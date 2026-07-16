@@ -600,9 +600,7 @@ function auditValuesCorrelate(left: string | undefined, right: string | undefine
 }
 
 function auditOperationsCorrelate(left: string, right: string): boolean {
-  if (left === right) return true;
-  return (left === "delete" && right === "delete:dry_run")
-    || (left === "delete:dry_run" && right === "delete");
+  return left === right;
 }
 
 function auditEventsCorrelate(left: MemoryAccessAuditEvent, right: MemoryAccessAuditEvent): boolean {
@@ -617,6 +615,14 @@ function richerAuditField(left: string | undefined, right: string | undefined): 
   if (left === undefined || isRedactedAuditValue(left)) return right ?? left;
   if (right === undefined || isRedactedAuditValue(right)) return left;
   return right.length > left.length ? right : left;
+}
+
+function richerAuditTargetStore(left: string | undefined, right: string | undefined): string | undefined {
+  const richer = richerAuditField(left, right);
+  if (left && right && left.includes("|") !== right.includes("|")) {
+    return left.includes("|") ? right : left;
+  }
+  return richer;
 }
 
 function strongerAuditDecision(left: string, right: string): string {
@@ -643,7 +649,7 @@ function mergeAuditEvents(left: MemoryAccessAuditEvent, right: MemoryAccessAudit
     ...left,
     source: rightSuppliedRicherMetadata || rightDecisionIsStronger ? right.source : left.source,
     operation: richerAuditField(left.operation, right.operation) ?? left.operation,
-    targetStore: richerAuditField(left.targetStore, right.targetStore) ?? left.targetStore,
+    targetStore: richerAuditTargetStore(left.targetStore, right.targetStore) ?? left.targetStore,
     targetClass: richerAuditField(left.targetClass, right.targetClass) ?? left.targetClass,
     decision: mergedDecision,
     reason: rightDecisionIsStronger ? right.reason : (richerAuditField(left.reason, right.reason) ?? left.reason),

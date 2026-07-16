@@ -485,6 +485,15 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
   return sanitized;
 }
 
+function acceptsSchemaType(type: string | readonly string[], value: unknown, actual: string): boolean {
+  const allowedTypes = typeof type === 'string' ? [type] : type;
+  return allowedTypes.some((candidate) => (candidate === 'integer' ? Number.isInteger(value) : actual === candidate));
+}
+
+function typeDescription(type: string | readonly string[]): string {
+  return typeof type === 'string' ? type : type.join(' or ');
+}
+
 export function validateToolArguments(
   tool: ToolSchemaDef,
   args: unknown,
@@ -515,10 +524,10 @@ export function validateToolArguments(
     }
     const value = descriptor.value;
     const actual = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
-    if (prop.type === 'integer' ? !Number.isInteger(value) : actual !== prop.type) {
-      return { ok: false, message: `Tool ${tool.name} property ${key} must be ${prop.type}` };
+    if (!acceptsSchemaType(prop.type, value, actual)) {
+      return { ok: false, message: `Tool ${tool.name} property ${key} must be ${typeDescription(prop.type)}` };
     }
-    if (prop.type === 'number' && !Number.isFinite(value)) {
+    if ((prop.type === 'number' || (Array.isArray(prop.type) && prop.type.includes('number'))) && typeof value === 'number' && !Number.isFinite(value)) {
       return { ok: false, message: `Tool ${tool.name} property ${key} must be a finite number` };
     }
     if (prop.enum && !prop.enum.includes(value)) {

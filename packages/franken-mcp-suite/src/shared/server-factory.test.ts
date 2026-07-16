@@ -271,6 +271,28 @@ describe('createMcpServer', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('accepts arguments matching any listed schema type', async () => {
+    const calls: unknown[] = [];
+    const tool: ToolDef = {
+      name: 'audit_report',
+      description: 'audit report',
+      inputSchema: { type: 'object', properties: { limit: { type: ['string', 'number'], description: 'limit' } } },
+      handler: async (a) => { calls.push(a); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+    };
+    const srv = createMcpServer('t', '1', [tool]);
+
+    const stringLimit = await srv.callTool('audit_report', { limit: '50' });
+    const numericLimit = await srv.callTool('audit_report', { limit: 50 });
+    const bad = await srv.callTool('audit_report', { limit: true });
+
+    expect(stringLimit).not.toHaveProperty('isError');
+    expect(numericLimit).not.toHaveProperty('isError');
+
+    expect(bad.isError).toBe(true);
+    expect(bad.content[0]!.text).toContain('string or number');
+    expect(calls).toEqual([{ limit: '50' }, { limit: 50 }]);
+  });
+
   it('rejects enum values not advertised by the input schema', async () => {
     const calls: unknown[] = [];
     const tool: ToolDef = {

@@ -141,6 +141,13 @@ vi.mock("better-sqlite3", () => ({
                 reason: "allowed before handler failure",
                 createdAt: "2026-07-16T13:30:00.000Z",
               },
+              {
+                action: "fbeast_memory_store",
+                context: JSON.stringify({ agentId: "agent-specific", profile: "target-specific-test", repo: "djm204/frankenbeast" }),
+                decision: "approved",
+                reason: "allowed write",
+                createdAt: "2026-07-16T13:50:00.000Z",
+              },
             ];
           }
           if (sql.includes("FROM audit_trail")) {
@@ -177,6 +184,11 @@ vi.mock("better-sqlite3", () => ({
               },
               {
                 eventType: "tool_call",
+                payload: JSON.stringify({ toolName: "fbeast_memory_right_to_forget", ok: true, args: { agentId: "agent-dry-redacted", profile: "rtf-redacted-test", dryRun: false } }),
+                createdAt: "2026-07-16T13:10:06.000Z",
+              },
+              {
+                eventType: "tool_call",
                 payload: JSON.stringify({ toolName: "fbeast_memory_query", ok: true, args: { agentId: "agent-rapid", profile: "rapid-repeat-test", type: "working" } }),
                 createdAt: "2026-07-16T13:20:05.000Z",
               },
@@ -194,6 +206,11 @@ vi.mock("better-sqlite3", () => ({
                 eventType: "tool_call",
                 payload: JSON.stringify({ toolName: "fbeast_memory_query", decision: "sk-secret-decision", args: { agentId: "agent-decision", profile: "decision-secret-test", type: "working" } }),
                 createdAt: "2026-07-16T13:40:00.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ toolName: "fbeast_memory_store", ok: true, args: { agentId: "agent-specific", profile: "target-specific-test", repo: "djm204/frankenbeast", type: "episodic" } }),
+                createdAt: "2026-07-16T13:50:05.000Z",
               },
             ];
           }
@@ -835,8 +852,8 @@ describe("createBrainAdapter", () => {
 
     const report = await brain.memoryAccessAuditReport({ tool: "fbeast_memory_right_to_forget", limit: 20 });
 
-    expect(report.count).toBe(2);
-    expect(report.summary.byOperation).toEqual({ "delete:dry_run": 2 });
+    expect(report.count).toBe(3);
+    expect(report.summary.byOperation).toEqual({ "delete:dry_run": 2, delete: 1 });
   });
 
   it("bounds memory access audit source scans in SQL", async () => {
@@ -880,6 +897,17 @@ describe("createBrainAdapter", () => {
       reason: "handler failed",
     });
     expect(report.summary.byDecision).toEqual({ error: 1 });
+  });
+
+  it("prefers specific target stores over broad governed defaults", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "target-specific-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      targetStore: "episodic",
+    });
   });
 
   it("does not echo untrusted audit decision strings", async () => {

@@ -621,7 +621,7 @@ const TOOLS: ToolFull[] = [
         operation: { type: 'string', description: 'Filter by operation, such as read, write, delete, review, or review:approve' },
         tool: { type: 'string', description: 'Filter by memory tool name, such as fbeast_memory_query or fbeast_memory_store' },
         decision: { type: 'string', description: 'Filter by any recorded governance/audit decision, such as approved, denied, validation_error, unknown_tool, or error' },
-        limit: { type: ['string', 'number'] as unknown as string, description: 'Max audit events returned (default 1000)' },
+        limit: { type: ['string', 'number'], description: 'Max audit events returned (default 1000)' },
       },
     },
     makeHandler: ({ brain }) => async (args) => {
