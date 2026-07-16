@@ -15,6 +15,7 @@ import {
   ApprovalMismatchError,
   ApprovalConfigurationError,
 } from '../../../src/errors/index.js';
+import { ApprovalAnomalyDetector } from '../../../src/security/approval-anomaly-detector.js';
 
 function makeRequest(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
   return {
@@ -210,6 +211,76 @@ describe('ApprovalGateway — security integration', () => {
 
     expect(jsonPayloadWithDifferentOrder).not.toBe(deterministicPayload);
     const outcome = await gateway.requestApproval(makeRequest());
+    expect(outcome.decision).toBe('APPROVE');
+  });
+
+  it('blocks anomalous approval bursts until the operator explicitly acknowledges the anomaly token', async () => {
+    const anomalyDetector = new ApprovalAnomalyDetector({ maxRepeatedDestructiveCommands: 2 });
+    const channel = makeFakeChannel();
+    const auditRecorder = makeFakeAuditRecorder();
+    const gateway = new ApprovalGateway({
+      channel,
+      auditRecorder,
+      config: defaultConfig(),
+      anomalyDetector,
+    });
+    const metadata = {
+      workerId: 'worker-1',
+      workdir: '/repo/a',
+      commandClass: 'git-remote-write',
+      command: 'git push --force-with-lease origin HEAD:main',
+      destructive: true,
+      force: true,
+    };
+
+    const first = await gateway.requestApproval(makeRequest({ requestId: 'req-1', metadata }));
+    const second = await gateway.requestApproval(makeRequest({
+      requestId: 'req-2',
+      timestamp: new Date('2026-01-01T00:00:05Z'),
+      metadata,
+    }));
+
+    expect(first.decision).toBe('APPROVE');
+    expect(second).toMatchObject({ decision: 'ABORT' });
+    if (second.decision === 'ABORT') {
+      expect(second.reason).toContain('ACK-APPROVAL-ANOMALY-req-2');
+    }
+    expect(channel.requestApproval).toHaveBeenLastCalledWith(expect.objectContaining({
+      summary: expect.stringContaining('SECURITY NOTICE'),
+      metadata: expect.objectContaining({
+        approvalAnomaly: expect.objectContaining({ acknowledgementToken: 'ACK-APPROVAL-ANOMALY-req-2' }),
+      }),
+    }));
+    expect(auditRecorder.record).toHaveBeenLastCalledWith(
+      expect.objectContaining({ requestId: 'req-2' }),
+      expect.objectContaining({ decision: 'APPROVE' }),
+      { securityFailure: 'approval-anomaly' },
+    );
+  });
+
+  it('allows a flagged approval when feedback includes the explicit anomaly acknowledgement token', async () => {
+    const anomalyDetector = new ApprovalAnomalyDetector({ maxRapidRetries: 2 });
+    const channel = makeFakeChannel({ feedback: 'operator checked evidence ACK-APPROVAL-ANOMALY-req-2' });
+    const gateway = new ApprovalGateway({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      config: defaultConfig(),
+      anomalyDetector,
+    });
+    const metadata = {
+      workerId: 'worker-1',
+      workdir: '/repo/a',
+      commandClass: 'github-mutation',
+      command: 'gh pr merge 1738 --squash',
+    };
+
+    await gateway.requestApproval(makeRequest({ requestId: 'req-1', metadata }));
+    const outcome = await gateway.requestApproval(makeRequest({
+      requestId: 'req-2',
+      timestamp: new Date('2026-01-01T00:00:05Z'),
+      metadata,
+    }));
+
     expect(outcome.decision).toBe('APPROVE');
   });
 

@@ -112,7 +112,8 @@ The module follows hexagonal architecture with dependency injection at every bou
 - **Triggers** are stateless evaluators — no I/O, purely functional
 - **Channels** are the Strategy pattern — swap CLI for Slack (or both) without touching the gateway
 - **Audit** records every decision through a port interface compatible with MOD-03 (@franken/brain)
-- **Security** layer adds optional HMAC-SHA256 signed approvals and session-token issuance/storage/validation helpers; callers must enforce those tokens at the execution boundary
+- **Security** layer adds optional HMAC-SHA256 signed approvals, session-token issuance/storage/validation helpers, and approval anomaly detection for bursty or suspicious approval traffic; callers must enforce those tokens at the execution boundary
+- See [approval anomaly detection](docs/approval-anomaly-detection.md) for the detector's evidence fields, default rules, and explicit operator acknowledgement flow.
 
 ## Trigger Evaluators
 

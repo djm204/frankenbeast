@@ -9,6 +9,12 @@ import type { SessionTokenStore } from '../security/session-token-store.js';
 import { assertValidSessionTokenTtl, createSessionToken } from '../security/session-token.js';
 import { formatApprovalSessionTokenScope } from '../security/session-token-scope.js';
 import {
+  ApprovalAnomalyDetector,
+  formatApprovalAnomalySummary,
+  hasApprovalAnomalyAcknowledgement,
+  type ApprovalAnomalyDecision,
+} from '../security/approval-anomaly-detector.js';
+import {
   ApprovalTimeoutError,
   SignatureVerificationError,
   ApprovalMismatchError,
@@ -24,7 +30,7 @@ export interface AuditRecorder {
 }
 
 export interface AuditRecordOptions {
-  readonly securityFailure?: 'signature-verification';
+  readonly securityFailure?: 'signature-verification' | 'approval-anomaly';
 }
 
 export interface ApprovalGatewayDeps {
@@ -33,6 +39,7 @@ export interface ApprovalGatewayDeps {
   readonly config: GovernorConfig;
   readonly signatureVerifier?: SignatureVerifier;
   readonly sessionTokenStore?: SessionTokenStore;
+  readonly anomalyDetector?: ApprovalAnomalyDetector;
 }
 
 export class ApprovalGateway {
@@ -43,6 +50,7 @@ export class ApprovalGateway {
   private configSignatureVerifier: SignatureVerifier | undefined;
   private configSignatureVerifierSecret: string | undefined;
   private readonly sessionTokenStore: SessionTokenStore | undefined;
+  private readonly anomalyDetector: ApprovalAnomalyDetector | undefined;
 
   constructor(deps: ApprovalGatewayDeps) {
     try {
@@ -64,6 +72,10 @@ export class ApprovalGateway {
     this.config = deps.config;
     this.configuredSignatureVerifier = deps.signatureVerifier;
     this.sessionTokenStore = deps.sessionTokenStore;
+    this.anomalyDetector = deps.anomalyDetector
+      ?? (deps.config.approvalAnomalyDetection?.enabled === false
+        ? undefined
+        : new ApprovalAnomalyDetector(deps.config.approvalAnomalyDetection));
   }
 
   async requestApproval(request: ApprovalRequest): Promise<ApprovalOutcome> {
@@ -73,8 +85,11 @@ export class ApprovalGateway {
       );
     }
 
+    const anomalyDecision = this.anomalyDetector?.record(request);
+    const requestForChannel = this.decorateAnomalousRequest(request, anomalyDecision);
+
     const response = await this.withTimeout(
-      this.channel.requestApproval(request),
+      this.channel.requestApproval(requestForChannel),
       request.requestId,
     );
 
@@ -104,9 +119,52 @@ export class ApprovalGateway {
       }
     }
 
-    await this.auditRecorder.record(request, response);
+    if (this.requiresAnomalyAcknowledgement(requestForChannel, response, anomalyDecision)) {
+      await this.auditRecorder.record(requestForChannel, response, {
+        securityFailure: 'approval-anomaly',
+      });
+      return {
+        decision: 'ABORT',
+        reason: formatApprovalAnomalySummary(anomalyDecision),
+      };
+    }
 
-    return this.toOutcome(request, response);
+    await this.auditRecorder.record(requestForChannel, response);
+
+    return this.toOutcome(requestForChannel, response);
+  }
+
+  private decorateAnomalousRequest(
+    request: ApprovalRequest,
+    anomalyDecision: ApprovalAnomalyDecision | undefined,
+  ): ApprovalRequest {
+    if (!anomalyDecision?.flagged) {
+      return request;
+    }
+
+    const anomalySummary = formatApprovalAnomalySummary(anomalyDecision);
+    return {
+      ...request,
+      summary: `${request.summary}\n\nSECURITY NOTICE: ${anomalySummary}`,
+      metadata: {
+        ...(request.metadata ?? {}),
+        approvalAnomaly: {
+          acknowledgementToken: anomalyDecision.acknowledgementToken,
+          evidence: anomalyDecision.evidence,
+          findings: anomalyDecision.findings,
+        },
+      },
+    };
+  }
+
+  private requiresAnomalyAcknowledgement(
+    request: ApprovalRequest,
+    response: ApprovalResponse,
+    anomalyDecision: ApprovalAnomalyDecision | undefined,
+  ): anomalyDecision is ApprovalAnomalyDecision {
+    return response.decision === 'APPROVE'
+      && anomalyDecision?.flagged === true
+      && !hasApprovalAnomalyAcknowledgement(request, response, anomalyDecision);
   }
 
   private verifySignature(response: ApprovalResponse): void {
