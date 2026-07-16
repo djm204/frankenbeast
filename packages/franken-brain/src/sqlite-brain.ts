@@ -534,6 +534,9 @@ class SqliteWorkingMemory implements IWorkingMemory {
     const deleteKey = this.db.prepare(
       `DELETE FROM working_memory WHERE key = ?`,
     );
+    const deleteProvenance = this.db.prepare(
+      `DELETE FROM memory_review_provenance WHERE target_store = 'working' AND memory_key = ?`,
+    );
     const upsert = this.db.prepare(
       `INSERT INTO working_memory (key, value, updated_at, schema_version) VALUES (?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, schema_version = excluded.schema_version
@@ -549,11 +552,13 @@ class SqliteWorkingMemory implements IWorkingMemory {
       }
 
       for (const key of this.deletedKeys) {
+        deleteProvenance.run(key);
         if (!this.dirtyKeys.has(key)) {
           deleteKey.run(key);
         }
       }
       for (const key of this.dirtyKeys) {
+        deleteProvenance.run(key);
         const serialized = this.serialized.get(key);
         if (serialized !== undefined) {
           upsert.run(
@@ -610,6 +615,11 @@ class SqliteWorkingMemory implements IWorkingMemory {
         return;
       }
     }
+    this.db
+      .prepare(
+        `DELETE FROM memory_review_provenance WHERE target_store = 'working' AND memory_key = ?`,
+      )
+      .run(key);
     this.db
       .prepare(
         `INSERT INTO working_memory (key, value, updated_at, schema_version) VALUES (?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})

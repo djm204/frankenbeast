@@ -1746,6 +1746,13 @@ describe('SqliteBrain', () => {
 
       expect(brain.memoryReview.provenanceFor('working', second.key)).toBeNull();
       expect(brain.memoryReview.listProvenance({ key: second.key })).toEqual([]);
+
+      brain.working.set(second.key, 'main');
+      brain.serialize();
+
+      expect(brain.working.get(second.key)).toBe('main');
+      expect(brain.memoryReview.provenanceFor('working', second.key)).toBeNull();
+      expect(brain.memoryReview.listProvenance({ key: second.key })).toEqual([]);
     });
 
     it('prunes expired temporary facts before approved working-memory writes enforce limits', () => {
