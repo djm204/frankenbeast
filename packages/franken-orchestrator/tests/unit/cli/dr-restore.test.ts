@@ -623,4 +623,33 @@ describe('dr restore-dry-run CLI', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it('redacts sensitive snapshot-diff directory paths in CLI output', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dr-token=PathSecret123-'));
+    const beforeDir = join(dir, 'before');
+    const afterDir = join(dir, 'after');
+    const output: string[] = [];
+
+    try {
+      await mkdir(beforeDir, { recursive: true });
+      await mkdir(afterDir, { recursive: true });
+      await writeFile(join(beforeDir, 'tasks.json'), JSON.stringify([{ id: 'task-1', status: 'ready' }]), 'utf8');
+      await writeFile(join(afterDir, 'tasks.json'), JSON.stringify([{ id: 'task-1', status: 'done' }]), 'utf8');
+
+      await handleDrCommand({
+        action: 'snapshot-diff',
+        backupManifestPath: beforeDir,
+        liveManifestPath: afterDir,
+        print: (message) => output.push(message),
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+
+    const rawOutput = output.join('\n');
+    expect(JSON.parse(rawOutput).command).toBe('dr snapshot-diff');
+    expect(rawOutput).not.toContain('token=PathSecret123');
+    expect(rawOutput).toContain('token=<redacted>');
+  });
+
 });

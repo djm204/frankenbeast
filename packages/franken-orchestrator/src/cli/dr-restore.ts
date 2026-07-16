@@ -119,7 +119,7 @@ export async function handleDrCommand(deps: DrCommandDeps): Promise<void> {
     if (!backupManifestPath || !liveManifestPath) {
       throw new Error('dr snapshot-diff requires two snapshot/export directories: <before-dir> <after-dir>');
     }
-    print(maskOpaqueSecretLiterals(JSON.stringify(await diffStateSnapshotDirectories(backupManifestPath, liveManifestPath), null, 2)));
+    printRedactedJson(print, await diffStateSnapshotDirectories(backupManifestPath, liveManifestPath));
     return;
   }
 

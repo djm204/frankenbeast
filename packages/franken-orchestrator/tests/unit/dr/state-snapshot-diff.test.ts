@@ -342,6 +342,32 @@ describe('state snapshot diff', () => {
     expect(serialized).toContain('"value":"<redacted>"');
   });
 
+
+
+  it('splits direct approval primitive token maps into redacted records', async () => {
+    const beforeToken = 'directApprovalTokenBefore123';
+    const afterToken = 'directApprovalTokenAfter456';
+    const before = await snapshotDir({
+      'approvals.json': { [beforeToken]: true },
+    });
+    const after = await snapshotDir({
+      'approvals.json': { [afterToken]: true },
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const approvalDiff = report.diffs.find((diff) => diff.subsystem === 'approvals');
+    const serialized = JSON.stringify(approvalDiff);
+
+    expect(approvalDiff?.added).toHaveLength(1);
+    expect(approvalDiff?.removed).toHaveLength(1);
+    expect(approvalDiff?.changed).toHaveLength(0);
+    expect(approvalDiff?.added[0]?.id).toMatch(/^approval:[a-f0-9]{16}$/u);
+    expect(approvalDiff?.removed[0]?.id).toMatch(/^approval:[a-f0-9]{16}$/u);
+    expect(serialized).not.toContain(beforeToken);
+    expect(serialized).not.toContain(afterToken);
+    expect(serialized).toContain('"value":"<redacted>"');
+  });
+
   it('uses file fallback identity for per-approval primitive files', async () => {
     const before = await snapshotDir({
       'approvals/token-before.json': { decision: 'pending' },
@@ -414,4 +440,39 @@ describe('state snapshot diff', () => {
     expect(serialized).not.toContain('approval-token-before');
     expect(serialized).not.toContain('approval-token-after');
   });
+
+  it('prefers stable card identity over mutable worker ownership for task records', async () => {
+    const before = await snapshotDir({
+      'tasks/card-1.json': { cardId: 'card-1', workerId: 'worker-a', status: 'running' },
+    });
+    const after = await snapshotDir({
+      'tasks/card-1.json': { cardId: 'card-1', workerId: 'worker-b', status: 'running' },
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const taskDiff = report.diffs.find((diff) => diff.subsystem === 'tasks');
+
+    expect(taskDiff?.added).toHaveLength(0);
+    expect(taskDiff?.removed).toHaveLength(0);
+    expect(taskDiff?.changed).toHaveLength(1);
+    expect(taskDiff?.changed[0]?.id).toBe('card-1');
+    expect(taskDiff?.changed[0]?.changedFields).toEqual(['workerId']);
+  });
+
+  it('does not diff aggregate wrapper metadata as records', async () => {
+    const before = await snapshotDir({
+      'tasks/export.json': { id: 'export-before', tasks: [{ id: 'task-1', status: 'ready' }] },
+    });
+    const after = await snapshotDir({
+      'tasks/export.json': { id: 'export-after', tasks: [{ id: 'task-1', status: 'ready' }] },
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const taskDiff = report.diffs.find((diff) => diff.subsystem === 'tasks');
+
+    expect(taskDiff?.added).toHaveLength(0);
+    expect(taskDiff?.removed).toHaveLength(0);
+    expect(taskDiff?.changed).toHaveLength(0);
+  });
+
 });

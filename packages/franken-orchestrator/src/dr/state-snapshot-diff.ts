@@ -126,8 +126,8 @@ function recordId(
   const idKeys = subsystem === 'approvals'
     ? ['id', 'tokenId', 'token_id', 'approvalId', 'approval_id', 'token', 'value']
     : options.preferFallbackOverMutableDisplayName
-      ? ['id', 'taskId', 'task_id', 'jobId', 'job_id', 'workerId', 'worker_id', 'currentWorkerId', 'current_worker_id', 'cardId', 'card_id', 'memoryKey', 'memory_key', 'key']
-      : ['id', 'taskId', 'task_id', 'jobId', 'job_id', 'workerId', 'worker_id', 'currentWorkerId', 'current_worker_id', 'cardId', 'card_id', 'memoryKey', 'memory_key', 'key', 'name'];
+      ? ['id', 'taskId', 'task_id', 'cardId', 'card_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key', 'workerId', 'worker_id', 'currentWorkerId', 'current_worker_id']
+      : ['id', 'taskId', 'task_id', 'cardId', 'card_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key', 'workerId', 'worker_id', 'currentWorkerId', 'current_worker_id', 'name'];
   for (const key of idKeys) {
     const value = record[key];
     if (typeof value === 'string' && value.trim() !== '') {
@@ -370,11 +370,11 @@ function extractRecordsFromJson(records: MutableSubsystemRecords, parsed: unknow
       }
     }
 
-    if (pathSubsystem !== undefined && (!foundRootCollection || hasRecordIdentityKey(parsed))) {
+    if (pathSubsystem !== undefined && !foundRootCollection) {
       const values = Object.values(parsed);
       if (values.length > 0 && values.every(isRecord)) {
         addObjectMapRecords(records, pathSubsystem, parsed, source);
-      } else if (pathSubsystem !== 'tasks' && pathSubsystem !== 'approvals' && !hasRecordIdentityKey(parsed) && values.length > 0 && values.every((value) => !isRecord(value) && !Array.isArray(value))) {
+      } else if (pathSubsystem !== 'tasks' && !hasRecordIdentityKey(parsed) && values.length > 0 && values.every((value) => !isRecord(value) && !Array.isArray(value)) && (pathSubsystem !== 'approvals' || isGenericCollectionSource(source))) {
         addObjectMapRecords(records, pathSubsystem, parsed, source);
       } else {
         addRecord(records, pathSubsystem, recordId(parsed, source, pathSubsystem, { preferFallbackOverMutableDisplayName: true }), parsed, source);
