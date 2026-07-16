@@ -219,6 +219,32 @@ describe('dead-letter queue for failed automation actions', () => {
     }
   });
 
+  it('reaps stale lock files with invalid timestamps', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dlq-'));
+    const queuePath = join(dir, 'dead-letter.json');
+    const lockPath = `${queuePath}.lock`;
+
+    try {
+      await writeFile(lockPath, JSON.stringify({ owner: 'bad-time-lock', pid: 999_999, acquiredAt: 'not-a-date' }), 'utf8');
+      const old = new Date(Date.now() - 60_000);
+      await utimes(lockPath, old, old);
+
+      const entry = await recordRetryExhaustionToDeadLetterQueue({
+        queuePath,
+        actionClass: 'codex-review-trigger',
+        target: 'pr-2342',
+        attempts: 3,
+        maxAttempts: 3,
+        lastError: 'invalid timestamp lock should not strand the queue',
+        replaySafety: 'safe',
+      });
+
+      expect(await listDeadLetterEntries(queuePath)).toEqual([entry]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('rejects queue entries parsed from disk before retry exhaustion', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'franken-dlq-'));
     const queuePath = join(dir, 'dead-letter.json');

@@ -193,7 +193,8 @@ async function reapStaleQueueLock(lockPath: string, now = Date.now()): Promise<b
   try {
     observed = parseQueueLock(await readFile(lockPath, 'utf8'));
     const acquiredAt = Date.parse(observed.acquiredAt);
-    if (!Number.isFinite(acquiredAt) || now - acquiredAt < STALE_LOCK_MS) return false;
+    if (!Number.isFinite(acquiredAt)) return reapMalformedQueueLock(lockPath, now);
+    if (now - acquiredAt < STALE_LOCK_MS) return false;
     if (isProcessAlive(observed.pid) && now - acquiredAt < LIVE_LOCK_MAX_MS) return false;
   } catch {
     return reapMalformedQueueLock(lockPath, now);

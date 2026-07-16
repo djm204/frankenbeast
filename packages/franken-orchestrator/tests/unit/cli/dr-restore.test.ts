@@ -83,10 +83,10 @@ describe('dr restore-dry-run CLI', () => {
         entries: [{
           id: 'dlq_test',
           actionClass: 'codex-review-trigger',
-          target: 'pr-2342',
+          target: 'postgres://beast:databaseSecret123@db.example/franken',
           attempts: 5,
           maxAttempts: 5,
-          lastError: 'HTTP 403 for token ghp_deadlettersecretdeadlettersecret',
+          lastError: 'provider failures: sk-proj-abcdefghijklmnopqrstuvwxyz123456 and xoxb-123456789012-abcdefabcdef',
           firstAttemptedAt: '2026-07-16T08:00:00.000Z',
           lastAttemptedAt: '2026-07-16T08:05:00.000Z',
           createdAt: '2026-07-16T08:05:00.000Z',
@@ -95,6 +95,7 @@ describe('dr restore-dry-run CLI', () => {
           payload: {
             command: 'curl --password notasecret -H "Authorization: Bearer ***" https://api.github.com/repos/djm204/frankenbeast',
             argv: ['gh', 'api', '--token', 'abcdefghijklmnopqrstuvwxyz123456', '--password=abcd1234secret5678'],
+            databaseUrl: 'postgres://beast:anotherSecret456@db.example/franken',
           },
         }],
       }), 'utf8');
@@ -104,9 +105,9 @@ describe('dr restore-dry-run CLI', () => {
       expect(JSON.parse(listOutput)).toMatchObject({
         command: 'dr dead-letter-list',
         summary: { open: 1 },
-        entries: [{ id: 'dlq_test', actionClass: 'codex-review-trigger', target: 'pr-2342' }],
+        entries: [{ id: 'dlq_test', actionClass: 'codex-review-trigger', target: 'postgres://beast:<redacted>@db.example/franken' }],
       });
-      expect(listOutput).not.toContain('ghp_testtoken1234567890');
+      expect(listOutput).not.toContain('databaseSecret123');
       expect(listOutput).not.toContain('abcd1234secret5678');
       expect(listOutput).not.toContain('GH_TOKEN');
       expect(listOutput).not.toContain('lastError');
@@ -115,9 +116,11 @@ describe('dr restore-dry-run CLI', () => {
       await handleDrCommand({ action: 'dead-letter-inspect', backupManifestPath: queuePath, liveManifestPath: 'dlq_test', print: (message) => output.push(message) });
       const inspectOutput = output.pop() ?? '';
       expect(JSON.parse(inspectOutput)).toMatchObject({ command: 'dr dead-letter-inspect', entry: { id: 'dlq_test' } });
-      expect(inspectOutput).not.toContain('ghp_deadlettersecretdeadlettersecret');
+      expect(inspectOutput).not.toContain('databaseSecret123');
       expect(inspectOutput).not.toContain('abcdefghijklmnopqrstuvwxyz123456');
       expect(inspectOutput).not.toContain('notasecret');
+      expect(inspectOutput).not.toContain('xoxb-123456789012-abcdefabcdef');
+      expect(inspectOutput).not.toContain('anotherSecret456');
       expect(inspectOutput).toContain('<redacted>');
 
       await handleDrCommand({ action: 'dead-letter-replay-dry-run', backupManifestPath: queuePath, liveManifestPath: 'dlq_test', generatedAt: '2026-07-16T08:06:00.000Z', print: (message) => output.push(message) });

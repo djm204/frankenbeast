@@ -97,6 +97,9 @@ function maskOpaqueSecretLiterals(text: string): string {
   return text
     .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/gu, '<redacted>')
     .replace(/\bgithub_pat_[A-Za-z0-9_]{12,}\b/gu, '<redacted>')
+    .replace(/\bsk-[A-Za-z0-9_-]{12,}\b/gu, '<redacted>')
+    .replace(/\bxox[baprs]-[A-Za-z0-9-]{10,}\b/gu, '<redacted>')
+    .replace(/\b((?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/[^:\s"']+):[^@\s"']+@/giu, '$1:<redacted>@')
     .replace(/\b(?:Bearer|Basic|Bot)\s+[A-Za-z0-9._~+/=-]{8,}\b/giu, (match) => `${match.split(/\s+/u)[0]} <redacted>`)
     .replace(/((?:^|[\s"'])--(?:api-?key|auth|authorization|bearer|password|secret|token)\s+)[^\s"']+/giu, '$1<redacted>')
     .replace(/((?:^|[\s"'])--(?:api-?key|auth|authorization|bearer|password|secret|token)=)[^\s"']+/giu, '$1<redacted>')
