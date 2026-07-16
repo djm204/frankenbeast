@@ -388,7 +388,7 @@ function extractRecordsFromJson(records: MutableSubsystemRecords, parsed: unknow
 
     if (pathSubsystem !== undefined && !foundRootCollection) {
       const values = Object.values(parsed);
-      if (pathSubsystem !== 'workerIds' && values.length > 0 && values.every(isRecord) && isGenericCollectionSource(source) && !hasExplicitParentSubsystem(source)) {
+      if (values.length > 0 && values.every(isRecord) && ((isGenericCollectionSource(source) && !hasExplicitParentSubsystem(source)) || pathSubsystem === 'approvals')) {
         addObjectMapRecords(records, pathSubsystem, parsed, source);
       } else if (pathSubsystem !== 'tasks' && !hasRecordIdentityKey(parsed) && values.length > 0 && values.every((value) => !isRecord(value) && !Array.isArray(value)) && (pathSubsystem !== 'approvals' || !looksLikeApprovalRecord(parsed))) {
         addObjectMapRecords(records, pathSubsystem, parsed, source);
@@ -439,8 +439,13 @@ function sourceForError(source: string): string {
 }
 
 function errorMessageForOutput(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return maskOpaqueSecretLiterals(redactLogData(message) as string);
+  if (isRecord(error) && typeof error.code === 'string' && error.code.trim() !== '') {
+    return error.code;
+  }
+  if (error instanceof Error && error.name.trim() !== '') {
+    return error.name;
+  }
+  return 'unknown error';
 }
 
 function hasExplicitParentSubsystem(source: string): boolean {

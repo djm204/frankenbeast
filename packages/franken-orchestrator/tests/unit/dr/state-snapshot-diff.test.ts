@@ -526,7 +526,7 @@ describe('state snapshot diff', () => {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       expect(message).not.toContain('token=PathSecret123');
-      expect(message).toContain('token=<redacted>');
+      expect(message).toContain('ENOENT');
     }
   });
 
@@ -648,6 +648,43 @@ describe('state snapshot diff', () => {
     expect(cronDiff?.changed).toHaveLength(1);
     expect(cronDiff?.changed[0]?.id).toBe('job-1');
     expect(cronDiff?.changed[0]?.changedFields).toEqual(['workerId']);
+  });
+
+  it('splits direct worker maps by worker id', async () => {
+    const before = await snapshotDir({
+      'workers.json': { 'worker-a': { status: 'idle' }, 'worker-b': { status: 'busy' } },
+    });
+    const after = await snapshotDir({
+      'workers.json': { 'worker-a': { status: 'idle' }, 'worker-c': { status: 'busy' } },
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const workerDiff = report.diffs.find((diff) => diff.subsystem === 'workerIds');
+
+    expect(workerDiff?.added.map((change) => change.id)).toEqual(['worker-c']);
+    expect(workerDiff?.removed.map((change) => change.id)).toEqual(['worker-b']);
+    expect(workerDiff?.changed).toHaveLength(0);
+  });
+
+  it('splits object-valued approval maps without leaking token keys', async () => {
+    const beforeToken = 'objectApprovalTokenBefore123';
+    const afterToken = 'objectApprovalTokenAfter456';
+    const before = await snapshotDir({
+      'approvals/pending.json': { [beforeToken]: { decision: 'pending' } },
+    });
+    const after = await snapshotDir({
+      'approvals/pending.json': { [afterToken]: { decision: 'approved' } },
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const serialized = JSON.stringify(report);
+    const approvalDiff = report.diffs.find((diff) => diff.subsystem === 'approvals');
+
+    expect(approvalDiff?.added).toHaveLength(1);
+    expect(approvalDiff?.removed).toHaveLength(1);
+    expect(approvalDiff?.changed).toHaveLength(0);
+    expect(serialized).not.toContain(beforeToken);
+    expect(serialized).not.toContain(afterToken);
   });
 
 });
