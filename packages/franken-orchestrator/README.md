@@ -94,7 +94,7 @@ Incident responders can compare two state snapshot/export directories without ma
 frankenbeast dr snapshot-diff <before-dir> <after-dir>
 ```
 
-The command scans JSON files in each directory and emits a redacted JSON report containing both `summary` counts and a human-readable `textSummary`. It groups added, removed, and changed records by tasks/cards, approval tokens, worker IDs, memory records, and cron jobs where those records are present.
+The command scans JSON and JSONL files in each directory and emits a redacted JSON report containing both `summary` counts and a human-readable `textSummary`. It groups added, removed, and changed records by tasks/cards, approval tokens, worker IDs, memory records, and cron jobs where those records are present. Approval-token IDs and primitive token arrays are represented by stable short digests, not raw token strings.
 
 ## Flaky liveness fixture replay
 

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { basename, join, relative, sep } from 'node:path';
 
@@ -98,11 +99,16 @@ export function maskOpaqueSecretLiterals(text: string): string {
     .replace(/("--(?:api-?key|auth|authorization|bearer|password|secret|token)"\s*,\s*")[^"]+/giu, '$1<redacted>');
 }
 
-function containsSensitiveIdMarker(value: string): boolean {
-  return /(?:token|secret|password|credential|bearer|refresh|access|api[-_]?key)/iu.test(value);
+function shortDigest(value: unknown): string {
+  return createHash('sha256').update(stableStringify(value)).digest('hex').slice(0, 16);
+}
+
+function safeApprovalId(value: unknown): string {
+  return `approval:${shortDigest(value)}`;
 }
 
 function recordId(record: unknown, fallback: string, subsystem?: StateSnapshotDiffSubsystem): string {
+  if (subsystem === 'approvals' && !isRecord(record)) return safeApprovalId(record);
   if (!isRecord(record)) return fallback;
   const idKeys = subsystem === 'approvals'
     ? ['id']
@@ -111,17 +117,24 @@ function recordId(record: unknown, fallback: string, subsystem?: StateSnapshotDi
     const value = record[key];
     if (typeof value === 'string' && value.trim() !== '') {
       const trimmed = value.trim();
-      if (subsystem === 'approvals' && containsSensitiveIdMarker(trimmed)) return fallback;
+      if (subsystem === 'approvals') return safeApprovalId(trimmed);
       return trimmed;
     }
-    if (typeof value === 'number' && Number.isSafeInteger(value)) return String(value);
+    if (typeof value === 'number' && Number.isSafeInteger(value)) {
+      if (subsystem === 'approvals') return safeApprovalId(value);
+      return String(value);
+    }
   }
   return fallback;
 }
 
 function scopedRecordValue(subsystem: StateSnapshotDiffSubsystem, value: unknown): unknown {
-  if (subsystem === 'approvals' && !isRecord(value)) {
+  if (subsystem !== 'approvals') return value;
+  if (!isRecord(value)) {
     return { token: value };
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'id')) {
+    return { ...value, id: '<redacted>' };
   }
   return value;
 }
@@ -160,8 +173,8 @@ function addObjectMapRecords(
 ): void {
   Object.entries(values)
     .sort(([a], [b]) => a.localeCompare(b))
-    .forEach(([key, value], index) => {
-      const fallback = subsystem === 'approvals' ? `${source}{${index}}` : key;
+    .forEach(([key, value]) => {
+      const fallback = subsystem === 'approvals' ? safeApprovalId(key) : key;
       addRecord(records, subsystem, recordId(value, fallback, subsystem), value, source);
     });
 }
@@ -237,43 +250,63 @@ function extractRecordsFromJson(records: MutableSubsystemRecords, parsed: unknow
   }
 }
 
-async function collectJsonFiles(directory: string, current = directory, collected: string[] = []): Promise<string[]> {
+async function collectSnapshotFiles(directory: string, current = directory, collected: string[] = []): Promise<string[]> {
   if (collected.length > MAX_DIRECTORY_FILES) {
-    throw new Error(`State snapshot directory has too many files; maximum supported JSON files is ${MAX_DIRECTORY_FILES}`);
+    throw new Error(`State snapshot directory has too many files; maximum supported JSON/JSONL files is ${MAX_DIRECTORY_FILES}`);
   }
   const entries = await readdir(current, { withFileTypes: true });
   for (const entry of entries) {
     const path = join(current, entry.name);
     if (entry.isDirectory()) {
-      await collectJsonFiles(directory, path, collected);
-    } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.json')) {
+      await collectSnapshotFiles(directory, path, collected);
+    } else if (entry.isFile() && /\.jsonl?$/iu.test(entry.name)) {
       collected.push(path);
       if (collected.length > MAX_DIRECTORY_FILES) {
-        throw new Error(`State snapshot directory has too many files; maximum supported JSON files is ${MAX_DIRECTORY_FILES}`);
+        throw new Error(`State snapshot directory has too many files; maximum supported JSON/JSONL files is ${MAX_DIRECTORY_FILES}`);
       }
     }
   }
   return collected;
 }
 
+function parseSnapshotFile(raw: string, file: string): ReadonlyArray<{ parsed: unknown; sourceSuffix: string }> {
+  if (file.toLowerCase().endsWith('.jsonl')) {
+    const records: Array<{ parsed: unknown; sourceSuffix: string }> = [];
+    raw.split(/\r?\n/u).forEach((line, index) => {
+      if (line.trim() === '') return;
+      try {
+        records.push({ parsed: JSON.parse(line) as unknown, sourceSuffix: `:${index + 1}` });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Unable to read state snapshot JSONL ${file} line ${index + 1}: ${message}`);
+      }
+    });
+    return records;
+  }
+
+  try {
+    return [{ parsed: JSON.parse(raw) as unknown, sourceSuffix: '' }];
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Unable to read state snapshot JSON ${file}: ${message}`);
+  }
+}
+
 async function loadSnapshotDirectory(directory: string): Promise<MutableSubsystemRecords> {
   const rootStat = await stat(directory);
   if (!rootStat.isDirectory()) throw new Error(`State snapshot path must be a directory: ${directory}`);
   const records = emptyRecords();
-  const files = await collectJsonFiles(directory);
+  const files = await collectSnapshotFiles(directory);
   for (const file of files.sort()) {
     const fileStat = await stat(file);
     if (fileStat.size > MAX_JSON_FILE_BYTES) {
-      throw new Error(`State snapshot JSON file is too large: ${file}`);
+      throw new Error(`State snapshot file is too large: ${file}`);
     }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(await readFile(file, 'utf8')) as unknown;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`Unable to read state snapshot JSON ${file}: ${message}`);
+    const source = relative(directory, file) || basename(file);
+    const parsedRecords = parseSnapshotFile(await readFile(file, 'utf8'), file);
+    for (const { parsed, sourceSuffix } of parsedRecords) {
+      extractRecordsFromJson(records, parsed, `${source}${sourceSuffix}`);
     }
-    extractRecordsFromJson(records, parsed, relative(directory, file) || basename(file));
   }
   return records;
 }
