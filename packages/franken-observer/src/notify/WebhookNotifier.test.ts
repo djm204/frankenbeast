@@ -110,9 +110,38 @@ describe('WebhookNotifier', () => {
       const firstReceipt = await notifier.send(payload, { idempotencyKey: 'status:run-1:discord' })
       const secondReceipt = await notifier.send(payload, { idempotencyKey: 'status:run-1:discord' })
 
-      expect(firstReceipt).toMatchObject({ status: 'sent', idempotencyKey: 'status:run-1:discord', target: webhookUrl })
-      expect(secondReceipt).toMatchObject({ status: 'skipped', idempotencyKey: 'status:run-1:discord', target: webhookUrl })
+      expect(firstReceipt).toMatchObject({
+        status: 'sent',
+        idempotencyKey: 'status:run-1:discord',
+        target: 'https://hooks.example.com/[REDACTED]',
+      })
+      expect(secondReceipt).toMatchObject({
+        status: 'skipped',
+        idempotencyKey: 'status:run-1:discord',
+        target: 'https://hooks.example.com/[REDACTED]',
+      })
       expect(secondReceipt.contentHash).toBe(firstReceipt.contentHash)
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+    })
+
+    it('reserves an idempotency key before delivery so overlapping sends do not duplicate POSTs', async () => {
+      const store = new InMemoryWebhookDeliveryReceiptStore()
+      let releaseFetch!: () => void
+      mockFetch.mockImplementationOnce(
+        () => new Promise(resolve => {
+          releaseFetch = () => resolve({ ok: true, status: 200, statusText: 'OK' })
+        }),
+      )
+      const notifier = createNotifier({ deliveryReceiptStore: store })
+      const payload = { type: 'status', runId: 'run-concurrent', state: 'green' }
+
+      const first = notifier.send(payload, { idempotencyKey: 'status:run-concurrent' })
+      const secondReceipt = await notifier.send(payload, { idempotencyKey: 'status:run-concurrent' })
+      releaseFetch()
+      const firstReceipt = await first
+
+      expect(firstReceipt.status).toBe('sent')
+      expect(secondReceipt.status).toBe('skipped')
       expect(mockFetch).toHaveBeenCalledTimes(1)
     })
 
@@ -129,6 +158,21 @@ describe('WebhookNotifier', () => {
       expect(mockFetch).toHaveBeenCalledTimes(2)
     })
 
+    it('preserves successful receipts for older content after newer content with the same key fails', async () => {
+      const store = new InMemoryWebhookDeliveryReceiptStore()
+      const notifier = createNotifier({ deliveryReceiptStore: store })
+
+      const firstReceipt = await notifier.send({ type: 'approval', state: 'pending' }, { idempotencyKey: 'approval:preserve' })
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Service Unavailable' })
+      await expect(notifier.send({ type: 'approval', state: 'failed' }, { idempotencyKey: 'approval:preserve' })).rejects.toThrow('503')
+      const staleRetryReceipt = await notifier.send({ type: 'approval', state: 'pending' }, { idempotencyKey: 'approval:preserve' })
+
+      expect(firstReceipt.status).toBe('sent')
+      expect(staleRetryReceipt.status).toBe('skipped')
+      expect(staleRetryReceipt.contentHash).toBe(firstReceipt.contentHash)
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+    })
+
     it('records failed receipts and allows retrying the same idempotency key after failure', async () => {
       const store = new InMemoryWebhookDeliveryReceiptStore()
       const saved = vi.spyOn(store, 'save')
@@ -141,9 +185,47 @@ describe('WebhookNotifier', () => {
       await expect(notifier.send(payload, { idempotencyKey: 'doctor:t_123:blocked' })).rejects.toThrow('503')
       const retryReceipt = await notifier.send(payload, { idempotencyKey: 'doctor:t_123:blocked' })
 
-      expect(saved.mock.calls[0]?.[0]).toMatchObject({ status: 'failed', idempotencyKey: 'doctor:t_123:blocked' })
+      expect(saved.mock.calls.some(call => call[0].status === 'failed' && call[0].idempotencyKey === 'doctor:t_123:blocked')).toBe(true)
       expect(retryReceipt.status).toBe('sent')
       expect(mockFetch).toHaveBeenCalledTimes(2)
+    })
+
+    it('does not record a failed receipt after a webhook was delivered but sent receipt persistence failed', async () => {
+      const saved: string[] = []
+      const store = {
+        findLatest: vi.fn(),
+        findByContent: vi.fn(),
+        reserve: vi.fn().mockResolvedValue(true),
+        save: vi.fn(async receipt => {
+          saved.push(receipt.status)
+          if (receipt.status === 'sent') {
+            throw new Error('receipt store unavailable')
+          }
+        }),
+      }
+      const notifier = createNotifier({ deliveryReceiptStore: store })
+
+      await expect(notifier.send({ type: 'status' }, { idempotencyKey: 'status:store-failure' })).rejects.toThrow(
+        'receipt store unavailable',
+      )
+
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+      expect(saved).toEqual(['sent'])
+    })
+
+    it('sanitizes the webhook URL before using it as the default receipt target', async () => {
+      const store = new InMemoryWebhookDeliveryReceiptStore()
+      const notifier = createNotifier({
+        url: 'https://discord.com/api/webhooks/123/secret-token?wait=true',
+        allowedTargets: ['https://discord.com/api/webhooks/'],
+        deliveryReceiptStore: store,
+      })
+
+      const receipt = await notifier.send({ type: 'status' }, { idempotencyKey: 'status:redacted-target' })
+
+      expect(receipt.target).toBe('https://discord.com/[REDACTED]/[REDACTED]/[REDACTED]/[REDACTED]')
+      expect(receipt.target).not.toContain('secret-token')
+      expect(mockFetch).toHaveBeenCalledTimes(1)
     })
 
     it('sends the same idempotency key and content when the target changes', async () => {
