@@ -156,6 +156,29 @@ function isSqliteLockError(error: unknown): boolean {
   return /database is (?:busy|locked)|SQLITE_(?:BUSY|LOCKED)/i.test(errorMessage(error))
 }
 
+function snapshotTrace(trace: Trace): Trace {
+  return {
+    id: trace.id,
+    goal: trace.goal,
+    status: trace.status,
+    startedAt: trace.startedAt,
+    endedAt: trace.endedAt,
+    spans: trace.spans.map(span => ({
+      id: span.id,
+      traceId: span.traceId,
+      parentSpanId: span.parentSpanId,
+      name: span.name,
+      status: span.status,
+      startedAt: span.startedAt,
+      endedAt: span.endedAt,
+      durationMs: span.durationMs,
+      errorMessage: span.errorMessage,
+      metadata: JSON.parse(JSON.stringify(span.metadata)) as Record<string, unknown>,
+      thoughtBlocks: [...span.thoughtBlocks],
+    })),
+  }
+}
+
 /**
  * Parse a JSON column, returning a fallback instead of throwing when the
  * stored value is corrupt. A single bad row must not poison the whole trace
@@ -201,10 +224,11 @@ export class SQLiteAdapter implements ExportAdapter {
   private writeTail: Promise<unknown> = Promise.resolve()
 
   constructor(filePath: string, options: SQLiteAdapterOptions = {}) {
+    const lockRetry = normalizeLockRetryOptions(options)
     mkdirSync(dirname(filePath), { recursive: true })
     this.db = new Database(filePath)
     this.filePath = filePath
-    this.lockRetry = normalizeLockRetryOptions(options)
+    this.lockRetry = lockRetry
     this.maxFlushedSpanSnapshots = Math.max(
       0,
       Math.floor(options.maxFlushedSpanSnapshots ?? 10_000),
@@ -216,7 +240,8 @@ export class SQLiteAdapter implements ExportAdapter {
   }
 
   async flush(trace: Trace): Promise<void> {
-    return this.enqueueSqliteWrite(() => this.flushNow(trace))
+    const snapshot = snapshotTrace(trace)
+    return this.enqueueSqliteWrite(() => this.flushNow(snapshot))
   }
 
   private async flushNow(trace: Trace): Promise<void> {

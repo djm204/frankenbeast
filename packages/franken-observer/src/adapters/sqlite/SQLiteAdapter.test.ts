@@ -45,8 +45,38 @@ describe('SQLiteAdapter', () => {
       'journal_mode = WAL',
       'foreign_keys = ON',
     ])
+    expect(execMock).toHaveBeenCalledTimes(1)
 
     adapter.close()
+  })
+
+  it('validates retry options before opening a database handle', () => {
+    expect(() => new SQLiteAdapter('/tmp/traces.db', { maxLockRetries: -1 })).toThrow(
+      'maxLockRetries must be an integer between 0 and 10',
+    )
+    expect(Database).not.toHaveBeenCalled()
+  })
+
+  it('snapshots traces before queued writes observe later mutations', async () => {
+    const upsertTraceRun = vi.fn()
+    const upsertSpanRun = vi.fn()
+    prepareMock
+      .mockReturnValueOnce({ run: upsertTraceRun })
+      .mockReturnValueOnce({ run: upsertSpanRun })
+    transactionMock.mockImplementation(fn => (trace: unknown) => fn(trace))
+
+    const adapter = new SQLiteAdapter('/tmp/traces.db')
+    const trace = TraceContext.createTrace('original-goal')
+    const span = TraceContext.startSpan(trace, { name: 'first' })
+    TraceContext.endSpan(span)
+
+    const flush = adapter.flush(trace)
+    trace.goal = 'mutated-goal'
+    span.metadata.changed = true
+    await flush
+
+    expect(upsertTraceRun).toHaveBeenCalledWith(expect.objectContaining({ goal: 'original-goal' }))
+    expect(upsertSpanRun).toHaveBeenCalledWith(expect.objectContaining({ metadata: '{}' }))
   })
 
   it('retries transient SQLite lock failures with bounded backoff and diagnostics', async () => {
