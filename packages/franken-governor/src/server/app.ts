@@ -99,6 +99,30 @@ function verifyGovernorSignature(
   return { ok: true };
 }
 
+function verifyGovernorEndpointAuth(
+  signature: string | undefined,
+  rawBody: Buffer,
+  options: GovernorAppOptions,
+): GovernorSignatureVerificationResult {
+  if (!options.signingSecret) {
+    return options.allowUnsignedApprovalsForTests
+      ? { ok: true }
+      : { ok: false, reason: 'missing' };
+  }
+  return verifyGovernorSignature(signature, rawBody, options.signingSecret);
+}
+
+function governorAuthErrorMessage(reason: Exclude<GovernorSignatureVerificationResult, { ok: true }>['reason']): string {
+  switch (reason) {
+    case 'missing':
+      return 'Missing signature';
+    case 'malformed':
+      return 'Malformed signature';
+    case 'invalid':
+      return 'Invalid signature';
+  }
+}
+
 function parseJsonBody(rawBody: Buffer): ParsedJsonBody | null {
   if (rawBody.length === 0) return {};
 
@@ -161,7 +185,8 @@ function signApprovalResponse(
  * callback instead of consuming the pending approval with a bogus decision.
  */
 function normalizeSlackDecision(actionId: unknown): ResponseCode | null {
-  switch (String(actionId).toLowerCase()) {
+  const [decisionId = ''] = String(actionId).toLowerCase().split(':', 1);
+  switch (decisionId) {
     case 'approve':
       return 'APPROVE';
     case 'reject':
@@ -176,6 +201,16 @@ function normalizeSlackDecision(actionId: unknown): ResponseCode | null {
     default:
       return null;
   }
+}
+
+function extractSlackActionFeedback(actionId: unknown): string | undefined {
+  const value = String(actionId);
+  const separatorIndex = value.indexOf(':');
+  if (separatorIndex === -1) {
+    return undefined;
+  }
+  const feedback = value.slice(separatorIndex + 1).trim();
+  return feedback.length > 0 ? feedback : undefined;
 }
 
 export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
@@ -209,6 +244,18 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
           }
         : { enabled: false },
     });
+  });
+
+  app.get('/v1/approval/pending', (c) => {
+    const verification = verifyGovernorEndpointAuth(
+      c.req.header('x-governor-signature'),
+      Buffer.alloc(0),
+      options,
+    );
+    if (!verification.ok) {
+      return c.json({ error: { message: governorAuthErrorMessage(verification.reason) } }, 401);
+    }
+    return c.json({ approvals: registry.list() });
   });
 
   // POST /v1/approval/request — submit an approval request
@@ -507,6 +554,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
     if (decision === null) {
       return c.json({ error: { message: 'Unknown Slack action' } }, 400);
     }
+    const feedback = extractSlackActionFeedback(action.action_id);
 
     // Look up the pending approval; unknown requests are rejected.
     if (!registry.has(requestId)) {
@@ -524,7 +572,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
         requestId,
         decision,
         payload.user?.id ?? payload.user?.username ?? 'slack',
-        undefined,
+        feedback,
         options.signingSecret,
       )
       : undefined;
@@ -534,6 +582,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       decision,
       respondedBy: payload.user?.id ?? payload.user?.username ?? 'slack',
       respondedAt: new Date(deterministicNow()),
+      ...(feedback !== undefined ? { feedback } : {}),
       ...(slackSignature !== undefined ? { signature: slackSignature } : {}),
     });
 

@@ -3,7 +3,10 @@ import { SlackChannel } from '../../../src/channels/slack-channel.js';
 import type { ApprovalRequest } from '../../../src/core/types.js';
 import type { HttpClient } from '../../../src/channels/slack-channel.js';
 import { ChannelUnavailableError } from '../../../src/errors/index.js';
-import { approvalPromptBoundary } from '../../../src/gateway/approval-prompt-markers.js';
+import {
+  approvalPromptBoundary,
+  attachTrustedApprovalPromptNotice,
+} from '../../../src/gateway/approval-prompt-markers.js';
 
 function makeRequest(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
   return {
@@ -112,6 +115,28 @@ describe('SlackChannel', () => {
     expect(blockText).toContain(approvalPromptBoundary('req-001', 'BEGIN'));
     expect(blockText).toContain(approvalPromptBoundary('req-001', 'END'));
     expect(blockText).toContain('truncated to fit Slack section limits');
+  });
+
+  it('keeps trusted security notices visible when truncating long untrusted summaries', async () => {
+    const httpClient = makeFakeHttpClient();
+    const channel = new SlackChannel({
+      webhookUrl: 'https://hooks.slack.com/test',
+      httpClient,
+      callbackServer: makeFakeCallbackServer(),
+    });
+    const request = attachTrustedApprovalPromptNotice(
+      makeRequest({ summary: 'x'.repeat(4000) }),
+      'Approval anomaly detected. To approve anyway, respond with ACK-APPROVAL-ANOMALY-cmVxLTAwMQ.',
+    );
+
+    await channel.requestApproval(request);
+
+    const [, body] = httpClient.post.mock.calls[0] as [string, { blocks: Array<{ text: { type: string; text: string } }> }];
+    const blockText = body.blocks[0]!.text.text;
+    expect(blockText.length).toBeLessThanOrEqual(3000);
+    expect(blockText).toContain('SECURITY NOTICE (trusted):');
+    expect(blockText).toContain('ACK-APPROVAL-ANOMALY-cmVxLTAwMQ');
+    expect(blockText.indexOf('SECURITY NOTICE (trusted):')).toBeLessThan(blockText.indexOf('Summary (untrusted):'));
   });
 
   it('throws ChannelUnavailableError with the original network error as cause when webhook POST fails', async () => {

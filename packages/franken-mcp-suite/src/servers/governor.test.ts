@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { createGovernorAdapter } from '../adapters/governor-adapter.js';
 import { createGovernorServer } from './governor.js';
 
 describe('Governor Server', () => {
@@ -41,4 +42,38 @@ describe('Governor Server', () => {
     expect(governor.budgetStatus).toHaveBeenCalledWith();
     expect(budgetResult.content[0]!.text).toContain('1.25');
   });
+
+  it.each(['keep_both_scoped', 'expire_existing'] as const)(
+    'approves %s memory conflict resolutions through the public governor check',
+    async (resolution) => {
+      const server = createGovernorServer({ governor: createGovernorAdapter(':memory:') });
+      const checkTool = server.tools.find((t) => t.name === 'fbeast_governor_check')!;
+
+      const context = JSON.stringify({
+        action: 'resolve_conflict',
+        id: 'memcand_1',
+        resolution,
+        ...(resolution === 'keep_both_scoped'
+          ? { scopedKey: 'user.preference.response-style.scope.docs' }
+          : {}),
+      });
+
+      const directResult = await checkTool.handler({
+        action: 'fbeast_memory_review_decide',
+        context,
+      });
+      expect(directResult.content[0]!.text).toContain('**Decision:** approved');
+      expect(directResult.content[0]!.text).toContain('explicit operator review decision');
+
+      const proxyResult = await checkTool.handler({
+        action: 'execute_tool',
+        context: JSON.stringify({
+          tool: 'fbeast_memory_review_decide',
+          args: JSON.parse(context) as Record<string, unknown>,
+        }),
+      });
+      expect(proxyResult.content[0]!.text).toContain('**Decision:** approved');
+      expect(proxyResult.content[0]!.text).toContain('explicit operator review decision');
+    },
+  );
 });

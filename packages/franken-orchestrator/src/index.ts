@@ -49,7 +49,7 @@ export type {
 } from './types.js';
 
 // Issues
-export { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses } from './issues/index.js';
+export { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses, detectWorkerHeartbeatMonotonicityAnomalies } from './issues/index.js';
 export type {
   IssueRunnerConfig,
   IssueBackpressureConfig,
@@ -68,7 +68,9 @@ export type {
   IssueDependencyStatus,
   IssueSchedulerFairnessBucket,
   IssueSchedulerFairnessReport,
+  IssueSchedulerFairnessReportOptions,
   IssueWorkerCardProcessSnapshot,
+  WorkerHeartbeatMonotonicityFinding,
   DuplicateWorkerCardProcessFinding,
 } from './issues/index.js';
 
@@ -164,6 +166,33 @@ export { LlmSkillHandler } from './skills/llm-skill-handler.js';
 export { LlmPlanner } from './skills/llm-planner.js';
 export { quoteUntrustedPayload, wrapUntrustedContent } from './prompt/untrusted-content.js';
 export type { UntrustedContentSource } from './prompt/untrusted-content.js';
+export { buildProjectMemorySnapshot } from './memory/project-memory-snapshot.js';
+export {
+  dryRunReplayDeadLetterEntry,
+  inspectDeadLetterEntry,
+  listDeadLetterEntries,
+  recordRetryExhaustionToDeadLetterQueue,
+  retireDeadLetterEntry,
+} from './dr/dead-letter-queue.js';
+export type {
+  DeadLetterEntry,
+  DeadLetterEntryStatus,
+  DeadLetterReplayDryRunReport,
+  DeadLetterReplaySafety,
+  DryRunReplayOptions,
+  RecordRetryExhaustionOptions,
+  RetireDeadLetterEntryOptions,
+} from './dr/dead-letter-queue.js';
+export type {
+  BuildProjectMemorySnapshotInput,
+  ProjectMemoryRecord,
+  ProjectMemorySensitivity,
+  ProjectMemorySnapshot,
+  ProjectMemorySnapshotEntry,
+  ProjectMemorySnapshotEntryProvenance,
+  ProjectMemorySnapshotProvenance,
+  ProjectMemorySnapshotSelector,
+} from './memory/project-memory-snapshot.js';
 
 // Planning
 export { ChunkFileGraphBuilder } from './planning/chunk-file-graph-builder.js';

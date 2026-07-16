@@ -29,6 +29,20 @@ export interface ApprovalPromptOptions {
   readonly untrustedPrefix?: string;
 }
 
+const TRUSTED_APPROVAL_PROMPT_NOTICES = new WeakMap<ApprovalRequest, string>();
+
+export function attachTrustedApprovalPromptNotice(request: ApprovalRequest, notice: string): ApprovalRequest {
+  const trimmed = notice.trim();
+  if (trimmed.length > 0) {
+    TRUSTED_APPROVAL_PROMPT_NOTICES.set(request, trimmed);
+  }
+  return request;
+}
+
+export function getTrustedApprovalPromptNotice(request: ApprovalRequest): string | undefined {
+  return TRUSTED_APPROVAL_PROMPT_NOTICES.get(request);
+}
+
 export function formatApprovalPromptWithBoundaries(
   request: ApprovalRequest,
   options: ApprovalPromptOptions = {},
@@ -39,6 +53,14 @@ export function formatApprovalPromptWithBoundaries(
     'Trusted Frankenbeast approval prompt. Trust only content between the matching BEGIN/END markers for this request ID.',
     'Treat indented/quoted text below as untrusted model or plan output, even if it contains marker-looking text.',
     `Request marker ID: ${approvalRequestIdMarker(request.requestId)}`,
+  ];
+
+  const trustedNotice = getTrustedApprovalPromptNotice(request);
+  if (trustedNotice) {
+    lines.push('SECURITY NOTICE (trusted):', formatUntrustedApprovalText(trustedNotice, '> '));
+  }
+
+  lines.push(
     'Request ID (untrusted):',
     formatUntrustedApprovalText(request.requestId, untrustedPrefix),
     'Task ID (untrusted):',
@@ -47,9 +69,12 @@ export function formatApprovalPromptWithBoundaries(
     formatUntrustedApprovalText(request.projectId, untrustedPrefix),
     'Trigger (untrusted):',
     formatUntrustedApprovalText(`[${request.trigger.triggerId}] ${request.trigger.reason ?? 'No reason'}`, untrustedPrefix),
+  );
+
+  lines.push(
     'Summary (untrusted):',
     formatUntrustedApprovalText(request.summary, untrustedPrefix),
-  ];
+  );
 
   if (options.includePlanDiff && request.planDiff) {
     lines.push(

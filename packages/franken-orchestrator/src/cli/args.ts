@@ -51,7 +51,17 @@ export type BeastAction =
 export type SkillAction = 'list' | 'add' | 'scaffold' | 'remove' | 'enable' | 'disable' | 'info' | undefined;
 export type SecurityAction = 'status' | 'set' | undefined;
 export type MemoryAction = 'snapshot-diff' | 'verify-backup' | 'duplicate-report' | undefined;
-export type DrAction = 'backup' | 'list' | 'verify' | 'restore' | 'restore-dry-run' | undefined;
+export type DrAction =
+  | 'backup'
+  | 'list'
+  | 'verify'
+  | 'restore'
+  | 'restore-dry-run'
+  | 'dead-letter-list'
+  | 'dead-letter-inspect'
+  | 'dead-letter-replay-dry-run'
+  | 'dead-letter-retire'
+  | undefined;
 
 export interface CliArgs {
   subcommand: Subcommand;
@@ -118,7 +128,17 @@ export interface CliArgs {
 const VALID_SUBCOMMANDS = new Set(['init', 'interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'beasts-daemon', 'network', 'memory', 'dr', 'skill', 'security']);
 const VALID_NETWORK_ACTIONS = new Set(['up', 'down', 'status', 'start', 'stop', 'restart', 'logs', 'config', 'credentials', 'help']);
 const VALID_MEMORY_ACTIONS = new Set(['snapshot-diff', 'verify-backup', 'duplicate-report']);
-const VALID_DR_ACTIONS = new Set(['backup', 'list', 'verify', 'restore', 'restore-dry-run']);
+const VALID_DR_ACTIONS = new Set([
+  'backup',
+  'list',
+  'verify',
+  'restore',
+  'restore-dry-run',
+  'dead-letter-list',
+  'dead-letter-inspect',
+  'dead-letter-replay-dry-run',
+  'dead-letter-retire',
+]);
 const VALID_BEAST_ACTIONS = new Set(['catalog', 'create', 'spawn', 'list', 'status', 'logs', 'stop', 'kill', 'restart', 'resume', 'delete']);
 const VALID_SKILL_ACTIONS = new Set(['list', 'add', 'scaffold', 'remove', 'enable', 'disable', 'info']);
 const VALID_SECURITY_ACTIONS = new Set(['status', 'set']);
@@ -258,6 +278,14 @@ Disaster-Recovery Commands:
                                   Restore an encrypted state backup; --dry-run verifies and prints planned writes only
   dr restore-dry-run <backup-manifest.json> <live-manifest.json>
                                   Compare backup/live restore manifests and print read-only JSON output
+  dr dead-letter-list <queue-file>
+                                  List failed automation actions in a dead-letter queue
+  dr dead-letter-inspect <queue-file> <entry-id>
+                                  Print one dead-letter entry with retry exhaustion evidence
+  dr dead-letter-replay-dry-run <queue-file> <entry-id>
+                                  Preview replay safety without executing side effects
+  dr dead-letter-retire <queue-file> <entry-id> [reason]
+                                  Mark a dead-letter entry retired after operator review
 
 Beast Commands:
   beasts catalog                      List fixed Beast definitions
@@ -606,13 +634,16 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     drBackupManifestPath = positionals[1];
     drLiveManifestPath = positionals[2];
     drKeyFilePath = positionals[3];
-    const maxPositionals = drAction === 'backup' || drAction === 'restore'
+    const maxPositionals = drAction === 'backup' || drAction === 'restore' || drAction === 'dead-letter-retire'
       ? 4
-      : drAction === 'verify' || drAction === 'restore-dry-run'
-        ? 3
-        : drAction === 'list'
-          ? 2
-          : 1;
+      : drAction === 'verify'
+        || drAction === 'restore-dry-run'
+        || drAction === 'dead-letter-inspect'
+        || drAction === 'dead-letter-replay-dry-run'
+          ? 3
+          : drAction === 'list' || drAction === 'dead-letter-list'
+            ? 2
+            : 1;
     if (positionals.length > maxPositionals) {
       throw new TypeError(`Unexpected argument '${positionals[maxPositionals]}'. dr ${drAction ?? '<action>'} accepts ${String(maxPositionals - 1)} argument(s)`);
     }

@@ -43,7 +43,7 @@ const DEFAULT_MEMORY_QUERY_LIMIT = 20;
 const MAX_MEMORY_QUERY_LIMIT = 1000;
 const MEMORY_REVIEW_STATUSES = ['pending', 'approved', 'rejected', 'never_store', 'suppressed'] as const;
 const MEMORY_REVIEW_ACTIONS = ['approve', 'reject', 'never_store', 'resolve_conflict'] as const;
-const MEMORY_CONFLICT_RESOLUTIONS = ['keep_existing', 'replace_existing', 'reject_candidate'] as const;
+const MEMORY_CONFLICT_RESOLUTIONS = ['keep_existing', 'replace_existing', 'keep_both_scoped', 'reject_candidate', 'expire_existing'] as const;
 
 type MemoryReviewStatus = (typeof MEMORY_REVIEW_STATUSES)[number];
 type MemoryReviewAction = (typeof MEMORY_REVIEW_ACTIONS)[number];
@@ -51,6 +51,15 @@ type MemoryConflictResolution = (typeof MEMORY_CONFLICT_RESOLUTIONS)[number];
 
 function parseMemoryQueryLimit(value: unknown): { ok: true; value: number } | { ok: false; message: string } {
   if (value === undefined) return { ok: true, value: DEFAULT_MEMORY_QUERY_LIMIT };
+  return parsePositiveMemoryLimit(value);
+}
+
+function parseMemoryExportLimit(value: unknown): { ok: true; value: number } | { ok: false; message: string } {
+  if (value === undefined) return { ok: true, value: MAX_MEMORY_QUERY_LIMIT };
+  return parsePositiveMemoryLimit(value);
+}
+
+function parsePositiveMemoryLimit(value: unknown): { ok: true; value: number } | { ok: false; message: string } {
   if (typeof value !== 'string' && typeof value !== 'number') {
     return { ok: false, message: `limit must be a positive integer between 1 and ${MAX_MEMORY_QUERY_LIMIT}` };
   }
@@ -82,6 +91,15 @@ function parseMemoryReadScopeArgs(args: Record<string, unknown>): { ok: true; va
     return { ok: false, message: 'agentId is required when readScope is agent' };
   }
   return { ok: true, value: { ...(readScope ? { readScope: readScope as 'all' | 'shared' | 'agent' } : {}), ...(agentId ? { agentId } : {}) } };
+}
+
+function parseMemoryExportRedaction(value: unknown): { ok: true; value?: 'safe' | 'none' } | { ok: false; message: string } {
+  if (value === undefined) return { ok: true };
+  const redaction = String(value);
+  if (redaction === 'safe' || redaction === 'none') {
+    return { ok: true, value: redaction };
+  }
+  return { ok: false, message: 'redaction must be one of: safe, none' };
 }
 
 function parseOptionalAgentIdArg(args: Record<string, unknown>): { ok: true; value?: string } | { ok: false; message: string } {
@@ -312,6 +330,42 @@ const TOOLS: ToolFull[] = [
     },
   },
   {
+    name: 'fbeast_memory_export',
+    server: 'memory',
+    description: 'Export project memory as structured JSON with safe redaction by default',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectId: { type: 'string', description: 'Optional legacy project identifier; export is database-scoped' },
+        readScope: { type: 'string', description: 'Read scope: all (legacy), shared (hide agent-scoped entries), or agent (shared plus entries for agentId)', enum: ['all', 'shared', 'agent'] },
+        agentId: { type: 'string', description: 'Agent id required when readScope is agent' },
+        redaction: { type: 'string', description: 'Redaction mode: safe (default) masks secrets/PII; none emits raw values for trusted operator-only exports', enum: ['safe', 'none'] },
+        operatorApproval: { type: 'string', description: 'Set to trusted-operator-approved only after explicit trusted-operator approval for redaction=none exports' },
+        limit: { type: 'string', description: 'Max entries per memory store (default 1000)' },
+      },
+    },
+    makeHandler: ({ brain }) => async (args) => {
+      const scopeArgs = parseMemoryReadScopeArgs(args);
+      if (!scopeArgs.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_export ${scopeArgs.message}` }], isError: true };
+      }
+      const parsedLimit = parseMemoryExportLimit(args['limit']);
+      if (!parsedLimit.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_export ${parsedLimit.message}` }], isError: true };
+      }
+      const redaction = parseMemoryExportRedaction(args['redaction']);
+      if (!redaction.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_export ${redaction.message}` }], isError: true };
+      }
+      const result = await brain.exportProjectMemory({
+        ...scopeArgs.value,
+        ...(redaction.value ? { redaction: redaction.value } : {}),
+        limit: parsedLimit.value,
+      });
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    },
+  },
+  {
     name: 'fbeast_memory_forget',
     server: 'memory',
     description: 'Delete working memory entry by key',
@@ -492,6 +546,7 @@ const TOOLS: ToolFull[] = [
         id: { type: 'string', description: 'Candidate id returned by fbeast_memory_review_propose/list' },
         action: { type: 'string', description: 'Decision to apply', enum: [...MEMORY_REVIEW_ACTIONS] },
         resolution: { type: 'string', description: 'Conflict resolution to apply when action is resolve_conflict', enum: [...MEMORY_CONFLICT_RESOLUTIONS] },
+        scopedKey: { type: 'string', description: 'Required when resolution is keep_both_scoped; stores the candidate under this explicit non-conflicting key' },
         reviewer: { type: 'string', description: 'Optional reviewer/operator id' },
         note: { type: 'string', description: 'Optional reviewer note' },
       },
@@ -510,6 +565,12 @@ const TOOLS: ToolFull[] = [
       if (resolution && !resolution.ok) {
         return { content: [{ type: 'text', text: `Error: fbeast_memory_review_decide ${resolution.message}` }], isError: true };
       }
+      const scopedKey = resolution?.ok && resolution.value === 'keep_both_scoped'
+        ? parseNonEmptyStringArg('scopedKey', args['scopedKey'])
+        : undefined;
+      if (scopedKey && !scopedKey.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_review_decide ${scopedKey.message}` }], isError: true };
+      }
       const reviewer = args['reviewer'] === undefined ? undefined : parseNonEmptyStringArg('reviewer', args['reviewer']);
       if (reviewer && !reviewer.ok) {
         return { content: [{ type: 'text', text: `Error: fbeast_memory_review_decide ${reviewer.message}` }], isError: true };
@@ -522,6 +583,7 @@ const TOOLS: ToolFull[] = [
         id: id.value,
         action: action.value,
         ...(resolution?.ok ? { resolution: resolution.value } : {}),
+        ...(scopedKey?.ok ? { scopedKey: scopedKey.value } : {}),
         options: {
           ...(reviewer?.value ? { reviewer: reviewer.value } : {}),
           ...(note?.value !== undefined ? { note: note.value } : {}),

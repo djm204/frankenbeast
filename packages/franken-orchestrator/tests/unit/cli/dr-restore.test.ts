@@ -17,7 +17,7 @@ describe('dr restore-dry-run CLI', () => {
     expect(args.drLiveManifestPath).toBe('/live/manifest.json');
   });
 
-  it('parses encrypted backup, verify, list, and restore commands', () => {
+  it('parses encrypted backup, verify, list, restore, and dead-letter commands', () => {
     expect(parseArgs(['dr', 'backup', '/state', '/backup.enc.json', '/key']).drKeyFilePath).toBe('/key');
     expect(parseArgs(['dr', 'list', '/backup.enc.json']).drAction).toBe('list');
     expect(parseArgs(['dr', 'verify', '/backup.enc.json', '/key']).drLiveManifestPath).toBe('/key');
@@ -27,6 +27,14 @@ describe('dr restore-dry-run CLI', () => {
     expect(restore.drLiveManifestPath).toBe('/restore');
     expect(restore.drKeyFilePath).toBe('/key');
     expect(restore.dryRun).toBe(true);
+
+    const inspect = parseArgs(['dr', 'dead-letter-inspect', '/queue.json', 'dlq_123']);
+    expect(inspect.drAction).toBe('dead-letter-inspect');
+    expect(inspect.drBackupManifestPath).toBe('/queue.json');
+    expect(inspect.drLiveManifestPath).toBe('dlq_123');
+    const retire = parseArgs(['dr', 'dead-letter-retire', '/queue.json', 'dlq_123', 'operator resolved manually']);
+    expect(retire.drAction).toBe('dead-letter-retire');
+    expect(retire.drKeyFilePath).toBe('operator resolved manually');
   });
 
   it('prints a small backup summary and marks list output unverified', async () => {
@@ -59,6 +67,70 @@ describe('dr restore-dry-run CLI', () => {
       expect(listReport.command).toBe('dr list');
       expect(listReport.verified).toBe(false);
       expect(listReport.verificationRequired).toContain('dr verify');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('prints dead-letter list, inspect, dry-run replay, and retire JSON', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dr-'));
+    const queuePath = join(dir, 'dead-letter.json');
+    const output: string[] = [];
+
+    try {
+      await writeFile(queuePath, JSON.stringify({
+        schemaVersion: 1,
+        entries: [{
+          id: 'dlq_test',
+          actionClass: 'codex-review-trigger',
+          target: 'https://operator:targetSecret123@example.com/franken',
+          attempts: 5,
+          maxAttempts: 5,
+          lastError: 'provider failures: «redacted:sk-…» and «redacted:xox…»',
+          firstAttemptedAt: '2026-07-16T08:00:00.000Z',
+          lastAttemptedAt: '2026-07-16T08:05:00.000Z',
+          createdAt: '2026-07-16T08:05:00.000Z',
+          replaySafety: 'side-effect-approval-required',
+          status: 'open',
+          payload: {
+            command: 'curl --password notasecret -H "Authorization: Bearer ***" https://api.github.com/repos/djm204/frankenbeast',
+            argv: ['gh', 'api', '--token', 'abcdefghijklmnopqrstuvwxyz123456', '--password=abcd1234secret5678'],
+            databaseUrl: 'postgres://beast:anotherSecret456@db.example/franken',
+          },
+        }],
+      }), 'utf8');
+
+      await handleDrCommand({ action: 'dead-letter-list', backupManifestPath: queuePath, print: (message) => output.push(message) });
+      const listOutput = output.pop() ?? '';
+      expect(JSON.parse(listOutput)).toMatchObject({
+        command: 'dr dead-letter-list',
+        summary: { open: 1 },
+        entries: [{ id: 'dlq_test', actionClass: 'codex-review-trigger', target: 'https://operator:<redacted>@example.com/franken' }],
+      });
+      expect(listOutput).not.toContain('targetSecret123');
+      expect(listOutput).not.toContain('databaseSecret123');
+      expect(listOutput).not.toContain('abcd1234secret5678');
+      expect(listOutput).not.toContain('GH_TOKEN');
+      expect(listOutput).not.toContain('lastError');
+      expect(listOutput).not.toContain('payload');
+
+      await handleDrCommand({ action: 'dead-letter-inspect', backupManifestPath: queuePath, liveManifestPath: 'dlq_test', print: (message) => output.push(message) });
+      const inspectOutput = output.pop() ?? '';
+      expect(JSON.parse(inspectOutput)).toMatchObject({ command: 'dr dead-letter-inspect', entry: { id: 'dlq_test' } });
+      expect(inspectOutput).not.toContain('databaseSecret123');
+      expect(inspectOutput).not.toContain('abcdefghijklmnopqrstuvwxyz123456');
+      expect(inspectOutput).not.toContain('notasecret');
+      expect(inspectOutput).not.toContain('xoxb-123456789012-abcdefabcdef');
+      expect(inspectOutput).not.toContain('anotherSecret456');
+      expect(inspectOutput).toContain('<redacted>');
+
+      await handleDrCommand({ action: 'dead-letter-replay-dry-run', backupManifestPath: queuePath, liveManifestPath: 'dlq_test', generatedAt: '2026-07-16T08:06:00.000Z', print: (message) => output.push(message) });
+      const replayOutput = output.pop() ?? '';
+      expect(JSON.parse(replayOutput)).toMatchObject({ command: 'dr dead-letter-replay-dry-run', replay: { dryRun: true, wouldReplay: false, requiresApproval: true } });
+      expect(replayOutput).not.toContain('ghp_testtoken1234567890');
+
+      await handleDrCommand({ action: 'dead-letter-retire', backupManifestPath: queuePath, liveManifestPath: 'dlq_test', keyFilePath: 'handled manually', generatedAt: '2026-07-16T08:07:00.000Z', print: (message) => output.push(message) });
+      expect(JSON.parse(output.pop() ?? '')).toMatchObject({ command: 'dr dead-letter-retire', entry: { id: 'dlq_test', status: 'retired', retiredReason: 'handled manually' } });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

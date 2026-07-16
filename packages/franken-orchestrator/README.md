@@ -34,6 +34,8 @@ frankenbeast interview
 frankenbeast plan --design-doc <file>
 frankenbeast run --plan-dir <dir>
 frankenbeast issues
+frankenbeast dr dead-letter-list .fbeast/dead-letter-actions.json
+frankenbeast dr dead-letter-replay-dry-run .fbeast/dead-letter-actions.json <entry-id>
 frankenbeast chat-server
 frankenbeast beasts-daemon
 ```
@@ -67,6 +69,21 @@ npm run test:coverage --workspace=@franken/orchestrator
 ```
 
 Integration and E2E scripts enable broader runtime paths with `INTEGRATION=true` or `E2E=true`; use them when the needed local services, credentials, and fixtures are available.
+
+## Disaster recovery dead-letter queue
+
+Failed automation actions that exhaust bounded retries can be recorded with `recordRetryExhaustionToDeadLetterQueue()` in a JSON dead-letter queue. Each entry preserves the action class, target, attempts, retry limit, last error, first/last attempt timestamps, and a replay-safety classification of `safe`, `side-effect-approval-required`, or `unsafe`.
+
+Operators can inspect the queue without executing side effects:
+
+```bash
+frankenbeast dr dead-letter-list <queue-file>
+frankenbeast dr dead-letter-inspect <queue-file> <entry-id>
+frankenbeast dr dead-letter-replay-dry-run <queue-file> <entry-id>
+frankenbeast dr dead-letter-retire <queue-file> <entry-id> "handled manually"
+```
+
+The replay command is dry-run only. Entries classified as side-effecting report that explicit operator approval is required before any future replay executor may run them, while retired or unsafe entries are not replayable.
 
 ## Flaky liveness fixture replay
 
@@ -107,6 +124,7 @@ Each criterion reports `pass` only when matching evidence is present in working 
 | Provider adapters | `src/providers/`, `src/skills/providers/`, `src/adapters/` | Claude, Codex, Gemini, Aider, and API/CLI provider integration. |
 | HTTP/chat/network | `src/http/`, `src/chat/`, `src/network/` | Chat server, managed network services, logs, secrets, and local attachment flows. |
 | Beast management | `src/beasts/` | Beast catalog, run persistence, and daemon-backed run services. |
+| Disaster recovery | `src/dr/` | Encrypted state backup/restore previews and failed-action dead-letter queue reports. |
 | Skills | `src/skills/` | CLI skill discovery, translation, execution, and auth/config stores. |
 
 ## Related docs

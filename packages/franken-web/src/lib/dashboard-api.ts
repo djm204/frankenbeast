@@ -23,10 +23,27 @@ export interface DashboardProvider {
   model?: string;
 }
 
+export type DashboardDependencyStatus = 'healthy' | 'degraded' | 'unavailable' | 'unknown';
+
+export interface DashboardDependency {
+  name: string;
+  type: string;
+  status: DashboardDependencyStatus;
+  summary: string;
+  remediationHint: string;
+  safeWork: string[];
+}
+
+export interface DashboardAvailability {
+  status: DashboardDependencyStatus;
+  dependencies: DashboardDependency[];
+}
+
 export interface DashboardSnapshot {
   skills: DashboardSkill[];
   security: DashboardSecurity;
   providers: DashboardProvider[];
+  availability?: DashboardAvailability;
 }
 
 export class DashboardApiClient {

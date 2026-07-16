@@ -73,6 +73,25 @@ describe('GovernorAuditRecorder', () => {
     expect(output.securityFailure).toBe('signature-verification');
   });
 
+  it('records approval anomaly blocks as failed security events', async () => {
+    const port = makeFakeMemoryPort();
+    const recorder = new GovernorAuditRecorder(port);
+
+    await recorder.record(
+      makeRequest(),
+      makeResponse({ decision: 'ABORT', feedback: 'Approval anomaly detected' }),
+      { securityFailure: 'approval-anomaly' },
+    );
+
+    const trace = port.calls[0]!;
+    const output = trace.output as { decision: string; securityFailure: string };
+    expect(trace.status).toBe('failure');
+    expect(trace.tags).toContain('hitl:approval-anomaly-failed');
+    expect(trace.tags).toContain('hitl:security-failure');
+    expect(output.decision).toBe('ABORT');
+    expect(output.securityFailure).toBe('approval-anomaly');
+  });
+
   it('records REGEN with status failure and tag hitl:rejected', async () => {
     const port = makeFakeMemoryPort();
     const recorder = new GovernorAuditRecorder(port);

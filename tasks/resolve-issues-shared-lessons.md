@@ -1,5 +1,10 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-16 — Dead-letter queue Codex closeout
+- DLQ/DR restore output redaction must cover provider token literals (for example `sk-*`, `xox*`) and credentialed database URLs even when they appear inside free-text fields such as `target`, `lastError`, or nested payload strings; test fixtures should prove output does not leak the original secret substrings.
+- For DLQ file locks, treat unparseable lock timestamps as malformed stale-lock candidates and fall back to mtime-based reaping; otherwise a syntactically valid lock JSON with `acquiredAt: not-a-date` can wedge writers forever.
+- When reaping malformed DLQ locks, revalidate the moved file identity after `rename` before unlinking so a stale-lock race cannot delete a fresh active lock; when persisting retry exhaustion, normalize blank caller timestamps before writing so later queue reads do not reject the whole DLQ.
+
 ## 2026-07-15 — Memory access audit privacy
 - Memory access audit hashes should use keyed HMACs, not bare SHA-256, and the tests should assert same-selector stability plus raw-value absence rather than pinning an unsalted digest.
 - Keep audit-only HMAC key material separate from exported right-to-forget/deletion guard snapshot keys; audit-only writes must not cause `serialize()` to expose `deletionGuardHashKey`.
@@ -15,6 +20,10 @@
 - For memory governance evidence, pass only selector/dry-run/profile fields into hook/governor context and redact selectors before logging; never serialize full memory tool payloads because schema-rejected extras or stored values can leak secrets into governor logs.
 - High-risk shell-command inference must parse common CLI variants, not just simple substrings: allow read-only GitHub inspection (`gh issue/pr view|list`), gate mutating GitHub subcommands such as labels/runs/secrets even behind inherited flags, recognize `git` global options before `push`, deny Git remote writes without a concrete target, avoid matching ordinary `service` path/package names as process control, include `crontab` edits, and match real webhook hosts like `hooks.slack.com/services` and Discord `/api/webhooks/`.
 
+## 2026-07-15 — Memory export redaction gates
+- For memory export features, keep the public MCP schema, adapter method, governance non-executing allowlist, README docs, standalone registry drift tests, and redaction regression tests in the same PR so exposed tool metadata cannot drift from runtime behavior.
+- When testing redaction patterns for token-like values, build dummy secret strings from split literals so repository secret scanners do not flag test fixtures while still exercising the runtime redactor.
+
 ## 2026-07-15 — Skill installer path hardening review fixes
 - For installer path hardening, guard every public surface that can surface unsafe-path errors, not just install routes; context/read/write routes should return generic unsafe-path messages and tests should assert absolute roots/targets are not leaked.
 - If an installer snapshots a root realpath at construction, handle missing-root recovery explicitly: revalidate the missing root's parent before `mkdir`, reject symlinked/repointed parents, then recheck the recreated root before creating child directories.
@@ -24,11 +33,12 @@
 - For temporary operational facts, keep TTL metadata on working-memory values (`expiresAt`) and enforce expiration on all read/list/hydration paths; also filter expired runtime rows before flush so stale operational state cannot be re-persisted.
 - Memory-review conflict checks can read persisted rows even when runtime hydration is disabled; parse/delete expired persisted TTL rows before returning `present`, otherwise stale temporary facts block normal approval as false conflicts.
 - For memory-review conflict resolvers, gate normal approval as well as optional preflight APIs; conflict checks must distinguish dirty runtime changes, pending local deletes, unhydrated persisted values, stale provenance, and concurrent DB updates before allowing replacement.
-- If a memory-review resolver adds a new decision action, update the MCP governance allowlist, audit sanitizer, tool registry, adapter surface, and a read-only conflict-inspection tool together; otherwise default governed MCP users can be told to resolve a conflict but blocked from doing it or forced to choose blindly.
+- If a memory-review resolver adds a new decision action, update the MCP governance allowlist, audit sanitizer, tool registry, adapter surface, and a read-only conflict-inspection tool together; otherwise default governed MCP users can be told to resolve a conflict but blocked from doing it or forced to choose blindly. Add public `fbeast_governor_check` coverage for both direct tool names and `execute_tool` proxy contexts so the shared governor path cannot drift from the registry enum.
 - When conflict checks refresh clean in-memory keys from SQLite, also update or clear the runtime cache for that key so a later flush cannot write stale runtime state back over the same persisted value that was just reported as authoritative.
 - When verifying workspace package typechecks in a fresh worktree, build dependency packages (or run root `npm run build`) before package-local `tsc --noEmit`; otherwise unresolved workspace package declarations can look like feature regressions.
 
 ## 2026-07-15 — Beast process cleanup review fixes
+- For Beast worktree cleanup, scope candidates to the orchestrator-owned worktree root and branch prefix, then require a deleted tracked agent or missing agent owner before deletion; default scan APIs should be dry-run and return owner/activity/card/PR evidence for review. Even with explicit destructive cleanup, skip dirty, locked, or active-run worktrees rather than forcing data loss or aborting startup.
 - For Beast cleanup paths, treat persisted process-group ownership as verified only when the stored start-time token matches the current `/proc` start time; missing or unreadable start times should fail closed to direct-PID signaling to avoid killing a PID-reused process group.
 - Keep cleanup ownership delegated through execution-mode wrappers: container executors must forward `cleanupPendingRun()` so queued container runs can be cancelled before an attempt exists.
 - CLI signal cleanup should register and unregister all handled signals symmetrically, and long-running `restart` commands should track the target run before awaiting restart so SIGINT/SIGHUP can clean up in-flight work.
@@ -259,6 +269,7 @@
 - 2026-07-14 — Egress policy wiring: provider/comms adapters that perform outbound HTTP must receive the live runtime egress policy from their construction routes, not just expose standalone guarded fetch helpers. For SDKs without a first-class fetch injection point, add a narrow wrapper with tests that prove the guarded fetch is active during the SDK request and that global fetch is restored afterward.
 - 2026-07-15 — Security scanner ReDoS: for untrusted source/env scanners, size bounds must run before allocation/decoding where possible (`stat` before `readFile`), and regex-based string literal extraction should be replaced with a linear parser for adversarial escape/unterminated literal cases. Codex may reproduce small payload DoS with only tens of backslashes, so add a targeted regression for that exact input class.
 - 2026-07-15 — Codex-cap cleanup rounds: when Codex findings arrive at the review-trigger cap, fix/reply/resolve every actionable thread and verify CI/unresolved-thread state, but do not fire an over-cap `@codex review` without explicit human approval; block with the exact refused trigger command and latest passing commit so the next worker can resume cleanly.
+- 2026-07-16 — Approval-anomaly closeout: if `/v1/approval/pending` exposes anomaly ACK tokens, treat it as operator-sensitive and require governor auth; preserve anomaly notices across waiter refreshes, quote trusted notice text line-by-line, and suppress reusable session tokens for acknowledged anomaly overrides.
 
 - 2026-07-15 — Webhook egress allowlists: match exact public HTTPS targets, reject credentials/query/fragment/path traversal, mirror private-host aliases from the orchestrator egress policy, resolve DNS before every network attempt including retries, and add regression tests for DNS rebinding-style private answers.
 - 2026-07-15 — MCP memory scoping: avoid encoding agent scope solely in user-visible keys or summaries. Store explicit scope metadata, use reversible internal key encoding for physical storage, keep logical keys in query/frontload output, and fetch/filter uncapped episodic rows before applying visible result limits so other agents' rows cannot starve the requested scope.

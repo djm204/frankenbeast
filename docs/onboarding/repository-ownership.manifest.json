@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "defaultOwner": "core-maintainers",
+  "unknownPathPolicy": "For unknown or cross-cutting paths, start with docs/CONTRACT_MATRIX.md and docs/RAMP_UP.md, then list every plausible manifest entry in the PM/worker handoff instead of guessing a single owner.",
+  "entries": [
+    {
+      "id": "types-contracts",
+      "name": "Shared types and cross-package contracts",
+      "paths": ["packages/franken-types/**", "docs/CONTRACT_MATRIX.md"],
+      "primaryOwner": "types-contracts-maintainers",
+      "escalationOwner": "core-maintainers",
+      "responsibilities": ["Branded ids, Result helpers, shared DTOs, public package exports, and contract-matrix alignment."],
+      "verification": ["npm run build --workspace @franken/types", "npm run typecheck"],
+      "handoffNotes": ["Call out downstream packages that import generated dist paths before changing public exports."]
+    },
+    {
+      "id": "brain-memory",
+      "name": "Brain and memory systems",
+      "paths": ["packages/franken-brain/**"],
+      "primaryOwner": "memory-maintainers",
+      "escalationOwner": "core-maintainers",
+      "responsibilities": ["Working memory, episodic memory, semantic memory, PII guards, and memory API behavior."],
+      "verification": ["npm test --workspace @franken/brain", "npm run typecheck --workspace @franken/brain"],
+      "handoffNotes": ["Mention persistence/backward-compatibility expectations when changing serialized memory state."]
+    },
+    {
+      "id": "planner-recovery",
+      "name": "Planner, task graphs, and recovery",
+      "paths": ["packages/franken-planner/**"],
+      "primaryOwner": "planner-maintainers",
+      "escalationOwner": "core-maintainers",
+      "responsibilities": ["Plan graphs, topological execution order, recursive expansion, recovery checkpoints, and planner integration tests."],
+      "verification": ["npm test --workspace @franken/planner", "npm run test:integration --workspace @franken/planner"],
+      "handoffNotes": ["State whether a change affects linear, parallel, recursive, or recovery flows."]
+    },
+    {
+      "id": "observer-telemetry",
+      "name": "Observer, tracing, and evaluation telemetry",
+      "paths": ["packages/franken-observer/**"],
+      "primaryOwner": "observer-maintainers",
+      "escalationOwner": "core-maintainers",
+      "responsibilities": ["Trace storage, token/cost accounting, circuit breakers, evaluation fixtures, and telemetry adapters."],
+      "verification": ["npm test --workspace @franken/observer", "npm run test:eval --workspace @franken/observer"],
+      "handoffNotes": ["Include data-retention and schema-migration impact when persistence code changes."]
+    },
+    {
+      "id": "critique-evaluation",
+      "name": "Critique and evaluation pipeline",
+      "paths": ["packages/franken-critique/**"],
+      "primaryOwner": "critique-maintainers",
+      "escalationOwner": "core-maintainers",
+      "responsibilities": ["Self-critique evaluators, conciseness/scoring rules, lesson recording, and critique package public contracts."],
+      "verification": ["npm test --workspace @franken/critique", "npm run typecheck --workspace @franken/critique"],
+      "handoffNotes": ["Keep evaluator fixtures deterministic and explain expected false-positive handling."]
+    },
+    {
+      "id": "governor-approval",
+      "name": "Governor and approval policy",
+      "paths": ["packages/franken-governor/**"],
+      "primaryOwner": "governor-maintainers",
+      "escalationOwner": "security-maintainers",
+      "responsibilities": ["HITL approval gates, policy manifests, signed requests, budget/skill/confidence triggers, and approval-channel adapters."],
+      "verification": ["npm test --workspace @franken/governor", "npm run typecheck --workspace @franken/governor"],
+      "handoffNotes": ["Flag any change that alters destructive-action approvals, signature validation, or default-deny behavior."]
+    },
+    {
+      "id": "web-dashboard",
+      "name": "Web dashboard and browser UX",
+      "paths": ["packages/franken-web/**"],
+      "primaryOwner": "web-maintainers",
+      "escalationOwner": "core-maintainers",
+      "responsibilities": ["React dashboard, Vite proxy config, browser-side API clients, chat UI, beast controls, and accessibility behavior."],
+      "verification": ["npm test --workspace @franken/web", "npm run build --workspace @franken/web"],
+      "handoffNotes": ["Identify the backend route or same-origin proxy path for every new browser call."]
+    },
+    {
+      "id": "orchestrator-runtime",
+      "name": "Orchestrator runtime, CLI, and HTTP services",
+      "paths": ["packages/franken-orchestrator/**"],
+      "primaryOwner": "orchestrator-maintainers",
+      "escalationOwner": "core-maintainers",
+      "responsibilities": ["Beast Loop runtime, CLI, chat server, beasts daemon, comms gateway, security middleware, provider registry, and closure PR creation."],
+      "verification": ["npm test --workspace @franken/orchestrator", "npm run typecheck --workspace @franken/orchestrator"],
+      "handoffNotes": ["Call out whether changes affect CLI, HTTP, WebSocket/SSE, provider execution, or persisted runtime state."]
+    },
+    {
+      "id": "mcp-suite",
+      "name": "MCP suite and external agent adapters",
+      "paths": ["packages/franken-mcp-suite/**"],
+      "primaryOwner": "mcp-maintainers",
+      "escalationOwner": "core-maintainers",
+      "responsibilities": ["MCP tool registry/server/proxy integrations, generated client configs, hook scripts, and governed-project setup flows."],
+      "verification": ["npm test --workspace @franken/mcp-suite", "npm run build --workspace @franken/mcp-suite"],
+      "handoffNotes": ["Separate published-package setup paths from local-checkout development paths."]
+    },
+    {
+      "id": "live-bench",
+      "name": "Live benchmark harness",
+      "paths": ["packages/live-bench/**"],
+      "primaryOwner": "benchmark-maintainers",
+      "escalationOwner": "core-maintainers",
+      "responsibilities": ["Live benchmark corpus loading, workspace provisioning, evidence manifests, scorer compatibility, and live-test gates."],
+      "verification": ["npm test --workspace @franken/live-bench", "npm run test:live:bench"],
+      "handoffNotes": ["State whether tool-call evidence is supported or intentionally unsupported for the scorer path."]
+    },
+    {
+      "id": "onboarding-docs",
+      "name": "Onboarding, contributor guidance, and repository documentation",
+      "paths": ["docs/onboarding/**", "ONBOARDING.md", "README.md", "docs/RAMP_UP.md", "docs/guides/**"],
+      "primaryOwner": "docs-onboarding-maintainers",
+      "escalationOwner": "core-maintainers",
+      "responsibilities": ["First-run setup, architecture reading path, operator guides, quickstart copy, and agent handoff guidance."],
+      "verification": ["npm run test:root -- tests/docs-issue-1773.test.ts", "npm run test:root -- tests/docs-issue-1774.test.ts tests/docs-issue-1776.test.ts"],
+      "handoffNotes": ["Keep docs tied to live scripts and package names; do not describe future plans as current behavior."]
+    },
+    {
+      "id": "repo-automation",
+      "name": "Repository automation, CI, release, and root guardrails",
+      "paths": [".github/**", "scripts/**", "package.json", "package-lock.json", "turbo.json", "tests/**"],
+      "primaryOwner": "repo-automation-maintainers",
+      "escalationOwner": "core-maintainers",
+      "responsibilities": ["GitHub workflows, release automation, dependency policy, root guard tests, package-manager checks, and CI entrypoints."],
+      "verification": ["npm run test:root", "npm run lint", "npm run typecheck"],
+      "handoffNotes": ["When root guardrails change, update both implementation scripts and tests that parse workflow/package metadata."]
+    }
+  ]
+}

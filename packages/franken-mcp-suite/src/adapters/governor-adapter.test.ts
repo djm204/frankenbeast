@@ -94,6 +94,30 @@ describe('GovernorAdapter', () => {
     expect(row.context).not.toContain('alice@example.test');
   });
 
+  it('redacts memory export context before shared governor logging', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({
+      action: 'fbeast_memory_export',
+      context: '{"readScope":"agent","agentId":"alice@example.test","redaction":"safe","limit":5,"legacy":"secret"}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+
+    await expect(governor.check({
+      action: 'execute_tool',
+      context: '{"tool":"fbeast_memory_export","args":{"readScope":"agent","agentId":"bob@example.test","redaction":"safe","limit":3,"legacy":"secret"}}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+
+    const db = new Database(dbPath);
+    const rows = db.prepare(`SELECT context FROM governor_log ORDER BY id ASC`).all() as Array<{ context: string }>;
+    db.close();
+    expect(rows[0]!.context).toBe('{"readScope":"agent","redaction":"safe","limit":5,"agentId":"[memory-export-context-redacted]"}');
+    expect(rows[1]!.context).toBe('{"tool":"fbeast_memory_export","args":{"readScope":"agent","redaction":"safe","limit":3,"agentId":"[memory-export-context-redacted]"}}');
+    expect(rows.map((row) => row.context).join('\n')).not.toContain('alice@example.test');
+    expect(rows.map((row) => row.context).join('\n')).not.toContain('bob@example.test');
+    expect(rows.map((row) => row.context).join('\n')).not.toContain('secret');
+  });
+
   it('denies raw destructive patterns (rm -rf)', async () => {
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
     const result = await governor.check({ action: 'rm -rf /data', context: '{}' });
@@ -143,6 +167,58 @@ describe('GovernorAdapter', () => {
     });
     expect(result.decision).toBe('review_recommended');
     expect(result.reason).toContain('Memory edits persist');
+  });
+
+  it('requires trusted-operator review for unredacted memory exports without approval evidence', async () => {
+    const governor = createGovernorAdapter(tracked(tmpDbPath()));
+
+    await expect(governor.check({
+      action: 'fbeast_memory_export',
+      context: '{"redaction":"safe"}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({
+      action: 'fbeast_memory_export',
+      context: '{"redaction":"none"}',
+    })).resolves.toMatchObject({
+      decision: 'review_recommended',
+      reason: expect.stringContaining('trusted-operator approval'),
+    });
+    await expect(governor.check({
+      action: 'fbeast_memory_export',
+      context: '{"redaction":"none","operatorApproval":"trusted-operator-approved"}',
+    })).resolves.toMatchObject({
+      decision: 'review_recommended',
+      reason: expect.stringContaining('outside the caller-supplied tool arguments'),
+    });
+    await expect(governor.check({
+      action: 'execute_tool',
+      context: JSON.stringify({
+        tool: 'fbeast_memory_export',
+        args: { redaction: 'none', readScope: 'shared' },
+      }),
+    })).resolves.toMatchObject({
+      decision: 'review_recommended',
+      reason: expect.stringContaining('trusted-operator approval'),
+    });
+    await expect(governor.check({
+      action: 'execute_tool',
+      context: JSON.stringify({
+        tool: 'fbeast_memory_export',
+        args: { redaction: 'none', readScope: 'shared', operatorApproval: 'trusted-operator-approved' },
+      }),
+    })).resolves.toMatchObject({ decision: 'review_recommended' });
+    await expect(governor.check({
+      action: 'execute_tool',
+      context: JSON.stringify({
+        tool_input: {
+          tool: 'mcp__franken_mcp__fbeast_memory_export',
+          args: { redaction: 'none', readScope: 'shared' },
+        },
+      }),
+    })).resolves.toMatchObject({
+      decision: 'review_recommended',
+      reason: expect.stringContaining('trusted-operator approval'),
+    });
   });
 
   it('routes non-memory high-risk action classes through policy-as-code', async () => {
@@ -299,6 +375,10 @@ describe('GovernorAdapter', () => {
     await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"reject","note":"Rejected because candidate text contains rm -rf /"}' }))
       .resolves.toMatchObject({ decision: 'approved' });
     await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"resolve_conflict","resolution":"replace_existing"}' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"resolve_conflict","resolution":"keep_both_scoped","scopedKey":"user.preference.scope.docs"}' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"resolve_conflict","resolution":"expire_existing"}' }))
       .resolves.toMatchObject({ decision: 'approved' });
     await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"resolve_conflict"}' }))
       .resolves.toMatchObject({ decision: 'review_recommended' });

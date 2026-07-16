@@ -106,10 +106,38 @@ export interface MemoryCandidateProposal {
   reason: string;
 }
 
+export type MemoryDuplicateMatchType = 'exact' | 'semantic';
+export type MemoryDuplicateConfidence = 'high' | 'low';
+
+export interface MemoryMergeSuggestionProvenance {
+  candidateId?: string;
+  source: string;
+  evidenceId?: string;
+  confidence?: number;
+  reason: string;
+  reviewer?: string;
+  note?: string;
+  approvedAt?: string;
+  createdAt?: string;
+}
+
+export interface MemoryMergeSuggestion {
+  targetStore: MemoryCandidateTargetStore;
+  key: string;
+  value: unknown;
+  matchType: MemoryDuplicateMatchType;
+  confidence: MemoryDuplicateConfidence;
+  similarity: number;
+  requiresReview: boolean;
+  guidance: string;
+  provenance: MemoryMergeSuggestionProvenance[];
+}
+
 export interface MemoryCandidate extends MemoryCandidateProposal {
   id: string;
   status: MemoryCandidateStatus;
   suppressionReason?: MemorySuppressionReason;
+  mergeSuggestions?: MemoryMergeSuggestion[];
   createdAt: string;
   updatedAt: string;
   decidedAt?: string;
@@ -117,7 +145,18 @@ export interface MemoryCandidate extends MemoryCandidateProposal {
   note?: string;
 }
 
+type ExistingMemoryMergeCandidate = {
+  targetStore: MemoryCandidateTargetStore;
+  key: string;
+  value: unknown;
+  provenance: MemoryMergeSuggestionProvenance[];
+  candidateId?: string;
+};
+
+const AGENT_WORKING_KEY_PREFIX = '__fbeast_agent_memory__/';
+
 export interface MemoryCandidateEdit {
+  key?: string;
   value?: unknown;
   source?: string;
   evidenceId?: string;
@@ -147,7 +186,9 @@ export interface MemoryProvenanceRecord {
 export type MemoryConflictResolution =
   | 'keep_existing'
   | 'replace_existing'
-  | 'reject_candidate';
+  | 'keep_both_scoped'
+  | 'reject_candidate'
+  | 'expire_existing';
 
 export interface MemoryConflict {
   targetStore: MemoryCandidateTargetStore;
@@ -160,8 +201,43 @@ export interface MemoryConflict {
   guidance: string;
 }
 
+export interface MemoryConflictEvidence {
+  source: string;
+  evidenceId?: string;
+}
+
+export interface MemoryResolutionPrompt {
+  candidateId: string;
+  targetStore: MemoryCandidateTargetStore;
+  key: string;
+  conflictType: MemoryConflict['conflictType'];
+  oldEntry: {
+    value: unknown;
+    source?: string;
+    evidenceId?: string;
+    confidence?: number;
+    reason?: string;
+  };
+  newCandidate: {
+    value: unknown;
+    source: string;
+    evidenceId?: string;
+    confidence: number;
+    reason: string;
+  };
+  sourceEvidence: {
+    old?: MemoryConflictEvidence;
+    new: MemoryConflictEvidence;
+  };
+  recommendedAction: MemoryConflictResolution;
+  availableActions: MemoryConflictResolution[];
+  guidance: string;
+}
+
 export interface MemoryConflictResolutionOptions extends MemoryReviewDecisionOptions {
   resolution: MemoryConflictResolution;
+  /** Required when resolution is keep_both_scoped. Stores the candidate under this non-conflicting key. */
+  scopedKey?: string;
 }
 
 export interface MemoryEncryptionMetadata {
@@ -2386,7 +2462,7 @@ export class SqliteMemoryReviewQueue {
       outcome: result!.status === 'suppressed' ? 'denied' : 'success',
       details: { status: result!.status },
     });
-    return result!;
+    return this.withMergeSuggestions(result!);
   }
 
   list(status: MemoryCandidateStatus = 'pending'): MemoryCandidate[] {
@@ -2396,13 +2472,16 @@ export class SqliteMemoryReviewQueue {
           `SELECT * FROM memory_review_candidates WHERE status = ? ORDER BY created_at ASC, id ASC`,
         )
         .all(status) as MemoryCandidateRow[];
+      const mergeCandidates = status === 'pending'
+        ? this.existingMergeCandidatesForTarget('working')
+        : undefined;
       this.audit?.({
         operation: 'review.list',
         store: 'review',
         outcome: 'success',
         details: { status },
       });
-      return rows.map((row) => this.rowToCandidate(row));
+      return rows.map((row) => this.withMergeSuggestions(this.rowToCandidate(row), mergeCandidates));
     } catch (error) {
       this.audit?.({
         operation: 'review.list',
@@ -2427,10 +2506,11 @@ export class SqliteMemoryReviewQueue {
       this.db
         .prepare(
           `UPDATE memory_review_candidates
-           SET value = ?, source = ?, evidence_id = ?, confidence = ?, reason = ?, updated_at = ?
+           SET memory_key = ?, value = ?, source = ?, evidence_id = ?, confidence = ?, reason = ?, updated_at = ?
            WHERE id = ? AND status = 'pending'`,
         )
         .run(
+          updated.key,
           this.encodeValue(updated.value),
           this.encodeText(updated.source),
           updated.evidenceId ? this.encodeText(updated.evidenceId) : null,
@@ -2447,7 +2527,7 @@ export class SqliteMemoryReviewQueue {
         outcome: 'success',
         details: { id, targetStore: result.targetStore },
       });
-      return result;
+      return this.withMergeSuggestions(result);
     } catch (error) {
       const candidate = this.tryCandidate(id);
       this.audit?.({
@@ -2764,6 +2844,72 @@ export class SqliteMemoryReviewQueue {
     }
   }
 
+  resolutionPromptFor(id: string): MemoryResolutionPrompt | null {
+    if (id.startsWith('memcand_suppressed_')) return null;
+    const candidate = this.requireCandidate(id);
+    if (candidate.status !== 'pending') return null;
+    const [conflict] = this.detectConflicts(candidate);
+    if (!conflict) return null;
+    const oldEntry = {
+      value: conflict.existingValue,
+      ...(conflict.existingProvenance?.source
+        ? { source: conflict.existingProvenance.source }
+        : {}),
+      ...(conflict.existingProvenance?.evidenceId
+        ? { evidenceId: conflict.existingProvenance.evidenceId }
+        : {}),
+      ...(conflict.existingProvenance?.confidence !== undefined
+        ? { confidence: conflict.existingProvenance.confidence }
+        : {}),
+      ...(conflict.existingProvenance?.reason
+        ? { reason: conflict.existingProvenance.reason }
+        : {}),
+    };
+    const newCandidate = {
+      value: candidate.value,
+      source: candidate.source,
+      ...(candidate.evidenceId ? { evidenceId: candidate.evidenceId } : {}),
+      confidence: candidate.confidence,
+      reason: candidate.reason,
+    };
+    return {
+      candidateId: candidate.id,
+      targetStore: candidate.targetStore,
+      key: candidate.key,
+      conflictType: conflict.conflictType,
+      oldEntry,
+      newCandidate,
+      sourceEvidence: {
+        ...(conflict.existingProvenance?.source
+          ? {
+              old: {
+                source: conflict.existingProvenance.source,
+                ...(conflict.existingProvenance.evidenceId
+                  ? { evidenceId: conflict.existingProvenance.evidenceId }
+                  : {}),
+              },
+            }
+          : {}),
+        new: {
+          source: candidate.source,
+          ...(candidate.evidenceId ? { evidenceId: candidate.evidenceId } : {}),
+        },
+      },
+      recommendedAction:
+        candidate.confidence >= (conflict.existingProvenance?.confidence ?? 0)
+          ? 'replace_existing'
+          : 'keep_existing',
+      availableActions: [
+        'keep_existing',
+        'replace_existing',
+        'keep_both_scoped',
+        'reject_candidate',
+        'expire_existing',
+      ],
+      guidance: conflict.guidance,
+    };
+  }
+
   resolveConflict(
     id: string,
     options: MemoryConflictResolutionOptions,
@@ -2791,6 +2937,14 @@ export class SqliteMemoryReviewQueue {
       }, conflictGuard);
     }
 
+    if (options.resolution === 'keep_both_scoped') {
+      return this.keepBothScoped(id, options.scopedKey, decisionOptions, conflictGuard);
+    }
+
+    if (options.resolution === 'expire_existing') {
+      return this.expireExistingAndApprove(id, decisionOptions, conflictGuard);
+    }
+
     return this.rejectCandidate(id, {
       ...decisionOptions,
       note: decisionOptions.note ?? (
@@ -2799,6 +2953,152 @@ export class SqliteMemoryReviewQueue {
           : 'Memory conflict resolved by rejecting the contradictory candidate.'
       ),
     }, conflictGuard);
+  }
+
+  private keepBothScoped(
+    id: string,
+    scopedKey: string | undefined,
+    decisionOptions: MemoryReviewDecisionOptions,
+    conflictGuard: { expectedExistingValue: unknown; expectedCandidateValue: unknown },
+  ): MemoryCandidate {
+    if (!scopedKey || scopedKey.trim().length === 0) {
+      throw new Error('keep_both_scoped requires a non-empty scopedKey');
+    }
+    const candidate = this.requireCandidate(id, 'pending');
+    if (scopedKey === candidate.key) {
+      throw new Error('keep_both_scoped scopedKey must differ from the conflicting key');
+    }
+    return this.approveScopedCandidate(id, scopedKey, decisionOptions, conflictGuard);
+  }
+
+  private approveScopedCandidate(
+    id: string,
+    scopedKey: string,
+    decisionOptions: MemoryReviewDecisionOptions,
+    conflictGuard: { expectedExistingValue: unknown; expectedCandidateValue: unknown },
+  ): MemoryCandidate {
+    const now = isoNow();
+    let finalizeWorkingFlush: (() => void) | undefined;
+    let approvedCandidate: MemoryCandidate | undefined;
+    const tx = this.db.transaction(() => {
+      const candidate = this.requireCandidate(id, 'pending');
+      this.assertConflictUnchanged(id, candidate, this.detectConflicts(candidate), 'resolution', conflictGuard);
+      const scopedCandidate: MemoryCandidate = {
+        ...candidate,
+        key: scopedKey,
+        updatedAt: now,
+      };
+      this.validateProposal(scopedCandidate);
+      assertMemoryCandidateNotDeletionGuarded(this.db, scopedCandidate, this.encryption);
+      if (this.detectConflicts(scopedCandidate).length > 0) {
+        throw new Error(`Scoped memory key ${scopedKey} still conflicts with an existing value`);
+      }
+      this.assertDecisionOptionsNotDeletionGuarded(decisionOptions);
+      this.db
+        .prepare(`UPDATE memory_review_candidates SET memory_key = ?, updated_at = ? WHERE id = ? AND status = 'pending'`)
+        .run(scopedKey, now, id);
+      const updatedCandidate = this.requireCandidate(id, 'pending');
+      const suppressionReason = this.findCandidateSuppression(updatedCandidate);
+      if (suppressionReason) {
+        this.markSuppressed(id, suppressionReason, now, decisionOptions);
+        approvedCandidate = this.requireCandidate(id);
+        return;
+      }
+      finalizeWorkingFlush = this.working.persistKeyAfterCommit(scopedKey, updatedCandidate.value) ?? undefined;
+      this.db
+        .prepare(
+          `INSERT INTO memory_review_provenance (
+            target_store, memory_key, value, candidate_id, source, evidence_id,
+            confidence, reason, reviewer, note, approved_at, schema_version
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
+          ON CONFLICT(target_store, memory_key) DO UPDATE SET
+            value = excluded.value,
+            candidate_id = excluded.candidate_id,
+            source = excluded.source,
+            evidence_id = excluded.evidence_id,
+            confidence = excluded.confidence,
+            reason = excluded.reason,
+            reviewer = excluded.reviewer,
+            note = excluded.note,
+            approved_at = excluded.approved_at,
+            schema_version = excluded.schema_version`,
+        )
+        .run(
+          updatedCandidate.targetStore,
+          scopedKey,
+          this.encodeValue(updatedCandidate.value),
+          updatedCandidate.id,
+          this.encodeText(updatedCandidate.source),
+          updatedCandidate.evidenceId ? this.encodeText(updatedCandidate.evidenceId) : null,
+          updatedCandidate.confidence,
+          this.encodeText(updatedCandidate.reason),
+          decisionOptions.reviewer ? this.encodeText(decisionOptions.reviewer) : null,
+          this.encodeText(decisionOptions.note ?? 'Memory conflict resolved by keeping both values with explicit scope.'),
+          now,
+        );
+      this.markDecision(id, 'approved', now, {
+        ...decisionOptions,
+        note: decisionOptions.note ?? 'Memory conflict resolved by keeping both values with explicit scope.',
+      });
+      approvedCandidate = this.requireCandidate(id);
+    });
+    tx.immediate();
+    finalizeWorkingFlush?.();
+    return approvedCandidate ?? this.requireCandidate(id, 'approved');
+  }
+
+  private expireExistingAndApprove(
+    id: string,
+    decisionOptions: MemoryReviewDecisionOptions,
+    conflictGuard: { expectedExistingValue: unknown; expectedCandidateValue: unknown },
+  ): MemoryCandidate {
+    const now = isoNow();
+    let finalizeWorkingFlush: (() => void) | undefined;
+    let approvedCandidate: MemoryCandidate | undefined;
+    const tx = this.db.transaction(() => {
+      const candidate = this.requireCandidate(id, 'pending');
+      const conflicts = this.detectConflicts(candidate);
+      this.assertConflictUnchanged(id, candidate, conflicts, 'resolution', conflictGuard);
+      this.assertDecisionOptionsNotDeletionGuarded(decisionOptions);
+      const suppressionReason = this.findCandidateSuppression(candidate);
+      if (suppressionReason) {
+        this.markSuppressed(id, suppressionReason, now, decisionOptions);
+        approvedCandidate = this.requireCandidate(id);
+        return;
+      }
+      finalizeWorkingFlush = this.working.persistKeyAfterCommit(candidate.key, candidate.value) ?? undefined;
+      this.db
+        .prepare(`DELETE FROM memory_review_provenance WHERE target_store = ? AND memory_key = ?`)
+        .run(candidate.targetStore, candidate.key);
+      this.db
+        .prepare(
+          `INSERT INTO memory_review_provenance (
+            target_store, memory_key, value, candidate_id, source, evidence_id,
+            confidence, reason, reviewer, note, approved_at, schema_version
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
+        )
+        .run(
+          candidate.targetStore,
+          candidate.key,
+          this.encodeValue(candidate.value),
+          candidate.id,
+          this.encodeText(candidate.source),
+          candidate.evidenceId ? this.encodeText(candidate.evidenceId) : null,
+          candidate.confidence,
+          this.encodeText(candidate.reason),
+          decisionOptions.reviewer ? this.encodeText(decisionOptions.reviewer) : null,
+          this.encodeText(decisionOptions.note ?? 'Memory conflict resolved by expiring the old value before approving the candidate.'),
+          now,
+        );
+      this.markDecision(id, 'approved', now, {
+        ...decisionOptions,
+        note: decisionOptions.note ?? 'Memory conflict resolved by expiring the old value before approving the candidate.',
+      });
+      approvedCandidate = this.requireCandidate(id);
+    });
+    tx.immediate();
+    finalizeWorkingFlush?.();
+    return approvedCandidate ?? this.requireCandidate(id, 'approved');
   }
 
   private assertConflictUnchanged(
@@ -2844,7 +3144,7 @@ export class SqliteMemoryReviewQueue {
         proposedValue: candidate.value,
         ...(matchingProvenance ? { existingProvenance: matchingProvenance } : {}),
         guidance:
-          'A pending memory candidate contradicts the current value for the same key. Resolve with keep_existing, replace_existing, or reject_candidate before treating the fact as durable.',
+          'A pending memory candidate contradicts the current value for the same key. Resolve with keep_existing, replace_existing, keep_both_scoped, reject_candidate, or expire_existing before treating the fact as durable.',
       },
     ];
   }
@@ -2854,13 +3154,154 @@ export class SqliteMemoryReviewQueue {
     return runtime.state === 'present' ? runtime.value : undefined;
   }
 
+  private withMergeSuggestions(
+    candidate: MemoryCandidate,
+    mergeCandidates?: ExistingMemoryMergeCandidate[],
+  ): MemoryCandidate {
+    if (candidate.status !== 'pending' || candidate.targetStore !== 'working') {
+      return candidate;
+    }
+    return {
+      ...candidate,
+      mergeSuggestions: this.findMergeSuggestions(candidate, mergeCandidates),
+    };
+  }
+
+  private findMergeSuggestions(
+    candidate: MemoryCandidate,
+    mergeCandidates?: ExistingMemoryMergeCandidate[],
+  ): MemoryMergeSuggestion[] {
+    const candidates = mergeCandidates ?? this.existingMergeCandidatesForTarget(candidate.targetStore);
+    const suggestions = candidates
+      .filter(
+        (existing) =>
+          existing.candidateId !== candidate.id &&
+          sameWorkingMemoryMergeScope(candidate.key, existing.key),
+      )
+      .map((existing) => this.buildMergeSuggestion(candidate, existing))
+      .filter((suggestion): suggestion is MemoryMergeSuggestion => suggestion !== null)
+      .sort(
+        (left, right) =>
+          mergeSuggestionRank(right) - mergeSuggestionRank(left) ||
+          right.similarity - left.similarity ||
+          left.key.localeCompare(right.key),
+      );
+    return suggestions.slice(0, 5);
+  }
+
+  private existingMergeCandidatesForTarget(
+    targetStore: MemoryCandidateTargetStore,
+  ): ExistingMemoryMergeCandidate[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM memory_review_provenance WHERE target_store = ? ORDER BY approved_at DESC, memory_key ASC`,
+      )
+      .all(targetStore) as MemoryProvenanceRow[];
+    const existing: ExistingMemoryMergeCandidate[] = rows
+      .map((row) => this.rowToProvenance(row))
+      .filter((record) => this.isLiveProvenanceRecord(record))
+      .map((record) => ({
+        targetStore: record.targetStore,
+        key: record.key,
+        value: record.value,
+        provenance: [this.provenanceRecordToMergeProvenance(record)],
+      }));
+
+    const pendingRows = this.db
+      .prepare(
+        `SELECT * FROM memory_review_candidates WHERE target_store = ? AND status = 'pending' ORDER BY created_at ASC, id ASC`,
+      )
+      .all(targetStore) as MemoryCandidateRow[];
+    for (const row of pendingRows) {
+      const pending = this.rowToCandidate(row);
+      existing.push({
+        targetStore: pending.targetStore,
+        key: pending.key,
+        value: pending.value,
+        provenance: [this.candidateToMergeProvenance(pending)],
+        candidateId: pending.id,
+      });
+    }
+
+    return existing;
+  }
+
+  private isLiveProvenanceRecord(record: MemoryProvenanceRecord): boolean {
+    if (record.targetStore !== 'working') return true;
+    const runtime = this.working.reviewValueState(record.key);
+    return runtime.state === 'present' && memoryValuesEqual(runtime.value, record.value);
+  }
+
+  private buildMergeSuggestion(
+    candidate: MemoryCandidate,
+    existing: ExistingMemoryMergeCandidate,
+  ): MemoryMergeSuggestion | null {
+    if (memoryValuesEqual(candidate.value, existing.value)) {
+      const highConfidenceExact = isHighConfidenceExactDuplicate(candidate.value);
+      return {
+        targetStore: existing.targetStore,
+        key: existing.key,
+        value: existing.value,
+        matchType: 'exact',
+        confidence: highConfidenceExact ? 'high' : 'low',
+        similarity: 1,
+        requiresReview: !highConfidenceExact,
+        guidance: highConfidenceExact
+          ? 'Exact duplicate memory candidate. Prefer merging provenance into the existing memory rather than approving a second durable entry.'
+          : 'Exact value match with too little semantic detail to prove the memories are duplicates. Review the keys and provenance before merging.',
+        provenance: existing.provenance,
+      };
+    }
+
+    const similarity = semanticMemorySimilarity(candidate.value, existing.value);
+    if (similarity < 0.42) return null;
+    return {
+      targetStore: existing.targetStore,
+      key: existing.key,
+      value: existing.value,
+      matchType: 'semantic',
+      confidence: 'low',
+      similarity,
+      requiresReview: true,
+      guidance:
+        'Possible semantic duplicate. Review both memory wordings and merge provenance only if they describe the same durable fact.',
+      provenance: existing.provenance,
+    };
+  }
+
+  private provenanceRecordToMergeProvenance(record: MemoryProvenanceRecord): MemoryMergeSuggestionProvenance {
+    return {
+      candidateId: record.candidateId,
+      source: record.source,
+      ...(record.evidenceId ? { evidenceId: record.evidenceId } : {}),
+      confidence: record.confidence,
+      reason: record.reason,
+      ...(record.reviewer ? { reviewer: record.reviewer } : {}),
+      ...(record.note ? { note: record.note } : {}),
+      approvedAt: record.approvedAt,
+    };
+  }
+
+  private candidateToMergeProvenance(candidate: MemoryCandidate): MemoryMergeSuggestionProvenance {
+    return {
+      candidateId: candidate.id,
+      source: candidate.source,
+      ...(candidate.evidenceId ? { evidenceId: candidate.evidenceId } : {}),
+      confidence: candidate.confidence,
+      reason: candidate.reason,
+      createdAt: candidate.createdAt,
+    };
+  }
+
   private assertValidConflictResolution(
     resolution: MemoryConflictResolution,
   ): void {
     if (
       resolution === 'keep_existing' ||
       resolution === 'replace_existing' ||
-      resolution === 'reject_candidate'
+      resolution === 'keep_both_scoped' ||
+      resolution === 'reject_candidate' ||
+      resolution === 'expire_existing'
     ) {
       return;
     }
@@ -3280,6 +3721,127 @@ function canonicalMemoryValue(value: unknown): unknown {
 function memoryValuesEqual(left: unknown, right: unknown): boolean {
   return stableStringify(canonicalMemoryValue(left)) ===
     stableStringify(canonicalMemoryValue(right));
+}
+
+const SEMANTIC_MEMORY_STOP_WORDS = new Set([
+  'a',
+  'an',
+  'and',
+  'are',
+  'as',
+  'be',
+  'by',
+  'for',
+  'from',
+  'has',
+  'in',
+  'include',
+  'includes',
+  'is',
+  'keep',
+  'most',
+  'of',
+  'only',
+  'or',
+  'project',
+  'the',
+  'to',
+  'use',
+  'uses',
+  'user',
+  'want',
+  'wants',
+  'with',
+]);
+
+const SEMANTIC_MEMORY_SYNONYMS = new Map([
+  ['brief', 'short'],
+  ['compact', 'short'],
+  ['concise', 'short'],
+  ['terse', 'short'],
+  ['report', 'status'],
+  ['reports', 'status'],
+  ['progress', 'status'],
+  ['updates', 'status'],
+  ['important', 'relevant'],
+  ['details', 'detail'],
+  ['reply', 'response'],
+  ['replies', 'response'],
+]);
+
+function semanticMemorySimilarity(left: unknown, right: unknown): number {
+  const leftTokens = semanticMemoryTokens(left);
+  const rightTokens = semanticMemoryTokens(right);
+  if (leftTokens.size < 3 || rightTokens.size < 3) return 0;
+  const intersection = [...leftTokens].filter((token) => rightTokens.has(token));
+  if (intersection.length < 3) return 0;
+  const union = new Set([...leftTokens, ...rightTokens]);
+  const jaccard = intersection.length / union.size;
+  const containment = Math.max(
+    intersection.length / leftTokens.size,
+    intersection.length / rightTokens.size,
+  );
+  return Math.round(Math.max(jaccard, containment * 0.72) * 1000) / 1000;
+}
+
+function isHighConfidenceExactDuplicate(value: unknown): boolean {
+  return semanticMemoryTokens(value).size >= 3;
+}
+
+function mergeSuggestionRank(suggestion: MemoryMergeSuggestion): number {
+  return suggestion.matchType === 'exact' ? 1 : 0;
+}
+
+function sameWorkingMemoryMergeScope(leftKey: string, rightKey: string): boolean {
+  const leftScope = decodeAgentWorkingKeyScope(leftKey);
+  const rightScope = decodeAgentWorkingKeyScope(rightKey);
+  return leftScope === rightScope;
+}
+
+function decodeAgentWorkingKeyScope(key: string): string | undefined {
+  if (!key.startsWith(AGENT_WORKING_KEY_PREFIX)) return undefined;
+  const rest = key.slice(AGENT_WORKING_KEY_PREFIX.length);
+  const slash = rest.indexOf('/');
+  if (slash <= 0) return undefined;
+  try {
+    return decodeURIComponent(rest.slice(0, slash));
+  } catch {
+    return undefined;
+  }
+}
+
+function semanticMemoryTokens(value: unknown): Set<string> {
+  const text = semanticMemoryText(canonicalMemoryValue(value)).toLowerCase();
+  const tokens = text.match(/[a-z0-9]+/g) ?? [];
+  return new Set(
+    tokens
+      .map(normalizeSemanticMemoryToken)
+      .filter((token) => token.length >= 3 && !SEMANTIC_MEMORY_STOP_WORDS.has(token)),
+  );
+}
+
+function semanticMemoryText(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return String(value ?? '');
+  }
+  if (Array.isArray(value)) {
+    return value.map(semanticMemoryText).join(' ');
+  }
+  return Object.values(value as Record<string, unknown>).map(semanticMemoryText).join(' ');
+}
+
+function normalizeSemanticMemoryToken(token: string): string {
+  if (token === 'status') return token;
+  const synonym = SEMANTIC_MEMORY_SYNONYMS.get(token);
+  if (synonym) return synonym;
+  const stemmed = token.endsWith('ing') && token.length > 5
+    ? token.slice(0, -3)
+    : token.endsWith('ed') && token.length > 4
+      ? token.slice(0, -2)
+      : token.endsWith('s') && token.length > 4
+        ? token.slice(0, -1)
+        : token;
+  return SEMANTIC_MEMORY_SYNONYMS.get(stemmed) ?? stemmed;
 }
 
 function stableStringify(value: unknown): string {

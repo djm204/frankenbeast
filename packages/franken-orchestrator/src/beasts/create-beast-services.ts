@@ -6,6 +6,7 @@ import { ContainerBeastExecutor } from './execution/container-beast-executor.js'
 import { DEFAULT_SANDBOX_POLICY, nonRootUserForWorkspace } from './execution/sandbox-policy.js';
 import { ProcessBeastExecutor } from './execution/process-beast-executor.js';
 import { ProcessSupervisor } from './execution/process-supervisor.js';
+import { cleanupAbandonedBeastWorktrees } from './execution/git-worktree-isolation.js';
 import { SQLiteBeastRepository } from './repository/sqlite-beast-repository.js';
 import { BeastCatalogService } from './services/beast-catalog-service.js';
 import { BeastDispatchService } from './services/beast-dispatch-service.js';
@@ -44,6 +45,13 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   const eventBus = new BeastEventBus();
   const ticketStore = new SseConnectionTicketStore();
   const capacityPolicy = createCapacityReservationPolicyFromEnv();
+
+  cleanupAbandonedBeastWorktrees({
+    agents: repository.listTrackedAgents(),
+    dryRun: false,
+    projectRoot,
+    runs: repository.listRuns(),
+  });
 
   // Deferred reference to break circular dep: executor → runService → executors → executor
   // eslint-disable-next-line prefer-const

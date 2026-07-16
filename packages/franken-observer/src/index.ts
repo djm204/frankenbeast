@@ -34,7 +34,7 @@ export { PostMortemGenerator } from './incident/PostMortemGenerator.js'
 export { LangfuseAdapter } from './adapters/langfuse/LangfuseAdapter.js'
 export { PrometheusAdapter } from './adapters/prometheus/PrometheusAdapter.js'
 export { TempoAdapter } from './adapters/tempo/TempoAdapter.js'
-export { WebhookNotifier } from './notify/WebhookNotifier.js'
+export { InMemoryWebhookDeliveryReceiptStore, WebhookNotifier } from './notify/WebhookNotifier.js'
 export {
   ClassificationGuardAdapter,
   RUNTIME_ARTIFACT_CLASSIFICATIONS,
@@ -65,7 +65,15 @@ export type { LangfuseAdapterOptions, FetchFn } from './adapters/langfuse/Langfu
 export type { SQLiteAdapterOptions } from './adapters/sqlite/SQLiteAdapter.js'
 export type { PrometheusAdapterOptions } from './adapters/prometheus/PrometheusAdapter.js'
 export type { TempoAdapterOptions, TempoBasicAuth } from './adapters/tempo/TempoAdapter.js'
-export type { WebhookAllowedTarget, WebhookNotifierOptions, WebhookRetryOptions } from './notify/WebhookNotifier.js'
+export type {
+  WebhookAllowedTarget,
+  WebhookDeliveryReceipt,
+  WebhookDeliveryReceiptStatus,
+  WebhookDeliveryReceiptStore,
+  WebhookNotifierOptions,
+  WebhookRetryOptions,
+  WebhookSendOptions,
+} from './notify/WebhookNotifier.js'
 export type {
   ClassificationGuardAdapterOptions,
   DataClassification,

@@ -79,6 +79,94 @@ describe('dashboard routes', () => {
       expect(body.providers).toEqual([
         { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0 },
       ]);
+      expect(body.availability).toEqual({
+        status: 'healthy',
+        dependencies: [
+          {
+            name: 'claude',
+            type: 'provider:claude-cli',
+            status: 'healthy',
+            summary: 'claude is available for failover slot #1.',
+            remediationHint: 'No remediation needed.',
+            safeWork: ['Provider-backed work can use this provider.'],
+          },
+        ],
+      });
+    });
+
+    it('reports partial dependency outages with remediation and safe-work guidance', async () => {
+      const deps = createMockDeps();
+      deps.getProviders = vi.fn().mockReturnValue([
+        { name: 'claude', type: 'claude-cli', available: false, failoverOrder: 0, model: 'sonnet' },
+        { name: 'codex', type: 'codex-cli', available: true, failoverOrder: 1, model: 'gpt-5.3-codex-spark' },
+      ]);
+      deps.getDependencies = vi.fn().mockReturnValue([
+        {
+          name: 'github-api',
+          type: 'github',
+          status: 'degraded',
+          summary: 'GitHub API is rate limited for issue enrichment.',
+          remediationHint: 'Wait for the API reset or reduce polling.',
+          safeWork: ['Continue code review on already-fetched PRs.'],
+        },
+      ]);
+      const app = createDashboardRoutes(deps);
+      const res = await app.request('/');
+
+      expect(res.status).toBe(200);
+      const body = await res.json() as Record<string, unknown>;
+      expect(body.availability).toMatchObject({
+        status: 'degraded',
+        dependencies: [
+          {
+            name: 'claude',
+            type: 'provider:claude-cli',
+            status: 'unavailable',
+            remediationHint: 'Check claude credentials, CLI installation, or upstream provider status.',
+            safeWork: ['Route provider-backed work to another available provider.', 'Continue work that does not require this provider.'],
+          },
+          {
+            name: 'codex',
+            type: 'provider:codex-cli',
+            status: 'healthy',
+          },
+          {
+            name: 'github-api',
+            type: 'github',
+            status: 'degraded',
+            summary: 'GitHub API is rate limited for issue enrichment.',
+            remediationHint: 'Wait for the API reset or reduce polling.',
+            safeWork: ['Continue code review on already-fetched PRs.'],
+          },
+        ],
+      });
+    });
+
+    it('routes provider-backed work to a healthy primary when a later fallback is unavailable', async () => {
+      const deps = createMockDeps();
+      deps.getProviders = vi.fn().mockReturnValue([
+        { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0, model: 'sonnet' },
+        { name: 'codex', type: 'codex-cli', available: false, failoverOrder: 1, model: 'gpt-5.3-codex-spark' },
+      ]);
+      const app = createDashboardRoutes(deps);
+      const res = await app.request('/');
+
+      expect(res.status).toBe(200);
+      const body = await res.json() as Record<string, unknown>;
+      expect(body.availability).toMatchObject({
+        status: 'degraded',
+        dependencies: [
+          {
+            name: 'claude',
+            status: 'healthy',
+          },
+          {
+            name: 'codex',
+            status: 'unavailable',
+            safeWork: ['Route provider-backed work to another available provider.', 'Continue work that does not require this provider.'],
+          },
+        ],
+      });
     });
 
     it('merges enabled field from getEnabledSkills', async () => {
