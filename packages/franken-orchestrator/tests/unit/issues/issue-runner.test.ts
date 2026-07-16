@@ -1332,7 +1332,7 @@ describe('IssueRunner', () => {
       expect(mockRun).not.toHaveBeenCalled();
     });
 
-    it('preserves missing-plan issueRuntime completion from chunk-file one-shot entries', async () => {
+    it('does not mark missing-plan issueRuntime checkpoints complete from chunk-file one-shot entries', async () => {
       const logger = mockLogger();
       const graphBuilder = mockGraphBuilder();
       const issueRuntime = makeIssueRuntimeSupport();
@@ -1356,7 +1356,12 @@ describe('IssueRunner', () => {
 
       const outcomes = await runner.run(config);
 
-      expect(outcomes[0]).toMatchObject({ issueNumber: 17, status: 'fixed', tokensUsed: 0 });
+      expect(outcomes[0]).toMatchObject({
+        issueNumber: 17,
+        status: 'skipped',
+        tokensUsed: 0,
+        error: expect.stringContaining('deferred by scheduler: blocked issue'),
+      });
       expect(graphBuilder.buildChunkDefinitionsForIssue).not.toHaveBeenCalled();
       expect(mockRun).not.toHaveBeenCalled();
     });
@@ -1680,7 +1685,7 @@ describe('IssueRunner', () => {
     });
 
 
-    it('preserves completed one-shot issueRuntime checkpoints that use chunk-file task ids after plan cleanup', async () => {
+    it('rejects completed one-shot issueRuntime checkpoint chunk ids after plan cleanup', async () => {
       const logger = mockLogger();
       const graphBuilder = mockGraphBuilder();
       const issueRuntime = makeIssueRuntimeSupport();
@@ -1705,13 +1710,18 @@ describe('IssueRunner', () => {
 
       const outcomes = await runner.run(config);
 
-      expect(outcomes[0]).toMatchObject({ issueNumber: 17, status: 'fixed', tokensUsed: 0 });
+      expect(outcomes[0]).toMatchObject({
+        issueNumber: 17,
+        status: 'skipped',
+        tokensUsed: 0,
+        error: expect.stringContaining('deferred by scheduler: blocked issue'),
+      });
       expect(graphBuilder.buildChunkDefinitionsForIssue).not.toHaveBeenCalled();
       expect(mockRun).not.toHaveBeenCalled();
     });
 
 
-    it('preserves shared-checkpoint one-shot completions with issue chunk ids before blocked deferral', async () => {
+    it('rejects shared-checkpoint one-shot chunk ids before blocked deferral', async () => {
       const graphBuilder = mockGraphBuilder();
       const checkpoint = mockCheckpoint(new Set([
         'impl:01_issue-17:done',
@@ -1726,7 +1736,12 @@ describe('IssueRunner', () => {
 
       const outcomes = await runner.run(config);
 
-      expect(outcomes[0]).toMatchObject({ issueNumber: 17, status: 'fixed', tokensUsed: 0 });
+      expect(outcomes[0]).toMatchObject({
+        issueNumber: 17,
+        status: 'skipped',
+        tokensUsed: 0,
+        error: expect.stringContaining('deferred by scheduler: blocked issue'),
+      });
       expect(graphBuilder.buildChunkDefinitionsForIssue).not.toHaveBeenCalled();
       expect(mockRun).not.toHaveBeenCalled();
     });

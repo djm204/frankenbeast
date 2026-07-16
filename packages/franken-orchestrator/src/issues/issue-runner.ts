@@ -1079,20 +1079,8 @@ function checkpointEntriesAreCompleteWithoutPlan(
   if (entries === undefined || entries.size === 0) return false;
   if (complexity === 'chunked') return false;
 
-  const issueToken = `issue-${issueNumber}`;
-  const doneEntries = [...entries].filter((entry) => entry.endsWith(':done') && entry.includes(issueToken));
-  const isDoneEntryForIssue = (entry: string, taskPrefix: 'impl' | 'harden'): boolean => {
-    if (!entry.startsWith(`${taskPrefix}:`) || !entry.endsWith(':done')) return false;
-    const index = entry.indexOf(issueToken);
-    if (index < 0) return false;
-    const before = entry[index - 1];
-    const after = entry[index + issueToken.length];
-    return !(before !== undefined && /\d/.test(before))
-      && !(after !== undefined && /\d/.test(after));
-  };
-
-  return doneEntries.some(entry => isDoneEntryForIssue(entry, 'impl'))
-    && doneEntries.some(entry => isDoneEntryForIssue(entry, 'harden'));
+  return entries.has(issueCompletionKey(`impl:issue-${issueNumber}`))
+    && entries.has(issueCompletionKey(`harden:issue-${issueNumber}`));
 }
 
 function checkpointHasTaskProgress(issueCheckpoint: ICheckpointStore, taskId: string): boolean {

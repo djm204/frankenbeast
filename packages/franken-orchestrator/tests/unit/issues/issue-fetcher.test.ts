@@ -77,21 +77,23 @@ describe('IssueFetcher', () => {
       expect(limits).toContain('1000');
     });
 
-    it('adds default oldest, urgent, and recent searches so urgent issues cannot fall outside the aged window', async () => {
+    it('adds default urgent newest, urgent oldest, recent, and oldest searches so urgent issues cannot fall outside the aged window', async () => {
       const execFn = vi.fn(makeExecFn(SAMPLE_GH_OUTPUT));
       const fetcher = new IssueFetcher(execFn);
 
       await fetcher.fetch({});
 
-      expect(execFn).toHaveBeenCalledTimes(3);
+      expect(execFn).toHaveBeenCalledTimes(4);
       const searches = execFn.mock.calls.map(([, args]) => args[args.indexOf('--search') + 1]);
       expect(searches[0]).toContain('label:critical');
       expect(searches[0]).toContain('label:high');
       expect(searches[0]).toContain('label:"priority:p0"');
       expect(searches[0]).toContain('label:"priority:p1"');
       expect(searches[0]).toContain('sort:created-desc');
-      expect(searches[1]).toBe('sort:created-desc');
-      expect(searches[2]).toBe('sort:created-asc');
+      expect(searches[1]).toContain('label:critical');
+      expect(searches[1]).toContain('sort:created-asc');
+      expect(searches[2]).toBe('sort:created-desc');
+      expect(searches[3]).toBe('sort:created-asc');
     });
 
     it('deduplicates issues returned by the default supplemental fetch windows', async () => {
@@ -107,6 +109,33 @@ describe('IssueFetcher', () => {
       expect(issues[0]!.number).toBe(42);
     });
 
+    it('preserves oldest urgent issues ahead of non-urgent backlog truncation', async () => {
+      const makeIssues = (numbers: readonly number[], labels: readonly string[] = []) => JSON.stringify(
+        numbers.map((number) => ({
+          number,
+          title: `Issue ${number}`,
+          body: 'body',
+          labels: labels.map((name) => ({ name })),
+          state: 'OPEN',
+          url: `https://github.com/org/repo/issues/${number}`,
+        })),
+      );
+      const execFn = vi.fn<ExecFn>()
+        .mockImplementationOnce(makeExecFn(makeIssues([1], ['priority:high'])))
+        .mockImplementationOnce(makeExecFn(makeIssues([9999], ['priority:critical'])))
+        .mockImplementationOnce(makeExecFn(makeIssues(Array.from({ length: 200 }, (_, index) => 100 + index))))
+        .mockImplementationOnce(makeExecFn(makeIssues(Array.from({ length: 1000 }, (_, index) => 1000 + index))));
+      const fetcher = new IssueFetcher(execFn);
+
+      const issues = await fetcher.fetch({});
+
+      expect(issues).toHaveLength(1000);
+      expect(issues.map((issue) => issue.number)).toContain(9999);
+      expect(issues.findIndex((issue) => issue.number === 9999)).toBeLessThan(
+        issues.findIndex((issue) => issue.number === 100),
+      );
+    });
+
     it('caps the merged default supplemental windows at the advertised default limit', async () => {
       const makeIssues = (start: number, count: number) => JSON.stringify(
         Array.from({ length: count }, (_, index) => ({
@@ -119,9 +148,10 @@ describe('IssueFetcher', () => {
         })),
       );
       const execFn = vi.fn<ExecFn>()
-        .mockImplementationOnce(makeExecFn(makeIssues(1, 200)))
-        .mockImplementationOnce(makeExecFn(makeIssues(201, 200)))
-        .mockImplementationOnce(makeExecFn(makeIssues(401, 1000)));
+        .mockImplementationOnce(makeExecFn(makeIssues(1, 1000)))
+        .mockImplementationOnce(makeExecFn(makeIssues(2001, 1000)))
+        .mockImplementationOnce(makeExecFn(makeIssues(3001, 200)))
+        .mockImplementationOnce(makeExecFn(makeIssues(4001, 1000)));
       const fetcher = new IssueFetcher(execFn);
 
       const issues = await fetcher.fetch({});
