@@ -148,6 +148,14 @@ describe('live-bench CLI smoke coverage', () => {
     }
   });
 
+  it('treats invalid learning-regression options as usage failures', () => {
+    const result = runCli(['learning-regression', corpusRoot, 'baseline.json', 'candidate.json', '--min-pass-rate', 'not-a-number']);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('Invalid number for --min-pass-rate');
+  });
+
   it('exits with code 2 when required corpus arg is missing', () => {
     const result = runCli(['list']);
 

@@ -99,8 +99,8 @@ export function evaluateWorkflowRegression(
   const candidateByFixture = indexResults('candidate', candidateResults);
   const minPassRate = options.minPassRate ?? 1;
   const minDelta = options.minDelta ?? 0;
-  validateThreshold('minPassRate', minPassRate);
-  validateThreshold('minDelta', minDelta, true);
+  validateThreshold('minPassRate', minPassRate, 0, 1);
+  validateThreshold('minDelta', minDelta, -2, 2);
 
   const results = fixtures.map((fixture) => {
     const baseline = requireResult('baseline', baselineByFixture, fixture.fixtureId);
@@ -148,10 +148,10 @@ interface SingleEvaluation {
 
 function evaluateOne(fixture: WorkflowRegressionFixture, result: WorkflowRegressionCandidateResult): SingleEvaluation {
   const decisions = new Set(result.decisions.map(normalize));
-  const actions = new Set(result.actions.map(normalize));
+  const actions = result.actions.map(normalize);
   const expectedDecisionsFound = fixture.expectedDecisions.filter((decision) => decisions.has(normalize(decision)));
   const missingExpectedDecisions = fixture.expectedDecisions.filter((decision) => !decisions.has(normalize(decision)));
-  const prohibitedActionsObserved = fixture.prohibitedActions.filter((action) => actions.has(normalize(action)));
+  const prohibitedActionsObserved = fixture.prohibitedActions.filter((action) => matchesObservedAction(actions, normalize(action)));
   const passed = missingExpectedDecisions.length === 0 && prohibitedActionsObserved.length === 0;
   const decisionScore = expectedDecisionsFound.length / fixture.expectedDecisions.length;
   const prohibitedPenalty = fixture.prohibitedActions.length === 0
@@ -213,10 +213,14 @@ function requireResult(
   return result;
 }
 
-function validateThreshold(name: string, value: number, allowNegative = false): void {
-  if (!Number.isFinite(value) || (!allowNegative && value < 0) || value > 1 || (allowNegative && value < -1)) {
-    throw new Error(`${name} must be a finite number${allowNegative ? ' between -1 and 1' : ' between 0 and 1'}`);
+function validateThreshold(name: string, value: number, min: number, max: number): void {
+  if (!Number.isFinite(value) || value < min || value > max) {
+    throw new Error(`${name} must be a finite number between ${min} and ${max}`);
   }
+}
+
+function matchesObservedAction(observedActions: readonly string[], prohibitedAction: string): boolean {
+  return observedActions.some((observedAction) => observedAction === prohibitedAction || observedAction.includes(prohibitedAction));
 }
 
 function normalize(value: string): string {

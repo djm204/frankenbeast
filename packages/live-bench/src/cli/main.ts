@@ -51,7 +51,13 @@ if (command === 'learning-regression') {
     process.exit(2);
   }
 
-  const options = parseLearningRegressionOptions(process.argv.slice(6));
+  let options: { minPassRate?: number; minDelta?: number };
+  try {
+    options = parseLearningRegressionOptions(process.argv.slice(6));
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(2);
+  }
   const report = evaluateWorkflowRegression(
     loadWorkflowRegressionFixtures(fixtureRoot),
     loadWorkflowRegressionCandidateResults(baselinePath),
