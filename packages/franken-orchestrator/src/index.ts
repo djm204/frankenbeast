@@ -165,6 +165,22 @@ export { LlmPlanner } from './skills/llm-planner.js';
 export { quoteUntrustedPayload, wrapUntrustedContent } from './prompt/untrusted-content.js';
 export type { UntrustedContentSource } from './prompt/untrusted-content.js';
 export { buildProjectMemorySnapshot } from './memory/project-memory-snapshot.js';
+export {
+  dryRunReplayDeadLetterEntry,
+  inspectDeadLetterEntry,
+  listDeadLetterEntries,
+  recordRetryExhaustionToDeadLetterQueue,
+  retireDeadLetterEntry,
+} from './dr/dead-letter-queue.js';
+export type {
+  DeadLetterEntry,
+  DeadLetterEntryStatus,
+  DeadLetterReplayDryRunReport,
+  DeadLetterReplaySafety,
+  DryRunReplayOptions,
+  RecordRetryExhaustionOptions,
+  RetireDeadLetterEntryOptions,
+} from './dr/dead-letter-queue.js';
 export type {
   BuildProjectMemorySnapshotInput,
   ProjectMemoryRecord,
