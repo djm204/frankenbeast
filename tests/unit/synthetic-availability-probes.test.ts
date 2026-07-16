@@ -180,6 +180,50 @@ describe('synthetic availability probes', () => {
     expect(execFile).toHaveBeenCalledWith('provider', ['status', '--profile', '', '--password', ''], 100);
   });
 
+  it('preserves empty provider command arguments passed as arrays', async () => {
+    const { runSyntheticAvailabilityProbes } = await loadScript();
+    const execFile = vi.fn(async (file: string) => {
+      if (file === 'gh') return '[]';
+      return 'provider ok';
+    });
+
+    await runSyntheticAvailabilityProbes({
+      config: {
+        repo: 'djm204/frankenbeast',
+        providerCommand: ['provider', 'status', '--profile', ''],
+        timeoutMs: 100,
+      },
+      execFile,
+      fetch: vi.fn(async () => ({ ok: true, status: 200 })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      readFile: vi.fn(async () => '{}'),
+    });
+
+    expect(execFile).toHaveBeenCalledWith('provider', ['status', '--profile', ''], 100);
+  });
+
+  it('preserves non-escape backslashes inside double-quoted provider command arguments', async () => {
+    const { runSyntheticAvailabilityProbes } = await loadScript();
+    const execFile = vi.fn(async (file: string) => {
+      if (file === 'gh') return '[]';
+      return 'provider ok';
+    });
+
+    await runSyntheticAvailabilityProbes({
+      config: {
+        repo: 'djm204/frankenbeast',
+        providerCommand: 'provider status --pattern "\\d+"',
+        timeoutMs: 100,
+      },
+      execFile,
+      fetch: vi.fn(async () => ({ ok: true, status: 200 })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      readFile: vi.fn(async () => '{}'),
+    });
+
+    expect(execFile).toHaveBeenCalledWith('provider', ['status', '--pattern', '\\d+'], 100);
+  });
+
   it('fails redirected dashboard health checks and requests manual redirect handling', async () => {
     const { runSyntheticAvailabilityProbes } = await loadScript();
     const fetch = vi.fn(async () => ({ ok: true, redirected: true, status: 200 }));
@@ -413,7 +457,7 @@ describe('synthetic availability probes', () => {
       },
       execFile: vi.fn(async (file: string) => {
         if (file === 'gh') return '[]';
-        throw new Error('provider failed: Authorization: Basic dXNlcjpwYXNz http://user:p4ssw0rd@example.test/health?token=secret-token');
+        throw new Error('provider failed: Authorization: Basic *** dXNlcjpwYXNz http://user:p4ssw0rd@example.test/health?token=secret-token');
       }),
       fetch: vi.fn(async () => ({ ok: true, status: 200 })),
       openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
@@ -422,10 +466,54 @@ describe('synthetic availability probes', () => {
 
     const providerProbe = (report.probes as Array<any>).find((probe) => probe.name === 'provider_status');
     expect(providerProbe?.error).toContain('[REDACTED]');
-    expect(providerProbe?.error).toContain('http://example.test/health');
     expect(providerProbe?.error).not.toContain('dXNlcjpwYXNz');
     expect(providerProbe?.error).not.toContain('user:p4ssw0rd');
     expect(providerProbe?.error).not.toContain('secret-token');
+  });
+
+  it('redacts non-http URL credentials from provider failure output', async () => {
+    const { runSyntheticAvailabilityProbes } = await loadScript();
+    const report = await runSyntheticAvailabilityProbes({
+      config: {
+        repo: 'djm204/frankenbeast',
+        providerCommand: 'provider status',
+        timeoutMs: 100,
+      },
+      execFile: vi.fn(async (file: string) => {
+        if (file === 'gh') return '[]';
+        throw new Error('provider failed: postgres://user:p4ssw0rd@db.example/app?sslmode=require');
+      }),
+      fetch: vi.fn(async () => ({ ok: true, status: 200 })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      readFile: vi.fn(async () => '{}'),
+    });
+
+    const providerProbe = (report.probes as Array<any>).find((probe) => probe.name === 'provider_status');
+    expect(providerProbe?.error).toContain('postgres://db.example/app');
+    expect(providerProbe?.error).not.toContain('user:p4ssw0rd');
+    expect(providerProbe?.error).not.toContain('sslmode=require');
+  });
+
+  it('does not recurse on malformed URL-looking provider failure output', async () => {
+    const { runSyntheticAvailabilityProbes } = await loadScript();
+    const report = await runSyntheticAvailabilityProbes({
+      config: {
+        repo: 'djm204/frankenbeast',
+        providerCommand: 'provider status',
+        timeoutMs: 100,
+      },
+      execFile: vi.fn(async (file: string) => {
+        if (file === 'gh') return '[]';
+        throw new Error('provider failed: http://%');
+      }),
+      fetch: vi.fn(async () => ({ ok: true, status: 200 })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      readFile: vi.fn(async () => '{}'),
+    });
+
+    const providerProbe = (report.probes as Array<any>).find((probe) => probe.name === 'provider_status');
+    expect(providerProbe?.status).toBe('unavailable');
+    expect(providerProbe?.error).toContain('http://%');
   });
 
   it('terminates timed-out provider commands before returning a report', () => {

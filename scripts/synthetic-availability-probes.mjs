@@ -10,21 +10,29 @@ const SECRET_ARG_PATTERN = /(?:token|secret|password|passwd|authorization|api[-_
 const BASIC_AUTH_FLAGS = new Set(['-u', '-U', '--user', '--proxy-user']);
 function parseCommandLine(value) {
   if (!value) return undefined;
-  if (Array.isArray(value)) return value.map(String).filter(Boolean);
+  if (Array.isArray(value)) return value.map(String);
   const words = [];
   let word = '';
   let quote = null;
   let escaping = false;
   let wordStarted = false;
-  for (const character of String(value).trim()) {
+  const input = String(value).trim();
+  for (let index = 0; index < input.length; index += 1) {
+    const character = input[index];
     if (escaping) {
       word += character;
       wordStarted = true;
       escaping = false;
     } else if (quote) {
       if (character === quote) quote = null;
-      else if (quote !== "'" && character === '\\') escaping = true;
-      else {
+      else if (quote !== "'" && character === '\\') {
+        const next = input[index + 1];
+        if (next && ['\\', '"', '$', '`', '\n'].includes(next)) escaping = true;
+        else {
+          word += character;
+          wordStarted = true;
+        }
+      } else {
         word += character;
         wordStarted = true;
       }
@@ -186,9 +194,10 @@ async function defaultExecFile(file, args, timeoutMs) {
 
 function redactText(value) {
   return String(value)
+    .replace(/(Authorization:\s*)Basic\s+\S+(?:\s+\S+)?/giu, '$1Basic [REDACTED]')
     .replace(/Bearer\s+\S+/giu, 'Bearer [REDACTED]')
     .replace(/Basic\s+\S+/giu, 'Basic [REDACTED]')
-    .replace(/https?:\/\/[^\s'"<>]+/giu, (match) => redactUrl(match))
+    .replace(/[a-z][a-z0-9+.-]*:\/\/[^\s'"<>]+/giu, (match) => redactUrl(match))
     .replace(/((?:token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)[\w.-]*\s*[=:]\s*)\S+/giu, '$1[REDACTED]')
     .replace(/((?:--?[\w-]*(?:token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)[\w-]*|(?:token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)[\w.-]*)\s+)\S+/giu, '$1[REDACTED]');
 }
@@ -202,7 +211,7 @@ function redactUrl(value) {
     url.hash = '';
     return url.toString();
   } catch {
-    return redactText(value);
+    return String(value);
   }
 }
 function redactCommand(command) {
