@@ -113,6 +113,78 @@ describe('process cleanup plan', () => {
 
     expect(report.findings.filter((finding) => finding.code === 'orphan-duplicate-process')).toHaveLength(0);
     expect(report.actions.filter((action) => action.action === 'terminate-orphan')).toHaveLength(0);
-    expect(report.operatorSummary).toContain('No orphan duplicate termination is planned without matching uid, cwd, and command evidence');
+    expect(report.operatorSummary).toContain('No orphan duplicate termination is planned without matching uid, cwd, command, args, and process-start evidence');
+  });
+
+  it('requires full recorded process evidence before marking a PID clean', () => {
+    const report = buildProcessCleanupPlan({
+      checkedAt: '2026-07-16T12:00:00.000Z',
+      dryRun: true,
+      currentUid: 1000,
+      attempts: [
+        {
+          runId: 'run-duplicate-a',
+          attemptId: 'attempt-duplicate-a',
+          status: 'running',
+          pid: 401,
+          expectedCommand: '/usr/bin/node',
+          expectedCwd: '/repo',
+        },
+        {
+          runId: 'run-duplicate-b',
+          attemptId: 'attempt-duplicate-b',
+          status: 'running',
+          pid: 401,
+          expectedCommand: '/usr/bin/node',
+          expectedCwd: '/repo',
+        },
+        {
+          runId: 'run-wrong-uid',
+          attemptId: 'attempt-wrong-uid',
+          status: 'running',
+          pid: 402,
+          expectedCommand: '/usr/bin/node',
+          expectedCwd: '/repo',
+          expectedUid: 1000,
+        },
+        {
+          runId: 'run-wrong-args',
+          attemptId: 'attempt-wrong-args',
+          status: 'running',
+          pid: 403,
+          expectedCommand: '/usr/bin/node',
+          expectedArgs: ['dist/cli/run.js', 'beast'],
+          expectedCwd: '/repo',
+        },
+        {
+          runId: 'run-wrong-start',
+          attemptId: 'attempt-wrong-start',
+          status: 'running',
+          pid: 404,
+          expectedCommand: '/usr/bin/node',
+          expectedArgs: ['dist/cli/run.js', 'beast'],
+          expectedCwd: '/repo',
+          expectedStartTimeTicks: '100',
+        },
+      ],
+      processes: [
+        { pid: 401, command: '/usr/bin/node', args: [], cwd: '/repo', uid: 1000 },
+        { pid: 402, command: '/usr/bin/node', args: [], cwd: '/repo', uid: 2000 },
+        { pid: 403, command: '/usr/bin/node', args: ['dist/cli/run.js', 'other'], cwd: '/repo', uid: 1000 },
+        { pid: 404, command: '/usr/bin/node', args: ['dist/cli/run.js', 'beast'], cwd: '/repo', uid: 1000, startTimeTicks: '200' },
+      ],
+    });
+
+    expect(report.status).toBe('review-required');
+    expect(report.findings.map((finding) => finding.code)).toEqual([
+      'duplicate-recorded-pid',
+      'duplicate-recorded-pid',
+      'wrong-uid',
+      'wrong-args',
+      'wrong-start-time',
+    ]);
+    expect(report.findings).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'live-matching-worker' }),
+    ]));
   });
 });

@@ -4,6 +4,10 @@ export type ProcessCleanupFindingCode =
   | 'live-matching-worker'
   | 'wrong-command'
   | 'wrong-cwd'
+  | 'wrong-uid'
+  | 'wrong-args'
+  | 'wrong-start-time'
+  | 'duplicate-recorded-pid'
   | 'orphan-duplicate-process';
 
 export type ProcessCleanupSeverity = 'info' | 'warning' | 'blocker';
@@ -19,6 +23,7 @@ export interface ProcessCleanupAttemptSnapshot {
   readonly expectedArgs?: readonly string[] | undefined;
   readonly expectedCwd?: string | undefined;
   readonly expectedUid?: number | undefined;
+  readonly expectedStartTimeTicks?: string | undefined;
 }
 
 export interface ProcessTableEntry {
@@ -97,6 +102,11 @@ function argsMatch(attempt: ProcessCleanupAttemptSnapshot, processEntry: Process
   return attempt.expectedArgs.every((arg, index) => actualArgs[index] === arg);
 }
 
+function startTimeMatches(attempt: ProcessCleanupAttemptSnapshot, processEntry: ProcessTableEntry): boolean {
+  return attempt.expectedStartTimeTicks === undefined
+    || attempt.expectedStartTimeTicks === processEntry.startTimeTicks;
+}
+
 function isLiveMatchingWorker(
   attempt: ProcessCleanupAttemptSnapshot,
   processEntry: ProcessTableEntry,
@@ -105,7 +115,8 @@ function isLiveMatchingWorker(
   return commandMatches(attempt, processEntry)
     && cwdMatches(attempt, processEntry)
     && uidMatches(attempt, processEntry, currentUid)
-    && argsMatch(attempt, processEntry);
+    && argsMatch(attempt, processEntry)
+    && startTimeMatches(attempt, processEntry);
 }
 
 function finding(input: ProcessCleanupFinding): ProcessCleanupFinding {
@@ -121,9 +132,16 @@ function statusForFindings(findings: readonly ProcessCleanupFinding[]): ProcessC
 function summarize(report: Pick<ProcessCleanupPlanReport, 'status' | 'findings' | 'actions'>): string {
   const staleCount = report.findings.filter((item) => item.code === 'stale-pid').length;
   const orphanCount = report.findings.filter((item) => item.code === 'orphan-duplicate-process').length;
-  const guardedSkips = report.findings.filter((item) => item.code === 'wrong-command' || item.code === 'wrong-cwd').length;
+  const guardedSkips = report.findings.filter((item) => [
+    'wrong-command',
+    'wrong-cwd',
+    'wrong-uid',
+    'wrong-args',
+    'wrong-start-time',
+    'duplicate-recorded-pid',
+  ].includes(item.code)).length;
   const planned = report.actions.filter((action) => action.action !== 'none').length;
-  const evidenceRule = 'No orphan duplicate termination is planned without matching uid, cwd, and command evidence.';
+  const evidenceRule = 'No orphan duplicate termination is planned without matching uid, cwd, command, args, and process-start evidence.';
 
   if (report.status === 'clean') {
     return `Process cleanup plan is clean; all inspected live attempts match their recorded PID, command, cwd, and owner. ${evidenceRule}`;
@@ -136,6 +154,12 @@ export function buildProcessCleanupPlan(options: ProcessCleanupPlanOptions): Pro
   const findings: ProcessCleanupFinding[] = [];
   const actions: ProcessCleanupAction[] = [];
   const processByPid = new Map(options.processes.map((entry) => [entry.pid, entry] as const));
+  const recordedPidCounts = new Map<number, number>();
+  for (const attempt of options.attempts) {
+    if (typeof attempt.pid === 'number' && attempt.pid > 0) {
+      recordedPidCounts.set(attempt.pid, (recordedPidCounts.get(attempt.pid) ?? 0) + 1);
+    }
+  }
   const claimedPids = new Set<number>();
 
   for (const attempt of options.attempts) {
@@ -179,6 +203,31 @@ export function buildProcessCleanupPlan(options: ProcessCleanupPlanOptions): Pro
         requiresApproval: false,
         wouldExecute: false,
         reason: 'Dry-run would clear the stale attempt PID/run liveness pointer; no process signal is needed.',
+      });
+      continue;
+    }
+
+    if ((recordedPidCounts.get(attempt.pid) ?? 0) > 1) {
+      findings.push(finding({
+        code: 'duplicate-recorded-pid',
+        severity: 'warning',
+        runId: attempt.runId,
+        attemptId: attempt.attemptId,
+        pid: attempt.pid,
+        expectedCommand: attempt.expectedCommand,
+        actualCommand: liveProcess.command,
+        expectedCwd: attempt.expectedCwd,
+        actualCwd: liveProcess.cwd,
+        message: `PID ${attempt.pid} is recorded by more than one live attempt snapshot.`,
+      }));
+      actions.push({
+        action: 'none',
+        runId: attempt.runId,
+        attemptId: attempt.attemptId,
+        pid: attempt.pid,
+        requiresApproval: true,
+        wouldExecute: false,
+        reason: 'Duplicate PID ownership requires operator review to choose the surviving run/attempt before cleanup.',
       });
       continue;
     }
@@ -229,6 +278,81 @@ export function buildProcessCleanupPlan(options: ProcessCleanupPlanOptions): Pro
         requiresApproval: true,
         wouldExecute: false,
         reason: 'Wrong-cwd PID may be a sibling or unrelated process; skip termination and require manual investigation.',
+      });
+      continue;
+    }
+
+    if (!uidMatches(attempt, liveProcess, options.currentUid)) {
+      findings.push(finding({
+        code: 'wrong-uid',
+        severity: 'warning',
+        runId: attempt.runId,
+        attemptId: attempt.attemptId,
+        pid: attempt.pid,
+        expectedCommand: attempt.expectedCommand,
+        actualCommand: liveProcess.command,
+        expectedCwd: attempt.expectedCwd,
+        actualCwd: liveProcess.cwd,
+        message: `PID ${attempt.pid} is live with expected command/cwd but a different owner uid.`,
+      }));
+      actions.push({
+        action: 'none',
+        runId: attempt.runId,
+        attemptId: attempt.attemptId,
+        pid: attempt.pid,
+        requiresApproval: true,
+        wouldExecute: false,
+        reason: 'Wrong-uid PID may be reused by another user; skip termination and require manual investigation.',
+      });
+      continue;
+    }
+
+    if (!argsMatch(attempt, liveProcess)) {
+      findings.push(finding({
+        code: 'wrong-args',
+        severity: 'warning',
+        runId: attempt.runId,
+        attemptId: attempt.attemptId,
+        pid: attempt.pid,
+        expectedCommand: attempt.expectedCommand,
+        actualCommand: liveProcess.command,
+        expectedCwd: attempt.expectedCwd,
+        actualCwd: liveProcess.cwd,
+        message: `PID ${attempt.pid} is live with expected command/cwd/uid but different launch arguments.`,
+      }));
+      actions.push({
+        action: 'none',
+        runId: attempt.runId,
+        attemptId: attempt.attemptId,
+        pid: attempt.pid,
+        requiresApproval: true,
+        wouldExecute: false,
+        reason: 'Wrong-args PID may be a different worker-looking process; skip termination and require manual investigation.',
+      });
+      continue;
+    }
+
+    if (!startTimeMatches(attempt, liveProcess)) {
+      findings.push(finding({
+        code: 'wrong-start-time',
+        severity: 'warning',
+        runId: attempt.runId,
+        attemptId: attempt.attemptId,
+        pid: attempt.pid,
+        expectedCommand: attempt.expectedCommand,
+        actualCommand: liveProcess.command,
+        expectedCwd: attempt.expectedCwd,
+        actualCwd: liveProcess.cwd,
+        message: `PID ${attempt.pid} is live but the process start token does not match the recorded attempt.`,
+      }));
+      actions.push({
+        action: 'none',
+        runId: attempt.runId,
+        attemptId: attempt.attemptId,
+        pid: attempt.pid,
+        requiresApproval: true,
+        wouldExecute: false,
+        reason: 'Wrong-start-time PID may be PID reuse; skip termination and require manual investigation.',
       });
       continue;
     }
