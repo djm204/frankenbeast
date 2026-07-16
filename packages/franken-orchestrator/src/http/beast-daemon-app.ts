@@ -169,6 +169,19 @@ export function createBeastDaemonApp(options: BeastDaemonAppOptions): Hono {
   });
 
   app.delete('/v1/beasts/availability/degraded', auth, (c) => {
+    const snapshot = availabilityMode.snapshot();
+    if (snapshot.source === 'automatic') {
+      const recovered = dependencyCountSnapshot(services, availabilityMode).availability;
+      if (recovered.readOnly) {
+        throw new HttpError(
+          503,
+          'READ_ONLY_DEGRADED_MODE_ACTIVE',
+          'Automatic read-only degraded mode remains active because dependency reads are still failing',
+          availabilityModeDenialDetails(recovered),
+        );
+      }
+      return c.json({ data: recovered });
+    }
     return c.json({ data: availabilityMode.leaveReadOnlyDegraded() });
   });
 

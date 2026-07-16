@@ -327,6 +327,22 @@ describe('beast daemon', () => {
       },
     });
 
+    const deniedLeave = await app.request('/v1/beasts/availability/degraded', {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${operatorToken}` },
+    });
+    expect(deniedLeave.status).toBe(503);
+    expect(await deniedLeave.json()).toMatchObject({
+      error: {
+        code: 'READ_ONLY_DEGRADED_MODE_ACTIVE',
+        details: {
+          mode: 'read-only-degraded',
+          readOnly: true,
+          source: 'automatic',
+        },
+      },
+    });
+
     vi.mocked(services.agents.listAgents).mockReturnValue([]);
     const recoveredHealth = await app.request('/health');
     expect(recoveredHealth.status).toBe(200);
