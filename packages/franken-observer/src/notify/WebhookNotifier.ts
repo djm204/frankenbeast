@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from 'node:crypto'
 import { lookup as dnsLookup } from 'node:dns/promises'
 import { request as httpsRequest } from 'node:https'
 import { isIP } from 'node:net'
@@ -18,6 +19,101 @@ export interface WebhookRetryOptions {
    * thundering-herd on shared endpoints. Default: true.
    */
   jitter?: boolean
+}
+
+export type WebhookDeliveryReceiptStatus = 'pending' | 'sent' | 'skipped' | 'failed'
+
+export interface WebhookDeliveryReceipt {
+  /** Caller-supplied key that makes a logical notification safe to retry. */
+  idempotencyKey?: string
+  /** Logical delivery target. Defaults to the configured webhook URL. */
+  target: string
+  /** Whether this call reserved, sent, skipped a duplicate, or failed before delivery. */
+  status: WebhookDeliveryReceiptStatus
+  /** ISO timestamp for when this receipt was recorded. */
+  timestamp: string
+  /** SHA-256 digest of the serialized payload sent or considered for delivery. */
+  contentHash: string
+  /** Opaque reservation owner used to avoid stale attempts overwriting newer receipts. */
+  reservationId?: string
+  /** Redacted failure summary for failed receipts. */
+  error?: string
+}
+
+export interface WebhookSendOptions {
+  /** Stable key for the logical notification, e.g. `status:<run-id>:discord`. */
+  idempotencyKey?: string
+  /** Optional logical target override when one notifier fronts multiple channels. */
+  target?: string
+}
+
+export interface WebhookDeliveryReceiptStore {
+  findLatest: (idempotencyKey: string, target: string) => WebhookDeliveryReceipt | undefined | Promise<WebhookDeliveryReceipt | undefined>
+  findByContent: (
+    idempotencyKey: string,
+    target: string,
+    contentHash: string,
+  ) => WebhookDeliveryReceipt | undefined | Promise<WebhookDeliveryReceipt | undefined>
+  reserve: (receipt: WebhookDeliveryReceipt) => boolean | Promise<boolean>
+  completeReservation: (reservationId: string, receipt: WebhookDeliveryReceipt) => boolean | Promise<boolean>
+  save: (receipt: WebhookDeliveryReceipt) => void | Promise<void>
+}
+
+export class InMemoryWebhookDeliveryReceiptStore implements WebhookDeliveryReceiptStore {
+  private readonly latestReceipts = new Map<string, WebhookDeliveryReceipt>()
+  private readonly contentReceipts = new Map<string, WebhookDeliveryReceipt>()
+
+  findLatest(idempotencyKey: string, target: string): WebhookDeliveryReceipt | undefined {
+    return this.latestReceipts.get(this.keyFor(idempotencyKey, target))
+  }
+
+  findByContent(idempotencyKey: string, target: string, contentHash: string): WebhookDeliveryReceipt | undefined {
+    return this.contentReceipts.get(this.contentKeyFor(idempotencyKey, target, contentHash))
+  }
+
+  reserve(receipt: WebhookDeliveryReceipt): boolean {
+    if (!receipt.idempotencyKey) return true
+    const contentKey = this.contentKeyFor(receipt.idempotencyKey, receipt.target, receipt.contentHash)
+    const existing = this.contentReceipts.get(contentKey)
+    if (existing && existing.status !== 'failed' && !isStalePendingReceipt(existing)) {
+      return false
+    }
+    this.save(receipt)
+    return true
+  }
+
+  completeReservation(reservationId: string, receipt: WebhookDeliveryReceipt): boolean {
+    if (!receipt.idempotencyKey) return true
+    const contentKey = this.contentKeyFor(receipt.idempotencyKey, receipt.target, receipt.contentHash)
+    const current = this.contentReceipts.get(contentKey)
+    if (current?.reservationId !== reservationId) {
+      return false
+    }
+    this.save(receipt)
+    return true
+  }
+
+  save(receipt: WebhookDeliveryReceipt): void {
+    if (!receipt.idempotencyKey) return
+    this.latestReceipts.set(this.keyFor(receipt.idempotencyKey, receipt.target), receipt)
+    this.contentReceipts.set(this.contentKeyFor(receipt.idempotencyKey, receipt.target, receipt.contentHash), receipt)
+  }
+
+  private keyFor(idempotencyKey: string, target: string): string {
+    return `${idempotencyKey}\u0000${target}`
+  }
+
+  private contentKeyFor(idempotencyKey: string, target: string, contentHash: string): string {
+    return `${this.keyFor(idempotencyKey, target)}\u0000${contentHash}`
+  }
+}
+
+const DEFAULT_PENDING_RECEIPT_TTL_MS = 5 * 60 * 1000
+
+function isStalePendingReceipt(receipt: WebhookDeliveryReceipt, now = Date.now()): boolean {
+  if (receipt.status !== 'pending') return false
+  const timestamp = Date.parse(receipt.timestamp)
+  return !Number.isFinite(timestamp) || now - timestamp > DEFAULT_PENDING_RECEIPT_TTL_MS
 }
 
 export interface WebhookAllowedTarget {
@@ -81,6 +177,12 @@ export interface WebhookNotifierOptions {
    * Defaults to a Promise-based `setTimeout` wrapper.
    */
   sleep?: (ms: number) => Promise<void>
+  /**
+   * Receipt store used when `send()` receives an idempotency key. The default
+   * in-memory store prevents duplicate deliveries within one process; pass a
+   * durable store for cron/status runners that need cross-process receipts.
+   */
+  deliveryReceiptStore?: WebhookDeliveryReceiptStore
 }
 
 /**
@@ -109,6 +211,10 @@ export interface WebhookNotifierOptions {
  */
 function isTransientStatus(status: number): boolean {
   return status === 429 || (status >= 500 && status <= 599)
+}
+
+function hashWebhookBody(body: string): string {
+  return createHash('sha256').update(body).digest('hex')
 }
 
 function validateNonNegativeInteger(value: number, fieldName: string): number {
@@ -400,6 +506,7 @@ export class WebhookNotifier {
   private readonly dnsLookupFn: WebhookDnsLookup | null
   private readonly retry: Required<WebhookRetryOptions> | null
   private readonly sleepFn: (ms: number) => Promise<void>
+  private readonly receiptStore: WebhookDeliveryReceiptStore
 
   constructor(options: WebhookNotifierOptions) {
     this.url = options.url
@@ -424,6 +531,7 @@ export class WebhookNotifier {
       ? null
       : async hostname => (await dnsLookup(hostname, { all: true })).map(result => result.address))
     this.sleepFn = options.sleep ?? ((ms: number) => new Promise(r => setTimeout(r, ms)))
+    this.receiptStore = options.deliveryReceiptStore ?? new InMemoryWebhookDeliveryReceiptStore()
     this.retry = options.retry
       ? {
           maxRetries: validateNonNegativeInteger(options.retry.maxRetries, 'retry.maxRetries'),
@@ -434,65 +542,132 @@ export class WebhookNotifier {
       : null
   }
 
-  async send(payload: unknown): Promise<void> {
+  async send(payload: unknown, options: WebhookSendOptions = {}): Promise<WebhookDeliveryReceipt> {
     this.assertTargetAllowed()
+
+    const receiptTarget = options.target ?? `${sanitizeWebhookEndpoint(this.url)}#${createHash('sha256').update(this.url).digest('hex').slice(0, 12)}`
+    const requestBody = JSON.stringify(payload)
+    const contentHash = hashWebhookBody(requestBody)
+    const reservationId = options.idempotencyKey ? randomUUID() : undefined
+    const receiptBase = {
+      idempotencyKey: options.idempotencyKey,
+      target: receiptTarget,
+      contentHash,
+    }
+    if (options.idempotencyKey) {
+      const existing = await this.receiptStore.findByContent(options.idempotencyKey, receiptTarget, contentHash)
+      if (existing && existing.status !== 'failed' && !isStalePendingReceipt(existing)) {
+        return {
+          ...receiptBase,
+          status: 'skipped',
+          timestamp: new Date().toISOString(),
+        }
+      }
+
+      const reserved = await this.receiptStore.reserve({
+        ...receiptBase,
+        reservationId,
+        status: 'pending',
+        timestamp: new Date().toISOString(),
+      })
+      if (!reserved) {
+        return {
+          ...receiptBase,
+          status: 'skipped',
+          timestamp: new Date().toISOString(),
+        }
+      }
+    }
 
     const maxAttempts = this.retry ? 1 + this.retry.maxRetries : 1
     let lastError: unknown
+    let delivered = false
 
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      if (attempt > 0 && this.retry) {
-        const { baseDelayMs, maxDelayMs, jitter } = this.retry
-        const base = Math.min(baseDelayMs * Math.pow(2, attempt - 1), maxDelayMs)
-        const jittered = jitter ? base + seededRandom.random() * baseDelayMs : base
-        // Clamp after adding jitter so maxDelayMs remains a true upper bound.
-        const delay = Math.min(jittered, maxDelayMs)
-        await this.sleepFn(delay)
-      }
+    try {
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        if (attempt > 0 && this.retry) {
+          const { baseDelayMs, maxDelayMs, jitter } = this.retry
+          const base = Math.min(baseDelayMs * Math.pow(2, attempt - 1), maxDelayMs)
+          const jittered = jitter ? base + seededRandom.random() * baseDelayMs : base
+          // Clamp after adding jitter so maxDelayMs remains a true upper bound.
+          const delay = Math.min(jittered, maxDelayMs)
+          await this.sleepFn(delay)
+        }
 
-      let resolvedAddresses: readonly string[] = []
-      try {
-        resolvedAddresses = await this.resolveAllowedTargetAddresses()
-      } catch (err) {
-        lastError = err
-        if (this.retry && isTransientDnsError(err) && attempt < maxAttempts - 1) {
+        let resolvedAddresses: readonly string[] = []
+        try {
+          resolvedAddresses = await this.resolveAllowedTargetAddresses()
+        } catch (err) {
+          lastError = err
+          if (this.retry && isTransientDnsError(err) && attempt < maxAttempts - 1) {
+            continue
+          }
+          throw err
+        }
+
+        let response: WebhookFetchResponse
+        try {
+          response = await this.fetchWebhook(resolvedAddresses, {
+            method: 'POST',
+            redirect: 'manual',
+            headers: {
+              'Content-Type': 'application/json',
+              ...this.extraHeaders,
+            },
+            body: requestBody,
+          })
+        } catch (err) {
+          lastError = err
           continue
         }
-        throw err
-      }
 
-      let response: WebhookFetchResponse
-      try {
-        response = await this.fetchWebhook(resolvedAddresses, {
-          method: 'POST',
-          redirect: 'manual',
-          headers: {
-            'Content-Type': 'application/json',
-            ...this.extraHeaders,
-          },
-          body: JSON.stringify(payload),
-        })
-      } catch (err) {
-        lastError = err
-        continue
-      }
-
-      if (!response.ok) {
-        const shouldReadBody = !this.retry || !isTransientStatus(response.status) || attempt === maxAttempts - 1
-        const responseBody = shouldReadBody ? await this.readResponseBody(response) : ''
-        const bodySuffix = responseBody ? `: ${responseBody}` : ''
-        lastError = new Error(
-          `Webhook delivery failed: ${response.status}${response.statusText ? ` ${response.statusText}` : ''} for ${sanitizeWebhookEndpoint(this.url)}${bodySuffix}`,
-        )
-        if (!this.retry || !isTransientStatus(response.status) || attempt === maxAttempts - 1) {
-          throw lastError
+        if (!response.ok) {
+          const shouldReadBody = !this.retry || !isTransientStatus(response.status) || attempt === maxAttempts - 1
+          const responseBody = shouldReadBody ? await this.readResponseBody(response) : ''
+          const bodySuffix = responseBody ? `: ${responseBody}` : ''
+          lastError = new Error(
+            `Webhook delivery failed: ${response.status}${response.statusText ? ` ${response.statusText}` : ''} for ${sanitizeWebhookEndpoint(this.url)}${bodySuffix}`,
+          )
+          if (!this.retry || !isTransientStatus(response.status) || attempt === maxAttempts - 1) {
+            throw lastError
+          }
+          continue
         }
-        continue
+        delivered = true
+        const sentReceipt: WebhookDeliveryReceipt = {
+          ...receiptBase,
+          status: 'sent',
+          timestamp: new Date().toISOString(),
+        }
+        if (options.idempotencyKey && reservationId) {
+          try {
+            await this.receiptStore.completeReservation(reservationId, sentReceipt)
+          } catch {
+            // The webhook was already accepted by the remote endpoint. Do not
+            // surface receipt persistence failures as delivery failures, because
+            // callers commonly retry rejected sends and would duplicate the POST.
+          }
+        }
+        return sentReceipt
       }
-      return
-    }
 
-    throw lastError
+      throw lastError
+    } catch (err) {
+      if (options.idempotencyKey && !delivered && reservationId) {
+        try {
+          await this.receiptStore.completeReservation(reservationId, {
+            ...receiptBase,
+            status: 'failed',
+            timestamp: new Date().toISOString(),
+            error: redactWebhookSecrets(err instanceof Error ? err.message : String(err)),
+          })
+        } catch {
+          // Preserve the original webhook delivery error; receipt persistence
+          // failures should not mask HTTP status or network failures.
+        }
+      }
+      throw err
+    }
   }
 
   private async readResponseBody(response: WebhookFetchResponse): Promise<string> {
