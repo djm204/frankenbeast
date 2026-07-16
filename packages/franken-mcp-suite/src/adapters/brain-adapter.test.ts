@@ -7,31 +7,8 @@ const { databaseInstances, brainInstances } = vi.hoisted(() => {
     close: ReturnType<typeof vi.fn>;
     options: unknown;
   }> = [];
-  const brainInstances: Array<{
-    working: {
-      restore: ReturnType<typeof vi.fn>;
-      snapshot: ReturnType<typeof vi.fn>;
-      set: ReturnType<typeof vi.fn>;
-      has: ReturnType<typeof vi.fn>;
-      delete: ReturnType<typeof vi.fn>;
-    };
-    episodic: {
-      recall: ReturnType<typeof vi.fn>;
-      recent: ReturnType<typeof vi.fn>;
-      record: ReturnType<typeof vi.fn>;
-    };
-    rightToForget: ReturnType<typeof vi.fn>;
-    memoryReview: {
-      propose: ReturnType<typeof vi.fn>;
-      approve: ReturnType<typeof vi.fn>;
-      reject: ReturnType<typeof vi.fn>;
-      neverStore: ReturnType<typeof vi.fn>;
-      listProvenance: ReturnType<typeof vi.fn>;
-      conflictsFor: ReturnType<typeof vi.fn>;
-      resolveConflict: ReturnType<typeof vi.fn>;
-    };
-    flush: ReturnType<typeof vi.fn>;
-  }> = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- vi.hoisted mock shape intentionally mirrors a broad SqliteBrain instance across tests.
+  const brainInstances: any[] = [];
   return { databaseInstances, brainInstances };
 });
 
@@ -167,6 +144,52 @@ vi.mock("@franken/brain", () => ({
         dryRun: false,
         deleted: { working: 1, episodic: 0, derived: 0 },
         remainingReferences: 0,
+      })),
+      memoryRetentionReport: vi.fn(() => ({
+        generatedAt: "2026-07-16T00:00:00.000Z",
+        policies: [],
+        counts: { total: 4, protected: 0, expired: 0, nearingExpiry: 0, compactionCandidates: 0 },
+        entries: [
+          {
+            store: "working",
+            key: "shared.low",
+            class: "environment_fact",
+            action: "retain",
+            policy: { class: "environment_fact", retentionDays: 180, compactPriority: 30, protected: false, description: "env" },
+            protected: false,
+            reason: "retain",
+          },
+          {
+            store: "working",
+            key: "shared.high",
+            class: "temporary_operational",
+            action: "retain",
+            policy: { class: "temporary_operational", retentionDays: 1, compactPriority: 100, protected: false, description: "tmp" },
+            protected: false,
+            reason: "retain",
+          },
+          {
+            store: "working",
+            key: "__fbeast_agent_memory__/beta/private",
+            agentId: "beta",
+            class: "temporary_operational",
+            action: "retain",
+            policy: { class: "temporary_operational", retentionDays: 1, compactPriority: 100, protected: false, description: "tmp" },
+            protected: false,
+            reason: "retain",
+          },
+          {
+            store: "working",
+            key: "__fbeast_agent_memory__/alpha/private",
+            agentId: "alpha",
+            class: "project_convention",
+            action: "retain",
+            policy: { class: "project_convention", retentionDays: 365, compactPriority: 20, protected: false, description: "project" },
+            protected: false,
+            reason: "retain",
+          },
+        ],
+        compactionCandidates: [],
       })),
       memoryReview: {
         propose: vi.fn((input) => ({
@@ -534,6 +557,30 @@ describe("createBrainAdapter", () => {
     const exportedText = JSON.stringify(exported);
     expect(exportedText).not.toContain('"agentId":"alpha"');
     expect(exportedText).not.toContain('"agentId":"beta"');
+  });
+
+  it("applies retention report budgets after read-scope filtering", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryRetentionReport({
+      readScope: "shared",
+      maxEntries: 1,
+    });
+
+    expect(brainInstances[0].memoryRetentionReport).toHaveBeenCalledWith({
+      maxEntries: Number.MAX_SAFE_INTEGER,
+    });
+    expect(report.entries.map((entry) => entry.key)).toEqual([
+      "shared.low",
+      "shared.high",
+    ]);
+    expect(report.compactionCandidates).toEqual([
+      expect.objectContaining({ key: "shared.high", action: "compact" }),
+    ]);
+    expect(report.counts).toMatchObject({
+      total: 2,
+      compactionCandidates: 1,
+    });
   });
 
   it("rejects agent read scope without an agent id before reading memory", async () => {

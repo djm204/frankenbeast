@@ -295,7 +295,11 @@ const MEMORY_RETENTION_CLASS_ALIASES: Record<string, MemoryRetentionClass> = {
   'temp-operational': 'temporary_operational',
   'operational-temp': 'temporary_operational',
   'transient-operational': 'temporary_operational',
+  uncategorized: 'uncategorized',
+  unclassified: 'uncategorized',
 };
+
+const FBEAST_AGENT_MEMORY_SCOPE_MARKER = 'fbeast:agent-memory';
 
 export function memoryRetentionPolicies(): MemoryRetentionPolicy[] {
   return Object.values(MEMORY_RETENTION_POLICIES).map((policy) => ({ ...policy }));
@@ -782,6 +786,21 @@ function isTemporaryOperationalWorkingMemoryValue(value: unknown): value is { ex
       || isTemporaryOperationalMarker(record.scope)
     )
   );
+}
+
+function extractTemporaryOperationalExpiresAt(value: unknown, className: MemoryRetentionClass): string | undefined {
+  if (className !== 'temporary_operational' || value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const expiresAt = (value as { expiresAt?: unknown }).expiresAt;
+  return typeof expiresAt === 'string' ? expiresAt : undefined;
+}
+
+function parseAgentScopedEpisodicDetails(details: Record<string, unknown> | undefined): string | undefined {
+  if (!details) return undefined;
+  return details.__fbeastMemoryScope === FBEAST_AGENT_MEMORY_SCOPE_MARKER && typeof details.agentId === 'string'
+    ? details.agentId
+    : undefined;
 }
 
 function isExpiredWorkingMemoryValue(value: unknown, nowMs = Date.now()): boolean {
@@ -3929,7 +3948,7 @@ export class SqliteBrain implements IBrain {
     for (const { key, value, updatedAt } of this.working.retentionEntries(now.toISOString())) {
       const className = classifyMemoryEntry({ store: 'working', key, value });
       const policy = MEMORY_RETENTION_POLICIES[className];
-      const expiresAt = isTemporaryOperationalWorkingMemoryValue(value) ? value.expiresAt : undefined;
+      const expiresAt = extractTemporaryOperationalExpiresAt(value, className);
       const observedAgeDays = ageDays(updatedAt, nowMs);
       const decision = retentionActionForEntry({
         className,
@@ -3972,7 +3991,7 @@ export class SqliteBrain implements IBrain {
         nowMs,
         expiryHorizonMs,
       });
-      const agentId = typeof event.details?.agentId === 'string' ? event.details.agentId : undefined;
+      const agentId = parseAgentScopedEpisodicDetails(event.details);
       entries.push({
         store: 'episodic',
         key,

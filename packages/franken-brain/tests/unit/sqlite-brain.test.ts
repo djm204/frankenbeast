@@ -238,6 +238,55 @@ describe('SqliteBrain', () => {
 
       expect(brain.memoryRetentionReport().entries[0]!.policy.description).not.toBe('mutated by caller');
     });
+
+    it('honors explicit temporary and uncategorized classes', () => {
+      brain.working.set('explicit.tmp', {
+        value: 'scratch state',
+        memoryClass: 'temporary_operational',
+        expiresAt: '2027-01-01T00:00:00.000Z',
+      });
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'uncategorized note',
+        details: { memoryClass: 'uncategorized' },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+
+      const report = brain.memoryRetentionReport({ now: '2027-01-02T00:00:00.000Z' });
+
+      expect(report.entries.find((entry) => entry.key === 'explicit.tmp')).toMatchObject({
+        class: 'temporary_operational',
+        action: 'expired',
+        expiresAt: '2027-01-01T00:00:00.000Z',
+      });
+      expect(report.entries.find((entry) => entry.store === 'episodic' && entry.class === 'uncategorized')).toMatchObject({
+        store: 'episodic',
+        class: 'uncategorized',
+      });
+    });
+
+    it('requires fbeast scoping markers before assigning episodic agent ids', () => {
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'domain event with agent metadata',
+        details: { agentId: 'domain-agent' },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'scoped agent event',
+        details: { __fbeastMemoryScope: 'fbeast:agent-memory', agentId: 'scoped-agent' },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+
+      const report = brain.memoryRetentionReport({ now: '2026-01-02T00:00:00.000Z' });
+
+      expect(report.entries).not.toContainEqual(expect.objectContaining({ agentId: 'domain-agent' }));
+      expect(report.entries).toContainEqual(expect.objectContaining({
+        store: 'episodic',
+        agentId: 'scoped-agent',
+      }));
+    });
   });
 
   describe('skill evolution review gate', () => {

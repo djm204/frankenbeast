@@ -63,6 +63,21 @@ describe('TOOL_REGISTRY', () => {
     expect(brain.store).not.toHaveBeenCalled();
   });
 
+  it('rejects malformed memory retention expiry horizons before invoking the adapter', async () => {
+    const brain = {
+      memoryRetentionReport: vi.fn(),
+    };
+    const handler = TOOL_REGISTRY.get('fbeast_memory_retention_report')!.makeHandler({ brain } as unknown as AdapterSet);
+
+    for (const expiryHorizonMs of ['', '   ', false, null]) {
+      const result = await handler({ expiryHorizonMs });
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain('expiryHorizonMs must be a non-negative number');
+    }
+
+    expect(brain.memoryRetentionReport).not.toHaveBeenCalled();
+  });
+
   it('rejects invalid observer log arguments before invoking the registry adapter handler', async () => {
     const observer = {
       log: vi.fn().mockResolvedValue({ id: 42, hash: 'abc123' }),

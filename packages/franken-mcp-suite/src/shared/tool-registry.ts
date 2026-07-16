@@ -114,7 +114,13 @@ function parseOptionalPositiveIntegerArg(name: string, value: unknown): { ok: tr
 
 function parseOptionalNonNegativeNumberArg(name: string, value: unknown): { ok: true; value?: number } | { ok: false; message: string } {
   if (value === undefined) return { ok: true };
-  const raw = typeof value === 'string' ? value.trim() : String(value);
+  if (typeof value !== 'number' && typeof value !== 'string') {
+    return { ok: false, message: `${name} must be a non-negative number` };
+  }
+  const raw = typeof value === 'string' ? value.trim() : value;
+  if (raw === '') {
+    return { ok: false, message: `${name} must be a non-negative number` };
+  }
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < 0) {
     return { ok: false, message: `${name} must be a non-negative number` };

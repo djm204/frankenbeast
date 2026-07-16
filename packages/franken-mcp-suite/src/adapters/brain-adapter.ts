@@ -379,16 +379,39 @@ function scopedReportEntry(entry: MemoryRetentionEntryReport): MemoryRetentionEn
   };
 }
 
+function applyRetentionBudget(
+  entries: MemoryRetentionEntryReport[],
+  maxEntries: number | undefined,
+): MemoryRetentionEntryReport[] {
+  const scopedEntries = entries.map((entry) => ({ ...entry }));
+  if (maxEntries === undefined) return scopedEntries;
+  const activeEntryCount = scopedEntries.filter((entry) => entry.action !== "expired").length;
+  const overBudgetCount = Math.max(0, activeEntryCount - maxEntries);
+  if (overBudgetCount === 0) return scopedEntries;
+  const retainedCandidates = scopedEntries
+    .filter((entry) => !entry.protected && entry.action === "retain")
+    .sort((a, b) => b.policy.compactPriority - a.policy.compactPriority || a.key.localeCompare(b.key));
+  for (const entry of retainedCandidates.slice(0, overBudgetCount)) {
+    entry.action = "compact";
+    entry.reason = `Scoped memory report has ${activeEntryCount} active entries, over report budget ${maxEntries}; ${entry.class} has compaction priority ${entry.policy.compactPriority}`;
+  }
+  return scopedEntries;
+}
+
 function filterRetentionReportByScope(
   report: MemoryRetentionReport,
   scope: { readScope: MemoryReadScope; agentId?: string },
+  maxEntries?: number,
 ): MemoryRetentionReport {
-  const entries = report.entries
-    .filter((entry) => canReadMemoryEntry(entry.agentId, scope))
-    .map(scopedReportEntry);
-  const compactionCandidates = report.compactionCandidates
-    .filter((entry) => canReadMemoryEntry(entry.agentId, scope))
-    .map(scopedReportEntry);
+  const entries = applyRetentionBudget(
+    report.entries
+      .filter((entry) => canReadMemoryEntry(entry.agentId, scope))
+      .map(scopedReportEntry),
+    maxEntries,
+  );
+  const compactionCandidates = entries
+    .filter((entry) => entry.action === "compact")
+    .sort((a, b) => b.policy.compactPriority - a.policy.compactPriority || a.key.localeCompare(b.key));
   return {
     ...report,
     counts: {
@@ -784,11 +807,17 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
       const reportOptions: MemoryRetentionReportOptions = {
         ...(input.now === undefined ? {} : { now: input.now }),
         ...(input.expiryHorizonMs === undefined ? {} : { expiryHorizonMs: input.expiryHorizonMs }),
-        ...(input.maxEntries === undefined ? {} : { maxEntries: input.maxEntries }),
+        ...(readScope.readScope === "all" && input.maxEntries !== undefined
+          ? { maxEntries: input.maxEntries }
+          : {}),
+        ...(readScope.readScope !== "all" && input.maxEntries !== undefined
+          ? { maxEntries: Number.MAX_SAFE_INTEGER }
+          : {}),
       };
       return filterRetentionReportByScope(
         brain.memoryRetentionReport(reportOptions),
         readScope,
+        readScope.readScope === "all" ? undefined : input.maxEntries,
       );
     },
 
