@@ -611,7 +611,7 @@ const TOOLS: ToolFull[] = [
   {
     name: 'fbeast_memory_access_audit_report',
     server: 'memory',
-    description: 'Report memory read/write/review/delete access by agent, profile, repo, tool, operation, and decision without exposing memory contents',
+    description: 'Report redacted memory access by agent, profile, repo, tool, operation, and decision',
     inputSchema: {
       type: 'object',
       properties: {

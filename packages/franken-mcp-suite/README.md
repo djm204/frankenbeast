@@ -90,7 +90,7 @@ For Beast controls, run the orchestrator/backend setup flow with `frankenbeast i
 
 | Server | Tools | Description |
 |--------|-------|-------------|
-| `fbeast-memory` | `fbeast_memory_store`, `fbeast_memory_query`, `fbeast_memory_frontload`, `fbeast_memory_export`, `fbeast_memory_forget`, `fbeast_memory_right_to_forget`, `fbeast_memory_review_propose`, `fbeast_memory_review_list`, `fbeast_memory_review_decide` | Key-value, episodic, redacted project export, review-queued promotion, and auditable deletion memory via SqliteBrain |
+| `fbeast-memory` | `fbeast_memory_store`, `fbeast_memory_query`, `fbeast_memory_frontload`, `fbeast_memory_export`, `fbeast_memory_forget`, `fbeast_memory_right_to_forget`, `fbeast_memory_review_propose`, `fbeast_memory_review_list`, `fbeast_memory_review_decide`, `fbeast_memory_access_audit_report` | Key-value, episodic, redacted project export, review-queued promotion, auditable deletion, and redacted access reporting memory via SqliteBrain |
 | `fbeast-observer` | `fbeast_observer_log`, `fbeast_observer_log_cost`, `fbeast_observer_cost`, `fbeast_observer_trail`, `fbeast_observer_verify` | Audit trail with chained hashes, token/cost logging and summaries |
 | `fbeast-governor` | `fbeast_governor_check`, `fbeast_governor_budget` | Action safety assessment and budget status |
 | `fbeast-planner` | `fbeast_plan_decompose`, `fbeast_plan_status`, `fbeast_plan_validate` | Task DAG planning, status visualization, and validation |
@@ -113,6 +113,8 @@ To create agent-scoped entries through `fbeast_memory_store`, pass `agentId`; wo
 `fbeast_memory_export` returns a structured JSON export of the same database-scoped project memory with `redaction: "safe"` by default. Safe redaction masks sensitive keys and values such as passwords, API keys, bearer tokens, session cookies, private keys, and email addresses before returning working and episodic memory entries. Use `redaction: "none"` only for trusted operator-only exports; `readScope` and `agentId` use the same scope rules as query/frontload.
 
 `fbeast_memory_right_to_forget` performs user-directed memory deletion by exact key, category metadata, source scope, or sensitive query text. The report returns only a selector hash, deleted counts, remaining-reference count, and optional audit event id; it does not echo the deleted content. Non-dry-run deletions also install hashed reinference guards so future working-memory writes matching forgotten keys, categories, source scopes, or query tokens are rejected.
+
+`fbeast_memory_access_audit_report` returns a redacted memory access report from the database audit logs. Use it to inspect read/write/review/delete/export activity by time window, agent, profile, repo, operation, decision, and tool without exposing stored memory contents. Report entries include metadata such as event timestamp, source audit table, tool, operation, target memory class, agent/card/profile/repo context when available, decision, and a redacted reason; summary counts are grouped by operation, tool, agent, profile, repo, and decision.
 
 ### Skill health endpoint
 
@@ -189,7 +191,7 @@ sensitive payloads into logs or issue comments.
 
 ## Combined server
 
-`fbeast-mcp` runs all 27 tools in a single MCP server process.
+`fbeast-mcp` runs all 28 tools in a single MCP server process.
 
 ## Tool argument shape hardening
 
