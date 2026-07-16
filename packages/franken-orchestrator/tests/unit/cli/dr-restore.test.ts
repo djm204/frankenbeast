@@ -92,7 +92,10 @@ describe('dr restore-dry-run CLI', () => {
           createdAt: '2026-07-16T08:05:00.000Z',
           replaySafety: 'side-effect-approval-required',
           status: 'open',
-          payload: { command: 'curl --password notasecret -H "Authorization: Bearer abcdef...3456" https://api.github.com/repos/djm204/frankenbeast' },
+          payload: {
+            command: 'curl --password notasecret -H "Authorization: Bearer ***" https://api.github.com/repos/djm204/frankenbeast',
+            argv: ['gh', 'api', '--token', 'abcdefghijklmnopqrstuvwxyz123456', '--password=abcd1234secret5678'],
+          },
         }],
       }), 'utf8');
 

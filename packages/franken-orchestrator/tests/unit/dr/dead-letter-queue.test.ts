@@ -1,4 +1,4 @@
-import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -165,11 +165,71 @@ describe('dead-letter queue for failed automation actions', () => {
     }
   });
 
+  it('reaps stale malformed lock files left by crashed writers', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dlq-'));
+    const queuePath = join(dir, 'dead-letter.json');
+    const lockPath = `${queuePath}.lock`;
+
+    try {
+      await writeFile(lockPath, '{not-json', 'utf8');
+      const old = new Date(Date.now() - 60_000);
+      await utimes(lockPath, old, old);
+
+      const entry = await recordRetryExhaustionToDeadLetterQueue({
+        queuePath,
+        actionClass: 'codex-review-trigger',
+        target: 'pr-2342',
+        attempts: 3,
+        maxAttempts: 3,
+        lastError: 'malformed lock should not strand the queue',
+        replaySafety: 'safe',
+      });
+
+      expect(await listDeadLetterEntries(queuePath)).toEqual([entry]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects queue entries parsed from disk before retry exhaustion', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dlq-'));
+    const queuePath = join(dir, 'dead-letter.json');
+
+    try {
+      await writeFile(queuePath, JSON.stringify({
+        schemaVersion: 1,
+        entries: [{
+          id: 'dlq_under_limit',
+          actionClass: 'codex-review-trigger',
+          target: 'pr-2342',
+          attempts: 2,
+          maxAttempts: 3,
+          lastError: 'still retryable',
+          firstAttemptedAt: '2026-07-16T08:00:00.000Z',
+          lastAttemptedAt: '2026-07-16T08:01:00.000Z',
+          createdAt: '2026-07-16T08:01:00.000Z',
+          replaySafety: 'safe',
+          status: 'open',
+        }],
+      }), 'utf8');
+
+      await expect(listDeadLetterEntries(queuePath)).rejects.toThrow(/retry limit has not been exhausted/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('normalizes non-JSON payloads so retry evidence is still recorded', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'franken-dlq-'));
     const queuePath = join(dir, 'dead-letter.json');
-    const payload: { id: bigint; self?: unknown } = { id: 123n };
+    const payload: { id: bigint; self?: unknown; broken?: unknown } = { id: 123n };
     payload.self = payload;
+    Object.defineProperty(payload, 'broken', {
+      enumerable: true,
+      get() {
+        throw new Error('diagnostic getter failed');
+      },
+    });
 
     try {
       const entry = await recordRetryExhaustionToDeadLetterQueue({
@@ -183,7 +243,7 @@ describe('dead-letter queue for failed automation actions', () => {
         payload,
       });
 
-      expect(entry.payload).toEqual({ id: '123', self: '[Circular]' });
+      expect(entry.payload).toEqual({ id: '123', self: '[Circular]', broken: '[Unserializable Property]' });
       await expect(listDeadLetterEntries(queuePath)).resolves.toHaveLength(1);
     } finally {
       await rm(dir, { recursive: true, force: true });

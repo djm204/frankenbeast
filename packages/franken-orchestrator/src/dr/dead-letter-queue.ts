@@ -1,4 +1,4 @@
-import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
@@ -128,6 +128,9 @@ function parseEntry(value: unknown): DeadLetterEntry {
   if (entry.attempts > entry.maxAttempts) {
     throw new Error('Invalid dead-letter queue entry: attempts cannot exceed maxAttempts');
   }
+  if (entry.attempts < entry.maxAttempts) {
+    throw new Error('Invalid dead-letter queue entry: retry limit has not been exhausted');
+  }
   return entry;
 }
 
@@ -189,7 +192,7 @@ async function reapStaleQueueLock(lockPath: string, now = Date.now()): Promise<b
     if (!Number.isFinite(acquiredAt) || now - acquiredAt < STALE_LOCK_MS) return false;
     if (isProcessAlive(observed.pid)) return false;
   } catch {
-    return false;
+    return reapMalformedQueueLock(lockPath, now);
   }
 
   const stalePath = `${lockPath}.stale.${observed.owner.replace(/[^A-Za-z0-9_.:-]/gu, '_')}.${now}`;
@@ -200,6 +203,19 @@ async function reapStaleQueueLock(lockPath: string, now = Date.now()): Promise<b
       await rename(stalePath, lockPath).catch(() => undefined);
       return false;
     }
+    await unlink(stalePath).catch(() => undefined);
+    return true;
+  } catch {
+    return reapMalformedQueueLock(lockPath, now);
+  }
+}
+
+async function reapMalformedQueueLock(lockPath: string, now = Date.now()): Promise<boolean> {
+  try {
+    const info = await stat(lockPath);
+    if (now - info.mtimeMs < STALE_LOCK_MS) return false;
+    const stalePath = `${lockPath}.malformed.${now}`;
+    await rename(lockPath, stalePath);
     await unlink(stalePath).catch(() => undefined);
     return true;
   } catch {
@@ -322,16 +338,35 @@ export async function listDeadLetterEntries(queuePath: string): Promise<DeadLett
 
 function normalizeJsonPayload(payload: unknown): unknown {
   const seen = new WeakSet<object>();
-  return JSON.parse(JSON.stringify(payload, (_key, value: unknown) => {
+  const normalize = (value: unknown): unknown => {
     if (typeof value === 'bigint') return value.toString();
     if (typeof value === 'function') return '[Function]';
     if (typeof value === 'symbol') return String(value);
     if (typeof value === 'object' && value !== null) {
       if (seen.has(value)) return '[Circular]';
       seen.add(value);
+      if (Array.isArray(value)) {
+        return value.map((item) => normalize(item));
+      }
+      const normalized: Record<string, unknown> = {};
+      let keys: string[];
+      try {
+        keys = Object.keys(value);
+      } catch {
+        return '[Unserializable Object]';
+      }
+      for (const key of keys) {
+        try {
+          normalized[key] = normalize((value as Record<string, unknown>)[key]);
+        } catch {
+          normalized[key] = '[Unserializable Property]';
+        }
+      }
+      return normalized;
     }
     return value;
-  }));
+  };
+  return normalize(payload);
 }
 
 export async function inspectDeadLetterEntry(queuePath: string, entryId: string): Promise<DeadLetterEntry> {
