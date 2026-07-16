@@ -47,13 +47,6 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   const ticketStore = new SseConnectionTicketStore();
   const capacityPolicy = createCapacityReservationPolicyFromEnv();
 
-  cleanupAbandonedBeastWorktrees({
-    agents: repository.listTrackedAgents(),
-    dryRun: false,
-    projectRoot,
-    runs: repository.listRuns(),
-  });
-
   // Deferred reference to break circular dep: executor → runService → executors → executor
   // eslint-disable-next-line prefer-const
   let runService: BeastRunService;
@@ -86,6 +79,12 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
     executors,
   });
   reconcileDispatcherQueueAfterRestart(repository);
+  cleanupAbandonedBeastWorktrees({
+    agents: repository.listTrackedAgents(),
+    dryRun: false,
+    projectRoot,
+    runs: repository.listRuns(),
+  });
 
   runService = new BeastRunService(repository, catalog, executors, metrics, logStore, { eventBus, capacityPolicy });
 

@@ -57,6 +57,11 @@ describe('dispatcher queue reconciliation after restart', () => {
       status: 'running',
       pid: 4242,
       startedAt: '2026-03-20T00:01:00.000Z',
+      executorMetadata: {
+        processGroupOwned: true,
+        processGroupLeaderPid: 4242,
+        processStartTimeTicks: '4242-start',
+      },
     });
 
     const deadRun = repo.createRun({
@@ -141,6 +146,7 @@ describe('dispatcher queue reconciliation after restart', () => {
     const report = reconcileDispatcherQueueAfterRestart(repo, {
       now: () => '2026-03-20T00:05:00.000Z',
       isPidAlive: (pid) => pid === 4242,
+      getProcessStartTimeTicks: (pid) => pid === 4242 ? '4242-start' : undefined,
     });
 
     expect(report.checkedRuns).toBe(6);
@@ -228,5 +234,102 @@ describe('dispatcher queue reconciliation after restart', () => {
       status: 'awaiting_approval',
       dispatchRunId: newRun.id,
     });
+  });
+
+  it('reports duplicate owned live processes for the same tracked agent before mutating restart state', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-dispatcher-reconcile-'));
+    const repo = createRepo(workDir);
+    const agent = createAgent(repo, 'duplicate worker');
+
+    const runOne = repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: { objective: 'first', chunkDirectory: '.' },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-20T00:00:01.000Z',
+    });
+    const attemptOne = repo.createAttempt(runOne.id, {
+      status: 'running',
+      pid: 1111,
+      executorMetadata: {
+        processGroupOwned: true,
+        processGroupLeaderPid: 1111,
+        processStartTimeTicks: '1111-start',
+      },
+    });
+    const runTwo = repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: { objective: 'second', chunkDirectory: '.' },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-20T00:00:02.000Z',
+    });
+    const attemptTwo = repo.createAttempt(runTwo.id, {
+      status: 'running',
+      pid: 2222,
+      executorMetadata: {
+        processGroupOwned: true,
+        processGroupLeaderPid: 2222,
+        processStartTimeTicks: '2222-start',
+      },
+    });
+
+    const report = reconcileDispatcherQueueAfterRestart(repo, {
+      now: () => '2026-03-20T00:05:00.000Z',
+      isPidAlive: (pid) => pid === 1111 || pid === 2222,
+      getProcessStartTimeTicks: (pid) => `${pid}-start`,
+    });
+
+    expect(report.duplicateLiveAgentRunCount).toBe(2);
+    expect(report.findings.filter(finding => finding.code === 'duplicate-live-agent-run')).toEqual([
+      expect.objectContaining({ runId: runTwo.id, attemptId: attemptTwo.id, pid: 2222 }),
+      expect.objectContaining({ runId: runOne.id, attemptId: attemptOne.id, pid: 1111 }),
+    ]);
+    expect(repo.getRun(runOne.id)).toMatchObject({ status: 'running' });
+    expect(repo.getRun(runTwo.id)).toMatchObject({ status: 'running' });
+    expect(repo.listEvents(runOne.id).some(event => event.type === 'run.reconciliation.duplicate_live_agent_run')).toBe(true);
+    expect(repo.listEvents(runTwo.id).some(event => event.type === 'run.reconciliation.duplicate_live_agent_run')).toBe(true);
+  });
+
+  it('fails closed when a live PID does not match the attempt process ownership metadata', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-dispatcher-reconcile-'));
+    const repo = createRepo(workDir);
+    const agent = createAgent(repo, 'pid reuse worker');
+
+    const run = repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: { objective: 'pid reuse', chunkDirectory: '.' },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-20T00:00:01.000Z',
+    });
+    const attempt = repo.createAttempt(run.id, {
+      status: 'running',
+      pid: 3333,
+      executorMetadata: {
+        processGroupOwned: true,
+        processGroupLeaderPid: 3333,
+        processStartTimeTicks: 'original-start',
+      },
+    });
+
+    const report = reconcileDispatcherQueueAfterRestart(repo, {
+      now: () => '2026-03-20T00:05:00.000Z',
+      isPidAlive: (pid) => pid === 3333,
+      getProcessStartTimeTicks: () => 'reused-start',
+    });
+
+    expect(report.findings.map(finding => finding.code)).toContain('stale-running-attempt-failed');
+    expect(repo.getRun(run.id)).toMatchObject({ status: 'failed', stopReason: 'dispatcher_restart_stale_pid' });
+    expect(repo.getAttempt(attempt.id)).toMatchObject({ status: 'failed', stopReason: 'dispatcher_restart_stale_pid' });
   });
 });

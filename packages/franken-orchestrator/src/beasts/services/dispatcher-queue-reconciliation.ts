@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import type { BeastRun, BeastRunAttempt, BeastRunStatus, TrackedAgentStatus } from '../types.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import { isoNow } from '@franken/types';
@@ -34,6 +35,7 @@ export interface DispatcherQueueReconciliationReport {
 export interface DispatcherQueueReconciliationOptions {
   readonly now?: () => string;
   readonly isPidAlive?: (pid: number) => boolean;
+  readonly getProcessStartTimeTicks?: (pid: number) => string | undefined;
 }
 
 const ACTIVE_RUN_STATUSES = new Set<BeastRunStatus>(['queued', 'interviewing', 'running', 'pending_approval']);
@@ -45,12 +47,13 @@ export function reconcileDispatcherQueueAfterRestart(
 ): DispatcherQueueReconciliationReport {
   const now = options.now ?? isoNow;
   const isPidAlive = options.isPidAlive ?? defaultIsPidAlive;
+  const getProcessStartTimeTicks = options.getProcessStartTimeTicks ?? defaultProcessStartTimeTicks;
   const reconciledAt = now();
   const findings: DispatcherQueueReconciliationFinding[] = [];
   let changedRuns = 0;
 
   repository.transaction(() => {
-    const duplicates = detectDuplicateLiveAgentRuns(repository, isPidAlive);
+    const duplicates = detectDuplicateLiveAgentRuns(repository, isPidAlive, getProcessStartTimeTicks);
     for (const duplicate of duplicates) {
       findings.push(duplicate);
       repository.appendEvent(duplicate.runId, {
@@ -78,7 +81,14 @@ export function reconcileDispatcherQueueAfterRestart(
       }
 
       const currentAttempt = run.currentAttemptId ? repository.getAttempt(run.currentAttemptId) : undefined;
-      const finding = reconcileActiveRun(repository, run, currentAttempt, reconciledAt, isPidAlive);
+      const finding = reconcileActiveRun(
+        repository,
+        run,
+        currentAttempt,
+        reconciledAt,
+        isPidAlive,
+        getProcessStartTimeTicks,
+      );
       findings.push(finding);
       if (finding.fromStatus !== finding.toStatus || finding.code === 'missing-running-attempt-failed' || finding.code === 'stale-running-attempt-failed') {
         changedRuns += 1;
@@ -101,6 +111,7 @@ function reconcileActiveRun(
   attempt: BeastRunAttempt | undefined,
   reconciledAt: string,
   isPidAlive: (pid: number) => boolean,
+  getProcessStartTimeTicks: (pid: number) => string | undefined,
 ): DispatcherQueueReconciliationFinding {
   if (run.status === 'pending_approval') {
     syncTrackedAgentIfRunOwnsDispatch(repository, run, 'awaiting_approval', reconciledAt);
@@ -177,7 +188,7 @@ function reconcileActiveRun(
   }
 
   const pid = attempt.pid;
-  if (typeof pid === 'number' && pid > 0 && isPidAlive(pid)) {
+  if (attemptOwnsLiveProcess(attempt, isPidAlive, getProcessStartTimeTicks)) {
     syncTrackedAgentIfRunOwnsDispatch(repository, run, 'running', reconciledAt);
     const finding: DispatcherQueueReconciliationFinding = {
       code: 'live-running-attempt-quarantined',
@@ -247,13 +258,14 @@ function reconcileTerminalRun(
 function detectDuplicateLiveAgentRuns(
   repository: SQLiteBeastRepository,
   isPidAlive: (pid: number) => boolean,
+  getProcessStartTimeTicks: (pid: number) => string | undefined,
 ): DispatcherQueueReconciliationFinding[] {
   const liveRunsByAgent = new Map<string, Array<{ run: BeastRun; attempt: BeastRunAttempt; pid: number }>>();
   for (const run of repository.listRuns()) {
     if (!run.trackedAgentId || run.status !== 'running' || !run.currentAttemptId) continue;
     const attempt = repository.getAttempt(run.currentAttemptId);
     const pid = attempt?.pid;
-    if (!attempt || typeof pid !== 'number' || pid <= 0 || !isPidAlive(pid)) continue;
+    if (!attempt || typeof pid !== 'number' || pid <= 0 || !attemptOwnsLiveProcess(attempt, isPidAlive, getProcessStartTimeTicks)) continue;
     const existing = liveRunsByAgent.get(run.trackedAgentId) ?? [];
     existing.push({ run, attempt, pid });
     liveRunsByAgent.set(run.trackedAgentId, existing);
@@ -350,6 +362,33 @@ function trackedAgentStatusForRun(status: BeastRunStatus): TrackedAgentStatus {
     case 'stopped':
       return 'stopped';
   }
+}
+
+function defaultProcessStartTimeTicks(pid: number): string | undefined {
+  if (pid <= 0 || process.platform !== 'linux') return undefined;
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const endOfCommand = stat.lastIndexOf(')');
+    if (endOfCommand < 0) return undefined;
+    const fieldsFromState = stat.slice(endOfCommand + 2).trim().split(/\s+/);
+    return fieldsFromState[19];
+  } catch {
+    return undefined;
+  }
+}
+
+function attemptOwnsLiveProcess(
+  attempt: BeastRunAttempt,
+  isPidAlive: (pid: number) => boolean,
+  getProcessStartTimeTicks: (pid: number) => string | undefined,
+): boolean {
+  const pid = attempt.pid;
+  if (typeof pid !== 'number' || pid <= 0 || !isPidAlive(pid)) return false;
+  if (attempt.executorMetadata?.processGroupOwned !== true) return false;
+  if (attempt.executorMetadata?.processGroupLeaderPid !== pid) return false;
+  const expectedStartTime = attempt.executorMetadata?.processStartTimeTicks;
+  if (typeof expectedStartTime !== 'string' || expectedStartTime.length === 0) return false;
+  return getProcessStartTimeTicks(pid) === expectedStartTime;
 }
 
 function defaultIsPidAlive(pid: number): boolean {
