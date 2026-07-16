@@ -2767,6 +2767,7 @@ export class SqliteMemoryReviewQueue {
         });
         return;
       }
+      assertMemoryCandidateNotDeletionGuarded(this.db, proposal, this.encryption);
       const now = isoNow();
       const sourceType = normalizeMemorySourceType(proposal.sourceType, proposal.source);
       const sourceId = proposal.sourceId;
@@ -3310,7 +3311,12 @@ export class SqliteMemoryReviewQueue {
         if (!options.includeExpired && provenance.expiresAt && Date.parse(provenance.expiresAt) <= nowMs) {
           continue;
         }
-        if (sourceFilter && !provenance.source.toLowerCase().includes(sourceFilter)) {
+        if (sourceFilter && ![
+          provenance.source,
+          provenance.sourceId,
+          provenance.evidenceId,
+          provenance.reason,
+        ].filter((value): value is string => value !== undefined).some(value => value.toLowerCase().includes(sourceFilter))) {
           continue;
         }
         attributions.push(provenance);
@@ -5369,21 +5375,21 @@ export class SqliteBrain implements IBrain {
   private matchingReviewPayloads(selector: NormalizedRightToForgetSelector): ReviewPayloadMatch[] {
     const matches: ReviewPayloadMatch[] = [];
     for (const row of this.db.prepare(
-      `SELECT id, target_store, memory_key, value, source, evidence_id, reason, reviewer, note FROM memory_review_candidates`,
+      `SELECT id, target_store, memory_key, value, source, source_id, evidence_id, reason, reviewer, note FROM memory_review_candidates`,
     ).all() as ReviewPayloadRow[]) {
       if (row.id && this.reviewPayloadRowMatchesSelector(row, selector)) {
         matches.push({ table: 'memory_review_candidates', id: row.id, key: row.memory_key });
       }
     }
     for (const row of this.db.prepare(
-      `SELECT target_store, memory_key, value, source, evidence_id, reason, reviewer, note FROM memory_review_provenance`,
+      `SELECT target_store, memory_key, value, source, source_id, evidence_id, reason, reviewer, note FROM memory_review_provenance`,
     ).all() as ReviewPayloadRow[]) {
       if (this.reviewPayloadRowMatchesSelector(row, selector)) {
         matches.push({ table: 'memory_review_provenance', targetStore: row.target_store, key: row.memory_key });
       }
     }
     for (const row of this.db.prepare(
-      `SELECT signature, target_store, memory_key, value, source, evidence_id, reason, reviewer, note FROM memory_review_suppressions`,
+      `SELECT signature, target_store, memory_key, value, source, source_id, evidence_id, reason, reviewer, note FROM memory_review_suppressions`,
     ).all() as ReviewPayloadRow[]) {
       if (row.signature && this.reviewPayloadRowMatchesSelector(row, selector)) {
         matches.push({ table: 'memory_review_suppressions', signature: row.signature, key: row.memory_key });
