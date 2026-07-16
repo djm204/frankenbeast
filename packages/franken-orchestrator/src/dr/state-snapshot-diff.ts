@@ -200,9 +200,9 @@ function scopedRecordCompareValue(subsystem: StateSnapshotDiffSubsystem, value: 
 }
 
 function redactSourceForOutput(subsystem: StateSnapshotDiffSubsystem, source: string): string {
-  const masked = normalizeSnapshotSourcePath(maskOpaqueSecretLiterals(source));
-  if (subsystem !== 'approvals') return masked;
-  return masked.split('/').map((segment) => {
+  const normalized = normalizeSnapshotSourcePath(source);
+  if (subsystem !== 'approvals') return maskOpaqueSecretLiterals(normalized);
+  return normalized.split('/').map((segment) => {
     if (/^(?:approvals?|approval[-_]?tokens?|tokens?|ledger|state|snapshots?)(?:\.jsonl?)?(?::\d+)?(?::approvals?)?$/iu.test(segment)) {
       return segment;
     }
@@ -276,7 +276,9 @@ function addObjectMapRecords(
     .sort(([a], [b]) => a.localeCompare(b))
     .forEach(([key, value]) => {
       const fallback = subsystem === 'approvals' ? safeApprovalId(key) : key;
-      const recordValue = !isRecord(value)
+      const recordValue = subsystem === 'approvals' && !isRecord(value)
+        ? { value }
+        : !isRecord(value)
         ? { [key]: value }
         : value;
       const id = subsystem === 'approvals'
@@ -299,11 +301,15 @@ function subsystemFromSegment(segment: string): StateSnapshotDiffSubsystem | und
 function likelySubsystemFromPath(relativePath: string): StateSnapshotDiffSubsystem | undefined {
   const normalized = normalizeSnapshotSourcePath(relativePath).toLowerCase();
   const segments = normalized.split('/').filter((segment) => segment !== '');
+  const basename = segments.at(-1);
+  if (basename !== undefined) {
+    const basenameSubsystem = subsystemFromSegment(basename);
+    if (basenameSubsystem === 'approvals') return basenameSubsystem;
+  }
   for (const segment of segments.slice(0, -1)) {
     const subsystem = subsystemFromSegment(segment);
     if (subsystem !== undefined) return subsystem;
   }
-  const basename = segments.at(-1);
   if (basename !== undefined) {
     const subsystem = subsystemFromSegment(basename);
     if (subsystem !== undefined) return subsystem;
@@ -368,7 +374,7 @@ function extractRecordsFromJson(records: MutableSubsystemRecords, parsed: unknow
       const values = Object.values(parsed);
       if (values.length > 0 && values.every(isRecord)) {
         addObjectMapRecords(records, pathSubsystem, parsed, source);
-      } else if (pathSubsystem !== 'tasks' && !hasRecordIdentityKey(parsed) && values.length > 0 && values.every((value) => !isRecord(value) && !Array.isArray(value))) {
+      } else if (pathSubsystem !== 'tasks' && pathSubsystem !== 'approvals' && !hasRecordIdentityKey(parsed) && values.length > 0 && values.every((value) => !isRecord(value) && !Array.isArray(value))) {
         addObjectMapRecords(records, pathSubsystem, parsed, source);
       } else {
         addRecord(records, pathSubsystem, recordId(parsed, source, pathSubsystem, { preferFallbackOverMutableDisplayName: true }), parsed, source);
@@ -439,11 +445,11 @@ async function loadSnapshotDirectory(directory: string): Promise<MutableSubsyste
   const records = emptyRecords();
   const files = await collectSnapshotFiles(directory);
   for (const file of files.sort()) {
+    const source = relative(directory, file) || basename(file);
     const fileStat = await stat(file);
     if (fileStat.size > MAX_JSON_FILE_BYTES) {
-      throw new Error(`State snapshot file is too large: ${file}`);
+      throw new Error(`State snapshot file is too large: ${sourceForError(source)}`);
     }
-    const source = relative(directory, file) || basename(file);
     const parsedRecords = parseSnapshotFile(await readFile(file, 'utf8'), source);
     for (const { parsed, sourceSuffix } of parsedRecords) {
       extractRecordsFromJson(records, parsed, `${source}${sourceSuffix}`);

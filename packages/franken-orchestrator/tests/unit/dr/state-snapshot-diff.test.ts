@@ -325,4 +325,93 @@ describe('state snapshot diff', () => {
     expect(taskDiff?.removed).toHaveLength(0);
     expect(taskDiff?.changed).toHaveLength(0);
   });
+
+  it('redacts approval primitive map keys from output payloads', async () => {
+    const secretKey = 'mapApprovalTokenBefore123';
+    const before = await snapshotDir({
+      'approvals/state.json': { approvals: { [secretKey]: true } },
+    });
+    const after = await snapshotDir({
+      'approvals/state.json': { approvals: { [secretKey]: false } },
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const serialized = JSON.stringify(report.diffs.find((diff) => diff.subsystem === 'approvals'));
+
+    expect(serialized).not.toContain(secretKey);
+    expect(serialized).toContain('"value":"<redacted>"');
+  });
+
+  it('uses file fallback identity for per-approval primitive files', async () => {
+    const before = await snapshotDir({
+      'approvals/token-before.json': { decision: 'pending' },
+    });
+    const after = await snapshotDir({
+      'approvals/token-after.json': { decision: 'pending' },
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const approvalDiff = report.diffs.find((diff) => diff.subsystem === 'approvals');
+
+    expect(approvalDiff?.added).toHaveLength(1);
+    expect(approvalDiff?.removed).toHaveLength(1);
+    expect(approvalDiff?.changed).toHaveLength(0);
+    expect(JSON.stringify(approvalDiff)).not.toContain('token-before');
+    expect(JSON.stringify(approvalDiff)).not.toContain('token-after');
+  });
+
+  it('hashes raw approval source names before opaque literal masking', async () => {
+    const before = await snapshotDir({
+      'approvals/ghp_beforeToken1234567890.json': { id: 'approval-1', decision: 'pending' },
+    });
+    const after = await snapshotDir({
+      'approvals/ghp_afterToken1234567890.json': { id: 'approval-1', decision: 'approved' },
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const approvalChange = report.diffs.find((diff) => diff.subsystem === 'approvals')?.changed[0];
+
+    expect(approvalChange?.beforeSource).toMatch(/^approvals\/<sha256:[a-f0-9]{16}>$/u);
+    expect(approvalChange?.afterSource).toMatch(/^approvals\/<sha256:[a-f0-9]{16}>$/u);
+    expect(approvalChange?.beforeSource).not.toBe(approvalChange?.afterSource);
+  });
+
+  it('redacts sensitive snapshot source paths in oversized file errors', async () => {
+    const before = await snapshotDir({
+      'approvals/oversized-secret-token.json': 'x'.repeat((4 * 1024 * 1024) + 1),
+    });
+    const after = await snapshotDir({
+      'approvals/oversized-secret-token.json': { decision: 'approved' },
+    });
+
+    try {
+      await diffStateSnapshotDirectories(before, after);
+      throw new Error('expected diffStateSnapshotDirectories to reject');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      expect(message).not.toContain('oversized-secret-token');
+      expect(message).toMatch(/approvals\/<sha256:[a-f0-9]{16}>/u);
+    }
+  });
+
+  it('prefers approval-token filenames over task-like parent directories', async () => {
+    const before = await snapshotDir({
+      'kanban/approval-tokens.json': ['approval-token-before'],
+    });
+    const after = await snapshotDir({
+      'kanban/approval-tokens.json': ['approval-token-after'],
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const approvalDiff = report.diffs.find((diff) => diff.subsystem === 'approvals');
+    const taskDiff = report.diffs.find((diff) => diff.subsystem === 'tasks');
+    const serialized = JSON.stringify(report);
+
+    expect(approvalDiff?.added).toHaveLength(1);
+    expect(approvalDiff?.removed).toHaveLength(1);
+    expect(taskDiff?.added).toHaveLength(0);
+    expect(taskDiff?.removed).toHaveLength(0);
+    expect(serialized).not.toContain('approval-token-before');
+    expect(serialized).not.toContain('approval-token-after');
+  });
 });
