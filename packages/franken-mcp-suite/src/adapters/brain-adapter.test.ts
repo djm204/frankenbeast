@@ -22,6 +22,7 @@ const { databaseInstances, brainInstances } = vi.hoisted(() => {
     };
     rightToForget: ReturnType<typeof vi.fn>;
     memoryReview: {
+      propose: ReturnType<typeof vi.fn>;
       approve: ReturnType<typeof vi.fn>;
       reject: ReturnType<typeof vi.fn>;
       neverStore: ReturnType<typeof vi.fn>;
@@ -113,6 +114,13 @@ vi.mock("@franken/brain", () => ({
         remainingReferences: 0,
       })),
       memoryReview: {
+        propose: vi.fn((input) => ({
+          ...input,
+          id: "memcand_1",
+          status: "pending",
+          createdAt: "2026-07-16T00:00:00.000Z",
+          updatedAt: "2026-07-16T00:00:00.000Z",
+        })),
         approve: vi.fn(() => ({ id: "memcand_1", status: "approved" })),
         reject: vi.fn(() => ({ id: "memcand_1", status: "rejected" })),
         neverStore: vi.fn(() => ({ id: "memcand_1", status: "never_store" })),
@@ -398,6 +406,45 @@ describe("createBrainAdapter", () => {
     expect(brainInstances[0].rightToForget).toHaveBeenCalledWith({
       key: "__fbeast_agent_memory__/Alpha%20Team!/profile",
     });
+  });
+
+  it("translates memory review proposals for agent-scoped working memory", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    await brain.proposeMemory({
+      key: "profile",
+      value: "scoped review value",
+      source: "test",
+      reason: "review",
+      confidence: 1,
+      agentId: "Alpha Team!",
+    });
+
+    expect(brainInstances[0].memoryReview.propose).toHaveBeenCalledWith({
+      targetStore: "working",
+      key: "__fbeast_agent_memory__/Alpha%20Team!/profile",
+      value: "scoped review value",
+      source: "test",
+      confidence: 1,
+      reason: "review",
+    });
+  });
+
+  it("frontloads approved scoped review values as agent-private entries", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+    const mockBrain = brainInstances[0];
+    mockBrain.working.snapshot.mockReturnValueOnce({
+      "__fbeast_agent_memory__/alpha/approved-secret": "approved scoped value",
+    });
+
+    const sharedSections = await brain.frontload({ readScope: "shared" });
+    mockBrain.working.snapshot.mockReturnValueOnce({
+      "__fbeast_agent_memory__/alpha/approved-secret": "approved scoped value",
+    });
+    const alphaSections = await brain.frontload({ readScope: "agent", agentId: "alpha" });
+
+    expect(sharedSections.flatMap((section) => section.entries).join("\n")).not.toContain("approved scoped value");
+    expect(alphaSections.flatMap((section) => section.entries).join("\n")).toContain("approved-secret: approved scoped value");
   });
 
   it("fails closed for unsupported memory review actions at the adapter boundary", async () => {
