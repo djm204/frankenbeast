@@ -173,6 +173,142 @@ describe('beast daemon', () => {
     }
   });
 
+  it('supports read-only degraded mode with manual enter and leave controls', async () => {
+    const paths = await makePaths();
+    const services = createBeastServices(paths);
+    const app = createBeastDaemonApp({
+      services,
+      operatorToken,
+      startedAt: '2026-07-02T00:00:00.000Z',
+    });
+
+    try {
+      const enter = await app.request('/v1/beasts/availability/degraded', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${operatorToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ reason: 'sqlite unavailable' }),
+      });
+      expect(enter.status).toBe(200);
+      expect(await enter.json()).toMatchObject({
+        data: {
+          mode: 'read-only-degraded',
+          readOnly: true,
+          reason: 'sqlite unavailable',
+          source: 'operator',
+        },
+      });
+
+      const health = await app.request('/health');
+      expect(health.status).toBe(503);
+      expect(await health.json()).toMatchObject({
+        ok: false,
+        status: 'degraded',
+        availability: {
+          mode: 'read-only-degraded',
+          readOnly: true,
+          reason: 'sqlite unavailable',
+          source: 'operator',
+        },
+      });
+
+      const catalog = await app.request('/v1/beasts/catalog', {
+        headers: { authorization: `Bearer ${operatorToken}` },
+      });
+      expect(catalog.status).toBe(200);
+
+      const deniedMutation = await app.request('/v1/beasts/runs', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${operatorToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          definitionId: 'martin-loop',
+          config: { provider: 'codex', objective: 'Ship it', chunkDirectory: 'chunks' },
+          startNow: false,
+        }),
+      });
+      expect(deniedMutation.status).toBe(503);
+      expect(await deniedMutation.json()).toMatchObject({
+        error: {
+          code: 'READ_ONLY_DEGRADED_MODE',
+          details: {
+            mode: 'read-only-degraded',
+            readOnly: true,
+            reason: 'sqlite unavailable',
+            source: 'operator',
+          },
+        },
+      });
+
+      const leave = await app.request('/v1/beasts/availability/degraded', {
+        method: 'DELETE',
+        headers: { authorization: `Bearer ${operatorToken}` },
+      });
+      expect(leave.status).toBe(200);
+      expect(await leave.json()).toMatchObject({
+        data: { mode: 'read-write', readOnly: false },
+      });
+
+      const allowedMutation = await app.request('/v1/beasts/runs', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${operatorToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          definitionId: 'martin-loop',
+          config: { provider: 'codex', objective: 'Ship it', chunkDirectory: 'chunks' },
+          startNow: false,
+        }),
+      });
+      expect(allowedMutation.status).toBe(201);
+    } finally {
+      services.dispose();
+    }
+  });
+
+  it('enters read-only degraded mode automatically when health dependency reads fail', async () => {
+    const services = makeDaemonServices([]).services;
+    vi.mocked(services.agents.listAgents).mockImplementation(() => {
+      throw new Error('agent store offline');
+    });
+    const app = createBeastDaemonApp({ services, operatorToken });
+
+    const health = await app.request('/health');
+    expect(health.status).toBe(503);
+    expect(await health.json()).toMatchObject({
+      status: 'degraded',
+      agents: null,
+      runs: null,
+      availability: {
+        mode: 'read-only-degraded',
+        readOnly: true,
+        reason: 'Health dependency read failed: agent store offline',
+        source: 'automatic',
+      },
+    });
+
+    const deniedMutation = await app.request('/v1/beasts/agents/agent-1/start', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${operatorToken}` },
+    });
+    expect(deniedMutation.status).toBe(503);
+    expect(await deniedMutation.json()).toMatchObject({
+      error: {
+        code: 'READ_ONLY_DEGRADED_MODE',
+        details: {
+          mode: 'read-only-degraded',
+          readOnly: true,
+          source: 'automatic',
+        },
+      },
+    });
+  });
+
   it('preserves chat attribution for daemon-created tracked runs', async () => {
     const paths = await makePaths();
     const services = createBeastServices(paths);
