@@ -376,6 +376,7 @@ describe('Codex hook scripts', () => {
       tool_name: 'fbeast_memory_export',
       tool_input: {
         redaction: 'none',
+        operatorApproval: 'trusted-operator-approved',
         readScope: 'agent',
         agentId: 'alice@example.test',
         value: 'SECRET_TOKEN_SHOULD_NOT_LEAK',
@@ -385,7 +386,10 @@ describe('Codex hook scripts', () => {
 
     expect(result.status, result.stderr).toBe(0);
     const context = readFileSync(contextFile, 'utf8');
-    expect(JSON.parse(context)).toEqual({ redaction: 'none' });
+    expect(JSON.parse(context)).toEqual({
+      redaction: 'none',
+      operatorApproval: 'trusted-operator-approved',
+    });
     expect(context).not.toContain('alice@example.test');
     expect(context).not.toContain('SECRET_TOKEN_SHOULD_NOT_LEAK');
   });
@@ -401,6 +405,7 @@ describe('Codex hook scripts', () => {
       tool_name: 'mcp__fbeast-memory__fbeast_memory_export',
       tool_input: {
         redaction: 'none',
+        operatorApproval: 'trusted-operator-approved',
         value: 'SECRET_TOKEN_SHOULD_NOT_LEAK',
       },
       session_id: 'sess-1',
@@ -408,7 +413,10 @@ describe('Codex hook scripts', () => {
 
     expect(result.status, result.stderr).toBe(0);
     const context = readFileSync(contextFile, 'utf8');
-    expect(JSON.parse(context)).toEqual({ redaction: 'none' });
+    expect(JSON.parse(context)).toEqual({
+      redaction: 'none',
+      operatorApproval: 'trusted-operator-approved',
+    });
     expect(context).not.toContain('SECRET_TOKEN_SHOULD_NOT_LEAK');
   });
 
