@@ -716,6 +716,14 @@ describe("createBrainAdapter", () => {
       tool: "fbeast_memory_store",
       operation: "write",
     });
+
+    const agentReport = await brain.memoryAccessAuditReport({ agentId: "agent-actual", profile: "duplicate-test", limit: 20 });
+    expect(agentReport.count).toBe(1);
+    expect(agentReport.events[0]).toMatchObject({
+      source: "audit_trail",
+      agentId: "agent-actual",
+      tool: "fbeast_memory_store",
+    });
   });
 
   it("classifies failed handler audit events as errors", async () => {

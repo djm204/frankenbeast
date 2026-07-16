@@ -70,6 +70,7 @@ export interface MemoryAccessAuditReportInput {
   until?: string;
   operation?: string;
   decision?: string;
+  tool?: string;
   limit?: number;
 }
 
@@ -451,7 +452,6 @@ const MEMORY_ACCESS_TOOL_OPERATIONS: Record<string, { operation: string; targetS
 };
 
 const MEMORY_REVIEW_DECISIONS = new Set(["approve", "reject", "never_store", "resolve_conflict"]);
-const AUDIT_SQL_SCAN_LIMIT_MULTIPLIER = 20;
 
 function unqualifyToolName(toolName: string): string {
   const marker = "__";
@@ -609,10 +609,6 @@ function auditSqlTimeClause(column: string, input: MemoryAccessAuditReportInput)
   return { clause: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
 }
 
-function auditSqlScanLimit(limit: number): number {
-  return Math.max(limit * AUDIT_SQL_SCAN_LIMIT_MULTIPLIER, MAX_QUERY_LIMIT);
-}
-
 function summarizeAuditEvents(events: MemoryAccessAuditEvent[]): MemoryAccessAuditReport["summary"] {
   const summary: MemoryAccessAuditReport["summary"] = { byTool: {}, byOperation: {}, byDecision: {}, byAgent: {}, byProfile: {}, byRepo: {} };
   for (const event of events) {
@@ -633,6 +629,7 @@ function filterMemoryAccessEvents(events: MemoryAccessAuditEvent[], input: Memor
     if (input.agentId !== undefined && event.agentId !== input.agentId) return false;
     if (input.profile !== undefined && event.profile !== input.profile) return false;
     if (input.repo !== undefined && event.repo !== input.repo) return false;
+    if (input.tool !== undefined && event.tool !== input.tool) return false;
     if (input.operation !== undefined && event.operation !== input.operation) return false;
     if (input.decision !== undefined && event.decision !== input.decision) return false;
     const eventMs = auditTimestampMs(event.timestamp);
@@ -986,16 +983,17 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
       configureBrainAdapterDb(reportDb);
       try {
         const events: MemoryAccessAuditEvent[] = [];
-        const scanLimit = auditSqlScanLimit(limit);
         const governorTimeFilter = auditSqlTimeClause("created_at", input);
+        const governorWhere = governorTimeFilter.clause
+          ? `${governorTimeFilter.clause} AND (action LIKE '%fbeast_memory%' OR action LIKE '%execute_tool%' OR context LIKE '%fbeast_memory%')`
+          : "WHERE action LIKE '%fbeast_memory%' OR action LIKE '%execute_tool%' OR context LIKE '%fbeast_memory%'";
         const governorRows = sqliteTableExists(reportDb, "governor_log")
           ? reportDb.prepare(`
           SELECT action, context, decision, reason, created_at AS createdAt
           FROM governor_log
-          ${governorTimeFilter.clause}
+          ${governorWhere}
           ORDER BY id DESC
-          LIMIT ?
-        `).all(...governorTimeFilter.params, scanLimit) as Array<{ action: string; context: string; decision: string; reason: string | null; createdAt: string }>
+        `).all(...governorTimeFilter.params) as Array<{ action: string; context: string; decision: string; reason: string | null; createdAt: string }>
           : [];
         for (const row of governorRows) {
           const context = parseAuditContext(row.context);
@@ -1024,15 +1022,16 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
         }
 
         const auditTimeFilter = auditSqlTimeClause("created_at", input);
+        const auditTimeCondition = auditTimeFilter.clause ? `AND ${auditTimeFilter.clause.slice("WHERE ".length)}` : "";
         const auditRows = sqliteTableExists(reportDb, "audit_trail")
           ? reportDb.prepare(`
           SELECT event_type AS eventType, payload, created_at AS createdAt
           FROM audit_trail
           WHERE event_type = 'tool_call'
-            ${auditTimeFilter.clause ? `AND ${auditTimeFilter.clause.slice("WHERE ".length)}` : ""}
+            AND (payload LIKE '%fbeast_memory%' OR payload LIKE '%execute_tool%')
+            ${auditTimeCondition}
           ORDER BY id DESC
-          LIMIT ?
-        `).all(...auditTimeFilter.params, scanLimit) as Array<{ eventType: string; payload: string; createdAt: string }>
+        `).all(...auditTimeFilter.params) as Array<{ eventType: string; payload: string; createdAt: string }>
           : [];
         for (const row of auditRows) {
           const payload = parseAuditContext(row.payload);
@@ -1061,7 +1060,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           });
         }
 
-        const filtered = filterMemoryAccessEvents(dedupeMemoryAccessEvents(events), input)
+        const filtered = dedupeMemoryAccessEvents(filterMemoryAccessEvents(events, input))
           .sort((a, b) => auditTimestampMs(b.timestamp) - auditTimestampMs(a.timestamp))
           .slice(0, limit);
         return {

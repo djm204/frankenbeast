@@ -619,6 +619,7 @@ const TOOLS: ToolFull[] = [
         since: { type: 'string', description: 'Inclusive lower timestamp bound (ISO string or SQLite timestamp)' },
         until: { type: 'string', description: 'Inclusive upper timestamp bound (ISO string or SQLite timestamp)' },
         operation: { type: 'string', description: 'Filter by operation, such as read, write, delete, review, or review:approve' },
+        tool: { type: 'string', description: 'Filter by memory tool name, such as fbeast_memory_query or fbeast_memory_store' },
         decision: { type: 'string', description: 'Filter by any recorded governance/audit decision, such as approved, denied, validation_error, unknown_tool, or error' },
         limit: { type: 'string', description: 'Max audit events returned (default 1000)' },
       },
@@ -633,7 +634,7 @@ const TOOLS: ToolFull[] = [
         return { content: [{ type: 'text', text: `Error: fbeast_memory_access_audit_report ${decision.message}` }], isError: true };
       }
       const filters: Record<string, string> = {};
-      for (const name of ['agentId', 'profile', 'repo', 'since', 'until', 'operation'] as const) {
+      for (const name of ['agentId', 'profile', 'repo', 'since', 'until', 'operation', 'tool'] as const) {
         const parsed = parseMemoryAccessAuditStringFilter(name, args[name]);
         if (!parsed.ok) {
           return { content: [{ type: 'text', text: `Error: fbeast_memory_access_audit_report ${parsed.message}` }], isError: true };
