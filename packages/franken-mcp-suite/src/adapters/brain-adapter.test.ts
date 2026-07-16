@@ -57,6 +57,12 @@ vi.mock("@franken/brain", () => ({
         snapshot: vi.fn(() => ({
           "task-1": "working entry",
           "agents/oncall/runbook": "shared runbook",
+          "temporary-operational": {
+            value: "rotate release key",
+            category: "temporary-operational",
+            sourceScope: "mcp-memory-store",
+            expiresAt: "2026-07-16T06:00:00.000Z",
+          },
           "github-token": "ghp_" + "supersecretvalue123456",
           "public-key": "sk-" + "secretvalue123456",
           "deployment-notes":
@@ -76,12 +82,6 @@ vi.mock("@franken/brain", () => ({
             password: "hunter2",
             nested: { token: 987654 },
             "alice@example.com": "oncall",
-          },
-          "temporary-operational": {
-            value: "rotate release key",
-            category: "temporary-operational",
-            sourceScope: "mcp-memory-store",
-            expiresAt: "2026-07-16T06:00:00.000Z",
           },
           "__fbeast_agent_memory__/alpha/private-task": {
             __fbeastMemoryScope: "fbeast:agent-memory",
