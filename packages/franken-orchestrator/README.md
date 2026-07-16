@@ -85,6 +85,8 @@ frankenbeast dr dead-letter-retire <queue-file> <entry-id> "handled manually"
 
 The replay command is dry-run only. Entries classified as side-effecting report that explicit operator approval is required before any future replay executor may run them, while retired or unsafe entries are not replayable.
 
+When dead-letter entries appear alongside corrupted Git worktrees, stuck approval-cop queues, broken Kanban cards, crashed dispatchers, or inconsistent liveness state, follow `docs/dr/corrupted-worktrees-and-queues.md` from the repository root. That runbook separates read-only diagnosis from repair, requires backups before mutation, and marks every destructive queue/worktree/card command as approval-cop/HITL required.
+
 ## Flaky liveness fixture replay
 
 Issue-worker liveness/backpressure regressions can be reproduced with colocated JSON replay fixtures in `packages/franken-orchestrator/tests/unit/issues/fixtures/`. The `flaky-liveness-replay.json` fixture captures each liveness tick as thresholds, signals, checkpoint state, and the expected PM-visible worker route. Add new flaky liveness cases there when a capacity spike, dependency breaker, or recovery edge needs deterministic coverage, then run:
