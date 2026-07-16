@@ -755,7 +755,7 @@ export function evaluateIssueSchedulingScore(issue: GithubIssue, nowMs: number =
   const priority = severityName(priorityRank);
   const blockerStatus = issueBlockerStatus(issue);
   const age = ageDays(issue, nowMs);
-  const ageBoost = blockerStatus === 'eligible'
+  const ageBoost = blockerStatus === 'eligible' && priorityRank < NO_SEVERITY
     ? Math.min(MAX_PRIORITY_AGE_BOOST, Math.floor(age / PRIORITY_AGING_DAYS_PER_RANK))
     : 0;
   const effectivePriorityRank = Math.max(0, priorityRank - ageBoost);
@@ -1095,6 +1095,7 @@ export class IssueRunner {
     for (let i = 0; i < sorted.length; i++) {
       const issue = sorted[i]!;
       const position = `${i + 1}/${sorted.length}`;
+      const schedulingScore = evaluateIssueSchedulingScore(issue);
 
       if (budgetExceeded) {
         outcomes.push({
@@ -1102,6 +1103,23 @@ export class IssueRunner {
           issueTitle: issue.title,
           status: 'skipped',
           tokensUsed: 0,
+        });
+        continue;
+      }
+
+      if (schedulingScore.blockerStatus !== 'eligible') {
+        const reason = `deferred by scheduler: ${schedulingScore.blockerStatus} issue is waiting on human/dependency gate`;
+        logger?.warn(
+          `[issues] Deferred issue #${issue.number} (${position}): ${reason}`,
+          { issueNumber: issue.number, schedulingScore },
+          'issues',
+        );
+        outcomes.push({
+          issueNumber: issue.number,
+          issueTitle: issue.title,
+          status: 'skipped',
+          tokensUsed: 0,
+          error: reason,
         });
         continue;
       }

@@ -27,6 +27,8 @@ const SAMPLE_GH_OUTPUT = JSON.stringify([
     labels: [{ name: 'bug' }, { name: 'priority:high' }],
     state: 'OPEN',
     url: 'https://github.com/org/repo/issues/42',
+    createdAt: '2026-07-01T00:00:00Z',
+    updatedAt: '2026-07-02T00:00:00Z',
   },
   {
     number: 43,
@@ -35,6 +37,8 @@ const SAMPLE_GH_OUTPUT = JSON.stringify([
     labels: [{ name: 'enhancement' }],
     state: 'OPEN',
     url: 'https://github.com/org/repo/issues/43',
+    createdAt: '2026-07-03T00:00:00Z',
+    updatedAt: '2026-07-04T00:00:00Z',
   },
 ]);
 
@@ -60,7 +64,7 @@ describe('IssueFetcher', () => {
       expect(args).toContain('issue');
       expect(args).toContain('list');
       expect(args).toContain('--json');
-      expect(args).toContain('number,title,body,labels,state,url');
+      expect(args).toContain('number,title,body,labels,state,url,createdAt,updatedAt');
     });
 
     it('adds default --limit 30 when no limit specified', async () => {
@@ -173,6 +177,8 @@ describe('IssueFetcher', () => {
         labels: ['bug', 'priority:high'],
         state: 'OPEN',
         url: 'https://github.com/org/repo/issues/42',
+        createdAt: '2026-07-01T00:00:00Z',
+        updatedAt: '2026-07-02T00:00:00Z',
       });
       expect(issues[1]!.labels).toEqual(['enhancement']);
     });

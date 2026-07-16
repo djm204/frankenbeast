@@ -557,6 +557,12 @@ describe('IssueRunner', () => {
           updatedAt: '2026-05-02T00:00:00.000Z',
         }),
         makeIssue({
+          number: 66,
+          labels: [],
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-02T00:00:00.000Z',
+        }),
+        makeIssue({
           number: 64,
           labels: ['medium', 'blocked'],
           createdAt: '2026-04-01T00:00:00.000Z',
@@ -578,16 +584,19 @@ describe('IssueRunner', () => {
       const outcomes = await runner.run(config);
       vi.useRealTimers();
 
-      expect(report.scheduledIssueNumbers).toEqual([62, 63, 61, 64, 65]);
-      expect(outcomes.map(outcome => outcome.issueNumber)).toEqual([62, 63, 61, 64, 65]);
+      expect(report.scheduledIssueNumbers).toEqual([62, 63, 61, 66, 64, 65]);
+      expect(outcomes.map(outcome => outcome.issueNumber)).toEqual([62, 63, 61, 66, 64, 65]);
+      expect(outcomes.find(outcome => outcome.issueNumber === 64)).toMatchObject({ status: 'skipped', error: expect.stringContaining('deferred by scheduler') });
+      expect(outcomes.find(outcome => outcome.issueNumber === 65)).toMatchObject({ status: 'skipped', error: expect.stringContaining('deferred by scheduler') });
       expect(report.effectivePriorities).toEqual([
         expect.objectContaining({ issueNumber: 62, priority: 'medium', ageDays: 36, ageBoost: 2, effectivePriorityRank: 0, blockerStatus: 'eligible', riskLane: 'orchestrator', freshness: 'stale' }),
         expect.objectContaining({ issueNumber: 63, priority: 'low', ageDays: 76, ageBoost: 2, effectivePriorityRank: 1, blockerStatus: 'eligible', riskLane: 'standard', freshness: 'stale' }),
         expect.objectContaining({ issueNumber: 61, priority: 'high', ageDays: 1, ageBoost: 0, effectivePriorityRank: 1, blockerStatus: 'eligible', riskLane: 'standard', freshness: 'fresh' }),
+        expect.objectContaining({ issueNumber: 66, priority: 'unprioritized', ageBoost: 0, effectivePriorityRank: 4, blockerStatus: 'eligible' }),
         expect.objectContaining({ issueNumber: 64, priority: 'medium', ageBoost: 0, blockerStatus: 'blocked' }),
         expect.objectContaining({ issueNumber: 65, priority: 'medium', ageBoost: 0, blockerStatus: 'hitl' }),
       ]);
-      expect(evaluateIssueSchedulingScore(issues[3]!, nowMs).explanation).toContain('blocker=blocked');
+      expect(evaluateIssueSchedulingScore(issues[4]!, nowMs).explanation).toContain('blocker=blocked');
     });
 
     it('reports missing triage as an explicit scheduler fairness edge case', () => {
