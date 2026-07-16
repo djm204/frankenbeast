@@ -4,6 +4,7 @@ import type { BeastCatalogService } from '../../../src/beasts/services/beast-cat
 import type { BeastDispatchService } from '../../../src/beasts/services/beast-dispatch-service.js';
 import type { BeastInterviewService } from '../../../src/beasts/services/beast-interview-service.js';
 import type { AgentInitService } from '../../../src/beasts/services/agent-init-service.js';
+import { MaintenanceModeError } from '../../../src/beasts/services/maintenance-mode-service.js';
 import type { BeastInterviewPrompt } from '../../../src/beasts/types.js';
 
 const providerPrompt: BeastInterviewPrompt = {
@@ -172,6 +173,55 @@ describe('ChatBeastDispatchAdapter', () => {
       assistantMessage: expect.stringContaining('run-1'),
       beastContext: null,
       runId: 'run-1',
+    });
+  });
+
+  it('clears completed interview context when maintenance blocks dispatch', async () => {
+    const answer = vi.fn().mockReturnValueOnce({
+      session: {
+        id: 'interview-1',
+        definitionId: 'martin-loop',
+        status: 'completed',
+        answers: { provider: 'claude', objective: 'Ship Beast monitoring' },
+        createdAt: '2026-03-10T00:00:00.000Z',
+        updatedAt: '2026-03-10T00:00:02.000Z',
+      },
+      complete: true,
+      config: { provider: 'claude', objective: 'Ship Beast monitoring' },
+    });
+    const dispatchAgent = vi.fn().mockRejectedValue(new MaintenanceModeError({
+      enabled: true,
+      reason: 'deploy',
+      allowedCommands: ['status'],
+    }));
+    const adapter = new ChatBeastDispatchAdapter({
+      catalog: {
+        listDefinitions: () => [
+          { id: 'martin-loop', label: 'Martin Loop' },
+        ],
+      } as unknown as BeastCatalogService,
+      interviews: { answer } as unknown as BeastInterviewService,
+      dispatch: {} as unknown as BeastDispatchService,
+      agentInit: { dispatchAgent } as unknown as AgentInitService,
+    });
+
+    const result = await adapter.handle('Ship Beast monitoring', {
+      projectId: 'proj',
+      sessionId: 'chat-1',
+      transcript: [],
+      beastContext: {
+        agentId: 'agent-1',
+        definitionId: 'martin-loop',
+        interviewSessionId: 'interview-1',
+        status: 'interviewing',
+      },
+    });
+
+    expect(result).toMatchObject({
+      kind: 'dispatch',
+      definitionId: 'martin-loop',
+      assistantMessage: expect.stringContaining('Maintenance mode is active'),
+      beastContext: null,
     });
   });
 });

@@ -229,6 +229,15 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
       });
     } catch (error) {
       if (error instanceof MaintenanceModeError) {
+        if (body.trackedAgentId) {
+          deps.agents.updateAgent(body.trackedAgentId, { status: 'stopped' });
+          deps.agents.appendEvent(body.trackedAgentId, {
+            level: 'warning',
+            type: 'agent.dispatch.paused',
+            message: error.message,
+            payload: { maintenance: error.state },
+          });
+        }
         throw new HttpError(423, 'MAINTENANCE_MODE_ACTIVE', error.message, { maintenance: error.state });
       }
       if (error instanceof UnknownBeastDefinitionError) {

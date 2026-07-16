@@ -10,6 +10,7 @@ import { BeastInterviewService } from '../../../src/beasts/services/beast-interv
 import { BeastDispatchService } from '../../../src/beasts/services/beast-dispatch-service.js';
 import { BeastRunService } from '../../../src/beasts/services/beast-run-service.js';
 import { AgentService } from '../../../src/beasts/services/agent-service.js';
+import { MaintenanceModeService } from '../../../src/beasts/services/maintenance-mode-service.js';
 import { PrometheusBeastMetrics } from '../../../src/beasts/telemetry/prometheus-beast-metrics.js';
 import { TransportSecurityService } from '../../../src/http/security/transport-security.js';
 import { BeastEventBus } from '../../../src/beasts/events/beast-event-bus.js';
@@ -25,7 +26,7 @@ const TEST_SUPER_SECRET_OPERATOR_TOKEN = testCredential('TEST_SUPER_SECRET_OPERA
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/beast-routes');
 
-function createBeastApp(options?: { rateLimitMax?: number; failStart?: boolean; realContainer?: boolean }) {
+function createBeastApp(options?: { rateLimitMax?: number; failStart?: boolean; realContainer?: boolean; maintenanceEnabled?: boolean }) {
   mkdirSync(TMP, { recursive: true });
   const repository = new SQLiteBeastRepository(join(TMP, 'beasts.db'));
   const logStore = new BeastLogStore(join(TMP, 'logs'));
@@ -99,7 +100,13 @@ function createBeastApp(options?: { rateLimitMax?: number; failStart?: boolean; 
       kill: vi.fn(),
     },
   };
-  const dispatch = new BeastDispatchService(repository, catalog, executors, metrics, logStore);
+  const maintenance = options?.maintenanceEnabled
+    ? new MaintenanceModeService(join(TMP, 'maintenance.json'))
+    : undefined;
+  if (maintenance) {
+    maintenance.activate({ reason: 'deploy', startedAt: '2026-03-10T00:00:00.000Z' });
+  }
+  const dispatch = new BeastDispatchService(repository, catalog, executors, metrics, logStore, { maintenance });
   const runs = new BeastRunService(repository, catalog, executors, metrics, logStore);
   const interviews = new BeastInterviewService(repository, catalog);
   const agents = new AgentService(repository, () => '2026-03-10T00:00:00.000Z');
@@ -116,6 +123,7 @@ function createBeastApp(options?: { rateLimitMax?: number; failStart?: boolean; 
       dispatch,
       runs,
       interviews,
+      maintenance,
       metrics,
       security,
       operatorToken,
@@ -128,7 +136,7 @@ function createBeastApp(options?: { rateLimitMax?: number; failStart?: boolean; 
     },
   });
 
-  return { app, operatorToken, fakeContainerSupervisor, repository };
+  return { app, operatorToken, fakeContainerSupervisor, repository, agents };
 }
 
 describe('beast routes', () => {
@@ -196,6 +204,43 @@ describe('beast routes', () => {
     });
     const logsBody = await logsResponse.json() as { data: { logs: string[] } };
     expect(logsBody.data.logs.some((line) => line.includes('started'))).toBe(true);
+  });
+
+  it('stops tracked agents when direct run creation is paused by maintenance mode', async () => {
+    const { app, operatorToken, agents } = createBeastApp({ maintenanceEnabled: true });
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+    const agent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'chat',
+      createdByUser: 'chat-session:chat-1',
+      chatSessionId: 'chat-1',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: { provider: 'claude', objective: 'ship', chunkDirectory: 'docs/chunks' },
+    });
+
+    const response = await app.request('/v1/beasts/runs', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        trackedAgentId: agent.id,
+        chatSessionId: 'chat-1',
+        config: {
+          provider: 'claude',
+          objective: 'Implement beast routes',
+          chunkDirectory: 'docs/chunks',
+        },
+        executionMode: 'process',
+        startNow: true,
+      }),
+    });
+
+    expect(response.status).toBe(423);
+    expect(agents.getAgent(agent.id).status).toBe('stopped');
+    expect(agents.getAgentDetail(agent.id).events.map((event) => event.type)).toContain('agent.dispatch.paused');
   });
 
   it.each([

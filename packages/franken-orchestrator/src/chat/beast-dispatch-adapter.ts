@@ -130,7 +130,7 @@ export class ChatBeastDispatchAdapter {
           kind: 'dispatch',
           definitionId,
           assistantMessage: `${error.message} Allowed commands: ${error.state.allowedCommands.join(', ')}.`,
-          beastContext: context,
+          beastContext: null,
         };
       }
       throw error;
