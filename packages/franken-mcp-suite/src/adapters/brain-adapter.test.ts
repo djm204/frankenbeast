@@ -41,6 +41,12 @@ vi.mock("better-sqlite3", () => ({
     const db = {
       pragma: vi.fn(),
       prepare: vi.fn((sql: string) => ({
+        get: vi.fn((tableName?: string) => {
+          if (sql.includes("sqlite_master") && (tableName === "governor_log" || tableName === "audit_trail")) {
+            return { name: tableName };
+          }
+          return undefined;
+        }),
         all: vi.fn(() => {
           if (sql.includes("FROM governor_log")) {
             return [

@@ -44,7 +44,6 @@ const MAX_MEMORY_QUERY_LIMIT = 1000;
 const MEMORY_REVIEW_STATUSES = ['pending', 'approved', 'rejected', 'never_store', 'suppressed'] as const;
 const MEMORY_REVIEW_ACTIONS = ['approve', 'reject', 'never_store', 'resolve_conflict'] as const;
 const MEMORY_CONFLICT_RESOLUTIONS = ['keep_existing', 'replace_existing', 'reject_candidate'] as const;
-const MEMORY_ACCESS_AUDIT_DECISIONS = ['approved', 'review_recommended', 'denied'] as const;
 
 type MemoryReviewStatus = (typeof MEMORY_REVIEW_STATUSES)[number];
 type MemoryReviewAction = (typeof MEMORY_REVIEW_ACTIONS)[number];
@@ -75,11 +74,10 @@ function parseMemoryAccessAuditStringFilter(name: string, value: unknown): { ok:
 
 function parseMemoryAccessAuditDecision(value: unknown): { ok: true; value?: string } | { ok: false; message: string } {
   if (value === undefined) return { ok: true };
-  const decision = String(value);
-  if (MEMORY_ACCESS_AUDIT_DECISIONS.includes(decision as (typeof MEMORY_ACCESS_AUDIT_DECISIONS)[number])) {
-    return { ok: true, value: decision };
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return { ok: false, message: 'decision must be a non-empty string when provided' };
   }
-  return { ok: false, message: `decision must be one of: ${MEMORY_ACCESS_AUDIT_DECISIONS.join(', ')}` };
+  return { ok: true, value: value.trim() };
 }
 
 function parsePositiveMemoryLimit(value: unknown): { ok: true; value: number } | { ok: false; message: string } {
@@ -621,7 +619,7 @@ const TOOLS: ToolFull[] = [
         since: { type: 'string', description: 'Inclusive lower timestamp bound (ISO string or SQLite timestamp)' },
         until: { type: 'string', description: 'Inclusive upper timestamp bound (ISO string or SQLite timestamp)' },
         operation: { type: 'string', description: 'Filter by operation, such as read, write, delete, review, or review:approve' },
-        decision: { type: 'string', description: 'Filter by governance decision', enum: [...MEMORY_ACCESS_AUDIT_DECISIONS] },
+        decision: { type: 'string', description: 'Filter by any recorded governance/audit decision, such as approved, denied, validation_error, unknown_tool, or error' },
         limit: { type: 'string', description: 'Max audit events returned (default 1000)' },
       },
     },
