@@ -527,8 +527,8 @@ function assessAction(action: string, context: string): GovernorCheckResult {
 
   if (isTrustedOperatorMemoryExport(unqualifiedAction, context)) {
     return {
-      decision: 'review_recommended',
-      reason: 'Unredacted fbeast_memory_export requires trusted-operator approval.',
+      decision: 'approved',
+      reason: 'Unredacted fbeast_memory_export is explicitly requested and restricted to the trusted-operator MCP path.',
     };
   }
 

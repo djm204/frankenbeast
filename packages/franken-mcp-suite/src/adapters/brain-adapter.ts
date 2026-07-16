@@ -375,16 +375,18 @@ function resolveExportLimit(limit: number | undefined): number {
   return resolveQueryLimit(limit ?? MAX_QUERY_LIMIT);
 }
 
-const SENSITIVE_EXPORT_KEY = /(?:password|passphrase|secret|token|api[_-]?key|access[_-]?key|authorization|credential|private[_-]?key|session|cookie)/i;
+const SENSITIVE_EXPORT_KEY = /(?:password|passphrase|passw?d|pwd|secret|token|api[_-]?key|access[_-]?key|authorization|credential|private[_-]?key|session|cookie|webhook(?:[_-]?url)?)/i;
 const SECRET_EXPORT_VALUES: Array<[RegExp, string]> = [
   [/\bAuthorization\s*:\s*Basic\s+\S+/gi, "Authorization: Basic ***"],
-  [/\bAuthorization\s*:\s*\*+\s+\S+/gi, "Authorization: [redacted]"],
+  [/\bAuthorization\s*:\s*\*+\s+\S+/gi, "Authorization: ***"],
   [/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]"],
   [/\bBasic\s+[A-Za-z0-9._~+/-]+=*/gi, "Basic [redacted]"],
+  [/https:\/\/hooks\.slack(?:-gov)?\.com\/services\/[A-Za-z0-9/_-]+/gi, "[redacted-webhook-url]"],
+  [/https:\/\/(?:discord(?:app)?\.com)\/api\/webhooks\/\d+\/[A-Za-z0-9._-]+/gi, "[redacted-webhook-url]"],
   [/\b([A-Za-z][A-Za-z0-9+.-]*:\/\/)\S+@/g, "$1[redacted]@"],
   [/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g, "[redacted-private-key]"],
-  [/\b([A-Z][A-Z0-9_]*(?:PASSWORD|PASS(?:PHRASE)?|SECRET|TOKEN|API_?KEY|ACCESS_?KEY|AUTH(?:ORIZATION)?|CREDENTIAL|PRIVATE_?KEY|SESSION(?:_?COOKIE)?|COOKIE)[A-Z0-9_]*\s*[=:]\s*)[^\s,;&]+/g, "$1[redacted]"],
-  [/\b([A-Za-z0-9_]*(?:password|passphrase|secret|token|api[_-]?key|access[_-]?key|authorization|credential|private[_-]?key|session(?:[_-]?cookie)?|cookie)[A-Za-z0-9_]*)\s*([:=])\s*([^\s,;&]+)/gi, "$1$2[redacted]"],
+  [/\b([A-Z][A-Z0-9_]*(?:PASSWORD|PASS(?:PHRASE)?|PASSWD|PWD|SECRET|TOKEN|API_?KEY|ACCESS_?KEY|AUTH(?:ORIZATION)?|CREDENTIAL|PRIVATE_?KEY|SESSION(?:_?COOKIE)?|COOKIE|WEBHOOK(?:_?URL)?)[A-Z0-9_]*\s*[=:]\s*)[^\s,;&]+/g, "$1[redacted]"],
+  [/\b([A-Za-z0-9_]*(?:password|passphrase|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|authorization|credential|private[_-]?key|session(?:[_-]?cookie)?|cookie|webhook(?:[_-]?url)?)[A-Za-z0-9_]*)\s*([:=])\s*([^\s,;&]+)/gi, "$1$2[redacted]"],
   [/\b(?:sk|pk|rk)-[A-Za-z0-9][A-Za-z0-9_-]{7,}\b/g, "[redacted-secret]"],
   [/\b(?:sk|gh[opusr])_[A-Za-z0-9_]{8,}\b/g, "[redacted-secret]"],
   [/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[redacted-secret]"],
@@ -413,7 +415,7 @@ function redactExportString(value: string): string {
   }
 
   const withJsonSecretsRedacted = value.replace(
-    /"((?:password|passphrase|secret|token|api[_-]?key|access[_-]?key|authorization|credential|private[_-]?key|session(?:[_-]?cookie)?|cookie))"\s*:\s*(?:"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)/gi,
+    /"((?:password|passphrase|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|authorization|credential|private[_-]?key|session(?:[_-]?cookie)?|cookie|webhook(?:[_-]?url)?))"\s*:\s*(?:"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)/gi,
     (_match, key: string) => `"${stableRedactedKey(key)}":"[redacted]"`,
   );
   return SECRET_EXPORT_VALUES.reduce(

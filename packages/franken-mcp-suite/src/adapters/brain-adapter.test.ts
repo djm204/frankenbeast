@@ -70,6 +70,9 @@ vi.mock("@franken/brain", () => ({
             "OPENSSH PRIVATE KEY-----\nsecret\n-----END " +
             "OPENSSH PRIVATE KEY-----",
           "status-page": "password=hunter2 session_cookie=abc123value",
+          "db_pwd": "short-password-alias",
+          "legacy-db-passwd": "legacy-password-alias",
+          "ops-note": "slack_webhook_url=https://hooks.slack.com/services/T000/B000/SECRET discord webhook https://discord.com/api/webhooks/1234567890/abcdef_SECRET",
           "env-snippet": "AWS_SECRET_ACCESS_KEY=AKIA" + "supersecretvalue123456 REGION=us-east-1",
           "legacy-token-snippet": "xoxb-" + "legacytokenvalue123 glpat-legacytokenvalue123",
           "basic-auth": "Authorization: Basic " + "dXNlcjpwYXNz",
@@ -380,6 +383,10 @@ describe("createBrainAdapter", () => {
     expect(serialized).not.toContain("sk_" + "secretvalue123456");
     expect(serialized).not.toContain("OPENSSH PRIVATE KEY");
     expect(serialized).not.toContain("hunter2");
+    expect(serialized).not.toContain("short-password-alias");
+    expect(serialized).not.toContain("legacy-password-alias");
+    expect(serialized).not.toContain("hooks.slack.com/services/T000/B000/SECRET");
+    expect(serialized).not.toContain("discord.com/api/webhooks/1234567890/abcdef_SECRET");
     expect(serialized).not.toContain("abc123value");
     expect(serialized).not.toContain("dXNlcjpwYXNz");
     expect(serialized).not.toContain("postgres://alice:hunter2@db.internal/app");

@@ -169,7 +169,7 @@ describe('GovernorAdapter', () => {
     expect(result.reason).toContain('Memory edits persist');
   });
 
-  it('requires trusted-operator review for unredacted memory exports', async () => {
+  it('approves explicit trusted-operator unredacted memory exports', async () => {
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
 
     await expect(governor.check({
@@ -180,8 +180,8 @@ describe('GovernorAdapter', () => {
       action: 'fbeast_memory_export',
       context: '{"redaction":"none"}',
     })).resolves.toMatchObject({
-      decision: 'review_recommended',
-      reason: expect.stringContaining('trusted-operator approval'),
+      decision: 'approved',
+      reason: expect.stringContaining('trusted-operator MCP path'),
     });
     await expect(governor.check({
       action: 'execute_tool',
@@ -190,8 +190,8 @@ describe('GovernorAdapter', () => {
         args: { redaction: 'none', readScope: 'shared' },
       }),
     })).resolves.toMatchObject({
-      decision: 'review_recommended',
-      reason: expect.stringContaining('trusted-operator approval'),
+      decision: 'approved',
+      reason: expect.stringContaining('trusted-operator MCP path'),
     });
     await expect(governor.check({
       action: 'execute_tool',
@@ -202,8 +202,8 @@ describe('GovernorAdapter', () => {
         },
       }),
     })).resolves.toMatchObject({
-      decision: 'review_recommended',
-      reason: expect.stringContaining('trusted-operator approval'),
+      decision: 'approved',
+      reason: expect.stringContaining('trusted-operator MCP path'),
     });
   });
 
