@@ -133,7 +133,7 @@ describe('synthetic availability probes', () => {
       readFile: vi.fn(async () => '{}'),
     });
 
-    expect(execFile).toHaveBeenCalledWith('node', ['-e', 'process.exit(1)'], 100);
+    expect(execFile).toHaveBeenCalledWith('node', ['-e', 'process.exit(1)'], 1);
   });
 
   it('emits compact one-line JSON for JSONL-friendly cron logs', () => {

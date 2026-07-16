@@ -5,6 +5,7 @@ import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 
 const DEFAULT_TIMEOUT_MS = 5_000;
+const OUTPUT_LIMIT_BYTES = 1024 * 1024;
 const SECRET_ARG_PATTERN = /(?:token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)/iu;
 function parseCommandLine(value) {
   if (!value) return undefined;
@@ -85,10 +86,24 @@ function normalizeError(error) {
   return String(error);
 }
 
+async function withTimeout(operation, timeoutMs) {
+  let timer;
+  try {
+    return await Promise.race([
+      operation(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`timed out after ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function measureProbe(name, timeoutMs, remediationHint, operation, now = () => Date.now()) {
   const started = now();
   try {
-    const detail = await operation();
+    const detail = await withTimeout(operation, timeoutMs);
     return {
       name,
       status: 'healthy',
@@ -111,23 +126,37 @@ async function measureProbe(name, timeoutMs, remediationHint, operation, now = (
 
 async function defaultExecFile(file, args, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const child = spawn(file, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(file, args, { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     let timedOut = false;
+    const killChildTree = (signal) => {
+      try {
+        process.kill(-child.pid, signal);
+      } catch {
+        child.kill(signal);
+      }
+    };
     const killTimer = setTimeout(() => {
       timedOut = true;
-      child.kill('SIGTERM');
+      killChildTree('SIGTERM');
       setTimeout(() => {
-        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+        if (child.exitCode === null && child.signalCode === null) killChildTree('SIGKILL');
       }, 500).unref();
     }, timeoutMs);
     child.stdout?.on('data', (chunk) => {
       stdout += String(chunk);
-      if (stdout.length > 1024 * 1024) child.kill('SIGTERM');
+      if (stdout.length > OUTPUT_LIMIT_BYTES) {
+        stdout = `${stdout.slice(0, OUTPUT_LIMIT_BYTES)}\n[truncated]`;
+        killChildTree('SIGTERM');
+      }
     });
     child.stderr?.on('data', (chunk) => {
       stderr += String(chunk);
+      if (stderr.length > OUTPUT_LIMIT_BYTES) {
+        stderr = `${stderr.slice(0, OUTPUT_LIMIT_BYTES)}\n[truncated]`;
+        killChildTree('SIGTERM');
+      }
     });
     child.on('error', (error) => {
       clearTimeout(killTimer);
@@ -137,9 +166,15 @@ async function defaultExecFile(file, args, timeoutMs) {
       clearTimeout(killTimer);
       if (timedOut) reject(new Error(`${file} timed out after ${timeoutMs}ms and was terminated`));
       else if (code === 0) resolve(stdout);
-      else reject(new Error(`${file} exited with code ${code ?? signal}: ${stderr.trim() || stdout.trim()}`));
+      else reject(new Error(`${file} exited with code ${code ?? signal}: ${redactText(stderr.trim() || stdout.trim())}`));
     });
   });
+}
+
+function redactText(value) {
+  return String(value)
+    .replace(/Bearer\s+\S+/giu, 'Bearer [REDACTED]')
+    .replace(/((?:token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)[\w.-]*\s*[=:]\s*)\S+/giu, '$1[REDACTED]');
 }
 
 function redactCommand(command) {
@@ -149,7 +184,8 @@ function redactCommand(command) {
     if (SECRET_ARG_PATTERN.test(part)) {
       const separator = part.includes('=') ? '=' : part.includes(':') ? ':' : null;
       if (separator) return `${part.slice(0, part.indexOf(separator) + 1)}[REDACTED]`;
-      return part;
+      if (part.startsWith('-')) return part;
+      return '[REDACTED]';
     }
     return part;
   });
@@ -185,7 +221,8 @@ async function probeProviderStatus(config, deps) {
   const command = parseCommandLine(config.providerCommand);
   if (!command || command.length === 0) throw new Error('missing provider status command');
   const [file, ...args] = command;
-  const stdout = await deps.execFile(file, args, config.timeoutMs);
+  const commandTimeoutMs = Math.max(1, config.timeoutMs - 100);
+  const stdout = await deps.execFile(file, args, commandTimeoutMs);
   return { command: redactCommand(command).join(' '), outputBytes: String(stdout ?? '').length };
 }
 
