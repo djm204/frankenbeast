@@ -1,4 +1,20 @@
 export {
+  ApprovalAnomalyDetector,
+  DEFAULT_APPROVAL_ANOMALY_CONFIG,
+  extractApprovalTrafficEvidence,
+  formatApprovalAnomalyAcknowledgementToken,
+  formatApprovalAnomalySummary,
+  hasApprovalAnomalyAcknowledgement,
+  normalizeApprovalAnomalyDetectorConfig,
+} from './approval-anomaly-detector.js';
+export type {
+  ApprovalAnomalyDecision,
+  ApprovalAnomalyDetectorConfig,
+  ApprovalAnomalyFinding,
+  ApprovalAnomalyRuleId,
+  ApprovalTrafficEvidence,
+} from './approval-anomaly-detector.js';
+export {
   formatApprovalResponseSignaturePayload,
   SignatureVerifier,
 } from './signature-verifier.js';
