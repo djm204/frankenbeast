@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -24,6 +24,28 @@ function composeServices(): string[] {
     }
   }
   return [...services].sort();
+}
+
+function writeExecutable(path: string, body: string): void {
+  writeFileSync(path, `#!/usr/bin/env bash\n${body}`);
+  chmodSync(path, 0o755);
+}
+
+function makePreflightFixture(options: { includeJq?: boolean; npmVersion?: string; gitStatusFails?: boolean } = {}): { dir: string; root: string; bin: string } {
+  const dir = mkdtempSync(join(tmpdir(), 'frankenbeast-new-worker-preflight-'));
+  const root = join(dir, 'repo');
+  const bin = join(dir, 'bin');
+  mkdirSync(root, { recursive: true });
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'frankenbeast', packageManager: 'npm@11.5.1' }));
+  writeExecutable(join(bin, 'npm'), `printf '%s\\n' '${options.npmVersion ?? '11.5.1'}'\n`);
+  writeExecutable(join(bin, 'gh'), `if [ \"$1\" = '--version' ]; then printf 'gh version 2.0.0\\n'; exit 0; fi\nif [ \"$1\" = 'auth' ] && [ \"$2\" = 'status' ] && [ \"$3\" = '--hostname' ] && [ \"$4\" = 'github.com' ]; then printf 'Logged in to github.com\\n'; exit 0; fi\nprintf 'unexpected gh args: %s %s %s %s\\n' \"$1\" \"$2\" \"$3\" \"$4\" >&2\nexit 1\n`);
+  const statusBranch = options.gitStatusFails ? `printf 'index is unreadable\\n' >&2; exit 2` : 'exit 0';
+  writeExecutable(join(bin, 'git'), `case \"$1\" in\n  --version) printf 'git version 2.53.0\\n' ;;\n  rev-parse) printf '%s\\n' '${root}' ;;\n  config) if [ \"$2\" = 'user.name' ]; then printf 'David Mendez\\n'; else printf 'me@davidmendez.dev\\n'; fi ;;\n  status) ${statusBranch} ;;\n  *) printf 'unexpected git args: %s %s\\n' \"$1\" \"$2\" >&2; exit 1 ;;\nesac\n`);
+  if (options.includeJq !== false) {
+    writeExecutable(join(bin, 'jq'), `printf 'jq-1.8.1\\n'\n`);
+  }
+  return { dir, root, bin };
 }
 
 describe('local setup scripts', () => {
@@ -186,12 +208,103 @@ describe('local setup scripts', () => {
 
     expect(manifest.scripts?.['local:seed']).toBe('tsx scripts/seed.ts');
     expect(manifest.scripts?.['local:verify-setup']).toBe('tsx scripts/verify-setup.ts');
+    expect(manifest.scripts?.['new-worker:preflight']).toBe('node scripts/new-worker-preflight.mjs');
     expect(readme).toContain('npm run local:seed');
     expect(readme).toContain('npm run local:verify-setup');
+    expect(readme).toContain('npm --silent run new-worker:preflight -- --json');
     expect(onboarding).toContain('npm run local:seed');
     expect(onboarding).toContain('npm run local:verify-setup');
+    expect(onboarding).toContain('npm --silent run new-worker:preflight -- --json');
+    expect(onboarding).toContain('[new-worker-preflight:<check>] ok|warn|fail');
     expect(seedScript).toContain('Usage: npm run local:seed');
     expect(verifyScript).toContain('Usage: npm run local:verify-setup');
+  });
+
+  it('new-worker preflight emits structured success output for a ready worker environment', () => {
+    const fixture = makePreflightFixture();
+    try {
+      const result = spawnSync(process.execPath, ['scripts/new-worker-preflight.mjs', '--json', '--root', fixture.root], {
+        cwd: ROOT,
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${fixture.bin}:${process.env.PATH ?? ''}` },
+      });
+      expect(result.status, result.stderr).toBe(0);
+      const report = JSON.parse(result.stdout) as { ok: boolean; checks: Array<{ id: string; status: string; detail: string }> };
+      expect(report.ok).toBe(true);
+      expect(report.checks).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: 'npm-package-manager', status: 'ok' }),
+        expect.objectContaining({ id: 'git-identity', status: 'ok' }),
+        expect.objectContaining({ id: 'github-auth', status: 'ok' }),
+        expect.objectContaining({ id: 'jq-command', status: 'ok' }),
+      ]));
+    } finally {
+      rmSync(fixture.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('new-worker preflight fails with actionable structured output when a required worker tool is missing', () => {
+    const fixture = makePreflightFixture({ includeJq: false });
+    try {
+      const result = spawnSync(process.execPath, ['scripts/new-worker-preflight.mjs', '--json', '--root', fixture.root], {
+        cwd: ROOT,
+        encoding: 'utf8',
+        env: { ...process.env, PATH: fixture.bin },
+      });
+      expect(result.status).toBe(1);
+      const report = JSON.parse(result.stdout) as { ok: boolean; checks: Array<{ id: string; status: string; action?: string }> };
+      expect(report.ok).toBe(false);
+      expect(report.checks).toContainEqual(expect.objectContaining({
+        id: 'jq-command',
+        status: 'fail',
+        action: expect.stringContaining('Install jq'),
+      }));
+    } finally {
+      rmSync(fixture.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('new-worker preflight rejects npm-managed repositories that are not Frankenbeast', () => {
+    const fixture = makePreflightFixture();
+    try {
+      writeFileSync(join(fixture.root, 'package.json'), JSON.stringify({ name: 'not-frankenbeast', packageManager: 'npm@11.5.1' }));
+      const result = spawnSync(process.execPath, ['scripts/new-worker-preflight.mjs', '--json', '--root', fixture.root], {
+        cwd: ROOT,
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${fixture.bin}:${process.env.PATH ?? ''}` },
+      });
+      expect(result.status).toBe(1);
+      const report = JSON.parse(result.stdout) as { ok: boolean; checks: Array<{ id: string; status: string; detail: string }> };
+      expect(report.ok).toBe(false);
+      expect(report.checks).toContainEqual(expect.objectContaining({
+        id: 'repository-root',
+        status: 'fail',
+        detail: expect.stringContaining('is not the Frankenbeast repository root'),
+      }));
+    } finally {
+      rmSync(fixture.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('new-worker preflight fails when git worktree status cannot be read', () => {
+    const fixture = makePreflightFixture({ gitStatusFails: true });
+    try {
+      const result = spawnSync(process.execPath, ['scripts/new-worker-preflight.mjs', '--json', '--root', fixture.root], {
+        cwd: ROOT,
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${fixture.bin}:${process.env.PATH ?? ''}` },
+      });
+      expect(result.status).toBe(1);
+      const report = JSON.parse(result.stdout) as { ok: boolean; checks: Array<{ id: string; status: string; detail: string; action?: string }> };
+      expect(report.ok).toBe(false);
+      expect(report.checks).toContainEqual(expect.objectContaining({
+        id: 'worktree-clean',
+        status: 'fail',
+        detail: 'unable to read git worktree status',
+        action: expect.stringContaining('Repair the git checkout'),
+      }));
+    } finally {
+      rmSync(fixture.dir, { recursive: true, force: true });
+    }
   });
 
   it('provides a one-click bootstrap script and CI dry-run gate', () => {
