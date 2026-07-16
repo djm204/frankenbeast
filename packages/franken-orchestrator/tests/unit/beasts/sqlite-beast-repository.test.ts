@@ -217,6 +217,67 @@ describe('SQLiteBeastRepository', () => {
     expect(storedRun).not.toHaveProperty('currentAttemptId');
   });
 
+  it('increments heartbeat sequence and logs duplicate or regressive heartbeat writes', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const run = repo.createRun({
+      definitionId: 'heartbeat-worker',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: { workerId: 't_worker_1' },
+      dispatchedBy: 'cli',
+      dispatchedByUser: 'pfk',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+
+    const first = repo.updateRun(run.id, {
+      lastHeartbeatAt: '2026-03-10T00:01:00.000Z',
+      heartbeatSource: 'kanban-heartbeat-writer',
+    });
+    const duplicate = repo.updateRun(run.id, {
+      lastHeartbeatAt: '2026-03-10T00:01:00.000Z',
+      heartbeatSource: 'kanban-heartbeat-writer',
+    });
+    const regressive = repo.updateRun(run.id, {
+      lastHeartbeatAt: '2026-03-10T00:00:59.000Z',
+      heartbeatSource: 'kanban-heartbeat-writer',
+    });
+
+    expect(first.lastHeartbeatSequence).toBe(1);
+    expect(duplicate.lastHeartbeatSequence).toBe(2);
+    expect(regressive.lastHeartbeatSequence).toBe(3);
+    expect(repo.getRun(run.id)).toMatchObject({
+      lastHeartbeatAt: '2026-03-10T00:00:59.000Z',
+      lastHeartbeatSequence: 3,
+    });
+    expect(repo.listEvents(run.id).map(event => ({ type: event.type, payload: event.payload }))).toEqual([
+      {
+        type: 'run.heartbeat.anomaly',
+        payload: {
+          code: 'duplicate-heartbeat',
+          workerId: run.id,
+          source: 'kanban-heartbeat-writer',
+          priorSequence: 1,
+          newSequence: 2,
+          priorHeartbeatAt: '2026-03-10T00:01:00.000Z',
+          newHeartbeatAt: '2026-03-10T00:01:00.000Z',
+        },
+      },
+      {
+        type: 'run.heartbeat.anomaly',
+        payload: {
+          code: 'regressive-heartbeat',
+          workerId: run.id,
+          source: 'kanban-heartbeat-writer',
+          priorSequence: 2,
+          newSequence: 3,
+          priorHeartbeatAt: '2026-03-10T00:01:00.000Z',
+          newHeartbeatAt: '2026-03-10T00:00:59.000Z',
+        },
+      },
+    ]);
+  });
+
   it('appends ordered run events and updates terminal status', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
