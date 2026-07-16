@@ -3939,8 +3939,8 @@ export class SqliteBrain implements IBrain {
     if (!Number.isFinite(expiryHorizonMs) || expiryHorizonMs < 0) {
       throw new Error('expiryHorizonMs must be a non-negative finite number');
     }
-    const maxEntries = options.maxEntries ?? this.working.usage().limits.maxEntries;
-    if (!Number.isSafeInteger(maxEntries) || maxEntries < 1) {
+    const maxEntries = options.maxEntries;
+    if (maxEntries !== undefined && (!Number.isSafeInteger(maxEntries) || maxEntries < 1)) {
       throw new Error('maxEntries must be a positive safe integer');
     }
 
@@ -4005,14 +4005,17 @@ export class SqliteBrain implements IBrain {
       });
     }
 
-    const nonProtectedRetained = entries
-      .filter((entry) => !entry.protected && entry.action === 'retain')
-      .sort((a, b) => b.policy.compactPriority - a.policy.compactPriority || a.key.localeCompare(b.key));
-    const activeEntryCount = entries.filter((entry) => entry.action !== 'expired').length;
-    const overBudgetCount = Math.max(0, activeEntryCount - maxEntries);
-    for (const entry of nonProtectedRetained.slice(0, overBudgetCount)) {
-      entry.action = 'compact';
-      entry.reason = `Memory store has ${activeEntryCount} active entries, over report budget ${maxEntries}; ${entry.class} has compaction priority ${entry.policy.compactPriority}`;
+    if (maxEntries !== undefined) {
+      const nonProtectedRetained = entries
+        .filter((entry) => !entry.protected && entry.action === 'retain')
+        .sort((a, b) => b.policy.compactPriority - a.policy.compactPriority || a.key.localeCompare(b.key));
+      const activeEntries = entries.filter((entry) => entry.action !== 'expired');
+      const existingCompactionCount = activeEntries.filter((entry) => entry.action === 'compact').length;
+      const extraBudgetCompactions = Math.max(0, activeEntries.length - maxEntries - existingCompactionCount);
+      for (const entry of nonProtectedRetained.slice(0, extraBudgetCompactions)) {
+        entry.action = 'compact';
+        entry.reason = `Memory store has ${activeEntries.length} active entries, over report budget ${maxEntries}; ${entry.class} has compaction priority ${entry.policy.compactPriority}`;
+      }
     }
 
     const compactionCandidates = entries

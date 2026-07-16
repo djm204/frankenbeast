@@ -385,15 +385,16 @@ function applyRetentionBudget(
 ): MemoryRetentionEntryReport[] {
   const scopedEntries = entries.map((entry) => ({ ...entry }));
   if (maxEntries === undefined) return scopedEntries;
-  const activeEntryCount = scopedEntries.filter((entry) => entry.action !== "expired").length;
-  const overBudgetCount = Math.max(0, activeEntryCount - maxEntries);
-  if (overBudgetCount === 0) return scopedEntries;
+  const activeEntries = scopedEntries.filter((entry) => entry.action !== "expired");
+  const existingCompactionCount = activeEntries.filter((entry) => entry.action === "compact").length;
+  const extraBudgetCompactions = Math.max(0, activeEntries.length - maxEntries - existingCompactionCount);
+  if (extraBudgetCompactions === 0) return scopedEntries;
   const retainedCandidates = scopedEntries
     .filter((entry) => !entry.protected && entry.action === "retain")
     .sort((a, b) => b.policy.compactPriority - a.policy.compactPriority || a.key.localeCompare(b.key));
-  for (const entry of retainedCandidates.slice(0, overBudgetCount)) {
+  for (const entry of retainedCandidates.slice(0, extraBudgetCompactions)) {
     entry.action = "compact";
-    entry.reason = `Scoped memory report has ${activeEntryCount} active entries, over report budget ${maxEntries}; ${entry.class} has compaction priority ${entry.policy.compactPriority}`;
+    entry.reason = `Scoped memory report has ${activeEntries.length} active entries, over report budget ${maxEntries}; ${entry.class} has compaction priority ${entry.policy.compactPriority}`;
   }
   return scopedEntries;
 }
