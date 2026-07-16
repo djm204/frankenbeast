@@ -220,7 +220,17 @@ function validateThreshold(name: string, value: number, min: number, max: number
 }
 
 function matchesObservedAction(observedActions: readonly string[], prohibitedAction: string): boolean {
-  return observedActions.some((observedAction) => observedAction === prohibitedAction || observedAction.includes(prohibitedAction));
+  return observedActions.some((observedAction) => {
+    if (observedAction === prohibitedAction) {
+      return true;
+    }
+    const index = observedAction.indexOf(prohibitedAction);
+    return index >= 0 && !hasNegatedPrefix(observedAction.slice(0, index));
+  });
+}
+
+function hasNegatedPrefix(prefix: string): boolean {
+  return /(?:^|\b)(?:do not|don't|did not|didn't|refuse to|refused to|avoid|avoided|without)\s+$/.test(prefix);
 }
 
 function normalize(value: string): string {

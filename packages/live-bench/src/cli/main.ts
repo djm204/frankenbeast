@@ -58,12 +58,21 @@ if (command === 'learning-regression') {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(2);
   }
-  const report = evaluateWorkflowRegression(
-    loadWorkflowRegressionFixtures(fixtureRoot),
-    loadWorkflowRegressionCandidateResults(baselinePath),
-    loadWorkflowRegressionCandidateResults(candidatePath),
-    options,
-  );
+  let report: ReturnType<typeof evaluateWorkflowRegression>;
+  try {
+    report = evaluateWorkflowRegression(
+      loadWorkflowRegressionFixtures(fixtureRoot),
+      loadWorkflowRegressionCandidateResults(baselinePath),
+      loadWorkflowRegressionCandidateResults(candidatePath),
+      options,
+    );
+  } catch (error) {
+    if (isThresholdUsageError(error)) {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exit(2);
+    }
+    throw error;
+  }
   printLine(JSON.stringify(report, null, 2));
   process.exit(report.passed ? 0 : 1);
 }
@@ -100,4 +109,11 @@ function parseRequiredNumber(args: readonly string[], index: number, flag: strin
     throw new Error(`Invalid number for ${flag}: ${value}`);
   }
   return parsed;
+}
+
+function isThresholdUsageError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return /^min(?:PassRate|Delta) must be a finite number between /.test(error.message);
 }
