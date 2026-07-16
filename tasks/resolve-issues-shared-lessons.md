@@ -14,6 +14,10 @@
 - If an installer snapshots a root realpath at construction, handle missing-root recovery explicitly: revalidate the missing root's parent before `mkdir`, reject symlinked/repointed parents, then recheck the recreated root before creating child directories.
 - When Codex reaches the configured review-invocation cap with new findings, fix/reply/resolve and stop for explicit approval before triggering another review; do not merge on stale clean signals after the head changed.
 
+## 2026-07-15 — Memory TTL policy
+- For temporary operational facts, keep TTL metadata on working-memory values (`expiresAt`) and enforce expiration on all read/list/hydration paths; also filter expired runtime rows before flush so stale operational state cannot be re-persisted.
+- When verifying workspace package typechecks in a fresh worktree, build dependency packages (or run root `npm run build`) before package-local `tsc --noEmit`; otherwise unresolved workspace package declarations can look like feature regressions.
+
 ## 2026-07-15 — Beast process cleanup review fixes
 - For Beast cleanup paths, treat persisted process-group ownership as verified only when the stored start-time token matches the current `/proc` start time; missing or unreadable start times should fail closed to direct-PID signaling to avoid killing a PID-reused process group.
 - Keep cleanup ownership delegated through execution-mode wrappers: container executors must forward `cleanupPendingRun()` so queued container runs can be cancelled before an attempt exists.

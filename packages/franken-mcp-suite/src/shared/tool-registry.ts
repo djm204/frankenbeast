@@ -110,7 +110,7 @@ const TOOLS: ToolFull[] = [
   {
     name: 'fbeast_memory_store',
     server: 'memory',
-    description: 'Store key/value in working or episodic memory',
+    description: 'Store memory; optional TTL for temporary working facts',
     inputSchema: {
       type: 'object',
       properties: {
@@ -118,6 +118,7 @@ const TOOLS: ToolFull[] = [
         value: { type: 'string', description: 'Content to store' },
         type: { type: 'string', description: 'Memory type: working or episodic', enum: ['working', 'episodic'] },
         agentId: { type: 'string', description: 'Optional agent id; when provided, the stored entry is namespaced for that agent and visible through readScope=agent for the same agent' },
+        ttlMs: { type: 'integer', description: 'Optional positive millisecond TTL for temporary operational working-memory facts' },
       },
       required: ['key', 'value', 'type'],
     },
@@ -129,8 +130,21 @@ const TOOLS: ToolFull[] = [
       if (!agentId.ok) {
         return { content: [{ type: 'text', text: `Error: fbeast_memory_store ${agentId.message}` }], isError: true };
       }
-      await brain.store(agentId.value ? { key, value, type, agentId: agentId.value } : { key, value, type });
-      return { content: [{ type: 'text', text: `Stored memory: ${key}` }] };
+      const ttlMs = args['ttlMs'] === undefined ? undefined : Number(args['ttlMs']);
+      if (ttlMs !== undefined && (!Number.isFinite(ttlMs) || !Number.isSafeInteger(ttlMs) || ttlMs < 1)) {
+        return { content: [{ type: 'text', text: 'Error: fbeast_memory_store ttlMs must be a positive integer number of milliseconds' }], isError: true };
+      }
+      if (ttlMs !== undefined && type !== 'working') {
+        return { content: [{ type: 'text', text: 'Error: fbeast_memory_store ttlMs is only supported for working memory entries' }], isError: true };
+      }
+      await brain.store({
+        key,
+        value,
+        type,
+        ...(agentId.value ? { agentId: agentId.value } : {}),
+        ...(ttlMs === undefined ? {} : { ttlMs }),
+      });
+      return { content: [{ type: 'text', text: ttlMs === undefined ? `Stored memory: ${key}` : `Stored temporary memory: ${key} (ttlMs=${ttlMs})` }] };
     },
   },
   {
