@@ -195,6 +195,9 @@ Edge case: many older diagrams and `docs/plans/` files describe target or histor
 
 ## Optional services
 
+Before starting Docker or blocking on optional infrastructure, read the [local service dependency explainer](docs/onboarding/local-service-dependencies.md).
+It maps ChromaDB, Grafana, Tempo, provider credentials, and secret backends to the capabilities that actually require them, with health checks and PM/worker handoff fields.
+
 - [ ] Configure `.env` before starting the full compose stack.
   - Keep `CHROMA_URL=http://localhost:8000` unless ChromaDB runs elsewhere.
   - Uncomment `GRAFANA_USER=admin` and set a unique `GRAFANA_PASSWORD`; the old `admin/admin` default is intentionally rejected.

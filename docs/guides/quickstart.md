@@ -62,6 +62,9 @@ ${EDITOR:-vi} .env
 
 ## 3. Optional: start infrastructure
 
+Read the [local service dependency explainer](../onboarding/local-service-dependencies.md) before starting Docker.
+It explains which services are optional and how to health-check them so a docs test, typecheck, or CLI-help failure does not turn into an unnecessary compose dependency.
+
 ```bash
 # The bootstrap script validates Grafana credentials before starting compose.
 npm run bootstrap -- --with-docker

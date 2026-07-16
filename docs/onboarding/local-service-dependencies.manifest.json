@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "defaultPolicy": "Most local services are optional. Start only the service tied to the capability you are testing, then verify its health before blaming provider or agent code.",
+  "services": [
+    {
+      "id": "chromadb",
+      "name": "ChromaDB",
+      "requiredFor": ["semantic memory", "local memory seeding", "memory-backed MCP workflows"],
+      "notRequiredFor": ["workspace install", "root unit tests", "orchestrator CLI help", "dashboard shell startup"],
+      "startCommand": "docker compose up -d chroma",
+      "healthCheck": "curl -fsS http://localhost:8000/api/v2/heartbeat || curl -fsS http://localhost:8000/api/v1/heartbeat",
+      "env": ["CHROMA_URL=http://localhost:8000"],
+      "failureSymptom": "Semantic memory seed, lookup, or MCP memory tools fail with connection refused or unavailable Chroma endpoint errors.",
+      "handoffNote": "Mention whether CHROMA_URL is set and whether the heartbeat endpoint responded before assigning memory-related work."
+    },
+    {
+      "id": "grafana",
+      "name": "Grafana",
+      "requiredFor": ["local dashboards", "operator-facing observability UI"],
+      "notRequiredFor": ["trace collection", "root unit tests", "CLI planning and run commands"],
+      "startCommand": "GRAFANA_USER=admin GRAFANA_PASSWORD=<unique-password> docker compose up -d grafana",
+      "healthCheck": "curl -fsS http://localhost:3000/api/health",
+      "env": ["GRAFANA_USER=admin", "GRAFANA_PASSWORD=<unique-password>"],
+      "failureSymptom": "Dashboard links or Grafana panels are unavailable even though application tests and traces still run.",
+      "handoffNote": "Record that Grafana credentials were set to a non-default password before starting compose."
+    },
+    {
+      "id": "tempo",
+      "name": "Tempo",
+      "requiredFor": ["local distributed trace viewing", "OTLP trace export smoke tests"],
+      "notRequiredFor": ["SQLite observer storage", "root unit tests", "MCP initialization"],
+      "startCommand": "docker compose up -d tempo",
+      "healthCheck": "curl -fsS http://localhost:3200/ready",
+      "env": ["OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318"],
+      "failureSymptom": "Trace export or Grafana trace panels cannot reach Tempo, while local SQLite traces may still be present.",
+      "handoffNote": "Check both Tempo readiness on 3200 and OTLP/HTTP target 4318 when debugging trace export."
+    },
+    {
+      "id": "provider-cli",
+      "name": "AI provider CLI or API credentials",
+      "requiredFor": ["local chat", "agent execution", "dashboard chat turns", "Beast runs against real providers"],
+      "notRequiredFor": ["documentation tests", "static typecheck", "most package unit tests"],
+      "startCommand": "Install and authenticate at least one configured provider CLI, or export the API key for an API-backed provider.",
+      "healthCheck": "command -v claude || command -v codex || command -v gemini || test -n \"${ANTHROPIC_API_KEY:-}${OPENAI_API_KEY:-}${GOOGLE_API_KEY:-}${GEMINI_API_KEY:-}\"",
+      "env": ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY"],
+      "failureSymptom": "Provider resolution fails, local chat cannot produce a turn, or Beast runs stop before model invocation.",
+      "handoffNote": "Name the selected provider path and whether it is CLI-authenticated or API-key backed."
+    },
+    {
+      "id": "secret-backend",
+      "name": "Secret backend",
+      "requiredFor": ["operator token lookup", "stored provider credentials", "Beast controls after init"],
+      "notRequiredFor": ["repository bootstrap", "docs-only checks", "unit tests with injected secrets"],
+      "startCommand": "node packages/franken-orchestrator/dist/cli/run.js init",
+      "healthCheck": "test -f .fbeast/config.json && (test -f .fbeast/secrets.enc || true)",
+      "env": ["FRANKENBEAST_PASSPHRASE", "BW_SESSION"],
+      "failureSymptom": "Runtime config contains secret refs but commands cannot resolve operator tokens or provider credentials.",
+      "handoffNote": "Record the configured network.secureBackend and whether existing secret refs were re-stored after backend changes."
+    }
+  ],
+  "edgeCases": [
+    {
+      "case": "Docker is not installed",
+      "expectedAction": "Use npm run bootstrap -- --no-docker and skip ChromaDB, Grafana, and Tempo unless the issue explicitly touches those services."
+    },
+    {
+      "case": "Only root tests are failing",
+      "expectedAction": "Do not start optional compose services as a default fix; root documentation and unit tests should explain service requirements without depending on live services."
+    },
+    {
+      "case": "A URL env var points to a remote service",
+      "expectedAction": "Treat the service as externally managed; verify the URL and credentials rather than starting the local compose service on the same port."
+    }
+  ]
+}
