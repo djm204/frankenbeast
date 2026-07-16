@@ -2174,6 +2174,423 @@ describe('SqliteBrain', () => {
       expect(brain.working.has('env.secret.api-token')).toBe(false);
     });
 
+    it('adds high-confidence merge suggestions for exact duplicate memory values and preserves provenance', () => {
+      const approved = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.reply-style',
+        value: 'User prefers concise, respectful replies.',
+        source: 'chat:turn-20',
+        evidenceId: 'msg-20',
+        confidence: 0.92,
+        reason: 'User explicitly requested concise respectful communication.',
+      });
+      brain.memoryReview.approve(approved.id, { reviewer: 'operator' });
+
+      const duplicate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.answer-style',
+        value: 'User prefers concise, respectful replies.',
+        source: 'chat:turn-21',
+        evidenceId: 'msg-21',
+        confidence: 0.85,
+        reason: 'User repeated the same communication preference.',
+      });
+
+      expect(duplicate.status).toBe('pending');
+      expect(duplicate.mergeSuggestions).toEqual([
+        expect.objectContaining({
+          targetStore: 'working',
+          key: 'user.preference.reply-style',
+          matchType: 'exact',
+          confidence: 'high',
+          requiresReview: false,
+          similarity: 1,
+          provenance: [
+            expect.objectContaining({
+              candidateId: approved.id,
+              source: 'chat:turn-20',
+              evidenceId: 'msg-20',
+              reason: 'User explicitly requested concise respectful communication.',
+            }),
+          ],
+        }),
+      ]);
+    });
+
+    it('recomputes merge suggestions after editing a pending candidate', () => {
+      const approved = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.reply-style',
+        value: 'User prefers concise, respectful replies.',
+        source: 'chat:turn-30',
+        confidence: 0.92,
+        reason: 'User explicitly requested concise respectful communication.',
+      });
+      brain.memoryReview.approve(approved.id, { reviewer: 'operator' });
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.answer-style',
+        value: 'User likes detailed explanations.',
+        source: 'chat:turn-31',
+        confidence: 0.7,
+        reason: 'Initial candidate before operator edit.',
+      });
+
+      const edited = brain.memoryReview.edit(candidate.id, {
+        value: 'User prefers concise, respectful replies.',
+        reason: 'Operator edited candidate into a duplicate preference.',
+      });
+
+      expect(edited.mergeSuggestions).toEqual([
+        expect.objectContaining({
+          key: 'user.preference.reply-style',
+          matchType: 'exact',
+        }),
+      ]);
+    });
+
+    it('ignores stale provenance before suggesting merge candidates', () => {
+      const approved = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.project.default-branch',
+        value: 'main',
+        source: 'repo:git-config',
+        confidence: 0.9,
+        reason: 'Detected default branch.',
+      });
+      brain.memoryReview.approve(approved.id, { reviewer: 'operator' });
+      brain.working.set('env.project.default-branch', 'develop');
+
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.project.release-branch',
+        value: 'main',
+        source: 'repo:release-config',
+        confidence: 0.8,
+        reason: 'Detected release branch.',
+      });
+
+      expect(candidate.mergeSuggestions).toEqual([]);
+    });
+
+    it('requires review for exact matches that lack semantic detail', () => {
+      const approved = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.project.default-branch',
+        value: 'main',
+        source: 'repo:git-config',
+        confidence: 0.9,
+        reason: 'Detected default branch.',
+      });
+      brain.memoryReview.approve(approved.id, { reviewer: 'operator' });
+
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.project.release-branch',
+        value: 'main',
+        source: 'repo:release-config',
+        confidence: 0.8,
+        reason: 'Detected release branch.',
+      });
+
+      expect(candidate.mergeSuggestions).toEqual([
+        expect.objectContaining({
+          key: 'env.project.default-branch',
+          matchType: 'exact',
+          confidence: 'low',
+          requiresReview: true,
+        }),
+      ]);
+    });
+
+    it('downgrades exact primitive matches to review-required suggestions', () => {
+      const approved = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.project.default-branch',
+        value: 'main',
+        source: 'repo:git-config',
+        confidence: 0.9,
+        reason: 'Detected default branch.',
+      });
+      brain.memoryReview.approve(approved.id, { reviewer: 'operator' });
+
+      const samePrimitive = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.project.release-branch',
+        value: 'main',
+        source: 'repo:release-config',
+        confidence: 0.9,
+        reason: 'Detected release branch.',
+      });
+
+      expect(samePrimitive.mergeSuggestions).toEqual([
+        expect.objectContaining({
+          key: 'env.project.default-branch',
+          matchType: 'exact',
+          confidence: 'low',
+          requiresReview: true,
+        }),
+      ]);
+    });
+
+    it('ignores stale provenance when current working memory changed after approval', () => {
+      const approved = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.summary-style',
+        value: 'User prefers concise daily summary updates.',
+        source: 'chat:turn-22',
+        confidence: 0.88,
+        reason: 'User asked for concise daily summaries.',
+      });
+      brain.memoryReview.approve(approved.id, { reviewer: 'operator' });
+      brain.working.set('user.preference.summary-style', 'User prefers detailed weekly summary updates.');
+
+      const duplicateOfStaleValue = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.summary-cadence',
+        value: 'User prefers concise daily summary updates.',
+        source: 'chat:turn-23',
+        confidence: 0.8,
+        reason: 'A later turn restated an older summary preference.',
+      });
+
+      expect(duplicateOfStaleValue.mergeSuggestions).toEqual([]);
+    });
+
+    it('adds review-required semantic merge suggestions for paraphrased memory candidates', () => {
+      const approved = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.progress-updates',
+        value: 'User wants short status updates with only the most relevant details.',
+        source: 'chat:turn-24',
+        confidence: 0.88,
+        reason: 'User asked for terse progress updates.',
+      });
+      brain.memoryReview.approve(approved.id, { reviewer: 'operator' });
+
+      const paraphrase = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.status-style',
+        value: 'Keep progress reports brief and include only relevant details.',
+        source: 'chat:turn-25',
+        confidence: 0.7,
+        reason: 'User repeated a similar status-reporting preference.',
+      });
+
+      expect(paraphrase.mergeSuggestions).toEqual([
+        expect.objectContaining({
+          key: 'user.preference.progress-updates',
+          matchType: 'semantic',
+          confidence: 'low',
+          requiresReview: true,
+        }),
+      ]);
+    });
+
+    it('does not suggest related but distinct memories as duplicates', () => {
+      const approved = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.short-status',
+        value: 'User prefers short status updates.',
+        source: 'chat:turn-24',
+        confidence: 0.9,
+        reason: 'User asked for concise progress reports.',
+      });
+      brain.memoryReview.approve(approved.id, { reviewer: 'operator' });
+
+      const distinct = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.short-examples',
+        value: 'User prefers short runnable code examples.',
+        source: 'chat:turn-25',
+        confidence: 0.82,
+        reason: 'User asked for compact code samples.',
+      });
+
+      expect(distinct.mergeSuggestions).toEqual([]);
+    });
+
+    it('avoids semantic false positives for memories that share generic wording only', () => {
+      const approved = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.project.test-runner',
+        value: 'Project uses Vitest for package unit tests.',
+        source: 'repo:test-config',
+        confidence: 0.9,
+        reason: 'Detected Vitest config files.',
+      });
+      brain.memoryReview.approve(approved.id, { reviewer: 'operator' });
+
+      const unrelated = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.project.package-manager',
+        value: 'Project uses npm workspaces for packages.',
+        source: 'repo:package-json',
+        confidence: 0.9,
+        reason: 'Detected workspaces in package.json.',
+      });
+
+      expect(unrelated.mergeSuggestions).toEqual([]);
+    });
+
+    it('suggests same-key repeats so approval does not hide existing provenance', () => {
+      const approved = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.reply-style',
+        value: 'User prefers concise, respectful replies.',
+        source: 'chat:turn-40',
+        confidence: 0.92,
+        reason: 'User explicitly requested concise respectful communication.',
+      });
+      brain.memoryReview.approve(approved.id, { reviewer: 'operator' });
+
+      const repeat = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.reply-style',
+        value: 'User prefers concise, respectful replies.',
+        source: 'chat:turn-41',
+        confidence: 0.84,
+        reason: 'User repeated the same communication preference.',
+      });
+
+      expect(repeat.mergeSuggestions).toEqual([
+        expect.objectContaining({
+          key: 'user.preference.reply-style',
+          matchType: 'exact',
+          provenance: [expect.objectContaining({ candidateId: approved.id })],
+        }),
+      ]);
+    });
+
+    it('keeps merge suggestions inside decoded agent working-memory scopes', () => {
+      const agentAKey = '__fbeast_agent_memory__/agent-a/user.preference.reply-style';
+      const agentBKey = '__fbeast_agent_memory__/agent-b/user.preference.reply-style';
+      const approved = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: agentAKey,
+        value: 'User prefers concise, respectful replies.',
+        source: 'agent-a:chat',
+        confidence: 0.92,
+        reason: 'Agent A observed a private memory preference.',
+      });
+      brain.memoryReview.approve(approved.id, { reviewer: 'operator' });
+
+      const scopedToOtherAgent = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: agentBKey,
+        value: 'User prefers concise, respectful replies.',
+        source: 'agent-b:chat',
+        confidence: 0.86,
+        reason: 'Agent B observed the same private memory preference.',
+      });
+      const scopedToSameAgent = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: '__fbeast_agent_memory__/agent-a/user.preference.answer-style',
+        value: 'User prefers concise, respectful replies.',
+        source: 'agent-a:chat-later',
+        confidence: 0.86,
+        reason: 'Agent A repeated the same private memory preference.',
+      });
+
+      expect(scopedToOtherAgent.mergeSuggestions).toEqual([]);
+      expect(scopedToSameAgent.mergeSuggestions).toEqual([
+        expect.objectContaining({ key: agentAKey, matchType: 'exact' }),
+      ]);
+    });
+
+    it('preserves status synonym matches when normalizing plural tokens', () => {
+      const approved = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.status-cadence',
+        value: 'User wants status cadence daily with short updates.',
+        source: 'chat:turn-42',
+        confidence: 0.88,
+        reason: 'User requested daily status cadence.',
+      });
+      brain.memoryReview.approve(approved.id, { reviewer: 'operator' });
+
+      const paraphrase = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.progress-cadence',
+        value: 'User wants progress cadence daily with brief reports.',
+        source: 'chat:turn-43',
+        confidence: 0.78,
+        reason: 'User repeated the same progress cadence.',
+      });
+
+      expect(paraphrase.mergeSuggestions).toEqual([
+        expect.objectContaining({
+          key: 'user.preference.status-cadence',
+          matchType: 'semantic',
+        }),
+      ]);
+    });
+
+    it('ignores object field names when creating semantic merge tokens', () => {
+      const approved = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.editor-vim',
+        value: { type: 'preference', value: 'vim' },
+        source: 'chat:turn-44',
+        confidence: 0.9,
+        reason: 'User mentioned vim.',
+      });
+      brain.memoryReview.approve(approved.id, { reviewer: 'operator' });
+
+      const distinctStructuredValue = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.editor-emacs',
+        value: { type: 'preference', value: 'emacs' },
+        source: 'chat:turn-45',
+        confidence: 0.9,
+        reason: 'User mentioned emacs.',
+      });
+
+      expect(distinctStructuredValue.mergeSuggestions).toEqual([]);
+    });
+
+    it('ranks exact merge suggestions ahead of equally similar semantic suggestions', () => {
+      for (const [index, key] of [
+        'aaa.semantic-one',
+        'aab.semantic-two',
+        'aac.semantic-three',
+        'aad.semantic-four',
+        'aae.semantic-five',
+      ].entries()) {
+        const semantic = brain.memoryReview.propose({
+          targetStore: 'working',
+          key,
+          value: 'User wants status cadence daily with short updates.',
+          source: `chat:semantic-${index}`,
+          confidence: 0.8,
+          reason: 'Existing semantic candidate.',
+        });
+        brain.memoryReview.approve(semantic.id, { reviewer: 'operator' });
+      }
+      const exact = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'zzz.exact',
+        value: 'User wants progress cadence daily with brief reports.',
+        source: 'chat:exact-existing',
+        confidence: 0.9,
+        reason: 'Existing exact candidate.',
+      });
+      brain.memoryReview.approve(exact.id, { reviewer: 'operator' });
+
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.progress-cadence',
+        value: 'User wants progress cadence daily with brief reports.',
+        source: 'chat:new',
+        confidence: 0.8,
+        reason: 'New repeated memory candidate.',
+      });
+
+      expect(candidate.mergeSuggestions?.[0]).toEqual(
+        expect.objectContaining({ key: 'zzz.exact', matchType: 'exact' }),
+      );
+    });
+
     it('purges approved working memory and provenance when a key is marked never-store', () => {
       const approved = brain.memoryReview.propose({
         targetStore: 'working',

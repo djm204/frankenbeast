@@ -106,16 +106,54 @@ export interface MemoryCandidateProposal {
   reason: string;
 }
 
+export type MemoryDuplicateMatchType = 'exact' | 'semantic';
+export type MemoryDuplicateConfidence = 'high' | 'low';
+
+export interface MemoryMergeSuggestionProvenance {
+  candidateId?: string;
+  source: string;
+  evidenceId?: string;
+  confidence?: number;
+  reason: string;
+  reviewer?: string;
+  note?: string;
+  approvedAt?: string;
+  createdAt?: string;
+}
+
+export interface MemoryMergeSuggestion {
+  targetStore: MemoryCandidateTargetStore;
+  key: string;
+  value: unknown;
+  matchType: MemoryDuplicateMatchType;
+  confidence: MemoryDuplicateConfidence;
+  similarity: number;
+  requiresReview: boolean;
+  guidance: string;
+  provenance: MemoryMergeSuggestionProvenance[];
+}
+
 export interface MemoryCandidate extends MemoryCandidateProposal {
   id: string;
   status: MemoryCandidateStatus;
   suppressionReason?: MemorySuppressionReason;
+  mergeSuggestions?: MemoryMergeSuggestion[];
   createdAt: string;
   updatedAt: string;
   decidedAt?: string;
   reviewer?: string;
   note?: string;
 }
+
+type ExistingMemoryMergeCandidate = {
+  targetStore: MemoryCandidateTargetStore;
+  key: string;
+  value: unknown;
+  provenance: MemoryMergeSuggestionProvenance[];
+  candidateId?: string;
+};
+
+const AGENT_WORKING_KEY_PREFIX = '__fbeast_agent_memory__/';
 
 export interface MemoryCandidateEdit {
   value?: unknown;
@@ -1819,7 +1857,7 @@ export class SqliteMemoryReviewQueue {
       result = candidate;
     });
     tx.immediate();
-    return result!;
+    return this.withMergeSuggestions(result!);
   }
 
   list(status: MemoryCandidateStatus = 'pending'): MemoryCandidate[] {
@@ -1828,7 +1866,10 @@ export class SqliteMemoryReviewQueue {
         `SELECT * FROM memory_review_candidates WHERE status = ? ORDER BY created_at ASC, id ASC`,
       )
       .all(status) as MemoryCandidateRow[];
-    return rows.map((row) => this.rowToCandidate(row));
+    const mergeCandidates = status === 'pending'
+      ? this.existingMergeCandidatesForTarget('working')
+      : undefined;
+    return rows.map((row) => this.withMergeSuggestions(this.rowToCandidate(row), mergeCandidates));
   }
 
   edit(id: string, edit: MemoryCandidateEdit): MemoryCandidate {
@@ -1855,7 +1896,7 @@ export class SqliteMemoryReviewQueue {
         updated.updatedAt,
         id,
       );
-    return this.requireCandidate(id, 'pending');
+    return this.withMergeSuggestions(this.requireCandidate(id, 'pending'));
   }
 
   approve(
@@ -2110,6 +2151,145 @@ export class SqliteMemoryReviewQueue {
   private existingWorkingValue(key: string): unknown {
     const runtime = this.working.reviewValueState(key);
     return runtime.state === 'present' ? runtime.value : undefined;
+  }
+
+  private withMergeSuggestions(
+    candidate: MemoryCandidate,
+    mergeCandidates?: ExistingMemoryMergeCandidate[],
+  ): MemoryCandidate {
+    if (candidate.status !== 'pending' || candidate.targetStore !== 'working') {
+      return candidate;
+    }
+    return {
+      ...candidate,
+      mergeSuggestions: this.findMergeSuggestions(candidate, mergeCandidates),
+    };
+  }
+
+  private findMergeSuggestions(
+    candidate: MemoryCandidate,
+    mergeCandidates?: ExistingMemoryMergeCandidate[],
+  ): MemoryMergeSuggestion[] {
+    const candidates = mergeCandidates ?? this.existingMergeCandidatesForTarget(candidate.targetStore);
+    const suggestions = candidates
+      .filter(
+        (existing) =>
+          existing.candidateId !== candidate.id &&
+          sameWorkingMemoryMergeScope(candidate.key, existing.key),
+      )
+      .map((existing) => this.buildMergeSuggestion(candidate, existing))
+      .filter((suggestion): suggestion is MemoryMergeSuggestion => suggestion !== null)
+      .sort(
+        (left, right) =>
+          mergeSuggestionRank(right) - mergeSuggestionRank(left) ||
+          right.similarity - left.similarity ||
+          left.key.localeCompare(right.key),
+      );
+    return suggestions.slice(0, 5);
+  }
+
+  private existingMergeCandidatesForTarget(
+    targetStore: MemoryCandidateTargetStore,
+  ): ExistingMemoryMergeCandidate[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM memory_review_provenance WHERE target_store = ? ORDER BY approved_at DESC, memory_key ASC`,
+      )
+      .all(targetStore) as MemoryProvenanceRow[];
+    const existing: ExistingMemoryMergeCandidate[] = rows
+      .map((row) => this.rowToProvenance(row))
+      .filter((record) => this.isLiveProvenanceRecord(record))
+      .map((record) => ({
+        targetStore: record.targetStore,
+        key: record.key,
+        value: record.value,
+        provenance: [this.provenanceRecordToMergeProvenance(record)],
+      }));
+
+    const pendingRows = this.db
+      .prepare(
+        `SELECT * FROM memory_review_candidates WHERE target_store = ? AND status = 'pending' ORDER BY created_at ASC, id ASC`,
+      )
+      .all(targetStore) as MemoryCandidateRow[];
+    for (const row of pendingRows) {
+      const pending = this.rowToCandidate(row);
+      existing.push({
+        targetStore: pending.targetStore,
+        key: pending.key,
+        value: pending.value,
+        provenance: [this.candidateToMergeProvenance(pending)],
+        candidateId: pending.id,
+      });
+    }
+
+    return existing;
+  }
+
+  private isLiveProvenanceRecord(record: MemoryProvenanceRecord): boolean {
+    if (record.targetStore !== 'working') return true;
+    const runtime = this.working.reviewValueState(record.key);
+    return runtime.state === 'present' && memoryValuesEqual(runtime.value, record.value);
+  }
+
+  private buildMergeSuggestion(
+    candidate: MemoryCandidate,
+    existing: ExistingMemoryMergeCandidate,
+  ): MemoryMergeSuggestion | null {
+    if (memoryValuesEqual(candidate.value, existing.value)) {
+      const highConfidenceExact = isHighConfidenceExactDuplicate(candidate.value);
+      return {
+        targetStore: existing.targetStore,
+        key: existing.key,
+        value: existing.value,
+        matchType: 'exact',
+        confidence: highConfidenceExact ? 'high' : 'low',
+        similarity: 1,
+        requiresReview: !highConfidenceExact,
+        guidance: highConfidenceExact
+          ? 'Exact duplicate memory candidate. Prefer merging provenance into the existing memory rather than approving a second durable entry.'
+          : 'Exact value match with too little semantic detail to prove the memories are duplicates. Review the keys and provenance before merging.',
+        provenance: existing.provenance,
+      };
+    }
+
+    const similarity = semanticMemorySimilarity(candidate.value, existing.value);
+    if (similarity < 0.42) return null;
+    return {
+      targetStore: existing.targetStore,
+      key: existing.key,
+      value: existing.value,
+      matchType: 'semantic',
+      confidence: 'low',
+      similarity,
+      requiresReview: true,
+      guidance:
+        'Possible semantic duplicate. Review both memory wordings and merge provenance only if they describe the same durable fact.',
+      provenance: existing.provenance,
+    };
+  }
+
+  private provenanceRecordToMergeProvenance(record: MemoryProvenanceRecord): MemoryMergeSuggestionProvenance {
+    return {
+      candidateId: record.candidateId,
+      source: record.source,
+      ...(record.evidenceId ? { evidenceId: record.evidenceId } : {}),
+      confidence: record.confidence,
+      reason: record.reason,
+      ...(record.reviewer ? { reviewer: record.reviewer } : {}),
+      ...(record.note ? { note: record.note } : {}),
+      approvedAt: record.approvedAt,
+    };
+  }
+
+  private candidateToMergeProvenance(candidate: MemoryCandidate): MemoryMergeSuggestionProvenance {
+    return {
+      candidateId: candidate.id,
+      source: candidate.source,
+      ...(candidate.evidenceId ? { evidenceId: candidate.evidenceId } : {}),
+      confidence: candidate.confidence,
+      reason: candidate.reason,
+      createdAt: candidate.createdAt,
+    };
   }
 
   private assertValidConflictResolution(
@@ -2531,6 +2711,127 @@ function canonicalMemoryValue(value: unknown): unknown {
 function memoryValuesEqual(left: unknown, right: unknown): boolean {
   return stableStringify(canonicalMemoryValue(left)) ===
     stableStringify(canonicalMemoryValue(right));
+}
+
+const SEMANTIC_MEMORY_STOP_WORDS = new Set([
+  'a',
+  'an',
+  'and',
+  'are',
+  'as',
+  'be',
+  'by',
+  'for',
+  'from',
+  'has',
+  'in',
+  'include',
+  'includes',
+  'is',
+  'keep',
+  'most',
+  'of',
+  'only',
+  'or',
+  'project',
+  'the',
+  'to',
+  'use',
+  'uses',
+  'user',
+  'want',
+  'wants',
+  'with',
+]);
+
+const SEMANTIC_MEMORY_SYNONYMS = new Map([
+  ['brief', 'short'],
+  ['compact', 'short'],
+  ['concise', 'short'],
+  ['terse', 'short'],
+  ['report', 'status'],
+  ['reports', 'status'],
+  ['progress', 'status'],
+  ['updates', 'status'],
+  ['important', 'relevant'],
+  ['details', 'detail'],
+  ['reply', 'response'],
+  ['replies', 'response'],
+]);
+
+function semanticMemorySimilarity(left: unknown, right: unknown): number {
+  const leftTokens = semanticMemoryTokens(left);
+  const rightTokens = semanticMemoryTokens(right);
+  if (leftTokens.size < 3 || rightTokens.size < 3) return 0;
+  const intersection = [...leftTokens].filter((token) => rightTokens.has(token));
+  if (intersection.length < 3) return 0;
+  const union = new Set([...leftTokens, ...rightTokens]);
+  const jaccard = intersection.length / union.size;
+  const containment = Math.max(
+    intersection.length / leftTokens.size,
+    intersection.length / rightTokens.size,
+  );
+  return Math.round(Math.max(jaccard, containment * 0.72) * 1000) / 1000;
+}
+
+function isHighConfidenceExactDuplicate(value: unknown): boolean {
+  return semanticMemoryTokens(value).size >= 3;
+}
+
+function mergeSuggestionRank(suggestion: MemoryMergeSuggestion): number {
+  return suggestion.matchType === 'exact' ? 1 : 0;
+}
+
+function sameWorkingMemoryMergeScope(leftKey: string, rightKey: string): boolean {
+  const leftScope = decodeAgentWorkingKeyScope(leftKey);
+  const rightScope = decodeAgentWorkingKeyScope(rightKey);
+  return leftScope === rightScope;
+}
+
+function decodeAgentWorkingKeyScope(key: string): string | undefined {
+  if (!key.startsWith(AGENT_WORKING_KEY_PREFIX)) return undefined;
+  const rest = key.slice(AGENT_WORKING_KEY_PREFIX.length);
+  const slash = rest.indexOf('/');
+  if (slash <= 0) return undefined;
+  try {
+    return decodeURIComponent(rest.slice(0, slash));
+  } catch {
+    return undefined;
+  }
+}
+
+function semanticMemoryTokens(value: unknown): Set<string> {
+  const text = semanticMemoryText(canonicalMemoryValue(value)).toLowerCase();
+  const tokens = text.match(/[a-z0-9]+/g) ?? [];
+  return new Set(
+    tokens
+      .map(normalizeSemanticMemoryToken)
+      .filter((token) => token.length >= 3 && !SEMANTIC_MEMORY_STOP_WORDS.has(token)),
+  );
+}
+
+function semanticMemoryText(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return String(value ?? '');
+  }
+  if (Array.isArray(value)) {
+    return value.map(semanticMemoryText).join(' ');
+  }
+  return Object.values(value as Record<string, unknown>).map(semanticMemoryText).join(' ');
+}
+
+function normalizeSemanticMemoryToken(token: string): string {
+  if (token === 'status') return token;
+  const synonym = SEMANTIC_MEMORY_SYNONYMS.get(token);
+  if (synonym) return synonym;
+  const stemmed = token.endsWith('ing') && token.length > 5
+    ? token.slice(0, -3)
+    : token.endsWith('ed') && token.length > 4
+      ? token.slice(0, -2)
+      : token.endsWith('s') && token.length > 4
+        ? token.slice(0, -1)
+        : token;
+  return SEMANTIC_MEMORY_SYNONYMS.get(stemmed) ?? stemmed;
 }
 
 function stableStringify(value: unknown): string {
