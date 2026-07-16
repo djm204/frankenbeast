@@ -12,6 +12,20 @@ function formatNumber(n: number): string {
   return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
+function abortReasonError(reason?: unknown): Error {
+  if (reason instanceof Error && reason.name === 'AbortError') return reason;
+  const error = new Error(reason instanceof Error ? reason.message : reason === undefined ? 'MartinLoop aborted' : String(reason));
+  error.name = 'AbortError';
+  if (reason instanceof Error) {
+    error.cause = reason;
+  }
+  return error;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
 // ── Iteration progress display ──
 
 export function formatIterationProgress(opts: {
@@ -397,6 +411,10 @@ export class CliSkillExecutor {
         this.observer.endSpan(chunkSpan, { status: 'error', errorMessage: 'budget-exceeded' });
         throw budgetError;
       }
+      if (isAbortError(err)) {
+        this.observer.endSpan(chunkSpan, { status: 'error', errorMessage: String(err) });
+        throw err;
+      }
       this.observer.endSpan(chunkSpan, { status: 'error', errorMessage: String(err) });
       throw new Error(
         `MartinLoop failed for chunk "${chunkId}": ${err instanceof Error ? err.message : String(err)}`,
@@ -701,6 +719,12 @@ export class CliSkillExecutor {
     );
     this.observer.endSpan(iterSpan, { status: 'completed' }, this.observer.loopDetector);
 
+    config.martin?.onIteration?.(iteration, result);
+
+    if (wrappedConfig.abortSignal?.aborted) {
+      throw abortReasonError(wrappedConfig.abortSignal.reason);
+    }
+
     const committed = this.git.autoCommit(chunkId, executionStage, iteration);
     if (committed && checkpoint && taskId) {
       const commitHash = this.git.getCurrentHead();
@@ -715,7 +739,6 @@ export class CliSkillExecutor {
       throw new BudgetExceededError(currentCost, budgetResult.limitUsd);
     }
 
-    config.martin?.onIteration?.(iteration, result);
   }
 
   private checkStaleMate(options: {

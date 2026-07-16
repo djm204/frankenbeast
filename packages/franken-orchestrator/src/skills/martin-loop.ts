@@ -46,9 +46,13 @@ function extractPromiseTags(output: string): string[] {
     .filter((tag): tag is string => Boolean(tag && tag.length > 0));
 }
 
-function abortError(): Error {
-  const error = new Error('MartinLoop sleep aborted');
+function abortError(reason?: unknown): Error {
+  if (reason instanceof Error && reason.name === 'AbortError') return reason;
+  const error = new Error(reason instanceof Error ? reason.message : reason === undefined ? 'MartinLoop sleep aborted' : String(reason));
   error.name = 'AbortError';
+  if (reason instanceof Error) {
+    error.cause = reason;
+  }
   return error;
 }
 
@@ -63,14 +67,14 @@ export function sleepWithAbort(
   signal?: AbortSignal,
 ): Promise<void> {
   if (!signal) return sleepFn(ms);
-  if (signal.aborted) return Promise.reject(abortError());
+  if (signal.aborted) return Promise.reject(abortError(signal.reason));
 
   if (sleepFn === defaultSleep) {
     return new Promise((resolve, reject) => {
       const onAbort = (): void => {
         clearTimeout(timer);
         signal.removeEventListener('abort', onAbort);
-        reject(abortError());
+        reject(abortError(signal.reason));
       };
 
       const timer = setTimeout(() => {
@@ -85,7 +89,7 @@ export function sleepWithAbort(
   return new Promise((resolve, reject) => {
     const onAbort = (): void => {
       signal.removeEventListener('abort', onAbort);
-      reject(abortError());
+      reject(abortError(signal.reason));
     };
 
     signal.addEventListener('abort', onAbort, { once: true });
@@ -273,7 +277,7 @@ function spawnIteration(
 ): Promise<{ stdout: string; stderr: string; exitCode: number; timedOut: boolean; cleanStdout: string }> {
   return new Promise((resolve, reject) => {
     if (config.abortSignal?.aborted) {
-      reject(abortError());
+      reject(abortError(config.abortSignal.reason));
       return;
     }
 
@@ -313,7 +317,7 @@ function spawnIteration(
       settled = true;
       config.abortSignal?.removeEventListener('abort', onAbort);
       if (aborted) {
-        reject(abortError());
+        reject(abortError(config.abortSignal?.reason));
         return;
       }
       resolve(result);
@@ -473,7 +477,7 @@ export class MartinLoop {
         result = await spawnIteration(config, resolved, renderedPrompt, sessionContinue);
       } catch (error) {
         if (config.abortSignal?.aborted) {
-          throw config.abortSignal.reason instanceof Error ? config.abortSignal.reason : abortError();
+          throw abortError(config.abortSignal.reason);
         }
         if (isAbortError(error)) {
           throw error;
@@ -496,7 +500,7 @@ export class MartinLoop {
         const msg = error instanceof Error ? error.message : String(error);
         config.onSpawnError?.(activeProvider, msg);
         if (config.abortSignal?.aborted) {
-          throw config.abortSignal.reason instanceof Error ? config.abortSignal.reason : abortError();
+          throw abortError(config.abortSignal.reason);
         }
         if (failure.kind === 'spawn_error') {
           iteration--;
@@ -567,7 +571,7 @@ export class MartinLoop {
       }
 
       if (config.abortSignal?.aborted) {
-        throw config.abortSignal.reason instanceof Error ? config.abortSignal.reason : abortError();
+        throw abortError(config.abortSignal.reason);
       }
 
       const durationMs = wallClockNow() - startTime;
@@ -629,6 +633,10 @@ export class MartinLoop {
 
       config.onIteration?.(iteration, iterResult);
 
+      if (config.abortSignal?.aborted) {
+        throw abortError(config.abortSignal.reason);
+      }
+
       chunkSession = await this.persistIterationSession({
         chunkSession,
         activeProvider,
@@ -638,6 +646,10 @@ export class MartinLoop {
         resolved,
         config,
       });
+
+      if (config.abortSignal?.aborted) {
+        throw abortError(config.abortSignal.reason);
+      }
 
       // Rate limit: provider fallback chain
       if (rateLimited) {
@@ -741,18 +753,50 @@ export class MartinLoop {
       };
     }
 
-    config.sessionStore?.save(nextSession);
-
-    if (
+    const shouldCompact = Boolean(
       config.contextUsage &&
       config.snapshotStore &&
       config.compactor &&
-      nextSession.contextWindow.usageRatio >= nextSession.contextWindow.compactThreshold
-    ) {
+      nextSession.contextWindow.usageRatio >= nextSession.contextWindow.compactThreshold,
+    );
+
+    if (shouldCompact && config.snapshotStore && config.compactor) {
+      const previousSession = config.sessionStore?.load(
+        nextSession.planName,
+        nextSession.chunkId,
+        nextSession.taskId,
+      );
+      const restorePreviousSession = (): void => {
+        if (!config.sessionStore) return;
+        if (previousSession) {
+          config.sessionStore.save(previousSession);
+          return;
+        }
+        config.sessionStore.delete(nextSession.planName, nextSession.chunkId, nextSession.taskId);
+      };
+
       config.snapshotStore.writeSnapshot(nextSession, 'pre-compaction');
-      nextSession = await config.compactor.compact(nextSession);
       config.sessionStore?.save(nextSession);
+      try {
+        nextSession = await config.compactor.compact(nextSession);
+      } catch (error) {
+        if (config.abortSignal?.aborted || isAbortError(error)) {
+          restorePreviousSession();
+          throw config.abortSignal?.aborted ? abortError(config.abortSignal.reason) : error;
+        }
+        throw error;
+      }
+      if (config.abortSignal?.aborted) {
+        restorePreviousSession();
+        throw abortError(config.abortSignal.reason);
+      }
     }
+
+    if (config.abortSignal?.aborted) {
+      throw abortError(config.abortSignal.reason);
+    }
+
+    config.sessionStore?.save(nextSession);
 
     return nextSession;
   }
