@@ -92,11 +92,12 @@ function assertNonEmptyString(value: string, field: string): void {
   }
 }
 
-function assertIsoTimestamp(value: string, field: string): void {
+function normalizeIsoTimestamp(value: string, field: string): string {
   const parsed = Date.parse(value)
-  if (Number.isNaN(parsed) || new Date(parsed).toISOString() !== value) {
+  if (Number.isNaN(parsed)) {
     throw new Error(`OutcomeAttribution: ${field} must be an ISO timestamp`)
   }
+  return new Date(parsed).toISOString()
 }
 
 function assertElapsedMs(value: number): void {
@@ -190,8 +191,7 @@ export class OutcomeAttribution {
     assertNonEmptyString(input.contextSummary, 'contextSummary')
     assertNonEmptyString(input.chosenAction, 'chosenAction')
     assertOptionalStringArray(input.alternatives, 'alternatives')
-    const timestamp = input.timestamp ?? defaultTimestamp()
-    assertIsoTimestamp(timestamp, 'timestamp')
+    const timestamp = normalizeIsoTimestamp(input.timestamp ?? defaultTimestamp(), 'timestamp')
 
     const record: AgentDecisionRecord = Object.freeze({
       decisionId: randomUUID(),
@@ -217,8 +217,7 @@ export class OutcomeAttribution {
     assertOptionalStringArray(input.blockers, 'blockers')
     assertOptionalBoolean(input.rollback, 'rollback')
     assertOptionalBoolean(input.failure, 'failure')
-    const timestamp = input.timestamp ?? defaultTimestamp()
-    assertIsoTimestamp(timestamp, 'timestamp')
+    const timestamp = normalizeIsoTimestamp(input.timestamp ?? defaultTimestamp(), 'timestamp')
 
     const decision = this.decisionRecords.find(decisionRecord => decisionRecord.decisionId === input.decisionId)
     if (decision === undefined) {

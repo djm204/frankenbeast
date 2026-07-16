@@ -309,6 +309,30 @@ describe('OutcomeAttribution', () => {
     })
   })
 
+  it('accepts and normalizes common ISO timestamp forms', () => {
+    const attribution = new OutcomeAttribution()
+    const decision = attribution.recordDecision({
+      workflowId: 'issue-1693',
+      decisionType: 'timestamp-normalization',
+      contextSummary: 'External systems omit milliseconds',
+      chosenAction: 'normalize parseable ISO timestamps',
+      timestamp: '2026-07-16T18:00:00Z',
+    })
+
+    const outcome = attribution.recordOutcome({
+      decisionId: decision.decisionId,
+      workflowId: 'issue-1693',
+      verification: 'offset timestamp accepted',
+      prState: 'merged',
+      issueState: 'closed',
+      elapsedMs: 1,
+      timestamp: '2026-07-16T13:00:01-05:00',
+    })
+
+    expect(decision.timestamp).toBe('2026-07-16T18:00:00.000Z')
+    expect(outcome.timestamp).toBe('2026-07-16T18:00:01.000Z')
+  })
+
   it('rejects malformed alternatives and aggregate elapsed-time overflow', () => {
     const attribution = new OutcomeAttribution()
 
