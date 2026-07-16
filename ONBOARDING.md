@@ -53,6 +53,18 @@ Use this checklist for a first local checkout or when rebuilding a development e
   ./scripts/bootstrap.sh --dry-run
   ```
 
+### Progress badges and status output
+
+The bootstrap script prints deterministic status badges as it advances through onboarding:
+
+```text
+[onboarding:1/6:prerequisites] start - checking Node.js, npm, and Corepack
+[onboarding:1/6:prerequisites] ok - Node.js v22.13.0 satisfies the repository engine range
+[onboarding:6/6:done] complete - onboarding bootstrap reached 6/6 steps
+```
+
+Read each badge as `[onboarding:<current>/<total>:<stage>] <state> - <detail>`. Automation can key on the stable `onboarding` prefix, fraction, stage, and state values (`start`, `ok`, `error`, `complete`) while humans can follow the detail text. If option parsing fails before the first stage, the stage is `args`; otherwise `error` badges keep the active stage name so PM/liveness tooling can identify the failed stage without parsing prose.
+
 - [ ] Review `.env` and fill in only the values you need:
 
   ```bash
@@ -246,6 +258,8 @@ Placeholder-only sections such as `<TBD>`, `TODO`, `N/A`, or empty headings fail
 - [ ] After changing `network.secureBackend`, re-store or migrate any existing secret refs. Changing config alone does not move already stored secret values between backends.
 
 ## Troubleshooting
+
+If a PM, liveness monitor, or operator reports a stalled worker, use the dedicated [troubleshooting guide for stalled workers](docs/guides/troubleshooting-stalled-workers.md) before respawning or deleting worktrees. It walks through live task/PR evidence, active versus blocked versus stale classifications, safe recovery actions, and the handoff fields future workers need.
 
 - [ ] `npm install` fails with an engine error:
   - Check `node --version` against the root `engines.node` range.
