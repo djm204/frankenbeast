@@ -297,3 +297,6 @@
 
 ## 2026-07-16 — DR process cleanup closeout
 - DR process cleanup planners should ignore terminal attempts before PID counting and orphan scans, treat missing-PID live attempts as possible owners of matching processes, and include process-start tokens on executable orphan actions so signal-time consumers can revalidate PID identity before termination.
+
+## 2026-07-16 — Orchestrator focused test command
+- In the root workspace, `npm test -- --run ...` passes `--run` to Turbo and fails. For one orchestrator test file, run `npm run test --workspace @franken/orchestrator -- tests/unit/path.test.ts`; run `npm run build` first if package-local typecheck cannot resolve internal `@franken/*` workspace declarations.

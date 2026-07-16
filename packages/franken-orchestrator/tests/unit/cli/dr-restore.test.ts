@@ -17,8 +17,13 @@ describe('dr restore-dry-run CLI', () => {
     expect(args.drLiveManifestPath).toBe('/live/manifest.json');
   });
 
-  it('parses encrypted backup, verify, list, restore, and dead-letter commands', () => {
+  it('parses encrypted backup, verify, list, restore, export, and dead-letter commands', () => {
     expect(parseArgs(['dr', 'backup', '/state', '/backup.enc.json', '/key']).drKeyFilePath).toBe('/key');
+    const pointInTimeExport = parseArgs(['--dry-run', 'dr', 'export', '/state', '/incident-export.json']);
+    expect(pointInTimeExport.drAction).toBe('export');
+    expect(pointInTimeExport.drBackupManifestPath).toBe('/state');
+    expect(pointInTimeExport.drLiveManifestPath).toBe('/incident-export.json');
+    expect(pointInTimeExport.dryRun).toBe(true);
     expect(parseArgs(['dr', 'list', '/backup.enc.json']).drAction).toBe('list');
     expect(parseArgs(['dr', 'verify', '/backup.enc.json', '/key']).drLiveManifestPath).toBe('/key');
     const restore = parseArgs(['--dry-run', 'dr', 'restore', '/backup.enc.json', '/restore', '/key']);
@@ -67,6 +72,75 @@ describe('dr restore-dry-run CLI', () => {
       expect(listReport.command).toBe('dr list');
       expect(listReport.verified).toBe(false);
       expect(listReport.verificationRequired).toContain('dr verify');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('creates a redacted point-in-time export with manifest, config checksums, summaries, and log tails', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dr-export-'));
+    const stateDir = join(dir, 'state');
+    const exportPath = join(dir, 'incident-export.json');
+    const output: string[] = [];
+
+    try {
+      await mkdir(join(stateDir, 'approvals'), { recursive: true });
+      await mkdir(join(stateDir, 'memory'), { recursive: true });
+      await mkdir(join(stateDir, 'runs', 'run-1'), { recursive: true });
+      await mkdir(join(stateDir, 'logs'), { recursive: true });
+      await writeFile(join(stateDir, 'config.json'), JSON.stringify({ provider: 'openai', apiToken: 'secret-config-token' }), 'utf8');
+      await writeFile(join(stateDir, 'approvals', 'ledger.json'), JSON.stringify({ approvals: [{ id: 'approval-1', token: 'secret-approval-token', state: 'pending' }] }), 'utf8');
+      await writeFile(join(stateDir, 'memory', 'store.json'), JSON.stringify({ memories: [{ key: 'user.pref', value: 'private memory body', metadata: { source: 'chat' } }] }), 'utf8');
+      await writeFile(join(stateDir, 'kanban-tasks.json'), JSON.stringify({ tasks: [{ id: 'task-1', title: 'secret task title', status: 'running' }] }), 'utf8');
+      await writeFile(join(stateDir, 'runs', 'run-1', 'metadata.json'), JSON.stringify({ id: 'run-1', taskId: 'task-1', status: 'running' }), 'utf8');
+      await writeFile(join(stateDir, 'logs', 'run-1.log'), [
+        'starting run',
+        'OPENAI_API_KEY=test-key-needs-redaction',
+        'finished run',
+      ].join('\n'), 'utf8');
+
+      await handleDrCommand({
+        action: 'export',
+        backupManifestPath: stateDir,
+        liveManifestPath: exportPath,
+        dryRun: true,
+        generatedAt: '2026-07-16T09:00:00.000Z',
+        print: (message) => output.push(message),
+      });
+      const preview = JSON.parse(output.pop() ?? '') as { command: string; dryRun: boolean; wouldWrite: boolean };
+      expect(preview.command).toBe('dr export');
+      expect(preview.dryRun).toBe(true);
+      expect(preview.wouldWrite).toBe(false);
+      await expect(readFile(exportPath, 'utf8')).rejects.toThrow();
+
+      await handleDrCommand({
+        action: 'export',
+        backupManifestPath: stateDir,
+        liveManifestPath: exportPath,
+        generatedAt: '2026-07-16T09:00:00.000Z',
+        print: (message) => output.push(message),
+      });
+      const reportText = await readFile(exportPath, 'utf8');
+      const report = JSON.parse(reportText) as {
+        command: string;
+        manifest: { generatedAt: string; configChecksums: Array<{ path: string; sha256: string }>; sections: Record<string, number> };
+        evidence: { approvals: unknown[]; memory: unknown[]; tasks: unknown[]; runs: unknown[]; logs: Array<{ tail: string[] }> };
+      };
+
+      expect(report.command).toBe('dr export');
+      expect(report.manifest.generatedAt).toBe('2026-07-16T09:00:00.000Z');
+      expect(report.manifest.configChecksums).toEqual([expect.objectContaining({ path: 'config.json', sha256: expect.stringMatching(/^sha256:/u) })]);
+      expect(report.manifest.sections).toEqual(expect.objectContaining({ approvals: 1, memory: 1, tasks: 1, runs: 1, logs: 1 }));
+      expect(report.evidence.approvals).toHaveLength(1);
+      expect(report.evidence.memory).toEqual([expect.objectContaining({ path: 'memory/store.json', recordCount: 1 })]);
+      expect(report.evidence.tasks).toEqual([expect.objectContaining({ path: 'kanban-tasks.json', records: [expect.objectContaining({ id: 'task-1', status: 'running' })] })]);
+      expect(report.evidence.runs).toEqual([expect.objectContaining({ path: 'runs/run-1/metadata.json', records: [expect.objectContaining({ id: 'run-1', status: 'running' })] })]);
+      expect(report.evidence.logs[0]?.tail.join('\n')).toContain('<redacted>');
+      expect(reportText).not.toContain('secret-config-token');
+      expect(reportText).not.toContain('secret-approval-token');
+      expect(reportText).not.toContain('private memory body');
+      expect(reportText).not.toContain('secret task title');
+      expect(reportText).not.toContain('test-key-needs-redaction');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
