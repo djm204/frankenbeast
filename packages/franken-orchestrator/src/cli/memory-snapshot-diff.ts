@@ -1,9 +1,8 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import Database from 'better-sqlite3';
+import { CURRENT_MEMORY_SCHEMA_VERSION } from '@franken/brain';
 import { BrainSnapshotSchema, ExecutionStateSchema, type BrainSnapshot, type EpisodicEvent } from '@franken/types';
-
-const CURRENT_MEMORY_SCHEMA_VERSION = 1;
 const REQUIRED_BACKUP_TABLES = [
   'working_memory',
   'episodic_events',
