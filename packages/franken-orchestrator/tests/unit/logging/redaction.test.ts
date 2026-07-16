@@ -79,6 +79,23 @@ describe('logging redaction', () => {
     expect(JSON.stringify(result.decisions)).not.toContain(value);
   });
 
+  it('keeps opaque-token and password-only URL masking in provenance-aware text redaction', () => {
+    const bearer = ['bearerCredential', 'ForReview123'].join('');
+    const password = ['cache', 'pass'].join('');
+    const result = redactSensitiveTextWithProvenance(`Authorization: Bearer ${bearer} redis://:${password}@localhost:6379/0`, '$.message');
+
+    expect(result.value).toBe('Authorization: Bearer <redacted> redis://:<redacted>@localhost:6379/0');
+    expect(result.value).not.toContain(bearer);
+    expect(result.value).not.toContain(password);
+    expect(result.decisions).toEqual([expect.objectContaining({
+      path: '$.message',
+      key: 'opaque-secret-literal',
+      source: 'text-opaque-literal',
+      rule: 'sensitive-key',
+      replacement: '<redacted>',
+    })]);
+  });
+
   it('returns path-aware provenance for object and nested string redaction decisions', () => {
     const objectValue = secretMarker('object', 'value');
     const textValue = secretMarker('inline', 'value');

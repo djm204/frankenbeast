@@ -129,6 +129,11 @@ function classifySqliteTable(table: string): SqliteEvidenceSection | undefined {
   return undefined;
 }
 
+function isMemoryStorePath(path: string): boolean {
+  const normalized = path.toLowerCase();
+  return normalized.includes('/memory') || basename(normalized) === 'memory.db';
+}
+
 function quoteSqliteIdentifier(identifier: string): string {
   return `"${identifier.replace(/"/gu, '""')}"`;
 }
@@ -198,11 +203,11 @@ async function checksumAndTailFor(root: string, absolutePath: string, limit: num
   let bytes = 0;
   let pending = '';
   await new Promise<void>((resolvePromise, reject) => {
-    const stream = createReadStream(absolutePath, { encoding: 'utf8' });
-    stream.on('data', (chunk: string | Buffer) => {
-      const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
-      bytes += Buffer.byteLength(text);
-      hasher.update(text);
+    const stream = createReadStream(absolutePath);
+    stream.on('data', (chunk: Buffer) => {
+      bytes += chunk.byteLength;
+      hasher.update(chunk);
+      const text = chunk.toString('utf8');
       const parts = `${pending}${text}`.split(/\r?\n/u);
       pending = parts.pop() ?? '';
       for (const line of parts) {
@@ -227,6 +232,7 @@ async function checksumAndTailFor(root: string, absolutePath: string, limit: num
 
 function summarizeSqliteTables(absolutePath: string, checksum: FileChecksum): Record<SqliteEvidenceSection, SqliteTableSummary[]> {
   const result: Record<SqliteEvidenceSection, SqliteTableSummary[]> = { approvals: [], tasks: [], runs: [] };
+  if (isMemoryStorePath(checksum.path)) return result;
   let db: Database.Database | undefined;
   try {
     db = new Database(absolutePath, { readonly: true, fileMustExist: true });

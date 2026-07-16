@@ -4,7 +4,7 @@ const SENSITIVE_KEY_RE = /(?:^|[_-])(?:SECRET|TOKEN|PASSWORD|PASSWD|PWD|CREDENTI
 const ASSIGNMENT_RE = /\b([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)/gu;
 const JSON_FIELD_RE = /("([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*)("(?:\\.|[^"\\])*"|[^,}\]\s]+)/gu;
 
-export type RedactionDecisionSource = 'text-assignment' | 'text-json-field' | 'object-key';
+export type RedactionDecisionSource = 'text-assignment' | 'text-json-field' | 'text-opaque-literal' | 'object-key';
 
 export interface RedactionDecision {
   /** Secret-free location of the redaction decision. Object paths use dot/bracket notation. */
@@ -33,7 +33,7 @@ export function isSensitiveLogKey(key: string): boolean {
 }
 
 export function redactSensitiveText(text: string): string {
-  return maskOpaqueSecretLiterals(redactSensitiveTextWithProvenance(text).value);
+  return redactSensitiveTextWithProvenance(text).value;
 }
 
 export function maskOpaqueSecretLiterals(text: string): string {
@@ -43,7 +43,7 @@ export function maskOpaqueSecretLiterals(text: string): string {
     .replace(/\bsk-[A-Za-z0-9_-]{12,}\b/gu, REDACTED)
     .replace(/\bxox[baprs]-[A-Za-z0-9-]{10,}\b/gu, REDACTED)
     .replace(/\b([A-Za-z][A-Za-z0-9+.-]*:\/\/[^:\s"'/@]+):[^@\s"']+@/gu, `$1:${REDACTED}@`)
-    .replace(/\b((?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/[^:\s"']+):[^@\s"']+@/giu, `$1:${REDACTED}@`)
+    .replace(/\b((?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/[^:\s"']*):[^@\s"']+@/giu, `$1:${REDACTED}@`)
     .replace(/\b(?:Bearer|Basic|Bot)\s+[A-Za-z0-9._~+/=-]{8,}\b/giu, (match) => `${match.split(/\s+/u)[0]} ${REDACTED}`)
     .replace(/((?:^|[\s"'])--(?:api-?key|auth|authorization|bearer|password|secret|token)\s+)[^\s"']+/giu, `$1${REDACTED}`)
     .replace(/((?:^|[\s"'])--(?:api-?key|auth|authorization|bearer|password|secret|token)=)[^\s"']+/giu, `$1${REDACTED}`)
@@ -60,13 +60,18 @@ export function redactSensitiveTextWithProvenance(text: string, path = '$'): Red
     return `${key}=${REDACTED}`;
   });
 
-  const value = withAssignmentsRedacted.replace(JSON_FIELD_RE, (match, prefix: string, key: string) => {
+  const jsonRedacted = withAssignmentsRedacted.replace(JSON_FIELD_RE, (match, prefix: string, key: string) => {
     if (!isSensitiveLogKey(key)) {
       return match;
     }
     decisions.push(createDecision(path, key, 'text-json-field'));
     return `${prefix}"${REDACTED}"`;
   });
+
+  const value = maskOpaqueSecretLiterals(jsonRedacted);
+  if (value !== jsonRedacted) {
+    decisions.push(createDecision(path, 'opaque-secret-literal', 'text-opaque-literal'));
+  }
 
   return { value, decisions };
 }
@@ -96,7 +101,7 @@ function redactValue(
   if (typeof value === 'string') {
     const result = redactSensitiveTextWithProvenance(value, formatPath(path));
     decisions.push(...result.decisions);
-    return maskOpaqueSecretLiterals(result.value);
+    return result.value;
   }
 
   if (typeof value !== 'object' || value === null) {

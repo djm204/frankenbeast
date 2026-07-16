@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -105,8 +106,11 @@ describe('dr restore-dry-run CLI', () => {
         'Authorization: Bearer bearerCredentialForReview123',
         'finished run',
       ].join('\n'), 'utf8');
+      const binaryLog = Buffer.from([0xff, 0xfe, 0x41, 0x0a]);
+      await writeFile(join(stateDir, 'logs', 'binary.log'), binaryLog);
       const beastDb = new Database(join(stateDir, 'beast.db'));
       const kanbanDb = new Database(join(stateDir, 'kanban.db'));
+      const memoryDb = new Database(join(stateDir, 'memory.db'));
       try {
         beastDb.exec(`CREATE TABLE beast_runs (id TEXT PRIMARY KEY, status TEXT, definition_id TEXT, created_at TEXT);`);
         beastDb.prepare('INSERT INTO beast_runs (id, status, definition_id, created_at) VALUES (?, ?, ?, ?)')
@@ -114,9 +118,13 @@ describe('dr restore-dry-run CLI', () => {
         kanbanDb.exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, status TEXT, created_at TEXT);`);
         kanbanDb.prepare('INSERT INTO tasks (id, status, created_at) VALUES (?, ?, ?)')
           .run('task-db-1', 'ready', '2026-07-16T08:00:00.000Z');
+        memoryDb.exec(`CREATE TABLE episodic_events (id TEXT PRIMARY KEY, status TEXT, created_at TEXT);`);
+        memoryDb.prepare('INSERT INTO episodic_events (id, status, created_at) VALUES (?, ?, ?)')
+          .run('memory-event-1', 'stored', '2026-07-16T08:00:00.000Z');
       } finally {
         beastDb.close();
         kanbanDb.close();
+        memoryDb.close();
       }
 
       await handleDrCommand({
@@ -150,17 +158,23 @@ describe('dr restore-dry-run CLI', () => {
       expect(report.command).toBe('dr export');
       expect(report.manifest.generatedAt).toBe('2026-07-16T09:00:00.000Z');
       expect(report.manifest.configChecksums).toEqual([expect.objectContaining({ path: 'config.json', sha256: expect.stringMatching(/^sha256:/u) })]);
-      expect(report.manifest.sections).toEqual(expect.objectContaining({ approvals: 2, memory: 1, tasks: 2, runs: 2, logs: 1 }));
+      expect(report.manifest.sections).toEqual(expect.objectContaining({ approvals: 2, memory: 2, tasks: 2, runs: 2, logs: 2 }));
       expect(report.evidence.approvals).toEqual(expect.arrayContaining([
         expect.objectContaining({ path: 'approvals/ledger.json' }),
         expect.objectContaining({ path: 'chat/session-1.json', records: [expect.objectContaining({ id: 'approval-chat-1' })] }),
       ]));
-      expect(report.evidence.memory).toEqual([expect.objectContaining({ path: 'memory/store.json', recordCount: 1 })]);
+      expect(report.evidence.memory).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'memory/store.json', recordCount: 1 })]));
       expect(report.evidence.tasks).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'kanban-tasks.json', records: [expect.objectContaining({ id: 'task-1', status: 'running' })] })]));
       expect(report.evidence.runs).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'runs/run-1/metadata.json', records: [expect.objectContaining({ id: 'run-1', status: 'running' })] })]));
       expect(report.evidence.tasks).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'kanban.db', table: 'tasks', rowCount: 1 })]));
       expect(report.evidence.runs).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'beast.db', table: 'beast_runs', rowCount: 1 })]));
-      expect(report.evidence.logs[0]?.tail.join('\n')).toContain('<redacted>');
+      expect(report.evidence.runs).not.toEqual(expect.arrayContaining([expect.objectContaining({ path: 'memory.db', table: 'episodic_events' })]));
+      expect(report.evidence.logs).toEqual(expect.arrayContaining([expect.objectContaining({
+        path: 'logs/binary.log',
+        bytes: binaryLog.byteLength,
+        sha256: `sha256:${createHash('sha256').update(binaryLog).digest('hex')}`,
+      })]));
+      expect(report.evidence.logs).toEqual(expect.arrayContaining([expect.objectContaining({ tail: expect.arrayContaining(['Authorization: Bearer <redacted>']) })]));
       expect(reportText).not.toContain('secret-config-token');
       expect(reportText).not.toContain('secret-approval-token');
       expect(reportText).not.toContain('private memory body');
