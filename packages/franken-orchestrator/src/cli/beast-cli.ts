@@ -215,7 +215,7 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
           throw new UnknownBeastRunError(args.beastTarget);
         }
         const attempts = services.runs.listAttempts(args.beastTarget);
-        print(JSON.stringify(statusPayload(run, attempts, services.maintenance.getState()), null, 2));
+        print(JSON.stringify(statusPayload(run, attempts, services.maintenance?.getState()), null, 2));
         return;
       }
       case 'logs': {
