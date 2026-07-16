@@ -95,10 +95,10 @@ function uidMatches(
 }
 
 function argsMatch(attempt: ProcessCleanupAttemptSnapshot, processEntry: ProcessTableEntry): boolean {
-  if (!attempt.expectedArgs || !processEntry.args) return false;
-  const actualArgs = processEntry.args;
-  return actualArgs.length === attempt.expectedArgs.length
-    && attempt.expectedArgs.every((arg, index) => actualArgs[index] === arg);
+  if (!attempt.expectedArgs) return false;
+  if (!processEntry.args) return false;
+  return processEntry.args.length === attempt.expectedArgs.length
+    && attempt.expectedArgs.every((arg, index) => processEntry.args?.[index] === arg);
 }
 
 function startTimeMatches(attempt: ProcessCleanupAttemptSnapshot, processEntry: ProcessTableEntry): boolean {
@@ -127,7 +127,9 @@ function isMatchingOrphanCandidate(
   return commandMatches(attempt, processEntry)
     && cwdMatches(attempt, processEntry)
     && uidMatches(attempt, processEntry, currentUid)
-    && argsMatch(attempt, processEntry);
+    && argsMatch(attempt, processEntry)
+    && typeof processEntry.startTimeTicks === 'string'
+    && processEntry.startTimeTicks.length > 0;
 }
 
 function finding(input: ProcessCleanupFinding): ProcessCleanupFinding {
