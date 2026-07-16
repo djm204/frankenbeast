@@ -9,6 +9,12 @@ import { assertNoBrowserOperatorToken, assertSecureProxyTarget, loadProxyEnv, lo
 type ServerSideProxyConfig = Record<string, string | ProxyOptions>;
 
 const repoRootDir = fileURLToPath(new URL('../../', import.meta.url));
+const dashboardSecurityHeaders = {
+  'Content-Security-Policy': "frame-ancestors 'none'",
+  'X-Frame-Options': 'DENY',
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'same-origin',
+} as const;
 const rootPackageJson = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
 ) as { version: string };
@@ -55,6 +61,10 @@ function isSameOriginProxyRequest(req: IncomingMessage): boolean {
   }
 }
 
+function requestProtocol(req: IncomingMessage): 'http' | 'https' {
+  return (req.socket as { encrypted?: boolean }).encrypted ? 'https' : 'http';
+}
+
 function withServerSideOperatorAuth(target: string, operatorToken: string, extra: ProxyOptions = {}): ProxyOptions {
   return {
     target,
@@ -68,11 +78,14 @@ function withServerSideOperatorAuth(target: string, operatorToken: string, extra
       return undefined;
     },
     configure(proxy) {
-      if (!operatorToken) {
-        return;
-      }
-      proxy.on('proxyReq', (proxyReq) => {
-        proxyReq.setHeader('authorization', `Bearer ${operatorToken}`);
+      proxy.on('proxyReq', (proxyReq, req) => {
+        if (operatorToken) {
+          proxyReq.setHeader('authorization', `Bearer ${operatorToken}`);
+        }
+        if (req.headers.host) {
+          proxyReq.setHeader('x-forwarded-host', req.headers.host);
+          proxyReq.setHeader('x-forwarded-proto', requestProtocol(req));
+        }
       });
     },
     ...extra,
@@ -101,9 +114,11 @@ export default defineConfig(async ({ command, mode }) => {
       __FRANKENBEAST_VERSION__: JSON.stringify(rootPackageJson.version),
     },
     server: {
+      headers: dashboardSecurityHeaders,
       proxy: serverSideProxy,
     },
     preview: {
+      headers: dashboardSecurityHeaders,
       proxy: serverSideProxy,
     },
     build: {

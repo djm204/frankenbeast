@@ -21,6 +21,11 @@
 - After a dispatch `onRunCreated` callback, re-read persisted run state before startNow execution; signal cleanup can mark a just-created run stopped before any attempt exists.
 - Keep post-spawn metadata providers inside the same cleanup try/catch as attempt persistence so provider failures cannot leave a spawned process without an attempt record.
 
+## 2026-07-15 — Local dashboard CSRF/clickjacking hardening
+- Local UI CSRF gates must account for every dashboard serving path: Hono API, built static dashboard, Vite dev server, static proxy, and chat-server-to-daemon compatibility proxy. Pair frame denial headers with both API and HTML/static responses.
+- When comparing Origin for browser mutations, check explicit `allowedOrigins` before rejecting on `Sec-Fetch-Site`, and trust implicit same-origin only for loopback hosts (`localhost`, `127.0.0.1`, `[::1]`) to avoid DNS-rebinding Host equality bypasses.
+- Multi-hop dashboard proxies should preserve existing `x-forwarded-host`/`x-forwarded-proto` rather than overwriting them at inner hops; otherwise daemon-side same-origin checks see the wrong origin and break valid dashboard Beast mutations.
+
 ## 2026-07-15 — Graceful shutdown drain gates
 - For daemon drain modes, make one outer mutation-admission middleware own both the draining check and in-flight counter; nested route-specific re-checks can reject already-admitted requests after shutdown begins.
 - If shutdown times out waiting for in-flight mutations, do not release ownership markers such as pid files until mutations are quiesced or definitively aborted; otherwise a replacement daemon can start while the old handler still mutates shared state.
