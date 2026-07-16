@@ -70,7 +70,7 @@ Every mutation or route change must have a row before it happens.
 
 ## 6. Recovery action checklist
 
-Use the matching lane only after stabilization is complete.
+Use the matching lane only after stabilization is complete. For a non-mutating rehearsal of primary provider failure, fallback-only routing, in-flight backlog freeze, recovery probe, and resume order, run the [provider outage recovery drill](provider-outage-recovery-drill.md) before practicing live incident response.
 
 ### Worker or Kanban failure
 

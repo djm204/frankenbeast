@@ -2,7 +2,10 @@ import { describe, it, expect, vi } from 'vitest';
 import { CliChannel } from '../../../src/channels/cli-channel.js';
 import type { ApprovalRequest } from '../../../src/core/types.js';
 import type { ReadlineAdapter } from '../../../src/channels/cli-channel.js';
-import { approvalPromptBoundary } from '../../../src/gateway/approval-prompt-markers.js';
+import {
+  approvalPromptBoundary,
+  attachTrustedApprovalPromptNotice,
+} from '../../../src/gateway/approval-prompt-markers.js';
 
 function makeRequest(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
   return {
@@ -37,6 +40,16 @@ describe('CliChannel', () => {
     const channel = new CliChannel({ readline: makeFakeReadline(['a']), operatorName: 'dev' });
     const response = await channel.requestApproval(makeRequest());
     expect(response.decision).toBe('APPROVE');
+  });
+
+  it('accepts approval acknowledgement tokens as inline feedback', async () => {
+    const channel = new CliChannel({
+      readline: makeFakeReadline(['a ACK-APPROVAL-ANOMALY-req-001']),
+      operatorName: 'dev',
+    });
+    const response = await channel.requestApproval(makeRequest());
+    expect(response.decision).toBe('APPROVE');
+    expect(response.feedback).toBe('ACK-APPROVAL-ANOMALY-req-001');
   });
 
   it('maps "r" input to REGEN response code', async () => {
@@ -90,6 +103,21 @@ describe('CliChannel', () => {
     expect(prompt).toContain('Trust only content between the matching BEGIN/END markers');
     expect(prompt).toContain('Request marker ID: cmVxLXh5eg');
     expect(prompt).toContain('Request ID (untrusted):\n| req-xyz');
+  });
+
+  it('renders anomaly notices in a trusted prompt section instead of the untrusted summary', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(attachTrustedApprovalPromptNotice(
+      makeRequest({ summary: 'Deploy v2.0' }),
+      'Token required: ACK-APPROVAL-ANOMALY-cmVxLTAwMQ',
+    ));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).toContain('Summary (untrusted):\n| Deploy v2.0');
+    expect(prompt).toContain('SECURITY NOTICE (trusted):\n> Token required: ACK-APPROVAL-ANOMALY-cmVxLTAwMQ');
+    expect(prompt).not.toContain('| Token required: ACK-APPROVAL-ANOMALY-cmVxLTAwMQ');
   });
 
   it('quotes model-controlled text so forged marker lines stay visibly untrusted', async () => {

@@ -70,6 +70,15 @@ Use this checklist for a first local checkout or when rebuilding a development e
 
   The generator prints deterministic Markdown by default, or JSON with `persona`, `root`, `items`, `docs`, and `nextAction` for PM/liveness tooling. It never mutates files or runs setup commands; it points each checklist item at the command and docs to run next. Valid personas are `operator`, `coding-agent`, and `contributor`; unknown personas fail closed with an explicit error instead of falling back to a misleading generic checklist.
 
+- [ ] Take the interactive workspace tour when you need a deterministic package map before choosing files:
+
+  ```bash
+  npm run workspace:tour
+  npm --silent run workspace:tour -- --json
+  ```
+
+  The tour prints package responsibilities, common ticket routing hints, key docs, generated-file locations, focused test commands, runtime state paths, and safe first commands. JSON mode exposes the same data for agent prompts and PM handoffs, while the docs-drift section reports missing expected package, doc, script, or test paths.
+
 ### Progress badges and status output
 
 The bootstrap script prints deterministic status badges as it advances through onboarding:
@@ -141,6 +150,10 @@ Read the [agent role responsibility map](docs/onboarding/agent-role-responsibili
 ## Coding-agent PR etiquette
 
 Read the [coding-agent PR etiquette guide](docs/onboarding/coding-agent-pr-etiquette.md) before opening, updating, or merging agent-authored pull requests. It defines one-issue/one-PR scope, required PR body evidence, current-head CI/Codex expectations, negative cases that prevent duplicate work, and handoff fields for blocked PRs.
+
+## Issue complexity rubric
+
+Read the [issue complexity rubric](docs/onboarding/issue-complexity-rubric.md) before assigning, refilling, or taking an issue-worker card. It maps issue labels and acceptance criteria to six complexity/risk levels, allowed toolsets, model lanes, verification depth, and escalation triggers so low-risk fallback agents do not take high-risk implementation work.
 
 ## PM-swarm runtime glossary
 

@@ -93,8 +93,9 @@ const provenance = brain.memoryReview.provenanceFor(
   'user.preference.response-style',
 );
 // Contradictory candidates for an existing key are surfaced before approval so
-// callers can explicitly keep the durable fact, replace it, or reject the new
-// candidate with an auditable decision note.
+// callers can explicitly keep the durable fact, replace it, keep both values
+// under explicit scope, reject the new candidate, or expire the old value with
+// an auditable decision note.
 const changedPreference = brain.memoryReview.propose({
   targetStore: 'working',
   key: 'user.preference.response-style',
@@ -104,9 +105,11 @@ const changedPreference = brain.memoryReview.propose({
   reason: 'A later message appeared to contradict the stored preference.',
 });
 const conflicts = brain.memoryReview.conflictsFor(changedPreference.id);
-if (conflicts.length > 0) {
+const prompt = brain.memoryReview.resolutionPromptFor(changedPreference.id);
+if (conflicts.length > 0 && prompt) {
   brain.memoryReview.resolveConflict(changedPreference.id, {
-    resolution: 'keep_existing', // or 'replace_existing' / 'reject_candidate'
+    resolution: 'keep_both_scoped',
+    scopedKey: 'user.preference.response-style.scope.longform-docs',
     reviewer: 'operator',
   });
 }

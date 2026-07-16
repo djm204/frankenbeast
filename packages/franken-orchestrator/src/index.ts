@@ -167,6 +167,22 @@ export { LlmPlanner } from './skills/llm-planner.js';
 export { quoteUntrustedPayload, wrapUntrustedContent } from './prompt/untrusted-content.js';
 export type { UntrustedContentSource } from './prompt/untrusted-content.js';
 export { buildProjectMemorySnapshot } from './memory/project-memory-snapshot.js';
+export {
+  dryRunReplayDeadLetterEntry,
+  inspectDeadLetterEntry,
+  listDeadLetterEntries,
+  recordRetryExhaustionToDeadLetterQueue,
+  retireDeadLetterEntry,
+} from './dr/dead-letter-queue.js';
+export type {
+  DeadLetterEntry,
+  DeadLetterEntryStatus,
+  DeadLetterReplayDryRunReport,
+  DeadLetterReplaySafety,
+  DryRunReplayOptions,
+  RecordRetryExhaustionOptions,
+  RetireDeadLetterEntryOptions,
+} from './dr/dead-letter-queue.js';
 export type {
   BuildProjectMemorySnapshotInput,
   ProjectMemoryRecord,
@@ -275,6 +291,10 @@ export {
   buildRestoreDryRunReport,
   detectRestorePreviewConflicts,
 } from './dr/restore-preview.js';
+export {
+  buildProcessCleanupPlan,
+  renderProcessCleanupDryRunPlan,
+} from './dr/process-cleanup-plan.js';
 export type {
   ApprovalLedgerRecordSummary,
   ApprovalLedgerRecoveryFinding,
@@ -321,6 +341,18 @@ export type {
   RestorePreviewResult,
   RestorePreviewSeverity,
 } from './dr/restore-preview.js';
+export type {
+  ProcessCleanupAction,
+  ProcessCleanupActionKind,
+  ProcessCleanupAttemptSnapshot,
+  ProcessCleanupFinding,
+  ProcessCleanupFindingCode,
+  ProcessCleanupPlanOptions,
+  ProcessCleanupPlanReport,
+  ProcessCleanupSeverity,
+  ProcessCleanupStatus,
+  ProcessTableEntry,
+} from './dr/process-cleanup-plan.js';
 
 // CLI — file writer
 export { writeDesignDoc, readDesignDoc } from './cli/file-writer.js';

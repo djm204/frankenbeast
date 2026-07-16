@@ -19,6 +19,22 @@ export {
 } from './evidence/tool-call-evidence.js';
 export { BenchmarkTaskSchema } from './corpus/schema.js';
 export { loadCorpus, loadTaskFile } from './corpus/loader.js';
+export {
+  WorkflowRegressionCandidateResultSchema,
+  WorkflowRegressionCandidateResultsSchema,
+  WorkflowRegressionFixtureSchema,
+  WorkflowRegressionMessageSchema,
+  evaluateWorkflowRegression,
+  loadWorkflowRegressionCandidateResults,
+  loadWorkflowRegressionFixture,
+  loadWorkflowRegressionFixtures,
+  type WorkflowRegressionCandidateResult,
+  type WorkflowRegressionFixture,
+  type WorkflowRegressionFixtureResult,
+  type WorkflowRegressionMessage,
+  type WorkflowRegressionOptions,
+  type WorkflowRegressionReport,
+} from './learning/regression.js';
 export { FixtureStore } from './workspace/fixture-store.js';
 export {
   WorkspaceProvisioner,

@@ -104,6 +104,12 @@ Resolves the GitHub `upstream` remote from the current fork checkout and uses th
 | `--provider <name>` | CLI agent provider | claude |
 | `--providers <list>` | Fallback chain for rate limits | — |
 
+## Complexity routing
+
+Before assigning or executing an issue, classify it with the [issue complexity rubric](../onboarding/issue-complexity-rubric.md). The rubric maps labels such as `docs`, `security`, `availability`, and priority tags to complexity/risk levels, allowed toolsets, recommended model lanes, verification depth, and escalation triggers.
+
+Use the rubric result as separate PM handoff metadata or an issue comment alongside the CLI's existing review table. The current `frankenbeast issues` table still reports implementation complexity such as `one-shot` or `chunked`; the C0-C5 rubric is the assignment-risk overlay PMs use to keep C0/C1 work in low-risk lanes while routing C3-C5 cross-package, security, disaster-recovery, or PM-swarm policy work to senior or PM-supervised lanes.
+
 ## Review Flow
 
 After triage, you see a table:
@@ -131,7 +137,7 @@ Issue execution has a programmatic backpressure policy for orchestrator/refill c
 
 During degraded mode, the worker routing policy is explicit and machine-readable through `routeIssueWorkerForDegradedMode(...)` and the logged `workerRoute` payload. Fresh issues with no checkpoint progress are routed to `defer-fresh-start`, while checkpointed/in-progress issues are routed to `resume-checkpointed` so the runner can finish or harden already-started work without launching duplicate fresh workers. Completed checkpoints route to `complete-checkpointed`. Each route includes `mode`, `action`, `reason`, and `guidance` fields for PM/liveness tooling.
 
-The deterministic burst-load fixture at `packages/franken-orchestrator/tests/unit/issues/fixtures/burst-dispatch-load.json` captures an overloaded dispatch tick, a recovered-capacity tick, and a queue-depth edge case. Use it when changing availability/refill policy so tests can prove both the pause reason and the automatic recovery behavior remain machine-readable.
+The deterministic burst-load fixture at `packages/franken-orchestrator/tests/unit/issues/fixtures/burst-dispatch-load.json` captures an overloaded dispatch tick, a recovered-capacity tick, and a queue-depth edge case. Use it when changing availability/refill policy so tests can prove both the pause reason and the automatic recovery behavior remain machine-readable. For an operator tabletop that rehearses primary provider failure, fallback-only routing, backlog freeze, recovery probes, and resume order without mutating live state, use [`docs/dr/provider-outage-recovery-drill.md`](../dr/provider-outage-recovery-drill.md).
 
 For live operator awareness before a hard pause, set `thresholds.capacityWatermarkRatio` to a value between `0` and `1` (for example `0.8`). The runner then emits `[issues] Capacity watermark alert for issue #<n>` with structured `alerts[]` whenever capacity-style signals such as `activeProcesses`, `inFlightBacklog`, `pendingIssueCount`, `oldestQueueAgeMs`, or `systemLoadAverage` reach that percentage of their configured threshold. Watermark alerts do not skip the issue; they are warning telemetry for PM/liveness tooling. Values below the watermark remain quiet so normal refill output is not noisy.
 

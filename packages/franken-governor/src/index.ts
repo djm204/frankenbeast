@@ -59,16 +59,27 @@ export type { GovernorMemoryPort, EpisodicTraceRecord } from './audit/index.js';
 export { GovernorAuditRecorder } from './audit/index.js';
 
 export {
+  ApprovalAnomalyDetector,
   createEvaluatorsFromApprovalPolicyManifest,
+  DEFAULT_APPROVAL_ANOMALY_CONFIG,
   evaluateHighRiskActionPolicy,
+  extractApprovalTrafficEvidence,
+  formatApprovalAnomalyAcknowledgementToken,
+  formatApprovalAnomalySummary,
   formatApprovalPolicyManifestPayload,
   formatApprovalResponseSignaturePayload,
+  hasApprovalAnomalyAcknowledgement,
   HIGH_RISK_ACTION_CLASSES,
   isHighRiskActionClass,
+  normalizeApprovalAnomalyDetectorConfig,
   SignatureVerifier,
   verifySignedApprovalPolicyManifest,
 } from './security/index.js';
 export type {
+  ApprovalAnomalyDecision,
+  ApprovalAnomalyDetectorConfig,
+  ApprovalAnomalyFinding,
+  ApprovalAnomalyRuleId,
   ApprovalPolicyManifest,
   ApprovalPolicyManifestPolicy,
   ApprovalPolicyManifestSignature,
@@ -80,6 +91,7 @@ export type {
   HighRiskActionPolicyDecision,
   HighRiskActionPolicyInput,
   HighRiskPolicyDecisionKind,
+  ApprovalTrafficEvidence,
   VerifiedApprovalPolicyManifest,
 } from './security/index.js';
 export {

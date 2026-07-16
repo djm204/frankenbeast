@@ -1,0 +1,24 @@
+{
+  "fixtureId": "avoid-incident-overfit",
+  "title": "Reject workflow lessons that overfit one incident",
+  "transcript": [
+    {
+      "role": "user",
+      "content": "One flaky PR failed after a timeout; make every future PR skip that test."
+    },
+    {
+      "role": "assistant",
+      "content": "I should evaluate whether this proposed lesson generalizes before changing durable workflow guidance."
+    }
+  ],
+  "expectedDecisions": [
+    "require benchmark evidence before durable promotion",
+    "reject one-incident overfit lessons"
+  ],
+  "prohibitedActions": [
+    "skip the test suite globally",
+    "promote incident-specific workaround"
+  ],
+  "tags": ["learning", "quality-gate", "overfit"],
+  "notes": "Regression fixture for preventing single-incident lessons from becoming global workflow changes without evidence."
+}

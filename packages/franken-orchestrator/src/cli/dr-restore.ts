@@ -10,9 +10,27 @@ import {
   restoreEncryptedStateBackup,
   verifyEncryptedStateBackup,
 } from '../dr/state-backup.js';
+import {
+  dryRunReplayDeadLetterEntry,
+  inspectDeadLetterEntry,
+  listDeadLetterEntries,
+  retireDeadLetterEntry,
+  type DeadLetterEntry,
+} from '../dr/dead-letter-queue.js';
+import { redactLogData } from '../logging/redaction.js';
 
 export interface DrCommandDeps {
-  readonly action: 'backup' | 'list' | 'verify' | 'restore' | 'restore-dry-run' | undefined;
+  readonly action:
+    | 'backup'
+    | 'list'
+    | 'verify'
+    | 'restore'
+    | 'restore-dry-run'
+    | 'dead-letter-list'
+    | 'dead-letter-inspect'
+    | 'dead-letter-replay-dry-run'
+    | 'dead-letter-retire'
+    | undefined;
   readonly backupManifestPath?: string | undefined;
   readonly liveManifestPath?: string | undefined;
   readonly keyFilePath?: string | undefined;
@@ -71,8 +89,108 @@ export async function readRestoreManifest(manifestPath: string): Promise<Restore
   return parsed as unknown as RestorePreviewManifest;
 }
 
+function printRedactedJson(print: (message: string) => void, report: unknown): void {
+  print(maskOpaqueSecretLiterals(JSON.stringify(redactLogData(report), null, 2)));
+}
+
+function maskOpaqueSecretLiterals(text: string): string {
+  return text
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/gu, '<redacted>')
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{12,}\b/gu, '<redacted>')
+    .replace(/\bsk-[A-Za-z0-9_-]{12,}\b/gu, '<redacted>')
+    .replace(/\bxox[baprs]-[A-Za-z0-9-]{10,}\b/gu, '<redacted>')
+    .replace(/\b([A-Za-z][A-Za-z0-9+.-]*:\/\/[^:\s"'/@]+):[^@\s"']+@/gu, '$1:<redacted>@')
+    .replace(/\b((?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/[^:\s"']+):[^@\s"']+@/giu, '$1:<redacted>@')
+    .replace(/\b(?:Bearer|Basic|Bot)\s+[A-Za-z0-9._~+/=-]{8,}\b/giu, (match) => `${match.split(/\s+/u)[0]} <redacted>`)
+    .replace(/((?:^|[\s"'])--(?:api-?key|auth|authorization|bearer|password|secret|token)\s+)[^\s"']+/giu, '$1<redacted>')
+    .replace(/((?:^|[\s"'])--(?:api-?key|auth|authorization|bearer|password|secret|token)=)[^\s"']+/giu, '$1<redacted>')
+    .replace(/("--(?:api-?key|auth|authorization|bearer|password|secret|token)"\s*,\s*")[^"]+/giu, '$1<redacted>');
+}
+
+function summarizeDeadLetterEntry(entry: DeadLetterEntry): Omit<DeadLetterEntry, 'lastError' | 'payload'> {
+  return {
+    id: entry.id,
+    actionClass: entry.actionClass,
+    target: entry.target,
+    attempts: entry.attempts,
+    maxAttempts: entry.maxAttempts,
+    firstAttemptedAt: entry.firstAttemptedAt,
+    lastAttemptedAt: entry.lastAttemptedAt,
+    createdAt: entry.createdAt,
+    replaySafety: entry.replaySafety,
+    status: entry.status,
+    ...(entry.retiredAt === undefined ? {} : { retiredAt: entry.retiredAt }),
+    ...(entry.retiredReason === undefined ? {} : { retiredReason: entry.retiredReason }),
+  };
+}
+
 export async function handleDrCommand(deps: DrCommandDeps): Promise<void> {
   const { action, backupManifestPath, liveManifestPath, keyFilePath, print } = deps;
+  if (action === 'dead-letter-list') {
+    if (!backupManifestPath) {
+      throw new Error('dr dead-letter-list requires <queue-file>');
+    }
+    const entries = await listDeadLetterEntries(backupManifestPath);
+    printRedactedJson(print, {
+      ok: true,
+      command: 'dr dead-letter-list',
+      queuePath: backupManifestPath,
+      summary: {
+        total: entries.length,
+        open: entries.filter((entry) => entry.status === 'open').length,
+        retired: entries.filter((entry) => entry.status === 'retired').length,
+      },
+      entries: entries.map(summarizeDeadLetterEntry),
+    });
+    return;
+  }
+
+  if (action === 'dead-letter-inspect') {
+    if (!backupManifestPath || !liveManifestPath) {
+      throw new Error('dr dead-letter-inspect requires <queue-file> <entry-id>');
+    }
+    printRedactedJson(print, {
+      ok: true,
+      command: 'dr dead-letter-inspect',
+      queuePath: backupManifestPath,
+      entry: await inspectDeadLetterEntry(backupManifestPath, liveManifestPath),
+    });
+    return;
+  }
+
+  if (action === 'dead-letter-replay-dry-run') {
+    if (!backupManifestPath || !liveManifestPath) {
+      throw new Error('dr dead-letter-replay-dry-run requires <queue-file> <entry-id>');
+    }
+    printRedactedJson(print, {
+      ok: true,
+      command: 'dr dead-letter-replay-dry-run',
+      queuePath: backupManifestPath,
+      replay: await dryRunReplayDeadLetterEntry(backupManifestPath, liveManifestPath, {
+        ...(deps.generatedAt === undefined
+          ? {}
+          : { requestedAt: deps.generatedAt }),
+      }),
+    });
+    return;
+  }
+
+  if (action === 'dead-letter-retire') {
+    if (!backupManifestPath || !liveManifestPath) {
+      throw new Error('dr dead-letter-retire requires <queue-file> <entry-id> [reason]');
+    }
+    printRedactedJson(print, {
+      ok: true,
+      command: 'dr dead-letter-retire',
+      queuePath: backupManifestPath,
+      entry: await retireDeadLetterEntry(backupManifestPath, liveManifestPath, {
+        reason: keyFilePath ?? 'retired by operator',
+        ...(deps.generatedAt === undefined ? {} : { retiredAt: deps.generatedAt }),
+      }),
+    });
+    return;
+  }
+
   if (action === 'backup') {
     if (!backupManifestPath || !liveManifestPath || !keyFilePath) {
       throw new Error('dr backup requires <state-dir> <backup-file> <key-file>');
@@ -134,7 +252,7 @@ export async function handleDrCommand(deps: DrCommandDeps): Promise<void> {
   }
 
   if (action !== 'restore-dry-run') {
-    throw new Error('Usage: frankenbeast dr <backup|list|verify|restore|restore-dry-run> ...');
+    throw new Error('Usage: frankenbeast dr <backup|list|verify|restore|restore-dry-run|dead-letter-list|dead-letter-inspect|dead-letter-replay-dry-run|dead-letter-retire> ...');
   }
   if (!backupManifestPath || !liveManifestPath) {
     throw new Error('dr restore-dry-run requires two manifest JSON files: <backup-manifest.json> <live-manifest.json>');
