@@ -98,14 +98,32 @@ export function maskOpaqueSecretLiterals(text: string): string {
     .replace(/("--(?:api-?key|auth|authorization|bearer|password|secret|token)"\s*,\s*")[^"]+/giu, '$1<redacted>');
 }
 
-function recordId(record: unknown, fallback: string): string {
+function containsSensitiveIdMarker(value: string): boolean {
+  return /(?:token|secret|password|credential|bearer|refresh|access|api[-_]?key)/iu.test(value);
+}
+
+function recordId(record: unknown, fallback: string, subsystem?: StateSnapshotDiffSubsystem): string {
   if (!isRecord(record)) return fallback;
-  for (const key of ['id', 'taskId', 'task_id', 'tokenId', 'token_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key', 'name']) {
+  const idKeys = subsystem === 'approvals'
+    ? ['id']
+    : ['id', 'taskId', 'task_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key', 'name'];
+  for (const key of idKeys) {
     const value = record[key];
-    if (typeof value === 'string' && value.trim() !== '') return value;
+    if (typeof value === 'string' && value.trim() !== '') {
+      const trimmed = value.trim();
+      if (subsystem === 'approvals' && containsSensitiveIdMarker(trimmed)) return fallback;
+      return trimmed;
+    }
     if (typeof value === 'number' && Number.isSafeInteger(value)) return String(value);
   }
   return fallback;
+}
+
+function scopedRecordValue(subsystem: StateSnapshotDiffSubsystem, value: unknown): unknown {
+  if (subsystem === 'approvals' && !isRecord(value)) {
+    return { token: value };
+  }
+  return value;
 }
 
 function addRecord(
@@ -117,12 +135,12 @@ function addRecord(
 ): void {
   const map = records[subsystem];
   if (!map.has(id)) {
-    map.set(id, { id, value, source });
+    map.set(id, { id, value: scopedRecordValue(subsystem, value), source });
     return;
   }
   let suffix = 2;
   while (map.has(`${id}#${suffix}`)) suffix += 1;
-  map.set(`${id}#${suffix}`, { id: `${id}#${suffix}`, value, source });
+  map.set(`${id}#${suffix}`, { id: `${id}#${suffix}`, value: scopedRecordValue(subsystem, value), source });
 }
 
 function addArrayRecords(
@@ -131,7 +149,21 @@ function addArrayRecords(
   values: readonly unknown[],
   source: string,
 ): void {
-  values.forEach((value, index) => addRecord(records, subsystem, recordId(value, `${source}[${index}]`), value, source));
+  values.forEach((value, index) => addRecord(records, subsystem, recordId(value, `${source}[${index}]`, subsystem), value, source));
+}
+
+function addObjectMapRecords(
+  records: MutableSubsystemRecords,
+  subsystem: StateSnapshotDiffSubsystem,
+  values: Record<string, unknown>,
+  source: string,
+): void {
+  Object.entries(values)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .forEach(([key, value], index) => {
+      const fallback = subsystem === 'approvals' ? `${source}{${index}}` : key;
+      addRecord(records, subsystem, recordId(value, fallback, subsystem), value, source);
+    });
 }
 
 function likelySubsystemFromPath(relativePath: string): StateSnapshotDiffSubsystem | undefined {
@@ -174,19 +206,27 @@ function extractRecordsFromJson(records: MutableSubsystemRecords, parsed: unknow
       ['memory', ['memory', 'memories', 'memoryRecords', 'memory_records']],
       ['cron', ['cron', 'cronJobs', 'cron_jobs', 'jobs']],
     ];
-    let foundRootArray = false;
+    let foundRootCollection = false;
     for (const [subsystem, keys] of rootArrays) {
       for (const key of keys) {
         const value = parsed[key];
         if (Array.isArray(value)) {
-          foundRootArray = true;
+          foundRootCollection = true;
           addArrayRecords(records, subsystem, value, `${source}:${key}`);
+        } else if (isRecord(value)) {
+          foundRootCollection = true;
+          addObjectMapRecords(records, subsystem, value, `${source}:${key}`);
         }
       }
     }
 
-    if (pathSubsystem !== undefined && !foundRootArray) {
-      addRecord(records, pathSubsystem, recordId(parsed, source), parsed, source);
+    if (pathSubsystem !== undefined && !foundRootCollection) {
+      const values = Object.values(parsed);
+      if (values.length > 0 && values.every(isRecord)) {
+        addObjectMapRecords(records, pathSubsystem, parsed, source);
+      } else {
+        addRecord(records, pathSubsystem, recordId(parsed, source, pathSubsystem), parsed, source);
+      }
     }
   }
 
@@ -208,6 +248,9 @@ async function collectJsonFiles(directory: string, current = directory, collecte
       await collectJsonFiles(directory, path, collected);
     } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.json')) {
       collected.push(path);
+      if (collected.length > MAX_DIRECTORY_FILES) {
+        throw new Error(`State snapshot directory has too many files; maximum supported JSON files is ${MAX_DIRECTORY_FILES}`);
+      }
     }
   }
   return collected;

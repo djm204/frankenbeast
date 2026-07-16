@@ -280,6 +280,8 @@ Disaster-Recovery Commands:
                                   Restore an encrypted state backup; --dry-run verifies and prints planned writes only
   dr restore-dry-run <backup-manifest.json> <live-manifest.json>
                                   Compare backup/live restore manifests and print read-only JSON output
+  dr snapshot-diff <before-dir> <after-dir>
+                                  Compare two state snapshot/export directories and print redacted incident-triage JSON output
   dr dead-letter-list <queue-file>
                                   List failed automation actions in a dead-letter queue
   dr dead-letter-inspect <queue-file> <entry-id>

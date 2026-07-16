@@ -144,6 +144,56 @@ describe('dr restore-dry-run CLI', () => {
     expect(rawOutput).toContain('<redacted>');
   });
 
+  it('extracts object-map snapshots and redacts primitive approval token arrays', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dr-snapshot-map-diff-'));
+    const beforeDir = join(dir, 'before');
+    const afterDir = join(dir, 'after');
+    const output: string[] = [];
+    const beforeRefreshToken = 'local' + 'RefreshToken123';
+    const afterRefreshToken = 'other' + 'RefreshToken456';
+
+    try {
+      await mkdir(beforeDir, { recursive: true });
+      await mkdir(afterDir, { recursive: true });
+      await writeFile(join(beforeDir, 'state.json'), JSON.stringify({
+        tasks: {
+          'task-1': { id: 'task-1', status: 'running' },
+        },
+        approvalTokens: [beforeRefreshToken],
+      }), 'utf8');
+      await writeFile(join(afterDir, 'state.json'), JSON.stringify({
+        tasks: {
+          'task-1': { id: 'task-1', status: 'blocked' },
+          'task-2': { id: 'task-2', status: 'ready' },
+        },
+        approvalTokens: [afterRefreshToken],
+      }), 'utf8');
+
+      await handleDrCommand({
+        action: 'snapshot-diff',
+        backupManifestPath: beforeDir,
+        liveManifestPath: afterDir,
+        print: (message) => output.push(message),
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+
+    const rawOutput = output.join('\n');
+    const report = JSON.parse(rawOutput) as {
+      summary: { bySubsystem: Record<string, { added: number; removed: number; changed: number }> };
+      diffs: Array<{ subsystem: string; added: Array<{ id: string }>; removed: Array<{ id: string }>; changed: Array<{ id: string }> }>;
+    };
+
+    expect(report.summary.bySubsystem.tasks).toEqual({ added: 1, removed: 0, changed: 1 });
+    expect(report.summary.bySubsystem.approvals).toEqual({ added: 0, removed: 0, changed: 1 });
+    expect(report.diffs.find((diff) => diff.subsystem === 'tasks')?.added[0]?.id).toBe('task-2');
+    expect(report.diffs.find((diff) => diff.subsystem === 'tasks')?.changed[0]?.id).toBe('task-1');
+    expect(rawOutput).not.toContain(beforeRefreshToken);
+    expect(rawOutput).not.toContain(afterRefreshToken);
+    expect(rawOutput).toContain('<redacted>');
+  });
+
   it('prints dead-letter list, inspect, dry-run replay, and retire JSON', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'franken-dr-'));
     const queuePath = join(dir, 'dead-letter.json');
