@@ -457,6 +457,14 @@ export function applyHumanFeedbackToLesson(
       'Explicit lesson approval requires at least one evidence item.',
     );
   }
+  if (
+    lesson.proposedLessonCritique !== undefined &&
+    lesson.proposedLessonCritique.verdict !== 'accepted'
+  ) {
+    throw new RangeError(
+      'Explicit lesson approval requires an accepted proposedLessonCritique verdict before promotion.',
+    );
+  }
   const primaryApprovalEvidence = feedbackEvidence[0];
   if (primaryApprovalEvidence === undefined) {
     throw new RangeError(
@@ -520,6 +528,17 @@ export function isLessonApplicable(lesson: CritiqueLesson): boolean {
   }
   return (
     lesson.lifecycleStatus === undefined || lesson.lifecycleStatus === 'active'
+  );
+}
+
+function isLessonComparableForDuplicate(lesson: CritiqueLesson): boolean {
+  if (lesson.quarantine !== undefined) {
+    return false;
+  }
+  return (
+    lesson.lifecycleStatus === undefined ||
+    lesson.lifecycleStatus === 'active' ||
+    lesson.lifecycleStatus === 'candidate'
   );
 }
 
@@ -607,7 +626,7 @@ export function critiqueProposedLesson(
     (prior) =>
       prior !== lesson &&
       getLessonId(prior) !== candidateLessonId &&
-      isLessonApplicable(prior) &&
+      isLessonComparableForDuplicate(prior) &&
       sameEvaluator(lesson, prior) &&
       normalizeText(prior.failureDescription) ===
         normalizeText(lesson.failureDescription),
@@ -1524,9 +1543,6 @@ function collectLessonCritiqueEvidenceRefs(lesson: CritiqueLesson): string[] {
   }
   if (lesson.privacyFilter) {
     refs.add(`privacy:${lesson.privacyFilter.originalHash}`);
-  }
-  if (lesson.contradictionReport) {
-    refs.add(`contradiction:${lesson.contradictionReport.status}`);
   }
   for (const pattern of lesson.blockerPatterns ?? []) {
     refs.add(`blocker:${pattern.key}`);
