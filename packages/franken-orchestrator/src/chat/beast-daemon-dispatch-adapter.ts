@@ -35,9 +35,29 @@ interface TrackedAgentResponse {
   readonly dispatchRunId?: string | undefined;
 }
 
+interface BeastDaemonErrorEnvelope {
+  readonly error?: {
+    readonly code?: string | undefined;
+    readonly message?: string | undefined;
+    readonly details?: unknown;
+  } | undefined;
+}
+
 export interface BeastDaemonDispatchAdapterOptions {
   readonly baseUrl: string;
   readonly operatorToken: string;
+}
+
+export class BeastDaemonRequestError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly statusText: string,
+    public readonly code?: string | undefined,
+    public readonly details?: unknown,
+  ) {
+    super(code ? `Beast daemon request failed: ${status} ${statusText} (${code})` : `Beast daemon request failed: ${status} ${statusText}`);
+    this.name = 'BeastDaemonRequestError';
+  }
 }
 
 const BEAST_VERBS = /\b(spawn|dispatch|launch|start|run|create)\b/i;
@@ -202,7 +222,18 @@ export class BeastDaemonDispatchAdapter {
       headers,
     });
     if (!response.ok) {
-      throw new Error(`Beast daemon request failed: ${response.status} ${response.statusText}`);
+      let envelope: BeastDaemonErrorEnvelope | undefined;
+      try {
+        envelope = await response.clone().json() as BeastDaemonErrorEnvelope;
+      } catch {
+        envelope = undefined;
+      }
+      throw new BeastDaemonRequestError(
+        response.status,
+        response.statusText,
+        envelope?.error?.code,
+        envelope?.error?.details,
+      );
     }
     return response.json() as Promise<T>;
   }

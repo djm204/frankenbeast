@@ -9,6 +9,7 @@ import { BeastCatalogService } from '../../../src/beasts/services/beast-catalog-
 import { BeastLogStore } from '../../../src/beasts/events/beast-log-store.js';
 import { PrometheusBeastMetrics } from '../../../src/beasts/telemetry/prometheus-beast-metrics.js';
 import type { ModuleConfig } from '../../../src/beasts/types.js';
+import { CapacityReservationPolicy } from '../../../src/beasts/services/capacity-reservation-policy.js';
 
 function stubExecutors(repo: SQLiteBeastRepository) {
   return {
@@ -230,6 +231,79 @@ describe('ModuleConfig plumbing', () => {
       expect(run.configSnapshot).toMatchObject({
         modules: { governor: false, heartbeat: false },
       });
+    });
+
+    it('preserves capacity classification metadata from strict run configs', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'franken-modcfg-dispatch-'));
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const metrics = new PrometheusBeastMetrics();
+      const executors = stubExecutors(repo);
+      const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+
+      const run = await dispatch.createRun({
+        definitionId: 'martin-loop',
+        config: {
+          provider: 'claude',
+          objective: 'security fix',
+          chunkDirectory: 'docs/chunks',
+          labels: ['security'],
+          categories: ['availability'],
+        },
+        dispatchedBy: 'dashboard',
+        dispatchedByUser: 'operator',
+      });
+
+      expect(run.configSnapshot).toMatchObject({
+        labels: ['security'],
+        categories: ['availability'],
+      });
+    });
+
+    it('classifies direct tracked dispatch capacity from the requested run config', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'franken-modcfg-dispatch-'));
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const metrics = new PrometheusBeastMetrics();
+      const executors = stubExecutors(repo);
+      const agents = new AgentService(repo, () => '2026-03-13T00:00:00.000Z');
+      const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs, {
+        capacityPolicy: new CapacityReservationPolicy({
+          totalSlots: 2,
+          reservations: [{ id: 'security-urgent', slots: 1, labels: ['security'] }],
+        }),
+      });
+      agents.createAgent({
+        definitionId: 'martin-loop',
+        source: 'dashboard',
+        createdByUser: 'operator',
+        initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+        initConfig: { labels: ['feature'] },
+      });
+      const urgentAgent = agents.createAgent({
+        definitionId: 'martin-loop',
+        source: 'dashboard',
+        createdByUser: 'operator',
+        initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+        initConfig: {},
+      });
+
+      const run = await dispatch.createRun({
+        definitionId: 'martin-loop',
+        trackedAgentId: urgentAgent.id,
+        config: {
+          provider: 'claude',
+          objective: 'security fix',
+          chunkDirectory: 'docs/chunks',
+          labels: ['security'],
+        },
+        dispatchedBy: 'dashboard',
+        dispatchedByUser: 'operator',
+        startNow: false,
+      });
+
+      expect(run.trackedAgentId).toBe(urgentAgent.id);
+      expect(run.configSnapshot).toMatchObject({ labels: ['security'] });
     });
 
     it('omits modules from configSnapshot when no moduleConfig provided', async () => {

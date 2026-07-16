@@ -12,6 +12,7 @@ import { BeastDispatchService } from './services/beast-dispatch-service.js';
 import { assertDispatcherStartupIntegrity } from './services/dispatcher-startup-integrity.js';
 import { BeastInterviewService } from './services/beast-interview-service.js';
 import { AgentService } from './services/agent-service.js';
+import { CapacityReservationPolicy, type CapacityReservationRule } from './services/capacity-reservation-policy.js';
 import { BeastRunService } from './services/beast-run-service.js';
 import { PrometheusBeastMetrics } from './telemetry/prometheus-beast-metrics.js';
 
@@ -42,6 +43,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   const metrics = new PrometheusBeastMetrics();
   const eventBus = new BeastEventBus();
   const ticketStore = new SseConnectionTicketStore();
+  const capacityPolicy = createCapacityReservationPolicyFromEnv();
 
   // Deferred reference to break circular dep: executor → runService → executors → executor
   // eslint-disable-next-line prefer-const
@@ -75,12 +77,12 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
     executors,
   });
 
-  runService = new BeastRunService(repository, catalog, executors, metrics, logStore, { eventBus });
+  runService = new BeastRunService(repository, catalog, executors, metrics, logStore, { eventBus, capacityPolicy });
 
   return {
-    agents: new AgentService(repository),
+    agents: new AgentService(repository, undefined, { capacityPolicy }),
     catalog,
-    dispatch: new BeastDispatchService(repository, catalog, executors, metrics, logStore, { eventBus }),
+    dispatch: new BeastDispatchService(repository, catalog, executors, metrics, logStore, { eventBus, capacityPolicy }),
     runs: runService,
     interviews: new BeastInterviewService(repository, catalog),
     metrics,
@@ -91,4 +93,79 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
       repository.close();
     },
   };
+}
+
+function createCapacityReservationPolicyFromEnv(): CapacityReservationPolicy | undefined {
+  const totalSlots = parsePositiveInteger(process.env.FBEAST_AGENT_CAPACITY_TOTAL);
+  const reservations = parseCapacityReservations(process.env.FBEAST_AGENT_CAPACITY_RESERVATIONS);
+  const releasedReservationIds = parseCsv(process.env.FBEAST_AGENT_CAPACITY_RELEASED_RESERVATIONS);
+  if (reservations.length > 0 && totalSlots === undefined) {
+    throw new RangeError('FBEAST_AGENT_CAPACITY_TOTAL is required when FBEAST_AGENT_CAPACITY_RESERVATIONS is set');
+  }
+  if (totalSlots === undefined) {
+    return undefined;
+  }
+  return new CapacityReservationPolicy({
+    totalSlots,
+    reservations,
+    releasedReservationIds,
+  });
+}
+
+function parsePositiveInteger(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new RangeError(`FBEAST_AGENT_CAPACITY_TOTAL must be a positive integer, received ${value}`);
+  }
+  return parsed;
+}
+
+function parseCapacityReservations(value: string | undefined): CapacityReservationRule[] {
+  if (!value) return [];
+  const parsed = JSON.parse(value) as unknown;
+  if (!Array.isArray(parsed)) {
+    throw new RangeError('FBEAST_AGENT_CAPACITY_RESERVATIONS must be a JSON array');
+  }
+  return parsed.map((entry, index) => {
+    if (!isRecord(entry)) {
+      throw new RangeError(`FBEAST_AGENT_CAPACITY_RESERVATIONS[${index}] must be an object`);
+    }
+    return {
+      id: requiredString(entry.id, `FBEAST_AGENT_CAPACITY_RESERVATIONS[${index}].id`),
+      slots: requiredPositiveInteger(entry.slots, `FBEAST_AGENT_CAPACITY_RESERVATIONS[${index}].slots`),
+      labels: optionalStringArray(entry.labels, `FBEAST_AGENT_CAPACITY_RESERVATIONS[${index}].labels`),
+      categories: optionalStringArray(entry.categories, `FBEAST_AGENT_CAPACITY_RESERVATIONS[${index}].categories`),
+    };
+  });
+}
+
+function parseCsv(value: string | undefined): string[] {
+  return value?.split(',').map((entry) => entry.trim()).filter(Boolean) ?? [];
+}
+
+function requiredString(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new RangeError(`${field} must be a non-empty string`);
+  }
+  return value;
+}
+
+function requiredPositiveInteger(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
+    throw new RangeError(`${field} must be a positive integer`);
+  }
+  return value;
+}
+
+function optionalStringArray(value: unknown, field: string): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+    throw new RangeError(`${field} must be an array of strings`);
+  }
+  return value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
