@@ -1679,10 +1679,18 @@ describe('LessonRecorder', () => {
       false,
     );
     expect(
-      isLessonApplicable(globalForOneTask, {
-        taskId: 'task-a',
-        now: 'not-a-date',
-      }),
+      isLessonApplicable(
+        {
+          ...baseLesson,
+          lessonScope: {
+            scope: 'future-scope',
+            allowedTasks: ['task-a'],
+            provenance: { source: 'recorded', taskId: 'scope-task' },
+            auditTrail: [],
+          } as unknown as CritiqueLesson['lessonScope'],
+        },
+        { taskId: 'task-a' },
+      ),
     ).toBe(false);
 
     const expired = updateLessonScope(baseLesson, {
@@ -1751,6 +1759,28 @@ describe('LessonRecorder', () => {
         toScope: 'role',
       }),
     ]);
+
+    const taskScoped = updateLessonScope(baseLesson, {
+      scope: 'task',
+      allowedTasks: ['scope-task'],
+      actor: 'pm-reviewer',
+      reason: 'Start as task-local until review.',
+      changedAt: '2026-07-13T03:00:00.000Z',
+      expiresAt: '2026-07-20T00:00:00.000Z',
+    });
+    const promoted = updateLessonScope(taskScoped, {
+      scope: 'repo',
+      allowedRepos: ['djm204/frankenbeast'],
+      actor: 'pm-reviewer',
+      reason: 'Promote after review without carrying the task allowlist.',
+      changedAt: '2026-07-13T04:00:00.000Z',
+    });
+    expect(promoted.lessonScope).toMatchObject({
+      scope: 'repo',
+      allowedRepos: ['djm204/frankenbeast'],
+      expiresAt: '2026-07-20T00:00:00.000Z',
+    });
+    expect(promoted.lessonScope?.allowedTasks).toBeUndefined();
   });
 
   it('ignores scoped-out prior lessons during promotion critique', async () => {
@@ -2767,7 +2797,7 @@ describe('LessonRecorder', () => {
       minedBlockerPatterns: [],
     });
     expect(lesson.cooldown).toEqual({
-      key: expect.stringMatching(/^critique-lesson:[^:]+:learning-reviewer:/),
+      key: expect.stringMatching(/^critique-lesson:learning-reviewer:/),
       windowMs: 60_000,
       recordedAt: '2026-07-12T10:00:00.000Z',
       suppressUntil: '2026-07-12T10:01:00.000Z',
@@ -2805,7 +2835,7 @@ describe('LessonRecorder', () => {
     expect(suppressed.recorded).toBe(0);
     expect(suppressed.suppressedByCooldown).toEqual([
       {
-        key: expect.stringMatching(/^critique-lesson:[^:]+:learning-reviewer:/),
+        key: expect.stringMatching(/^critique-lesson:learning-reviewer:/),
         taskId: 'first-task',
         evaluatorName: 'learning-reviewer',
         suppressedAt: '2026-07-12T10:00:30.000Z',
@@ -2817,7 +2847,7 @@ describe('LessonRecorder', () => {
     ]);
   });
 
-  it('does not suppress equivalent task-scoped lessons across different tasks', async () => {
+  it('suppresses equivalent lessons across different tasks', async () => {
     const port = createMockMemoryPort();
     let now = new Date('2026-07-12T10:00:00.000Z');
     const recorder = new LessonRecorder(port, {
@@ -2841,9 +2871,9 @@ describe('LessonRecorder', () => {
     now = new Date('2026-07-12T10:00:30.000Z');
     const second = await recorder.record(result, 'second-task');
 
-    expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(second.recorded).toBe(1);
-    expect(second.suppressedByCooldown).toEqual([]);
+    expect(port.recordLesson).toHaveBeenCalledTimes(1);
+    expect(second.recorded).toBe(0);
+    expect(second.suppressedByCooldown).toHaveLength(1);
   });
 
   it('clusters repeated failures by task family, package, tool, and root cause without retaining raw transcripts', async () => {
@@ -2899,8 +2929,8 @@ describe('LessonRecorder', () => {
         occurrences: 1,
       }),
     ]);
-    expect(secondSummary.recorded).toBe(1);
-    expect(secondSummary.suppressedByCooldown).toEqual([]);
+    expect(secondSummary.recorded).toBe(0);
+    expect(secondSummary.suppressedByCooldown).toHaveLength(1);
     expect(secondSummary.failureClusterReport.clusters).toEqual([
       expect.objectContaining({
         taskFamily: 'frontend auth',
@@ -3436,7 +3466,7 @@ describe('LessonRecorder', () => {
       thirdRecord,
     ]);
 
-    expect(port.recordLesson).toHaveBeenCalledTimes(3);
+    expect(port.recordLesson).toHaveBeenCalledTimes(2);
     expect(firstSummary).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [],
@@ -3448,8 +3478,13 @@ describe('LessonRecorder', () => {
       minedBlockerPatterns: [],
     });
     expect(thirdSummary).toMatchObject({
-      recorded: 1,
-      suppressedByCooldown: [],
+      recorded: 0,
+      suppressedByCooldown: [
+        expect.objectContaining({
+          taskId: 'third-task',
+          evaluatorName: 'learning-reviewer',
+        }),
+      ],
       minedBlockerPatterns: [],
     });
   });
@@ -3642,32 +3677,25 @@ describe('LessonRecorder', () => {
     now = new Date('2026-07-12T10:00:10.000Z');
     const secondSummary = await recorder.record(result, 'task-b');
     now = new Date('2026-07-12T10:00:20.000Z');
-    const thirdSummary = await recorder.record(result, 'task-b');
-    now = new Date('2026-07-12T10:00:30.000Z');
-    const fourthSummary = await recorder.record(result, 'task-c');
-    const fourthLesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
-      .calls[2]![0];
+    const thirdSummary = await recorder.record(result, 'task-c');
+    const thirdLesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[1]![0];
 
     expect(secondSummary).toMatchObject({
-      recorded: 1,
-      suppressedByCooldown: [],
-      minedBlockerPatterns: [],
-    });
-    expect(thirdSummary).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [expect.objectContaining({ taskId: 'task-b' })],
       minedBlockerPatterns: [],
     });
-    expect(fourthSummary.recorded).toBe(1);
-    expect(fourthSummary.suppressedByCooldown).toEqual([]);
-    expect(fourthSummary.minedBlockerPatterns).toEqual([
+    expect(thirdSummary.recorded).toBe(1);
+    expect(thirdSummary.suppressedByCooldown).toEqual([]);
+    expect(thirdSummary.minedBlockerPatterns).toEqual([
       expect.objectContaining({
         occurrences: 3,
         taskIds: ['task-a', 'task-b', 'task-c'],
       }),
     ]);
-    expect(fourthLesson.blockerPatterns).toEqual(
-      fourthSummary.minedBlockerPatterns,
+    expect(thirdLesson.blockerPatterns).toEqual(
+      thirdSummary.minedBlockerPatterns,
     );
   });
 

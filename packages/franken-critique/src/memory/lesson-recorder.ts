@@ -450,11 +450,19 @@ export function updateLessonScope(
     toScope: scope,
     reason,
   };
-  const allowedRepos = request.allowedRepos ?? lesson.lessonScope?.allowedRepos;
-  const allowedRoles = request.allowedRoles ?? lesson.lessonScope?.allowedRoles;
+  const allowedRepos =
+    request.allowedRepos ??
+    (scope !== 'global' ? lesson.lessonScope?.allowedRepos : undefined);
+  const allowedRoles =
+    request.allowedRoles ??
+    (scope === 'role' ? lesson.lessonScope?.allowedRoles : undefined);
   const allowedProfiles =
-    request.allowedProfiles ?? lesson.lessonScope?.allowedProfiles;
-  const allowedTasks = request.allowedTasks ?? lesson.lessonScope?.allowedTasks;
+    request.allowedProfiles ??
+    (scope === 'profile' ? lesson.lessonScope?.allowedProfiles : undefined);
+  const allowedTasks =
+    request.allowedTasks ??
+    (scope === 'task' ? lesson.lessonScope?.allowedTasks : undefined);
+  const expiresAt = request.expiresAt ?? lesson.lessonScope?.expiresAt;
   const lessonScope = createLessonScopeMetadata({
     scope,
     ...(allowedRepos !== undefined ? { allowedRepos } : {}),
@@ -467,9 +475,7 @@ export function updateLessonScope(
         taskId: lesson.taskId,
         note: LESSON_SCOPE_REVIEW_GUIDANCE,
       },
-    ...(request.expiresAt !== undefined
-      ? { expiresAt: request.expiresAt }
-      : {}),
+    ...(expiresAt !== undefined ? { expiresAt } : {}),
     auditTrail: [...(lesson.lessonScope?.auditTrail ?? []), auditEntry],
   });
   return {
@@ -1203,7 +1209,9 @@ export class LessonRecorder {
         10,
       );
       const applicablePriorLessons = priorLessons.filter((priorLesson) =>
-        isLessonApplicable(priorLesson, { taskId: lesson.taskId }),
+        isLessonApplicableForKnownContext(priorLesson, {
+          taskId: lesson.taskId,
+        }),
       );
       return {
         report: detectLessonContradictions(lesson, applicablePriorLessons),
@@ -1886,7 +1894,35 @@ function isLessonScopeAllowed(
   if (scope.scope === 'profile') {
     return matchesRequiredAllowlist(scope.allowedProfiles, context.profile);
   }
-  return matchesRequiredAllowlist(scope.allowedTasks, context.taskId);
+  if (scope.scope === 'task') {
+    return matchesRequiredAllowlist(scope.allowedTasks, context.taskId);
+  }
+  return false;
+}
+
+function isLessonApplicableForKnownContext(
+  lesson: CritiqueLesson,
+  context: LessonInjectionContext,
+): boolean {
+  if (
+    lesson.lifecycleStatus === 'quarantined' ||
+    lesson.lifecycleStatus === 'retired'
+  ) {
+    return false;
+  }
+  const scope = lesson.lessonScope;
+  if (scope === undefined) {
+    return true;
+  }
+  if (scope.scope === 'task' && context.taskId !== undefined) {
+    return matchesRequiredAllowlist(scope.allowedTasks, context.taskId);
+  }
+  return (
+    scope.scope === 'global' ||
+    scope.scope === 'repo' ||
+    scope.scope === 'role' ||
+    scope.scope === 'profile'
+  );
 }
 
 function parseScopeTimestamp(timestamp: string): number | undefined {
@@ -2843,14 +2879,13 @@ function createCooldownKey(
   evaluatorName: string,
   findingMessages: readonly string[],
 ): string {
+  void taskId;
   const normalizedFindings = JSON.stringify({
-    taskId,
     evaluatorName,
     findings: findingMessages.map((message) => message.trim()).sort(),
   });
   return [
     'critique-lesson',
-    sanitizeLessonIdPart(taskId),
     sanitizeLessonIdPart(evaluatorName),
     stableHash(normalizedFindings),
   ].join(':');
