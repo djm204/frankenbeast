@@ -3452,7 +3452,35 @@ describe('LessonRecorder', () => {
     });
   });
 
-  it('does not flag the candidate itself as a duplicate prior lesson', () => {
+  it('recomputes contradiction status when explicit prior lessons are supplied', () => {
+    const lesson = createLesson({
+      testTraceability: [
+        {
+          lessonId: 'recheck-lesson',
+          taskId: 'lesson-task',
+          evaluatorName: 'factuality',
+          failingIteration: 0,
+          resolvedIteration: 1,
+          sourceFindingMessages: ['Cache guidance lacked provenance checks'],
+          testId: 'recheck-lesson:regression',
+          verificationCommand: 'npm run test --workspace @franken/critique',
+        },
+      ],
+      contradictionReport: {
+        status: 'not_checked',
+        guidance: 'Historical lesson contradictions were not checked.',
+        verificationCommand: 'npm run test --workspace @franken/critique',
+        contradictions: [],
+      },
+    });
+
+    expect(critiqueProposedLesson(lesson, [])).toMatchObject({
+      verdict: 'accepted',
+      evidenceRefs: expect.arrayContaining(['contradiction:clear']),
+    });
+  });
+
+  it('does not flag the candidate itself or inactive lessons as duplicate priors', () => {
     const lesson = createLesson({
       testTraceability: [
         {
@@ -3473,8 +3501,28 @@ describe('LessonRecorder', () => {
         contradictions: [],
       },
     });
+    const deserializedSelf = createLesson({ ...lesson });
+    const quarantinedPrior = createLesson({
+      failureDescription: lesson.failureDescription,
+      correctionApplied: 'Require cache verification before reuse',
+      lifecycleStatus: 'quarantined',
+      quarantine: {
+        trigger: 'explicit-user-correction',
+        reason: 'Superseded by corrected guidance.',
+        quarantinedAt: '2026-07-12T00:00:00.000Z',
+        reviewItem: {
+          lessonId: 'inactive-prior-lesson',
+          taskId: 'lesson-task',
+          evaluatorName: 'factuality',
+          failureDescription: lesson.failureDescription,
+          correctionApplied: 'Require cache verification before reuse',
+          status: 'pending-review',
+          exitCriteria: ['Confirm replacement lesson supersedes this one.'],
+        },
+      },
+    });
 
-    const critique = critiqueProposedLesson(lesson, [lesson]);
+    const critique = critiqueProposedLesson(lesson, [deserializedSelf, quarantinedPrior]);
 
     expect(critique.verdict).toBe('accepted');
     expect(

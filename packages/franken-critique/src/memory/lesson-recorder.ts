@@ -92,7 +92,7 @@ interface InternalLessonPrivacyFilterDecision
 
 interface LessonContradictionContext {
   readonly report: LessonContradictionReport;
-  readonly priorLessons: readonly CritiqueLesson[];
+  readonly priorLessons?: readonly CritiqueLesson[];
 }
 
 interface LessonCandidatePrivacyFilterResult {
@@ -602,9 +602,12 @@ export function critiqueProposedLesson(
     });
   }
 
+  const candidateLessonId = getLessonId(lesson);
   const duplicate = priorLessons?.find(
     (prior) =>
       prior !== lesson &&
+      getLessonId(prior) !== candidateLessonId &&
+      isLessonApplicable(prior) &&
       sameEvaluator(lesson, prior) &&
       normalizeText(prior.failureDescription) ===
         normalizeText(lesson.failureDescription),
@@ -623,10 +626,9 @@ export function critiqueProposedLesson(
   }
 
   const contradictionReport =
-    lesson.contradictionReport ??
-    (priorLessons === undefined
-      ? detectLessonContradictions(lesson)
-      : detectLessonContradictions(lesson, priorLessons));
+    priorLessons !== undefined
+      ? detectLessonContradictions(lesson, priorLessons)
+      : (lesson.contradictionReport ?? detectLessonContradictions(lesson));
   evidenceRefs.add(`contradiction:${contradictionReport.status}`);
   if (contradictionReport.status === 'not_checked') {
     findings.push({
@@ -958,13 +960,15 @@ export class LessonRecorder {
           ...lesson,
           contradictionReport: contradictionContext.report,
         };
-        const admittedLesson = this.withAdmissionTimestamp({
-          ...lessonWithContradiction,
+        const admittedBaseLesson = this.withAdmissionTimestamp(lessonWithContradiction);
+        const admittedLesson = {
+          ...admittedBaseLesson,
           proposedLessonCritique: critiqueProposedLesson(
-            lessonWithContradiction,
+            admittedBaseLesson,
             contradictionContext.priorLessons,
+            admittedBaseLesson.timestamp,
           ),
-        });
+        };
         await this.memory.recordLesson(admittedLesson);
         recordingResult.recorded += 1;
         this.commitBlockerPatternObservations(lesson);
@@ -1004,7 +1008,6 @@ export class LessonRecorder {
     if (!this.memory.searchLessons) {
       return {
         report: detectLessonContradictions(lesson),
-        priorLessons: [],
       };
     }
 
@@ -1020,7 +1023,6 @@ export class LessonRecorder {
     } catch {
       return {
         report: createLessonSearchFailureReport(),
-        priorLessons: [],
       };
     }
   }
