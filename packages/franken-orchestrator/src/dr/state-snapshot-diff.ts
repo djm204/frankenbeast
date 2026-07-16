@@ -127,7 +127,7 @@ function recordId(
   record: unknown,
   fallback: string,
   subsystem?: StateSnapshotDiffSubsystem,
-  options: { readonly preferFallbackOverMutableDisplayName?: boolean } = {},
+  options: { readonly preferFallbackOverMutableDisplayName?: boolean; readonly preferFallbackOverMutableWorkerOwner?: boolean } = {},
 ): string {
   if (subsystem === 'approvals' && !isRecord(record)) return safeApprovalId(record);
   if (subsystem === 'workerIds' && (typeof record === 'string' || typeof record === 'number')) return String(record);
@@ -138,8 +138,8 @@ function recordId(
       ? options.preferFallbackOverMutableDisplayName
         ? ['id', 'taskId', 'task_id', 'cardId', 'card_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key']
         : ['id', 'taskId', 'task_id', 'cardId', 'card_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key', 'name']
-      : options.preferFallbackOverMutableDisplayName
-        ? ['id', 'taskId', 'task_id', 'cardId', 'card_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key', 'workerId', 'worker_id', 'currentWorkerId', 'current_worker_id']
+      : (options.preferFallbackOverMutableDisplayName || options.preferFallbackOverMutableWorkerOwner) && subsystem !== 'workerIds'
+        ? ['id', 'taskId', 'task_id', 'cardId', 'card_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key']
         : ['id', 'taskId', 'task_id', 'cardId', 'card_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key', 'workerId', 'worker_id', 'currentWorkerId', 'current_worker_id', 'name'];
   for (const key of idKeys) {
     const value = record[key];
@@ -296,7 +296,10 @@ function addObjectMapRecords(
         : value;
       const id = subsystem === 'approvals'
         ? fallback
-        : recordId(recordValue, fallback, subsystem, { preferFallbackOverMutableDisplayName: true });
+        : recordId(recordValue, fallback, subsystem, {
+          preferFallbackOverMutableDisplayName: true,
+          preferFallbackOverMutableWorkerOwner: subsystem !== 'workerIds',
+        });
       addRecord(records, subsystem, id, recordValue, source);
     });
 }
@@ -385,7 +388,7 @@ function extractRecordsFromJson(records: MutableSubsystemRecords, parsed: unknow
 
     if (pathSubsystem !== undefined && !foundRootCollection) {
       const values = Object.values(parsed);
-      if (values.length > 0 && values.every(isRecord)) {
+      if (pathSubsystem !== 'workerIds' && values.length > 0 && values.every(isRecord) && isGenericCollectionSource(source) && !hasExplicitParentSubsystem(source)) {
         addObjectMapRecords(records, pathSubsystem, parsed, source);
       } else if (pathSubsystem !== 'tasks' && !hasRecordIdentityKey(parsed) && values.length > 0 && values.every((value) => !isRecord(value) && !Array.isArray(value)) && (pathSubsystem !== 'approvals' || !looksLikeApprovalRecord(parsed))) {
         addObjectMapRecords(records, pathSubsystem, parsed, source);
@@ -457,9 +460,8 @@ function parseSnapshotFile(raw: string, source: string): ReadonlyArray<{ parsed:
       if (line.trim() === '') return;
       try {
         records.push({ parsed: JSON.parse(line) as unknown, sourceSuffix: `:${index + 1}` });
-      } catch (error) {
-        const message = errorMessageForOutput(error);
-        throw new Error(`Unable to read state snapshot JSONL ${redactedSource} line ${index + 1}: ${message}`);
+      } catch {
+        throw new Error(`Unable to read state snapshot JSONL ${redactedSource} line ${index + 1}: invalid JSON`);
       }
     });
     return records;
@@ -467,9 +469,8 @@ function parseSnapshotFile(raw: string, source: string): ReadonlyArray<{ parsed:
 
   try {
     return [{ parsed: JSON.parse(raw) as unknown, sourceSuffix: '' }];
-  } catch (error) {
-    const message = errorMessageForOutput(error);
-    throw new Error(`Unable to read state snapshot JSON ${redactedSource}: ${message}`);
+  } catch {
+    throw new Error(`Unable to read state snapshot JSON ${redactedSource}: invalid JSON`);
   }
 }
 

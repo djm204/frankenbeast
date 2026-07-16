@@ -594,4 +594,60 @@ describe('state snapshot diff', () => {
     expect(serialized).toContain('"value":"<redacted>"');
   });
 
+  it('does not echo malformed snapshot contents in parse errors', async () => {
+    const leakedPrefix = 'approval-token-prefix-Secret123';
+    const before = await snapshotDir({
+      'approvals/broken.jsonl': `{"token":"${leakedPrefix}",\n`,
+    });
+    const after = await snapshotDir({
+      'approvals/broken.jsonl': { decision: 'approved' },
+    });
+
+    try {
+      await diffStateSnapshotDirectories(before, after);
+      throw new Error('expected diffStateSnapshotDirectories to reject');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      expect(message).toContain('invalid JSON');
+      expect(message).not.toContain(leakedPrefix);
+      expect(message).not.toContain('"token"');
+    }
+  });
+
+  it('uses file identity for path-scoped single-record objects with nested fields', async () => {
+    const before = await snapshotDir({
+      'memory/operator.json': { profile: { name: 'operator' }, settings: { theme: 'dark' } },
+    });
+    const after = await snapshotDir({
+      'memory/operator.json': { profile: { name: 'operator' }, settings: { theme: 'light' } },
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const memoryDiff = report.diffs.find((diff) => diff.subsystem === 'memory');
+
+    expect(memoryDiff?.added).toHaveLength(0);
+    expect(memoryDiff?.removed).toHaveLength(0);
+    expect(memoryDiff?.changed).toHaveLength(1);
+    expect(memoryDiff?.changed[0]?.id).toBe('memory/operator.json');
+    expect(memoryDiff?.changed[0]?.changedFields).toEqual(['settings']);
+  });
+
+  it('uses non-worker map keys before mutable worker owners', async () => {
+    const before = await snapshotDir({
+      'cron/jobs.json': { jobs: { 'job-1': { workerId: 'worker-a', schedule: '0 1 * * *' } } },
+    });
+    const after = await snapshotDir({
+      'cron/jobs.json': { jobs: { 'job-1': { workerId: 'worker-b', schedule: '0 1 * * *' } } },
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const cronDiff = report.diffs.find((diff) => diff.subsystem === 'cron');
+
+    expect(cronDiff?.added).toHaveLength(0);
+    expect(cronDiff?.removed).toHaveLength(0);
+    expect(cronDiff?.changed).toHaveLength(1);
+    expect(cronDiff?.changed[0]?.id).toBe('job-1');
+    expect(cronDiff?.changed[0]?.changedFields).toEqual(['workerId']);
+  });
+
 });
