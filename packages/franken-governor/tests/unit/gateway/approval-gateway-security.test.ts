@@ -253,7 +253,7 @@ describe('ApprovalGateway — security integration', () => {
     }));
     expect(auditRecorder.record).toHaveBeenLastCalledWith(
       expect.objectContaining({ requestId: 'req-2' }),
-      expect.objectContaining({ decision: 'APPROVE' }),
+      expect.objectContaining({ decision: 'ABORT' }),
       { securityFailure: 'approval-anomaly' },
     );
   });

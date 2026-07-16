@@ -39,6 +39,16 @@ describe('CliChannel', () => {
     expect(response.decision).toBe('APPROVE');
   });
 
+  it('accepts approval acknowledgement tokens as inline feedback', async () => {
+    const channel = new CliChannel({
+      readline: makeFakeReadline(['a ACK-APPROVAL-ANOMALY-req-001']),
+      operatorName: 'dev',
+    });
+    const response = await channel.requestApproval(makeRequest());
+    expect(response.decision).toBe('APPROVE');
+    expect(response.feedback).toBe('ACK-APPROVAL-ANOMALY-req-001');
+  });
+
   it('maps "r" input to REGEN response code', async () => {
     const channel = new CliChannel({ readline: makeFakeReadline(['r', 'try another way']), operatorName: 'dev' });
     const response = await channel.requestApproval(makeRequest());

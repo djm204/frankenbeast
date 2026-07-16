@@ -28,7 +28,7 @@ When an approval request is flagged, the approval prompt is decorated with a `SE
 ACK-APPROVAL-ANOMALY-req-123
 ```
 
-An anomalous request that receives a normal `APPROVE` is converted to `ABORT` and audited as `securityFailure: "approval-anomaly"`. To proceed anyway, the operator must include the exact acknowledgement token in approval feedback, or the caller must provide the same token in `metadata.approvalAnomalyAcknowledgement` after an out-of-band review.
+An anomalous request that receives a normal `APPROVE` is converted to `ABORT` and audited as `securityFailure: "approval-anomaly"`. To proceed anyway, the operator must include the exact acknowledgement token in trusted response feedback (for example `a ACK-APPROVAL-ANOMALY-req-123` in the CLI channel, or an authenticated Slack action id carrying the same token). Caller-supplied request metadata is intentionally not accepted as acknowledgement material because guarded workers can populate their own request metadata.
 
 ## Metadata callers should provide
 

@@ -90,7 +90,7 @@ export class ApprovalAnomalyDetector {
     };
 
     this.records = [...this.records, record].filter(
-      (candidate) => evidence.timestampMs - candidate.timestampMs <= this.config.windowMs,
+      (candidate) => isWithinLookbackWindow(candidate, evidence.timestampMs, this.config.windowMs),
     );
 
     if (!this.config.enabled) {
@@ -113,11 +113,11 @@ export class ApprovalAnomalyDetector {
 
   private evaluate(current: ApprovalTrafficRecord): ApprovalAnomalyFinding[] {
     const windowRecords = this.records.filter(
-      (record) => current.timestampMs - record.timestampMs <= this.config.windowMs,
+      (record) => isWithinLookbackWindow(record, current.timestampMs, this.config.windowMs),
     );
     const workerRecords = windowRecords.filter((record) => record.workerId === current.workerId);
     const retryRecords = workerRecords.filter(
-      (record) => current.timestampMs - record.timestampMs <= this.config.retryWindowMs,
+      (record) => isWithinLookbackWindow(record, current.timestampMs, this.config.retryWindowMs),
     );
     const findings: ApprovalAnomalyFinding[] = [];
 
@@ -252,16 +252,20 @@ export function formatApprovalAnomalySummary(decision: ApprovalAnomalyDecision):
 }
 
 export function hasApprovalAnomalyAcknowledgement(
-  request: ApprovalRequest,
+  _request: ApprovalRequest,
   response: ApprovalResponse,
   decision: ApprovalAnomalyDecision,
 ): boolean {
-  const metadataAck = readMetadataString(request.metadata ?? {}, 'approvalAnomalyAcknowledgement')
-    ?? readMetadataString(request.metadata ?? {}, 'approval_anomaly_acknowledgement');
-  if (metadataAck === decision.acknowledgementToken) {
-    return true;
-  }
   return response.feedback?.includes(decision.acknowledgementToken) === true;
+}
+
+function isWithinLookbackWindow(
+  record: ApprovalTrafficRecord,
+  currentTimestampMs: number,
+  windowMs: number,
+): boolean {
+  const ageMs = currentTimestampMs - record.timestampMs;
+  return ageMs >= 0 && ageMs <= windowMs;
 }
 
 function readMetadataString(metadata: Record<string, unknown>, key: string): string | undefined {
@@ -271,6 +275,9 @@ function readMetadataString(metadata: Record<string, unknown>, key: string): str
 
 function isDestructiveApprovalRequest(request: ApprovalRequest, commandClass: string): boolean {
   const metadata = request.metadata ?? {};
+  if (metadata.destructive === false || metadata.readonly === true || metadata.readOnly === true) {
+    return false;
+  }
   if (metadata.destructive === true || metadata.force === true) {
     return true;
   }

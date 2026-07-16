@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   ApprovalAnomalyDetector,
   formatApprovalAnomalyAcknowledgementToken,
+  hasApprovalAnomalyAcknowledgement,
 } from '../../../src/security/approval-anomaly-detector.js';
 import type { ApprovalRequest } from '../../../src/core/types.js';
 
@@ -122,5 +123,57 @@ describe('ApprovalAnomalyDetector', () => {
 
     expect(decision.acknowledgementToken).toBe(formatApprovalAnomalyAcknowledgementToken(decision.evidence));
     expect(decision.acknowledgementToken).toBe('ACK-APPROVAL-ANOMALY-req-ack');
+  });
+
+  it('ignores caller-supplied acknowledgement metadata and only accepts response feedback', () => {
+    const request = makeRequest('req-ack', {
+      metadata: { approvalAnomalyAcknowledgement: 'ACK-APPROVAL-ANOMALY-req-ack' },
+    });
+    const decision = new ApprovalAnomalyDetector().record(request);
+
+    expect(hasApprovalAnomalyAcknowledgement(request, {
+      requestId: 'req-ack',
+      decision: 'APPROVE',
+      respondedBy: 'operator',
+      respondedAt: new Date('2026-01-01T00:00:05Z'),
+    }, decision)).toBe(false);
+    expect(hasApprovalAnomalyAcknowledgement(request, {
+      requestId: 'req-ack',
+      decision: 'APPROVE',
+      respondedBy: 'operator',
+      respondedAt: new Date('2026-01-01T00:00:05Z'),
+      feedback: 'reviewed ACK-APPROVAL-ANOMALY-req-ack',
+    }, decision)).toBe(true);
+  });
+
+  it('does not let future-dated records inflate later anomaly windows', () => {
+    const detector = new ApprovalAnomalyDetector({ maxApprovalsPerWindow: 1 });
+
+    detector.record(makeRequest('req-future', { timestamp: new Date('2026-01-01T00:10:00Z') }));
+    const decision = detector.record(makeRequest('req-now', {
+      timestamp: new Date('2026-01-01T00:00:00Z'),
+      metadata: { command: 'gh issue comment 1 --body ok', destructive: false },
+    }));
+
+    expect(decision.flagged).toBe(false);
+  });
+
+  it('honors explicit non-destructive metadata before command-class defaults', () => {
+    const detector = new ApprovalAnomalyDetector({ maxRepeatedDestructiveCommands: 2 });
+    const metadata = {
+      workerId: 'worker-1',
+      workdir: '/repo/a',
+      commandClass: 'github-mutation',
+      command: 'gh issue comment 1738 --body progress',
+      destructive: false,
+    };
+
+    detector.record(makeRequest('req-1', { metadata }));
+    const decision = detector.record(makeRequest('req-2', {
+      timestamp: new Date('2026-01-01T00:00:05Z'),
+      metadata,
+    }));
+
+    expect(decision.findings.map((finding) => finding.ruleId)).not.toContain('repeated-destructive-command');
   });
 });

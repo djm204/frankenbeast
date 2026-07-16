@@ -120,7 +120,14 @@ export class ApprovalGateway {
     }
 
     if (this.requiresAnomalyAcknowledgement(requestForChannel, response, anomalyDecision)) {
-      await this.auditRecorder.record(requestForChannel, response, {
+      const blockedResponse: ApprovalResponse = {
+        ...response,
+        decision: 'ABORT',
+        feedback: [response.feedback, formatApprovalAnomalySummary(anomalyDecision)]
+          .filter((value): value is string => value !== undefined && value.length > 0)
+          .join('\n'),
+      };
+      await this.auditRecorder.record(requestForChannel, blockedResponse, {
         securityFailure: 'approval-anomaly',
       });
       return {

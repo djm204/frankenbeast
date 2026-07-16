@@ -161,7 +161,8 @@ function signApprovalResponse(
  * callback instead of consuming the pending approval with a bogus decision.
  */
 function normalizeSlackDecision(actionId: unknown): ResponseCode | null {
-  switch (String(actionId).toLowerCase()) {
+  const [decisionId = ''] = String(actionId).toLowerCase().split(':', 1);
+  switch (decisionId) {
     case 'approve':
       return 'APPROVE';
     case 'reject':
@@ -176,6 +177,16 @@ function normalizeSlackDecision(actionId: unknown): ResponseCode | null {
     default:
       return null;
   }
+}
+
+function extractSlackActionFeedback(actionId: unknown): string | undefined {
+  const value = String(actionId);
+  const separatorIndex = value.indexOf(':');
+  if (separatorIndex === -1) {
+    return undefined;
+  }
+  const feedback = value.slice(separatorIndex + 1).trim();
+  return feedback.length > 0 ? feedback : undefined;
 }
 
 export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
@@ -507,6 +518,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
     if (decision === null) {
       return c.json({ error: { message: 'Unknown Slack action' } }, 400);
     }
+    const feedback = extractSlackActionFeedback(action.action_id);
 
     // Look up the pending approval; unknown requests are rejected.
     if (!registry.has(requestId)) {
@@ -524,7 +536,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
         requestId,
         decision,
         payload.user?.id ?? payload.user?.username ?? 'slack',
-        undefined,
+        feedback,
         options.signingSecret,
       )
       : undefined;
@@ -534,6 +546,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       decision,
       respondedBy: payload.user?.id ?? payload.user?.username ?? 'slack',
       respondedAt: new Date(deterministicNow()),
+      ...(feedback !== undefined ? { feedback } : {}),
       ...(slackSignature !== undefined ? { signature: slackSignature } : {}),
     });
 
