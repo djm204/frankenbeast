@@ -198,6 +198,72 @@ describe("Memory Server", () => {
     expect(deletionResult.content[0]!.text).not.toContain("secret");
   });
 
+
+  it("quarantines sensitive working memory instead of storing or echoing the value", async () => {
+    const sensitiveValue = "example value that must not be echoed";
+    const brain = createBrainStub({
+      store: vi.fn(),
+      proposeMemory: vi.fn().mockResolvedValue({
+        id: "memcand_secret",
+        targetStore: "working",
+        key: "OPENAI_API_KEY",
+        value: sensitiveValue,
+        source: "fbeast_memory_store:quarantine",
+        evidenceId: "quarantine:OPENAI_API_KEY",
+        confidence: 1,
+        reason: "Sensitive memory quarantined for operator review (key-name-indicates-secret).",
+        status: "pending",
+        createdAt: "2026-07-16T00:00:00.000Z",
+        updatedAt: "2026-07-16T00:00:00.000Z",
+      }),
+    });
+    const server = createMemoryServer({ brain });
+
+    const result = await server.callTool("fbeast_memory_store", {
+      key: "OPENAI_API_KEY",
+      value: sensitiveValue,
+      type: "working",
+    });
+
+    expect(brain.store).not.toHaveBeenCalled();
+    expect(brain.proposeMemory).toHaveBeenCalledWith({
+      key: "OPENAI_API_KEY",
+      value: sensitiveValue,
+      source: "fbeast_memory_store:quarantine",
+      evidenceId: "quarantine:OPENAI_API_KEY",
+      confidence: 1,
+      reason: expect.stringContaining("key-name-indicates-secret"),
+    });
+    const payload = JSON.parse(result.content[0]!.text);
+    expect(payload).toMatchObject({
+      status: "quarantined",
+      id: "memcand_secret",
+      key: "OPENAI_API_KEY",
+      reason: "key-name-indicates-secret",
+      stored: false,
+    });
+    expect(result.content[0]!.text).not.toContain(sensitiveValue);
+  });
+
+  it("keeps benign token-budget working memory on the direct store path", async () => {
+    const brain = createBrainStub({ store: vi.fn().mockResolvedValue(undefined), proposeMemory: vi.fn() });
+    const server = createMemoryServer({ brain });
+
+    const result = await server.callTool("fbeast_memory_store", {
+      key: "token_budget_notes",
+      value: "Keep summaries concise when token budget is low.",
+      type: "working",
+    });
+
+    expect(result.content[0]!.text).toBe("Stored memory: token_budget_notes");
+    expect(brain.store).toHaveBeenCalledWith({
+      key: "token_budget_notes",
+      value: "Keep summaries concise when token budget is low.",
+      type: "working",
+    });
+    expect(brain.proposeMemory).not.toHaveBeenCalled();
+  });
+
   it("rejects blank agent ids before storing private memory as shared", async () => {
     const brain = createBrainStub({
       query: vi.fn().mockResolvedValue([]),
