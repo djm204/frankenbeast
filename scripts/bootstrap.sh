@@ -105,8 +105,8 @@ if [[ "$actual_npm" != "$expected_npm" ]]; then
     package_manager_status="npm $actual_npm would be changed to $expected_pm by Corepack"
   else
     log "Activating repository package manager pin $expected_pm with Corepack."
-    corepack prepare "$expected_pm" --activate
-    corepack enable npm
+    run corepack prepare "$expected_pm" --activate
+    run corepack enable npm
     actual_npm="$(npm --version)"
     [[ "$actual_npm" == "$expected_npm" ]] || fail "npm $actual_npm does not match packageManager $expected_pm after Corepack activation."
     package_manager_status="npm $actual_npm matches $expected_pm"

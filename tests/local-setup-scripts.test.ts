@@ -271,6 +271,29 @@ describe('local setup scripts', () => {
       rmSync(mismatchRoot, { recursive: true, force: true });
     }
 
+    const corepackFailureRoot = mkdtempSync(join(tmpdir(), 'franken-bootstrap-corepack-failure-'));
+    try {
+      const binDir = join(corepackFailureRoot, 'bin');
+      mkdirSync(join(corepackFailureRoot, 'scripts'));
+      mkdirSync(binDir);
+      writeFileSync(join(corepackFailureRoot, 'scripts/bootstrap.sh'), script);
+      writeFileSync(join(corepackFailureRoot, 'package.json'), JSON.stringify({ packageManager: 'npm@11.5.1' }));
+      writeFileSync(join(corepackFailureRoot, '.env.example'), 'CHROMA_URL=http://localhost:8000\n');
+      writeFileSync(join(binDir, 'npm'), '#!/usr/bin/env bash\nprintf "10.0.0\\n"\n', { mode: 0o755 });
+      writeFileSync(join(binDir, 'corepack'), '#!/usr/bin/env bash\nexit 42\n', { mode: 0o755 });
+
+      const corepackFailure = spawnSync('bash', [join(corepackFailureRoot, 'scripts/bootstrap.sh'), '--no-docker'], {
+        cwd: corepackFailureRoot,
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${binDir}:${process.env.PATH ?? ''}` },
+        timeout: 60_000,
+      });
+      expect(corepackFailure.status).toBe(1);
+      expect(corepackFailure.stderr).toContain('[onboarding:2/6:package-manager] error - Command failed: corepack prepare npm@11.5.1 --activate');
+    } finally {
+      rmSync(corepackFailureRoot, { recursive: true, force: true });
+    }
+
     const dependencyFailureRoot = mkdtempSync(join(tmpdir(), 'franken-bootstrap-dependency-failure-'));
     try {
       const binDir = join(dependencyFailureRoot, 'bin');
