@@ -172,10 +172,57 @@ export interface IssueWorkerCardProcessSnapshot {
   readonly alive?: boolean | undefined;
   readonly startedAt?: string | number | Date | undefined;
   readonly lastHeartbeatAt?: string | number | Date | undefined;
+  /** Last stdout/stderr/output event from the worker process. */
+  readonly lastOutputAt?: string | number | Date | undefined;
+  /** Last tool invocation or external side-effect recorded for the worker. */
+  readonly lastToolActivityAt?: string | number | Date | undefined;
+  /** Last Kanban/task state transition observed for this worker card. */
+  readonly lastStateTransitionAt?: string | number | Date | undefined;
+  /** PM/Doctor blocker hint already known before watchdog classification. */
+  readonly blockerCategory?: IssueStuckRunBlockerCategory | undefined;
+  /** Human-readable wait reason, e.g. provider queue, CI checks, or approval token. */
+  readonly waitingOn?: string | undefined;
   /** Monotonic heartbeat sequence recorded by the heartbeat writer. */
   readonly heartbeatSequence?: number | undefined;
   /** Writer/reader source for diagnostics when heartbeat state is stale or regressive. */
   readonly source?: string | undefined;
+}
+
+export type IssueStuckRunBlockerCategory =
+  | 'approval-gate'
+  | 'ci-wait'
+  | 'dispatcher-bug'
+  | 'process-crash'
+  | 'provider-wait'
+  | 'unknown';
+
+export interface IssueStuckRunWatchdogOptions {
+  readonly nowMs?: number | undefined;
+  readonly staleHeartbeatMs?: number | undefined;
+  readonly staleOutputMs?: number | undefined;
+  readonly staleToolActivityMs?: number | undefined;
+  readonly staleStateTransitionMs?: number | undefined;
+  readonly longRunningWaitGraceMs?: number | undefined;
+}
+
+export interface IssueStuckRunWatchdogFinding {
+  readonly cardId: string;
+  readonly pid: number;
+  readonly runId?: string | undefined;
+  readonly issueNumber?: number | undefined;
+  readonly owner?: string | undefined;
+  readonly status?: string | undefined;
+  readonly blockerCategory: IssueStuckRunBlockerCategory;
+  readonly confidence: 'low' | 'medium' | 'high';
+  readonly heartbeatAgeMs?: number | undefined;
+  readonly outputAgeMs?: number | undefined;
+  readonly toolActivityAgeMs?: number | undefined;
+  readonly stateTransitionAgeMs?: number | undefined;
+  readonly processStatus: 'alive' | 'dead' | 'unknown';
+  readonly kanbanState: string;
+  readonly evidence: readonly string[];
+  readonly recommendedAction: string;
+  readonly message: string;
 }
 
 export interface WorkerHeartbeatMonotonicityFinding {
@@ -338,6 +385,11 @@ const ONE_SHOT_MAX_ITERATIONS = 50;
 const ONE_SHOT_STALE_MATE_LIMIT = 3;
 const DEFAULT_SCHEDULER_FAIRNESS_ISSUE_NUMBER_LIMIT = 50;
 const DEFAULT_SCHEDULER_FAIRNESS_WARNING_LIMIT = 50;
+const DEFAULT_STUCK_RUN_STALE_HEARTBEAT_MS = 30 * 60 * 1000;
+const DEFAULT_STUCK_RUN_STALE_OUTPUT_MS = 45 * 60 * 1000;
+const DEFAULT_STUCK_RUN_STALE_TOOL_ACTIVITY_MS = 45 * 60 * 1000;
+const DEFAULT_STUCK_RUN_STALE_STATE_TRANSITION_MS = 60 * 60 * 1000;
+const DEFAULT_STUCK_RUN_WAIT_GRACE_MS = 2 * 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const PRIORITY_AGING_DAYS_PER_RANK = 14;
 const MAX_PRIORITY_AGE_BOOST = 2;
@@ -638,12 +690,187 @@ const TERMINAL_WORKER_CARD_STATUSES = new Set([
   'stopped',
 ]);
 
+const CRASH_WORKER_CARD_STATUSES = new Set([
+  'crashed',
+  'exited',
+  'failed',
+]);
+
 function activeWorkerCardProcess(snapshot: IssueWorkerCardProcessSnapshot): boolean {
   if (snapshot.alive === false) return false;
   if (!snapshot.cardId.trim()) return false;
   if (!Number.isSafeInteger(snapshot.pid) || snapshot.pid <= 0) return false;
   const status = snapshot.status?.trim().toLowerCase();
   return status === undefined || !TERMINAL_WORKER_CARD_STATUSES.has(status);
+}
+
+function ageMs(value: string | number | Date | undefined, nowMs: number): number | undefined {
+  if (value === undefined) return undefined;
+  const date = value instanceof Date ? value : new Date(value);
+  const ms = date.getTime();
+  if (!Number.isFinite(ms) || ms > nowMs) return undefined;
+  return nowMs - ms;
+}
+
+function stale(age: number | undefined, threshold: number): boolean {
+  return age !== undefined && age >= threshold;
+}
+
+function explicitProcessCrash(snapshot: IssueWorkerCardProcessSnapshot): boolean {
+  const status = snapshot.status?.trim().toLowerCase() ?? '';
+  if (CRASH_WORKER_CARD_STATUSES.has(status)) return true;
+  return snapshot.blockerCategory === 'process-crash'
+    && (status === '' || !TERMINAL_WORKER_CARD_STATUSES.has(status));
+}
+
+function redactStuckRunEvidenceText(value: string): string {
+  return value
+    .replace(/\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[opusr]_[A-Za-z0-9_.-]{12,})\b/g, '[REDACTED_TOKEN]')
+    .replace(/\b(sk|xox[baprs]?|hf|glpat)-[A-Za-z0-9._/-]+\b/g, '$1-[REDACTED]')
+    .replace(/\b([A-Za-z0-9_-]{20,})\.([A-Za-z0-9_-]{20,})\.([A-Za-z0-9_-]{20,})\b/g, '[REDACTED_JWT]')
+    .replace(/\b((?:approval|session|access|refresh|api)[-_ ]?token)\s*[:=]\s*\S+/gi, '$1=[REDACTED]')
+    .replace(/\b(token)\s*[:=]\s*\S+/gi, '$1=[REDACTED]');
+}
+
+function normalizeStuckRunBlockerCategory(
+  snapshot: IssueWorkerCardProcessSnapshot,
+): IssueStuckRunBlockerCategory {
+  const status = snapshot.status?.trim().toLowerCase() ?? '';
+  if (snapshot.alive === false) return 'process-crash';
+  if (CRASH_WORKER_CARD_STATUSES.has(status)) return 'process-crash';
+  if (snapshot.blockerCategory && snapshot.blockerCategory !== 'unknown') return snapshot.blockerCategory;
+  const text = `${snapshot.status ?? ''} ${snapshot.waitingOn ?? ''}`.toLowerCase();
+  if (/\bapproval\b|\bhitl\b|\bhuman\b|approval[- ]?token|pending approval|operator approval|approval-cop|approve/.test(text)) return 'approval-gate';
+  if (/provider|codex|rate limit|quota|llm|model/.test(text)) return 'provider-wait';
+  if (/\bci\b|ci[- ]?check|status check|check run|workflow|merge queue|github actions?/.test(text)) return 'ci-wait';
+  if (/\b(crash(?:ed|ing)?|exit(?:ed|ing)?|dead|pid|fail(?:ed|ure|ing)?)\b/.test(text)) return 'process-crash';
+  if (/dispatcher|kanban|current_run|current run|respawn|heartbeat/.test(text)) return 'dispatcher-bug';
+  return 'unknown';
+}
+
+function remediationForStuckRun(category: IssueStuckRunBlockerCategory, processStatus: IssueStuckRunWatchdogFinding['processStatus']): string {
+  if (processStatus === 'dead' || category === 'process-crash') {
+    return 'Inspect the worker exit/crash logs, clear the stale PID/current-run pointer if no process is alive, then respawn one focused worker.';
+  }
+  switch (category) {
+    case 'approval-gate':
+      return 'Route the exact pending approval command/token to approval-cop or a human, and do not respawn duplicate workers while the gate is pending.';
+    case 'ci-wait':
+      return 'Check live CI/run status and merge queue state, rerun failed checks or unblock shared CI before touching issue code.';
+    case 'dispatcher-bug':
+      return 'Audit Kanban current_run/status/heartbeat consistency and repair dispatcher metadata before unblocking the card.';
+    case 'provider-wait':
+      return 'Check provider quota/rate-limit status and the latest model/bot response; retry later or switch provider only after preserving current work evidence.';
+    default:
+      return 'Open a Doctor card with heartbeat/output/tool/state evidence, verify process liveness, and choose between wait, repair, or single-worker respawn.';
+  }
+}
+
+function confidenceForStuckRun(
+  category: IssueStuckRunBlockerCategory,
+  staleCount: number,
+  processStatus: IssueStuckRunWatchdogFinding['processStatus'],
+): IssueStuckRunWatchdogFinding['confidence'] {
+  if (processStatus === 'dead') return 'high';
+  if (category !== 'unknown' && staleCount >= 3) return 'high';
+  if (category !== 'unknown' || staleCount >= 3) return 'medium';
+  return 'low';
+}
+
+function knownLongRunningWait(category: IssueStuckRunBlockerCategory): boolean {
+  return category === 'ci-wait' || category === 'provider-wait';
+}
+
+export function detectStuckRunWatchdogFindings(
+  snapshots: readonly IssueWorkerCardProcessSnapshot[],
+  options: IssueStuckRunWatchdogOptions = {},
+): IssueStuckRunWatchdogFinding[] {
+  const nowMs = options.nowMs ?? Date.now();
+  const staleHeartbeatMs = options.staleHeartbeatMs ?? DEFAULT_STUCK_RUN_STALE_HEARTBEAT_MS;
+  const staleOutputMs = options.staleOutputMs ?? DEFAULT_STUCK_RUN_STALE_OUTPUT_MS;
+  const staleToolActivityMs = options.staleToolActivityMs ?? DEFAULT_STUCK_RUN_STALE_TOOL_ACTIVITY_MS;
+  const staleStateTransitionMs = options.staleStateTransitionMs ?? DEFAULT_STUCK_RUN_STALE_STATE_TRANSITION_MS;
+  const longRunningWaitGraceMs = options.longRunningWaitGraceMs ?? DEFAULT_STUCK_RUN_WAIT_GRACE_MS;
+  const findings: IssueStuckRunWatchdogFinding[] = [];
+
+  for (const snapshot of snapshots) {
+    if (!snapshot.cardId.trim()) continue;
+    const hasPositivePid = Number.isSafeInteger(snapshot.pid) && snapshot.pid > 0;
+    const status = snapshot.status?.trim().toLowerCase();
+    if (status && TERMINAL_WORKER_CARD_STATUSES.has(status) && !explicitProcessCrash(snapshot)) continue;
+
+    const category = normalizeStuckRunBlockerCategory(snapshot);
+    const heartbeatAgeMs = ageMs(snapshot.lastHeartbeatAt, nowMs);
+    const outputAgeMs = ageMs(snapshot.lastOutputAt, nowMs);
+    const toolActivityAgeMs = ageMs(snapshot.lastToolActivityAt, nowMs);
+    const stateTransitionAgeMs = ageMs(snapshot.lastStateTransitionAt ?? snapshot.startedAt, nowMs);
+    const heartbeatStale = stale(heartbeatAgeMs, staleHeartbeatMs);
+    const outputStale = stale(outputAgeMs, staleOutputMs);
+    const toolStale = stale(toolActivityAgeMs, staleToolActivityMs);
+    const stateStale = stale(stateTransitionAgeMs, staleStateTransitionMs);
+    const staleCount = [heartbeatStale, outputStale, toolStale, stateStale].filter(Boolean).length;
+    const providedActivitySignalCount = [
+      heartbeatAgeMs,
+      outputAgeMs,
+      toolActivityAgeMs,
+      stateTransitionAgeMs,
+    ].filter((age) => age !== undefined).length;
+    const minimumStaleSignals = providedActivitySignalCount;
+    const freshLongRunningWaitActivity = [heartbeatAgeMs, outputAgeMs, toolActivityAgeMs, stateTransitionAgeMs]
+      .some((age) => age !== undefined && age < longRunningWaitGraceMs);
+    const processStatus: IssueStuckRunWatchdogFinding['processStatus'] = snapshot.alive === false
+      ? 'dead'
+      : hasPositivePid
+        ? 'alive'
+        : 'unknown';
+
+    if (processStatus !== 'dead' && category !== 'process-crash' && providedActivitySignalCount === 0) continue;
+
+    if (
+      knownLongRunningWait(category)
+      && processStatus !== 'dead'
+      && freshLongRunningWaitActivity
+    ) {
+      continue;
+    }
+
+    if (processStatus !== 'dead' && category !== 'process-crash' && staleCount < minimumStaleSignals) continue;
+
+    const evidence = [
+      `heartbeatAgeMs=${heartbeatAgeMs ?? 'unknown'}`,
+      `outputAgeMs=${outputAgeMs ?? 'unknown'}`,
+      `toolActivityAgeMs=${toolActivityAgeMs ?? 'unknown'}`,
+      `stateTransitionAgeMs=${stateTransitionAgeMs ?? 'unknown'}`,
+      `processStatus=${processStatus}`,
+      `kanbanState=${status ?? 'unknown'}`,
+      `blockerCategory=${category}`,
+    ];
+    if (snapshot.waitingOn) evidence.push(`waitingOn=${redactStuckRunEvidenceText(snapshot.waitingOn)}`);
+
+    const recommendedAction = remediationForStuckRun(category, processStatus);
+    const confidence = confidenceForStuckRun(category, staleCount, processStatus);
+    findings.push({
+      cardId: snapshot.cardId.trim(),
+      pid: snapshot.pid,
+      ...(snapshot.runId ? { runId: snapshot.runId } : {}),
+      ...(snapshot.issueNumber !== undefined ? { issueNumber: snapshot.issueNumber } : {}),
+      ...(snapshot.owner ? { owner: snapshot.owner } : {}),
+      ...(snapshot.status ? { status: snapshot.status } : {}),
+      blockerCategory: category,
+      confidence,
+      ...(heartbeatAgeMs !== undefined ? { heartbeatAgeMs } : {}),
+      ...(outputAgeMs !== undefined ? { outputAgeMs } : {}),
+      ...(toolActivityAgeMs !== undefined ? { toolActivityAgeMs } : {}),
+      ...(stateTransitionAgeMs !== undefined ? { stateTransitionAgeMs } : {}),
+      processStatus,
+      kanbanState: status ?? 'unknown',
+      evidence,
+      recommendedAction,
+      message: `Worker card ${snapshot.cardId.trim()} appears stuck (${category}, ${confidence} confidence): ${recommendedAction}`,
+    });
+  }
+
+  return findings.sort((a, b) => a.cardId.localeCompare(b.cardId));
 }
 
 function isoTimestamp(value: string | number | Date | undefined): string | undefined {
