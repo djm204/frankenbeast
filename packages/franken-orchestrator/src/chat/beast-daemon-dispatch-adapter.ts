@@ -149,7 +149,7 @@ export class BeastDaemonDispatchAdapter {
           kind: 'dispatch',
           definitionId,
           assistantMessage: formatMaintenanceDaemonMessage(error),
-          beastContext: context,
+          beastContext: null,
         };
       }
       throw error;

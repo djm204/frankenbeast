@@ -165,7 +165,7 @@ describe('BeastDaemonDispatchAdapter', () => {
       kind: 'dispatch',
       definitionId: 'martin-loop',
       assistantMessage: expect.stringContaining('Maintenance mode is active'),
-      beastContext: context,
+      beastContext: null,
     });
     expect(result?.assistantMessage).toContain('Reason: deploy');
     expect(result?.assistantMessage).toContain('beasts maintenance off');

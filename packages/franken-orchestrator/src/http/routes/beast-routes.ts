@@ -231,13 +231,16 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
       if (error instanceof MaintenanceModeError) {
         if (body.trackedAgentId) {
           try {
-            deps.agents.updateAgent(body.trackedAgentId, { status: 'stopped' });
-            deps.agents.appendEvent(body.trackedAgentId, {
-              level: 'warning',
-              type: 'agent.dispatch.paused',
-              message: error.message,
-              payload: { maintenance: error.state },
-            });
+            const trackedAgent = deps.agents.getAgent(body.trackedAgentId);
+            if (trackedAgent.status === 'initializing') {
+              deps.agents.updateAgent(body.trackedAgentId, { status: 'stopped' });
+              deps.agents.appendEvent(body.trackedAgentId, {
+                level: 'warning',
+                type: 'agent.dispatch.paused',
+                message: error.message,
+                payload: { maintenance: error.state },
+              });
+            }
           } catch (cleanupError) {
             if (!(cleanupError instanceof UnknownTrackedAgentError)) {
               throw cleanupError;

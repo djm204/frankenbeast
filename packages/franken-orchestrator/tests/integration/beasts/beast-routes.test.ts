@@ -274,6 +274,42 @@ describe('beast routes', () => {
     });
   });
 
+  it('does not stop unrelated tracked agents when maintenance blocks direct run creation', async () => {
+    const { app, operatorToken, agents } = createBeastApp({ maintenanceEnabled: true });
+    const agent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'chat',
+      createdByUser: 'chat-session:chat-1',
+      chatSessionId: 'chat-1',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: { provider: 'claude', objective: 'ship', chunkDirectory: 'docs/chunks' },
+    });
+    agents.updateAgent(agent.id, { status: 'running' });
+
+    const response = await app.request('/v1/beasts/runs', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer ' + operatorToken,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        trackedAgentId: agent.id,
+        chatSessionId: 'chat-1',
+        config: {
+          provider: 'claude',
+          objective: 'Implement beast routes',
+          chunkDirectory: 'docs/chunks',
+        },
+        executionMode: 'process',
+        startNow: true,
+      }),
+    });
+
+    expect(response.status).toBe(423);
+    expect(agents.getAgent(agent.id).status).toBe('running');
+  });
+
   it.each([
     ['/v1/beasts/runs/missing-run-id'],
     ['/v1/beasts/runs/missing-run-id/events'],
