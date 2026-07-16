@@ -269,6 +269,85 @@ describe('extractPostTaskLessonCandidates', () => {
       }),
     );
   });
+
+  it('admits redacted raw preferences after recategorizing task-state corrections', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-preference-with-state',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['Please keep summaries concise for PR #123'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'preference',
+        suggestedDestination: 'memory',
+        privacyFilter: expect.objectContaining({
+          action: 'admit',
+          category: 'preference',
+        }),
+      }),
+    );
+  });
+
+  it('recognizes imperative run/check workaround wording as reusable', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-imperative-tool-workaround',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      toolFailures: [
+        'When gh pr checks returns 502, run gh run view before giving up',
+      ],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'procedure',
+        suggestedDestination: 'skill',
+        review: expect.objectContaining({ status: 'pending-review' }),
+      }),
+    );
+  });
+
+  it('discards one-off user corrections without reusable signals', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-one-off-correction',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['The failing test is tests/foo.test.ts, not tests/bar.test.ts'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        privacyFilter: expect.objectContaining({ action: 'reject' }),
+        review: expect.objectContaining({ status: 'discarded' }),
+      }),
+    );
+  });
+
+  it('attaches verification evidence only to its matching candidate', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-matching-verification',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['Please keep summaries concise'],
+      toolFailures: [
+        'When gh pr checks returns 502, run gh run view before giving up',
+      ],
+      verificationSteps: ['Confirmed gh run view showed the failed check log'],
+    });
+
+    const preference = report.candidates.find(
+      (candidate) => candidate.evidence[0]?.kind === 'user-correction',
+    );
+    const workaround = report.candidates.find(
+      (candidate) => candidate.evidence[0]?.kind === 'tool-failure',
+    );
+
+    expect(preference?.evidence).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'verification' })]),
+    );
+    expect(workaround?.evidence).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'verification' })]),
+    );
+  });
 });
 
 describe('LessonRecorder', () => {

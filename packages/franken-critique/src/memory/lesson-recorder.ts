@@ -1061,10 +1061,10 @@ export function extractPostTaskLessonCandidates(
           privacyDecision.category,
         );
     if (!options.forceDiscard && category !== privacyDecision.category) {
-      publicDecision = {
-        ...publicDecision,
+      publicDecision = recategorizePostTaskPrivacyDecision(
+        publicDecision,
         category,
-      };
+      );
     }
     if (options.forceDiscard) {
       publicDecision = {
@@ -1111,7 +1111,11 @@ export function extractPostTaskLessonCandidates(
   };
 
   for (const correction of input.userCorrections ?? []) {
-    addCandidate('user-correction', correction);
+    addCandidate('user-correction', correction, undefined, {
+      forceDiscard:
+        !isRawUserPreferenceCorrection(correction) &&
+        !hasExplicitPostTaskLessonSignal(correction),
+    });
   }
   for (const failure of input.toolFailures ?? []) {
     addCandidate('tool-failure', failure, undefined, {
@@ -1172,6 +1176,26 @@ function inferPostTaskLessonCategory(
   return fallback;
 }
 
+function recategorizePostTaskPrivacyDecision(
+  decision: LessonPrivacyFilterDecision,
+  category: LessonCandidateCategory,
+): LessonPrivacyFilterDecision {
+  const action =
+    category === 'task-state' || category === 'discard' ? 'reject' : 'admit';
+  return {
+    ...decision,
+    category,
+    action,
+    approvalRequired: action === 'admit' && decision.sensitive,
+    reason:
+      action === 'reject'
+        ? PRIVACY_FILTER_TASK_STATE_REASON
+        : decision.sensitive
+          ? PRIVACY_FILTER_SENSITIVE_REASON
+          : PRIVACY_FILTER_ADMIT_REASON,
+  };
+}
+
 function isRawUserPreferenceCorrection(text: string): boolean {
   if (/\b(?:use|run|command|cli|tool|fallback|workaround|workflow|procedure|steps?|script|test|verify|retry)\b/i.test(text)) {
     return false;
@@ -1184,6 +1208,14 @@ function isRawUserPreferenceCorrection(text: string): boolean {
 function hasExplicitPostTaskLessonSignal(text: string): boolean {
   if (PREFERENCE_PATTERNS.some((pattern) => pattern.test(text))) return true;
   if (ENVIRONMENT_FACT_PATTERNS.some((pattern) => pattern.test(text))) {
+    return true;
+  }
+  if (
+    /\b(?:when|if)\b.{0,160}\b(?:run|check)\b.{0,160}\b(?:before|instead|fallback|workaround|retry|use|giving\s+up)\b/i.test(
+      text,
+    ) ||
+    /\b(?:run|check)\b.{0,160}\b(?:when|if)\b/i.test(text)
+  ) {
     return true;
   }
   return /\b(?:always|avoid|ensure|prefer|require|validate|verify|retry|redact|must|should|use|fallback|workaround)\b/i.test(
@@ -1230,20 +1262,120 @@ function attachPostTaskVerificationEvidence(
     (candidate) => candidate.suggestedDestination !== 'discard',
   );
   if (reviewableCandidates.length === 0) return candidates;
+  if (reviewableCandidates.length === 1) {
+    const candidate = reviewableCandidates[0]!;
+    return candidates.map((item) =>
+      item.id === candidate.id
+        ? attachVerificationEvidenceToCandidate(item, verificationEvidence)
+        : item,
+    );
+  }
+
+  const attachments = new Map<string, PostTaskVerificationEvidenceItem[]>();
+  for (const evidence of verificationEvidence) {
+    const match = chooseVerificationEvidenceCandidate(
+      evidence,
+      reviewableCandidates,
+    );
+    if (!match) continue;
+    attachments.set(match.id, [...(attachments.get(match.id) ?? []), evidence]);
+  }
+
   return candidates.map((candidate) =>
-    candidate.suggestedDestination !== 'discard'
-      ? {
-          ...candidate,
-          evidence: [
-            ...candidate.evidence,
-            ...verificationEvidence.map((item) => item.evidence),
-          ],
-          privacyFilter: mergePostTaskPrivacyFilters(
-            candidate.privacyFilter,
-            verificationEvidence.map((item) => item.privacyFilter),
-          ),
-        }
-      : candidate,
+    attachVerificationEvidenceToCandidate(
+      candidate,
+      attachments.get(candidate.id) ?? [],
+    ),
+  );
+}
+
+function attachVerificationEvidenceToCandidate(
+  candidate: PostTaskLessonCandidate,
+  verificationEvidence: readonly PostTaskVerificationEvidenceItem[],
+): PostTaskLessonCandidate {
+  if (candidate.suggestedDestination === 'discard' || verificationEvidence.length === 0) {
+    return candidate;
+  }
+  return {
+    ...candidate,
+    evidence: [
+      ...candidate.evidence,
+      ...verificationEvidence.map((item) => item.evidence),
+    ],
+    privacyFilter: mergePostTaskPrivacyFilters(
+      candidate.privacyFilter,
+      verificationEvidence.map((item) => item.privacyFilter),
+    ),
+  };
+}
+
+function chooseVerificationEvidenceCandidate(
+  verificationEvidence: PostTaskVerificationEvidenceItem,
+  candidates: readonly PostTaskLessonCandidate[],
+): PostTaskLessonCandidate | undefined {
+  const ranked = candidates
+    .map((candidate) => ({
+      candidate,
+      score: scoreVerificationEvidenceMatch(
+        verificationEvidence.evidence.summary,
+        candidate,
+      ),
+    }))
+    .filter((entry) => entry.score >= 2)
+    .sort((left, right) => right.score - left.score);
+  if (ranked.length === 0) return undefined;
+  if (ranked.length > 1 && ranked[0]!.score === ranked[1]!.score) {
+    return undefined;
+  }
+  return ranked[0]!.candidate;
+}
+
+function scoreVerificationEvidenceMatch(
+  verificationSummary: string,
+  candidate: PostTaskLessonCandidate,
+): number {
+  const verificationTokens = tokenizePostTaskVerificationText(verificationSummary);
+  const candidateTokens = new Set(
+    tokenizePostTaskVerificationText(
+      [
+        candidate.text,
+        ...candidate.evidence.map((evidence) => evidence.summary),
+      ].join(' '),
+    ),
+  );
+  return verificationTokens.filter((token) => candidateTokens.has(token)).length;
+}
+
+function tokenizePostTaskVerificationText(text: string): string[] {
+  const stopWords = new Set([
+    'verification',
+    'evidence',
+    'verified',
+    'confirmed',
+    'against',
+    'after',
+    'before',
+    'with',
+    'that',
+    'this',
+    'the',
+    'and',
+    'for',
+    'was',
+    'were',
+    'ran',
+    'run',
+  ]);
+  return Array.from(
+    new Set(
+      text
+        .toLowerCase()
+        .match(/[a-z0-9][a-z0-9._-]{1,}/g)
+        ?.map((token) =>
+          token.length > 3 && token.endsWith('s') ? token.slice(0, -1) : token,
+        )
+        .filter((token) => !stopWords.has(token)) ?? [],
+    ),
   );
 }
 
