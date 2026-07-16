@@ -2,6 +2,7 @@ const REDACTED = '<redacted>';
 
 const SENSITIVE_KEY_RE = /(?:^|[_-])(?:SECRET|TOKEN|PASSWORD|PASSWD|PWD|CREDENTIAL|COOKIE|BEARER|AUTH|AUTHORIZATION|PROXY[_-]?AUTHORIZATION|API[_-]?KEY|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|CLAUDE[_-]?SESSION)(?:$|[_-])/iu;
 const ASSIGNMENT_RE = /\b([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)/gu;
+const HEADER_STYLE_FIELD_RE = /\b([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)/gu;
 const JSON_FIELD_RE = /("([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*)("(?:\\.|[^"\\])*"|[^,}\]\s]+)/gu;
 
 export type RedactionDecisionSource = 'text-assignment' | 'text-json-field' | 'text-opaque-literal' | 'object-key';
@@ -43,7 +44,7 @@ export function maskOpaqueSecretLiterals(text: string): string {
     .replace(/\bsk-[A-Za-z0-9_-]{12,}\b/gu, REDACTED)
     .replace(/\bxox[baprs]-[A-Za-z0-9-]{10,}\b/gu, REDACTED)
     .replace(/\b([A-Za-z][A-Za-z0-9+.-]*:\/\/[^:\s"'/@]+):[^@\s"']+@/gu, `$1:${REDACTED}@`)
-    .replace(/\b((?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/[^:\s"']*):[^@\s"']+@/giu, `$1:${REDACTED}@`)
+    .replace(/\b((?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|rediss?):\/\/[^:\s"']*):[^@\s"']+@/giu, `$1:${REDACTED}@`)
     .replace(/\b(?:Bearer|Basic|Bot)\s+[A-Za-z0-9._~+/=-]{8,}\b/giu, (match) => `${match.split(/\s+/u)[0]} ${REDACTED}`)
     .replace(/((?:^|[\s"'])--(?:api-?key|auth|authorization|bearer|password|secret|token)\s+)[^\s"']+/giu, `$1${REDACTED}`)
     .replace(/((?:^|[\s"'])--(?:api-?key|auth|authorization|bearer|password|secret|token)=)[^\s"']+/giu, `$1${REDACTED}`)
@@ -68,8 +69,19 @@ export function redactSensitiveTextWithProvenance(text: string, path = '$'): Red
     return `${prefix}"${REDACTED}"`;
   });
 
-  const value = maskOpaqueSecretLiterals(jsonRedacted);
-  if (value !== jsonRedacted) {
+  const headerRedacted = jsonRedacted.replace(HEADER_STYLE_FIELD_RE, (match, key: string, value: string) => {
+    if (!isSensitiveLogKey(key)) {
+      return match;
+    }
+    if (/^(?:authorization|proxy-authorization)$/iu.test(key)) {
+      return match;
+    }
+    decisions.push(createDecision(path, key, 'text-assignment'));
+    return `${key}: ${REDACTED}`;
+  });
+
+  const value = maskOpaqueSecretLiterals(headerRedacted);
+  if (value !== headerRedacted) {
     decisions.push(createDecision(path, 'opaque-secret-literal', 'text-opaque-literal'));
   }
 

@@ -79,21 +79,37 @@ describe('logging redaction', () => {
     expect(JSON.stringify(result.decisions)).not.toContain(value);
   });
 
-  it('keeps opaque-token and password-only URL masking in provenance-aware text redaction', () => {
+  it('keeps header, opaque-token, and password-only URL masking in provenance-aware text redaction', () => {
     const bearer = ['bearerCredential', 'ForReview123'].join('');
     const password = ['cache', 'pass'].join('');
-    const result = redactSensitiveTextWithProvenance(`Authorization: Bearer ${bearer} redis://:${password}@localhost:6379/0`, '$.message');
+    const redissPassword = ['tls', 'cache', 'pass'].join('');
+    const apiKey = ['header', 'api', 'key'].join('');
+    const result = redactSensitiveTextWithProvenance(
+      `Authorization: Bearer ${bearer} X-API-Key: ${apiKey} redis://:${password}@localhost:6379/0 rediss://:${redissPassword}@cache.example:6380/0`,
+      '$.message',
+    );
 
-    expect(result.value).toBe('Authorization: Bearer <redacted> redis://:<redacted>@localhost:6379/0');
+    expect(result.value).toBe('Authorization: Bearer *** X-API-Key: <redacted> redis://:<redacted>@localhost:6379/0 rediss://:<redacted>@cache.example:6380/0');
     expect(result.value).not.toContain(bearer);
     expect(result.value).not.toContain(password);
-    expect(result.decisions).toEqual([expect.objectContaining({
-      path: '$.message',
-      key: 'opaque-secret-literal',
-      source: 'text-opaque-literal',
-      rule: 'sensitive-key',
-      replacement: '<redacted>',
-    })]);
+    expect(result.value).not.toContain(redissPassword);
+    expect(result.value).not.toContain(apiKey);
+    expect(result.decisions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: '$.message',
+        key: 'X-API-Key',
+        source: 'text-assignment',
+        rule: 'sensitive-key',
+        replacement: '<redacted>',
+      }),
+      expect.objectContaining({
+        path: '$.message',
+        key: 'opaque-secret-literal',
+        source: 'text-opaque-literal',
+        rule: 'sensitive-key',
+        replacement: '<redacted>',
+      }),
+    ]));
   });
 
   it('returns path-aware provenance for object and nested string redaction decisions', () => {

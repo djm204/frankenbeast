@@ -91,19 +91,32 @@ describe('dr restore-dry-run CLI', () => {
       await mkdir(join(stateDir, 'runs', 'run-1'), { recursive: true });
       await mkdir(join(stateDir, 'logs'), { recursive: true });
       await mkdir(join(stateDir, 'chat'), { recursive: true });
-      await writeFile(join(stateDir, 'config.json'), JSON.stringify({ provider: 'openai', apiToken: 'secret-config-token' }), 'utf8');
-      await writeFile(join(stateDir, 'approvals', 'ledger.json'), JSON.stringify({ approvals: [{ id: 'approval-1', token: 'secret-approval-token', state: 'pending' }] }), 'utf8');
+      await writeFile(join(stateDir, 'config.json'), JSON.stringify({ provider: 'openai', apiToken: 'config-value-for-mask' }), 'utf8');
+      await writeFile(join(stateDir, 'approvals', 'ledger.json'), JSON.stringify({ approvals: [{ id: 'approval-1', token: 'approval-value-for-mask', state: 'pending' }] }), 'utf8');
       await writeFile(join(stateDir, 'memory', 'store.json'), JSON.stringify({ memories: [{ key: 'user.pref', value: 'private memory body', metadata: { source: 'chat' } }] }), 'utf8');
-      await writeFile(join(stateDir, 'kanban-tasks.json'), JSON.stringify({ tasks: [{ id: 'task-1', title: 'secret task title', status: 'running' }] }), 'utf8');
+      await writeFile(join(stateDir, 'kanban-tasks.json'), JSON.stringify({ tasks: [{ id: 'task-1', title: 'private task title', status: 'running' }] }), 'utf8');
       await writeFile(join(stateDir, 'runs', 'run-1', 'metadata.json'), JSON.stringify({ id: 'run-1', taskId: 'task-1', status: 'running' }), 'utf8');
       await writeFile(join(stateDir, 'chat', 'session-1.json'), JSON.stringify({
         id: 'session-1',
-        pendingApproval: { id: 'approval-chat-1', description: 'deploy pending', target: 'https://operator:chatTargetSecret@example.com' },
+        pendingApproval: {
+          id: 'approval-chat-1',
+          description: 'deploy pending',
+          target: 'https://operator:targetValueForMask@example.com',
+          command: 'deploy --token commandValueForMask',
+          tool: 'shell',
+          risk: 'requires-approval',
+          affectedFiles: ['deploy-plan.md'],
+          sessionId: 'session-1',
+        },
       }), 'utf8');
+      const longSingleLinePrefix = 'x'.repeat(9000);
       await writeFile(join(stateDir, 'logs', 'run-1.log'), [
         'starting run',
         'OPENAI_API_KEY=test-key-needs-redaction',
-        'Authorization: Bearer bearerCredentialForReview123',
+        'X-API-Key: reviewHeaderValueForMasking',
+        'Authorization: Bearer bearerValueForMasking123',
+        'redis tls rediss://:redissValueForMasking@cache.example:6380/0',
+        `${longSingleLinePrefix}tail-marker`,
         'finished run',
       ].join('\n'), 'utf8');
       const binaryLog = Buffer.from([0xff, 0xfe, 0x41, 0x0a]);
@@ -113,8 +126,11 @@ describe('dr restore-dry-run CLI', () => {
       const memoryDb = new Database(join(stateDir, 'memory.db'));
       try {
         beastDb.exec(`CREATE TABLE beast_runs (id TEXT PRIMARY KEY, status TEXT, definition_id TEXT, created_at TEXT);`);
+        beastDb.exec(`CREATE TABLE tracked_agents (id TEXT PRIMARY KEY, status TEXT, definition_id TEXT, created_at TEXT);`);
         beastDb.prepare('INSERT INTO beast_runs (id, status, definition_id, created_at) VALUES (?, ?, ?, ?)')
           .run('run-db-1', 'running', 'nightly', '2026-07-16T08:00:00.000Z');
+        beastDb.prepare('INSERT INTO tracked_agents (id, status, definition_id, created_at) VALUES (?, ?, ?, ?)')
+          .run('agent-db-1', 'running', 'nightly', '2026-07-16T08:01:00.000Z');
         kanbanDb.exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, status TEXT, created_at TEXT);`);
         kanbanDb.prepare('INSERT INTO tasks (id, status, created_at) VALUES (?, ?, ?)')
           .run('task-db-1', 'ready', '2026-07-16T08:00:00.000Z');
@@ -158,16 +174,20 @@ describe('dr restore-dry-run CLI', () => {
       expect(report.command).toBe('dr export');
       expect(report.manifest.generatedAt).toBe('2026-07-16T09:00:00.000Z');
       expect(report.manifest.configChecksums).toEqual([expect.objectContaining({ path: 'config.json', sha256: expect.stringMatching(/^sha256:/u) })]);
-      expect(report.manifest.sections).toEqual(expect.objectContaining({ approvals: 2, memory: 3, tasks: 2, runs: 2, logs: 2 }));
+      expect(report.manifest.sections).toEqual(expect.objectContaining({ approvals: 2, memory: 3, tasks: 2, runs: 3, logs: 2 }));
       expect(report.evidence.approvals).toEqual(expect.arrayContaining([
         expect.objectContaining({ path: 'approvals/ledger.json' }),
-        expect.objectContaining({ path: 'chat/session-1.json', records: [expect.objectContaining({ id: 'approval-chat-1' })] }),
+        expect.objectContaining({
+          path: 'chat/session-1.json',
+          records: [expect.objectContaining({ id: 'approval-chat-1', command: 'deploy --token <redacted>', tool: 'shell', sessionId: 'session-1' })],
+        }),
       ]));
       expect(report.evidence.memory).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'memory/store.json', recordCount: 1 })]));
       expect(report.evidence.tasks).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'kanban-tasks.json', records: [expect.objectContaining({ id: 'task-1', status: 'running' })] })]));
       expect(report.evidence.runs).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'runs/run-1/metadata.json', records: [expect.objectContaining({ id: 'run-1', status: 'running' })] })]));
       expect(report.evidence.tasks).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'kanban.db', table: 'tasks', rowCount: 1 })]));
       expect(report.evidence.runs).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'beast.db', table: 'beast_runs', rowCount: 1 })]));
+      expect(report.evidence.runs).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'beast.db', table: 'tracked_agents', rowCount: 1 })]));
       expect(report.evidence.runs).not.toEqual(expect.arrayContaining([expect.objectContaining({ path: 'memory.db', table: 'episodic_events' })]));
       expect(report.evidence.logs).toEqual(expect.arrayContaining([expect.objectContaining({
         path: 'logs/binary.log',
@@ -175,12 +195,90 @@ describe('dr restore-dry-run CLI', () => {
         sha256: `sha256:${createHash('sha256').update(binaryLog).digest('hex')}`,
       })]));
       expect(report.evidence.logs).toEqual(expect.arrayContaining([expect.objectContaining({ tail: expect.arrayContaining(['Authorization: Bearer <redacted>']) })]));
-      expect(reportText).not.toContain('secret-config-token');
-      expect(reportText).not.toContain('secret-approval-token');
+      expect(report.evidence.logs).toEqual(expect.arrayContaining([expect.objectContaining({ tail: expect.arrayContaining(['X-API-Key: <redacted>']) })]));
+      expect(report.evidence.logs).toEqual(expect.arrayContaining([expect.objectContaining({ tail: expect.arrayContaining(['redis tls rediss://:<redacted>@cache.example:6380/0']) })]));
+      expect(report.evidence.logs.flatMap((log) => log.tail).every((line) => line.length <= 8192)).toBe(true);
+      expect(reportText).not.toContain('config-value-for-mask');
+      expect(reportText).not.toContain('approval-value-for-mask');
       expect(reportText).not.toContain('private memory body');
-      expect(reportText).not.toContain('secret task title');
+      expect(reportText).not.toContain('private task title');
       expect(reportText).not.toContain('test-key-needs-redaction');
-      expect(reportText).not.toContain('bearerCredentialForReview123');
+      expect(reportText).not.toContain('reviewHeaderValueForMasking');
+      expect(reportText).not.toContain(longSingleLinePrefix);
+      expect(reportText).not.toContain('bearerValueForMasking123');
+      expect(reportText).not.toContain('redissValueForMasking');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('expands a .fbeast/state input to the incident evidence root', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dr-export-root-'));
+    const evidenceRoot = join(dir, '.fbeast');
+    const stateSubdir = join(evidenceRoot, 'state');
+    const exportPath = join(dir, 'incident-export.json');
+    const output: string[] = [];
+
+    try {
+      await mkdir(stateSubdir, { recursive: true });
+      await mkdir(join(evidenceRoot, 'logs'), { recursive: true });
+      await writeFile(join(stateSubdir, 'run-metadata.json'), JSON.stringify({ id: 'run-state-1', status: 'running' }), 'utf8');
+      await writeFile(join(evidenceRoot, 'logs', 'sibling.log'), 'sibling evidence', 'utf8');
+
+      await handleDrCommand({
+        action: 'export',
+        backupManifestPath: stateSubdir,
+        liveManifestPath: exportPath,
+        generatedAt: '2026-07-16T09:00:00.000Z',
+        print: (message) => output.push(message),
+      });
+
+      const report = JSON.parse(output.pop() ?? '') as {
+        manifest: { sourceDir: string; sections: Record<string, number> };
+        evidence: { logs: Array<{ path: string }>; runs: Array<{ path: string }> };
+      };
+      expect(report.manifest.sourceDir).toBe(evidenceRoot);
+      expect(report.manifest.sections.logs).toBe(1);
+      expect(report.evidence.logs).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'logs/sibling.log' })]));
+      expect(report.evidence.runs).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'state/run-metadata.json' })]));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('treats .fbeast/state as the full .fbeast incident evidence root', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dr-export-state-root-'));
+    const fbeastDir = join(dir, '.fbeast');
+    const stateDir = join(fbeastDir, 'state');
+    const exportPath = join(dir, 'incident-export.json');
+    const output: string[] = [];
+
+    try {
+      await mkdir(stateDir, { recursive: true });
+      await writeFile(join(fbeastDir, 'config.json'), JSON.stringify({ provider: 'openai' }), 'utf8');
+      const beastDb = new Database(join(fbeastDir, 'beast.db'));
+      try {
+        beastDb.exec(`CREATE TABLE beast_runs (id TEXT PRIMARY KEY, status TEXT);`);
+        beastDb.prepare('INSERT INTO beast_runs (id, status) VALUES (?, ?)').run('run-db-1', 'running');
+      } finally {
+        beastDb.close();
+      }
+
+      await handleDrCommand({
+        action: 'export',
+        backupManifestPath: stateDir,
+        liveManifestPath: exportPath,
+        generatedAt: '2026-07-16T09:00:00.000Z',
+        print: (message) => output.push(message),
+      });
+
+      const report = JSON.parse(await readFile(exportPath, 'utf8')) as {
+        manifest: { sourceDir: string; configChecksums: Array<{ path: string }> };
+        evidence: { runs: Array<{ path: string; table?: string }> };
+      };
+      expect(report.manifest.sourceDir).toBe(fbeastDir);
+      expect(report.manifest.configChecksums).toEqual([expect.objectContaining({ path: 'config.json' })]);
+      expect(report.evidence.runs).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'beast.db', table: 'beast_runs' })]));
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

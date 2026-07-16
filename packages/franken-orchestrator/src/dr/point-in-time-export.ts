@@ -8,6 +8,7 @@ import Database from 'better-sqlite3';
 import { redactLogData, redactSensitiveText } from '../logging/redaction.js';
 
 export const POINT_IN_TIME_EXPORT_SCHEMA_VERSION = 1;
+const MAX_LOG_TAIL_LINE_CHARS = 8192;
 
 export interface PointInTimeExportOptions {
   readonly stateDir: string;
@@ -125,7 +126,7 @@ function classifySqliteTable(table: string): SqliteEvidenceSection | undefined {
   const normalized = table.toLowerCase();
   if (normalized.includes('approval')) return 'approvals';
   if (normalized.includes('task') || normalized.includes('card') || normalized.includes('issue')) return 'tasks';
-  if (normalized.includes('run') || normalized.includes('attempt') || normalized.includes('event')) return 'runs';
+  if (normalized.includes('run') || normalized.includes('attempt') || normalized.includes('event') || normalized.includes('tracked_agent') || normalized === 'agents') return 'runs';
   return undefined;
 }
 
@@ -141,6 +142,14 @@ function isWithinDirectory(root: string, candidate: string): boolean {
 
 function quoteSqliteIdentifier(identifier: string): string {
   return `"${identifier.replace(/"/gu, '""')}"`;
+}
+
+function resolvePointInTimeSourceDir(input: string): string {
+  const resolved = resolve(input);
+  if (basename(resolved).toLowerCase() === 'state' && basename(dirname(resolved)).toLowerCase() === '.fbeast') {
+    return dirname(resolved);
+  }
+  return resolved;
 }
 
 function parseJsonObjectOrArray(text: string): unknown[] {
@@ -165,7 +174,7 @@ function sanitizeRecord(value: unknown): Record<string, unknown> {
   for (const key of [
     'id', 'task_id', 'taskId', 'run_id', 'runId', 'state', 'status', 'created_at', 'createdAt', 'updated_at', 'updatedAt',
     'started_at', 'startedAt', 'finished_at', 'finishedAt', 'completed_at', 'completedAt', 'definition_id', 'tracked_agent_id',
-    'action_class', 'actionClass', 'target', 'description', 'requestedAt',
+    'action_class', 'actionClass', 'target', 'description', 'requestedAt', 'command', 'tool', 'risk', 'affectedFiles', 'sessionId',
   ]) {
     if (redacted[key] !== undefined) summary[key] = redacted[key];
   }
@@ -236,14 +245,15 @@ async function checksumAndTailFor(root: string, absolutePath: string, limit: num
       const text = chunk.toString('utf8');
       const parts = `${pending}${text}`.split(/\r?\n/u);
       pending = parts.pop() ?? '';
+      if (pending.length > MAX_LOG_TAIL_LINE_CHARS) pending = pending.slice(-MAX_LOG_TAIL_LINE_CHARS);
       for (const line of parts) {
-        lines.push(redactSensitiveText(line));
+        lines.push(redactSensitiveText(line.slice(-MAX_LOG_TAIL_LINE_CHARS)));
         if (lines.length > limit) lines.splice(0, lines.length - limit);
       }
     });
     stream.on('error', reject);
     stream.on('end', () => {
-      if (pending.length > 0) lines.push(redactSensitiveText(pending));
+      if (pending.length > 0) lines.push(redactSensitiveText(pending.slice(-MAX_LOG_TAIL_LINE_CHARS)));
       if (lines.length > limit) lines.splice(0, lines.length - limit);
       resolvePromise();
     });
@@ -272,7 +282,7 @@ function summarizeSqliteTables(absolutePath: string, checksum: FileChecksum): Re
       const preferred = [
         'id', 'task_id', 'taskId', 'run_id', 'runId', 'status', 'state', 'created_at', 'createdAt', 'updated_at', 'updatedAt',
         'started_at', 'startedAt', 'finished_at', 'finishedAt', 'completed_at', 'completedAt', 'definition_id', 'tracked_agent_id',
-        'action_class', 'actionClass', 'target', 'description', 'requestedAt',
+        'action_class', 'actionClass', 'target', 'description', 'requestedAt', 'command', 'tool', 'risk', 'affectedFiles', 'sessionId',
       ];
       const selected = preferred.filter((column) => columns.some((candidate) => candidate.name === column));
       const records = selected.length === 0
@@ -301,7 +311,7 @@ function splitChatPendingApprovals(checksum: FileChecksum, text: string): Redact
 }
 
 export async function createPointInTimeExport(options: PointInTimeExportOptions): Promise<PointInTimeExportReport> {
-  const sourceDir = resolve(options.stateDir);
+  const sourceDir = resolvePointInTimeSourceDir(options.stateDir);
   const outputPath = resolve(options.outputPath);
   const dryRun = options.dryRun === true;
   const generatedAt = options.generatedAt ?? new Date().toISOString();
