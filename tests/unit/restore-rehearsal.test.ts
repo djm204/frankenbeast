@@ -74,13 +74,15 @@ describe('restore rehearsal fixture', () => {
     expect(result.stdout).toContain('corrupt-fixture ok - approval ledger is not valid JSON');
   });
 
-  it('refuses to use the repository root as the rehearsal root', () => {
-    const result = spawnSync('npx', ['tsx', SCRIPT, '--root', ROOT], {
-      cwd: ROOT,
-      encoding: 'utf8',
-    });
+  it('refuses to use repository paths as the rehearsal root', () => {
+    for (const unsafeRoot of [ROOT, resolve(ROOT, 'scripts')]) {
+      const result = spawnSync('npx', ['tsx', SCRIPT, '--root', unsafeRoot], {
+        cwd: tmpdir(),
+        encoding: 'utf8',
+      });
 
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('must be an isolated scratch directory');
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('must be an isolated scratch directory');
+    }
   });
 });

@@ -40,7 +40,12 @@ function assertSafeIsolatedRoot(path, label) {
     REPO_ROOT,
     dirname(REPO_ROOT),
   ].filter(Boolean));
-  if (unsafeExact.has(target) || target.split(sep).filter(Boolean).length < 2 || isSameOrParent(target, REPO_ROOT)) {
+  if (
+    unsafeExact.has(target)
+    || target.split(sep).filter(Boolean).length < 2
+    || isSameOrParent(target, REPO_ROOT)
+    || isSameOrParent(REPO_ROOT, target)
+  ) {
     throw new Error(`${label} must be an isolated scratch directory, not a home, repository, or filesystem root`);
   }
 }
