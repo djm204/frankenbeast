@@ -108,6 +108,7 @@ export interface BrainAdapter {
     reason: string;
     confidence: number;
     evidenceId?: string;
+    agentId?: string;
   }): Promise<MemoryCandidate>;
   listMemoryReview(status?: MemoryCandidateStatus): Promise<MemoryCandidate[]>;
   decideMemoryReview(input: {
@@ -264,18 +265,18 @@ function parseScopedWorkingExportEntry(
   value: unknown,
 ): { key: string; value: unknown; agentId?: string; expiresAt?: string } {
   const unwrapped = unwrapWorkingMemoryExportValue(value);
-  if (
-    key.startsWith(AGENT_WORKING_KEY_PREFIX) &&
-    isAgentScopedWorkingValue(value)
-  ) {
+  if (key.startsWith(AGENT_WORKING_KEY_PREFIX)) {
     const rest = key.slice(AGENT_WORKING_KEY_PREFIX.length);
     const slash = rest.indexOf("/");
     if (slash > 0) {
       try {
+        const decodedAgentId = decodeScopeComponent(rest.slice(0, slash));
         return {
           key: decodeScopeComponent(rest.slice(slash + 1)),
           value: unwrapped.value,
-          agentId: value.agentId,
+          agentId: isAgentScopedWorkingValue(value)
+            ? value.agentId
+            : decodedAgentId,
           ...(unwrapped.expiresAt ? { expiresAt: unwrapped.expiresAt } : {}),
         };
       } catch {
@@ -722,7 +723,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
     async proposeMemory(input) {
       return brain.memoryReview.propose({
         targetStore: 'working',
-        key: input.key,
+        key: scopedWorkingKey(input.key, input.agentId),
         value: input.value,
         source: input.source,
         ...(input.evidenceId ? { evidenceId: input.evidenceId } : {}),

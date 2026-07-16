@@ -240,6 +240,8 @@ const MEMORY_EXPORT_TOOL = 'fbeast_memory_export';
 const MEMORY_EXPORT_SAFE_AUDIT_KEYS = new Set(['readScope', 'redaction', 'limit', 'projectId']);
 const MEMORY_EXPORT_SAFE_READ_SCOPES = new Set(['all', 'shared', 'agent']);
 const MEMORY_EXPORT_SAFE_REDACTIONS = new Set(['safe', 'none']);
+const MEMORY_STORE_TOOL = 'fbeast_memory_store';
+const MEMORY_STORE_SAFE_AUDIT_KEYS = new Set(['key', 'type', 'agentId', 'ttlMs']);
 
 function unqualifyMcpToolName(toolName: string): string {
   const marker = '__';
@@ -290,10 +292,6 @@ function redactMemoryReviewDecisionArgs(sanitized: Record<string, unknown>, reda
   if (Object.prototype.hasOwnProperty.call(sanitized, 'id')) {
     sanitized['id'] = redaction;
   }
-  if (Object.prototype.hasOwnProperty.call(sanitized, 'action')
-    && (typeof sanitized['action'] !== 'string' || !['approve', 'reject', 'never_store'].includes(sanitized['action']))) {
-    sanitized['action'] = redaction;
-  }
   return sanitized;
 }
 
@@ -325,7 +323,7 @@ function redactMemoryExportArgs(sanitized: Record<string, unknown>, redaction = 
       sanitized[key] = redaction;
     } else if (key === 'redaction' && !MEMORY_EXPORT_SAFE_REDACTIONS.has(String(sanitized[key]))) {
       sanitized[key] = redaction;
-    } else if (key === 'limit' && typeof sanitized[key] !== 'string' && typeof sanitized[key] !== 'number') {
+    } else if (key === 'limit' && typeof sanitized[key] !== 'number') {
       sanitized[key] = redaction;
     } else if (!MEMORY_EXPORT_SAFE_AUDIT_KEYS.has(key)) {
       sanitized[key] = redaction;
@@ -355,11 +353,46 @@ function redactMemoryExportEnvelope(sanitized: Record<string, unknown>, redactio
   return sanitized;
 }
 
+function redactMemoryStoreArgs(sanitized: Record<string, unknown>, redaction = '[memory-store-value-redacted]'): Record<string, unknown> {
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'invalid')) {
+    sanitized['invalid'] = redaction;
+    return sanitized;
+  }
+  for (const key of Object.keys(sanitized)) {
+    if (!MEMORY_STORE_SAFE_AUDIT_KEYS.has(key)) {
+      sanitized[key] = redaction;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'value')) {
+    sanitized['value'] = redaction;
+  }
+  return sanitized;
+}
+
+function redactMemoryStoreEnvelope(sanitized: Record<string, unknown>, redaction = '[memory-store-value-redacted]'): Record<string, unknown> {
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'args')) {
+    const args = sanitized['args'];
+    sanitized['args'] = isObjectLike(args) && !Array.isArray(args)
+      ? redactMemoryStoreArgs(args as Record<string, unknown>, redaction)
+      : redaction;
+  }
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
+    sanitized['context'] = redaction;
+  }
+  for (const key of Object.keys(sanitized)) {
+    if (!['tool', 'action', 'args', 'context'].includes(key)) {
+      sanitized[key] = redaction;
+    }
+  }
+  return sanitized;
+}
+
 export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unknown): Record<string, unknown> {
   const sanitized = sanitizeToolArgumentsForAudit(args);
   const unqualifiedToolName = unqualifyMcpToolName(toolName);
   const isMemoryReviewPropose = unqualifiedToolName === MEMORY_REVIEW_PROPOSE_TOOL;
   const isDirectMemoryReviewDecide = unqualifiedToolName === MEMORY_REVIEW_DECIDE_TOOL;
+  const isDirectMemoryStore = unqualifiedToolName === MEMORY_STORE_TOOL;
   const isDirectRightToForget = unqualifiedToolName === 'fbeast_memory_right_to_forget';
   const auditedTool = unqualifiedToolName === 'fbeast_memory_right_to_forget'
     ? unqualifiedToolName
@@ -376,6 +409,18 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
     }
     if (unqualifiedToolName === MEMORY_EXPORT_TOOL) {
       return redactMemoryExportArgs(sanitized);
+    }
+    return sanitized;
+  }
+  if (auditedTool === MEMORY_STORE_TOOL || auditedAction === MEMORY_STORE_TOOL) {
+    if (unqualifiedToolName === 'execute_tool') {
+      return redactMemoryStoreEnvelope(sanitized);
+    }
+    if (auditedAction === MEMORY_STORE_TOOL && Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
+      sanitized['context'] = '[memory-store-value-redacted]';
+    }
+    if (unqualifiedToolName === MEMORY_STORE_TOOL) {
+      return redactMemoryStoreArgs(sanitized);
     }
     return sanitized;
   }
