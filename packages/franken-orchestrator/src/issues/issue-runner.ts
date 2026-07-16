@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { loadavg } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -203,6 +204,50 @@ export interface DuplicateWorkerCardProcessFinding {
   readonly lastHeartbeatAt?: string | undefined;
   readonly message: string;
   readonly guidance: string;
+}
+
+
+export type KanbanStateMutationOperation = 'comment' | 'block' | 'unblock' | 'complete';
+export type KanbanStateMutationDecisionAction = 'apply' | 'skip' | 'conflict';
+
+export interface KanbanStateMutationRecord {
+  readonly idempotencyKey: string;
+  readonly operation: KanbanStateMutationOperation;
+  readonly contentHash?: string | undefined;
+  readonly appliedAt?: string | number | Date | undefined;
+}
+
+export interface KanbanTaskCommentSnapshot {
+  readonly body: string;
+  readonly idempotencyKey?: string | undefined;
+  readonly author?: string | undefined;
+  readonly createdAt?: string | number | Date | undefined;
+}
+
+export interface KanbanTaskStateSnapshot {
+  readonly taskId: string;
+  readonly status: string;
+  readonly revision?: string | number | undefined;
+  readonly blockReason?: string | undefined;
+  readonly completionSummary?: string | undefined;
+  readonly comments?: readonly KanbanTaskCommentSnapshot[] | undefined;
+  readonly appliedMutations?: readonly KanbanStateMutationRecord[] | undefined;
+}
+
+export interface KanbanStateMutationRequest {
+  readonly operation: KanbanStateMutationOperation;
+  readonly idempotencyKey: string;
+  readonly expectedRevision?: string | number | undefined;
+  readonly body?: string | undefined;
+  readonly contentHash?: string | undefined;
+}
+
+export interface KanbanStateMutationDecision {
+  readonly action: KanbanStateMutationDecisionAction;
+  readonly operation: KanbanStateMutationOperation;
+  readonly idempotencyKey: string;
+  readonly reason: string;
+  readonly evidence: readonly string[];
 }
 
 export interface IssueSchedulerFairnessBucket {
@@ -740,6 +785,154 @@ export function detectDuplicateWorkerCardProcesses(
   }
 
   return findings.sort((a, b) => a.cardId.localeCompare(b.cardId));
+}
+
+
+function normalizedMutationStatus(status: string): string {
+  return status.trim().toLowerCase().replace(/_/g, '-');
+}
+
+function sha256Hex(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function mutationContentTokens(request: KanbanStateMutationRequest): readonly string[] {
+  const tokens = new Set<string>();
+  const explicitHash = request.contentHash?.trim();
+  if (explicitHash) tokens.add(explicitHash);
+  if (request.body !== undefined) {
+    const rawBody = request.body;
+    const body = rawBody.trim();
+    tokens.add(body);
+    const digest = sha256Hex(rawBody);
+    tokens.add(digest);
+    tokens.add(`sha256:${digest}`);
+  }
+  return [...tokens];
+}
+
+function mutationRecordMatches(record: KanbanStateMutationRecord, request: KanbanStateMutationRequest): boolean {
+  if (record.idempotencyKey.trim() !== request.idempotencyKey.trim()) return false;
+  if (record.operation !== request.operation) return false;
+  const requestedTokens = mutationContentTokens(request);
+  if (requestedTokens.length === 0 || record.contentHash === undefined) return true;
+  return requestedTokens.includes(record.contentHash.trim());
+}
+
+function matchingComment(snapshot: KanbanTaskStateSnapshot, request: KanbanStateMutationRequest): KanbanTaskCommentSnapshot | undefined {
+  if (request.operation !== 'comment') return undefined;
+  const requestedKey = request.idempotencyKey.trim();
+  const requestedBody = request.body?.trim();
+  return snapshot.comments?.find((comment) => {
+    if (comment.idempotencyKey?.trim() === requestedKey) return true;
+    return requestedBody !== undefined && comment.body.trim() === requestedBody;
+  });
+}
+
+function statusConverged(snapshot: KanbanTaskStateSnapshot, request: KanbanStateMutationRequest): string | undefined {
+  const status = normalizedMutationStatus(snapshot.status);
+  const body = request.body?.trim();
+  if (request.operation === 'block' && status === 'blocked' && (!body || snapshot.blockReason?.trim() === body)) {
+    return `task ${snapshot.taskId} is already blocked with the requested reason`;
+  }
+  if (request.operation === 'unblock' && status !== 'blocked') {
+    return `task ${snapshot.taskId} is already not blocked`;
+  }
+  if (request.operation === 'complete' && ['done', 'complete', 'completed', 'merged', 'closed'].includes(status)
+    && (!body || snapshot.completionSummary?.trim() === body)) {
+    return `task ${snapshot.taskId} is already complete with the requested summary`;
+  }
+  return undefined;
+}
+
+function revisionsMatch(actual: string | number | undefined, expected: string | number | undefined): boolean {
+  return actual !== undefined && expected !== undefined && String(actual) === String(expected);
+}
+
+export function planKanbanStateMutation(
+  snapshot: KanbanTaskStateSnapshot,
+  request: KanbanStateMutationRequest,
+): KanbanStateMutationDecision {
+  const key = request.idempotencyKey.trim();
+  const evidence: string[] = [`task=${snapshot.taskId}`, `operation=${request.operation}`];
+  if (!key) {
+    return {
+      action: 'conflict',
+      operation: request.operation,
+      idempotencyKey: request.idempotencyKey,
+      reason: 'kanban state mutation requires a non-empty idempotency key',
+      evidence,
+    };
+  }
+  evidence.push(`idempotencyKey=${key}`);
+
+  const priorMutation = snapshot.appliedMutations?.find((record) => mutationRecordMatches(record, request));
+  if (priorMutation) {
+    return {
+      action: 'skip',
+      operation: request.operation,
+      idempotencyKey: key,
+      reason: 'mutation idempotency key was already applied with matching operation/content',
+      evidence: [
+        ...evidence,
+        ...(priorMutation.appliedAt !== undefined ? [`appliedAt=${isoTimestamp(priorMutation.appliedAt) ?? String(priorMutation.appliedAt)}`] : []),
+      ],
+    };
+  }
+
+  const comment = matchingComment(snapshot, request);
+  if (comment) {
+    return {
+      action: 'skip',
+      operation: request.operation,
+      idempotencyKey: key,
+      reason: request.operation === 'comment'
+        ? 'comment mutation already converged on an existing matching comment'
+        : 'mutation idempotency key is already present on an existing comment',
+      evidence: [
+        ...evidence,
+        ...(comment.createdAt !== undefined ? [`commentCreatedAt=${isoTimestamp(comment.createdAt) ?? String(comment.createdAt)}`] : []),
+      ],
+    };
+  }
+
+  const converged = statusConverged(snapshot, request);
+  if (converged) {
+    return {
+      action: 'skip',
+      operation: request.operation,
+      idempotencyKey: key,
+      reason: converged,
+      evidence: [...evidence, `status=${snapshot.status}`],
+    };
+  }
+
+  if (request.expectedRevision !== undefined && !revisionsMatch(snapshot.revision, request.expectedRevision)) {
+    return {
+      action: 'conflict',
+      operation: request.operation,
+      idempotencyKey: key,
+      reason: 'kanban state revision changed before mutation could be applied',
+      evidence: [
+        ...evidence,
+        `expectedRevision=${request.expectedRevision}`,
+        `actualRevision=${snapshot.revision ?? 'unknown'}`,
+        `status=${snapshot.status}`,
+      ],
+    };
+  }
+
+  return {
+    action: 'apply',
+    operation: request.operation,
+    idempotencyKey: key,
+    reason: 'mutation is new for the current task state and compare-and-set guard passed',
+    evidence: [
+      ...evidence,
+      ...(snapshot.revision !== undefined ? [`revision=${snapshot.revision}`] : []),
+      `status=${snapshot.status}`,
+    ],
+  };
 }
 
 function extractSeverity(labels: readonly string[]): number {

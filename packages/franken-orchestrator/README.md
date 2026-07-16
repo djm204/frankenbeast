@@ -86,6 +86,8 @@ frankenbeast dr dead-letter-retire <queue-file> <entry-id> "handled manually"
 
 The replay command is dry-run only. Entries classified as side-effecting report that explicit operator approval is required before any future replay executor may run them, while retired or unsafe entries are not replayable.
 
+When dead-letter entries appear alongside corrupted Git worktrees, stuck approval-cop queues, broken Kanban cards, crashed dispatchers, or inconsistent liveness state, follow `docs/dr/corrupted-worktrees-and-queues.md` from the repository root. That runbook separates read-only diagnosis from repair, requires backups before mutation, and marks every destructive queue/worktree/card command as approval-cop/HITL required.
+
 ## Disaster recovery state snapshot diff
 
 Incident responders can compare two state snapshot/export directories without manually reading every JSON dump:
