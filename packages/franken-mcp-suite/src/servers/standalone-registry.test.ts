@@ -16,6 +16,7 @@ const standaloneServers = [
         query: vi.fn(),
         store: vi.fn(),
         frontload: vi.fn(),
+        exportProjectMemory: vi.fn(),
         forget: vi.fn(),
         rightToForget: vi.fn(),
         proposeMemory: vi.fn(),
