@@ -200,6 +200,80 @@ describe('dr restore-dry-run CLI', () => {
     expect(rawOutput).toContain('<redacted>');
   });
 
+  it('uses stable diff identities for approval tokens, primitive workers, and map-keyed cron jobs', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dr-snapshot-stable-ids-'));
+    const beforeDir = join(dir, 'before');
+    const afterDir = join(dir, 'after');
+    const output: string[] = [];
+    const beforeTokenId = 'before' + 'SessionToken123';
+    const stableTokenId = 'stable' + 'SessionToken456';
+    const afterTokenId = 'after' + 'SessionToken789';
+    const beforeApprovalValue = 'before' + 'ApprovalValue123';
+    const afterApprovalValue = 'after' + 'ApprovalValue456';
+
+    try {
+      await mkdir(beforeDir, { recursive: true });
+      await mkdir(afterDir, { recursive: true });
+      await writeFile(join(beforeDir, 'state.json'), JSON.stringify({
+        approvals: [
+          { tokenId: beforeTokenId, approvalId: 'approval-before', state: 'pending' },
+          { tokenId: stableTokenId, approvalId: 'approval-stable', state: 'pending' },
+          { id: 'stable-approval-record', state: 'pending', value: beforeApprovalValue },
+        ],
+        cron: {
+          'job-1': { name: 'nightly', status: 'running' },
+        },
+      }), 'utf8');
+      await writeFile(join(afterDir, 'state.json'), JSON.stringify({
+        approvals: [
+          { tokenId: stableTokenId, approvalId: 'approval-stable', state: 'pending' },
+          { tokenId: afterTokenId, approvalId: 'approval-after', state: 'pending' },
+          { id: 'stable-approval-record', state: 'pending', value: afterApprovalValue },
+        ],
+        cron: {
+          'job-1': { name: 'nightly-v2', status: 'running' },
+        },
+      }), 'utf8');
+      await writeFile(join(beforeDir, 'workers.json'), JSON.stringify(['worker-a', 'worker-stable']), 'utf8');
+      await writeFile(join(afterDir, 'workers.json'), JSON.stringify(['worker-stable', 'worker-b']), 'utf8');
+
+      await handleDrCommand({
+        action: 'snapshot-diff',
+        backupManifestPath: beforeDir,
+        liveManifestPath: afterDir,
+        print: (message) => output.push(message),
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+
+    const rawOutput = output.join('\n');
+    const report = JSON.parse(rawOutput) as {
+      summary: { bySubsystem: Record<string, { added: number; removed: number; changed: number }> };
+      diffs: Array<{
+        subsystem: string;
+        added: Array<{ id: string }>;
+        removed: Array<{ id: string }>;
+        changed: Array<{ id: string; changedFields: string[] }>;
+      }>;
+    };
+    const workerDiff = report.diffs.find((diff) => diff.subsystem === 'workerIds');
+    const cronDiff = report.diffs.find((diff) => diff.subsystem === 'cron');
+    const approvalDiff = report.diffs.find((diff) => diff.subsystem === 'approvals');
+
+    expect(report.summary.bySubsystem.approvals).toEqual({ added: 1, removed: 1, changed: 1 });
+    expect(report.summary.bySubsystem.workerIds).toEqual({ added: 1, removed: 1, changed: 0 });
+    expect(report.summary.bySubsystem.cron).toEqual({ added: 0, removed: 0, changed: 1 });
+    expect(workerDiff?.added.map((entry) => entry.id)).toEqual(['worker-b']);
+    expect(workerDiff?.removed.map((entry) => entry.id)).toEqual(['worker-a']);
+    expect(cronDiff?.changed[0]?.id).toBe('job-1');
+    expect(approvalDiff?.changed[0]?.changedFields).toEqual(['value']);
+    expect(rawOutput).not.toContain(beforeTokenId);
+    expect(rawOutput).not.toContain(afterTokenId);
+    expect(rawOutput).not.toContain(beforeApprovalValue);
+    expect(rawOutput).not.toContain(afterApprovalValue);
+  });
+
   it('reads JSONL snapshots and hashes approval record identifiers', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'franken-dr-snapshot-jsonl-diff-'));
     const beforeDir = join(dir, 'before');

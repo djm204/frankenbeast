@@ -10,6 +10,7 @@ export type StateSnapshotDiffChangeType = 'added' | 'removed' | 'changed';
 export interface StateSnapshotDiffRecord {
   readonly id: string;
   readonly value: unknown;
+  readonly compareValue: unknown;
   readonly source: string;
 }
 
@@ -107,12 +108,20 @@ function safeApprovalId(value: unknown): string {
   return `approval:${shortDigest(value)}`;
 }
 
-function recordId(record: unknown, fallback: string, subsystem?: StateSnapshotDiffSubsystem): string {
+function recordId(
+  record: unknown,
+  fallback: string,
+  subsystem?: StateSnapshotDiffSubsystem,
+  options: { readonly preferFallbackOverMutableDisplayName?: boolean } = {},
+): string {
   if (subsystem === 'approvals' && !isRecord(record)) return safeApprovalId(record);
+  if (subsystem === 'workerIds' && (typeof record === 'string' || typeof record === 'number')) return String(record);
   if (!isRecord(record)) return fallback;
   const idKeys = subsystem === 'approvals'
-    ? ['id']
-    : ['id', 'taskId', 'task_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key', 'name'];
+    ? ['id', 'tokenId', 'token_id', 'approvalId', 'approval_id']
+    : options.preferFallbackOverMutableDisplayName
+      ? ['id', 'taskId', 'task_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key']
+      : ['id', 'taskId', 'task_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key', 'name'];
   for (const key of idKeys) {
     const value = record[key];
     if (typeof value === 'string' && value.trim() !== '') {
@@ -128,6 +137,13 @@ function recordId(record: unknown, fallback: string, subsystem?: StateSnapshotDi
   return fallback;
 }
 
+function sensitiveApprovalValueForComparison(key: string, value: unknown): unknown {
+  if (/^(?:id|token|tokens|value|secret|password|credential|bearer|refresh|access|api[-_]?key)$/iu.test(key)) {
+    return `<sha256:${shortDigest(value)}>`;
+  }
+  return value;
+}
+
 function scopedRecordValue(subsystem: StateSnapshotDiffSubsystem, value: unknown): unknown {
   if (subsystem !== 'approvals') return value;
   if (!isRecord(value)) {
@@ -141,6 +157,17 @@ function scopedRecordValue(subsystem: StateSnapshotDiffSubsystem, value: unknown
   ]));
 }
 
+function scopedRecordCompareValue(subsystem: StateSnapshotDiffSubsystem, value: unknown): unknown {
+  if (subsystem !== 'approvals') return value;
+  if (!isRecord(value)) {
+    return { token: sensitiveApprovalValueForComparison('token', value) };
+  }
+  return Object.fromEntries(Object.entries(value).map(([key, nested]) => [
+    key,
+    sensitiveApprovalValueForComparison(key, nested),
+  ]));
+}
+
 function addRecord(
   records: MutableSubsystemRecords,
   subsystem: StateSnapshotDiffSubsystem,
@@ -150,12 +177,12 @@ function addRecord(
 ): void {
   const map = records[subsystem];
   if (!map.has(id)) {
-    map.set(id, { id, value: scopedRecordValue(subsystem, value), source });
+    map.set(id, { id, value: scopedRecordValue(subsystem, value), compareValue: scopedRecordCompareValue(subsystem, value), source });
     return;
   }
   let suffix = 2;
   while (map.has(`${id}#${suffix}`)) suffix += 1;
-  map.set(`${id}#${suffix}`, { id: `${id}#${suffix}`, value: scopedRecordValue(subsystem, value), source });
+  map.set(`${id}#${suffix}`, { id: `${id}#${suffix}`, value: scopedRecordValue(subsystem, value), compareValue: scopedRecordCompareValue(subsystem, value), source });
 }
 
 function addArrayRecords(
@@ -178,7 +205,7 @@ function addObjectMapRecords(
     .forEach(([key, value]) => {
       const fallback = subsystem === 'approvals' ? safeApprovalId(key) : key;
       const recordValue = subsystem === 'approvals' && !isRecord(value) ? { id: key, value } : value;
-      addRecord(records, subsystem, recordId(recordValue, fallback, subsystem), recordValue, source);
+      addRecord(records, subsystem, recordId(recordValue, fallback, subsystem, { preferFallbackOverMutableDisplayName: true }), recordValue, source);
     });
 }
 
@@ -335,13 +362,13 @@ function diffSubsystem(
     const beforeRecord = before.get(id);
     if (beforeRecord === undefined) {
       added.push({ type: 'added', id, after: redactForOutput(afterRecord.value), afterSource: afterRecord.source });
-    } else if (stableStringify(beforeRecord.value) !== stableStringify(afterRecord.value)) {
+    } else if (stableStringify(beforeRecord.compareValue) !== stableStringify(afterRecord.compareValue)) {
       changed.push({
         type: 'changed',
         id,
         before: redactForOutput(beforeRecord.value),
         after: redactForOutput(afterRecord.value),
-        changedFields: changedFields(beforeRecord.value, afterRecord.value),
+        changedFields: changedFields(beforeRecord.compareValue, afterRecord.compareValue),
         beforeSource: beforeRecord.source,
         afterSource: afterRecord.source,
       });
