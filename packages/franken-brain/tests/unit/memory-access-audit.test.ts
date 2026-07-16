@@ -192,4 +192,72 @@ describe('memory access audit trail', () => {
 
     brain.close();
   });
+
+  it('hashes the restore entry that fails validation', () => {
+    const brain = new SqliteBrain(':memory:', { maxValueBytes: 64 });
+    brain.working.set('restore.invalid.target', 'probe');
+    const expectedHash = brain.accessAudit.list({ operation: 'working.set' })[0]?.keyHash;
+
+    expect(() => brain.working.restore({
+      safe: 'ok',
+      'restore.invalid.target': 'x'.repeat(128),
+    })).toThrow(/maxValueBytes/);
+
+    const restoreAudit = brain.accessAudit.list({ operation: 'working.restore' });
+    expect(restoreAudit[0]).toMatchObject({ operation: 'working.restore', outcome: 'error' });
+    expect(restoreAudit[0]?.keyHash).toBe(expectedHash);
+
+    brain.close();
+  });
+
+  it('audits denied review rejects and never-store decisions without raw guarded metadata', () => {
+    const brain = new SqliteBrain(':memory:');
+    const rejectCandidate = brain.memoryReview.propose({
+      targetStore: 'working',
+      key: 'review.reject.target',
+      value: 'safe value',
+      source: 'operator',
+      confidence: 0.9,
+      reason: 'Candidate for reject denial.',
+    });
+    const neverStoreCandidate = brain.memoryReview.propose({
+      targetStore: 'working',
+      key: 'review.never-store.target',
+      value: 'safe value',
+      source: 'operator',
+      confidence: 0.9,
+      reason: 'Candidate for never-store denial.',
+    });
+
+    brain.rightToForget({ query: 'guarded-review-decision-note' });
+
+    expect(() => brain.memoryReview.reject(rejectCandidate.id, {
+      reviewer: 'operator',
+      note: 'guarded-review-decision-note',
+    })).toThrow(/right-to-forget/);
+    expect(() => brain.memoryReview.neverStore(neverStoreCandidate.id, {
+      reviewer: 'operator',
+      note: 'guarded-review-decision-note',
+    })).toThrow(/right-to-forget/);
+
+    const rejectAudit = brain.accessAudit.list({ operation: 'review.reject' });
+    const neverStoreAudit = brain.accessAudit.list({ operation: 'review.neverStore' });
+    expect(rejectAudit[0]).toMatchObject({ operation: 'review.reject', outcome: 'denied' });
+    expect(neverStoreAudit[0]).toMatchObject({ operation: 'review.neverStore', outcome: 'denied' });
+    expect(JSON.stringify([...rejectAudit, ...neverStoreAudit])).not.toContain('guarded-review-decision-note');
+
+    brain.close();
+  });
+
+  it('does not emit an internal working.clear audit event during restore', () => {
+    const brain = new SqliteBrain(':memory:');
+
+    brain.working.restore({ restored: true });
+
+    const workingAudit = brain.accessAudit.list({ store: 'working' });
+    expect(workingAudit.map((event) => event.operation)).toContain('working.restore');
+    expect(workingAudit.map((event) => event.operation)).not.toContain('working.clear');
+
+    brain.close();
+  });
 });

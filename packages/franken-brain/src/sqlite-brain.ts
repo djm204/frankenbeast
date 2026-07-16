@@ -660,10 +660,6 @@ export class SqliteMemoryAccessAuditTrail {
     private encryption?: MemoryCipher,
   ) {}
 
-  record(event: MemoryAccessAuditInput): void {
-    insertMemoryAccessAuditEvent(this.db, event, this.encryption);
-  }
-
   list(options: MemoryAccessAuditListOptions = {}): MemoryAccessAuditEvent[] {
     const clauses: string[] = [];
     const params: Array<string | number> = [];
@@ -1573,9 +1569,9 @@ class SqliteWorkingMemory implements IWorkingMemory {
     const prepared: Array<[string, unknown, string, number]> = [];
     let deniedKey: string | undefined;
     for (const [key, value] of entries) {
+      deniedKey = key;
       try {
         const { normalized, serialized, size } = this.prepareEntry(key, value);
-        deniedKey = key;
         assertNotDeletionGuarded(this.db, key, serialized, this.encryption);
         total += size;
         prepared.push([key, normalized, serialized, size]);
@@ -1599,7 +1595,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
       );
     }
 
-    this.clear();
+    this.clear({ audit: false });
     this.deletedKeys = new Set(this.persistedSerialized.keys());
     for (const [key, normalized, serialized, size] of prepared) {
       this.store.set(key, normalized);
@@ -1619,18 +1615,20 @@ class SqliteWorkingMemory implements IWorkingMemory {
     });
   }
 
-  clear(): void {
+  clear(options: { audit?: boolean } = {}): void {
     this.store.clear();
     this.sizes.clear();
     this.serialized.clear();
     this.dirtyKeys.clear();
     this.deletedKeys = new Set(this.persistedSerialized.keys());
     this.totalBytes = 0;
-    this.audit?.({
-      operation: 'working.clear',
-      store: 'working',
-      outcome: 'success',
-    });
+    if (options.audit ?? true) {
+      this.audit?.({
+        operation: 'working.clear',
+        store: 'working',
+        outcome: 'success',
+      });
+    }
   }
 }
 
@@ -2474,7 +2472,24 @@ export class SqliteMemoryReviewQueue {
       this.markDecision(id, 'rejected', now, options);
       rejectedCandidate = this.requireCandidate(id);
     });
-    tx.immediate();
+    try {
+      tx.immediate();
+    } catch (error) {
+      const candidate = this.requireCandidate(id);
+      this.audit?.({
+        operation: 'review.reject',
+        store: 'review',
+        key: candidate.key,
+        outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
+        details: {
+          id,
+          status: candidate.status,
+          targetStore: candidate.targetStore,
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
+      throw error;
+    }
     const result = rejectedCandidate ?? this.requireCandidate(id, 'rejected');
     this.audit?.({
       operation: 'review.reject',
@@ -2511,7 +2526,24 @@ export class SqliteMemoryReviewQueue {
       this.redactNeverStoreRows(candidate, now);
       neverStoredCandidate = this.requireCandidate(id);
     });
-    tx.immediate();
+    try {
+      tx.immediate();
+    } catch (error) {
+      const candidate = this.requireCandidate(id);
+      this.audit?.({
+        operation: 'review.neverStore',
+        store: 'review',
+        key: originalKey ?? candidate.key,
+        outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
+        details: {
+          id,
+          status: candidate.status,
+          targetStore: candidate.targetStore,
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
+      throw error;
+    }
     finalizeWorkingFlush?.();
     purgeDeletedSqliteContent(this.db, this.dbPath);
     const result = neverStoredCandidate ?? this.requireCandidate(id, 'never_store');
@@ -3096,6 +3128,7 @@ export class SqliteBrain implements IBrain {
   private db: Database.Database;
   private readonly dbPath: string;
   private readonly encryption: MemoryCipher | undefined;
+  private readonly auditRecorder: MemoryAccessAuditRecorder;
 
   constructor(
     dbPath: string = ':memory:',
@@ -3114,6 +3147,7 @@ export class SqliteBrain implements IBrain {
     const encryption = makeMemoryCipher(options.encryption);
     this.encryption = encryption;
     assertMemoryEncryptionState(this.db, dbPath, encryption);
+    this.auditRecorder = (event) => insertMemoryAccessAuditEvent(this.db, event, encryption);
     this.accessAudit = new SqliteMemoryAccessAuditTrail(this.db, encryption);
     this.working = new SqliteWorkingMemory(
       this.db,
@@ -3123,25 +3157,25 @@ export class SqliteBrain implements IBrain {
       },
       options.hydrateWorkingMemoryFromDb ?? true,
       encryption,
-      (event) => this.accessAudit.record(event),
+      (event) => this.auditRecorder(event),
     );
     this.episodic = new SqliteEpisodicMemory(
       this.db,
       encryption,
-      (event) => this.accessAudit.record(event),
+      (event) => this.auditRecorder(event),
     );
     this.recovery = new SqliteRecoveryMemory(
       this.db,
       () => this.working.flushToDb(),
       encryption,
-      (event) => this.accessAudit.record(event),
+      (event) => this.auditRecorder(event),
     );
     this.memoryReview = new SqliteMemoryReviewQueue(
       this.db,
       this.working,
       this.dbPath,
       encryption,
-      (event) => this.accessAudit.record(event),
+      (event) => this.auditRecorder(event),
     );
     SqliteBrain.registerLiveBrain(this.dbPath, this);
   }
@@ -3484,7 +3518,7 @@ export class SqliteBrain implements IBrain {
       };
       if (normalizedSelector.query !== undefined) accessEvent.query = normalizedSelector.query;
       if (normalizedSelector.key !== undefined) accessEvent.key = normalizedSelector.key;
-      this.accessAudit.record(accessEvent);
+      this.auditRecorder(accessEvent);
       return {
         selectorHash,
         dryRun,
