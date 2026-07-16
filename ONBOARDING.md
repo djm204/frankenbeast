@@ -63,7 +63,7 @@ The bootstrap script prints deterministic status badges as it advances through o
 [onboarding:6/6:done] complete - onboarding bootstrap reached 6/6 steps
 ```
 
-Read each badge as `[onboarding:<current>/<total>:<stage>] <state> - <detail>`. Automation can key on the stable `onboarding` prefix, fraction, stage, and state values (`start`, `ok`, `error`, `complete`) while humans can follow the detail text. If a prerequisite or option validation fails, the script emits an `error` badge before the normal `[bootstrap] ERROR` line so PM/liveness tooling can identify the failed stage without parsing prose.
+Read each badge as `[onboarding:<current>/<total>:<stage>] <state> - <detail>`. Automation can key on the stable `onboarding` prefix, fraction, stage, and state values (`start`, `ok`, `error`, `complete`) while humans can follow the detail text. If option parsing fails before the first stage, the stage is `args`; otherwise `error` badges keep the active stage name so PM/liveness tooling can identify the failed stage without parsing prose.
 
 - [ ] Review `.env` and fill in only the values you need:
 

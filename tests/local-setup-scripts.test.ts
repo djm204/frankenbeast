@@ -245,7 +245,58 @@ describe('local setup scripts', () => {
       timeout: 60_000,
     });
     expect(invalidArgument.status).not.toBe(0);
-    expect(invalidArgument.stderr).toContain('[onboarding:0/6:failed] error - Unknown argument: --definitely-not-a-real-option');
+    expect(invalidArgument.stderr).toContain('[onboarding:0/6:args] error - Unknown argument: --definitely-not-a-real-option');
+
+    const mismatchRoot = mkdtempSync(join(tmpdir(), 'franken-bootstrap-npm-mismatch-'));
+    try {
+      const binDir = join(mismatchRoot, 'bin');
+      mkdirSync(join(mismatchRoot, 'scripts'));
+      mkdirSync(binDir);
+      writeFileSync(join(mismatchRoot, 'scripts/bootstrap.sh'), script);
+      writeFileSync(join(mismatchRoot, 'package.json'), JSON.stringify({ packageManager: 'npm@11.5.1' }));
+      writeFileSync(join(mismatchRoot, '.env.example'), 'CHROMA_URL=http://localhost:8000\n');
+      writeFileSync(join(binDir, 'npm'), '#!/usr/bin/env bash\nprintf "10.0.0\\n"\n', { mode: 0o755 });
+      writeFileSync(join(binDir, 'corepack'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
+
+      const mismatchDryRun = spawnSync('bash', [join(mismatchRoot, 'scripts/bootstrap.sh'), '--dry-run', '--no-docker'], {
+        cwd: mismatchRoot,
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${binDir}:${process.env.PATH ?? ''}` },
+        timeout: 60_000,
+      });
+      expect(mismatchDryRun.status, mismatchDryRun.stderr || mismatchDryRun.stdout).toBe(0);
+      expect(mismatchDryRun.stdout).toContain('[onboarding:2/6:package-manager] ok - npm 10.0.0 would be changed to npm@11.5.1 by Corepack');
+      expect(mismatchDryRun.stdout).not.toContain('[onboarding:2/6:package-manager] ok - npm 10.0.0 matches npm@11.5.1');
+    } finally {
+      rmSync(mismatchRoot, { recursive: true, force: true });
+    }
+
+    const dependencyFailureRoot = mkdtempSync(join(tmpdir(), 'franken-bootstrap-dependency-failure-'));
+    try {
+      const binDir = join(dependencyFailureRoot, 'bin');
+      mkdirSync(join(dependencyFailureRoot, 'scripts'));
+      mkdirSync(binDir);
+      writeFileSync(join(dependencyFailureRoot, 'scripts/bootstrap.sh'), script);
+      writeFileSync(join(dependencyFailureRoot, 'package.json'), JSON.stringify({ packageManager: 'npm@11.5.1' }));
+      writeFileSync(join(dependencyFailureRoot, '.env.example'), 'CHROMA_URL=http://localhost:8000\n');
+      writeFileSync(
+        join(binDir, 'npm'),
+        '#!/usr/bin/env bash\nif [[ "$1" == "--version" ]]; then printf "11.5.1\\n"; exit 0; fi\nexit 42\n',
+        { mode: 0o755 },
+      );
+      writeFileSync(join(binDir, 'corepack'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
+
+      const dependencyFailure = spawnSync('bash', [join(dependencyFailureRoot, 'scripts/bootstrap.sh'), '--no-docker'], {
+        cwd: dependencyFailureRoot,
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${binDir}:${process.env.PATH ?? ''}` },
+        timeout: 60_000,
+      });
+      expect(dependencyFailure.status).toBe(1);
+      expect(dependencyFailure.stderr).toContain('[onboarding:5/6:dependencies] error - Command failed: npm ci');
+    } finally {
+      rmSync(dependencyFailureRoot, { recursive: true, force: true });
+    }
 
     const servicesDryRun = spawnSync('bash', [scriptPath, '--dry-run', '--services'], {
       cwd: ROOT,

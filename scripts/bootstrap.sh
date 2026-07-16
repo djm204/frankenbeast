@@ -7,6 +7,7 @@ PROMPT_DOCKER=1
 ASSUME_YES=0
 ONBOARDING_TOTAL_STEPS=6
 ONBOARDING_STEP=0
+ONBOARDING_STAGE=args
 
 usage() {
   cat <<'USAGE'
@@ -44,10 +45,11 @@ status() {
 }
 step() {
   ONBOARDING_STEP=$((ONBOARDING_STEP + 1))
+  ONBOARDING_STAGE="$1"
   status start "$1" "$2"
 }
 fail() {
-  status error failed "$*" >&2
+  status error "$ONBOARDING_STAGE" "$*" >&2
   printf '[bootstrap] ERROR: %s\n' "$*" >&2
   exit 1
 }
@@ -55,7 +57,7 @@ run() {
   if [[ "$DRY_RUN" -eq 1 ]]; then
     log "dry-run: $*"
   else
-    "$@"
+    "$@" || fail "Command failed: $*"
   fi
 }
 
@@ -78,7 +80,7 @@ command -v node >/dev/null 2>&1 || fail "Node.js is required. Install Node.js >=
 command -v npm >/dev/null 2>&1 || fail "npm is required. Enable Corepack and activate the repository packageManager pin."
 command -v corepack >/dev/null 2>&1 || fail "Corepack is required. Install it with: npm install -g corepack"
 
-node <<'NODE'
+if ! node <<'NODE'
 const version = process.versions.node.split('.').map(Number);
 const [major, minor, patch] = version;
 const ok = (major === 22 && (minor > 13 || (minor === 13 && patch >= 0))) || (major >= 24 && major < 26);
@@ -87,27 +89,33 @@ if (!ok) {
   process.exit(1);
 }
 NODE
+then
+  fail "Node.js is outside the supported range. Install Node.js >=22.13.0 <23 or >=24.0.0 <26."
+fi
 status ok prerequisites "Node.js $(node --version) satisfies the repository engine range"
 
 step package-manager "activating pinned npm version"
 expected_pm="$(node -p "require('./package.json').packageManager")"
 expected_npm="${expected_pm#npm@}"
 actual_npm="$(npm --version)"
+package_manager_status="npm $actual_npm matches $expected_pm"
 if [[ "$actual_npm" != "$expected_npm" ]]; then
   if [[ "$DRY_RUN" -eq 1 ]]; then
     log "dry-run: npm $actual_npm does not match packageManager $expected_pm; a real bootstrap would run corepack prepare \"$expected_pm\" --activate and corepack enable npm"
+    package_manager_status="npm $actual_npm would be changed to $expected_pm by Corepack"
   else
     log "Activating repository package manager pin $expected_pm with Corepack."
     corepack prepare "$expected_pm" --activate
     corepack enable npm
     actual_npm="$(npm --version)"
     [[ "$actual_npm" == "$expected_npm" ]] || fail "npm $actual_npm does not match packageManager $expected_pm after Corepack activation."
+    package_manager_status="npm $actual_npm matches $expected_pm"
     log "npm $actual_npm matches packageManager $expected_pm."
   fi
 else
   log "npm $actual_npm matches packageManager $expected_pm."
 fi
-status ok package-manager "npm $actual_npm matches $expected_pm"
+status ok package-manager "$package_manager_status"
 
 step env-file "creating or validating local environment defaults"
 [[ -f .env.example ]] || fail ".env.example is missing; cannot bootstrap local environment."
