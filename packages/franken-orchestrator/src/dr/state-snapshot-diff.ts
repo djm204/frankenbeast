@@ -12,6 +12,7 @@ export interface StateSnapshotDiffRecord {
   readonly value: unknown;
   readonly compareValue: unknown;
   readonly source: string;
+  readonly workerReferenceOnly?: boolean;
 }
 
 export interface StateSnapshotRecordChange {
@@ -226,13 +227,34 @@ function addRecord(
   source: string,
 ): void {
   const map = records[subsystem];
-  if (!map.has(id)) {
+  const existing = map.get(id);
+  if (existing === undefined) {
     map.set(id, { id, value: scopedRecordValue(subsystem, value), compareValue: scopedRecordCompareValue(subsystem, value), source });
+    return;
+  }
+  const valueForOutput = scopedRecordValue(subsystem, value);
+  const compareValue = scopedRecordCompareValue(subsystem, value);
+  if (subsystem === 'workerIds' && existing.workerReferenceOnly) {
+    map.set(id, { id, value: valueForOutput, compareValue, source });
+    return;
+  }
+  if (stableStringify(existing.compareValue) === stableStringify(compareValue)) {
     return;
   }
   let suffix = 2;
   while (map.has(`${id}#${suffix}`)) suffix += 1;
-  map.set(`${id}#${suffix}`, { id: `${id}#${suffix}`, value: scopedRecordValue(subsystem, value), compareValue: scopedRecordCompareValue(subsystem, value), source });
+  map.set(`${id}#${suffix}`, { id: `${id}#${suffix}`, value: valueForOutput, compareValue, source });
+}
+
+function addWorkerReference(records: MutableSubsystemRecords, workerId: string, source: string): void {
+  if (records.workerIds.has(workerId)) return;
+  records.workerIds.set(workerId, {
+    id: workerId,
+    value: { id: workerId },
+    compareValue: { id: workerId },
+    source,
+    workerReferenceOnly: true,
+  });
 }
 
 function addArrayRecords(
@@ -254,7 +276,9 @@ function addObjectMapRecords(
     .sort(([a], [b]) => a.localeCompare(b))
     .forEach(([key, value]) => {
       const fallback = subsystem === 'approvals' ? safeApprovalId(key) : key;
-      const recordValue = subsystem === 'approvals' && !isRecord(value) ? { id: key, value } : value;
+      const recordValue = !isRecord(value)
+        ? { [key]: value }
+        : value;
       const id = subsystem === 'approvals'
         ? fallback
         : recordId(recordValue, fallback, subsystem, { preferFallbackOverMutableDisplayName: true });
@@ -262,13 +286,33 @@ function addObjectMapRecords(
     });
 }
 
+function subsystemFromSegment(segment: string): StateSnapshotDiffSubsystem | undefined {
+  const normalized = segment.toLowerCase().replace(/\.jsonl?(?::\d+)?$/iu, '').replace(/(?::\d+)$/u, '');
+  if (/^(?:approvals?|approval[-_]?tokens?|tokens?|ledger)$/iu.test(normalized)) return 'approvals';
+  if (/^(?:tasks?|cards?|kanban)$/iu.test(normalized)) return 'tasks';
+  if (/^(?:workers?|worker[-_]?ids?)$/iu.test(normalized)) return 'workerIds';
+  if (/^(?:memory|memories)$/iu.test(normalized)) return 'memory';
+  if (/^(?:cron|schedule|jobs?)$/iu.test(normalized)) return 'cron';
+  return undefined;
+}
+
 function likelySubsystemFromPath(relativePath: string): StateSnapshotDiffSubsystem | undefined {
   const normalized = normalizeSnapshotSourcePath(relativePath).toLowerCase();
-  if (/approvals?|tokens?|ledger/.test(normalized)) return 'approvals';
-  if (/tasks?|cards?|kanban/.test(normalized)) return 'tasks';
-  if (/workers?/.test(normalized)) return 'workerIds';
-  if (/memory|memories/.test(normalized)) return 'memory';
-  if (/cron|schedule|jobs?/.test(normalized)) return 'cron';
+  const segments = normalized.split('/').filter((segment) => segment !== '');
+  for (const segment of segments.slice(0, -1)) {
+    const subsystem = subsystemFromSegment(segment);
+    if (subsystem !== undefined) return subsystem;
+  }
+  const basename = segments.at(-1);
+  if (basename !== undefined) {
+    const subsystem = subsystemFromSegment(basename);
+    if (subsystem !== undefined) return subsystem;
+    if (/approvals?|tokens?|ledger/.test(basename)) return 'approvals';
+    if (/tasks?|cards?|kanban/.test(basename)) return 'tasks';
+    if (/workers?/.test(basename)) return 'workerIds';
+    if (/memory|memories/.test(basename)) return 'memory';
+    if (/cron|schedule|jobs?/.test(basename)) return 'cron';
+  }
   return undefined;
 }
 
@@ -335,7 +379,7 @@ function extractRecordsFromJson(records: MutableSubsystemRecords, parsed: unknow
   const workerIds = new Set<string>();
   extractWorkerIds(parsed, workerIds);
   for (const workerId of workerIds) {
-    if (!records.workerIds.has(workerId)) addRecord(records, 'workerIds', workerId, { id: workerId }, source);
+    addWorkerReference(records, workerId, source);
   }
 }
 
@@ -358,8 +402,16 @@ async function collectSnapshotFiles(directory: string, current = directory, coll
   return collected;
 }
 
-function parseSnapshotFile(raw: string, file: string): ReadonlyArray<{ parsed: unknown; sourceSuffix: string }> {
-  if (file.toLowerCase().endsWith('.jsonl')) {
+function sourceForError(source: string): string {
+  const subsystem = likelySubsystemFromPath(source);
+  return subsystem === undefined
+    ? normalizeSnapshotSourcePath(maskOpaqueSecretLiterals(source))
+    : redactSourceForOutput(subsystem, source);
+}
+
+function parseSnapshotFile(raw: string, source: string): ReadonlyArray<{ parsed: unknown; sourceSuffix: string }> {
+  const redactedSource = sourceForError(source);
+  if (source.toLowerCase().endsWith('.jsonl')) {
     const records: Array<{ parsed: unknown; sourceSuffix: string }> = [];
     raw.split(/\r?\n/u).forEach((line, index) => {
       if (line.trim() === '') return;
@@ -367,7 +419,7 @@ function parseSnapshotFile(raw: string, file: string): ReadonlyArray<{ parsed: u
         records.push({ parsed: JSON.parse(line) as unknown, sourceSuffix: `:${index + 1}` });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`Unable to read state snapshot JSONL ${file} line ${index + 1}: ${message}`);
+        throw new Error(`Unable to read state snapshot JSONL ${redactedSource} line ${index + 1}: ${message}`);
       }
     });
     return records;
@@ -377,7 +429,7 @@ function parseSnapshotFile(raw: string, file: string): ReadonlyArray<{ parsed: u
     return [{ parsed: JSON.parse(raw) as unknown, sourceSuffix: '' }];
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Unable to read state snapshot JSON ${file}: ${message}`);
+    throw new Error(`Unable to read state snapshot JSON ${redactedSource}: ${message}`);
   }
 }
 
@@ -392,7 +444,7 @@ async function loadSnapshotDirectory(directory: string): Promise<MutableSubsyste
       throw new Error(`State snapshot file is too large: ${file}`);
     }
     const source = relative(directory, file) || basename(file);
-    const parsedRecords = parseSnapshotFile(await readFile(file, 'utf8'), file);
+    const parsedRecords = parseSnapshotFile(await readFile(file, 'utf8'), source);
     for (const { parsed, sourceSuffix } of parsedRecords) {
       extractRecordsFromJson(records, parsed, `${source}${sourceSuffix}`);
     }

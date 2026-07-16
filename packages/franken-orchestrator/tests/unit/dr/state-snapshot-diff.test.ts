@@ -240,4 +240,89 @@ describe('state snapshot diff', () => {
     expect(serialized).not.toContain(secret);
     expect(serialized).toContain('redis://:<redacted>@cache:6379');
   });
+
+  it('keeps key context when redacting primitive memory maps', async () => {
+    const secret = ['hunter', 'Two'].join('');
+    const before = await snapshotDir({
+      'memory/state.json': { password: secret, theme: 'dark' },
+    });
+    const after = await snapshotDir({
+      'memory/state.json': { password: `${secret}-rotated`, theme: 'dark' },
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const serialized = JSON.stringify(report.diffs.find((diff) => diff.subsystem === 'memory'));
+
+    expect(serialized).not.toContain(secret);
+    expect(serialized).toContain('"password":"<redacted>"');
+  });
+
+  it('honors subsystem directory segments before filename substrings', async () => {
+    const before = await snapshotDir({
+      'memory/task-notes.json': { id: 'memory-note-1', note: 'before' },
+    });
+    const after = await snapshotDir({
+      'memory/task-notes.json': { id: 'memory-note-1', note: 'after' },
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const memoryDiff = report.diffs.find((diff) => diff.subsystem === 'memory');
+    const taskDiff = report.diffs.find((diff) => diff.subsystem === 'tasks');
+
+    expect(memoryDiff?.changed).toHaveLength(1);
+    expect(memoryDiff?.changed[0]?.id).toBe('memory-note-1');
+    expect(taskDiff?.changed).toHaveLength(0);
+  });
+
+  it('lets real worker registry records replace task worker references', async () => {
+    const before = await snapshotDir({
+      'tasks/task-1.json': { id: 'task-1', workerId: 'worker-a', status: 'ready' },
+      'workers/worker-a.json': { workerId: 'worker-a', status: 'idle' },
+    });
+    const after = await snapshotDir({
+      'workers/worker-a.json': { workerId: 'worker-a', status: 'idle' },
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const workerDiff = report.diffs.find((diff) => diff.subsystem === 'workerIds');
+
+    expect(workerDiff?.added).toHaveLength(0);
+    expect(workerDiff?.removed).toHaveLength(0);
+    expect(workerDiff?.changed).toHaveLength(0);
+  });
+
+  it('redacts sensitive snapshot source paths in parse errors', async () => {
+    const before = await snapshotDir({
+      'approvals/opaque-secret-token.json': '{',
+    });
+    const after = await snapshotDir({
+      'approvals/opaque-secret-token.json': { decision: 'approved' },
+    });
+
+    try {
+      await diffStateSnapshotDirectories(before, after);
+      throw new Error('expected diffStateSnapshotDirectories to reject');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      expect(message).not.toContain('opaque-secret-token');
+      expect(message).toMatch(/approvals\/<sha256:[a-f0-9]{16}>/u);
+    }
+  });
+
+  it('coalesces identical duplicate records from aggregate and per-record exports', async () => {
+    const before = await snapshotDir({
+      'tasks/index.json': { tasks: [{ id: 'task-1', status: 'ready' }] },
+      'tasks/task-1.json': { id: 'task-1', status: 'ready' },
+    });
+    const after = await snapshotDir({
+      'tasks/task-1.json': { id: 'task-1', status: 'ready' },
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const taskDiff = report.diffs.find((diff) => diff.subsystem === 'tasks');
+
+    expect(taskDiff?.added).toHaveLength(0);
+    expect(taskDiff?.removed).toHaveLength(0);
+    expect(taskDiff?.changed).toHaveLength(0);
+  });
 });

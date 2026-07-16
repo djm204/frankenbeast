@@ -1,8 +1,9 @@
 # Resolve Issues Shared Lessons
 
 ## 2026-07-16 — Snapshot diff Codex closeout
-- State snapshot diff redaction must cover metadata as well as values: record ids, source filenames, map keys, and password-only connection URLs (for example Redis URLs with no username) need regression coverage so incident reports cannot leak PII or credentials through supposedly redacted metadata.
-- For one-record-per-file snapshot exports, prefer immutable ids when present but fall back to the source path instead of mutable display names such as `name`; otherwise a rename appears as remove+add instead of one changed record.
+- State snapshot diff redaction must cover metadata as well as values: record ids, source filenames, map keys, primitive-map key/value pairs, parse-error paths, and password-only connection URLs (for example Redis URLs with no username) need regression coverage so incident reports cannot leak PII or credentials through supposedly redacted metadata.
+- For one-record-per-file snapshot exports, prefer immutable ids when present but fall back to the source path instead of mutable display names such as `name`; otherwise a rename appears as remove+add instead of one changed record. Coalesce identical aggregate/per-record duplicates so missing duplicate exports do not count as state drift.
+- For subsystem inference and worker ids, prefer explicit directory segments before filename substrings (`memory/task-notes.json` is memory), and let real worker registry records replace task-extracted worker references instead of suffixing them as duplicate workers.
 
 ## 2026-07-16 — Memory attribution scope and MCP inventory review fixes
 - MCP memory tooling: adding a new registry tool must update package README combined-server tool counts and `tool-registry.test.ts` aggregate/search count expectations, not only server-specific tests, or full `@franken/mcp-suite` CI fails despite targeted memory tests passing.
