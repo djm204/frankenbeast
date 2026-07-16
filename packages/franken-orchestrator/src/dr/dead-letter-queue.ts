@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
@@ -27,7 +27,8 @@ interface DeadLetterQueueFile {
   readonly entries: readonly DeadLetterEntry[];
 }
 
-const appendLocks = new Map<string, Promise<void>>();
+const LOCK_RETRY_DELAY_MS = 25;
+const LOCK_TIMEOUT_MS = 5_000;
 
 export interface RecordRetryExhaustionOptions {
   readonly queuePath: string;
@@ -163,27 +164,74 @@ async function readQueue(queuePath: string): Promise<DeadLetterQueueFile> {
 async function writeQueue(queuePath: string, queue: DeadLetterQueueFile): Promise<void> {
   await mkdir(dirname(queuePath), { recursive: true });
   const tempPath = `${queuePath}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(tempPath, `${JSON.stringify(queue, null, 2)}\n`, 'utf8');
+  await writeFile(tempPath, `${JSON.stringify(queue, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
   await rename(tempPath, queuePath);
+  await chmod(queuePath, 0o600);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withQueueLock<T>(queuePath: string, operation: () => Promise<T>): Promise<T> {
+  const lockPath = `${queuePath}.lock`;
+  await mkdir(dirname(queuePath), { recursive: true });
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  for (;;) {
+    try {
+      const lockHandle = await open(lockPath, 'wx', 0o600);
+      await lockHandle.writeFile(JSON.stringify({ pid: process.pid, acquiredAt: new Date().toISOString() }), 'utf8');
+      await lockHandle.close();
+      break;
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST' && Date.now() < deadline) {
+        await sleep(LOCK_RETRY_DELAY_MS);
+        continue;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Unable to acquire dead-letter queue lock ${lockPath}: ${message}`);
+    }
+  }
+
+  try {
+    return await operation();
+  } finally {
+    await unlink(lockPath).catch(() => undefined);
+  }
 }
 
 async function appendQueueEntry(queuePath: string, entry: DeadLetterEntry): Promise<void> {
-  const previous = appendLocks.get(queuePath) ?? Promise.resolve();
-  let release!: () => void;
-  const current = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const chained = previous.then(() => current, () => current);
-  appendLocks.set(queuePath, chained);
-  await previous.catch(() => undefined);
-  try {
+  await withQueueLock(queuePath, async () => {
     const queue = await readQueue(queuePath);
     await writeQueue(queuePath, { schemaVersion: 1, entries: [...queue.entries, entry] });
-  } finally {
-    release();
-    if (appendLocks.get(queuePath) === chained) {
-      appendLocks.delete(queuePath);
-    }
+  });
+}
+
+async function mutateQueueEntry(queuePath: string, entryId: string, mutate: (entry: DeadLetterEntry) => DeadLetterEntry): Promise<DeadLetterEntry> {
+  return withQueueLock(queuePath, async () => {
+    const queue = await readQueue(queuePath);
+    let updated: DeadLetterEntry | undefined;
+    const entries = queue.entries.map((entry) => {
+      if (entry.id !== entryId) return entry;
+      updated = mutate(entry);
+      return updated;
+    });
+    if (!updated) throw new Error('Dead-letter entry not found');
+    await writeQueue(queuePath, { schemaVersion: 1, entries });
+    return updated;
+  });
+}
+
+function validateReplaySafety(value: DeadLetterReplaySafety): DeadLetterReplaySafety {
+  return parseReplaySafety(value);
+}
+
+/* c8 ignore next 7 */
+async function assertQueueFileMode(queuePath: string): Promise<void> {
+  try {
+    await chmod(queuePath, 0o600);
+  } catch {
+    // Best-effort hardening for platforms/filesystems that do not support chmod.
   }
 }
 
@@ -233,6 +281,7 @@ export async function recordRetryExhaustionToDeadLetterQueue(
   if (!options.actionClass.trim()) throw new Error('Cannot dead-letter automation action: actionClass is required');
   if (!options.target.trim()) throw new Error('Cannot dead-letter automation action: target is required');
   if (!options.lastError.trim()) throw new Error('Cannot dead-letter automation action: lastError is required');
+  const replaySafety = validateReplaySafety(options.replaySafety);
 
   const exhaustedAt = options.exhaustedAt ?? new Date().toISOString();
   const entry: DeadLetterEntry = {
@@ -245,12 +294,13 @@ export async function recordRetryExhaustionToDeadLetterQueue(
     firstAttemptedAt: options.firstAttemptedAt ?? exhaustedAt,
     lastAttemptedAt: exhaustedAt,
     createdAt: exhaustedAt,
-    replaySafety: options.replaySafety,
+    replaySafety,
     status: 'open',
     ...(options.payload === undefined ? {} : { payload: options.payload }),
   };
 
   await appendQueueEntry(options.queuePath, entry);
+  await assertQueueFileMode(options.queuePath);
   return entry;
 }
 
@@ -260,25 +310,26 @@ export async function retireDeadLetterEntry(
   options: RetireDeadLetterEntryOptions,
 ): Promise<DeadLetterEntry> {
   if (!options.reason.trim()) throw new Error('Retiring a dead-letter entry requires a reason');
-  const queue = await readQueue(queuePath);
-  let updated: DeadLetterEntry | undefined;
-  const entries = queue.entries.map((entry) => {
-    if (entry.id !== entryId) return entry;
-    if (entry.status === 'retired') {
-      updated = entry;
-      return entry;
-    }
-    updated = {
-      ...entry,
-      status: 'retired',
-      retiredAt: options.retiredAt ?? new Date().toISOString(),
-      retiredReason: options.reason,
-    };
+  try {
+    const updated = await mutateQueueEntry(queuePath, entryId, (entry) => {
+      if (entry.status === 'retired') {
+        return entry;
+      }
+      return {
+        ...entry,
+        status: 'retired',
+        retiredAt: options.retiredAt ?? new Date().toISOString(),
+        retiredReason: options.reason,
+      };
+    });
+    await assertQueueFileMode(queuePath);
     return updated;
-  });
-  if (!updated) throw new Error(`Dead-letter entry not found: ${entryId}`);
-  await writeQueue(queuePath, { schemaVersion: 1, entries });
-  return updated;
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Dead-letter entry not found') {
+      throw new Error(`Dead-letter entry not found: ${entryId}`);
+    }
+    throw error;
+  }
 }
 
 export async function dryRunReplayDeadLetterEntry(

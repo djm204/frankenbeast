@@ -98,9 +98,15 @@ describe('dr restore-dry-run CLI', () => {
 
       await handleDrCommand({ action: 'dead-letter-list', backupManifestPath: queuePath, print: (message) => output.push(message) });
       const listOutput = output.pop() ?? '';
-      expect(JSON.parse(listOutput)).toMatchObject({ command: 'dr dead-letter-list', summary: { open: 1 } });
+      expect(JSON.parse(listOutput)).toMatchObject({
+        command: 'dr dead-letter-list',
+        summary: { open: 1 },
+        entries: [{ id: 'dlq_test', actionClass: 'codex-review-trigger', target: 'pr-2342' }],
+      });
       expect(listOutput).not.toContain('secret-value');
-      expect(listOutput).toContain('<redacted>');
+      expect(listOutput).not.toContain('GH_TOKEN');
+      expect(listOutput).not.toContain('lastError');
+      expect(listOutput).not.toContain('payload');
 
       await handleDrCommand({ action: 'dead-letter-inspect', backupManifestPath: queuePath, liveManifestPath: 'dlq_test', print: (message) => output.push(message) });
       const inspectOutput = output.pop() ?? '';

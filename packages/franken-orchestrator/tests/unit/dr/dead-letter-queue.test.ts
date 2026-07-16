@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -47,6 +47,7 @@ describe('dead-letter queue for failed automation actions', () => {
       const listed = await listDeadLetterEntries(queuePath);
       expect(listed).toHaveLength(1);
       expect(listed[0]).toEqual(entry);
+      expect((await stat(queuePath)).mode & 0o777).toBe(0o600);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -87,6 +88,27 @@ describe('dead-letter queue for failed automation actions', () => {
         lastError: 'loop incremented past cap',
         replaySafety: 'side-effect-approval-required',
       })).rejects.toThrow(/attempts cannot exceed maxAttempts/);
+
+      expect(await listDeadLetterEntries(queuePath)).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects invalid replay safety before writing unreadable entries', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dlq-'));
+    const queuePath = join(dir, 'dead-letter.json');
+
+    try {
+      await expect(recordRetryExhaustionToDeadLetterQueue({
+        queuePath,
+        actionClass: 'approval-cop-command',
+        target: 'pr-2342',
+        attempts: 3,
+        maxAttempts: 3,
+        lastError: 'bad replay safety',
+        replaySafety: 'bogus' as 'safe',
+      })).rejects.toThrow(/replaySafety/);
 
       expect(await listDeadLetterEntries(queuePath)).toEqual([]);
     } finally {

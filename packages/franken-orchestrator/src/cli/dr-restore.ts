@@ -15,6 +15,7 @@ import {
   inspectDeadLetterEntry,
   listDeadLetterEntries,
   retireDeadLetterEntry,
+  type DeadLetterEntry,
 } from '../dr/dead-letter-queue.js';
 import { redactLogData } from '../logging/redaction.js';
 
@@ -92,6 +93,23 @@ function printRedactedJson(print: (message: string) => void, report: unknown): v
   print(JSON.stringify(redactLogData(report), null, 2));
 }
 
+function summarizeDeadLetterEntry(entry: DeadLetterEntry): Omit<DeadLetterEntry, 'lastError' | 'payload'> {
+  return {
+    id: entry.id,
+    actionClass: entry.actionClass,
+    target: entry.target,
+    attempts: entry.attempts,
+    maxAttempts: entry.maxAttempts,
+    firstAttemptedAt: entry.firstAttemptedAt,
+    lastAttemptedAt: entry.lastAttemptedAt,
+    createdAt: entry.createdAt,
+    replaySafety: entry.replaySafety,
+    status: entry.status,
+    ...(entry.retiredAt === undefined ? {} : { retiredAt: entry.retiredAt }),
+    ...(entry.retiredReason === undefined ? {} : { retiredReason: entry.retiredReason }),
+  };
+}
+
 export async function handleDrCommand(deps: DrCommandDeps): Promise<void> {
   const { action, backupManifestPath, liveManifestPath, keyFilePath, print } = deps;
   if (action === 'dead-letter-list') {
@@ -108,7 +126,7 @@ export async function handleDrCommand(deps: DrCommandDeps): Promise<void> {
         open: entries.filter((entry) => entry.status === 'open').length,
         retired: entries.filter((entry) => entry.status === 'retired').length,
       },
-      entries,
+      entries: entries.map(summarizeDeadLetterEntry),
     });
     return;
   }
