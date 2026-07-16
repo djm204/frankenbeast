@@ -37,14 +37,14 @@
     },
     {
       "id": "provider-cli",
-      "name": "AI provider CLI or API credentials",
-      "requiredFor": ["local chat through CLI-backed providers", "agent execution", "dashboard chat turns through CLI-backed providers", "explicit API-backed provider-registry integrations"],
+      "name": "AI provider CLI credentials",
+      "requiredFor": ["local chat through CLI-backed providers", "agent execution", "dashboard chat turns through CLI-backed providers", "normal frankenbeast run paths"],
       "notRequiredFor": ["documentation tests", "static typecheck", "most package unit tests"],
-      "startCommand": "For chat surfaces and normal frankenbeast run/agent execution, install and authenticate a configured CLI provider. For explicitly API-backed provider-registry integrations, export the API key for the selected API-backed provider.",
-      "healthCheck": "Run a real smoke call through the selected configured provider; chat surfaces and normal frankenbeast run/agent execution require a CLI-backed provider with an authenticated no-op prompt, while explicitly API-backed provider-registry integrations may use that provider's API key.",
+      "startCommand": "Install and authenticate a configured CLI provider (claude, codex, or gemini) for chat surfaces and normal frankenbeast run/agent execution. API keys are only sufficient for code paths that explicitly bypass the CLI registry and construct API-backed provider adapters directly.",
+      "healthCheck": "Run a real smoke call through the selected configured CLI-backed provider; chat surfaces and normal frankenbeast run/agent execution require a CLI-backed provider with an authenticated no-op prompt. Do not treat ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY, or GEMINI_API_KEY alone as healthy for Beast run paths.",
       "env": ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY"],
-      "failureSymptom": "Provider resolution fails, local chat or frankenbeast run cannot produce a turn because only API-backed providers are configured, or API-backed integration paths stop before model invocation.",
-      "handoffNote": "Name the selected provider path and whether the surface requires CLI authentication or is an explicitly API-key backed provider-registry integration."
+      "failureSymptom": "Provider resolution fails before model invocation, local chat or frankenbeast run cannot produce a turn because an API-backed provider type was selected for a CLI-registry path, or an explicit low-level API integration lacks its API key.",
+      "handoffNote": "Name the selected provider path, the CLI binary/auth smoke result required by the surface, and whether any separate API-key-only integration was deliberately exercised outside normal Beast run/chat paths."
     },
     {
       "id": "secret-backend",
@@ -52,10 +52,10 @@
       "requiredFor": ["operator token lookup", "stored provider credentials", "Beast controls after init"],
       "notRequiredFor": ["repository bootstrap", "docs-only checks", "unit tests with injected secrets"],
       "startCommand": "node packages/franken-orchestrator/dist/cli/run.js init",
-      "healthCheck": "node --input-type=module -e \"import fs from 'node:fs'; import cp from 'node:child_process'; const run=(cmd,args)=>{const r=cp.spawnSync(cmd,args,{encoding:'utf8'}); return {exitCode:r.status ?? 1,stdout:r.stdout ?? '',stderr:r.stderr ?? ''};}; const cfg=JSON.parse(fs.readFileSync('.fbeast/config.json','utf8')); const b=cfg.network?.secureBackend ?? 'local-encrypted'; if (b === 'local-encrypted') { if (!fs.existsSync('.fbeast/secrets.enc') || !process.env.FRANKENBEAST_PASSPHRASE) process.exit(1); const { LocalEncryptedStore } = await import('./packages/franken-orchestrator/dist/network/secret-backends/local-encrypted-store.js'); await new LocalEncryptedStore({ projectRoot: process.cwd(), passphrase: process.env.FRANKENBEAST_PASSPHRASE }).keys(); } else if (b === 'bitwarden') { if (!process.env.BW_SESSION) process.exit(1); const { BitwardenStore } = await import('./packages/franken-orchestrator/dist/network/secret-backends/bitwarden-store.js'); const s=new BitwardenStore(run); if (!(await s.detect()).available) process.exit(1); cp.execFileSync('bw',['list','items','--search','frankenbeast'],{stdio:'ignore'}); } else if (b === '1password') { cp.execFileSync('op',['account','get'],{stdio:'ignore'}); } else if (b === 'os-keychain') { const { OsKeychainStore } = await import('./packages/franken-orchestrator/dist/network/secret-backends/os-keychain-store.js'); const s=new OsKeychainStore({runner:run}); if (!(await s.detect()).available) process.exit(1); await s.keys(); } else process.exit(1);\"",
+      "healthCheck": "node --input-type=module -e \"import fs from 'node:fs'; const cfg=JSON.parse(fs.readFileSync('.fbeast/config.json','utf8')); const backend=cfg.network?.secureBackend ?? 'local-encrypted'; const { createSecretStore, SecretResolver } = await import('./packages/franken-orchestrator/dist/network/secret-store.js'); const store=createSecretStore(backend,{projectRoot:process.cwd(),passphrase:process.env.FRANKENBEAST_PASSPHRASE}); const detection=await store.detect(); if(!detection.available) throw new Error(detection.reason ?? ('secret backend '+backend+' unavailable')); await store.keys(); const refs=[cfg.network?.operatorTokenRef,cfg.comms?.orchestratorTokenRef,cfg.comms?.slack?.botTokenRef,cfg.comms?.slack?.signingSecretRef,cfg.comms?.discord?.botTokenRef,cfg.comms?.telegram?.botTokenRef,cfg.comms?.whatsapp?.accessTokenRef,cfg.comms?.whatsapp?.appSecretRef,cfg.comms?.whatsapp?.verifyTokenRef].filter(Boolean); for (const ref of refs) { const value=await store.resolve(ref); if(!value) throw new Error('secret ref '+ref+' did not resolve through '+backend); } await new SecretResolver(store).resolveAll(cfg);\"",
       "env": ["FRANKENBEAST_PASSPHRASE", "BW_SESSION"],
       "failureSymptom": "Runtime config contains secret refs but commands cannot resolve operator tokens or provider credentials.",
-      "handoffNote": "Record the configured network.secureBackend and the backend-specific proof: local encrypted vault decrypted with FRANKENBEAST_PASSPHRASE, Bitwarden CLI session listed items with BW_SESSION, op CLI session, or OS keychain detection succeeded."
+      "handoffNote": "Record the configured network.secureBackend and backend-specific proof: detect() succeeded, keys() worked, configured secret refs resolved through store.resolve(), and SecretResolver.resolveAll(config) completed for local-encrypted, Bitwarden, 1Password, or OS keychain."
     }
   ],
   "edgeCases": [

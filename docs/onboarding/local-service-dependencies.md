@@ -13,7 +13,7 @@ Structured source: `docs/onboarding/local-service-dependencies.manifest.json`.
 | Local observability dashboards | Grafana | Yes for dashboard viewing only | `curl -fsS http://localhost:3000/api/health` |
 | Distributed trace viewing/export smoke tests | Tempo | Yes for OTLP trace export | `curl -fsS http://localhost:3200/ready` |
 | Local chat, agent execution, dashboard chat turns | CLI-backed provider login | Yes for chat surfaces that use the CLI registry | selected CLI-backed provider smoke call; do not rely on `command -v` alone |
-| Explicit API-backed provider-registry integrations | API-backed provider keys or CLI-backed provider login | Yes for real model calls | selected provider smoke call using that provider path; do not treat normal `frankenbeast run` as API-key-only |
+| Low-level API adapter integrations that bypass normal Beast run/chat paths | API-backed provider keys | Yes only for that explicit integration | adapter-specific API smoke call; do not treat normal `frankenbeast run` or chat as API-key-only |
 | Operator token and stored credentials | Configured secret backend | Yes when runtime resolves secret refs | `.fbeast/config.json` names the backend and a backend-specific decrypt/session check succeeds |
 
 ## Service details
@@ -60,12 +60,13 @@ Structured source: `docs/onboarding/local-service-dependencies.manifest.json`.
 - Not required for: SQLite observer adapters, most package tests, or MCP initialization.
 - Edge case: verify readiness on port `3200` and the OTLP/HTTP target on `4318` when debugging trace export.
 
-### Provider CLI or API-backed providers
+### Provider CLI credentials
 
 - Local chat, normal `frankenbeast run`/agent execution, and dashboard chat surfaces currently resolve providers through the CLI provider registry. Install and authenticate a supported CLI (`claude`, `codex`, or `gemini`) before expecting those paths to start.
-- Only code paths that explicitly use API-backed provider-registry integrations may rely on an exported key such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `GEMINI_API_KEY`; do not document API-key-only setup as sufficient for normal `frankenbeast run` or chat surfaces.
+- Do not advertise API-key-only setup for Beast run/chat paths: selecting `anthropic-api`, `openai-api`, or `gemini-api` still fails the CLI-registry preflight before model invocation on those surfaces.
+- Exported keys such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `GEMINI_API_KEY` are sufficient only for low-level code paths that explicitly bypass the CLI registry and construct API-backed provider adapters directly. Name that path in the handoff if you rely on it.
 - Not required for: docs-only tests, static typecheck, and most package unit tests.
-- Failure symptom: provider resolution fails before a model call, chat or normal `frankenbeast run` rejects API-only provider types such as `anthropic-api`, `openai-api`, or `gemini-api`, or an explicitly API-backed integration stops with missing provider credentials.
+- Failure symptom: provider resolution fails before a model call, chat or normal `frankenbeast run` rejects API-only provider types such as `anthropic-api`, `openai-api`, or `gemini-api`, or an explicit low-level API integration stops with missing provider credentials.
 
 ### Secret backend
 
@@ -77,7 +78,7 @@ Structured source: `docs/onboarding/local-service-dependencies.manifest.json`.
 
 - Required for: stored operator tokens, stored provider credentials, and runtime paths that resolve secret refs.
 - Not required for: repository bootstrap, docs-only checks, or tests that inject secrets directly.
-- Health check: verify `.fbeast/config.json`, then prove the selected backend is usable: for `local-encrypted`, instantiate `LocalEncryptedStore` and run a decrypting call such as `keys()` with `FRANKENBEAST_PASSPHRASE`; for Bitwarden, require `BW_SESSION`, confirm `bw` is installed, and run a `bw list items --search frankenbeast` probe so stale sessions fail; for 1Password, require an authenticated `op` CLI session; for OS keychain, instantiate `OsKeychainStore`, run its platform detection, and fail when `secret-tool`/`security`/`cmdkey` is unavailable.
+- Health check: verify `.fbeast/config.json`, then prove the selected backend is usable: for `local-encrypted`, instantiate the runtime store and run decrypting calls such as `detect()`, `keys()`, and `resolve()` for configured refs with `FRANKENBEAST_PASSPHRASE`; for Bitwarden, require `BW_SESSION`, confirm `bw` is installed, run `detect()`, `keys()`, and resolve each configured secret ref so stale sessions fail; for 1Password, require an authenticated `op` CLI session and resolve configured refs; for OS keychain, instantiate `OsKeychainStore`, run its platform detection, fail when `secret-tool`/`security`/`cmdkey` is unavailable, and resolve configured refs through the same store used at runtime.
 - Edge case: changing `network.secureBackend` does not migrate existing secret refs. Re-store or migrate secrets after switching between `local-encrypted`, `os-keychain`, `1password`, and `bitwarden`.
 
 ## Negative guidance

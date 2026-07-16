@@ -54,16 +54,14 @@ describe('issue #1771 local service dependency explainer', () => {
 
     const secretBackend = manifest.services.find((service) => service.id === 'secret-backend');
     expect(secretBackend?.healthCheck).toContain("JSON.parse(fs.readFileSync('.fbeast/config.json'");
-    expect(secretBackend?.healthCheck).toContain("b === 'local-encrypted'");
-    expect(secretBackend?.healthCheck).toContain('.fbeast/secrets.enc');
+    expect(secretBackend?.healthCheck).toContain('createSecretStore');
     expect(secretBackend?.healthCheck).toContain('FRANKENBEAST_PASSPHRASE');
-    expect(secretBackend?.healthCheck).toContain('LocalEncryptedStore');
+    expect(secretBackend?.healthCheck).toContain('store.detect()');
+    expect(secretBackend?.healthCheck).toContain('store.resolve(ref)');
+    expect(secretBackend?.healthCheck).toContain('SecretResolver');
     expect(secretBackend?.healthCheck).toContain('.keys()');
-    expect(secretBackend?.healthCheck).toContain('BitwardenStore');
-    expect(secretBackend?.healthCheck).toContain("bw',['list','items','--search','frankenbeast'");
-    expect(secretBackend?.healthCheck).toContain('OsKeychainStore');
-    expect(secretBackend?.healthCheck).toContain('s.detect()');
-    expect(secretBackend?.healthCheck).toContain('BW_SESSION');
+    expect(secretBackend?.handoffNote).toContain('detect() succeeded');
+    expect(secretBackend?.handoffNote).toContain('configured secret refs resolved through store.resolve()');
     expect(secretBackend?.healthCheck).not.toContain('|| true');
 
     const grafana = manifest.services.find((service) => service.id === 'grafana');
@@ -72,12 +70,13 @@ describe('issue #1771 local service dependency explainer', () => {
     expect(grafana?.startCommand).not.toContain('replace-with-unique-password');
 
     const provider = manifest.services.find((service) => service.id === 'provider-cli');
-    expect(provider?.healthCheck).toContain('selected configured provider');
+    expect(provider?.healthCheck).toContain('selected configured CLI-backed provider');
     expect(provider?.healthCheck).toContain('chat surfaces and normal frankenbeast run/agent execution require a CLI-backed provider');
-    expect(provider?.startCommand).toContain('explicitly API-backed provider-registry integrations');
+    expect(provider?.startCommand).toContain('explicitly bypass the CLI registry');
     expect(provider?.startCommand).toContain('normal frankenbeast run/agent execution');
     expect(provider?.healthCheck).toContain('authenticated no-op prompt');
-    expect(provider?.healthCheck).toContain('explicitly API-backed provider-registry integrations');
+    expect(provider?.healthCheck).toContain('Do not treat ANTHROPIC_API_KEY');
+    expect(provider?.handoffNote).toContain('outside normal Beast run/chat paths');
     expect(provider?.healthCheck).not.toContain('command -v');
 
     for (const service of manifest.services) {
@@ -121,10 +120,10 @@ describe('issue #1771 local service dependency explainer', () => {
       'Full-stack probe: `npm run local:verify-setup` checks ChromaDB, Grafana, and Tempo together',
       'selected CLI-backed provider smoke call; do not rely on `command -v` alone',
       'chat surfaces currently resolve providers through the CLI provider registry',
-      'do not treat normal `frankenbeast run` as API-key-only',
+      'do not treat normal `frankenbeast run` or chat as API-key-only',
       'docker compose up -d --no-deps grafana',
-      'run a decrypting call such as `keys()`',
-      'run a `bw list items --search frankenbeast` probe',
+      'resolve configured refs through the same store used at runtime',
+      'run `detect()`, `keys()`, and resolve each configured secret ref',
       'Local service dependency check:',
     ]) {
       expect(guide).toContain(requiredText);
