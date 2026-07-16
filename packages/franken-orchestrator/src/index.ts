@@ -68,6 +68,7 @@ export type {
   IssueDependencyStatus,
   IssueSchedulerFairnessBucket,
   IssueSchedulerFairnessReport,
+  IssueSchedulerFairnessReportOptions,
   IssueWorkerCardProcessSnapshot,
   DuplicateWorkerCardProcessFinding,
 } from './issues/index.js';
