@@ -20,6 +20,10 @@ const MEMORY_REVIEW_PROPOSE_CONTEXT_REDACTION = '[memory-review-proposal-context
 const MEMORY_EXPORT_CONTEXT_REDACTION = '[memory-export-context-redacted]';
 const MEMORY_RETENTION_REPORT_CONTEXT_REDACTION = '[memory-retention-report-args-redacted]';
 
+function isValidAuditDateString(value: unknown): value is string {
+  return typeof value === 'string' && Number.isFinite(Date.parse(value));
+}
+
 const HIGH_RISK_ACTIONS: Readonly<Record<string, HighRiskActionClass>> = {
   fbeast_memory_store: 'memory',
   fbeast_memory_forget: 'memory',
@@ -328,7 +332,7 @@ function sanitizeMemoryRetentionReportGovernanceArgs(args: Record<string, unknow
   } else if (Object.prototype.hasOwnProperty.call(args, 'readScope')) {
     safe['readScope'] = MEMORY_RETENTION_REPORT_CONTEXT_REDACTION;
   }
-  if (typeof args['now'] === 'string') {
+  if (isValidAuditDateString(args['now'])) {
     safe['now'] = args['now'];
   } else if (Object.prototype.hasOwnProperty.call(args, 'now')) {
     safe['now'] = MEMORY_RETENTION_REPORT_CONTEXT_REDACTION;

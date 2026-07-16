@@ -169,7 +169,7 @@ describe('GovernorAdapter', () => {
 
     await expect(governor.check({
       action: 'fbeast_memory_retention_report',
-      context: '{"readScope":"agent","agentId":"alice@example.test","maxEntries":10,"legacy":"secret"}',
+      context: '{"readScope":"agent","agentId":"alice@example.test","now":"alice@example.test invalid date","maxEntries":10,"legacy":"secret"}',
     })).resolves.toMatchObject({ decision: 'approved' });
 
     await expect(governor.check({
@@ -185,7 +185,7 @@ describe('GovernorAdapter', () => {
     const db = new Database(dbPath);
     const rows = db.prepare(`SELECT context FROM governor_log ORDER BY id ASC`).all() as Array<{ context: string }>;
     db.close();
-    expect(rows[0]!.context).toBe('{"readScope":"agent","maxEntries":10,"agentId":"[memory-retention-report-args-redacted]"}');
+    expect(rows[0]!.context).toBe('{"readScope":"agent","now":"[memory-retention-report-args-redacted]","maxEntries":10,"agentId":"[memory-retention-report-args-redacted]"}');
     expect(rows[1]!.context).toBe('{"tool":"fbeast_memory_retention_report","args":{"readScope":"agent","expiryHorizonMs":1000,"agentId":"[memory-retention-report-args-redacted]"}}');
     expect(rows[2]!.context).toBe('{"readScope":"agent","maxEntries":5,"agentId":"[memory-retention-report-args-redacted]"}');
     expect(rows.map((row) => row.context).join('\n')).not.toContain('alice@example.test');

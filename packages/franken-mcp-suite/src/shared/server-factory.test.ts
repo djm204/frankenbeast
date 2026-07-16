@@ -476,6 +476,20 @@ describe('createMcpServer', () => {
       });
     });
 
+    it('redacts invalid retention-report timestamps before recording audit args', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_retention_report', {
+        readScope: 'agent',
+        agentId: 'alice@example.test',
+        now: 'alice@example.test invalid date payload',
+        expiryHorizonMs: 1000,
+      })).toEqual({
+        readScope: 'agent',
+        agentId: '[memory-retention-report-args-redacted]',
+        now: '[memory-retention-report-args-redacted]',
+        expiryHorizonMs: 1000,
+      });
+    });
+
     it('redacts proxied retention-report envelopes before recording audit args', () => {
       expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
         tool: 'fbeast_memory_retention_report',
