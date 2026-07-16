@@ -232,6 +232,7 @@ describe('Brain interfaces (type-level)', () => {
         key: 'lesson',
         cooldownMs: 86_400_000,
       }),
+      recordSkillFailure: () => {},
       recall: (_query: string, _limit?: number) => [],
       recentFailures: (_n?: number) => [],
       recent: (_n?: number) => [],

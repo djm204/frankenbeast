@@ -69,6 +69,7 @@ export type {
   EpisodicEvent,
   LearningCooldownOptions,
   LearningRecordResult,
+  SkillFailureSignature,
   ExecutionState,
   BrainSnapshot,
   MemoryDeletionGuardSnapshot,
