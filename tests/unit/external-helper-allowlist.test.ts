@@ -101,4 +101,35 @@ describe('external helper allowlist', () => {
       allowlistPath,
     })).rejects.toThrow(/not allowed to invoke/u);
   });
+
+  it('uses the repository root when no explicit repoRoot is provided', async () => {
+    await expect(verifyExternalHelperInvocation({
+      helperId: 'ci-retry-command',
+      command: ['npm', 'run', 'test:root'],
+    })).resolves.toMatchObject({ helper: expect.objectContaining({ path: 'scripts/retry-ci-command.mjs' }) });
+  });
+
+  it('does not classify mutating git -C commands as readonly', async () => {
+    const { allowlistPath, scriptPath } = await makeFixture();
+    const sha256 = createHash('sha256').update(await readFile(scriptPath)).digest('hex');
+    await writeFile(allowlistPath, JSON.stringify({
+      version: 1,
+      helpers: [
+        {
+          id: 'safe-helper',
+          path: 'scripts/safe-helper.mjs',
+          sha256,
+          owner: 'Security team',
+          allowedArgumentClasses: ['git-readonly'],
+        },
+      ],
+    }), 'utf8');
+
+    await expect(verifyExternalHelperInvocation({
+      helperId: 'safe-helper',
+      command: ['git', '-C', '/tmp/repo', 'push', 'origin', 'main'],
+      repoRoot: workDir,
+      allowlistPath,
+    })).rejects.toThrow(/not allowed to invoke/u);
+  });
 });

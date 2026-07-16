@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
-import { dirname, relative, resolve, sep } from 'node:path';
+import { relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const DEFAULT_ALLOWLIST_URL = new URL('../external-helper-allowlist.json', import.meta.url);
@@ -9,7 +9,11 @@ const HELPER_ID_RE = /^[a-z0-9][a-z0-9_.:-]{0,127}$/u;
 const ARG_CLASS_RE = /^[a-z][a-z0-9:-]{0,63}$/u;
 
 const KNOWN_ARGUMENT_CLASS_VALIDATORS = Object.freeze({
-  'git-readonly': (command) => command[0] === 'git' && new Set(['rev-parse', 'fetch', 'branch', '-C']).has(command[1]),
+  'git-readonly': (command) => {
+    if (command[0] !== 'git') return false;
+    const subcommand = command[1] === '-C' ? command[3] : command[1];
+    return new Set(['rev-parse', 'fetch', 'branch', 'status']).has(subcommand);
+  },
   'git-worktree-create': (command) => command[0] === 'git' && command[1] === 'worktree' && command[2] === 'add',
   'git-worktree-config': (command) => command[0] === 'git' && command[1] === '-C' && command[3] === 'config'
     && (command.includes('user.email') || command.includes('user.name') || command.includes('extensions.worktreeConfig')),
@@ -101,7 +105,7 @@ export function findAllowlistedHelper(allowlist, helperIdOrPath, repoRoot = proc
 }
 
 export async function verifyExternalHelperFile({ helperId, helperPath, repoRoot, allowlistPath } = {}) {
-  const resolvedRepoRoot = resolve(repoRoot ?? dirname(fileURLToPath(new URL('..', DEFAULT_ALLOWLIST_URL))));
+  const resolvedRepoRoot = resolve(repoRoot ?? fileURLToPath(new URL('..', DEFAULT_ALLOWLIST_URL)));
   const allowlist = await loadExternalHelperAllowlist(allowlistPath);
   const helper = findAllowlistedHelper(allowlist, helperId ?? helperPath, resolvedRepoRoot);
   if (!helper) {
