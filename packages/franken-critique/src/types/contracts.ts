@@ -300,6 +300,65 @@ export interface PostPrLessonExtractionTemplate {
 export type LessonCandidateCategory =
   'procedure' | 'preference' | 'environment-fact' | 'task-state' | 'discard';
 
+/** Sources considered by the post-task lesson extraction pipeline. */
+export type PostTaskLessonEvidenceKind =
+  | 'user-correction'
+  | 'tool-failure'
+  | 'verification'
+  | 'completion-summary'
+  | 'task-note';
+
+/** Destination proposed for a candidate lesson after classification. */
+export type PostTaskLessonDestination = 'skill' | 'memory' | 'docs' | 'discard';
+
+/** Non-transcript evidence pointer used by post-task learning review. */
+export interface PostTaskLessonEvidence {
+  readonly kind: PostTaskLessonEvidenceKind;
+  readonly summary: string;
+  readonly reference?: string;
+}
+
+/** Candidate emitted after a task completes; persistence is gated on review. */
+export interface PostTaskLessonCandidate {
+  readonly id: string;
+  readonly taskId: TaskId;
+  readonly text: string;
+  readonly category: LessonCandidateCategory;
+  readonly suggestedDestination: PostTaskLessonDestination;
+  readonly evidence: readonly PostTaskLessonEvidence[];
+  readonly privacyFilter: LessonPrivacyFilterDecision;
+  readonly review: {
+    readonly status: 'pending-review' | 'discarded';
+    readonly approvalRequired: boolean;
+    readonly persistentWriteAllowed: false;
+    readonly reason: string;
+  };
+}
+
+/** Task-completion inputs used to mine reviewed lesson candidates. */
+export interface PostTaskLessonExtractionInput {
+  readonly taskId: TaskId;
+  readonly completedAt: string;
+  readonly summary?: string;
+  readonly userCorrections?: readonly string[];
+  readonly toolFailures?: readonly string[];
+  readonly verificationSteps?: readonly string[];
+  readonly notes?: readonly string[];
+}
+
+/** Review queue/report produced by post-task lesson extraction. */
+export interface PostTaskLessonExtractionReport {
+  readonly schemaVersion: 'post-task-lesson-extraction-v1';
+  readonly taskId: TaskId;
+  readonly generatedAt: string;
+  readonly candidates: readonly PostTaskLessonCandidate[];
+  readonly governance: {
+    readonly persistentWritesRequireReview: true;
+    readonly allowedDestinations: readonly PostTaskLessonDestination[];
+    readonly guidance: string;
+  };
+}
+
 /** Redaction applied before a learned lesson candidate can reach durable memory. */
 export interface LessonPrivacyRedaction {
   readonly kind: 'secret' | 'personal-data' | 'customer-data' | 'task-state';

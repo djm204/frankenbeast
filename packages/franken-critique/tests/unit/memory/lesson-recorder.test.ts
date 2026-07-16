@@ -4,6 +4,7 @@ import {
   applyHumanFeedbackToLesson,
   critiqueProposedLesson,
   detectLessonContradictions,
+  extractPostTaskLessonCandidates,
   isLessonApplicable,
   quarantineLesson,
   quarantineLessonForRepeatedFailures,
@@ -76,6 +77,86 @@ function createLesson(overrides: Partial<CritiqueLesson> = {}): CritiqueLesson {
     ...overrides,
   };
 }
+
+describe('extractPostTaskLessonCandidates', () => {
+  it('routes explicit user corrections to memory review without allowing immediate writes', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-user-correction',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: [
+        'User prefers concise post-task summaries instead of verbose status narration',
+      ],
+      verificationSteps: ['Verified the final response format against the user correction'],
+    });
+
+    const correction = report.candidates.find(
+      (candidate) => candidate.evidence[0]?.kind === 'user-correction',
+    );
+    expect(report.governance.persistentWritesRequireReview).toBe(true);
+    expect(correction).toEqual(
+      expect.objectContaining({
+        category: 'preference',
+        suggestedDestination: 'memory',
+        review: expect.objectContaining({
+          status: 'pending-review',
+          approvalRequired: true,
+          persistentWriteAllowed: false,
+        }),
+      }),
+    );
+  });
+
+  it('routes reusable tool failure workarounds to skill review with evidence', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-tool-failure',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      toolFailures: [
+        'When gh pr checks returns a transient 502, retry with gh run view before treating CI as unavailable',
+      ],
+      verificationSteps: ['Ran gh run view and confirmed the failed check log was available'],
+    });
+
+    const workaround = report.candidates.find(
+      (candidate) => candidate.evidence[0]?.kind === 'tool-failure',
+    );
+    expect(workaround).toEqual(
+      expect.objectContaining({
+        category: 'procedure',
+        suggestedDestination: 'skill',
+        evidence: [
+          expect.objectContaining({
+            kind: 'tool-failure',
+            summary: expect.stringContaining('gh pr checks'),
+          }),
+        ],
+        review: expect.objectContaining({
+          status: 'pending-review',
+          persistentWriteAllowed: false,
+        }),
+      }),
+    );
+  });
+
+  it('discards one-off task state instead of proposing persistent learning', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-one-off',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      summary: 'Merged PR #123 after CI turned green and deleted the branch',
+    });
+
+    expect(report.candidates).toHaveLength(1);
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        review: expect.objectContaining({
+          status: 'discarded',
+          approvalRequired: false,
+          persistentWriteAllowed: false,
+        }),
+      }),
+    );
+  });
+});
 
 describe('LessonRecorder', () => {
   it('does not record when critique passes on first iteration', async () => {

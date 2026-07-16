@@ -30,6 +30,12 @@ import type {
   LessonScopeKind,
   LessonScopeMetadata,
   LessonScopeProvenance,
+  PostTaskLessonCandidate,
+  PostTaskLessonDestination,
+  PostTaskLessonEvidence,
+  PostTaskLessonEvidenceKind,
+  PostTaskLessonExtractionInput,
+  PostTaskLessonExtractionReport,
 } from '../types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
 import type { TaskId } from '../types/common.js';
@@ -1005,6 +1011,135 @@ export function unquarantineLesson(
     lifecycleStatus: restoredLifecycleStatus,
     unquarantine,
   };
+}
+
+const POST_TASK_LESSON_GOVERNANCE_GUIDANCE =
+  'Post-task lesson candidates are review-queue items only. A reviewer must approve the exact destination before any skill, memory, or docs write occurs; discard task-state-only candidates.';
+
+export function extractPostTaskLessonCandidates(
+  input: PostTaskLessonExtractionInput,
+): PostTaskLessonExtractionReport {
+  requireNonEmptyString(input.taskId, 'post-task lesson taskId');
+  const taskId = input.taskId as TaskId;
+  const generatedAt = normalizeTimestamp(input.completedAt);
+  const candidates: PostTaskLessonCandidate[] = [];
+
+  const addCandidate = (
+    kind: PostTaskLessonEvidenceKind,
+    text: string,
+    reference?: string,
+  ): void => {
+    const normalizedText = text.trim().replace(/\s+/g, ' ');
+    if (!normalizedText) return;
+    const privacyDecision = createPrivacyDecision(
+      `${taskId}\n${kind}\n${normalizedText}`,
+      { flagCustomerData: true },
+    );
+    const publicDecision = toPublicPrivacyDecision(privacyDecision);
+    const sanitizedText = redactSensitiveText(
+      normalizedText,
+      privacyDecision.redactions,
+    );
+    const category = privacyDecision.category;
+    const suggestedDestination = choosePostTaskLessonDestination(
+      category,
+      kind,
+      sanitizedText,
+    );
+    const discarded = suggestedDestination === 'discard';
+    const evidence: PostTaskLessonEvidence[] = [
+      {
+        kind,
+        summary: summarizePostTaskEvidence(kind, sanitizedText),
+        ...(reference ? { reference } : {}),
+      },
+    ];
+    candidates.push({
+      id: `post-task-lesson:${stableHash(`${taskId}\n${kind}\n${sanitizedText}`)}`,
+      taskId,
+      text: sanitizedText,
+      category: discarded ? 'task-state' : category,
+      suggestedDestination,
+      evidence,
+      privacyFilter: publicDecision,
+      review: {
+        status: discarded ? 'discarded' : 'pending-review',
+        approvalRequired: !discarded,
+        persistentWriteAllowed: false,
+        reason: discarded
+          ? 'Candidate contains one-off task state or no durable learning signal; do not persist it.'
+          : 'Candidate is queued for human review before any durable learning write.',
+      },
+    });
+  };
+
+  for (const correction of input.userCorrections ?? []) {
+    addCandidate('user-correction', correction);
+  }
+  for (const failure of input.toolFailures ?? []) {
+    addCandidate('tool-failure', failure);
+  }
+  for (const verificationStep of input.verificationSteps ?? []) {
+    addCandidate('verification', verificationStep);
+  }
+  if (input.summary) {
+    addCandidate('completion-summary', input.summary);
+  }
+  for (const note of input.notes ?? []) {
+    addCandidate('task-note', note);
+  }
+
+  return {
+    schemaVersion: 'post-task-lesson-extraction-v1',
+    taskId,
+    generatedAt,
+    candidates: dedupePostTaskLessonCandidates(candidates),
+    governance: {
+      persistentWritesRequireReview: true,
+      allowedDestinations: ['skill', 'memory', 'docs', 'discard'],
+      guidance: POST_TASK_LESSON_GOVERNANCE_GUIDANCE,
+    },
+  };
+}
+
+function choosePostTaskLessonDestination(
+  category: LessonCandidateCategory,
+  kind: PostTaskLessonEvidenceKind,
+  text: string,
+): PostTaskLessonDestination {
+  if (category === 'task-state' || category === 'discard') return 'discard';
+  if (kind === 'user-correction' && category === 'preference') return 'memory';
+  if (category === 'environment-fact') return 'memory';
+  if (/\b(?:docs?|readme|runbook|guide|operator)\b/i.test(text)) return 'docs';
+  if (kind === 'tool-failure' || category === 'procedure') return 'skill';
+  return 'memory';
+}
+
+function summarizePostTaskEvidence(
+  kind: PostTaskLessonEvidenceKind,
+  text: string,
+): string {
+  const prefix: Record<PostTaskLessonEvidenceKind, string> = {
+    'user-correction': 'User correction',
+    'tool-failure': 'Tool failure workaround',
+    verification: 'Verification evidence',
+    'completion-summary': 'Completion summary',
+    'task-note': 'Task note',
+  };
+  return `${prefix[kind]}: ${text.slice(0, 240)}`;
+}
+
+function dedupePostTaskLessonCandidates(
+  candidates: readonly PostTaskLessonCandidate[],
+): PostTaskLessonCandidate[] {
+  const seen = new Set<string>();
+  const deduped: PostTaskLessonCandidate[] = [];
+  for (const candidate of candidates) {
+    if (seen.has(candidate.id)) continue;
+    seen.add(candidate.id);
+    deduped.push(candidate);
+  }
+  return deduped;
 }
 
 export class LessonRecorder {
