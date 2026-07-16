@@ -6,7 +6,7 @@ import Database from 'better-sqlite3';
 import { SqliteBrain } from '@franken/brain';
 import type { BrainSnapshot } from '@franken/types';
 import { parseArgs } from '../../../src/cli/args.js';
-import { diffMemorySnapshots, handleMemoryCommand, verifyMemoryBackup } from '../../../src/cli/memory-snapshot-diff.js';
+import { diffMemorySnapshots, generateDuplicateMemoryReport, handleMemoryCommand, verifyMemoryBackup } from '../../../src/cli/memory-snapshot-diff.js';
 
 const baseSnapshot: BrainSnapshot = {
   version: 1,
@@ -65,6 +65,20 @@ describe('memory snapshot-diff CLI args', () => {
   it('rejects extra verify-backup positionals with actionable guidance', () => {
     expect(() => parseArgs(['memory', 'verify-backup', 'backup.sqlite', 'extra'])).toThrow(
       /memory verify-backup accepts exactly one backup file/,
+    );
+  });
+
+  it('parses the memory duplicate-report command and snapshot path', () => {
+    const args = parseArgs(['memory', 'duplicate-report', 'snapshot.json']);
+
+    expect(args.subcommand).toBe('memory');
+    expect(args.memoryAction).toBe('duplicate-report');
+    expect(args.memoryDuplicateReportPath).toBe('snapshot.json');
+  });
+
+  it('rejects extra duplicate-report positionals with actionable guidance', () => {
+    expect(() => parseArgs(['memory', 'duplicate-report', 'snapshot.json', 'extra'])).toThrow(
+      /memory duplicate-report accepts exactly one snapshot file/,
     );
   });
 });
@@ -127,6 +141,69 @@ describe('diffMemorySnapshots', () => {
   });
 });
 
+
+describe('generateDuplicateMemoryReport', () => {
+  it('reports deterministic working and episodic consolidation candidates', () => {
+    const snapshot: BrainSnapshot = {
+      ...baseSnapshot,
+      working: {
+        alpha: { fact: 'Operator prefers terse updates' },
+        beta: { fact: 'Operator prefers terse updates' },
+        gamma: { fact: 'Different fact' },
+      },
+      episodic: [
+        {
+          id: 11,
+          type: 'observation',
+          summary: 'User prefers concise updates',
+          details: { source: 'profile' },
+          createdAt: '2026-07-11T00:00:01.000Z',
+        },
+        {
+          id: 12,
+          type: 'observation',
+          summary: 'User prefers concise updates',
+          details: { source: 'profile' },
+          createdAt: '2026-07-11T00:00:02.000Z',
+        },
+        {
+          id: 13,
+          type: 'decision',
+          summary: 'Keep separate decisions distinct',
+          createdAt: '2026-07-11T00:00:03.000Z',
+        },
+      ],
+    };
+
+    const report = generateDuplicateMemoryReport('snapshot.json', snapshot);
+
+    expect(report.summary).toEqual({
+      duplicateGroups: 2,
+      duplicateEntries: 4,
+      workingDuplicateGroups: 1,
+      workingDuplicateEntries: 2,
+      episodicDuplicateGroups: 1,
+      episodicDuplicateEntries: 2,
+    });
+    expect(report.groups[0]).toMatchObject({
+      id: 'dup-001',
+      suggestedCanonical: { kind: 'working', key: 'alpha' },
+      entries: [{ kind: 'working', key: 'alpha' }, { kind: 'working', key: 'beta' }],
+    });
+    expect(report.groups[1]?.entries.map((entry) => entry.eventId)).toEqual([11, 12]);
+    expect(report.groups[0]?.normalizedHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(report.guidance.join(' ')).toContain('Review each group before deleting memory');
+  });
+
+  it('returns an explicit empty report when no duplicates exist', () => {
+    const report = generateDuplicateMemoryReport('snapshot.json', baseSnapshot);
+
+    expect(report.summary.duplicateGroups).toBe(0);
+    expect(report.groups).toEqual([]);
+    expect(report.guidance[0]).toContain('No duplicate');
+  });
+});
+
 describe('handleMemoryCommand', () => {
   it('prints JSON diff for valid snapshot files', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'memory-snapshot-diff-'));
@@ -153,6 +230,36 @@ describe('handleMemoryCommand', () => {
       command: 'memory snapshot-diff',
       summary: { workingAdded: 1 },
     });
+  });
+
+  it('prints JSON duplicate report for a valid snapshot file', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'memory-duplicate-report-'));
+    const snapshotPath = join(dir, 'snapshot.json');
+    await writeFile(snapshotPath, JSON.stringify({
+      ...baseSnapshot,
+      working: { one: 'same', two: 'same' },
+    }));
+    const printed: string[] = [];
+
+    await handleMemoryCommand({
+      action: 'duplicate-report',
+      snapshotPath,
+      print: (message) => printed.push(message),
+    });
+
+    expect(printed).toHaveLength(1);
+    expect(JSON.parse(printed[0]!)).toMatchObject({
+      ok: true,
+      command: 'memory duplicate-report',
+      summary: { duplicateGroups: 1, workingDuplicateEntries: 2 },
+    });
+  });
+
+  it('requires a snapshot path for duplicate-report', async () => {
+    await expect(handleMemoryCommand({
+      action: 'duplicate-report',
+      print: () => undefined,
+    })).rejects.toThrow(/memory duplicate-report requires one BrainSnapshot JSON file/);
   });
 
   it('fails with actionable guidance when a snapshot is invalid', async () => {
