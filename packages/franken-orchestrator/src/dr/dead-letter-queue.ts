@@ -27,9 +27,16 @@ interface DeadLetterQueueFile {
   readonly entries: readonly DeadLetterEntry[];
 }
 
+interface QueueLockFile {
+  readonly owner: string;
+  readonly pid: number;
+  readonly acquiredAt: string;
+}
+
 const LOCK_RETRY_DELAY_MS = 25;
 const LOCK_TIMEOUT_MS = 5_000;
-const STALE_LOCK_MS = LOCK_TIMEOUT_MS;
+const STALE_LOCK_MS = 30_000;
+const LOCK_OWNER_PREFIX = `${process.pid}:${randomUUID()}`;
 
 export interface RecordRetryExhaustionOptions {
   readonly queuePath: string;
@@ -175,27 +182,47 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function reapStaleQueueLock(lockPath: string, now = Date.now()): Promise<boolean> {
+  let observed: QueueLockFile;
   try {
-    const raw = await readFile(lockPath, 'utf8');
-    const parsed = JSON.parse(raw) as { acquiredAt?: unknown };
-    if (typeof parsed.acquiredAt !== 'string') return false;
-    const acquiredAt = Date.parse(parsed.acquiredAt);
+    observed = parseQueueLock(await readFile(lockPath, 'utf8'));
+    const acquiredAt = Date.parse(observed.acquiredAt);
     if (!Number.isFinite(acquiredAt) || now - acquiredAt < STALE_LOCK_MS) return false;
-    await unlink(lockPath);
+  } catch {
+    return false;
+  }
+
+  const stalePath = `${lockPath}.stale.${observed.owner.replace(/[^A-Za-z0-9_.:-]/gu, '_')}.${now}`;
+  try {
+    await rename(lockPath, stalePath);
+    const moved = parseQueueLock(await readFile(stalePath, 'utf8'));
+    if (moved.owner !== observed.owner || moved.acquiredAt !== observed.acquiredAt) {
+      await rename(stalePath, lockPath).catch(() => undefined);
+      return false;
+    }
+    await unlink(stalePath).catch(() => undefined);
     return true;
   } catch {
     return false;
   }
 }
 
+function parseQueueLock(raw: string): QueueLockFile {
+  const parsed = JSON.parse(raw) as { owner?: unknown; pid?: unknown; acquiredAt?: unknown };
+  if (typeof parsed.owner !== 'string' || typeof parsed.pid !== 'number' || typeof parsed.acquiredAt !== 'string') {
+    throw new Error('invalid dead-letter queue lock file');
+  }
+  return { owner: parsed.owner, pid: parsed.pid, acquiredAt: parsed.acquiredAt };
+}
+
 async function withQueueLock<T>(queuePath: string, operation: () => Promise<T>): Promise<T> {
   const lockPath = `${queuePath}.lock`;
   await mkdir(dirname(queuePath), { recursive: true });
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  const lock: QueueLockFile = { owner: `${LOCK_OWNER_PREFIX}:${randomUUID()}`, pid: process.pid, acquiredAt: new Date().toISOString() };
   for (;;) {
     try {
       const lockHandle = await open(lockPath, 'wx', 0o600);
-      await lockHandle.writeFile(JSON.stringify({ pid: process.pid, acquiredAt: new Date().toISOString() }), 'utf8');
+      await lockHandle.writeFile(JSON.stringify(lock), 'utf8');
       await lockHandle.close();
       break;
     } catch (error) {
@@ -217,7 +244,14 @@ async function withQueueLock<T>(queuePath: string, operation: () => Promise<T>):
   try {
     return await operation();
   } finally {
-    await unlink(lockPath).catch(() => undefined);
+    try {
+      const current = parseQueueLock(await readFile(lockPath, 'utf8'));
+      if (current.owner === lock.owner) {
+        await unlink(lockPath).catch(() => undefined);
+      }
+    } catch {
+      // Lock cleanup is best-effort; stale-lock reaping handles abandoned locks.
+    }
   }
 }
 
@@ -276,6 +310,20 @@ export async function listDeadLetterEntries(queuePath: string): Promise<DeadLett
   return [...(await readQueue(queuePath)).entries];
 }
 
+function normalizeJsonPayload(payload: unknown): unknown {
+  const seen = new WeakSet<object>();
+  return JSON.parse(JSON.stringify(payload, (_key, value: unknown) => {
+    if (typeof value === 'bigint') return value.toString();
+    if (typeof value === 'function') return '[Function]';
+    if (typeof value === 'symbol') return String(value);
+    if (typeof value === 'object' && value !== null) {
+      if (seen.has(value)) return '[Circular]';
+      seen.add(value);
+    }
+    return value;
+  }));
+}
+
 export async function inspectDeadLetterEntry(queuePath: string, entryId: string): Promise<DeadLetterEntry> {
   const entry = (await readQueue(queuePath)).entries.find((candidate) => candidate.id === entryId);
   if (!entry) {
@@ -317,7 +365,7 @@ export async function recordRetryExhaustionToDeadLetterQueue(
     createdAt: exhaustedAt,
     replaySafety,
     status: 'open',
-    ...(options.payload === undefined ? {} : { payload: options.payload }),
+    ...(options.payload === undefined ? {} : { payload: normalizeJsonPayload(options.payload) }),
   };
 
   await appendQueueEntry(options.queuePath, entry);

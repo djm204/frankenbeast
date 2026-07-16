@@ -147,7 +147,7 @@ describe('dead-letter queue for failed automation actions', () => {
     const lockPath = `${queuePath}.lock`;
 
     try {
-      await writeFile(lockPath, JSON.stringify({ pid: 1, acquiredAt: '2000-01-01T00:00:00.000Z' }), 'utf8');
+      await writeFile(lockPath, JSON.stringify({ owner: 'crashed-worker', pid: 1, acquiredAt: '2000-01-01T00:00:00.000Z' }), 'utf8');
 
       const entry = await recordRetryExhaustionToDeadLetterQueue({
         queuePath,
@@ -160,6 +160,31 @@ describe('dead-letter queue for failed automation actions', () => {
       });
 
       expect(await listDeadLetterEntries(queuePath)).toEqual([entry]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('normalizes non-JSON payloads so retry evidence is still recorded', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dlq-'));
+    const queuePath = join(dir, 'dead-letter.json');
+    const payload: { id: bigint; self?: unknown } = { id: 123n };
+    payload.self = payload;
+
+    try {
+      const entry = await recordRetryExhaustionToDeadLetterQueue({
+        queuePath,
+        actionClass: 'approval-cop-command',
+        target: 'pr-2342',
+        attempts: 3,
+        maxAttempts: 3,
+        lastError: 'payload had rich retry context',
+        replaySafety: 'safe',
+        payload,
+      });
+
+      expect(entry.payload).toEqual({ id: '123', self: '[Circular]' });
+      await expect(listDeadLetterEntries(queuePath)).resolves.toHaveLength(1);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

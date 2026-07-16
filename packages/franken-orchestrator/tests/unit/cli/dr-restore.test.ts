@@ -103,7 +103,7 @@ describe('dr restore-dry-run CLI', () => {
         summary: { open: 1 },
         entries: [{ id: 'dlq_test', actionClass: 'codex-review-trigger', target: 'pr-2342' }],
       });
-      expect(listOutput).not.toContain('ghp_secretvalue1234567890');
+      expect(listOutput).not.toContain('ghp_testtoken1234567890');
       expect(listOutput).not.toContain('abcd1234secret5678');
       expect(listOutput).not.toContain('GH_TOKEN');
       expect(listOutput).not.toContain('lastError');
@@ -119,7 +119,7 @@ describe('dr restore-dry-run CLI', () => {
       await handleDrCommand({ action: 'dead-letter-replay-dry-run', backupManifestPath: queuePath, liveManifestPath: 'dlq_test', generatedAt: '2026-07-16T08:06:00.000Z', print: (message) => output.push(message) });
       const replayOutput = output.pop() ?? '';
       expect(JSON.parse(replayOutput)).toMatchObject({ command: 'dr dead-letter-replay-dry-run', replay: { dryRun: true, wouldReplay: false, requiresApproval: true } });
-      expect(replayOutput).not.toContain('secret-value');
+      expect(replayOutput).not.toContain('ghp_testtoken1234567890');
 
       await handleDrCommand({ action: 'dead-letter-retire', backupManifestPath: queuePath, liveManifestPath: 'dlq_test', keyFilePath: 'handled manually', generatedAt: '2026-07-16T08:07:00.000Z', print: (message) => output.push(message) });
       expect(JSON.parse(output.pop() ?? '')).toMatchObject({ command: 'dr dead-letter-retire', entry: { id: 'dlq_test', status: 'retired', retiredReason: 'handled manually' } });
