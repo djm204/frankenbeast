@@ -96,7 +96,7 @@ function redactValue(
   if (typeof value === 'string') {
     const result = redactSensitiveTextWithProvenance(value, formatPath(path));
     decisions.push(...result.decisions);
-    return result.value;
+    return maskOpaqueSecretLiterals(result.value);
   }
 
   if (typeof value !== 'object' || value === null) {

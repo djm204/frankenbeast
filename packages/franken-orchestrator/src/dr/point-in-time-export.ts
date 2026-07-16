@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+
+import Database from 'better-sqlite3';
 
 import { redactLogData, redactSensitiveText } from '../logging/redaction.js';
 
@@ -29,10 +32,10 @@ export interface PointInTimeExportReport {
     readonly files: readonly FileChecksum[];
   };
   readonly evidence: {
-    readonly approvals: readonly RedactedRecordSummary[];
+    readonly approvals: ReadonlyArray<RedactedRecordSummary | SqliteTableSummary>;
     readonly memory: readonly MemoryMetadataSummary[];
-    readonly tasks: readonly RedactedRecordSummary[];
-    readonly runs: readonly RedactedRecordSummary[];
+    readonly tasks: ReadonlyArray<RedactedRecordSummary | SqliteTableSummary>;
+    readonly runs: ReadonlyArray<RedactedRecordSummary | SqliteTableSummary>;
     readonly logs: readonly LogTailSummary[];
   };
 }
@@ -57,7 +60,14 @@ export interface LogTailSummary extends FileChecksum {
   readonly tail: readonly string[];
 }
 
+export interface SqliteTableSummary extends FileChecksum {
+  readonly table: string;
+  readonly rowCount: number;
+  readonly records: readonly Record<string, unknown>[];
+}
+
 type EvidenceSection = 'approvals' | 'memory' | 'tasks' | 'runs' | 'logs' | 'config' | 'other';
+type SqliteEvidenceSection = 'approvals' | 'tasks' | 'runs';
 
 function sha256(data: Buffer | string): string {
   return `sha256:${createHash('sha256').update(data).digest('hex')}`;
@@ -103,12 +113,24 @@ function classifyExportPath(path: string): EvidenceSection {
   const normalized = path.toLowerCase();
   const base = basename(normalized);
   if (base.endsWith('.log') || normalized.includes('/logs/')) return 'logs';
-  if (normalized.includes('approval') || normalized.includes('ledger')) return 'approvals';
+  if (normalized.includes('pendingapproval') || normalized.includes('pending_approval') || normalized.includes('approval') || normalized.includes('ledger')) return 'approvals';
   if (normalized.includes('memory')) return 'memory';
   if (base === 'kanban.db' || normalized.includes('kanban') || normalized.includes('/tasks/') || normalized.includes('task')) return 'tasks';
-  if (normalized.startsWith('runs/') || normalized.includes('/runs/') || normalized.includes('run-metadata') || normalized.includes('attempt')) return 'runs';
+  if (base === 'beast.db' || normalized.startsWith('runs/') || normalized.includes('/runs/') || normalized.includes('run-metadata') || normalized.includes('attempt')) return 'runs';
   if (/config\.(?:json|ya?ml|toml|ini)$/iu.test(base) || base === '.env' || base.startsWith('.env.')) return 'config';
   return 'other';
+}
+
+function classifySqliteTable(table: string): SqliteEvidenceSection | undefined {
+  const normalized = table.toLowerCase();
+  if (normalized.includes('approval')) return 'approvals';
+  if (normalized.includes('task') || normalized.includes('card') || normalized.includes('issue')) return 'tasks';
+  if (normalized.includes('run') || normalized.includes('attempt') || normalized.includes('event')) return 'runs';
+  return undefined;
+}
+
+function quoteSqliteIdentifier(identifier: string): string {
+  return `"${identifier.replace(/"/gu, '""')}"`;
 }
 
 function parseJsonObjectOrArray(text: string): unknown[] {
@@ -130,7 +152,11 @@ function sanitizeRecord(value: unknown): Record<string, unknown> {
   const redacted = redactLogData(value);
   if (!isRecord(redacted)) return {};
   const summary: Record<string, unknown> = {};
-  for (const key of ['id', 'taskId', 'runId', 'state', 'status', 'createdAt', 'updatedAt', 'startedAt', 'completedAt', 'actionClass', 'target']) {
+  for (const key of [
+    'id', 'task_id', 'taskId', 'run_id', 'runId', 'state', 'status', 'created_at', 'createdAt', 'updated_at', 'updatedAt',
+    'started_at', 'startedAt', 'finished_at', 'finishedAt', 'completed_at', 'completedAt', 'definition_id', 'tracked_agent_id',
+    'action_class', 'actionClass', 'target', 'description', 'requestedAt',
+  ]) {
     if (redacted[key] !== undefined) summary[key] = redacted[key];
   }
   return summary;
@@ -158,16 +184,88 @@ function sanitizeMemory(text: string): { recordCount: number; keys: string[]; me
   return { recordCount: records.length, keys: keys.sort(), metadata };
 }
 
-function tailLines(text: string, limit: number): string[] {
-  return text.split(/\r?\n/u).slice(-limit).map((line) => redactSensitiveText(line));
-}
-
 async function checksumFor(root: string, absolutePath: string, data: Buffer): Promise<FileChecksum> {
   return {
     path: normalizeRelative(root, absolutePath),
     bytes: data.byteLength,
     sha256: sha256(data),
   };
+}
+
+async function checksumAndTailFor(root: string, absolutePath: string, limit: number): Promise<LogTailSummary> {
+  const hasher = createHash('sha256');
+  const lines: string[] = [];
+  let bytes = 0;
+  let pending = '';
+  await new Promise<void>((resolvePromise, reject) => {
+    const stream = createReadStream(absolutePath, { encoding: 'utf8' });
+    stream.on('data', (chunk: string | Buffer) => {
+      const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      bytes += Buffer.byteLength(text);
+      hasher.update(text);
+      const parts = `${pending}${text}`.split(/\r?\n/u);
+      pending = parts.pop() ?? '';
+      for (const line of parts) {
+        lines.push(redactSensitiveText(line));
+        if (lines.length > limit) lines.splice(0, lines.length - limit);
+      }
+    });
+    stream.on('error', reject);
+    stream.on('end', () => {
+      if (pending.length > 0) lines.push(redactSensitiveText(pending));
+      if (lines.length > limit) lines.splice(0, lines.length - limit);
+      resolvePromise();
+    });
+  });
+  return {
+    path: normalizeRelative(root, absolutePath),
+    bytes,
+    sha256: `sha256:${hasher.digest('hex')}`,
+    tail: lines,
+  };
+}
+
+function summarizeSqliteTables(absolutePath: string, checksum: FileChecksum): Record<SqliteEvidenceSection, SqliteTableSummary[]> {
+  const result: Record<SqliteEvidenceSection, SqliteTableSummary[]> = { approvals: [], tasks: [], runs: [] };
+  let db: Database.Database | undefined;
+  try {
+    db = new Database(absolutePath, { readonly: true, fileMustExist: true });
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as Array<{ name: string }>;
+    for (const { name } of tables) {
+      const section = classifySqliteTable(name);
+      if (section === undefined) continue;
+      const quoted = quoteSqliteIdentifier(name);
+      const countRow = db.prepare(`SELECT COUNT(*) AS count FROM ${quoted}`).get() as { count: number };
+      const columns = db.prepare(`PRAGMA table_info(${quoted})`).all() as Array<{ name: string }>;
+      const preferred = [
+        'id', 'task_id', 'taskId', 'run_id', 'runId', 'status', 'state', 'created_at', 'createdAt', 'updated_at', 'updatedAt',
+        'started_at', 'startedAt', 'finished_at', 'finishedAt', 'completed_at', 'completedAt', 'definition_id', 'tracked_agent_id',
+        'action_class', 'actionClass', 'target', 'description', 'requestedAt',
+      ];
+      const selected = preferred.filter((column) => columns.some((candidate) => candidate.name === column));
+      const records = selected.length === 0
+        ? []
+        : (db.prepare(`SELECT ${selected.map(quoteSqliteIdentifier).join(', ')} FROM ${quoted} ORDER BY rowid DESC LIMIT 25`).all() as Array<Record<string, unknown>>)
+          .map(sanitizeRecord)
+          .filter((record) => Object.keys(record).length > 0);
+      result[section].push({ ...checksum, table: name, rowCount: countRow.count, records });
+    }
+  } catch {
+    // Keep the checksum evidence for malformed or non-SQLite .db files; do not fail an incident export.
+  } finally {
+    db?.close();
+  }
+  return result;
+}
+
+function splitChatPendingApprovals(checksum: FileChecksum, text: string): RedactedRecordSummary | undefined {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (!isRecord(parsed) || parsed.pendingApproval == null) return undefined;
+    return { ...checksum, records: [sanitizeRecord(parsed.pendingApproval)] };
+  } catch {
+    return undefined;
+  }
 }
 
 export async function createPointInTimeExport(options: PointInTimeExportOptions): Promise<PointInTimeExportReport> {
@@ -182,32 +280,52 @@ export async function createPointInTimeExport(options: PointInTimeExportOptions)
   const discovered = await walkFiles(sourceDir);
   const configChecksums: FileChecksum[] = [];
   const files: FileChecksum[] = [];
-  const approvals: RedactedRecordSummary[] = [];
+  const approvals: Array<RedactedRecordSummary | SqliteTableSummary> = [];
   const memory: MemoryMetadataSummary[] = [];
-  const tasks: RedactedRecordSummary[] = [];
-  const runs: RedactedRecordSummary[] = [];
+  const tasks: Array<RedactedRecordSummary | SqliteTableSummary> = [];
+  const runs: Array<RedactedRecordSummary | SqliteTableSummary> = [];
   const logs: LogTailSummary[] = [];
 
   for (const absolutePath of discovered) {
     const resolved = resolve(absolutePath);
     if (resolved === outputPath || !await pathIsFile(resolved)) continue;
+    const relativePath = normalizeRelative(sourceDir, resolved);
+    const section = classifyExportPath(relativePath);
+    if (section === 'logs') {
+      const logSummary = await checksumAndTailFor(sourceDir, resolved, logTailLimit);
+      files.push({ path: logSummary.path, bytes: logSummary.bytes, sha256: logSummary.sha256 });
+      logs.push(logSummary);
+      continue;
+    }
+
     const data = await readFile(resolved);
     const text = data.toString('utf8');
     const checksum = await checksumFor(sourceDir, resolved, data);
-    const section = classifyExportPath(checksum.path);
     files.push(checksum);
+
+    if (basename(checksum.path).endsWith('.db')) {
+      const sqlite = summarizeSqliteTables(resolved, checksum);
+      approvals.push(...sqlite.approvals);
+      tasks.push(...sqlite.tasks);
+      runs.push(...sqlite.runs);
+    }
+
+    const pendingApprovalSummary = splitChatPendingApprovals(checksum, text);
+    if (pendingApprovalSummary !== undefined) approvals.push(pendingApprovalSummary);
+
     if (section === 'config') {
       configChecksums.push(checksum);
     } else if (section === 'approvals') {
-      approvals.push({ ...checksum, records: sanitizeRecords(text) });
+      const records = sanitizeRecords(text);
+      if (records.length > 0) approvals.push({ ...checksum, records });
     } else if (section === 'memory') {
       memory.push({ ...checksum, ...sanitizeMemory(text) });
     } else if (section === 'tasks') {
-      tasks.push({ ...checksum, records: sanitizeRecords(text) });
+      const records = sanitizeRecords(text);
+      if (records.length > 0) tasks.push({ ...checksum, records });
     } else if (section === 'runs') {
-      runs.push({ ...checksum, records: sanitizeRecords(text) });
-    } else if (section === 'logs') {
-      logs.push({ ...checksum, tail: tailLines(text, logTailLimit) });
+      const records = sanitizeRecords(text);
+      if (records.length > 0) runs.push({ ...checksum, records });
     }
   }
 
