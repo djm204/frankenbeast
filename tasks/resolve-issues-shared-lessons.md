@@ -272,3 +272,6 @@
 - For JSON cache stores, validate both schemaVersion and the runtime shape (`content` type) before returning entries, otherwise stale/malformed files can be reused as cache hits.
 - Add regression tests that write an explicitly mismatched schema version and a wrong-shaped payload to prove stale cache entries are rejected.
 - Keep Codex review follow-ups separate from CI: CI green + no fresh Codex findings is not sufficient when Codex usage-limited responses occur; treat limits as blocked merge gates and retry only after credits reset.
+
+## 2026-07-16 — DR process cleanup closeout
+- DR process cleanup planners should ignore terminal attempts before PID counting and orphan scans, treat missing-PID live attempts as possible owners of matching processes, and include process-start tokens on executable orphan actions so signal-time consumers can revalidate PID identity before termination.
