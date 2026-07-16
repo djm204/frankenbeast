@@ -38,6 +38,7 @@ describe('issue #1770 coding-agent PR etiquette guide', () => {
       'Conventional Commit',
       'Closes #<issue-number>',
       'Ownership entries:',
+      '`onboarding-docs` is the expected ownership surface',
       'Codex: current-head clean | not required | blocked: <reason>',
       'Next safe command:',
       'Verification already run:',

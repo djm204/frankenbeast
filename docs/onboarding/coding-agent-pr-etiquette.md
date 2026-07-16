@@ -68,7 +68,7 @@ Next safe command: <command that continues the same PR, not a duplicate branch>
 Verification already run: <commands and results>
 ```
 
-For ownership routing, read the repository ownership manifest and include matching entry ids when a PR spans packages, docs, scripts, or workflows. For docs-only onboarding changes, `docs-onboarding` is the expected ownership surface.
+For ownership routing, read the repository ownership manifest and include matching entry ids when a PR spans packages, docs, scripts, or workflows. For docs-only onboarding changes, `onboarding-docs` is the expected ownership surface.
 
 ## Maintainer review cues
 
