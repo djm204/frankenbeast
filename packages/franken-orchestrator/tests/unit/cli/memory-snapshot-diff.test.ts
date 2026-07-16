@@ -446,6 +446,35 @@ describe('handleMemoryCommand', () => {
     expect(() => verifyMemoryBackup(backupPath)).toThrow(/memory_access_audit_events is missing required column\(s\): key_hash, query_hash, outcome, details/);
   });
 
+  it('rejects malformed access audit details JSON in backups', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'memory-backup-verify-audit-json-'));
+    const backupPath = join(dir, 'malformed-audit-json.sqlite');
+    const db = new Database(backupPath);
+    db.exec(`
+      CREATE TABLE working_memory (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE episodic_events (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, step TEXT, summary TEXT NOT NULL, details TEXT, embedding BLOB, created_at TEXT NOT NULL);
+      CREATE TABLE checkpoints (id INTEGER PRIMARY KEY AUTOINCREMENT, state TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE memory_deletion_hash_keys (id TEXT PRIMARY KEY, key_material TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE memory_access_audit_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        operation TEXT NOT NULL,
+        store TEXT NOT NULL,
+        key_hash TEXT,
+        query_hash TEXT,
+        outcome TEXT NOT NULL,
+        details TEXT,
+        created_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL DEFAULT 1
+      );
+      INSERT INTO memory_deletion_hash_keys VALUES ('memory-access-audit-hmac-v1', 'material', '2026-07-11T00:00:00.000Z');
+      INSERT INTO memory_access_audit_events (operation, store, key_hash, outcome, details, created_at)
+      VALUES ('working.get', 'working', 'hmac:key', 'success', 'not json', '2026-07-11T00:00:01.000Z');
+    `);
+    db.close();
+
+    expect(() => verifyMemoryBackup(backupPath)).toThrow(/Invalid JSON payload in memory_access_audit_events\.details/);
+  });
+
   it('rejects encrypted stores without verifier metadata', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'memory-backup-verify-missing-verifier-'));
     const backupPath = join(dir, 'missing-verifier.sqlite');

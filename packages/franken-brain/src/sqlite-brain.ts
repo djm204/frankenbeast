@@ -2390,18 +2390,28 @@ export class SqliteMemoryReviewQueue {
   }
 
   list(status: MemoryCandidateStatus = 'pending'): MemoryCandidate[] {
-    this.audit?.({
-      operation: 'review.list',
-      store: 'review',
-      outcome: 'success',
-      details: { status },
-    });
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM memory_review_candidates WHERE status = ? ORDER BY created_at ASC, id ASC`,
-      )
-      .all(status) as MemoryCandidateRow[];
-    return rows.map((row) => this.rowToCandidate(row));
+    try {
+      const rows = this.db
+        .prepare(
+          `SELECT * FROM memory_review_candidates WHERE status = ? ORDER BY created_at ASC, id ASC`,
+        )
+        .all(status) as MemoryCandidateRow[];
+      this.audit?.({
+        operation: 'review.list',
+        store: 'review',
+        outcome: 'success',
+        details: { status },
+      });
+      return rows.map((row) => this.rowToCandidate(row));
+    } catch (error) {
+      this.audit?.({
+        operation: 'review.list',
+        store: 'review',
+        outcome: 'error',
+        details: { status, errorName: error instanceof Error ? error.name : 'Error' },
+      });
+      throw error;
+    }
   }
 
   edit(id: string, edit: MemoryCandidateEdit): MemoryCandidate {
@@ -2558,6 +2568,15 @@ export class SqliteMemoryReviewQueue {
       outcome: result.status === 'suppressed' ? 'denied' : 'success',
       details: { id, status: result.status, targetStore: result.targetStore },
     });
+    if (result.status === 'approved' && result.targetStore === 'working') {
+      this.audit?.({
+        operation: 'working.set',
+        store: 'working',
+        key: result.key,
+        outcome: 'success',
+        details: { source: 'review.approve', candidateId: id },
+      });
+    }
     return result;
   }
 

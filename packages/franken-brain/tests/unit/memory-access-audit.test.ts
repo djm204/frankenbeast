@@ -171,6 +171,39 @@ describe('memory access audit trail', () => {
     brain.close();
   });
 
+  it('audits approved review candidates as working-memory writes', () => {
+    const brain = new SqliteBrain(':memory:');
+    const candidate = brain.memoryReview.propose({
+      targetStore: 'working',
+      key: 'review.approved.write',
+      value: 'approved value',
+      source: 'operator',
+      confidence: 0.9,
+      reason: 'Approval should emit working write audit.',
+    });
+
+    brain.memoryReview.approve(candidate.id, { reviewer: 'operator' });
+
+    const workingSetAudit = brain.accessAudit.list({ operation: 'working.set' });
+    expect(workingSetAudit[0]).toMatchObject({ operation: 'working.set', store: 'working', outcome: 'success' });
+    expect(workingSetAudit[0]?.details).toMatchObject({ source: 'review.approve', candidateId: candidate.id });
+
+    brain.close();
+  });
+
+  it('audits failed review list reads as errors after the read fails', () => {
+    const brain = new SqliteBrain(':memory:');
+    const db = (brain as unknown as { db: { exec: (sql: string) => void } }).db;
+    db.exec('DROP TABLE memory_review_candidates');
+
+    expect(() => brain.memoryReview.list()).toThrow(/memory_review_candidates/);
+
+    const listAudit = brain.accessAudit.list({ operation: 'review.list' });
+    expect(listAudit[0]).toMatchObject({ operation: 'review.list', outcome: 'error' });
+
+    brain.close();
+  });
+
   it('hashes never-store audits with the original candidate key', () => {
     const brain = new SqliteBrain(':memory:');
     const candidate = brain.memoryReview.propose({

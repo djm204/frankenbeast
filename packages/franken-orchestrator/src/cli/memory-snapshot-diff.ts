@@ -24,6 +24,7 @@ const MEMORY_BACKUP_TABLES = [
 const JSON_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
   episodic_events: ['details'],
   checkpoints: ['state'],
+  memory_access_audit_events: ['details'],
 };
 const ENCRYPTED_PAYLOAD_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
   working_memory: ['value'],
