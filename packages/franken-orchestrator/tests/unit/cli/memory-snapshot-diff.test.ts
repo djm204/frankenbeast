@@ -603,6 +603,25 @@ describe('handleMemoryCommand', () => {
     expect(() => verifyMemoryBackup(backupPath)).toThrow(/missing canonical access audit hash key memory-access-audit-hmac-v1/);
   });
 
+  it('requires the access audit table for current-schema backups', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'memory-backup-verify-audit-table-'));
+    const backupPath = join(dir, 'missing-audit-table.sqlite');
+    const db = new Database(backupPath);
+    db.exec(`
+      CREATE TABLE working_memory (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE episodic_events (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, step TEXT, summary TEXT NOT NULL, details TEXT, embedding BLOB, created_at TEXT NOT NULL);
+      CREATE TABLE checkpoints (id INTEGER PRIMARY KEY AUTOINCREMENT, state TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE memory_schema_versions (store TEXT PRIMARY KEY, version INTEGER NOT NULL, migrated_at TEXT NOT NULL);
+      CREATE TABLE memory_deletion_guards (selector_hash TEXT NOT NULL, guard_kind TEXT NOT NULL, value_hash TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE memory_deletion_hash_keys (id TEXT PRIMARY KEY, key_material TEXT NOT NULL, created_at TEXT NOT NULL);
+      INSERT INTO memory_schema_versions VALUES ('working_memory', 1, '2026-07-11T00:00:00.000Z');
+      INSERT INTO memory_schema_versions VALUES ('memory_access_audit_events', 1, '2026-07-11T00:00:00.000Z');
+    `);
+    db.close();
+
+    expect(() => verifyMemoryBackup(backupPath)).toThrow(/Current memory backup is missing required table\(s\): memory_access_audit_events/);
+  });
+
   it('fails explicitly when a backup is missing required memory tables', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'memory-backup-verify-invalid-'));
     const backupPath = join(dir, 'partial.sqlite');

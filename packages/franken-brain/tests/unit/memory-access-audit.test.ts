@@ -391,6 +391,11 @@ describe('memory access audit trail', () => {
 
   it('includes derived right-to-forget deletions in access audit details', () => {
     const brain = new SqliteBrain(':memory:');
+    brain.episodic.record({
+      type: 'observation',
+      summary: 'derived-forget-secret episodic payload',
+      createdAt: new Date().toISOString(),
+    });
     brain.recovery.checkpoint({
       runId: 'derived-forget-run',
       phase: 'audit',
@@ -413,6 +418,32 @@ describe('memory access audit trail', () => {
     expect(audit.details?.deletedCheckpoints).toBeGreaterThan(0);
     expect(audit.details?.deletedReviewPayloads).toBeGreaterThan(0);
     expect(audit.details?.deletedDerived).toBe(report.deleted.derived);
+
+    brain.close();
+  });
+
+  it('audits failed right-to-forget deletion attempts before rethrowing', () => {
+    const brain = new SqliteBrain(':memory:');
+    brain.episodic.record({
+      type: 'observation',
+      summary: 'failed-forget-secret payload',
+      createdAt: new Date().toISOString(),
+    });
+    const db = (brain as unknown as { db: Database.Database }).db;
+    db.exec(`
+      CREATE TRIGGER fail_forget_delete BEFORE DELETE ON episodic_events
+      WHEN OLD.summary LIKE '%failed-forget-secret%'
+      BEGIN
+        SELECT RAISE(ABORT, 'simulated forget delete failure');
+      END;
+    `);
+
+    expect(() => brain.rightToForget({ query: 'failed-forget-secret' })).toThrow('simulated forget delete failure');
+
+    const audit = brain.accessAudit.list({ operation: 'privacy.rightToForget', limit: 1 })[0];
+    expect(audit).toMatchObject({ operation: 'privacy.rightToForget', outcome: 'error' });
+    expect(audit.queryHash).toBeTruthy();
+    expect(audit.details?.errorName).toBeTruthy();
 
     brain.close();
   });

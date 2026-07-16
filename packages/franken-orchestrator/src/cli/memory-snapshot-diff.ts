@@ -558,6 +558,15 @@ export function verifyMemoryBackup(path: string): MemoryBackupVerificationReport
       if (missingCurrentTables.length > 0) {
         throw new Error(`Current memory backup is missing required table(s): ${missingCurrentTables.join(', ')}`);
       }
+      const schemaRowsForMissingTables = db
+        .prepare(`SELECT store FROM memory_schema_versions ORDER BY store ASC`)
+        .all() as Array<{ store: string }>;
+      const registeredMissingStores = schemaRowsForMissingTables
+        .map((row) => row.store)
+        .filter((store) => MEMORY_BACKUP_TABLES.includes(store as typeof MEMORY_BACKUP_TABLES[number]) && !tables.has(store));
+      if (registeredMissingStores.length > 0) {
+        throw new Error(`Current memory backup is missing required table(s): ${registeredMissingStores.join(', ')}`);
+      }
     }
 
     const encryptedStores = readEncryptedStores(db, tables);

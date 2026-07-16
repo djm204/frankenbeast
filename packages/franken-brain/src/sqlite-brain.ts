@@ -1737,12 +1737,15 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
 
     const normalizedCreatedAt = new Date(eventTimeMs).toISOString();
 
+    let transactionActive = false;
     this.db.exec('BEGIN IMMEDIATE');
+    transactionActive = true;
     try {
       if (cooldownMs > 0) {
         const existingEvent = this.findLearningCooldownEvent(key, eventTimeMs, cooldownMs);
         if (existingEvent) {
           this.db.exec('COMMIT');
+          transactionActive = false;
           this.audit?.({
             operation: 'episodic.recordLearning',
             store: 'episodic',
@@ -1783,9 +1786,12 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       });
 
       this.db.exec('COMMIT');
+      transactionActive = false;
       return { recorded: true, key, cooldownMs };
     } catch (error) {
-      this.db.exec('ROLLBACK');
+      if (transactionActive) {
+        this.db.exec('ROLLBACK');
+      }
       this.audit?.({
         operation: 'episodic.recordLearning',
         store: 'episodic',
@@ -3595,7 +3601,8 @@ export class SqliteBrain implements IBrain {
         ? 0
         : this.matchingReviewPayloads(normalizedSelector).length;
     } else {
-      const tx = this.db.transaction(() => {
+      try {
+        const tx = this.db.transaction(() => {
         const workingMatches = memoryType === 'episodic'
           ? []
           : this.matchingWorkingKeys(normalizedSelector, { expireRuntimeGuards: true, expirePersistedTtlEntries: false });
@@ -3677,7 +3684,7 @@ export class SqliteBrain implements IBrain {
           deletedEpisodic: episodicMatchCount,
           deletedCheckpoints: checkpointMatchCount,
           deletedReviewPayloads: reviewMatchCount,
-          deletedDerived: checkpointMatchCount + reviewMatchCount,
+          deletedDerived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
           deletedTotalDerived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
         },
       };
@@ -3695,6 +3702,22 @@ export class SqliteBrain implements IBrain {
         remainingReferences: this.countRemainingReferences(normalizedSelector, { expireRuntimeGuards: true }),
         auditEventId,
       };
+      } catch (error) {
+        const accessEvent: MemoryAccessAuditInput = {
+          operation: 'privacy.rightToForget',
+          store: 'privacy',
+          outcome: 'error',
+          details: {
+            selectorHash,
+            dryRun: false,
+            errorName: error instanceof Error ? error.name : 'Error',
+          },
+        };
+        if (normalizedSelector.query !== undefined) accessEvent.query = normalizedSelector.query;
+        if (normalizedSelector.key !== undefined) accessEvent.key = normalizedSelector.key;
+        this.auditRecorder(accessEvent);
+        throw error;
+      }
     }
 
     return {
