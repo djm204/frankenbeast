@@ -10,7 +10,10 @@ import {
   makeLogger,
 } from '../helpers/stubs.js';
 import type { ICheckpointStore, SkillInput, SkillResult } from '../../src/deps.js';
-import type { CliSkillExecutor } from '../../src/skills/cli-skill-executor.js';
+import type { CliSkillExecutor, ObserverDeps } from '../../src/skills/cli-skill-executor.js';
+import type { MartinLoop } from '../../src/skills/martin-loop.js';
+import type { CliSkillConfig, MartinLoopConfig } from '../../src/skills/cli-types.js';
+import type { GitBranchIsolator } from '../../src/skills/git-branch-isolator.js';
 
 vi.mock('node:child_process', () => ({
   execFileSync: vi.fn(),
@@ -487,6 +490,13 @@ describe('CliSkillExecutor.recoverDirtyFiles', () => {
       costCalc: { totalCost: vi.fn().mockReturnValue(0) },
       breaker: { check: vi.fn().mockReturnValue({ tripped: false, limitUsd: 10, spendUsd: 0 }) },
       loopDetector: { check: vi.fn().mockReturnValue({ detected: false }) },
+      estimateContextWindow: vi.fn().mockReturnValue({
+        usedTokens: 0,
+        maxTokens: 1000,
+        usageRatio: 0,
+        threshold: 0.85,
+        shouldCompact: false,
+      }),
       startSpan: vi.fn().mockImplementation(() => ({ id: `span-${spanCount++}` })),
       endSpan: vi.fn(),
       recordTokenUsage: vi.fn(),
@@ -495,6 +505,45 @@ describe('CliSkillExecutor.recoverDirtyFiles', () => {
   }
 
   const mockedExecFileSync = vi.mocked(execFileSync);
+
+  it('does not auto-commit an iteration when a Martin onIteration hook cancels', async () => {
+    const ac = new AbortController();
+    const git = makeMockGit();
+    const martin = {
+      run: vi.fn(async (config: MartinLoopConfig) => {
+        config.onIteration?.(1, {
+          iteration: 1,
+          provider: 'claude',
+          stdout: 'done\n<promise>IMPL_t1_DONE</promise>',
+          stderr: '',
+          durationMs: 10,
+          exitCode: 0,
+          rateLimited: false,
+          promiseDetected: true,
+          emittedPromiseTags: ['IMPL_t1_DONE'],
+          tokensEstimated: 1,
+          sleepMs: 0,
+        });
+        return { completed: true, iterations: 1, output: 'done', tokensUsed: 1 };
+      }),
+    };
+    const { CliSkillExecutor } = await import('../../src/skills/cli-skill-executor.js');
+    const executor = new CliSkillExecutor(
+      martin as unknown as MartinLoop,
+      git as unknown as GitBranchIsolator,
+      makeMockObserver() as ObserverDeps,
+    );
+
+    await expect(executor.execute(
+      't1',
+      { objective: 'do it', sessionId: 'sess-1' } as SkillInput,
+      { martin: { abortSignal: ac.signal, onIteration: () => ac.abort('operator cancelled') } } as unknown as Partial<CliSkillConfig>,
+      makeCheckpoint(),
+      'impl:t1',
+    )).rejects.toThrow('operator cancelled');
+
+    expect(git.autoCommit).not.toHaveBeenCalled();
+  });
 
   function mockVerifyPass(): void {
     mockedExecFileSync.mockImplementation(() => 'ok');

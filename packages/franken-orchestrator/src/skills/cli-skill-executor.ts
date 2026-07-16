@@ -12,6 +12,13 @@ function formatNumber(n: number): string {
   return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
+function abortReasonError(reason?: unknown): Error {
+  if (reason instanceof Error) return reason;
+  const error = new Error(reason === undefined ? 'MartinLoop aborted' : String(reason));
+  error.name = 'AbortError';
+  return error;
+}
+
 // ── Iteration progress display ──
 
 export function formatIterationProgress(opts: {
@@ -701,6 +708,12 @@ export class CliSkillExecutor {
     );
     this.observer.endSpan(iterSpan, { status: 'completed' }, this.observer.loopDetector);
 
+    config.martin?.onIteration?.(iteration, result);
+
+    if (wrappedConfig.abortSignal?.aborted) {
+      throw abortReasonError(wrappedConfig.abortSignal.reason);
+    }
+
     const committed = this.git.autoCommit(chunkId, executionStage, iteration);
     if (committed && checkpoint && taskId) {
       const commitHash = this.git.getCurrentHead();
@@ -715,7 +728,6 @@ export class CliSkillExecutor {
       throw new BudgetExceededError(currentCost, budgetResult.limitUsd);
     }
 
-    config.martin?.onIteration?.(iteration, result);
   }
 
   private checkStaleMate(options: {

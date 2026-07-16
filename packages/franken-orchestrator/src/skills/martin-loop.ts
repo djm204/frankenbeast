@@ -48,7 +48,7 @@ function extractPromiseTags(output: string): string[] {
 
 function abortError(reason?: unknown): Error {
   if (reason instanceof Error) return reason;
-  const error = new Error('MartinLoop sleep aborted');
+  const error = new Error(reason === undefined ? 'MartinLoop sleep aborted' : String(reason));
   error.name = 'AbortError';
   return error;
 }
@@ -474,7 +474,7 @@ export class MartinLoop {
         result = await spawnIteration(config, resolved, renderedPrompt, sessionContinue);
       } catch (error) {
         if (config.abortSignal?.aborted) {
-          throw config.abortSignal.reason instanceof Error ? config.abortSignal.reason : abortError();
+          throw abortError(config.abortSignal.reason);
         }
         if (isAbortError(error)) {
           throw error;
@@ -497,7 +497,7 @@ export class MartinLoop {
         const msg = error instanceof Error ? error.message : String(error);
         config.onSpawnError?.(activeProvider, msg);
         if (config.abortSignal?.aborted) {
-          throw config.abortSignal.reason instanceof Error ? config.abortSignal.reason : abortError();
+          throw abortError(config.abortSignal.reason);
         }
         if (failure.kind === 'spawn_error') {
           iteration--;
@@ -568,7 +568,7 @@ export class MartinLoop {
       }
 
       if (config.abortSignal?.aborted) {
-        throw config.abortSignal.reason instanceof Error ? config.abortSignal.reason : abortError();
+        throw abortError(config.abortSignal.reason);
       }
 
       const durationMs = wallClockNow() - startTime;
@@ -631,7 +631,7 @@ export class MartinLoop {
       config.onIteration?.(iteration, iterResult);
 
       if (config.abortSignal?.aborted) {
-        throw config.abortSignal.reason instanceof Error ? config.abortSignal.reason : abortError();
+        throw abortError(config.abortSignal.reason);
       }
 
       chunkSession = await this.persistIterationSession({
@@ -643,6 +643,10 @@ export class MartinLoop {
         resolved,
         config,
       });
+
+      if (config.abortSignal?.aborted) {
+        throw abortError(config.abortSignal.reason);
+      }
 
       // Rate limit: provider fallback chain
       if (rateLimited) {

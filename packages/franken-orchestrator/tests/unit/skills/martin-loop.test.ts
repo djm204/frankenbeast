@@ -739,7 +739,7 @@ describe('MartinLoop', () => {
   describe('cancellation and signal-handling stability (issue #1746)', () => {
     it('cancels during setup before spawning a provider process', async () => {
       const ac = new AbortController();
-      ac.abort(new Error('setup cancelled'));
+      ac.abort('setup cancelled');
 
       const loop = new MartinLoop();
       await expect(loop.run(baseConfig({ abortSignal: ac.signal }))).rejects.toThrow('setup cancelled');
@@ -811,6 +811,40 @@ describe('MartinLoop', () => {
       expect(stored?.transcript).toHaveLength(1);
       expect(stored?.transcript[0]?.kind).toBe('objective');
       expect(stored?.transcript.some((entry) => entry.kind === 'assistant')).toBe(false);
+    });
+
+    it('does not return completed when cancellation arrives during async session persistence', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'martin-compact-cancel-'));
+      tmpDirs.push(root);
+      const sessionStore = new FileChunkSessionStore(root);
+      const snapshotStore = new FileChunkSessionSnapshotStore(root);
+      const ac = new AbortController();
+
+      queueMock({ stdout: 'done\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+      const loop = new MartinLoop();
+      await expect(loop.run(baseConfig({
+        abortSignal: ac.signal,
+        planName: 'compact-cancel-plan',
+        taskId: 'impl:compact_cancel',
+        chunkId: 'compact_cancel',
+        sessionStore,
+        snapshotStore,
+        renderer: new ChunkSessionRenderer(),
+        compactor: {
+          compact: async (session) => {
+            ac.abort('compaction cancelled');
+            return session;
+          },
+        },
+        contextUsage: () => ({
+          usedTokens: 900,
+          maxTokens: 1000,
+          usageRatio: 0.9,
+          threshold: 0.85,
+          shouldCompact: true,
+        }),
+      }))).rejects.toThrow('compaction cancelled');
     });
   });
 });
