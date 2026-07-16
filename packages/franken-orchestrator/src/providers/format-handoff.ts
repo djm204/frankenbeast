@@ -30,9 +30,11 @@ export interface PmHandoffQualityAssessment {
   readonly operatorGuidance: string;
 }
 
-export type AgentHandoffTemplateSectionId = 'scope' | 'state' | 'verification' | 'blockers' | 'artifacts' | 'learning';
+export type AgentHandoffTemplateSectionId =
+  'scope' | 'state' | 'verification' | 'blockers' | 'artifacts' | 'learning';
 
-export type AgentHandoffTemplateFindingStatus = 'pass' | 'missing' | 'placeholder';
+export type AgentHandoffTemplateFindingStatus =
+  'pass' | 'missing' | 'placeholder';
 
 export interface AgentHandoffTemplateRequirement {
   readonly id: AgentHandoffTemplateSectionId;
@@ -68,8 +70,11 @@ export const PM_HANDOFF_QUALITY_RUBRIC: readonly PmHandoffRubricCriterion[] = [
   {
     id: 'scope',
     label: 'Scope and objective',
-    guidance: 'Name the issue/task, business goal, and out-of-scope boundaries so the next PM does not re-discover intent.',
-    evidencePatterns: [/\b(issue|task|goal|objective|scope|out[- ]of[- ]scope|boundary|boundaries)\b/i],
+    guidance:
+      'Name the issue/task, business goal, and out-of-scope boundaries so the next PM does not re-discover intent.',
+    evidencePatterns: [
+      /\b(issue|task|goal|objective|scope|out[- ]of[- ]scope|boundary|boundaries)\b/i,
+    ],
     requiredEvidencePatterns: [
       /\b(issue|task|scope)\b/i,
       /\b(goal|objective)\b/i,
@@ -79,14 +84,20 @@ export const PM_HANDOFF_QUALITY_RUBRIC: readonly PmHandoffRubricCriterion[] = [
   {
     id: 'state',
     label: 'Current state and decisions',
-    guidance: 'Preserve completed work, current phase, and key decisions with enough context for a fresh worker to resume safely.',
-    evidencePatterns: [/\b(decision|phase|status|completed|remaining|checkpoint|current state)\b/i],
+    guidance:
+      'Preserve completed work, current phase, and key decisions with enough context for a fresh worker to resume safely.',
+    evidencePatterns: [
+      /\b(decision|phase|status|completed|remaining|checkpoint|current state)\b/i,
+    ],
   },
   {
     id: 'verification',
     label: 'Verification evidence',
-    guidance: 'Include deterministic test, lint, build, or verifier commands and their outcome before promotion or retirement.',
-    evidencePatterns: [/\b(test|lint|typecheck|build|verified|verification|pass(?:ed)?|fail(?:ed)?|fixture|npm|pnpm|yarn|vitest|tsc|eslint|pytest)\b/i],
+    guidance:
+      'Include deterministic test, lint, build, or verifier commands and their outcome before promotion or retirement.',
+    evidencePatterns: [
+      /\b(test|lint|typecheck|build|verified|verification|pass(?:ed)?|fail(?:ed)?|fixture|npm|pnpm|yarn|vitest|tsc|eslint|pytest)\b/i,
+    ],
     requiredEvidencePatterns: [
       /\b(test|lint|typecheck|build|verified|verification|fixture|npm|pnpm|yarn|vitest|tsc|eslint|pytest)\b/i,
       /\b(pass(?:ed)?|fail(?:ed)?|exit|0 errors|green|succeed(?:ed)?)\b/i,
@@ -95,86 +106,116 @@ export const PM_HANDOFF_QUALITY_RUBRIC: readonly PmHandoffRubricCriterion[] = [
   {
     id: 'blockers',
     label: 'Blockers and next action',
-    guidance: 'Make blockers, owner, and next action explicit instead of leaving the receiving PM to infer what to do.',
-    evidencePatterns: [/\b(blocker|blockers|blocked|risk|next action|next step|next steps|owner|assignee|needs review|follow[- ]?up)\b/i],
+    guidance:
+      'Make blockers, owner, and next action explicit instead of leaving the receiving PM to infer what to do.',
+    evidencePatterns: [
+      /\b(blocker|blockers|blocked|risk|next action|next step|next steps|owner|assignee|needs review|follow[- ]?up)\b/i,
+    ],
   },
   {
     id: 'artifacts',
     label: 'Artifacts and links',
-    guidance: 'Point to concrete artifacts such as branch, PR, worktree, diff, docs, or telemetry records that the next PM can inspect.',
-    evidencePatterns: [/\b(branch|pr|pull request|worktree|diff|artifact|doc|url|https?:\/\/|telemetry)\b/i],
+    guidance:
+      'Point to concrete artifacts such as branch, PR, worktree, diff, docs, or telemetry records that the next PM can inspect.',
+    evidencePatterns: [
+      /\b(branch|pr|pull request|worktree|diff|artifact|doc|url|https?:\/\/|telemetry)\b/i,
+    ],
   },
   {
     id: 'learning',
     label: 'Learning and reuse',
-    guidance: 'Capture reusable lessons, retrospective notes, Codex/CI feedback, or promotion/retirement rationale without one-off noise.',
-    evidencePatterns: [/\b(lesson|learning|retrospective|retro|rubric|codex|ci feedback|reuse|promot(?:e|ion)|retir(?:e|ement))\b/i],
+    guidance:
+      'Capture reusable lessons, retrospective notes, Codex/CI feedback, or promotion/retirement rationale without one-off noise.',
+    evidencePatterns: [
+      /\b(lesson|learning|retrospective|retro|rubric|codex|ci feedback|reuse|promot(?:e|ion)|retir(?:e|ement))\b/i,
+    ],
   },
 ];
 
-export const AGENT_HANDOFF_TEMPLATE_REQUIREMENTS: readonly AgentHandoffTemplateRequirement[] = [
-  {
-    id: 'scope',
-    label: 'Scope and objective',
-    headingPatterns: [/\bscope\b/i, /\bobjective\b/i, /\bgoal\b/i],
-    guidance: 'Add a section that names the issue/task, business goal, and out-of-scope boundaries.',
-    requiredContentPatterns: [
-      /\b(issue|task)\b/i,
-      /\b(goal|objective|business goal)\b/i,
-      /\b(out[- ]of[- ]scope|boundary|boundaries)\b/i,
-    ],
-  },
-  {
-    id: 'state',
-    label: 'Current state and decisions',
-    headingPatterns: [/\bcurrent state\b/i, /\bstatus\b/i, /\bdecisions?\b/i],
-    guidance: 'Add a section for completed work, current phase, key decisions, and remaining work.',
-    requiredContentPatterns: [
-      /\b(completed|done|current|phase|status)\b/i,
-      /\b(decision|decisions|decided)\b/i,
-      /\b(remaining|next|todo|pending)\b/i,
-    ],
-  },
-  {
-    id: 'verification',
-    label: 'Verification evidence',
-    headingPatterns: [/\bverification\b/i, /\btests?\b/i, /\bvalidation\b/i],
-    guidance: 'Add a section for deterministic test, lint, build, or verifier commands and outcomes.',
-    requiredContentPatterns: [
-      /\b(test|lint|typecheck|build|verify|verification|npm|pnpm|yarn|vitest|tsc|eslint|pytest)\b/i,
-      /\b(pass(?:ed)?|fail(?:ed)?|exit|outcome|green|succeed(?:ed)?|0 errors)\b/i,
-    ],
-  },
-  {
-    id: 'blockers',
-    label: 'Blockers and next action',
-    headingPatterns: [/\bblockers?\b/i, /\bnext action\b/i, /\bnext steps?\b/i],
-    guidance: 'Add a section that makes blockers, owner, and the next action explicit.',
-    requiredContentPatterns: [
-      /\b(blocker|blockers|blocked|risk|none)\b/i,
-      /\b(owner|assignee|responsible)\b/i,
-      /\b(next action|next step|next steps|follow[- ]?up|continue)\b/i,
-    ],
-  },
-  {
-    id: 'artifacts',
-    label: 'Artifacts and links',
-    headingPatterns: [/\bartifacts?\b/i, /\blinks?\b/i, /\bbranches?\b/i, /\bpull requests?\b/i],
-    guidance: 'Add a section for concrete artifacts such as branch, PR, worktree, docs, or telemetry links.',
-    requiredContentPatterns: [
-      /\b(branch|pr|pull request|worktree|diff|doc|docs|telemetry|artifact|artifacts|https?:\/\/)\b/i,
-    ],
-  },
-  {
-    id: 'learning',
-    label: 'Learning and reuse',
-    headingPatterns: [/\blearnings?\b/i, /\blessons?\b/i, /\bretrospective\b/i, /\breuse\b/i],
-    guidance: 'Add a section for durable lessons, review feedback, and reusable follow-up guidance.',
-    requiredContentPatterns: [
-      /\b(lesson|lessons|learning|retrospective|reuse|reusable|codex|ci feedback|review feedback)\b/i,
-    ],
-  },
-];
+export const AGENT_HANDOFF_TEMPLATE_REQUIREMENTS: readonly AgentHandoffTemplateRequirement[] =
+  [
+    {
+      id: 'scope',
+      label: 'Scope and objective',
+      headingPatterns: [/\bscope\b/i, /\bobjective\b/i, /\bgoal\b/i],
+      guidance:
+        'Add a section that names the issue/task, business goal, and out-of-scope boundaries.',
+      requiredContentPatterns: [
+        /\b(issue|task)\b/i,
+        /\b(goal|objective|business goal)\b/i,
+        /\b(out[- ]of[- ]scope|boundary|boundaries)\b/i,
+      ],
+    },
+    {
+      id: 'state',
+      label: 'Current state and decisions',
+      headingPatterns: [/\bcurrent state\b/i, /\bstatus\b/i, /\bdecisions?\b/i],
+      guidance:
+        'Add a section for completed work, current phase, key decisions, and remaining work.',
+      requiredContentPatterns: [
+        /\b(completed|done|current|phase|status)\b/i,
+        /\b(decision|decisions|decided)\b/i,
+        /\b(remaining|next|todo|pending)\b/i,
+      ],
+    },
+    {
+      id: 'verification',
+      label: 'Verification evidence',
+      headingPatterns: [/\bverification\b/i, /\btests?\b/i, /\bvalidation\b/i],
+      guidance:
+        'Add a section for deterministic test, lint, build, or verifier commands and outcomes.',
+      requiredContentPatterns: [
+        /\b(test|lint|typecheck|build|verify|verification|npm|pnpm|yarn|vitest|tsc|eslint|pytest)\b/i,
+        /\b(pass(?:ed)?|fail(?:ed)?|exit|outcome|green|succeed(?:ed)?|0 errors)\b/i,
+      ],
+    },
+    {
+      id: 'blockers',
+      label: 'Blockers and next action',
+      headingPatterns: [
+        /\bblockers?\b/i,
+        /\bnext action\b/i,
+        /\bnext steps?\b/i,
+      ],
+      guidance:
+        'Add a section that makes blockers, owner, and the next action explicit.',
+      requiredContentPatterns: [
+        /\b(blocker|blockers|blocked|risk|none)\b/i,
+        /\b(owner|assignee|responsible)\b/i,
+        /\b(next action|next step|next steps|follow[- ]?up|continue)\b/i,
+      ],
+    },
+    {
+      id: 'artifacts',
+      label: 'Artifacts and links',
+      headingPatterns: [
+        /\bartifacts?\b/i,
+        /\blinks?\b/i,
+        /\bbranches?\b/i,
+        /\bpull requests?\b/i,
+      ],
+      guidance:
+        'Add a section for concrete artifacts such as branch, PR, worktree, docs, or telemetry links.',
+      requiredContentPatterns: [
+        /\b(branch|pr|pull request|worktree|diff|doc|docs|telemetry|artifact|artifacts|https?:\/\/)\b/i,
+      ],
+    },
+    {
+      id: 'learning',
+      label: 'Learning and reuse',
+      headingPatterns: [
+        /\blearnings?\b/i,
+        /\blessons?\b/i,
+        /\bretrospective\b/i,
+        /\breuse\b/i,
+      ],
+      guidance:
+        'Add a section for durable lessons, review feedback, and reusable follow-up guidance.',
+      requiredContentPatterns: [
+        /\b(lesson|lessons|learning|retrospective|reuse|reusable|codex|ci feedback|review feedback)\b/i,
+      ],
+    },
+  ];
 
 /**
  * Truncate a BrainSnapshot to fit within a token budget.
@@ -196,10 +237,7 @@ export function truncateSnapshot(
   };
 
   // Phase 1: trim episodic events (oldest first, keep most recent)
-  while (
-    trimmed.episodic.length > 0 &&
-    estimateChars(trimmed) > maxChars
-  ) {
+  while (trimmed.episodic.length > 0 && estimateChars(trimmed) > maxChars) {
     trimmed = {
       ...trimmed,
       episodic: trimmed.episodic.slice(1),
@@ -210,8 +248,7 @@ export function truncateSnapshot(
   if (estimateChars(trimmed) > maxChars) {
     const entries = Object.entries(trimmed.working as Record<string, unknown>);
     entries.sort(
-      (a, b) =>
-        JSON.stringify(b[1]).length - JSON.stringify(a[1]).length,
+      (a, b) => JSON.stringify(b[1]).length - JSON.stringify(a[1]).length,
     );
     const working = { ...trimmed.working } as Record<string, unknown>;
     for (const [key] of entries) {
@@ -240,14 +277,18 @@ export function assessPmHandoffQuality(
   const results = PM_HANDOFF_QUALITY_RUBRIC.map((criterion) => {
     const evidence = evidenceCorpus
       .filter((entry) =>
-        criterion.evidencePatterns.some((pattern) => pattern.test(entry.searchable)),
+        criterion.evidencePatterns.some((pattern) =>
+          pattern.test(entry.searchable),
+        ),
       )
       .map((entry) => entry.display)
       .slice(0, 1);
     return {
       id: criterion.id,
       label: criterion.label,
-      status: criterionPasses(criterion, evidenceCorpus) ? 'pass' : 'needs-attention',
+      status: criterionPasses(criterion, evidenceCorpus)
+        ? 'pass'
+        : 'needs-attention',
       evidence,
       guidance: criterion.guidance,
     } satisfies PmHandoffRubricResult;
@@ -279,9 +320,12 @@ export function validateAgentHandoffTemplate(
   const sections = extractMarkdownSections(template);
   const usedSectionIndexes = new Set<number>();
   const findings = AGENT_HANDOFF_TEMPLATE_REQUIREMENTS.map((requirement) => {
-    const sectionIndex = sections.findIndex((candidate, candidateIndex) =>
-      !usedSectionIndexes.has(candidateIndex)
-        && requirement.headingPatterns.some((pattern) => pattern.test(candidate.heading)),
+    const sectionIndex = sections.findIndex(
+      (candidate, candidateIndex) =>
+        !usedSectionIndexes.has(candidateIndex) &&
+        requirement.headingPatterns.some((pattern) =>
+          pattern.test(candidate.heading),
+        ),
     );
     const section = sectionIndex >= 0 ? sections[sectionIndex] : undefined;
     if (!section) {
@@ -294,11 +338,16 @@ export function validateAgentHandoffTemplate(
     }
     usedSectionIndexes.add(sectionIndex);
 
-    const searchableContent = normalizeEvidence(stripPlaceholderOnlyTemplateFields(section.content));
-    const hasRequiredContent = requirement.requiredContentPatterns.every((pattern) =>
-      pattern.test(searchableContent),
+    const searchableContent = normalizeEvidence(
+      stripPlaceholderOnlyTemplateFields(section.content),
     );
-    if (!hasSubstantiveTemplateGuidance(section.content) || !hasRequiredContent) {
+    const hasRequiredContent = requirement.requiredContentPatterns.every(
+      (pattern) => pattern.test(searchableContent),
+    );
+    if (
+      !hasSubstantiveTemplateGuidance(section.content) ||
+      !hasRequiredContent
+    ) {
       return {
         id: requirement.id,
         label: requirement.label,
@@ -343,7 +392,9 @@ function criterionPasses(
     );
   }
   return evidenceCorpus.some((entry) =>
-    criterion.evidencePatterns.some((pattern) => pattern.test(entry.searchable)),
+    criterion.evidencePatterns.some((pattern) =>
+      pattern.test(entry.searchable),
+    ),
   );
 }
 
@@ -363,9 +414,9 @@ export function formatHandoff(snapshot: BrainSnapshot): string {
     JSON.stringify(snapshot.working, null, 2),
     '',
     `Recent events (${snapshot.episodic.length}):`,
-    ...snapshot.episodic.slice(-10).map(
-      (event: EpisodicEvent) => `  [${event.type}] ${event.summary}`,
-    ),
+    ...snapshot.episodic
+      .slice(-10)
+      .map((event: EpisodicEvent) => `  [${event.type}] ${event.summary}`),
     '',
     formatPmHandoffQualityRubric(assessPmHandoffQuality(snapshot)),
   ];
@@ -387,7 +438,10 @@ function formatPmHandoffQualityRubric(
   return [
     `PM rubric: ${assessment.passed}/${assessment.total} (${assessment.score})`,
     ...assessment.results.map((result) => {
-      const evidence = result.evidence.length > 0 ? result.evidence.join('; ') : 'missing evidence';
+      const evidence =
+        result.evidence.length > 0
+          ? result.evidence.join('; ')
+          : 'missing evidence';
       return `  - ${result.id}: ${result.status} — ${evidence}`;
     }),
     `PM guidance: ${assessment.passed === assessment.total ? 'complete' : 'add missing evidence before promotion/retirement'}`,
@@ -433,7 +487,8 @@ interface MarkdownSection {
 }
 
 function extractMarkdownSections(template: string): MarkdownSection[] {
-  const sections: Array<{ heading: string; level: number; content: string[] }> = [];
+  const sections: Array<{ heading: string; level: number; content: string[] }> =
+    [];
   const openSectionIndexes: number[] = [];
 
   for (const line of template.split(/\r?\n/)) {
@@ -441,7 +496,8 @@ function extractMarkdownSections(template: string): MarkdownSection[] {
     if (heading) {
       const level = heading[1]?.length ?? 1;
       while (openSectionIndexes.length > 0) {
-        const current = sections[openSectionIndexes[openSectionIndexes.length - 1]!];
+        const current =
+          sections[openSectionIndexes[openSectionIndexes.length - 1]!];
         if (current && current.level < level) {
           break;
         }
@@ -473,8 +529,13 @@ function extractMarkdownSections(template: string): MarkdownSection[] {
 }
 
 function hasSubstantiveTemplateGuidance(content: string): boolean {
-  const normalized = normalizeEvidence(stripPlaceholderOnlyTemplateFields(content));
-  return /[A-Za-z0-9]/.test(normalized) && normalized.split(' ').some((token) => token.length >= 4);
+  const normalized = normalizeEvidence(
+    stripPlaceholderOnlyTemplateFields(content),
+  );
+  return (
+    /[A-Za-z0-9]/.test(normalized) &&
+    normalized.split(' ').some((token) => token.length >= 4)
+  );
 }
 
 function stripPlaceholderOnlyTemplateFields(content: string): string {
@@ -488,7 +549,10 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
         .replace(/\[[^\]]*\]/g, ' ')
         .replace(/\{\{[^}]*\}\}/g, ' ')
         .replace(/[{}]/g, ' ')
-        .replace(/\b(?:tbd|todo|n\/?a|unknown|placeholder|fill in|to be decided)\b/gi, ' ')
+        .replace(
+          /\b(?:tbd|todo|n\/?a|unknown|placeholder|fill in|to be decided)\b/gi,
+          ' ',
+        )
         .replace(/[_.-]{2,}/g, ' ');
       return /^\s*(?:[-*]\s*)?[A-Za-z0-9 /_-]+:\s*$/.test(withoutPlaceholders)
         ? ''
@@ -505,7 +569,9 @@ function formatWorkingEvidence(
   if (valueEvidence.length === 0) {
     return null;
   }
-  const searchable = normalizeEvidence(`${splitEvidenceKey(key)} ${valueEvidence}`);
+  const searchable = normalizeEvidence(
+    `${splitEvidenceKey(key)} ${valueEvidence}`,
+  );
   return {
     searchable,
     display: `working.${key}: ${truncateEvidence(valueEvidence)}`,
@@ -513,9 +579,13 @@ function formatWorkingEvidence(
 }
 
 function formatEpisodicEvidence(event: EpisodicEvent): HandoffEvidenceEntry {
-  const details = event.details ? ` details=${summarizeUnknown(event.details)}` : '';
+  const details = event.details
+    ? ` details=${summarizeUnknown(event.details)}`
+    : '';
   const step = event.step ? ` step=${event.step}` : '';
-  const searchable = normalizeEvidence(`${event.type} ${step} ${event.summary}${details}`);
+  const searchable = normalizeEvidence(
+    `${event.type} ${step} ${event.summary}${details}`,
+  );
   return {
     searchable,
     display: `event.${event.type}:${step} ${truncateEvidence(searchable)}`,
@@ -559,7 +629,9 @@ function pruneEmptyEvidence(value: unknown): unknown {
   }
   if (typeof value === 'object') {
     const entries = Object.entries(value as Record<string, unknown>)
-      .map(([key, entryValue]) => [key, pruneEmptyEvidence(entryValue)] as const)
+      .map(
+        ([key, entryValue]) => [key, pruneEmptyEvidence(entryValue)] as const,
+      )
       .filter(([, entryValue]) => entryValue !== undefined);
     return entries.length === 0 ? undefined : Object.fromEntries(entries);
   }
@@ -567,9 +639,7 @@ function pruneEmptyEvidence(value: unknown): unknown {
 }
 
 function splitEvidenceKey(key: string): string {
-  return key
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .replace(/[_-]+/g, ' ');
+  return key.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ');
 }
 
 function normalizeEvidence(value: string): string {

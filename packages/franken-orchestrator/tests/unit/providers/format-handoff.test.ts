@@ -13,10 +13,18 @@ function makeSnapshot(overrides: Partial<BrainSnapshot> = {}): BrainSnapshot {
     timestamp: '2026-03-22T00:00:00.000Z',
     working: { task: 'fix auth' },
     episodic: [
-      { type: 'decision', summary: 'Refactor auth module', createdAt: '2026-03-22T00:00:00.000Z' },
+      {
+        type: 'decision',
+        summary: 'Refactor auth module',
+        createdAt: '2026-03-22T00:00:00.000Z',
+      },
     ],
     checkpoint: null,
-    metadata: { lastProvider: 'claude-cli', switchReason: 'rate-limit', totalTokensUsed: 5000 },
+    metadata: {
+      lastProvider: 'claude-cli',
+      switchReason: 'rate-limit',
+      totalTokensUsed: 5000,
+    },
     ...overrides,
   };
 }
@@ -81,11 +89,14 @@ describe('formatHandoff', () => {
     const text = formatHandoff(
       makeSnapshot({
         working: {
-          issue: '#1862 add PM handoff quality rubric with goal to improve PM handoffs; out-of-scope: unrelated learning changes',
+          issue:
+            '#1862 add PM handoff quality rubric with goal to improve PM handoffs; out-of-scope: unrelated learning changes',
           status: 'completed docs and implementation',
-          verification: 'npm test -- --run tests/unit/providers/format-handoff.test.ts passed',
+          verification:
+            'npm test -- --run tests/unit/providers/format-handoff.test.ts passed',
           blocker: 'needs review before merge PR',
-          artifact: 'branch resolve/issue-1862-feat-learning-add-pm-handoff-quality-rubric',
+          artifact:
+            'branch resolve/issue-1862-feat-learning-add-pm-handoff-quality-rubric',
           lesson: 'Future workers can use this rubric before promotion',
         },
       }),
@@ -105,7 +116,8 @@ describe('assessPmHandoffQuality', () => {
         working: {
           goal: 'Resolve issue #1862 without broadening scope; out-of-scope: unrelated learning changes',
           status: 'implementation completed with decisions recorded',
-          verificationCommand: 'npm test --workspace @franken/orchestrator -- --run tests/unit/providers/format-handoff.test.ts passed',
+          verificationCommand:
+            'npm test --workspace @franken/orchestrator -- --run tests/unit/providers/format-handoff.test.ts passed',
           blocker: 'needs review before merge',
           pr: 'https://github.com/djm204/frankenbeast/pull/9999',
           retrospective: 'lesson captured for PM handoffs',
@@ -115,7 +127,9 @@ describe('assessPmHandoffQuality', () => {
 
     expect(assessment.score).toBe(1);
     expect(assessment.passed).toBe(6);
-    expect(assessment.results.every((result) => result.status === 'pass')).toBe(true);
+    expect(assessment.results.every((result) => result.status === 'pass')).toBe(
+      true,
+    );
   });
 
   it('flags sparse handoffs instead of inventing missing evidence', () => {
@@ -136,7 +150,9 @@ describe('assessPmHandoffQuality', () => {
     expect(assessment.results.map((result) => result.status)).toEqual(
       Array.from({ length: 6 }, () => 'needs-attention'),
     );
-    expect(assessment.operatorGuidance).toContain('missing one or more rubric criteria');
+    expect(assessment.operatorGuidance).toContain(
+      'missing one or more rubric criteria',
+    );
   });
 
   it('ignores empty placeholder fields when scoring evidence', () => {
@@ -169,7 +185,9 @@ describe('assessPmHandoffQuality', () => {
     );
 
     expect(assessment.score).toBe(0.17);
-    expect(assessment.results.find((result) => result.id === 'state')?.status).toBe('pass');
+    expect(
+      assessment.results.find((result) => result.id === 'state')?.status,
+    ).toBe('pass');
     expect(
       assessment.results
         .filter((result) => result.id !== 'state')
@@ -208,7 +226,9 @@ describe('assessPmHandoffQuality', () => {
       }),
     );
 
-    expect(assessment.results.find((result) => result.id === 'blockers')?.status).toBe('pass');
+    expect(
+      assessment.results.find((result) => result.id === 'blockers')?.status,
+    ).toBe('pass');
   });
 
   it('requires command and outcome signals for verification evidence', () => {
@@ -218,9 +238,10 @@ describe('assessPmHandoffQuality', () => {
         episodic: [],
       }),
     );
-    expect(missingOutcome.results.find((result) => result.id === 'verification')?.status).toBe(
-      'needs-attention',
-    );
+    expect(
+      missingOutcome.results.find((result) => result.id === 'verification')
+        ?.status,
+    ).toBe('needs-attention');
 
     const verified = assessPmHandoffQuality(
       makeSnapshot({
@@ -228,7 +249,9 @@ describe('assessPmHandoffQuality', () => {
         episodic: [],
       }),
     );
-    expect(verified.results.find((result) => result.id === 'verification')?.status).toBe('pass');
+    expect(
+      verified.results.find((result) => result.id === 'verification')?.status,
+    ).toBe('pass');
   });
 
   it('bounds large checkpoint context evidence in the formatted rubric', () => {
@@ -283,7 +306,9 @@ Capture durable lessons, Codex or CI feedback, and reusable notes for future han
     expect(validation.valid).toBe(true);
     expect(validation.passed).toBe(6);
     expect(validation.missingSections).toEqual([]);
-    expect(validation.findings.every((finding) => finding.status === 'pass')).toBe(true);
+    expect(
+      validation.findings.every((finding) => finding.status === 'pass'),
+    ).toBe(true);
     expect(validation.operatorGuidance).toContain('every required section');
   });
 
@@ -296,9 +321,18 @@ Record npm test passed or failed.
 `);
 
     expect(validation.valid).toBe(false);
-    expect(validation.missingSections).toEqual(['state', 'blockers', 'artifacts', 'learning']);
-    expect(validation.findings.find((finding) => finding.id === 'state')?.status).toBe('missing');
-    expect(validation.operatorGuidance).toContain('state, blockers, artifacts, learning');
+    expect(validation.missingSections).toEqual([
+      'state',
+      'blockers',
+      'artifacts',
+      'learning',
+    ]);
+    expect(
+      validation.findings.find((finding) => finding.id === 'state')?.status,
+    ).toBe('missing');
+    expect(validation.operatorGuidance).toContain(
+      'state, blockers, artifacts, learning',
+    );
   });
 
   it('flags placeholder-only sections as explicit failures', () => {
@@ -311,7 +345,9 @@ Record npm test passed or failed.
 
     expect(validation.valid).toBe(false);
     expect(validation.missingSections).toContain('verification');
-    expect(validation.findings.find((finding) => finding.id === 'verification')).toMatchObject({
+    expect(
+      validation.findings.find((finding) => finding.id === 'verification'),
+    ).toMatchObject({
       status: 'placeholder',
       matchedHeading: 'Verification evidence',
     });
@@ -326,7 +362,9 @@ Record npm test passed or failed.
     );
 
     expect(validation.valid).toBe(false);
-    expect(validation.findings.find((finding) => finding.id === 'scope')?.status).toBe('placeholder');
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
   });
 
   it('preserves child-heading content inside a required parent section', () => {
@@ -338,7 +376,10 @@ Record npm test passed or failed.
     );
 
     expect(validation.valid).toBe(true);
-    expect(validation.findings.find((finding) => finding.id === 'verification')?.status).toBe('pass');
+    expect(
+      validation.findings.find((finding) => finding.id === 'verification')
+        ?.status,
+    ).toBe('pass');
   });
 
   it('requires a distinct matched section for each handoff dimension', () => {
@@ -349,8 +390,16 @@ Issue #1775 goal is onboarding; out-of-scope boundaries are unrelated refactors.
 `);
 
     expect(validation.valid).toBe(false);
-    expect(validation.findings.find((finding) => finding.id === 'scope')?.status).toBe('pass');
-    expect(validation.missingSections).toEqual(['state', 'verification', 'blockers', 'artifacts', 'learning']);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('pass');
+    expect(validation.missingSections).toEqual([
+      'state',
+      'verification',
+      'blockers',
+      'artifacts',
+      'learning',
+    ]);
   });
 
   it('rejects sections that omit required content signals', () => {
@@ -362,7 +411,9 @@ Issue #1775 goal is onboarding; out-of-scope boundaries are unrelated refactors.
     );
 
     expect(validation.valid).toBe(false);
-    expect(validation.findings.find((finding) => finding.id === 'scope')?.status).toBe('placeholder');
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
   });
 });
 
@@ -385,7 +436,9 @@ describe('truncateSnapshot', () => {
 
     expect(truncated.episodic.length).toBeLessThan(50);
     // Most recent events are kept
-    expect(truncated.episodic[truncated.episodic.length - 1]!.summary).toContain('Step 49');
+    expect(
+      truncated.episodic[truncated.episodic.length - 1]!.summary,
+    ).toContain('Step 49');
     // Oldest events are removed
     expect(truncated.episodic[0]!.summary).not.toContain('Step 0');
   });
@@ -400,7 +453,9 @@ describe('truncateSnapshot', () => {
       },
     });
     const truncated = truncateSnapshot(snapshot, 500);
-    const workingKeys = Object.keys(truncated.working as Record<string, unknown>);
+    const workingKeys = Object.keys(
+      truncated.working as Record<string, unknown>,
+    );
 
     // Largest value should be removed first
     expect(workingKeys).not.toContain('large');
