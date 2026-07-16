@@ -1251,7 +1251,12 @@ describe('IssueRunner', () => {
     });
 
     it('preserves one-shot checkpoint-complete outcomes before evaluating backpressure or blocker deferral', async () => {
-      const checkpoint = mockCheckpoint(new Set(['impl:issue-15:done', 'harden:issue-15:done']));
+      const checkpoint = mockCheckpoint(new Set([
+        'impl:issue-15:done',
+        'harden:issue-15:done',
+        'impl:issue-15:commit:abc123',
+        'harden:issue-15:last-commit:def456',
+      ]));
       const issueRuntime = makeIssueRuntimeSupport();
       vi.mocked(issueRuntime.checkpointForIssue).mockReturnValue(checkpoint);
       vi.mocked(issueRuntime.artifactsForIssue).mockReturnValue({

@@ -223,7 +223,7 @@ Issue Flags (for 'issues' subcommand):
   --milestone <name>      Filter by milestone
   --search <query>        Search issues by text
   --assignee <user>       Filter by assignee
-  --limit <n>             Max issues to fetch (default: 30)
+  --limit <n>             Max issues to fetch (default: 1000)
   --repo <owner/repo>     Target repository
   --target-upstream       Use the fork upstream as the canonical repo for issues and PRs
   --dry-run               Preview without executing
@@ -716,8 +716,6 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   let issueLimit: number | undefined;
   if (limitRaw !== undefined) {
     issueLimit = parseIntegerOption('--limit', limitRaw, { min: 1 });
-  } else if (subcommand === 'issues') {
-    issueLimit = 30;
   }
 
   const budget = values.budget !== undefined

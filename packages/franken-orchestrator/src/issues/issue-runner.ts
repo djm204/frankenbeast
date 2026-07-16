@@ -1075,13 +1075,12 @@ function checkpointEntriesAreCompleteWithoutPlan(
   if (!issueSpecificCheckpoint || entries === undefined || entries.size === 0) return false;
   if (complexity === 'chunked') return false;
 
-  const doneEntries = [...entries];
   const issueToken = `issue-${issueNumber}`;
+  const doneEntries = [...entries].filter((entry) => entry.endsWith(':done') && entry.includes(issueToken));
   const oneShotImplKey = `impl:${issueToken}:done`;
   const oneShotHardenKey = `harden:${issueToken}:done`;
 
-  return doneEntries.every((entry) => entry.endsWith(':done') && entry.includes(issueToken))
-    && doneEntries.includes(oneShotImplKey)
+  return doneEntries.includes(oneShotImplKey)
     && doneEntries.includes(oneShotHardenKey);
 }
 

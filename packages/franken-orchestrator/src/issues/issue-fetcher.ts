@@ -5,6 +5,11 @@ import type { GithubIssue, IIssueFetcher, IssueFetchOptions } from './types.js';
 type ExecCallback = (error: Error | null, stdout: string, stderr: string) => void;
 type ExecFn = (file: string, args: string[], callback: ExecCallback) => void;
 
+const DEFAULT_ISSUE_FETCH_LIMIT = 1_000;
+const MIN_ISSUE_FETCH_BUFFER_BYTES = 2_097_152;
+const MAX_ISSUE_FETCH_BUFFER_BYTES = 128 * 1_024 * 1_024;
+const APPROX_MAX_GITHUB_ISSUE_BODY_BYTES = 65_536;
+
 interface RawGithubIssue {
   readonly number: number;
   readonly title: string;
@@ -50,13 +55,18 @@ export class IssueFetcher implements IIssueFetcher {
       args.push('--assignee', options.assignee);
     }
 
-    const limit = options.limit ?? 1_000;
+    const limit = options.limit ?? DEFAULT_ISSUE_FETCH_LIMIT;
     args.push('--limit', String(limit));
 
-    const stdout = await this.run('gh', args, 2_097_152);
+    const maxPayloadBytes = Math.min(
+      Math.max(MIN_ISSUE_FETCH_BUFFER_BYTES, limit * APPROX_MAX_GITHUB_ISSUE_BODY_BYTES),
+      MAX_ISSUE_FETCH_BUFFER_BYTES,
+    );
+
+    const stdout = await this.run('gh', args, maxPayloadBytes);
     const raw = parseSafeJson(stdout, {
       context: 'GitHub issue list payload',
-      maxBytes: 2_097_152,
+      maxBytes: maxPayloadBytes,
       maxDepth: 48,
       maxContainers: 20_000,
       maxObjectKeys: 100_000,
