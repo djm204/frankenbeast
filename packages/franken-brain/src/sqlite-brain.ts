@@ -934,6 +934,12 @@ class SqliteWorkingMemory implements IWorkingMemory {
     return { normalized: JSON.parse(serialized) as unknown, serialized, size };
   }
 
+  private clearWorkingMemoryProvenance(key: string): void {
+    this.db
+      .prepare(`DELETE FROM memory_review_provenance WHERE target_store = 'working' AND memory_key = ?`)
+      .run(key);
+  }
+
   set(key: string, value: unknown): void {
     const { normalized, serialized, size } = this.prepareEntry(key, value);
     assertNotDeletionGuarded(this.db, key, serialized, this.encryption);
@@ -958,6 +964,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
     this.sizes.set(key, size);
     this.serialized.set(key, serialized);
     this.totalBytes = newTotal;
+    this.clearWorkingMemoryProvenance(key);
     if (this.persistedSerialized.get(key) === serialized) {
       this.dirtyKeys.delete(key);
     } else {
@@ -980,6 +987,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
     } else {
       this.deletedKeys.delete(key);
     }
+    this.clearWorkingMemoryProvenance(key);
     return this.store.delete(key);
   }
 
