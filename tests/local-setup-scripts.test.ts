@@ -210,19 +210,108 @@ describe('local setup scripts', () => {
     expect(manifest.scripts?.['local:verify-setup']).toBe('tsx scripts/verify-setup.ts');
     expect(manifest.scripts?.['new-worker:preflight']).toBe('node scripts/new-worker-preflight.mjs');
     expect(manifest.scripts?.['first-run:checklist']).toBe('node scripts/first-run-checklist.mjs');
+    expect(manifest.scripts?.['workspace:tour']).toBe('node scripts/workspace-tour.mjs');
     expect(readme).toContain('npm run local:seed');
     expect(readme).toContain('npm run local:verify-setup');
     expect(readme).toContain('npm --silent run new-worker:preflight -- --json');
+    expect(readme).toContain('npm --silent run workspace:tour -- --json');
     expect(readme).toContain('npm run first-run:checklist -- --persona operator');
     expect(onboarding).toContain('npm run local:seed');
     expect(onboarding).toContain('npm run local:verify-setup');
     expect(onboarding).toContain('npm --silent run new-worker:preflight -- --json');
     expect(onboarding).toContain('npm --silent run first-run:checklist -- --persona coding-agent --json');
+    expect(onboarding).toContain('npm run workspace:tour');
+    expect(onboarding).toContain('docs-drift section reports missing expected package, doc, script, or test paths');
     expect(onboarding).toContain('Valid personas are `operator`, `coding-agent`, and `contributor`');
     expect(onboarding).toContain('[new-worker-preflight:<check>] ok|warn|fail');
     expect(read('docs/guides/quickstart.md')).toContain('npm run first-run:checklist -- --persona contributor');
+    expect(read('docs/guides/quickstart.md')).toContain('npm --silent run workspace:tour -- --json');
     expect(seedScript).toContain('Usage: npm run local:seed');
     expect(verifyScript).toContain('Usage: npm run local:verify-setup');
+  });
+
+  it('workspace tour emits structured package map and docs-drift output', () => {
+    const result = spawnSync(process.execPath, ['scripts/workspace-tour.mjs', '--json'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    const tour = JSON.parse(result.stdout) as {
+      ok: boolean;
+      packageMap: Array<{ id: string; path: string; packageName: string; responsibility: string; testCommand: string }>;
+      keyDocs: Array<{ path: string; purpose: string }>;
+      generatedFiles: Array<{ path: string; producer: string }>;
+      runtimeStatePaths: Array<{ path: string; purpose: string }>;
+      safeFirstCommands: Array<{ command: string; why: string }>;
+      testCommands: Array<{ command: string; why: string }>;
+      docsDrift: Array<{ path: string; status: string }>;
+    };
+
+    expect(tour.ok).toBe(true);
+    expect(tour.packageMap).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'orchestrator',
+        path: 'packages/franken-orchestrator',
+        packageName: '@franken/orchestrator',
+        testCommand: expect.stringContaining('npm test --workspace @franken/orchestrator'),
+      }),
+      expect.objectContaining({ id: 'mcp-suite', packageName: '@franken/mcp-suite' }),
+      expect.objectContaining({ id: 'web', packageName: '@franken/web' }),
+    ]));
+    expect(tour.keyDocs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'ONBOARDING.md' }),
+      expect.objectContaining({ path: 'docs/ARCHITECTURE.md' }),
+      expect.objectContaining({ path: 'docs/onboarding/test-command-decision-tree.md' }),
+    ]));
+    expect(tour.generatedFiles).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'packages/*/dist/**', producer: 'npm run build' }),
+    ]));
+    expect(tour.runtimeStatePaths).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: '.fbeast/beast.db' }),
+      expect.objectContaining({ path: '.fbeast/config.json + .fbeast/secrets.enc + .fbeast/secrets.meta.json' }),
+    ]));
+    expect(tour.safeFirstCommands).toEqual(expect.arrayContaining([
+      expect.objectContaining({ command: 'npm --silent run workspace:tour -- --json' }),
+      expect.objectContaining({ command: 'npm --silent run new-worker:preflight -- --json' }),
+      expect.objectContaining({ command: "sed -n '1,120p' docs/onboarding/test-command-decision-tree.md" }),
+    ]));
+    expect(tour.safeFirstCommands.some((entry) => entry.command.startsWith('open '))).toBe(false);
+    expect(tour.testCommands).toEqual(expect.arrayContaining([
+      expect.objectContaining({ command: 'npm run test:root -- tests/local-setup-scripts.test.ts' }),
+    ]));
+    expect(tour.docsDrift.every((entry) => entry.status === 'ok')).toBe(true);
+  });
+
+  it('workspace tour renders human output and reports missing expected paths as docs drift', () => {
+    const human = spawnSync(process.execPath, ['scripts/workspace-tour.mjs'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+    });
+
+    expect(human.status, human.stderr).toBe(0);
+    expect(human.stdout).toContain('# Frankenbeast workspace tour');
+    expect(human.stdout).toContain('## Package map');
+    expect(human.stdout).toContain('@franken/orchestrator (packages/franken-orchestrator)');
+    expect(human.stdout).toContain('## Runtime state paths');
+    expect(human.stdout).toContain('## Docs drift checks');
+    expect(human.stdout).toContain('ok: all expected package/doc/script/test paths exist');
+
+    const fixture = mkdtempSync(join(tmpdir(), 'frankenbeast-workspace-tour-drift-'));
+    try {
+      writeFileSync(join(fixture, 'package.json'), JSON.stringify({ name: 'frankenbeast', packageManager: 'npm@11.5.1' }));
+      const drift = spawnSync(process.execPath, [join(ROOT, 'scripts/workspace-tour.mjs'), '--json', '--root', fixture], {
+        cwd: ROOT,
+        encoding: 'utf8',
+      });
+      expect(drift.status).toBe(1);
+      const report = JSON.parse(drift.stdout) as { ok: boolean; docsDrift: Array<{ path: string; status: string }> };
+      expect(report.ok).toBe(false);
+      expect(report.docsDrift).toContainEqual(expect.objectContaining({ path: 'ONBOARDING.md', status: 'missing' }));
+      expect(report.docsDrift).toContainEqual(expect.objectContaining({ path: 'packages/franken-orchestrator', status: 'missing' }));
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
   });
 
   it('first-run checklist generator emits persona-specific structured output', () => {
