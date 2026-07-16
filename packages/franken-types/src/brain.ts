@@ -47,6 +47,11 @@ export interface IWorkingMemory {
 export interface IEpisodicMemory {
   record(event: EpisodicEvent): void;
   recordLearning(event: EpisodicEvent, options?: LearningCooldownOptions): LearningRecordResult;
+  /**
+   * Record a sanitized failure signal tied to a workflow skill. The event keeps
+   * evidence pointers and a stable signature hash, not raw failure logs.
+   */
+  recordSkillFailure(input: SkillFailureSignature): void;
   recall(query: string, limit?: number): EpisodicEvent[];
   recentFailures(n?: number): EpisodicEvent[];
   recent(n?: number): EpisodicEvent[];
@@ -78,6 +83,23 @@ export interface LearningCooldownOptions {
   key?: string;
   /** Cooldown window in milliseconds. Defaults to 24 hours. */
   cooldownMs?: number;
+}
+
+export interface SkillFailureSignature {
+  /** Name of the skill or procedural workflow that appears tied to the failure. */
+  skillName: string;
+  /** Optional broader workflow name when it differs from the skill name. */
+  workflowName?: string;
+  /** Short sanitized failure pattern such as 'missing test step' or 'stale CLI flag'. */
+  failureSignature: string;
+  /** Pointer to the source evidence, for example a run id, task id, PR comment id, or trace id. */
+  evidenceId: string;
+  /** Optional step or phase where the failure occurred. */
+  step?: string;
+  /** Optional suggested section of the skill/procedure to inspect. */
+  suggestedPatchArea?: string;
+  /** When omitted, the current wall-clock time should be used by implementations. */
+  createdAt?: string;
 }
 
 export type LearningRecordResult =

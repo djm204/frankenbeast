@@ -11,6 +11,7 @@ import { PrometheusBeastMetrics } from '../../../src/beasts/telemetry/prometheus
 import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
 import { AgentService } from '../../../src/beasts/services/agent-service.js';
 import { CapacityReservationPolicy } from '../../../src/beasts/services/capacity-reservation-policy.js';
+import { MaintenanceModeError, MaintenanceModeService } from '../../../src/beasts/services/maintenance-mode-service.js';
 
 describe('BeastRunService', () => {
   let workDir: string | undefined;
@@ -434,6 +435,53 @@ describe('BeastRunService', () => {
     expect(executors.process.stop).not.toHaveBeenCalled();
     expect(repo.getRun(run.id)).toMatchObject({ id: run.id, status: 'running' });
     expect(repo.getTrackedAgent(agent.id)).toMatchObject({ status: 'running', dispatchRunId: run.id });
+  });
+
+  it('does not stop a running run when restart is blocked by maintenance mode', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: {
+        start: vi.fn(async (run: { id: string }) => repo.createAttempt(run.id, {
+          status: 'running',
+          pid: 2001,
+          startedAt: '2026-03-10T00:03:00.000Z',
+        })),
+        stop: vi.fn(async (runId: string, attemptId: string) => {
+          repo.updateAttempt(attemptId, { status: 'stopped' });
+          return repo.updateRun(runId, { status: 'stopped', stopReason: 'operator_stop' });
+        }),
+        kill: vi.fn(),
+      },
+      container: {
+        start: vi.fn(),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const maintenance = new MaintenanceModeService(join(workDir, 'maintenance-mode.json'));
+    const runs = new BeastRunService(repo, new BeastCatalogService(), executors, metrics, logs, { maintenance });
+    const run = await dispatch.createRun({
+      definitionId: 'martin-loop',
+      config: {
+        provider: 'claude',
+        objective: 'Restart safely',
+        chunkDirectory: 'docs/chunks',
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+      startNow: true,
+    });
+    maintenance.activate({ reason: 'database migration', startedAt: '2026-07-16T10:00:00.000Z' });
+
+    await expect(runs.restart(run.id, 'operator')).rejects.toThrow(MaintenanceModeError);
+
+    expect(executors.process.stop).not.toHaveBeenCalled();
+    expect(repo.getRun(run.id)).toMatchObject({ id: run.id, status: 'running' });
   });
 
   it('starts queued linked runs using reservation metadata from the run config snapshot', async () => {

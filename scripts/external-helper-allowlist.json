@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "description": "Signed/checksum allowlist for repository helper scripts that invoke external commands. Update hashes after reviewing helper changes.",
+  "helpers": [
+    {
+      "id": "issue-worktree-bootstrap",
+      "path": "scripts/issue-worktree-bootstrap.mjs",
+      "sha256": "09cd329ef37d91165034c3c86aa5ca6c5774e65358419fa93af80179883a43b9",
+      "owner": "Frankenbeast maintainers",
+      "allowedArgumentClasses": ["git-readonly", "git-worktree-create", "git-worktree-config", "gh-pr-readonly"]
+    },
+    {
+      "id": "ci-retry-command",
+      "path": "scripts/retry-ci-command.mjs",
+      "sha256": "ca4049e88860fcf780f62f16835f270df9b85f41d4fa683dcf4557a76b796bfe",
+      "owner": "Frankenbeast maintainers",
+      "allowedArgumentClasses": ["npm-test-runner", "npx-turbo-test-runner"]
+    }
+  ]
+}

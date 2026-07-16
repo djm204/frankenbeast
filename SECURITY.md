@@ -62,6 +62,17 @@ When deploying Frankenbeast services, apply defense-in-depth controls around the
 - Store logs and traces in locations with restricted access and retention appropriate for their sensitivity.
 - Monitor security scan output and GitHub security alerts regularly.
 
+## External helper allowlist
+
+Repository helper scripts that invoke external commands must be reviewed before use in high-risk automation lanes. The signed/checksum allowlist lives at `scripts/external-helper-allowlist.json` and records each helper's repository-relative path, SHA-256 checksum, owner, and allowed argument classes. Helpers that opt in call `scripts/lib/external-helper-allowlist.mjs` before spawning commands; checksum mismatches, missing files, unlisted helpers, and disallowed command classes fail closed before execution.
+
+When changing an allowlisted helper:
+
+1. Review the helper diff and confirm the owner still accepts the command classes it may invoke.
+2. Update `scripts/external-helper-allowlist.json` with the new SHA-256 of the changed helper file.
+3. Add or update tests for the helper's allowed command classes.
+4. Run the targeted allowlist tests before requesting review.
+
 ## Security checks
 
 Useful local checks before opening or merging security-sensitive changes:

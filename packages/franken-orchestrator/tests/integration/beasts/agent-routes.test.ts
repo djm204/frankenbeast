@@ -11,6 +11,7 @@ import { BeastInterviewService } from '../../../src/beasts/services/beast-interv
 import { BeastDispatchService } from '../../../src/beasts/services/beast-dispatch-service.js';
 import { BeastRunService } from '../../../src/beasts/services/beast-run-service.js';
 import { AgentService } from '../../../src/beasts/services/agent-service.js';
+import { MaintenanceModeError } from '../../../src/beasts/services/maintenance-mode-service.js';
 import { CapacityReservationError, CapacityReservationPolicy } from '../../../src/beasts/services/capacity-reservation-policy.js';
 import { PrometheusBeastMetrics } from '../../../src/beasts/telemetry/prometheus-beast-metrics.js';
 import { errorHandler } from '../../../src/http/middleware.js';
@@ -304,6 +305,58 @@ describe('agent routes integration', () => {
     });
     expect(repository.listTrackedAgents()).toHaveLength(1);
     expect(repository.listTrackedAgents()[0]).toMatchObject({ status: 'initializing' });
+  });
+
+  it('stops tracked agents when auto-dispatch loses a maintenance race', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const repository = new SQLiteBeastRepository(join(TMP, 'auto-dispatch-maintenance.db'));
+    const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
+    const runs = { getRun: vi.fn(), start: vi.fn(), stop: vi.fn(), kill: vi.fn(), restart: vi.fn() };
+    const dispatch = {
+      createRun: vi.fn(async () => {
+        throw new MaintenanceModeError({
+          enabled: true,
+          reason: 'deploy',
+          allowedCommands: ['beasts list'],
+        });
+      }),
+    };
+    const app = new Hono();
+    app.onError(errorHandler);
+    app.route('/', agentRoutes({
+      agents,
+      dispatch: dispatch as never,
+      runs: runs as never,
+      operatorToken: TEST_SUPER_SECRET_OPERATOR_TOKEN,
+      security: new TransportSecurityService(),
+    }));
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${TEST_SUPER_SECRET_OPERATOR_TOKEN}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        initAction: {
+          kind: 'martin-loop',
+          command: 'martin-loop',
+          config: { provider: 'claude', objective: 'Race maintenance', chunkDirectory: 'docs/chunks' },
+        },
+        initConfig: { provider: 'claude', objective: 'Race maintenance', chunkDirectory: 'docs/chunks' },
+      }),
+    });
+
+    expect(response.status).toBe(423);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'MAINTENANCE_MODE_ACTIVE',
+      },
+    });
+    const [agent] = repository.listTrackedAgents();
+    expect(agent).toMatchObject({ status: 'stopped' });
+    expect(agents.getAgentDetail(agent.id).events.map((event) => event.type)).toContain('agent.dispatch.paused');
   });
 
   it('returns validation errors for invalid tracked agent payloads', async () => {

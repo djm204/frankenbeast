@@ -63,6 +63,11 @@ export type {
   LessonCritiqueChecklistItem,
   LessonCritiqueAgentFinding,
   LessonMultiAgentCritique,
+  LessonInjectionContext,
+  LessonScopeAuditEntry,
+  LessonScopeKind,
+  LessonScopeMetadata,
+  LessonScopeProvenance,
   CritiqueLesson,
   TokenSpend,
   EscalationRequest,
@@ -108,6 +113,7 @@ export {
   detectLessonContradictions,
   critiqueProposedLesson,
   isLessonApplicable,
+  updateLessonScope,
   quarantineLesson,
   quarantineLessonForRepeatedFailures,
   unquarantineLesson,
@@ -122,6 +128,7 @@ export type {
   RepeatedFailureQuarantineRequest,
   LessonUnquarantineRequest,
   LessonHumanFeedbackRequest,
+  LessonScopeReviewRequest,
 } from './memory/lesson-recorder.js';
 
 // Evaluators

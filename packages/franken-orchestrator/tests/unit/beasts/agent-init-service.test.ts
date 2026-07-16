@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
 import { AgentService } from '../../../src/beasts/services/agent-service.js';
 import { AgentInitService } from '../../../src/beasts/services/agent-init-service.js';
+import { MaintenanceModeError } from '../../../src/beasts/services/maintenance-mode-service.js';
 
 describe('AgentInitService', () => {
   let workDir: string | undefined;
@@ -94,5 +95,39 @@ describe('AgentInitService', () => {
     });
     expect(run.id).toBe('run-123');
     expect(detail.events.map((event) => event.type)).toContain('agent.dispatch.requested');
+  });
+
+  it('marks chat-created agents stopped when maintenance blocks dispatch', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-agent-init-'));
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
+    const createRun = vi.fn().mockRejectedValue(new MaintenanceModeError({
+      enabled: true,
+      reason: 'deploy',
+      allowedCommands: ['status'],
+    }));
+    const init = new AgentInitService(agents, {
+      createRun,
+    } as never, () => '2026-03-11T00:00:00.000Z');
+
+    const agent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'chat',
+      createdByUser: 'chat-session:sess-1',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {}, chatSessionId: 'sess-1' },
+      initConfig: { provider: 'claude', objective: 'ship' },
+      chatSessionId: 'sess-1',
+    });
+
+    await expect(init.dispatchAgent(agent.id, {
+      definitionId: 'martin-loop',
+      chatSessionId: 'sess-1',
+      config: { provider: 'claude', objective: 'ship' },
+      executionMode: 'process',
+    })).rejects.toThrow(MaintenanceModeError);
+
+    const detail = agents.getAgentDetail(agent.id);
+    expect(detail.agent.status).toBe('stopped');
+    expect(detail.events.map((event) => event.type)).toContain('agent.dispatch.paused');
   });
 });

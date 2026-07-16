@@ -242,12 +242,7 @@ export interface FailedTestSkillCandidate {
 export type LessonCritiqueVerdict = 'accepted' | 'needs-edit' | 'rejected';
 
 export type LessonCritiqueChecklistItem =
-  | 'correctness'
-  | 'scope'
-  | 'privacy'
-  | 'security'
-  | 'duplication'
-  | 'conflict';
+  'correctness' | 'scope' | 'privacy' | 'security' | 'duplication' | 'conflict';
 
 export interface LessonCritiqueAgentFinding {
   /** Deterministic agent/reviewer persona that produced this finding. */
@@ -323,6 +318,55 @@ export interface LessonPrivacyFilterDecision {
   readonly redactions: readonly LessonPrivacyRedaction[];
   readonly originalHash: string;
   readonly reason: string;
+}
+
+/** Deliberate visibility boundary for cross-agent lesson sharing. */
+export type LessonScopeKind = 'global' | 'repo' | 'role' | 'profile' | 'task';
+
+/** Provenance explaining why a lesson exists and who/what may promote it. */
+export interface LessonScopeProvenance {
+  readonly source:
+    'critique-loop' | 'post-pr-extraction' | 'human-review' | 'import';
+  readonly taskId?: TaskId;
+  readonly issueNumber?: number;
+  readonly prUrl?: string;
+  readonly note?: string;
+}
+
+/** Audit entry emitted whenever a reviewer changes lesson scope. */
+export interface LessonScopeAuditEntry {
+  readonly changedAt: string;
+  readonly actor: string;
+  readonly fromScope?: LessonScopeKind;
+  readonly toScope: LessonScopeKind;
+  readonly reason: string;
+}
+
+/** Scope controls used before injecting or sharing a lesson with another agent. */
+export interface LessonScopeMetadata {
+  readonly schemaVersion: 'lesson-scope-v1';
+  readonly scope: LessonScopeKind;
+  /** Repos allowed to receive the lesson. Required for repo scope; optional narrowing otherwise. */
+  readonly allowedRepos?: readonly string[];
+  /** Agent roles allowed to receive the lesson. Required for role scope; optional narrowing otherwise. */
+  readonly allowedRoles?: readonly string[];
+  /** Hermes profiles allowed to receive the lesson. Required for profile scope; optional narrowing otherwise. */
+  readonly allowedProfiles?: readonly string[];
+  /** Task ids allowed to receive one-task notes. Required for task scope. */
+  readonly allowedTasks?: readonly TaskId[];
+  readonly provenance: LessonScopeProvenance;
+  /** ISO timestamp after which injection must deny the lesson. */
+  readonly expiresAt?: string;
+  readonly auditTrail: readonly LessonScopeAuditEntry[];
+}
+
+/** Runtime context used to decide whether a scoped lesson may be injected. */
+export interface LessonInjectionContext {
+  readonly repo?: string;
+  readonly role?: string;
+  readonly profile?: string;
+  readonly taskId?: TaskId;
+  readonly now?: string;
 }
 
 /** Cooldown metadata attached to a recorded lesson so PM/liveness tooling can prevent churn. */
@@ -549,6 +593,8 @@ export interface CritiqueLesson {
   readonly privacyFilter?: LessonPrivacyFilterDecision;
   /** Human/inferred feedback weighting used for promotion, demotion, retirement, and quarantine decisions. */
   readonly feedbackWeighting?: LessonFeedbackWeighting;
+  /** Scope controls checked before sharing or injecting this lesson into another agent context. */
+  readonly lessonScope?: LessonScopeMetadata;
   /** Multi-agent critique of the proposed lesson before promotion. */
   readonly proposedLessonCritique?: LessonMultiAgentCritique;
 }
