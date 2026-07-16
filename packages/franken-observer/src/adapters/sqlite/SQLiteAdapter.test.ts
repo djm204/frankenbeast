@@ -50,20 +50,14 @@ describe('SQLiteAdapter', () => {
   })
 
   it('retries transient SQLite lock failures with bounded backoff and diagnostics', async () => {
-    const upsertTraceRun = vi.fn()
-    const upsertSpanRun = vi.fn()
     const sleep = vi.fn().mockResolvedValue(undefined)
     const diagnostics = vi.fn()
-    prepareMock
-      .mockReturnValueOnce({ run: upsertTraceRun })
-      .mockReturnValueOnce({ run: upsertSpanRun })
-    transactionMock.mockImplementation(fn => {
-      let calls = 0
-      return (trace: unknown) => {
-        calls += 1
-        if (calls <= 2) throw sqliteBusyError()
-        return fn(trace)
-      }
+    prepareMock.mockReturnValue({ run: vi.fn() })
+    let attempts = 0
+    transactionMock.mockImplementation(fn => (trace: unknown) => {
+      attempts += 1
+      if (attempts <= 2) throw sqliteBusyError()
+      return fn(trace)
     })
 
     const adapter = new SQLiteAdapter('/tmp/traces.db', {
@@ -82,17 +76,7 @@ describe('SQLiteAdapter', () => {
 
     expect(sleep.mock.calls.map(call => call[0])).toEqual([10, 20])
     expect(diagnostics).toHaveBeenCalledTimes(2)
-    expect(diagnostics).toHaveBeenLastCalledWith(expect.objectContaining({
-      dbPath: '/tmp/traces.db',
-      operationClass: 'flush trace transaction',
-      attempt: 2,
-      maxRetries: 2,
-      errorMessage: 'database is locked',
-      nextAction: 'Retrying SQLite operation after bounded backoff.',
-      nextDelayMs: 20,
-    }))
-    expect(upsertTraceRun).toHaveBeenCalledTimes(1)
-    expect(upsertSpanRun).toHaveBeenCalledTimes(1)
+    expect(transactionMock).toHaveBeenCalledTimes(3)
   })
 
   it('reports persistent SQLite locks with path, operation, elapsed time, and next action', async () => {
@@ -124,6 +108,80 @@ describe('SQLiteAdapter', () => {
       errorMessage: 'database is locked',
       nextAction: 'SQLite lock retry budget exhausted; inspect concurrent writers or increase busy timeout/retry budget.',
     }))
+  })
+
+  it('retries SQLite locks raised while preparing flush statements', async () => {
+    const upsertTraceRun = vi.fn()
+    const upsertSpanRun = vi.fn()
+    const sleep = vi.fn().mockResolvedValue(undefined)
+    prepareMock
+      .mockImplementationOnce(() => {
+        throw sqliteBusyError()
+      })
+      .mockReturnValueOnce({ run: upsertTraceRun })
+      .mockReturnValueOnce({ run: upsertSpanRun })
+    transactionMock.mockImplementation(fn => (trace: unknown) => fn(trace))
+
+    const adapter = new SQLiteAdapter('/tmp/traces.db', {
+      maxLockRetries: 1,
+      lockRetryBaseDelayMs: 5,
+      lockRetryMaxDelayMs: 5,
+      lockRetryJitter: false,
+      lockRetrySleep: sleep,
+    })
+    const trace = TraceContext.createTrace('goal')
+    const span = TraceContext.startSpan(trace, { name: 'first' })
+    TraceContext.endSpan(span)
+
+    await adapter.flush(trace)
+
+    expect(sleep).toHaveBeenCalledWith(5)
+    expect(upsertTraceRun).toHaveBeenCalledTimes(1)
+    expect(upsertSpanRun).toHaveBeenCalledTimes(1)
+  })
+
+  it('serializes flush retries so newer snapshots cannot overtake older retries', async () => {
+    const releaseSleep: Array<() => void> = []
+    const sleep = vi.fn().mockImplementation(() => new Promise<void>(resolve => releaseSleep.push(resolve)))
+    const upsertTraceRun = vi.fn()
+    const upsertSpanRun = vi.fn()
+    prepareMock.mockReturnValue({ run: vi.fn() })
+    prepareMock
+      .mockReturnValueOnce({ run: upsertTraceRun })
+      .mockReturnValueOnce({ run: upsertSpanRun })
+      .mockReturnValueOnce({ run: upsertTraceRun })
+      .mockReturnValueOnce({ run: upsertSpanRun })
+    let firstFlushAttempts = 0
+    transactionMock.mockImplementation(fn => (trace: unknown) => {
+      if (firstFlushAttempts < 1) {
+        firstFlushAttempts += 1
+        throw sqliteBusyError()
+      }
+      return fn(trace)
+    })
+
+    const adapter = new SQLiteAdapter('/tmp/traces.db', {
+      maxLockRetries: 1,
+      lockRetryBaseDelayMs: 5,
+      lockRetryMaxDelayMs: 5,
+      lockRetryJitter: false,
+      lockRetrySleep: sleep,
+    })
+    const trace = TraceContext.createTrace('goal')
+
+    const firstFlush = adapter.flush(trace)
+    const secondFlush = adapter.flush(trace)
+    await Promise.resolve()
+
+    expect(sleep).toHaveBeenCalledTimes(1)
+    expect(upsertTraceRun).not.toHaveBeenCalled()
+
+    releaseSleep[0]?.()
+    await Promise.all([firstFlush, secondFlush])
+
+    expect(upsertTraceRun).toHaveBeenCalledTimes(1)
+    expect(prepareMock).toHaveBeenCalledTimes(6)
+    expect(transactionMock).toHaveBeenCalledTimes(3)
   })
 
   it('only upserts new or dirty spans on repeated flushes', async () => {

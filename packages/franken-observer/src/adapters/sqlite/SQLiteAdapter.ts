@@ -198,6 +198,7 @@ export class SQLiteAdapter implements ExportAdapter {
   private readonly filePath: string
   private readonly flushedSpans = new Map<string, Map<string, FlushedSpanState>>()
   private flushedSpanSnapshotCount = 0
+  private flushTail: Promise<void> = Promise.resolve()
 
   constructor(filePath: string, options: SQLiteAdapterOptions = {}) {
     mkdirSync(dirname(filePath), { recursive: true })
@@ -215,40 +216,49 @@ export class SQLiteAdapter implements ExportAdapter {
   }
 
   async flush(trace: Trace): Promise<void> {
+    const flush = this.flushTail.then(() => this.flushNow(trace))
+    this.flushTail = flush.catch(() => undefined)
+    return flush
+  }
+
+  private async flushNow(trace: Trace): Promise<void> {
     warnIfTraceHasActiveSpans(trace, 'SQLiteAdapter')
-    const upsertTrace = this.db.prepare(UPSERT_TRACE)
-    const upsertSpan = this.db.prepare(UPSERT_SPAN)
-    const flushedInTransaction: Span[] = []
+    const flushedInTransaction = await this.withSqliteLockRetry('flush trace transaction', () => {
+      const upsertTrace = this.db.prepare(UPSERT_TRACE)
+      const upsertSpan = this.db.prepare(UPSERT_SPAN)
+      const flushed: Span[] = []
 
-    const transaction = this.db.transaction((t: Trace) => {
-      upsertTrace.run({
-        id: t.id,
-        goal: t.goal,
-        status: t.status,
-        startedAt: t.startedAt,
-        endedAt: t.endedAt ?? null,
-      })
-      for (const span of t.spans) {
-        if (!this.shouldFlushSpan(span)) continue
-
-        upsertSpan.run({
-          id: span.id,
-          traceId: span.traceId,
-          parentSpanId: span.parentSpanId ?? null,
-          name: span.name,
-          status: span.status,
-          startedAt: span.startedAt,
-          endedAt: span.endedAt ?? null,
-          durationMs: span.durationMs ?? null,
-          errorMessage: span.errorMessage ?? null,
-          metadata: JSON.stringify(span.metadata),
-          thoughtBlocks: JSON.stringify(span.thoughtBlocks),
+      const transaction = this.db.transaction((t: Trace) => {
+        upsertTrace.run({
+          id: t.id,
+          goal: t.goal,
+          status: t.status,
+          startedAt: t.startedAt,
+          endedAt: t.endedAt ?? null,
         })
-        flushedInTransaction.push(span)
-      }
-    })
+        for (const span of t.spans) {
+          if (!this.shouldFlushSpan(span)) continue
 
-    await this.withSqliteLockRetry('flush trace transaction', () => transaction(trace))
+          upsertSpan.run({
+            id: span.id,
+            traceId: span.traceId,
+            parentSpanId: span.parentSpanId ?? null,
+            name: span.name,
+            status: span.status,
+            startedAt: span.startedAt,
+            endedAt: span.endedAt ?? null,
+            durationMs: span.durationMs ?? null,
+            errorMessage: span.errorMessage ?? null,
+            metadata: JSON.stringify(span.metadata),
+            thoughtBlocks: JSON.stringify(span.thoughtBlocks),
+          })
+          flushed.push(span)
+        }
+      })
+
+      transaction(trace)
+      return flushed
+    })
     for (const span of flushedInTransaction) {
       this.rememberFlushedSpan(span)
     }
