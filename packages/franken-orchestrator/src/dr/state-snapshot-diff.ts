@@ -120,8 +120,8 @@ function recordId(
   const idKeys = subsystem === 'approvals'
     ? ['id', 'tokenId', 'token_id', 'approvalId', 'approval_id', 'token', 'value']
     : options.preferFallbackOverMutableDisplayName
-      ? ['id', 'taskId', 'task_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key']
-      : ['id', 'taskId', 'task_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key', 'name'];
+      ? ['id', 'taskId', 'task_id', 'jobId', 'job_id', 'workerId', 'worker_id', 'currentWorkerId', 'current_worker_id', 'cardId', 'card_id', 'memoryKey', 'memory_key', 'key']
+      : ['id', 'taskId', 'task_id', 'jobId', 'job_id', 'workerId', 'worker_id', 'currentWorkerId', 'current_worker_id', 'cardId', 'card_id', 'memoryKey', 'memory_key', 'key', 'name'];
   for (const key of idKeys) {
     const value = record[key];
     if (typeof value === 'string' && value.trim() !== '') {
@@ -142,7 +142,7 @@ function hasRecordIdentityKey(value: Record<string, unknown>): boolean {
 }
 
 function sensitiveApprovalValueForComparison(key: string, value: unknown): unknown {
-  if (/^(?:id|token|tokens|value|secret|password|credential|bearer|refresh|access|api[-_]?key)$/iu.test(key)) {
+  if (/^(?:id|token|tokens|value|secret|password|credential|bearer|refresh|access|digest|api[-_]?key)$/iu.test(key)) {
     return `<sha256:${shortDigest(value)}>`;
   }
   return value;
@@ -155,7 +155,7 @@ function scopedRecordValue(subsystem: StateSnapshotDiffSubsystem, value: unknown
   }
   return Object.fromEntries(Object.entries(value).map(([key, nested]) => [
     key,
-    /^(?:id|token|tokens|value|secret|password|credential|bearer|refresh|access|api[-_]?key)$/iu.test(key)
+    /^(?:id|token|tokens|value|secret|password|credential|bearer|refresh|access|digest|api[-_]?key)$/iu.test(key)
       ? '<redacted>'
       : nested,
   ]));
@@ -179,11 +179,12 @@ function redactSourceForOutput(subsystem: StateSnapshotDiffSubsystem, source: st
     if (/^(?:approvals?|approval[-_]?tokens?|tokens?|ledger|state|snapshots?)(?:\.jsonl?)?(?::\d+)?(?::approvals?)?$/iu.test(segment)) {
       return segment;
     }
-    if (/^[^:]+\.jsonl?(?::\d+)?$/iu.test(segment) && !/(?:token|secret|credential|bearer|refresh|access|password|api[-_]?key)/iu.test(segment)) {
-      return segment;
-    }
     return `<sha256:${shortDigest(segment)}>`;
   }).join('/');
+}
+
+function isGenericCollectionSource(source: string): boolean {
+  return /(?:^|\/)(?:state|index|tasks|cards|kanban|approvals?|approval[-_]?tokens?|tokens?|ledger|workers?|memory|memories|cron|jobs)\.jsonl?$/iu.test(source);
 }
 
 function addRecord(
@@ -284,7 +285,7 @@ function extractRecordsFromJson(records: MutableSubsystemRecords, parsed: unknow
       }
     }
 
-    if (pathSubsystem !== undefined && !foundRootCollection) {
+    if (pathSubsystem !== undefined && (!foundRootCollection || !isGenericCollectionSource(source))) {
       const values = Object.values(parsed);
       if (values.length > 0 && values.every(isRecord)) {
         addObjectMapRecords(records, pathSubsystem, parsed, source);
