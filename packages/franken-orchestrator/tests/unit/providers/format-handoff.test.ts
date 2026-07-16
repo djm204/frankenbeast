@@ -367,6 +367,34 @@ Record npm test passed or failed.
     ).toBe('placeholder');
   });
 
+  it('rejects field labels that only point at single-brace placeholders', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '- Issue: {issue}\n- Goal: {business goal}\n- Boundaries: {out-of-scope boundaries}',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('rejects field labels that only point at square-bracket placeholders', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '- Issue/task: [issue]\n- Business goal: [business goal]\n- Out-of-scope boundaries: [boundaries]',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
   it('preserves child-heading content inside a required parent section', () => {
     const validation = validateAgentHandoffTemplate(
       completeTemplate.replace(
@@ -457,6 +485,21 @@ Reusable lesson.
       'artifacts',
       'learning',
     ]);
+  });
+
+  it('ignores fenced example content when checking required section guidance', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.',
+        '```md\nnpm test passed with exit 0.\n```',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'verification')
+        ?.status,
+    ).toBe('placeholder');
   });
 
   it('strips empty table skeletons before checking required content', () => {
@@ -572,6 +615,23 @@ ${completeTemplate}`);
       validation.findings.find((finding) => finding.id === 'artifacts')
         ?.matchedHeading,
     ).toBe('Branch');
+  });
+
+  it('accepts a PR heading for artifact guidance', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate
+        .replace('## Artifacts and links', '## PR / diff')
+        .replace(
+          'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
+          'Record PR #2331, branch resolve/issue-1775, and diff artifact links.',
+        ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'artifacts')
+        ?.matchedHeading,
+    ).toBe('PR / diff');
   });
 
   it('does not consume an overlapping placeholder heading before a later matching requirement', () => {

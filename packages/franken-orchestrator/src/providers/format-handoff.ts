@@ -193,6 +193,7 @@ export const AGENT_HANDOFF_TEMPLATE_REQUIREMENTS: readonly AgentHandoffTemplateR
         /\blinks?\b/i,
         /\bbranches?\b/i,
         /\bbranch\b/i,
+        /\bpr\b/i,
         /\bpull requests?\b/i,
       ],
       guidance:
@@ -581,9 +582,27 @@ function hasSubstantiveTemplateGuidance(content: string): boolean {
 function stripPlaceholderOnlyTemplateFields(content: string): string {
   const lines = content.split(/\r?\n/);
   const stripped: string[] = [];
+  let activeFence: string | null = null;
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? '';
+    const fence = /^\s*(`{3,}|~{3,})/.exec(line);
+    if (fence) {
+      const marker = fence[1] ?? '';
+      if (activeFence === null) {
+        activeFence = marker;
+      } else if (
+        marker[0] === activeFence[0] &&
+        marker.length >= activeFence.length
+      ) {
+        activeFence = null;
+      }
+      continue;
+    }
+    if (activeFence !== null) {
+      continue;
+    }
+
     const nextLine = lines[index + 1] ?? '';
     if (isMarkdownTableHeader(line, nextLine)) {
       index += 1;
@@ -596,11 +615,12 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
     const withoutPlaceholders = line
       .replace(/^```.*$/g, ' ')
       .replace(/\[([^\]]+)\]\(([^)]*)\)/g, '$1 $2')
+      .replace(/\[[^\]]*\]/g, ' ')
       .replace(/<((?:https?:\/\/|\.\.?\/|#)[^>\s]+)>/g, '$1')
       .replace(/`([^`]*)`/g, '$1')
       .replace(/<[^>]*>/g, ' ')
       .replace(/\{\{[^}]*\}\}/g, ' ')
-      .replace(/[{}]/g, ' ')
+      .replace(/\{[^}]*\}/g, ' ')
       .replace(
         /\b(?:tbd|todo|n\/?a|unknown|placeholder|fill in|to be decided)\b/gi,
         ' ',
