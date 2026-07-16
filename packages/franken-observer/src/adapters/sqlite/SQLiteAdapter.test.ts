@@ -21,9 +21,15 @@ vi.mock('better-sqlite3', () => ({
   }),
 }))
 
-import { SQLiteAdapter } from './SQLiteAdapter.js'
+import { SQLiteAdapter, SQLiteLockRetryExhaustedError } from './SQLiteAdapter.js'
 import { TraceContext } from '../../core/TraceContext.js'
 import { SpanLifecycle } from '../../core/SpanLifecycle.js'
+
+function sqliteBusyError(): Error & { code: string } {
+  const error = new Error('database is locked') as Error & { code: string }
+  error.code = 'SQLITE_BUSY'
+  return error
+}
 
 describe('SQLiteAdapter', () => {
   beforeEach(() => {
@@ -41,6 +47,83 @@ describe('SQLiteAdapter', () => {
     ])
 
     adapter.close()
+  })
+
+  it('retries transient SQLite lock failures with bounded backoff and diagnostics', async () => {
+    const upsertTraceRun = vi.fn()
+    const upsertSpanRun = vi.fn()
+    const sleep = vi.fn().mockResolvedValue(undefined)
+    const diagnostics = vi.fn()
+    prepareMock
+      .mockReturnValueOnce({ run: upsertTraceRun })
+      .mockReturnValueOnce({ run: upsertSpanRun })
+    transactionMock.mockImplementation(fn => {
+      let calls = 0
+      return (trace: unknown) => {
+        calls += 1
+        if (calls <= 2) throw sqliteBusyError()
+        return fn(trace)
+      }
+    })
+
+    const adapter = new SQLiteAdapter('/tmp/traces.db', {
+      maxLockRetries: 2,
+      lockRetryBaseDelayMs: 10,
+      lockRetryMaxDelayMs: 20,
+      lockRetryJitter: false,
+      lockRetrySleep: sleep,
+      onLockRetryDiagnostic: diagnostics,
+    })
+    const trace = TraceContext.createTrace('goal')
+    const span = TraceContext.startSpan(trace, { name: 'first' })
+    TraceContext.endSpan(span)
+
+    await adapter.flush(trace)
+
+    expect(sleep.mock.calls.map(call => call[0])).toEqual([10, 20])
+    expect(diagnostics).toHaveBeenCalledTimes(2)
+    expect(diagnostics).toHaveBeenLastCalledWith(expect.objectContaining({
+      dbPath: '/tmp/traces.db',
+      operationClass: 'flush trace transaction',
+      attempt: 2,
+      maxRetries: 2,
+      errorMessage: 'database is locked',
+      nextAction: 'Retrying SQLite operation after bounded backoff.',
+      nextDelayMs: 20,
+    }))
+    expect(upsertTraceRun).toHaveBeenCalledTimes(1)
+    expect(upsertSpanRun).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports persistent SQLite locks with path, operation, elapsed time, and next action', async () => {
+    const sleep = vi.fn().mockResolvedValue(undefined)
+    const diagnostics = vi.fn()
+    transactionMock.mockImplementation(() => () => {
+      throw sqliteBusyError()
+    })
+
+    const adapter = new SQLiteAdapter('/tmp/traces.db', {
+      maxLockRetries: 1,
+      lockRetryBaseDelayMs: 5,
+      lockRetryMaxDelayMs: 5,
+      lockRetryJitter: false,
+      lockRetrySleep: sleep,
+      onLockRetryDiagnostic: diagnostics,
+    })
+    const trace = TraceContext.createTrace('goal')
+
+    await expect(adapter.flush(trace)).rejects.toThrow(SQLiteLockRetryExhaustedError)
+    await expect(adapter.flush(trace)).rejects.toThrow(/SQLite lock persisted for flush trace transaction on \/tmp\/traces\.db/)
+
+    expect(sleep).toHaveBeenCalledWith(5)
+    expect(diagnostics).toHaveBeenLastCalledWith(expect.objectContaining({
+      dbPath: '/tmp/traces.db',
+      operationClass: 'flush trace transaction',
+      attempt: 2,
+      maxRetries: 1,
+      errorMessage: 'database is locked',
+      nextAction: 'SQLite lock retry budget exhausted; inspect concurrent writers or increase busy timeout/retry budget.',
+    }))
   })
 
   it('only upserts new or dirty spans on repeated flushes', async () => {
