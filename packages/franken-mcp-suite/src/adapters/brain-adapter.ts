@@ -450,6 +450,9 @@ const MEMORY_ACCESS_TOOL_OPERATIONS: Record<string, { operation: string; targetS
   fbeast_memory_access_audit_report: { operation: "read", targetStore: "audit", targetClass: "memory-access-audit" },
 };
 
+const MEMORY_REVIEW_DECISIONS = new Set(["approve", "reject", "never_store", "resolve_conflict"]);
+const AUDIT_SQL_SCAN_LIMIT_MULTIPLIER = 20;
+
 function unqualifyToolName(toolName: string): string {
   const marker = "__";
   const index = toolName.lastIndexOf(marker);
@@ -502,12 +505,16 @@ function inferMemoryAccess(toolName: string, context: Record<string, unknown>): 
     return inferMemoryAccess(nestedTool, auditToolArgs(context));
   }
   const accessArgs = auditToolArgs(context);
-  const explicitOperation = stringAuditField(accessArgs, "operation");
   const action = stringAuditField(accessArgs, "action");
   const type = stringAuditField(accessArgs, "type");
+  const operation = unqualified === "fbeast_memory_right_to_forget" && accessArgs["dryRun"] === true
+    ? "delete:dry_run"
+    : unqualified === "fbeast_memory_review_decide" && action && MEMORY_REVIEW_DECISIONS.has(action)
+      ? `review:${action}`
+      : defaults.operation;
   return {
-    operation: explicitOperation ?? (unqualified === "fbeast_memory_review_decide" && action ? `review:${action}` : defaults.operation),
-    targetStore: type ?? defaults.targetStore,
+    operation,
+    targetStore: type === "working" || type === "episodic" ? type : defaults.targetStore,
     targetClass: defaults.targetClass,
   };
 }
@@ -547,9 +554,28 @@ function auditDecisionFromPayload(payload: Record<string, unknown>): string {
   const explicitDecision = stringAuditField(payload, "decision");
   if (explicitDecision) return explicitDecision;
   const ok = payload["ok"];
-  if (ok === false) return stringAuditField(payload, "error") ? "error" : "denied";
+  if (ok === false) return "error";
   if (ok === true) return "approved";
   return "unknown";
+}
+
+function isRedactedAuditValue(value: string | undefined): boolean {
+  if (!value) return false;
+  return value.includes("[redacted]") || value.includes("«redacted:") || value.includes("***");
+}
+
+function auditValuesCorrelate(left: string | undefined, right: string | undefined): boolean {
+  if (!left || !right) return true;
+  if (isRedactedAuditValue(left) || isRedactedAuditValue(right)) return true;
+  return left === right;
+}
+
+function auditEventsCorrelate(left: MemoryAccessAuditEvent, right: MemoryAccessAuditEvent): boolean {
+  return left.tool === right.tool
+    && left.operation === right.operation
+    && auditValuesCorrelate(left.agentId, right.agentId)
+    && auditValuesCorrelate(left.profile, right.profile)
+    && auditValuesCorrelate(left.repo, right.repo);
 }
 
 function dedupeMemoryAccessEvents(events: MemoryAccessAuditEvent[]): MemoryAccessAuditEvent[] {
@@ -558,11 +584,33 @@ function dedupeMemoryAccessEvents(events: MemoryAccessAuditEvent[]): MemoryAcces
     if (event.source !== "audit_trail") return true;
     const eventTime = auditTimestampMs(event.timestamp);
     return !governorEvents.some((governorEvent) => {
-      if (governorEvent.tool !== event.tool || governorEvent.agentId !== event.agentId || governorEvent.profile !== event.profile || governorEvent.repo !== event.repo || governorEvent.operation !== event.operation) return false;
+      if (!auditEventsCorrelate(governorEvent, event)) return false;
       const governorTime = auditTimestampMs(governorEvent.timestamp);
       return Math.abs(governorTime - eventTime) <= 10_000;
     });
   });
+}
+
+function sqliteAuditTimestamp(value: string): string {
+  return normalizeAuditTimestamp(value).replace("T", " ").replace(/\.\d{3}Z$/, "");
+}
+
+function auditSqlTimeClause(column: string, input: MemoryAccessAuditReportInput): { clause: string; params: string[] } {
+  const clauses: string[] = [];
+  const params: string[] = [];
+  if (input.since !== undefined) {
+    clauses.push(`datetime(replace(replace(${column}, 'T', ' '), 'Z', '')) >= datetime(?)`);
+    params.push(sqliteAuditTimestamp(input.since));
+  }
+  if (input.until !== undefined) {
+    clauses.push(`datetime(replace(replace(${column}, 'T', ' '), 'Z', '')) <= datetime(?)`);
+    params.push(sqliteAuditTimestamp(input.until));
+  }
+  return { clause: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
+}
+
+function auditSqlScanLimit(limit: number): number {
+  return Math.max(limit * AUDIT_SQL_SCAN_LIMIT_MULTIPLIER, MAX_QUERY_LIMIT);
 }
 
 function summarizeAuditEvents(events: MemoryAccessAuditEvent[]): MemoryAccessAuditReport["summary"] {
@@ -938,12 +986,16 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
       configureBrainAdapterDb(reportDb);
       try {
         const events: MemoryAccessAuditEvent[] = [];
+        const scanLimit = auditSqlScanLimit(limit);
+        const governorTimeFilter = auditSqlTimeClause("created_at", input);
         const governorRows = sqliteTableExists(reportDb, "governor_log")
           ? reportDb.prepare(`
           SELECT action, context, decision, reason, created_at AS createdAt
           FROM governor_log
+          ${governorTimeFilter.clause}
           ORDER BY id DESC
-        `).all() as Array<{ action: string; context: string; decision: string; reason: string | null; createdAt: string }>
+          LIMIT ?
+        `).all(...governorTimeFilter.params, scanLimit) as Array<{ action: string; context: string; decision: string; reason: string | null; createdAt: string }>
           : [];
         for (const row of governorRows) {
           const context = parseAuditContext(row.context);
@@ -971,13 +1023,16 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           });
         }
 
+        const auditTimeFilter = auditSqlTimeClause("created_at", input);
         const auditRows = sqliteTableExists(reportDb, "audit_trail")
           ? reportDb.prepare(`
           SELECT event_type AS eventType, payload, created_at AS createdAt
           FROM audit_trail
           WHERE event_type = 'tool_call'
+            ${auditTimeFilter.clause ? `AND ${auditTimeFilter.clause.slice("WHERE ".length)}` : ""}
           ORDER BY id DESC
-        `).all() as Array<{ eventType: string; payload: string; createdAt: string }>
+          LIMIT ?
+        `).all(...auditTimeFilter.params, scanLimit) as Array<{ eventType: string; payload: string; createdAt: string }>
           : [];
         for (const row of auditRows) {
           const payload = parseAuditContext(row.payload);

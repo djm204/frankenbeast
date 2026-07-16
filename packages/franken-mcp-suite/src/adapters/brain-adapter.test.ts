@@ -78,6 +78,27 @@ vi.mock("better-sqlite3", () => ({
                 reason: "dangerous",
                 createdAt: "2026-07-16T12:00:00.000Z",
               },
+              {
+                action: "fbeast_memory_query",
+                context: JSON.stringify({ agentId: "agent-secret", profile: "security-test", operation: "sk-secretvalue123456", type: "ghp_secretvalue123456" }),
+                decision: "validation_error",
+                reason: "invalid args",
+                createdAt: "2026-07-16T12:10:00.000Z",
+              },
+              {
+                action: "fbeast_memory_right_to_forget",
+                context: JSON.stringify({ agentId: "agent-dry", profile: "dry-run-test", dryRun: true }),
+                decision: "approved",
+                reason: "dry run",
+                createdAt: "2026-07-16T12:20:00.000Z",
+              },
+              {
+                action: "fbeast_memory_store",
+                context: JSON.stringify({ agentId: "«redacted:agent…»", profile: "duplicate-test", repo: "djm204/frankenbeast", type: "working" }),
+                decision: "approved",
+                reason: "allowed",
+                createdAt: "2026-07-16T12:30:00.000Z",
+              },
             ];
           }
           if (sql.includes("FROM audit_trail")) {
@@ -86,6 +107,16 @@ vi.mock("better-sqlite3", () => ({
                 eventType: "tool_call",
                 payload: JSON.stringify({ toolName: "fbeast_memory_export", ok: true, profile: "default", repo: "djm204/frankenbeast" }),
                 createdAt: "2026-07-16T09:00:00.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ toolName: "fbeast_memory_store", ok: true, profile: "duplicate-test", repo: "djm204/frankenbeast", agentId: "agent-actual" }),
+                createdAt: "2026-07-16T12:30:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ toolName: "fbeast_memory_query", ok: false, profile: "error-test", error: "limit must be numeric" }),
+                createdAt: "2026-07-16T12:40:00.000Z",
               },
             ];
           }
@@ -641,6 +672,63 @@ describe("createBrainAdapter", () => {
       targetClass: "memory-review-candidate",
       decision: "approved",
     });
+  });
+
+  it("does not echo unvalidated operation or type fields in memory access audit reports", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "security-test", limit: 20 });
+    const serialized = JSON.stringify(report);
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      tool: "fbeast_memory_query",
+      operation: "read",
+      targetStore: "working|episodic",
+      decision: "validation_error",
+    });
+    expect(serialized).not.toContain("sk-secretvalue123456");
+    expect(serialized).not.toContain("ghp_secretvalue123456");
+  });
+
+  it("distinguishes right-to-forget dry runs from deletion activity", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "dry-run-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      tool: "fbeast_memory_right_to_forget",
+      operation: "delete:dry_run",
+      decision: "approved",
+    });
+    expect(report.summary.byOperation).toEqual({ "delete:dry_run": 1 });
+  });
+
+  it("deduplicates governed and observed memory access events with redacted metadata", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "duplicate-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      source: "governor_log",
+      tool: "fbeast_memory_store",
+      operation: "write",
+    });
+  });
+
+  it("classifies failed handler audit events as errors", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "error-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      tool: "fbeast_memory_query",
+      decision: "error",
+    });
+    expect(report.summary.byDecision).toEqual({ error: 1 });
   });
 
   it("translates memory review proposals for agent-scoped working memory", async () => {
