@@ -555,7 +555,13 @@ function assessAction(action: string, context: string): GovernorCheckResult {
     }
     if (reviewAction === 'resolve_conflict') {
       const resolution = stringContext(decisionArgs, 'resolution');
-      if (resolution === 'keep_existing' || resolution === 'replace_existing' || resolution === 'reject_candidate') {
+      if (
+        resolution === 'keep_existing' ||
+        resolution === 'replace_existing' ||
+        resolution === 'keep_both_scoped' ||
+        resolution === 'reject_candidate' ||
+        resolution === 'expire_existing'
+      ) {
         return {
           decision: 'approved',
           reason: 'Memory conflict resolution is an explicit operator review decision with structured resolution metadata; candidate content remains governed by the review queue.',
@@ -563,7 +569,7 @@ function assessAction(action: string, context: string): GovernorCheckResult {
       }
       return {
         decision: 'review_recommended',
-        reason: 'Memory conflict resolution requires an explicit keep_existing, replace_existing, or reject_candidate resolution.',
+        reason: 'Memory conflict resolution requires an explicit keep_existing, replace_existing, keep_both_scoped, reject_candidate, or expire_existing resolution.',
       };
     }
     if (reviewAction === 'never_store') {

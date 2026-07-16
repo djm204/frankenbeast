@@ -2185,22 +2185,83 @@ export class SqliteMemoryReviewQueue {
     if (scopedKey === candidate.key) {
       throw new Error('keep_both_scoped scopedKey must differ from the conflicting key');
     }
-    this.assertConflictUnchanged(id, candidate, this.detectConflicts(candidate), 'resolution', conflictGuard);
-    const scopedCandidate: MemoryCandidate = {
-      ...candidate,
-      key: scopedKey,
-      updatedAt: isoNow(),
-    };
-    this.validateProposal(scopedCandidate);
-    assertMemoryCandidateNotDeletionGuarded(this.db, scopedCandidate, this.encryption);
-    if (this.detectConflicts(scopedCandidate).length > 0) {
-      throw new Error(`Scoped memory key ${scopedKey} still conflicts with an existing value`);
-    }
-    this.edit(id, { key: scopedKey });
-    return this.approveCandidate(id, {
-      ...decisionOptions,
-      note: decisionOptions.note ?? 'Memory conflict resolved by keeping both values with explicit scope.',
+    return this.approveScopedCandidate(id, scopedKey, decisionOptions, conflictGuard);
+  }
+
+  private approveScopedCandidate(
+    id: string,
+    scopedKey: string,
+    decisionOptions: MemoryReviewDecisionOptions,
+    conflictGuard: { expectedExistingValue: unknown; expectedCandidateValue: unknown },
+  ): MemoryCandidate {
+    const now = isoNow();
+    let finalizeWorkingFlush: (() => void) | undefined;
+    let approvedCandidate: MemoryCandidate | undefined;
+    const tx = this.db.transaction(() => {
+      const candidate = this.requireCandidate(id, 'pending');
+      this.assertConflictUnchanged(id, candidate, this.detectConflicts(candidate), 'resolution', conflictGuard);
+      const scopedCandidate: MemoryCandidate = {
+        ...candidate,
+        key: scopedKey,
+        updatedAt: now,
+      };
+      this.validateProposal(scopedCandidate);
+      assertMemoryCandidateNotDeletionGuarded(this.db, scopedCandidate, this.encryption);
+      if (this.detectConflicts(scopedCandidate).length > 0) {
+        throw new Error(`Scoped memory key ${scopedKey} still conflicts with an existing value`);
+      }
+      this.assertDecisionOptionsNotDeletionGuarded(decisionOptions);
+      this.db
+        .prepare(`UPDATE memory_review_candidates SET memory_key = ?, updated_at = ? WHERE id = ? AND status = 'pending'`)
+        .run(scopedKey, now, id);
+      const updatedCandidate = this.requireCandidate(id, 'pending');
+      const suppressionReason = this.findCandidateSuppression(updatedCandidate);
+      if (suppressionReason) {
+        this.markSuppressed(id, suppressionReason, now, decisionOptions);
+        approvedCandidate = this.requireCandidate(id);
+        return;
+      }
+      finalizeWorkingFlush = this.working.persistKeyAfterCommit(scopedKey, updatedCandidate.value) ?? undefined;
+      this.db
+        .prepare(
+          `INSERT INTO memory_review_provenance (
+            target_store, memory_key, value, candidate_id, source, evidence_id,
+            confidence, reason, reviewer, note, approved_at, schema_version
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
+          ON CONFLICT(target_store, memory_key) DO UPDATE SET
+            value = excluded.value,
+            candidate_id = excluded.candidate_id,
+            source = excluded.source,
+            evidence_id = excluded.evidence_id,
+            confidence = excluded.confidence,
+            reason = excluded.reason,
+            reviewer = excluded.reviewer,
+            note = excluded.note,
+            approved_at = excluded.approved_at,
+            schema_version = excluded.schema_version`,
+        )
+        .run(
+          updatedCandidate.targetStore,
+          scopedKey,
+          this.encodeValue(updatedCandidate.value),
+          updatedCandidate.id,
+          this.encodeText(updatedCandidate.source),
+          updatedCandidate.evidenceId ? this.encodeText(updatedCandidate.evidenceId) : null,
+          updatedCandidate.confidence,
+          this.encodeText(updatedCandidate.reason),
+          decisionOptions.reviewer ? this.encodeText(decisionOptions.reviewer) : null,
+          this.encodeText(decisionOptions.note ?? 'Memory conflict resolved by keeping both values with explicit scope.'),
+          now,
+        );
+      this.markDecision(id, 'approved', now, {
+        ...decisionOptions,
+        note: decisionOptions.note ?? 'Memory conflict resolved by keeping both values with explicit scope.',
+      });
+      approvedCandidate = this.requireCandidate(id);
     });
+    tx.immediate();
+    finalizeWorkingFlush?.();
+    return approvedCandidate ?? this.requireCandidate(id, 'approved');
   }
 
   private expireExistingAndApprove(

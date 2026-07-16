@@ -376,6 +376,10 @@ describe('GovernorAdapter', () => {
       .resolves.toMatchObject({ decision: 'approved' });
     await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"resolve_conflict","resolution":"replace_existing"}' }))
       .resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"resolve_conflict","resolution":"keep_both_scoped","scopedKey":"user.preference.scope.docs"}' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"resolve_conflict","resolution":"expire_existing"}' }))
+      .resolves.toMatchObject({ decision: 'approved' });
     await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"resolve_conflict"}' }))
       .resolves.toMatchObject({ decision: 'review_recommended' });
     await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"resolve_conflict","resolution":"overwrite"}' }))

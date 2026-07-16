@@ -1724,6 +1724,50 @@ describe('SqliteBrain', () => {
       expect(brain.memoryReview.conflictsFor(candidate.id)).toHaveLength(1);
     });
 
+    it('does not mutate a pending candidate when keep-both scoped approval validation fails', () => {
+      const limited = new SqliteBrain(':memory:', {
+        maxEntries: 10,
+        maxValueBytes: 32,
+        maxTotalBytes: 128,
+      });
+      try {
+        const base = limited.memoryReview.propose({
+          targetStore: 'working',
+          key: 'user.preference.theme',
+          value: 'dark',
+          source: 'chat:turn-63',
+          confidence: 0.9,
+          reason: 'Default UI preference.',
+        });
+        limited.memoryReview.approve(base.id, { reviewer: 'operator' });
+        const candidate = limited.memoryReview.propose({
+          targetStore: 'working',
+          key: 'user.preference.theme',
+          value: 'light '.repeat(20),
+          source: 'chat:turn-64',
+          confidence: 0.85,
+          reason: 'Oversized scoped presentation preference.',
+        });
+
+        expect(() =>
+          limited.memoryReview.resolveConflict(candidate.id, {
+            resolution: 'keep_both_scoped',
+            scopedKey: 'user.preference.theme.scope.presentations',
+            reviewer: 'operator',
+          }),
+        ).toThrow(WorkingMemoryLimitError);
+
+        expect(limited.memoryReview.list().find((item) => item.id === candidate.id)).toMatchObject({
+          key: 'user.preference.theme',
+          status: 'pending',
+        });
+        expect(limited.working.get('user.preference.theme.scope.presentations')).toBeUndefined();
+        expect(limited.memoryReview.conflictsFor(candidate.id)).toHaveLength(1);
+      } finally {
+        limited.close();
+      }
+    });
+
     it('does not expire the old fact when expire-existing replacement validation fails', () => {
       const limited = new SqliteBrain(':memory:', {
         maxEntries: 10,
