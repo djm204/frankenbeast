@@ -72,7 +72,7 @@ export class InMemoryWebhookDeliveryReceiptStore implements WebhookDeliveryRecei
     if (!receipt.idempotencyKey) return true
     const contentKey = this.contentKeyFor(receipt.idempotencyKey, receipt.target, receipt.contentHash)
     const existing = this.contentReceipts.get(contentKey)
-    if (existing && existing.status !== 'failed') {
+    if (existing && existing.status !== 'failed' && !isStalePendingReceipt(existing)) {
       return false
     }
     this.save(receipt)
@@ -92,6 +92,14 @@ export class InMemoryWebhookDeliveryReceiptStore implements WebhookDeliveryRecei
   private contentKeyFor(idempotencyKey: string, target: string, contentHash: string): string {
     return `${this.keyFor(idempotencyKey, target)}\u0000${contentHash}`
   }
+}
+
+const DEFAULT_PENDING_RECEIPT_TTL_MS = 5 * 60 * 1000
+
+function isStalePendingReceipt(receipt: WebhookDeliveryReceipt, now = Date.now()): boolean {
+  if (receipt.status !== 'pending') return false
+  const timestamp = Date.parse(receipt.timestamp)
+  return !Number.isFinite(timestamp) || now - timestamp > DEFAULT_PENDING_RECEIPT_TTL_MS
 }
 
 export interface WebhookAllowedTarget {
@@ -523,7 +531,7 @@ export class WebhookNotifier {
   async send(payload: unknown, options: WebhookSendOptions = {}): Promise<WebhookDeliveryReceipt> {
     this.assertTargetAllowed()
 
-    const receiptTarget = options.target ?? sanitizeWebhookEndpoint(this.url)
+    const receiptTarget = options.target ?? `${sanitizeWebhookEndpoint(this.url)}#${createHash('sha256').update(this.url).digest('hex').slice(0, 12)}`
     const contentHash = hashWebhookPayload(payload)
     const receiptBase = {
       idempotencyKey: options.idempotencyKey,
@@ -532,7 +540,7 @@ export class WebhookNotifier {
     }
     if (options.idempotencyKey) {
       const existing = await this.receiptStore.findByContent(options.idempotencyKey, receiptTarget, contentHash)
-      if (existing && existing.status !== 'failed') {
+      if (existing && existing.status !== 'failed' && !isStalePendingReceipt(existing)) {
         const skippedReceipt: WebhookDeliveryReceipt = {
           ...receiptBase,
           status: 'skipped',
@@ -627,12 +635,17 @@ export class WebhookNotifier {
       throw lastError
     } catch (err) {
       if (options.idempotencyKey && !delivered) {
-        await this.receiptStore.save({
-          ...receiptBase,
-          status: 'failed',
-          timestamp: new Date().toISOString(),
-          error: err instanceof Error ? err.message : String(err),
-        })
+        try {
+          await this.receiptStore.save({
+            ...receiptBase,
+            status: 'failed',
+            timestamp: new Date().toISOString(),
+            error: err instanceof Error ? err.message : String(err),
+          })
+        } catch {
+          // Preserve the original webhook delivery error; receipt persistence
+          // failures should not mask HTTP status or network failures.
+        }
       }
       throw err
     }

@@ -113,12 +113,12 @@ describe('WebhookNotifier', () => {
       expect(firstReceipt).toMatchObject({
         status: 'sent',
         idempotencyKey: 'status:run-1:discord',
-        target: 'https://hooks.example.com/[REDACTED]',
+        target: 'https://hooks.example.com/[REDACTED]#951f9d00d945',
       })
       expect(secondReceipt).toMatchObject({
         status: 'skipped',
         idempotencyKey: 'status:run-1:discord',
-        target: 'https://hooks.example.com/[REDACTED]',
+        target: 'https://hooks.example.com/[REDACTED]#951f9d00d945',
       })
       expect(secondReceipt.contentHash).toBe(firstReceipt.contentHash)
       expect(mockFetch).toHaveBeenCalledTimes(1)
@@ -143,6 +143,21 @@ describe('WebhookNotifier', () => {
       expect(firstReceipt.status).toBe('sent')
       expect(secondReceipt.status).toBe('skipped')
       expect(mockFetch).toHaveBeenCalledTimes(1)
+    })
+
+    it('retries stale pending reservations instead of skipping forever', async () => {
+      const store = new InMemoryWebhookDeliveryReceiptStore()
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Service Unavailable' })
+      const notifier = createNotifier({ deliveryReceiptStore: store })
+      const payload = { type: 'status', runId: 'stale-pending', state: 'green' }
+      await expect(notifier.send(payload, { idempotencyKey: 'status:stale-pending', target: 'ops' })).rejects.toThrow('503')
+      const failed = await store.findLatest('status:stale-pending', 'ops')
+      await store.save({ ...failed!, status: 'pending', timestamp: '2000-01-01T00:00:00.000Z' })
+
+      const receipt = await notifier.send(payload, { idempotencyKey: 'status:stale-pending', target: 'ops' })
+
+      expect(receipt.status).toBe('sent')
+      expect(mockFetch).toHaveBeenCalledTimes(2)
     })
 
     it('sends changed content for the same idempotency key and target', async () => {
@@ -213,6 +228,25 @@ describe('WebhookNotifier', () => {
       expect(saved).toEqual(['sent'])
     })
 
+    it('preserves the original webhook error when failed receipt persistence also fails', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Service Unavailable' })
+      const store = {
+        findLatest: vi.fn(),
+        findByContent: vi.fn(),
+        reserve: vi.fn().mockResolvedValue(true),
+        save: vi.fn(async receipt => {
+          if (receipt.status === 'failed') {
+            throw new Error('receipt store unavailable')
+          }
+        }),
+      }
+      const notifier = createNotifier({ deliveryReceiptStore: store })
+
+      await expect(notifier.send({ type: 'status' }, { idempotencyKey: 'status:failed-save' })).rejects.toThrow(
+        'Webhook delivery failed: 503 Service Unavailable',
+      )
+    })
+
     it('sanitizes the webhook URL before using it as the default receipt target', async () => {
       const store = new InMemoryWebhookDeliveryReceiptStore()
       const notifier = createNotifier({
@@ -223,9 +257,32 @@ describe('WebhookNotifier', () => {
 
       const receipt = await notifier.send({ type: 'status' }, { idempotencyKey: 'status:redacted-target' })
 
-      expect(receipt.target).toBe('https://discord.com/[REDACTED]/[REDACTED]/[REDACTED]/[REDACTED]')
+      expect(receipt.target).toMatch(/^https:\/\/discord\.com\/(?:\[REDACTED\]\/){3}\[REDACTED\]#[a-f0-9]{12}$/)
       expect(receipt.target).not.toContain('secret-token')
       expect(mockFetch).toHaveBeenCalledTimes(1)
+    })
+
+    it('keeps default receipt targets unique when redacted webhook URLs have the same shape', async () => {
+      const store = new InMemoryWebhookDeliveryReceiptStore()
+      const firstNotifier = createNotifier({
+        url: 'https://discord.com/api/webhooks/123/secret-token-a',
+        allowedTargets: ['https://discord.com/api/webhooks/'],
+        deliveryReceiptStore: store,
+      })
+      const secondNotifier = createNotifier({
+        url: 'https://discord.com/api/webhooks/456/secret-token-b',
+        allowedTargets: ['https://discord.com/api/webhooks/'],
+        deliveryReceiptStore: store,
+      })
+      const payload = { type: 'status', runId: 'same-payload' }
+
+      const firstReceipt = await firstNotifier.send(payload, { idempotencyKey: 'status:same-payload' })
+      const secondReceipt = await secondNotifier.send(payload, { idempotencyKey: 'status:same-payload' })
+
+      expect(firstReceipt.target).not.toBe(secondReceipt.target)
+      expect(firstReceipt.target).not.toContain('secret-token-a')
+      expect(secondReceipt.target).not.toContain('secret-token-b')
+      expect(mockFetch).toHaveBeenCalledTimes(2)
     })
 
     it('sends the same idempotency key and content when the target changes', async () => {
