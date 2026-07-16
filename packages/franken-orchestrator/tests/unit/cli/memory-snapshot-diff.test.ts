@@ -190,6 +190,7 @@ describe('generateDuplicateMemoryReport', () => {
       suggestedCanonical: { kind: 'working', key: 'alpha' },
       entries: [{ kind: 'working', key: 'alpha' }, { kind: 'working', key: 'beta' }],
     });
+    expect(report.groups[1]).toMatchObject({ id: 'dup-002' });
     expect(report.groups[1]?.entries.map((entry) => entry.eventId)).toEqual([11, 12]);
     expect(report.groups[0]?.normalizedHash).toMatch(/^[a-f0-9]{64}$/);
     expect(report.guidance.join(' ')).toContain('Review each group before deleting memory');

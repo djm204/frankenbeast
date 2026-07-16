@@ -445,7 +445,8 @@ export function generateDuplicateMemoryReport(path: string, snapshot: BrainSnaps
 
   const workingGroups = buildDuplicateGroups(workingCandidates);
   const episodicGroups = buildDuplicateGroups(episodicCandidates);
-  const groups = [...workingGroups, ...episodicGroups];
+  const groups = [...workingGroups, ...episodicGroups]
+    .map((group, index) => ({ ...group, id: `dup-${String(index + 1).padStart(3, '0')}` }));
   const duplicateEntries = groups.reduce((total, group) => total + group.entries.length, 0);
 
   return {
