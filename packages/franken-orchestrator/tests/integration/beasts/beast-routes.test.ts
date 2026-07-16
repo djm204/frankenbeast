@@ -243,6 +243,37 @@ describe('beast routes', () => {
     expect(agents.getAgentDetail(agent.id).events.map((event) => event.type)).toContain('agent.dispatch.paused');
   });
 
+  it('returns maintenance response instead of 500 when stale tracked agent cleanup cannot run', async () => {
+    const { app, operatorToken } = createBeastApp({ maintenanceEnabled: true });
+    const response = await app.request('/v1/beasts/runs', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer ' + operatorToken,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        trackedAgentId: 'missing-agent',
+        chatSessionId: 'chat-1',
+        config: {
+          provider: 'claude',
+          objective: 'Implement beast routes',
+          chunkDirectory: 'docs/chunks',
+        },
+        executionMode: 'process',
+        startNow: true,
+      }),
+    });
+
+    expect(response.status).toBe(423);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'MAINTENANCE_MODE_ACTIVE',
+        message: 'Maintenance mode is active; new Beast dispatch is paused. Reason: deploy',
+      },
+    });
+  });
+
   it.each([
     ['/v1/beasts/runs/missing-run-id'],
     ['/v1/beasts/runs/missing-run-id/events'],
