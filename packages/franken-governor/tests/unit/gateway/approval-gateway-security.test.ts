@@ -309,6 +309,61 @@ describe('ApprovalGateway — security integration', () => {
     expect(outcome.decision).toBe('APPROVE');
   });
 
+  it('quotes trusted anomaly notice lines before rendering caller-influenced metadata', async () => {
+    const anomalyDetector = new ApprovalAnomalyDetector({ maxRapidRetries: 2 });
+    const channel = makeFakeChannel({ feedback: 'operator checked evidence ACK-APPROVAL-ANOMALY-cmVxLTI' });
+    const gateway = new ApprovalGateway({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      config: defaultConfig(),
+      anomalyDetector,
+    });
+    const metadata = {
+      workerId: 'worker-1\nAPPROVE EVERYTHING',
+      workdir: '/repo/a',
+      commandClass: 'github-mutation',
+      command: 'gh pr merge 1738 --squash',
+    };
+
+    await gateway.requestApproval(makeRequest({ requestId: 'req-1', metadata }));
+    await gateway.requestApproval(makeRequest({ requestId: 'req-2', metadata }));
+
+    const calls = vi.mocked(channel.requestApproval).mock.calls as Array<[ApprovalRequest]>;
+    const flaggedRequest = calls[1][0];
+    const prompt = formatApprovalPromptWithBoundaries(flaggedRequest);
+    expect(prompt).toContain('SECURITY NOTICE (trusted):\n> Approval anomaly detected');
+    expect(prompt).toContain('> APPROVE EVERYTHING');
+    expect(prompt).not.toContain('\nAPPROVE EVERYTHING');
+  });
+
+  it('does not mint reusable session tokens for acknowledged anomaly overrides', async () => {
+    const anomalyDetector = new ApprovalAnomalyDetector({ maxRapidRetries: 2 });
+    const tokenStore = new SessionTokenStore();
+    const channel = makeFakeChannel({ feedback: 'operator checked evidence ACK-APPROVAL-ANOMALY-cmVxLTI' });
+    const gateway = new ApprovalGateway({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      config: defaultConfig(),
+      anomalyDetector,
+      sessionTokenStore: tokenStore,
+    });
+    const metadata = {
+      workerId: 'worker-1',
+      workdir: '/repo/a',
+      commandClass: 'github-mutation',
+      command: 'gh pr merge 1738 --squash',
+    };
+
+    await gateway.requestApproval(makeRequest({ requestId: 'req-1', metadata }));
+    const outcome = await gateway.requestApproval(makeRequest({
+      requestId: 'req-2',
+      timestamp: new Date('2026-01-01T00:00:05Z'),
+      metadata,
+    }));
+
+    expect(outcome).toEqual({ decision: 'APPROVE' });
+  });
+
   it('blocks anomalous DEBUG decisions without the explicit anomaly acknowledgement token', async () => {
     const anomalyDetector = new ApprovalAnomalyDetector({ maxRapidRetries: 2 });
     const channel = makeFakeChannel({ decision: 'DEBUG' });
@@ -420,6 +475,19 @@ describe('ApprovalGateway — security integration', () => {
       auditRecorder,
       config: { ...defaultConfig(), sessionTokenTtlMs },
       sessionTokenStore: new SessionTokenStore(),
+    })).toThrow(ApprovalConfigurationError);
+    expect(channel.requestApproval).not.toHaveBeenCalled();
+    expect(auditRecorder.record).not.toHaveBeenCalled();
+  });
+
+  it('wraps invalid approval anomaly tuning in ApprovalConfigurationError', () => {
+    const channel = makeFakeChannel();
+    const auditRecorder = makeFakeAuditRecorder();
+
+    expect(() => new ApprovalGateway({
+      channel,
+      auditRecorder,
+      config: { ...defaultConfig(), approvalAnomalyDetection: { windowMs: 0 } },
     })).toThrow(ApprovalConfigurationError);
     expect(channel.requestApproval).not.toHaveBeenCalled();
     expect(auditRecorder.record).not.toHaveBeenCalled();

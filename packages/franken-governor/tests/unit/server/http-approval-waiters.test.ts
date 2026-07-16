@@ -179,17 +179,42 @@ describe('standalone governor HTTP app wired to real approval waiters', () => {
     await expect(waiter).resolves.toMatchObject({ decision: 'ABORT' });
   });
 
+  it('requires governor auth before listing pending HTTP operator approvals', async () => {
+    const secret = 'shared-governor-secret';
+    const registry = new ApprovalWaiterRegistry();
+    const app = createGovernorApp({ registry, signingSecret: secret });
+    registry.register('req-auth-1', 'task-1', 'Sensitive approval');
+
+    const unsigned = await app.request('/v1/approval/pending');
+    expect(unsigned.status).toBe(401);
+
+    const signature = `sha256=${createHmac('sha256', secret).update(Buffer.alloc(0)).digest('hex')}`;
+    const signed = await app.request('/v1/approval/pending', {
+      headers: { 'x-governor-signature': signature },
+    });
+    expect(signed.status).toBe(200);
+    await expect(signed.json()).resolves.toEqual({
+      approvals: [{ requestId: 'req-auth-1', taskId: 'task-1', summary: 'Sensitive approval' }],
+    });
+  });
+
   it('allows a real waiter to replace a placeholder and preserves it across later placeholder refreshes', async () => {
     const registry = new ApprovalWaiterRegistry();
 
     registry.register('req-placeholder-1', 'task-placeholder', 'Placeholder approval');
-    const waiter = registry.waitFor('req-placeholder-1', 'task-real', 'Real approval');
+    const waiter = registry.waitFor(
+      'req-placeholder-1',
+      'task-real',
+      'Real approval',
+      'Approval anomaly detected. Respond with ACK-APPROVAL-ANOMALY-cmVxLXBsYWNlaG9sZGVyLTE.',
+    );
 
     registry.register('req-placeholder-1', 'task-refreshed', 'Refreshed approval');
 
     expect(registry.get('req-placeholder-1')).toEqual({
       taskId: 'task-refreshed',
       summary: 'Refreshed approval',
+      approvalAnomalyNotice: 'Approval anomaly detected. Respond with ACK-APPROVAL-ANOMALY-cmVxLXBsYWNlaG9sZGVyLTE.',
     });
 
     const response = {

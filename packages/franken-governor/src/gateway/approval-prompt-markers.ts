@@ -57,7 +57,7 @@ export function formatApprovalPromptWithBoundaries(
 
   const trustedNotice = getTrustedApprovalPromptNotice(request);
   if (trustedNotice) {
-    lines.push('SECURITY NOTICE (trusted):', trustedNotice);
+    lines.push('SECURITY NOTICE (trusted):', formatUntrustedApprovalText(trustedNotice, '> '));
   }
 
   lines.push(

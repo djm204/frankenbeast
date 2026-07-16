@@ -73,10 +73,14 @@ export class ApprovalGateway {
     this.config = deps.config;
     this.configuredSignatureVerifier = deps.signatureVerifier;
     this.sessionTokenStore = deps.sessionTokenStore;
-    this.anomalyDetector = deps.anomalyDetector
-      ?? (deps.config.approvalAnomalyDetection?.enabled === false
-        ? undefined
-        : new ApprovalAnomalyDetector(deps.config.approvalAnomalyDetection));
+    try {
+      this.anomalyDetector = deps.anomalyDetector
+        ?? (deps.config.approvalAnomalyDetection?.enabled === false
+          ? undefined
+          : new ApprovalAnomalyDetector(deps.config.approvalAnomalyDetection));
+    } catch (error) {
+      throw new ApprovalConfigurationError((error as Error).message);
+    }
   }
 
   async requestApproval(request: ApprovalRequest): Promise<ApprovalOutcome> {
@@ -139,7 +143,7 @@ export class ApprovalGateway {
 
     await this.auditRecorder.record(requestForChannel, response);
 
-    return this.toOutcome(requestForChannel, response);
+    return this.toOutcome(requestForChannel, response, anomalyDecision);
   }
 
   private decorateAnomalousRequest(
@@ -243,10 +247,14 @@ export class ApprovalGateway {
     });
   }
 
-  private toOutcome(request: ApprovalRequest, response: ApprovalResponse): ApprovalOutcome {
+  private toOutcome(
+    request: ApprovalRequest,
+    response: ApprovalResponse,
+    anomalyDecision: ApprovalAnomalyDecision | undefined,
+  ): ApprovalOutcome {
     switch (response.decision) {
       case 'APPROVE': {
-        const token = this.sessionTokenStore
+        const token = this.sessionTokenStore && anomalyDecision?.flagged !== true
           ? this.createAndStoreToken(request, response, this.sessionTokenStore)
           : undefined;
         return token !== undefined

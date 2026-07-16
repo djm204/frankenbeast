@@ -70,10 +70,13 @@ export class ApprovalWaiterRegistry {
    */
   register(requestId: string, taskId: string, summary: string, approvalAnomalyNotice?: string): void {
     const existing = this.pending.get(requestId);
+    const effectiveApprovalAnomalyNotice = approvalAnomalyNotice ?? existing?.approvalAnomalyNotice;
     this.pending.set(requestId, {
       taskId,
       summary,
-      ...(approvalAnomalyNotice !== undefined ? { approvalAnomalyNotice } : {}),
+      ...(effectiveApprovalAnomalyNotice !== undefined
+        ? { approvalAnomalyNotice: effectiveApprovalAnomalyNotice }
+        : {}),
       hasRealWaiter: existing?.hasRealWaiter ?? false,
       resolve: existing?.resolve ?? (() => {}),
     });
@@ -95,10 +98,13 @@ export class ApprovalWaiterRegistry {
     }
 
     return new Promise<ApprovalResponse>((resolvePromise) => {
+      const effectiveApprovalAnomalyNotice = approvalAnomalyNotice ?? existing?.approvalAnomalyNotice;
       this.pending.set(requestId, {
         taskId,
         summary,
-        ...(approvalAnomalyNotice !== undefined ? { approvalAnomalyNotice } : {}),
+        ...(effectiveApprovalAnomalyNotice !== undefined
+          ? { approvalAnomalyNotice: effectiveApprovalAnomalyNotice }
+          : {}),
         hasRealWaiter: true,
         resolve: resolvePromise,
       });

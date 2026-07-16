@@ -99,6 +99,30 @@ function verifyGovernorSignature(
   return { ok: true };
 }
 
+function verifyGovernorEndpointAuth(
+  signature: string | undefined,
+  rawBody: Buffer,
+  options: GovernorAppOptions,
+): GovernorSignatureVerificationResult {
+  if (!options.signingSecret) {
+    return options.allowUnsignedApprovalsForTests
+      ? { ok: true }
+      : { ok: false, reason: 'missing' };
+  }
+  return verifyGovernorSignature(signature, rawBody, options.signingSecret);
+}
+
+function governorAuthErrorMessage(reason: Exclude<GovernorSignatureVerificationResult, { ok: true }>['reason']): string {
+  switch (reason) {
+    case 'missing':
+      return 'Missing signature';
+    case 'malformed':
+      return 'Malformed signature';
+    case 'invalid':
+      return 'Invalid signature';
+  }
+}
+
 function parseJsonBody(rawBody: Buffer): ParsedJsonBody | null {
   if (rawBody.length === 0) return {};
 
@@ -222,7 +246,17 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
     });
   });
 
-  app.get('/v1/approval/pending', (c) => c.json({ approvals: registry.list() }));
+  app.get('/v1/approval/pending', (c) => {
+    const verification = verifyGovernorEndpointAuth(
+      c.req.header('x-governor-signature'),
+      Buffer.alloc(0),
+      options,
+    );
+    if (!verification.ok) {
+      return c.json({ error: { message: governorAuthErrorMessage(verification.reason) } }, 401);
+    }
+    return c.json({ approvals: registry.list() });
+  });
 
   // POST /v1/approval/request — submit an approval request
   app.post('/v1/approval/request', async (c) => {

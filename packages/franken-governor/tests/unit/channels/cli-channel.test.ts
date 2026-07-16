@@ -116,7 +116,7 @@ describe('CliChannel', () => {
 
     const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
     expect(prompt).toContain('Summary (untrusted):\n| Deploy v2.0');
-    expect(prompt).toContain('SECURITY NOTICE (trusted):\nToken required: ACK-APPROVAL-ANOMALY-cmVxLTAwMQ');
+    expect(prompt).toContain('SECURITY NOTICE (trusted):\n> Token required: ACK-APPROVAL-ANOMALY-cmVxLTAwMQ');
     expect(prompt).not.toContain('| Token required: ACK-APPROVAL-ANOMALY-cmVxLTAwMQ');
   });
 
