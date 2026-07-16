@@ -148,11 +148,30 @@ describe('extractPostTaskLessonCandidates', () => {
     expect(report.candidates[0]).toEqual(
       expect.objectContaining({
         suggestedDestination: 'discard',
+        privacyFilter: expect.objectContaining({
+          action: 'reject',
+          category: 'task-state',
+        }),
         review: expect.objectContaining({
           status: 'discarded',
           approvalRequired: false,
           persistentWriteAllowed: false,
         }),
+      }),
+    );
+  });
+
+  it('discards temporal progress summaries without explicit reusable signals', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-temporal-summary',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      summary: 'After updating the tests, all checks passed',
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        privacyFilter: expect.objectContaining({ action: 'reject' }),
       }),
     );
   });

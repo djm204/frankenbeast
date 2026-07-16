@@ -1045,12 +1045,22 @@ export function extractPostTaskLessonCandidates(
     const privacyDecision = createPrivacyDecision(normalizedText, {
       flagCustomerData: true,
     });
-    const publicDecision = toPublicPrivacyDecision(privacyDecision);
+    let publicDecision = toPublicPrivacyDecision(privacyDecision);
     const sanitizedText = redactSensitiveText(
       normalizedText,
       privacyDecision.redactions,
     );
     const category = options.forceDiscard ? 'task-state' : privacyDecision.category;
+    if (options.forceDiscard) {
+      publicDecision = {
+        ...publicDecision,
+        category: 'task-state',
+        action: 'reject',
+        approvalRequired: false,
+        reason:
+          'Post-task candidate lacks an explicit reusable learning signal and is rejected before durable learning.',
+      };
+    }
     const suggestedDestination = options.forceDiscard
       ? 'discard'
       : choosePostTaskLessonDestination(
@@ -1135,7 +1145,7 @@ function choosePostTaskLessonDestination(
 }
 
 function hasExplicitPostTaskLessonSignal(text: string): boolean {
-  return /\b(?:always|avoid|prefer|require|must|should|when|before|after|retry|redact|validate|verify)\b/i.test(
+  return /\b(?:always|avoid|prefer|require|must|should|retry|redact|validate|verify)\b/i.test(
     text,
   );
 }
