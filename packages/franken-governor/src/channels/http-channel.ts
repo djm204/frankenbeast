@@ -27,7 +27,13 @@ export class HttpApprovalChannel implements ApprovalChannel {
   }
 
   requestApproval(request: ApprovalRequest): Promise<ApprovalResponse> {
-    return this.registry.waitFor(request.requestId, request.taskId, request.summary);
+    const notice = request.metadata?.approvalAnomalyNotice;
+    return this.registry.waitFor(
+      request.requestId,
+      request.taskId,
+      request.summary,
+      typeof notice === 'string' ? notice : undefined,
+    );
   }
 
   /**

@@ -149,6 +149,36 @@ describe('standalone governor HTTP app wired to real approval waiters', () => {
     expect(registry.size).toBe(0);
   });
 
+  it('exposes anomaly notices for pending HTTP operator approvals', async () => {
+    const registry = new ApprovalWaiterRegistry();
+    const app = createGovernorApp({ registry, allowUnsignedApprovalsForTests: true });
+    const waiter = registry.waitFor(
+      'req-anomaly-1',
+      'task-1',
+      'Deploy to production',
+      'Approval anomaly detected. Respond with ACK-APPROVAL-ANOMALY-cmVxLWFub21hbHktMQ.',
+    );
+
+    const res = await app.request('/v1/approval/pending');
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      approvals: [{
+        requestId: 'req-anomaly-1',
+        taskId: 'task-1',
+        summary: 'Deploy to production',
+        approvalAnomalyNotice: 'Approval anomaly detected. Respond with ACK-APPROVAL-ANOMALY-cmVxLWFub21hbHktMQ.',
+      }],
+    });
+
+    registry.resolve('req-anomaly-1', {
+      requestId: 'req-anomaly-1',
+      decision: 'ABORT',
+      respondedBy: 'operator',
+      respondedAt: new Date('2026-01-01T00:00:00Z'),
+    });
+    await expect(waiter).resolves.toMatchObject({ decision: 'ABORT' });
+  });
+
   it('allows a real waiter to replace a placeholder and preserves it across later placeholder refreshes', async () => {
     const registry = new ApprovalWaiterRegistry();
 

@@ -222,6 +222,8 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
     });
   });
 
+  app.get('/v1/approval/pending', (c) => c.json({ approvals: registry.list() }));
+
   // POST /v1/approval/request — submit an approval request
   app.post('/v1/approval/request', async (c) => {
     const rawBody = Buffer.from(await c.req.arrayBuffer());

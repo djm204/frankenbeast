@@ -3,8 +3,16 @@ import type { ApprovalResponse } from '../core/types.js';
 interface PendingApproval {
   readonly taskId: string;
   readonly summary: string;
+  readonly approvalAnomalyNotice?: string;
   readonly hasRealWaiter: boolean;
   resolve: (response: ApprovalResponse) => void;
+}
+
+export interface PendingApprovalSnapshot {
+  readonly requestId: string;
+  readonly taskId: string;
+  readonly summary: string;
+  readonly approvalAnomalyNotice?: string;
 }
 
 /**
@@ -35,9 +43,22 @@ export class ApprovalWaiterRegistry {
     return this.pending.has(requestId);
   }
 
-  get(requestId: string): { taskId: string; summary: string } | undefined {
+  get(requestId: string): { taskId: string; summary: string; approvalAnomalyNotice?: string } | undefined {
     const entry = this.pending.get(requestId);
-    return entry ? { taskId: entry.taskId, summary: entry.summary } : undefined;
+    return entry ? {
+      taskId: entry.taskId,
+      summary: entry.summary,
+      ...(entry.approvalAnomalyNotice !== undefined ? { approvalAnomalyNotice: entry.approvalAnomalyNotice } : {}),
+    } : undefined;
+  }
+
+  list(): PendingApprovalSnapshot[] {
+    return [...this.pending.entries()].map(([requestId, entry]) => ({
+      requestId,
+      taskId: entry.taskId,
+      summary: entry.summary,
+      ...(entry.approvalAnomalyNotice !== undefined ? { approvalAnomalyNotice: entry.approvalAnomalyNotice } : {}),
+    }));
   }
 
   /**
@@ -47,11 +68,12 @@ export class ApprovalWaiterRegistry {
    * If a real waiter is already registered for this `requestId` (via
    * `waitFor`), its resolver is preserved rather than overwritten.
    */
-  register(requestId: string, taskId: string, summary: string): void {
+  register(requestId: string, taskId: string, summary: string, approvalAnomalyNotice?: string): void {
     const existing = this.pending.get(requestId);
     this.pending.set(requestId, {
       taskId,
       summary,
+      ...(approvalAnomalyNotice !== undefined ? { approvalAnomalyNotice } : {}),
       hasRealWaiter: existing?.hasRealWaiter ?? false,
       resolve: existing?.resolve ?? (() => {}),
     });
@@ -61,14 +83,25 @@ export class ApprovalWaiterRegistry {
    * Register a real waiter and return a promise that resolves when
    * `resolve(requestId, response)` is called for this `requestId`.
    */
-  waitFor(requestId: string, taskId: string, summary: string): Promise<ApprovalResponse> {
+  waitFor(
+    requestId: string,
+    taskId: string,
+    summary: string,
+    approvalAnomalyNotice?: string,
+  ): Promise<ApprovalResponse> {
     const existing = this.pending.get(requestId);
     if (existing?.hasRealWaiter) {
       return Promise.reject(new Error(`Approval waiter already registered for requestId ${requestId}`));
     }
 
     return new Promise<ApprovalResponse>((resolvePromise) => {
-      this.pending.set(requestId, { taskId, summary, hasRealWaiter: true, resolve: resolvePromise });
+      this.pending.set(requestId, {
+        taskId,
+        summary,
+        ...(approvalAnomalyNotice !== undefined ? { approvalAnomalyNotice } : {}),
+        hasRealWaiter: true,
+        resolve: resolvePromise,
+      });
     });
   }
 
