@@ -1,5 +1,20 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-16 — Memory attribution scope and MCP inventory review fixes
+- MCP memory tooling: adding a new registry tool must update package README combined-server tool counts and `tool-registry.test.ts` aggregate/search count expectations, not only server-specific tests, or full `@franken/mcp-suite` CI fails despite targeted memory tests passing.
+- Memory attribution privacy: source-attribution viewers must honor the same `readScope`/`agentId` controls as memory query/frontload and translate internal scoped working keys back to logical keys before returning results; governor redaction for proxied attribution calls should match the narrow attribution-argument shape so ordinary memory store/proposal calls are not over-redacted.
+
+## 2026-07-16 — SQLite lock retry review fixes
+- When adding async retries around sync SQLite adapters, serialize all mutating operations that can overlap through one write queue; otherwise a sleeping retry can be overtaken by later flush/delete calls and reintroduce stale rows.
+- Capture mutable trace/span payloads before enqueueing delayed SQLite writes, and include statement preparation inside the retry wrapper so schema/contention locks during `prepare()` get the same diagnostics as transaction failures.
+- Validate retry/backoff options before opening a native SQLite handle; constructor validation failures should not leak a handle that can keep the database locked.
+- Retry initialization pragmas/schema creation too, make diagnostic callbacks best-effort, and defer `close()` until pending queued writes settle so shutdown cannot race an async write tail.
+
+## 2026-07-16 — Queue priority aging
+- For issue scheduler aging, score only eligible work with age boosts; blocked/HITL work should carry a large safety penalty and zero age boost so stale unsafe cards never bypass human/dependency gates. Include priority rank, effective rank, age, blocker status, risk lane, freshness, and an explanation string in liveness/fairness output.
+- For issue-runner queue-depth/backpressure, count only startable eligible issues; blocked/HITL cards should not inflate queue depth. Defer gated issues before any plan decomposition when no plan chunks already exist, but preserve zero-token completion only for exact one-shot issue checkpoints (`impl:issue-N:done` and `harden:issue-N:done`); chunk-shaped checkpoint keys require plan coverage before completion.
+- Issue backlog aging depends on fetching old backlog rows before local score sorting. `gh issue list` must use a backlog-safe high limit and oldest-first search sort by default so stale medium/low issues are not excluded by the GitHub CLI's recent-item window before aging runs.
+
 ## 2026-07-16 — Dead-letter queue Codex closeout
 - DLQ/DR restore output redaction must cover provider token literals (for example `sk-*`, `xox*`) and credentialed database URLs even when they appear inside free-text fields such as `target`, `lastError`, or nested payload strings; test fixtures should prove output does not leak the original secret substrings.
 - For DLQ file locks, treat unparseable lock timestamps as malformed stale-lock candidates and fall back to mtime-based reaping; otherwise a syntactically valid lock JSON with `acquiredAt: not-a-date` can wedge writers forever.
@@ -268,6 +283,12 @@
 - 2026-07-15 — Webhook egress allowlists: match exact public HTTPS targets, reject credentials/query/fragment/path traversal, mirror private-host aliases from the orchestrator egress policy, resolve DNS before every network attempt including retries, and add regression tests for DNS rebinding-style private answers.
 - 2026-07-15 — MCP memory scoping: avoid encoding agent scope solely in user-visible keys or summaries. Store explicit scope metadata, use reversible internal key encoding for physical storage, keep logical keys in query/frontload output, and fetch/filter uncapped episodic rows before applying visible result limits so other agents' rows cannot starve the requested scope.
 - 2026-07-15 — DR backup review hardening: encrypted state backups should back up only the requested state tree plus explicit sibling DBs, never keys/cache/old artifacts; reject live SQLite sidecars (`-wal`, `-shm`, `-journal`), validate dry-run restore targets, and quarantine approval ledgers rather than reactivating stale approvals.
+
+## 2026-07-16 — Maintenance-mode tracked-agent cleanup
+- When maintenance blocks Beast dispatch after a tracked agent has been created, mark the agent `stopped` and append an `agent.dispatch.paused` event in every dispatch path, including chat-backed `AgentInitService.dispatchAgent`.
+- HTTP maintenance cleanup for stale `trackedAgentId` values must never mask the intended 423 response; ignore missing-agent cleanup failures but rethrow unexpected cleanup errors.
+- Do not keep daemon chat Beast context after a 423 maintenance response from final dispatch; clear it so a later arbitrary chat message cannot auto-resume a completed interview after maintenance is disabled.
+- Only stop maintenance-blocked tracked agents that are still `initializing`; direct run requests can name unrelated running/deleted agents, and maintenance errors happen before createRun validates/links that ID.
 
 ## 2026-07-16 — LlmCacheStore read-path schema validation
 - For JSON cache stores, validate both schemaVersion and the runtime shape (`content` type) before returning entries, otherwise stale/malformed files can be reused as cache hits.

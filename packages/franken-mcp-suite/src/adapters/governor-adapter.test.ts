@@ -62,6 +62,51 @@ describe('GovernorAdapter', () => {
     expect(row.context).not.toContain('alice@example.test');
   });
 
+  it('allows memory source attribution filters without logging their raw context', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({
+      action: 'fbeast_memory_source_attribution',
+      context: '{"key":"profile.delete-policy","source":"chat:turn-42 secret"}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+
+    const db = new Database(dbPath);
+    const row = db.prepare(`SELECT context FROM governor_log WHERE action = ?`).get('fbeast_memory_source_attribution') as { context: string };
+    db.close();
+    expect(row.context).toBe('{}');
+  });
+
+  it('redacts explicit proxy memory source attribution filters without hiding generic execute_tool payloads', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"tool":"fbeast_memory_source_attribution","args":{"key":"profile.delete-policy","source":"chat:turn-42 secret","readScope":"agent","agentId":"agent-1"}}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"key":"profile.delete-policy","source":"chat:turn-42 secret","readScope":"agent","agentId":"agent-1"}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"key":"profile.delete-policy","agentId":"agent-1"}',
+    })).resolves.toMatchObject({ decision: 'denied' });
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"key":"profile.delete-policy","value":"rm -rf /","source":"chat:turn-42 secret"}',
+    })).resolves.toMatchObject({ decision: 'denied' });
+
+    const db = new Database(dbPath);
+    const rows = db.prepare(`SELECT context FROM governor_log WHERE action = ? ORDER BY id ASC`).all('mcp__fbeast-proxy__execute_tool') as Array<{ context: string }>;
+    db.close();
+    expect(rows[0]?.context).toBe('{}');
+    expect(rows[1]?.context).toBe('{}');
+    expect(rows[2]?.context).toContain('profile.delete-policy');
+    expect(rows[3]?.context).toContain('profile.delete-policy');
+  });
+
   it('allows right-to-forget dryRun calls while keeping selector context redacted', async () => {
     const dbPath = tracked(tmpDbPath());
     const governor = createGovernorAdapter(dbPath);

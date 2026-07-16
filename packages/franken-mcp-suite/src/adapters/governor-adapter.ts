@@ -56,6 +56,7 @@ export const NON_EXECUTING_TOOLS: ReadonlySet<string> = new Set([
   'fbeast_governor_check',
   'fbeast_governor_budget',
   'fbeast_memory_review_propose',
+  'fbeast_memory_source_attribution',
   'fbeast_memory_query',
   'fbeast_memory_frontload',
   'fbeast_memory_export',
@@ -287,6 +288,37 @@ function redactMemoryReviewDecisionGovernanceContext(action: string, context: st
   }
 }
 
+function redactMemorySourceAttributionGovernanceContext(action: string, context: string): string {
+  const unqualified = unqualifyMcpActionName(action);
+  if (unqualified === 'fbeast_memory_source_attribution'
+    || (unqualified === 'execute_tool'
+      && (contextTargetsTool(context, 'fbeast_memory_source_attribution')
+        || contextLooksLikeMemorySourceAttributionArgs(context)))) {
+    return '{}';
+  }
+  return context;
+}
+
+function contextLooksLikeMemorySourceAttributionArgs(context: string): boolean {
+  try {
+    const parsed = JSON.parse(context) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+    const record = parsed as Record<string, unknown>;
+    return Object.keys(record).length > 0
+      && Object.keys(record).every(key => [
+        'key',
+        'source',
+        'limit',
+        'readScope',
+        'agentId',
+        'targetStore',
+      ].includes(key))
+      && Object.prototype.hasOwnProperty.call(record, 'source');
+  } catch {
+    return false;
+  }
+}
+
 function sanitizeMemoryExportGovernanceArgs(args: Record<string, unknown>): Record<string, unknown> {
   const safe: Record<string, unknown> = {};
   if (args['__fbeastGovernanceSource'] === 'central-dispatch') {
@@ -354,9 +386,12 @@ function redactMemoryExportGovernanceContext(action: string, context: string): s
 function redactGovernanceContext(action: string, context: string): string {
   return redactMemoryExportGovernanceContext(
     action,
-    redactMemoryReviewDecisionGovernanceContext(
+    redactMemorySourceAttributionGovernanceContext(
       action,
-      redactMemoryReviewProposalGovernanceContext(action, redactRightToForgetGovernanceContext(action, context)),
+      redactMemoryReviewDecisionGovernanceContext(
+        action,
+        redactMemoryReviewProposalGovernanceContext(action, redactRightToForgetGovernanceContext(action, context)),
+      ),
     ),
   );
 }

@@ -69,6 +69,31 @@ if (!learningResult.recorded) {
   console.log(`Learning still cooling down until ${learningResult.cooldownUntil}`);
 }
 
+// Repeated skill/workflow failures can open an evidence-backed review gate for
+// procedural skill evolution without storing raw logs. Callers store a sanitized
+// failure pattern plus evidence pointers; once the threshold is met, a normal
+// memory-review candidate is created so an operator can accept, edit, or discard
+// the suggested skill update.
+for (const evidenceId of ['run-1', 'run-2', 'run-3']) {
+  brain.episodic.recordSkillFailure({
+    skillName: 'resolve-issues',
+    workflowName: 'issue-to-pr',
+    failureSignature: 'Codex feedback was not folded back into the skill',
+    evidenceId,
+    suggestedPatchArea: 'Codex review loop pitfalls',
+  });
+}
+const [skillReview] = brain.createSkillEvolutionReviewGate({ threshold: 3 });
+if (skillReview) {
+  brain.memoryReview.edit(skillReview.id, {
+    value: {
+      ...skillReview.value,
+      suggestedPatchArea: 'Add a required lesson-forwarding closeout step',
+    },
+    reason: 'Reviewer narrowed the actionable skill section.',
+  });
+}
+
 // Candidate durable memories stay user-visible until reviewed. They are not
 // written to working memory until approval, and approvals retain provenance.
 const candidate = brain.memoryReview.propose({

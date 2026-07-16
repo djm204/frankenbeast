@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createAdapterSet, TOOL_STUBS, TOOL_REGISTRY, searchTools, type AdapterSet } from './tool-registry.js';
 
-const EXPECTED_COUNT = 28;
+const EXPECTED_COUNT = 29;
 
 describe('TOOL_STUBS', () => {
   it('contains exactly 28 tools', () => {
@@ -202,7 +202,7 @@ describe('searchTools', () => {
 
   it('returns exactly 11 tools for query "memory"', () => {
     const results = searchTools('memory');
-    expect(results).toHaveLength(11);
+    expect(results).toHaveLength(12);
     for (const r of results) {
       expect(r.server).toBe('memory');
     }

@@ -1,6 +1,7 @@
 import type { TrackedAgent, TrackedAgentInitActionKind, BeastExecutionMode, BeastRun } from '../types.js';
 import type { BeastDispatchService } from './beast-dispatch-service.js';
 import { AgentService } from './agent-service.js';
+import { MaintenanceModeError } from './maintenance-mode-service.js';
 import { isoNow } from '@franken/types';
 
 export interface CreateChatInitAgentRequest {
@@ -78,14 +79,27 @@ export class AgentInitService {
       },
     });
 
-    return this.dispatch.createRun({
-      definitionId: request.definitionId,
-      config: request.config,
-      dispatchedBy: 'chat',
-      dispatchedByUser: `chat-session:${request.chatSessionId}`,
-      trackedAgentId: agentId,
-      startNow: true,
-      ...(request.executionMode ? { executionMode: request.executionMode } : {}),
-    });
+    try {
+      return await this.dispatch.createRun({
+        definitionId: request.definitionId,
+        config: request.config,
+        dispatchedBy: 'chat',
+        dispatchedByUser: `chat-session:${request.chatSessionId}`,
+        trackedAgentId: agentId,
+        startNow: true,
+        ...(request.executionMode ? { executionMode: request.executionMode } : {}),
+      });
+    } catch (error) {
+      if (error instanceof MaintenanceModeError) {
+        this.agents.updateAgent(agentId, { status: 'stopped' });
+        this.agents.appendEvent(agentId, {
+          level: 'warning',
+          type: 'agent.dispatch.paused',
+          message: error.message,
+          payload: { maintenance: error.state },
+        });
+      }
+      throw error;
+    }
   }
 }

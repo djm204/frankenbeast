@@ -44,6 +44,7 @@ function createBrainStub(overrides: Partial<BrainAdapter> = {}): BrainAdapter {
       updatedAt: "2026-07-15T00:00:00.000Z",
     }),
     listMemoryReview: vi.fn().mockResolvedValue([]),
+    memoryAttribution: vi.fn().mockResolvedValue([]),
     conflictsForMemoryReview: vi.fn().mockResolvedValue([]),
     decideMemoryReview: vi.fn().mockResolvedValue({
       id: "memcand_1",
@@ -77,6 +78,7 @@ describe("Memory Server", () => {
       "fbeast_memory_right_to_forget",
       "fbeast_memory_review_propose",
       "fbeast_memory_review_list",
+      "fbeast_memory_source_attribution",
       "fbeast_memory_review_conflicts",
       "fbeast_memory_review_decide",
       "fbeast_memory_access_audit_report",
@@ -596,6 +598,86 @@ describe("Memory Server", () => {
       scopedKey: "user.preference.response-style.scope.docs",
       options: { reviewer: "operator" },
     });
+  });
+
+  it("exposes memory source attribution with filters and empty-result structure", async () => {
+    const brain = createBrainStub({
+      memoryAttribution: vi.fn().mockResolvedValue([
+        {
+          targetStore: "working",
+          key: "user.preference.response-style",
+          value: "concise",
+          candidateId: "memcand_1",
+          source: "chat:turn-42",
+          evidenceId: "msg-42",
+          confidence: 0.92,
+          reason: "User explicitly requested concise responses.",
+          reviewer: "operator",
+          approvedAt: "2026-07-15T00:01:00.000Z",
+        },
+      ]),
+    });
+    const server = createMemoryServer({ brain });
+
+    const result = await server.callTool("fbeast_memory_source_attribution", {
+      key: "user.preference.response-style",
+      source: "chat:",
+      limit: "5",
+      readScope: "agent",
+      agentId: "agent-1",
+    });
+
+    expect(brain.memoryAttribution).toHaveBeenCalledWith({
+      targetStore: "working",
+      key: "user.preference.response-style",
+      source: "chat:",
+      limit: 5,
+      readScope: "agent",
+      agentId: "agent-1",
+    });
+    expect(JSON.parse(result.content[0]!.text)).toMatchObject({
+      count: 1,
+      attributions: [
+        {
+          key: "user.preference.response-style",
+          source: "chat:turn-42",
+          candidateId: "memcand_1",
+        },
+      ],
+    });
+
+    vi.mocked(brain.memoryAttribution).mockResolvedValueOnce([]);
+    const emptyResult = await server.callTool("fbeast_memory_source_attribution", {
+      key: "missing.memory",
+    });
+    expect(JSON.parse(emptyResult.content[0]!.text)).toEqual({
+      count: 0,
+      attributions: [],
+    });
+  });
+
+  it("rejects invalid memory source attribution input before calling the brain adapter", async () => {
+    const brain = createBrainStub();
+    const server = createMemoryServer({ brain });
+
+    const blankKey = await server.callTool("fbeast_memory_source_attribution", {
+      key: "   ",
+    });
+    expect(blankKey.isError).toBe(true);
+    expect(blankKey.content[0]!.text).toContain("key must be a non-empty string");
+
+    const badLimit = await server.callTool("fbeast_memory_source_attribution", {
+      limit: "0",
+    });
+    expect(badLimit.isError).toBe(true);
+    expect(badLimit.content[0]!.text).toContain("limit must be a positive integer");
+
+    const missingAgent = await server.callTool("fbeast_memory_source_attribution", {
+      readScope: "agent",
+    });
+    expect(missingAgent.isError).toBe(true);
+    expect(missingAgent.content[0]!.text).toContain("agentId is required");
+    expect(brain.memoryAttribution).not.toHaveBeenCalled();
   });
 
   it("rejects invalid memory review queue input before calling the brain adapter", async () => {

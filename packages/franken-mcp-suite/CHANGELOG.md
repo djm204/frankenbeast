@@ -1,5 +1,83 @@
 # Changelog
 
+## [0.5.0](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.4.0...franken-mcp-suite-v0.5.0) (2026-07-16)
+
+
+### Features
+
+* **memory:** add source attribution viewer ([#2329](https://github.com/djm204/frankenbeast/issues/2329)) ([9a47d63](https://github.com/djm204/frankenbeast/commit/9a47d63ce4bed21908af873ed7588794ae19d25a))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.12.0 to 0.13.0
+    * @franken/brain bumped from 0.11.0 to 0.12.0
+    * @franken/critique bumped from 0.9.0 to 0.9.1
+    * @franken/governor bumped from 0.7.1 to 0.7.2
+    * @franken/observer bumped from 0.9.0 to 0.10.0
+    * @franken/orchestrator bumped from 0.50.0 to 0.51.0
+    * @franken/planner bumped from 0.4.19 to 0.4.20
+
+## [0.4.0](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.3.4...franken-mcp-suite-v0.4.0) (2026-07-16)
+
+
+### Features
+
+* **brain:** add memory conflict resolution prompts ([#2396](https://github.com/djm204/frankenbeast/issues/2396)) ([eeb9155](https://github.com/djm204/frankenbeast/commit/eeb9155ccf06a1dd9cf2872685d3ac95b8bee7bf))
+* **mcp-suite:** add agent-scoped memory reads ([#2316](https://github.com/djm204/frankenbeast/issues/2316)) ([f9d03fe](https://github.com/djm204/frankenbeast/commit/f9d03fecc7ccfed3f5b6f1c4a3d7124a07671b21))
+* **memory:** add conflict resolver ([#2320](https://github.com/djm204/frankenbeast/issues/2320)) ([6066b86](https://github.com/djm204/frankenbeast/commit/6066b861ca55505c5508f74b905362d68ef54b05))
+* **memory:** add redacted project memory export ([#2321](https://github.com/djm204/frankenbeast/issues/2321)) ([6a7b8bb](https://github.com/djm204/frankenbeast/commit/6a7b8bb1dfbbc10282e7cd90ac34936a06943d15))
+* **memory:** expire temporary operational facts ([a5f581a](https://github.com/djm204/frankenbeast/commit/a5f581af955a937416760779dcbaffb64a1abf6d))
+* **memory:** expire temporary operational facts ([5c46ae6](https://github.com/djm204/frankenbeast/commit/5c46ae662bbf52688d3c7afe8f8fbf3a4577fa0e))
+* **memory:** expose promotion review queue tools ([efa666d](https://github.com/djm204/frankenbeast/commit/efa666df7eb49e0eadde812a45172fde33eaf6e0))
+* **memory:** expose promotion review queue tools ([ecece38](https://github.com/djm204/frankenbeast/commit/ecece38986b9b8a74378c534005b57977197df79))
+* **memory:** quarantine sensitive memory writes ([#2327](https://github.com/djm204/frankenbeast/issues/2327)) ([c77679b](https://github.com/djm204/frankenbeast/commit/c77679b3e33723d37c2b0d34484bfb5029b947b1))
+
+
+### Bug Fixes
+
+* **governor:** add high-risk action policy checks ([#2303](https://github.com/djm204/frankenbeast/issues/2303)) ([9071f78](https://github.com/djm204/frankenbeast/commit/9071f7828cdda8d83c75e096f6c4233b13546fb9))
+* **memory:** address review queue codex findings ([c6fa35d](https://github.com/djm204/frankenbeast/commit/c6fa35dbbb3571c7ef3f93b627abf8900b04c3b0))
+* **memory:** address TTL hydration races ([102c710](https://github.com/djm204/frankenbeast/commit/102c7105bafab8afe7fb0786c1901d279c0630a2))
+* **memory:** address TTL review edge cases ([f3c1c5f](https://github.com/djm204/frankenbeast/commit/f3c1c5f9cf0c01b29f69ea2e702ac5dc746941d2))
+* **memory:** close review decision governance gaps ([a8f6ce6](https://github.com/djm204/frankenbeast/commit/a8f6ce6ac39da54c5c1f0fa760bae8a6a92edf54))
+* **memory:** close review queue audit loop ([bff1b45](https://github.com/djm204/frankenbeast/commit/bff1b4545176f1b6ccb79634c222034cd57ff547))
+* **memory:** close review queue redaction gaps ([d5a55ab](https://github.com/djm204/frankenbeast/commit/d5a55ab3f03aae3dce03708d79ff60021592d843))
+* **memory:** enforce operator review boundaries ([17f5be9](https://github.com/djm204/frankenbeast/commit/17f5be99e1b1bb8b92ad248780fb6b1c28a2e081))
+* **memory:** handle review decision edge cases ([5989d48](https://github.com/djm204/frankenbeast/commit/5989d4843c941bbe60b4ed4f26e8d3ef6a4e6c5d))
+* **memory:** handle TTL review edge cases ([57b15e8](https://github.com/djm204/frankenbeast/commit/57b15e8c9a6309c544a5b43b64438c7f8afaa7f7))
+* **memory:** harden proxied review audit paths ([708e073](https://github.com/djm204/frankenbeast/commit/708e073e25aa7d04192c5ef13912a383faf0ebc0))
+* **memory:** harden review governance audit paths ([e89bb80](https://github.com/djm204/frankenbeast/commit/e89bb806af2201188fd020de4baf8b1f5ec1c96d))
+* **memory:** harden review queue redaction gates ([a2e90ea](https://github.com/djm204/frankenbeast/commit/a2e90ea584ca815951cd9f25cc40737dc0f39fa5))
+* **memory:** preserve durable TTL edge cases ([f3bd7cc](https://github.com/djm204/frankenbeast/commit/f3bd7cc5c9b4e961f67749d3495c6b12ed9deb39))
+* **memory:** redact queued promotion candidates ([9e29018](https://github.com/djm204/frankenbeast/commit/9e29018ba31558a4a721fd08978b9b50b2bd308c))
+* **memory:** redact stripped proxy proposal args ([77d5167](https://github.com/djm204/frankenbeast/commit/77d51672b56155cef4acd63f04d0b85976f890b8))
+* **memory:** require approval for review approvals ([c0b7069](https://github.com/djm204/frankenbeast/commit/c0b706921542d945750923cba5592f4b422d8752))
+* **memory:** resolve review queue audit findings ([d7f0033](https://github.com/djm204/frankenbeast/commit/d7f003323fd7001a6eb48b8ef64aa77517a286e1))
+* **memory:** tighten review queue governance ([6bba037](https://github.com/djm204/frankenbeast/commit/6bba0370f65a07dad44ee9a0c7e6b7b6a19104af))
+* preserve Codex hooks backup on invalid JSON ([5656689](https://github.com/djm204/frankenbeast/commit/56566899ade1ad75cd0f37b9a4c9643d5c6df7ee))
+* preserve invalid Codex hooks with recoverable backup ([1e5d4a1](https://github.com/djm204/frankenbeast/commit/1e5d4a123e26c81798051497882694cdb0449214))
+
+
+### Miscellaneous
+
+* **memory:** merge latest governance policy ([7d38d44](https://github.com/djm204/frankenbeast/commit/7d38d441bf2ecd247e33cacdc77616133c52877b))
+* **memory:** merge main into review queue branch ([f3e0a23](https://github.com/djm204/frankenbeast/commit/f3e0a23812418b82591280e03cf803658695495c))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/brain bumped from 0.10.1 to 0.11.0
+    * @franken/critique bumped from 0.8.3 to 0.9.0
+    * @franken/governor bumped from 0.7.0 to 0.7.1
+    * @franken/observer bumped from 0.8.2 to 0.9.0
+    * @franken/orchestrator bumped from 0.49.2 to 0.50.0
+    * @franken/planner bumped from 0.4.18 to 0.4.19
+
 ## [0.3.4](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.3.3...franken-mcp-suite-v0.3.4) (2026-07-15)
 
 

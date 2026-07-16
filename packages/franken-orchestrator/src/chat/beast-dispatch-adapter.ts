@@ -2,6 +2,7 @@ import type { BeastCatalogService } from '../beasts/services/beast-catalog-servi
 import type { BeastDispatchService } from '../beasts/services/beast-dispatch-service.js';
 import type { BeastInterviewService, BeastInterviewProgress } from '../beasts/services/beast-interview-service.js';
 import type { AgentInitService } from '../beasts/services/agent-init-service.js';
+import { MaintenanceModeError } from '../beasts/services/maintenance-mode-service.js';
 import type { BeastExecutionMode } from '../beasts/types.js';
 import type { ChatBeastContext, TranscriptMessage } from './types.js';
 
@@ -106,21 +107,34 @@ export class ChatBeastDispatchAdapter {
       };
     }
 
-    const run = context.agentId
-      ? await this.options.agentInit.dispatchAgent(context.agentId, {
+    let run;
+    try {
+      run = context.agentId
+        ? await this.options.agentInit.dispatchAgent(context.agentId, {
+            definitionId,
+            chatSessionId: sessionId,
+            config: progress.config,
+            ...(context.executionMode ? { executionMode: context.executionMode } : {}),
+          })
+        : await this.options.dispatch.createRun({
+            definitionId,
+            config: progress.config,
+            dispatchedBy: 'chat',
+            dispatchedByUser: `chat-session:${sessionId}`,
+            startNow: true,
+            ...(context.executionMode ? { executionMode: context.executionMode } : {}),
+          });
+    } catch (error) {
+      if (error instanceof MaintenanceModeError) {
+        return {
+          kind: 'dispatch',
           definitionId,
-          chatSessionId: sessionId,
-          config: progress.config,
-          ...(context.executionMode ? { executionMode: context.executionMode } : {}),
-        })
-      : await this.options.dispatch.createRun({
-          definitionId,
-          config: progress.config,
-          dispatchedBy: 'chat',
-          dispatchedByUser: `chat-session:${sessionId}`,
-          startNow: true,
-          ...(context.executionMode ? { executionMode: context.executionMode } : {}),
-        });
+          assistantMessage: `${error.message} Allowed commands: ${error.state.allowedCommands.join(', ')}.`,
+          beastContext: null,
+        };
+      }
+      throw error;
+    }
 
     return {
       kind: 'dispatch',

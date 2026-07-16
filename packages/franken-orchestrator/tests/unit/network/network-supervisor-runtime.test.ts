@@ -1,6 +1,12 @@
 import { spawn } from 'node:child_process';
+import { createServer } from 'node:http';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
-import { startNetworkService, stopNetworkService } from '../../../src/network/network-supervisor-runtime.js';
+import {
+  healthcheckNetworkService,
+  preflightNetworkService,
+  startNetworkService,
+  stopNetworkService,
+} from '../../../src/network/network-supervisor-runtime.js';
 import type { ResolvedNetworkService } from '../../../src/network/network-registry.js';
 
 const spawnMock = vi.hoisted(() => vi.fn(() => ({
@@ -251,5 +257,70 @@ describe('stopNetworkService', () => {
     await stopNetworkService({ pid: 0, detached: true });
 
     expect(killSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('network degraded health handling', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('treats read-only degraded health as reachable for stored-service healthchecks', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      ok: false,
+      status: 'degraded',
+      service: 'beasts-daemon',
+      availability: { mode: 'read-only-degraded', readOnly: true },
+    }, { status: 503 })));
+
+    await expect(healthcheckNetworkService({
+      id: 'beasts-daemon',
+      displayName: 'Beast Daemon',
+      pid: 4242,
+      healthUrl: 'http://127.0.0.1:4050/health',
+      startedAt: '2026-07-16T00:00:00.000Z',
+    })).resolves.toBe(true);
+  });
+
+  it('reuses a port whose health identity is read-only degraded', async () => {
+    const server = createServer((_req, res) => {
+      res.statusCode = 503;
+      res.setHeader('content-type', 'application/json');
+      res.setHeader('x-frankenbeast-service', 'beasts-daemon');
+      res.end(JSON.stringify({
+        ok: false,
+        status: 'degraded',
+        service: 'beasts-daemon',
+        availability: { mode: 'read-only-degraded', readOnly: true },
+      }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        throw new Error('test server did not bind to a TCP port');
+      }
+      const service: ResolvedNetworkService = {
+        id: 'beasts-daemon',
+        displayName: 'Beast Daemon',
+        kind: 'app',
+        dependsOn: [],
+        configPaths: [],
+        enabled: () => true,
+        describe: () => 'test daemon',
+        buildRuntimeConfig: () => ({}),
+        explanation: 'test daemon',
+        runtimeConfig: {
+          process: { command: 'npm', args: CHAT_SERVER_ARGS, cwd: process.cwd() },
+          host: '127.0.0.1',
+          port: address.port,
+          healthUrl: `http://127.0.0.1:${address.port}/health`,
+          serviceIdentity: 'beasts-daemon',
+        },
+      };
+      await expect(preflightNetworkService(service)).resolves.toEqual({ action: 'reuse' });
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
   });
 });

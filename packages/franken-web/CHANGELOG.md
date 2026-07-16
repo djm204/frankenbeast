@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.5.0](https://github.com/djm204/frankenbeast/compare/franken-web-v0.4.0...franken-web-v0.5.0) (2026-07-16)
+
+
+### Features
+
+* **beasts:** add maintenance dispatch guardrails ([#2400](https://github.com/djm204/frankenbeast/issues/2400)) ([f50e966](https://github.com/djm204/frankenbeast/commit/f50e966246a1a05902fd0054ffa79bb59ffe35e7))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.12.0 to 0.13.0
+
+## [0.4.0](https://github.com/djm204/frankenbeast/compare/franken-web-v0.3.0...franken-web-v0.4.0) (2026-07-16)
+
+
+### Features
+
+* **availability:** add read-only degraded mode ([#2402](https://github.com/djm204/frankenbeast/issues/2402)) ([4dcd49b](https://github.com/djm204/frankenbeast/commit/4dcd49b14a856330c6ae287124c04eb2928b4c05))
+* **dashboard:** surface dependency availability ([#2347](https://github.com/djm204/frankenbeast/issues/2347)) ([0298dd5](https://github.com/djm204/frankenbeast/commit/0298dd58133a30015f3487893d64ef0d3d02dbb7))
+
+
+### Bug Fixes
+
+* **learning:** resolve privacy lesson closeout conflicts ([c39ec0f](https://github.com/djm204/frankenbeast/commit/c39ec0fc1e3ebb18074e57409ab4077c93714afc))
+* **security:** protect local web controls ([#2295](https://github.com/djm204/frankenbeast/issues/2295)) ([9a8a914](https://github.com/djm204/frankenbeast/commit/9a8a9148854858be7062b2330f4b9cc168bb9aa8))
+* **web:** render untrusted markdown as escaped text ([1aece97](https://github.com/djm204/frankenbeast/commit/1aece97056c131d318b1d6e944f560149bfcb4c6))
+
+
+### Tests
+
+* **web:** add corrupted approval markdown fixture ([#2276](https://github.com/djm204/frankenbeast/issues/2276)) ([784507f](https://github.com/djm204/frankenbeast/commit/784507f33ca74e359e35cf3bff433978a440377c))
+* **web:** cover approval fallback during socket reconnect ([#2293](https://github.com/djm204/frankenbeast/issues/2293)) ([eaaf24f](https://github.com/djm204/frankenbeast/commit/eaaf24f3d654ee339d7bc895714c2497ad2edb58))
+
 ## [0.3.0](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.11...franken-web-v0.3.0) (2026-07-15)
 
 

@@ -13,6 +13,8 @@ import {
 } from '../../beasts/services/beast-interview-service.js';
 import { BeastRunService, UnknownBeastRunError } from '../../beasts/services/beast-run-service.js';
 import { CapacityReservationError } from '../../beasts/services/capacity-reservation-policy.js';
+import type { MaintenanceModeService } from '../../beasts/services/maintenance-mode-service.js';
+import { MaintenanceModeError } from '../../beasts/services/maintenance-mode-service.js';
 import type { AgentService } from '../../beasts/services/agent-service.js';
 import type { BeastEventBus } from '../../beasts/events/beast-event-bus.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
@@ -101,6 +103,9 @@ class InterviewSessionNotFoundHttpError extends HttpError {
 }
 
 function throwKnownRunError(runId: string, error: unknown): never {
+  if (error instanceof MaintenanceModeError) {
+    throw new HttpError(423, 'MAINTENANCE_MODE_ACTIVE', error.message, { maintenance: error.state });
+  }
   throwCapacityReservationError(error);
   if (error instanceof UnknownBeastRunError) {
     throw beastRunNotFound(runId);
@@ -146,6 +151,7 @@ export interface BeastRoutesDeps {
   dispatch: BeastDispatchService;
   runs: BeastRunService;
   interviews: BeastInterviewService;
+  maintenance?: MaintenanceModeService | undefined;
   metrics: BeastMetrics;
   operatorToken: string;
   security: TransportSecurityService;
@@ -198,6 +204,15 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
     return c.json({ data: await getContainerRuntimeStatus() });
   });
 
+  app.get('/v1/beasts/maintenance', (c) => {
+    return c.json({
+      data: deps.maintenance?.getState() ?? {
+        enabled: false,
+        allowedCommands: [],
+      },
+    });
+  });
+
   app.post('/v1/beasts/runs', async (c) => {
     const body = validateBody(CreateRunBody, await parseJsonBody(c));
     let run;
@@ -213,6 +228,27 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
         ...(body.moduleConfig ? { moduleConfig: body.moduleConfig } : {}),
       });
     } catch (error) {
+      if (error instanceof MaintenanceModeError) {
+        if (body.trackedAgentId) {
+          try {
+            const trackedAgent = deps.agents.getAgent(body.trackedAgentId);
+            if (trackedAgent.status === 'initializing') {
+              deps.agents.updateAgent(body.trackedAgentId, { status: 'stopped' });
+              deps.agents.appendEvent(body.trackedAgentId, {
+                level: 'warning',
+                type: 'agent.dispatch.paused',
+                message: error.message,
+                payload: { maintenance: error.state },
+              });
+            }
+          } catch (cleanupError) {
+            if (!(cleanupError instanceof UnknownTrackedAgentError)) {
+              throw cleanupError;
+            }
+          }
+        }
+        throw new HttpError(423, 'MAINTENANCE_MODE_ACTIVE', error.message, { maintenance: error.state });
+      }
       if (error instanceof UnknownBeastDefinitionError) {
         throw new HttpError(
           404,

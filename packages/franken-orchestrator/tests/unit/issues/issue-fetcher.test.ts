@@ -27,6 +27,8 @@ const SAMPLE_GH_OUTPUT = JSON.stringify([
     labels: [{ name: 'bug' }, { name: 'priority:high' }],
     state: 'OPEN',
     url: 'https://github.com/org/repo/issues/42',
+    createdAt: '2026-07-01T00:00:00Z',
+    updatedAt: '2026-07-02T00:00:00Z',
   },
   {
     number: 43,
@@ -35,6 +37,8 @@ const SAMPLE_GH_OUTPUT = JSON.stringify([
     labels: [{ name: 'enhancement' }],
     state: 'OPEN',
     url: 'https://github.com/org/repo/issues/43',
+    createdAt: '2026-07-03T00:00:00Z',
+    updatedAt: '2026-07-04T00:00:00Z',
   },
 ]);
 
@@ -54,25 +58,238 @@ describe('IssueFetcher', () => {
 
       await expect(fetcher.fetch({})).resolves.toEqual([]);
 
-      expect(execFn).toHaveBeenCalledOnce();
+      expect(execFn).toHaveBeenCalled();
       const [file, args] = execFn.mock.calls[0]!;
       expect(file).toBe('gh');
       expect(args).toContain('issue');
       expect(args).toContain('list');
       expect(args).toContain('--json');
-      expect(args).toContain('number,title,body,labels,state,url');
+      expect(args).toContain('number,title,body,labels,state,url,createdAt,updatedAt');
     });
 
-    it('adds default --limit 30 when no limit specified', async () => {
+    it('adds a backlog-safe default --limit when no limit is specified', async () => {
       const execFn = vi.fn(makeExecFn(SAMPLE_GH_OUTPUT));
       const fetcher = new IssueFetcher(execFn);
 
       await fetcher.fetch({});
 
-      const [, args] = execFn.mock.calls[0]!;
-      const limitIdx = args.indexOf('--limit');
-      expect(limitIdx).toBeGreaterThan(-1);
-      expect(args[limitIdx + 1]).toBe('30');
+      const limits = execFn.mock.calls.map(([, args]) => args[args.indexOf('--limit') + 1]);
+      expect(limits).toContain('1000');
+    });
+
+    it('adds default urgent newest, urgent oldest, recent, and oldest searches so urgent issues cannot fall outside the aged window', async () => {
+      const execFn = vi.fn(makeExecFn(SAMPLE_GH_OUTPUT));
+      const fetcher = new IssueFetcher(execFn);
+
+      await fetcher.fetch({});
+
+      expect(execFn).toHaveBeenCalledTimes(4);
+      const searches = execFn.mock.calls.map(([, args]) => args[args.indexOf('--search') + 1]);
+      expect(searches[0]).toContain('label:critical');
+      expect(searches[0]).toContain('label:high');
+      expect(searches[0]).toContain('label:"priority:p0"');
+      expect(searches[0]).toContain('label:"priority:p1"');
+      expect(searches[0]).toContain('label:"priority:p2"');
+      expect(searches[0]).toContain('label:"priority:low"');
+      expect(searches[0]).toContain('sort:created-desc');
+      expect(searches[1]).toContain('label:critical');
+      expect(searches[1]).toContain('sort:created-asc');
+      expect(searches[2]).toBe('sort:created-desc');
+      expect(searches[3]).toBe('sort:created-asc');
+    });
+
+    it('fetches old medium and low priority pages before relying on unfiltered oldest backlog', async () => {
+      const execFn = vi.fn(makeExecFn(SAMPLE_GH_OUTPUT));
+      const fetcher = new IssueFetcher(execFn);
+
+      await fetcher.fetch({});
+
+      const oldestPrioritySearch = execFn.mock.calls[1]![1][execFn.mock.calls[1]![1].indexOf('--search') + 1];
+      expect(oldestPrioritySearch).toContain('label:medium');
+      expect(oldestPrioritySearch).toContain('label:low');
+      expect(oldestPrioritySearch).toContain('label:"priority:p2"');
+      expect(oldestPrioritySearch).toContain('label:"priority:p3"');
+      expect(oldestPrioritySearch).toContain('sort:created-asc');
+    });
+
+    it('deduplicates issues returned by the default supplemental fetch windows', async () => {
+      const duplicateOutput = JSON.stringify([
+        JSON.parse(SAMPLE_GH_OUTPUT)[0],
+      ]);
+      const execFn = vi.fn(makeExecFn(duplicateOutput));
+      const fetcher = new IssueFetcher(execFn);
+
+      const issues = await fetcher.fetch({});
+
+      expect(issues).toHaveLength(1);
+      expect(issues[0]!.number).toBe(42);
+    });
+
+    it('preserves oldest urgent issues ahead of non-urgent backlog truncation', async () => {
+      const makeIssues = (numbers: readonly number[], labels: readonly string[] = []) => JSON.stringify(
+        numbers.map((number) => ({
+          number,
+          title: `Issue ${number}`,
+          body: 'body',
+          labels: labels.map((name) => ({ name })),
+          state: 'OPEN',
+          url: `https://github.com/org/repo/issues/${number}`,
+        })),
+      );
+      const execFn = vi.fn<ExecFn>()
+        .mockImplementationOnce(makeExecFn(makeIssues([1], ['priority:high'])))
+        .mockImplementationOnce(makeExecFn(makeIssues([9999], ['priority:critical'])))
+        .mockImplementationOnce(makeExecFn(makeIssues(Array.from({ length: 200 }, (_, index) => 100 + index))))
+        .mockImplementationOnce(makeExecFn(makeIssues(Array.from({ length: 1000 }, (_, index) => 1000 + index))));
+      const fetcher = new IssueFetcher(execFn);
+
+      const issues = await fetcher.fetch({});
+
+      expect(issues).toHaveLength(1000);
+      expect(issues.map((issue) => issue.number)).toContain(9999);
+      expect(issues.findIndex((issue) => issue.number === 9999)).toBeLessThan(
+        issues.findIndex((issue) => issue.number === 100),
+      );
+    });
+
+    it('falls back to simple default issue pages when advanced search is unsupported', async () => {
+      const makeIssues = (numbers: readonly number[]) => JSON.stringify(
+        numbers.map((number) => ({
+          number,
+          title: `Issue ${number}`,
+          body: 'body',
+          labels: [],
+          state: 'OPEN',
+          url: `https://github.com/org/repo/issues/${number}`,
+        })),
+      );
+      const execFn = vi.fn<ExecFn>()
+        .mockImplementationOnce(makeFailingExecFn('advanced issue search is not supported on this GitHub host'))
+        .mockImplementationOnce(makeExecFn(makeIssues([2])))
+        .mockImplementationOnce(makeExecFn(makeIssues([1])));
+      const fetcher = new IssueFetcher(execFn);
+
+      const issues = await fetcher.fetch({});
+
+      expect(issues.map((issue) => issue.number)).toEqual([1, 2]);
+      expect(execFn).toHaveBeenCalledTimes(3);
+      const searches = execFn.mock.calls.map(([, args]) => args[args.indexOf('--search') + 1]);
+      expect(searches[0]).toContain('label:critical');
+      expect(searches[1]).toBe('sort:created-desc');
+      expect(searches[2]).toBe('sort:created-asc');
+    });
+
+    it('falls back to plain issue list when simple search sorting is unsupported', async () => {
+      const output = JSON.stringify([
+        { number: 3, title: 'Issue 3', body: 'body', labels: [], state: 'OPEN', url: 'https://github.com/org/repo/issues/3' },
+      ]);
+      const execFn = vi.fn<ExecFn>()
+        .mockImplementationOnce(makeFailingExecFn('advanced issue search is not supported on this GitHub host'))
+        .mockImplementationOnce(makeFailingExecFn('search is unsupported on this GitHub host'))
+        .mockImplementationOnce(makeExecFn(output));
+      const fetcher = new IssueFetcher(execFn);
+
+      const issues = await fetcher.fetch({});
+
+      expect(issues.map((issue) => issue.number)).toEqual([3]);
+      expect(execFn.mock.calls[2]![1]).not.toContain('--search');
+    });
+
+    it('keeps eligible issues ahead of gated critical issues before truncation', async () => {
+      const makeIssues = (numbers: readonly number[], labels: readonly string[]) => JSON.stringify(
+        numbers.map((number) => ({
+          number,
+          title: `Issue ${number}`,
+          body: 'body',
+          labels: labels.map((name) => ({ name })),
+          state: 'OPEN',
+          url: `https://github.com/org/repo/issues/${number}`,
+          createdAt: '2026-07-15T00:00:00Z',
+        })),
+      );
+      const execFn = vi.fn<ExecFn>()
+        .mockImplementationOnce(makeExecFn(makeIssues(Array.from({ length: 1000 }, (_, index) => 100 + index), ['critical', 'status:blocked'])))
+        .mockImplementationOnce(makeExecFn(makeIssues([])))
+        .mockImplementationOnce(makeExecFn(makeIssues([])))
+        .mockImplementationOnce(makeExecFn(makeIssues([9999], ['priority:low'])));
+      const fetcher = new IssueFetcher(execFn);
+
+      const issues = await fetcher.fetch({});
+
+      expect(issues[0]!.number).toBe(9999);
+    });
+
+    it('applies priority aging before default fetch truncation', async () => {
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-07-16T00:00:00Z'));
+      const makeIssues = (numbers: readonly number[], labels: readonly string[] = [], createdAt = '2026-07-15T00:00:00Z') => JSON.stringify(
+        numbers.map((number) => ({
+          number,
+          title: `Issue ${number}`,
+          body: 'body',
+          labels: labels.map((name) => ({ name })),
+          state: 'OPEN',
+          url: `https://github.com/org/repo/issues/${number}`,
+          createdAt,
+        })),
+      );
+      const execFn = vi.fn<ExecFn>()
+        .mockImplementationOnce(makeExecFn(makeIssues(Array.from({ length: 1000 }, (_, index) => 100 + index), ['priority:high'])))
+        .mockImplementationOnce(makeExecFn(makeIssues([])))
+        .mockImplementationOnce(makeExecFn(makeIssues([])))
+        .mockImplementationOnce(makeExecFn(makeIssues([9999], ['priority:low'], '2026-06-01T00:00:00Z')));
+      const fetcher = new IssueFetcher(execFn);
+
+      try {
+        const issues = await fetcher.fetch({});
+
+        expect(issues.map((issue) => issue.number)).toContain(9999);
+        expect(issues.findIndex((issue) => issue.number === 9999)).toBeLessThan(1000);
+      } finally {
+        nowSpy.mockRestore();
+      }
+    });
+
+    it('caps the merged default supplemental windows at the advertised default limit', async () => {
+      const makeIssues = (start: number, count: number) => JSON.stringify(
+        Array.from({ length: count }, (_, index) => ({
+          number: start + index,
+          title: `Issue ${start + index}`,
+          body: 'body',
+          labels: [],
+          state: 'OPEN',
+          url: `https://github.com/org/repo/issues/${start + index}`,
+        })),
+      );
+      const execFn = vi.fn<ExecFn>()
+        .mockImplementationOnce(makeExecFn(makeIssues(1, 1000)))
+        .mockImplementationOnce(makeExecFn(makeIssues(2001, 1000)))
+        .mockImplementationOnce(makeExecFn(makeIssues(3001, 200)))
+        .mockImplementationOnce(makeExecFn(makeIssues(4001, 1000)));
+      const fetcher = new IssueFetcher(execFn);
+
+      const issues = await fetcher.fetch({});
+
+      expect(issues).toHaveLength(1000);
+      expect(issues[0]!.number).toBe(1);
+      expect(issues.at(-1)!.number).toBe(1000);
+    });
+
+    it('parses heavily labeled default-sized payloads', async () => {
+      const output = JSON.stringify(Array.from({ length: 1000 }, (_, index) => ({
+        number: index + 1,
+        title: `Issue ${index + 1}`,
+        body: 'body',
+        labels: Array.from({ length: 20 }, (__, labelIndex) => ({ name: `label-${labelIndex}` })),
+        state: 'OPEN',
+        url: `https://github.com/org/repo/issues/${index + 1}`,
+      })));
+      const execFn = vi.fn(makeExecFn(output));
+      const fetcher = new IssueFetcher(execFn);
+
+      const issues = await fetcher.fetch({ limit: 1000 });
+
+      expect(issues).toHaveLength(1000);
+      expect(issues[0]!.labels).toHaveLength(20);
     });
 
     it('uses custom --limit when provided', async () => {
@@ -81,9 +298,9 @@ describe('IssueFetcher', () => {
 
       await fetcher.fetch({ limit: 50 });
 
-      const [, args] = execFn.mock.calls[0]!;
-      const limitIdx = args.indexOf('--limit');
-      expect(args[limitIdx + 1]).toBe('50');
+      const limits = execFn.mock.calls.map(([, args]) => args[args.indexOf('--limit') + 1]);
+      expect(limits).toContain('50');
+      expect(limits.at(-1)).toBe('50');
     });
 
     it('adds each label as separate --label flag', async () => {
@@ -173,6 +390,8 @@ describe('IssueFetcher', () => {
         labels: ['bug', 'priority:high'],
         state: 'OPEN',
         url: 'https://github.com/org/repo/issues/42',
+        createdAt: '2026-07-01T00:00:00Z',
+        updatedAt: '2026-07-02T00:00:00Z',
       });
       expect(issues[1]!.labels).toEqual(['enhancement']);
     });
