@@ -458,6 +458,66 @@ describe('extractPostTaskLessonCandidates', () => {
       }),
     );
   });
+
+  it('keeps please-use final-summary corrections as preferences', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-please-use-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['Please use British English in final summaries'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'preference',
+        suggestedDestination: 'memory',
+      }),
+    );
+  });
+
+  it('discards task-state before preference wording', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-user-wants-pr-state',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['User wants PR #123 merged'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        privacyFilter: expect.objectContaining({ action: 'reject' }),
+      }),
+    );
+  });
+
+  it('discards raw tool failures without workaround verbs', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-raw-tool-failure',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      toolFailures: ['gh pr checks should not have returned 502'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        privacyFilter: expect.objectContaining({ action: 'reject' }),
+      }),
+    );
+  });
+
+  it('discards repo-named issue follow-up state', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-repo-issue-follow-up',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Frankenbeast issue #123 requires follow-up'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        privacyFilter: expect.objectContaining({ action: 'reject' }),
+      }),
+    );
+  });
 });
 
 describe('LessonRecorder', () => {

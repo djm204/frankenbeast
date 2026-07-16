@@ -1119,7 +1119,7 @@ export function extractPostTaskLessonCandidates(
   }
   for (const failure of input.toolFailures ?? []) {
     addCandidate('tool-failure', failure, undefined, {
-      forceDiscard: !hasExplicitPostTaskLessonSignal(failure),
+      forceDiscard: !hasReusableToolFailureSignal(failure),
     });
   }
   if (input.summary) {
@@ -1207,7 +1207,7 @@ function isRawUserPreferenceCorrection(text: string): boolean {
     return true;
   }
   if (
-    /^(?:please\s+)?(?:keep|avoid|do\s+not|don't|never|prefer)\b/i.test(
+    /^(?:please\s+)?(?:keep|avoid|do\s+not|don't|never|prefer|use)\b/i.test(
       text,
     ) &&
     /\b(?:include|mention|expose|save|record|persist|show|share|summar(?:y|ies|ize)|final)\b/i.test(
@@ -1225,8 +1225,8 @@ function isRawUserPreferenceCorrection(text: string): boolean {
 }
 
 function hasExplicitPostTaskLessonSignal(text: string): boolean {
-  if (PREFERENCE_PATTERNS.some((pattern) => pattern.test(text))) return true;
   if (isOneOffPostTaskProgress(text)) return false;
+  if (PREFERENCE_PATTERNS.some((pattern) => pattern.test(text))) return true;
   if (ENVIRONMENT_FACT_PATTERNS.some((pattern) => pattern.test(text))) {
     return true;
   }
@@ -1243,8 +1243,20 @@ function hasExplicitPostTaskLessonSignal(text: string): boolean {
   );
 }
 
+function hasReusableToolFailureSignal(text: string): boolean {
+  return /\b(?:when|if)\b.{0,160}\b(?:run|check|use|retry|fallback|workaround)\b|\b(?:run|check|use|retry|fallback|workaround)\b.{0,160}\b(?:when|if|before|instead|giving\s+up)\b/i.test(
+    text,
+  );
+}
+
 function isOneOffPostTaskProgress(text: string): boolean {
   if (/^(?:updated|implemented|fixed|added|changed|refactored|wrote|created|removed|completed)\b/i.test(text)) {
+    return true;
+  }
+  if (
+    ENVIRONMENT_FACT_PATTERNS.some((pattern) => pattern.test(text)) &&
+    /\b(?:pr|pull\s+request|issue|ticket|task)\s*#?\d+\b/i.test(text)
+  ) {
     return true;
   }
   return (
