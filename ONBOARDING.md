@@ -117,6 +117,10 @@ Read each badge as `[onboarding:<current>/<total>:<stage>] <state> - <detail>`. 
 
 Read the [repository ownership manifest](docs/onboarding/repository-ownership.md) before assigning repository-wide or cross-package work. It maps current package and documentation surfaces to primary owners, escalation owners, verification commands, and PM/worker handoff notes so agents do not guess ownership from path names alone.
 
+## PM-swarm runtime glossary
+
+Read the [PM-swarm runtime glossary](docs/onboarding/pm-swarm-runtime-glossary.md) before interpreting PM-swarm Kanban comments, liveness reports, doctor treatment notes, or issue-worker handoffs. It defines the runtime vocabulary used to decode liveness, refill, Codex, approval-cop, and worker handoff terms without creating duplicate branches, worktrees, or PRs.
+
 ## Architecture reading path
 
 Use this path when you are new to Frankenbeast or when an agent handoff says "read the architecture docs first." It is intentionally ordered from current implementation to deeper historical context.
