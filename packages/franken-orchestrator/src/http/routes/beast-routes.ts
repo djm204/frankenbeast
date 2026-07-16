@@ -13,6 +13,7 @@ import {
 } from '../../beasts/services/beast-interview-service.js';
 import { BeastRunService, UnknownBeastRunError } from '../../beasts/services/beast-run-service.js';
 import { CapacityReservationError } from '../../beasts/services/capacity-reservation-policy.js';
+import { MaintenanceModeError } from '../../beasts/services/maintenance-mode-service.js';
 import type { AgentService } from '../../beasts/services/agent-service.js';
 import type { BeastEventBus } from '../../beasts/events/beast-event-bus.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
@@ -213,6 +214,9 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
         ...(body.moduleConfig ? { moduleConfig: body.moduleConfig } : {}),
       });
     } catch (error) {
+      if (error instanceof MaintenanceModeError) {
+        throw new HttpError(423, 'MAINTENANCE_MODE_ACTIVE', error.message, { maintenance: error.state });
+      }
       if (error instanceof UnknownBeastDefinitionError) {
         throw new HttpError(
           404,

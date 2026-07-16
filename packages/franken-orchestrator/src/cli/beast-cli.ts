@@ -6,6 +6,7 @@ import { collectBeastConfig } from './beast-prompts.js';
 import type { ProjectPaths } from './project-root.js';
 import { createBeastControlClient } from './beast-control-client.js';
 import type { BeastExecutionMode, BeastRun, BeastRunAttempt } from '../beasts/types.js';
+import type { MaintenanceModeState } from '../beasts/services/maintenance-mode-service.js';
 import { spawnSync } from 'node:child_process';
 
 type BeastControlClient = Omit<ReturnType<typeof createBeastControlClient>, 'dispose'> & {
@@ -58,7 +59,7 @@ function pickContainerMetadata(metadata: Readonly<Record<string, unknown>> | und
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
-function statusPayload(run: BeastRun, attempts: readonly BeastRunAttempt[]) {
+function statusPayload(run: BeastRun, attempts: readonly BeastRunAttempt[], maintenance?: MaintenanceModeState) {
   const currentAttempt = latestAttempt(run, attempts);
   const containerMetadata = run.executionMode === 'container'
     ? pickContainerMetadata(currentAttempt?.executorMetadata)
@@ -69,7 +70,14 @@ function statusPayload(run: BeastRun, attempts: readonly BeastRunAttempt[]) {
     ...(containerMetadata
       ? { container: containerMetadata }
       : {}),
+    ...(maintenance ? { maintenance } : {}),
   };
+}
+
+function maintenanceReason(values: readonly string[] | undefined): string | undefined {
+  const entry = values?.find((value) => value.startsWith('reason='));
+  const reason = entry?.slice('reason='.length).trim();
+  return reason ? reason : undefined;
 }
 
 function containerLogHeader(run: BeastRun, attempts: readonly BeastRunAttempt[]): string[] {
@@ -207,7 +215,7 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
           throw new UnknownBeastRunError(args.beastTarget);
         }
         const attempts = services.runs.listAttempts(args.beastTarget);
-        print(JSON.stringify(statusPayload(run, attempts), null, 2));
+        print(JSON.stringify(statusPayload(run, attempts, services.maintenance.getState()), null, 2));
         return;
       }
       case 'logs': {
@@ -218,6 +226,22 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
         const header = run ? containerLogHeader(run, services.runs.listAttempts(args.beastTarget)) : [];
         const logs = await services.runs.readLogs(args.beastTarget);
         print([...header, ...logs].join('\n'));
+        return;
+      }
+      case 'maintenance': {
+        const action = args.beastTarget ?? 'status';
+        if (action === 'on') {
+          print(JSON.stringify(services.maintenance.activate({ reason: maintenanceReason(args.networkSet) }), null, 2));
+          return;
+        }
+        if (action === 'off') {
+          print(JSON.stringify(services.maintenance.deactivate(), null, 2));
+          return;
+        }
+        if (action !== 'status') {
+          throw new Error(`Unknown maintenance action: ${action}. Valid: status, on, off`);
+        }
+        print(JSON.stringify(services.maintenance.getState(), null, 2));
         return;
       }
       case 'stop': {

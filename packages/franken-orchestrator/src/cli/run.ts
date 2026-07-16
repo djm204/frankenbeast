@@ -60,6 +60,7 @@ import type { ISecretStore } from '../network/secret-store.js';
 import { resolveSecurityConfig, type SecurityConfig } from '../middleware/security-profiles.js';
 import { startBeastDaemon } from '../http/beast-daemon-server.js';
 import { createBeastServices } from '../beasts/create-beast-services.js';
+import { MaintenanceModeService } from '../beasts/services/maintenance-mode-service.js';
 import { TransportSecurityService } from '../http/security/transport-security.js';
 import { CommsConfigSchema, type CommsConfig } from '../comms/config/comms-config.js';
 import { assertLocalPlaintextOrSecureHttpUrl, localPlaintextOrSecureEndpoint } from '../network/network-url.js';
@@ -1349,6 +1350,7 @@ async function runChatCommandIfRequested(
               skillManager,
               getSecurityConfig: () => resolveConfigSecurity(mutableConfig),
               getProviders: () => buildDashboardProviderSnapshot(mutableConfig, providerRegistry, [resolveSelectedProvider(args, mutableConfig), ...(args.providers ?? [])]),
+              getMaintenanceMode: () => (localBeastServices?.maintenance ?? MaintenanceModeService.forProjectRoot(root)).getState(),
             },
           }
         : {}),

@@ -10,6 +10,7 @@ import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-bea
 import { AgentService } from '../../../src/beasts/services/agent-service.js';
 import { BeastEventBus } from '../../../src/beasts/events/beast-event-bus.js';
 import { CapacityReservationPolicy } from '../../../src/beasts/services/capacity-reservation-policy.js';
+import { MaintenanceModeError, MaintenanceModeService } from '../../../src/beasts/services/maintenance-mode-service.js';
 
 describe('BeastDispatchService', () => {
   let workDir: string | undefined;
@@ -18,6 +19,42 @@ describe('BeastDispatchService', () => {
     if (workDir) {
       await rm(workDir, { recursive: true, force: true });
     }
+  });
+
+  it('blocks new dispatches while maintenance mode is active', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const maintenance = new MaintenanceModeService(join(workDir, 'maintenance-mode.json'));
+    maintenance.activate({ reason: 'database migration', startedAt: '2026-07-16T10:00:00.000Z' });
+    const executors = {
+      process: {
+        start: vi.fn(async () => repo.createAttempt('placeholder', { status: 'running' })),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+      container: {
+        start: vi.fn(),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs, { maintenance });
+
+    await expect(dispatch.createRun({
+      definitionId: 'martin-loop',
+      config: {
+        provider: 'claude',
+        objective: 'Implement the dispatch panel',
+        chunkDirectory: 'docs/chunks',
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'pfk',
+      executionMode: 'process',
+    })).rejects.toThrow(MaintenanceModeError);
+    expect(executors.process.start).not.toHaveBeenCalled();
+    expect(repo.listRuns()).toHaveLength(0);
   });
 
   it('creates a run with an immutable config snapshot and records metrics', async () => {

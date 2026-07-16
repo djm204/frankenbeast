@@ -15,6 +15,7 @@ import { BeastInterviewService } from './services/beast-interview-service.js';
 import { AgentService } from './services/agent-service.js';
 import { CapacityReservationPolicy, type CapacityReservationRule } from './services/capacity-reservation-policy.js';
 import { BeastRunService } from './services/beast-run-service.js';
+import { MaintenanceModeService } from './services/maintenance-mode-service.js';
 import { PrometheusBeastMetrics } from './telemetry/prometheus-beast-metrics.js';
 
 export interface BeastServicePaths {
@@ -30,6 +31,7 @@ export interface BeastServiceBundle {
   runs: BeastRunService;
   interviews: BeastInterviewService;
   metrics: PrometheusBeastMetrics;
+  maintenance: MaintenanceModeService;
   eventBus: BeastEventBus;
   ticketStore: SseConnectionTicketStore;
   dispose(): void;
@@ -45,6 +47,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   const eventBus = new BeastEventBus();
   const ticketStore = new SseConnectionTicketStore();
   const capacityPolicy = createCapacityReservationPolicyFromEnv();
+  const maintenance = MaintenanceModeService.forProjectRoot(projectRoot);
 
   cleanupAbandonedBeastWorktrees({
     agents: repository.listTrackedAgents(),
@@ -90,10 +93,11 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   return {
     agents: new AgentService(repository, undefined, { capacityPolicy }),
     catalog,
-    dispatch: new BeastDispatchService(repository, catalog, executors, metrics, logStore, { eventBus, capacityPolicy }),
+    dispatch: new BeastDispatchService(repository, catalog, executors, metrics, logStore, { eventBus, capacityPolicy, maintenance }),
     runs: runService,
     interviews: new BeastInterviewService(repository, catalog),
     metrics,
+    maintenance,
     eventBus,
     ticketStore,
     dispose: () => {

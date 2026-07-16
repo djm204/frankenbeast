@@ -31,6 +31,7 @@ export function DashboardPage({ client }: DashboardPageProps) {
     security,
     providers,
     availability,
+    maintenance,
     loading,
     setSnapshot,
     setSkillEnabled,
@@ -115,6 +116,7 @@ export function DashboardPage({ client }: DashboardPageProps) {
       security: currentSnapshot.security ?? confirmedSnapshot.security,
       providers: currentSnapshot.providers,
       availability: currentSnapshot.availability ?? undefined,
+      maintenance: currentSnapshot.maintenance ?? undefined,
     });
   }, [setSnapshot]);
 
@@ -127,6 +129,7 @@ export function DashboardPage({ client }: DashboardPageProps) {
       security: confirmedSecurity,
       providers: currentSnapshot.providers,
       availability: currentSnapshot.availability ?? undefined,
+      maintenance: currentSnapshot.maintenance ?? undefined,
     });
   }, [setSnapshot]);
 
@@ -319,6 +322,24 @@ export function DashboardPage({ client }: DashboardPageProps) {
   return (
     <div className="dashboard-page">
       <h2>Dashboard</h2>
+      {maintenance?.enabled && (
+        <section className="maintenance-banner" role="status" aria-live="polite">
+          <div>
+            <strong>Maintenance mode is active</strong>
+            <p>{maintenance.reason ?? 'New Beast dispatch is paused while operators perform maintenance.'}</p>
+          </div>
+          <dl>
+            {maintenance.startedAt && (
+              <>
+                <dt>Started</dt>
+                <dd>{maintenance.startedAt}</dd>
+              </>
+            )}
+            <dt>Allowed commands</dt>
+            <dd>{maintenance.allowedCommands.join(', ')}</dd>
+          </dl>
+        </section>
+      )}
       {(loadError || Object.keys(skillErrors).length > 0 || securityError) && (
         <section className="dashboard-alerts" aria-label="Dashboard errors" aria-live="assertive">
           {loadError && (
