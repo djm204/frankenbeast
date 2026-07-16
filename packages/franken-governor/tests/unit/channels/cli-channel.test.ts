@@ -2,7 +2,10 @@ import { describe, it, expect, vi } from 'vitest';
 import { CliChannel } from '../../../src/channels/cli-channel.js';
 import type { ApprovalRequest } from '../../../src/core/types.js';
 import type { ReadlineAdapter } from '../../../src/channels/cli-channel.js';
-import { approvalPromptBoundary } from '../../../src/gateway/approval-prompt-markers.js';
+import {
+  approvalPromptBoundary,
+  attachTrustedApprovalPromptNotice,
+} from '../../../src/gateway/approval-prompt-markers.js';
 
 function makeRequest(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
   return {
@@ -106,15 +109,15 @@ describe('CliChannel', () => {
     const readline = makeFakeReadline(['a']);
     const channel = new CliChannel({ readline, operatorName: 'dev' });
 
-    await channel.requestApproval(makeRequest({
-      summary: 'Deploy v2.0',
-      metadata: { approvalAnomalyNotice: 'Token required: ACK-APPROVAL-ANOMALY-req-001' },
-    }));
+    await channel.requestApproval(attachTrustedApprovalPromptNotice(
+      makeRequest({ summary: 'Deploy v2.0' }),
+      'Token required: ACK-APPROVAL-ANOMALY-cmVxLTAwMQ',
+    ));
 
     const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
     expect(prompt).toContain('Summary (untrusted):\n| Deploy v2.0');
-    expect(prompt).toContain('SECURITY NOTICE (trusted):\nToken required: ACK-APPROVAL-ANOMALY-req-001');
-    expect(prompt).not.toContain('| Token required: ACK-APPROVAL-ANOMALY-req-001');
+    expect(prompt).toContain('SECURITY NOTICE (trusted):\nToken required: ACK-APPROVAL-ANOMALY-cmVxLTAwMQ');
+    expect(prompt).not.toContain('| Token required: ACK-APPROVAL-ANOMALY-cmVxLTAwMQ');
   });
 
   it('quotes model-controlled text so forged marker lines stay visibly untrusted', async () => {

@@ -122,7 +122,7 @@ describe('ApprovalAnomalyDetector', () => {
     const decision = new ApprovalAnomalyDetector().record(request);
 
     expect(decision.acknowledgementToken).toBe(formatApprovalAnomalyAcknowledgementToken(decision.evidence));
-    expect(decision.acknowledgementToken).toBe('ACK-APPROVAL-ANOMALY-req-ack');
+    expect(decision.acknowledgementToken).toBe('ACK-APPROVAL-ANOMALY-cmVxLWFjaw');
   });
 
   it('ignores caller-supplied acknowledgement metadata and only accepts response feedback', () => {
@@ -142,7 +142,7 @@ describe('ApprovalAnomalyDetector', () => {
       decision: 'APPROVE',
       respondedBy: 'operator',
       respondedAt: new Date('2026-01-01T00:00:05Z'),
-      feedback: 'reviewed ACK-APPROVAL-ANOMALY-req-ack',
+      feedback: 'reviewed ACK-APPROVAL-ANOMALY-cmVxLWFjaw',
     }, decision)).toBe(true);
   });
 
@@ -159,14 +159,15 @@ describe('ApprovalAnomalyDetector', () => {
     expect(decision.findings.map((finding) => finding.ruleId)).toContain('approval-volume');
   });
 
-  it('honors explicit non-destructive metadata before command-class defaults', () => {
+  it('does not let untrusted non-destructive metadata suppress high-risk command classes', () => {
     const detector = new ApprovalAnomalyDetector({ maxRepeatedDestructiveCommands: 2 });
     const metadata = {
       workerId: 'worker-1',
       workdir: '/repo/a',
-      commandClass: 'github-mutation',
-      command: 'gh issue comment 1738 --body progress',
+      commandClass: 'git-remote-write',
+      command: 'git push --force-with-lease',
       destructive: false,
+      readOnly: true,
     };
 
     detector.record(makeRequest('req-1', { metadata }));
@@ -175,7 +176,7 @@ describe('ApprovalAnomalyDetector', () => {
       metadata,
     }));
 
-    expect(decision.findings.map((finding) => finding.ruleId)).not.toContain('repeated-destructive-command');
+    expect(decision.findings.map((finding) => finding.ruleId)).toContain('repeated-destructive-command');
   });
 
   it('scans command metadata when destructive flags and command class are omitted', () => {
@@ -195,23 +196,23 @@ describe('ApprovalAnomalyDetector', () => {
     expect(decision.findings.map((finding) => finding.ruleId)).toContain('repeated-destructive-command');
   });
 
-  it('matches acknowledgement tokens exactly rather than by prefix', () => {
-    const request = makeRequest('req-12');
+  it('matches acknowledgement tokens exactly and supports request-id delimiters', () => {
+    const request = makeRequest('job:123');
     const decision = new ApprovalAnomalyDetector().record(request);
 
     expect(hasApprovalAnomalyAcknowledgement(request, {
-      requestId: 'req-12',
+      requestId: 'job:123',
       decision: 'APPROVE',
       respondedBy: 'operator',
       respondedAt: new Date('2026-01-01T00:00:05Z'),
-      feedback: 'ACK-APPROVAL-ANOMALY-req-123',
+      feedback: 'ACK-APPROVAL-ANOMALY-am9iOjEyMw-extra',
     }, { ...decision, flagged: true })).toBe(false);
     expect(hasApprovalAnomalyAcknowledgement(request, {
-      requestId: 'req-12',
+      requestId: 'job:123',
       decision: 'APPROVE',
       respondedBy: 'operator',
       respondedAt: new Date('2026-01-01T00:00:05Z'),
-      feedback: 'ACK-APPROVAL-ANOMALY-req-12',
+      feedback: 'reviewed ACK-APPROVAL-ANOMALY-am9iOjEyMw, proceed',
     }, { ...decision, flagged: true })).toBe(true);
   });
 

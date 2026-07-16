@@ -14,6 +14,7 @@ import {
   hasApprovalAnomalyAcknowledgement,
   type ApprovalAnomalyDecision,
 } from '../security/approval-anomaly-detector.js';
+import { attachTrustedApprovalPromptNotice } from './approval-prompt-markers.js';
 import {
   ApprovalTimeoutError,
   SignatureVerificationError,
@@ -146,11 +147,17 @@ export class ApprovalGateway {
     anomalyDecision: ApprovalAnomalyDecision | undefined,
   ): ApprovalRequest {
     if (!anomalyDecision?.flagged) {
-      return request;
+      if (!request.metadata || !('approvalAnomalyNotice' in request.metadata) && !('approvalAnomaly' in request.metadata)) {
+        return request;
+      }
+      const metadata = { ...request.metadata };
+      delete metadata.approvalAnomalyNotice;
+      delete metadata.approvalAnomaly;
+      return { ...request, metadata };
     }
 
     const anomalySummary = formatApprovalAnomalySummary(anomalyDecision);
-    return {
+    const decoratedRequest = {
       ...request,
       metadata: {
         ...(request.metadata ?? {}),
@@ -162,6 +169,7 @@ export class ApprovalGateway {
         },
       },
     };
+    return attachTrustedApprovalPromptNotice(decoratedRequest, anomalySummary);
   }
 
   private requiresAnomalyAcknowledgement(

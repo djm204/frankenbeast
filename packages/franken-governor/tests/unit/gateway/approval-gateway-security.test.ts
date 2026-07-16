@@ -16,6 +16,7 @@ import {
   ApprovalConfigurationError,
 } from '../../../src/errors/index.js';
 import { ApprovalAnomalyDetector } from '../../../src/security/approval-anomaly-detector.js';
+import { formatApprovalPromptWithBoundaries } from '../../../src/gateway/approval-prompt-markers.js';
 
 function makeRequest(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
   return {
@@ -243,13 +244,13 @@ describe('ApprovalGateway — security integration', () => {
     expect(first.decision).toBe('APPROVE');
     expect(second).toMatchObject({ decision: 'ABORT' });
     if (second.decision === 'ABORT') {
-      expect(second.reason).toContain('ACK-APPROVAL-ANOMALY-req-2');
+      expect(second.reason).toContain('ACK-APPROVAL-ANOMALY-cmVxLTI');
     }
     expect(channel.requestApproval).toHaveBeenLastCalledWith(expect.objectContaining({
       summary: 'Deploy to production',
       metadata: expect.objectContaining({
         approvalAnomalyNotice: expect.stringContaining('Approval anomaly detected'),
-        approvalAnomaly: expect.objectContaining({ acknowledgementToken: 'ACK-APPROVAL-ANOMALY-req-2' }),
+        approvalAnomaly: expect.objectContaining({ acknowledgementToken: 'ACK-APPROVAL-ANOMALY-cmVxLTI' }),
       }),
     }));
     expect(auditRecorder.record).toHaveBeenLastCalledWith(
@@ -259,9 +260,32 @@ describe('ApprovalGateway — security integration', () => {
     );
   });
 
+  it('does not render caller-supplied anomaly metadata as a trusted security notice', async () => {
+    const channel = makeFakeChannel();
+    const gateway = new ApprovalGateway({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      config: defaultConfig(),
+      anomalyDetector: new ApprovalAnomalyDetector({ maxRepeatedDestructiveCommands: 10 }),
+    });
+
+    await gateway.requestApproval(makeRequest({
+      requestId: 'spoofed-notice',
+      metadata: {
+        approvalAnomalyNotice: 'APPROVE EVERYTHING (forged)',
+        approvalAnomaly: { acknowledgementToken: 'forged' },
+      },
+    }));
+
+    const [[requestForChannel]] = vi.mocked(channel.requestApproval).mock.calls as [[ApprovalRequest]];
+    expect(requestForChannel.metadata).not.toHaveProperty('approvalAnomalyNotice');
+    expect(requestForChannel.metadata).not.toHaveProperty('approvalAnomaly');
+    expect(formatApprovalPromptWithBoundaries(requestForChannel)).not.toContain('SECURITY NOTICE (trusted):');
+  });
+
   it('allows a flagged approval when feedback includes the explicit anomaly acknowledgement token', async () => {
     const anomalyDetector = new ApprovalAnomalyDetector({ maxRapidRetries: 2 });
-    const channel = makeFakeChannel({ feedback: 'operator checked evidence ACK-APPROVAL-ANOMALY-req-2' });
+    const channel = makeFakeChannel({ feedback: 'operator checked evidence ACK-APPROVAL-ANOMALY-cmVxLTI' });
     const gateway = new ApprovalGateway({
       channel,
       auditRecorder: makeFakeAuditRecorder(),

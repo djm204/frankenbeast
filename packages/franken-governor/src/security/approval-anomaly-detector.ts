@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import type { ApprovalRequest, ApprovalResponse } from '../core/types.js';
 import type { HighRiskActionClass } from './high-risk-action-policy.js';
 import { isHighRiskActionClass } from './high-risk-action-policy.js';
@@ -74,7 +75,7 @@ const DESTRUCTIVE_COMMAND_CLASSES = new Set<HighRiskActionClass>([
   'shell-process-control',
 ]);
 
-const ACKNOWLEDGEMENT_TOKEN_BOUNDARY = /[\s,;:|()[\]{}<>"'`]+/u;
+const ACKNOWLEDGEMENT_TOKEN_EDGE = '[\\s,;|()\\[\\]{}<>"\'`]';
 
 export class ApprovalAnomalyDetector {
   private readonly config: Required<ApprovalAnomalyDetectorConfig>;
@@ -257,7 +258,8 @@ export function extractApprovalTrafficEvidence(
 }
 
 export function formatApprovalAnomalyAcknowledgementToken(evidence: ApprovalTrafficEvidence): string {
-  return `ACK-APPROVAL-ANOMALY-${evidence.requestId}`;
+  const encodedRequestId = Buffer.from(evidence.requestId, 'utf8').toString('base64url') || 'empty';
+  return `ACK-APPROVAL-ANOMALY-${encodedRequestId}`;
 }
 
 export function formatApprovalAnomalySummary(decision: ApprovalAnomalyDecision): string {
@@ -276,9 +278,10 @@ export function hasApprovalAnomalyAcknowledgement(
   response: ApprovalResponse,
   decision: ApprovalAnomalyDecision,
 ): boolean {
-  return response.feedback
-    ?.split(ACKNOWLEDGEMENT_TOKEN_BOUNDARY)
-    .some((token) => token === decision.acknowledgementToken) === true;
+  if (!response.feedback) return false;
+  const escapedToken = decision.acknowledgementToken.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  return new RegExp(`(^|${ACKNOWLEDGEMENT_TOKEN_EDGE})${escapedToken}($|${ACKNOWLEDGEMENT_TOKEN_EDGE})`, 'u')
+    .test(response.feedback);
 }
 
 function isWithinLookbackWindow(
@@ -297,18 +300,19 @@ function readMetadataString(metadata: Record<string, unknown>, key: string): str
 
 function isDestructiveApprovalRequest(request: ApprovalRequest, commandClass: string): boolean {
   const metadata = request.metadata ?? {};
-  if (metadata.destructive === false || metadata.readonly === true || metadata.readOnly === true) {
-    return false;
-  }
   if (metadata.destructive === true || metadata.force === true) {
     return true;
   }
   if (isHighRiskActionClass(commandClass) && DESTRUCTIVE_COMMAND_CLASSES.has(commandClass)) {
     return true;
   }
-  return /\b(force-push|--force-with-lease|rm\s+-rf|delete|destroy|drop|kill|terminate)\b/iu.test(
+  const destructiveText = /(^|\s)(force-push|--force-with-lease|rm\s+-rf|delete|destroy|drop|kill|terminate)(\s|$)/iu.test(
     `${request.summary}\n${request.planDiff ?? ''}\n${readMetadataString(metadata, 'command') ?? ''}\n${readMetadataString(metadata, 'commandText') ?? ''}`,
   );
+  if (destructiveText) {
+    return true;
+  }
+  return false;
 }
 
 function fingerprintCommand(command: string): string {
