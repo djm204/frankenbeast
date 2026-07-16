@@ -435,7 +435,7 @@ function parseSnapshotFile(raw: string, source: string): ReadonlyArray<{ parsed:
       try {
         records.push({ parsed: JSON.parse(line) as unknown, sourceSuffix: `:${index + 1}` });
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = errorMessageForOutput(error);
         throw new Error(`Unable to read state snapshot JSONL ${redactedSource} line ${index + 1}: ${message}`);
       }
     });
@@ -445,7 +445,7 @@ function parseSnapshotFile(raw: string, source: string): ReadonlyArray<{ parsed:
   try {
     return [{ parsed: JSON.parse(raw) as unknown, sourceSuffix: '' }];
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessageForOutput(error);
     throw new Error(`Unable to read state snapshot JSON ${redactedSource}: ${message}`);
   }
 }
@@ -462,11 +462,21 @@ async function loadSnapshotDirectory(directory: string): Promise<MutableSubsyste
   const files = await collectSnapshotFiles(directory);
   for (const file of files.sort()) {
     const source = relative(directory, file) || basename(file);
-    const fileStat = await stat(file);
+    let fileStat;
+    try {
+      fileStat = await stat(file);
+    } catch (error) {
+      throw new Error(`Unable to read state snapshot file ${sourceForError(source)}: ${errorMessageForOutput(error)}`);
+    }
     if (fileStat.size > MAX_JSON_FILE_BYTES) {
       throw new Error(`State snapshot file is too large: ${sourceForError(source)}`);
     }
-    const raw = await readFile(file, 'utf8');
+    let raw;
+    try {
+      raw = await readFile(file, 'utf8');
+    } catch (error) {
+      throw new Error(`Unable to read state snapshot file ${sourceForError(source)}: ${errorMessageForOutput(error)}`);
+    }
     if (Buffer.byteLength(raw, 'utf8') > MAX_JSON_FILE_BYTES) {
       throw new Error(`State snapshot file is too large: ${sourceForError(source)}`);
     }
@@ -482,6 +492,13 @@ function changedFields(before: unknown, after: unknown): readonly string[] {
   if (!isRecord(before) || !isRecord(after)) return [];
   const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
   return [...keys].sort().filter((key) => stableStringify(before[key]) !== stableStringify(after[key]));
+}
+
+function redactFieldNameForOutput(subsystem: StateSnapshotDiffSubsystem, field: string): string {
+  if (subsystem === 'approvals' && /^(?:id|approval[-_]?id|token|tokens|secret|password|credential|bearer|refresh|access|api[-_]?key)$/iu.test(field)) {
+    return '<redacted>';
+  }
+  return maskOpaqueSecretLiterals(redactLogData(field) as string);
 }
 
 function diffSubsystem(
@@ -503,7 +520,7 @@ function diffSubsystem(
         id: redactIdForOutput(subsystem, id),
         before: redactForOutput(beforeRecord.value),
         after: redactForOutput(afterRecord.value),
-        changedFields: changedFields(beforeRecord.compareValue, afterRecord.compareValue),
+        changedFields: changedFields(beforeRecord.compareValue, afterRecord.compareValue).map((field) => redactFieldNameForOutput(subsystem, field)),
         beforeSource: redactSourceForOutput(subsystem, beforeRecord.source),
         afterSource: redactSourceForOutput(subsystem, afterRecord.source),
       });
@@ -557,8 +574,8 @@ export async function diffStateSnapshotDirectories(beforePath: string, afterPath
   const summary = summarize(diffs);
   return {
     command: 'dr snapshot-diff',
-    beforePath,
-    afterPath,
+    beforePath: sourceForError(beforePath),
+    afterPath: sourceForError(afterPath),
     summary,
     textSummary: renderTextSummary(summary),
     diffs,

@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -527,6 +527,31 @@ describe('state snapshot diff', () => {
       const message = error instanceof Error ? error.message : String(error);
       expect(message).not.toContain('token=PathSecret123');
       expect(message).toContain('token=<redacted>');
+    }
+  });
+
+
+  it('redacts sensitive changed field names and successful root paths', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'franken-dr-token=PathSecret123-'));
+    const before = join(root, 'before');
+    const after = join(root, 'after');
+
+    try {
+      await mkdir(before, { recursive: true });
+      await mkdir(after, { recursive: true });
+      await writeFile(join(before, 'memory.json'), JSON.stringify({ 'user@example.com': 'old' }), 'utf8');
+      await writeFile(join(after, 'memory.json'), JSON.stringify({ 'user@example.com': 'new' }), 'utf8');
+
+      const report = await diffStateSnapshotDirectories(before, after);
+      const serialized = JSON.stringify(report);
+      const memoryDiff = report.diffs.find((diff) => diff.subsystem === 'memory');
+
+      expect(serialized).not.toContain('token=PathSecret123');
+      expect(serialized).toContain('token=<redacted>');
+      expect(memoryDiff?.changed[0]?.changedFields).toEqual(['<redacted-email>']);
+      expect(serialized).not.toContain('user@example.com');
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 
