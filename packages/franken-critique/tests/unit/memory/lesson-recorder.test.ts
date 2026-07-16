@@ -3505,6 +3505,17 @@ describe('LessonRecorder', () => {
         'npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts',
       contradictions: [],
     });
+    expect(lesson.proposedLessonCritique).toMatchObject({
+      verdict: 'needs-edit',
+      manualReviewRequired: true,
+      findings: expect.arrayContaining([
+        expect.objectContaining({
+          checklistItem: 'conflict',
+          verdict: 'needs-edit',
+          evidenceRefs: ['contradiction:not_checked'],
+        }),
+      ]),
+    });
   });
 
   it('attaches a clear contradiction report when comparable prior lessons do not conflict', async () => {
@@ -3541,6 +3552,73 @@ describe('LessonRecorder', () => {
         'npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts',
       contradictions: [],
     });
+  });
+
+  it('attaches duplicate critique findings from prior lessons returned by memory search', async () => {
+    const port = createMockMemoryPort();
+    port.searchLessons = vi.fn().mockResolvedValue([
+      createLesson({
+        failureDescription: 'Cache guidance allowed unaudited stale responses',
+        correctionApplied: 'Require cache verification and provenance review before reuse',
+      }),
+    ]);
+    const recorder = new LessonRecorder(port);
+
+    await recorder.record(
+      {
+        verdict: 'pass',
+        iterations: [
+          createIteration(0, 'fail', 'factuality', [
+            { message: 'Cache guidance allowed unaudited stale responses', severity: 'warning' },
+          ]),
+          createIteration(1, 'pass'),
+        ],
+      },
+      'lesson-task',
+    );
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(lesson.proposedLessonCritique).toMatchObject({
+      verdict: 'needs-edit',
+      findings: expect.arrayContaining([
+        expect.objectContaining({
+          checklistItem: 'duplication',
+          verdict: 'needs-edit',
+        }),
+      ]),
+    });
+  });
+
+  it('returns per-call copies of shared lesson critique arrays', () => {
+    const lesson = createLesson({
+      testTraceability: [
+        {
+          lessonId: 'copy-safe-lesson',
+          taskId: 'lesson-task',
+          evaluatorName: 'factuality',
+          failingIteration: 0,
+          resolvedIteration: 1,
+          sourceFindingMessages: ['Cache guidance lacked provenance checks'],
+          testId: 'copy-safe-lesson:regression',
+          verificationCommand: 'npm run test --workspace @franken/critique',
+        },
+      ],
+      contradictionReport: {
+        status: 'clear',
+        guidance: 'No deterministic lesson contradiction was detected among comparable prior lessons.',
+        verificationCommand: 'npm run test --workspace @franken/critique',
+        contradictions: [],
+      },
+    });
+
+    const first = critiqueProposedLesson(lesson);
+    (first.checklist as string[]).push('mutated');
+    (first.criticAgents as string[]).push('mutated-agent');
+
+    const second = critiqueProposedLesson(lesson);
+
+    expect(second.checklist).not.toContain('mutated');
+    expect(second.criticAgents).not.toContain('mutated-agent');
   });
 
   it('detects same-evaluator lesson contradictions with shared terms and negated guidance', () => {

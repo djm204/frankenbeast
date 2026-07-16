@@ -90,6 +90,11 @@ interface InternalLessonPrivacyFilterDecision
   readonly redactions: readonly InternalLessonPrivacyRedaction[];
 }
 
+interface LessonContradictionContext {
+  readonly report: LessonContradictionReport;
+  readonly priorLessons: readonly CritiqueLesson[];
+}
+
 interface LessonCandidatePrivacyFilterResult {
   readonly decision: InternalLessonPrivacyFilterDecision;
   readonly rejectedDecisions: readonly InternalLessonPrivacyFilterDecision[];
@@ -614,6 +619,18 @@ export function critiqueProposedLesson(
   const contradictionReport =
     lesson.contradictionReport ?? detectLessonContradictions(lesson, priorLessons);
   evidenceRefs.add(`contradiction:${contradictionReport.status}`);
+  if (contradictionReport.status === 'not_checked') {
+    findings.push({
+      agentName: 'duplication-conflict-critic',
+      checklistItem: 'conflict',
+      verdict: 'needs-edit',
+      severity: 'warning',
+      message:
+        'Historical lesson conflicts were not checked, so promotion needs manual review.',
+      evidenceRefs: addEvidenceRef(evidenceRefs, 'contradiction:not_checked'),
+      suggestion: 'Run lesson search or have a reviewer confirm no conflicting prior guidance exists.',
+    });
+  }
   if (contradictionReport.status === 'contradiction_detected') {
     findings.push({
       agentName: 'duplication-conflict-critic',
@@ -655,8 +672,8 @@ export function critiqueProposedLesson(
     schemaVersion: 'lesson-multi-agent-critique-v1',
     generatedAt: normalizeTimestamp(generatedAt),
     verdict,
-    checklist: LESSON_CRITIQUE_CHECKLIST,
-    criticAgents: LESSON_CRITIQUE_AGENTS,
+    checklist: [...LESSON_CRITIQUE_CHECKLIST],
+    criticAgents: [...LESSON_CRITIQUE_AGENTS],
     findings: sortLessonCritiqueFindings(findings),
     highRisk,
     manualReviewRequired: highRisk || verdict !== 'accepted',
@@ -926,15 +943,18 @@ export class LessonRecorder {
       }
 
       try {
-        const contradictionReport =
-          await this.createContradictionReport(lesson);
+        const contradictionContext =
+          await this.createContradictionContext(lesson);
         const lessonWithContradiction = {
           ...lesson,
-          contradictionReport,
+          contradictionReport: contradictionContext.report,
         };
         const admittedLesson = this.withAdmissionTimestamp({
           ...lessonWithContradiction,
-          proposedLessonCritique: critiqueProposedLesson(lessonWithContradiction),
+          proposedLessonCritique: critiqueProposedLesson(
+            lessonWithContradiction,
+            contradictionContext.priorLessons,
+          ),
         });
         await this.memory.recordLesson(admittedLesson);
         recordingResult.recorded += 1;
@@ -969,11 +989,14 @@ export class LessonRecorder {
     });
   }
 
-  private async createContradictionReport(
+  private async createContradictionContext(
     lesson: CritiqueLesson,
-  ): Promise<LessonContradictionReport> {
+  ): Promise<LessonContradictionContext> {
     if (!this.memory.searchLessons) {
-      return detectLessonContradictions(lesson);
+      return {
+        report: detectLessonContradictions(lesson),
+        priorLessons: [],
+      };
     }
 
     try {
@@ -981,9 +1004,15 @@ export class LessonRecorder {
         createLessonSearchQuery(lesson),
         10,
       );
-      return detectLessonContradictions(lesson, priorLessons);
+      return {
+        report: detectLessonContradictions(lesson, priorLessons),
+        priorLessons,
+      };
     } catch {
-      return createLessonSearchFailureReport();
+      return {
+        report: createLessonSearchFailureReport(),
+        priorLessons: [],
+      };
     }
   }
 
