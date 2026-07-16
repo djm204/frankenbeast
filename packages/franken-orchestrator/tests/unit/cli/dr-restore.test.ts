@@ -86,13 +86,13 @@ describe('dr restore-dry-run CLI', () => {
           target: 'pr-2342',
           attempts: 5,
           maxAttempts: 5,
-          lastError: 'HTTP 403 for token ghp_secretvalue1234567890',
+          lastError: 'HTTP 403 for token ghp_deadlettersecretdeadlettersecret',
           firstAttemptedAt: '2026-07-16T08:00:00.000Z',
           lastAttemptedAt: '2026-07-16T08:05:00.000Z',
           createdAt: '2026-07-16T08:05:00.000Z',
           replaySafety: 'side-effect-approval-required',
           status: 'open',
-          payload: { command: 'curl -H "Authorization: Bearer abcd1234secret5678" https://api.github.com/repos/djm204/frankenbeast' },
+          payload: { command: 'curl -H "Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456" https://api.github.com/repos/djm204/frankenbeast' },
         }],
       }), 'utf8');
 
@@ -112,8 +112,8 @@ describe('dr restore-dry-run CLI', () => {
       await handleDrCommand({ action: 'dead-letter-inspect', backupManifestPath: queuePath, liveManifestPath: 'dlq_test', print: (message) => output.push(message) });
       const inspectOutput = output.pop() ?? '';
       expect(JSON.parse(inspectOutput)).toMatchObject({ command: 'dr dead-letter-inspect', entry: { id: 'dlq_test' } });
-      expect(inspectOutput).not.toContain('ghp_secretvalue1234567890');
-      expect(inspectOutput).not.toContain('abcd1234secret5678');
+      expect(inspectOutput).not.toContain('ghp_deadlettersecretdeadlettersecret');
+      expect(inspectOutput).not.toContain('abcdefghijklmnopqrstuvwxyz123456');
       expect(inspectOutput).toContain('<redacted>');
 
       await handleDrCommand({ action: 'dead-letter-replay-dry-run', backupManifestPath: queuePath, liveManifestPath: 'dlq_test', generatedAt: '2026-07-16T08:06:00.000Z', print: (message) => output.push(message) });

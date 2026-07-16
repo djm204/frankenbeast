@@ -1,4 +1,4 @@
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -136,6 +136,30 @@ describe('dead-letter queue for failed automation actions', () => {
       const listed = await listDeadLetterEntries(queuePath);
       expect(listed).toHaveLength(recorded.length);
       expect(new Set(listed.map((entry) => entry.target))).toEqual(new Set(recorded.map((entry) => entry.target)));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reaps stale dead-letter lock files before recording exhausted actions', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dlq-'));
+    const queuePath = join(dir, 'dead-letter.json');
+    const lockPath = `${queuePath}.lock`;
+
+    try {
+      await writeFile(lockPath, JSON.stringify({ pid: 1, acquiredAt: '2000-01-01T00:00:00.000Z' }), 'utf8');
+
+      const entry = await recordRetryExhaustionToDeadLetterQueue({
+        queuePath,
+        actionClass: 'codex-review-trigger',
+        target: 'pr-2342',
+        attempts: 3,
+        maxAttempts: 3,
+        lastError: 'stale lock should not strand the queue',
+        replaySafety: 'safe',
+      });
+
+      expect(await listDeadLetterEntries(queuePath)).toEqual([entry]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
