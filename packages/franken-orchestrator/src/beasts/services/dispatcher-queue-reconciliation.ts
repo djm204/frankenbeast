@@ -4,6 +4,7 @@ import { isoNow } from '@franken/types';
 
 export type DispatcherQueueReconciliationCode =
   | 'queued-run-restored'
+  | 'live-running-attempt-quarantined'
   | 'terminal-attempt-restored'
   | 'stale-running-attempt-failed'
   | 'missing-running-attempt-failed'
@@ -49,24 +50,6 @@ export function reconcileDispatcherQueueAfterRestart(
   let changedRuns = 0;
 
   repository.transaction(() => {
-    for (const run of repository.listRuns()) {
-      if (TERMINAL_RUN_STATUSES.has(run.status)) {
-        findings.push(reconcileTerminalRun(repository, run, reconciledAt));
-        continue;
-      }
-
-      if (!ACTIVE_RUN_STATUSES.has(run.status)) {
-        continue;
-      }
-
-      const currentAttempt = run.currentAttemptId ? repository.getAttempt(run.currentAttemptId) : undefined;
-      const finding = reconcileActiveRun(repository, run, currentAttempt, reconciledAt, isPidAlive);
-      findings.push(finding);
-      if (finding.fromStatus !== finding.toStatus || finding.code === 'missing-running-attempt-failed' || finding.code === 'stale-running-attempt-failed') {
-        changedRuns += 1;
-      }
-    }
-
     const duplicates = detectDuplicateLiveAgentRuns(repository, isPidAlive);
     for (const duplicate of duplicates) {
       findings.push(duplicate);
@@ -81,6 +64,25 @@ export function reconcileDispatcherQueueAfterRestart(
         },
         createdAt: reconciledAt,
       });
+    }
+
+    for (const run of repository.listRuns()) {
+      if (TERMINAL_RUN_STATUSES.has(run.status)) {
+        const finding = reconcileTerminalRun(repository, run, reconciledAt);
+        if (finding) findings.push(finding);
+        continue;
+      }
+
+      if (!ACTIVE_RUN_STATUSES.has(run.status)) {
+        continue;
+      }
+
+      const currentAttempt = run.currentAttemptId ? repository.getAttempt(run.currentAttemptId) : undefined;
+      const finding = reconcileActiveRun(repository, run, currentAttempt, reconciledAt, isPidAlive);
+      findings.push(finding);
+      if (finding.fromStatus !== finding.toStatus || finding.code === 'missing-running-attempt-failed' || finding.code === 'stale-running-attempt-failed') {
+        changedRuns += 1;
+      }
     }
   });
 
@@ -101,7 +103,7 @@ function reconcileActiveRun(
   isPidAlive: (pid: number) => boolean,
 ): DispatcherQueueReconciliationFinding {
   if (run.status === 'pending_approval') {
-    syncTrackedAgent(repository, run, 'awaiting_approval', reconciledAt);
+    syncTrackedAgentIfRunOwnsDispatch(repository, run, 'awaiting_approval', reconciledAt);
     const finding: DispatcherQueueReconciliationFinding = {
       code: 'pending-approval-restored',
       runId: run.id,
@@ -117,7 +119,7 @@ function reconcileActiveRun(
   }
 
   if (run.status === 'queued' || run.status === 'interviewing') {
-    syncTrackedAgent(repository, run, 'dispatching', reconciledAt);
+    syncTrackedAgentIfRunOwnsDispatch(repository, run, 'dispatching', reconciledAt);
     const finding: DispatcherQueueReconciliationFinding = {
       code: 'queued-run-restored',
       runId: run.id,
@@ -139,7 +141,7 @@ function reconcileActiveRun(
       currentAttemptId: null,
       stopReason: 'dispatcher_restart_missing_attempt',
     });
-    syncTrackedAgent(repository, failedRun, 'failed', reconciledAt);
+    syncTrackedAgentIfRunOwnsDispatch(repository, failedRun, 'failed', reconciledAt);
     const finding: DispatcherQueueReconciliationFinding = {
       code: 'missing-running-attempt-failed',
       runId: run.id,
@@ -159,7 +161,7 @@ function reconcileActiveRun(
       latestExitCode: attempt.exitCode ?? null,
       stopReason: attempt.stopReason ?? null,
     });
-    syncTrackedAgent(repository, restoredRun, trackedAgentStatusForRun(attempt.status), reconciledAt);
+    syncTrackedAgentIfRunOwnsDispatch(repository, restoredRun, trackedAgentStatusForRun(attempt.status), reconciledAt);
     const finding: DispatcherQueueReconciliationFinding = {
       code: 'terminal-attempt-restored',
       runId: run.id,
@@ -175,14 +177,28 @@ function reconcileActiveRun(
   }
 
   const pid = attempt.pid;
+  if (typeof pid === 'number' && pid > 0 && isPidAlive(pid)) {
+    syncTrackedAgentIfRunOwnsDispatch(repository, run, 'running', reconciledAt);
+    const finding: DispatcherQueueReconciliationFinding = {
+      code: 'live-running-attempt-quarantined',
+      runId: run.id,
+      trackedAgentId: run.trackedAgentId,
+      attemptId: attempt.id,
+      pid,
+      fromStatus: run.status,
+      toStatus: run.status,
+      message: `Run ${run.id} recorded live PID ${pid} after dispatcher restart; preserved it as non-startable running state for operator reconciliation.`,
+    };
+    appendReconciliationEvent(repository, finding, reconciledAt);
+    return finding;
+  }
+
   const failedAttempt = repository.updateAttempt(attempt.id, {
     status: 'failed',
     finishedAt: reconciledAt,
-    stopReason: typeof pid === 'number' && pid > 0 && isPidAlive(pid)
-      ? 'dispatcher_restart_unattached_pid'
-      : typeof pid === 'number' && pid > 0
-        ? 'dispatcher_restart_stale_pid'
-        : 'dispatcher_restart_missing_pid',
+    stopReason: typeof pid === 'number' && pid > 0
+      ? 'dispatcher_restart_stale_pid'
+      : 'dispatcher_restart_missing_pid',
   });
   const failedRun = repository.updateRun(run.id, {
     status: 'failed',
@@ -190,7 +206,7 @@ function reconcileActiveRun(
     latestExitCode: null,
     stopReason: failedAttempt.stopReason,
   });
-  syncTrackedAgent(repository, failedRun, 'failed', reconciledAt);
+  syncTrackedAgentIfRunOwnsDispatch(repository, failedRun, 'failed', reconciledAt);
   const finding: DispatcherQueueReconciliationFinding = {
     code: typeof pid === 'number' && pid > 0 ? 'stale-running-attempt-failed' : 'missing-running-attempt-failed',
     runId: run.id,
@@ -211,10 +227,9 @@ function reconcileTerminalRun(
   repository: SQLiteBeastRepository,
   run: BeastRun,
   reconciledAt: string,
-): DispatcherQueueReconciliationFinding {
-  const trackedAgent = run.trackedAgentId ? repository.getTrackedAgent(run.trackedAgentId) : undefined;
-  if (!trackedAgent?.dispatchRunId || trackedAgent.dispatchRunId === run.id) {
-    syncTrackedAgent(repository, run, trackedAgentStatusForRun(run.status), reconciledAt);
+): DispatcherQueueReconciliationFinding | undefined {
+  if (!syncTrackedAgentIfRunOwnsDispatch(repository, run, trackedAgentStatusForRun(run.status), reconciledAt)) {
+    return undefined;
   }
   const finding: DispatcherQueueReconciliationFinding = {
     code: 'terminal-run-restored',
@@ -223,7 +238,7 @@ function reconcileTerminalRun(
     attemptId: run.currentAttemptId,
     fromStatus: run.status,
     toStatus: run.status,
-    message: `Run ${run.id} is terminal (${run.status}) after dispatcher restart; terminal state preserved.`,
+    message: `Run ${run.id} is terminal (${run.status}) after dispatcher restart; repaired tracked agent linkage.`,
   };
   appendReconciliationEvent(repository, finding, reconciledAt);
   return finding;
@@ -258,6 +273,21 @@ function detectDuplicateLiveAgentRuns(
       message: `Tracked agent ${trackedAgentId} has duplicate live running runs after dispatcher restart: ${runIds.join(', ')}.`,
     }));
   });
+}
+
+function syncTrackedAgentIfRunOwnsDispatch(
+  repository: SQLiteBeastRepository,
+  run: BeastRun,
+  status: TrackedAgentStatus,
+  updatedAt: string,
+): boolean {
+  if (!run.trackedAgentId) return false;
+  const agent = repository.getTrackedAgent(run.trackedAgentId);
+  if (!agent || agent.status === 'deleted') return false;
+  if (agent.dispatchRunId && agent.dispatchRunId !== run.id) return false;
+  if (agent.status === status && agent.dispatchRunId === run.id) return false;
+  syncTrackedAgent(repository, run, status, updatedAt);
+  return true;
 }
 
 function syncTrackedAgent(

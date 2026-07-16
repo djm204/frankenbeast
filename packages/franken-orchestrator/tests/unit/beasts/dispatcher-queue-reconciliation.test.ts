@@ -145,22 +145,16 @@ describe('dispatcher queue reconciliation after restart', () => {
 
     expect(report.checkedRuns).toBe(6);
     expect(report.findings.map(finding => finding.code)).toEqual(expect.arrayContaining([
+      'live-running-attempt-quarantined',
       'stale-running-attempt-failed',
       'queued-run-restored',
       'pending-approval-restored',
       'terminal-run-restored',
       'terminal-attempt-restored',
     ]));
-    expect(repo.getRun(liveRun.id)).toMatchObject({
-      status: 'failed',
-      stopReason: 'dispatcher_restart_unattached_pid',
-      finishedAt: '2026-03-20T00:05:00.000Z',
-    });
-    expect(repo.getAttempt(liveAttempt.id)).toMatchObject({
-      status: 'failed',
-      stopReason: 'dispatcher_restart_unattached_pid',
-    });
-    expect(repo.getTrackedAgent(liveAgent.id)).toMatchObject({ status: 'failed', dispatchRunId: liveRun.id });
+    expect(repo.getRun(liveRun.id)).toMatchObject({ status: 'running', currentAttemptId: liveAttempt.id });
+    expect(repo.getAttempt(liveAttempt.id)).toMatchObject({ status: 'running', pid: 4242 });
+    expect(repo.getTrackedAgent(liveAgent.id)).toMatchObject({ status: 'running', dispatchRunId: liveRun.id });
 
     expect(repo.getRun(deadRun.id)).toMatchObject({
       status: 'failed',
@@ -193,7 +187,7 @@ describe('dispatcher queue reconciliation after restart', () => {
     ]));
   });
 
-  it('does not relink an agent to an older terminal run when a newer run already owns dispatch', async () => {
+  it('does not relink an agent to an older queued run when a newer run already owns dispatch', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-dispatcher-reconcile-'));
     const repo = createRepo(workDir);
     const agent = createAgent(repo, 'replacement worker');
@@ -207,10 +201,6 @@ describe('dispatcher queue reconciliation after restart', () => {
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'operator',
       createdAt: '2026-03-20T00:00:01.000Z',
-    });
-    repo.updateRun(oldRun.id, {
-      status: 'completed',
-      finishedAt: '2026-03-20T00:03:00.000Z',
     });
     const newRun = repo.createRun({
       trackedAgentId: agent.id,
@@ -231,8 +221,9 @@ describe('dispatcher queue reconciliation after restart', () => {
 
     expect(report.findings.map(finding => finding.code)).toEqual(expect.arrayContaining([
       'pending-approval-restored',
-      'terminal-run-restored',
+      'queued-run-restored',
     ]));
+    expect(repo.getRun(oldRun.id)).toMatchObject({ status: 'queued' });
     expect(repo.getTrackedAgent(agent.id)).toMatchObject({
       status: 'awaiting_approval',
       dispatchRunId: newRun.id,
