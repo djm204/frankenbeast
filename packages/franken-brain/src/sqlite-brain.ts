@@ -2186,10 +2186,17 @@ export class SqliteMemoryReviewQueue {
       throw new Error('keep_both_scoped scopedKey must differ from the conflicting key');
     }
     this.assertConflictUnchanged(id, candidate, this.detectConflicts(candidate), 'resolution', conflictGuard);
-    const scoped = this.edit(id, { key: scopedKey } as MemoryCandidateEdit);
-    if (this.detectConflicts(scoped).length > 0) {
+    const scopedCandidate: MemoryCandidate = {
+      ...candidate,
+      key: scopedKey,
+      updatedAt: isoNow(),
+    };
+    this.validateProposal(scopedCandidate);
+    assertMemoryCandidateNotDeletionGuarded(this.db, scopedCandidate, this.encryption);
+    if (this.detectConflicts(scopedCandidate).length > 0) {
       throw new Error(`Scoped memory key ${scopedKey} still conflicts with an existing value`);
     }
+    this.edit(id, { key: scopedKey });
     return this.approveCandidate(id, {
       ...decisionOptions,
       note: decisionOptions.note ?? 'Memory conflict resolved by keeping both values with explicit scope.',
@@ -2202,7 +2209,6 @@ export class SqliteMemoryReviewQueue {
     conflictGuard: { expectedExistingValue: unknown; expectedCandidateValue: unknown },
   ): MemoryCandidate {
     const now = isoNow();
-    let finalizeWorkingPurge: (() => void) | undefined;
     let finalizeWorkingFlush: (() => void) | undefined;
     let approvedCandidate: MemoryCandidate | undefined;
     const tx = this.db.transaction(() => {
@@ -2210,11 +2216,16 @@ export class SqliteMemoryReviewQueue {
       const conflicts = this.detectConflicts(candidate);
       this.assertConflictUnchanged(id, candidate, conflicts, 'resolution', conflictGuard);
       this.assertDecisionOptionsNotDeletionGuarded(decisionOptions);
-      finalizeWorkingPurge = this.working.purgeKey(candidate.key) ?? undefined;
+      const suppressionReason = this.findCandidateSuppression(candidate);
+      if (suppressionReason) {
+        this.markSuppressed(id, suppressionReason, now, decisionOptions);
+        approvedCandidate = this.requireCandidate(id);
+        return;
+      }
+      finalizeWorkingFlush = this.working.persistKeyAfterCommit(candidate.key, candidate.value) ?? undefined;
       this.db
         .prepare(`DELETE FROM memory_review_provenance WHERE target_store = ? AND memory_key = ?`)
         .run(candidate.targetStore, candidate.key);
-      finalizeWorkingFlush = this.working.persistKeyAfterCommit(candidate.key, candidate.value) ?? undefined;
       this.db
         .prepare(
           `INSERT INTO memory_review_provenance (
@@ -2242,7 +2253,6 @@ export class SqliteMemoryReviewQueue {
       approvedCandidate = this.requireCandidate(id);
     });
     tx.immediate();
-    finalizeWorkingPurge?.();
     finalizeWorkingFlush?.();
     return approvedCandidate ?? this.requireCandidate(id, 'approved');
   }
