@@ -204,6 +204,55 @@ describe('SqliteBrain', () => {
       expect(brain.working.snapshot()).toHaveProperty('expired.one');
     });
 
+    it('counts existing compaction candidates before applying entry budgets', () => {
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'fresh high-priority retained note',
+        details: { memoryClass: 'learned_procedure' },
+        createdAt: '2026-01-08T00:00:00.000Z',
+      });
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'fresh low-priority retained note',
+        details: { memoryClass: 'environment_fact' },
+        createdAt: '2026-01-08T00:00:00.000Z',
+      });
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'aged scratch observation',
+        details: { memoryClass: 'transient_observation' },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+
+      const report = brain.memoryRetentionReport({
+        now: '2026-01-09T00:00:00.000Z',
+        maxEntries: 2,
+      });
+
+      expect(report.compactionCandidates.map((entry) => entry.key)).toEqual(['3']);
+    });
+
+    it('does not apply the working-memory cap as a default report budget', () => {
+      const bounded = new SqliteBrain(':memory:', { maxEntries: 1 });
+      bounded.episodic.record({
+        type: 'observation',
+        summary: 'fresh procedure one',
+        details: { memoryClass: 'learned_procedure' },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      bounded.episodic.record({
+        type: 'observation',
+        summary: 'fresh procedure two',
+        details: { memoryClass: 'learned_procedure' },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+
+      const report = bounded.memoryRetentionReport({ now: '2026-01-02T00:00:00.000Z' });
+
+      expect(report.compactionCandidates).toEqual([]);
+      bounded.close();
+    });
+
     it('uses persisted working-memory age for retention windows', () => {
       const dir = mkdtempSync(join(tmpdir(), 'retention-age-'));
       const dbPath = join(dir, 'memory.sqlite');

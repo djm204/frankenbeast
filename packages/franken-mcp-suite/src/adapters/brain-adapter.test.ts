@@ -583,6 +583,53 @@ describe("createBrainAdapter", () => {
     });
   });
 
+  it("counts existing scoped compaction candidates before applying retention budgets", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+    brainInstances[0].memoryRetentionReport.mockReturnValueOnce({
+      generatedAt: "2026-07-16T00:00:00.000Z",
+      policies: [],
+      counts: { total: 3, protected: 0, expired: 0, nearingExpiry: 0, compactionCandidates: 1 },
+      entries: [
+        {
+          store: "working",
+          key: "shared.fresh-high",
+          class: "temporary_operational",
+          action: "retain",
+          policy: { class: "temporary_operational", retentionDays: 1, compactPriority: 100, protected: false, description: "tmp" },
+          protected: false,
+          reason: "retain",
+        },
+        {
+          store: "working",
+          key: "shared.fresh-low",
+          class: "environment_fact",
+          action: "retain",
+          policy: { class: "environment_fact", retentionDays: 180, compactPriority: 30, protected: false, description: "env" },
+          protected: false,
+          reason: "retain",
+        },
+        {
+          store: "working",
+          key: "shared.already-compact",
+          class: "transient_observation",
+          action: "compact",
+          policy: { class: "transient_observation", retentionDays: 7, compactPriority: 80, protected: false, description: "transient" },
+          protected: false,
+          reason: "retention window elapsed",
+        },
+      ],
+      compactionCandidates: [],
+    });
+
+    const report = await brain.memoryRetentionReport({
+      readScope: "shared",
+      maxEntries: 2,
+    });
+
+    expect(report.compactionCandidates.map((entry) => entry.key)).toEqual(["shared.already-compact"]);
+    expect(report.entries.find((entry) => entry.key === "shared.fresh-high")).toMatchObject({ action: "retain" });
+  });
+
   it("rejects agent read scope without an agent id before reading memory", async () => {
     const brain = createBrainAdapter("/tmp/beast.db");
     const mockBrain = brainInstances[0];

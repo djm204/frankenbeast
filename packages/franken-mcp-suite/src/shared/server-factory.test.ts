@@ -458,6 +458,54 @@ describe('createMcpServer', () => {
       });
     });
 
+    it('redacts retention-report agent identifiers before recording audit args', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_retention_report', {
+        readScope: 'agent',
+        agentId: 'alice@example.test',
+        now: '2026-07-16T00:00:00.000Z',
+        expiryHorizonMs: 1000,
+        maxEntries: 10,
+        extra: 'sensitive detail',
+      })).toEqual({
+        readScope: 'agent',
+        agentId: '[memory-retention-report-args-redacted]',
+        now: '2026-07-16T00:00:00.000Z',
+        expiryHorizonMs: 1000,
+        maxEntries: 10,
+        extra: '[memory-retention-report-args-redacted]',
+      });
+    });
+
+    it('redacts proxied retention-report envelopes before recording audit args', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
+        tool: 'fbeast_memory_retention_report',
+        args: { readScope: 'agent', agentId: 'alice@example.test', maxEntries: 10 },
+        context: 'agent alice@example.test requested scoped report',
+      })).toEqual({
+        tool: 'fbeast_memory_retention_report',
+        args: {
+          readScope: 'agent',
+          agentId: '[memory-retention-report-args-redacted]',
+          maxEntries: 10,
+        },
+        context: '[memory-retention-report-args-redacted]',
+      });
+    });
+
+    it('redacts caller-controlled envelopes on direct retention-report validation errors', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_retention_report', {
+        tool: 'not_the_memory_tool',
+        agentId: 'alice@example.test',
+        password: 'secret-value-that-must-not-leak',
+        maxEntries: 'not-a-number',
+      })).toEqual({
+        tool: '[memory-retention-report-args-redacted]',
+        agentId: '[memory-retention-report-args-redacted]',
+        password: '[memory-retention-report-args-redacted]',
+        maxEntries: '[memory-retention-report-args-redacted]',
+      });
+    });
+
     it('redacts caller-controlled tool envelopes on direct memory export validation errors', () => {
       expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_export', {
         tool: 'not_the_memory_tool',
