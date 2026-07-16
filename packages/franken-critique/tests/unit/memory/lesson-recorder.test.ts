@@ -87,6 +87,798 @@ describe('LessonRecorder', () => {
     expect(port.recordLesson).not.toHaveBeenCalled();
   });
 
+  it('redacts secrets before recording critique lessons', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+    const fakeToken = `ghp_${'FAKE'.padEnd(36, '0')}`;
+    const lowercaseBearer = `bearer ${'opaque'.padEnd(24, 'x')}`;
+    const fakeConnectionString = `postgresql://user:${'pass'.padEnd(12, 'x')}@db.internal/app`;
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'privacy', [
+          {
+            message: `Reviewer pasted Authorization: Bearer *** and ${lowercaseBearer} and ${fakeConnectionString}`,
+            severity: 'critical',
+            suggestion: `Move token ${fakeToken} into a secret manager before retrying.`,
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const recording = await recorder.record(result, 'privacy-task');
+
+    expect(recording.recorded).toBe(1);
+    expect(recording.rejectedByPrivacy).toEqual([]);
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(JSON.stringify(lesson)).not.toContain(fakeToken);
+    expect(JSON.stringify(lesson)).not.toContain(lowercaseBearer);
+    expect(JSON.stringify(lesson)).not.toContain(fakeConnectionString);
+    expect(lesson.failureDescription).toContain('Bearer [REDACTED_TOKEN]');
+    expect(lesson.failureDescription).toContain(
+      '[REDACTED_CONNECTION_STRING]',
+    );
+    expect(lesson.reviewerFeedback?.findings[0]?.suggestion).toContain(
+      '[REDACTED_GITHUB_TOKEN]',
+    );
+    expect(lesson.privacyFilter).toEqual(
+      expect.objectContaining({
+        schemaVersion: 'lesson-privacy-filter-v1',
+        action: 'admit',
+        sensitive: true,
+        approvalRequired: true,
+        redactions: expect.arrayContaining([
+          expect.objectContaining({ label: 'github-token' }),
+          expect.objectContaining({ label: 'bearer-token' }),
+          expect.objectContaining({ label: 'connection-string' }),
+        ]),
+      }),
+    );
+    expect(JSON.stringify(lesson.privacyFilter)).not.toContain(fakeToken);
+  });
+
+  it('flags personal and customer data for explicit approval after redaction', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+    const emailAddress = `operator${'@'}example.test`;
+    const customerAccount = 'customer account ACME-Enterprise-42';
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'privacy', [
+          {
+            message: `${customerAccount} handoff included ${emailAddress}`,
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'privacy-personal-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(JSON.stringify(lesson)).not.toContain(emailAddress);
+    expect(JSON.stringify(lesson)).not.toContain(customerAccount);
+    expect(lesson.failureDescription).toContain('[REDACTED_EMAIL]');
+    expect(lesson.failureDescription).toContain('[REDACTED_CUSTOMER_DATA]');
+    expect(lesson.privacyFilter).toEqual(
+      expect.objectContaining({
+        action: 'admit',
+        sensitive: true,
+        approvalRequired: true,
+        flags: expect.arrayContaining([
+          'customer-data',
+          'email-address',
+          'personal-data',
+        ]),
+      }),
+    );
+  });
+
+  it('redacts customer-only findings before recording lessons', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+    const customerAccount = 'customer account ACME-Enterprise-42';
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'privacy-customer', [
+          {
+            message: `Reviewer pasted ${customerAccount} in the lesson candidate`,
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'privacy-customer-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(JSON.stringify(lesson)).not.toContain(customerAccount);
+    expect(lesson.failureDescription).toContain('[REDACTED_CUSTOMER_DATA]');
+    expect(lesson.privacyFilter).toEqual(
+      expect.objectContaining({
+        action: 'admit',
+        sensitive: true,
+        approvalRequired: true,
+        flags: expect.arrayContaining(['customer-data']),
+        redactions: expect.arrayContaining([
+          expect.objectContaining({ label: 'customer-context' }),
+        ]),
+      }),
+    );
+  });
+
+  it('binds privacy approval hashes to sensitive suggestions and locations', async () => {
+    const firstPort = createMockMemoryPort();
+    const secondPort = createMockMemoryPort();
+    const firstRecorder = new LessonRecorder(firstPort);
+    const secondRecorder = new LessonRecorder(secondPort);
+    const firstEmail = `first${'@'}example.test`;
+    const secondEmail = `second${'@'}example.test`;
+
+    const createResult = (emailAddress: string): CritiqueLoopResult => ({
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'privacy-suggestion', [
+          {
+            message: 'Validate privacy evidence before recording lessons',
+            severity: 'critical',
+            location: `owner ${emailAddress}`,
+            suggestion: `Do not persist ${emailAddress}`,
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    });
+
+    await firstRecorder.record(createResult(firstEmail), 'privacy-hash-task');
+    await secondRecorder.record(createResult(secondEmail), 'privacy-hash-task');
+
+    const firstLesson = (firstPort.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    const secondLesson = (secondPort.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(JSON.stringify(firstLesson)).not.toContain(firstEmail);
+    expect(JSON.stringify(secondLesson)).not.toContain(secondEmail);
+    expect(firstLesson.privacyFilter?.originalHash).not.toEqual(
+      secondLesson.privacyFilter?.originalHash,
+    );
+  });
+
+  it('rejects sensitive lesson metadata before durable recording', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+    const sensitiveEvaluator = `reviewer-${'operator'}${'@'}example.test`;
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', sensitiveEvaluator, [
+          {
+            message: 'Validate evidence before recording a durable lesson',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const recording = await recorder.record(result, 'privacy-metadata-task');
+
+    expect(recording.recorded).toBe(0);
+    expect(port.recordLesson).not.toHaveBeenCalled();
+    expect(JSON.stringify(recording)).not.toContain(sensitiveEvaluator);
+    expect(recording.rejectedByPrivacy).toEqual([
+      expect.objectContaining({
+        action: 'reject',
+        sensitive: true,
+        flags: expect.arrayContaining(['email-address', 'personal-data']),
+      }),
+    ]);
+  });
+
+  it('rejects customer lesson metadata before durable recording', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const recording = await recorder.record(
+      {
+        verdict: 'pass',
+        iterations: [
+          createIteration(0, 'fail', 'customer account ACME', [
+            {
+              message: 'Validate evidence before recording a durable lesson',
+              severity: 'warning',
+            },
+          ]),
+          createIteration(1, 'pass'),
+        ],
+      },
+      'privacy-customer-metadata-task',
+    );
+
+    expect(recording.recorded).toBe(0);
+    expect(port.recordLesson).not.toHaveBeenCalled();
+    expect(recording.rejectedByPrivacy).toEqual([
+      expect.objectContaining({
+        action: 'reject',
+        sensitive: true,
+        flags: expect.arrayContaining(['customer-data']),
+      }),
+    ]);
+  });
+
+  it('classifies safe environment facts without redacting false-positive learning terms', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning', [
+          {
+            message:
+              'Repository uses token budget metadata for cooldown scoring',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'privacy-environment-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.failureDescription).toContain('token budget metadata');
+    expect(lesson.privacyFilter).toEqual(
+      expect.objectContaining({
+        category: 'environment-fact',
+        action: 'admit',
+        sensitive: false,
+        approvalRequired: false,
+        redactions: [],
+      }),
+    );
+  });
+
+  it('classifies reusable procedures as durable candidates', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning', [
+          {
+            message:
+              'Before recording lessons, validate evidence and include the verification command',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'privacy-procedure-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.privacyFilter).toEqual(
+      expect.objectContaining({
+        category: 'procedure',
+        action: 'admit',
+      }),
+    );
+  });
+
+  it('preserves reusable findings when mixed with task-state findings', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message: 'Merged PR #123 after CI turned green',
+            severity: 'warning',
+          },
+          {
+            message:
+              'Before recording lessons, validate evidence and include the verification command',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const recording = await recorder.record(result, 'privacy-mixed-task');
+
+    expect(recording.recorded).toBe(1);
+    expect(recording.rejectedByPrivacy).toEqual([
+      expect.objectContaining({
+        category: 'task-state',
+        action: 'reject',
+      }),
+    ]);
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.failureDescription).toContain('validate evidence');
+    expect(lesson.failureDescription).not.toContain('PR #123');
+  });
+
+  it('preserves reusable findings that cite issue IDs after redacting the transient reference', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message:
+              'Regression for issue #69: validate evidence before recording lessons',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const recording = await recorder.record(result, 'privacy-issue-ref-task');
+
+    expect(recording.recorded).toBe(1);
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.failureDescription).toContain('validate evidence');
+    expect(lesson.failureDescription).toContain('[REDACTED_TASK_REFERENCE]');
+    expect(lesson.failureDescription).not.toContain('issue #69');
+  });
+
+  it('redacts all admitted task references consistently', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message:
+              'Regression in pull request #123 at commit abcdef1 and task t_abcdef: validate evidence before recording lessons',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const recording = await recorder.record(result, 'privacy-task-ref-task');
+
+    expect(recording.recorded).toBe(1);
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.failureDescription).toContain('[REDACTED_TASK_REFERENCE]');
+    expect(lesson.failureDescription).not.toContain('pull request #123');
+    expect(lesson.failureDescription).not.toContain('commit abcdef1');
+    expect(lesson.failureDescription).not.toContain('task t_abcdef');
+  });
+
+  it('redacts generated issue task references consistently', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message:
+              'Regression in impl:issue-42 and harden:issue-42: validate evidence before recording lessons',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'privacy-generated-issue-ref-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.failureDescription).toContain('[REDACTED_TASK_REFERENCE]');
+    expect(lesson.failureDescription).not.toContain('impl:issue-42');
+    expect(lesson.failureDescription).not.toContain('harden:issue-42');
+  });
+
+  it('does not flag ordinary client or account wording as customer data', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning', [
+          {
+            message:
+              'HTTP client should validate retries and always account for flaky tests',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'privacy-customer-false-positive-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.failureDescription).toContain('HTTP client should validate retries');
+    expect(lesson.failureDescription).toContain('account for flaky tests');
+    expect(lesson.privacyFilter).toEqual(
+      expect.objectContaining({
+        sensitive: false,
+        approvalRequired: false,
+        flags: [],
+        redactions: [],
+      }),
+    );
+  });
+
+  it('does not flag generic customer-facing wording as customer data', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning', [
+          {
+            message: 'Customer-facing checkout should validate retries',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'privacy-generic-customer-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.failureDescription).toContain('Customer-facing checkout');
+    expect(lesson.privacyFilter).toEqual(
+      expect.objectContaining({
+        sensitive: false,
+        approvalRequired: false,
+        flags: [],
+        redactions: [],
+      }),
+    );
+  });
+
+  it('rejects chronology-only task-state findings despite reusable verbs', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message: 'Merged PR #123 before tests ran',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const recording = await recorder.record(result, 'privacy-chronology-task');
+
+    expect(recording.recorded).toBe(0);
+    expect(port.recordLesson).not.toHaveBeenCalled();
+    expect(recording.rejectedByPrivacy).toEqual([
+      expect.objectContaining({
+        category: 'task-state',
+        action: 'reject',
+      }),
+    ]);
+  });
+
+  it('preserves specific personal-data redactions when customer spans overlap', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+    const emailAddress = `operator${'@'}example.test`;
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'privacy', [
+          {
+            message: `Customer account ${emailAddress} needs validation before recording lessons`,
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'privacy-overlap-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(JSON.stringify(lesson)).not.toContain(emailAddress);
+    expect(lesson.failureDescription).toContain('[REDACTED_EMAIL]');
+    expect(lesson.failureDescription).not.toContain('@example.test');
+    expect(lesson.failureDescription).toContain('[REDACTED_CUSTOMER_DATA]');
+  });
+
+  it('redacts lowercase customer identifiers fully', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+    const customerAccount = 'customer account acme-42';
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'privacy', [
+          {
+            message: `${customerAccount} needs validation before recording lessons`,
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'privacy-lowercase-customer-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(JSON.stringify(lesson)).not.toContain(customerAccount);
+    expect(JSON.stringify(lesson)).not.toContain('acme-42');
+    expect(lesson.failureDescription).toContain('[REDACTED_CUSTOMER_DATA]');
+  });
+
+  it('detects capitalized tenant and client customer references', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'privacy', [
+          {
+            message:
+              'Tenant ACME and Client account Foo need validation before recording lessons',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'privacy-capitalized-customer-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(JSON.stringify(lesson)).not.toContain('Tenant ACME');
+    expect(JSON.stringify(lesson)).not.toContain('Client account Foo');
+    expect(lesson.privacyFilter?.flags).toEqual(
+      expect.arrayContaining(['customer-data']),
+    );
+  });
+
+  it('rejects ticket-only task references before durable recording', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message: 'Closed ticket #123 after deploy',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const recording = await recorder.record(result, 'privacy-ticket-task');
+
+    expect(recording.recorded).toBe(0);
+    expect(port.recordLesson).not.toHaveBeenCalled();
+    expect(recording.rejectedByPrivacy).toEqual([
+      expect.objectContaining({ category: 'task-state' }),
+    ]);
+  });
+
+  it('keeps cross-field secret detections from leaking reviewer feedback', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+    const tokenValue = 'opaque-token-value'.padEnd(24, 'x');
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'privacy', [
+          {
+            message: 'Token:',
+            severity: 'critical',
+            suggestion: `${tokenValue} should be moved before recording lessons`,
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'privacy-cross-field-secret-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(JSON.stringify(lesson)).not.toContain(tokenValue);
+    expect(lesson.reviewerFeedback?.findings[0]?.suggestion).not.toContain(
+      tokenValue,
+    );
+  });
+
+  it('preserves overlapping customer redactions that contain personal data', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+    const phoneNumber = '4155551212';
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'privacy', [
+          {
+            message: `customer ${phoneNumber} ACME needs validation before recording lessons`,
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'privacy-overlap-customer-phone-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(JSON.stringify(lesson)).not.toContain(phoneNumber);
+    expect(JSON.stringify(lesson)).not.toContain('ACME');
+    expect(lesson.failureDescription).toContain('[REDACTED_CUSTOMER_DATA]');
+  });
+
+  it('redacts customer identifiers that follow email contacts', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+    const emailAddress = `operator${'@'}example.test`;
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'privacy', [
+          {
+            message: `Customer account ${emailAddress} ACME needs validation before recording lessons`,
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'privacy-email-customer-id-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(JSON.stringify(lesson)).not.toContain(emailAddress);
+    expect(JSON.stringify(lesson)).not.toContain('ACME');
+    expect(lesson.failureDescription).toContain('[REDACTED_CUSTOMER_DATA]');
+  });
+
+  it('redacts suggestion secrets when locations are present', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+    const tokenValue = 'opaque-suggestion-secret'.padEnd(28, 'x');
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'privacy', [
+          {
+            message: 'Token:',
+            severity: 'critical',
+            location: 'src/file.ts',
+            suggestion: `${tokenValue} should be moved before recording lessons`,
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'privacy-location-suggestion-secret-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(JSON.stringify(lesson)).not.toContain(tokenValue);
+    expect(lesson.reviewerFeedback?.findings[0]?.suggestion).not.toContain(
+      tokenValue,
+    );
+  });
+
+  it('keeps durable guidance despite merge chronology task state', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message: 'Merged PR #123; always run CI before merging',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const recording = await recorder.record(result, 'privacy-merge-guidance-task');
+
+    expect(recording.recorded).toBe(1);
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.failureDescription).toContain('always run CI');
+    expect(lesson.failureDescription).not.toContain('PR #123');
+  });
+
+  it('rejects transient task-state candidates before durable recording', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message: 'Merged PR #123 after CI turned green',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const recording = await recorder.record(result, 'privacy-task-state');
+
+    expect(recording.recorded).toBe(0);
+    expect(port.recordLesson).not.toHaveBeenCalled();
+    expect(recording.rejectedByPrivacy).toEqual([
+      expect.objectContaining({
+        schemaVersion: 'lesson-privacy-filter-v1',
+        category: 'task-state',
+        action: 'reject',
+        sensitive: true,
+        approvalRequired: false,
+      }),
+    ]);
+  });
+
   it('records a lesson when multi-iteration pass occurs (fail then pass)', async () => {
     const unsafeDynamicCallName = 'executeUntrustedCode';
 

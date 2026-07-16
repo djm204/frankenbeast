@@ -263,6 +263,33 @@ export interface PostPrLessonExtractionTemplate {
   readonly insufficientEvidenceGuidance: string;
 }
 
+export type LessonCandidateCategory =
+  | 'procedure'
+  | 'preference'
+  | 'environment-fact'
+  | 'task-state'
+  | 'discard';
+
+/** Redaction applied before a learned lesson candidate can reach durable memory. */
+export interface LessonPrivacyRedaction {
+  readonly kind: 'secret' | 'personal-data' | 'customer-data' | 'task-state';
+  readonly label: string;
+  readonly replacement: string;
+}
+
+/** Privacy/classification decision applied before lesson persistence. */
+export interface LessonPrivacyFilterDecision {
+  readonly schemaVersion: 'lesson-privacy-filter-v1';
+  readonly category: LessonCandidateCategory;
+  readonly action: 'admit' | 'reject';
+  readonly sensitive: boolean;
+  readonly approvalRequired: boolean;
+  readonly flags: readonly string[];
+  readonly redactions: readonly LessonPrivacyRedaction[];
+  readonly originalHash: string;
+  readonly reason: string;
+}
+
 /** Cooldown metadata attached to a recorded lesson so PM/liveness tooling can prevent churn. */
 export interface LessonCooldownMetadata {
   /** Stable key used to deduplicate equivalent lessons across task ids during the cooldown window. */
@@ -390,6 +417,8 @@ export interface AgentImprovementScorecard {
 export interface LessonRecordingResult {
   readonly recorded: number;
   readonly suppressedByCooldown: readonly LessonCooldownSuppression[];
+  /** Lesson candidates rejected by privacy/classification before persistence. */
+  readonly rejectedByPrivacy: readonly LessonPrivacyFilterDecision[];
   /** Cross-task blocker patterns discovered while recording this critique result. */
   readonly minedBlockerPatterns: readonly CrossTaskBlockerPattern[];
   /** Prioritized PM/liveness follow-up generated from this record call's learning signals. */
@@ -429,6 +458,8 @@ export interface CritiqueLesson {
   readonly blockerPatterns?: readonly CrossTaskBlockerPattern[];
   /** Optional per-agent learning scorecard for worker retrospectives and PM handoffs. */
   readonly agentImprovementScorecard?: AgentImprovementScorecard;
+  /** Privacy and learning-classification decision applied before durable recording. */
+  readonly privacyFilter?: LessonPrivacyFilterDecision;
   /** Human/inferred feedback weighting used for promotion, demotion, retirement, and quarantine decisions. */
   readonly feedbackWeighting?: LessonFeedbackWeighting;
 }
