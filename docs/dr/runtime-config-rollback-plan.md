@@ -5,9 +5,10 @@ Use the runtime config rollback plan generator when a persistent Beast/runtime c
 The helper is intentionally conservative:
 
 - it only accepts JSON object snapshots;
+- it validates snapshots against the supported runtime config keys (`provider`, `model`, `modules`, `skills`, `gitConfig`, `promptConfig`, and related scalar limits) before generating a plan;
 - it enforces the same 1 MiB/depth/container safety budget as the runtime config loader;
 - it rejects no-op comparisons so operators do not approve an empty rollback;
-- it prints deterministic JSON-pointer changed paths;
+- it prints deterministic JSON-pointer changed paths, including added paths where the last-known-good snapshot had no previous value;
 - it JSON-encodes changed paths in Markdown so unusual config keys cannot forge headings or command bullets;
 - it redacts changed values from machine-readable plan output and evidence commands;
 - it rejects control characters in rendered file paths;
@@ -49,6 +50,7 @@ Do not run the approval-gated copy until the evidence is captured and the change
 ## Failure modes
 
 - Invalid JSON or a non-object snapshot fails before a plan is printed.
+- Unsupported runtime config keys or invalid field types fail before a plan is printed, so operators do not get a rollback plan for a config shape the helper cannot safely validate.
 - Snapshots larger than 1 MiB, deeper than 64 containers, or exceeding the configured container/key/item budgets fail before a plan is printed.
 - Matching before/after snapshots fail with `No runtime config changes detected`.
 - Paths starting with `-` or containing control characters are rejected so generated argv and Markdown cannot be interpreted as options or forged plan text.

@@ -114,6 +114,54 @@ describe('runtime config rollback plan dry-run helper', () => {
     expect(plan.notes.join('\n')).toContain('Snapshot parsing is bounded');
   });
 
+  it('summarizes representative runtime config changes without leaking changed values', () => {
+    const before = {
+      provider: 'anthropic',
+      model: 'claude-sonnet-4',
+      maxDurationMs: 300_000,
+      modules: { planner: true, memory: true },
+      skills: ['github-code-review'],
+      gitConfig: { baseBranch: 'main', prCreation: 'manual' },
+      promptConfig: { files: ['README.md'] },
+    };
+    const after = {
+      provider: 'openai',
+      model: 'gpt-5.3-codex-spark',
+      maxDurationMs: 600_000,
+      modules: { planner: true, memory: false, governor: true },
+      skills: ['github-code-review', 'test-driven-development'],
+      gitConfig: { baseBranch: 'release/next', prCreation: 'auto' },
+      promptConfig: { files: ['README.md', 'docs/dr/runtime-config-rollback-plan.md'] },
+    };
+
+    const plan = buildRuntimeConfigRollbackPlan({
+      beforePath: 'snapshots/runtime.before.json',
+      afterPath: 'snapshots/runtime.after.json',
+      targetPath: 'config/runtime.json',
+      before,
+      after,
+      beforeSha256: jsonSha(before),
+      afterSha256: jsonSha(after),
+      evidenceDir: 'rollback-evidence/runtime-config',
+    });
+
+    expect(plan.changedPaths).toEqual([
+      '/gitConfig/baseBranch',
+      '/gitConfig/prCreation',
+      '/maxDurationMs',
+      '/model',
+      '/modules/governor',
+      '/modules/memory',
+      '/promptConfig/files/1',
+      '/provider',
+      '/skills/1',
+    ]);
+    expect(plan.changes).toContainEqual({ path: '/modules/governor', type: 'added' });
+    expect(plan.requiredDecisions.join('\n')).toContain('"/modules/governor"');
+    expect(JSON.stringify(plan.changes)).not.toContain('gpt-5.3-codex-spark');
+    expect(JSON.stringify(plan.readOnlyCapture)).not.toContain('release/next');
+  });
+
   it('requires caller-provided snapshot file hashes for approval-gated plans', () => {
     expect(() => buildRuntimeConfigRollbackPlan({
       beforePath: 'before.json',
@@ -202,6 +250,29 @@ describe('runtime config rollback plan dry-run helper', () => {
       snapshot: { provider: 'claude', maxDurationMs: 123, skills: ['safe'] },
       sha256: createHash('sha256').update(raw).digest('hex'),
     });
+  });
+
+  it('rejects unsupported runtime config changes before generating a plan', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'runtime-config-unsupported-'));
+    const before = join(workDir, 'before.json');
+    const after = join(workDir, 'after.json');
+    const target = join(workDir, 'current.json');
+    await writeFile(before, JSON.stringify({ provider: 'claude', modules: { planner: true } }));
+    await writeFile(after, JSON.stringify({ provider: 'claude', modules: { planner: true, experimental: true } }));
+    await writeFile(target, JSON.stringify({ provider: 'claude', modules: { planner: true, experimental: true } }));
+
+    const result = spawnSync(process.execPath, [
+      SCRIPT,
+      '--dry-run',
+      '--format', 'json',
+      '--before', before,
+      '--after', after,
+      '--target', target,
+    ], { cwd: ROOT, encoding: 'utf8' });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('unsupported modules.experimental');
+    expect(result.stdout).toBe('');
   });
 
   it('rejects non-regular snapshots before reading', async () => {
@@ -313,6 +384,44 @@ describe('runtime config rollback plan dry-run helper', () => {
     expect(changes).toEqual([{ path: '/provider', type: 'changed' }]);
     await expect(readFile(join(evidence, 'rollback-config.json'), 'utf8')).resolves.toContain('claude');
     await expect(readFile(join(evidence, 'rollback-comment.md'), 'utf8')).resolves.toContain('Changed paths: "/provider"');
+  });
+
+  it('executes the generated approval-gated action and verification commands after evidence capture', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'runtime-config-approval-action-'));
+    const before = join(workDir, 'before.json');
+    const after = join(workDir, 'after.json');
+    const target = join(workDir, 'current.json');
+    const evidence = join(workDir, 'evidence');
+    await writeFile(before, `${JSON.stringify({ provider: 'claude', modules: { memory: true } }, null, 2)}\n`);
+    await writeFile(after, `${JSON.stringify({ provider: 'openai', modules: { memory: false } }, null, 2)}\n`);
+    await writeFile(target, `${JSON.stringify({ provider: 'openai', modules: { memory: false } }, null, 2)}\n`);
+
+    const jsonResult = spawnSync(process.execPath, [
+      SCRIPT,
+      '--dry-run',
+      '--format', 'json',
+      '--approval-cop', 'env',
+      '--before', before,
+      '--after', after,
+      '--target', target,
+      '--evidence-dir', evidence,
+    ], { cwd: ROOT, encoding: 'utf8' });
+
+    expect(jsonResult.status).toBe(0);
+    const parsed = JSON.parse(jsonResult.stdout);
+    for (const command of parsed.readOnlyCapture) {
+      const result = spawnSync(command[0], command.slice(1), { cwd: ROOT, encoding: 'utf8' });
+      expect(result.status, result.stderr || result.stdout).toBe(0);
+    }
+
+    const approvalResult = spawnSync(parsed.approvalGatedActions[0][0], parsed.approvalGatedActions[0].slice(1), { cwd: ROOT, encoding: 'utf8' });
+    expect(approvalResult.status, approvalResult.stderr || approvalResult.stdout).toBe(0);
+    await expect(readFile(target, 'utf8')).resolves.toContain('claude');
+
+    for (const command of parsed.postRollbackVerification.slice(0, 2)) {
+      const result = spawnSync(command[0], command.slice(1), { cwd: ROOT, encoding: 'utf8' });
+      expect(result.status, result.stderr || result.stdout).toBe(0);
+    }
   });
 
   it('does not chmod pre-existing evidence directories', async () => {
