@@ -59,7 +59,6 @@ export interface BeastWorktreeCleanupInput extends Omit<BeastWorktreeCleanupPlan
 
 const DEFAULT_WORKTREES_DIR = join('.frankenbeast', '.worktrees');
 const DEFAULT_BRANCH_PREFIX = 'beast/';
-const ACTIVE_RUN_STATUSES = new Set(['queued', 'interviewing', 'running', 'pending_approval']);
 
 function defaultRunGit(args: readonly string[], cwd: string): string {
   return execFileSync('git', [...args], {
@@ -119,10 +118,6 @@ function worktreeAgentId(worktreesRoot: string, worktreePath: string): string | 
   return relativePath;
 }
 
-function isActiveRun(run: BeastRun): boolean {
-  return ACTIVE_RUN_STATUSES.has(run.status);
-}
-
 function runActivityTime(run: BeastRun): string | undefined {
   return run.lastHeartbeatAt ?? run.finishedAt ?? run.startedAt ?? run.createdAt;
 }
@@ -154,12 +149,6 @@ export function planAbandonedBeastWorktreeCleanup(
     runs.push(run);
     runsByAgentId.set(run.trackedAgentId, runs);
   }
-  const activeRunAgentIds = new Set(
-    input.runs
-      .filter((run) => run.trackedAgentId && isActiveRun(run))
-      .map((run) => run.trackedAgentId as string),
-  );
-
   return input.worktrees
     .map((worktree): BeastWorktreeCleanupCandidate | undefined => {
       if (!worktree.branch?.startsWith(branchPrefix)) return undefined;
@@ -184,9 +173,6 @@ export function planAbandonedBeastWorktreeCleanup(
       }
       if (agent.status === 'deleted') {
         return { agentId, branchName: worktree.branch, path: resolve(worktree.path), reason: 'agent-deleted', ...evidence };
-      }
-      if (!activeRunAgentIds.has(agentId)) {
-        return { agentId, branchName: worktree.branch, path: resolve(worktree.path), reason: 'no-active-run', ...evidence };
       }
       return undefined;
     })

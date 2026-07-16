@@ -27,7 +27,7 @@
 - When verifying workspace package typechecks in a fresh worktree, build dependency packages (or run root `npm run build`) before package-local `tsc --noEmit`; otherwise unresolved workspace package declarations can look like feature regressions.
 
 ## 2026-07-15 — Beast process cleanup review fixes
-- For Beast worktree cleanup, scope candidates to the orchestrator-owned worktree root and branch prefix, then require no active queued/interviewing/running/pending-approval run before deletion; default scan APIs should be dry-run and return owner/activity/card/PR evidence for review.
+- For Beast worktree cleanup, scope candidates to the orchestrator-owned worktree root and branch prefix, then require a deleted tracked agent or missing agent owner before deletion; default scan APIs should be dry-run and return owner/activity/card/PR evidence for review.
 - For Beast cleanup paths, treat persisted process-group ownership as verified only when the stored start-time token matches the current `/proc` start time; missing or unreadable start times should fail closed to direct-PID signaling to avoid killing a PID-reused process group.
 - Keep cleanup ownership delegated through execution-mode wrappers: container executors must forward `cleanupPendingRun()` so queued container runs can be cancelled before an attempt exists.
 - CLI signal cleanup should register and unregister all handled signals symmetrically, and long-running `restart` commands should track the target run before awaiting restart so SIGINT/SIGHUP can clean up in-flight work.

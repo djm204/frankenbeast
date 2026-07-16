@@ -111,13 +111,9 @@ describe('git worktree isolation', () => {
       worktreesDir,
     });
 
-    expect(plan.map((entry) => entry.agentId)).toEqual([deletedAgent.id, 'agent-orphan', stoppedAgent.id]);
-    expect(plan.map((entry) => entry.reason)).toEqual(['agent-deleted', 'orphaned-worktree', 'no-active-run']);
-    expect(plan.map((entry) => entry.branchName)).toEqual([
-      `beast/${deletedAgent.id}`,
-      'beast/agent-orphan',
-      `beast/${stoppedAgent.id}`,
-    ]);
+    expect(plan.map((entry) => entry.agentId)).toEqual([deletedAgent.id, 'agent-orphan']);
+    expect(plan.map((entry) => entry.reason)).toEqual(['agent-deleted', 'orphaned-worktree']);
+    expect(plan.map((entry) => entry.branchName)).toEqual([`beast/${deletedAgent.id}`, 'beast/agent-orphan']);
   });
 
   it('keeps cleanup dry-run by default', () => {
