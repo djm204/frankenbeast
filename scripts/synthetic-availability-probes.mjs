@@ -18,11 +18,12 @@ function parseCommandLine(value) {
     if (escaping) {
       word += character;
       escaping = false;
-    } else if (character === '\\') {
-      escaping = true;
     } else if (quote) {
       if (character === quote) quote = null;
+      else if (quote !== "'" && character === '\\') escaping = true;
       else word += character;
+    } else if (character === '\\') {
+      escaping = true;
     } else if (character === '"' || character === "'") {
       quote = character;
     } else if (/\s/u.test(character)) {
@@ -178,6 +179,19 @@ function redactText(value) {
     .replace(/((?:--?[\w-]*(?:token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)[\w-]*|token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)\s+)\S+/giu, '$1[REDACTED]');
 }
 
+function redactUrl(value) {
+  try {
+    const url = new URL(String(value));
+    url.username = '';
+    url.password = '';
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return redactText(value);
+  }
+}
+
 function redactCommand(command) {
   return command.map((part, index) => {
     const previous = command[index - 1] ?? '';
@@ -230,16 +244,25 @@ async function probeDashboardHealth(config, deps) {
   if (!config.dashboardHealthUrl) throw new Error('missing dashboard health URL');
   const response = await deps.fetch(config.dashboardHealthUrl, {
     method: 'GET',
+    redirect: 'manual',
     signal: AbortSignal.timeout(config.timeoutMs),
   });
+  if (response?.redirected || (Number(response?.status) >= 300 && Number(response?.status) < 400)) {
+    throw new Error(`dashboard health redirected with HTTP ${response?.status ?? 'unknown'}`);
+  }
   if (!response?.ok) throw new Error(`dashboard health returned HTTP ${response?.status ?? 'unknown'}`);
-  return { url: config.dashboardHealthUrl, status: response.status };
+  return { url: redactUrl(config.dashboardHealthUrl), status: response.status };
 }
 
 async function probeApprovalLedgerParse(config, deps) {
   if (!config.approvalLedgerPath) throw new Error('missing approval ledger path; pass --approval-ledger');
   const raw = await deps.readFile(config.approvalLedgerPath, 'utf8');
-  const parsed = JSON.parse(raw);
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('approval ledger contains invalid JSON');
+  }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new Error('approval ledger must be a JSON object');
   }

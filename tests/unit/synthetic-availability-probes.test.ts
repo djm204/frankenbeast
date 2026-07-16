@@ -136,6 +136,96 @@ describe('synthetic availability probes', () => {
     expect(execFile).toHaveBeenCalledWith('node', ['-e', 'process.exit(1)'], 100);
   });
 
+  it('preserves backslashes inside single-quoted provider command arguments', async () => {
+    const { runSyntheticAvailabilityProbes } = await loadScript();
+    const execFile = vi.fn(async (file: string) => {
+      if (file === 'gh') return '[]';
+      return 'provider ok';
+    });
+
+    await runSyntheticAvailabilityProbes({
+      config: {
+        repo: 'djm204/frankenbeast',
+        providerCommand: "printf '%s\\n' ok",
+        timeoutMs: 100,
+      },
+      execFile,
+      fetch: vi.fn(async () => ({ ok: true, status: 200 })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      readFile: vi.fn(async () => '{}'),
+    });
+
+    expect(execFile).toHaveBeenCalledWith('printf', ['%s\\n', 'ok'], 100);
+  });
+
+  it('fails redirected dashboard health checks and requests manual redirect handling', async () => {
+    const { runSyntheticAvailabilityProbes } = await loadScript();
+    const fetch = vi.fn(async () => ({ ok: true, redirected: true, status: 200 }));
+
+    const report = await runSyntheticAvailabilityProbes({
+      config: {
+        repo: 'djm204/frankenbeast',
+        providerCommand: ['node', '--version'],
+        dashboardHealthUrl: 'http://127.0.0.1:3737/health',
+        timeoutMs: 100,
+      },
+      execFile: vi.fn(async (file: string) => (file === 'gh' ? '[]' : 'provider ok')),
+      fetch,
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      readFile: vi.fn(async () => '{}'),
+    });
+
+    const dashboardProbe = (report.probes as Array<Record<string, string>>).find((probe) => probe.name === 'dashboard_health');
+    expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:3737/health', expect.objectContaining({ redirect: 'manual' }));
+    expect(dashboardProbe?.status).toBe('unavailable');
+    expect(dashboardProbe?.error).toContain('redirected');
+  });
+
+  it('redacts credentials from dashboard health URLs in successful reports', async () => {
+    const { runSyntheticAvailabilityProbes } = await loadScript();
+
+    const report = await runSyntheticAvailabilityProbes({
+      config: {
+        repo: 'djm204/frankenbeast',
+        providerCommand: ['node', '--version'],
+        dashboardHealthUrl: 'http://user:pass@127.0.0.1:3737/health?token=secret-token&api_key=secret-key#frag',
+        timeoutMs: 100,
+      },
+      execFile: vi.fn(async (file: string) => (file === 'gh' ? '[]' : 'provider ok')),
+      fetch: vi.fn(async () => ({ ok: true, status: 200 })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      readFile: vi.fn(async () => '{}'),
+    });
+
+    const dashboardProbe = (report.probes as Array<Record<string, Record<string, string>>>).find((probe) => probe.name === 'dashboard_health');
+    expect(dashboardProbe?.detail.url).toBe('http://127.0.0.1:3737/health');
+    expect(JSON.stringify(dashboardProbe)).not.toContain('secret-token');
+    expect(JSON.stringify(dashboardProbe)).not.toContain('secret-key');
+    expect(JSON.stringify(dashboardProbe)).not.toContain('user:pass');
+  });
+
+  it('hides raw approval ledger contents from invalid JSON parse errors', async () => {
+    const { runSyntheticAvailabilityProbes } = await loadScript();
+
+    const report = await runSyntheticAvailabilityProbes({
+      config: {
+        repo: 'djm204/frankenbeast',
+        providerCommand: ['node', '--version'],
+        approvalLedgerPath: '/tmp/ledger.json',
+        timeoutMs: 100,
+      },
+      execFile: vi.fn(async (file: string) => (file === 'gh' ? '[]' : 'provider ok')),
+      fetch: vi.fn(async () => ({ ok: true, status: 200 })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      readFile: vi.fn(async () => 'opaque-approval-token-value'),
+    });
+
+    const ledgerProbe = (report.probes as Array<Record<string, string>>).find((probe) => probe.name === 'approval_ledger_parse');
+    expect(ledgerProbe?.status).toBe('unavailable');
+    expect(ledgerProbe?.error).toBe('approval ledger contains invalid JSON');
+    expect(JSON.stringify(ledgerProbe)).not.toContain('opaque-approval-token-value');
+  });
+
   it('emits compact one-line JSON for JSONL-friendly cron logs', () => {
     const result = spawnSync(process.execPath, [SCRIPT, '--json', '--repo', 'djm204/frankenbeast'], {
       cwd: ROOT,
