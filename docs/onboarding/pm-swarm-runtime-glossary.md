@@ -9,6 +9,8 @@ Use this glossary when a PM, doctor, or issue worker handoff mentions PM-swarm r
 3. Apply the **What to do when you see it** guidance, then record the exact evidence in the task comment or PR handoff.
 4. If evidence is stale or contradictory, re-check live Kanban, GitHub PR, CI, Codex, and worktree state before editing code or spawning more workers.
 
+For an outage rehearsal that uses these terms in sequence, run the [provider outage recovery drill](../dr/provider-outage-recovery-drill.md). It covers primary provider failure, fallback-only mode, in-flight backlog freeze, recovery probe, and resume order with fixture/sandbox commands by default.
+
 ## Runtime term table
 
 | Term | What it means | What to verify first | What to do when you see it |
