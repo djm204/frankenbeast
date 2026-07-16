@@ -598,6 +598,51 @@ describe('memory access audit trail', () => {
     brain.close();
   });
 
+  it('keeps failed working restore audit writes from mutating runtime memory', () => {
+    const brain = new SqliteBrain(':memory:');
+    brain.working.set('restore-existing-key', 'old value');
+    const db = (brain as unknown as { db: Database.Database }).db;
+    db.exec(`
+      CREATE TRIGGER fail_working_restore_audit
+      BEFORE INSERT ON memory_access_audit_events
+      WHEN NEW.operation = 'working.restore'
+      BEGIN
+        SELECT RAISE(ABORT, 'simulated working restore audit failure');
+      END;
+    `);
+
+    expect(() => brain.working.restore({ 'restore-new-key': 'new value' })).toThrow('simulated working restore audit failure');
+    expect(brain.working.get('restore-existing-key')).toBe('old value');
+    expect(brain.working.get('restore-new-key')).toBeUndefined();
+
+    brain.close();
+  });
+
+  it('rolls back right-to-forget deletions when success audit persistence fails', () => {
+    const brain = new SqliteBrain(':memory:');
+    brain.episodic.record({
+      type: 'observation',
+      summary: 'atomic-forget-secret payload',
+      createdAt: new Date().toISOString(),
+    });
+    const beforeCount = brain.episodic.count();
+    const db = (brain as unknown as { db: Database.Database }).db;
+    db.exec(`
+      CREATE TRIGGER fail_right_to_forget_success_audit
+      BEFORE INSERT ON memory_access_audit_events
+      WHEN NEW.operation = 'privacy.rightToForget' AND NEW.outcome = 'success'
+      BEGIN
+        SELECT RAISE(ABORT, 'simulated right-to-forget audit failure');
+      END;
+    `);
+
+    expect(() => brain.rightToForget({ query: 'atomic-forget-secret' })).toThrow('simulated right-to-forget audit failure');
+    expect(brain.episodic.count()).toBe(beforeCount);
+    expect(brain.episodic.recall('atomic-forget-secret', 5)).toHaveLength(1);
+
+    brain.close();
+  });
+
   it('audits clear-checkpoint failures before rethrowing', () => {
     const brain = new SqliteBrain(':memory:');
     brain.recovery.checkpoint({
@@ -639,16 +684,17 @@ describe('memory access audit trail', () => {
     brain.close();
   });
 
-  it('audits dry-run right-to-forget scans', () => {
+  it('audits dry-run right-to-forget scans once', () => {
     const brain = new SqliteBrain(':memory:');
     brain.working.set('dry-run-forget-key', 'dry-run-forget-secret');
 
     const report = brain.rightToForget({ query: 'dry-run-forget-secret', dryRun: true });
-    const audit = brain.accessAudit.list({ operation: 'privacy.rightToForget', limit: 1 })[0];
+    const audit = brain.accessAudit.list({ operation: 'privacy.rightToForget' });
 
     expect(report.dryRun).toBe(true);
-    expect(audit).toMatchObject({ operation: 'privacy.rightToForget', outcome: 'success' });
-    expect(audit.details).toMatchObject({ dryRun: true, deletedWorking: 1 });
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({ operation: 'privacy.rightToForget', outcome: 'success' });
+    expect(audit[0]?.details).toMatchObject({ dryRun: true, deletedWorking: 1 });
 
     brain.close();
   });

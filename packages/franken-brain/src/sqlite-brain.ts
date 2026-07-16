@@ -1743,24 +1743,60 @@ class SqliteWorkingMemory implements IWorkingMemory {
       throw error;
     }
 
-    this.clear({ audit: false });
-    this.deletedKeys = new Set(this.persistedSerialized.keys());
-    for (const [key, normalized, serialized, size] of prepared) {
-      this.store.set(key, normalized);
-      this.sizes.set(key, size);
-      this.serialized.set(key, serialized);
-      this.deletedKeys.delete(key);
-      if (this.persistedSerialized.get(key) !== serialized) {
-        this.dirtyKeys.add(key);
+    const previousStore = new Map(this.store);
+    const previousSizes = new Map(this.sizes);
+    const previousSerialized = new Map(this.serialized);
+    const previousDirtyKeys = new Set(this.dirtyKeys);
+    const previousDeletedKeys = new Set(this.deletedKeys);
+    const previousTotalBytes = this.totalBytes;
+    let mutationApplied = false;
+
+    try {
+      this.clear({ audit: false });
+      this.deletedKeys = new Set(this.persistedSerialized.keys());
+      for (const [key, normalized, serialized, size] of prepared) {
+        this.store.set(key, normalized);
+        this.sizes.set(key, size);
+        this.serialized.set(key, serialized);
+        this.deletedKeys.delete(key);
+        if (this.persistedSerialized.get(key) !== serialized) {
+          this.dirtyKeys.add(key);
+        }
       }
+      this.totalBytes = total;
+      mutationApplied = true;
+      this.audit?.({
+        operation: 'working.restore',
+        store: 'working',
+        outcome: 'success',
+        details: { count: prepared.length, totalBytes: total },
+      });
+    } catch (error) {
+      if (mutationApplied) {
+        this.store = previousStore;
+        this.sizes = previousSizes;
+        this.serialized = previousSerialized;
+        this.dirtyKeys = previousDirtyKeys;
+        this.deletedKeys = previousDeletedKeys;
+        this.totalBytes = previousTotalBytes;
+      }
+      try {
+        this.audit?.({
+          operation: 'working.restore',
+          store: 'working',
+          outcome: 'error',
+          details: {
+            count: entries.length,
+            errorName: error instanceof Error ? error.name : 'Error',
+          },
+        });
+      } catch {
+        // If audit persistence is what failed, preserving restore atomicity is
+        // more important than masking the original error with a second audit
+        // write failure.
+      }
+      throw error;
     }
-    this.totalBytes = total;
-    this.audit?.({
-      operation: 'working.restore',
-      store: 'working',
-      outcome: 'success',
-      details: { count: prepared.length, totalBytes: total },
-    });
   }
 
   clear(options: { audit?: boolean } = {}): void {
@@ -4397,10 +4433,21 @@ export class SqliteBrain implements IBrain {
           deletedDerived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
           deletedTotalDerived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
         },
+        ...(normalizedSelector.query === undefined ? {} : { query: normalizedSelector.query }),
+        ...(normalizedSelector.key === undefined ? {} : { key: normalizedSelector.key }),
       };
-      if (normalizedSelector.query !== undefined) accessEvent.query = normalizedSelector.query;
-      if (normalizedSelector.key !== undefined) accessEvent.key = normalizedSelector.key;
       this.auditRecorder(accessEvent);
+
+      return {
+        selectorHash,
+        dryRun,
+        deleted: {
+          working: deletedWorkingKeys.size,
+          episodic: episodicMatchCount,
+          derived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
+        },
+        remainingReferences: this.countRemainingReferences(normalizedSelector, { expireRuntimeGuards: false, expirePersistedTtlEntries: false }),
+      };
     } else {
       try {
         const tx = this.db.transaction(() => {
@@ -4465,6 +4512,24 @@ export class SqliteBrain implements IBrain {
           this.encryption?.encrypt(auditDetails) ?? auditDetails,
           isoNow(),
         );
+        const accessEvent: MemoryAccessAuditInput = {
+          operation: 'privacy.rightToForget',
+          store: 'privacy',
+          outcome: 'success',
+          details: {
+            selectorHash,
+            dryRun: false,
+            deletedWorking: deletedWorkingKeys.size,
+            deletedEpisodic: episodicMatchCount,
+            deletedCheckpoints: checkpointMatchCount,
+            deletedReviewPayloads: reviewMatchCount,
+            deletedDerived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
+            deletedTotalDerived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
+          },
+          ...(normalizedSelector.query === undefined ? {} : { query: normalizedSelector.query }),
+          ...(normalizedSelector.key === undefined ? {} : { key: normalizedSelector.key }),
+        };
+        this.auditRecorder(accessEvent);
         return Number(result.lastInsertRowid);
       });
       const auditEventId = tx() as number;
@@ -4474,24 +4539,6 @@ export class SqliteBrain implements IBrain {
         purgeDeletedSqliteContent(this.db, this.dbPath);
       }
       SqliteBrain.expireLiveWorkingMatches(this.dbPath, normalizedSelector);
-      const accessEvent: MemoryAccessAuditInput = {
-        operation: 'privacy.rightToForget',
-        store: 'privacy',
-        outcome: 'success',
-        details: {
-          selectorHash,
-          dryRun: false,
-          deletedWorking: deletedWorkingKeys.size,
-          deletedEpisodic: episodicMatchCount,
-          deletedCheckpoints: checkpointMatchCount,
-          deletedReviewPayloads: reviewMatchCount,
-          deletedDerived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
-          deletedTotalDerived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
-        },
-      };
-      if (normalizedSelector.query !== undefined) accessEvent.query = normalizedSelector.query;
-      if (normalizedSelector.key !== undefined) accessEvent.key = normalizedSelector.key;
-      this.auditRecorder(accessEvent);
       return {
         selectorHash,
         dryRun,
@@ -4513,43 +4560,13 @@ export class SqliteBrain implements IBrain {
             dryRun: false,
             errorName: error instanceof Error ? error.name : 'Error',
           },
+          ...(normalizedSelector.query === undefined ? {} : { query: normalizedSelector.query }),
+          ...(normalizedSelector.key === undefined ? {} : { key: normalizedSelector.key }),
         };
-        if (normalizedSelector.query !== undefined) accessEvent.query = normalizedSelector.query;
-        if (normalizedSelector.key !== undefined) accessEvent.key = normalizedSelector.key;
         this.auditRecorder(accessEvent);
         throw error;
       }
     }
-
-    const accessEvent: MemoryAccessAuditInput = {
-      operation: 'privacy.rightToForget',
-      store: 'privacy',
-      outcome: 'success',
-      details: {
-        selectorHash,
-        dryRun: true,
-        deletedWorking: deletedWorkingKeys.size,
-        deletedEpisodic: episodicMatchCount,
-        deletedCheckpoints: checkpointMatchCount,
-        deletedReviewPayloads: reviewMatchCount,
-        deletedDerived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
-        deletedTotalDerived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
-      },
-    };
-    if (normalizedSelector.query !== undefined) accessEvent.query = normalizedSelector.query;
-    if (normalizedSelector.key !== undefined) accessEvent.key = normalizedSelector.key;
-    this.auditRecorder(accessEvent);
-
-    return {
-      selectorHash,
-      dryRun,
-      deleted: {
-        working: deletedWorkingKeys.size,
-        episodic: episodicMatchCount,
-        derived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
-      },
-      remainingReferences: this.countRemainingReferences(normalizedSelector, { expireRuntimeGuards: false, expirePersistedTtlEntries: false }),
-    };
   }
 
   private matchingWorkingKeys(selector: NormalizedRightToForgetSelector, options: { expireRuntimeGuards?: boolean; expirePersistedTtlEntries?: boolean } = {}): Array<{ key: string; source: 'persisted' | 'runtime' }> {
