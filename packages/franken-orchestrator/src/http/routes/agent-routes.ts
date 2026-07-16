@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireBeastOperatorAuth } from '../../beasts/http/beast-auth.js';
 import { InMemoryRateLimiter, requireBeastRateLimit, type BeastRateLimitOptions } from '../../beasts/http/beast-rate-limit.js';
 import { DeletedTrackedAgentError, UnknownTrackedAgentError } from '../../beasts/errors.js';
+import { CapacityReservationError } from '../../beasts/services/capacity-reservation-policy.js';
 import type { AgentService } from '../../beasts/services/agent-service.js';
 import type { BeastDispatchService } from '../../beasts/services/beast-dispatch-service.js';
 import type { BeastRunService } from '../../beasts/services/beast-run-service.js';
@@ -14,6 +15,7 @@ import {
   validateBody,
 } from '../middleware.js';
 import { TransportSecurityService } from '../security/transport-security.js';
+import type { BeastRun, TrackedAgent } from '../../beasts/types.js';
 
 const ModuleConfigSchema = z.object({
   firewall: z.boolean().optional(),
@@ -77,6 +79,22 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
 
   app.post('/v1/beasts/agents', async (c) => {
     const body = validateBody(CreateAgentBody, await parseJsonBody(c));
+    const shouldAutoDispatch = body.autoDispatch !== false && deps.dispatch && shouldDispatchOnCreate(body.initAction.kind);
+    if (shouldAutoDispatch) {
+      const capacityDecision = deps.agents.canStartInitConfig(body.initConfig);
+      if (!capacityDecision.allowed) {
+        return c.json({
+          error: {
+            code: 'AGENT_CAPACITY_RESERVED',
+            message: 'Agent capacity is reserved for urgent matching work',
+            details: {
+              decision: capacityDecision,
+              capacity: deps.agents.getCapacityReservationState(),
+            },
+          },
+        }, 409);
+      }
+    }
     const agent = deps.agents.createAgent({
       definitionId: body.definitionId,
       source: body.chatSessionId ? 'chat' : 'dashboard',
@@ -134,6 +152,19 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
         ...(body.moduleConfig ? { moduleConfig: body.moduleConfig } : {}),
       });
     } catch (error) {
+      if (error instanceof CapacityReservationError) {
+        return c.json({
+          error: {
+            code: 'AGENT_CAPACITY_RESERVED',
+            message: 'Agent capacity is reserved for urgent matching work',
+            details: {
+              decision: error.decision,
+              capacity: error.state,
+              agentId: agent.id,
+            },
+          },
+        }, 409);
+      }
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error(`[agent-routes] Dispatch failed for ${agent.id}: ${errorMessage}`);
       if (error instanceof Error && error.stack) {
@@ -167,6 +198,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
     return c.json({
       data: {
         agents: deps.agents.listAgents(),
+        capacityReservation: deps.agents.getCapacityReservationState(),
       },
     });
   });
@@ -248,7 +280,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
         const existingRun = deps.runs.getRun(agent.dispatchRunId);
         const run = shouldDispatchFreshRunForModuleConfig(agent, existingRun)
           ? await dispatchDetachedAgent(deps, agentId)
-          : await deps.runs.start(agent.dispatchRunId, 'operator');
+          : await startLinkedAgentRun(deps, agent);
         deps.agents.appendEvent(agentId, {
           level: 'info',
           type: 'agent.start.requested',
@@ -278,6 +310,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
           `Tracked agent '${agentId}' was not found`,
         );
       }
+      throwCapacityReservationError(error);
       throw error;
     }
   });
@@ -326,8 +359,8 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       if (agent.dispatchRunId) {
         const existingRun = deps.runs.getRun(agent.dispatchRunId);
         const run = shouldDispatchFreshRunForModuleConfig(agent, existingRun)
-          ? await dispatchReplacementAgentRun(deps, agentId, existingRun)
-          : await deps.runs.restart(agent.dispatchRunId, 'operator');
+          ? await dispatchReplacementAgentRun(deps, agent, existingRun)
+          : await restartLinkedAgentRun(deps, agent);
         deps.agents.appendEvent(agentId, {
           level: 'info',
           type: 'agent.restart.requested',
@@ -365,6 +398,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
           `Tracked agent '${agentId}' was not found`,
         );
       }
+      throwCapacityReservationError(error);
       throw error;
     }
   });
@@ -448,6 +482,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
           `Tracked agent '${agentId}' was not found`,
         );
       }
+      throwCapacityReservationError(error);
       throw error;
     }
   });
@@ -535,15 +570,59 @@ function shouldDispatchFreshRunForModuleConfig(
   return JSON.stringify(run.configSnapshot.modules ?? {}) !== JSON.stringify(agent.moduleConfig);
 }
 
+function throwCapacityReservationError(error: unknown): void {
+  if (error instanceof CapacityReservationError) {
+    throw new HttpError(
+      409,
+      'AGENT_CAPACITY_RESERVED',
+      'Agent capacity is reserved for urgent matching work',
+      {
+        decision: error.decision,
+        capacity: error.state,
+      },
+    );
+  }
+}
+
 async function dispatchReplacementAgentRun(
   deps: AgentRoutesDeps,
-  agentId: string,
+  agent: TrackedAgent,
   existingRun: ReturnType<BeastRunService['getRun']>,
 ) {
+  assertAgentCapacityAvailable(deps, agent);
   if (existingRun?.status === 'running') {
     await deps.runs.stop(existingRun.id, 'operator');
   }
-  return dispatchDetachedAgent(deps, agentId);
+  return dispatchDetachedAgent(deps, agent.id);
+}
+
+async function startLinkedAgentRun(deps: AgentRoutesDeps, agent: TrackedAgent): Promise<BeastRun> {
+  if (!agent.dispatchRunId) {
+    throw new Error(`Tracked agent '${agent.id}' has no linked run`);
+  }
+  return deps.runs.start(agent.dispatchRunId, 'operator');
+}
+
+async function restartLinkedAgentRun(deps: AgentRoutesDeps, agent: TrackedAgent): Promise<BeastRun> {
+  if (!agent.dispatchRunId) {
+    throw new Error(`Tracked agent '${agent.id}' has no linked run`);
+  }
+  return deps.runs.restart(agent.dispatchRunId, 'operator');
+}
+
+function assertAgentCapacityAvailable(deps: AgentRoutesDeps, agent: TrackedAgent): void {
+  const capacityDecision = deps.agents.canStartAgent(agent);
+  if (!capacityDecision.allowed) {
+    throw new HttpError(
+      409,
+      'AGENT_CAPACITY_RESERVED',
+      'Agent capacity is reserved for urgent matching work',
+      {
+        decision: capacityDecision,
+        capacity: deps.agents.getCapacityReservationState(),
+      },
+    );
+  }
 }
 
 async function dispatchDetachedAgent(
@@ -558,6 +637,8 @@ async function dispatchDetachedAgent(
       `Tracked agent '${agentId}' cannot be started without a linked run`,
     );
   }
+
+  assertAgentCapacityAvailable(deps, agent);
 
   return deps.dispatch.createRun({
     definitionId: agent.definitionId,

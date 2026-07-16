@@ -12,6 +12,7 @@ import {
   UnknownBeastInterviewSessionError,
 } from '../../beasts/services/beast-interview-service.js';
 import { BeastRunService, UnknownBeastRunError } from '../../beasts/services/beast-run-service.js';
+import { CapacityReservationError } from '../../beasts/services/capacity-reservation-policy.js';
 import type { AgentService } from '../../beasts/services/agent-service.js';
 import type { BeastEventBus } from '../../beasts/events/beast-event-bus.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
@@ -79,6 +80,20 @@ function beastRunNotFound(runId: string): HttpError {
   return new HttpError(404, 'BEAST_RUN_NOT_FOUND', `Beast run '${runId}' was not found`);
 }
 
+function throwCapacityReservationError(error: unknown): void {
+  if (error instanceof CapacityReservationError) {
+    throw new HttpError(
+      409,
+      'AGENT_CAPACITY_RESERVED',
+      'Agent capacity is reserved for urgent matching work',
+      {
+        decision: error.decision,
+        capacity: error.state,
+      },
+    );
+  }
+}
+
 class InterviewSessionNotFoundHttpError extends HttpError {
   constructor(sessionId: string) {
     super(404, 'INTERVIEW_SESSION_NOT_FOUND', `Beast interview session '${sessionId}' was not found`);
@@ -86,6 +101,7 @@ class InterviewSessionNotFoundHttpError extends HttpError {
 }
 
 function throwKnownRunError(runId: string, error: unknown): never {
+  throwCapacityReservationError(error);
   if (error instanceof UnknownBeastRunError) {
     throw beastRunNotFound(runId);
   }
@@ -211,6 +227,7 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
           `Tracked agent '${body.trackedAgentId}' was not found`,
         );
       }
+      throwCapacityReservationError(error);
       throw error;
     }
     return c.json({ data: runResponse(run, deps) }, 201);

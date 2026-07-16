@@ -48,6 +48,7 @@ describe('createGovernanceGate', () => {
       'fbeast_firewall_scan_file',
       'fbeast_governor_check',
       'fbeast_governor_budget',
+      'fbeast_memory_review_propose',
       'fbeast_memory_query',
       'fbeast_memory_frontload',
       'fbeast_memory_export',
@@ -77,7 +78,7 @@ describe('createGovernanceGate', () => {
         tool,
         args,
       });
-      expect(result.decision).toBe('approved');
+      expect(result.decision, tool).toBe('approved');
       expect(seen).toHaveLength(0);
     }
   });

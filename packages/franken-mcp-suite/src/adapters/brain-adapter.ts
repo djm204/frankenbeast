@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import {
   SqliteBrain,
+  type MemoryCandidate,
+  type MemoryCandidateStatus,
+  type MemoryReviewDecisionOptions,
   type RightToForgetReport,
   type RightToForgetSelector,
 } from "@franken/brain";
@@ -90,6 +93,7 @@ export interface BrainAdapter {
     value: string;
     type: string;
     agentId?: string;
+    ttlMs?: number;
   }): Promise<void>;
   frontload(input?: MemoryScopeInput): Promise<BrainFrontloadSection[]>;
   exportProjectMemory(input?: MemoryExportInput): Promise<ProjectMemoryExport>;
@@ -97,6 +101,20 @@ export interface BrainAdapter {
   rightToForget(
     input: RightToForgetSelector & AgentScopedInput,
   ): Promise<RightToForgetReport>;
+  proposeMemory(input: {
+    key: string;
+    value: string;
+    source: string;
+    reason: string;
+    confidence: number;
+    evidenceId?: string;
+  }): Promise<MemoryCandidate>;
+  listMemoryReview(status?: MemoryCandidateStatus): Promise<MemoryCandidate[]>;
+  decideMemoryReview(input: {
+    id: string;
+    action: 'approve' | 'reject' | 'never_store';
+    options?: MemoryReviewDecisionOptions;
+  }): Promise<MemoryCandidate>;
 }
 
 const SUPPORTED_MEMORY_TYPES = ["working", "episodic"] as const;
@@ -104,8 +122,35 @@ const DEFAULT_QUERY_LIMIT = 20;
 const MAX_QUERY_LIMIT = 1000;
 const AGENT_WORKING_KEY_PREFIX = "__fbeast_agent_memory__/";
 const AGENT_MEMORY_SCOPE_MARKER = "fbeast:agent-memory";
+const MAX_OPERATIONAL_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 
 type SupportedMemoryType = (typeof SUPPORTED_MEMORY_TYPES)[number];
+
+function isTemporaryOperationalValue(record: Record<string, unknown>): boolean {
+  const markers = [record.category, record.kind, record.type, record.scope];
+  return markers.some(
+    (marker) =>
+      typeof marker === "string" &&
+      /^(temporary[-_\s]?operational|operational[-_\s]?temporary|temp[-_\s]?operational|operational[-_\s]?temp|transient[-_\s]?operational)$/i.test(
+        marker.trim(),
+      ),
+  );
+}
+
+function resolveOperationalTtlMs(ttlMs: number | undefined): number | undefined {
+  if (ttlMs === undefined) return undefined;
+  if (
+    !Number.isFinite(ttlMs) ||
+    !Number.isSafeInteger(ttlMs) ||
+    ttlMs < 1 ||
+    ttlMs > MAX_OPERATIONAL_TTL_MS
+  ) {
+    throw new Error(
+      `ttlMs must be a positive integer no greater than ${MAX_OPERATIONAL_TTL_MS}`,
+    );
+  }
+  return ttlMs;
+}
 
 function resolveAgentId(agentId: string | undefined): string | undefined {
   if (agentId === undefined) return undefined;
@@ -126,6 +171,9 @@ interface AgentScopedWorkingValue {
   __fbeastMemoryScope: typeof AGENT_MEMORY_SCOPE_MARKER;
   agentId: string;
   value: string;
+  expiresAt?: string;
+  category?: string;
+  sourceScope?: string;
 }
 
 function isAgentScopedWorkingValue(
@@ -151,33 +199,71 @@ function scopedWorkingKey(key: string, agentId: string | undefined): string {
 function scopedWorkingValue(
   value: string,
   agentId: string | undefined,
-): string | AgentScopedWorkingValue {
+  ttlMs: number | undefined,
+): string | AgentScopedWorkingValue | { value: string; category: string; sourceScope: string; expiresAt: string } {
+  const expiresAt =
+    ttlMs === undefined ? undefined : new Date(Date.now() + ttlMs).toISOString();
   const resolvedAgentId = resolveAgentId(agentId);
-  return resolvedAgentId
+
+  if (resolvedAgentId) {
+    return {
+      __fbeastMemoryScope: AGENT_MEMORY_SCOPE_MARKER,
+      agentId: resolvedAgentId,
+      value,
+      ...(expiresAt
+        ? { category: "temporary-operational", sourceScope: "mcp-memory-store", expiresAt }
+        : {}),
+    };
+  }
+
+  return expiresAt
     ? {
-        __fbeastMemoryScope: AGENT_MEMORY_SCOPE_MARKER,
-        agentId: resolvedAgentId,
         value,
+        category: "temporary-operational",
+        sourceScope: "mcp-memory-store",
+        expiresAt,
       }
     : value;
+}
+
+function unwrapWorkingMemoryValue(value: unknown): { text: string; expiresAt?: string } {
+  if (isAgentScopedWorkingValue(value)) {
+    const record = value as unknown as Record<string, unknown>;
+    return {
+      text: value.value,
+      ...(typeof value.expiresAt === "string" && isTemporaryOperationalValue(record) ? { expiresAt: value.expiresAt } : {}),
+    };
+  }
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    const record = value as Record<string, unknown> & { value?: unknown; expiresAt?: unknown };
+    if ('value' in record && typeof record.expiresAt === 'string' && isTemporaryOperationalValue(record)) {
+      return {
+        text: typeof record.value === "string" ? record.value : JSON.stringify(record.value),
+        expiresAt: record.expiresAt,
+      };
+    }
+  }
+  return { text: typeof value === "string" ? value : JSON.stringify(value) };
 }
 
 function parseScopedWorkingEntry(
   key: string,
   value: unknown,
-): { key: string; value: string; agentId?: string } {
+): { key: string; value: string; agentId?: string; expiresAt?: string } {
   const entry = parseScopedWorkingExportEntry(key, value);
   return {
     key: entry.key,
     value: typeof entry.value === "string" ? entry.value : JSON.stringify(entry.value),
     ...(entry.agentId === undefined ? {} : { agentId: entry.agentId }),
+    ...(entry.expiresAt ? { expiresAt: entry.expiresAt } : {}),
   };
 }
 
 function parseScopedWorkingExportEntry(
   key: string,
   value: unknown,
-): { key: string; value: unknown; agentId?: string } {
+): { key: string; value: unknown; agentId?: string; expiresAt?: string } {
+  const unwrapped = unwrapWorkingMemoryValue(value);
   if (
     key.startsWith(AGENT_WORKING_KEY_PREFIX) &&
     isAgentScopedWorkingValue(value)
@@ -188,15 +274,24 @@ function parseScopedWorkingExportEntry(
       try {
         return {
           key: decodeScopeComponent(rest.slice(slash + 1)),
-          value: value.value,
+          value: unwrapped.text,
           agentId: value.agentId,
+          ...(unwrapped.expiresAt ? { expiresAt: unwrapped.expiresAt } : {}),
         };
       } catch {
         // Fall through to treating malformed reserved keys as ordinary shared keys.
       }
     }
   }
-  return { key, value };
+  return {
+    key,
+    value: unwrapped.text,
+    ...(unwrapped.expiresAt ? { expiresAt: unwrapped.expiresAt } : {}),
+  };
+}
+
+function formatWorkingEntryValue(entry: { value: string; expiresAt?: string }): string {
+  return entry.expiresAt ? `${entry.value} (expires ${entry.expiresAt})` : entry.value;
 }
 
 function parseAgentFromEpisodicDetails(
@@ -291,9 +386,13 @@ function stableRedactedKey(key: string): string {
 }
 
 function redactExportString(value: string): string {
+  const withJsonSecretsRedacted = value.replace(
+    /"((?:password|passphrase|secret|token|api[_-]?key|authorization|credential|private[_-]?key|session(?:[_-]?cookie)?|cookie))"\s*:\s*"(?:\\.|[^"\\])*"/gi,
+    (_match, key: string) => `"${stableRedactedKey(key)}":"[redacted]"`,
+  );
   return SECRET_EXPORT_VALUES.reduce(
     (current, [pattern, replacement]) => current.replace(pattern, replacement),
-    value,
+    withJsonSecretsRedacted,
   );
 }
 
@@ -439,14 +538,15 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
         const query = input.query.toLowerCase();
         for (const [key, value] of Object.entries(snapshot)) {
           const entry = parseScopedWorkingEntry(key, value);
+          const formattedValue = formatWorkingEntryValue(entry);
           if (!canReadMemoryEntry(entry.agentId, readScope)) continue;
           if (
             entry.key.toLowerCase().includes(query) ||
-            entry.value.toLowerCase().includes(query)
+            formattedValue.toLowerCase().includes(query)
           ) {
             results.push({
               key: entry.key,
-              value: entry.value,
+              value: formattedValue,
               type: "working",
             });
           }
@@ -458,6 +558,9 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
 
     async store(input) {
       const memoryType = resolveMemoryType(input.type);
+      if (input.ttlMs !== undefined && memoryType !== 'working') {
+        throw new Error('ttlMs is only supported for working memory entries');
+      }
 
       if (memoryType === "episodic") {
         const details = scopedEpisodicDetails(input.agentId);
@@ -470,9 +573,10 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
         return;
       }
 
+      const ttlMs = resolveOperationalTtlMs(input.ttlMs);
       brain.working.set(
         scopedWorkingKey(input.key, input.agentId),
-        scopedWorkingValue(input.value, input.agentId),
+        scopedWorkingValue(input.value, input.agentId, ttlMs),
       );
       brain.flush();
     },
@@ -486,7 +590,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
       const workingEntries = Object.entries(snapshot)
         .map(([k, v]) => parseScopedWorkingEntry(k, v))
         .filter((entry) => canReadMemoryEntry(entry.agentId, readScope))
-        .map((entry) => `${entry.key}: ${entry.value}`);
+        .map((entry) => `${entry.key}: ${formatWorkingEntryValue(entry)}`);
       if (workingEntries.length > 0) {
         sections.push({ type: "working", entries: workingEntries });
       }
@@ -601,6 +705,36 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           ? { key: scopedWorkingKey(selector.key, agentId) }
           : {}),
       });
+    },
+
+    async proposeMemory(input) {
+      return brain.memoryReview.propose({
+        targetStore: 'working',
+        key: input.key,
+        value: input.value,
+        source: input.source,
+        ...(input.evidenceId ? { evidenceId: input.evidenceId } : {}),
+        confidence: input.confidence,
+        reason: input.reason,
+      });
+    },
+
+    async listMemoryReview(status = 'pending') {
+      return brain.memoryReview.list(status);
+    },
+
+    async decideMemoryReview(input) {
+      const options = input.options ?? {};
+      if (input.action === 'approve') {
+        return brain.memoryReview.approve(input.id, options);
+      }
+      if (input.action === 'reject') {
+        return brain.memoryReview.reject(input.id, options);
+      }
+      if (input.action === 'never_store') {
+        return brain.memoryReview.neverStore(input.id, options);
+      }
+      throw new Error(`Unsupported memory review action: ${String(input.action)}`);
     },
   };
 }

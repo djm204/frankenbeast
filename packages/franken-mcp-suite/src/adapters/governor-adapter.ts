@@ -16,6 +16,7 @@ const DESTRUCTIVE_ACTIONS = new Set([
   'fbeast_memory_forget',
   'fbeast_memory_right_to_forget',
 ]);
+const MEMORY_REVIEW_PROPOSE_CONTEXT_REDACTION = '[memory-review-proposal-context-redacted]';
 
 const HIGH_RISK_ACTIONS: Readonly<Record<string, HighRiskActionClass>> = {
   fbeast_memory_store: 'memory',
@@ -53,6 +54,7 @@ export const NON_EXECUTING_TOOLS: ReadonlySet<string> = new Set([
   'fbeast_firewall_scan_file',
   'fbeast_governor_check',
   'fbeast_governor_budget',
+  'fbeast_memory_review_propose',
   'fbeast_memory_query',
   'fbeast_memory_frontload',
   'fbeast_memory_export',
@@ -153,13 +155,118 @@ function matchesDangerousPattern(action: string, context: string): boolean {
   return matchesDangerousActionName(action) || DANGEROUS_CONTEXT_PATTERNS.some((p) => p.test(combined));
 }
 
+function unqualifyMcpActionName(action: string): string {
+  const marker = '__';
+  if (!action.startsWith('mcp__')) return action;
+  const index = action.lastIndexOf(marker);
+  return index >= 0 ? action.slice(index + marker.length) : action;
+}
+
+function contextValueTargetsTool(value: unknown, toolName: string): boolean {
+  return typeof value === 'string' && unqualifyMcpActionName(value) === toolName;
+}
+
+function contextTargetsTool(context: string, toolName: string): boolean {
+  try {
+    const parsed = JSON.parse(context) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+    const record = parsed as Record<string, unknown>;
+    const direct = record['tool'] ?? record['tool_name'] ?? record['name'];
+    if (contextValueTargetsTool(direct, toolName)) return true;
+    const toolInput = record['tool_input'];
+    if (toolInput !== null && typeof toolInput === 'object' && !Array.isArray(toolInput)) {
+      const nested = (toolInput as Record<string, unknown>)['tool'];
+      return contextValueTargetsTool(nested, toolName);
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+function memoryReviewDecisionArgsFromContext(context: string, options: { requireExplicitTarget?: boolean } = {}): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(context) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const record = parsed as Record<string, unknown>;
+    const directArgs = record['args'];
+    if (contextValueTargetsTool(record['tool'] ?? record['tool_name'] ?? record['name'], 'fbeast_memory_review_decide')
+      && directArgs !== null
+      && typeof directArgs === 'object'
+      && !Array.isArray(directArgs)) {
+      return directArgs as Record<string, unknown>;
+    }
+    const toolInput = record['tool_input'];
+    if (toolInput !== null && typeof toolInput === 'object' && !Array.isArray(toolInput)) {
+      const nested = toolInput as Record<string, unknown>;
+      const nestedArgs = nested['args'];
+      if (contextValueTargetsTool(nested['tool'], 'fbeast_memory_review_decide')
+        && nestedArgs !== null
+        && typeof nestedArgs === 'object'
+        && !Array.isArray(nestedArgs)) {
+        return nestedArgs as Record<string, unknown>;
+      }
+    }
+    if (options.requireExplicitTarget !== true && typeof record['id'] === 'string' && typeof record['action'] === 'string') return record;
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
 function redactRightToForgetGovernanceContext(action: string, context: string): string {
-  if (action !== 'fbeast_memory_right_to_forget') return context;
+  if (unqualifyMcpActionName(action) !== 'fbeast_memory_right_to_forget') return context;
   return '[right-to-forget-context-redacted]';
 }
 
+function redactMemoryReviewProposalGovernanceContext(action: string, context: string): string {
+  const unqualified = unqualifyMcpActionName(action);
+  if (unqualified !== 'fbeast_memory_review_propose'
+    && !(unqualified === 'execute_tool'
+      && contextTargetsTool(context, 'fbeast_memory_review_propose'))) {
+    return context;
+  }
+  return MEMORY_REVIEW_PROPOSE_CONTEXT_REDACTION;
+}
+
+function redactMemoryReviewDecisionGovernanceContext(action: string, context: string): string {
+  const unqualified = unqualifyMcpActionName(action);
+  const decisionArgs = memoryReviewDecisionArgsFromContext(context, { requireExplicitTarget: unqualified === 'execute_tool' });
+  if (unqualified === 'execute_tool'
+    && contextTargetsTool(context, 'fbeast_memory_review_decide')) {
+    return JSON.stringify({
+      tool: 'fbeast_memory_review_decide',
+      ...(typeof decisionArgs?.['id'] === 'string' ? { id: decisionArgs['id'] } : {}),
+      ...(typeof decisionArgs?.['action'] === 'string' ? { action: decisionArgs['action'] } : {}),
+      ...(decisionArgs !== undefined && Object.prototype.hasOwnProperty.call(decisionArgs, 'reviewer') ? { reviewer: '[memory-review-decision-metadata-redacted]' } : {}),
+      ...(decisionArgs !== undefined && Object.prototype.hasOwnProperty.call(decisionArgs, 'note') ? { note: '[memory-review-decision-metadata-redacted]' } : {}),
+    });
+  }
+  if (unqualified !== 'fbeast_memory_review_decide') return context;
+  try {
+    const parsed = JSON.parse(context) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return context;
+    const record = parsed as Record<string, unknown>;
+    return JSON.stringify({
+      ...(typeof record['id'] === 'string' ? { id: record['id'] } : {}),
+      ...(typeof record['action'] === 'string' ? { action: record['action'] } : {}),
+      ...(Object.prototype.hasOwnProperty.call(record, 'reviewer') ? { reviewer: '[memory-review-decision-metadata-redacted]' } : {}),
+      ...(Object.prototype.hasOwnProperty.call(record, 'note') ? { note: '[memory-review-decision-metadata-redacted]' } : {}),
+    });
+  } catch {
+    return context;
+  }
+}
+
+function redactGovernanceContext(action: string, context: string): string {
+  return redactMemoryReviewDecisionGovernanceContext(
+    action,
+    redactMemoryReviewProposalGovernanceContext(action, redactRightToForgetGovernanceContext(action, context)),
+  );
+}
+
 function isRightToForgetDryRun(action: string, context: string): boolean {
-  if (action !== 'fbeast_memory_right_to_forget') return false;
+  if (unqualifyMcpActionName(action) !== 'fbeast_memory_right_to_forget') return false;
   try {
     const parsed = JSON.parse(context) as unknown;
     return parsed !== null
@@ -344,38 +451,81 @@ function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; m
 }
 
 function assessAction(action: string, context: string): GovernorCheckResult {
-  const highRiskResult = assessHighRiskAction(action, context);
+  const unqualifiedAction = unqualifyMcpActionName(action);
+  const highRiskResult = assessHighRiskAction(unqualifiedAction, context);
   if (highRiskResult !== undefined) return highRiskResult;
 
-  if (isTrustedOperatorMemoryExport(action, context)) {
+  if (isTrustedOperatorMemoryExport(unqualifiedAction, context)) {
     return {
       decision: 'review_recommended',
       reason: 'Unredacted fbeast_memory_export requires trusted-operator approval.',
     };
   }
 
+  const isMemoryReviewDecision = unqualifiedAction === 'fbeast_memory_review_decide'
+    || (unqualifiedAction === 'execute_tool'
+      && unqualifyMcpActionName(stringContext(parseContextObject(context), 'tool') ?? '') === 'fbeast_memory_review_decide');
+  if (isMemoryReviewDecision) {
+    const parsed = parseContextObject(context);
+    const reviewAction = stringContext(parsed, 'action');
+    if (reviewAction === 'approve') {
+      return {
+        decision: 'approved',
+        reason: 'Memory review approval is the explicit operator promotion decision; candidate content remains governed by the review queue.',
+      };
+    }
+    if (reviewAction === 'never_store') {
+      const result = evaluateHighRiskActionPolicy({
+        actionClass: 'memory',
+        evidence: {
+          operation: 'review-never-store',
+          ...optionalTarget(stringContext(parsed, 'id')),
+        },
+      });
+      if (result.decision === 'allow') {
+        return { decision: 'approved', reason: `High-risk policy allowed memory review never-store: ${result.reason}` };
+      }
+      if (result.decision === 'deny') {
+        return { decision: 'denied', reason: `High-risk policy denied memory review never-store: ${result.reason}` };
+      }
+      return { decision: 'review_recommended', reason: `High-risk policy requires approval for memory review never-store: ${result.reason}` };
+    }
+    if (reviewAction === 'reject') {
+      return {
+        decision: 'approved',
+        reason: 'Memory review reject decision does not persist or delete candidate content; allowed while audit metadata remains redacted.',
+      };
+    }
+    return {
+      decision: 'review_recommended',
+      reason: 'Memory review decision is missing a recognized action; explicit approve/reject/never_store metadata is required.',
+    };
+  }
+
   // Non-executing tools are approved without payload governance, so this
   // exemption holds on every path that reaches the shared governor (hook,
   // public check tool, central gate) — not just the central dispatch gate.
-  if (NON_EXECUTING_TOOLS.has(action)) {
+  if (NON_EXECUTING_TOOLS.has(unqualifiedAction)) {
     return {
       decision: 'approved',
       reason: `Tool "${action}" is non-executing (its payload is data, not an operation); exempt from payload governance.`,
     };
   }
 
-  if (action === 'fbeast_memory_right_to_forget') {
+  if (unqualifiedAction === 'fbeast_memory_right_to_forget') {
     return {
       decision: 'approved',
       reason: 'Tool "fbeast_memory_right_to_forget" is an explicit privacy deletion workflow; execution is allowed through the central gate while audit context remains redacted.',
     };
   }
 
-  const isDestructive = DESTRUCTIVE_ACTIONS.has(action) || matchesDangerousPattern(action, context);
+  const isDestructive = DESTRUCTIVE_ACTIONS.has(unqualifiedAction)
+    || matchesDangerousPattern(action, context)
+    || matchesDangerousPattern(unqualifiedAction, context);
 
   // Evaluate via governor SkillTrigger with pattern-derived destructiveness
   const triggerResult: TriggerResult = triggerRegistry.evaluateAll({
-    skillId: action,
+    skillId: unqualifiedAction,
     requiresHitl: false,
     isDestructive,
   });
@@ -404,7 +554,7 @@ export function createGovernorAdapter(dbPath: string): GovernorAdapter {
   return {
     async check(input) {
       const isDryRunForget = isRightToForgetDryRun(input.action, input.context);
-      const context = redactRightToForgetGovernanceContext(input.action, input.context);
+      const context = redactGovernanceContext(input.action, input.context);
       const result = isDryRunForget
         ? {
             decision: 'approved' as const,

@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createAdapterSet, TOOL_STUBS, TOOL_REGISTRY, searchTools, type AdapterSet } from './tool-registry.js';
 
-const EXPECTED_COUNT = 23;
+const EXPECTED_COUNT = 26;
 
 describe('TOOL_STUBS', () => {
-  it('contains exactly 23 tools', () => {
+  it('contains exactly 26 tools', () => {
     expect(TOOL_STUBS).toHaveLength(EXPECTED_COUNT);
   });
 
@@ -20,7 +20,7 @@ describe('TOOL_STUBS', () => {
 });
 
 describe('TOOL_REGISTRY', () => {
-  it('contains exactly 23 tools', () => {
+  it('contains exactly 26 tools', () => {
     expect(TOOL_REGISTRY.size).toBe(EXPECTED_COUNT);
   });
 
@@ -37,11 +37,28 @@ describe('TOOL_REGISTRY', () => {
     }
   });
 
-  it('TOOL_STUBS and TOOL_REGISTRY contain the same 23 tool names', () => {
+  it('TOOL_STUBS and TOOL_REGISTRY contain the same 26 tool names', () => {
     const stubNames = new Set(TOOL_STUBS.map((s) => s.name));
     const registryNames = new Set(TOOL_REGISTRY.keys());
     expect(stubNames).toEqual(registryNames);
     expect(stubNames.size).toBe(EXPECTED_COUNT);
+  });
+
+  it('rejects episodic TTL stores before invoking the registry adapter handler', async () => {
+    const brain = {
+      query: vi.fn(),
+      store: vi.fn(),
+      frontload: vi.fn(),
+      forget: vi.fn(),
+      rightToForget: vi.fn(),
+    };
+    const handler = TOOL_REGISTRY.get('fbeast_memory_store')!.makeHandler({ brain } as unknown as AdapterSet);
+
+    const result = await handler({ key: 'evt', value: 'durable event', type: 'episodic', ttlMs: 60000 });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain('ttlMs is only supported for working memory');
+    expect(brain.store).not.toHaveBeenCalled();
   });
 
   it('rejects invalid observer log arguments before invoking the registry adapter handler', async () => {
@@ -139,14 +156,14 @@ describe('TOOL_REGISTRY', () => {
 });
 
 describe('searchTools', () => {
-  it('returns all 23 tools when called with no query', () => {
+  it('returns all 26 tools when called with no query', () => {
     expect(searchTools()).toHaveLength(EXPECTED_COUNT);
     expect(searchTools(undefined)).toHaveLength(EXPECTED_COUNT);
   });
 
-  it('returns exactly 6 tools for query "memory"', () => {
+  it('returns exactly 9 tools for query "memory"', () => {
     const results = searchTools('memory');
-    expect(results).toHaveLength(6);
+    expect(results).toHaveLength(9);
     for (const r of results) {
       expect(r.server).toBe('memory');
     }

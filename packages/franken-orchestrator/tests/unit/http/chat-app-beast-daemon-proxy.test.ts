@@ -5,11 +5,12 @@ import { testCredential } from '../../support/test-credentials.js';
 
 const TEST_DAEMON_TOKEN = testCredential('TEST_DAEMON_TOKEN');
 const TEST_GATEWAY_TOKEN = testCredential('TEST_GATEWAY_TOKEN');
-function createProxyApp() {
+function createProxyApp(options: { allowedOrigins?: string[] } = {}) {
   return createChatApp({
     sessionStoreDir: '/tmp/chat-app-beast-daemon-proxy-test',
     llm: { complete: vi.fn().mockResolvedValue('hello') },
     projectName: 'proxy-test',
+    ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
     beastDaemon: {
       baseUrl: 'http://127.0.0.1:4050',
       operatorToken: TEST_DAEMON_TOKEN,
@@ -121,4 +122,52 @@ describe('chat app beast daemon proxy', () => {
     expect(forwardedHeaders.has('x-remove-me')).toBe(false);
     expect(forwardedHeaders.has('host')).toBe(false);
   });
+
+  it('preserves dashboard forwarded origin headers when proxying to the beast daemon', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ data: 'ok' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createProxyApp({ allowedOrigins: ['https://dashboard.example.com'] });
+
+    const response = await app.request('/v1/beasts/runs', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${TEST_DAEMON_TOKEN}`,
+        origin: 'https://dashboard.example.com',
+        'x-forwarded-host': 'dashboard.example.com',
+        'x-forwarded-proto': 'https',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ ok: true }),
+    });
+
+    expect(response.status).toBe(200);
+    const [, init] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
+    const forwardedHeaders = init.headers as Headers;
+    expect(forwardedHeaders.get('x-forwarded-host')).toBe('dashboard.example.com');
+    expect(forwardedHeaders.get('x-forwarded-proto')).toBe('https');
+  });
+
+  it('derives forwarded origin headers from allowed browser origins when proxying to the beast daemon', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ data: 'ok' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createProxyApp({ allowedOrigins: ['https://dashboard.example.com'] });
+
+    const response = await app.request('/v1/beasts/runs', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${TEST_DAEMON_TOKEN}`,
+        origin: 'https://dashboard.example.com',
+        'sec-fetch-site': 'cross-site',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ ok: true }),
+    });
+
+    expect(response.status).toBe(200);
+    const [, init] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
+    const forwardedHeaders = init.headers as Headers;
+    expect(forwardedHeaders.get('x-forwarded-host')).toBe('dashboard.example.com');
+    expect(forwardedHeaders.get('x-forwarded-proto')).toBe('https');
+  });
+
 });

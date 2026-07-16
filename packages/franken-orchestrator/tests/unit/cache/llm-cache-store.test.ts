@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { LlmCacheStore } from '../../../src/cache/llm-cache-store.js';
+import { encodeCachePathSegment } from '../../../src/cache/llm-cache-types.js';
 
 describe('LlmCacheStore', () => {
   let workDir: string | undefined;
@@ -37,6 +38,59 @@ describe('LlmCacheStore', () => {
         provider: 'claude',
       },
     });
+  });
+
+  it('invalidates cache entries when schema version changes', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-llm-cache-'));
+    const rootDir = join(workDir, '.fbeast', '.cache', 'llm');
+
+    const store = new LlmCacheStore(rootDir, { schemaVersion: 1 });
+    await store.saveProjectEntry('frankenbeast', 'stable:skills', {
+      content: 'stable prompt',
+      fingerprint: 'fp-project-stable',
+      createdAt: '2026-03-13T00:00:00.000Z',
+      metadata: {
+        kind: 'project',
+        provider: 'claude',
+      },
+    });
+
+    const reloaded = new LlmCacheStore(rootDir, { schemaVersion: 2 });
+    await expect(reloaded.loadProjectEntry('frankenbeast', 'stable:skills')).resolves.toBeUndefined();
+  });
+
+  it('invalidates cache entries when stored shape is invalid', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-llm-cache-'));
+    const rootDir = join(workDir, '.fbeast', '.cache', 'llm');
+    const store = new LlmCacheStore(rootDir, { schemaVersion: 1 });
+    const path = join(
+      rootDir,
+      'project',
+      encodeCachePathSegment('frankenbeast'),
+      'stable',
+      `${encodeCachePathSegment('project:broken')}.json`,
+    );
+
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(
+      path,
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          content: null,
+          fingerprint: 'fp-broken',
+          createdAt: '2026-03-13T00:00:00.000Z',
+          metadata: {
+            kind: 'project',
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    await expect(store.loadProjectEntry('frankenbeast', 'project:broken')).resolves.toBeUndefined();
   });
 
   it('isolates work entries by work id', async () => {

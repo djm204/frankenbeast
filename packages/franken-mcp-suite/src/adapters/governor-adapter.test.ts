@@ -78,6 +78,22 @@ describe('GovernorAdapter', () => {
     expect(row.context).not.toContain('alice@example.test');
   });
 
+  it('allows MCP-qualified right-to-forget dryRun calls while keeping selector context redacted', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({
+      action: 'mcp__fbeast-memory__fbeast_memory_right_to_forget',
+      context: '{"query":"alice@example.test","dryRun":true}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+
+    const db = new Database(dbPath);
+    const row = db.prepare(`SELECT context FROM governor_log WHERE action = ?`).get('mcp__fbeast-memory__fbeast_memory_right_to_forget') as { context: string };
+    db.close();
+    expect(row.context).toBe('[right-to-forget-context-redacted]');
+    expect(row.context).not.toContain('alice@example.test');
+  });
+
   it('denies raw destructive patterns (rm -rf)', async () => {
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
     const result = await governor.check({ action: 'rm -rf /data', context: '{}' });
@@ -99,6 +115,8 @@ describe('GovernorAdapter', () => {
     await expect(governor.check({ action: 'delete_file', context: '{"path":"src/app.ts"}' }))
       .resolves.toMatchObject({ decision: 'denied' });
     await expect(governor.check({ action: 'dropTable', context: '{"name":"events"}' }))
+      .resolves.toMatchObject({ decision: 'denied' });
+    await expect(governor.check({ action: 'delete__file', context: '{"path":"src/app.ts"}' }))
       .resolves.toMatchObject({ decision: 'denied' });
   });
 
@@ -228,6 +246,111 @@ describe('GovernorAdapter', () => {
       .resolves.toMatchObject({ decision: 'approved' });
     await expect(governor.check({ action: 'run_shell', context: 'service nginx restart' }))
       .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('redacts proposed memory context before shared governor logging', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({
+      action: 'fbeast_memory_review_propose',
+      context: '{"key":"secret","value":"token abc123","source":"chat","reason":"remember"}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+
+    const db = new Database(dbPath);
+    const row = db.prepare(`SELECT context FROM governor_log WHERE action = ?`).get('fbeast_memory_review_propose') as { context: string };
+    db.close();
+    expect(row.context).toBe('[memory-review-proposal-context-redacted]');
+    expect(row.context).not.toContain('token abc123');
+  });
+
+  it('redacts proxied proposed memory context before shared governor logging', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"tool_name":"mcp__fbeast-proxy__execute_tool","tool_input":{"tool":"mcp__fbeast-memory__fbeast_memory_review_propose","args":{"key":"secret","value":"token abc123","source":"chat","reason":"remember"}}}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+
+    const db = new Database(dbPath);
+    const row = db.prepare(`SELECT context FROM governor_log WHERE action = ?`).get('mcp__fbeast-proxy__execute_tool') as { context: string };
+    db.close();
+    expect(row.context).toBe('[memory-review-proposal-context-redacted]');
+    expect(row.context).not.toContain('token abc123');
+  });
+
+  it('does not hide stripped generic execute_tool payloads that only resemble memory proposals', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"key":"secret","value":"rm -rf /","source":"chat","reason":"remember"}',
+    })).resolves.toMatchObject({ decision: 'denied' });
+
+    const db = new Database(dbPath);
+    const row = db.prepare(`SELECT context FROM governor_log WHERE action = ?`).get('mcp__fbeast-proxy__execute_tool') as { context: string };
+    db.close();
+    expect(row.context).toContain('secret');
+    expect(row.context).toContain('rm -rf /');
+  });
+
+  it('does not redact arbitrary execute_tool context that merely mentions the proposal tool', async () => {
+    const governor = createGovernorAdapter(tracked(tmpDbPath()));
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"tool_input":{"tool":"fbeast_echo","args":{"text":"mentions fbeast_memory_review_propose and rm -rf /"}}}',
+    })).resolves.toMatchObject({ decision: 'denied' });
+  });
+
+  it('allows memory review approvals/rejections but gates never-store deletions through the shared path', async () => {
+    const governor = createGovernorAdapter(tracked(tmpDbPath()));
+    await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"approve"}' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"reject"}' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"never_store"}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+    await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"reject","note":"Rejected because candidate text contains rm -rf /"}' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"tool_input":{"tool":"mcp__fbeast-memory__fbeast_memory_review_decide","args":{"id":"memcand_1","action":"approve","note":"candidate"}}}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"tool_input":{"tool":"mcp__fbeast-memory__fbeast_memory_review_decide","args":{"id":"memcand_1","action":"never_store","note":"candidate"}}}',
+    })).resolves.toMatchObject({ decision: 'review_recommended' });
+    await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('ignores dangerous reviewer notes when governing memory review decisions', async () => {
+    const governor = createGovernorAdapter(tracked(tmpDbPath()));
+
+    await expect(governor.check({
+      action: 'fbeast_memory_review_decide',
+      context: '{"id":"memcand_1","action":"reject","reviewer":"alice","note":"Rejected because candidate contains rm -rf /"}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+  });
+
+  it('redacts proxied memory review decision notes before shared governor scanning', async () => {
+    const governor = createGovernorAdapter(tracked(tmpDbPath()));
+
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"tool_input":{"tool":"mcp__fbeast-memory__fbeast_memory_review_decide","args":{"id":"memcand_1","action":"reject","note":"Rejected because candidate contains rm -rf /"}}}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+  });
+
+  it('does not infer memory review decisions from stripped generic execute_tool args', async () => {
+    const governor = createGovernorAdapter(tracked(tmpDbPath()));
+
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"id":"memcand_1","action":"reject","note":"Rejected because candidate contains rm -rf /"}',
+    })).resolves.toMatchObject({ decision: 'denied' });
   });
 
   it('reprices zero-cost known model rows in budget status', async () => {

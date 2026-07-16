@@ -1,0 +1,1432 @@
+import { spawn, spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { constants as osConstants, tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { describe, expect, it } from 'vitest';
+
+const ROOT = resolve(import.meta.dirname, '..', '..');
+const SCRIPT = resolve(ROOT, 'scripts/run-cron-script.mjs');
+const DOC = resolve(ROOT, 'docs/cron-script-error-envelopes.md');
+
+function runCronScript(args: string[]) {
+  return spawnSync(process.execPath, [SCRIPT, ...args], {
+    cwd: ROOT,
+    env: { ...process.env, TZ: 'UTC' },
+    encoding: 'utf8',
+    maxBuffer: 8 * 1024 * 1024,
+  });
+}
+
+function runCronScriptWithEnv(args: string[], env: NodeJS.ProcessEnv) {
+  return spawnSync(process.execPath, [SCRIPT, ...args], {
+    cwd: ROOT,
+    env: { ...process.env, TZ: 'UTC', ...env },
+    encoding: 'utf8',
+    maxBuffer: 8 * 1024 * 1024,
+  });
+}
+
+function parseEnvelopes(stderr: string) {
+  return stderr
+    .split('\n')
+    .filter((entry) => entry.trim().startsWith('{') && entry.includes('franken.cron.script.error'))
+    .map((entry) => JSON.parse(entry));
+}
+
+function parseEnvelope(stderr: string) {
+  const envelopes = parseEnvelopes(stderr);
+  expect(envelopes, `stderr should include a structured JSON envelope: ${stderr}`).toHaveLength(1);
+  return envelopes[0];
+}
+
+describe('cron script error envelope runner', () => {
+  it('emits a structured JSON error envelope when a cron command exits non-zero', () => {
+    const result = runCronScript([
+      '--name',
+      'nightly-dr-check',
+      '--',
+      process.execPath,
+      '-e',
+      "console.error('database unavailable'); process.exit(7)",
+    ]);
+
+    expect(result.status).toBe(7);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope).toMatchObject({
+      schemaVersion: 1,
+      type: 'franken.cron.script.error',
+      script: 'nightly-dr-check',
+      exitCode: 7,
+      signal: null,
+      recoverable: false,
+    });
+    expect(envelope.command).toEqual([process.execPath, '-e', "console.error('database unavailable'); process.exit(7)"]);
+    expect(envelope.stderrTail).toContain('database unavailable');
+    expect(envelope.durationMs).toEqual(expect.any(Number));
+    expect(envelope.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('redacts secret-looking argv before emitting envelopes', () => {
+    const result = runCronScript([
+      '--name',
+      'secret-job',
+      '--',
+      process.execPath,
+      '-e',
+      "process.stderr.write('API_KEY=stderr-value QUOTED_TOKEN=\\\"quoted-value\\\" SPACED_TOKEN=\\\"top secret\\\" token=\\'single quoted value\\' AUTHORIZATION=Bearer bearer-value PASSWORD=top secret; {\\\"password\\\":\\\"json-value\\\"} {\\\"access_token\\\":\\\"json-token-value\\\"} Authorization: Basic *** Authorization: Bearer *** https://***@github.com/org/repo.git'); process.exit(3)",
+      '--',
+      '--token',
+      'super-secret-token',
+      '--api-key=abc123',
+      '--authorization',
+      'Bearer',
+      'split-bearer-token',
+      '--private-key',
+      'inline-private-key',
+      '--private-key=inline-private-key-equals',
+      'postgres://user:***@localhost:5432/db',
+      'https://***@github.com/org/repo.git',
+    ]);
+
+    expect(result.status).toBe(3);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.command).toContain('[REDACTED]');
+    expect(envelope.command).toContain('--api-key=[REDACTED]');
+    expect(envelope.command).not.toContain('Bearer');
+    expect(envelope.command).not.toContain('split-bearer-token');
+    expect(envelope.command).not.toContain('inline-private-key');
+    expect(envelope.command).toContain('--private-key=[REDACTED]');
+    expect(envelope.command).toContain('postgres://[REDACTED]:[REDACTED]@localhost:5432/db');
+    expect(envelope.command).toContain('https://[REDACTED]@github.com/org/repo.git');
+    expect(envelope.stderrTail).toContain('API_KEY=[REDACTED]');
+    expect(envelope.stderrTail).toContain('[REDACTED]');
+    expect(envelope.stderrTail).toContain('password');
+    expect(JSON.stringify(envelope)).not.toContain('super-secret-token');
+    expect(JSON.stringify(envelope)).not.toContain('abc123');
+    expect(JSON.stringify(envelope)).not.toContain('db-password');
+    expect(JSON.stringify(envelope)).not.toContain('stderr-secret');
+    expect(JSON.stringify(envelope)).not.toContain('stderr-token');
+    expect(JSON.stringify(envelope)).not.toContain('quoted-value');
+    expect(JSON.stringify(envelope)).not.toContain('top secret');
+    expect(JSON.stringify(envelope)).not.toContain('single quoted value');
+    expect(JSON.stringify(envelope)).not.toContain('json-value');
+    expect(JSON.stringify(envelope)).not.toContain('json-token-value');
+    expect(JSON.stringify(envelope)).not.toContain('basic-value');
+    expect(JSON.stringify(envelope)).not.toContain('bearer-value');
+    expect(JSON.stringify(envelope)).not.toContain('deploytoken');
+    expect(JSON.stringify(envelope)).not.toContain('commandtoken');
+    expect(JSON.stringify(envelope)).not.toContain('split-bearer-token');
+    expect(JSON.stringify(envelope)).not.toContain('inline-private-key');
+    expect(JSON.stringify(envelope)).not.toContain('json-value');
+    expect(JSON.stringify(envelope)).not.toContain('json-token-value');
+  });
+
+  it('redacts multiline private keys in command envelopes before assignment matching', () => {
+    const privateKey = `-----BEGIN ${'PRIVATE KEY'}-----\nsecret-line-one\nsecret-line-two\n-----END ${'PRIVATE KEY'}-----`;
+    const result = runCronScript([
+      '--name',
+      'multiline-private-key-command',
+      '--',
+      process.execPath,
+      '-e',
+      'process.exit(4)',
+      `PRIVATE_KEY=${privateKey}`,
+    ]);
+
+    expect(result.status).toBe(4);
+    const envelope = parseEnvelope(result.stderr);
+    expect(JSON.stringify(envelope)).not.toContain('secret-line-one');
+    expect(JSON.stringify(envelope)).not.toContain('secret-line-two');
+    expect(JSON.stringify(envelope)).not.toContain('BEGIN PRIVATE KEY');
+    expect(envelope.command).toContain('PRIVATE_KEY=[REDACTED]');
+  });
+
+  it('redacts prefixed JSON secret keys in stderr envelopes', () => {
+    const result = runCronScript([
+      '--name',
+      'prefixed-json-secrets',
+      '--',
+      process.execPath,
+      '-e',
+      "process.stderr.write(JSON.stringify({ client_secret: 'oauth-value', aws_secret_access_key: 'cloud-value' })); process.exit(4)",
+    ]);
+
+    expect(result.status).toBe(4);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('client_secret');
+    expect(envelope.stderrTail).toContain('aws_secret_access_key');
+    expect(JSON.stringify(envelope)).not.toContain('oauth-value');
+    expect(JSON.stringify(envelope)).not.toContain('cloud-value');
+  });
+
+  it('redacts private-key blocks split across stderr chunks', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'chunked-private-key-stderr',
+      '--',
+      process.execPath,
+      '-e',
+      "const fs = require('node:fs'); fs.writeSync(2, '-----BEGIN PRIVATE KEY-----\\nsecret-line-one\\n'); fs.writeSync(2, 'secret-line-two\\n-----END PRIVATE KEY-----\\nreal diagnostic'); process.exit(4)",
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(4);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('[REDACTED_PRIVATE_KEY]');
+    expect(envelope.stderrTail).toContain('real diagnostic');
+    expect(JSON.stringify(envelope)).not.toContain('secret-line-one');
+    expect(JSON.stringify(envelope)).not.toContain('secret-line-two');
+  });
+
+  it('stops assignment redaction at newlines while preserving following diagnostics', () => {
+    const result = runCronScript([
+      '--name',
+      'newline-secret-diagnostic',
+      '--',
+      process.execPath,
+      '-e',
+      "process.stderr.write('API_KEY=secret-value\\nstack trace line'); process.exit(4)",
+    ]);
+
+    expect(result.status).toBe(4);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('API_KEY=[REDACTED]');
+    expect(envelope.stderrTail).toContain('stack trace line');
+    expect(JSON.stringify(envelope)).not.toContain('secret-value');
+  });
+
+  it('redacts prefixed token assignments before shell punctuation', () => {
+    const result = runCronScript([
+      '--name',
+      'punctuated-prefixed-token',
+      '--',
+      process.execPath,
+      '-e',
+      "process.stderr.write(\"access_token=stderr-secret') oauthToken=oauth-secret')\"); process.exit(9)",
+      "access_token=argv-secret')",
+    ]);
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain("access_token=[REDACTED]')");
+    expect(envelope.stderrTail).toContain("oauthToken=[REDACTED]')");
+    expect(JSON.stringify(envelope)).not.toContain('stderr-secret');
+    expect(JSON.stringify(envelope)).not.toContain('oauth-secret');
+    expect(JSON.stringify(envelope)).not.toContain('argv-secret');
+  });
+
+  it('redacts object-valued JSON secrets in stderr envelopes', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'object-json-secret-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      `process.stderr.write('{"token":{"a":"secret","b":"leak"},"safe":{"b":"kept"}}'); process.exit(9)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('"token":[REDACTED]');
+    expect(envelope.stderrTail).toContain('"safe":{"b":"kept"}');
+    expect(JSON.stringify(envelope)).not.toContain('"a":"secret"');
+    expect(JSON.stringify(envelope)).not.toContain('"b":"leak"');
+  });
+
+  it('redacts secret assignment continuations after stderr context truncation', () => {
+    const leakedSuffix = 'oversized-secret-tail-fragment';
+    const result = runCronScriptWithEnv([
+      '--name',
+      'oversized-secret-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      `process.stderr.write('API_KEY=${'x'.repeat(80 * 1024)}${leakedSuffix}'); process.exit(13)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(13);
+    const envelope = parseEnvelope(result.stderr);
+    expect(JSON.stringify(envelope)).not.toContain(leakedSuffix);
+    expect(envelope.stderrTail).toContain('TRUNCATED_SECRET=[REDACTED]');
+  });
+
+  it('fails with an explicit envelope when the cron command is missing', () => {
+    const result = runCronScript(['--name', 'missing-command']);
+
+    expect(result.status).toBe(2);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope).toMatchObject({
+      schemaVersion: 1,
+      type: 'franken.cron.script.error',
+      script: 'missing-command',
+      exitCode: 2,
+      signal: null,
+      failureKind: 'usage',
+    });
+    expect(envelope.message).toContain('Usage: node scripts/run-cron-script.mjs --name <job-name> -- <command> [args...]');
+  });
+
+  it('keeps the envelope parseable when stderr lacks a trailing newline', () => {
+    const result = runCronScript([
+      '--name',
+      'unterminated-stderr',
+      '--',
+      process.execPath,
+      '-e',
+      "process.stderr.write('unterminated'); process.exit(9)",
+    ]);
+
+    expect(result.status).toBe(9);
+    expect(result.stderr).toContain('unterminated\n{');
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope).toMatchObject({
+      script: 'unterminated-stderr',
+      failureKind: 'exit',
+      exitCode: 9,
+    });
+  });
+
+  it('keeps the envelope parseable when progress stderr ends with a carriage return', () => {
+    const result = runCronScript([
+      '--name',
+      'progress-stderr',
+      '--',
+      process.execPath,
+      '-e',
+      "process.stderr.write('progress\\r'); process.exit(9)",
+    ]);
+
+    expect(result.status).toBe(9);
+    expect(result.stderr).toContain('progress\r\n{');
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope).toMatchObject({
+      script: 'progress-stderr',
+      failureKind: 'exit',
+      exitCode: 9,
+    });
+  });
+
+  it('emits one spawn envelope when the child command cannot start', () => {
+    const result = runCronScript(['--name', 'bad-binary', '--', 'definitely-not-a-real-command-frankenbeast']);
+
+    expect(result.status).toBe(127);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope).toMatchObject({
+      script: 'bad-binary',
+      failureKind: 'spawn',
+      exitCode: 127,
+    });
+  });
+
+  it('scrubs secret-looking spawn failure messages before logging envelopes', () => {
+    const result = runCronScript(['--name', 'bad-secret-binary', '--', 'API_KEY=abc123', 'job.js']);
+
+    expect(result.status).toBe(127);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.command).toEqual(['API_KEY=[REDACTED]', 'job.js']);
+    expect(envelope.message).toContain('API_KEY=[REDACTED]');
+    expect(envelope.message).not.toContain('abc123');
+    expect(result.stderr).not.toContain('API_KEY=abc123');
+  });
+
+  it('uses shell-compatible 126 for permission-denied spawn failures', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'franken-cron-permission-'));
+    const blockedCommand = join(tempDir, 'blocked-command');
+
+    try {
+      writeFileSync(blockedCommand, '#!/bin/sh\nexit 0\n');
+      chmodSync(blockedCommand, 0o644);
+
+      const result = runCronScript(['--name', 'permission-denied-command', '--', blockedCommand]);
+
+      expect(result.status).toBe(126);
+      const envelope = parseEnvelope(result.stderr);
+      expect(envelope).toMatchObject({
+        script: 'permission-denied-command',
+        failureKind: 'spawn',
+        exitCode: 126,
+      });
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports child exit promptly even when a background helper keeps stderr open', () => {
+    const result = runCronScript([
+      '--name',
+      'inherited-stderr-helper',
+      '--',
+      process.execPath,
+      '-e',
+      "require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { detached: true, stdio: ['ignore', 'ignore', 'inherit'] }).unref(); process.exit(7)",
+    ]);
+
+    expect(result.status).toBe(7);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope).toMatchObject({
+      script: 'inherited-stderr-helper',
+      failureKind: 'exit',
+      exitCode: 7,
+    });
+    expect(envelope.durationMs).toBeLessThan(1_500);
+  });
+
+  it('preserves the final stderr tail when large stderr bursts hit backpressure', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'large-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      "const fs = require('node:fs'); fs.writeSync(2, 'x'.repeat(2 * 1024 * 1024)); fs.writeSync(2, 'FINAL-TAIL-MARKER'); process.exit(12)",
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(12);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('FINAL-TAIL-MARKER');
+  });
+
+  it('redacts secret values before truncating the stderr tail', () => {
+    const leakedSuffix = 'secret-tail-fragment';
+    const pem = `-----BEGIN ${'PRIVATE KEY'}-----\nline-one-secret\nline-two-secret\n-----END ${'PRIVATE KEY'}-----`;
+    const result = runCronScriptWithEnv([
+      '--name',
+      'large-secret-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      `process.stderr.write('API_KEY=${'x'.repeat(8192)}${leakedSuffix}'); process.stderr.write('\\nPRIVATE_KEY=' + ${JSON.stringify(pem)}); process.exit(13)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(13);
+    const envelope = parseEnvelope(result.stderr);
+    expect(JSON.stringify(envelope)).not.toContain(leakedSuffix);
+    expect(JSON.stringify(envelope)).not.toContain('line-one');
+    expect(JSON.stringify(envelope)).not.toContain('line-two');
+    expect(envelope.stderrTail).toContain('API_KEY=[REDACTED]');
+  });
+
+  it('redacts quoted JSON secrets before truncating stderr tails', () => {
+    const leakedSuffix = 'json-secret-tail-fragment';
+    const result = runCronScriptWithEnv([
+      '--name',
+      'json-secret-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      `process.stderr.write('{"password":"${'x'.repeat(8192)}${leakedSuffix}'); process.exit(9)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(JSON.stringify(envelope)).not.toContain(leakedSuffix);
+    expect(envelope.stderrTail).toContain('"password":"[REDACTED]');
+  });
+
+  it('redacts prefixed JSON secret keys before truncating stderr tails', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'prefixed-json-secret-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      `process.stderr.write('{"client_secret":"oauth-secret-value","aws_secret_access_key":"cloud-secret-value","safe":"kept"}'); process.exit(9)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('"client_secret":"[REDACTED]"');
+    expect(envelope.stderrTail).toContain('"aws_secret_access_key":"[REDACTED]"');
+    expect(envelope.stderrTail).toContain('"safe":"kept"');
+    expect(JSON.stringify(envelope)).not.toContain('oauth-secret-value');
+    expect(JSON.stringify(envelope)).not.toContain('cloud-secret-value');
+  });
+
+  it('redacts private key blocks split across stderr chunks', () => {
+    const keyBody = 'split-private-key-material-'.repeat(256);
+    const result = runCronScriptWithEnv([
+      '--name',
+      'split-pem-secret-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      `const fs = require('node:fs'); fs.writeSync(2, '-----BEGIN PRIVATE KEY-----\\n'); fs.writeSync(2, ${JSON.stringify(keyBody)}); fs.writeSync(2, '\\n-----END PRIVATE KEY-----\\nafter-key'); process.exit(9)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('[REDACTED_PRIVATE_KEY]');
+    expect(envelope.stderrTail).toContain('after-key');
+    expect(JSON.stringify(envelope)).not.toContain('split-private-key-material');
+    expect(JSON.stringify(envelope)).not.toContain('BEGIN PRIVATE KEY');
+    expect(JSON.stringify(envelope)).not.toContain('END PRIVATE KEY');
+  });
+
+  it('stops assignment redaction at newlines while preserving following diagnostics', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'newline-secret-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      "process.stderr.write('API_KEY=secret-value\\nstack trace line'); process.exit(9)",
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('API_KEY=[REDACTED]');
+    expect(envelope.stderrTail).toContain('stack trace line');
+    expect(JSON.stringify(envelope)).not.toContain('secret-value');
+  });
+
+  it('does not reset the stderr drain deadline after child exit', () => {
+    const started = Date.now();
+    const result = runCronScriptWithEnv([
+      '--name',
+      'noisy-helper-after-exit',
+      '--',
+      process.execPath,
+      '-e',
+      "require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => process.stderr.write(\"noise\\n\"), 10)'], { detached: true, stdio: ['ignore', 'ignore', 'inherit'] }).unref(); process.exit(9)",
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '100' });
+
+    expect(result.status).toBe(9);
+    expect(Date.now() - started).toBeLessThan(1_500);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.script).toBe('noisy-helper-after-exit');
+  });
+
+  it('redacts escaped quotes inside JSON secret values', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'escaped-json-secret',
+      '--',
+      process.execPath,
+      '-e',
+      String.raw`process.stderr.write('{"password":"abc\\"def","safe":"kept"}'); process.exit(9)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('"password":"[REDACTED]"');
+    expect(envelope.stderrTail).toContain('"safe":"kept"');
+    expect(JSON.stringify(envelope)).not.toContain('abc');
+    expect(JSON.stringify(envelope)).not.toContain('def');
+  });
+
+  it('redacts multiline private-key assignment bodies', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'multiline-private-key-assignment',
+      '--',
+      process.execPath,
+      '-e',
+      "process.stderr.write('PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\\nkey-body-line\\n-----END PRIVATE KEY-----\\nreal diagnostic'); process.exit(9)",
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('PRIVATE_KEY=[REDACTED]');
+    expect(envelope.stderrTail).toContain('real diagnostic');
+    expect(JSON.stringify(envelope)).not.toContain('key-body-line');
+    expect(JSON.stringify(envelope)).not.toContain('BEGIN PRIVATE KEY');
+  });
+
+  it('redacts hyphen-prefixed JSON secret keys', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'hyphen-json-secret',
+      '--',
+      process.execPath,
+      '-e',
+      `process.stderr.write('{"x-api-key":"hyphen-secret","proxy-authorization":"Bearer bearer-secret","safe":"kept"}'); process.exit(9)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('"x-api-key":"[REDACTED]"');
+    expect(envelope.stderrTail).toContain('"proxy-authorization":"[REDACTED]"');
+    expect(envelope.stderrTail).toContain('"safe":"kept"');
+    expect(JSON.stringify(envelope)).not.toContain('hyphen-secret');
+    expect(JSON.stringify(envelope)).not.toContain('bearer-secret');
+  });
+
+  it('redacts private-key headers split across stderr chunks', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'split-pem-header-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      "const fs = require('node:fs'); fs.writeSync(2, '-----BEGIN PRIVATE '); fs.writeSync(2, 'KEY-----\\nsplit-header-key-body\\n-----END PRIVATE KEY-----\\nafter split header'); process.exit(9)",
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('[REDACTED_PRIVATE_KEY]');
+    expect(envelope.stderrTail).toContain('after split header');
+    expect(JSON.stringify(envelope)).not.toContain('split-header-key-body');
+    expect(JSON.stringify(envelope)).not.toContain('BEGIN PRIVATE');
+  });
+
+  it('redacts non-string JSON secret values', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'numeric-json-secret-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      `process.stderr.write('{"token":123456,"password":false,"safe":"kept"}'); process.exit(9)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('"token":[REDACTED]');
+    expect(envelope.stderrTail).toContain('"password":[REDACTED]');
+    expect(envelope.stderrTail).toContain('"safe":"kept"');
+    expect(JSON.stringify(envelope)).not.toContain('123456');
+    expect(envelope.stderrTail).not.toContain('false');
+  });
+
+  it('redacts array-valued JSON secrets in stderr envelopes', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'array-json-secret-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      `process.stderr.write('{"password":["array-secret"],"tokens":["one","two"],"safe":["kept"]}'); process.exit(9)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('"password":[REDACTED]');
+    expect(envelope.stderrTail).toContain('"tokens":[REDACTED]');
+    expect(envelope.stderrTail).toContain('"safe":["kept"]');
+    expect(JSON.stringify(envelope)).not.toContain('array-secret');
+    expect(JSON.stringify(envelope)).not.toContain('one');
+    expect(JSON.stringify(envelope)).not.toContain('two');
+  });
+
+  it('redacts escaped JSON string secrets after earlier secrets', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'escaped-json-secret-after-secret',
+      '--',
+      process.execPath,
+      '-e',
+      `process.stderr.write('API_KEY=first-secret {\\"password\\":\\"x\\",\\"token\\":\\"tok\\\\\\"suffix\\"} safe-tail'); process.exit(9)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('safe-tail');
+    expect(JSON.stringify(envelope)).not.toContain('first-secret');
+    expect(JSON.stringify(envelope)).not.toContain('suffix');
+  });
+
+  it('redacts truncated array-valued JSON secrets in stderr envelopes', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'truncated-array-json-secret-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      `process.stderr.write('{"tokens":["truncated-array-secret"'); process.exit(9)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('"tokens":[REDACTED]');
+    expect(JSON.stringify(envelope)).not.toContain('truncated-array-secret');
+  });
+
+  it('redacts split Authorization header argv tokens', () => {
+    const result = runCronScript([
+      '--name',
+      'split-authorization-header-argv',
+      '--',
+      process.execPath,
+      '-e',
+      'process.exit(9)',
+      'Authorization:',
+      'Bearer',
+      'argv-bearer-secret',
+    ]);
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.command).toContain('Authorization:');
+    expect(JSON.stringify(envelope)).not.toContain('Bearer');
+    expect(JSON.stringify(envelope)).not.toContain('argv-bearer-secret');
+  });
+
+  it('redacts split secret-looking header argv tokens', () => {
+    const apiHeader = `X-${'Api'}-Key:`;
+    const result = runCronScript([
+      '--name',
+      'split-secret-header-argv',
+      '--',
+      process.execPath,
+      '-e',
+      'process.exit(9)',
+      'Proxy-Authorization:',
+      'Bearer',
+      'proxy-secret',
+      apiHeader,
+      'api-key-secret',
+    ]);
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.command).toContain('Proxy-Authorization:');
+    expect(envelope.command).toContain(apiHeader);
+    expect(JSON.stringify(envelope)).not.toContain('Bearer');
+    expect(JSON.stringify(envelope)).not.toContain('proxy-secret');
+    expect(JSON.stringify(envelope)).not.toContain('api-key-secret');
+  });
+
+  it('redacts proxy authorization argv when the header and scheme share a token', () => {
+    const result = runCronScript([
+      '--name',
+      'proxy-authorization-header-argv',
+      '--',
+      process.execPath,
+      '-e',
+      'process.exit(9)',
+      'Proxy-Authorization: Bearer',
+      'proxy-token-secret',
+    ]);
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.command).toContain('Proxy-Authorization: [REDACTED]');
+    expect(JSON.stringify(envelope)).not.toContain('Bearer');
+    expect(JSON.stringify(envelope)).not.toContain('proxy-token-secret');
+  });
+
+  it('carries JSON escape state across stderr chunks', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'split-escaped-json-secret-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      String.raw`const fs = require('node:fs'); fs.writeSync(2, '{"password":"abc\\'); fs.writeSync(2, '"def","safe":"kept"}'); process.exit(9)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('"password":"[REDACTED]"');
+    expect(envelope.stderrTail).toContain('"safe":"kept"');
+    expect(JSON.stringify(envelope)).not.toContain('abc');
+    expect(JSON.stringify(envelope)).not.toContain('def');
+  });
+
+  it('preserves buffered stderr for successful cron runs', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'successful-large-stderr',
+      '--',
+      process.execPath,
+      '-e',
+      "const fs = require('node:fs'); fs.writeSync(2, 'successful-stderr-'.repeat(8192)); fs.writeSync(2, 'SUCCESS-FINAL-TAIL'); process.exit(0)",
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain('SUCCESS-FINAL-TAIL');
+  });
+
+  it('does not keep successful cron runs alive for the full stderr drain window', () => {
+    const started = Date.now();
+    const result = runCronScriptWithEnv([
+      '--name',
+      'quick-success',
+      '--',
+      process.execPath,
+      '-e',
+      "require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { detached: true, stdio: ['ignore', 'ignore', 'inherit'] }).unref(); process.exit(0)",
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '5000' });
+
+    expect(result.status).toBe(0);
+    expect(Date.now() - started).toBeLessThan(1_500);
+  });
+
+  it('keeps the cron child in the supervisor kill group', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'franken-cron-supervisor-'));
+    const pidFile = join(tempDir, 'child.pid');
+    try {
+      const supervisor = spawn(process.execPath, [
+        SCRIPT,
+        '--name',
+        'supervisor-kill-group',
+        '--',
+        process.execPath,
+        '-e',
+        `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);`,
+      ], {
+        cwd: ROOT,
+        detached: true,
+        env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '50' },
+        stdio: ['ignore', 'ignore', 'ignore'],
+      });
+
+      await new Promise<void>((resolve) => {
+        const started = Date.now();
+        const poll = () => {
+          try {
+            readFileSync(pidFile, 'utf8');
+            resolve();
+          } catch {
+            if (Date.now() - started > 1_000) {
+              resolve();
+              return;
+            }
+            setTimeout(poll, 20);
+          }
+        };
+        poll();
+      });
+
+      expect(readFileSync(pidFile, 'utf8')).toMatch(/^\d+$/);
+      const childPid = Number.parseInt(readFileSync(pidFile, 'utf8'), 10);
+      process.kill(-supervisor.pid!, 'SIGTERM');
+      await new Promise((resolve) => supervisor.on('close', resolve));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      let childAlive = true;
+      try {
+        process.kill(childPid, 0);
+        try {
+          childAlive = readFileSync(`/proc/${childPid}/stat`, 'utf8').split(' ')[2] !== 'Z';
+        } catch {
+          childAlive = true;
+        }
+      } catch (error) {
+        const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code?: unknown }).code) : '';
+        childAlive = code !== 'ESRCH';
+      }
+      if (childAlive) {
+        process.kill(childPid, 'SIGKILL');
+      }
+      expect(childAlive).toBe(false);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not send duplicate graceful signals to descendants already in the child process group', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'franken-cron-single-signal-'));
+    const markerFile = join(tempDir, 'cleanup.txt');
+    const readyFile = join(tempDir, 'helper.ready');
+
+    try {
+      const child = spawn(process.execPath, [
+        SCRIPT,
+        '--name',
+        'single-descendant-signal-test',
+        '--',
+        process.execPath,
+        '-e',
+        `const { spawn } = require('node:child_process'); const helper = spawn(process.execPath, ['-e', ${JSON.stringify(`const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(readyFile)}, 'ready'); process.once('SIGTERM', () => { fs.appendFileSync(${JSON.stringify(markerFile)}, 'first\\n'); setTimeout(() => { fs.appendFileSync(${JSON.stringify(markerFile)}, 'cleanup\\n'); process.exit(0); }, 150); }); setInterval(() => {}, 1000);`)}], { stdio: ['ignore', 'ignore', 'ignore'] }); require('node:fs').writeFileSync(${JSON.stringify(join(tempDir, 'helper.pid'))}, String(helper.pid)); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);`,
+      ], {
+        cwd: ROOT,
+        env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '500' },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+
+      await new Promise<void>((resolve) => {
+        const started = Date.now();
+        const poll = () => {
+          if (existsSync(readyFile)) {
+            resolve();
+            return;
+          }
+          if (Date.now() - started > 1_000) {
+            resolve();
+            return;
+          }
+          setTimeout(poll, 20);
+        };
+        poll();
+      });
+
+      child.kill('SIGTERM');
+      await new Promise((resolve) => child.on('close', resolve));
+      const marker = readFileSync(markerFile, 'utf8');
+      expect(marker).toContain('first');
+      expect(marker).toContain('cleanup');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('terminates descendants when the wrapper receives a parent signal', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'franken-cron-descendant-'));
+    const pidFile = join(tempDir, 'helper.pid');
+
+    try {
+      const child = spawn(process.execPath, [
+        SCRIPT,
+        '--name',
+        'descendant-signal-test',
+        '--',
+        process.execPath,
+        '-e',
+        `const { spawn } = require('node:child_process'); const helper = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: ['ignore', 'ignore', 'ignore'] }); require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(helper.pid)); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);`,
+      ], {
+        cwd: ROOT,
+        env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '50' },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+
+      await new Promise<void>((resolve) => {
+        const started = Date.now();
+        const poll = () => {
+          try {
+            readFileSync(pidFile, 'utf8');
+            resolve();
+          } catch {
+            if (Date.now() - started > 1_000) {
+              resolve();
+              return;
+            }
+            setTimeout(poll, 20);
+          }
+        };
+        poll();
+      });
+
+      const helperPid = Number.parseInt(readFileSync(pidFile, 'utf8'), 10);
+      child.kill('SIGTERM');
+      await new Promise((resolve) => child.on('close', resolve));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      let helperAlive = true;
+      try {
+        process.kill(helperPid, 0);
+        helperAlive = readFileSync(`/proc/${helperPid}/stat`, 'utf8').split(' ')[2] !== 'Z';
+      } catch (error) {
+        const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code?: unknown }).code) : '';
+        helperAlive = code !== 'ESRCH';
+      }
+      if (helperAlive) {
+        process.kill(helperPid, 'SIGKILL');
+      }
+      expect(helperAlive).toBe(false);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('terminates detached descendants outside the child process group during signal cleanup', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'franken-cron-detached-descendant-'));
+    const pidFile = join(tempDir, 'detached-helper.pid');
+
+    try {
+      const child = spawn(process.execPath, [
+        SCRIPT,
+        '--name',
+        'detached-descendant-signal-test',
+        '--',
+        process.execPath,
+        '-e',
+        `const { spawn } = require('node:child_process'); const helper = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: ['ignore', 'ignore', 'ignore'] }); require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(helper.pid)); helper.unref(); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);`,
+      ], {
+        cwd: ROOT,
+        env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '50' },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+
+      await new Promise<void>((resolve) => {
+        const started = Date.now();
+        const poll = () => {
+          try {
+            readFileSync(pidFile, 'utf8');
+            resolve();
+          } catch {
+            if (Date.now() - started > 1_000) {
+              resolve();
+              return;
+            }
+            setTimeout(poll, 20);
+          }
+        };
+        poll();
+      });
+
+      const helperPid = Number.parseInt(readFileSync(pidFile, 'utf8'), 10);
+      child.kill('SIGTERM');
+      await new Promise((resolve) => child.on('close', resolve));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      let helperAlive = true;
+      try {
+        process.kill(helperPid, 0);
+        helperAlive = readFileSync(`/proc/${helperPid}/stat`, 'utf8').split(' ')[2] !== 'Z';
+      } catch (error) {
+        const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code?: unknown }).code) : '';
+        helperAlive = code !== 'ESRCH';
+      }
+      if (helperAlive) {
+        process.kill(helperPid, 'SIGKILL');
+      }
+      expect(helperAlive).toBe(false);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('snapshots detached descendants before signaling an exiting direct child', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'franken-cron-detached-snapshot-'));
+    const pidFile = join(tempDir, 'detached-helper.pid');
+
+    try {
+      const child = spawn(process.execPath, [
+        SCRIPT,
+        '--name',
+        'detached-descendant-snapshot-test',
+        '--',
+        process.execPath,
+        '-e',
+        `const { spawn } = require('node:child_process'); const helper = spawn(process.execPath, ['-e', 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000)'], { detached: true, stdio: ['ignore', 'ignore', 'ignore'] }); require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(helper.pid)); helper.unref(); process.on('SIGTERM', () => process.exit(0)); setInterval(() => {}, 1000);`,
+      ], {
+        cwd: ROOT,
+        env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '50' },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+
+      await new Promise<void>((resolve) => {
+        const started = Date.now();
+        const poll = () => {
+          try {
+            readFileSync(pidFile, 'utf8');
+            resolve();
+          } catch {
+            if (Date.now() - started > 1_000) {
+              resolve();
+              return;
+            }
+            setTimeout(poll, 20);
+          }
+        };
+        poll();
+      });
+
+      const helperPid = Number.parseInt(readFileSync(pidFile, 'utf8'), 10);
+      child.kill('SIGTERM');
+      await new Promise((resolve) => child.on('close', resolve));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      let helperAlive = true;
+      try {
+        process.kill(helperPid, 0);
+        helperAlive = readFileSync(`/proc/${helperPid}/stat`, 'utf8').split(' ')[2] !== 'Z';
+      } catch (error) {
+        const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code?: unknown }).code) : '';
+        helperAlive = code !== 'ESRCH';
+      }
+      if (helperAlive) {
+        process.kill(helperPid, 'SIGKILL');
+      }
+      expect(helperAlive).toBe(false);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the force-kill timer active after the direct child exits during shutdown', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'franken-cron-orphan-descendant-'));
+    const pidFile = join(tempDir, 'helper.pid');
+
+    try {
+      const child = spawn(process.execPath, [
+        SCRIPT,
+        '--name',
+        'exiting-parent-descendant-signal-test',
+        '--',
+        process.execPath,
+        '-e',
+        `const { spawn } = require('node:child_process'); const helper = spawn(process.execPath, ['-e', 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000)'], { stdio: ['ignore', 'ignore', 'ignore'] }); require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(helper.pid)); process.on('SIGTERM', () => { process.exit(0); }); setInterval(() => {}, 1000);`,
+      ], {
+        cwd: ROOT,
+        env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '50' },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+
+      await new Promise<void>((resolve) => {
+        const started = Date.now();
+        const poll = () => {
+          try {
+            readFileSync(pidFile, 'utf8');
+            resolve();
+          } catch {
+            if (Date.now() - started > 1_000) {
+              resolve();
+              return;
+            }
+            setTimeout(poll, 20);
+          }
+        };
+        poll();
+      });
+
+      const helperPid = Number.parseInt(readFileSync(pidFile, 'utf8'), 10);
+      child.kill('SIGTERM');
+      await new Promise((resolve) => child.on('close', resolve));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      let helperAlive = true;
+      try {
+        process.kill(helperPid, 0);
+        helperAlive = readFileSync(`/proc/${helperPid}/stat`, 'utf8').split(' ')[2] !== 'Z';
+      } catch (error) {
+        const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code?: unknown }).code) : '';
+        helperAlive = code !== 'ESRCH';
+      }
+      if (helperAlive) {
+        process.kill(helperPid, 'SIGKILL');
+      }
+      expect(helperAlive).toBe(false);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps inherited stderr open while descendants finish shutdown cleanup', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'franken-cron-descendant-stderr-grace-'));
+    const readyFile = join(tempDir, 'helper.ready');
+
+    try {
+      const child = spawn(process.execPath, [
+        SCRIPT,
+        '--name',
+        'descendant-stderr-grace-test',
+        '--',
+        process.execPath,
+        '-e',
+        `const { spawn } = require('node:child_process'); spawn(process.execPath, ['-e', 'const fs = require("node:fs"); fs.writeFileSync(${JSON.stringify(readyFile)}, "ready"); setTimeout(() => { process.stderr.write("helper final diagnostic\\n"); process.exit(0); }, 120); setInterval(() => {}, 1000)'], { stdio: ['ignore', 'ignore', 'inherit'] }); process.stderr.write('helper-started\\n'); process.on('SIGTERM', () => process.exit(0)); setInterval(() => {}, 1000);`,
+      ], {
+        cwd: ROOT,
+        env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '500', CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '20' },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+
+      let stderr = '';
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk;
+      });
+
+      await new Promise<void>((resolve) => {
+        const deadline = Date.now() + 1_000;
+        const check = () => {
+          if (stderr.includes('helper-started') && existsSync(readyFile)) {
+            resolve();
+            return;
+          }
+          if (Date.now() > deadline) {
+            resolve();
+            return;
+          }
+          setTimeout(check, 10);
+        };
+        check();
+      });
+      child.kill('SIGTERM');
+      const status = await new Promise<number | null>((resolve) => child.on('close', (code) => resolve(code)));
+
+      expect(status).toBe(128 + osConstants.signals.SIGTERM);
+      const envelope = parseEnvelope(stderr);
+      expect(envelope.stderrTail).toContain('helper final diagnostic');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('gives descendants the configured shutdown grace period after their parent exits', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'franken-cron-descendant-grace-'));
+    const cleanupFile = join(tempDir, 'cleanup.done');
+    const readyFile = join(tempDir, 'helper.ready');
+
+    try {
+      const child = spawn(process.execPath, [
+        SCRIPT,
+        '--name',
+        'descendant-grace-test',
+        '--',
+        process.execPath,
+        '-e',
+        `const { spawn } = require('node:child_process'); const helper = spawn(process.execPath, ['-e', 'const fs = require("node:fs"); fs.writeFileSync(${JSON.stringify(readyFile)}, "ready"); process.on("SIGTERM", () => setTimeout(() => { fs.writeFileSync(${JSON.stringify(cleanupFile)}, "done"); process.exit(0); }, 120)); setInterval(() => {}, 1000)'], { stdio: ['ignore', 'ignore', 'ignore'] }); process.stderr.write('helper-started\\n'); process.on('SIGTERM', () => process.exit(0)); setInterval(() => {}, 1000);`,
+      ], {
+        cwd: ROOT,
+        env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '500' },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+
+      let stderr = '';
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk;
+      });
+
+      await new Promise<void>((resolve) => {
+        const deadline = Date.now() + 1_000;
+        const check = () => {
+          if (stderr.includes('helper-started') && existsSync(readyFile)) {
+            resolve();
+            return;
+          }
+          if (Date.now() > deadline) {
+            resolve();
+            return;
+          }
+          setTimeout(check, 10);
+        };
+        check();
+      });
+      child.kill('SIGTERM');
+      const status = await new Promise<number | null>((resolve) => child.on('close', (code) => resolve(code)));
+
+      expect(status).toBe(128 + osConstants.signals.SIGTERM);
+      expect(readFileSync(cleanupFile, 'utf8')).toBe('done');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('finishes promptly when descendants exit before the shutdown grace timer expires', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'franken-cron-descendant-prompt-recheck-'));
+    const readyFile = join(tempDir, 'helper.ready');
+
+    try {
+      const child = spawn(process.execPath, [
+        SCRIPT,
+        '--name',
+        'descendant-prompt-recheck-test',
+        '--',
+        process.execPath,
+        '-e',
+        `const { spawn } = require('node:child_process'); spawn(process.execPath, ['-e', 'const fs = require("node:fs"); fs.writeFileSync(${JSON.stringify(readyFile)}, "ready"); process.on("SIGTERM", () => setTimeout(() => process.exit(0), 120)); setInterval(() => {}, 1000)'], { stdio: ['ignore', 'ignore', 'ignore'] }); process.stderr.write('helper-started\\n'); process.on('SIGTERM', () => process.exit(0)); setInterval(() => {}, 1000);`,
+      ], {
+        cwd: ROOT,
+        env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '5000' },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+
+      let stderr = '';
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk;
+      });
+
+      await new Promise<void>((resolve) => {
+        const deadline = Date.now() + 1_000;
+        const check = () => {
+          if (stderr.includes('helper-started') && existsSync(readyFile)) {
+            resolve();
+            return;
+          }
+          if (Date.now() > deadline) {
+            resolve();
+            return;
+          }
+          setTimeout(check, 10);
+        };
+        check();
+      });
+      const started = Date.now();
+      child.kill('SIGTERM');
+      const status = await new Promise<number | null>((resolve) => child.on('close', (code) => resolve(code)));
+
+      expect(status).toBe(128 + osConstants.signals.SIGTERM);
+      expect(Date.now() - started).toBeLessThan(1_500);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('finishes parent shutdown promptly when only zombie process-group members remain', async () => {
+    const child = spawn(process.execPath, [
+      SCRIPT,
+      '--name',
+      'prompt-shutdown-zombie-descendant',
+      '--',
+      process.execPath,
+      '-e',
+      `const { spawn } = require('node:child_process'); spawn(process.execPath, ['-e', 'process.exit(0)'], { stdio: ['ignore', 'ignore', 'ignore'] }); process.on('SIGTERM', () => process.exit(0)); process.stderr.write('ready with zombie candidate\n'); setInterval(() => {}, 1000);`,
+    ], {
+      cwd: ROOT,
+      env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '5000' },
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+
+    await new Promise<void>((resolve) => {
+      child.stderr.on('data', () => {
+        if (stderr.includes('ready with zombie candidate')) {
+          resolve();
+        }
+      });
+    });
+    const started = Date.now();
+    child.kill('SIGTERM');
+
+    const status = await new Promise<number | null>((resolve) => child.on('close', (code) => resolve(code)));
+
+    expect(status).toBe(128 + osConstants.signals.SIGTERM);
+    expect(Date.now() - started).toBeLessThan(1_500);
+  });
+
+  it('finishes parent shutdown promptly when no process-group members remain', async () => {
+    const child = spawn(process.execPath, [
+      SCRIPT,
+      '--name',
+      'prompt-shutdown-no-descendants',
+      '--',
+      process.execPath,
+      '-e',
+      "process.on('SIGTERM', () => process.exit(0)); process.stderr.write('ready for prompt shutdown\\n'); setInterval(() => {}, 1000)",
+    ], {
+      cwd: ROOT,
+      env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '5000' },
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+
+    await new Promise<void>((resolve) => {
+      child.stderr.on('data', () => {
+        if (stderr.includes('ready for prompt shutdown')) {
+          resolve();
+        }
+      });
+    });
+    const started = Date.now();
+    child.kill('SIGTERM');
+
+    const status = await new Promise<number | null>((resolve) => child.on('close', (code) => resolve(code)));
+
+    expect(status).toBe(128 + osConstants.signals.SIGTERM);
+    expect(Date.now() - started).toBeLessThan(1_500);
+  });
+
+  it('preserves the job name on option parse errors', () => {
+    const result = runCronScript(['--name', 'nightly', '--recvoerable', '--', process.execPath, '-e', 'process.exit(0)']);
+
+    expect(result.status).toBe(2);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope).toMatchObject({
+      script: 'nightly',
+      failureKind: 'usage',
+      exitCode: 2,
+    });
+  });
+
+  it('forwards parent termination signals to the child and reports signal-specific status', async () => {
+    const child = spawn(process.execPath, [
+      SCRIPT,
+      '--name',
+      'signal-test',
+      '--',
+      process.execPath,
+      '-e',
+      "process.on('SIGTERM', () => { process.stderr.write('cleanup after signal'); process.exit(0); }); process.stderr.write('ready for signal\\n'); setInterval(() => {}, 1000)",
+    ], {
+      cwd: ROOT,
+      env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '50' },
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+
+    await new Promise<void>((resolve) => {
+      child.stderr.on('data', () => {
+        if (stderr.includes('ready for signal')) {
+          resolve();
+        }
+      });
+    });
+    child.kill('SIGTERM');
+
+    const status = await new Promise<number | null>((resolve) => {
+      child.on('close', (code) => resolve(code));
+    });
+
+    expect(status).toBe(128 + osConstants.signals.SIGTERM);
+    const envelope = parseEnvelope(stderr);
+    expect(envelope).toMatchObject({
+      script: 'signal-test',
+      failureKind: 'signal',
+      signal: 'SIGTERM',
+      exitCode: 128 + osConstants.signals.SIGTERM,
+    });
+    expect(envelope.stderrTail).toContain('cleanup after signal');
+  });
+
+  it('emits a signal envelope before force-finishing when the child ignores termination', async () => {
+    const child = spawn(process.execPath, [
+      SCRIPT,
+      '--name',
+      'force-kill-signal-test',
+      '--',
+      process.execPath,
+      '-e',
+      "process.on('SIGTERM', () => { process.stderr.write('ignoring signal'); }); process.stderr.write('ready for signal\\n'); setInterval(() => {}, 1000)",
+    ], {
+      cwd: ROOT,
+      env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '50' },
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+
+    await new Promise<void>((resolve) => {
+      child.stderr.on('data', () => {
+        if (stderr.includes('ready for signal')) {
+          resolve();
+        }
+      });
+    });
+    child.kill('SIGTERM');
+
+    const status = await new Promise<number | null>((resolve) => {
+      child.on('close', (code) => resolve(code));
+    });
+
+    expect(status).toBe(128 + osConstants.signals.SIGTERM);
+    const envelope = parseEnvelope(stderr);
+    expect(envelope).toMatchObject({
+      script: 'force-kill-signal-test',
+      failureKind: 'signal',
+      signal: 'SIGTERM',
+      exitCode: 128 + osConstants.signals.SIGTERM,
+    });
+    expect(envelope.stderrTail).toContain('ignoring signal');
+  });
+
+  it('documents the envelope schema for operators and liveness tooling', () => {
+    const doc = readFileSync(DOC, 'utf8');
+
+    expect(doc).toContain('scripts/run-cron-script.mjs');
+    expect(doc).toContain('franken.cron.script.error');
+    expect(doc).toContain('failureKind');
+    expect(doc).toContain('stderrTail');
+  });
+});

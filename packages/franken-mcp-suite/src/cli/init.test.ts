@@ -22,6 +22,10 @@ function jsonBackups(dir: string): string[] {
   return readdirSync(dir).filter((name) => name.startsWith('settings.json.invalid-'));
 }
 
+function hooksBackups(dir: string): string[] {
+  return readdirSync(dir).filter((name) => name.startsWith('hooks.json.invalid-'));
+}
+
 describe('fbeast init', () => {
   const dirs: string[] = [];
 
@@ -400,6 +404,28 @@ describe('fbeast init', () => {
     expect(content).not.toContain('You have access to fbeast MCP tools');
     expect(content).toContain('<!-- fbeast-start -->');
     expect(content).toContain('<!-- fbeast-end -->');
+  });
+
+  it('backs up invalid Codex hooks.json and initializes with Codex hooks entries', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const codexDir = join(root, '.codex');
+    const hooksPath = join(codexDir, 'hooks.json');
+    mkdirSync(codexDir, { recursive: true });
+    writeFileSync(hooksPath, '{ invalid json');
+
+    const mockSpawn = () => ({ status: 0 });
+
+    runInit({ root, claudeDir: codexDir, hooks: true, client: 'codex', spawn: mockSpawn });
+
+    const hooks = JSON.parse(readFileSync(hooksPath, 'utf-8'));
+    expect(Array.isArray(hooks.hooks.PreToolUse)).toBe(true);
+    expect(Array.isArray(hooks.hooks.PostToolUse)).toBe(true);
+    expect(hooks.hooks.PreToolUse[0].hooks[0].command).toContain('fbeast-codex-pre-tool.sh');
+
+    const backups = hooksBackups(codexDir);
+    expect(backups).toHaveLength(1);
+    expect(readFileSync(join(codexDir, backups[0]!), 'utf-8')).toBe('{ invalid json');
   });
 
   it('merges fbeast section into existing AGENTS.md without clobbering it', () => {
