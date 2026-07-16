@@ -168,6 +168,12 @@ await evaluateIssueBackpressure({
 
 PM and liveness callers that inventory worker-card processes can call `detectDuplicateWorkerCardProcesses(snapshots)` before starting or refilling issue work. Provide one snapshot per observed worker process with `cardId`, `pid`, optional string `runId`, `issueNumber`, `owner`, `status`, `alive`, `startedAt`, and `lastHeartbeatAt`. The detector ignores terminal/dead/invalid snapshots while preserving live blocked workers and reports only cards with two or more distinct live PIDs. Each finding is structured for automation: `cardId`, `processCount`, sorted `pids`, `runIds`, `owners`, `statuses`, timestamps, a `message`, and operator `guidance` telling the PM to keep one live owner, stop or park the duplicate, and record the survivor in liveness output.
 
+## Idempotent Kanban state mutation planning
+
+Retrying PM, doctor, or watchdog updates should first call `planKanbanStateMutation(snapshot, request)` with a deterministic `idempotencyKey` and, when available, an `expectedRevision`. The planner returns `apply`, `skip`, or `conflict` with machine-readable evidence so repeated comment/block/unblock/complete attempts converge without duplicate noise while stale concurrent writes surface an explicit compare-and-set conflict.
+
+Use stable keys derived from the business intent, not random attempts, for example `comment:<card-id>:liveness:<head-sha>`, `block:<card-id>:codex-usage-limit`, `unblock:<card-id>:doctor-treatment`, or `complete:<card-id>:merged:<pr-number>`. Treat `skip` as success, `conflict` as a re-read-and-decide signal, and only execute the underlying Kanban mutation on `apply`.
+
 ## Scheduler fairness report
 
 Before execution starts, `IssueRunner` emits `[issues] Scheduler fairness report` with structured data that PM/liveness tooling can consume without parsing prose. The report includes:
