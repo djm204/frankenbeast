@@ -86,13 +86,13 @@ describe('dr restore-dry-run CLI', () => {
           target: 'pr-2342',
           attempts: 5,
           maxAttempts: 5,
-          lastError: 'usage limit for GH_TOKEN=secret-value',
+          lastError: 'HTTP 403 for token ghp_secretvalue1234567890',
           firstAttemptedAt: '2026-07-16T08:00:00.000Z',
           lastAttemptedAt: '2026-07-16T08:05:00.000Z',
           createdAt: '2026-07-16T08:05:00.000Z',
           replaySafety: 'side-effect-approval-required',
           status: 'open',
-          payload: { command: 'GH_TOKEN=secret-value gh pr comment 2342 --body @codex review' },
+          payload: { command: 'curl -H "Authorization: Bearer abcd1234secret5678" https://api.github.com/repos/djm204/frankenbeast' },
         }],
       }), 'utf8');
 
@@ -103,7 +103,8 @@ describe('dr restore-dry-run CLI', () => {
         summary: { open: 1 },
         entries: [{ id: 'dlq_test', actionClass: 'codex-review-trigger', target: 'pr-2342' }],
       });
-      expect(listOutput).not.toContain('secret-value');
+      expect(listOutput).not.toContain('ghp_secretvalue1234567890');
+      expect(listOutput).not.toContain('abcd1234secret5678');
       expect(listOutput).not.toContain('GH_TOKEN');
       expect(listOutput).not.toContain('lastError');
       expect(listOutput).not.toContain('payload');
@@ -111,7 +112,9 @@ describe('dr restore-dry-run CLI', () => {
       await handleDrCommand({ action: 'dead-letter-inspect', backupManifestPath: queuePath, liveManifestPath: 'dlq_test', print: (message) => output.push(message) });
       const inspectOutput = output.pop() ?? '';
       expect(JSON.parse(inspectOutput)).toMatchObject({ command: 'dr dead-letter-inspect', entry: { id: 'dlq_test' } });
-      expect(inspectOutput).not.toContain('secret-value');
+      expect(inspectOutput).not.toContain('ghp_secretvalue1234567890');
+      expect(inspectOutput).not.toContain('abcd1234secret5678');
+      expect(inspectOutput).toContain('<redacted>');
 
       await handleDrCommand({ action: 'dead-letter-replay-dry-run', backupManifestPath: queuePath, liveManifestPath: 'dlq_test', generatedAt: '2026-07-16T08:06:00.000Z', print: (message) => output.push(message) });
       const replayOutput = output.pop() ?? '';

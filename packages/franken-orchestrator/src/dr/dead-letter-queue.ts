@@ -29,6 +29,7 @@ interface DeadLetterQueueFile {
 
 const LOCK_RETRY_DELAY_MS = 25;
 const LOCK_TIMEOUT_MS = 5_000;
+const STALE_LOCK_MS = LOCK_TIMEOUT_MS;
 
 export interface RecordRetryExhaustionOptions {
   readonly queuePath: string;
@@ -166,11 +167,25 @@ async function writeQueue(queuePath: string, queue: DeadLetterQueueFile): Promis
   const tempPath = `${queuePath}.${process.pid}.${Date.now()}.tmp`;
   await writeFile(tempPath, `${JSON.stringify(queue, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
   await rename(tempPath, queuePath);
-  await chmod(queuePath, 0o600);
+  await chmod(queuePath, 0o600).catch(() => undefined);
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function reapStaleQueueLock(lockPath: string, now = Date.now()): Promise<boolean> {
+  try {
+    const raw = await readFile(lockPath, 'utf8');
+    const parsed = JSON.parse(raw) as { acquiredAt?: unknown };
+    if (typeof parsed.acquiredAt !== 'string') return false;
+    const acquiredAt = Date.parse(parsed.acquiredAt);
+    if (!Number.isFinite(acquiredAt) || now - acquiredAt < STALE_LOCK_MS) return false;
+    await unlink(lockPath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function withQueueLock<T>(queuePath: string, operation: () => Promise<T>): Promise<T> {
@@ -184,9 +199,15 @@ async function withQueueLock<T>(queuePath: string, operation: () => Promise<T>):
       await lockHandle.close();
       break;
     } catch (error) {
-      if (error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST' && Date.now() < deadline) {
-        await sleep(LOCK_RETRY_DELAY_MS);
-        continue;
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST') {
+        if (await reapStaleQueueLock(lockPath)) {
+          continue;
+        }
+        if (Date.now() < deadline) {
+          await sleep(LOCK_RETRY_DELAY_MS);
+          continue;
+        }
+        throw new Error(`Unable to acquire dead-letter queue lock ${lockPath}: existing lock is still active`);
       }
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(`Unable to acquire dead-letter queue lock ${lockPath}: ${message}`);

@@ -90,7 +90,14 @@ export async function readRestoreManifest(manifestPath: string): Promise<Restore
 }
 
 function printRedactedJson(print: (message: string) => void, report: unknown): void {
-  print(JSON.stringify(redactLogData(report), null, 2));
+  print(maskOpaqueSecretLiterals(JSON.stringify(redactLogData(report), null, 2)));
+}
+
+function maskOpaqueSecretLiterals(text: string): string {
+  return text
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/gu, '<redacted>')
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{12,}\b/gu, '<redacted>')
+    .replace(/\b(?:Bearer|Basic|Bot)\s+[A-Za-z0-9._~+/=-]{8,}\b/giu, (match) => `${match.split(/\s+/u)[0]} <redacted>`);
 }
 
 function summarizeDeadLetterEntry(entry: DeadLetterEntry): Omit<DeadLetterEntry, 'lastError' | 'payload'> {
