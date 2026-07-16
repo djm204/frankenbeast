@@ -213,6 +213,8 @@ describe('local setup scripts', () => {
     expect(script).toContain('GRAFANA_USER=admin');
     expect(script).toContain('npm ci');
     expect(script).toContain('docker compose up -d');
+    expect(script).toContain('[onboarding:%s/%s:%s] %s');
+    expect(script).toContain('status complete done');
     expect(readme).toContain('## 🚀 One-click onboarding');
     expect(readme).toContain('[Frankenbeast onboarding checklist](ONBOARDING.md)');
     expect(readme).toContain('[`scripts/bootstrap.sh`](scripts/bootstrap.sh)');
@@ -233,6 +235,17 @@ describe('local setup scripts', () => {
     expect(dryRun.status, dryRun.stderr || dryRun.stdout).toBe(0);
     expect(dryRun.stdout).toMatch(/dry-run: would copy \.env\.example to \.env|\.env already exists; leaving it unchanged\./);
     expect(dryRun.stdout).toContain('dry-run: npm ci');
+    expect(dryRun.stdout).toContain('[onboarding:1/6:prerequisites] start - checking Node.js, npm, and Corepack');
+    expect(dryRun.stdout).toContain('[onboarding:6/6:services] ok - optional services intentionally skipped');
+    expect(dryRun.stdout).toContain('[onboarding:6/6:done] complete - onboarding bootstrap reached 6/6 steps');
+
+    const invalidArgument = spawnSync('bash', [scriptPath, '--definitely-not-a-real-option'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      timeout: 60_000,
+    });
+    expect(invalidArgument.status).not.toBe(0);
+    expect(invalidArgument.stderr).toContain('[onboarding:0/6:failed] error - Unknown argument: --definitely-not-a-real-option');
 
     const servicesDryRun = spawnSync('bash', [scriptPath, '--dry-run', '--services'], {
       cwd: ROOT,
