@@ -78,6 +78,15 @@ Use this checklist for a first local checkout or when rebuilding a development e
 
   The generator prints deterministic Markdown by default, or JSON with `persona`, `root`, `items`, `docs`, and `nextAction` for PM/liveness tooling. It never mutates files or runs setup commands; it points each checklist item at the command and docs to run next. Valid personas are `operator`, `coding-agent`, and `contributor`; unknown personas fail closed with an explicit error instead of falling back to a misleading generic checklist.
 
+- [ ] Rehearse the full local-to-PR path before publishing anything:
+
+  ```bash
+  npm run local-to-pr:dry-run -- --issue 1700 --title "feat(onboarding): add guided local-to-PR dry run mode"
+  npm --silent run local-to-pr:dry-run -- --issue 1700 --title "feat(onboarding): add guided local-to-PR dry run mode" --json
+  ```
+
+  The dry run checks auth, install, and git-state prerequisites, then walks through checkout, branch/worktree creation, a no-op change, test selection, PR body generation, Codex review, and cleanup. Every remote mutation is skipped: `git push`, `gh pr create`, `gh pr comment`, and merge actions are printed as planned side effects rather than executed. Local write steps are simulated, and failures include remediation such as `gh auth login`, Corepack/npm activation, `npm ci`, or starting from a clean isolated worktree.
+
 - [ ] Take the interactive workspace tour when you need a deterministic package map before choosing files:
 
   ```bash
