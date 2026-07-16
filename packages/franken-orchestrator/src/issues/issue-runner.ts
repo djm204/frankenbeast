@@ -1169,6 +1169,9 @@ export class IssueRunner {
     if (issues.length === 0) return [];
 
     const sorted = sortBySchedulingScore(issues);
+    const startableRemainingCounts = sorted.map((_, index) =>
+      sorted.slice(index).filter((candidate) => evaluateIssueSchedulingScore(candidate).blockerStatus === 'eligible').length,
+    );
     logger?.info('[issues] Scheduler fairness report', buildIssueSchedulerFairnessReport(issues, triageResults), 'issues');
     const budgetTokens = budget * TOKENS_PER_DOLLAR;
     let cumulativeTokens = 0;
@@ -1208,7 +1211,7 @@ export class IssueRunner {
         const outcome = await this.processIssue(issue, triage, config, {
           index: i,
           totalIssues: sorted.length,
-          pendingIssueCount: sorted.length - i,
+          pendingIssueCount: startableRemainingCounts[i] ?? 0,
           cumulativeTokens,
           budgetTokens,
           providerBudgetTokensRemaining: Math.max(0, budgetTokens - cumulativeTokens),
@@ -1429,6 +1432,22 @@ export class IssueRunner {
         issueTitle: issue.title,
         status: 'fixed',
         tokensUsed: 0,
+      };
+    }
+
+    if (schedulingScore.blockerStatus !== 'eligible') {
+      const reason = `deferred by scheduler: ${schedulingScore.blockerStatus} issue is waiting on human/dependency gate`;
+      logger?.warn(
+        `[issues] Deferred issue #${issue.number}: ${reason}`,
+        { issueNumber: issue.number, schedulingScore, graphHasCheckpointProgress, graphComplete },
+        'issues',
+      );
+      return {
+        issueNumber: issue.number,
+        issueTitle: issue.title,
+        status: 'skipped',
+        tokensUsed: 0,
+        error: reason,
       };
     }
 
