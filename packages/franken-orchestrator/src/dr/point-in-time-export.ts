@@ -134,6 +134,11 @@ function isMemoryStorePath(path: string): boolean {
   return normalized.includes('/memory') || basename(normalized) === 'memory.db';
 }
 
+function isWithinDirectory(root: string, candidate: string): boolean {
+  const rel = relative(root, candidate).split(sep).join('/');
+  return rel !== '' && !rel.startsWith('../') && rel !== '..' && !rel.startsWith('/');
+}
+
 function quoteSqliteIdentifier(identifier: string): string {
   return `"${identifier.replace(/"/gu, '""')}"`;
 }
@@ -187,6 +192,27 @@ function sanitizeMemory(text: string): { recordCount: number; keys: string[]; me
     }
   }
   return { recordCount: records.length, keys: keys.sort(), metadata };
+}
+
+function summarizeSqliteMemoryStore(absolutePath: string, checksum: FileChecksum): MemoryMetadataSummary | undefined {
+  let db: Database.Database | undefined;
+  try {
+    db = new Database(absolutePath, { readonly: true, fileMustExist: true });
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as Array<{ name: string }>;
+    const metadata: Record<string, unknown>[] = [];
+    let recordCount = 0;
+    for (const { name } of tables) {
+      const quoted = quoteSqliteIdentifier(name);
+      const countRow = db.prepare(`SELECT COUNT(*) AS count FROM ${quoted}`).get() as { count: number };
+      recordCount += countRow.count;
+      metadata.push({ table: name, rowCount: countRow.count });
+    }
+    return { ...checksum, recordCount, keys: [], metadata };
+  } catch {
+    return undefined;
+  } finally {
+    db?.close();
+  }
 }
 
 async function checksumFor(root: string, absolutePath: string, data: Buffer): Promise<FileChecksum> {
@@ -282,6 +308,9 @@ export async function createPointInTimeExport(options: PointInTimeExportOptions)
   const logTailLimit = options.logTailLines ?? 50;
   const sourceStats = await stat(sourceDir);
   if (!sourceStats.isDirectory()) throw new Error(`DR export source must be a directory: ${options.stateDir}`);
+  if (isWithinDirectory(sourceDir, outputPath) && await pathIsFile(outputPath)) {
+    throw new Error(`DR export output path must not overwrite an existing source file: ${options.outputPath}`);
+  }
 
   const discovered = await walkFiles(sourceDir);
   const configChecksums: FileChecksum[] = [];
@@ -314,13 +343,15 @@ export async function createPointInTimeExport(options: PointInTimeExportOptions)
       approvals.push(...sqlite.approvals);
       tasks.push(...sqlite.tasks);
       runs.push(...sqlite.runs);
+      const memorySummary = isMemoryStorePath(checksum.path) ? summarizeSqliteMemoryStore(resolved, { ...checksum }) : undefined;
+      if (memorySummary !== undefined) memory.push(memorySummary);
     }
 
     const pendingApprovalSummary = splitChatPendingApprovals(checksum, text);
     if (pendingApprovalSummary !== undefined) approvals.push(pendingApprovalSummary);
 
     if (section === 'config') {
-      configChecksums.push(checksum);
+      configChecksums.push({ ...checksum });
     } else if (section === 'approvals') {
       const records = sanitizeRecords(text);
       if (records.length > 0) approvals.push({ ...checksum, records });

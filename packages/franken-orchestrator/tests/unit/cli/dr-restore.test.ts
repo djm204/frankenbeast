@@ -158,7 +158,7 @@ describe('dr restore-dry-run CLI', () => {
       expect(report.command).toBe('dr export');
       expect(report.manifest.generatedAt).toBe('2026-07-16T09:00:00.000Z');
       expect(report.manifest.configChecksums).toEqual([expect.objectContaining({ path: 'config.json', sha256: expect.stringMatching(/^sha256:/u) })]);
-      expect(report.manifest.sections).toEqual(expect.objectContaining({ approvals: 2, memory: 2, tasks: 2, runs: 2, logs: 2 }));
+      expect(report.manifest.sections).toEqual(expect.objectContaining({ approvals: 2, memory: 3, tasks: 2, runs: 2, logs: 2 }));
       expect(report.evidence.approvals).toEqual(expect.arrayContaining([
         expect.objectContaining({ path: 'approvals/ledger.json' }),
         expect.objectContaining({ path: 'chat/session-1.json', records: [expect.objectContaining({ id: 'approval-chat-1' })] }),
