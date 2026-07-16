@@ -1592,6 +1592,7 @@ describe('LessonRecorder', () => {
         },
       ],
     });
+    expect(isLessonApplicable(approved)).toBe(false);
     expect(isLessonApplicable(approved, { taskId: 'scope-task' })).toBe(true);
   });
 
@@ -1945,7 +1946,9 @@ describe('LessonRecorder', () => {
         },
       ],
     });
-    expect(isLessonApplicable(directlyApproved)).toBe(true);
+    expect(
+      isLessonApplicable(directlyApproved, { taskId: 'feedback-weight-task' }),
+    ).toBe(true);
 
     const approvedLegacySandboxed = applyHumanFeedbackToLesson(
       { ...approvalReadyLesson, lifecycleStatus: 'active' },
@@ -1964,7 +1967,11 @@ describe('LessonRecorder', () => {
     );
     expect(approvedLegacySandboxed.lifecycleStatus).toBe('active');
     expect(approvedLegacySandboxed.experimentSandbox).toBeUndefined();
-    expect(isLessonApplicable(approvedLegacySandboxed)).toBe(true);
+    expect(
+      isLessonApplicable(approvedLegacySandboxed, {
+        taskId: 'feedback-weight-task',
+      }),
+    ).toBe(true);
 
     const approvedAfterCorrection = applyHumanFeedbackToLesson(corrected, {
       source: 'explicit-user-approval',
@@ -2057,7 +2064,9 @@ describe('LessonRecorder', () => {
     expect(approvedLegacy.unquarantine?.evidenceUrl).toBe(
       'https://github.com/djm204/frankenbeast/issues/1763#legacy',
     );
-    expect(isLessonApplicable(approvedLegacy)).toBe(true);
+    expect(
+      isLessonApplicable(approvedLegacy, { taskId: 'feedback-weight-task' }),
+    ).toBe(true);
 
     const legacySandboxedActiveQuarantine = quarantineLesson(
       {
@@ -2102,7 +2111,11 @@ describe('LessonRecorder', () => {
     expect(approvedLegacySandboxedQuarantine.lifecycleStatus).toBe('active');
     expect(approvedLegacySandboxedQuarantine.quarantine).toBeUndefined();
     expect(approvedLegacySandboxedQuarantine.experimentSandbox).toBeUndefined();
-    expect(isLessonApplicable(approvedLegacySandboxedQuarantine)).toBe(true);
+    expect(
+      isLessonApplicable(approvedLegacySandboxedQuarantine, {
+        taskId: 'feedback-weight-task',
+      }),
+    ).toBe(true);
 
     const approvedRetired = applyHumanFeedbackToLesson(
       {
@@ -2590,7 +2603,9 @@ describe('LessonRecorder', () => {
       evidenceUrl: 'https://github.com/djm204/frankenbeast/pull/3',
       reason: 'Replacement guidance has regression coverage.',
     });
-    expect(isLessonApplicable(unquarantined)).toBe(true);
+    expect(
+      isLessonApplicable(unquarantined, { taskId: 'lifecycle-task' }),
+    ).toBe(true);
   });
 
   it('does not attach rollback workflow guidance when no actionable lesson is recorded', async () => {

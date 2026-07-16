@@ -1845,8 +1845,11 @@ function isLessonScopeAllowed(
   scope: LessonScopeMetadata | undefined,
   context: LessonInjectionContext,
 ): boolean {
-  if (scope === undefined || isEmptyLessonInjectionContext(context)) {
+  if (scope === undefined) {
     return true;
+  }
+  if (isEmptyLessonInjectionContext(context)) {
+    return false;
   }
   const nowMs = Date.parse(context.now ?? new Date().toISOString());
   if (scope.expiresAt !== undefined && Date.parse(scope.expiresAt) <= nowMs) {
