@@ -1173,6 +1173,9 @@ function inferPostTaskLessonCategory(
 }
 
 function isRawUserPreferenceCorrection(text: string): boolean {
+  if (/\b(?:use|run|command|cli|tool|fallback|workaround|workflow|procedure|steps?|script|test|verify|retry)\b/i.test(text)) {
+    return false;
+  }
   return /^(?:please\s+)?(?:keep|avoid|do\s+not|don't|never|always|prefer)\b/i.test(
     text,
   );
@@ -1183,7 +1186,7 @@ function hasExplicitPostTaskLessonSignal(text: string): boolean {
   if (ENVIRONMENT_FACT_PATTERNS.some((pattern) => pattern.test(text))) {
     return true;
   }
-  return /\b(?:always|avoid|ensure|prefer|require|validate|verify|retry|redact|must|should)\b/i.test(
+  return /\b(?:always|avoid|ensure|prefer|require|validate|verify|retry|redact|must|should|use|fallback|workaround)\b/i.test(
     text,
   );
 }
@@ -1226,10 +1229,9 @@ function attachPostTaskVerificationEvidence(
   const reviewableCandidates = candidates.filter(
     (candidate) => candidate.suggestedDestination !== 'discard',
   );
-  if (reviewableCandidates.length !== 1) return candidates;
-  const [targetCandidate] = reviewableCandidates;
+  if (reviewableCandidates.length === 0) return candidates;
   return candidates.map((candidate) =>
-    candidate === targetCandidate
+    candidate.suggestedDestination !== 'discard'
       ? {
           ...candidate,
           evidence: [
