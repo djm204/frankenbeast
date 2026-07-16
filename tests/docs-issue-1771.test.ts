@@ -59,6 +59,10 @@ describe('issue #1771 local service dependency explainer', () => {
     expect(secretBackend?.healthCheck).toContain('FRANKENBEAST_PASSPHRASE');
     expect(secretBackend?.healthCheck).toContain('LocalEncryptedStore');
     expect(secretBackend?.healthCheck).toContain('.keys()');
+    expect(secretBackend?.healthCheck).toContain('BitwardenStore');
+    expect(secretBackend?.healthCheck).toContain("bw',['list','items','--search','frankenbeast'");
+    expect(secretBackend?.healthCheck).toContain('OsKeychainStore');
+    expect(secretBackend?.healthCheck).toContain('s.detect()');
     expect(secretBackend?.healthCheck).toContain('BW_SESSION');
     expect(secretBackend?.healthCheck).not.toContain('|| true');
 
@@ -69,9 +73,11 @@ describe('issue #1771 local service dependency explainer', () => {
 
     const provider = manifest.services.find((service) => service.id === 'provider-cli');
     expect(provider?.healthCheck).toContain('selected configured provider');
-    expect(provider?.healthCheck).toContain('chat surfaces require a CLI-backed provider');
-    expect(provider?.startCommand).toContain('provider-registry Beast runs');
+    expect(provider?.healthCheck).toContain('chat surfaces and normal frankenbeast run/agent execution require a CLI-backed provider');
+    expect(provider?.startCommand).toContain('explicitly API-backed provider-registry integrations');
+    expect(provider?.startCommand).toContain('normal frankenbeast run/agent execution');
     expect(provider?.healthCheck).toContain('authenticated no-op prompt');
+    expect(provider?.healthCheck).toContain('explicitly API-backed provider-registry integrations');
     expect(provider?.healthCheck).not.toContain('command -v');
 
     for (const service of manifest.services) {
@@ -115,8 +121,10 @@ describe('issue #1771 local service dependency explainer', () => {
       'Full-stack probe: `npm run local:verify-setup` checks ChromaDB, Grafana, and Tempo together',
       'selected CLI-backed provider smoke call; do not rely on `command -v` alone',
       'chat surfaces currently resolve providers through the CLI provider registry',
+      'do not treat normal `frankenbeast run` as API-key-only',
       'docker compose up -d --no-deps grafana',
       'run a decrypting call such as `keys()`',
+      'run a `bw list items --search frankenbeast` probe',
       'Local service dependency check:',
     ]) {
       expect(guide).toContain(requiredText);
