@@ -20,6 +20,9 @@ import type {
   LessonFeedbackSignalSource,
   LessonFeedbackWeight,
   LessonFeedbackWeighting,
+  LessonCritiqueAgentFinding,
+  LessonCritiqueChecklistItem,
+  LessonMultiAgentCritique,
   FailureRecordMetadata,
   FailureCluster,
 } from '../types/contracts.js';
@@ -62,6 +65,25 @@ const PRIVACY_FILTER_ADMIT_REASON =
   'Lesson candidate passed the privacy filter before durable learning.';
 const PRIVACY_FILTER_SENSITIVE_REASON =
   'Lesson candidate was redacted and flagged for explicit review before promotion because it contained sensitive data.';
+const LESSON_CRITIQUE_CHECKLIST: readonly LessonCritiqueChecklistItem[] = [
+  'correctness',
+  'scope',
+  'privacy',
+  'security',
+  'duplication',
+  'conflict',
+];
+const LESSON_CRITIQUE_AGENTS = [
+  'correctness-scope-critic',
+  'privacy-security-critic',
+  'duplication-conflict-critic',
+] as const;
+const LESSON_CRITIQUE_ACCEPT_GUIDANCE =
+  'Lesson candidate passed the multi-agent critique checklist; promote only after attached evidence and any manual-review requirement are satisfied.';
+const LESSON_CRITIQUE_NEEDS_EDIT_GUIDANCE =
+  'Lesson candidate needs edits or additional evidence before promotion; keep it out of durable guidance until the findings are addressed.';
+const LESSON_CRITIQUE_REJECT_GUIDANCE =
+  'Lesson candidate was rejected by critique and should not be promoted to durable guidance.';
 
 interface InternalLessonPrivacyRedaction extends LessonPrivacyRedaction {
   readonly original: string;
@@ -72,6 +94,11 @@ interface InternalLessonPrivacyFilterDecision extends Omit<
   'redactions'
 > {
   readonly redactions: readonly InternalLessonPrivacyRedaction[];
+}
+
+interface LessonContradictionContext {
+  readonly report: LessonContradictionReport;
+  readonly priorLessons?: readonly CritiqueLesson[];
 }
 
 interface LessonCandidatePrivacyFilterResult {
@@ -450,6 +477,14 @@ export function applyHumanFeedbackToLesson(
       'Explicit lesson approval requires at least one evidence item.',
     );
   }
+  if (
+    lesson.proposedLessonCritique !== undefined &&
+    isProposedLessonCritiqueApprovalBlocked(lesson.proposedLessonCritique)
+  ) {
+    throw new RangeError(
+      'Explicit lesson approval requires an accepted proposedLessonCritique verdict or only manual-review duplicate/conflict findings before promotion.',
+    );
+  }
   const primaryApprovalEvidence = feedbackEvidence[0];
   if (primaryApprovalEvidence === undefined) {
     throw new RangeError(
@@ -495,11 +530,44 @@ export function applyHumanFeedbackToLesson(
 }
 
 function removeStaleLessonValidation(lesson: CritiqueLesson): CritiqueLesson {
-  const { contradictionReport, testTraceability, ...lessonWithoutValidation } =
-    lesson;
+  const {
+    contradictionReport,
+    proposedLessonCritique,
+    testTraceability,
+    ...lessonWithoutValidation
+  } = lesson;
   void contradictionReport;
+  void proposedLessonCritique;
   void testTraceability;
   return lessonWithoutValidation;
+}
+
+function isProposedLessonCritiqueApprovalBlocked(
+  critique: LessonMultiAgentCritique,
+): boolean {
+  if (critique.verdict === 'accepted') {
+    return false;
+  }
+  if (critique.verdict === 'rejected') {
+    return true;
+  }
+  return critique.findings.some(
+    (finding) =>
+      finding.verdict !== 'pass' &&
+      !isManualReviewResolvableCritiqueFinding(finding),
+  );
+}
+
+function isManualReviewResolvableCritiqueFinding(
+  finding: LessonCritiqueAgentFinding,
+): boolean {
+  return (
+    finding.verdict === 'needs-edit' &&
+    ((finding.checklistItem === 'conflict' &&
+      finding.evidenceRefs.includes('contradiction:not_checked')) ||
+      (finding.checklistItem === 'duplication' &&
+        finding.evidenceRefs.includes('duplicate:not_checked')))
+  );
 }
 
 export function isLessonApplicable(lesson: CritiqueLesson): boolean {
@@ -512,6 +580,203 @@ export function isLessonApplicable(lesson: CritiqueLesson): boolean {
   return (
     lesson.lifecycleStatus === undefined || lesson.lifecycleStatus === 'active'
   );
+}
+
+function isLessonComparableForDuplicate(lesson: CritiqueLesson): boolean {
+  if (lesson.quarantine !== undefined) {
+    return false;
+  }
+  return (
+    lesson.lifecycleStatus === undefined ||
+    lesson.lifecycleStatus === 'active' ||
+    lesson.lifecycleStatus === 'candidate'
+  );
+}
+
+export function critiqueProposedLesson(
+  lesson: CritiqueLesson,
+  priorLessons?: readonly CritiqueLesson[],
+  generatedAt: string = lesson.timestamp,
+): LessonMultiAgentCritique {
+  const findings: LessonCritiqueAgentFinding[] = [];
+  const evidenceRefs = new Set<string>();
+  for (const ref of collectLessonCritiqueEvidenceRefs(lesson)) {
+    evidenceRefs.add(ref);
+  }
+
+  const privacyFilter = lesson.privacyFilter;
+  if (privacyFilter?.action === 'reject') {
+    findings.push({
+      agentName: 'privacy-security-critic',
+      checklistItem: 'privacy',
+      verdict: 'reject',
+      severity: 'critical',
+      message:
+        'Privacy filter rejected this lesson candidate before durable promotion.',
+      evidenceRefs: addEvidenceRef(evidenceRefs, `privacy:${privacyFilter.originalHash}`),
+      suggestion: 'Discard the candidate or rewrite it without transient/private data.',
+    });
+  }
+
+  if ((lesson.testTraceability?.length ?? 0) === 0) {
+    findings.push({
+      agentName: 'correctness-scope-critic',
+      checklistItem: 'correctness',
+      verdict: 'needs-edit',
+      severity: 'warning',
+      message: 'Lesson candidate lacks traceability to verification evidence.',
+      evidenceRefs: addEvidenceRef(evidenceRefs, 'traceability:missing'),
+      suggestion: 'Attach a regression or verifier command before promotion.',
+    });
+  }
+
+  if (lesson.reviewerFeedback?.suggestionsComplete === false) {
+    findings.push({
+      agentName: 'correctness-scope-critic',
+      checklistItem: 'scope',
+      verdict: 'needs-edit',
+      severity: 'warning',
+      message: 'Reviewer feedback does not include suggestions for every finding.',
+      evidenceRefs: addEvidenceRef(evidenceRefs, 'reviewer-feedback:missing-suggestions'),
+      suggestion: 'Add remediation guidance so the lesson is scoped and actionable.',
+    });
+  }
+
+  if (lesson.privacyFilter?.approvalRequired === true) {
+    findings.push({
+      agentName: 'privacy-security-critic',
+      checklistItem: 'privacy',
+      verdict: 'pass',
+      severity: 'warning',
+      message:
+        'Lesson candidate contains redacted sensitive signals and requires manual review even though only stable evidence refs are exposed.',
+      evidenceRefs: addEvidenceRef(evidenceRefs, `privacy:${lesson.privacyFilter.originalHash}`),
+      suggestion: 'Have a human reviewer inspect the redacted candidate before promotion.',
+    });
+  }
+
+  const hasCriticalSecuritySignal =
+    lesson.reviewerFeedback?.findings.some(
+      (finding) => finding.severity === 'critical',
+    ) === true || (lesson.blockerPatterns?.length ?? 0) > 0;
+  if (hasCriticalSecuritySignal) {
+    findings.push({
+      agentName: 'privacy-security-critic',
+      checklistItem: 'security',
+      verdict: 'pass',
+      severity: 'warning',
+      message:
+        'High-risk critique signal requires manual review before promotion.',
+      evidenceRefs: addEvidenceRef(evidenceRefs, 'risk:critical-finding'),
+      suggestion: 'Confirm the lesson is safe, scoped, and not overgeneralized.',
+    });
+  }
+
+  const candidateLessonId = getLessonId(lesson);
+  const duplicate = priorLessons?.find(
+    (prior) =>
+      prior !== lesson &&
+      getLessonId(prior) !== candidateLessonId &&
+      isLessonComparableForDuplicate(prior) &&
+      sameEvaluator(lesson, prior) &&
+      normalizeText(prior.failureDescription) ===
+        normalizeText(lesson.failureDescription),
+  );
+  if (priorLessons === undefined) {
+    findings.push({
+      agentName: 'duplication-conflict-critic',
+      checklistItem: 'duplication',
+      verdict: 'needs-edit',
+      severity: 'warning',
+      message:
+        'Historical duplicate lessons were not checked, so promotion needs manual review.',
+      evidenceRefs: addEvidenceRef(evidenceRefs, 'duplicate:not_checked'),
+      suggestion: 'Run lesson search or have a reviewer confirm no matching prior guidance exists.',
+    });
+  } else if (duplicate) {
+    findings.push({
+      agentName: 'duplication-conflict-critic',
+      checklistItem: 'duplication',
+      verdict: 'needs-edit',
+      severity: 'warning',
+      message:
+        'A comparable prior lesson already covers the same failure description.',
+      evidenceRefs: addEvidenceRef(evidenceRefs, `duplicate:${getLessonId(duplicate)}`),
+      suggestion: 'Update or link the existing lesson instead of promoting a duplicate.',
+    });
+  }
+
+  const contradictionReport =
+    priorLessons !== undefined
+      ? detectLessonContradictions(lesson, priorLessons)
+      : (lesson.contradictionReport ?? detectLessonContradictions(lesson));
+  evidenceRefs.add(`contradiction:${contradictionReport.status}`);
+  if (contradictionReport.status === 'not_checked') {
+    findings.push({
+      agentName: 'duplication-conflict-critic',
+      checklistItem: 'conflict',
+      verdict: 'needs-edit',
+      severity: 'warning',
+      message:
+        'Historical lesson conflicts were not checked, so promotion needs manual review.',
+      evidenceRefs: addEvidenceRef(evidenceRefs, 'contradiction:not_checked'),
+      suggestion: 'Run lesson search or have a reviewer confirm no conflicting prior guidance exists.',
+    });
+  }
+  if (contradictionReport.status === 'contradiction_detected') {
+    findings.push({
+      agentName: 'duplication-conflict-critic',
+      checklistItem: 'conflict',
+      verdict: 'needs-edit',
+      severity: 'critical',
+      message:
+        'Potential contradiction with existing lesson guidance blocks promotion until reconciled.',
+      evidenceRefs: contradictionReport.contradictions.map((contradiction) =>
+        addEvidenceRef(evidenceRefs, `conflict:${contradiction.conflictingLessonId}`),
+      ).flat(),
+      suggestion: 'Resolve or supersede the conflicting lesson before promotion.',
+    });
+  }
+
+  for (const item of LESSON_CRITIQUE_CHECKLIST) {
+    if (!findings.some((finding) => finding.checklistItem === item)) {
+      findings.push({
+        agentName: selectPassingCriticAgent(item),
+        checklistItem: item,
+        verdict: 'pass',
+        severity: 'info',
+        message: `No ${item} blocker was detected by deterministic critique.`,
+        evidenceRefs: Array.from(evidenceRefs).sort(),
+      });
+    }
+  }
+
+  const highRisk =
+    lesson.privacyFilter?.approvalRequired === true ||
+    hasCriticalSecuritySignal ||
+    contradictionReport.status === 'contradiction_detected';
+  const verdict = findings.some((finding) => finding.verdict === 'reject')
+    ? 'rejected'
+    : findings.some((finding) => finding.verdict === 'needs-edit')
+      ? 'needs-edit'
+      : 'accepted';
+  return {
+    schemaVersion: 'lesson-multi-agent-critique-v1',
+    generatedAt: normalizeTimestamp(generatedAt),
+    verdict,
+    checklist: [...LESSON_CRITIQUE_CHECKLIST],
+    criticAgents: [...LESSON_CRITIQUE_AGENTS],
+    findings: sortLessonCritiqueFindings(findings),
+    highRisk,
+    manualReviewRequired: highRisk || verdict !== 'accepted',
+    evidenceRefs: Array.from(evidenceRefs).sort(),
+    guidance:
+      verdict === 'accepted'
+        ? LESSON_CRITIQUE_ACCEPT_GUIDANCE
+        : verdict === 'needs-edit'
+          ? LESSON_CRITIQUE_NEEDS_EDIT_GUIDANCE
+          : LESSON_CRITIQUE_REJECT_GUIDANCE,
+  };
 }
 
 export function quarantineLesson(
@@ -774,12 +1039,21 @@ export class LessonRecorder {
       }
 
       try {
-        const contradictionReport =
-          await this.createContradictionReport(lesson);
-        const admittedLesson = this.withAdmissionTimestamp({
+        const contradictionContext =
+          await this.createContradictionContext(lesson);
+        const lessonWithContradiction = {
           ...lesson,
-          contradictionReport,
-        });
+          contradictionReport: contradictionContext.report,
+        };
+        const admittedBaseLesson = this.withAdmissionTimestamp(lessonWithContradiction);
+        const admittedLesson = {
+          ...admittedBaseLesson,
+          proposedLessonCritique: critiqueProposedLesson(
+            admittedBaseLesson,
+            contradictionContext.priorLessons,
+            admittedBaseLesson.timestamp,
+          ),
+        };
         await this.memory.recordLesson(admittedLesson);
         recordingResult.recorded += 1;
         this.commitFailureClusterObservation(admittedLesson, recordingResult);
@@ -814,11 +1088,13 @@ export class LessonRecorder {
     });
   }
 
-  private async createContradictionReport(
+  private async createContradictionContext(
     lesson: CritiqueLesson,
-  ): Promise<LessonContradictionReport> {
+  ): Promise<LessonContradictionContext> {
     if (!this.memory.searchLessons) {
-      return detectLessonContradictions(lesson);
+      return {
+        report: detectLessonContradictions(lesson),
+      };
     }
 
     try {
@@ -826,9 +1102,14 @@ export class LessonRecorder {
         createLessonSearchQuery(lesson),
         10,
       );
-      return detectLessonContradictions(lesson, priorLessons);
+      return {
+        report: detectLessonContradictions(lesson, priorLessons),
+        priorLessons,
+      };
     } catch {
-      return createLessonSearchFailureReport();
+      return {
+        report: createLessonSearchFailureReport(),
+      };
     }
   }
 
@@ -1376,6 +1657,53 @@ export function detectLessonContradictions(
     verificationCommand: LESSON_CONTRADICTION_VERIFICATION_COMMAND,
     contradictions: [],
   };
+}
+
+function collectLessonCritiqueEvidenceRefs(lesson: CritiqueLesson): string[] {
+  const refs = new Set<string>();
+  for (const entry of lesson.testTraceability ?? []) {
+    refs.add(`traceability:${entry.lessonId}`);
+    refs.add(`test:${entry.testId}`);
+    refs.add(`verification:${stableHash(entry.verificationCommand)}`);
+  }
+  if (lesson.privacyFilter) {
+    refs.add(`privacy:${lesson.privacyFilter.originalHash}`);
+  }
+  for (const pattern of lesson.blockerPatterns ?? []) {
+    refs.add(`blocker:${pattern.key}`);
+  }
+  return Array.from(refs).sort();
+}
+
+function addEvidenceRef(target: Set<string>, ref: string): string[] {
+  target.add(ref);
+  return [ref];
+}
+
+function selectPassingCriticAgent(
+  item: LessonCritiqueChecklistItem,
+): (typeof LESSON_CRITIQUE_AGENTS)[number] {
+  if (item === 'privacy' || item === 'security') {
+    return 'privacy-security-critic';
+  }
+  if (item === 'duplication' || item === 'conflict') {
+    return 'duplication-conflict-critic';
+  }
+  return 'correctness-scope-critic';
+}
+
+function sortLessonCritiqueFindings(
+  findings: readonly LessonCritiqueAgentFinding[],
+): LessonCritiqueAgentFinding[] {
+  const verdictRank = { reject: 0, 'needs-edit': 1, pass: 2 };
+  const severityRank = { critical: 0, warning: 1, info: 2 };
+  return [...findings].sort(
+    (left, right) =>
+      verdictRank[left.verdict] - verdictRank[right.verdict] ||
+      severityRank[left.severity] - severityRank[right.severity] ||
+      left.checklistItem.localeCompare(right.checklistItem) ||
+      left.agentName.localeCompare(right.agentName),
+  );
 }
 
 function createLessonSearchFailureReport(): LessonContradictionReport {

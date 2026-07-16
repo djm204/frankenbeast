@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   LessonRecorder,
   applyHumanFeedbackToLesson,
+  critiqueProposedLesson,
   detectLessonContradictions,
   isLessonApplicable,
   quarantineLesson,
@@ -1599,6 +1600,7 @@ describe('LessonRecorder', () => {
       'Require explicit human validation before promoting inferred learning signals.',
     );
     expect(corrected.contradictionReport).toBeUndefined();
+    expect(corrected.proposedLessonCritique).toBeUndefined();
     expect(corrected.testTraceability).toBeUndefined();
     expect(corrected.quarantine?.reviewItem.lessonId).toBe(
       lesson.testTraceability?.[0]?.lessonId,
@@ -1682,7 +1684,72 @@ describe('LessonRecorder', () => {
       }),
     ).toThrow('Lesson revised correctionApplied must be a non-empty string.');
 
-    const directlyApproved = applyHumanFeedbackToLesson(lesson, {
+    expect(() =>
+      applyHumanFeedbackToLesson(
+        {
+          ...lesson,
+          proposedLessonCritique: critiqueProposedLesson({
+            ...lesson,
+            testTraceability: undefined,
+          }),
+        },
+        {
+          source: 'explicit-user-approval',
+          reason: 'Unresolved promotion critique must block lesson promotion.',
+          observedAt: '2026-07-12T01:41:00.000Z',
+          evidence: [
+            {
+              kind: 'operator-report',
+              reference: 'https://github.com/djm204/frankenbeast/issues/1763#critique',
+            },
+          ],
+        },
+      ),
+    ).toThrow(
+      'Explicit lesson approval requires an accepted proposedLessonCritique verdict or only manual-review duplicate/conflict findings before promotion.',
+    );
+
+    const manualReviewCandidate = createLesson({
+      testTraceability: [
+        {
+          lessonId: 'manual-review-lesson',
+          taskId: 'lesson-task',
+          evaluatorName: 'factuality',
+          failingIteration: 0,
+          resolvedIteration: 1,
+          sourceFindingMessages: ['Cache guidance lacked provenance checks'],
+          testId: 'manual-review-lesson:regression',
+          verificationCommand: 'npm run test --workspace @franken/critique',
+        },
+      ],
+    });
+    const manualReviewApproved = applyHumanFeedbackToLesson(
+      {
+        ...manualReviewCandidate,
+        proposedLessonCritique: critiqueProposedLesson(manualReviewCandidate),
+      },
+      {
+        source: 'explicit-user-approval',
+        reason:
+          'User manually reviewed the unchecked duplicate/conflict findings before promotion.',
+        observedAt: '2026-07-12T01:41:30.000Z',
+        evidence: [
+          {
+            kind: 'operator-report',
+            reference:
+              'https://github.com/djm204/frankenbeast/issues/1763#manual-review',
+          },
+        ],
+      },
+    );
+    expect(manualReviewApproved.lifecycleStatus).toBe('active');
+    expect(manualReviewApproved.experimentSandbox).toBeUndefined();
+
+    const { proposedLessonCritique: ignoredPromotionCritique, ...approvalReadyLesson } =
+      lesson;
+    void ignoredPromotionCritique;
+
+    const directlyApproved = applyHumanFeedbackToLesson(approvalReadyLesson, {
       source: 'explicit-user-approval',
       reason: 'User approved this candidate lesson after reviewing evidence.',
       observedAt: '2026-07-12T01:42:00.000Z',
@@ -1709,7 +1776,7 @@ describe('LessonRecorder', () => {
     expect(isLessonApplicable(directlyApproved)).toBe(true);
 
     const approvedLegacySandboxed = applyHumanFeedbackToLesson(
-      { ...lesson, lifecycleStatus: 'active' },
+      { ...approvalReadyLesson, lifecycleStatus: 'active' },
       {
         source: 'explicit-user-approval',
         reason: 'User approved legacy active sandboxed guidance.',
@@ -1751,7 +1818,7 @@ describe('LessonRecorder', () => {
     expect(approvedAfterCorrection.lifecycleStatus).toBe('candidate');
     expect(isLessonApplicable(approvedAfterCorrection)).toBe(false);
 
-    const quarantinedCandidate = quarantineLesson(lesson, {
+    const quarantinedCandidate = quarantineLesson(approvalReadyLesson, {
       trigger: 'repeated-failure-threshold',
       reason:
         'Repeated failures paused this candidate before explicit approval.',
@@ -1786,7 +1853,7 @@ describe('LessonRecorder', () => {
 
     const legacyActiveQuarantine = quarantineLesson(
       {
-        ...lesson,
+        ...approvalReadyLesson,
         lifecycleStatus: undefined,
         experimentSandbox: undefined,
       },
@@ -1822,7 +1889,7 @@ describe('LessonRecorder', () => {
 
     const legacySandboxedActiveQuarantine = quarantineLesson(
       {
-        ...lesson,
+        ...approvalReadyLesson,
         lifecycleStatus: 'active',
         experimentSandbox: {
           state: 'experimental',
@@ -1866,7 +1933,7 @@ describe('LessonRecorder', () => {
     expect(isLessonApplicable(approvedLegacySandboxedQuarantine)).toBe(true);
 
     const approvedRetired = applyHumanFeedbackToLesson(
-      { ...lesson, lifecycleStatus: 'retired', experimentSandbox: undefined },
+      { ...approvalReadyLesson, lifecycleStatus: 'retired', experimentSandbox: undefined },
       {
         source: 'explicit-user-approval',
         reason: 'User acknowledged retired guidance for audit history only.',
@@ -3605,6 +3672,331 @@ describe('LessonRecorder', () => {
     expect(port.recordLesson).not.toHaveBeenCalled();
   });
 
+  it('accepts low-risk proposed lessons after every critique checklist item passes', () => {
+    const lesson = createLesson({
+      testTraceability: [
+        {
+          lessonId: 'lesson-task:factuality:iteration-0',
+          taskId: 'lesson-task',
+          evaluatorName: 'factuality',
+          failingIteration: 0,
+          resolvedIteration: 1,
+          sourceFindingMessages: ['Cache guidance lacked provenance checks'],
+          testId: 'lesson-task:factuality:iteration-0:regression',
+          verificationCommand:
+            'npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts',
+        },
+      ],
+      privacyFilter: {
+        schemaVersion: 'lesson-privacy-filter-v1',
+        category: 'procedure',
+        action: 'admit',
+        sensitive: false,
+        approvalRequired: false,
+        flags: [],
+        redactions: [],
+        originalHash: 'safe-hash',
+        reason: 'safe candidate',
+      },
+      contradictionReport: {
+        status: 'clear',
+        guidance: 'No deterministic lesson contradiction was detected among comparable prior lessons.',
+        verificationCommand: 'npm run test --workspace @franken/critique',
+        contradictions: [],
+      },
+      reviewerFeedback: {
+        summary: 'Cache guidance lacked provenance checks',
+        suggestionsComplete: true,
+        findings: [
+          {
+            sourceIteration: 0,
+            evaluatorName: 'factuality',
+            message: 'Cache guidance lacked provenance checks',
+            severity: 'warning',
+            suggestion: 'Require provenance checks before cache reuse.',
+          },
+        ],
+      },
+    });
+
+    const critique = critiqueProposedLesson(lesson, [], '2026-07-12T00:00:00.000Z');
+
+    expect(critique).toMatchObject({
+      schemaVersion: 'lesson-multi-agent-critique-v1',
+      verdict: 'accepted',
+      highRisk: false,
+      manualReviewRequired: false,
+      checklist: ['correctness', 'scope', 'privacy', 'security', 'duplication', 'conflict'],
+      criticAgents: [
+        'correctness-scope-critic',
+        'privacy-security-critic',
+        'duplication-conflict-critic',
+      ],
+    });
+    expect(critique.findings.every((finding) => finding.verdict === 'pass')).toBe(true);
+    expect(critique.evidenceRefs).toEqual(
+      expect.arrayContaining([
+        'traceability:lesson-task:factuality:iteration-0',
+        'privacy:safe-hash',
+        'contradiction:clear',
+      ]),
+    );
+  });
+
+  it('rejects proposed lessons that fail the privacy critique without dumping secrets', () => {
+    const critique = critiqueProposedLesson(
+      createLesson({
+        privacyFilter: {
+          schemaVersion: 'lesson-privacy-filter-v1',
+          category: 'task-state',
+          action: 'reject',
+          sensitive: true,
+          approvalRequired: false,
+          flags: ['task-state'],
+          redactions: [{ kind: 'secret', label: 'github-token', replacement: '[REDACTED_GITHUB_TOKEN]' }],
+          originalHash: 'secret-hash',
+          reason: 'rejected before durable learning',
+        },
+      }),
+    );
+
+    expect(critique.verdict).toBe('rejected');
+    expect(critique.manualReviewRequired).toBe(true);
+    expect(JSON.stringify(critique)).not.toContain('ghp_');
+    expect(critique.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          agentName: 'privacy-security-critic',
+          checklistItem: 'privacy',
+          verdict: 'reject',
+          evidenceRefs: ['privacy:secret-hash'],
+        }),
+      ]),
+    );
+  });
+
+  it('preserves not-checked conflict status when critique helper has no prior lesson search result', () => {
+    const lesson = createLesson({
+      testTraceability: [
+        {
+          lessonId: 'unchecked-lesson',
+          taskId: 'lesson-task',
+          evaluatorName: 'factuality',
+          failingIteration: 0,
+          resolvedIteration: 1,
+          sourceFindingMessages: ['Cache guidance lacked provenance checks'],
+          testId: 'unchecked-lesson:regression',
+          verificationCommand: 'npm run test --workspace @franken/critique',
+        },
+      ],
+    });
+
+    expect(critiqueProposedLesson(lesson)).toMatchObject({
+      verdict: 'needs-edit',
+      manualReviewRequired: true,
+      findings: expect.arrayContaining([
+        expect.objectContaining({ checklistItem: 'duplication', verdict: 'needs-edit' }),
+        expect.objectContaining({ checklistItem: 'conflict', verdict: 'needs-edit' }),
+      ]),
+    });
+    expect(critiqueProposedLesson(lesson, [])).toMatchObject({
+      verdict: 'accepted',
+      manualReviewRequired: false,
+    });
+  });
+
+  it('recomputes contradiction status when explicit prior lessons are supplied', () => {
+    const lesson = createLesson({
+      testTraceability: [
+        {
+          lessonId: 'recheck-lesson',
+          taskId: 'lesson-task',
+          evaluatorName: 'factuality',
+          failingIteration: 0,
+          resolvedIteration: 1,
+          sourceFindingMessages: ['Cache guidance lacked provenance checks'],
+          testId: 'recheck-lesson:regression',
+          verificationCommand: 'npm run test --workspace @franken/critique',
+        },
+      ],
+      contradictionReport: {
+        status: 'not_checked',
+        guidance: 'Historical lesson contradictions were not checked.',
+        verificationCommand: 'npm run test --workspace @franken/critique',
+        contradictions: [],
+      },
+    });
+
+    expect(critiqueProposedLesson(lesson, [])).toMatchObject({
+      verdict: 'accepted',
+      evidenceRefs: expect.arrayContaining(['contradiction:clear']),
+    });
+  });
+
+  it('does not flag the candidate itself or inactive lessons as duplicate priors', () => {
+    const lesson = createLesson({
+      testTraceability: [
+        {
+          lessonId: 'self-safe-lesson',
+          taskId: 'lesson-task',
+          evaluatorName: 'factuality',
+          failingIteration: 0,
+          resolvedIteration: 1,
+          sourceFindingMessages: ['Cache guidance lacked provenance checks'],
+          testId: 'self-safe-lesson:regression',
+          verificationCommand: 'npm run test --workspace @franken/critique',
+        },
+      ],
+      contradictionReport: {
+        status: 'clear',
+        guidance: 'No deterministic lesson contradiction was detected among comparable prior lessons.',
+        verificationCommand: 'npm run test --workspace @franken/critique',
+        contradictions: [],
+      },
+    });
+    const deserializedSelf = createLesson({ ...lesson });
+    const quarantinedPrior = createLesson({
+      failureDescription: lesson.failureDescription,
+      correctionApplied: 'Require cache verification before reuse',
+      lifecycleStatus: 'quarantined',
+      quarantine: {
+        trigger: 'explicit-user-correction',
+        reason: 'Superseded by corrected guidance.',
+        quarantinedAt: '2026-07-12T00:00:00.000Z',
+        reviewItem: {
+          lessonId: 'inactive-prior-lesson',
+          taskId: 'lesson-task',
+          evaluatorName: 'factuality',
+          failureDescription: lesson.failureDescription,
+          correctionApplied: 'Require cache verification before reuse',
+          status: 'pending-review',
+          exitCriteria: ['Confirm replacement lesson supersedes this one.'],
+        },
+      },
+    });
+
+    const critique = critiqueProposedLesson(lesson, [deserializedSelf, quarantinedPrior]);
+
+    expect(critique.verdict).toBe('accepted');
+    expect(
+      critique.findings.some(
+        (finding) =>
+          finding.checklistItem === 'duplication' && finding.verdict === 'needs-edit',
+      ),
+    ).toBe(false);
+  });
+
+  it('flags prior sandboxed candidates as duplicates while they are still promotion candidates', () => {
+    const lesson = createLesson({
+      testTraceability: [
+        {
+          lessonId: 'fresh-candidate-lesson',
+          taskId: 'lesson-task',
+          evaluatorName: 'factuality',
+          failingIteration: 0,
+          resolvedIteration: 1,
+          sourceFindingMessages: ['Cache guidance lacked provenance checks'],
+          testId: 'fresh-candidate-lesson:regression',
+          verificationCommand: 'npm run test --workspace @franken/critique',
+        },
+      ],
+      contradictionReport: {
+        status: 'clear',
+        guidance: 'No deterministic lesson contradiction was detected among comparable prior lessons.',
+        verificationCommand: 'npm run test --workspace @franken/critique',
+        contradictions: [],
+      },
+    });
+    const sandboxedPrior = createLesson({
+      ...lesson,
+      testTraceability: [
+        {
+          lessonId: 'sandboxed-prior-lesson',
+          taskId: 'lesson-task',
+          evaluatorName: 'factuality',
+          failingIteration: 0,
+          resolvedIteration: 1,
+          sourceFindingMessages: ['Cache guidance lacked provenance checks'],
+          testId: 'sandboxed-prior-lesson:regression',
+          verificationCommand: 'npm run test --workspace @franken/critique',
+        },
+      ],
+      experimentSandbox: {
+        state: 'experimental',
+        promotionBlocked: true,
+        reason: 'Requires verification before promotion.',
+        exitCriteria: ['Confirm duplicate handling.'],
+        verificationCommand: 'npm run test --workspace @franken/critique',
+      },
+      lifecycleStatus: 'candidate',
+    });
+
+    expect(critiqueProposedLesson(lesson, [sandboxedPrior])).toMatchObject({
+      verdict: 'needs-edit',
+      findings: expect.arrayContaining([
+        expect.objectContaining({ checklistItem: 'duplication', verdict: 'needs-edit' }),
+      ]),
+    });
+  });
+
+  it('marks high-risk or conflicting proposed lessons as needs-edit/manual-review', () => {
+    const current = createLesson({
+      correctionApplied: 'Do not reuse cache responses without provenance checks',
+      testTraceability: [
+        {
+          lessonId: 'current-cache-lesson',
+          taskId: 'lesson-task',
+          evaluatorName: 'factuality',
+          failingIteration: 0,
+          resolvedIteration: 1,
+          sourceFindingMessages: ['Cache guidance allowed unaudited stale responses'],
+          testId: 'current-cache-lesson:regression',
+          verificationCommand: 'npm run test --workspace @franken/critique',
+        },
+      ],
+      privacyFilter: {
+        schemaVersion: 'lesson-privacy-filter-v1',
+        category: 'procedure',
+        action: 'admit',
+        sensitive: true,
+        approvalRequired: true,
+        flags: ['secret'],
+        redactions: [{ kind: 'secret', label: 'bearer-token', replacement: 'Bearer [REDACTED_TOKEN]' }],
+        originalHash: 'redacted-hash',
+        reason: 'sensitive candidate was redacted before durable learning',
+      },
+    });
+    const prior = createLesson({
+      testTraceability: [
+        {
+          lessonId: 'prior-cache-lesson',
+          taskId: 'prior-task',
+          evaluatorName: 'factuality',
+          failingIteration: 0,
+          resolvedIteration: 1,
+          sourceFindingMessages: ['Cache guidance allowed unaudited stale responses'],
+          testId: 'prior-cache-lesson:regression',
+          verificationCommand: 'npm run test --workspace @franken/critique',
+        },
+      ],
+      correctionApplied: 'Reuse cache responses',
+    });
+
+    const critique = critiqueProposedLesson(current, [prior]);
+
+    expect(critique.verdict).toBe('needs-edit');
+    expect(critique.highRisk).toBe(true);
+    expect(critique.manualReviewRequired).toBe(true);
+    expect(critique.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ checklistItem: 'privacy', verdict: 'pass' }),
+        expect.objectContaining({ checklistItem: 'conflict', verdict: 'needs-edit' }),
+        expect.objectContaining({ checklistItem: 'duplication', verdict: 'needs-edit' }),
+      ]),
+    );
+    expect(JSON.stringify(critique)).not.toContain('Bearer token');
+  });
+
   it('attaches a not-checked contradiction report when lesson search is unavailable', async () => {
     const port = createMockMemoryPort();
     const recorder = new LessonRecorder(port);
@@ -3633,6 +4025,17 @@ describe('LessonRecorder', () => {
       verificationCommand:
         'npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts',
       contradictions: [],
+    });
+    expect(lesson.proposedLessonCritique).toMatchObject({
+      verdict: 'needs-edit',
+      manualReviewRequired: true,
+      findings: expect.arrayContaining([
+        expect.objectContaining({
+          checklistItem: 'conflict',
+          verdict: 'needs-edit',
+          evidenceRefs: ['contradiction:not_checked'],
+        }),
+      ]),
     });
   });
 
@@ -3679,6 +4082,73 @@ describe('LessonRecorder', () => {
         'npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts',
       contradictions: [],
     });
+  });
+
+  it('attaches duplicate critique findings from prior lessons returned by memory search', async () => {
+    const port = createMockMemoryPort();
+    port.searchLessons = vi.fn().mockResolvedValue([
+      createLesson({
+        failureDescription: 'Cache guidance allowed unaudited stale responses',
+        correctionApplied: 'Require cache verification and provenance review before reuse',
+      }),
+    ]);
+    const recorder = new LessonRecorder(port);
+
+    await recorder.record(
+      {
+        verdict: 'pass',
+        iterations: [
+          createIteration(0, 'fail', 'factuality', [
+            { message: 'Cache guidance allowed unaudited stale responses', severity: 'warning' },
+          ]),
+          createIteration(1, 'pass'),
+        ],
+      },
+      'lesson-task',
+    );
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(lesson.proposedLessonCritique).toMatchObject({
+      verdict: 'needs-edit',
+      findings: expect.arrayContaining([
+        expect.objectContaining({
+          checklistItem: 'duplication',
+          verdict: 'needs-edit',
+        }),
+      ]),
+    });
+  });
+
+  it('returns per-call copies of shared lesson critique arrays', () => {
+    const lesson = createLesson({
+      testTraceability: [
+        {
+          lessonId: 'copy-safe-lesson',
+          taskId: 'lesson-task',
+          evaluatorName: 'factuality',
+          failingIteration: 0,
+          resolvedIteration: 1,
+          sourceFindingMessages: ['Cache guidance lacked provenance checks'],
+          testId: 'copy-safe-lesson:regression',
+          verificationCommand: 'npm run test --workspace @franken/critique',
+        },
+      ],
+      contradictionReport: {
+        status: 'clear',
+        guidance: 'No deterministic lesson contradiction was detected among comparable prior lessons.',
+        verificationCommand: 'npm run test --workspace @franken/critique',
+        contradictions: [],
+      },
+    });
+
+    const first = critiqueProposedLesson(lesson);
+    (first.checklist as string[]).push('mutated');
+    (first.criticAgents as string[]).push('mutated-agent');
+
+    const second = critiqueProposedLesson(lesson);
+
+    expect(second.checklist).not.toContain('mutated');
+    expect(second.criticAgents).not.toContain('mutated-agent');
   });
 
   it('detects same-evaluator lesson contradictions with shared terms and negated guidance', () => {
