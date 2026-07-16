@@ -713,14 +713,12 @@ function stale(age: number | undefined, threshold: number): boolean {
 function explicitProcessCrash(snapshot: IssueWorkerCardProcessSnapshot): boolean {
   if (snapshot.blockerCategory === 'process-crash') return true;
   const status = snapshot.status?.trim().toLowerCase() ?? '';
-  const waitingOn = snapshot.waitingOn?.toLowerCase() ?? '';
-  if (/crash|exit|dead|pid|process|fail/.test(waitingOn)) return true;
   return /crash|exit|fail/.test(status);
 }
 
 function redactStuckRunEvidenceText(value: string): string {
   return value
-    .replace(/\b(gh[opsu]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)\b/g, '[REDACTED_TOKEN]')
+    .replace(/\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[opusr]_[A-Za-z0-9_.-]{12,})\b/g, '[REDACTED_TOKEN]')
     .replace(/\b(sk|xox[baprs]?|hf|glpat)-[A-Za-z0-9._/-]+\b/g, '$1-[REDACTED]')
     .replace(/\b([A-Za-z0-9_-]{20,})\.([A-Za-z0-9_-]{20,})\.([A-Za-z0-9_-]{20,})\b/g, '[REDACTED_JWT]')
     .replace(/\b((?:approval|session|access|refresh|api)[-_ ]?token)\s*[:=]\s*\S+/gi, '$1=[REDACTED]')
@@ -808,7 +806,6 @@ export function detectStuckRunWatchdogFindings(
       toolActivityAgeMs,
       stateTransitionAgeMs,
     ].filter((age) => age !== undefined).length;
-    if (providedActivitySignalCount === 0) continue;
     const minimumStaleSignals = Math.min(3, providedActivitySignalCount);
     const freshLongRunningWaitActivity = [heartbeatAgeMs, outputAgeMs, toolActivityAgeMs, stateTransitionAgeMs]
       .some((age) => age !== undefined && age < longRunningWaitGraceMs);
@@ -817,6 +814,8 @@ export function detectStuckRunWatchdogFindings(
       : hasPositivePid
         ? 'alive'
         : 'unknown';
+
+    if (processStatus !== 'dead' && providedActivitySignalCount === 0) continue;
 
     if (
       knownLongRunningWait(category)

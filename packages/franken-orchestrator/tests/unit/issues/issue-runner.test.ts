@@ -695,6 +695,22 @@ describe('stuck-run watchdog', () => {
     expect(findings).toEqual([]);
   });
 
+  it('keeps terminal cards quiet even when stale waitingOn text mentions failures', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_done_with_stale_waiting_on',
+        pid: 7406,
+        status: 'done',
+        alive: true,
+        waitingOn: 'CI checks failed before the card completed',
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([]);
+  });
+
   it('reports terminal crash statuses when alive is false without waitingOn hints', () => {
     const findings = detectStuckRunWatchdogFindings([
       {
@@ -732,6 +748,24 @@ describe('stuck-run watchdog', () => {
 
     expect(findings[0]).toMatchObject({
       cardId: 't_dead_ci_wait',
+      blockerCategory: 'process-crash',
+      confidence: 'high',
+      processStatus: 'dead',
+    });
+  });
+
+  it('reports dead workers even when activity timestamps are absent', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_dead_without_activity',
+        pid: 7407,
+        status: 'running',
+        alive: false,
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_dead_without_activity',
       blockerCategory: 'process-crash',
       confidence: 'high',
       processStatus: 'dead',
@@ -861,7 +895,7 @@ describe('stuck-run watchdog', () => {
         pid: 7411,
         status: 'running',
         alive: true,
-        waitingOn: 'approval token=ghp_abcdEFGHijklMNOPqrstUVWX1234567890 and api token: sk-testsecretvalue123',
+        waitingOn: 'approval token=ghr_abcdefghijklmnopqrstuvwx.yz-123456 and api token: sk-abcdefghijklmnopqrstuvwxyz123456',
         lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
         lastOutputAt: '2026-07-16T08:00:00.000Z',
         lastToolActivityAt: '2026-07-16T08:00:00.000Z',
@@ -870,8 +904,8 @@ describe('stuck-run watchdog', () => {
     ], { nowMs });
 
     expect(findings[0].evidence).toContain('waitingOn=approval token=[REDACTED] and api token=[REDACTED]');
-    expect(findings[0].evidence.join('\n')).not.toContain('ghp_abcd');
-    expect(findings[0].evidence.join('\n')).not.toContain('sk-testsecretvalue123');
+    expect(findings[0].evidence.join('\n')).not.toContain('ghr_');
+    expect(findings[0].evidence.join('\n')).not.toContain('sk-abcdefghijklmnopqrstuvwxyz123456');
   });
 
   it('keeps provider token and checkpoint text out of approval and CI buckets', () => {
