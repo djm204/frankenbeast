@@ -208,16 +208,20 @@ const TOOLS: ToolFull[] = [
           evidenceId: `quarantine:${key}`,
           confidence: 1,
           reason: `Sensitive memory quarantined for operator review (${quarantineReason}). Approve through fbeast_memory_review_decide to persist, reject to discard, or never_store to suppress reinference.`,
+          ...(agentId.value ? { agentId: agentId.value } : {}),
         });
+        const isPending = candidate.status === 'pending';
         return {
           content: [{
             type: 'text',
             text: JSON.stringify({
-              status: 'quarantined',
+              status: isPending ? 'quarantined' : candidate.status,
               id: candidate.id,
               key,
+              ...(agentId.value ? { agentId: agentId.value } : {}),
               reason: quarantineReason,
-              reviewAction: 'Use fbeast_memory_review_decide with approve, reject, or never_store.',
+              ...(candidate.suppressionReason ? { suppressionReason: candidate.suppressionReason } : {}),
+              ...(isPending ? { reviewAction: 'Use fbeast_memory_review_decide with approve, reject, or never_store.' } : {}),
               stored: false,
             }, null, 2),
           }],

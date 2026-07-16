@@ -223,6 +223,7 @@ describe("Memory Server", () => {
       key: "OPENAI_API_KEY",
       value: sensitiveValue,
       type: "working",
+      agentId: "worker-alpha",
     });
 
     expect(brain.store).not.toHaveBeenCalled();
@@ -233,16 +234,56 @@ describe("Memory Server", () => {
       evidenceId: "quarantine:OPENAI_API_KEY",
       confidence: 1,
       reason: expect.stringContaining("key-name-indicates-secret"),
+      agentId: "worker-alpha",
     });
     const payload = JSON.parse(result.content[0]!.text);
     expect(payload).toMatchObject({
       status: "quarantined",
       id: "memcand_secret",
       key: "OPENAI_API_KEY",
+      agentId: "worker-alpha",
       reason: "key-name-indicates-secret",
       stored: false,
     });
     expect(result.content[0]!.text).not.toContain(sensitiveValue);
+  });
+
+  it("reports suppressed sensitive memory quarantine candidates without a review action", async () => {
+    const brain = createBrainStub({
+      store: vi.fn(),
+      proposeMemory: vi.fn().mockResolvedValue({
+        id: "memcand_suppressed",
+        targetStore: "working",
+        key: "OPENAI_API_KEY",
+        value: "example value that must not be echoed",
+        source: "fbeast_memory_store:quarantine",
+        evidenceId: "quarantine:OPENAI_API_KEY",
+        confidence: 1,
+        reason: "Sensitive memory quarantined for operator review (key-name-indicates-secret).",
+        status: "suppressed",
+        suppressionReason: "never_store",
+        createdAt: "2026-07-16T00:00:00.000Z",
+        updatedAt: "2026-07-16T00:00:00.000Z",
+      }),
+    });
+    const server = createMemoryServer({ brain });
+
+    const result = await server.callTool("fbeast_memory_store", {
+      key: "OPENAI_API_KEY",
+      value: "example value that must not be echoed",
+      type: "working",
+    });
+
+    expect(brain.store).not.toHaveBeenCalled();
+    const payload = JSON.parse(result.content[0]!.text);
+    expect(payload).toMatchObject({
+      status: "suppressed",
+      id: "memcand_suppressed",
+      suppressionReason: "never_store",
+      stored: false,
+    });
+    expect(payload.reviewAction).toBeUndefined();
+    expect(result.content[0]!.text).not.toContain("example value that must not be echoed");
   });
 
   it("keeps benign token-budget working memory on the direct store path", async () => {
