@@ -13,12 +13,14 @@ const CURRENT_SCHEMA_REQUIRED_TABLES = [
   ...REQUIRED_BACKUP_TABLES,
   'memory_deletion_guards',
   'memory_deletion_hash_keys',
+  'memory_access_audit_events',
 ] as const;
 const MEMORY_BACKUP_TABLES = [
   'memory_schema_versions',
   ...REQUIRED_BACKUP_TABLES,
   'memory_deletion_guards',
   'memory_deletion_hash_keys',
+  'memory_access_audit_events',
 ] as const;
 const JSON_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
   episodic_events: ['details'],
@@ -37,6 +39,7 @@ const REQUIRED_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
   memory_schema_versions: ['store', 'version', 'migrated_at'],
   memory_deletion_guards: ['selector_hash', 'guard_kind', 'value_hash', 'created_at'],
   memory_deletion_hash_keys: ['id', 'key_material', 'created_at'],
+  memory_access_audit_events: ['id', 'operation', 'store', 'outcome', 'created_at'],
 };
 const ENCRYPTED_MEMORY_PREFIX = 'enc:v1:';
 const DELETION_HASH_KEY_ID = 'right-to-forget-hmac-v1';

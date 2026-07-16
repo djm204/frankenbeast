@@ -1994,38 +1994,66 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
   }
 
   recentFailures(n = 10): EpisodicEvent[] {
-    this.audit?.({
-      operation: 'episodic.recentFailures',
-      store: 'episodic',
-      outcome: 'success',
-      details: { limit: n },
-    });
-    const stmt = this.db.prepare(
-      `SELECT * FROM episodic_events WHERE type = 'failure'
-       ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-    );
-    return collectRowsToEvents(
-      (limit, offset) => stmt.all(limit, offset) as EpisodicRow[],
-      n,
-      this.encryption,
-    );
+    try {
+      const stmt = this.db.prepare(
+        `SELECT * FROM episodic_events WHERE type = 'failure'
+         ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+      );
+      const result = collectRowsToEvents(
+        (limit, offset) => stmt.all(limit, offset) as EpisodicRow[],
+        n,
+        this.encryption,
+      );
+      this.audit?.({
+        operation: 'episodic.recentFailures',
+        store: 'episodic',
+        outcome: 'success',
+        details: { limit: n, count: result.length },
+      });
+      return result;
+    } catch (error) {
+      this.audit?.({
+        operation: 'episodic.recentFailures',
+        store: 'episodic',
+        outcome: 'error',
+        details: {
+          limit: n,
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
+      throw error;
+    }
   }
 
   recent(n = 10): EpisodicEvent[] {
-    this.audit?.({
-      operation: 'episodic.recent',
-      store: 'episodic',
-      outcome: 'success',
-      details: { limit: n },
-    });
-    const stmt = this.db.prepare(
-      `SELECT * FROM episodic_events ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-    );
-    return collectRowsToEvents(
-      (limit, offset) => stmt.all(limit, offset) as EpisodicRow[],
-      n,
-      this.encryption,
-    );
+    try {
+      const stmt = this.db.prepare(
+        `SELECT * FROM episodic_events ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+      );
+      const result = collectRowsToEvents(
+        (limit, offset) => stmt.all(limit, offset) as EpisodicRow[],
+        n,
+        this.encryption,
+      );
+      this.audit?.({
+        operation: 'episodic.recent',
+        store: 'episodic',
+        outcome: 'success',
+        details: { limit: n, count: result.length },
+      });
+      return result;
+    } catch (error) {
+      this.audit?.({
+        operation: 'episodic.recent',
+        store: 'episodic',
+        outcome: 'error',
+        details: {
+          limit: n,
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
+      throw error;
+    }
   }
 
   snapshotForHandoff(n = 100, nowMs = Date.now()): EpisodicEvent[] {
