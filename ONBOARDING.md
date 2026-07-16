@@ -61,6 +61,14 @@ Use this checklist for a first local checkout or when rebuilding a development e
 
   The command prints stable `[new-worker-preflight:<check>] ok|warn|fail - ...` badges by default, or a JSON object with `ok` and `checks` when `--json` is supplied. Use `npm --silent` or `node scripts/new-worker-preflight.mjs --json` for machine-parsed JSON so npm lifecycle banners do not prefix stdout. It verifies the supported Node.js/npm pin, required `git`/`gh`/`jq` commands, GitHub CLI authentication for `github.com`, the project git identity (`David Mendez <me@davidmendez.dev>`), Frankenbeast repository root, and whether the current worktree already has uncommitted files. Use `--skip-github-auth` only for offline docs/tests; run without it before opening PRs.
 
+- [ ] PMs or workers that need profile-specific evidence: run the capability self-test with the expected profile schema or explicit flags before dispatching PR-producing work:
+
+  ```bash
+  npm --silent run profile:capability-self-test -- --json --repo djm204/frankenbeast --require-repo-write --toolset terminal,file --delivery-target discord:1523806555047333968
+  ```
+
+  The command is read-only: even a failing self-test checks GitHub repository permission with `gh repo view --json viewerPermission` and never creates, edits, pushes, comments, or merges. It verifies expected model/provider labels, required toolsets, `gh` auth, git identity, optional repo write permission, approval-cop availability, and delivery target wiring. Human output uses stable `[profile-capability-self-test:<check>] ok|warn|fail - ...` badges; `--json` returns `{ ok, profile, checks }` for Kanban/Discord reports.
+
 - [ ] Generate a guided checklist when you need a smaller first-run path than the full document. Pick the persona that matches the work:
 
   ```bash
@@ -69,6 +77,15 @@ Use this checklist for a first local checkout or when rebuilding a development e
   ```
 
   The generator prints deterministic Markdown by default, or JSON with `persona`, `root`, `items`, `docs`, and `nextAction` for PM/liveness tooling. It never mutates files or runs setup commands; it points each checklist item at the command and docs to run next. Valid personas are `operator`, `coding-agent`, and `contributor`; unknown personas fail closed with an explicit error instead of falling back to a misleading generic checklist.
+
+- [ ] Rehearse the full local-to-PR path before publishing anything:
+
+  ```bash
+  npm run local-to-pr:dry-run -- --issue 1700 --title "feat(onboarding): add guided local-to-PR dry run mode"
+  npm --silent run local-to-pr:dry-run -- --issue 1700 --title "feat(onboarding): add guided local-to-PR dry run mode" --json
+  ```
+
+  The dry run checks auth, install, and git-state prerequisites, then walks through checkout, branch/worktree creation, a no-op change, test selection, PR body generation, Codex review, and cleanup. Every remote mutation is skipped: `git push`, `gh pr create`, `gh pr comment`, and merge actions are printed as planned side effects rather than executed. Local write steps are simulated, and failures include remediation such as `gh auth login`, Corepack/npm activation, `npm ci`, or starting from a clean isolated worktree.
 
 - [ ] Take the interactive workspace tour when you need a deterministic package map before choosing files:
 

@@ -11,10 +11,12 @@ import { SQLiteBeastRepository } from './repository/sqlite-beast-repository.js';
 import { BeastCatalogService } from './services/beast-catalog-service.js';
 import { BeastDispatchService } from './services/beast-dispatch-service.js';
 import { assertDispatcherStartupIntegrity } from './services/dispatcher-startup-integrity.js';
+import { reconcileDispatcherQueueAfterRestart } from './services/dispatcher-queue-reconciliation.js';
 import { BeastInterviewService } from './services/beast-interview-service.js';
 import { AgentService } from './services/agent-service.js';
 import { CapacityReservationPolicy, type CapacityReservationRule } from './services/capacity-reservation-policy.js';
 import { BeastRunService } from './services/beast-run-service.js';
+import { MaintenanceModeService } from './services/maintenance-mode-service.js';
 import { PrometheusBeastMetrics } from './telemetry/prometheus-beast-metrics.js';
 
 export interface BeastServicePaths {
@@ -30,6 +32,7 @@ export interface BeastServiceBundle {
   runs: BeastRunService;
   interviews: BeastInterviewService;
   metrics: PrometheusBeastMetrics;
+  maintenance: MaintenanceModeService;
   eventBus: BeastEventBus;
   ticketStore: SseConnectionTicketStore;
   dispose(): void;
@@ -37,7 +40,7 @@ export interface BeastServiceBundle {
 
 export function createBeastServices(paths: BeastServicePaths): BeastServiceBundle {
   const repository = new SQLiteBeastRepository(paths.beastsDb);
-  const logStore = new BeastLogStore(paths.beastLogsDir);
+  const logStore = new BeastLogStore(paths.beastLogsDir, createBeastLogStoreOptionsFromEnv());
   const projectRoot = resolve(paths.root ?? process.env.FBEAST_ROOT ?? process.cwd());
   const runConfigDir = join(projectRoot, '.fbeast', '.build', 'run-configs');
   const catalog = new BeastCatalogService();
@@ -45,13 +48,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   const eventBus = new BeastEventBus();
   const ticketStore = new SseConnectionTicketStore();
   const capacityPolicy = createCapacityReservationPolicyFromEnv();
-
-  cleanupAbandonedBeastWorktrees({
-    agents: repository.listTrackedAgents(),
-    dryRun: false,
-    projectRoot,
-    runs: repository.listRuns(),
-  });
+  const maintenance = MaintenanceModeService.forProjectRoot(projectRoot);
 
   // Deferred reference to break circular dep: executor → runService → executors → executor
   // eslint-disable-next-line prefer-const
@@ -84,22 +81,42 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
     definitions: catalog.listDefinitions(),
     executors,
   });
+  reconcileDispatcherQueueAfterRestart(repository);
+  cleanupAbandonedBeastWorktrees({
+    agents: repository.listTrackedAgents(),
+    dryRun: false,
+    projectRoot,
+    runs: repository.listRuns(),
+  });
 
-  runService = new BeastRunService(repository, catalog, executors, metrics, logStore, { eventBus, capacityPolicy });
+  runService = new BeastRunService(repository, catalog, executors, metrics, logStore, { eventBus, capacityPolicy, maintenance });
 
   return {
     agents: new AgentService(repository, undefined, { capacityPolicy }),
     catalog,
-    dispatch: new BeastDispatchService(repository, catalog, executors, metrics, logStore, { eventBus, capacityPolicy }),
+    dispatch: new BeastDispatchService(repository, catalog, executors, metrics, logStore, { eventBus, capacityPolicy, maintenance }),
     runs: runService,
     interviews: new BeastInterviewService(repository, catalog),
     metrics,
+    maintenance,
     eventBus,
     ticketStore,
     dispose: () => {
       ticketStore.destroy();
       repository.close();
     },
+  };
+}
+
+function createBeastLogStoreOptionsFromEnv(): { maxLogFileBytes?: number; maxRotatedLogFiles?: number } {
+  const maxLogFileBytes = parsePositiveIntegerEnv('FBEAST_RUN_LOG_MAX_BYTES', process.env.FBEAST_RUN_LOG_MAX_BYTES);
+  const maxRotatedLogFiles = parseNonNegativeIntegerEnv(
+    'FBEAST_RUN_LOG_MAX_ROTATED_FILES',
+    process.env.FBEAST_RUN_LOG_MAX_ROTATED_FILES,
+  );
+  return {
+    ...(maxLogFileBytes === undefined ? {} : { maxLogFileBytes }),
+    ...(maxRotatedLogFiles === undefined ? {} : { maxRotatedLogFiles }),
   };
 }
 
@@ -121,10 +138,23 @@ function createCapacityReservationPolicyFromEnv(): CapacityReservationPolicy | u
 }
 
 function parsePositiveInteger(value: string | undefined): number | undefined {
+  return parsePositiveIntegerEnv('FBEAST_AGENT_CAPACITY_TOTAL', value);
+}
+
+function parsePositiveIntegerEnv(name: string, value: string | undefined): number | undefined {
   if (!value) return undefined;
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 1) {
-    throw new RangeError(`FBEAST_AGENT_CAPACITY_TOTAL must be a positive integer, received ${value}`);
+    throw new RangeError(`${name} must be a positive integer, received ${value}`);
+  }
+  return parsed;
+}
+
+function parseNonNegativeIntegerEnv(name: string, value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new RangeError(`${name} must be a non-negative integer, received ${value}`);
   }
   return parsed;
 }

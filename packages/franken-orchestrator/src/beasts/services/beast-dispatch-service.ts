@@ -14,10 +14,12 @@ import {
   type CapacityReservationWorkItem,
   capacityItemFromConfig,
 } from './capacity-reservation-policy.js';
+import type { MaintenanceModeService } from './maintenance-mode-service.js';
 
 export interface BeastDispatchServiceOptions {
   eventBus?: BeastEventBus;
   capacityPolicy?: CapacityReservationPolicy | undefined;
+  maintenance?: MaintenanceModeService | undefined;
 }
 
 export interface BeastExecutors {
@@ -148,6 +150,7 @@ export class BeastDispatchService {
   ) {}
 
   async createRun(request: CreateBeastRunRequest): Promise<BeastRun> {
+    this.options.maintenance?.assertDispatchAllowed();
     const definition = this.getDefinitionOrThrow(request.definitionId);
     // Try parsing as-is first. If it fails with unrecognized_keys (strict schema
     // rejecting extra fields from agent init config), strip to only known keys.

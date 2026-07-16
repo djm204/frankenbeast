@@ -20,6 +20,7 @@ import type {
   EpisodicEventType,
   LearningCooldownOptions,
   LearningRecordResult,
+  SkillFailureSignature,
 } from '@franken/types';
 import { isoNow } from '@franken/types';
 
@@ -183,6 +184,27 @@ export interface MemoryProvenanceRecord {
   approvedAt: string;
 }
 
+export interface MemoryAttributionListOptions {
+  /** Filter attribution records to a target store. Defaults to all supported stores. */
+  targetStore?: MemoryCandidateTargetStore;
+  /** Filter attribution records to an exact memory key. */
+  key?: string;
+  /** Filter attribution records to any exact memory key in this set. */
+  keys?: string[];
+  /** Include only unprefixed keys plus keys matching any of these prefixes. */
+  visibleKeyPrefixes?: string[];
+  /** Include keys that do not match any visible/excluded key prefix. */
+  includeUnprefixedKeys?: boolean;
+  /** Prefixes that define non-shared scoped keys when includeUnprefixedKeys is set. */
+  unprefixedKeyPrefixExclusions?: string[];
+  /** Exclude attribution records whose memory key starts with any of these prefixes. */
+  excludeKeyPrefixes?: string[];
+  /** Case-insensitive substring filter for the decoded source string. */
+  source?: string;
+  /** Maximum attribution records to return. Defaults to 50, max 1000. */
+  limit?: number;
+}
+
 export type MemoryConflictResolution =
   | 'keep_existing'
   | 'replace_existing'
@@ -238,6 +260,33 @@ export interface MemoryConflictResolutionOptions extends MemoryReviewDecisionOpt
   resolution: MemoryConflictResolution;
   /** Required when resolution is keep_both_scoped. Stores the candidate under this non-conflicting key. */
   scopedKey?: string;
+}
+
+export interface SkillEvolutionReviewGateOptions {
+  /** Number of matching failures required before creating a review item. Defaults to 3. */
+  threshold?: number;
+  /** Number of recent failure events to inspect. Defaults to 100. */
+  lookback?: number;
+  /** Confidence used for generated review candidates. Defaults to 0.8. */
+  confidence?: number;
+}
+
+export interface SkillEvolutionReviewValue {
+  kind: 'skill-evolution-review';
+  skillName: string;
+  workflowName?: string;
+  failurePattern: string;
+  failureSignatureHash: string;
+  failureCount: number;
+  suggestedPatchArea: string;
+  evidencePointers: string[];
+}
+
+export interface SkillEvolutionReviewItem {
+  id: string;
+  key: string;
+  status: MemoryCandidateStatus;
+  value: SkillEvolutionReviewValue;
 }
 
 export interface MemoryEncryptionMetadata {
@@ -699,6 +748,9 @@ class SqliteWorkingMemory implements IWorkingMemory {
     const deleteKey = this.db.prepare(
       `DELETE FROM working_memory WHERE key = ?`,
     );
+    const deleteProvenance = this.db.prepare(
+      `DELETE FROM memory_review_provenance WHERE target_store = 'working' AND memory_key = ?`,
+    );
     const upsert = this.db.prepare(
       `INSERT INTO working_memory (key, value, updated_at, schema_version) VALUES (?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, schema_version = excluded.schema_version
@@ -714,11 +766,13 @@ class SqliteWorkingMemory implements IWorkingMemory {
       }
 
       for (const key of this.deletedKeys) {
+        deleteProvenance.run(key);
         if (!this.dirtyKeys.has(key)) {
           deleteKey.run(key);
         }
       }
       for (const key of this.dirtyKeys) {
+        deleteProvenance.run(key);
         const serialized = this.serialized.get(key);
         if (serialized !== undefined) {
           upsert.run(
@@ -775,6 +829,11 @@ class SqliteWorkingMemory implements IWorkingMemory {
         return;
       }
     }
+    this.db
+      .prepare(
+        `DELETE FROM memory_review_provenance WHERE target_store = 'working' AND memory_key = ?`,
+      )
+      .run(key);
     this.db
       .prepare(
         `INSERT INTO working_memory (key, value, updated_at, schema_version) VALUES (?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
@@ -1471,6 +1530,47 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     }
   }
 
+  recordSkillFailure(input: SkillFailureSignature): void {
+    const skillName = sanitizeSkillEvolutionText(input.skillName, 'skillName');
+    const failurePattern = sanitizeSkillEvolutionText(input.failureSignature, 'failureSignature');
+    const evidenceId = sanitizeSkillEvolutionText(input.evidenceId, 'evidenceId');
+    const workflowName = input.workflowName
+      ? sanitizeSkillEvolutionText(input.workflowName, 'workflowName')
+      : undefined;
+    const step = input.step
+      ? sanitizeSkillEvolutionText(input.step, 'step')
+      : 'skill-evolution';
+    const suggestedPatchArea = input.suggestedPatchArea
+      ? sanitizeSkillEvolutionText(input.suggestedPatchArea, 'suggestedPatchArea')
+      : 'Review the workflow skill instructions that govern this failure pattern.';
+    const createdAt = input.createdAt ?? isoNow();
+    const createdAtMs = Date.parse(createdAt);
+    if (!Number.isFinite(createdAtMs)) {
+      throw new Error(`Skill failure createdAt must be a valid ISO timestamp: ${createdAt}`);
+    }
+    const failureSignatureHash = hashSkillEvolutionSignature({
+      skillName,
+      failurePattern,
+      ...(workflowName ? { workflowName } : {}),
+    });
+
+    this.record({
+      type: 'failure',
+      step,
+      summary: `Workflow skill failure recorded for ${skillName}`,
+      createdAt: new Date(createdAtMs).toISOString(),
+      details: {
+        category: 'skill-evolution',
+        skillName,
+        ...(workflowName ? { workflowName } : {}),
+        failurePattern,
+        failureSignatureHash,
+        suggestedPatchArea,
+        evidenceId,
+      },
+    });
+  }
+
   private insertEvent(event: EpisodicEvent): void {
     this.db
       .prepare(
@@ -2092,7 +2192,107 @@ export class SqliteMemoryReviewQueue {
         `SELECT * FROM memory_review_provenance WHERE target_store = ? AND memory_key = ?`,
       )
       .get(targetStore, key) as MemoryProvenanceRow | undefined;
-    return row ? this.rowToProvenance(row) : null;
+    return row && this.provenanceMatchesCurrentWorkingMemory(row)
+      ? this.rowToProvenance(row)
+      : null;
+  }
+
+  listProvenance(
+    options: MemoryAttributionListOptions = {},
+  ): MemoryProvenanceRecord[] {
+    const limit = this.resolveAttributionLimit(options.limit);
+    if (options.targetStore !== undefined && options.targetStore !== 'working') {
+      throw new Error(`Unsupported memory attribution target store: ${options.targetStore}`);
+    }
+    if (options.key !== undefined && options.key.trim().length === 0) {
+      throw new Error('Memory attribution key filter must not be empty');
+    }
+    if (options.keys !== undefined && options.keys.some(key => key.trim().length === 0)) {
+      throw new Error('Memory attribution key filter must not be empty');
+    }
+    if (options.keys !== undefined && options.keys.length === 0) {
+      return [];
+    }
+    if (options.key !== undefined && options.keys !== undefined) {
+      throw new Error('Memory attribution key and keys filters are mutually exclusive');
+    }
+    if (options.source !== undefined && options.source.trim().length === 0) {
+      throw new Error('Memory attribution source filter must not be empty');
+    }
+
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (options.targetStore !== undefined) {
+      conditions.push('target_store = ?');
+      params.push(options.targetStore);
+    }
+    if (options.key !== undefined) {
+      conditions.push('memory_key = ?');
+      params.push(options.key);
+    }
+    if (options.keys !== undefined && options.keys.length > 0) {
+      conditions.push(`memory_key IN (${options.keys.map(() => '?').join(', ')})`);
+      params.push(...options.keys);
+    }
+    const visibleKeyPrefixes = options.visibleKeyPrefixes ?? [];
+    if (visibleKeyPrefixes.length > 0) {
+      const visibleConditions = visibleKeyPrefixes.map(() => "memory_key LIKE ? ESCAPE '\\'");
+      params.push(...visibleKeyPrefixes.map(prefix => `${prefix.replace(/[\\%_]/g, char => `\\${char}`)}%`));
+      if (options.includeUnprefixedKeys) {
+        const unprefixedExclusions = options.unprefixedKeyPrefixExclusions ?? visibleKeyPrefixes;
+        visibleConditions.push(...unprefixedExclusions.map(() => "memory_key NOT LIKE ? ESCAPE '\\'"));
+        params.push(...unprefixedExclusions.map(prefix => `${prefix.replace(/[\\%_]/g, char => `\\${char}`)}%`));
+      }
+      conditions.push(options.includeUnprefixedKeys
+        ? `(${visibleConditions.slice(0, visibleKeyPrefixes.length).join(' OR ')} OR (${visibleConditions.slice(visibleKeyPrefixes.length).join(' AND ')}))`
+        : `(${visibleConditions.join(' OR ')})`);
+    }
+    for (const prefix of options.excludeKeyPrefixes ?? []) {
+      conditions.push("memory_key NOT LIKE ? ESCAPE '\\'");
+      params.push(`${prefix.replace(/[\\%_]/g, char => `\\${char}`)}%`);
+    }
+    const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM memory_review_provenance${where} ORDER BY approved_at DESC, memory_key ASC`,
+      )
+      .all(...params) as MemoryProvenanceRow[];
+    const sourceFilter = options.source?.trim().toLowerCase();
+    const attributions: MemoryProvenanceRecord[] = [];
+    for (const row of rows) {
+      if (!this.provenanceMatchesCurrentWorkingMemory(row)) {
+        continue;
+      }
+      const provenance = this.rowToProvenance(row);
+      if (sourceFilter && !provenance.source.toLowerCase().includes(sourceFilter)) {
+        continue;
+      }
+      attributions.push(provenance);
+      if (attributions.length >= limit) break;
+    }
+    return attributions;
+  }
+
+  private resolveAttributionLimit(limit: number | undefined): number {
+    if (limit === undefined) return 50;
+    if (
+      !Number.isFinite(limit) ||
+      !Number.isSafeInteger(limit) ||
+      limit < 1 ||
+      limit > 1000
+    ) {
+      throw new Error('Memory attribution limit must be a positive integer between 1 and 1000');
+    }
+    return limit;
+  }
+
+  private provenanceMatchesCurrentWorkingMemory(row: MemoryProvenanceRow): boolean {
+    if (row.target_store !== 'working') return false;
+    const workingRow = this.db
+      .prepare(`SELECT value FROM working_memory WHERE key = ?`)
+      .get(row.memory_key) as { value: string } | undefined;
+    if (!workingRow) return false;
+    return this.decodeText(workingRow.value) === this.decodeText(row.value);
   }
 
   conflictsFor(id: string): MemoryConflict[] {
@@ -3167,6 +3367,102 @@ export class SqliteBrain implements IBrain {
       encryption,
     );
     SqliteBrain.registerLiveBrain(this.dbPath, this);
+  }
+
+  createSkillEvolutionReviewGate(
+    options: SkillEvolutionReviewGateOptions = {},
+  ): SkillEvolutionReviewItem[] {
+    const threshold = options.threshold ?? 3;
+    const lookback = options.lookback ?? 100;
+    const confidence = options.confidence ?? 0.8;
+    if (!Number.isInteger(threshold) || threshold < 2) {
+      throw new RangeError('Skill evolution review threshold must be an integer >= 2');
+    }
+    if (!Number.isInteger(lookback) || lookback < threshold) {
+      throw new RangeError('Skill evolution review lookback must be an integer >= threshold');
+    }
+    if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+      throw new RangeError('Skill evolution review confidence must be a finite number between 0 and 1');
+    }
+
+    const createReviewItems = this.db.transaction(() => {
+      const pendingKeys = new Set(
+        this.memoryReview
+          .list('pending')
+          .filter(candidate => isSkillEvolutionReviewValue(candidate.value))
+          .map(candidate => candidate.key),
+      );
+      const groups = new Map<string, {
+        skillName: string;
+        workflowName?: string;
+        failurePattern: string;
+        failureSignatureHash: string;
+        suggestedPatchArea: string;
+        evidencePointers: Set<string>;
+      }>();
+
+      for (const event of this.episodic.recentFailures(lookback)) {
+        const signal = skillEvolutionSignalFromEvent(event);
+        if (!signal) continue;
+        const groupKey = `${normalizeLearningKey(signal.skillName)}:${signal.failureSignatureHash}`;
+        const existing = groups.get(groupKey);
+        if (existing) {
+          existing.evidencePointers.add(signal.evidenceId);
+        } else {
+          groups.set(groupKey, {
+            skillName: signal.skillName,
+            ...(signal.workflowName ? { workflowName: signal.workflowName } : {}),
+            failurePattern: signal.failurePattern,
+            failureSignatureHash: signal.failureSignatureHash,
+            suggestedPatchArea: signal.suggestedPatchArea,
+            evidencePointers: new Set([signal.evidenceId]),
+          });
+        }
+      }
+
+      const created: SkillEvolutionReviewItem[] = [];
+      for (const group of groups.values()) {
+        const uniqueEvidenceCount = group.evidencePointers.size;
+        if (uniqueEvidenceCount < threshold) continue;
+        const key = skillEvolutionReviewKey(group.skillName, group.failureSignatureHash);
+        const suppressedReviewKey = this.db
+          .prepare(`SELECT 1 FROM memory_review_suppressions WHERE target_store = ? AND memory_key = ? LIMIT 1`)
+          .get('working', key);
+        if (pendingKeys.has(key) || suppressedReviewKey || this.memoryReview.provenanceFor('working', key)) {
+          continue;
+        }
+        const value: SkillEvolutionReviewValue = {
+          kind: 'skill-evolution-review',
+          skillName: group.skillName,
+          ...(group.workflowName ? { workflowName: group.workflowName } : {}),
+          failurePattern: group.failurePattern,
+          failureSignatureHash: group.failureSignatureHash,
+          failureCount: uniqueEvidenceCount,
+          suggestedPatchArea: group.suggestedPatchArea,
+          evidencePointers: [...group.evidencePointers].sort(),
+        };
+        const candidate = this.memoryReview.propose({
+          targetStore: 'working',
+          key,
+          value,
+          source: 'episodic-skill-evolution-gate',
+          evidenceId: value.evidencePointers[0] ?? key,
+          confidence,
+          reason: `Repeated ${uniqueEvidenceCount} failures for ${group.skillName} match the same sanitized failure signature; review the workflow skill before more agents repeat it.`,
+        });
+        pendingKeys.add(key);
+        if (candidate.status === 'pending' && isSkillEvolutionReviewValue(candidate.value)) {
+          created.push({
+            id: candidate.id,
+            key: candidate.key,
+            status: candidate.status,
+            value: candidate.value,
+          });
+        }
+      }
+      return created;
+    });
+    return createReviewItems();
   }
 
   private static registerLiveBrain(dbPath: string, brain: SqliteBrain): void {
@@ -5204,6 +5500,112 @@ const STOPWORDS = new Set([
 ]);
 
 // --- Helpers ---
+
+const MAX_SKILL_EVOLUTION_TEXT_LENGTH = 240;
+
+type SkillEvolutionSignal = {
+  skillName: string;
+  workflowName?: string;
+  failurePattern: string;
+  failureSignatureHash: string;
+  suggestedPatchArea: string;
+  evidenceId: string;
+};
+
+function sanitizeSkillEvolutionText(value: string, fieldName: string): string {
+  const normalized = value.trim().replace(/\s+/g, ' ');
+  if (!normalized) {
+    throw new Error(`Skill evolution ${fieldName} must be a non-empty string`);
+  }
+  if (normalized.length > MAX_SKILL_EVOLUTION_TEXT_LENGTH) {
+    throw new Error(
+      `Skill evolution ${fieldName} must be ${MAX_SKILL_EVOLUTION_TEXT_LENGTH} characters or fewer; store raw logs externally and pass an evidence pointer`,
+    );
+  }
+  return normalized;
+}
+
+function hashSkillEvolutionSignature(input: {
+  skillName: string;
+  workflowName?: string;
+  failurePattern: string;
+}): string {
+  return createHash('sha256')
+    .update(JSON.stringify({
+      skillName: normalizeLearningKey(input.skillName),
+      workflowName: input.workflowName ? normalizeLearningKey(input.workflowName) : undefined,
+      failurePattern: normalizeLearningKey(input.failurePattern),
+    }))
+    .digest('hex');
+}
+
+function skillEvolutionReviewKey(skillName: string, failureSignatureHash: string): string {
+  const slug = normalizeForMatch(skillName)
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || 'skill';
+  return `skill-evolution.review.${slug}.${failureSignatureHash.slice(0, 16)}`;
+}
+
+function skillEvolutionString(record: Record<string, unknown>, name: string): string | undefined {
+  const value = record[name];
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function sanitizedSkillEvolutionString(record: Record<string, unknown>, name: string): string | undefined {
+  const value = skillEvolutionString(record, name);
+  return value === undefined ? undefined : sanitizeSkillEvolutionText(value, name);
+}
+
+function skillEvolutionSignalFromEvent(event: EpisodicEvent): SkillEvolutionSignal | null {
+  if (event.type !== 'failure') return null;
+  const details = event.details;
+  if (details === undefined || details === null || Array.isArray(details) || typeof details !== 'object') {
+    return null;
+  }
+  const record = details as Record<string, unknown>;
+  if (record.category !== 'skill-evolution') return null;
+  try {
+    const skillName = sanitizedSkillEvolutionString(record, 'skillName');
+    const failurePattern = sanitizedSkillEvolutionString(record, 'failurePattern')
+      ?? sanitizedSkillEvolutionString(record, 'failureSignature');
+    const evidenceId = sanitizedSkillEvolutionString(record, 'evidenceId');
+    if (!skillName || !failurePattern || !evidenceId) return null;
+    const workflowName = sanitizedSkillEvolutionString(record, 'workflowName');
+    const storedFailureSignatureHash = skillEvolutionString(record, 'failureSignatureHash');
+    const failureSignatureHash = storedFailureSignatureHash && /^[a-f0-9]{64}$/i.test(storedFailureSignatureHash)
+      ? storedFailureSignatureHash.toLowerCase()
+      : hashSkillEvolutionSignature({
+          skillName,
+          failurePattern,
+          ...(workflowName ? { workflowName } : {}),
+        });
+    return {
+      skillName,
+      ...(workflowName ? { workflowName } : {}),
+      failurePattern,
+      failureSignatureHash,
+      suggestedPatchArea: sanitizedSkillEvolutionString(record, 'suggestedPatchArea')
+        ?? 'Review the workflow skill instructions that govern this failure pattern.',
+      evidenceId,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isSkillEvolutionReviewValue(value: unknown): value is SkillEvolutionReviewValue {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return record.kind === 'skill-evolution-review'
+    && typeof record.skillName === 'string'
+    && typeof record.failurePattern === 'string'
+    && typeof record.failureSignatureHash === 'string'
+    && typeof record.failureCount === 'number'
+    && typeof record.suggestedPatchArea === 'string'
+    && Array.isArray(record.evidencePointers)
+    && record.evidencePointers.every(pointer => typeof pointer === 'string');
+}
 
 function escapeLike(s: string): string {
   return s.replace(/[%_\\]/g, '\\$&');

@@ -130,6 +130,27 @@ describe('IssueTriage', () => {
       expect(results.map((r) => r.issueNumber)).toEqual([2, 7, 10]);
     });
 
+    it('batches large issue sets before sending them to the LLM', async () => {
+      const completeFn = vi.fn<CompleteFn>(async (prompt) => {
+        const numbers = [...prompt.matchAll(/^### Issue #(\d+):/gm)].map((match) => Number(match[1]));
+        return makeTriageResponse(numbers.map((issueNumber) => ({
+          issueNumber,
+          complexity: 'one-shot',
+          rationale: 'Batched',
+          estimatedScope: '1 file',
+        })));
+      });
+      const triage = new IssueTriage(completeFn);
+      const issues = Array.from({ length: 121 }, (_, index) => makeIssue({ number: index + 1 }));
+
+      const results = await triage.triage(issues);
+
+      expect(completeFn).toHaveBeenCalledTimes(3);
+      expect(results).toHaveLength(121);
+      expect(results.map((result) => result.issueNumber)).toEqual(Array.from({ length: 121 }, (_, index) => index + 1));
+      expect(completeFn.mock.calls.map(([prompt]) => (prompt.match(/^### Issue #/gm) ?? []).length)).toEqual([50, 50, 21]);
+    });
+
     it('extracts JSON array from LLM output with preamble text', async () => {
       const completeFn = vi.fn<CompleteFn>(async () =>
         `Here is the classification:\n${makeTriageResponse([
@@ -235,6 +256,32 @@ describe('IssueTriage', () => {
 
       expect(results).toHaveLength(3);
       expect(completeFn).toHaveBeenCalledOnce(); // single LLM call for all issues
+    });
+
+    it('batches large triage sets to keep prompts bounded', async () => {
+      const completeFn = vi.fn<CompleteFn>(async (prompt) => {
+        const issueNumbers = [...prompt.matchAll(/### Issue #(\d+):/g)].map((match) => Number(match[1]));
+        return makeTriageResponse(issueNumbers.map((issueNumber) => ({
+          issueNumber,
+          complexity: 'one-shot',
+          rationale: 'Batch classified',
+          estimatedScope: '1 file',
+        })));
+      });
+      const triage = new IssueTriage(completeFn);
+      const issues = Array.from({ length: 101 }, (_, index) => makeIssue({ number: index + 1 }));
+
+      const results = await triage.triage(issues);
+
+      expect(results).toHaveLength(101);
+      expect(completeFn).toHaveBeenCalledTimes(3);
+      expect((completeFn.mock.calls[0]![0].match(/### Issue #/g) ?? [])).toHaveLength(50);
+      expect((completeFn.mock.calls[1]![0].match(/### Issue #/g) ?? [])).toHaveLength(50);
+      expect((completeFn.mock.calls[2]![0].match(/### Issue #/g) ?? [])).toHaveLength(1);
+      expect(completeFn.mock.calls[0]![0]).toContain('#1');
+      expect(completeFn.mock.calls[0]![0]).toContain('#50');
+      expect(completeFn.mock.calls[0]![0]).not.toContain('#51');
+      expect(completeFn.mock.calls[2]![0]).toContain('#101');
     });
 
     it('instructs LLM to return JSON array with required fields', async () => {

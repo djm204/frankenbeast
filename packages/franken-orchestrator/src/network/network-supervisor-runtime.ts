@@ -351,7 +351,7 @@ export async function healthcheckNetworkService(service: ManagedNetworkServiceSt
       const response = await fetch(probeUrl, {
         signal: AbortSignal.timeout(HTTP_CHECK_TIMEOUT_MS),
       });
-      return response.ok;
+      return response.ok || await isDegradedHealthResponse(response);
     } catch {
       // Fall back to PID checks for services that have not opened HTTP yet.
     }
@@ -434,12 +434,33 @@ async function fetchServiceIdentity(url: string): Promise<string | undefined> {
       return undefined;
     }
 
-    const body = await response.json() as { service?: string; reason?: string };
+    const body = await response.json() as { service?: string; reason?: string; status?: string; ok?: boolean };
     if (!response.ok) {
-      return body.reason === 'dashboard-build-building' ? (headerIdentity ?? body.service) : undefined;
+      return body.reason === 'dashboard-build-building' || isDegradedHealthBody(body)
+        ? (headerIdentity ?? body.service)
+        : undefined;
     }
     return body.service;
   } catch {
     return undefined;
+  }
+}
+
+function isDegradedHealthBody(body: { status?: string; ok?: boolean }): boolean {
+  return body.status === 'degraded' && body.ok === false;
+}
+
+async function isDegradedHealthResponse(response: Response): Promise<boolean> {
+  if (response.status !== 503) {
+    return false;
+  }
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!contentType.includes('application/json')) {
+    return false;
+  }
+  try {
+    return isDegradedHealthBody(await response.json() as { status?: string; ok?: boolean });
+  } catch {
+    return false;
   }
 }

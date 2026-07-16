@@ -12,10 +12,12 @@ import {
   type CapacityReservationWorkItem,
   capacityItemFromConfig,
 } from './capacity-reservation-policy.js';
+import type { MaintenanceModeService } from './maintenance-mode-service.js';
 
 export interface BeastRunServiceOptions {
   eventBus?: BeastEventBus;
   capacityPolicy?: CapacityReservationPolicy | undefined;
+  maintenance?: MaintenanceModeService | undefined;
 }
 
 export class UnknownBeastRunError extends Error {
@@ -67,6 +69,7 @@ export class BeastRunService {
   }
 
   async start(runId: string, _actor: string): Promise<BeastRun> {
+    this.serviceOptions.maintenance?.assertDispatchAllowed();
     const run = this.reserveTrackedAgentCapacityForStart(this.requireRun(runId));
     const definition = this.getDefinitionOrThrow(run.definitionId);
     const priorAttemptId = run.currentAttemptId;
@@ -280,6 +283,7 @@ export class BeastRunService {
   }
 
   async restart(runId: string, actor: string): Promise<BeastRun> {
+    this.serviceOptions.maintenance?.assertDispatchAllowed();
     const run = this.requireRun(runId);
     if (run.status === 'running') {
       this.assertTrackedAgentCapacity(run);

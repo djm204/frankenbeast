@@ -290,7 +290,7 @@ These flags are for `frankenbeast beasts create|spawn` unless otherwise noted. `
 | `--milestone <name>` | `issues` | Filter by milestone. |
 | `--search <query>` | `issues` | Search issues by text. |
 | `--assignee <user>` | `issues` | Filter by assignee. |
-| `--limit <n>` | `issues` | Maximum issues to fetch; defaults to `30`. |
+| `--limit <n>` | `issues` | Maximum issues to fetch; defaults to `1000`. |
 | `--repo <owner/repo>` | `issues` | Explicit target repository. Cannot be combined with `--target-upstream`. |
 | `--target-upstream` | `issues` | Derive the canonical issue/PR repo from the fork upstream remote. |
 | `--dry-run` | `issues` | Preview without executing fixes. |
@@ -360,7 +360,7 @@ frankenbeast issues --label bug,critical         # Filter by comma-separated lab
 frankenbeast issues --milestone v1               # Filter by milestone
 frankenbeast issues --search "parser docs"       # Search issue text
 frankenbeast issues --assignee octocat           # Filter by assignee
-frankenbeast issues --limit 10                   # Max issues to fetch (default: 30)
+frankenbeast issues --limit 10                   # Max issues to fetch (default: 1000)
 frankenbeast issues --dry-run                    # Preview without executing
 ```
 

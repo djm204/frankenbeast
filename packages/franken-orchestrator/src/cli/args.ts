@@ -46,6 +46,7 @@ export type BeastAction =
   | 'restart'
   | 'resume'
   | 'delete'
+  | 'maintenance'
   | undefined;
 
 export type SkillAction = 'list' | 'add' | 'scaffold' | 'remove' | 'enable' | 'disable' | 'info' | undefined;
@@ -141,7 +142,7 @@ const VALID_DR_ACTIONS = new Set([
   'dead-letter-replay-dry-run',
   'dead-letter-retire',
 ]);
-const VALID_BEAST_ACTIONS = new Set(['catalog', 'create', 'spawn', 'list', 'status', 'logs', 'stop', 'kill', 'restart', 'resume', 'delete']);
+const VALID_BEAST_ACTIONS = new Set(['catalog', 'create', 'spawn', 'list', 'status', 'logs', 'stop', 'kill', 'restart', 'resume', 'delete', 'maintenance']);
 const VALID_SKILL_ACTIONS = new Set(['list', 'add', 'scaffold', 'remove', 'enable', 'disable', 'info']);
 const VALID_SECURITY_ACTIONS = new Set(['status', 'set']);
 const STRING_OPTIONS = new Set([
@@ -245,7 +246,7 @@ Issue Flags (for 'issues' subcommand):
   --milestone <name>      Filter by milestone
   --search <query>        Search issues by text
   --assignee <user>       Filter by assignee
-  --limit <n>             Max issues to fetch (default: 30)
+  --limit <n>             Max issues to fetch (default: 1000)
   --repo <owner/repo>     Target repository
   --target-upstream       Use the fork upstream as the canonical repo for issues and PRs
   --dry-run               Preview without executing
@@ -303,6 +304,7 @@ Beast Commands:
   beasts restart <run-id>             Restart a Beast with a new attempt
   beasts resume <agent-id>            Resume a tracked agent's linked run
   beasts delete <agent-id>            Soft-delete a tracked agent
+  beasts maintenance [status|on|off]  Show, activate, or deactivate dispatch maintenance mode
 
 Skill Commands:
   skill list                          List installed skills
@@ -326,6 +328,7 @@ Module Toggles (for beasts spawn):
   --no-critique                       Disable critique module
   --no-governor                       Disable governor module
   --no-heartbeat                      Disable heartbeat module
+  --set reason=<text>                 Maintenance activation reason for beasts maintenance on
 
 Examples:
   frankenbeast                              # full interactive flow
@@ -477,6 +480,7 @@ function maxBeastPositionals(action: BeastAction): number {
     || action === 'restart'
     || action === 'resume'
     || action === 'delete'
+    || action === 'maintenance'
   ) {
     return 2;
   }
@@ -752,8 +756,6 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   let issueLimit: number | undefined;
   if (limitRaw !== undefined) {
     issueLimit = parseIntegerOption('--limit', limitRaw, { min: 1 });
-  } else if (subcommand === 'issues') {
-    issueLimit = 30;
   }
 
   const budget = values.budget !== undefined
