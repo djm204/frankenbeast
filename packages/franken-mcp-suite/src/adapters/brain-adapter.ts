@@ -369,7 +369,7 @@ function resolveExportLimit(limit: number | undefined): number {
   return resolveQueryLimit(limit ?? MAX_QUERY_LIMIT);
 }
 
-const SENSITIVE_EXPORT_KEY = /(?:password|passphrase|secret|token|api[_-]?key|authorization|credential|private[_-]?key|session|cookie)/i;
+const SENSITIVE_EXPORT_KEY = /(?:password|passphrase|secret|token|api[_-]?key|access[_-]?key|authorization|credential|private[_-]?key|session|cookie)/i;
 const SECRET_EXPORT_VALUES: Array<[RegExp, string]> = [
   [/\bAuthorization\s*:\s*Basic\s+\S+/gi, "Authorization: Basic [redacted]"],
   [/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]"],
@@ -378,7 +378,7 @@ const SECRET_EXPORT_VALUES: Array<[RegExp, string]> = [
   [/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g, "[redacted-private-key]"],
   [/\b((?:password|passphrase|secret|token|api[_-]?key|authorization|credential|private[_-]?key|session(?:[_-]?cookie)?|cookie))\s*([:=])\s*([^\s,;&]+)/gi, "$1$2[redacted]"],
   [/\b(?:sk|pk|rk)-[A-Za-z0-9][A-Za-z0-9_-]{7,}\b/g, "[redacted-secret]"],
-  [/\b(?:sk|gho|ghp)_[A-Za-z0-9_]{8,}\b/g, "[redacted-secret]"],
+  [/\b(?:sk|gh[opusr])_[A-Za-z0-9_]{8,}\b/g, "[redacted-secret]"],
   [/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[redacted-secret]"],
   [/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[redacted-email]"],
 ];
@@ -389,8 +389,17 @@ function stableRedactedKey(key: string): string {
 }
 
 function redactExportString(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      return JSON.stringify(redactExportValue(JSON.parse(value)));
+    } catch {
+      // Fall through to pattern-based redaction for non-JSON strings.
+    }
+  }
+
   const withJsonSecretsRedacted = value.replace(
-    /"((?:password|passphrase|secret|token|api[_-]?key|authorization|credential|private[_-]?key|session(?:[_-]?cookie)?|cookie))"\s*:\s*(?:"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)/gi,
+    /"((?:password|passphrase|secret|token|api[_-]?key|access[_-]?key|authorization|credential|private[_-]?key|session(?:[_-]?cookie)?|cookie))"\s*:\s*(?:"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)/gi,
     (_match, key: string) => `"${stableRedactedKey(key)}":"[redacted]"`,
   );
   return SECRET_EXPORT_VALUES.reduce(

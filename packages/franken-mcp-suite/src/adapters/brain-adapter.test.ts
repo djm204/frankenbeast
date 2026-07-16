@@ -65,7 +65,7 @@ vi.mock("@franken/brain", () => ({
           "status-page": "password=hunter2 session_cookie=abc123value",
           "basic-auth": "Authorization: Basic dXNlcjpwYXNz",
           "database-url": "postgres://alice:hunter2@db.internal/app",
-          "json-literal-secrets": '{"password":123456,"token":true,"safe":"ok"}',
+          "json-literal-secrets": '{"password":123456,"token":true,"authToken":{"raw":"ghs_secretvalue123456"},"accessKey":["secretvalue123456"],"safe":"ok"}',
           profile: {
             password: "hunter2",
             "alice@example.com": "oncall",
@@ -375,6 +375,8 @@ describe("createBrainAdapter", () => {
     expect(serialized).not.toContain("apiKey");
     expect(serialized).not.toContain("dXNlcjpwYXNz");
     expect(serialized).not.toContain("postgres://alice:hunter2");
+    expect(serialized).not.toContain("ghs_secretvalue123456");
+    expect(serialized).not.toContain("secretvalue123456");
     expect(serialized).not.toContain("123456");
     expect(serialized).not.toContain('"token":true');
   });
