@@ -681,6 +681,30 @@ describe("createBrainAdapter", () => {
     });
   });
 
+  it("preserves structured memory attribution values while decoding scoped keys", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+    const mockBrain = brainInstances[0];
+    const structuredValue = { nested: { enabled: true }, count: 2 };
+    mockBrain.memoryReview.listProvenance.mockReturnValueOnce([
+      {
+        targetStore: "working",
+        key: "structured-memory",
+        value: structuredValue,
+        candidateId: "memcand_structured",
+        source: "shared-source",
+        confidence: 0.9,
+        reason: "structured",
+        approvedAt: "2026-07-16T00:00:00.000Z",
+      },
+    ]);
+
+    const attributions = await brain.memoryAttribution({ readScope: "shared" });
+
+    expect(attributions).toHaveLength(1);
+    expect(attributions[0]!.key).toBe("structured-memory");
+    expect(attributions[0]!.value).toEqual(structuredValue);
+  });
+
   it("uses attribution defaults and pre-filters scoped provenance before enforcing limits", async () => {
     const brain = createBrainAdapter("/tmp/beast.db");
     const mockBrain = brainInstances[0];

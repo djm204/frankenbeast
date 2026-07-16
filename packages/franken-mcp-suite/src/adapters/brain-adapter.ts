@@ -829,7 +829,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
 
       return attributions
         .map((attribution) => {
-          const entry = parseScopedWorkingEntry(attribution.key, attribution.value);
+          const entry = parseScopedWorkingExportEntry(attribution.key, attribution.value);
           return { attribution, entry };
         })
         .filter(({ entry }) => canReadMemoryEntry(entry.agentId, readScope))

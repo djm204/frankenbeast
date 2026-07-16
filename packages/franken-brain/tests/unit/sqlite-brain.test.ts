@@ -1410,6 +1410,7 @@ describe('SqliteBrain', () => {
           source: 'chat:turn-42',
         },
       ]);
+      expect(brain.memoryReview.listProvenance({ keys: [] })).toEqual([]);
       expect(brain.memoryReview.listProvenance({ key: 'missing.memory' })).toEqual([]);
       expect(() => brain.memoryReview.listProvenance({ key: '   ' })).toThrow(
         /key filter must not be empty/,

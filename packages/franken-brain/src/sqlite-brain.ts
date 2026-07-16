@@ -2061,6 +2061,9 @@ export class SqliteMemoryReviewQueue {
     if (options.keys !== undefined && options.keys.some(key => key.trim().length === 0)) {
       throw new Error('Memory attribution key filter must not be empty');
     }
+    if (options.keys !== undefined && options.keys.length === 0) {
+      return [];
+    }
     if (options.key !== undefined && options.keys !== undefined) {
       throw new Error('Memory attribution key and keys filters are mutually exclusive');
     }
