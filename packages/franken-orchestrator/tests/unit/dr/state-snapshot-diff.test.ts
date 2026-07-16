@@ -555,4 +555,43 @@ describe('state snapshot diff', () => {
     }
   });
 
+
+  it('uses task map fallback identities before mutable worker ids', async () => {
+    const before = await snapshotDir({
+      'tasks.json': { 'task-1': { workerId: 'worker-a', status: 'running' } },
+    });
+    const after = await snapshotDir({
+      'tasks.json': { 'task-1': { workerId: 'worker-b', status: 'running' } },
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const taskDiff = report.diffs.find((diff) => diff.subsystem === 'tasks');
+
+    expect(taskDiff?.added).toHaveLength(0);
+    expect(taskDiff?.removed).toHaveLength(0);
+    expect(taskDiff?.changed).toHaveLength(1);
+    expect(taskDiff?.changed[0]?.id).toBe('task-1');
+  });
+
+  it('redacts token-keyed primitive approval maps from non-generic approval files', async () => {
+    const beforeToken = 'pendingApprovalTokenBefore123';
+    const afterToken = 'pendingApprovalTokenAfter456';
+    const before = await snapshotDir({
+      'approvals/pending.json': { [beforeToken]: true },
+    });
+    const after = await snapshotDir({
+      'approvals/pending.json': { [afterToken]: true },
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const serialized = JSON.stringify(report);
+    const approvalDiff = report.diffs.find((diff) => diff.subsystem === 'approvals');
+
+    expect(approvalDiff?.added).toHaveLength(1);
+    expect(approvalDiff?.removed).toHaveLength(1);
+    expect(serialized).not.toContain(beforeToken);
+    expect(serialized).not.toContain(afterToken);
+    expect(serialized).toContain('"value":"<redacted>"');
+  });
+
 });

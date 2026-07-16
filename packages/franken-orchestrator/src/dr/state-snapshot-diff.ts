@@ -82,8 +82,17 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(value);
 }
 
+function redactObjectKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => redactObjectKeys(item));
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, nested]) => [
+    maskOpaqueSecretLiterals(redactLogData(key) as string),
+    redactObjectKeys(nested),
+  ]));
+}
+
 function redactForOutput(value: unknown): unknown {
-  const redacted = redactLogData(value);
+  const redacted = redactObjectKeys(redactLogData(value));
   return JSON.parse(maskOpaqueSecretLiterals(JSON.stringify(redacted))) as unknown;
 }
 
@@ -125,9 +134,13 @@ function recordId(
   if (!isRecord(record)) return fallback;
   const idKeys = subsystem === 'approvals'
     ? ['id', 'tokenId', 'token_id', 'approvalId', 'approval_id', 'token', 'value']
-    : options.preferFallbackOverMutableDisplayName
-      ? ['id', 'taskId', 'task_id', 'cardId', 'card_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key', 'workerId', 'worker_id', 'currentWorkerId', 'current_worker_id']
-      : ['id', 'taskId', 'task_id', 'cardId', 'card_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key', 'workerId', 'worker_id', 'currentWorkerId', 'current_worker_id', 'name'];
+    : subsystem === 'tasks'
+      ? options.preferFallbackOverMutableDisplayName
+        ? ['id', 'taskId', 'task_id', 'cardId', 'card_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key']
+        : ['id', 'taskId', 'task_id', 'cardId', 'card_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key', 'name']
+      : options.preferFallbackOverMutableDisplayName
+        ? ['id', 'taskId', 'task_id', 'cardId', 'card_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key', 'workerId', 'worker_id', 'currentWorkerId', 'current_worker_id']
+        : ['id', 'taskId', 'task_id', 'cardId', 'card_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key', 'workerId', 'worker_id', 'currentWorkerId', 'current_worker_id', 'name'];
   for (const key of idKeys) {
     const value = record[key];
     if (typeof value === 'string' && value.trim() !== '') {
@@ -212,7 +225,7 @@ function redactSourceForOutput(subsystem: StateSnapshotDiffSubsystem, source: st
 
 function redactIdForOutput(subsystem: StateSnapshotDiffSubsystem, id: string): string {
   if (subsystem === 'approvals') return id;
-  return maskOpaqueSecretLiterals(id);
+  return maskOpaqueSecretLiterals(redactLogData(id) as string);
 }
 
 function isGenericCollectionSource(source: string): boolean {
@@ -374,7 +387,7 @@ function extractRecordsFromJson(records: MutableSubsystemRecords, parsed: unknow
       const values = Object.values(parsed);
       if (values.length > 0 && values.every(isRecord)) {
         addObjectMapRecords(records, pathSubsystem, parsed, source);
-      } else if (pathSubsystem !== 'tasks' && !hasRecordIdentityKey(parsed) && values.length > 0 && values.every((value) => !isRecord(value) && !Array.isArray(value)) && (pathSubsystem !== 'approvals' || isGenericCollectionSource(source))) {
+      } else if (pathSubsystem !== 'tasks' && !hasRecordIdentityKey(parsed) && values.length > 0 && values.every((value) => !isRecord(value) && !Array.isArray(value)) && (pathSubsystem !== 'approvals' || !looksLikeApprovalRecord(parsed))) {
         addObjectMapRecords(records, pathSubsystem, parsed, source);
       } else {
         addRecord(records, pathSubsystem, recordId(parsed, source, pathSubsystem, { preferFallbackOverMutableDisplayName: true }), parsed, source);
@@ -393,7 +406,13 @@ async function collectSnapshotFiles(directory: string, current = directory, coll
   if (collected.length > MAX_DIRECTORY_FILES) {
     throw new Error(`State snapshot directory has too many files; maximum supported JSON/JSONL files is ${MAX_DIRECTORY_FILES}`);
   }
-  const entries = await readdir(current, { withFileTypes: true });
+  let entries;
+  try {
+    entries = await readdir(current, { withFileTypes: true });
+  } catch (error) {
+    const source = relative(directory, current) || current;
+    throw new Error(`Unable to read state snapshot directory ${sourceForError(source)}: ${errorMessageForOutput(error)}`);
+  }
   for (const entry of entries) {
     const path = join(current, entry.name);
     if (entry.isDirectory()) {
@@ -424,6 +443,10 @@ function errorMessageForOutput(error: unknown): string {
 function hasExplicitParentSubsystem(source: string): boolean {
   const segments = normalizeSnapshotSourcePath(source).toLowerCase().split('/').filter((segment) => segment !== '');
   return segments.slice(0, -1).some((segment) => subsystemFromSegment(segment) !== undefined);
+}
+
+function looksLikeApprovalRecord(value: Record<string, unknown>): boolean {
+  return Object.keys(value).some((key) => /^(?:decision|status|state|approved|denied|reason|createdAt|created_at|updatedAt|updated_at|expiresAt|expires_at)$/iu.test(key));
 }
 
 function parseSnapshotFile(raw: string, source: string): ReadonlyArray<{ parsed: unknown; sourceSuffix: string }> {
