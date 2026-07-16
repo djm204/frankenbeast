@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -335,6 +336,43 @@ describe('kanban state mutation idempotency planning', () => {
       reason: 'mutation idempotency key was already applied with matching operation/content',
       evidence: expect.arrayContaining(['appliedAt=2026-07-16T10:00:00.000Z']),
     });
+  });
+
+  it('recognizes retries that provide the body when the stored content hash is a digest', () => {
+    const body = 'doctor note';
+    const digest = createHash('sha256').update(body).digest('hex');
+
+    expect(planKanbanStateMutation(
+      {
+        taskId: 't_retry',
+        status: 'running',
+        appliedMutations: [{
+          operation: 'comment',
+          idempotencyKey: 'comment:t_retry:liveness',
+          contentHash: digest,
+        }],
+      },
+      { operation: 'comment', idempotencyKey: 'comment:t_retry:liveness', body },
+    )).toMatchObject({ action: 'skip' });
+  });
+
+  it('does not let audit comments prove non-comment state mutations', () => {
+    expect(planKanbanStateMutation(
+      {
+        taskId: 't_retry',
+        status: 'running',
+        revision: 7,
+        comments: [{ body: 'blocked: usage limit', idempotencyKey: 'block:t_retry:usage-limit' }],
+      },
+      { operation: 'block', idempotencyKey: 'block:t_retry:usage-limit', expectedRevision: 7, body: 'usage limit' },
+    )).toMatchObject({ action: 'apply' });
+  });
+
+  it('applies new mutations when numeric and serialized revisions match', () => {
+    expect(planKanbanStateMutation(
+      { taskId: 't_retry', status: 'running', revision: '7' },
+      { operation: 'block', idempotencyKey: 'block:t_retry:new', expectedRevision: 7, body: 'fresh blocker' },
+    )).toMatchObject({ action: 'apply' });
   });
 
   it('applies new mutations only when the compare-and-set revision matches', () => {

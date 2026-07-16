@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { loadavg } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -791,23 +792,39 @@ function normalizedMutationStatus(status: string): string {
   return status.trim().toLowerCase().replace(/_/g, '-');
 }
 
-function mutationContentHash(request: KanbanStateMutationRequest): string | undefined {
-  return request.contentHash?.trim() || (request.body !== undefined ? request.body.trim() : undefined);
+function sha256Hex(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function mutationContentTokens(request: KanbanStateMutationRequest): readonly string[] {
+  const tokens = new Set<string>();
+  const explicitHash = request.contentHash?.trim();
+  if (explicitHash) tokens.add(explicitHash);
+  if (request.body !== undefined) {
+    const body = request.body.trim();
+    tokens.add(body);
+    const digest = sha256Hex(body);
+    tokens.add(digest);
+    tokens.add(`sha256:${digest}`);
+  }
+  return [...tokens];
 }
 
 function mutationRecordMatches(record: KanbanStateMutationRecord, request: KanbanStateMutationRequest): boolean {
   if (record.idempotencyKey.trim() !== request.idempotencyKey.trim()) return false;
   if (record.operation !== request.operation) return false;
-  const requestedHash = mutationContentHash(request);
-  return requestedHash === undefined || record.contentHash === undefined || record.contentHash === requestedHash;
+  const requestedTokens = mutationContentTokens(request);
+  if (requestedTokens.length === 0 || record.contentHash === undefined) return true;
+  return requestedTokens.includes(record.contentHash.trim());
 }
 
 function matchingComment(snapshot: KanbanTaskStateSnapshot, request: KanbanStateMutationRequest): KanbanTaskCommentSnapshot | undefined {
+  if (request.operation !== 'comment') return undefined;
   const requestedKey = request.idempotencyKey.trim();
   const requestedBody = request.body?.trim();
   return snapshot.comments?.find((comment) => {
     if (comment.idempotencyKey?.trim() === requestedKey) return true;
-    return request.operation === 'comment' && requestedBody !== undefined && comment.body.trim() === requestedBody;
+    return requestedBody !== undefined && comment.body.trim() === requestedBody;
   });
 }
 
@@ -825,6 +842,10 @@ function statusConverged(snapshot: KanbanTaskStateSnapshot, request: KanbanState
     return `task ${snapshot.taskId} is already complete with the requested summary`;
   }
   return undefined;
+}
+
+function revisionsMatch(actual: string | number | undefined, expected: string | number | undefined): boolean {
+  return actual !== undefined && expected !== undefined && String(actual) === String(expected);
 }
 
 export function planKanbanStateMutation(
@@ -885,7 +906,7 @@ export function planKanbanStateMutation(
     };
   }
 
-  if (request.expectedRevision !== undefined && snapshot.revision !== request.expectedRevision) {
+  if (request.expectedRevision !== undefined && !revisionsMatch(snapshot.revision, request.expectedRevision)) {
     return {
       action: 'conflict',
       operation: request.operation,
