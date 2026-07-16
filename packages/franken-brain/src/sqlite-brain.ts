@@ -972,6 +972,12 @@ class SqliteWorkingMemory implements IWorkingMemory {
     const applyFlush = (): boolean => {
       this.refreshPreparedStateForFlush();
       if (this.dirtyKeys.size === 0 && this.deletedKeys.size === 0) {
+        this.audit?.({
+          operation: 'working.flush',
+          store: 'working',
+          outcome: 'success',
+          details: { changed: false },
+        });
         return false;
       }
 
@@ -994,6 +1000,12 @@ class SqliteWorkingMemory implements IWorkingMemory {
       }
       flushedDirtyKeys = new Set(this.dirtyKeys);
       flushedDeletedKeys = new Set(this.deletedKeys);
+      this.audit?.({
+        operation: 'working.flush',
+        store: 'working',
+        outcome: 'success',
+        details: { changed: true },
+      });
       return true;
     };
     const tx = this.db.transaction(applyFlush);
@@ -1009,12 +1021,6 @@ class SqliteWorkingMemory implements IWorkingMemory {
       });
       throw error;
     }
-    this.audit?.({
-      operation: 'working.flush',
-      store: 'working',
-      outcome: 'success',
-      details: { changed: hasChanges },
-    });
     if (!hasChanges) {
       return;
     }
@@ -1137,20 +1143,18 @@ class SqliteWorkingMemory implements IWorkingMemory {
   }
 
   purgeKey(key: string): (() => void) | void {
-    if (this.store.has(key)) {
-      this.totalBytes -= this.sizes.get(key) ?? 0;
-      this.store.delete(key);
-      this.sizes.delete(key);
-      this.serialized.delete(key);
-    }
-    this.dirtyKeys.delete(key);
-    this.deletedKeys.delete(key);
-    this.db.prepare(`DELETE FROM working_memory WHERE key = ?`).run(key);
     const finalize = (): void => {
+      if (this.store.has(key)) {
+        this.totalBytes -= this.sizes.get(key) ?? 0;
+        this.store.delete(key);
+        this.sizes.delete(key);
+        this.serialized.delete(key);
+      }
       this.persistedSerialized.delete(key);
       this.deletedKeys.delete(key);
       this.dirtyKeys.delete(key);
     };
+    this.db.prepare(`DELETE FROM working_memory WHERE key = ?`).run(key);
     if (!this.db.inTransaction) {
       finalize();
       return;
@@ -1908,18 +1912,36 @@ class SqliteWorkingMemory implements IWorkingMemory {
   }
 
   clear(options: { audit?: boolean } = {}): void {
+    const shouldAudit = options.audit ?? true;
+    const previousStore = shouldAudit ? new Map(this.store) : undefined;
+    const previousSizes = shouldAudit ? new Map(this.sizes) : undefined;
+    const previousSerialized = shouldAudit ? new Map(this.serialized) : undefined;
+    const previousDirtyKeys = shouldAudit ? new Set(this.dirtyKeys) : undefined;
+    const previousDeletedKeys = shouldAudit ? new Set(this.deletedKeys) : undefined;
+    const previousTotalBytes = shouldAudit ? this.totalBytes : undefined;
+
     this.store.clear();
     this.sizes.clear();
     this.serialized.clear();
     this.dirtyKeys.clear();
     this.deletedKeys = new Set(this.persistedSerialized.keys());
     this.totalBytes = 0;
-    if (options.audit ?? true) {
-      this.audit?.({
-        operation: 'working.clear',
-        store: 'working',
-        outcome: 'success',
-      });
+    if (shouldAudit) {
+      try {
+        this.audit?.({
+          operation: 'working.clear',
+          store: 'working',
+          outcome: 'success',
+        });
+      } catch (error) {
+        this.store = previousStore!;
+        this.sizes = previousSizes!;
+        this.serialized = previousSerialized!;
+        this.dirtyKeys = previousDirtyKeys!;
+        this.deletedKeys = previousDeletedKeys!;
+        this.totalBytes = previousTotalBytes!;
+        throw error;
+      }
     }
   }
 }
@@ -2484,18 +2506,19 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
             JSON.stringify(state),
           state.timestamp,
         );
-      return { id: String(result.lastInsertRowid) };
+      const checkpoint = { id: String(result.lastInsertRowid) };
+      this.audit?.({
+        operation: 'recovery.checkpoint',
+        store: 'recovery',
+        outcome: 'success',
+        details: { checkpointId: checkpoint.id },
+      });
+      return checkpoint;
     });
 
     try {
       const result = tx() as { id: string };
       finalizeWorkingMemoryFlush.current?.();
-      this.audit?.({
-        operation: 'recovery.checkpoint',
-        store: 'recovery',
-        outcome: 'success',
-        details: { checkpointId: result.id },
-      });
       return result;
     } catch (error) {
       if (flushState.attempted && !flushState.completed) {
@@ -2572,12 +2595,15 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
 
   clearCheckpoints(): void {
     try {
-      this.db.prepare(`DELETE FROM checkpoints`).run();
-      this.audit?.({
-        operation: 'recovery.clearCheckpoints',
-        store: 'recovery',
-        outcome: 'success',
+      const tx = this.db.transaction(() => {
+        this.db.prepare(`DELETE FROM checkpoints`).run();
+        this.audit?.({
+          operation: 'recovery.clearCheckpoints',
+          store: 'recovery',
+          outcome: 'success',
+        });
       });
+      tx.immediate();
     } catch (error) {
       this.audit?.({
         operation: 'recovery.clearCheckpoints',
@@ -2757,39 +2783,43 @@ export class SqliteMemoryReviewQueue {
 
   edit(id: string, edit: MemoryCandidateEdit): MemoryCandidate {
     try {
-      const candidate = this.requireCandidate(id, 'pending');
-      const updated: MemoryCandidate = {
-        ...candidate,
-        ...edit,
-        updatedAt: isoNow(),
-      };
-      this.validateProposal(updated);
-      assertMemoryCandidateNotDeletionGuarded(this.db, updated, this.encryption);
-      this.db
-        .prepare(
-          `UPDATE memory_review_candidates
-           SET memory_key = ?, value = ?, source = ?, evidence_id = ?, confidence = ?, reason = ?, updated_at = ?
-           WHERE id = ? AND status = 'pending'`,
-        )
-        .run(
-          updated.key,
-          this.encodeValue(updated.value),
-          this.encodeText(updated.source),
-          updated.evidenceId ? this.encodeText(updated.evidenceId) : null,
-          updated.confidence,
-          this.encodeText(updated.reason),
-          updated.updatedAt,
-          id,
-        );
-      const result = this.requireCandidate(id, 'pending');
-      this.audit?.({
-        operation: 'review.edit',
-        store: 'review',
-        key: result.key,
-        outcome: 'success',
-        details: { id, targetStore: result.targetStore },
+      let result: MemoryCandidate | undefined;
+      const tx = this.db.transaction(() => {
+        const candidate = this.requireCandidate(id, 'pending');
+        const updated: MemoryCandidate = {
+          ...candidate,
+          ...edit,
+          updatedAt: isoNow(),
+        };
+        this.validateProposal(updated);
+        assertMemoryCandidateNotDeletionGuarded(this.db, updated, this.encryption);
+        this.db
+          .prepare(
+            `UPDATE memory_review_candidates
+             SET memory_key = ?, value = ?, source = ?, evidence_id = ?, confidence = ?, reason = ?, updated_at = ?
+             WHERE id = ? AND status = 'pending'`,
+          )
+          .run(
+            updated.key,
+            this.encodeValue(updated.value),
+            this.encodeText(updated.source),
+            updated.evidenceId ? this.encodeText(updated.evidenceId) : null,
+            updated.confidence,
+            this.encodeText(updated.reason),
+            updated.updatedAt,
+            id,
+          );
+        result = this.requireCandidate(id, 'pending');
+        this.audit?.({
+          operation: 'review.edit',
+          store: 'review',
+          key: result.key,
+          outcome: 'success',
+          details: { id, targetStore: result.targetStore },
+        });
       });
-      return this.withMergeSuggestions(result);
+      tx.immediate();
+      return this.withMergeSuggestions(result!);
     } catch (error) {
       const candidate = this.tryCandidate(id);
       this.audit?.({
@@ -2826,6 +2856,13 @@ export class SqliteMemoryReviewQueue {
       const candidate = this.requireCandidate(id);
       if (candidate.status === 'suppressed') {
         approvedCandidate = candidate;
+        this.audit?.({
+          operation: 'review.approve',
+          store: 'review',
+          key: candidate.key,
+          outcome: 'denied',
+          details: { id, status: candidate.status, targetStore: candidate.targetStore },
+        });
         return;
       }
       if (candidate.status !== 'pending') {
@@ -2838,6 +2875,13 @@ export class SqliteMemoryReviewQueue {
       if (suppressionReason) {
         this.markSuppressed(id, suppressionReason, now, options);
         approvedCandidate = this.requireCandidate(id);
+        this.audit?.({
+          operation: 'review.approve',
+          store: 'review',
+          key: approvedCandidate.key,
+          outcome: 'denied',
+          details: { id, status: approvedCandidate.status, targetStore: approvedCandidate.targetStore },
+        });
         return;
       }
       const conflicts = this.detectConflicts(candidate);
@@ -2883,6 +2927,22 @@ export class SqliteMemoryReviewQueue {
         );
       this.markDecision(id, 'approved', now, options);
       approvedCandidate = this.requireCandidate(id);
+      this.audit?.({
+        operation: 'review.approve',
+        store: 'review',
+        key: approvedCandidate.key,
+        outcome: 'success',
+        details: { id, status: approvedCandidate.status, targetStore: approvedCandidate.targetStore },
+      });
+      if (approvedCandidate.targetStore === 'working') {
+        this.audit?.({
+          operation: 'working.set',
+          store: 'working',
+          key: approvedCandidate.key,
+          outcome: 'success',
+          details: { source: 'review.approve', candidateId: id },
+        });
+      }
     });
     try {
       approveTx.immediate();
@@ -2903,22 +2963,6 @@ export class SqliteMemoryReviewQueue {
     }
     finalizeWorkingFlush?.();
     const result = approvedCandidate ?? this.requireCandidate(id);
-    this.audit?.({
-      operation: 'review.approve',
-      store: 'review',
-      key: result.key,
-      outcome: result.status === 'suppressed' ? 'denied' : 'success',
-      details: { id, status: result.status, targetStore: result.targetStore },
-    });
-    if (result.status === 'approved' && result.targetStore === 'working') {
-      this.audit?.({
-        operation: 'working.set',
-        store: 'working',
-        key: result.key,
-        outcome: 'success',
-        details: { source: 'review.approve', candidateId: id },
-      });
-    }
     return result;
   }
 
@@ -2951,6 +2995,13 @@ export class SqliteMemoryReviewQueue {
       this.insertSuppression(candidate, 'rejected', now, options);
       this.markDecision(id, 'rejected', now, options);
       rejectedCandidate = this.requireCandidate(id);
+      this.audit?.({
+        operation: 'review.reject',
+        store: 'review',
+        key: rejectedCandidate.key,
+        outcome: 'success',
+        details: { id, status: rejectedCandidate.status, targetStore: rejectedCandidate.targetStore },
+      });
     });
     try {
       tx.immediate();
@@ -2970,13 +3021,6 @@ export class SqliteMemoryReviewQueue {
       throw error;
     }
     const result = rejectedCandidate ?? this.requireCandidate(id, 'rejected');
-    this.audit?.({
-      operation: 'review.reject',
-      store: 'review',
-      key: result.key,
-      outcome: 'success',
-      details: { id, status: result.status, targetStore: result.targetStore },
-    });
     return result;
   }
 
@@ -3009,6 +3053,22 @@ export class SqliteMemoryReviewQueue {
       });
       this.redactNeverStoreRows(candidate, now);
       neverStoredCandidate = this.requireCandidate(id);
+      this.audit?.({
+        operation: 'review.neverStore',
+        store: 'review',
+        key: originalKey ?? neverStoredCandidate.key,
+        outcome: 'success',
+        details: { id, status: neverStoredCandidate.status, targetStore: neverStoredCandidate.targetStore },
+      });
+      if (purgedWorkingKey !== undefined) {
+        this.audit?.({
+          operation: 'working.delete',
+          store: 'working',
+          key: purgedWorkingKey,
+          outcome: 'success',
+          details: { source: 'review.neverStore', candidateId: id },
+        });
+      }
     });
     try {
       tx.immediate();
@@ -3031,22 +3091,6 @@ export class SqliteMemoryReviewQueue {
     finalizeWorkingFlush?.();
     purgeDeletedSqliteContent(this.db, this.dbPath);
     const result = neverStoredCandidate ?? this.requireCandidate(id, 'never_store');
-    this.audit?.({
-      operation: 'review.neverStore',
-      store: 'review',
-      key: originalKey ?? result.key,
-      outcome: 'success',
-      details: { id, status: result.status, targetStore: result.targetStore },
-    });
-    if (purgedWorkingKey !== undefined) {
-      this.audit?.({
-        operation: 'working.delete',
-        store: 'working',
-        key: purgedWorkingKey,
-        outcome: 'success',
-        details: { source: 'review.neverStore', candidateId: id },
-      });
-    }
     return result;
   }
 
@@ -3438,6 +3482,13 @@ export class SqliteMemoryReviewQueue {
       if (suppressionReason) {
         this.markSuppressed(id, suppressionReason, now, decisionOptions);
         approvedCandidate = this.requireCandidate(id);
+        this.audit?.({
+          operation: 'review.approve',
+          store: 'review',
+          key: approvedCandidate.key,
+          outcome: 'denied',
+          details: { id, status: approvedCandidate.status, targetStore: approvedCandidate.targetStore, resolution: 'keep_both_scoped' },
+        });
         return;
       }
       finalizeWorkingFlush = this.working.persistKeyAfterCommit(scopedKey, updatedCandidate.value) ?? undefined;
@@ -3477,6 +3528,22 @@ export class SqliteMemoryReviewQueue {
         note: decisionOptions.note ?? 'Memory conflict resolved by keeping both values with explicit scope.',
       });
       approvedCandidate = this.requireCandidate(id);
+      this.audit?.({
+        operation: 'review.approve',
+        store: 'review',
+        key: approvedCandidate.key,
+        outcome: 'success',
+        details: { id, status: approvedCandidate.status, targetStore: approvedCandidate.targetStore, resolution: 'keep_both_scoped' },
+      });
+      if (approvedCandidate.targetStore === 'working') {
+        this.audit?.({
+          operation: 'working.set',
+          store: 'working',
+          key: approvedCandidate.key,
+          outcome: 'success',
+          details: { source: 'review.approve', candidateId: id, resolution: 'keep_both_scoped' },
+        });
+      }
     });
     try {
       tx.immediate();
@@ -3498,22 +3565,6 @@ export class SqliteMemoryReviewQueue {
     }
     finalizeWorkingFlush?.();
     const result = approvedCandidate ?? this.requireCandidate(id, 'approved');
-    this.audit?.({
-      operation: 'review.approve',
-      store: 'review',
-      key: result.key,
-      outcome: result.status === 'suppressed' ? 'denied' : 'success',
-      details: { id, status: result.status, targetStore: result.targetStore, resolution: 'keep_both_scoped' },
-    });
-    if (result.status === 'approved' && result.targetStore === 'working') {
-      this.audit?.({
-        operation: 'working.set',
-        store: 'working',
-        key: result.key,
-        outcome: 'success',
-        details: { source: 'review.approve', candidateId: id, resolution: 'keep_both_scoped' },
-      });
-    }
     return result;
   }
 
@@ -3534,6 +3585,13 @@ export class SqliteMemoryReviewQueue {
       if (suppressionReason) {
         this.markSuppressed(id, suppressionReason, now, decisionOptions);
         approvedCandidate = this.requireCandidate(id);
+        this.audit?.({
+          operation: 'review.approve',
+          store: 'review',
+          key: approvedCandidate.key,
+          outcome: 'denied',
+          details: { id, status: approvedCandidate.status, targetStore: approvedCandidate.targetStore, resolution: 'expire_existing' },
+        });
         return;
       }
       finalizeWorkingFlush = this.working.persistKeyAfterCommit(candidate.key, candidate.value) ?? undefined;
@@ -3565,6 +3623,22 @@ export class SqliteMemoryReviewQueue {
         note: decisionOptions.note ?? 'Memory conflict resolved by expiring the old value before approving the candidate.',
       });
       approvedCandidate = this.requireCandidate(id);
+      this.audit?.({
+        operation: 'review.approve',
+        store: 'review',
+        key: approvedCandidate.key,
+        outcome: 'success',
+        details: { id, status: approvedCandidate.status, targetStore: approvedCandidate.targetStore, resolution: 'expire_existing' },
+      });
+      if (approvedCandidate.targetStore === 'working') {
+        this.audit?.({
+          operation: 'working.set',
+          store: 'working',
+          key: approvedCandidate.key,
+          outcome: 'success',
+          details: { source: 'review.approve', candidateId: id, resolution: 'expire_existing' },
+        });
+      }
     });
     try {
       tx.immediate();
@@ -3586,22 +3660,6 @@ export class SqliteMemoryReviewQueue {
     }
     finalizeWorkingFlush?.();
     const result = approvedCandidate ?? this.requireCandidate(id, 'approved');
-    this.audit?.({
-      operation: 'review.approve',
-      store: 'review',
-      key: result.key,
-      outcome: result.status === 'suppressed' ? 'denied' : 'success',
-      details: { id, status: result.status, targetStore: result.targetStore, resolution: 'expire_existing' },
-    });
-    if (result.status === 'approved' && result.targetStore === 'working') {
-      this.audit?.({
-        operation: 'working.set',
-        store: 'working',
-        key: result.key,
-        outcome: 'success',
-        details: { source: 'review.approve', candidateId: id, resolution: 'expire_existing' },
-      });
-    }
     return result;
   }
 
