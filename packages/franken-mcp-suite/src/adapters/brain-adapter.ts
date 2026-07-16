@@ -128,6 +128,7 @@ export interface BrainAdapter {
 
 const SUPPORTED_MEMORY_TYPES = ["working", "episodic"] as const;
 const DEFAULT_QUERY_LIMIT = 20;
+const DEFAULT_ATTRIBUTION_LIMIT = 50;
 const MAX_QUERY_LIMIT = 1000;
 const AGENT_WORKING_KEY_PREFIX = "__fbeast_agent_memory__/";
 const AGENT_MEMORY_SCOPE_MARKER = "fbeast:agent-memory";
@@ -359,8 +360,8 @@ function takeVisibleEntries<T>(
   return entries.filter(canRead).slice(0, limit);
 }
 
-function resolveQueryLimit(limit: number | undefined): number {
-  if (limit === undefined) return DEFAULT_QUERY_LIMIT;
+function resolveQueryLimit(limit: number | undefined, defaultLimit = DEFAULT_QUERY_LIMIT): number {
+  if (limit === undefined) return defaultLimit;
   if (
     !Number.isFinite(limit) ||
     !Number.isSafeInteger(limit) ||
@@ -800,15 +801,30 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
 
     async memoryAttribution(input = {}) {
       const readScope = resolveMemoryReadScope(input);
-      const requestedLimit = resolveQueryLimit(input.limit);
-      const lookupKey = input.key === undefined
+      const requestedLimit = resolveQueryLimit(input.limit, DEFAULT_ATTRIBUTION_LIMIT);
+      const scopedAgentKeyPrefix = readScope.agentId
+        ? `${AGENT_WORKING_KEY_PREFIX}${encodeScopeComponent(readScope.agentId)}/`
+        : undefined;
+      const provenanceKeys = input.key === undefined || readScope.readScope !== "agent"
         ? undefined
-        : scopedWorkingKey(input.key, readScope.readScope === "agent" ? readScope.agentId : undefined);
-      const attributions = brain.memoryReview.listProvenance({
+        : [input.key, scopedWorkingKey(input.key, readScope.agentId)];
+      const lookupKey = input.key === undefined || readScope.readScope === "agent"
+        ? undefined
+        : input.key;
+      const attributions: MemoryProvenanceRecord[] = brain.memoryReview.listProvenance({
         ...(input.targetStore !== undefined ? { targetStore: input.targetStore } : {}),
+        ...(provenanceKeys !== undefined ? { keys: provenanceKeys } : {}),
         ...(lookupKey !== undefined ? { key: lookupKey } : {}),
         ...(input.source !== undefined ? { source: input.source } : {}),
-        limit: readScope.readScope === "all" ? requestedLimit : MAX_QUERY_LIMIT,
+        ...(readScope.readScope === "shared" ? { excludeKeyPrefixes: [AGENT_WORKING_KEY_PREFIX] } : {}),
+        ...(readScope.readScope === "agent" && input.key === undefined && scopedAgentKeyPrefix !== undefined
+          ? {
+              visibleKeyPrefixes: [scopedAgentKeyPrefix],
+              includeUnprefixedKeys: true,
+              unprefixedKeyPrefixExclusions: [AGENT_WORKING_KEY_PREFIX],
+            }
+          : {}),
+        limit: requestedLimit,
       });
 
       return attributions

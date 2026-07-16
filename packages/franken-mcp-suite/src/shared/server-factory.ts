@@ -444,7 +444,7 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
   const isDirectMemorySourceAttribution = unqualifiedToolName === MEMORY_SOURCE_ATTRIBUTION_TOOL;
   const isDirectMemoryStore = unqualifiedToolName === MEMORY_STORE_TOOL;
   const isDirectRightToForget = unqualifiedToolName === 'fbeast_memory_right_to_forget';
-  const auditedTool = isDirectMemoryExport || isDirectMemoryReviewDecide || isMemoryReviewPropose || isDirectRightToForget
+  const auditedTool = isDirectMemoryExport || isDirectMemoryReviewDecide || isMemoryReviewPropose || isDirectMemoryStore || isDirectMemorySourceAttribution || isDirectRightToForget
     ? unqualifiedToolName
     : typeof sanitized['tool'] === 'string'
       ? unqualifyMcpToolName(sanitized['tool'])

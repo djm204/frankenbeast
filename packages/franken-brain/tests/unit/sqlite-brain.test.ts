@@ -2695,6 +2695,38 @@ describe('SqliteBrain', () => {
       }
     });
 
+    it('keeps working-memory provenance until pending changes are flushed durably', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'preference.source-attribution',
+        value: 'approved',
+        source: 'chat:turn-22',
+        confidence: 0.9,
+        reason: 'Approved memory for attribution durability regression.',
+      });
+      brain.memoryReview.approve(candidate.id, { reviewer: 'operator' });
+
+      brain.working.set('preference.source-attribution', 'pending change');
+      expect(
+        brain.memoryReview.provenanceFor('working', 'preference.source-attribution'),
+      ).not.toBeNull();
+
+      brain.working.set('preference.source-attribution', 'approved');
+      brain.flush();
+      expect(
+        brain.memoryReview.provenanceFor('working', 'preference.source-attribution'),
+      ).not.toBeNull();
+
+      brain.working.delete('preference.source-attribution');
+      expect(
+        brain.memoryReview.provenanceFor('working', 'preference.source-attribution'),
+      ).not.toBeNull();
+      brain.flush();
+      expect(
+        brain.memoryReview.provenanceFor('working', 'preference.source-attribution'),
+      ).toBeNull();
+    });
+
     it('clears stale review suppressions before hydrating snapshot working memory', () => {
       const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-review-hydrate-stale-suppression-'));
       const dbPath = join(dir, 'brain.db');

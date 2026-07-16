@@ -179,7 +179,15 @@ vi.mock("@franken/brain", () => ({
         approve: vi.fn(() => ({ id: "memcand_1", status: "approved" })),
         reject: vi.fn(() => ({ id: "memcand_1", status: "rejected" })),
         neverStore: vi.fn(() => ({ id: "memcand_1", status: "never_store" })),
-        listProvenance: vi.fn((options?: { key?: string }) => {
+        listProvenance: vi.fn((options?: {
+          key?: string;
+          keys?: string[];
+          limit?: number;
+          visibleKeyPrefixes?: string[];
+          includeUnprefixedKeys?: boolean;
+          unprefixedKeyPrefixExclusions?: string[];
+          excludeKeyPrefixes?: string[];
+        }) => {
           const rows = [
             {
               targetStore: "working",
@@ -220,9 +228,26 @@ vi.mock("@franken/brain", () => ({
               approvedAt: "2026-07-16T00:02:00.000Z",
             },
           ];
-          return options?.key === undefined
-            ? rows
-            : rows.filter((row) => row.key === options.key);
+          let filtered = rows;
+          if (options?.key !== undefined) {
+            filtered = filtered.filter((row) => row.key === options.key);
+          }
+          if (options?.keys !== undefined) {
+            filtered = filtered.filter((row) => options.keys!.includes(row.key));
+          }
+          for (const prefix of options?.excludeKeyPrefixes ?? []) {
+            filtered = filtered.filter((row) => !row.key.startsWith(prefix));
+          }
+          if ((options?.visibleKeyPrefixes?.length ?? 0) > 0) {
+            const visiblePrefixes = options!.visibleKeyPrefixes!;
+            const unprefixedExclusions = options!.unprefixedKeyPrefixExclusions ?? visiblePrefixes;
+            filtered = filtered.filter((row) =>
+              visiblePrefixes.some((prefix) => row.key.startsWith(prefix))
+              || (options!.includeUnprefixedKeys === true
+                && unprefixedExclusions.every((prefix) => !row.key.startsWith(prefix))),
+            );
+          }
+          return filtered.slice(0, options?.limit ?? filtered.length);
         }),
         conflictsFor: vi.fn(() => []),
         resolveConflict: vi.fn(() => ({ id: "memcand_1", status: "approved" })),
@@ -651,8 +676,27 @@ describe("createBrainAdapter", () => {
     expect(alphaAttribution.map((row) => row.key).join("\n")).not.toContain("__fbeast_agent_memory__");
     expect(alphaExactAttribution.map((row) => row.key)).toEqual(["private-task"]);
     expect(mockBrain.memoryReview.listProvenance).toHaveBeenLastCalledWith({
-      key: "__fbeast_agent_memory__/alpha/private-task",
-      limit: 1000,
+      keys: ["private-task", "__fbeast_agent_memory__/alpha/private-task"],
+      limit: 10,
+    });
+  });
+
+  it("uses attribution defaults and pre-filters scoped provenance before enforcing limits", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+    const mockBrain = brainInstances[0];
+
+    await brain.memoryAttribution({ readScope: "shared" });
+    await brain.memoryAttribution({ readScope: "agent", agentId: "alpha" });
+
+    expect(mockBrain.memoryReview.listProvenance).toHaveBeenNthCalledWith(1, {
+      excludeKeyPrefixes: ["__fbeast_agent_memory__/"],
+      limit: 50,
+    });
+    expect(mockBrain.memoryReview.listProvenance).toHaveBeenNthCalledWith(2, {
+      visibleKeyPrefixes: ["__fbeast_agent_memory__/alpha/"],
+      includeUnprefixedKeys: true,
+      unprefixedKeyPrefixExclusions: ["__fbeast_agent_memory__/"],
+      limit: 50,
     });
   });
 

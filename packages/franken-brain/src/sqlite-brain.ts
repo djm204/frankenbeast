@@ -149,6 +149,16 @@ export interface MemoryAttributionListOptions {
   targetStore?: MemoryCandidateTargetStore;
   /** Filter attribution records to an exact memory key. */
   key?: string;
+  /** Filter attribution records to any exact memory key in this set. */
+  keys?: string[];
+  /** Include only unprefixed keys plus keys matching any of these prefixes. */
+  visibleKeyPrefixes?: string[];
+  /** Include keys that do not match any visible/excluded key prefix. */
+  includeUnprefixedKeys?: boolean;
+  /** Prefixes that define non-shared scoped keys when includeUnprefixedKeys is set. */
+  unprefixedKeyPrefixExclusions?: string[];
+  /** Exclude attribution records whose memory key starts with any of these prefixes. */
+  excludeKeyPrefixes?: string[];
   /** Case-insensitive substring filter for the decoded source string. */
   source?: string;
   /** Maximum attribution records to return. Defaults to 50, max 1000. */
@@ -1034,12 +1044,6 @@ class SqliteWorkingMemory implements IWorkingMemory {
     return { normalized: JSON.parse(serialized) as unknown, serialized, size };
   }
 
-  private clearWorkingMemoryProvenance(key: string): void {
-    this.db
-      .prepare(`DELETE FROM memory_review_provenance WHERE target_store = 'working' AND memory_key = ?`)
-      .run(key);
-  }
-
   set(key: string, value: unknown): void {
     const { normalized, serialized, size } = this.prepareEntry(key, value);
     assertNotDeletionGuarded(this.db, key, serialized, this.encryption);
@@ -1067,7 +1071,6 @@ class SqliteWorkingMemory implements IWorkingMemory {
     if (this.persistedSerialized.get(key) === serialized) {
       this.dirtyKeys.delete(key);
     } else {
-      this.clearWorkingMemoryProvenance(key);
       this.dirtyKeys.add(key);
     }
     this.deletedKeys.delete(key);
@@ -1087,7 +1090,6 @@ class SqliteWorkingMemory implements IWorkingMemory {
     } else {
       this.deletedKeys.delete(key);
     }
-    this.clearWorkingMemoryProvenance(key);
     return this.store.delete(key);
   }
 
@@ -2056,6 +2058,12 @@ export class SqliteMemoryReviewQueue {
     if (options.key !== undefined && options.key.trim().length === 0) {
       throw new Error('Memory attribution key filter must not be empty');
     }
+    if (options.keys !== undefined && options.keys.some(key => key.trim().length === 0)) {
+      throw new Error('Memory attribution key filter must not be empty');
+    }
+    if (options.key !== undefined && options.keys !== undefined) {
+      throw new Error('Memory attribution key and keys filters are mutually exclusive');
+    }
     if (options.source !== undefined && options.source.trim().length === 0) {
       throw new Error('Memory attribution source filter must not be empty');
     }
@@ -2069,6 +2077,27 @@ export class SqliteMemoryReviewQueue {
     if (options.key !== undefined) {
       conditions.push('memory_key = ?');
       params.push(options.key);
+    }
+    if (options.keys !== undefined && options.keys.length > 0) {
+      conditions.push(`memory_key IN (${options.keys.map(() => '?').join(', ')})`);
+      params.push(...options.keys);
+    }
+    const visibleKeyPrefixes = options.visibleKeyPrefixes ?? [];
+    if (visibleKeyPrefixes.length > 0) {
+      const visibleConditions = visibleKeyPrefixes.map(() => "memory_key LIKE ? ESCAPE '\\'");
+      params.push(...visibleKeyPrefixes.map(prefix => `${prefix.replace(/[\\%_]/g, char => `\\${char}`)}%`));
+      if (options.includeUnprefixedKeys) {
+        const unprefixedExclusions = options.unprefixedKeyPrefixExclusions ?? visibleKeyPrefixes;
+        visibleConditions.push(...unprefixedExclusions.map(() => "memory_key NOT LIKE ? ESCAPE '\\'"));
+        params.push(...unprefixedExclusions.map(prefix => `${prefix.replace(/[\\%_]/g, char => `\\${char}`)}%`));
+      }
+      conditions.push(options.includeUnprefixedKeys
+        ? `(${visibleConditions.slice(0, visibleKeyPrefixes.length).join(' OR ')} OR (${visibleConditions.slice(visibleKeyPrefixes.length).join(' AND ')}))`
+        : `(${visibleConditions.join(' OR ')})`);
+    }
+    for (const prefix of options.excludeKeyPrefixes ?? []) {
+      conditions.push("memory_key NOT LIKE ? ESCAPE '\\'");
+      params.push(`${prefix.replace(/[\\%_]/g, char => `\\${char}`)}%`);
     }
     const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
     const rows = this.db

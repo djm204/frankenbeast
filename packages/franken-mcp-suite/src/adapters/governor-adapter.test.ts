@@ -77,14 +77,18 @@ describe('GovernorAdapter', () => {
     expect(row.context).toBe('{}');
   });
 
-  it('redacts stripped proxy memory source attribution filters without hiding generic execute_tool payloads', async () => {
+  it('redacts explicit proxy memory source attribution filters without hiding generic execute_tool payloads', async () => {
     const dbPath = tracked(tmpDbPath());
     const governor = createGovernorAdapter(dbPath);
 
     await expect(governor.check({
       action: 'mcp__fbeast-proxy__execute_tool',
-      context: '{"key":"profile.delete-policy","source":"chat:turn-42 secret","readScope":"agent","agentId":"agent-1"}',
+      context: '{"tool":"fbeast_memory_source_attribution","args":{"key":"profile.delete-policy","source":"chat:turn-42 secret","readScope":"agent","agentId":"agent-1"}}',
     })).resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"key":"profile.delete-policy","agentId":"agent-1"}',
+    })).resolves.toMatchObject({ decision: 'denied' });
     await expect(governor.check({
       action: 'mcp__fbeast-proxy__execute_tool',
       context: '{"key":"profile.delete-policy","value":"rm -rf /","source":"chat:turn-42 secret"}',
@@ -95,6 +99,7 @@ describe('GovernorAdapter', () => {
     db.close();
     expect(rows[0]?.context).toBe('{}');
     expect(rows[1]?.context).toContain('profile.delete-policy');
+    expect(rows[2]?.context).toContain('profile.delete-policy');
   });
 
   it('allows right-to-forget dryRun calls while keeping selector context redacted', async () => {
