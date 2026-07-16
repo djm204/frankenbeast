@@ -695,6 +695,87 @@ describe('stuck-run watchdog', () => {
     expect(findings).toEqual([]);
   });
 
+  it('reports terminal crash statuses when alive is false without waitingOn hints', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_terminal_crash',
+        pid: 7407,
+        status: 'crashed',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_terminal_crash',
+      blockerCategory: 'process-crash',
+      confidence: 'high',
+      processStatus: 'dead',
+      kanbanState: 'crashed',
+    });
+  });
+
+  it('reports stale heartbeat snapshots even when optional activity timestamps are absent', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_stale_heartbeat_only',
+        pid: 7408,
+        status: 'running',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        startedAt: '2026-07-16T07:30:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_stale_heartbeat_only',
+      blockerCategory: 'unknown',
+      confidence: 'low',
+      heartbeatAgeMs: 14_400_000,
+      stateTransitionAgeMs: 16_200_000,
+      processStatus: 'alive',
+    });
+  });
+
+  it('keeps provider token and checkpoint text out of approval and CI buckets', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_provider_tokens',
+        pid: 7409,
+        status: 'running',
+        alive: true,
+        waitingOn: 'provider budget remaining 0 tokens',
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastOutputAt: '2026-07-16T08:00:00.000Z',
+        lastToolActivityAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+      {
+        cardId: 't_checkpoint_wait',
+        pid: 7410,
+        status: 'running',
+        alive: true,
+        waitingOn: 'checkpoint handoff is pending',
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastOutputAt: '2026-07-16T08:00:00.000Z',
+        lastToolActivityAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        cardId: 't_provider_tokens',
+        blockerCategory: 'provider-wait',
+      }),
+      expect.objectContaining({
+        cardId: 't_checkpoint_wait',
+        blockerCategory: 'unknown',
+      }),
+    ]));
+  });
+
   it('escalates stale provider waits after every activity signal exceeds grace', () => {
     const findings = detectStuckRunWatchdogFindings([
       {

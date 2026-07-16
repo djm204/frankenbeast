@@ -712,7 +712,10 @@ function stale(age: number | undefined, threshold: number): boolean {
 
 function explicitProcessCrash(snapshot: IssueWorkerCardProcessSnapshot): boolean {
   if (snapshot.blockerCategory === 'process-crash') return true;
-  return /crash|exit|dead|pid|process/.test(snapshot.waitingOn?.toLowerCase() ?? '');
+  const status = snapshot.status?.trim().toLowerCase() ?? '';
+  const waitingOn = snapshot.waitingOn?.toLowerCase() ?? '';
+  if (/crash|exit|dead|pid|process|fail/.test(waitingOn)) return true;
+  return snapshot.alive === false && /crash|exit|fail/.test(status);
 }
 
 function normalizeStuckRunBlockerCategory(
@@ -720,9 +723,9 @@ function normalizeStuckRunBlockerCategory(
 ): IssueStuckRunBlockerCategory {
   if (snapshot.blockerCategory) return snapshot.blockerCategory;
   const text = `${snapshot.status ?? ''} ${snapshot.waitingOn ?? ''}`.toLowerCase();
-  if (/approval|hitl|human|token/.test(text)) return 'approval-gate';
-  if (/\bci\b|check|workflow|merge queue/.test(text)) return 'ci-wait';
   if (/provider|codex|rate limit|quota|llm|model/.test(text)) return 'provider-wait';
+  if (/\bapproval\b|\bhitl\b|\bhuman\b|approval[- ]?token|pending approval|operator approval|approval-cop|approve/.test(text)) return 'approval-gate';
+  if (/\bci\b|ci[- ]?check|status check|check run|workflow|merge queue|github actions?/.test(text)) return 'ci-wait';
   if (/crash|exit|dead|pid|process/.test(text) || snapshot.alive === false) return 'process-crash';
   if (/dispatcher|kanban|current_run|current run|respawn|heartbeat/.test(text)) return 'dispatcher-bug';
   return 'unknown';
@@ -788,6 +791,8 @@ export function detectStuckRunWatchdogFindings(
     const toolStale = stale(toolActivityAgeMs, staleToolActivityMs);
     const stateStale = stale(stateTransitionAgeMs, staleStateTransitionMs);
     const staleCount = [heartbeatStale, outputStale, toolStale, stateStale].filter(Boolean).length;
+    const optionalActivitySignalsProvided = outputAgeMs !== undefined || toolActivityAgeMs !== undefined;
+    const minimumStaleSignals = optionalActivitySignalsProvided ? 3 : 2;
     const freshLongRunningWaitActivity = [heartbeatAgeMs, outputAgeMs, toolActivityAgeMs, stateTransitionAgeMs]
       .some((age) => age !== undefined && age < longRunningWaitGraceMs);
     const processStatus: IssueStuckRunWatchdogFinding['processStatus'] = snapshot.alive === false
@@ -804,7 +809,7 @@ export function detectStuckRunWatchdogFindings(
       continue;
     }
 
-    if (processStatus !== 'dead' && staleCount < 3) continue;
+    if (processStatus !== 'dead' && staleCount < minimumStaleSignals) continue;
 
     const evidence = [
       `heartbeatAgeMs=${heartbeatAgeMs ?? 'unknown'}`,
