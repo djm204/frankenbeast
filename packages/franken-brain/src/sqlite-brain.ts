@@ -153,6 +153,8 @@ type ExistingMemoryMergeCandidate = {
   candidateId?: string;
 };
 
+const AGENT_WORKING_KEY_PREFIX = '__fbeast_agent_memory__/';
+
 export interface MemoryCandidateEdit {
   value?: unknown;
   source?: string;
@@ -2170,10 +2172,19 @@ export class SqliteMemoryReviewQueue {
   ): MemoryMergeSuggestion[] {
     const candidates = mergeCandidates ?? this.existingMergeCandidatesForTarget(candidate.targetStore);
     const suggestions = candidates
-      .filter((existing) => existing.key !== candidate.key && existing.candidateId !== candidate.id)
+      .filter(
+        (existing) =>
+          existing.candidateId !== candidate.id &&
+          sameWorkingMemoryMergeScope(candidate.key, existing.key),
+      )
       .map((existing) => this.buildMergeSuggestion(candidate, existing))
       .filter((suggestion): suggestion is MemoryMergeSuggestion => suggestion !== null)
-      .sort((left, right) => right.similarity - left.similarity || left.key.localeCompare(right.key));
+      .sort(
+        (left, right) =>
+          mergeSuggestionRank(right) - mergeSuggestionRank(left) ||
+          right.similarity - left.similarity ||
+          left.key.localeCompare(right.key),
+      );
     return suggestions.slice(0, 5);
   }
 
@@ -2767,8 +2778,30 @@ function isHighConfidenceExactDuplicate(value: unknown): boolean {
   return semanticMemoryTokens(value).size >= 3;
 }
 
+function mergeSuggestionRank(suggestion: MemoryMergeSuggestion): number {
+  return suggestion.matchType === 'exact' ? 1 : 0;
+}
+
+function sameWorkingMemoryMergeScope(leftKey: string, rightKey: string): boolean {
+  const leftScope = decodeAgentWorkingKeyScope(leftKey);
+  const rightScope = decodeAgentWorkingKeyScope(rightKey);
+  return leftScope === rightScope;
+}
+
+function decodeAgentWorkingKeyScope(key: string): string | undefined {
+  if (!key.startsWith(AGENT_WORKING_KEY_PREFIX)) return undefined;
+  const rest = key.slice(AGENT_WORKING_KEY_PREFIX.length);
+  const slash = rest.indexOf('/');
+  if (slash <= 0) return undefined;
+  try {
+    return decodeURIComponent(rest.slice(0, slash));
+  } catch {
+    return undefined;
+  }
+}
+
 function semanticMemoryTokens(value: unknown): Set<string> {
-  const text = stableStringify(canonicalMemoryValue(value)).toLowerCase();
+  const text = semanticMemoryText(canonicalMemoryValue(value)).toLowerCase();
   const tokens = text.match(/[a-z0-9]+/g) ?? [];
   return new Set(
     tokens
@@ -2777,13 +2810,28 @@ function semanticMemoryTokens(value: unknown): Set<string> {
   );
 }
 
+function semanticMemoryText(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return String(value ?? '');
+  }
+  if (Array.isArray(value)) {
+    return value.map(semanticMemoryText).join(' ');
+  }
+  return Object.values(value as Record<string, unknown>).map(semanticMemoryText).join(' ');
+}
+
 function normalizeSemanticMemoryToken(token: string): string {
+  if (token === 'status') return token;
   const synonym = SEMANTIC_MEMORY_SYNONYMS.get(token);
   if (synonym) return synonym;
-  if (token.endsWith('ing') && token.length > 5) return token.slice(0, -3);
-  if (token.endsWith('ed') && token.length > 4) return token.slice(0, -2);
-  if (token.endsWith('s') && token.length > 4) return token.slice(0, -1);
-  return token;
+  const stemmed = token.endsWith('ing') && token.length > 5
+    ? token.slice(0, -3)
+    : token.endsWith('ed') && token.length > 4
+      ? token.slice(0, -2)
+      : token.endsWith('s') && token.length > 4
+        ? token.slice(0, -1)
+        : token;
+  return SEMANTIC_MEMORY_SYNONYMS.get(stemmed) ?? stemmed;
 }
 
 function stableStringify(value: unknown): string {
