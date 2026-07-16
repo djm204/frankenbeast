@@ -11,6 +11,7 @@ import { SQLiteBeastRepository } from './repository/sqlite-beast-repository.js';
 import { BeastCatalogService } from './services/beast-catalog-service.js';
 import { BeastDispatchService } from './services/beast-dispatch-service.js';
 import { assertDispatcherStartupIntegrity } from './services/dispatcher-startup-integrity.js';
+import { reconcileDispatcherQueueAfterRestart } from './services/dispatcher-queue-reconciliation.js';
 import { BeastInterviewService } from './services/beast-interview-service.js';
 import { AgentService } from './services/agent-service.js';
 import { CapacityReservationPolicy, type CapacityReservationRule } from './services/capacity-reservation-policy.js';
@@ -46,13 +47,6 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   const ticketStore = new SseConnectionTicketStore();
   const capacityPolicy = createCapacityReservationPolicyFromEnv();
 
-  cleanupAbandonedBeastWorktrees({
-    agents: repository.listTrackedAgents(),
-    dryRun: false,
-    projectRoot,
-    runs: repository.listRuns(),
-  });
-
   // Deferred reference to break circular dep: executor → runService → executors → executor
   // eslint-disable-next-line prefer-const
   let runService: BeastRunService;
@@ -83,6 +77,13 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   assertDispatcherStartupIntegrity({
     definitions: catalog.listDefinitions(),
     executors,
+  });
+  reconcileDispatcherQueueAfterRestart(repository);
+  cleanupAbandonedBeastWorktrees({
+    agents: repository.listTrackedAgents(),
+    dryRun: false,
+    projectRoot,
+    runs: repository.listRuns(),
   });
 
   runService = new BeastRunService(repository, catalog, executors, metrics, logStore, { eventBus, capacityPolicy });
