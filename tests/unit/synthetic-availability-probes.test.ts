@@ -152,6 +152,51 @@ describe('synthetic availability probes', () => {
     expect(() => JSON.parse(lines[0])).not.toThrow();
   });
 
+  it('can be imported from eval hosts where argv[1] is absent', () => {
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', `import(${JSON.stringify(SCRIPT)}).then(() => console.log('import-ok'))`], {
+      cwd: ROOT,
+      encoding: 'utf8',
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe('import-ok');
+  });
+
+  it('redacts secret-looking provider command args from reports', async () => {
+    const { runSyntheticAvailabilityProbes } = await loadScript();
+    const report = await runSyntheticAvailabilityProbes({
+      config: {
+        repo: 'djm204/frankenbeast',
+        providerCommand: 'curl -H "Authorization: Bearer secret-token" --api-key super-secret http://127.0.0.1/health',
+        timeoutMs: 100,
+      },
+      execFile: vi.fn(async (file: string) => (file === 'gh' ? '[]' : 'provider ok')),
+      fetch: vi.fn(async () => ({ ok: true, status: 200 })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      readFile: vi.fn(async () => '{}'),
+    });
+
+    const providerProbe = (report.probes as Array<Record<string, Record<string, string>>>).find((probe) => probe.name === 'provider_status');
+    expect(providerProbe?.detail.command).toContain('[REDACTED]');
+    expect(providerProbe?.detail.command).not.toContain('secret-token');
+    expect(providerProbe?.detail.command).not.toContain('super-secret');
+  });
+
+  it('terminates timed-out provider commands before returning a report', () => {
+    const result = spawnSync(process.execPath, [SCRIPT, '--json', '--repo', 'djm204/frankenbeast', '--provider-command', `node -e "process.on('SIGTERM',()=>{}); setInterval(()=>{},1000)"`, '--timeout-ms', '100'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      timeout: 3_000,
+    });
+
+    expect([0, 1]).toContain(result.status);
+    expect(result.error).toBeUndefined();
+    const report = JSON.parse(result.stdout.trim());
+    const providerProbe = report.probes.find((probe: Record<string, string>) => probe.name === 'provider_status');
+    expect(providerProbe.status).toBe('unavailable');
+    expect(providerProbe.error).toContain('terminated');
+  });
+
   it('renders compact text output and documents cron/CI usage', async () => {
     const { formatProbeReportText } = await loadScript();
     const text = formatProbeReportText({

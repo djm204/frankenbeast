@@ -1,13 +1,11 @@
 #!/usr/bin/env node
-import { execFile as nodeExecFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { readFile as nodeReadFile } from 'node:fs/promises';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
-import { promisify } from 'node:util';
-
-const execFileAsync = promisify(nodeExecFile);
 
 const DEFAULT_TIMEOUT_MS = 5_000;
+const SECRET_ARG_PATTERN = /(?:token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)/iu;
 function parseCommandLine(value) {
   if (!value) return undefined;
   if (Array.isArray(value)) return value.map(String).filter(Boolean);
@@ -87,24 +85,10 @@ function normalizeError(error) {
   return String(error);
 }
 
-async function withTimeout(operation, timeoutMs) {
-  let timer;
-  try {
-    return await Promise.race([
-      operation(),
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`timed out after ${timeoutMs}ms`)), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
 async function measureProbe(name, timeoutMs, remediationHint, operation, now = () => Date.now()) {
   const started = now();
   try {
-    const detail = await withTimeout(operation, timeoutMs);
+    const detail = await operation();
     return {
       name,
       status: 'healthy',
@@ -126,8 +110,49 @@ async function measureProbe(name, timeoutMs, remediationHint, operation, now = (
 }
 
 async function defaultExecFile(file, args, timeoutMs) {
-  const result = await execFileAsync(file, args, { timeout: timeoutMs, maxBuffer: 1024 * 1024 });
-  return result.stdout;
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+    const killTimer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGTERM');
+      setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      }, 500).unref();
+    }, timeoutMs);
+    child.stdout?.on('data', (chunk) => {
+      stdout += String(chunk);
+      if (stdout.length > 1024 * 1024) child.kill('SIGTERM');
+    });
+    child.stderr?.on('data', (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on('error', (error) => {
+      clearTimeout(killTimer);
+      reject(error);
+    });
+    child.on('close', (code, signal) => {
+      clearTimeout(killTimer);
+      if (timedOut) reject(new Error(`${file} timed out after ${timeoutMs}ms and was terminated`));
+      else if (code === 0) resolve(stdout);
+      else reject(new Error(`${file} exited with code ${code ?? signal}: ${stderr.trim() || stdout.trim()}`));
+    });
+  });
+}
+
+function redactCommand(command) {
+  return command.map((part, index) => {
+    const previous = command[index - 1] ?? '';
+    if (part.startsWith('Bearer ') || SECRET_ARG_PATTERN.test(previous)) return '[REDACTED]';
+    if (SECRET_ARG_PATTERN.test(part)) {
+      const separator = part.includes('=') ? '=' : part.includes(':') ? ':' : null;
+      if (separator) return `${part.slice(0, part.indexOf(separator) + 1)}[REDACTED]`;
+      return part;
+    }
+    return part;
+  });
 }
 
 async function defaultOpenSqliteReadOnly(path) {
@@ -161,7 +186,7 @@ async function probeProviderStatus(config, deps) {
   if (!command || command.length === 0) throw new Error('missing provider status command');
   const [file, ...args] = command;
   const stdout = await deps.execFile(file, args, config.timeoutMs);
-  return { command: command.join(' '), outputBytes: String(stdout ?? '').length };
+  return { command: redactCommand(command).join(' '), outputBytes: String(stdout ?? '').length };
 }
 
 async function probeDashboardHealth(config, deps) {
@@ -239,7 +264,7 @@ async function main() {
   if (!report.ok) process.exitCode = 1;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error) => {
     console.error(normalizeError(error));
     process.exitCode = 2;
