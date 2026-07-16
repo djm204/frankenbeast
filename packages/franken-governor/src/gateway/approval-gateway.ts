@@ -152,9 +152,9 @@ export class ApprovalGateway {
     const anomalySummary = formatApprovalAnomalySummary(anomalyDecision);
     return {
       ...request,
-      summary: `${request.summary}\n\nSECURITY NOTICE: ${anomalySummary}`,
       metadata: {
         ...(request.metadata ?? {}),
+        approvalAnomalyNotice: anomalySummary,
         approvalAnomaly: {
           acknowledgementToken: anomalyDecision.acknowledgementToken,
           evidence: anomalyDecision.evidence,
@@ -170,8 +170,10 @@ export class ApprovalGateway {
     anomalyDecision: ApprovalAnomalyDecision | undefined,
   ): anomalyDecision is ApprovalAnomalyDecision {
     return response.decision === 'APPROVE'
-      && anomalyDecision?.flagged === true
-      && !hasApprovalAnomalyAcknowledgement(request, response, anomalyDecision);
+      || response.decision === 'DEBUG'
+      ? anomalyDecision?.flagged === true
+        && !hasApprovalAnomalyAcknowledgement(request, response, anomalyDecision)
+      : false;
   }
 
   private verifySignature(response: ApprovalResponse): void {

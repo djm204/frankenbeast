@@ -74,6 +74,8 @@ const DESTRUCTIVE_COMMAND_CLASSES = new Set<HighRiskActionClass>([
   'shell-process-control',
 ]);
 
+const ACKNOWLEDGEMENT_TOKEN_BOUNDARY = /[\s,;:|()[\]{}<>"'`]+/u;
+
 export class ApprovalAnomalyDetector {
   private readonly config: Required<ApprovalAnomalyDetectorConfig>;
   private records: ApprovalTrafficRecord[] = [];
@@ -82,8 +84,8 @@ export class ApprovalAnomalyDetector {
     this.config = normalizeApprovalAnomalyDetectorConfig(config);
   }
 
-  record(request: ApprovalRequest): ApprovalAnomalyDecision {
-    const evidence = extractApprovalTrafficEvidence(request);
+  record(request: ApprovalRequest, receiptTimestampMs = Date.now()): ApprovalAnomalyDecision {
+    const evidence = extractApprovalTrafficEvidence(request, receiptTimestampMs);
     const record: ApprovalTrafficRecord = {
       ...evidence,
       destructive: isDestructiveApprovalRequest(request, evidence.commandClass),
@@ -201,16 +203,34 @@ export class ApprovalAnomalyDetector {
 export function normalizeApprovalAnomalyDetectorConfig(
   config: ApprovalAnomalyDetectorConfig = {},
 ): Required<ApprovalAnomalyDetectorConfig> {
-  return {
+  const merged = {
     ...DEFAULT_APPROVAL_ANOMALY_CONFIG,
     ...config,
   };
+  for (const [key, value] of Object.entries(merged)) {
+    if (key === 'enabled') continue;
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || !Number.isInteger(value)) {
+      throw new Error(`Invalid approval anomaly detector config: ${key} must be a positive integer`);
+    }
+  }
+  return {
+    enabled: merged.enabled,
+    windowMs: merged.windowMs,
+    retryWindowMs: merged.retryWindowMs,
+    maxApprovalsPerWindow: merged.maxApprovalsPerWindow,
+    maxUniqueWorkdirsPerWindow: merged.maxUniqueWorkdirsPerWindow,
+    maxRepeatedDestructiveCommands: merged.maxRepeatedDestructiveCommands,
+    maxRapidRetries: merged.maxRapidRetries,
+  };
 }
 
-export function extractApprovalTrafficEvidence(request: ApprovalRequest): ApprovalTrafficEvidence {
+export function extractApprovalTrafficEvidence(
+  request: ApprovalRequest,
+  receiptTimestampMs = Date.now(),
+): ApprovalTrafficEvidence {
   const metadata = request.metadata ?? {};
-  const timestampMs = Number.isFinite(request.timestamp.getTime())
-    ? request.timestamp.getTime()
+  const timestampMs = Number.isFinite(receiptTimestampMs)
+    ? receiptTimestampMs
     : Date.now();
 
   return {
@@ -256,7 +276,9 @@ export function hasApprovalAnomalyAcknowledgement(
   response: ApprovalResponse,
   decision: ApprovalAnomalyDecision,
 ): boolean {
-  return response.feedback?.includes(decision.acknowledgementToken) === true;
+  return response.feedback
+    ?.split(ACKNOWLEDGEMENT_TOKEN_BOUNDARY)
+    .some((token) => token === decision.acknowledgementToken) === true;
 }
 
 function isWithinLookbackWindow(
@@ -285,7 +307,7 @@ function isDestructiveApprovalRequest(request: ApprovalRequest, commandClass: st
     return true;
   }
   return /\b(force-push|--force-with-lease|rm\s+-rf|delete|destroy|drop|kill|terminate)\b/iu.test(
-    `${request.summary}\n${request.planDiff ?? ''}`,
+    `${request.summary}\n${request.planDiff ?? ''}\n${readMetadataString(metadata, 'command') ?? ''}\n${readMetadataString(metadata, 'commandText') ?? ''}`,
   );
 }
 

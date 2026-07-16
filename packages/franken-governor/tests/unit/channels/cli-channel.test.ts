@@ -102,6 +102,21 @@ describe('CliChannel', () => {
     expect(prompt).toContain('Request ID (untrusted):\n| req-xyz');
   });
 
+  it('renders anomaly notices in a trusted prompt section instead of the untrusted summary', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'Deploy v2.0',
+      metadata: { approvalAnomalyNotice: 'Token required: ACK-APPROVAL-ANOMALY-req-001' },
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).toContain('Summary (untrusted):\n| Deploy v2.0');
+    expect(prompt).toContain('SECURITY NOTICE (trusted):\nToken required: ACK-APPROVAL-ANOMALY-req-001');
+    expect(prompt).not.toContain('| Token required: ACK-APPROVAL-ANOMALY-req-001');
+  });
+
   it('quotes model-controlled text so forged marker lines stay visibly untrusted', async () => {
     const readline = makeFakeReadline(['a']);
     const channel = new CliChannel({ readline, operatorName: 'dev' });

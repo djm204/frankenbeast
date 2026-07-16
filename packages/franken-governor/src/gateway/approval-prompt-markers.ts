@@ -29,6 +29,11 @@ export interface ApprovalPromptOptions {
   readonly untrustedPrefix?: string;
 }
 
+function readTrustedMetadataNotice(request: ApprovalRequest): string | undefined {
+  const value = request.metadata?.approvalAnomalyNotice;
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
 export function formatApprovalPromptWithBoundaries(
   request: ApprovalRequest,
   options: ApprovalPromptOptions = {},
@@ -50,6 +55,11 @@ export function formatApprovalPromptWithBoundaries(
     'Summary (untrusted):',
     formatUntrustedApprovalText(request.summary, untrustedPrefix),
   ];
+
+  const trustedNotice = readTrustedMetadataNotice(request);
+  if (trustedNotice) {
+    lines.push('SECURITY NOTICE (trusted):', trustedNotice);
+  }
 
   if (options.includePlanDiff && request.planDiff) {
     lines.push(

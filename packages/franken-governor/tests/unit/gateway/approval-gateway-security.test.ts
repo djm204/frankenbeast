@@ -246,8 +246,9 @@ describe('ApprovalGateway — security integration', () => {
       expect(second.reason).toContain('ACK-APPROVAL-ANOMALY-req-2');
     }
     expect(channel.requestApproval).toHaveBeenLastCalledWith(expect.objectContaining({
-      summary: expect.stringContaining('SECURITY NOTICE'),
+      summary: 'Deploy to production',
       metadata: expect.objectContaining({
+        approvalAnomalyNotice: expect.stringContaining('Approval anomaly detected'),
         approvalAnomaly: expect.objectContaining({ acknowledgementToken: 'ACK-APPROVAL-ANOMALY-req-2' }),
       }),
     }));
@@ -282,6 +283,38 @@ describe('ApprovalGateway — security integration', () => {
     }));
 
     expect(outcome.decision).toBe('APPROVE');
+  });
+
+  it('blocks anomalous DEBUG decisions without the explicit anomaly acknowledgement token', async () => {
+    const anomalyDetector = new ApprovalAnomalyDetector({ maxRapidRetries: 2 });
+    const channel = makeFakeChannel({ decision: 'DEBUG' });
+    const auditRecorder = makeFakeAuditRecorder();
+    const gateway = new ApprovalGateway({
+      channel,
+      auditRecorder,
+      config: defaultConfig(),
+      anomalyDetector,
+    });
+    const metadata = {
+      workerId: 'worker-1',
+      workdir: '/repo/a',
+      commandClass: 'github-mutation',
+      command: 'gh pr merge 1738 --squash',
+    };
+
+    await gateway.requestApproval(makeRequest({ requestId: 'req-1', metadata }));
+    const outcome = await gateway.requestApproval(makeRequest({
+      requestId: 'req-2',
+      timestamp: new Date('2026-01-01T00:00:05Z'),
+      metadata,
+    }));
+
+    expect(outcome.decision).toBe('ABORT');
+    expect(auditRecorder.record).toHaveBeenLastCalledWith(
+      expect.objectContaining({ requestId: 'req-2' }),
+      expect.objectContaining({ decision: 'ABORT' }),
+      { securityFailure: 'approval-anomaly' },
+    );
   });
 
   it('skips verification when requireSignedApprovals is false', async () => {

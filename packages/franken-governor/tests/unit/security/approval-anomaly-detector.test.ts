@@ -146,16 +146,17 @@ describe('ApprovalAnomalyDetector', () => {
     }, decision)).toBe(true);
   });
 
-  it('does not let future-dated records inflate later anomaly windows', () => {
+  it('uses trusted receipt time instead of caller-supplied request timestamps for windows', () => {
     const detector = new ApprovalAnomalyDetector({ maxApprovalsPerWindow: 1 });
 
-    detector.record(makeRequest('req-future', { timestamp: new Date('2026-01-01T00:10:00Z') }));
-    const decision = detector.record(makeRequest('req-now', {
-      timestamp: new Date('2026-01-01T00:00:00Z'),
+    detector.record(makeRequest('req-old', { timestamp: new Date('2020-01-01T00:00:00Z') }), 1_000);
+    const decision = detector.record(makeRequest('req-new', {
+      timestamp: new Date('2030-01-01T00:00:00Z'),
       metadata: { command: 'gh issue comment 1 --body ok', destructive: false },
-    }));
+    }), 1_001);
 
-    expect(decision.flagged).toBe(false);
+    expect(decision.flagged).toBe(true);
+    expect(decision.findings.map((finding) => finding.ruleId)).toContain('approval-volume');
   });
 
   it('honors explicit non-destructive metadata before command-class defaults', () => {
@@ -175,5 +176,47 @@ describe('ApprovalAnomalyDetector', () => {
     }));
 
     expect(decision.findings.map((finding) => finding.ruleId)).not.toContain('repeated-destructive-command');
+  });
+
+  it('scans command metadata when destructive flags and command class are omitted', () => {
+    const detector = new ApprovalAnomalyDetector({ maxRepeatedDestructiveCommands: 2 });
+    const metadata = {
+      workerId: 'worker-1',
+      workdir: '/repo/a',
+      command: 'git push --force-with-lease',
+    };
+
+    detector.record(makeRequest('req-1', { metadata }));
+    const decision = detector.record(makeRequest('req-2', {
+      timestamp: new Date('2026-01-01T00:00:05Z'),
+      metadata,
+    }));
+
+    expect(decision.findings.map((finding) => finding.ruleId)).toContain('repeated-destructive-command');
+  });
+
+  it('matches acknowledgement tokens exactly rather than by prefix', () => {
+    const request = makeRequest('req-12');
+    const decision = new ApprovalAnomalyDetector().record(request);
+
+    expect(hasApprovalAnomalyAcknowledgement(request, {
+      requestId: 'req-12',
+      decision: 'APPROVE',
+      respondedBy: 'operator',
+      respondedAt: new Date('2026-01-01T00:00:05Z'),
+      feedback: 'ACK-APPROVAL-ANOMALY-req-123',
+    }, { ...decision, flagged: true })).toBe(false);
+    expect(hasApprovalAnomalyAcknowledgement(request, {
+      requestId: 'req-12',
+      decision: 'APPROVE',
+      respondedBy: 'operator',
+      respondedAt: new Date('2026-01-01T00:00:05Z'),
+      feedback: 'ACK-APPROVAL-ANOMALY-req-12',
+    }, { ...decision, flagged: true })).toBe(true);
+  });
+
+  it('rejects invalid tuning values that would disable anomaly checks', () => {
+    expect(() => new ApprovalAnomalyDetector({ windowMs: -1 })).toThrow(/positive integer/u);
+    expect(() => new ApprovalAnomalyDetector({ maxRapidRetries: Number.NaN })).toThrow(/positive integer/u);
   });
 });
