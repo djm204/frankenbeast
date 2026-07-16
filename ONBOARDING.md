@@ -53,6 +53,18 @@ Use this checklist for a first local checkout or when rebuilding a development e
   ./scripts/bootstrap.sh --dry-run
   ```
 
+### Progress badges and status output
+
+The bootstrap script prints deterministic status badges as it advances through onboarding:
+
+```text
+[onboarding:1/6:prerequisites] start - checking Node.js, npm, and Corepack
+[onboarding:1/6:prerequisites] ok - Node.js v22.13.0 satisfies the repository engine range
+[onboarding:6/6:done] complete - onboarding bootstrap reached 6/6 steps
+```
+
+Read each badge as `[onboarding:<current>/<total>:<stage>] <state> - <detail>`. Automation can key on the stable `onboarding` prefix, fraction, stage, and state values (`start`, `ok`, `error`, `complete`) while humans can follow the detail text. If option parsing fails before the first stage, the stage is `args`; otherwise `error` badges keep the active stage name so PM/liveness tooling can identify the failed stage without parsing prose.
+
 - [ ] Review `.env` and fill in only the values you need:
 
   ```bash

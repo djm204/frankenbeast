@@ -238,6 +238,7 @@ function redactMemoryReviewDecisionGovernanceContext(action: string, context: st
       tool: 'fbeast_memory_review_decide',
       ...(typeof decisionArgs?.['id'] === 'string' ? { id: decisionArgs['id'] } : {}),
       ...(typeof decisionArgs?.['action'] === 'string' ? { action: decisionArgs['action'] } : {}),
+      ...(typeof decisionArgs?.['resolution'] === 'string' ? { resolution: decisionArgs['resolution'] } : {}),
       ...(decisionArgs !== undefined && Object.prototype.hasOwnProperty.call(decisionArgs, 'reviewer') ? { reviewer: '[memory-review-decision-metadata-redacted]' } : {}),
       ...(decisionArgs !== undefined && Object.prototype.hasOwnProperty.call(decisionArgs, 'note') ? { note: '[memory-review-decision-metadata-redacted]' } : {}),
     });
@@ -250,6 +251,7 @@ function redactMemoryReviewDecisionGovernanceContext(action: string, context: st
     return JSON.stringify({
       ...(typeof record['id'] === 'string' ? { id: record['id'] } : {}),
       ...(typeof record['action'] === 'string' ? { action: record['action'] } : {}),
+      ...(typeof record['resolution'] === 'string' ? { resolution: record['resolution'] } : {}),
       ...(Object.prototype.hasOwnProperty.call(record, 'reviewer') ? { reviewer: '[memory-review-decision-metadata-redacted]' } : {}),
       ...(Object.prototype.hasOwnProperty.call(record, 'note') ? { note: '[memory-review-decision-metadata-redacted]' } : {}),
     });
@@ -463,11 +465,25 @@ function assessAction(action: string, context: string): GovernorCheckResult {
       && unqualifyMcpActionName(stringContext(parseContextObject(context), 'tool') ?? '') === 'fbeast_memory_review_decide');
   if (isMemoryReviewDecision) {
     const parsed = parseContextObject(context);
-    const reviewAction = stringContext(parsed, 'action');
+    const decisionArgs = memoryReviewDecisionArgsFromContext(context, { requireExplicitTarget: unqualifiedAction === 'execute_tool' }) ?? parsed;
+    const reviewAction = stringContext(decisionArgs, 'action');
     if (reviewAction === 'approve') {
       return {
         decision: 'approved',
         reason: 'Memory review approval is the explicit operator promotion decision; candidate content remains governed by the review queue.',
+      };
+    }
+    if (reviewAction === 'resolve_conflict') {
+      const resolution = stringContext(decisionArgs, 'resolution');
+      if (resolution === 'keep_existing' || resolution === 'replace_existing' || resolution === 'reject_candidate') {
+        return {
+          decision: 'approved',
+          reason: 'Memory conflict resolution is an explicit operator review decision with structured resolution metadata; candidate content remains governed by the review queue.',
+        };
+      }
+      return {
+        decision: 'review_recommended',
+        reason: 'Memory conflict resolution requires an explicit keep_existing, replace_existing, or reject_candidate resolution.',
       };
     }
     if (reviewAction === 'never_store') {
@@ -475,7 +491,7 @@ function assessAction(action: string, context: string): GovernorCheckResult {
         actionClass: 'memory',
         evidence: {
           operation: 'review-never-store',
-          ...optionalTarget(stringContext(parsed, 'id')),
+          ...optionalTarget(stringContext(decisionArgs, 'id')),
         },
       });
       if (result.decision === 'allow') {

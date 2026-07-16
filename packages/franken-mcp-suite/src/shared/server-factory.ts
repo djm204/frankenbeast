@@ -234,10 +234,11 @@ const MEMORY_REVIEW_PROPOSE_TOOL = 'fbeast_memory_review_propose';
 const MEMORY_REVIEW_PROPOSE_SAFE_AUDIT_KEYS = new Set(['type', 'confidence']);
 const MEMORY_REVIEW_PROPOSE_SAFE_TYPES = new Set(['working', 'episodic']);
 const MEMORY_REVIEW_DECIDE_TOOL = 'fbeast_memory_review_decide';
-const MEMORY_REVIEW_DECIDE_SAFE_AUDIT_KEYS = new Set(['id', 'action']);
-const MEMORY_REVIEW_DECIDE_SAFE_ACTIONS = new Set(['approve', 'reject', 'never_store']);
 const MEMORY_SOURCE_ATTRIBUTION_TOOL = 'fbeast_memory_source_attribution';
 const MEMORY_SOURCE_ATTRIBUTION_SAFE_AUDIT_KEYS = new Set(['limit']);
+const MEMORY_REVIEW_DECIDE_SAFE_AUDIT_KEYS = new Set(['id', 'action', 'resolution']);
+const MEMORY_REVIEW_DECIDE_SAFE_ACTIONS = new Set(['approve', 'reject', 'never_store', 'resolve_conflict']);
+const MEMORY_REVIEW_DECIDE_SAFE_RESOLUTIONS = new Set(['keep_existing', 'replace_existing', 'reject_candidate']);
 const MEMORY_STORE_TOOL = 'fbeast_memory_store';
 const MEMORY_STORE_SAFE_AUDIT_KEYS = new Set(['key', 'type', 'agentId', 'ttlMs']);
 
@@ -283,6 +284,8 @@ function redactMemoryReviewDecisionArgs(sanitized: Record<string, unknown>, reda
   for (const key of Object.keys(sanitized)) {
     if (key === 'action' && !MEMORY_REVIEW_DECIDE_SAFE_ACTIONS.has(String(sanitized[key]))) {
       sanitized[key] = redaction;
+    } else if (key === 'resolution' && !MEMORY_REVIEW_DECIDE_SAFE_RESOLUTIONS.has(String(sanitized[key]))) {
+      sanitized[key] = redaction;
     } else if (!MEMORY_REVIEW_DECIDE_SAFE_AUDIT_KEYS.has(key)) {
       sanitized[key] = redaction;
     }
@@ -291,8 +294,12 @@ function redactMemoryReviewDecisionArgs(sanitized: Record<string, unknown>, reda
     sanitized['id'] = redaction;
   }
   if (Object.prototype.hasOwnProperty.call(sanitized, 'action')
-    && (typeof sanitized['action'] !== 'string' || !['approve', 'reject', 'never_store'].includes(sanitized['action']))) {
+    && (typeof sanitized['action'] !== 'string' || !MEMORY_REVIEW_DECIDE_SAFE_ACTIONS.has(sanitized['action']))) {
     sanitized['action'] = redaction;
+  }
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'resolution')
+    && (typeof sanitized['resolution'] !== 'string' || !MEMORY_REVIEW_DECIDE_SAFE_RESOLUTIONS.has(sanitized['resolution']))) {
+    sanitized['resolution'] = redaction;
   }
   return sanitized;
 }

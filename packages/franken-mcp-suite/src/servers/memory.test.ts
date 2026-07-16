@@ -29,6 +29,7 @@ function createBrainStub(overrides: Partial<BrainAdapter> = {}): BrainAdapter {
     }),
     listMemoryReview: vi.fn().mockResolvedValue([]),
     memoryAttribution: vi.fn().mockResolvedValue([]),
+    conflictsForMemoryReview: vi.fn().mockResolvedValue([]),
     decideMemoryReview: vi.fn().mockResolvedValue({
       id: "memcand_1",
       targetStore: "working",
@@ -61,6 +62,7 @@ describe("Memory Server", () => {
       "fbeast_memory_review_propose",
       "fbeast_memory_review_list",
       "fbeast_memory_source_attribution",
+      "fbeast_memory_review_conflicts",
       "fbeast_memory_review_decide",
     ]);
     const storeTool = server.tools.find(
@@ -429,6 +431,31 @@ describe("Memory Server", () => {
     expect(brain.listMemoryReview).toHaveBeenCalledWith("pending");
     expect(JSON.parse(listResult.content[0]!.text)).toMatchObject({ status: "pending", count: 1 });
 
+    vi.mocked(brain.conflictsForMemoryReview).mockResolvedValue([
+      {
+        targetStore: "working",
+        key: "user.preference.response-style",
+        conflictType: "value_mismatch",
+        proposedCandidateId: "memcand_1",
+        existingValue: "verbose",
+        proposedValue: "concise",
+        guidance: "Choose keep_existing, replace_existing, or reject_candidate.",
+      },
+    ]);
+    const conflictsResult = await server.callTool("fbeast_memory_review_conflicts", { id: "memcand_1" });
+    expect(brain.conflictsForMemoryReview).toHaveBeenCalledWith("memcand_1");
+    expect(JSON.parse(conflictsResult.content[0]!.text)).toMatchObject({
+      id: "memcand_1",
+      count: 1,
+      conflicts: [
+        {
+          key: "user.preference.response-style",
+          existingValue: "verbose",
+          proposedValue: "concise",
+        },
+      ],
+    });
+
     const decideResult = await server.callTool("fbeast_memory_review_decide", {
       id: "memcand_1",
       action: "approve",
@@ -441,6 +468,20 @@ describe("Memory Server", () => {
       options: { reviewer: "operator", note: "Confirmed." },
     });
     expect(JSON.parse(decideResult.content[0]!.text)).toMatchObject({ id: "memcand_1", status: "approved" });
+
+    await server.callTool("fbeast_memory_review_decide", {
+      id: "memcand_2",
+      action: "resolve_conflict",
+      resolution: "replace_existing",
+      reviewer: "operator",
+      note: "Newer evidence wins.",
+    });
+    expect(brain.decideMemoryReview).toHaveBeenLastCalledWith({
+      id: "memcand_2",
+      action: "resolve_conflict",
+      resolution: "replace_existing",
+      options: { reviewer: "operator", note: "Newer evidence wins." },
+    });
   });
 
   it("exposes memory source attribution with filters and empty-result structure", async () => {
@@ -535,6 +576,22 @@ describe("Memory Server", () => {
     expect(badAction.isError).toBe(true);
     expect(badAction.content[0]!.text).toContain("action must be one of");
     expect(brain.decideMemoryReview).not.toHaveBeenCalled();
+
+    const badResolution = await server.callTool("fbeast_memory_review_decide", {
+      id: "memcand_1",
+      action: "resolve_conflict",
+      resolution: "overwrite",
+    });
+    expect(badResolution.isError).toBe(true);
+    expect(badResolution.content[0]!.text).toContain("resolution must be one of");
+    expect(brain.decideMemoryReview).not.toHaveBeenCalled();
+
+    const blankConflictId = await server.callTool("fbeast_memory_review_conflicts", {
+      id: "   ",
+    });
+    expect(blankConflictId.isError).toBe(true);
+    expect(blankConflictId.content[0]!.text).toContain("id must be a non-empty string");
+    expect(brain.conflictsForMemoryReview).not.toHaveBeenCalled();
   });
 });
 

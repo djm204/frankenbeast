@@ -5,6 +5,9 @@ DRY_RUN=0
 START_DOCKER=0
 PROMPT_DOCKER=1
 ASSUME_YES=0
+ONBOARDING_TOTAL_STEPS=6
+ONBOARDING_STEP=0
+ONBOARDING_STAGE=args
 
 usage() {
   cat <<'USAGE'
@@ -30,12 +33,31 @@ USAGE
 }
 
 log() { printf '[bootstrap] %s\n' "$*"; }
-fail() { printf '[bootstrap] ERROR: %s\n' "$*" >&2; exit 1; }
+status() {
+  local state="$1"
+  local label="$2"
+  shift 2
+  printf '[onboarding:%s/%s:%s] %s' "$ONBOARDING_STEP" "$ONBOARDING_TOTAL_STEPS" "$label" "$state"
+  if [[ "$#" -gt 0 ]]; then
+    printf ' - %s' "$*"
+  fi
+  printf '\n'
+}
+step() {
+  ONBOARDING_STEP=$((ONBOARDING_STEP + 1))
+  ONBOARDING_STAGE="$1"
+  status start "$1" "$2"
+}
+fail() {
+  status error "$ONBOARDING_STAGE" "$*" >&2
+  printf '[bootstrap] ERROR: %s\n' "$*" >&2
+  exit 1
+}
 run() {
   if [[ "$DRY_RUN" -eq 1 ]]; then
     log "dry-run: $*"
   else
-    "$@"
+    "$@" || fail "Command failed: $*"
   fi
 }
 
@@ -53,11 +75,12 @@ done
 
 cd "$(dirname "$0")/.."
 
+step prerequisites "checking Node.js, npm, and Corepack"
 command -v node >/dev/null 2>&1 || fail "Node.js is required. Install Node.js >=22.13.0 <23 or >=24.0.0 <26."
 command -v npm >/dev/null 2>&1 || fail "npm is required. Enable Corepack and activate the repository packageManager pin."
 command -v corepack >/dev/null 2>&1 || fail "Corepack is required. Install it with: npm install -g corepack"
 
-node <<'NODE'
+if ! node <<'NODE'
 const version = process.versions.node.split('.').map(Number);
 const [major, minor, patch] = version;
 const ok = (major === 22 && (minor > 13 || (minor === 13 && patch >= 0))) || (major >= 24 && major < 26);
@@ -66,26 +89,35 @@ if (!ok) {
   process.exit(1);
 }
 NODE
-log "Node.js $(node --version) satisfies the repository engine range."
+then
+  fail "Node.js is outside the supported range. Install Node.js >=22.13.0 <23 or >=24.0.0 <26."
+fi
+status ok prerequisites "Node.js $(node --version) satisfies the repository engine range"
 
+step package-manager "activating pinned npm version"
 expected_pm="$(node -p "require('./package.json').packageManager")"
 expected_npm="${expected_pm#npm@}"
 actual_npm="$(npm --version)"
+package_manager_status="npm $actual_npm matches $expected_pm"
 if [[ "$actual_npm" != "$expected_npm" ]]; then
   if [[ "$DRY_RUN" -eq 1 ]]; then
     log "dry-run: npm $actual_npm does not match packageManager $expected_pm; a real bootstrap would run corepack prepare \"$expected_pm\" --activate and corepack enable npm"
+    package_manager_status="npm $actual_npm would be changed to $expected_pm by Corepack"
   else
     log "Activating repository package manager pin $expected_pm with Corepack."
-    corepack prepare "$expected_pm" --activate
-    corepack enable npm
+    run corepack prepare "$expected_pm" --activate
+    run corepack enable npm
     actual_npm="$(npm --version)"
     [[ "$actual_npm" == "$expected_npm" ]] || fail "npm $actual_npm does not match packageManager $expected_pm after Corepack activation."
+    package_manager_status="npm $actual_npm matches $expected_pm"
     log "npm $actual_npm matches packageManager $expected_pm."
   fi
 else
   log "npm $actual_npm matches packageManager $expected_pm."
 fi
+status ok package-manager "$package_manager_status"
 
+step env-file "creating or validating local environment defaults"
 [[ -f .env.example ]] || fail ".env.example is missing; cannot bootstrap local environment."
 if [[ ! -f .env ]]; then
   if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -124,7 +156,9 @@ if [[ -n "$default_keys" && -f .env ]]; then
     log ".env includes documented defaults."
   fi
 fi
+status ok env-file "local environment defaults are present or planned"
 
+step docker "evaluating optional Docker services"
 if [[ "$PROMPT_DOCKER" -eq 1 && "$ASSUME_YES" -eq 0 && "$DRY_RUN" -eq 0 && -t 0 ]]; then
   read -r -p "Start optional Docker compose services now? [y/N] " docker_answer
   case "$docker_answer" in
@@ -151,13 +185,26 @@ if [[ "$START_DOCKER" -eq 1 ]]; then
     command -v docker >/dev/null 2>&1 || fail "Docker is required for --services/--with-docker. Install Docker or rerun with --no-docker."
   fi
 fi
+if [[ "$START_DOCKER" -eq 1 ]]; then
+  status ok docker "optional services enabled"
+else
+  status ok docker "optional services skipped"
+fi
 
+step dependencies "installing workspace dependencies"
 run npm ci
+status ok dependencies "npm dependencies installed or dry-run planned"
 
+step services "starting requested optional services"
 if [[ "$START_DOCKER" -eq 1 ]]; then
   run docker compose up -d
 else
   log "Skipping optional Docker compose services. Use --services or --with-docker to start them."
+fi
+if [[ "$START_DOCKER" -eq 1 ]]; then
+  status ok services "optional services started or dry-run planned"
+else
+  status ok services "optional services intentionally skipped"
 fi
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -165,3 +212,4 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
 else
   log "Bootstrap completed successfully."
 fi
+status complete done "onboarding bootstrap reached $ONBOARDING_TOTAL_STEPS/$ONBOARDING_TOTAL_STEPS steps"
