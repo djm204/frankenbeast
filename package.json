@@ -31,6 +31,7 @@
     "local:verify-cli": "fbeast --help && fbeast mcp --help && frankenbeast --help",
     "local:verify-setup": "tsx scripts/verify-setup.ts",
     "new-worker:preflight": "node scripts/new-worker-preflight.mjs",
+    "profile:capability-self-test": "node scripts/profile-capability-self-test.mjs",
     "first-run:checklist": "node scripts/first-run-checklist.mjs",
     "workspace:tour": "node scripts/workspace-tour.mjs",
     "test": "turbo run test",
