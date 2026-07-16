@@ -344,6 +344,7 @@ export type MemoryAccessAuditOperation =
   | 'review.neverStore'
   | 'review.resolutionPromptFor'
   | 'review.provenanceFor'
+  | 'review.listProvenance'
   | 'review.conflictsFor'
   | 'privacy.rightToForget';
 
@@ -2540,33 +2541,43 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
   }
 
   lastCheckpoint(): ExecutionState | null {
-    const stmt = this.db.prepare(
-      `SELECT * FROM checkpoints ORDER BY id DESC LIMIT ? OFFSET ?`,
-    );
-    for (let offset = 0; ; offset += CORRUPT_JSON_SCAN_BATCH_SIZE) {
-      const rows = stmt.all(
-        CORRUPT_JSON_SCAN_BATCH_SIZE,
-        offset,
-      ) as CheckpointRow[];
-      for (const row of rows) {
-        const state = parseCheckpointState(row, this.encryption);
-        if (state !== null) {
+    try {
+      const stmt = this.db.prepare(
+        `SELECT * FROM checkpoints ORDER BY id DESC LIMIT ? OFFSET ?`,
+      );
+      for (let offset = 0; ; offset += CORRUPT_JSON_SCAN_BATCH_SIZE) {
+        const rows = stmt.all(
+          CORRUPT_JSON_SCAN_BATCH_SIZE,
+          offset,
+        ) as CheckpointRow[];
+        for (const row of rows) {
+          const state = parseCheckpointState(row, this.encryption);
+          if (state !== null) {
+            this.audit?.({
+              operation: 'recovery.lastCheckpoint',
+              store: 'recovery',
+              outcome: 'success',
+            });
+            return state;
+          }
+        }
+        if (rows.length < CORRUPT_JSON_SCAN_BATCH_SIZE) {
           this.audit?.({
             operation: 'recovery.lastCheckpoint',
             store: 'recovery',
-            outcome: 'success',
+            outcome: 'miss',
           });
-          return state;
+          return null;
         }
       }
-      if (rows.length < CORRUPT_JSON_SCAN_BATCH_SIZE) {
-        this.audit?.({
-          operation: 'recovery.lastCheckpoint',
-          store: 'recovery',
-          outcome: 'miss',
-        });
-        return null;
-      }
+    } catch (error) {
+      this.audit?.({
+        operation: 'recovery.lastCheckpoint',
+        store: 'recovery',
+        outcome: 'error',
+        details: { errorName: error instanceof Error ? error.name : 'Error' },
+      });
+      throw error;
     }
   }
 
@@ -3140,9 +3151,6 @@ export class SqliteMemoryReviewQueue {
     if (options.keys !== undefined && options.keys.some(key => key.trim().length === 0)) {
       throw new Error('Memory attribution key filter must not be empty');
     }
-    if (options.keys !== undefined && options.keys.length === 0) {
-      return [];
-    }
     if (options.key !== undefined && options.keys !== undefined) {
       throw new Error('Memory attribution key and keys filters are mutually exclusive');
     }
@@ -3150,57 +3158,120 @@ export class SqliteMemoryReviewQueue {
       throw new Error('Memory attribution source filter must not be empty');
     }
 
-    const conditions: string[] = [];
-    const params: unknown[] = [];
-    if (options.targetStore !== undefined) {
-      conditions.push('target_store = ?');
-      params.push(options.targetStore);
+    const auditQuery = this.provenanceListAuditQuery(options);
+    const auditDetails = this.provenanceListAuditDetails(options, limit);
+    if (options.keys !== undefined && options.keys.length === 0) {
+      this.audit?.({
+        operation: 'review.listProvenance',
+        store: 'review',
+        outcome: 'miss',
+        query: auditQuery,
+        details: { ...auditDetails, count: 0 },
+      });
+      return [];
     }
-    if (options.key !== undefined) {
-      conditions.push('memory_key = ?');
-      params.push(options.key);
-    }
-    if (options.keys !== undefined && options.keys.length > 0) {
-      conditions.push(`memory_key IN (${options.keys.map(() => '?').join(', ')})`);
-      params.push(...options.keys);
-    }
-    const visibleKeyPrefixes = options.visibleKeyPrefixes ?? [];
-    if (visibleKeyPrefixes.length > 0) {
-      const visibleConditions = visibleKeyPrefixes.map(() => "memory_key LIKE ? ESCAPE '\\'");
-      params.push(...visibleKeyPrefixes.map(prefix => `${prefix.replace(/[\\%_]/g, char => `\\${char}`)}%`));
-      if (options.includeUnprefixedKeys) {
-        const unprefixedExclusions = options.unprefixedKeyPrefixExclusions ?? visibleKeyPrefixes;
-        visibleConditions.push(...unprefixedExclusions.map(() => "memory_key NOT LIKE ? ESCAPE '\\'"));
-        params.push(...unprefixedExclusions.map(prefix => `${prefix.replace(/[\\%_]/g, char => `\\${char}`)}%`));
+
+    try {
+      const conditions: string[] = [];
+      const params: unknown[] = [];
+      if (options.targetStore !== undefined) {
+        conditions.push('target_store = ?');
+        params.push(options.targetStore);
       }
-      conditions.push(options.includeUnprefixedKeys
-        ? `(${visibleConditions.slice(0, visibleKeyPrefixes.length).join(' OR ')} OR (${visibleConditions.slice(visibleKeyPrefixes.length).join(' AND ')}))`
-        : `(${visibleConditions.join(' OR ')})`);
-    }
-    for (const prefix of options.excludeKeyPrefixes ?? []) {
-      conditions.push("memory_key NOT LIKE ? ESCAPE '\\'");
-      params.push(`${prefix.replace(/[\\%_]/g, char => `\\${char}`)}%`);
-    }
-    const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM memory_review_provenance${where} ORDER BY approved_at DESC, memory_key ASC`,
-      )
-      .all(...params) as MemoryProvenanceRow[];
-    const sourceFilter = options.source?.trim().toLowerCase();
-    const attributions: MemoryProvenanceRecord[] = [];
-    for (const row of rows) {
-      if (!this.provenanceMatchesCurrentWorkingMemory(row)) {
-        continue;
+      if (options.key !== undefined) {
+        conditions.push('memory_key = ?');
+        params.push(options.key);
       }
-      const provenance = this.rowToProvenance(row);
-      if (sourceFilter && !provenance.source.toLowerCase().includes(sourceFilter)) {
-        continue;
+      if (options.keys !== undefined && options.keys.length > 0) {
+        conditions.push(`memory_key IN (${options.keys.map(() => '?').join(', ')})`);
+        params.push(...options.keys);
       }
-      attributions.push(provenance);
-      if (attributions.length >= limit) break;
+      const visibleKeyPrefixes = options.visibleKeyPrefixes ?? [];
+      if (visibleKeyPrefixes.length > 0) {
+        const visibleConditions = visibleKeyPrefixes.map(() => "memory_key LIKE ? ESCAPE '\\'");
+        params.push(...visibleKeyPrefixes.map(prefix => `${prefix.replace(/[\\%_]/g, char => `\\${char}`)}%`));
+        if (options.includeUnprefixedKeys) {
+          const unprefixedExclusions = options.unprefixedKeyPrefixExclusions ?? visibleKeyPrefixes;
+          visibleConditions.push(...unprefixedExclusions.map(() => "memory_key NOT LIKE ? ESCAPE '\\'"));
+          params.push(...unprefixedExclusions.map(prefix => `${prefix.replace(/[\\%_]/g, char => `\\${char}`)}%`));
+        }
+        conditions.push(options.includeUnprefixedKeys
+          ? `(${visibleConditions.slice(0, visibleKeyPrefixes.length).join(' OR ')} OR (${visibleConditions.slice(visibleKeyPrefixes.length).join(' AND ')}))`
+          : `(${visibleConditions.join(' OR ')})`);
+      }
+      for (const prefix of options.excludeKeyPrefixes ?? []) {
+        conditions.push("memory_key NOT LIKE ? ESCAPE '\\'");
+        params.push(`${prefix.replace(/[\\%_]/g, char => `\\${char}`)}%`);
+      }
+      const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
+      const rows = this.db
+        .prepare(
+          `SELECT * FROM memory_review_provenance${where} ORDER BY approved_at DESC, memory_key ASC`,
+        )
+        .all(...params) as MemoryProvenanceRow[];
+      const sourceFilter = options.source?.trim().toLowerCase();
+      const attributions: MemoryProvenanceRecord[] = [];
+      for (const row of rows) {
+        if (!this.provenanceMatchesCurrentWorkingMemory(row)) {
+          continue;
+        }
+        const provenance = this.rowToProvenance(row);
+        if (sourceFilter && !provenance.source.toLowerCase().includes(sourceFilter)) {
+          continue;
+        }
+        attributions.push(provenance);
+        if (attributions.length >= limit) break;
+      }
+      this.audit?.({
+        operation: 'review.listProvenance',
+        store: 'review',
+        outcome: attributions.length > 0 ? 'success' : 'miss',
+        query: auditQuery,
+        details: { ...auditDetails, count: attributions.length },
+      });
+      return attributions;
+    } catch (error) {
+      this.audit?.({
+        operation: 'review.listProvenance',
+        store: 'review',
+        outcome: 'error',
+        query: auditQuery,
+        details: {
+          ...auditDetails,
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
+      throw error;
     }
-    return attributions;
+  }
+
+  private provenanceListAuditQuery(options: MemoryAttributionListOptions): string {
+    return JSON.stringify({
+      targetStore: options.targetStore,
+      key: options.key,
+      keys: options.keys,
+      source: options.source,
+      visibleKeyPrefixes: options.visibleKeyPrefixes,
+      includeUnprefixedKeys: options.includeUnprefixedKeys,
+      unprefixedKeyPrefixExclusions: options.unprefixedKeyPrefixExclusions,
+      excludeKeyPrefixes: options.excludeKeyPrefixes,
+    });
+  }
+
+  private provenanceListAuditDetails(
+    options: MemoryAttributionListOptions,
+    limit: number,
+  ): Record<string, unknown> {
+    return {
+      targetStore: options.targetStore ?? 'all',
+      hasKeyFilter: options.key !== undefined,
+      keyCount: options.keys?.length,
+      hasSourceFilter: options.source !== undefined,
+      visiblePrefixCount: options.visibleKeyPrefixes?.length,
+      excludePrefixCount: options.excludeKeyPrefixes?.length,
+      includeUnprefixedKeys: options.includeUnprefixedKeys,
+      limit,
+    };
   }
 
   private resolveAttributionLimit(limit: number | undefined): number {

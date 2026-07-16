@@ -13,7 +13,6 @@ const CURRENT_SCHEMA_REQUIRED_TABLES = [
   ...REQUIRED_BACKUP_TABLES,
   'memory_deletion_guards',
   'memory_deletion_hash_keys',
-  'memory_access_audit_events',
 ] as const;
 const MEMORY_BACKUP_TABLES = [
   'memory_schema_versions',
@@ -339,6 +338,21 @@ function verifyAccessAuditKeyLink(db: Database.Database, tables: Set<string>): v
   const auditColumns = readTableColumns(db, 'memory_access_audit_events');
   const hashColumns = ['key_hash', 'query_hash'].filter((column) => auditColumns.has(column));
   if (hashColumns.length === 0) return;
+  for (const column of hashColumns) {
+    const rows = db
+      .prepare(
+        `SELECT ${sqliteIdentifier(column)} AS hashValue
+         FROM memory_access_audit_events
+         WHERE ${sqliteIdentifier(column)} IS NOT NULL`,
+      )
+      .all() as Array<{ hashValue: string }>;
+    const invalid = rows.find((row) => !/^[0-9a-f]{64}$/iu.test(row.hashValue));
+    if (invalid) {
+      throw new Error(
+        `Memory backup has non-HMAC access audit hash value in memory_access_audit_events.${column}`,
+      );
+    }
+  }
   const hashedPredicate = hashColumns.map((column) => `${sqliteIdentifier(column)} IS NOT NULL`).join(' OR ');
   const hashedAuditRows = db
     .prepare(`SELECT COUNT(*) AS count FROM memory_access_audit_events WHERE ${hashedPredicate}`)

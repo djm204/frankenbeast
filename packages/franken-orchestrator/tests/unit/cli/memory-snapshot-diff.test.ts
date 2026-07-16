@@ -411,9 +411,9 @@ describe('handleMemoryCommand', () => {
     expect(() => verifyMemoryBackup(backupPath)).toThrow(/working_memory is missing required column\(s\): value/);
   });
 
-  it('requires current-schema v1 backups to include the access audit table', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'memory-backup-verify-audit-table-'));
-    const backupPath = join(dir, 'missing-audit.sqlite');
+  it('keeps legacy schema-v1 backups verifiable when no access audit store is registered', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'memory-backup-verify-legacy-schema-'));
+    const backupPath = join(dir, 'legacy-schema.sqlite');
     const db = new Database(backupPath);
     db.exec(`
       CREATE TABLE memory_schema_versions (store TEXT PRIMARY KEY, version INTEGER NOT NULL, migrated_at TEXT NOT NULL);
@@ -425,7 +425,7 @@ describe('handleMemoryCommand', () => {
     `);
     db.close();
 
-    expect(() => verifyMemoryBackup(backupPath)).toThrow(/Current memory backup is missing required table\(s\): memory_access_audit_events/);
+    expect(verifyMemoryBackup(backupPath)).toMatchObject({ ok: true });
   });
 
   it('validates required access audit backup columns', async () => {
@@ -468,7 +468,7 @@ describe('handleMemoryCommand', () => {
       );
       INSERT INTO memory_deletion_hash_keys VALUES ('memory-access-audit-hmac-v1', 'material', '2026-07-11T00:00:00.000Z');
       INSERT INTO memory_access_audit_events (operation, store, key_hash, outcome, details, created_at)
-      VALUES ('working.get', 'working', 'hmac:key', 'success', 'not json', '2026-07-11T00:00:01.000Z');
+      VALUES ('working.get', 'working', '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'success', 'not json', '2026-07-11T00:00:01.000Z');
     `);
     db.close();
 
@@ -625,11 +625,32 @@ describe('handleMemoryCommand', () => {
       CREATE TABLE memory_access_audit_events (id INTEGER PRIMARY KEY AUTOINCREMENT, operation TEXT NOT NULL, store TEXT NOT NULL, key_hash TEXT, query_hash TEXT, outcome TEXT NOT NULL, details TEXT, created_at TEXT NOT NULL, schema_version INTEGER NOT NULL DEFAULT 1);
       INSERT INTO memory_schema_versions VALUES ('working_memory', 1, '2026-07-11T00:00:00.000Z');
       INSERT INTO memory_deletion_hash_keys VALUES ('right-to-forget-hmac-v1', 'material', '2026-07-11T00:00:01.000Z');
-      INSERT INTO memory_access_audit_events (operation, store, key_hash, outcome, created_at) VALUES ('working.get', 'working', 'abc123', 'success', '2026-07-11T00:00:02.000Z');
+      INSERT INTO memory_access_audit_events (operation, store, key_hash, outcome, created_at) VALUES ('working.get', 'working', '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'success', '2026-07-11T00:00:02.000Z');
     `);
     db.close();
 
     expect(() => verifyMemoryBackup(backupPath)).toThrow(/missing canonical access audit hash key memory-access-audit-hmac-v1/);
+  });
+
+  it('rejects raw access-audit hash column values', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'memory-backup-verify-audit-raw-hash-'));
+    const backupPath = join(dir, 'raw-audit-hash.sqlite');
+    const db = new Database(backupPath);
+    db.exec(`
+      CREATE TABLE working_memory (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE episodic_events (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, step TEXT, summary TEXT NOT NULL, details TEXT, embedding BLOB, created_at TEXT NOT NULL);
+      CREATE TABLE checkpoints (id INTEGER PRIMARY KEY AUTOINCREMENT, state TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE memory_schema_versions (store TEXT PRIMARY KEY, version INTEGER NOT NULL, migrated_at TEXT NOT NULL);
+      CREATE TABLE memory_deletion_guards (selector_hash TEXT NOT NULL, guard_kind TEXT NOT NULL, value_hash TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE memory_deletion_hash_keys (id TEXT PRIMARY KEY, key_material TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE memory_access_audit_events (id INTEGER PRIMARY KEY AUTOINCREMENT, operation TEXT NOT NULL, store TEXT NOT NULL, key_hash TEXT, query_hash TEXT, outcome TEXT NOT NULL, details TEXT, created_at TEXT NOT NULL, schema_version INTEGER NOT NULL DEFAULT 1);
+      INSERT INTO memory_schema_versions VALUES ('working_memory', 1, '2026-07-11T00:00:00.000Z');
+      INSERT INTO memory_deletion_hash_keys VALUES ('memory-access-audit-hmac-v1', 'material', '2026-07-11T00:00:01.000Z');
+      INSERT INTO memory_access_audit_events (operation, store, key_hash, outcome, created_at) VALUES ('working.get', 'working', 'raw-memory-key', 'success', '2026-07-11T00:00:02.000Z');
+    `);
+    db.close();
+
+    expect(() => verifyMemoryBackup(backupPath)).toThrow(/non-HMAC access audit hash value/);
   });
 
   it('rejects hashed access audit rows without a hash key table', async () => {
@@ -652,7 +673,7 @@ describe('handleMemoryCommand', () => {
         schema_version INTEGER NOT NULL DEFAULT 1
       );
       INSERT INTO memory_access_audit_events (operation, store, key_hash, outcome, details, created_at)
-      VALUES ('working.get', 'working', 'hmac:key', 'success', '{}', '2026-07-11T00:00:01.000Z');
+      VALUES ('working.get', 'working', '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'success', '{}', '2026-07-11T00:00:01.000Z');
     `);
     db.close();
 

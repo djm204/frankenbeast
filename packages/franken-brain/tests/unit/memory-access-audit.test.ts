@@ -933,6 +933,58 @@ describe('memory access audit trail', () => {
     brain.close();
   });
 
+  it('audits provenance list reads and failures without raw filters', () => {
+    const brain = new SqliteBrain(':memory:');
+    const candidate = brain.memoryReview.propose({
+      targetStore: 'working',
+      key: 'audit.provenance.list',
+      value: 'audited provenance',
+      source: 'operator',
+      confidence: 0.9,
+      reason: 'Provenance list audit coverage.',
+    });
+    brain.memoryReview.approve(candidate.id, { reviewer: 'operator' });
+
+    expect(brain.memoryReview.listProvenance({ key: 'audit.provenance.list' })).toHaveLength(1);
+    const successAudit = brain.accessAudit.list({ operation: 'review.listProvenance', limit: 1 })[0];
+    expect(successAudit).toMatchObject({
+      operation: 'review.listProvenance',
+      outcome: 'success',
+      queryHash: expect.any(String),
+    });
+    expect(JSON.stringify(successAudit)).not.toContain('audit.provenance.list');
+
+    expect(brain.memoryReview.listProvenance({ keys: [] })).toEqual([]);
+    expect(brain.accessAudit.list({ operation: 'review.listProvenance', limit: 1 })[0]).toMatchObject({
+      outcome: 'miss',
+      details: { count: 0 },
+    });
+
+    const db = (brain as unknown as { db: Database.Database }).db;
+    db.exec('DROP TABLE memory_review_provenance');
+    expect(() => brain.memoryReview.listProvenance({ key: 'audit.provenance.list' })).toThrow(/memory_review_provenance/);
+    expect(brain.accessAudit.list({ operation: 'review.listProvenance', limit: 1 })[0]).toMatchObject({
+      operation: 'review.listProvenance',
+      outcome: 'error',
+    });
+
+    brain.close();
+  });
+
+  it('audits failed last-checkpoint reads before rethrowing', () => {
+    const brain = new SqliteBrain(':memory:');
+    const db = (brain as unknown as { db: Database.Database }).db;
+    db.exec('DROP TABLE checkpoints');
+
+    expect(() => brain.recovery.lastCheckpoint()).toThrow(/checkpoints/);
+    expect(brain.accessAudit.list({ operation: 'recovery.lastCheckpoint', limit: 1 })[0]).toMatchObject({
+      operation: 'recovery.lastCheckpoint',
+      outcome: 'error',
+    });
+
+    brain.close();
+  });
+
   it('audits dry-run right-to-forget scans once', () => {
     const brain = new SqliteBrain(':memory:');
     brain.working.set('dry-run-forget-key', 'dry-run-forget-secret');
