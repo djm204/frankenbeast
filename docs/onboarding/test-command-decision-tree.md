@@ -23,14 +23,19 @@ Use this decision tree before handing a branch to review. Pick the narrowest com
      ```
 
 3. **Did you change one package's runtime or tests?**
-   - Run that package's targeted test and typecheck scripts:
+   - Run that package's targeted test, typecheck, and build scripts when they exist:
      ```bash
      npm test --workspace @franken/<package>
      npm run typecheck --workspace @franken/<package>
+     npm run build --workspace @franken/<package>
      ```
    - If the package consumes generated workspace exports, build its dependencies first. A common fresh-checkout prerequisite is:
      ```bash
      npm run build --workspace @franken/types
+     ```
+   - If the package owns an integration suite, prefer its workspace integration script over the root aggregate:
+     ```bash
+     npm run test:integration --workspace @franken/<package>
      ```
 
 4. **Did you change shared types or cross-package contracts?**
@@ -48,13 +53,23 @@ Use this decision tree before handing a branch to review. Pick the narrowest com
      npm run test:e2e
      npm run test:live:bench
      ```
+   - For package-owned integration suites outside the root aggregate filters, run the package script directly:
+     ```bash
+     npm run test:integration --workspace @franken/<package>
+     ```
+   - For root-level E2E tests under `tests/integration/`, run the root suite with the E2E flag or the exact file:
+     ```bash
+     E2E=true npm run test:root
+     E2E=true npm run test:root -- tests/integration/e2e-beast-loop.test.ts
+     ```
 
 6. **Are you preparing a CI-equivalent local handoff?**
-   - Use the aggregate CI test target after the narrower checks pass:
+   - Use the aggregate CI test target and the separate CI E2E smoke gate after the narrower checks pass:
      ```bash
      npm run test:ci
+     npm run ci:test:e2e
      ```
-   - `test:ci` intentionally excludes Docker smoke, security/dependency audits, lint, live benchmarks, and the broader orchestrator E2E gate; run those separately when you changed those surfaces.
+   - `test:ci` intentionally excludes Docker smoke, security/dependency audits, lint, live benchmarks, and the broader orchestrator E2E gate; `ci:test:e2e` covers the dedicated CI E2E smoke step. Run the other excluded gates separately when you changed those surfaces.
 
 ## Negative and edge cases
 

@@ -38,6 +38,7 @@ describe('issue #1772 onboarding test command decision tree', () => {
       'test:eval',
       'test:e2e',
       'test:live:bench',
+      'ci:test:e2e',
       'typecheck',
       'lint',
     ]) {
@@ -58,6 +59,10 @@ describe('issue #1772 onboarding test command decision tree', () => {
       'Do not use `test:eval`, `test:e2e`, or `test:live:bench` as default smoke checks.',
       'Do not treat a dry-run task graph as enough evidence by itself.',
       'Do not run package scripts from a stale shell directory.',
+      'npm run build --workspace @franken/<package>',
+      'npm run test:integration --workspace @franken/<package>',
+      'E2E=true npm run test:root -- tests/integration/e2e-beast-loop.test.ts',
+      'npm run ci:test:e2e',
       'Broader gates skipped:',
     ]) {
       expect(guide).toContain(requiredText);
