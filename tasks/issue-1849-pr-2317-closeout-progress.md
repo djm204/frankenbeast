@@ -6,6 +6,7 @@
 - [x] Fix unresolved audit gaps without broadening beyond memory access audit trail work.
 - [x] Merge/rebase origin/main and resolve conflicts.
 - [x] Run package tests/typecheck/lint/build and targeted regressions.
+  - Targeted rerun after latest fixes: `@franken/brain` memory-access-audit test passed (18 tests); `@franken/orchestrator` memory-snapshot-diff test passed (31 tests).
 - [ ] Push branch and verify CI.
 - [ ] Reply to and resolve Codex threads with concrete evidence.
 - [ ] Trigger fresh @codex review within invocation cap and wait for current-head clean.

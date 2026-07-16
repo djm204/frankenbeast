@@ -866,7 +866,18 @@ class SqliteWorkingMemory implements IWorkingMemory {
       return true;
     };
     const tx = this.db.transaction(applyFlush);
-    const hasChanges = this.db.inTransaction ? applyFlush() : tx.immediate();
+    let hasChanges: boolean;
+    try {
+      hasChanges = this.db.inTransaction ? applyFlush() : tx.immediate();
+    } catch (error) {
+      this.audit?.({
+        operation: 'working.flush',
+        store: 'working',
+        outcome: 'error',
+        details: { errorName: error instanceof Error ? error.name : 'Error' },
+      });
+      throw error;
+    }
     this.audit?.({
       operation: 'working.flush',
       store: 'working',
@@ -2146,9 +2157,12 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
     const finalizeWorkingMemoryFlush: { current: (() => void) | undefined } = {
       current: undefined,
     };
+    const flushState = { attempted: false, completed: false };
     const tx = this.db.transaction(() => {
+      flushState.attempted = true;
       finalizeWorkingMemoryFlush.current =
         this.flushWorkingMemory?.() ?? undefined;
+      flushState.completed = true;
       const result = this.db
         .prepare(
           `INSERT INTO checkpoints (state, created_at, schema_version) VALUES (?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
@@ -2172,6 +2186,14 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
       });
       return result;
     } catch (error) {
+      if (flushState.attempted && !flushState.completed) {
+        this.audit?.({
+          operation: 'working.flush',
+          store: 'working',
+          outcome: 'error',
+          details: { errorName: error instanceof Error ? error.name : 'Error' },
+        });
+      }
       this.audit?.({
         operation: 'recovery.checkpoint',
         store: 'recovery',
@@ -2514,8 +2536,7 @@ export class SqliteMemoryReviewQueue {
         outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
         details: {
           id,
-          status: candidate?.status,
-          targetStore: candidate?.targetStore,
+          ...(candidate ? { status: candidate.status, targetStore: candidate.targetStore } : {}),
           errorName: error instanceof Error ? error.name : 'Error',
         },
       });
@@ -2566,16 +2587,15 @@ export class SqliteMemoryReviewQueue {
     try {
       tx.immediate();
     } catch (error) {
-      const candidate = this.requireCandidate(id);
+      const candidate = this.tryCandidate(id);
       this.audit?.({
         operation: 'review.reject',
         store: 'review',
-        key: candidate.key,
+        ...(candidate ? { key: candidate.key } : {}),
         outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
         details: {
           id,
-          status: candidate.status,
-          targetStore: candidate.targetStore,
+          ...(candidate ? { status: candidate.status, targetStore: candidate.targetStore } : {}),
           errorName: error instanceof Error ? error.name : 'Error',
         },
       });
@@ -2620,16 +2640,16 @@ export class SqliteMemoryReviewQueue {
     try {
       tx.immediate();
     } catch (error) {
-      const candidate = this.requireCandidate(id);
+      const candidate = this.tryCandidate(id);
+      const auditKey = originalKey ?? candidate?.key;
       this.audit?.({
         operation: 'review.neverStore',
         store: 'review',
-        key: originalKey ?? candidate.key,
+        ...(auditKey !== undefined ? { key: auditKey } : {}),
         outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
         details: {
           id,
-          status: candidate.status,
-          targetStore: candidate.targetStore,
+          ...(candidate ? { status: candidate.status, targetStore: candidate.targetStore } : {}),
           errorName: error instanceof Error ? error.name : 'Error',
         },
       });
@@ -3655,6 +3675,10 @@ export class SqliteBrain implements IBrain {
           dryRun: false,
           deletedWorking: deletedWorkingKeys.size,
           deletedEpisodic: episodicMatchCount,
+          deletedCheckpoints: checkpointMatchCount,
+          deletedReviewPayloads: reviewMatchCount,
+          deletedDerived: checkpointMatchCount + reviewMatchCount,
+          deletedTotalDerived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
         },
       };
       if (normalizedSelector.query !== undefined) accessEvent.query = normalizedSelector.query;

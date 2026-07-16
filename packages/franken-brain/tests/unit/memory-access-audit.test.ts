@@ -249,6 +249,24 @@ describe('memory access audit trail', () => {
     brain.close();
   });
 
+  it('audits missing review reject and never-store candidates before rethrowing', () => {
+    const brain = new SqliteBrain(':memory:');
+
+    expect(() => brain.memoryReview.reject('missing-reject-candidate')).toThrow(/not found/);
+    expect(() => brain.memoryReview.neverStore('missing-never-store-candidate')).toThrow(/not found/);
+
+    const rejectAudit = brain.accessAudit.list({ operation: 'review.reject' });
+    const neverStoreAudit = brain.accessAudit.list({ operation: 'review.neverStore' });
+    expect(rejectAudit[0]).toMatchObject({ operation: 'review.reject', outcome: 'error' });
+    expect(rejectAudit[0]?.details?.id).toBe('missing-reject-candidate');
+    expect(rejectAudit[0]?.keyHash).toBeUndefined();
+    expect(neverStoreAudit[0]).toMatchObject({ operation: 'review.neverStore', outcome: 'error' });
+    expect(neverStoreAudit[0]?.details?.id).toBe('missing-never-store-candidate');
+    expect(neverStoreAudit[0]?.keyHash).toBeUndefined();
+
+    brain.close();
+  });
+
   it('does not emit an internal working.clear audit event during restore', () => {
     const brain = new SqliteBrain(':memory:');
 
@@ -340,6 +358,63 @@ describe('memory access audit trail', () => {
 
     const audit = brain.accessAudit.list({ operation: 'recovery.checkpoint', limit: 1 })[0];
     expect(audit.outcome).toBe('error');
+  });
+
+  it('audits working-memory flush failures before rethrowing', () => {
+    const brain = new SqliteBrain(':memory:');
+    const db = (brain as unknown as { db: { exec: (sql: string) => void } }).db;
+    db.exec(`
+      CREATE TRIGGER fail_working_memory_insert
+      BEFORE INSERT ON working_memory
+      BEGIN
+        SELECT RAISE(ABORT, 'simulated working flush failure');
+      END;
+    `);
+
+    brain.working.set('flush.failure.target', 'value that should fail on checkpoint flush');
+    expect(() =>
+      brain.recovery.checkpoint({
+        runId: 'flush-audit-run',
+        phase: 'audit',
+        step: 1,
+        context: {},
+        timestamp: new Date().toISOString(),
+      }),
+    ).toThrow('simulated working flush failure');
+
+    const audit = brain.accessAudit.list({ operation: 'working.flush', limit: 1 })[0];
+    expect(audit).toMatchObject({ operation: 'working.flush', outcome: 'error' });
+    expect(audit.details?.errorName).toBeTruthy();
+
+    brain.close();
+  });
+
+  it('includes derived right-to-forget deletions in access audit details', () => {
+    const brain = new SqliteBrain(':memory:');
+    brain.recovery.checkpoint({
+      runId: 'derived-forget-run',
+      phase: 'audit',
+      step: 1,
+      context: { note: 'derived-forget-secret' },
+      timestamp: new Date().toISOString(),
+    });
+    brain.memoryReview.propose({
+      targetStore: 'working',
+      key: 'derived.review.target',
+      value: 'derived-forget-secret review payload',
+      source: 'operator',
+      confidence: 0.9,
+      reason: 'Candidate for derived right-to-forget audit.',
+    });
+
+    const report = brain.rightToForget({ query: 'derived-forget-secret' });
+    const audit = brain.accessAudit.list({ operation: 'privacy.rightToForget', limit: 1 })[0];
+    expect(report.deleted.derived).toBeGreaterThan(0);
+    expect(audit.details?.deletedCheckpoints).toBeGreaterThan(0);
+    expect(audit.details?.deletedReviewPayloads).toBeGreaterThan(0);
+    expect(audit.details?.deletedDerived).toBe(report.deleted.derived);
+
+    brain.close();
   });
 
   it('audits attempts to approve missing review candidates', () => {

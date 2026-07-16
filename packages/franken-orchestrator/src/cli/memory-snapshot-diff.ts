@@ -42,6 +42,7 @@ const REQUIRED_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
 };
 const ENCRYPTED_MEMORY_PREFIX = 'enc:v1:';
 const DELETION_HASH_KEY_ID = 'right-to-forget-hmac-v1';
+const ACCESS_AUDIT_HASH_KEY_ID = 'memory-access-audit-hmac-v1';
 
 export interface SnapshotDiff<T = unknown> {
   readonly added: Record<string, T>;
@@ -331,6 +332,24 @@ function verifyDeletionGuardKeyLink(db: Database.Database, tables: Set<string>):
   }
 }
 
+function verifyAccessAuditKeyLink(db: Database.Database, tables: Set<string>): void {
+  if (!tables.has('memory_access_audit_events') || !tables.has('memory_deletion_hash_keys')) return;
+  const auditColumns = readTableColumns(db, 'memory_access_audit_events');
+  const hashColumns = ['key_hash', 'query_hash'].filter((column) => auditColumns.has(column));
+  if (hashColumns.length === 0) return;
+  const hashedPredicate = hashColumns.map((column) => `${sqliteIdentifier(column)} IS NOT NULL`).join(' OR ');
+  const hashedAuditRows = db
+    .prepare(`SELECT COUNT(*) AS count FROM memory_access_audit_events WHERE ${hashedPredicate}`)
+    .get() as { count: number };
+  if (hashedAuditRows.count === 0) return;
+  const row = db
+    .prepare(`SELECT id FROM memory_deletion_hash_keys WHERE id = ? LIMIT 1`)
+    .get(ACCESS_AUDIT_HASH_KEY_ID) as { id: string } | undefined;
+  if (!row) {
+    throw new Error(`Memory backup has access audit hashes but is missing canonical access audit hash key ${ACCESS_AUDIT_HASH_KEY_ID}`);
+  }
+}
+
 function readSchemaStores(db: Database.Database, tables: Set<string>): MemoryBackupVerificationReport['schema']['stores'] {
   if (!tables.has('memory_schema_versions')) {
     return REQUIRED_BACKUP_TABLES.map((store) => ({
@@ -559,6 +578,7 @@ export function verifyMemoryBackup(path: string): MemoryBackupVerificationReport
       verifyPayloadColumns(db, table, columns, encryptedStores);
     }
     verifyDeletionGuardKeyLink(db, tables);
+    verifyAccessAuditKeyLink(db, tables);
 
     const stores = readSchemaStores(db, tables);
     return {
