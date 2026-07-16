@@ -8,6 +8,7 @@ import {
   quarantineLesson,
   quarantineLessonForRepeatedFailures,
   unquarantineLesson,
+  updateLessonScope,
 } from '../../../src/memory/lesson-recorder.js';
 import { EVALUATOR_EXCEPTION_LOCATION } from '../../../src/types/evaluation.js';
 import type {
@@ -1534,6 +1535,530 @@ describe('LessonRecorder', () => {
     });
   });
 
+  it('records critique lessons with one-task scope until a reviewer promotes sharing', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port, {
+      now: (): Date => new Date('2026-07-13T00:00:00.000Z'),
+    });
+
+    await recorder.record(
+      {
+        verdict: 'pass',
+        iterations: [
+          createIteration(0, 'fail', 'scope-reviewer', [
+            {
+              message:
+                'Repo-specific build lesson should not be injected into unrelated repos.',
+              severity: 'warning',
+              suggestion:
+                'Keep the lesson one-task scoped until a reviewer approves broader sharing.',
+            },
+          ]),
+          createIteration(1, 'pass'),
+        ],
+      },
+      'scope-task',
+    );
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as CritiqueLesson;
+    expect(lesson.lessonScope).toMatchObject({
+      schemaVersion: 'lesson-scope-v1',
+      scope: 'task',
+      allowedTasks: ['scope-task'],
+      provenance: {
+        source: 'critique-loop',
+        taskId: 'scope-task',
+      },
+      auditTrail: [
+        expect.objectContaining({
+          actor: 'lesson-recorder',
+          toScope: 'task',
+          reason:
+            'Default one-task scope prevents cross-agent sharing before review.',
+        }),
+      ],
+    });
+    expect(isLessonApplicable(lesson, { taskId: 'scope-task' })).toBe(false);
+    const approved = applyHumanFeedbackToLesson(lesson, {
+      source: 'explicit-user-approval',
+      reason: 'Traceability and scope reviewed for repo-local reuse.',
+      observedAt: '2026-07-13T00:10:00.000Z',
+      evidence: [
+        {
+          kind: 'operator-report',
+          reference:
+            'https://github.com/djm204/frankenbeast/issues/1731#scope-review',
+        },
+      ],
+    });
+    expect(isLessonApplicable(approved)).toBe(false);
+    expect(isLessonApplicable(approved, { taskId: 'scope-task' })).toBe(true);
+  });
+
+  it('filters scoped lessons by repo role profile task and expiry', () => {
+    const baseLesson = createLesson({ lifecycleStatus: 'active' });
+    const reviewedAt = '2026-07-13T01:00:00.000Z';
+
+    const globalForReviewer = updateLessonScope(baseLesson, {
+      scope: 'global',
+      allowedRoles: ['reviewer'],
+      actor: 'pm-reviewer',
+      reason: 'Safe global workflow lesson only for reviewer agents.',
+      changedAt: reviewedAt,
+      provenance: { source: 'human-review', taskId: 'scope-task' },
+    });
+    expect(isLessonApplicable(globalForReviewer, { role: 'reviewer' })).toBe(
+      true,
+    );
+    expect(isLessonApplicable(globalForReviewer, { role: 'worker' })).toBe(
+      false,
+    );
+
+    const repoScoped = updateLessonScope(baseLesson, {
+      scope: 'repo',
+      allowedRepos: ['djm204/frankenbeast'],
+      actor: 'pm-reviewer',
+      reason: 'Repo-specific convention must stay in this repository.',
+      changedAt: reviewedAt,
+      provenance: { source: 'human-review', taskId: 'scope-task' },
+    });
+    expect(
+      isLessonApplicable(repoScoped, { repo: 'djm204/frankenbeast' }),
+    ).toBe(true);
+    expect(isLessonApplicable(repoScoped, { repo: 'other/repo' })).toBe(false);
+
+    const profileScoped = updateLessonScope(baseLesson, {
+      scope: 'profile',
+      allowedProfiles: ['default'],
+      actor: 'pm-reviewer',
+      reason: 'Profile-local fact must not leak to other Hermes profiles.',
+      changedAt: reviewedAt,
+      provenance: { source: 'human-review', taskId: 'scope-task' },
+    });
+    expect(isLessonApplicable(profileScoped, { profile: 'default' })).toBe(
+      true,
+    );
+    const globalForOneTask = updateLessonScope(baseLesson, {
+      scope: 'global',
+      allowedTasks: ['task-a'],
+      actor: 'pm-reviewer',
+      reason: 'Globally reusable only for one migration task.',
+      changedAt: reviewedAt,
+      provenance: { source: 'human-review', taskId: 'scope-task' },
+    });
+    expect(isLessonApplicable(globalForOneTask, { taskId: 'task-a' })).toBe(
+      true,
+    );
+    expect(isLessonApplicable(globalForOneTask, { taskId: 'task-b' })).toBe(
+      false,
+    );
+
+    const malformedExpiry = {
+      ...updateLessonScope(baseLesson, {
+        scope: 'task',
+        allowedTasks: ['task-a'],
+        actor: 'pm-reviewer',
+        reason: 'Persisted malformed expiry must fail closed.',
+        changedAt: reviewedAt,
+        provenance: { source: 'human-review', taskId: 'scope-task' },
+      }),
+      lessonScope: {
+        ...updateLessonScope(baseLesson, {
+          scope: 'task',
+          allowedTasks: ['task-a'],
+          actor: 'pm-reviewer',
+          reason: 'Persisted malformed expiry must fail closed.',
+          changedAt: reviewedAt,
+          provenance: { source: 'human-review', taskId: 'scope-task' },
+        }).lessonScope!,
+        expiresAt: 'not-a-date',
+      },
+    };
+    expect(isLessonApplicable(malformedExpiry, { taskId: 'task-a' })).toBe(
+      false,
+    );
+    expect(
+      isLessonApplicable(
+        {
+          ...baseLesson,
+          lessonScope: {
+            scope: 'future-scope',
+            allowedTasks: ['task-a'],
+            provenance: { source: 'recorded', taskId: 'scope-task' },
+            auditTrail: [],
+          } as unknown as CritiqueLesson['lessonScope'],
+        },
+        { taskId: 'task-a' },
+      ),
+    ).toBe(false);
+
+    const importedRepoWithoutAudit = {
+      ...baseLesson,
+      lessonScope: {
+        schemaVersion: 'lesson-scope-v1',
+        scope: 'repo',
+        allowedRepos: ['djm204/frankenbeast'],
+        provenance: { source: 'recorded', taskId: 'scope-task' },
+        auditTrail: [],
+      },
+    } satisfies CritiqueLesson;
+    expect(
+      isLessonApplicable(importedRepoWithoutAudit, {
+        repo: 'djm204/frankenbeast',
+      }),
+    ).toBe(false);
+
+    const importedRepoWithWrongAuditScope = {
+      ...baseLesson,
+      lessonScope: {
+        schemaVersion: 'lesson-scope-v1',
+        scope: 'repo',
+        allowedRepos: ['djm204/frankenbeast'],
+        provenance: { source: 'recorded', taskId: 'scope-task' },
+        auditTrail: [
+          {
+            changedAt: reviewedAt,
+            actor: 'pm-reviewer',
+            toScope: 'task',
+            reason: 'Only attested a task-local scope.',
+          },
+        ],
+      },
+    } satisfies CritiqueLesson;
+    expect(
+      isLessonApplicable(importedRepoWithWrongAuditScope, {
+        repo: 'djm204/frankenbeast',
+      }),
+    ).toBe(false);
+
+    const importedRepoWithMalformedAudit = {
+      ...baseLesson,
+      lessonScope: {
+        schemaVersion: 'lesson-scope-v1',
+        scope: 'repo',
+        allowedRepos: ['djm204/frankenbeast'],
+        provenance: { source: 'recorded', taskId: 'scope-task' },
+        auditTrail: [{ changedAt: reviewedAt, actor: 42, toScope: 'repo' }],
+      } as unknown as CritiqueLesson['lessonScope'],
+    };
+    expect(
+      isLessonApplicable(importedRepoWithMalformedAudit, {
+        repo: 'djm204/frankenbeast',
+      }),
+    ).toBe(false);
+
+    const importedRepoWithMissingAudit = {
+      ...baseLesson,
+      lessonScope: {
+        schemaVersion: 'lesson-scope-v1',
+        scope: 'repo',
+        allowedRepos: ['djm204/frankenbeast'],
+        provenance: { source: 'recorded', taskId: 'scope-task' },
+      } as unknown as CritiqueLesson['lessonScope'],
+    };
+    expect(
+      isLessonApplicable(importedRepoWithMissingAudit, {
+        repo: 'djm204/frankenbeast',
+      }),
+    ).toBe(false);
+
+    const unknownSchemaRepoScope = {
+      ...repoScoped,
+      lessonScope: {
+        ...repoScoped.lessonScope!,
+        schemaVersion: 'lesson-scope-v2',
+      } as unknown as CritiqueLesson['lessonScope'],
+    };
+    expect(
+      isLessonApplicable(unknownSchemaRepoScope, {
+        repo: 'djm204/frankenbeast',
+      }),
+    ).toBe(false);
+
+    const expired = updateLessonScope(baseLesson, {
+      scope: 'role',
+      allowedRoles: ['worker'],
+      actor: 'pm-reviewer',
+      reason: 'Temporary role lesson should expire after the migration.',
+      changedAt: reviewedAt,
+      expiresAt: '2026-07-13T02:00:00.000Z',
+      provenance: { source: 'human-review', taskId: 'scope-task' },
+    });
+    expect(
+      isLessonApplicable(expired, {
+        role: 'worker',
+        now: '2026-07-13T01:30:00.000Z',
+      }),
+    ).toBe(true);
+    expect(
+      isLessonApplicable(expired, {
+        role: 'worker',
+        now: '2026-07-13T02:00:00.000Z',
+      }),
+    ).toBe(false);
+  });
+
+  it('requires scope-specific allowlists and appends review audit entries', () => {
+    const baseLesson = createLesson({ lifecycleStatus: 'active' });
+
+    expect(() =>
+      updateLessonScope(baseLesson, {
+        scope: 'repo',
+        actor: 'pm-reviewer',
+        reason: 'Missing repo allowlist should fail closed.',
+        changedAt: '2026-07-13T01:00:00.000Z',
+      }),
+    ).toThrow('Repo-scoped lessons require at least one allowed repo.');
+
+    const repoScoped = updateLessonScope(baseLesson, {
+      scope: 'repo',
+      allowedRepos: ['djm204/frankenbeast'],
+      actor: 'pm-reviewer',
+      reason: 'Promote to repo scope after review.',
+      changedAt: '2026-07-13T01:00:00.000Z',
+    });
+    const roleScoped = updateLessonScope(repoScoped, {
+      scope: 'role',
+      allowedRoles: ['reviewer'],
+      clearAllowlists: ['repos'],
+      actor: 'senior-reviewer',
+      reason: 'Demote to reviewer-only scope after privacy review.',
+      changedAt: '2026-07-13T02:00:00.000Z',
+    });
+
+    expect(roleScoped.lessonScope).toMatchObject({
+      scope: 'role',
+      allowedRoles: ['reviewer'],
+    });
+    expect(roleScoped.lessonScope?.allowedRepos).toBeUndefined();
+    expect(roleScoped.lessonScope?.auditTrail).toEqual([
+      expect.objectContaining({
+        actor: 'pm-reviewer',
+        toScope: 'repo',
+      }),
+      expect.objectContaining({
+        actor: 'senior-reviewer',
+        fromScope: 'repo',
+        toScope: 'role',
+      }),
+    ]);
+
+    const taskScoped = updateLessonScope(baseLesson, {
+      scope: 'task',
+      allowedTasks: ['scope-task'],
+      actor: 'pm-reviewer',
+      reason: 'Start as task-local until review.',
+      changedAt: '2026-07-13T03:00:00.000Z',
+      expiresAt: '2026-07-20T00:00:00.000Z',
+    });
+    const promoted = updateLessonScope(taskScoped, {
+      scope: 'repo',
+      allowedRepos: ['djm204/frankenbeast'],
+      clearAllowlists: ['tasks'],
+      actor: 'pm-reviewer',
+      reason: 'Promote after review without carrying the task allowlist.',
+      changedAt: '2026-07-13T04:00:00.000Z',
+    });
+    expect(promoted.lessonScope).toMatchObject({
+      scope: 'repo',
+      allowedRepos: ['djm204/frankenbeast'],
+      expiresAt: '2026-07-20T00:00:00.000Z',
+    });
+    expect(promoted.lessonScope?.allowedTasks).toBeUndefined();
+
+    const narrowedGlobal = updateLessonScope(baseLesson, {
+      scope: 'global',
+      allowedRoles: ['reviewer'],
+      actor: 'pm-reviewer',
+      reason: 'Global reviewer-only guidance.',
+      changedAt: '2026-07-13T05:00:00.000Z',
+    });
+    const metadataOnlyReview = updateLessonScope(narrowedGlobal, {
+      scope: 'global',
+      actor: 'pm-reviewer',
+      reason: 'Refresh audit metadata without widening.',
+      changedAt: '2026-07-13T06:00:00.000Z',
+    });
+    expect(metadataOnlyReview.lessonScope?.allowedRoles).toEqual(['reviewer']);
+
+    const repoScopedReviewerOnly = updateLessonScope(narrowedGlobal, {
+      scope: 'repo',
+      allowedRepos: ['djm204/frankenbeast'],
+      actor: 'pm-reviewer',
+      reason: 'Narrow global reviewer-only guidance to one repository.',
+      changedAt: '2026-07-13T06:30:00.000Z',
+    });
+    expect(repoScopedReviewerOnly.lessonScope).toMatchObject({
+      scope: 'repo',
+      allowedRepos: ['djm204/frankenbeast'],
+      allowedRoles: ['reviewer'],
+    });
+    expect(
+      isLessonApplicable(repoScopedReviewerOnly, {
+        repo: 'djm204/frankenbeast',
+        role: 'reviewer',
+      }),
+    ).toBe(true);
+    expect(
+      isLessonApplicable(repoScopedReviewerOnly, {
+        repo: 'djm204/frankenbeast',
+        role: 'worker',
+      }),
+    ).toBe(false);
+
+    const clearedRoleNarrowing = updateLessonScope(repoScopedReviewerOnly, {
+      scope: 'repo',
+      clearAllowlists: ['roles'],
+      actor: 'pm-reviewer',
+      reason: 'Explicitly clear role narrowing after review.',
+      changedAt: '2026-07-13T06:45:00.000Z',
+    });
+    expect(clearedRoleNarrowing.lessonScope?.allowedRoles).toBeUndefined();
+
+    const demoted = updateLessonScope(promoted, {
+      scope: 'task',
+      allowedTasks: ['scope-task'],
+      clearAllowlists: ['repos'],
+      actor: 'pm-reviewer',
+      reason: 'Demote back to task-local.',
+      changedAt: '2026-07-13T07:00:00.000Z',
+    });
+    expect(demoted.lessonScope).toMatchObject({
+      scope: 'task',
+      allowedTasks: ['scope-task'],
+    });
+    expect(demoted.lessonScope?.allowedRepos).toBeUndefined();
+  });
+
+  it('ignores scoped-out prior lessons during promotion critique', async () => {
+    const scopedOutPrior = updateLessonScope(
+      createLesson({
+        failureDescription: 'Cache guidance allowed unaudited stale responses',
+        correctionApplied: 'Require cache verification before reuse',
+        taskId: 'prior-task',
+        lifecycleStatus: 'active',
+      }),
+      {
+        scope: 'task',
+        allowedTasks: ['prior-task'],
+        actor: 'pm-reviewer',
+        reason: 'Prior lesson is task-local only.',
+        changedAt: '2026-07-13T01:00:00.000Z',
+      },
+    );
+    const port = {
+      ...createMockMemoryPort(),
+      searchLessons: vi.fn().mockResolvedValue([scopedOutPrior]),
+    };
+    const recorder = new LessonRecorder(port, {
+      now: (): Date => new Date('2026-07-13T03:00:00.000Z'),
+    });
+
+    await recorder.record(
+      {
+        verdict: 'pass',
+        iterations: [
+          createIteration(0, 'fail', 'factuality', [
+            {
+              message: 'Cache guidance allowed unaudited stale responses',
+              severity: 'warning',
+              suggestion: 'Require cache verification before reuse',
+            },
+          ]),
+          createIteration(1, 'pass'),
+        ],
+      },
+      'current-task',
+    );
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as CritiqueLesson;
+    expect(lesson.contradictionReport?.status).not.toBe(
+      'contradiction_detected',
+    );
+    expect(
+      lesson.proposedLessonCritique?.findings.some((finding) =>
+        finding.evidenceRefs.some(
+          (ref) =>
+            ref !== 'duplicate:not_checked' && ref.startsWith('duplicate:'),
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it('uses per-review lesson injection context before filtering prior lessons', async () => {
+    const scopedPrior = updateLessonScope(
+      createLesson({
+        failureDescription: 'Cache guidance allowed unaudited stale responses',
+        correctionApplied: 'Require cache verification before reuse',
+        taskId: 'prior-task',
+        lifecycleStatus: 'active',
+      }),
+      {
+        scope: 'repo',
+        allowedRepos: ['djm204/frankenbeast'],
+        actor: 'pm-reviewer',
+        reason: 'Prior lesson is repo-local.',
+        changedAt: '2026-07-13T01:00:00.000Z',
+      },
+    );
+    const scopedOutPriors = Array.from({ length: 10 }, (_, index) =>
+      updateLessonScope(
+        createLesson({
+          failureDescription: `Scoped-out duplicate ${index}`,
+          correctionApplied: 'Require cache verification before reuse',
+          taskId: `scoped-out-${index}`,
+          lifecycleStatus: 'active',
+        }),
+        {
+          scope: 'task',
+          allowedTasks: [`scoped-out-${index}`],
+          actor: 'pm-reviewer',
+          reason: 'Scoped to another task.',
+          changedAt: '2026-07-13T01:00:00.000Z',
+        },
+      ),
+    );
+    const port = {
+      ...createMockMemoryPort(),
+      searchLessons: vi
+        .fn()
+        .mockResolvedValue([...scopedOutPriors, scopedPrior]),
+    };
+    const recorder = new LessonRecorder(port, {
+      now: (): Date => new Date('2026-07-13T03:00:00.000Z'),
+    });
+
+    await recorder.record(
+      {
+        verdict: 'pass',
+        iterations: [
+          createIteration(0, 'fail', 'factuality', [
+            {
+              message: 'Cache guidance allowed unaudited stale responses',
+              severity: 'warning',
+              suggestion: 'Require cache verification before reuse',
+            },
+          ]),
+          createIteration(1, 'pass'),
+        ],
+      },
+      'current-task',
+      { repo: 'djm204/frankenbeast' },
+    );
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as CritiqueLesson;
+    expect(
+      lesson.proposedLessonCritique?.findings.some(
+        (finding) =>
+          finding.checklistItem === 'duplication' &&
+          finding.verdict === 'needs-edit',
+      ),
+    ).toBe(true);
+  });
+
   it('weights explicit human feedback higher than inferred lesson signals', async () => {
     const port = createMockMemoryPort();
     const recorder = new LessonRecorder(port, {
@@ -1700,7 +2225,8 @@ describe('LessonRecorder', () => {
           evidence: [
             {
               kind: 'operator-report',
-              reference: 'https://github.com/djm204/frankenbeast/issues/1763#critique',
+              reference:
+                'https://github.com/djm204/frankenbeast/issues/1763#critique',
             },
           ],
         },
@@ -1745,8 +2271,10 @@ describe('LessonRecorder', () => {
     expect(manualReviewApproved.lifecycleStatus).toBe('active');
     expect(manualReviewApproved.experimentSandbox).toBeUndefined();
 
-    const { proposedLessonCritique: ignoredPromotionCritique, ...approvalReadyLesson } =
-      lesson;
+    const {
+      proposedLessonCritique: ignoredPromotionCritique,
+      ...approvalReadyLesson
+    } = lesson;
     void ignoredPromotionCritique;
 
     const directlyApproved = applyHumanFeedbackToLesson(approvalReadyLesson, {
@@ -1773,7 +2301,9 @@ describe('LessonRecorder', () => {
         },
       ],
     });
-    expect(isLessonApplicable(directlyApproved)).toBe(true);
+    expect(
+      isLessonApplicable(directlyApproved, { taskId: 'feedback-weight-task' }),
+    ).toBe(true);
 
     const approvedLegacySandboxed = applyHumanFeedbackToLesson(
       { ...approvalReadyLesson, lifecycleStatus: 'active' },
@@ -1792,7 +2322,11 @@ describe('LessonRecorder', () => {
     );
     expect(approvedLegacySandboxed.lifecycleStatus).toBe('active');
     expect(approvedLegacySandboxed.experimentSandbox).toBeUndefined();
-    expect(isLessonApplicable(approvedLegacySandboxed)).toBe(true);
+    expect(
+      isLessonApplicable(approvedLegacySandboxed, {
+        taskId: 'feedback-weight-task',
+      }),
+    ).toBe(true);
 
     const approvedAfterCorrection = applyHumanFeedbackToLesson(corrected, {
       source: 'explicit-user-approval',
@@ -1885,7 +2419,9 @@ describe('LessonRecorder', () => {
     expect(approvedLegacy.unquarantine?.evidenceUrl).toBe(
       'https://github.com/djm204/frankenbeast/issues/1763#legacy',
     );
-    expect(isLessonApplicable(approvedLegacy)).toBe(true);
+    expect(
+      isLessonApplicable(approvedLegacy, { taskId: 'feedback-weight-task' }),
+    ).toBe(true);
 
     const legacySandboxedActiveQuarantine = quarantineLesson(
       {
@@ -1930,10 +2466,18 @@ describe('LessonRecorder', () => {
     expect(approvedLegacySandboxedQuarantine.lifecycleStatus).toBe('active');
     expect(approvedLegacySandboxedQuarantine.quarantine).toBeUndefined();
     expect(approvedLegacySandboxedQuarantine.experimentSandbox).toBeUndefined();
-    expect(isLessonApplicable(approvedLegacySandboxedQuarantine)).toBe(true);
+    expect(
+      isLessonApplicable(approvedLegacySandboxedQuarantine, {
+        taskId: 'feedback-weight-task',
+      }),
+    ).toBe(true);
 
     const approvedRetired = applyHumanFeedbackToLesson(
-      { ...approvalReadyLesson, lifecycleStatus: 'retired', experimentSandbox: undefined },
+      {
+        ...approvalReadyLesson,
+        lifecycleStatus: 'retired',
+        experimentSandbox: undefined,
+      },
       {
         source: 'explicit-user-approval',
         reason: 'User acknowledged retired guidance for audit history only.',
@@ -1973,14 +2517,14 @@ describe('LessonRecorder', () => {
 
     await recorder.record(result, 'first-task');
     now = new Date('2026-07-12T10:00:30.000Z');
-    const suppressed = await recorder.record(result, 'second-task');
+    const suppressed = await recorder.record(result, 'first-task');
 
     expect(suppressed.learningBacklogPrioritizationReport.items).toEqual([
       expect.objectContaining({
         source: 'cooldown-suppression',
         priority: 'low',
         score: 20,
-        taskId: 'second-task',
+        taskId: 'first-task',
         evaluatorName: 'learning-reviewer',
         recommendedAction:
           'Reuse the existing in-cooldown lesson until suppression expires; do not create a duplicate backlog item.',
@@ -2414,7 +2958,9 @@ describe('LessonRecorder', () => {
       evidenceUrl: 'https://github.com/djm204/frankenbeast/pull/3',
       reason: 'Replacement guidance has regression coverage.',
     });
-    expect(isLessonApplicable(unquarantined)).toBe(true);
+    expect(
+      isLessonApplicable(unquarantined, { taskId: 'lifecycle-task' }),
+    ).toBe(true);
   });
 
   it('does not attach rollback workflow guidance when no actionable lesson is recorded', async () => {
@@ -2471,7 +3017,7 @@ describe('LessonRecorder', () => {
       minedBlockerPatterns: [],
     });
     expect(lesson.cooldown).toEqual({
-      key: expect.stringMatching(/^critique-lesson:learning-reviewer:/),
+      key: expect.stringMatching(/^critique-lesson:[^:]+:learning-reviewer:/),
       windowMs: 60_000,
       recordedAt: '2026-07-12T10:00:00.000Z',
       suppressUntil: '2026-07-12T10:01:00.000Z',
@@ -2503,14 +3049,14 @@ describe('LessonRecorder', () => {
 
     await recorder.record(result, 'first-task');
     now = new Date('2026-07-12T10:00:30.000Z');
-    const suppressed = await recorder.record(result, 'second-task');
+    const suppressed = await recorder.record(result, 'first-task');
 
     expect(port.recordLesson).toHaveBeenCalledTimes(1);
     expect(suppressed.recorded).toBe(0);
     expect(suppressed.suppressedByCooldown).toEqual([
       {
-        key: expect.stringMatching(/^critique-lesson:learning-reviewer:/),
-        taskId: 'second-task',
+        key: expect.stringMatching(/^critique-lesson:[^:]+:learning-reviewer:/),
+        taskId: 'first-task',
         evaluatorName: 'learning-reviewer',
         suppressedAt: '2026-07-12T10:00:30.000Z',
         suppressUntil: '2026-07-12T10:01:00.000Z',
@@ -2519,6 +3065,35 @@ describe('LessonRecorder', () => {
           'Equivalent critique lesson is still inside the learning cooldown window; reuse the existing lesson metadata instead of recording another copy.',
       },
     ]);
+  });
+
+  it('does not suppress equivalent task-scoped lessons across different tasks', async () => {
+    const port = createMockMemoryPort();
+    let now = new Date('2026-07-12T10:00:00.000Z');
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 60_000,
+      now: (): Date => now,
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning-reviewer', [
+          {
+            message: 'Repeated PM handoff lesson caused churn',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'first-task');
+    now = new Date('2026-07-12T10:00:30.000Z');
+    const second = await recorder.record(result, 'second-task');
+
+    expect(port.recordLesson).toHaveBeenCalledTimes(2);
+    expect(second.recorded).toBe(1);
+    expect(second.suppressedByCooldown).toEqual([]);
   });
 
   it('clusters repeated failures by task family, package, tool, and root cause without retaining raw transcripts', async () => {
@@ -2574,8 +3149,8 @@ describe('LessonRecorder', () => {
         occurrences: 1,
       }),
     ]);
-    expect(secondSummary.recorded).toBe(0);
-    expect(secondSummary.suppressedByCooldown).toHaveLength(1);
+    expect(secondSummary.recorded).toBe(1);
+    expect(secondSummary.suppressedByCooldown).toEqual([]);
     expect(secondSummary.failureClusterReport.clusters).toEqual([
       expect.objectContaining({
         taskFamily: 'frontend auth',
@@ -2846,14 +3421,14 @@ describe('LessonRecorder', () => {
     };
 
     await firstRecorder.record(result, 'first-task');
-    const suppressed = await secondRecorder.record(result, 'second-task');
+    const suppressed = await secondRecorder.record(result, 'first-task');
 
     expect(port.recordLesson).toHaveBeenCalledTimes(1);
     expect(suppressed).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [
         expect.objectContaining({
-          taskId: 'second-task',
+          taskId: 'first-task',
           remainingMs: 30_000,
         }),
       ],
@@ -2900,7 +3475,7 @@ describe('LessonRecorder', () => {
 
     const firstRecord = firstRecorder.record(result, 'first-task');
     await persistenceStarted;
-    const secondRecord = secondRecorder.record(result, 'second-task');
+    const secondRecord = secondRecorder.record(result, 'first-task');
     releasePersistence();
     const [firstSummary, secondSummary] = await Promise.all([
       firstRecord,
@@ -2915,9 +3490,7 @@ describe('LessonRecorder', () => {
     });
     expect(secondSummary).toMatchObject({
       recorded: 0,
-      suppressedByCooldown: [
-        expect.objectContaining({ taskId: 'second-task' }),
-      ],
+      suppressedByCooldown: [expect.objectContaining({ taskId: 'first-task' })],
       minedBlockerPatterns: [],
     });
   });
@@ -2998,7 +3571,7 @@ describe('LessonRecorder', () => {
     now = new Date('2026-07-12T10:00:02.000Z');
     releasePersistence();
     await firstRecord;
-    const secondSummary = await recorder.record(result, 'second-task');
+    const secondSummary = await recorder.record(result, 'first-task');
     const firstLesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
       .calls[0]![0] as {
       cooldown: { recordedAt: string; suppressUntil: string };
@@ -3045,7 +3618,7 @@ describe('LessonRecorder', () => {
 
     const firstRecord = recorder.record(result, 'first-task');
     await persistenceStarted;
-    const secondRecord = recorder.record(result, 'second-task');
+    const secondRecord = recorder.record(result, 'first-task');
     releasePersistence();
     const [firstSummary, secondSummary] = await Promise.all([
       firstRecord,
@@ -3062,7 +3635,7 @@ describe('LessonRecorder', () => {
       recorded: 0,
       suppressedByCooldown: [
         expect.objectContaining({
-          taskId: 'second-task',
+          taskId: 'first-task',
           evaluatorName: 'learning-reviewer',
           remainingMs: 60_000,
         }),
@@ -3104,7 +3677,7 @@ describe('LessonRecorder', () => {
 
     const firstRecord = recorder.record(result, 'first-task');
     await firstPersistenceStarted;
-    const secondRecord = recorder.record(result, 'second-task');
+    const secondRecord = recorder.record(result, 'first-task');
     const thirdRecord = recorder.record(result, 'third-task');
     rejectFirstPersistence(new Error('transient store failure'));
     const [firstSummary, secondSummary, thirdSummary] = await Promise.all([
@@ -3113,7 +3686,7 @@ describe('LessonRecorder', () => {
       thirdRecord,
     ]);
 
-    expect(port.recordLesson).toHaveBeenCalledTimes(2);
+    expect(port.recordLesson).toHaveBeenCalledTimes(3);
     expect(firstSummary).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [],
@@ -3125,13 +3698,8 @@ describe('LessonRecorder', () => {
       minedBlockerPatterns: [],
     });
     expect(thirdSummary).toMatchObject({
-      recorded: 0,
-      suppressedByCooldown: [
-        expect.objectContaining({
-          taskId: 'third-task',
-          evaluatorName: 'learning-reviewer',
-        }),
-      ],
+      recorded: 1,
+      suppressedByCooldown: [],
       minedBlockerPatterns: [],
     });
   });
@@ -3324,25 +3892,32 @@ describe('LessonRecorder', () => {
     now = new Date('2026-07-12T10:00:10.000Z');
     const secondSummary = await recorder.record(result, 'task-b');
     now = new Date('2026-07-12T10:00:20.000Z');
-    const thirdSummary = await recorder.record(result, 'task-c');
-    const thirdLesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
-      .calls[1]![0];
+    const thirdSummary = await recorder.record(result, 'task-b');
+    now = new Date('2026-07-12T10:00:30.000Z');
+    const fourthSummary = await recorder.record(result, 'task-c');
+    const fourthLesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[2]![0];
 
     expect(secondSummary).toMatchObject({
+      recorded: 1,
+      suppressedByCooldown: [],
+      minedBlockerPatterns: [],
+    });
+    expect(thirdSummary).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [expect.objectContaining({ taskId: 'task-b' })],
       minedBlockerPatterns: [],
     });
-    expect(thirdSummary.recorded).toBe(1);
-    expect(thirdSummary.suppressedByCooldown).toEqual([]);
-    expect(thirdSummary.minedBlockerPatterns).toEqual([
+    expect(fourthSummary.recorded).toBe(1);
+    expect(fourthSummary.suppressedByCooldown).toEqual([]);
+    expect(fourthSummary.minedBlockerPatterns).toEqual([
       expect.objectContaining({
         occurrences: 3,
         taskIds: ['task-a', 'task-b', 'task-c'],
       }),
     ]);
-    expect(thirdLesson.blockerPatterns).toEqual(
-      thirdSummary.minedBlockerPatterns,
+    expect(fourthLesson.blockerPatterns).toEqual(
+      fourthSummary.minedBlockerPatterns,
     );
   });
 
@@ -3536,14 +4111,14 @@ describe('LessonRecorder', () => {
     now = new Date('2026-07-12T10:00:10.000Z');
     const secondSummary = await recorder.record(result, 'task-b');
     now = new Date('2026-07-12T10:00:20.000Z');
-    const thirdSummary = await recorder.record(result, 'task-c');
+    const thirdSummary = await recorder.record(result, 'task-b');
 
     expect(secondSummary.recorded).toBe(1);
     expect(secondSummary.minedBlockerPatterns).toHaveLength(1);
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
     expect(thirdSummary).toMatchObject({
       recorded: 0,
-      suppressedByCooldown: [expect.objectContaining({ taskId: 'task-c' })],
+      suppressedByCooldown: [expect.objectContaining({ taskId: 'task-b' })],
       minedBlockerPatterns: [],
     });
   });
@@ -3573,7 +4148,7 @@ describe('LessonRecorder', () => {
     };
 
     const failedSummary = await recorder.record(result, 'task-a');
-    const secondSummary = await recorder.record(result, 'task-b');
+    const secondSummary = await recorder.record(result, 'task-a');
 
     expect(failedSummary).toMatchObject({
       recorded: 0,
@@ -3634,7 +4209,7 @@ describe('LessonRecorder', () => {
     };
 
     await recorder.record(result, 'task-a');
-    const secondSummary = await recorder.record(result, 'task-b');
+    const secondSummary = await recorder.record(result, 'task-a');
 
     expect(secondSummary.minedBlockerPatterns).toEqual([]);
   });
@@ -3700,7 +4275,8 @@ describe('LessonRecorder', () => {
       },
       contradictionReport: {
         status: 'clear',
-        guidance: 'No deterministic lesson contradiction was detected among comparable prior lessons.',
+        guidance:
+          'No deterministic lesson contradiction was detected among comparable prior lessons.',
         verificationCommand: 'npm run test --workspace @franken/critique',
         contradictions: [],
       },
@@ -3719,21 +4295,34 @@ describe('LessonRecorder', () => {
       },
     });
 
-    const critique = critiqueProposedLesson(lesson, [], '2026-07-12T00:00:00.000Z');
+    const critique = critiqueProposedLesson(
+      lesson,
+      [],
+      '2026-07-12T00:00:00.000Z',
+    );
 
     expect(critique).toMatchObject({
       schemaVersion: 'lesson-multi-agent-critique-v1',
       verdict: 'accepted',
       highRisk: false,
       manualReviewRequired: false,
-      checklist: ['correctness', 'scope', 'privacy', 'security', 'duplication', 'conflict'],
+      checklist: [
+        'correctness',
+        'scope',
+        'privacy',
+        'security',
+        'duplication',
+        'conflict',
+      ],
       criticAgents: [
         'correctness-scope-critic',
         'privacy-security-critic',
         'duplication-conflict-critic',
       ],
     });
-    expect(critique.findings.every((finding) => finding.verdict === 'pass')).toBe(true);
+    expect(
+      critique.findings.every((finding) => finding.verdict === 'pass'),
+    ).toBe(true);
     expect(critique.evidenceRefs).toEqual(
       expect.arrayContaining([
         'traceability:lesson-task:factuality:iteration-0',
@@ -3753,7 +4342,13 @@ describe('LessonRecorder', () => {
           sensitive: true,
           approvalRequired: false,
           flags: ['task-state'],
-          redactions: [{ kind: 'secret', label: 'github-token', replacement: '[REDACTED_GITHUB_TOKEN]' }],
+          redactions: [
+            {
+              kind: 'secret',
+              label: 'github-token',
+              replacement: '[REDACTED_GITHUB_TOKEN]',
+            },
+          ],
           originalHash: 'secret-hash',
           reason: 'rejected before durable learning',
         },
@@ -3795,8 +4390,14 @@ describe('LessonRecorder', () => {
       verdict: 'needs-edit',
       manualReviewRequired: true,
       findings: expect.arrayContaining([
-        expect.objectContaining({ checklistItem: 'duplication', verdict: 'needs-edit' }),
-        expect.objectContaining({ checklistItem: 'conflict', verdict: 'needs-edit' }),
+        expect.objectContaining({
+          checklistItem: 'duplication',
+          verdict: 'needs-edit',
+        }),
+        expect.objectContaining({
+          checklistItem: 'conflict',
+          verdict: 'needs-edit',
+        }),
       ]),
     });
     expect(critiqueProposedLesson(lesson, [])).toMatchObject({
@@ -3849,7 +4450,8 @@ describe('LessonRecorder', () => {
       ],
       contradictionReport: {
         status: 'clear',
-        guidance: 'No deterministic lesson contradiction was detected among comparable prior lessons.',
+        guidance:
+          'No deterministic lesson contradiction was detected among comparable prior lessons.',
         verificationCommand: 'npm run test --workspace @franken/critique',
         contradictions: [],
       },
@@ -3875,13 +4477,17 @@ describe('LessonRecorder', () => {
       },
     });
 
-    const critique = critiqueProposedLesson(lesson, [deserializedSelf, quarantinedPrior]);
+    const critique = critiqueProposedLesson(lesson, [
+      deserializedSelf,
+      quarantinedPrior,
+    ]);
 
     expect(critique.verdict).toBe('accepted');
     expect(
       critique.findings.some(
         (finding) =>
-          finding.checklistItem === 'duplication' && finding.verdict === 'needs-edit',
+          finding.checklistItem === 'duplication' &&
+          finding.verdict === 'needs-edit',
       ),
     ).toBe(false);
   });
@@ -3902,7 +4508,8 @@ describe('LessonRecorder', () => {
       ],
       contradictionReport: {
         status: 'clear',
-        guidance: 'No deterministic lesson contradiction was detected among comparable prior lessons.',
+        guidance:
+          'No deterministic lesson contradiction was detected among comparable prior lessons.',
         verificationCommand: 'npm run test --workspace @franken/critique',
         contradictions: [],
       },
@@ -3934,14 +4541,18 @@ describe('LessonRecorder', () => {
     expect(critiqueProposedLesson(lesson, [sandboxedPrior])).toMatchObject({
       verdict: 'needs-edit',
       findings: expect.arrayContaining([
-        expect.objectContaining({ checklistItem: 'duplication', verdict: 'needs-edit' }),
+        expect.objectContaining({
+          checklistItem: 'duplication',
+          verdict: 'needs-edit',
+        }),
       ]),
     });
   });
 
   it('marks high-risk or conflicting proposed lessons as needs-edit/manual-review', () => {
     const current = createLesson({
-      correctionApplied: 'Do not reuse cache responses without provenance checks',
+      correctionApplied:
+        'Do not reuse cache responses without provenance checks',
       testTraceability: [
         {
           lessonId: 'current-cache-lesson',
@@ -3949,7 +4560,9 @@ describe('LessonRecorder', () => {
           evaluatorName: 'factuality',
           failingIteration: 0,
           resolvedIteration: 1,
-          sourceFindingMessages: ['Cache guidance allowed unaudited stale responses'],
+          sourceFindingMessages: [
+            'Cache guidance allowed unaudited stale responses',
+          ],
           testId: 'current-cache-lesson:regression',
           verificationCommand: 'npm run test --workspace @franken/critique',
         },
@@ -3961,7 +4574,13 @@ describe('LessonRecorder', () => {
         sensitive: true,
         approvalRequired: true,
         flags: ['secret'],
-        redactions: [{ kind: 'secret', label: 'bearer-token', replacement: 'Bearer [REDACTED_TOKEN]' }],
+        redactions: [
+          {
+            kind: 'secret',
+            label: 'bearer-token',
+            replacement: 'Bearer [REDACTED_TOKEN]',
+          },
+        ],
         originalHash: 'redacted-hash',
         reason: 'sensitive candidate was redacted before durable learning',
       },
@@ -3974,7 +4593,9 @@ describe('LessonRecorder', () => {
           evaluatorName: 'factuality',
           failingIteration: 0,
           resolvedIteration: 1,
-          sourceFindingMessages: ['Cache guidance allowed unaudited stale responses'],
+          sourceFindingMessages: [
+            'Cache guidance allowed unaudited stale responses',
+          ],
           testId: 'prior-cache-lesson:regression',
           verificationCommand: 'npm run test --workspace @franken/critique',
         },
@@ -3990,8 +4611,14 @@ describe('LessonRecorder', () => {
     expect(critique.findings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ checklistItem: 'privacy', verdict: 'pass' }),
-        expect.objectContaining({ checklistItem: 'conflict', verdict: 'needs-edit' }),
-        expect.objectContaining({ checklistItem: 'duplication', verdict: 'needs-edit' }),
+        expect.objectContaining({
+          checklistItem: 'conflict',
+          verdict: 'needs-edit',
+        }),
+        expect.objectContaining({
+          checklistItem: 'duplication',
+          verdict: 'needs-edit',
+        }),
       ]),
     );
     expect(JSON.stringify(critique)).not.toContain('Bearer token');
@@ -4072,7 +4699,7 @@ describe('LessonRecorder', () => {
       expect.stringContaining(
         'Cache guidance allowed unaudited stale responses',
       ),
-      10,
+      50,
     );
     expect(lesson.contradictionReport).toEqual({
       status: 'clear',
@@ -4089,7 +4716,8 @@ describe('LessonRecorder', () => {
     port.searchLessons = vi.fn().mockResolvedValue([
       createLesson({
         failureDescription: 'Cache guidance allowed unaudited stale responses',
-        correctionApplied: 'Require cache verification and provenance review before reuse',
+        correctionApplied:
+          'Require cache verification and provenance review before reuse',
       }),
     ]);
     const recorder = new LessonRecorder(port);
@@ -4099,7 +4727,10 @@ describe('LessonRecorder', () => {
         verdict: 'pass',
         iterations: [
           createIteration(0, 'fail', 'factuality', [
-            { message: 'Cache guidance allowed unaudited stale responses', severity: 'warning' },
+            {
+              message: 'Cache guidance allowed unaudited stale responses',
+              severity: 'warning',
+            },
           ]),
           createIteration(1, 'pass'),
         ],
@@ -4107,7 +4738,8 @@ describe('LessonRecorder', () => {
       'lesson-task',
     );
 
-    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
     expect(lesson.proposedLessonCritique).toMatchObject({
       verdict: 'needs-edit',
       findings: expect.arrayContaining([
@@ -4135,7 +4767,8 @@ describe('LessonRecorder', () => {
       ],
       contradictionReport: {
         status: 'clear',
-        guidance: 'No deterministic lesson contradiction was detected among comparable prior lessons.',
+        guidance:
+          'No deterministic lesson contradiction was detected among comparable prior lessons.',
         verificationCommand: 'npm run test --workspace @franken/critique',
         contradictions: [],
       },
@@ -5441,7 +6074,7 @@ describe('LessonRecorder', () => {
       expect.stringContaining(
         'Do not reuse cache responses without provenance checks',
       ),
-      10,
+      50,
     );
   });
 
