@@ -116,7 +116,7 @@ function preflight(options) {
     : { id: 'node-version', status: 'fail', detail: `Node.js v${process.versions.node} does not satisfy ${NODE_RANGE}`, action: 'Install the version in .nvmrc or another supported Node.js release before taking a worker card.' });
 
   const expectedNpm = packageManagerNpmVersion(options.root);
-  const npmVersion = run('npm', ['--version']);
+  const npmVersion = run('npm', ['--version'], { cwd: options.root });
   if (!expectedNpm) {
     checks.push({ id: 'npm-package-manager', status: 'fail', detail: 'root package.json is missing packageManager npm@x.y.z', action: 'Run from the Frankenbeast repository root or restore the packageManager field.' });
   } else if (!npmVersion.ok) {
@@ -158,9 +158,11 @@ function preflight(options) {
   }
 
   const status = run('git', ['status', '--porcelain'], { cwd: options.root });
-  if (status.ok && status.stdout.length > 0) {
+  if (!status.ok) {
+    checks.push({ id: 'worktree-clean', status: 'fail', detail: 'unable to read git worktree status', action: `Repair the git checkout or start from a fresh isolated worktree. ${status.detail}` });
+  } else if (status.stdout.length > 0) {
     checks.push({ id: 'worktree-clean', status: 'warn', detail: 'worktree has uncommitted files', action: 'Start each issue from a fresh isolated worktree, or intentionally continue the existing scoped branch.' });
-  } else if (status.ok) {
+  } else {
     checks.push({ id: 'worktree-clean', status: 'ok', detail: 'worktree is clean' });
   }
 

@@ -31,7 +31,7 @@ function writeExecutable(path: string, body: string): void {
   chmodSync(path, 0o755);
 }
 
-function makePreflightFixture(options: { includeJq?: boolean; npmVersion?: string } = {}): { dir: string; root: string; bin: string } {
+function makePreflightFixture(options: { includeJq?: boolean; npmVersion?: string; gitStatusFails?: boolean } = {}): { dir: string; root: string; bin: string } {
   const dir = mkdtempSync(join(tmpdir(), 'frankenbeast-new-worker-preflight-'));
   const root = join(dir, 'repo');
   const bin = join(dir, 'bin');
@@ -40,7 +40,8 @@ function makePreflightFixture(options: { includeJq?: boolean; npmVersion?: strin
   writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'frankenbeast', packageManager: 'npm@11.5.1' }));
   writeExecutable(join(bin, 'npm'), `printf '%s\\n' '${options.npmVersion ?? '11.5.1'}'\n`);
   writeExecutable(join(bin, 'gh'), `if [ \"$1\" = '--version' ]; then printf 'gh version 2.0.0\\n'; exit 0; fi\nif [ \"$1\" = 'auth' ] && [ \"$2\" = 'status' ] && [ \"$3\" = '--hostname' ] && [ \"$4\" = 'github.com' ]; then printf 'Logged in to github.com\\n'; exit 0; fi\nprintf 'unexpected gh args: %s %s %s %s\\n' \"$1\" \"$2\" \"$3\" \"$4\" >&2\nexit 1\n`);
-  writeExecutable(join(bin, 'git'), `case \"$1\" in\n  --version) printf 'git version 2.53.0\\n' ;;\n  rev-parse) printf '%s\\n' '${root}' ;;\n  config) if [ \"$2\" = 'user.name' ]; then printf 'David Mendez\\n'; else printf 'me@davidmendez.dev\\n'; fi ;;\n  status) exit 0 ;;\n  *) printf 'unexpected git args: %s %s\\n' \"$1\" \"$2\" >&2; exit 1 ;;\nesac\n`);
+  const statusBranch = options.gitStatusFails ? `printf 'index is unreadable\\n' >&2; exit 2` : 'exit 0';
+  writeExecutable(join(bin, 'git'), `case \"$1\" in\n  --version) printf 'git version 2.53.0\\n' ;;\n  rev-parse) printf '%s\\n' '${root}' ;;\n  config) if [ \"$2\" = 'user.name' ]; then printf 'David Mendez\\n'; else printf 'me@davidmendez.dev\\n'; fi ;;\n  status) ${statusBranch} ;;\n  *) printf 'unexpected git args: %s %s\\n' \"$1\" \"$2\" >&2; exit 1 ;;\nesac\n`);
   if (options.includeJq !== false) {
     writeExecutable(join(bin, 'jq'), `printf 'jq-1.8.1\\n'\n`);
   }
@@ -278,6 +279,28 @@ describe('local setup scripts', () => {
         id: 'repository-root',
         status: 'fail',
         detail: expect.stringContaining('is not the Frankenbeast repository root'),
+      }));
+    } finally {
+      rmSync(fixture.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('new-worker preflight fails when git worktree status cannot be read', () => {
+    const fixture = makePreflightFixture({ gitStatusFails: true });
+    try {
+      const result = spawnSync(process.execPath, ['scripts/new-worker-preflight.mjs', '--json', '--root', fixture.root], {
+        cwd: ROOT,
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${fixture.bin}:${process.env.PATH ?? ''}` },
+      });
+      expect(result.status).toBe(1);
+      const report = JSON.parse(result.stdout) as { ok: boolean; checks: Array<{ id: string; status: string; detail: string; action?: string }> };
+      expect(report.ok).toBe(false);
+      expect(report.checks).toContainEqual(expect.objectContaining({
+        id: 'worktree-clean',
+        status: 'fail',
+        detail: 'unable to read git worktree status',
+        action: expect.stringContaining('Repair the git checkout'),
       }));
     } finally {
       rmSync(fixture.dir, { recursive: true, force: true });
