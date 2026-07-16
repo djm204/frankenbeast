@@ -450,6 +450,20 @@ Record npm test passed or failed.
     ).toBe('placeholder');
   });
 
+  it('rejects dash-separated placeholder-only field fragments', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '- Issue/task - <issue>\n- Business goal - <goal>\n- Boundaries - <boundaries>',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
   it('preserves child-heading content inside a required parent section', () => {
     const validation = validateAgentHandoffTemplate(
       completeTemplate.replace(
@@ -702,6 +716,20 @@ ${completeTemplate}`);
       completeTemplate.replace(
         'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
         '| Issue/task | Business goal | Boundaries |\n| --- | --- | --- |\n| <issue> | {goal} | [boundaries] |',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('rejects dash-only table rows as placeholder values', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '| Issue/task | Business goal | Boundaries |\n| --- | --- | --- |\n| - | - | - |',
       ),
     );
 

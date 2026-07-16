@@ -648,7 +648,12 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
     if (activeFence !== null) {
       continue;
     }
-    if (/^\s*(?:[-*]\s*)?(?:todo|tbd|placeholder|please\s+fill\s+in)\s*:/i.test(line)) {
+    if (
+      /^\s*(?:[-*]\s*)?(?:todo|tbd|placeholder|please\s+fill\s+in)\s*:/i.test(
+        line,
+      ) ||
+      isPlaceholderOnlyFieldLine(line)
+    ) {
       continue;
     }
 
@@ -666,7 +671,7 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
 
     const withoutPlaceholders = line
       .replace(
-        /\b[A-Za-z0-9 /_-]+:\s*(?:<[^>]*>|\{\{[^}]*\}\}|\{[^}]*\}|\[[^\]]*\]|\b(?:tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)\b)\s*(?:[;,.]|$)/gi,
+        /\b[A-Za-z0-9 /_-]+(?:\s+-\s+|:)\s*(?:<[^>]*>|\{\{[^}]*\}\}|\{[^}]*\}|\[[^\]]*\]|[-–—]+|\b(?:tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)\b)\s*(?:[;,.]|$)/gi,
         ' ',
       )
       .replace(/^```.*$/g, ' ')
@@ -701,11 +706,21 @@ function isEmptyTemplateLabel(line: string): boolean {
     .replace(/\([^)]*\)/g, ' ')
     .replace(/\b(?:required|optional)\b/gi, ' ')
     .replace(/[^A-Za-z0-9 /_:-]/g, ' ');
+  const normalizedLabelKey = normalizeEvidence(
+    normalizedLabel.replace(/[\/_-]+/g, ' '),
+  );
   return (
     /^\s*(?:[-*]\s*)?[A-Za-z0-9 /_-]+:\s*$/.test(normalizedLabel) ||
-    /^\s*(?:[-*]\s*)?(?:issue|issue task|task|business goal|goal|out of scope boundaries|boundaries|status|current status|decisions|remaining work|command|commands|test command|test commands|outcome|result|owner|next action|artifact|artifacts|link|links|lesson|lessons)\s*$/i.test(
-      normalizedLabel,
+    /^(?:issue|issue task|task|business goal|goal|out of scope boundaries|boundaries|status|current status|decisions|remaining work|command|commands|test command|test commands|outcome|result|owner|next action|artifact|artifacts|link|links|lesson|lessons)$/i.test(
+      normalizedLabelKey,
     )
+  );
+}
+
+function isPlaceholderOnlyFieldLine(line: string): boolean {
+  const normalized = normalizeEvidence(line.replace(/^\s*[-*]\s*/, ''));
+  return /^[A-Za-z0-9 /_-]+(?::|\s+-\s+)(?:<[^>]*>|\{\{[^}]*\}\}|\{[^}]*\}|\[[^\]]*\]|[-–—]+|\b(?:tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)\b)\s*$/i.test(
+    normalized,
   );
 }
 
@@ -752,7 +767,7 @@ function isEmptyTableRow(line: string): boolean {
         /^(?:issue|issue task|task|business goal|goal|out of scope boundaries|boundaries|status|current status|decisions|remaining work|command|commands|test command|test commands|outcome|result|owner|next action|artifact|artifacts|link|links|lesson|lessons)$/i.test(
           cell,
         ) ||
-        /^(?:tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)$/i.test(
+        /^(?:tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided|[-–—]+)$/i.test(
           cell,
         ),
     )
