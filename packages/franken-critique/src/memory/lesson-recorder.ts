@@ -479,10 +479,10 @@ export function applyHumanFeedbackToLesson(
   }
   if (
     lesson.proposedLessonCritique !== undefined &&
-    lesson.proposedLessonCritique.verdict !== 'accepted'
+    isProposedLessonCritiqueApprovalBlocked(lesson.proposedLessonCritique)
   ) {
     throw new RangeError(
-      'Explicit lesson approval requires an accepted proposedLessonCritique verdict before promotion.',
+      'Explicit lesson approval requires an accepted proposedLessonCritique verdict or only manual-review duplicate/conflict findings before promotion.',
     );
   }
   const primaryApprovalEvidence = feedbackEvidence[0];
@@ -540,6 +540,34 @@ function removeStaleLessonValidation(lesson: CritiqueLesson): CritiqueLesson {
   void proposedLessonCritique;
   void testTraceability;
   return lessonWithoutValidation;
+}
+
+function isProposedLessonCritiqueApprovalBlocked(
+  critique: LessonMultiAgentCritique,
+): boolean {
+  if (critique.verdict === 'accepted') {
+    return false;
+  }
+  if (critique.verdict === 'rejected') {
+    return true;
+  }
+  return critique.findings.some(
+    (finding) =>
+      finding.verdict !== 'pass' &&
+      !isManualReviewResolvableCritiqueFinding(finding),
+  );
+}
+
+function isManualReviewResolvableCritiqueFinding(
+  finding: LessonCritiqueAgentFinding,
+): boolean {
+  return (
+    finding.verdict === 'needs-edit' &&
+    ((finding.checklistItem === 'conflict' &&
+      finding.evidenceRefs.includes('contradiction:not_checked')) ||
+      (finding.checklistItem === 'duplication' &&
+        finding.evidenceRefs.includes('duplicate:not_checked')))
+  );
 }
 
 export function isLessonApplicable(lesson: CritiqueLesson): boolean {
@@ -654,7 +682,18 @@ export function critiqueProposedLesson(
       normalizeText(prior.failureDescription) ===
         normalizeText(lesson.failureDescription),
   );
-  if (duplicate) {
+  if (priorLessons === undefined) {
+    findings.push({
+      agentName: 'duplication-conflict-critic',
+      checklistItem: 'duplication',
+      verdict: 'needs-edit',
+      severity: 'warning',
+      message:
+        'Historical duplicate lessons were not checked, so promotion needs manual review.',
+      evidenceRefs: addEvidenceRef(evidenceRefs, 'duplicate:not_checked'),
+      suggestion: 'Run lesson search or have a reviewer confirm no matching prior guidance exists.',
+    });
+  } else if (duplicate) {
     findings.push({
       agentName: 'duplication-conflict-critic',
       checklistItem: 'duplication',

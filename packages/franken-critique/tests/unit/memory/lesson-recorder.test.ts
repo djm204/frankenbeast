@@ -1706,8 +1706,44 @@ describe('LessonRecorder', () => {
         },
       ),
     ).toThrow(
-      'Explicit lesson approval requires an accepted proposedLessonCritique verdict before promotion.',
+      'Explicit lesson approval requires an accepted proposedLessonCritique verdict or only manual-review duplicate/conflict findings before promotion.',
     );
+
+    const manualReviewCandidate = createLesson({
+      testTraceability: [
+        {
+          lessonId: 'manual-review-lesson',
+          taskId: 'lesson-task',
+          evaluatorName: 'factuality',
+          failingIteration: 0,
+          resolvedIteration: 1,
+          sourceFindingMessages: ['Cache guidance lacked provenance checks'],
+          testId: 'manual-review-lesson:regression',
+          verificationCommand: 'npm run test --workspace @franken/critique',
+        },
+      ],
+    });
+    const manualReviewApproved = applyHumanFeedbackToLesson(
+      {
+        ...manualReviewCandidate,
+        proposedLessonCritique: critiqueProposedLesson(manualReviewCandidate),
+      },
+      {
+        source: 'explicit-user-approval',
+        reason:
+          'User manually reviewed the unchecked duplicate/conflict findings before promotion.',
+        observedAt: '2026-07-12T01:41:30.000Z',
+        evidence: [
+          {
+            kind: 'operator-report',
+            reference:
+              'https://github.com/djm204/frankenbeast/issues/1763#manual-review',
+          },
+        ],
+      },
+    );
+    expect(manualReviewApproved.lifecycleStatus).toBe('active');
+    expect(manualReviewApproved.experimentSandbox).toBeUndefined();
 
     const { proposedLessonCritique: ignoredPromotionCritique, ...approvalReadyLesson } =
       lesson;
@@ -3759,6 +3795,7 @@ describe('LessonRecorder', () => {
       verdict: 'needs-edit',
       manualReviewRequired: true,
       findings: expect.arrayContaining([
+        expect.objectContaining({ checklistItem: 'duplication', verdict: 'needs-edit' }),
         expect.objectContaining({ checklistItem: 'conflict', verdict: 'needs-edit' }),
       ]),
     });
