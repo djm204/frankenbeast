@@ -339,7 +339,7 @@ describe('kanban state mutation idempotency planning', () => {
   });
 
   it('recognizes retries that provide the body when the stored content hash is a digest', () => {
-    const body = 'doctor note';
+    const body = 'doctor note\n';
     const digest = createHash('sha256').update(body).digest('hex');
 
     expect(planKanbanStateMutation(

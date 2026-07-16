@@ -801,9 +801,10 @@ function mutationContentTokens(request: KanbanStateMutationRequest): readonly st
   const explicitHash = request.contentHash?.trim();
   if (explicitHash) tokens.add(explicitHash);
   if (request.body !== undefined) {
-    const body = request.body.trim();
+    const rawBody = request.body;
+    const body = rawBody.trim();
     tokens.add(body);
-    const digest = sha256Hex(body);
+    const digest = sha256Hex(rawBody);
     tokens.add(digest);
     tokens.add(`sha256:${digest}`);
   }
