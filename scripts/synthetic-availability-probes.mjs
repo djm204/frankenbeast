@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 const DEFAULT_TIMEOUT_MS = 5_000;
 const OUTPUT_LIMIT_BYTES = 1024 * 1024;
 const SECRET_ARG_PATTERN = /(?:token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)/iu;
-const BASIC_AUTH_FLAGS = new Set(['-u', '--user', '--proxy-user']);
+const BASIC_AUTH_FLAGS = new Set(['-u', '-U', '--user', '--proxy-user']);
 function parseCommandLine(value) {
   if (!value) return undefined;
   if (Array.isArray(value)) return value.map(String).filter(Boolean);
@@ -15,30 +15,41 @@ function parseCommandLine(value) {
   let word = '';
   let quote = null;
   let escaping = false;
+  let wordStarted = false;
   for (const character of String(value).trim()) {
     if (escaping) {
       word += character;
+      wordStarted = true;
       escaping = false;
     } else if (quote) {
       if (character === quote) quote = null;
       else if (quote !== "'" && character === '\\') escaping = true;
-      else word += character;
+      else {
+        word += character;
+        wordStarted = true;
+      }
     } else if (character === '\\') {
       escaping = true;
     } else if (character === '"' || character === "'") {
       quote = character;
+      wordStarted = true;
     } else if (/\s/u.test(character)) {
-      if (word) {
+      if (wordStarted) {
         words.push(word);
         word = '';
+        wordStarted = false;
       }
     } else {
       word += character;
+      wordStarted = true;
     }
   }
-  if (escaping) word += '\\';
+  if (escaping) {
+    word += '\\';
+    wordStarted = true;
+  }
   if (quote) throw new Error(`unterminated quote in provider command: ${value}`);
-  if (word) words.push(word);
+  if (wordStarted) words.push(word);
   return words;
 }
 
@@ -176,6 +187,8 @@ async function defaultExecFile(file, args, timeoutMs) {
 function redactText(value) {
   return String(value)
     .replace(/Bearer\s+\S+/giu, 'Bearer [REDACTED]')
+    .replace(/Basic\s+\S+/giu, 'Basic [REDACTED]')
+    .replace(/https?:\/\/[^\s'"<>]+/giu, (match) => redactUrl(match))
     .replace(/((?:token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)[\w.-]*\s*[=:]\s*)\S+/giu, '$1[REDACTED]')
     .replace(/((?:--?[\w-]*(?:token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)[\w-]*|(?:token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)[\w.-]*)\s+)\S+/giu, '$1[REDACTED]');
 }

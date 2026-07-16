@@ -158,6 +158,28 @@ describe('synthetic availability probes', () => {
     expect(execFile).toHaveBeenCalledWith('printf', ['%s\\n', 'ok'], 100);
   });
 
+  it('preserves quoted empty provider command arguments', async () => {
+    const { runSyntheticAvailabilityProbes } = await loadScript();
+    const execFile = vi.fn(async (file: string) => {
+      if (file === 'gh') return '[]';
+      return 'provider ok';
+    });
+
+    await runSyntheticAvailabilityProbes({
+      config: {
+        repo: 'djm204/frankenbeast',
+        providerCommand: 'provider status --profile "" --password \'\'',
+        timeoutMs: 100,
+      },
+      execFile,
+      fetch: vi.fn(async () => ({ ok: true, status: 200 })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      readFile: vi.fn(async () => '{}'),
+    });
+
+    expect(execFile).toHaveBeenCalledWith('provider', ['status', '--profile', '', '--password', ''], 100);
+  });
+
   it('fails redirected dashboard health checks and requests manual redirect handling', async () => {
     const { runSyntheticAvailabilityProbes } = await loadScript();
     const fetch = vi.fn(async () => ({ ok: true, redirected: true, status: 200 }));
@@ -273,6 +295,25 @@ describe('synthetic availability probes', () => {
     expect(providerProbe?.detail.command).not.toContain('secret-token');
   });
 
+  it('redacts proxy basic-auth short flag provider command details', async () => {
+    const { runSyntheticAvailabilityProbes } = await loadScript();
+    const report = await runSyntheticAvailabilityProbes({
+      config: {
+        repo: 'djm204/frankenbeast',
+        providerCommand: ['curl', '-U', 'proxy:p4ssw0rd', 'http://127.0.0.1/health'],
+        timeoutMs: 100,
+      },
+      execFile: vi.fn(async (file: string) => (file === 'gh' ? '[]' : 'provider ok')),
+      fetch: vi.fn(async () => ({ ok: true, status: 200 })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      readFile: vi.fn(async () => '{}'),
+    });
+
+    const providerProbe = (report.probes as Array<any>).find((probe) => probe.name === 'provider_status');
+    expect(providerProbe?.detail.command).toContain('-U [REDACTED]');
+    expect(providerProbe?.detail.command).not.toContain('proxy:p4ssw0rd');
+  });
+
   it('emits compact one-line JSON for JSONL-friendly cron logs', () => {
     const result = spawnSync(process.execPath, [SCRIPT, '--json', '--repo', 'djm204/frankenbeast'], {
       cwd: ROOT,
@@ -360,6 +401,31 @@ describe('synthetic availability probes', () => {
     expect(providerProbe?.error).not.toContain('super-secret');
     expect(providerProbe?.error).not.toContain('another-secret');
     expect(providerProbe?.error).not.toContain('bearer-secret');
+  });
+
+  it('redacts basic-auth headers and URL credentials from provider failure output', async () => {
+    const { runSyntheticAvailabilityProbes } = await loadScript();
+    const report = await runSyntheticAvailabilityProbes({
+      config: {
+        repo: 'djm204/frankenbeast',
+        providerCommand: 'provider status',
+        timeoutMs: 100,
+      },
+      execFile: vi.fn(async (file: string) => {
+        if (file === 'gh') return '[]';
+        throw new Error('provider failed: Authorization: Basic dXNlcjpwYXNz http://user:p4ssw0rd@example.test/health?token=secret-token');
+      }),
+      fetch: vi.fn(async () => ({ ok: true, status: 200 })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      readFile: vi.fn(async () => '{}'),
+    });
+
+    const providerProbe = (report.probes as Array<any>).find((probe) => probe.name === 'provider_status');
+    expect(providerProbe?.error).toContain('[REDACTED]');
+    expect(providerProbe?.error).toContain('http://example.test/health');
+    expect(providerProbe?.error).not.toContain('dXNlcjpwYXNz');
+    expect(providerProbe?.error).not.toContain('user:p4ssw0rd');
+    expect(providerProbe?.error).not.toContain('secret-token');
   });
 
   it('terminates timed-out provider commands before returning a report', () => {
