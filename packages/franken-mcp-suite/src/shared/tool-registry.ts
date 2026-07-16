@@ -404,6 +404,26 @@ const TOOLS: ToolFull[] = [
     },
   },
   {
+    name: 'fbeast_memory_review_conflicts',
+    server: 'memory',
+    description: 'Show conflict details, existing value/provenance, and guidance for a pending memory promotion candidate',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Candidate id returned by fbeast_memory_review_propose/list' },
+      },
+      required: ['id'],
+    },
+    makeHandler: ({ brain }) => async (args) => {
+      const id = parseNonEmptyStringArg('id', args['id']);
+      if (!id.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_review_conflicts ${id.message}` }], isError: true };
+      }
+      const conflicts = await brain.conflictsForMemoryReview(id.value);
+      return { content: [{ type: 'text', text: JSON.stringify({ id: id.value, count: conflicts.length, conflicts }, null, 2) }] };
+    },
+  },
+  {
     name: 'fbeast_memory_review_decide',
     server: 'memory',
     description: 'Approve, reject, mark never-store, or resolve a conflicting queued memory promotion',

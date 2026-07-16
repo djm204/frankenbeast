@@ -2,6 +2,7 @@ import {
   SqliteBrain,
   type MemoryCandidate,
   type MemoryCandidateStatus,
+  type MemoryConflict,
   type MemoryConflictResolution,
   type MemoryReviewDecisionOptions,
   type RightToForgetReport,
@@ -74,6 +75,7 @@ export interface BrainAdapter {
     evidenceId?: string;
   }): Promise<MemoryCandidate>;
   listMemoryReview(status?: MemoryCandidateStatus): Promise<MemoryCandidate[]>;
+  conflictsForMemoryReview(id: string): Promise<MemoryConflict[]>;
   decideMemoryReview(input: {
     id: string;
     action: 'approve' | 'reject' | 'never_store' | 'resolve_conflict';
@@ -503,6 +505,10 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
 
     async listMemoryReview(status = 'pending') {
       return brain.memoryReview.list(status);
+    },
+
+    async conflictsForMemoryReview(id) {
+      return brain.memoryReview.conflictsFor(id);
     },
 
     async decideMemoryReview(input) {

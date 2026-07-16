@@ -1025,6 +1025,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
       .get(key) as { value: string } | undefined;
     if (!row) {
       this.persistedSerialized.delete(key);
+      this.syncCleanRuntimeKeyToAbsent(key);
       return { state: 'absent' };
     }
     const serialized = this.encryption?.decrypt(row.value) ?? row.value;
@@ -1032,14 +1033,35 @@ class SqliteWorkingMemory implements IWorkingMemory {
     if (isExpiredWorkingMemoryValue(value)) {
       const [preserved] = this.deleteExpiredPersistedRows([{ key, serialized }]);
       if (!preserved) {
+        this.syncCleanRuntimeKeyToAbsent(key);
         return { state: 'absent' };
       }
       const preservedValue = parseStoredWorkingMemoryValue(preserved.serialized);
       this.persistedSerialized.set(key, preserved.serialized);
+      this.syncCleanRuntimeKeyToPersisted(key, preservedValue, preserved.serialized);
       return { state: 'present', value: preservedValue };
     }
     this.persistedSerialized.set(key, serialized);
+    this.syncCleanRuntimeKeyToPersisted(key, value, serialized);
     return { state: 'present', value };
+  }
+
+  private syncCleanRuntimeKeyToAbsent(key: string): void {
+    if (this.dirtyKeys.has(key) || this.deletedKeys.has(key) || !this.store.has(key)) return;
+    this.totalBytes -= this.sizes.get(key) ?? 0;
+    this.store.delete(key);
+    this.sizes.delete(key);
+    this.serialized.delete(key);
+  }
+
+  private syncCleanRuntimeKeyToPersisted(key: string, value: unknown, serialized: string): void {
+    if (this.dirtyKeys.has(key) || this.deletedKeys.has(key) || !this.store.has(key)) return;
+    if (this.serialized.get(key) === serialized) return;
+    const prepared = this.prepareEntry(key, value);
+    this.totalBytes = this.totalBytes - (this.sizes.get(key) ?? 0) + prepared.size;
+    this.store.set(key, prepared.normalized);
+    this.sizes.set(key, prepared.size);
+    this.serialized.set(key, prepared.serialized);
   }
 
 
