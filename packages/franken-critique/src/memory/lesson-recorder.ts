@@ -20,6 +20,8 @@ import type {
   LessonFeedbackSignalSource,
   LessonFeedbackWeight,
   LessonFeedbackWeighting,
+  FailureRecordMetadata,
+  FailureCluster,
 } from '../types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
 import type { TaskId } from '../types/common.js';
@@ -52,6 +54,8 @@ const AGENT_IMPROVEMENT_SCORECARD_GUIDANCE =
   'Use this per-agent scorecard in worker retrospectives and PM handoff summaries to compare improvement over time without parsing free-form lesson prose.';
 const LEARNING_BACKLOG_PRIORITIZATION_GUIDANCE =
   'Use this report to sort newly observed learning backlog items before promotion, retirement, or PM routing; higher priority items should receive durable mitigation before low-risk documentation follow-up.';
+const FAILURE_CLUSTER_REPORT_GUIDANCE =
+  'Use this transcript-free report to spot recurring failure families by task family, package/tool, and root cause before routing durable skill, documentation, or test mitigations.';
 const PRIVACY_FILTER_TASK_STATE_REASON =
   'Lesson candidate describes transient task or PR state and is rejected before durable learning.';
 const PRIVACY_FILTER_ADMIT_REASON =
@@ -63,8 +67,10 @@ interface InternalLessonPrivacyRedaction extends LessonPrivacyRedaction {
   readonly original: string;
 }
 
-interface InternalLessonPrivacyFilterDecision
-  extends Omit<LessonPrivacyFilterDecision, 'redactions'> {
+interface InternalLessonPrivacyFilterDecision extends Omit<
+  LessonPrivacyFilterDecision,
+  'redactions'
+> {
   readonly redactions: readonly InternalLessonPrivacyRedaction[];
 }
 
@@ -92,7 +98,8 @@ const PRIVACY_REDACTION_RULES: readonly PrivacyRedactionRule[] = [
   {
     kind: 'secret',
     label: 'github-token',
-    pattern: /\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{30,})\b/g,
+    pattern:
+      /\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{30,})\b/g,
     replacement: '[REDACTED_GITHUB_TOKEN]',
   },
   {
@@ -117,7 +124,8 @@ const PRIVACY_REDACTION_RULES: readonly PrivacyRedactionRule[] = [
   {
     kind: 'secret',
     label: 'connection-string',
-    pattern: /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^\s'\")]+/gi,
+    pattern:
+      /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^\s'\")]+/gi,
     replacement: '[REDACTED_CONNECTION_STRING]',
   },
   {
@@ -193,6 +201,16 @@ export interface BlockerPatternState {
   readonly observations: BlockerPatternObservation[];
 }
 
+export interface FailureClusterState {
+  readonly key: string;
+  readonly taskFamily: string;
+  readonly packageName?: string;
+  readonly toolName?: string;
+  readonly errorClass: string;
+  readonly rootCause: string;
+  readonly observations: FailureRecordMetadata[];
+}
+
 interface PendingBlockerPatternObservation {
   readonly key: string;
   readonly taskId: TaskId;
@@ -212,6 +230,8 @@ export interface LessonRecorderOptions {
   readonly blockerPatternThreshold?: number;
   /** Shared blocker-pattern state for mining recurrent blockers across recorder instances. */
   readonly blockerPatternStore?: Map<string, BlockerPatternState>;
+  /** Shared failure-cluster state for grouping repeated failures across recorder instances. */
+  readonly failureClusterStore?: Map<string, FailureClusterState>;
   /** Optional per-agent identifier used to attach deterministic improvement scorecards to learned lessons. */
   readonly agentId?: string;
 }
@@ -436,7 +456,10 @@ export function applyHumanFeedbackToLesson(
       'Explicit lesson approval requires at least one evidence item.',
     );
   }
-  if (lesson.lifecycleStatus === 'quarantined' && lesson.quarantine !== undefined) {
+  if (
+    lesson.lifecycleStatus === 'quarantined' &&
+    lesson.quarantine !== undefined
+  ) {
     const unquarantinedLesson = unquarantineLesson(lesson, {
       reviewedAt: observedAt,
       reviewer: request.source,
@@ -606,6 +629,7 @@ export class LessonRecorder {
   private readonly blockerPatternThreshold: number;
   private readonly blockerPatterns: Map<string, BlockerPatternState>;
   private readonly pendingBlockerAdmissions: Map<string, Promise<void>>;
+  private readonly failureClusters: Map<string, FailureClusterState>;
   private readonly agentId?: string;
   private readonly pendingBlockerObservations = new WeakMap<
     CritiqueLesson,
@@ -641,6 +665,7 @@ export class LessonRecorder {
     this.pendingBlockerAdmissions = getPendingBlockerAdmissions(
       this.blockerPatterns,
     );
+    this.failureClusters = options.failureClusterStore ?? new Map();
     if (options.agentId !== undefined) {
       const agentId = options.agentId.trim();
       if (!agentId) {
@@ -722,9 +747,11 @@ export class LessonRecorder {
             (lesson.blockerPatterns?.length ?? 0) > 0;
           const suppression = this.getCooldownSuppression(lesson, cooldownKey);
           if (suppression && !hasMinedBlockerPatterns) {
+            this.commitFailureClusterObservation(lesson, recordingResult);
             this.commitBlockerPatternObservations(lesson);
             recordingResult.suppressedByCooldown.push(suppression);
-            recordingResult.learningBacklogItems.push(
+            addOrReplaceLearningBacklogItem(
+              recordingResult.learningBacklogItems,
               createCooldownSuppressionBacklogItem(suppression),
             );
             admissionSettled?.(false);
@@ -755,6 +782,7 @@ export class LessonRecorder {
         });
         await this.memory.recordLesson(admittedLesson);
         recordingResult.recorded += 1;
+        this.commitFailureClusterObservation(admittedLesson, recordingResult);
         this.commitBlockerPatternObservations(lesson);
         addUniqueBlockerPatterns(
           recordingResult.minedBlockerPatterns,
@@ -868,6 +896,16 @@ export class LessonRecorder {
           evalResult.evaluatorName,
           filteredFindings,
         );
+        const failureRecord = createFailureRecordMetadata({
+          taskId,
+          evaluatorName: evalResult.evaluatorName,
+          findings: filteredFindings,
+          recordedAt,
+          resolution: passingIteration
+            ? `Corrected in iteration ${passingIteration.index}`
+            : 'Unknown correction',
+          evidenceId: `${lessonId}:failure-record`,
+        });
 
         const lesson: CritiqueLesson = {
           evaluatorName: evalResult.evaluatorName,
@@ -908,6 +946,7 @@ export class LessonRecorder {
             evalResult.evaluatorName,
             filteredFindings,
           ),
+          failureRecord,
           ...(failedTestSkillCandidate ? { failedTestSkillCandidate } : {}),
           postPrLessonExtractionTemplate:
             createPostPrLessonExtractionTemplate(),
@@ -1051,6 +1090,55 @@ export class LessonRecorder {
       }
     }
     this.pendingBlockerObservations.delete(lesson);
+  }
+
+  private commitFailureClusterObservation(
+    lesson: CritiqueLesson,
+    recordingResult: MutableLessonRecordingResult,
+  ): void {
+    const record = lesson.failureRecord;
+    if (!record) {
+      return;
+    }
+    let cluster = this.failureClusters.get(record.clusterKey);
+    if (!cluster) {
+      cluster = {
+        key: record.clusterKey,
+        taskFamily: record.taskFamily,
+        ...(record.packageName ? { packageName: record.packageName } : {}),
+        ...(record.toolName ? { toolName: record.toolName } : {}),
+        errorClass: record.errorClass,
+        rootCause: record.rootCause,
+        observations: [],
+      };
+      this.failureClusters.set(record.clusterKey, cluster);
+    }
+    if (
+      !cluster.observations.some(
+        (observation) =>
+          observation.taskFamily === record.taskFamily &&
+          observation.evidencePointer.id === record.evidencePointer.id,
+      )
+    ) {
+      cluster.observations.push(record);
+    }
+
+    const reportCluster = createFailureCluster(cluster);
+    const existingIndex = recordingResult.failureClusters.findIndex(
+      (existing) => existing.key === reportCluster.key,
+    );
+    if (existingIndex >= 0) {
+      recordingResult.failureClusters.splice(existingIndex, 1, reportCluster);
+    } else {
+      recordingResult.failureClusters.push(reportCluster);
+    }
+    sortFailureClusters(recordingResult.failureClusters);
+    if (reportCluster.occurrences >= 2) {
+      addOrReplaceLearningBacklogItem(
+        recordingResult.learningBacklogItems,
+        createFailureClusterBacklogItem(reportCluster),
+      );
+    }
   }
 
   private async withBlockerPatternAdmissionLock<T>(
@@ -1329,6 +1417,7 @@ interface MutableLessonRecordingResult extends LessonRecordingResult {
   suppressedByCooldown: LessonCooldownSuppression[];
   rejectedByPrivacy: LessonPrivacyFilterDecision[];
   minedBlockerPatterns: CrossTaskBlockerPattern[];
+  failureClusters: FailureCluster[];
   learningBacklogItems: LearningBacklogPrioritizationItem[];
 }
 
@@ -1336,6 +1425,7 @@ function createMutableLessonRecordingResult(
   generatedAt: string,
 ): MutableLessonRecordingResult {
   const learningBacklogItems: LearningBacklogPrioritizationItem[] = [];
+  const failureClusters: FailureCluster[] = [];
   const result = {
     recorded: 0,
     suppressedByCooldown: [],
@@ -1345,6 +1435,21 @@ function createMutableLessonRecordingResult(
   Object.defineProperty(result, 'learningBacklogItems', {
     value: learningBacklogItems,
     enumerable: false,
+    writable: false,
+  });
+  Object.defineProperty(result, 'failureClusters', {
+    value: failureClusters,
+    enumerable: false,
+    writable: false,
+  });
+  Object.defineProperty(result, 'failureClusterReport', {
+    value: {
+      schemaVersion: 'failure-cluster-report-v1',
+      generatedAt,
+      guidance: FAILURE_CLUSTER_REPORT_GUIDANCE,
+      clusters: failureClusters,
+    },
+    enumerable: true,
     writable: false,
   });
   Object.defineProperty(result, 'learningBacklogPrioritizationReport', {
@@ -1407,7 +1512,8 @@ function createLessonFeedbackWeighting(
     deduped.set(weight.source, weight);
   }
   const sortedWeights = [...deduped.values()].sort(
-    (left, right) => right.weight - left.weight || left.source.localeCompare(right.source),
+    (left, right) =>
+      right.weight - left.weight || left.source.localeCompare(right.source),
   );
   const primarySource = selectPrimaryFeedbackSource(sortedWeights);
   return {
@@ -1435,15 +1541,14 @@ function selectPrimaryFeedbackSource(
       Date.parse(right.observedAt) - Date.parse(left.observedAt) ||
       right.weight - left.weight,
   )[0];
-  return latestExplicitSignal?.source ?? weights[0]?.source ?? 'inferred-success';
+  return (
+    latestExplicitSignal?.source ?? weights[0]?.source ?? 'inferred-success'
+  );
 }
 
 function summarizeFeedbackSources(
   feedbackWeighting: LessonFeedbackWeighting,
-): readonly Pick<
-  LessonFeedbackWeight,
-  'source' | 'weight' | 'scoreImpact'
->[] {
+): readonly Pick<LessonFeedbackWeight, 'source' | 'weight' | 'scoreImpact'>[] {
   return feedbackWeighting.weights.map(({ source, weight, scoreImpact }) => ({
     source,
     weight,
@@ -1463,13 +1568,16 @@ function createRecordedLessonBacklogItem(
   const suggestionsIncomplete =
     lesson.reviewerFeedback?.suggestionsComplete === false;
   const primaryFeedbackSource = lesson.feedbackWeighting?.primarySource;
-  const hasExplicitCorrection = primaryFeedbackSource === 'explicit-user-correction';
-  const hasExplicitApproval = primaryFeedbackSource === 'explicit-user-approval';
-  const priority = hasExplicitCorrection || hasExplicitApproval || hasCriticalFindings
-    ? 'high'
-    : suggestionsIncomplete
-      ? 'medium'
-      : 'low';
+  const hasExplicitCorrection =
+    primaryFeedbackSource === 'explicit-user-correction';
+  const hasExplicitApproval =
+    primaryFeedbackSource === 'explicit-user-approval';
+  const priority =
+    hasExplicitCorrection || hasExplicitApproval || hasCriticalFindings
+      ? 'high'
+      : suggestionsIncomplete
+        ? 'medium'
+        : 'low';
   const score = hasExplicitCorrection
     ? 120
     : hasExplicitApproval
@@ -1543,6 +1651,245 @@ function createBlockerPatternBacklogItem(
     recommendedAction:
       'Route a durable mitigation owner before accepting more duplicate worker rediscovery for this blocker pattern.',
   };
+}
+
+function createFailureRecordMetadata(options: {
+  readonly taskId: TaskId;
+  readonly evaluatorName: string;
+  readonly findings: readonly SanitizedLessonFinding[];
+  readonly recordedAt: string;
+  readonly resolution: string;
+  readonly evidenceId: string;
+}): FailureRecordMetadata {
+  const joinedText = options.findings
+    .map(
+      (finding) =>
+        `${finding.message} ${finding.location ?? ''} ${finding.suggestion ?? ''}`,
+    )
+    .join('\n');
+  const firstFinding = options.findings[0];
+  const taskFamily = inferTaskFamily(options.taskId, joinedText);
+  const packageName = inferPackageName(joinedText);
+  const toolName = inferToolName(options.evaluatorName, joinedText);
+  const errorClass = inferErrorClass(options.findings, joinedText);
+  const rootCause = inferRootCause(joinedText);
+  const clusterKey = createFailureClusterKey({
+    taskFamily,
+    ...(packageName ? { packageName } : {}),
+    ...(toolName ? { toolName } : {}),
+    errorClass,
+    rootCause,
+  });
+
+  return {
+    schemaVersion: 'failure-record-v1',
+    taskFamily,
+    ...(packageName ? { packageName } : {}),
+    ...(toolName ? { toolName } : {}),
+    errorClass,
+    rootCause,
+    resolution: options.resolution,
+    evidencePointer: {
+      kind: 'review-finding',
+      id: options.evidenceId,
+      ...(firstFinding?.location ? { location: firstFinding.location } : {}),
+    },
+    clusterKey,
+  };
+}
+
+function createFailureClusterKey(parts: {
+  readonly taskFamily: string;
+  readonly packageName?: string;
+  readonly toolName?: string;
+  readonly errorClass: string;
+  readonly rootCause: string;
+}): string {
+  return [
+    'failure-cluster',
+    sanitizeLessonIdPart(parts.taskFamily),
+    sanitizeLessonIdPart(parts.packageName ?? 'repo'),
+    sanitizeLessonIdPart(parts.toolName ?? 'unknown-tool'),
+    sanitizeLessonIdPart(parts.errorClass),
+    stableHash(parts.rootCause).slice(0, 16),
+  ].join(':');
+}
+
+function inferTaskFamily(taskId: TaskId, text: string): string {
+  const explicitFamily =
+    /\b(?:task family|family)\s*[:=]\s*([a-z][a-z0-9 _/-]{2,60})/i.exec(
+      text,
+    )?.[1];
+  const raw = explicitFamily ?? taskId;
+  const normalized = raw
+    .replace(/\bt_[0-9a-f]{6,}\b/gi, ' ')
+    .replace(/\b(?:task|issue|ticket|pr|pull|request)\b/gi, ' ')
+    .replace(/\b\d+\b/g, ' ')
+    .replace(/[-_/]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  return normalized || 'general';
+}
+
+function inferPackageName(text: string): string | undefined {
+  const workspaceMatch = /\b@franken(?:beast)?\/[a-z0-9-]+\b/i.exec(text)?.[0];
+  if (workspaceMatch) {
+    return workspaceMatch.toLowerCase();
+  }
+  const packagePathMatch = /\bpackages\/([a-z0-9-]+)\b/i.exec(text)?.[1];
+  if (packagePathMatch) {
+    return `packages/${packagePathMatch.toLowerCase()}`;
+  }
+  return undefined;
+}
+
+function inferToolName(
+  evaluatorName: string,
+  text: string,
+): string | undefined {
+  const lower = `${evaluatorName} ${text}`.toLowerCase();
+  const toolPatterns: readonly [string, RegExp][] = [
+    ['vitest', /\bvitest\b|\btest(?:s|ing)?\b/],
+    ['typescript', /\b(?:typescript|tsc|typecheck)\b/],
+    ['eslint', /\b(?:eslint|lint)\b/],
+    ['prettier', /\bprettier\b|\bformat(?:ting)?\b/],
+    ['npm', /\bnpm\b/],
+    ['turbo', /\bturbo\b/],
+    ['codex', /\bcodex\b/],
+    ['github', /\bgithub\b|\bgh\b/],
+    ['docker', /\bdocker\b/],
+  ];
+  return toolPatterns.find(([, pattern]) => pattern.test(lower))?.[0];
+}
+
+function inferErrorClass(
+  findings: readonly SanitizedLessonFinding[],
+  text: string,
+): string {
+  const severity = findings.some((finding) => finding.severity === 'critical')
+    ? 'critical'
+    : findings.some((finding) => finding.severity === 'warning')
+      ? 'warning'
+      : 'info';
+  const lower = text.toLowerCase();
+  if (/\b(?:timeout|timed out|hang|hung)\b/.test(lower)) {
+    return `${severity}:timeout`;
+  }
+  if (
+    /\b(?:assertion|expected|received|failed test|tests? failed|vitest failed)\b/.test(
+      lower,
+    )
+  ) {
+    return `${severity}:test-failure`;
+  }
+  if (/\b(?:type error|typescript|tsc|typecheck)\b/.test(lower)) {
+    return `${severity}:typecheck`;
+  }
+  if (/\b(?:permission|auth|token|credential|secret)\b/.test(lower)) {
+    return `${severity}:auth-or-secret`;
+  }
+  if (/\b(?:missing|absent|required|omitted)\b/.test(lower)) {
+    return `${severity}:missing-contract`;
+  }
+  return `${severity}:review-finding`;
+}
+
+function inferRootCause(text: string): string {
+  const lower = normalizeBlockerFinding(text);
+  const categories: readonly [string, RegExp][] = [
+    [
+      'verification-evidence',
+      /\b(?:verification|evidence|handoff|test command|test result)\b/,
+    ],
+    [
+      'missing-required-contract',
+      /\b(?:missing|absent|required|omitted|not included)\b/,
+    ],
+    ['type-safety', /\b(?:type|typescript|tsc|declaration|schema)\b/],
+    [
+      'authentication-or-secret',
+      /\b(?:auth|token|credential|secret|permission)\b/,
+    ],
+    [
+      'timeout-or-liveness',
+      /\b(?:timeout|timed out|hang|liveness|heartbeat)\b/,
+    ],
+    ['formatting-or-lint', /\b(?:lint|eslint|prettier|format)\b/],
+  ];
+  const matched = categories.find(([, pattern]) => pattern.test(lower))?.[0];
+  if (matched) {
+    return matched;
+  }
+  const terms = extractComparableTerms(lower).slice(0, 6);
+  return terms.length > 0 ? terms.join('-') : 'unspecified-root-cause';
+}
+
+function createFailureCluster(state: FailureClusterState): FailureCluster {
+  const examples = state.observations.slice(-3).map((observation) => ({
+    evidencePointer: observation.evidencePointer,
+    resolution: observation.resolution,
+  }));
+  return {
+    key: state.key,
+    taskFamily: state.taskFamily,
+    ...(state.packageName ? { packageName: state.packageName } : {}),
+    ...(state.toolName ? { toolName: state.toolName } : {}),
+    errorClass: state.errorClass,
+    rootCause: state.rootCause,
+    occurrences: state.observations.length,
+    examples,
+    suggestedActions: createFailureClusterSuggestedActions(state),
+  };
+}
+
+function createFailureClusterSuggestedActions(
+  state: FailureClusterState,
+): readonly string[] {
+  const scope = [state.taskFamily, state.packageName, state.toolName]
+    .filter((value): value is string => Boolean(value))
+    .join(' / ');
+  return [
+    `Add or update regression coverage for ${state.rootCause} in ${scope}.`,
+    `Review package or tool documentation for ${state.errorClass} and add targeted worker guidance if this recurs.`,
+    'Route the top cluster to a PM learning backlog owner before accepting more duplicate rediscovery.',
+  ];
+}
+
+function createFailureClusterBacklogItem(
+  cluster: FailureCluster,
+): LearningBacklogPrioritizationItem {
+  return {
+    id: `failure-cluster:${cluster.key}`,
+    source: 'failure-cluster',
+    priority: cluster.occurrences >= 3 ? 'high' : 'medium',
+    score: Math.min(95, 40 + cluster.occurrences * 20),
+    title: `${cluster.rootCause} in ${cluster.taskFamily}`,
+    rationale: `Failure cluster recurred ${cluster.occurrences} times for ${cluster.errorClass}; PMs should treat it as a systemic learning opportunity instead of an isolated incident.`,
+    recommendedAction: cluster.suggestedActions[0]!,
+  };
+}
+
+function addOrReplaceLearningBacklogItem(
+  target: LearningBacklogPrioritizationItem[],
+  item: LearningBacklogPrioritizationItem,
+): void {
+  const existingIndex = target.findIndex((existing) => existing.id === item.id);
+  if (existingIndex >= 0) {
+    target.splice(existingIndex, 1, item);
+  } else {
+    target.push(item);
+  }
+  sortLearningBacklogItems(target);
+}
+
+function sortFailureClusters(clusters: FailureCluster[]): void {
+  clusters.sort((left, right) => {
+    if (right.occurrences !== left.occurrences) {
+      return right.occurrences - left.occurrences;
+    }
+    return left.key.localeCompare(right.key);
+  });
 }
 
 function sortLearningBacklogItems(
@@ -2023,7 +2370,9 @@ function createLessonPrivacyFilterResult(
     flags: Array.from(flags).sort(),
     redactions,
     originalHash: stableHash(rawText),
-    reason: sensitive ? PRIVACY_FILTER_SENSITIVE_REASON : PRIVACY_FILTER_ADMIT_REASON,
+    reason: sensitive
+      ? PRIVACY_FILTER_SENSITIVE_REASON
+      : PRIVACY_FILTER_ADMIT_REASON,
   };
 
   return {
@@ -2048,11 +2397,14 @@ function createPrivacyDecision(
     CUSTOMER_DATA_PATTERNS.some((pattern) => pattern.test(rawText));
   if (containsCustomerData) {
     flags.add('customer-data');
-    for (const segment of rawText.split('\n').flatMap(extractCustomerSegments)) {
+    for (const segment of rawText
+      .split('\n')
+      .flatMap(extractCustomerSegments)) {
       if (
         redactions.some(
           (redaction) =>
-            redaction.kind === 'customer-data' && redaction.original === segment,
+            redaction.kind === 'customer-data' &&
+            redaction.original === segment,
         )
       ) {
         continue;
@@ -2094,11 +2446,15 @@ function extractCustomerSegments(text: string): string[] {
       /\b[Cc]ustomer(?:\s+account)?(?:\s+[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})?(?:\s+[A-Za-z0-9_.:-]+){1,3}\b|\b[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b|\b[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*)(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b|\b[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b/g,
     ) ?? [];
   return segments.flatMap((segment) => {
-    const emailMatch = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.exec(segment);
+    const emailMatch = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.exec(
+      segment,
+    );
     if (!emailMatch) {
       return [segment];
     }
-    const trailingIdentifier = segment.slice(emailMatch.index + emailMatch[0].length).trim();
+    const trailingIdentifier = segment
+      .slice(emailMatch.index + emailMatch[0].length)
+      .trim();
     return trailingIdentifier ? [trailingIdentifier] : [];
   });
 }
@@ -2108,9 +2464,11 @@ function createFindingPrivacyText(finding: {
   readonly location?: string | undefined;
   readonly suggestion?: string | undefined;
 }): string {
-  return [finding.message, finding.suggestion ?? '', finding.location ?? ''].join(
-    '\n',
-  );
+  return [
+    finding.message,
+    finding.suggestion ?? '',
+    finding.location ?? '',
+  ].join('\n');
 }
 
 function mergePrivacyRedactions(
@@ -2149,8 +2507,8 @@ function toPublicPrivacyDecision(
 ): LessonPrivacyFilterDecision {
   return {
     ...decision,
-    redactions: decision.redactions.map(({ original: _original, ...rest }) =>
-      rest,
+    redactions: decision.redactions.map(
+      ({ original: _original, ...rest }) => rest,
     ),
   };
 }
@@ -2181,15 +2539,15 @@ function containsReusableLessonSignal(text: string): boolean {
   if (ENVIRONMENT_FACT_PATTERNS.some((pattern) => pattern.test(text))) {
     return true;
   }
-  if (/\b(?:always|avoid|ensure|prefer|require|validate|verify)\b/i.test(text)) {
+  if (
+    /\b(?:always|avoid|ensure|prefer|require|validate|verify)\b/i.test(text)
+  ) {
     return true;
   }
   if (/\b(?:merged|opened|closed|pushed|committed)\b/i.test(text)) {
     return false;
   }
-  return /\b(?:before|check|run)\b/i.test(
-    text,
-  );
+  return /\b(?:before|check|run)\b/i.test(text);
 }
 
 function collectPrivacyRedactions(
@@ -2346,12 +2704,20 @@ function findContradictoryGuidanceMatch(
   const priorDirectives = createLessonDirectiveClauses(prior);
   for (const lessonDirective of lessonDirectives) {
     for (const priorDirective of priorDirectives) {
-      if (normalizeText(lessonDirective.sourceText) === normalizeText(priorDirective.sourceText)) {
+      if (
+        normalizeText(lessonDirective.sourceText) ===
+        normalizeText(priorDirective.sourceText)
+      ) {
         continue;
       }
-      if (hasDoubleNegativeOppositeDirectivePair(lessonDirective, priorDirective)) {
+      if (
+        hasDoubleNegativeOppositeDirectivePair(lessonDirective, priorDirective)
+      ) {
         return {
-          sharedTerms: sharedDirectiveObjectTerms(lessonDirective, priorDirective),
+          sharedTerms: sharedDirectiveObjectTerms(
+            lessonDirective,
+            priorDirective,
+          ),
           lessonGuidance: lessonDirective.sourceText,
           conflictingGuidance: priorDirective.sourceText,
         };
@@ -2370,7 +2736,14 @@ function findContradictoryGuidanceMatch(
       if (lessonDirective.polarity === priorDirective.polarity) {
         continue;
       }
-      if (hasCompatibleSiblingDirective(lessonDirectives, priorDirectives, lessonDirective, priorDirective)) {
+      if (
+        hasCompatibleSiblingDirective(
+          lessonDirectives,
+          priorDirectives,
+          lessonDirective,
+          priorDirective,
+        )
+      ) {
         continue;
       }
       const opposedGuardSharedTerms = opposedConditionalGuardSharedTerms(
@@ -2397,7 +2770,13 @@ function findContradictoryGuidanceMatch(
       if (hasCompatibleConditionalGuard(lessonDirective, priorDirective)) {
         continue;
       }
-      if (hasDivergentQualifiedGenericObjectPair(lessonDirective, priorDirective, sharedTerms)) {
+      if (
+        hasDivergentQualifiedGenericObjectPair(
+          lessonDirective,
+          priorDirective,
+          sharedTerms,
+        )
+      ) {
         continue;
       }
       if (hasExplicitOppositeDirectivePair(lessonDirective, priorDirective)) {
@@ -2426,7 +2805,10 @@ function hasAuthenticationScopeConflict(
   a: LessonDirectiveClause,
   b: LessonDirectiveClause,
 ): boolean {
-  return hasAuthenticationScopeConflictInOrder(a, b) || hasAuthenticationScopeConflictInOrder(b, a);
+  return (
+    hasAuthenticationScopeConflictInOrder(a, b) ||
+    hasAuthenticationScopeConflictInOrder(b, a)
+  );
 }
 
 function hasAuthenticationScopeConflictInOrder(
@@ -2461,7 +2843,9 @@ function hasDivergentScopeQualifiers(a: string, b: string): boolean {
   const aScopes = extractScopeQualifiers(a);
   const bScopes = extractScopeQualifiers(b);
   return aScopes.some((scope) =>
-    SCOPE_QUALIFIER_OPPOSITES[scope]?.some((opposite) => bScopes.includes(opposite)),
+    SCOPE_QUALIFIER_OPPOSITES[scope]?.some((opposite) =>
+      bScopes.includes(opposite),
+    ),
   );
 }
 
@@ -2481,8 +2865,16 @@ function hasCompatibleSiblingDirective(
     return false;
   }
   return (
-    hasCompatibleSiblingInList(lessonDirectives, currentDirective, priorDirective) ||
-    hasCompatibleSiblingInList(priorDirectives, priorDirective, currentDirective)
+    hasCompatibleSiblingInList(
+      lessonDirectives,
+      currentDirective,
+      priorDirective,
+    ) ||
+    hasCompatibleSiblingInList(
+      priorDirectives,
+      priorDirective,
+      currentDirective,
+    )
   );
 }
 
@@ -2495,13 +2887,16 @@ function hasCompatibleSiblingInList(
     (directive) =>
       directive !== currentDirective &&
       directive.polarity === comparedDirective.polarity &&
-      canonicalComparableText(directive.text) === canonicalComparableText(comparedDirective.text),
+      canonicalComparableText(directive.text) ===
+        canonicalComparableText(comparedDirective.text),
   );
 }
 
 function sharedTextTerms(a: string, b: string): string[] {
   const aTerms = new Set(extractComparableTerms(a));
-  const bTerms = new Set(extractComparableTerms(b).map(canonicalComparableTerm));
+  const bTerms = new Set(
+    extractComparableTerms(b).map(canonicalComparableTerm),
+  );
   return [...aTerms]
     .filter((term) => bTerms.has(canonicalComparableTerm(term)))
     .sort();
@@ -2523,7 +2918,9 @@ function createLessonDirectiveFragments(lesson: CritiqueLesson): string[] {
       if (finding.suggestion) {
         return [finding.suggestion];
       }
-      return isDirectiveLikeFindingMessage(finding.message) ? [finding.message] : [];
+      return isDirectiveLikeFindingMessage(finding.message)
+        ? [finding.message]
+        : [];
     }) ?? [];
   return [lesson.correctionApplied, ...reviewerGuidance].filter(
     (fragment) => normalizeText(fragment).length > 0,
@@ -2539,7 +2936,8 @@ function isDirectiveLikeFindingMessage(message: string): boolean {
   return (
     (startsWithPositiveDirective(normalized) && !looksLikeFailureProse) ||
     startsWithNegativeDirective(normalized) ||
-    (!looksLikeFailureProse && /\b(?:do not|don t|must not|should not|unless|until)\b/i.test(message))
+    (!looksLikeFailureProse &&
+      /\b(?:do not|don t|must not|should not|unless|until)\b/i.test(message))
   );
 }
 
@@ -2593,7 +2991,10 @@ function createDirectiveClauses(fragment: string): LessonDirectiveClause[] {
     },
   ];
 
-  if (guardCondition && (conditionalProhibition || /\b(?:without|unless)\b/i.test(fragment))) {
+  if (
+    guardCondition &&
+    (conditionalProhibition || /\b(?:without|unless)\b/i.test(fragment))
+  ) {
     clauses.push({
       text: `${normalized} ${guardCondition}`,
       sourceText: fragment,
@@ -2603,7 +3004,11 @@ function createDirectiveClauses(fragment: string): LessonDirectiveClause[] {
     });
   }
 
-  if (embeddedNegatedCondition && leadingPolarity === 'positive' && !startsWithDoubleNegativeDirective(normalized)) {
+  if (
+    embeddedNegatedCondition &&
+    leadingPolarity === 'positive' &&
+    !startsWithDoubleNegativeDirective(normalized)
+  ) {
     clauses.push({
       text: embeddedNegatedCondition,
       sourceText: fragment,
@@ -2623,7 +3028,9 @@ function splitDirectiveFragments(fragment: string): string[] {
 }
 
 function splitCoordinatedDirectiveFragment(fragment: string): string[] {
-  const parts = fragment.split(/,?\s+(?:and|then)\s+/i).map((part) => part.trim());
+  const parts = fragment
+    .split(/,?\s+(?:and|then)\s+/i)
+    .map((part) => part.trim());
   if (parts.length <= 1) {
     return parts;
   }
@@ -2632,7 +3039,10 @@ function splitCoordinatedDirectiveFragment(fragment: string): string[] {
   let current = parts[0]!;
   for (const part of parts.slice(1)) {
     const normalizedPart = normalizeText(part);
-    if (startsWithPositiveDirective(normalizedPart) || startsWithNegativeDirective(normalizedPart)) {
+    if (
+      startsWithPositiveDirective(normalizedPart) ||
+      startsWithNegativeDirective(normalizedPart)
+    ) {
       fragments.push(current);
       current = part;
       continue;
@@ -2658,7 +3068,10 @@ function normalizeGuardCondition(value: string): string {
 function extractEmbeddedNegatedCondition(
   normalized: string,
 ): string | undefined {
-  const match = /\b(?:do not|don t|does not|not|never|cannot|can t|must not|should not)\s+(.+)$/i.exec(normalized);
+  const match =
+    /\b(?:do not|don t|does not|not|never|cannot|can t|must not|should not)\s+(.+)$/i.exec(
+      normalized,
+    );
   const condition = match?.[1]?.trim() ?? '';
   return condition.length > 0 ? condition : undefined;
 }
@@ -2672,7 +3085,10 @@ function opposedConditionalGuardSharedTerms(
     return [];
   }
 
-  if (hasComplementaryConditionalGuardPair(a, b) || hasComplementaryConditionalGuardPair(b, a)) {
+  if (
+    hasComplementaryConditionalGuardPair(a, b) ||
+    hasComplementaryConditionalGuardPair(b, a)
+  ) {
     return [];
   }
 
@@ -2715,8 +3131,10 @@ function hasComplementaryConditionalGuardPair(
       maybeProhibition.guardCondition,
       maybeAllowance.guardCondition,
     ) &&
-    sharedTextTerms(maybeProhibition.guardCondition, maybeAllowance.guardCondition)
-      .length >= 1 &&
+    sharedTextTerms(
+      maybeProhibition.guardCondition,
+      maybeAllowance.guardCondition,
+    ).length >= 1 &&
     sharedTextTerms(maybeProhibition.text, maybeAllowance.text).length >=
       MIN_CONTRADICTION_SHARED_TERMS
   );
@@ -2752,7 +3170,10 @@ function hasDivergentConditionalGuardPair(
   if (!a.guardCondition || !b.guardCondition || a.polarity === b.polarity) {
     return false;
   }
-  if (!hasGuardOutcomeWord(a.guardCondition) || !hasGuardOutcomeWord(b.guardCondition)) {
+  if (
+    !hasGuardOutcomeWord(a.guardCondition) ||
+    !hasGuardOutcomeWord(b.guardCondition)
+  ) {
     return false;
   }
 
@@ -2920,7 +3341,8 @@ function hasSharedGuardSubject(
   guardCondition: string,
   comparedDirective: LessonDirectiveClause,
 ): boolean {
-  const comparedGuard = comparedDirective.guardCondition ?? comparedDirective.text;
+  const comparedGuard =
+    comparedDirective.guardCondition ?? comparedDirective.text;
   return (
     sharedTextTerms(
       stripGuardOutcomeWords(guardCondition),
@@ -2935,7 +3357,6 @@ function stripGuardOutcomeWords(text: string): string {
     '',
   );
 }
-
 
 function hasCompatibleWithoutWithPair(
   maybeAllowance: LessonDirectiveClause,
@@ -2952,8 +3373,8 @@ function hasCompatibleWithoutWithPair(
   }
 
   return (
-    sharedTextTerms(maybeAllowance.guardCondition, maybeProhibition.text).length >=
-      1 &&
+    sharedTextTerms(maybeAllowance.guardCondition, maybeProhibition.text)
+      .length >= 1 &&
     sharedTextTerms(maybeAllowance.text, maybeProhibition.text).length >=
       MIN_CONTRADICTION_SHARED_TERMS
   );
@@ -3001,8 +3422,8 @@ function hasCompatibleGuardedAllowancePair(
   }
 
   return (
-    sharedTextTerms(maybeProhibition.guardCondition, maybeAllowance.text).length >=
-      1 &&
+    sharedTextTerms(maybeProhibition.guardCondition, maybeAllowance.text)
+      .length >= 1 &&
     sharedTextTerms(maybeProhibition.text, maybeAllowance.text).length >=
       MIN_CONTRADICTION_SHARED_TERMS
   );
@@ -3019,8 +3440,12 @@ function hasCompatibleValidityQualifierPair(
     return false;
   }
 
-  const validAllowanceMatch = /\b(?:valid|validated)\s+(\w+)\b/i.exec(maybeAllowance.text);
-  const invalidProhibitionMatch = /\b(?:invalid|unvalidated)\s+(\w+)\b/i.exec(maybeProhibition.text);
+  const validAllowanceMatch = /\b(?:valid|validated)\s+(\w+)\b/i.exec(
+    maybeAllowance.text,
+  );
+  const invalidProhibitionMatch = /\b(?:invalid|unvalidated)\s+(\w+)\b/i.exec(
+    maybeProhibition.text,
+  );
   return (
     validAllowanceMatch?.[1] !== undefined &&
     invalidProhibitionMatch?.[1] !== undefined &&
@@ -3037,20 +3462,24 @@ function hasOpposedGuardOutcome(
     /\b(pass|passes|passed|passing|success|succeed|succeeds|valid|validated|approved|granted)\b/.test(
       guardCondition,
     );
-  const guardHasFail = /\b(fail|fails|failed|failing|failure|invalid|missing|absent|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected|unapproved|unverified|not\s+approved|not\s+granted)\b/.test(
-    guardCondition,
-  );
+  const guardHasFail =
+    /\b(fail|fails|failed|failing|failure|invalid|missing|absent|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected|unapproved|unverified|not\s+approved|not\s+granted)\b/.test(
+      guardCondition,
+    );
   const requirementHasPass =
     /\b(pass|passes|passed|passing|success|succeed|succeeds|valid|validated|approved|granted)\b/.test(
       requirementText,
     );
   const requirementHasFail =
-    /\b(fail|fails|failed|failing|failure|invalid|missing|absent|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected|unapproved|unverified|not\s+approved|not\s+granted)\b/.test(requirementText);
+    /\b(fail|fails|failed|failing|failure|invalid|missing|absent|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected|unapproved|unverified|not\s+approved|not\s+granted)\b/.test(
+      requirementText,
+    );
 
   return (
     (guardHasPass && requirementHasFail) ||
     (guardHasFail && requirementHasPass) ||
-    (requirementHasFail && sharedTextTerms(guardCondition, requirementText).length >= 1)
+    (requirementHasFail &&
+      sharedTextTerms(guardCondition, requirementText).length >= 1)
   );
 }
 
@@ -3089,7 +3518,10 @@ function hasExactTopLevelReversal(
   a: LessonDirectiveClause,
   b: LessonDirectiveClause,
 ): boolean {
-  return hasExactTopLevelReversalInOrder(a, b) || hasExactTopLevelReversalInOrder(b, a);
+  return (
+    hasExactTopLevelReversalInOrder(a, b) ||
+    hasExactTopLevelReversalInOrder(b, a)
+  );
 }
 
 function hasExactTopLevelReversalInOrder(
@@ -3107,7 +3539,9 @@ function hasExactTopLevelReversalInOrder(
     return false;
   }
 
-  const negativeObject = stripLeadingPositiveDirective(stripLeadingDirective(maybeNegative.text));
+  const negativeObject = stripLeadingPositiveDirective(
+    stripLeadingDirective(maybeNegative.text),
+  );
   const positiveObject = stripLeadingDirective(maybePositive.text);
   const negativeAction = leadingDirectiveAction(maybeNegative.text);
   const positiveAction = leadingDirectiveAction(maybePositive.text);
@@ -3142,8 +3576,9 @@ function hasDoubleNegativeOppositeDirectivePairInOrder(
     return false;
   }
   return (
-    canonicalComparableText(stripLeadingPositiveDirective(maybeDoubleNegative.text)) ===
-    canonicalComparableText(stripLeadingDirective(maybeNegative.text))
+    canonicalComparableText(
+      stripLeadingPositiveDirective(maybeDoubleNegative.text),
+    ) === canonicalComparableText(stripLeadingDirective(maybeNegative.text))
   );
 }
 
@@ -3164,7 +3599,9 @@ function leadingDirectiveAction(text: string): string | undefined {
     .replace(/^(?:do not|don t|must not|should not|cannot|can t)\s+/, '')
     .replace(/^(?:should|must)\s+/, '');
   const action = normalizeText(strippedNegation).split(' ').find(Boolean);
-  if (['disallow', 'prohibit', 'forbid', 'deny', 'reject'].includes(action ?? '')) {
+  if (
+    ['disallow', 'prohibit', 'forbid', 'deny', 'reject'].includes(action ?? '')
+  ) {
     return 'allow';
   }
   if (action === 'permit') {
@@ -3181,14 +3618,17 @@ function sharedDirectiveObjectTerms(
   const bObjectTerms = extractComparableTerms(stripLeadingDirective(b.text));
   return aObjectTerms.filter((aTerm) =>
     bObjectTerms.some(
-      (bTerm) => canonicalComparableTerm(aTerm) === canonicalComparableTerm(bTerm),
+      (bTerm) =>
+        canonicalComparableTerm(aTerm) === canonicalComparableTerm(bTerm),
     ),
   );
 }
 
 function stripLeadingDirective(normalized: string): string {
   return stripLeadingPositiveDirective(
-    stripLeadingNegativeDirective(stripLeadingDoubleNegativeDirective(normalized)),
+    stripLeadingNegativeDirective(
+      stripLeadingDoubleNegativeDirective(normalized),
+    ),
   );
 }
 
@@ -3209,7 +3649,9 @@ function hasDivergentQualifiedGenericObjectPair(
   if (sharedTerms.length < MIN_CONTRADICTION_SHARED_TERMS) {
     return false;
   }
-  const sharedCanonicalTerms = new Set(sharedTerms.map(canonicalComparableTerm));
+  const sharedCanonicalTerms = new Set(
+    sharedTerms.map(canonicalComparableTerm),
+  );
   const sharedGenericObjects = [...sharedCanonicalTerms].filter((term) =>
     LESSON_CONTRADICTION_GENERIC_OBJECT_TERMS.has(term),
   );
@@ -3240,7 +3682,10 @@ function hasExplicitOppositeDirectivePairInOrder(
   }
 
   const negativeObject = stripLeadingDirective(maybeNegative.text);
-  if (canonicalComparableText(negativeObject) === canonicalComparableText(maybePositive.text)) {
+  if (
+    canonicalComparableText(negativeObject) ===
+    canonicalComparableText(maybePositive.text)
+  ) {
     return true;
   }
 
@@ -3248,7 +3693,8 @@ function hasExplicitOppositeDirectivePairInOrder(
   return (
     negativeObject.length > 0 &&
     positiveObject.length > 0 &&
-    canonicalComparableText(negativeObject) === canonicalComparableText(positiveObject)
+    canonicalComparableText(negativeObject) ===
+      canonicalComparableText(positiveObject)
   );
 }
 
@@ -3269,8 +3715,11 @@ function startsWithDoubleNegativeDirective(normalized: string): boolean {
 }
 
 function startsWithPositiveDirective(normalized: string): boolean {
-  return startsWithDoubleNegativeDirective(normalized) || /^(allow|enable|enabled|deploy|reuse|use|cache|log|store|record|permit|require|requires|required|run|rotate|should|must)\b/.test(
-    normalized,
+  return (
+    startsWithDoubleNegativeDirective(normalized) ||
+    /^(allow|enable|enabled|deploy|reuse|use|cache|log|store|record|permit|require|requires|required|run|rotate|should|must)\b/.test(
+      normalized,
+    )
   );
 }
 
@@ -3285,8 +3734,14 @@ function stripLeadingNegativeDirective(normalized: string): string {
 
 function stripLeadingPositiveDirective(normalized: string): string {
   return normalized
-    .replace(/^(?:do not|don t|must not|should not|cannot|can t)\s+(?:avoid|reject|forbid|disallow|prohibit|disable|disabled|skip|omit|ignore|bypass|deny)\s+/, '')
-    .replace(/^(?:allow|enable|enabled|deploy|reuse|use|cache|log|store|record|permit|require|requires|required|run|rotate|should|must)\s+/, '')
+    .replace(
+      /^(?:do not|don t|must not|should not|cannot|can t)\s+(?:avoid|reject|forbid|disallow|prohibit|disable|disabled|skip|omit|ignore|bypass|deny)\s+/,
+      '',
+    )
+    .replace(
+      /^(?:allow|enable|enabled|deploy|reuse|use|cache|log|store|record|permit|require|requires|required|run|rotate|should|must)\s+/,
+      '',
+    )
     .trim();
 }
 
