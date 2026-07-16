@@ -2405,53 +2405,54 @@ export class SqliteMemoryReviewQueue {
   }
 
   edit(id: string, edit: MemoryCandidateEdit): MemoryCandidate {
-    const candidate = this.requireCandidate(id, 'pending');
-    const updated: MemoryCandidate = {
-      ...candidate,
-      ...edit,
-      updatedAt: isoNow(),
-    };
-    this.validateProposal(updated);
     try {
+      const candidate = this.requireCandidate(id, 'pending');
+      const updated: MemoryCandidate = {
+        ...candidate,
+        ...edit,
+        updatedAt: isoNow(),
+      };
+      this.validateProposal(updated);
       assertMemoryCandidateNotDeletionGuarded(this.db, updated, this.encryption);
-    } catch (error) {
+      this.db
+        .prepare(
+          `UPDATE memory_review_candidates
+           SET value = ?, source = ?, evidence_id = ?, confidence = ?, reason = ?, updated_at = ?
+           WHERE id = ? AND status = 'pending'`,
+        )
+        .run(
+          this.encodeValue(updated.value),
+          this.encodeText(updated.source),
+          updated.evidenceId ? this.encodeText(updated.evidenceId) : null,
+          updated.confidence,
+          this.encodeText(updated.reason),
+          updated.updatedAt,
+          id,
+        );
+      const result = this.requireCandidate(id, 'pending');
       this.audit?.({
         operation: 'review.edit',
         store: 'review',
-        key: updated.key,
+        key: result.key,
+        outcome: 'success',
+        details: { id, targetStore: result.targetStore },
+      });
+      return result;
+    } catch (error) {
+      const candidate = this.tryCandidate(id);
+      this.audit?.({
+        operation: 'review.edit',
+        store: 'review',
+        ...(candidate ? { key: candidate.key } : {}),
         outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
         details: {
           id,
-          targetStore: updated.targetStore,
+          ...(candidate ? { status: candidate.status, targetStore: candidate.targetStore } : {}),
           errorName: error instanceof Error ? error.name : 'Error',
         },
       });
       throw error;
     }
-    this.db
-      .prepare(
-        `UPDATE memory_review_candidates
-         SET value = ?, source = ?, evidence_id = ?, confidence = ?, reason = ?, updated_at = ?
-         WHERE id = ? AND status = 'pending'`,
-      )
-      .run(
-        this.encodeValue(updated.value),
-        this.encodeText(updated.source),
-        updated.evidenceId ? this.encodeText(updated.evidenceId) : null,
-        updated.confidence,
-        this.encodeText(updated.reason),
-        updated.updatedAt,
-        id,
-      );
-    const result = this.requireCandidate(id, 'pending');
-    this.audit?.({
-      operation: 'review.edit',
-      store: 'review',
-      key: result.key,
-      outcome: 'success',
-      details: { id, targetStore: result.targetStore },
-    });
-    return result;
   }
 
   approve(

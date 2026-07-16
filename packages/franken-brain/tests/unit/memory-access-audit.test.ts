@@ -249,14 +249,19 @@ describe('memory access audit trail', () => {
     brain.close();
   });
 
-  it('audits missing review reject and never-store candidates before rethrowing', () => {
+  it('audits missing review edit, reject, and never-store candidates before rethrowing', () => {
     const brain = new SqliteBrain(':memory:');
 
+    expect(() => brain.memoryReview.edit('missing-edit-candidate', { reason: 'attempted edit' })).toThrow(/not found/);
     expect(() => brain.memoryReview.reject('missing-reject-candidate')).toThrow(/not found/);
     expect(() => brain.memoryReview.neverStore('missing-never-store-candidate')).toThrow(/not found/);
 
+    const editAudit = brain.accessAudit.list({ operation: 'review.edit' });
     const rejectAudit = brain.accessAudit.list({ operation: 'review.reject' });
     const neverStoreAudit = brain.accessAudit.list({ operation: 'review.neverStore' });
+    expect(editAudit[0]).toMatchObject({ operation: 'review.edit', outcome: 'error' });
+    expect(editAudit[0]?.details?.id).toBe('missing-edit-candidate');
+    expect(editAudit[0]?.keyHash).toBeUndefined();
     expect(rejectAudit[0]).toMatchObject({ operation: 'review.reject', outcome: 'error' });
     expect(rejectAudit[0]?.details?.id).toBe('missing-reject-candidate');
     expect(rejectAudit[0]?.keyHash).toBeUndefined();
@@ -321,7 +326,7 @@ describe('memory access audit trail', () => {
 
   it('records recall failures as errors instead of successes', () => {
     const brain = new SqliteBrain(':memory:');
-    brain.episodic.record({ type: 'task', summary: 'needle event', createdAt: new Date().toISOString() });
+    brain.episodic.record({ type: 'observation', summary: 'needle event', createdAt: new Date().toISOString() });
 
     expect(() => brain.episodic.recall('needle', Infinity)).toThrow();
 
@@ -332,7 +337,7 @@ describe('memory access audit trail', () => {
 
   it('audits episodic counts and checkpoint write failures', () => {
     const brain = new SqliteBrain(':memory:');
-    brain.episodic.record({ type: 'task', summary: 'count me', createdAt: new Date().toISOString() });
+    brain.episodic.record({ type: 'observation', summary: 'count me', createdAt: new Date().toISOString() });
 
     expect(brain.episodic.count()).toBe(1);
     expect(brain.accessAudit.list({ operation: 'episodic.count', limit: 1 })[0].outcome).toBe('success');
