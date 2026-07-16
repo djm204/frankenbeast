@@ -95,8 +95,16 @@ describe('GovernorAdapter', () => {
     })).resolves.toMatchObject({ decision: 'approved' });
     await expect(governor.check({
       action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"key":"profile.delete-policy"}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"readScope":"agent","agentId":"agent-1"}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
       context: '{"key":"profile.delete-policy","agentId":"agent-1"}',
-    })).resolves.toMatchObject({ decision: 'denied' });
+    })).resolves.toMatchObject({ decision: 'approved' });
     await expect(governor.check({
       action: 'mcp__fbeast-proxy__execute_tool',
       context: '{"key":"profile.delete-policy","value":"rm -rf /","source":"chat:turn-42 secret"}',
@@ -108,8 +116,10 @@ describe('GovernorAdapter', () => {
     expect(rows[0]?.context).toBe('{}');
     expect(rows[1]?.context).toBe('{}');
     expect(rows[2]?.context).toBe('{}');
-    expect(rows[3]?.context).toContain('profile.delete-policy');
-    expect(rows[4]?.context).toContain('profile.delete-policy');
+    expect(rows[3]?.context).toBe('{}');
+    expect(rows[4]?.context).toBe('{}');
+    expect(rows[5]?.context).toBe('{}');
+    expect(rows[6]?.context).toContain('profile.delete-policy');
   });
 
   it('allows right-to-forget dryRun calls while keeping selector context redacted', async () => {
