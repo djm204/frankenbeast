@@ -12,8 +12,9 @@ Structured source: `docs/onboarding/local-service-dependencies.manifest.json`.
 | Semantic-memory seed scripts | ChromaDB | Yes when using local semantic memory scripts | `curl -fsS "${CHROMA_URL:-http://localhost:8000}/api/v2/heartbeat"` |
 | Local observability dashboards | Grafana | Yes for dashboard viewing only | `curl -fsS http://localhost:3000/api/health` |
 | Distributed trace viewing/export smoke tests | Tempo | Yes for OTLP trace export | `curl -fsS http://localhost:3200/ready` |
-| Local chat, Beast runs, dashboard chat turns | Provider CLI login or API-backed provider keys | Yes for real model calls | selected provider smoke call; do not rely on `command -v` alone |
-| Operator token and stored credentials | Configured secret backend | Yes when runtime resolves secret refs | `.fbeast/config.json` names the backend and required backend session/passphrase is available |
+| Local chat, agent execution, dashboard chat turns | CLI-backed provider login | Yes for chat surfaces that use the CLI registry | selected CLI-backed provider smoke call; do not rely on `command -v` alone |
+| Provider-registry Beast runs | API-backed provider keys or CLI-backed provider login | Yes for real model calls | selected provider smoke call using that provider path |
+| Operator token and stored credentials | Configured secret backend | Yes when runtime resolves secret refs | `.fbeast/config.json` names the backend and a backend-specific decrypt/session check succeeds |
 
 ## Service details
 
@@ -38,13 +39,13 @@ Structured source: `docs/onboarding/local-service-dependencies.manifest.json`.
 - Start only when you need the observability UI:
 
   ```bash
-  GRAFANA_USER=admin GRAFANA_PASSWORD=replace-with-unique-password docker compose up -d grafana
+  GRAFANA_USER=admin GRAFANA_PASSWORD="$(openssl rand -base64 24)" docker compose up -d --no-deps grafana
   curl -fsS http://localhost:3000/api/health
   ```
 
 - Required for: local Grafana panels and operator-facing dashboard views.
 - Not required for: trace collection itself, SQLite observer storage, root unit tests, or CLI planning/runs.
-- Edge case: the old `admin/admin` default is intentionally rejected. Set a unique `GRAFANA_PASSWORD` before starting compose.
+- Edge case: the old `admin/admin` default is intentionally rejected. Generate a unique `GRAFANA_PASSWORD` before starting compose, and use `--no-deps` when you want Grafana without also starting Tempo through Docker Compose dependencies.
 
 ### Tempo
 
@@ -61,9 +62,10 @@ Structured source: `docs/onboarding/local-service-dependencies.manifest.json`.
 
 ### Provider CLI or API-backed providers
 
-- Local chat, Beast runs, and dashboard chat need at least one real provider path. Install and authenticate a supported CLI (`claude`, `codex`, or `gemini`) or configure an API-backed provider with an exported key such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `GEMINI_API_KEY`.
+- Local chat, agent execution, and dashboard chat surfaces currently resolve providers through the CLI provider registry. Install and authenticate a supported CLI (`claude`, `codex`, or `gemini`) before expecting those chat paths to start.
+- Provider-registry Beast runs may use either a CLI-backed provider or an API-backed provider with an exported key such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `GEMINI_API_KEY`; scope API-key-only guidance to those Beast/provider-registry paths.
 - Not required for: docs-only tests, static typecheck, and most package unit tests.
-- Failure symptom: provider resolution fails before a model call, or chat/Beast execution stops with missing provider credentials.
+- Failure symptom: provider resolution fails before a model call, chat startup rejects API-only provider types such as `anthropic-api`, `openai-api`, or `gemini-api`, or Beast execution stops with missing provider credentials.
 
 ### Secret backend
 
@@ -75,7 +77,7 @@ Structured source: `docs/onboarding/local-service-dependencies.manifest.json`.
 
 - Required for: stored operator tokens, stored provider credentials, and runtime paths that resolve secret refs.
 - Not required for: repository bootstrap, docs-only checks, or tests that inject secrets directly.
-- Health check: verify `.fbeast/config.json`, then prove the selected backend is usable: local encrypted vault plus `FRANKENBEAST_PASSPHRASE`, `BW_SESSION` for Bitwarden, an authenticated `op` CLI session for 1Password, or OS keychain availability.
+- Health check: verify `.fbeast/config.json`, then prove the selected backend is usable: for `local-encrypted`, instantiate `LocalEncryptedStore` and run a decrypting call such as `keys()` with `FRANKENBEAST_PASSPHRASE`; use `BW_SESSION` for Bitwarden, an authenticated `op` CLI session for 1Password, or OS keychain availability.
 - Edge case: changing `network.secureBackend` does not migrate existing secret refs. Re-store or migrate secrets after switching between `local-encrypted`, `os-keychain`, `1password`, and `bitwarden`.
 
 ## Negative guidance
