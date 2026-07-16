@@ -113,4 +113,99 @@ describe('OutcomeAttribution', () => {
       },
     ])
   })
+
+  it('recursively drops nested prompt and secret metadata keys', () => {
+    const attribution = new OutcomeAttribution()
+
+    attribution.recordDecision({
+      workflowId: 'issue-1693',
+      decisionType: 'tool-choice',
+      contextSummary: 'Need a safe query helper',
+      chosenAction: 'capture summaries only',
+      metadata: {
+        payload: {
+          rawPrompt: 'DO NOT STORE nested prompt',
+          nested: { token: 'nested-token', safeNestedSignal: 'ok' },
+        },
+        safeTopLevel: 'kept',
+      },
+    })
+
+    expect(attribution.decisions()[0]!.metadata).toEqual({
+      payload: { nested: { safeNestedSignal: 'ok' } },
+      safeTopLevel: 'kept',
+    })
+    expect(JSON.stringify(attribution.decisions())).not.toContain('DO NOT STORE')
+    expect(JSON.stringify(attribution.decisions())).not.toContain('nested-token')
+  })
+
+  it('rejects outcome workflow ids that do not match the decision workflow', () => {
+    const attribution = new OutcomeAttribution()
+    const decision = attribution.recordDecision({
+      workflowId: 'issue-1693',
+      decisionType: 'review-gate',
+      contextSummary: 'PR needs review',
+      chosenAction: 'trigger Codex',
+    })
+
+    expect(() =>
+      attribution.recordOutcome({
+        decisionId: decision.decisionId,
+        workflowId: 'issue-9999',
+        verification: 'wrong workflow',
+        prState: 'open',
+        issueState: 'open',
+        elapsedMs: 1,
+      }),
+    ).toThrow(/workflowId issue-9999 does not match decision workflowId issue-1693/)
+  })
+
+  it.each([
+    ['closed PR', { prState: 'closed' as const, issueState: 'open' as const }],
+    ['not-planned issue', { prState: 'none' as const, issueState: 'not-planned' as const }],
+  ])('counts %s terminal outcomes as unsuccessful by default', (_name, state) => {
+    const attribution = new OutcomeAttribution()
+    const decision = attribution.recordDecision({
+      workflowId: 'issue-1693',
+      decisionType: 'scope-choice',
+      contextSummary: 'Decide whether to continue',
+      chosenAction: 'stop work',
+    })
+
+    attribution.recordOutcome({
+      decisionId: decision.decisionId,
+      workflowId: 'issue-1693',
+      verification: 'terminal without merge',
+      prState: state.prState,
+      issueState: state.issueState,
+      elapsedMs: 5,
+    })
+
+    expect(attribution.joinedOutcomes()[0]!.success).toBe(false)
+    expect(attribution.reportByWorkflow()[0]!.successfulOutcomeCount).toBe(0)
+  })
+
+  it.each([
+    ['bad PR state', { prState: 'merge', issueState: 'open' }],
+    ['bad issue state', { prState: 'open', issueState: 'done' }],
+  ])('rejects invalid runtime state values for %s', (_name, state) => {
+    const attribution = new OutcomeAttribution()
+    const decision = attribution.recordDecision({
+      workflowId: 'issue-1693',
+      decisionType: 'state-validation',
+      contextSummary: 'Validate JS callers',
+      chosenAction: 'reject invalid states',
+    })
+
+    expect(() =>
+      attribution.recordOutcome({
+        decisionId: decision.decisionId,
+        workflowId: 'issue-1693',
+        verification: 'invalid state',
+        prState: state.prState as never,
+        issueState: state.issueState as never,
+        elapsedMs: 1,
+      }),
+    ).toThrow(/must be one of/)
+  })
 })

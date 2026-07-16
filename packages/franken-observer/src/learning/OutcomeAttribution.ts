@@ -83,6 +83,8 @@ export interface WorkflowOutcomeAttributionReport {
 }
 
 const SENSITIVE_METADATA_KEY_PATTERN = /(raw.*prompt|prompt|input|secret|token|password|credential|api[-_]?key)/i
+const VALID_PR_STATES = ['none', 'draft', 'open', 'merged', 'closed'] as const
+const VALID_ISSUE_STATES = ['open', 'closed', 'not-planned', 'unknown'] as const
 
 function assertNonEmptyString(value: string, field: string): void {
   if (value.trim().length === 0) {
@@ -103,6 +105,12 @@ function assertElapsedMs(value: number): void {
   }
 }
 
+function assertOneOf(value: string, field: string, allowed: readonly string[]): void {
+  if (!allowed.includes(value)) {
+    throw new Error(`OutcomeAttribution: ${field} must be one of ${allowed.join(', ')}, received ${value}`)
+  }
+}
+
 function defaultTimestamp(): string {
   return new Date().toISOString()
 }
@@ -111,20 +119,39 @@ function freezeRecord<T extends Record<string, unknown>>(value: T): Readonly<T> 
   return Object.freeze({ ...value })
 }
 
+function sanitizeMetadataValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return Object.freeze(value.map(item => sanitizeMetadataValue(item)))
+  }
+
+  if (typeof value !== 'object' || value === null) {
+    return value
+  }
+
+  const sanitized: Record<string, unknown> = {}
+  for (const [key, nestedValue] of Object.entries(value)) {
+    if (SENSITIVE_METADATA_KEY_PATTERN.test(key)) continue
+    sanitized[key] = sanitizeMetadataValue(nestedValue)
+  }
+
+  return freezeRecord(sanitized)
+}
+
 function sanitizeMetadata(metadata: Record<string, unknown> | undefined): Readonly<Record<string, unknown>> | undefined {
   if (metadata === undefined) return undefined
 
-  const sanitized: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(metadata)) {
-    if (SENSITIVE_METADATA_KEY_PATTERN.test(key)) continue
-    sanitized[key] = value
-  }
-
-  return Object.keys(sanitized).length === 0 ? undefined : freezeRecord(sanitized)
+  const sanitized = sanitizeMetadataValue(metadata) as Readonly<Record<string, unknown>>
+  return Object.keys(sanitized).length === 0 ? undefined : sanitized
 }
 
 function successfulOutcome(outcome: DecisionOutcomeRecord): boolean {
-  return outcome.blockers.length === 0 && !outcome.rollback && !outcome.failure
+  return (
+    outcome.blockers.length === 0 &&
+    !outcome.rollback &&
+    !outcome.failure &&
+    outcome.prState !== 'closed' &&
+    outcome.issueState !== 'not-planned'
+  )
 }
 
 /**
@@ -164,11 +191,19 @@ export class OutcomeAttribution {
     assertNonEmptyString(input.workflowId, 'workflowId')
     assertNonEmptyString(input.verification, 'verification')
     assertElapsedMs(input.elapsedMs)
+    assertOneOf(input.prState, 'prState', VALID_PR_STATES)
+    assertOneOf(input.issueState, 'issueState', VALID_ISSUE_STATES)
     const timestamp = input.timestamp ?? defaultTimestamp()
     assertIsoTimestamp(timestamp, 'timestamp')
 
-    if (!this.decisionRecords.some(decision => decision.decisionId === input.decisionId)) {
+    const decision = this.decisionRecords.find(decisionRecord => decisionRecord.decisionId === input.decisionId)
+    if (decision === undefined) {
       throw new Error(`OutcomeAttribution: decisionId ${input.decisionId} has not been recorded`)
+    }
+    if (decision.workflowId !== input.workflowId) {
+      throw new Error(
+        `OutcomeAttribution: workflowId ${input.workflowId} does not match decision workflowId ${decision.workflowId}`,
+      )
     }
 
     const record: DecisionOutcomeRecord = Object.freeze({
