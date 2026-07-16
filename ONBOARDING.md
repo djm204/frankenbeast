@@ -70,6 +70,15 @@ Use this checklist for a first local checkout or when rebuilding a development e
 
   The generator prints deterministic Markdown by default, or JSON with `persona`, `root`, `items`, `docs`, and `nextAction` for PM/liveness tooling. It never mutates files or runs setup commands; it points each checklist item at the command and docs to run next. Valid personas are `operator`, `coding-agent`, and `contributor`; unknown personas fail closed with an explicit error instead of falling back to a misleading generic checklist.
 
+- [ ] Take the interactive workspace tour when you need a deterministic package map before choosing files:
+
+  ```bash
+  npm run workspace:tour
+  npm --silent run workspace:tour -- --json
+  ```
+
+  The tour prints package responsibilities, common ticket routing hints, key docs, generated-file locations, focused test commands, runtime state paths, and safe first commands. JSON mode exposes the same data for agent prompts and PM handoffs, while the docs-drift section reports missing expected package, doc, script, or test paths.
+
 ### Progress badges and status output
 
 The bootstrap script prints deterministic status badges as it advances through onboarding:
@@ -136,13 +145,30 @@ Read each badge as `[onboarding:<current>/<total>:<stage>] <state> - <detail>`. 
 
 Read the [repository ownership manifest](docs/onboarding/repository-ownership.md) before assigning repository-wide or cross-package work. It maps current package and documentation surfaces to primary owners, escalation owners, verification commands, and PM/worker handoff notes so agents do not guess ownership from path names alone.
 
+Read the [agent role responsibility map](docs/onboarding/agent-role-responsibility-map.md) when assigning, resuming, reviewing, or recovering agent work. It maps PM shards, issue workers, doctors, reviewers, and docs workers to repository responsibilities, required handoff fields, verification commands, and explicit `mustNotOwn` boundaries.
+
 ## Coding-agent PR etiquette
 
 Read the [coding-agent PR etiquette guide](docs/onboarding/coding-agent-pr-etiquette.md) before opening, updating, or merging agent-authored pull requests. It defines one-issue/one-PR scope, required PR body evidence, current-head CI/Codex expectations, negative cases that prevent duplicate work, and handoff fields for blocked PRs.
 
+## Issue complexity rubric
+
+Read the [issue complexity rubric](docs/onboarding/issue-complexity-rubric.md) before assigning, refilling, or taking an issue-worker card. It maps issue labels and acceptance criteria to six complexity/risk levels, allowed toolsets, model lanes, verification depth, and escalation triggers so low-risk fallback agents do not take high-risk implementation work.
+
 ## PM-swarm runtime glossary
 
 Read the [PM-swarm runtime glossary](docs/onboarding/pm-swarm-runtime-glossary.md) before interpreting PM-swarm Kanban comments, liveness reports, doctor treatment notes, or issue-worker handoffs. It defines the runtime vocabulary used to decode liveness, refill, Codex, approval-cop, and worker handoff terms without creating duplicate branches, worktrees, or PRs.
+
+## Issue worktree bootstrap
+
+When a PM or issue handoff gives you one GitHub issue to fix, start from a dedicated branch/worktree instead of the main checkout:
+
+```bash
+npm run issue:worktree -- --dry-run --issue 1769 --title "feat(onboarding): add issue-to-worktree bootstrap helper"
+npm run issue:worktree -- --issue 1769 --title "feat(onboarding): add issue-to-worktree bootstrap helper"
+```
+
+The helper prints structured issue, branch, worktree path, duplicate-PR check, and verification commands before it mutates anything. By default it creates `../resolve-wt/issue-<number>` from the selected remote's `main` branch, uses a `resolve/issue-<number>-<slug>` branch, and configures the worktree commit identity as `David Mendez <me@davidmendez.dev>`. Use `--reuse --branch <existing-branch>` only when resuming an already-created issue branch; never use it to combine unrelated issues.
 
 ## Architecture reading path
 
@@ -221,6 +247,9 @@ Edge case: many older diagrams and `docs/plans/` files describe target or histor
 - [ ] If the backend runs on a different port, keep browser calls same-origin through the Vite proxy with `VITE_API_PROXY_TARGET` and, for Beast routes, `VITE_BEAST_API_PROXY_TARGET` when needed.
 
 ## Optional services
+
+Before starting Docker or blocking on optional infrastructure, read the [local service dependency explainer](docs/onboarding/local-service-dependencies.md).
+It maps ChromaDB, Grafana, Tempo, provider credentials, and secret backends to the capabilities that actually require them, with health checks and PM/worker handoff fields.
 
 - [ ] Configure `.env` before starting the full compose stack.
   - Keep `CHROMA_URL=http://localhost:8000` unless ChromaDB runs elsewhere.

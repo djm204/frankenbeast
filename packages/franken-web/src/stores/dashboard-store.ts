@@ -1,14 +1,15 @@
 import { create } from 'zustand';
-import type { DashboardSkill, DashboardSecurity, DashboardProvider } from '../lib/dashboard-api';
+import type { DashboardSkill, DashboardSecurity, DashboardProvider, DashboardAvailability } from '../lib/dashboard-api';
 
 interface DashboardStore {
   skills: DashboardSkill[];
   security: DashboardSecurity | null;
   providers: DashboardProvider[];
+  availability: DashboardAvailability | null;
   loading: boolean;
   error: string | null;
 
-  setSnapshot: (snapshot: { skills: DashboardSkill[]; security: DashboardSecurity; providers: DashboardProvider[] }) => void;
+  setSnapshot: (snapshot: { skills: DashboardSkill[]; security: DashboardSecurity; providers: DashboardProvider[]; availability?: DashboardAvailability | undefined }) => void;
   toggleSkill: (name: string) => void;
   setSkillEnabled: (name: string, enabled: boolean) => void;
   setSecurityProfile: (profile: string) => void;
@@ -21,6 +22,7 @@ const initialState = {
   skills: [] as DashboardSkill[],
   security: null as DashboardSecurity | null,
   providers: [] as DashboardProvider[],
+  availability: null as DashboardAvailability | null,
   loading: true,
   error: null as string | null,
 };
@@ -33,6 +35,7 @@ export const useDashboardStore = create<DashboardStore>()((set) => ({
       skills: snapshot.skills,
       security: snapshot.security,
       providers: snapshot.providers,
+      availability: snapshot.availability ?? null,
       loading: false,
       error: null,
     }),

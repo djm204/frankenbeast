@@ -25,9 +25,11 @@ If you are not sure which first-run steps apply to your role, generate a guided 
 ```bash
 npm run first-run:checklist -- --persona contributor
 npm --silent run first-run:checklist -- --persona coding-agent --json
+npm run workspace:tour
+npm --silent run workspace:tour -- --json
 ```
 
-The generator is read-only and returns deterministic Markdown or JSON checklist items with commands, docs, required/optional status, and the next action.
+The checklist generator is read-only and returns deterministic Markdown or JSON checklist items with commands, docs, required/optional status, and the next action. The workspace tour is also read-only; it prints package responsibilities, key docs, generated files, test commands, runtime state paths, safe first commands, and docs-drift checks in human or JSON form.
 
 If Corepack is not available yet, install it first with `npm install -g corepack`; the bootstrap script then activates and verifies the root `packageManager` pin.
 
@@ -70,6 +72,9 @@ ${EDITOR:-vi} .env
 ```
 
 ## 3. Optional: start infrastructure
+
+Read the [local service dependency explainer](../onboarding/local-service-dependencies.md) before starting Docker.
+It explains which services are optional and how to health-check them so a docs test, typecheck, or CLI-help failure does not turn into an unnecessary compose dependency.
 
 ```bash
 # The bootstrap script validates Grafana credentials before starting compose.

@@ -723,32 +723,43 @@ prom.reset() // clear accumulators between scrape windows
 `WebhookNotifier` delivers HITL signals (circuit-breaker trips, loop detections) to external systems over HTTP. Any JSON-serialisable payload is accepted.
 
 ```ts
-import { WebhookNotifier, CircuitBreaker, LoopDetector } from '@franken/observer'
+import { WebhookNotifier, CircuitBreaker, LoopDetector, InMemoryWebhookDeliveryReceiptStore } from '@franken/observer'
 
+const deliveryReceiptStore = new InMemoryWebhookDeliveryReceiptStore()
 const notifier = new WebhookNotifier({
   url: process.env.SLACK_WEBHOOK_URL!,
   // Required allowlist: the configured target URL must resolve to one of these origins.
   allowedTargetOrigins: ['https://hooks.slack.com'],
   // Optional extra headers (auth, custom content-type, etc.)
   headers: { 'X-Source': 'frankenbeast' },
+  // Use a durable WebhookDeliveryReceiptStore here for cron/status runners.
+  deliveryReceiptStore,
 })
 
 // Wire to CircuitBreaker
 const breaker = new CircuitBreaker({ limitUsd: 10.0 })
 breaker.on('limit-reached', result => {
-  void notifier.send({ type: 'circuit-breaker', ...result })
+  void notifier.send(
+    { type: 'circuit-breaker', ...result },
+    { idempotencyKey: `status:circuit-breaker:${result.limitUsd}`, target: 'slack:ops' },
+  )
     .catch(err => console.error('Webhook failed', err))
 })
 
 // Wire to LoopDetector
 const detector = new LoopDetector()
 detector.on('loop-detected', result => {
-  void notifier.send({ type: 'loop-detected', ...result })
+  void notifier.send(
+    { type: 'loop-detected', ...result },
+    { idempotencyKey: `doctor:loop:${result.detectedPattern.join('/')}`, target: 'slack:ops' },
+  )
     .catch(err => console.error('Webhook failed', err))
 })
 ```
 
 `send()` throws on non-2xx responses and network errors. For fire-and-forget use inside event handlers, handle rejections with `.catch()` or `void`.
+
+When `send(payload, { idempotencyKey, target })` receives an idempotency key, `WebhookNotifier` records a delivery receipt with `pending`, `sent`, `skipped`, or `failed`, an ISO timestamp, the logical target, and a SHA-256 content hash. A later call with the same key, target, and content hash is skipped after a successful receipt or a non-stale pending reservation; changed content, a different target, a stale pending reservation, or a prior failed receipt is delivered again. Receipt stores must implement atomic `reserve()` plus content-hash lookup so overlapping cron/status runs cannot both POST the same logical notification. The in-memory receipt store is useful for one process, while status, approval, and doctor/loop notification runners should pass a durable `WebhookDeliveryReceiptStore` so repeated cron/status runs do not duplicate Discord or webhook messages across restarts. If no logical target is provided, the notifier stores a redacted endpoint plus a short SHA-256 URL discriminator rather than the raw webhook URL.
 
 Retries are opt-in through `retry`. When enabled, `WebhookNotifier` retries only transient failures: network errors, HTTP 429, and HTTP 5xx responses. Non-transient 4xx responses fail immediately so invalid payloads or credentials do not create retry storms. Retry delays use exponential backoff (`baseDelayMs * 2^attempt`), jitter is enabled by default to spread concurrent webhook traffic, and the final delay is always capped by `maxDelayMs` even after jitter is applied.
 

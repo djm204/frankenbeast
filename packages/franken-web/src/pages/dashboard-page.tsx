@@ -3,6 +3,7 @@ import { useDashboardStore } from '../stores/dashboard-store';
 import { SkillCatalogBrowser } from '../components/skills/skill-catalog-browser';
 import { SecurityPanel } from '../components/security/security-panel';
 import { ProviderPanel } from '../components/providers/provider-panel';
+import { AvailabilityPanel } from '../components/availability/availability-panel';
 import type { DashboardApiClient, DashboardSecurity, DashboardSnapshot } from '../lib/dashboard-api';
 
 interface DashboardPageProps {
@@ -29,6 +30,7 @@ export function DashboardPage({ client }: DashboardPageProps) {
     skills,
     security,
     providers,
+    availability,
     loading,
     setSnapshot,
     setSkillEnabled,
@@ -98,6 +100,7 @@ export function DashboardPage({ client }: DashboardPageProps) {
         skills: currentSnapshot.skills,
         security: confirmedSecurity,
         providers: currentSnapshot.providers,
+        availability: currentSnapshot.availability ?? undefined,
       });
     }
   }, [setSnapshot]);
@@ -111,6 +114,7 @@ export function DashboardPage({ client }: DashboardPageProps) {
       skills: currentSnapshot.skills.map((skill) => (skill.name === name ? confirmedSkill : skill)),
       security: currentSnapshot.security ?? confirmedSnapshot.security,
       providers: currentSnapshot.providers,
+      availability: currentSnapshot.availability ?? undefined,
     });
   }, [setSnapshot]);
 
@@ -122,6 +126,7 @@ export function DashboardPage({ client }: DashboardPageProps) {
       skills: currentSnapshot.skills,
       security: confirmedSecurity,
       providers: currentSnapshot.providers,
+      availability: currentSnapshot.availability ?? undefined,
     });
   }, [setSnapshot]);
 
@@ -356,6 +361,7 @@ export function DashboardPage({ client }: DashboardPageProps) {
           />
         )}
         <ProviderPanel providers={providers} />
+        <AvailabilityPanel availability={availability ?? undefined} />
       </div>
     </div>
   );

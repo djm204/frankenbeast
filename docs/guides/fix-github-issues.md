@@ -42,6 +42,17 @@ The `frankenbeast issues` subcommand runs a 4-stage pipeline:
 
 Each issue gets its own git branch (`issue-{number}`) and PR with `Fixes #{number}` in the body.
 
+## Issue-to-worktree bootstrap helper
+
+For one-issue/one-PR worker handoffs, use the root helper before coding so branch and worktree names are deterministic and easy for PM/liveness tooling to audit:
+
+```bash
+npm run issue:worktree -- --dry-run --issue 1769 --title "feat(onboarding): add issue-to-worktree bootstrap helper"
+npm run issue:worktree -- --issue 1769 --title "feat(onboarding): add issue-to-worktree bootstrap helper"
+```
+
+The dry run emits the issue number, `resolve/issue-<number>-<slug>` branch, target `../resolve-wt/issue-<number>` worktree, duplicate open-PR check, and exact git verification commands. A real run fetches the base ref, creates the branch/worktree from the selected remote's `main` branch, and configures the worktree commit identity as `David Mendez <me@davidmendez.dev>`. If a previous worker already created the branch, pass `--reuse --branch <existing-branch>` to attach a worktree without creating a duplicate branch; the helper rejects invalid issue numbers, unsafe branch names, and malformed `OWNER/REPO` values before running git.
+
 ## Examples
 
 ### Fix all critical issues
@@ -92,6 +103,12 @@ Resolves the GitHub `upstream` remote from the current fork checkout and uses th
 | `--no-pr` | Skip PR creation | false |
 | `--provider <name>` | CLI agent provider | claude |
 | `--providers <list>` | Fallback chain for rate limits | — |
+
+## Complexity routing
+
+Before assigning or executing an issue, classify it with the [issue complexity rubric](../onboarding/issue-complexity-rubric.md). The rubric maps labels such as `docs`, `security`, `availability`, and priority tags to complexity/risk levels, allowed toolsets, recommended model lanes, verification depth, and escalation triggers.
+
+Use the rubric result as separate PM handoff metadata or an issue comment alongside the CLI's existing review table. The current `frankenbeast issues` table still reports implementation complexity such as `one-shot` or `chunked`; the C0-C5 rubric is the assignment-risk overlay PMs use to keep C0/C1 work in low-risk lanes while routing C3-C5 cross-package, security, disaster-recovery, or PM-swarm policy work to senior or PM-supervised lanes.
 
 ## Review Flow
 
@@ -161,3 +178,7 @@ Before execution starts, `IssueRunner` emits `[issues] Scheduler fairness report
 - `warnings[]`: explicit edge cases, such as unprioritized issues that will run after prioritized work or approved issues missing triage results.
 
 Library callers can produce the same deterministic payload directly with `buildIssueSchedulerFairnessReport(issues, triageResults)`. Treat non-empty `warnings[]` as operator guidance: either add the missing labels/triage data before approving the run, or record why the fallback order is acceptable.
+
+### Large backlog liveness/refill scaling assumptions
+
+Issue scheduler liveness output is intended to stay bounded even when a refill run sees hundreds or thousands of issues/cards. `buildIssueSchedulerFairnessReport()` samples issue-number lists and warnings while keeping authoritative counts (`totalIssues`, bucket `count`, omitted counts, and `warningSummary`). Operators should rely on the counts and summaries for backlog health, then drill into GitHub/Kanban for the full list only when a specific bucket or warning class needs action. Callers that need a tighter UI payload can pass `maxIssueNumbersPerList` and `maxWarnings`; the defaults keep output concise without hiding blocker classes.
