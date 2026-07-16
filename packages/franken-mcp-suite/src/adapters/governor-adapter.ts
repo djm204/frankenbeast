@@ -18,6 +18,7 @@ const DESTRUCTIVE_ACTIONS = new Set([
 ]);
 const MEMORY_REVIEW_PROPOSE_CONTEXT_REDACTION = '[memory-review-proposal-context-redacted]';
 const MEMORY_EXPORT_CONTEXT_REDACTION = '[memory-export-context-redacted]';
+const MEMORY_RETENTION_REPORT_CONTEXT_REDACTION = '[memory-retention-report-args-redacted]';
 
 const HIGH_RISK_ACTIONS: Readonly<Record<string, HighRiskActionClass>> = {
   fbeast_memory_store: 'memory',
@@ -319,6 +320,91 @@ function sanitizeMemoryExportGovernanceArgs(args: Record<string, unknown>): Reco
   return safe;
 }
 
+
+function sanitizeMemoryRetentionReportGovernanceArgs(args: Record<string, unknown>): Record<string, unknown> {
+  const safe: Record<string, unknown> = {};
+  if (typeof args['readScope'] === 'string' && ['all', 'shared', 'agent'].includes(args['readScope'])) {
+    safe['readScope'] = args['readScope'];
+  } else if (Object.prototype.hasOwnProperty.call(args, 'readScope')) {
+    safe['readScope'] = MEMORY_RETENTION_REPORT_CONTEXT_REDACTION;
+  }
+  if (typeof args['now'] === 'string') {
+    safe['now'] = args['now'];
+  } else if (Object.prototype.hasOwnProperty.call(args, 'now')) {
+    safe['now'] = MEMORY_RETENTION_REPORT_CONTEXT_REDACTION;
+  }
+  if (typeof args['expiryHorizonMs'] === 'number') {
+    safe['expiryHorizonMs'] = args['expiryHorizonMs'];
+  } else if (Object.prototype.hasOwnProperty.call(args, 'expiryHorizonMs')) {
+    safe['expiryHorizonMs'] = MEMORY_RETENTION_REPORT_CONTEXT_REDACTION;
+  }
+  if (typeof args['maxEntries'] === 'number') {
+    safe['maxEntries'] = args['maxEntries'];
+  } else if (Object.prototype.hasOwnProperty.call(args, 'maxEntries')) {
+    safe['maxEntries'] = MEMORY_RETENTION_REPORT_CONTEXT_REDACTION;
+  }
+  if (Object.prototype.hasOwnProperty.call(args, 'agentId')) {
+    safe['agentId'] = MEMORY_RETENTION_REPORT_CONTEXT_REDACTION;
+  }
+  return safe;
+}
+
+function contextLooksLikeMemoryRetentionReportArgs(context: string): boolean {
+  try {
+    const parsed = JSON.parse(context) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+    const record = parsed as Record<string, unknown>;
+    const keys = Object.keys(record);
+    return keys.length > 0
+      && keys.every(key => [
+        'readScope',
+        'agentId',
+        'now',
+        'expiryHorizonMs',
+        'maxEntries',
+      ].includes(key))
+      && (Object.prototype.hasOwnProperty.call(record, 'readScope')
+        || Object.prototype.hasOwnProperty.call(record, 'agentId')
+        || Object.prototype.hasOwnProperty.call(record, 'expiryHorizonMs')
+        || Object.prototype.hasOwnProperty.call(record, 'maxEntries'));
+  } catch {
+    return false;
+  }
+}
+
+function redactMemoryRetentionReportGovernanceContext(action: string, context: string): string {
+  const unqualified = unqualifyMcpActionName(action);
+  const directRetentionReport = unqualified === 'fbeast_memory_retention_report';
+  const proxiedRetentionReport = unqualified === 'execute_tool'
+    && (contextTargetsTool(context, 'fbeast_memory_retention_report')
+      || contextLooksLikeMemoryRetentionReportArgs(context));
+  if (!directRetentionReport && !proxiedRetentionReport) return context;
+  try {
+    const parsed = JSON.parse(context) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return MEMORY_RETENTION_REPORT_CONTEXT_REDACTION;
+    const record = parsed as Record<string, unknown>;
+    if (proxiedRetentionReport && contextTargetsTool(context, 'fbeast_memory_retention_report')) {
+      const directArgs = record['args'];
+      const toolInput = record['tool_input'];
+      const nestedArgs = toolInput !== null && typeof toolInput === 'object' && !Array.isArray(toolInput)
+        ? (toolInput as Record<string, unknown>)['args']
+        : undefined;
+      const args = directArgs !== null && typeof directArgs === 'object' && !Array.isArray(directArgs)
+        ? directArgs as Record<string, unknown>
+        : nestedArgs !== null && typeof nestedArgs === 'object' && !Array.isArray(nestedArgs)
+          ? nestedArgs as Record<string, unknown>
+          : undefined;
+      return JSON.stringify({
+        tool: 'fbeast_memory_retention_report',
+        args: args === undefined ? MEMORY_RETENTION_REPORT_CONTEXT_REDACTION : sanitizeMemoryRetentionReportGovernanceArgs(args),
+      });
+    }
+    return JSON.stringify(sanitizeMemoryRetentionReportGovernanceArgs(record));
+  } catch {
+    return MEMORY_RETENTION_REPORT_CONTEXT_REDACTION;
+  }
+}
+
 function redactMemoryExportGovernanceContext(action: string, context: string): string {
   const unqualified = unqualifyMcpActionName(action);
   const directExport = unqualified === 'fbeast_memory_export';
@@ -350,11 +436,14 @@ function redactMemoryExportGovernanceContext(action: string, context: string): s
 function redactGovernanceContext(action: string, context: string): string {
   return redactMemoryExportGovernanceContext(
     action,
-    redactMemorySourceAttributionGovernanceContext(
+    redactMemoryRetentionReportGovernanceContext(
       action,
-      redactMemoryReviewDecisionGovernanceContext(
+      redactMemorySourceAttributionGovernanceContext(
         action,
-        redactMemoryReviewProposalGovernanceContext(action, redactRightToForgetGovernanceContext(action, context)),
+        redactMemoryReviewDecisionGovernanceContext(
+          action,
+          redactMemoryReviewProposalGovernanceContext(action, redactRightToForgetGovernanceContext(action, context)),
+        ),
       ),
     ),
   );
