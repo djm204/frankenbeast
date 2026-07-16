@@ -45,6 +45,7 @@ interface UpdateRunPatch {
   currentAttemptId?: string | null | undefined;
   attemptCount?: number | undefined;
   lastHeartbeatAt?: string | undefined;
+  heartbeatSource?: string | undefined;
   stopReason?: string | null | undefined;
   latestExitCode?: number | null | undefined;
 }
@@ -114,6 +115,7 @@ type BeastRunRow = {
   current_attempt_id: string | null;
   attempt_count: number;
   last_heartbeat_at: string | null;
+  last_heartbeat_sequence: number;
   stop_reason: string | null;
   latest_exit_code: number | null;
 };
@@ -297,6 +299,9 @@ export class SQLiteBeastRepository {
 
   updateRun(runId: string, patch: UpdateRunPatch): BeastRun {
     const current = this.getRunOrThrow(runId);
+    const heartbeatUpdated = patch.lastHeartbeatAt !== undefined;
+    const nextHeartbeatSequence = heartbeatUpdated ? (current.lastHeartbeatSequence ?? 0) + 1 : current.lastHeartbeatSequence;
+    const priorHeartbeatAt = current.lastHeartbeatAt;
     const next: BeastRun = {
       ...current,
       ...(patch.status !== undefined ? { status: patch.status } : {}),
@@ -317,7 +322,7 @@ export class SQLiteBeastRepository {
           : { currentAttemptId: patch.currentAttemptId }
         : {}),
       ...(patch.attemptCount !== undefined ? { attemptCount: patch.attemptCount } : {}),
-      ...(patch.lastHeartbeatAt !== undefined ? { lastHeartbeatAt: patch.lastHeartbeatAt } : {}),
+      ...(heartbeatUpdated ? { lastHeartbeatAt: patch.lastHeartbeatAt, lastHeartbeatSequence: nextHeartbeatSequence } : {}),
       ...(patch.stopReason !== undefined
         ? patch.stopReason === null
           ? { stopReason: undefined }
@@ -339,6 +344,7 @@ export class SQLiteBeastRepository {
              current_attempt_id = ?,
              attempt_count = ?,
              last_heartbeat_at = ?,
+             last_heartbeat_sequence = ?,
              stop_reason = ?,
              latest_exit_code = ?
        WHERE id = ?`,
@@ -350,10 +356,32 @@ export class SQLiteBeastRepository {
       next.currentAttemptId ?? null,
       next.attemptCount,
       next.lastHeartbeatAt ?? null,
+      next.lastHeartbeatSequence ?? 0,
       next.stopReason ?? null,
       next.latestExitCode ?? null,
       runId,
     );
+
+    if (patch.lastHeartbeatAt !== undefined && priorHeartbeatAt !== undefined) {
+      const newHeartbeatAt = patch.lastHeartbeatAt;
+      const priorMs = Date.parse(priorHeartbeatAt);
+      const nextMs = Date.parse(newHeartbeatAt);
+      if (Number.isFinite(priorMs) && Number.isFinite(nextMs) && nextMs <= priorMs) {
+        this.insertEvent(runId, {
+          type: 'run.heartbeat.anomaly',
+          payload: {
+            code: nextMs < priorMs ? 'regressive-heartbeat' : 'duplicate-heartbeat',
+            workerId: runId,
+            source: patch.heartbeatSource ?? 'unknown-source',
+            priorSequence: current.lastHeartbeatSequence ?? 0,
+            newSequence: next.lastHeartbeatSequence ?? 0,
+            priorHeartbeatAt,
+            newHeartbeatAt: patch.lastHeartbeatAt,
+          },
+          createdAt: patch.lastHeartbeatAt,
+        });
+      }
+    }
 
     return next;
   }
@@ -396,6 +424,10 @@ export class SQLiteBeastRepository {
   }
 
   appendEvent(runId: string, input: AppendEventInput): BeastRunEvent {
+    return this.insertEvent(runId, input);
+  }
+
+  private insertEvent(runId: string, input: AppendEventInput): BeastRunEvent {
     const sequence = nextEventSequence(this.db, runId);
     const event: BeastRunEvent = {
       id: prefixedId('event'),
@@ -666,6 +698,7 @@ export class SQLiteBeastRepository {
 
   private migrateLegacySchema(): void {
     this.ensureColumnExists('beast_runs', 'tracked_agent_id', 'ALTER TABLE beast_runs ADD COLUMN tracked_agent_id TEXT');
+    this.ensureColumnExists('beast_runs', 'last_heartbeat_sequence', 'ALTER TABLE beast_runs ADD COLUMN last_heartbeat_sequence INTEGER NOT NULL DEFAULT 0');
     this.ensureColumnExists('tracked_agents', 'module_config', 'ALTER TABLE tracked_agents ADD COLUMN module_config TEXT');
     this.ensureColumnExists('tracked_agents', 'execution_mode', 'ALTER TABLE tracked_agents ADD COLUMN execution_mode TEXT');
   }
@@ -779,6 +812,7 @@ function mapRun(row: BeastRunRow): BeastRun {
     ...(row.current_attempt_id ? { currentAttemptId: row.current_attempt_id } : {}),
     attemptCount: row.attempt_count,
     ...(row.last_heartbeat_at ? { lastHeartbeatAt: row.last_heartbeat_at } : {}),
+    ...(row.last_heartbeat_sequence > 0 ? { lastHeartbeatSequence: row.last_heartbeat_sequence } : {}),
     ...(row.stop_reason ? { stopReason: row.stop_reason } : {}),
     ...(row.latest_exit_code !== null ? { latestExitCode: row.latest_exit_code } : {}),
   };

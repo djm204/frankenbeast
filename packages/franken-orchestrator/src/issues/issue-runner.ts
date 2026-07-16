@@ -171,6 +171,23 @@ export interface IssueWorkerCardProcessSnapshot {
   readonly alive?: boolean | undefined;
   readonly startedAt?: string | number | Date | undefined;
   readonly lastHeartbeatAt?: string | number | Date | undefined;
+  /** Monotonic heartbeat sequence recorded by the heartbeat writer. */
+  readonly heartbeatSequence?: number | undefined;
+  /** Writer/reader source for diagnostics when heartbeat state is stale or regressive. */
+  readonly source?: string | undefined;
+}
+
+export interface WorkerHeartbeatMonotonicityFinding {
+  readonly cardId: string;
+  readonly runId?: string | undefined;
+  readonly source: string;
+  readonly severity: 'warning';
+  readonly code: 'duplicate-heartbeat' | 'regressive-heartbeat';
+  readonly priorSequence?: number | undefined;
+  readonly newSequence?: number | undefined;
+  readonly priorHeartbeatAt?: string | undefined;
+  readonly newHeartbeatAt?: string | undefined;
+  readonly message: string;
 }
 
 export interface DuplicateWorkerCardProcessFinding {
@@ -612,6 +629,72 @@ function maxIsoTimestamp(values: Iterable<string | number | Date | undefined>): 
     }
   }
   return maxIso;
+}
+
+function heartbeatSource(snapshot: IssueWorkerCardProcessSnapshot): string {
+  return snapshot.source?.trim() || snapshot.owner?.trim() || 'unknown-source';
+}
+
+function sequenceDidNotAdvance(
+  prior: number | undefined,
+  next: number | undefined,
+): boolean {
+  return prior !== undefined
+    && next !== undefined
+    && Number.isSafeInteger(prior)
+    && Number.isSafeInteger(next)
+    && next <= prior;
+}
+
+function timestampDidNotAdvance(
+  prior: string | undefined,
+  next: string | undefined,
+): boolean {
+  if (!prior || !next) return false;
+  return new Date(next).getTime() <= new Date(prior).getTime();
+}
+
+export function detectWorkerHeartbeatMonotonicityAnomalies(
+  snapshots: readonly IssueWorkerCardProcessSnapshot[],
+): WorkerHeartbeatMonotonicityFinding[] {
+  const highWaterByRun = new Map<string, IssueWorkerCardProcessSnapshot>();
+  const findings: WorkerHeartbeatMonotonicityFinding[] = [];
+
+  for (const snapshot of snapshots) {
+    if (!activeWorkerCardProcess(snapshot)) continue;
+    const cardId = snapshot.cardId.trim();
+    const baselineKey = `${cardId}\0${snapshot.runId ?? 'unknown-run'}`;
+    const prior = highWaterByRun.get(baselineKey);
+    if (prior) {
+      const priorHeartbeatAt = isoTimestamp(prior.lastHeartbeatAt);
+      const newHeartbeatAt = isoTimestamp(snapshot.lastHeartbeatAt);
+      const sequenceStale = sequenceDidNotAdvance(prior.heartbeatSequence, snapshot.heartbeatSequence);
+      const timestampStale = timestampDidNotAdvance(priorHeartbeatAt, newHeartbeatAt);
+
+      if (sequenceStale || timestampStale) {
+        const regressed = (snapshot.heartbeatSequence !== undefined && prior.heartbeatSequence !== undefined && snapshot.heartbeatSequence < prior.heartbeatSequence)
+          || (priorHeartbeatAt !== undefined && newHeartbeatAt !== undefined && new Date(newHeartbeatAt).getTime() < new Date(priorHeartbeatAt).getTime());
+        const code: WorkerHeartbeatMonotonicityFinding['code'] = regressed ? 'regressive-heartbeat' : 'duplicate-heartbeat';
+        const source = heartbeatSource(snapshot);
+        findings.push({
+          cardId,
+          ...(snapshot.runId ? { runId: snapshot.runId } : prior.runId ? { runId: prior.runId } : {}),
+          source,
+          severity: 'warning',
+          code,
+          ...(prior.heartbeatSequence !== undefined ? { priorSequence: prior.heartbeatSequence } : {}),
+          ...(snapshot.heartbeatSequence !== undefined ? { newSequence: snapshot.heartbeatSequence } : {}),
+          ...(priorHeartbeatAt ? { priorHeartbeatAt } : {}),
+          ...(newHeartbeatAt ? { newHeartbeatAt } : {}),
+          message: `Worker card ${cardId} heartbeat ${code === 'regressive-heartbeat' ? 'regressed' : 'did not advance'}: prior sequence ${prior.heartbeatSequence ?? 'unknown'} at ${priorHeartbeatAt ?? 'unknown'}, new sequence ${snapshot.heartbeatSequence ?? 'unknown'} at ${newHeartbeatAt ?? 'unknown'} from ${source}`,
+        });
+        continue;
+      }
+    }
+    highWaterByRun.set(baselineKey, snapshot);
+  }
+
+  return findings;
 }
 
 export function detectDuplicateWorkerCardProcesses(

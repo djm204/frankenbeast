@@ -15,6 +15,7 @@ export const BEAST_SQLITE_SCHEMA_STATEMENTS = [
     current_attempt_id TEXT,
     attempt_count INTEGER NOT NULL DEFAULT 0,
     last_heartbeat_at TEXT,
+    last_heartbeat_sequence INTEGER NOT NULL DEFAULT 0,
     stop_reason TEXT,
     latest_exit_code INTEGER,
     FOREIGN KEY (tracked_agent_id) REFERENCES tracked_agents(id)
