@@ -266,6 +266,8 @@ export interface LessonRecorderOptions {
   readonly blockerPatternStore?: Map<string, BlockerPatternState>;
   /** Shared failure-cluster state for grouping repeated failures across recorder instances. */
   readonly failureClusterStore?: Map<string, FailureClusterState>;
+  /** Optional scope context used when filtering prior lessons returned by memory search. */
+  readonly lessonInjectionContext?: LessonInjectionContext;
   /** Optional per-agent identifier used to attach deterministic improvement scorecards to learned lessons. */
   readonly agentId?: string;
 }
@@ -450,18 +452,27 @@ export function updateLessonScope(
     toScope: scope,
     reason,
   };
+  const isSameScope = lesson.lessonScope?.scope === scope;
   const allowedRepos =
     request.allowedRepos ??
-    (scope !== 'global' ? lesson.lessonScope?.allowedRepos : undefined);
+    (isSameScope || scope !== 'global'
+      ? lesson.lessonScope?.allowedRepos
+      : undefined);
   const allowedRoles =
     request.allowedRoles ??
-    (scope === 'role' ? lesson.lessonScope?.allowedRoles : undefined);
+    (isSameScope || scope === 'role'
+      ? lesson.lessonScope?.allowedRoles
+      : undefined);
   const allowedProfiles =
     request.allowedProfiles ??
-    (scope === 'profile' ? lesson.lessonScope?.allowedProfiles : undefined);
+    (isSameScope || scope === 'profile'
+      ? lesson.lessonScope?.allowedProfiles
+      : undefined);
   const allowedTasks =
     request.allowedTasks ??
-    (scope === 'task' ? lesson.lessonScope?.allowedTasks : undefined);
+    (isSameScope || scope === 'task'
+      ? lesson.lessonScope?.allowedTasks
+      : undefined);
   const expiresAt = request.expiresAt ?? lesson.lessonScope?.expiresAt;
   const lessonScope = createLessonScopeMetadata({
     scope,
@@ -999,6 +1010,7 @@ export class LessonRecorder {
   private readonly blockerPatterns: Map<string, BlockerPatternState>;
   private readonly pendingBlockerAdmissions: Map<string, Promise<void>>;
   private readonly failureClusters: Map<string, FailureClusterState>;
+  private readonly lessonInjectionContext: LessonInjectionContext | undefined;
   private readonly agentId?: string;
   private readonly pendingBlockerObservations = new WeakMap<
     CritiqueLesson,
@@ -1035,6 +1047,7 @@ export class LessonRecorder {
       this.blockerPatterns,
     );
     this.failureClusters = options.failureClusterStore ?? new Map();
+    this.lessonInjectionContext = options.lessonInjectionContext;
     if (options.agentId !== undefined) {
       const agentId = options.agentId.trim();
       if (!agentId) {
@@ -1914,15 +1927,7 @@ function isLessonApplicableForKnownContext(
   if (scope === undefined) {
     return true;
   }
-  if (scope.scope === 'task' && context.taskId !== undefined) {
-    return matchesRequiredAllowlist(scope.allowedTasks, context.taskId);
-  }
-  return (
-    scope.scope === 'global' ||
-    scope.scope === 'repo' ||
-    scope.scope === 'role' ||
-    scope.scope === 'profile'
-  );
+  return isLessonScopeAllowed(scope, context);
 }
 
 function parseScopeTimestamp(timestamp: string): number | undefined {
@@ -2879,13 +2884,14 @@ function createCooldownKey(
   evaluatorName: string,
   findingMessages: readonly string[],
 ): string {
-  void taskId;
   const normalizedFindings = JSON.stringify({
+    taskId,
     evaluatorName,
     findings: findingMessages.map((message) => message.trim()).sort(),
   });
   return [
     'critique-lesson',
+    sanitizeLessonIdPart(taskId),
     sanitizeLessonIdPart(evaluatorName),
     stableHash(normalizedFindings),
   ].join(':');
