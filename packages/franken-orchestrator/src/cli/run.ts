@@ -1419,6 +1419,8 @@ export async function main(): Promise<void> {
         action: args.drAction,
         backupManifestPath: args.drBackupManifestPath,
         liveManifestPath: args.drLiveManifestPath,
+        keyFilePath: args.drKeyFilePath,
+        dryRun: args.dryRun,
         print: printLine,
       });
     } catch (err) {
