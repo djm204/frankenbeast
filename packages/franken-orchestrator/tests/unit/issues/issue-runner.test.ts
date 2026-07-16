@@ -1250,13 +1250,13 @@ describe('IssueRunner', () => {
       expect(logger.warn).not.toHaveBeenCalled();
     });
 
-    it('preserves checkpoint-complete outcomes before evaluating backpressure or blocker deferral', async () => {
-      const checkpoint = mockCheckpoint(new Set(['impl:01_issue-15:done', 'harden:01_issue-15:done']));
+    it('preserves one-shot checkpoint-complete outcomes before evaluating backpressure or blocker deferral', async () => {
+      const checkpoint = mockCheckpoint(new Set(['impl:issue-15:done', 'harden:issue-15:done']));
       const issueRuntime = makeIssueRuntimeSupport();
       vi.mocked(issueRuntime.checkpointForIssue).mockReturnValue(checkpoint);
       vi.mocked(issueRuntime.artifactsForIssue).mockReturnValue({
         planName: 'issue-15',
-        planDir: '.tmp/test-issue-15',
+        planDir: '.tmp/missing-one-shot-test-issue-15',
         checkpointFile: '.tmp/test-issue-15.checkpoint',
         logFile: '.tmp/test-issue-15.log',
       });
@@ -1281,6 +1281,39 @@ describe('IssueRunner', () => {
 
       expect(outcomes[0]).toMatchObject({ issueNumber: 15, status: 'fixed' });
       expect(signals).not.toHaveBeenCalled();
+      expect(mockRun).not.toHaveBeenCalled();
+    });
+
+    it('does not mark missing-plan chunked issueRuntime checkpoints complete from one finished chunk', async () => {
+      const logger = mockLogger();
+      const graphBuilder = mockGraphBuilder();
+      const issueRuntime = makeIssueRuntimeSupport();
+      vi.mocked(issueRuntime.checkpointForIssue).mockReturnValue(mockCheckpoint(new Set([
+        'impl:01_issue-17:done',
+        'harden:01_issue-17:done',
+      ])));
+      vi.mocked(issueRuntime.artifactsForIssue).mockReturnValue({
+        planName: 'issue-17',
+        planDir: '.tmp/missing-test-issue-17',
+        checkpointFile: '.tmp/test-issue-17.checkpoint',
+        logFile: '.tmp/test-issue-17.log',
+      });
+      const config = makeConfig({
+        issues: [makeIssue({ number: 17, labels: ['blocked'] })],
+        triageResults: [makeTriage(17, 'chunked')],
+        graphBuilder,
+        issueRuntime,
+        logger,
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({
+        issueNumber: 17,
+        status: 'skipped',
+        error: expect.stringContaining('deferred by scheduler: blocked issue'),
+      });
+      expect(graphBuilder.buildChunkDefinitionsForIssue).not.toHaveBeenCalled();
       expect(mockRun).not.toHaveBeenCalled();
     });
 

@@ -48,7 +48,7 @@ export class IssueFetcher implements IIssueFetcher {
       args.push('--assignee', options.assignee);
     }
 
-    const limit = options.limit ?? 30;
+    const limit = options.limit ?? 1_000;
     args.push('--limit', String(limit));
 
     const stdout = await this.run('gh', args, 2_097_152);

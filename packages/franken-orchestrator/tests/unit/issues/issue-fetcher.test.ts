@@ -67,7 +67,7 @@ describe('IssueFetcher', () => {
       expect(args).toContain('number,title,body,labels,state,url,createdAt,updatedAt');
     });
 
-    it('adds default --limit 30 when no limit specified', async () => {
+    it('adds a backlog-safe default --limit when no limit is specified', async () => {
       const execFn = vi.fn(makeExecFn(SAMPLE_GH_OUTPUT));
       const fetcher = new IssueFetcher(execFn);
 
@@ -76,7 +76,7 @@ describe('IssueFetcher', () => {
       const [, args] = execFn.mock.calls[0]!;
       const limitIdx = args.indexOf('--limit');
       expect(limitIdx).toBeGreaterThan(-1);
-      expect(args[limitIdx + 1]).toBe('30');
+      expect(args[limitIdx + 1]).toBe('1000');
     });
 
     it('uses custom --limit when provided', async () => {

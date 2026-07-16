@@ -1068,11 +1068,16 @@ function checkpointEntriesHaveIssueProgress(
 
 function checkpointEntriesAreCompleteWithoutPlan(
   entries: ReadonlySet<string> | undefined,
+  issueNumber: number,
   issueSpecificCheckpoint: boolean,
+  complexity: TriageResult['complexity'],
 ): boolean {
   if (!issueSpecificCheckpoint || entries === undefined || entries.size === 0) return false;
+  if (complexity === 'chunked') return false;
+
   const doneEntries = [...entries];
-  return doneEntries.every((entry) => entry.endsWith(':done'))
+  const issueToken = `issue-${issueNumber}`;
+  return doneEntries.every((entry) => entry.endsWith(':done') && entry.includes(issueToken))
     && doneEntries.some((entry) => entry.startsWith('impl:'))
     && doneEntries.some((entry) => entry.startsWith('harden:'));
 }
@@ -1287,7 +1292,12 @@ export class IssueRunner {
     if (
       schedulingScore.blockerStatus !== 'eligible'
       && checkpointedPlanChunkPaths.length === 0
-      && checkpointEntriesAreCompleteWithoutPlan(checkpointEntries, issueRuntime !== undefined)
+      && checkpointEntriesAreCompleteWithoutPlan(
+        checkpointEntries,
+        issue.number,
+        issueRuntime !== undefined,
+        triage.complexity,
+      )
     ) {
       logger?.info(
         `[issues] Issue #${issue.number} already completed (checkpoint)`,
