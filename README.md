@@ -21,7 +21,7 @@ Starting from a fresh checkout? Use the [Frankenbeast onboarding checklist](ONBO
 npm run bootstrap -- --no-docker
 ```
 
-The bootstrap command delegates to [`scripts/bootstrap.sh`](scripts/bootstrap.sh), which validates Node.js, npm/Corepack, `.env` defaults, dependencies, and optional Docker services. New issue workers can run `npm --silent run new-worker:preflight -- --json` before coding to verify the local Node/npm/git/gh/jq toolchain, GitHub authentication, project git identity, repository root, and worktree cleanliness with parseable structured output for PM handoffs. Pass `--services` when you want bootstrap to start the optional Docker compose stack after dependency installation. To preview the checks without changing files or installing packages, run:
+The bootstrap command delegates to [`scripts/bootstrap.sh`](scripts/bootstrap.sh), which validates Node.js, npm/Corepack, `.env` defaults, dependencies, and optional Docker services. If you want persona-specific guidance before running setup commands, generate a deterministic first-run checklist with `npm run first-run:checklist -- --persona operator` or `npm --silent run first-run:checklist -- --persona coding-agent --json`. New issue workers can run `npm --silent run new-worker:preflight -- --json` before coding to verify the local Node/npm/git/gh/jq toolchain, GitHub authentication, project git identity, repository root, and worktree cleanliness with parseable structured output for PM handoffs. Pass `--services` when you want bootstrap to start the optional Docker compose stack after dependency installation. To preview the checks without changing files or installing packages, run:
 
 ```bash
 ./scripts/bootstrap.sh --dry-run
