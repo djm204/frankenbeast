@@ -33,7 +33,7 @@ node scripts/synthetic-availability-probes.mjs --json \
   --approval-ledger .fbeast/approvals/ledger.json
 ```
 
-The process exits `0` when all probes are healthy, `1` when any probe is unavailable, and `2` for invalid CLI/configuration errors. CI can archive the JSON output as compact probe evidence.
+The process exits `0` when all probes are healthy, `1` when any probe is unavailable, and `2` for invalid CLI/configuration errors. `--json` emits one compact JSON object per run so CI and cron can append it to JSONL logs; use `--pretty-json` only for interactive human inspection.
 
 ## Cron usage
 
@@ -47,7 +47,7 @@ Environment variable equivalents are available for schedulers that prefer static
 
 - `FRANKENBEAST_AVAILABILITY_REPO`
 - `FRANKENBEAST_AVAILABILITY_KANBAN_DB` or `HERMES_KANBAN_DB`
-- `FRANKENBEAST_AVAILABILITY_PROVIDER_COMMAND`
+- `FRANKENBEAST_AVAILABILITY_PROVIDER_COMMAND` (shell-style quoted argv is supported, for example `node -e "process.exit(0)"`)
 - `FRANKENBEAST_AVAILABILITY_DASHBOARD_URL`
 - `FRANKENBEAST_AVAILABILITY_APPROVAL_LEDGER`
 

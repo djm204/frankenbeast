@@ -2,22 +2,50 @@
 import { execFile as nodeExecFile } from 'node:child_process';
 import { readFile as nodeReadFile } from 'node:fs/promises';
 import process from 'node:process';
+import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(nodeExecFile);
 
 const DEFAULT_TIMEOUT_MS = 5_000;
-function splitCommand(value) {
+function parseCommandLine(value) {
   if (!value) return undefined;
   if (Array.isArray(value)) return value.map(String).filter(Boolean);
-  return String(value).trim().split(/\s+/u).filter(Boolean);
+  const words = [];
+  let word = '';
+  let quote = null;
+  let escaping = false;
+  for (const character of String(value).trim()) {
+    if (escaping) {
+      word += character;
+      escaping = false;
+    } else if (character === '\\') {
+      escaping = true;
+    } else if (quote) {
+      if (character === quote) quote = null;
+      else word += character;
+    } else if (character === '"' || character === "'") {
+      quote = character;
+    } else if (/\s/u.test(character)) {
+      if (word) {
+        words.push(word);
+        word = '';
+      }
+    } else {
+      word += character;
+    }
+  }
+  if (escaping) word += '\\';
+  if (quote) throw new Error(`unterminated quote in provider command: ${value}`);
+  if (word) words.push(word);
+  return words;
 }
 
 function parseCliArgs(argv) {
   const config = {
     repo: process.env.FRANKENBEAST_AVAILABILITY_REPO,
     kanbanDbPath: process.env.FRANKENBEAST_AVAILABILITY_KANBAN_DB ?? process.env.HERMES_KANBAN_DB,
-    providerCommand: splitCommand(process.env.FRANKENBEAST_AVAILABILITY_PROVIDER_COMMAND) ?? ['node', '--version'],
+    providerCommand: parseCommandLine(process.env.FRANKENBEAST_AVAILABILITY_PROVIDER_COMMAND) ?? ['node', '--version'],
     dashboardHealthUrl: process.env.FRANKENBEAST_AVAILABILITY_DASHBOARD_URL ?? 'http://127.0.0.1:3737/health',
     approvalLedgerPath: process.env.FRANKENBEAST_AVAILABILITY_APPROVAL_LEDGER,
     timeoutMs: DEFAULT_TIMEOUT_MS,
@@ -33,10 +61,11 @@ function parseCliArgs(argv) {
       return value;
     };
     if (arg === '--json') config.output = 'json';
+    else if (arg === '--pretty-json') config.output = 'pretty-json';
     else if (arg === '--text') config.output = 'text';
     else if (arg === '--repo') config.repo = next();
     else if (arg === '--kanban-db') config.kanbanDbPath = next();
-    else if (arg === '--provider-command') config.providerCommand = splitCommand(next());
+    else if (arg === '--provider-command') config.providerCommand = parseCommandLine(next());
     else if (arg === '--dashboard-url') config.dashboardHealthUrl = next();
     else if (arg === '--approval-ledger') config.approvalLedgerPath = next();
     else if (arg === '--timeout-ms') config.timeoutMs = Number(next());
@@ -50,7 +79,7 @@ function parseCliArgs(argv) {
 }
 
 function usage() {
-  return `Usage: node scripts/synthetic-availability-probes.mjs [--json|--text] [options]\n\nRead-only synthetic availability probes for critical Frankenbeast workflows.\n\nOptions:\n  --repo <owner/repo>          GitHub repo for issue inventory probe\n  --kanban-db <path>           Kanban SQLite database path\n  --provider-command <cmd>     Read-only provider status command (default: node --version)\n  --dashboard-url <url>        Dashboard health URL (default: http://127.0.0.1:3737/health)\n  --approval-ledger <path>     Approval ledger JSON path\n  --timeout-ms <ms>            Per-probe timeout (default: ${DEFAULT_TIMEOUT_MS})\n  --json                      Emit machine-readable JSON\n  --text                      Emit compact text (default)`;
+  return `Usage: node scripts/synthetic-availability-probes.mjs [--json|--text] [options]\n\nRead-only synthetic availability probes for critical Frankenbeast workflows.\n\nOptions:\n  --repo <owner/repo>          GitHub repo for issue inventory probe\n  --kanban-db <path>           Kanban SQLite database path\n  --provider-command <cmd>     Read-only provider status command (default: node --version)\n  --dashboard-url <url>        Dashboard health URL (default: http://127.0.0.1:3737/health)\n  --approval-ledger <path>     Approval ledger JSON path\n  --timeout-ms <ms>            Per-probe timeout (default: ${DEFAULT_TIMEOUT_MS})\n  --json                      Emit compact machine-readable JSON/JSONL\n  --pretty-json               Emit pretty-printed JSON for humans\n  --text                      Emit compact text (default)`;
 }
 
 function normalizeError(error) {
@@ -128,7 +157,7 @@ async function probeKanbanRead(config, deps) {
 }
 
 async function probeProviderStatus(config, deps) {
-  const command = splitCommand(config.providerCommand);
+  const command = parseCommandLine(config.providerCommand);
   if (!command || command.length === 0) throw new Error('missing provider status command');
   const [file, ...args] = command;
   const stdout = await deps.execFile(file, args, config.timeoutMs);
@@ -204,12 +233,13 @@ async function main() {
     return;
   }
   const report = await runSyntheticAvailabilityProbes({ config });
-  if (config.output === 'json') console.log(JSON.stringify(report, null, 2));
+  if (config.output === 'json') console.log(JSON.stringify(report));
+  else if (config.output === 'pretty-json') console.log(JSON.stringify(report, null, 2));
   else console.log(formatProbeReportText(report));
   if (!report.ok) process.exitCode = 1;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error) => {
     console.error(normalizeError(error));
     process.exitCode = 2;

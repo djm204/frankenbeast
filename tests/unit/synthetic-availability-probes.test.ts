@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -113,6 +114,44 @@ describe('synthetic availability probes', () => {
     });
   });
 
+  it('parses quoted provider commands as argv instead of passing literal quotes', async () => {
+    const { runSyntheticAvailabilityProbes } = await loadScript();
+    const execFile = vi.fn(async (file: string) => {
+      if (file === 'gh') return '[]';
+      return 'provider ok';
+    });
+
+    await runSyntheticAvailabilityProbes({
+      config: {
+        repo: 'djm204/frankenbeast',
+        providerCommand: 'node -e "process.exit(1)"',
+        timeoutMs: 100,
+      },
+      execFile,
+      fetch: vi.fn(async () => ({ ok: true, status: 200 })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      readFile: vi.fn(async () => '{}'),
+    });
+
+    expect(execFile).toHaveBeenCalledWith('node', ['-e', 'process.exit(1)'], 100);
+  });
+
+  it('emits compact one-line JSON for JSONL-friendly cron logs', () => {
+    const result = spawnSync(process.execPath, [SCRIPT, '--json', '--repo', 'djm204/frankenbeast'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        FRANKENBEAST_AVAILABILITY_PROVIDER_COMMAND: 'node --version',
+      },
+    });
+
+    expect([0, 1]).toContain(result.status);
+    const lines = result.stdout.trim().split('\n');
+    expect(lines).toHaveLength(1);
+    expect(() => JSON.parse(lines[0])).not.toThrow();
+  });
+
   it('renders compact text output and documents cron/CI usage', async () => {
     const { formatProbeReportText } = await loadScript();
     const text = formatProbeReportText({
@@ -131,6 +170,7 @@ describe('synthetic availability probes', () => {
     expect(doc).toContain('node scripts/synthetic-availability-probes.mjs --json');
     expect(doc).toContain('cron');
     expect(doc).toContain('CI');
+    expect(doc).toContain('JSONL');
     expect(doc).toContain('No probe mutates GitHub, Git, memory, or approval state');
   });
 });
