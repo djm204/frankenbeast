@@ -92,7 +92,6 @@ const provenance = brain.memoryReview.provenanceFor(
   'working',
   'user.preference.response-style',
 );
-
 // Contradictory candidates for an existing key are surfaced before approval so
 // callers can explicitly keep the durable fact, replace it, or reject the new
 // candidate with an auditable decision note.
