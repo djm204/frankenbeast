@@ -534,13 +534,14 @@ describe('CliSkillExecutor.recoverDirtyFiles', () => {
       makeMockObserver() as ObserverDeps,
     );
 
+    const abortReason = new Error('operator cancelled');
     await expect(executor.execute(
       't1',
       { objective: 'do it', sessionId: 'sess-1' } as SkillInput,
-      { martin: { abortSignal: ac.signal, onIteration: () => ac.abort('operator cancelled') } } as unknown as Partial<CliSkillConfig>,
+      { martin: { abortSignal: ac.signal, onIteration: () => ac.abort(abortReason) } } as unknown as Partial<CliSkillConfig>,
       makeCheckpoint(),
       'impl:t1',
-    )).rejects.toThrow('operator cancelled');
+    )).rejects.toMatchObject({ name: 'AbortError', message: 'operator cancelled' });
 
     expect(git.autoCommit).not.toHaveBeenCalled();
   });

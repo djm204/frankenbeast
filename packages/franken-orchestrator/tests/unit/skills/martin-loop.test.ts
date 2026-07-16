@@ -816,13 +816,12 @@ describe('MartinLoop', () => {
     it('does not return completed when cancellation arrives during async session persistence', async () => {
       const root = mkdtempSync(join(tmpdir(), 'martin-compact-cancel-'));
       tmpDirs.push(root);
-      const sessionStore = new FileChunkSessionStore(root);
-      const snapshotStore = new FileChunkSessionSnapshotStore(root);
+      const sessionStore = new FileChunkSessionStore(join(root, 'sessions'));
+      const snapshotStore = new FileChunkSessionSnapshotStore(join(root, 'snapshots'));
       const ac = new AbortController();
-
-      queueMock({ stdout: 'done\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
-
+      queueMock({ stdout: 'done\n<promise>IMPL_COMPACT_DONE</promise>', exitCode: 0 });
       const loop = new MartinLoop();
+
       await expect(loop.run(baseConfig({
         abortSignal: ac.signal,
         planName: 'compact-cancel-plan',
@@ -836,7 +835,7 @@ describe('MartinLoop', () => {
             ac.abort('compaction cancelled');
             return session;
           },
-        },
+        } as unknown as ChunkSessionCompactor,
         contextUsage: () => ({
           usedTokens: 900,
           maxTokens: 1000,
@@ -849,6 +848,40 @@ describe('MartinLoop', () => {
       const stored = sessionStore.load('compact-cancel-plan', 'compact_cancel');
       expect(stored?.transcript).toHaveLength(1);
       expect(stored?.transcript[0]?.kind).toBe('objective');
+    });
+
+    it('keeps pre-compaction iteration output when non-abort compaction fails', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'martin-compact-fail-'));
+      tmpDirs.push(root);
+      const sessionStore = new FileChunkSessionStore(join(root, 'sessions'));
+      const snapshotStore = new FileChunkSessionSnapshotStore(join(root, 'snapshots'));
+      queueMock({ stdout: 'done\n<promise>IMPL_COMPACT_FAIL_DONE</promise>', exitCode: 0 });
+      const loop = new MartinLoop();
+
+      await expect(loop.run(baseConfig({
+        planName: 'compact-fail-plan',
+        taskId: 'impl:compact_fail',
+        chunkId: 'compact_fail',
+        sessionStore,
+        snapshotStore,
+        renderer: new ChunkSessionRenderer(),
+        compactor: {
+          compact: async () => {
+            throw new Error('summarizer unavailable');
+          },
+        } as unknown as ChunkSessionCompactor,
+        contextUsage: () => ({
+          usedTokens: 900,
+          maxTokens: 1000,
+          usageRatio: 0.9,
+          threshold: 0.85,
+          shouldCompact: true,
+        }),
+      }))).rejects.toThrow('summarizer unavailable');
+
+      const stored = sessionStore.load('compact-fail-plan', 'compact_fail');
+      expect(stored?.transcript.map((entry) => entry.kind)).toEqual(['objective', 'assistant']);
+      expect(stored?.transcript[1]?.content).toContain('IMPL_COMPACT_FAIL_DONE');
     });
   });
 });

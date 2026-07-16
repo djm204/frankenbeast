@@ -13,9 +13,12 @@ function formatNumber(n: number): string {
 }
 
 function abortReasonError(reason?: unknown): Error {
-  if (reason instanceof Error) return reason;
-  const error = new Error(reason === undefined ? 'MartinLoop aborted' : String(reason));
+  if (reason instanceof Error && reason.name === 'AbortError') return reason;
+  const error = new Error(reason instanceof Error ? reason.message : reason === undefined ? 'MartinLoop aborted' : String(reason));
   error.name = 'AbortError';
+  if (reason instanceof Error) {
+    error.cause = reason;
+  }
   return error;
 }
 

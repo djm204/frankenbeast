@@ -47,9 +47,12 @@ function extractPromiseTags(output: string): string[] {
 }
 
 function abortError(reason?: unknown): Error {
-  if (reason instanceof Error) return reason;
-  const error = new Error(reason === undefined ? 'MartinLoop sleep aborted' : String(reason));
+  if (reason instanceof Error && reason.name === 'AbortError') return reason;
+  const error = new Error(reason instanceof Error ? reason.message : reason === undefined ? 'MartinLoop sleep aborted' : String(reason));
   error.name = 'AbortError';
+  if (reason instanceof Error) {
+    error.cause = reason;
+  }
   return error;
 }
 
@@ -750,15 +753,41 @@ export class MartinLoop {
       };
     }
 
-    if (
+    const shouldCompact = Boolean(
       config.contextUsage &&
       config.snapshotStore &&
       config.compactor &&
-      nextSession.contextWindow.usageRatio >= nextSession.contextWindow.compactThreshold
-    ) {
+      nextSession.contextWindow.usageRatio >= nextSession.contextWindow.compactThreshold,
+    );
+
+    if (shouldCompact && config.snapshotStore && config.compactor) {
+      const previousSession = config.sessionStore?.load(
+        nextSession.planName,
+        nextSession.chunkId,
+        nextSession.taskId,
+      );
+      const restorePreviousSession = (): void => {
+        if (!config.sessionStore) return;
+        if (previousSession) {
+          config.sessionStore.save(previousSession);
+          return;
+        }
+        config.sessionStore.delete(nextSession.planName, nextSession.chunkId, nextSession.taskId);
+      };
+
       config.snapshotStore.writeSnapshot(nextSession, 'pre-compaction');
-      nextSession = await config.compactor.compact(nextSession);
+      config.sessionStore?.save(nextSession);
+      try {
+        nextSession = await config.compactor.compact(nextSession);
+      } catch (error) {
+        if (config.abortSignal?.aborted || isAbortError(error)) {
+          restorePreviousSession();
+          throw config.abortSignal?.aborted ? abortError(config.abortSignal.reason) : error;
+        }
+        throw error;
+      }
       if (config.abortSignal?.aborted) {
+        restorePreviousSession();
         throw abortError(config.abortSignal.reason);
       }
     }
