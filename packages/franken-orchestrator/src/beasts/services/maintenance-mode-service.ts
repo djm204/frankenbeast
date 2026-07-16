@@ -87,13 +87,20 @@ export class MaintenanceModeService {
       const parsed = JSON.parse(readFileSync(this.stateFile, 'utf8')) as unknown;
       return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
         ? parsed as Record<string, unknown>
-        : undefined;
+        : this.unreadableState();
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code === 'ENOENT') {
         return undefined;
       }
-      return undefined;
+      return this.unreadableState();
     }
+  }
+
+  private unreadableState(): Record<string, unknown> {
+    return {
+      enabled: true,
+      reason: `Maintenance state is unreadable; dispatch is paused until ${this.stateFile} is repaired or removed.`,
+    };
   }
 }

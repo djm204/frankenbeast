@@ -4,6 +4,7 @@ import { requireBeastOperatorAuth } from '../../beasts/http/beast-auth.js';
 import { InMemoryRateLimiter, requireBeastRateLimit, type BeastRateLimitOptions } from '../../beasts/http/beast-rate-limit.js';
 import { DeletedTrackedAgentError, UnknownTrackedAgentError } from '../../beasts/errors.js';
 import { CapacityReservationError } from '../../beasts/services/capacity-reservation-policy.js';
+import { MaintenanceModeError, type MaintenanceModeService } from '../../beasts/services/maintenance-mode-service.js';
 import type { AgentService } from '../../beasts/services/agent-service.js';
 import type { BeastDispatchService } from '../../beasts/services/beast-dispatch-service.js';
 import type { BeastRunService } from '../../beasts/services/beast-run-service.js';
@@ -51,6 +52,7 @@ const PatchAgentConfigBody = z.object({
 export interface AgentRoutesDeps {
   agents: AgentService;
   dispatch?: BeastDispatchService;
+  maintenance?: MaintenanceModeService | undefined;
   runs: BeastRunService;
   operatorToken: string;
   security: TransportSecurityService;
@@ -81,6 +83,20 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
     const body = validateBody(CreateAgentBody, await parseJsonBody(c));
     const shouldAutoDispatch = body.autoDispatch !== false && deps.dispatch && shouldDispatchOnCreate(body.initAction.kind);
     if (shouldAutoDispatch) {
+      try {
+        deps.maintenance?.assertDispatchAllowed();
+      } catch (error) {
+        if (error instanceof MaintenanceModeError) {
+          return c.json({
+            error: {
+              code: 'MAINTENANCE_MODE_ACTIVE',
+              message: error.message,
+              details: { maintenance: error.state },
+            },
+          }, 423);
+        }
+        throw error;
+      }
       const capacityDecision = deps.agents.canStartInitConfig(body.initConfig);
       if (!capacityDecision.allowed) {
         return c.json({
@@ -152,6 +168,15 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
         ...(body.moduleConfig ? { moduleConfig: body.moduleConfig } : {}),
       });
     } catch (error) {
+      if (error instanceof MaintenanceModeError) {
+        return c.json({
+          error: {
+            code: 'MAINTENANCE_MODE_ACTIVE',
+            message: error.message,
+            details: { maintenance: error.state },
+          },
+        }, 423);
+      }
       if (error instanceof CapacityReservationError) {
         return c.json({
           error: {
@@ -310,6 +335,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
           `Tracked agent '${agentId}' was not found`,
         );
       }
+      throwMaintenanceModeError(error);
       throwCapacityReservationError(error);
       throw error;
     }
@@ -398,6 +424,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
           `Tracked agent '${agentId}' was not found`,
         );
       }
+      throwMaintenanceModeError(error);
       throwCapacityReservationError(error);
       throw error;
     }
@@ -482,6 +509,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
           `Tracked agent '${agentId}' was not found`,
         );
       }
+      throwMaintenanceModeError(error);
       throwCapacityReservationError(error);
       throw error;
     }
@@ -568,6 +596,12 @@ function shouldDispatchFreshRunForModuleConfig(
 ): boolean {
   if (!run || agent.moduleConfig === undefined || run.attemptCount === 0) return false;
   return JSON.stringify(run.configSnapshot.modules ?? {}) !== JSON.stringify(agent.moduleConfig);
+}
+
+function throwMaintenanceModeError(error: unknown): void {
+  if (error instanceof MaintenanceModeError) {
+    throw new HttpError(423, 'MAINTENANCE_MODE_ACTIVE', error.message, { maintenance: error.state });
+  }
 }
 
 function throwCapacityReservationError(error: unknown): void {

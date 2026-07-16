@@ -88,7 +88,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
     executors,
   });
 
-  runService = new BeastRunService(repository, catalog, executors, metrics, logStore, { eventBus, capacityPolicy });
+  runService = new BeastRunService(repository, catalog, executors, metrics, logStore, { eventBus, capacityPolicy, maintenance });
 
   return {
     agents: new AgentService(repository, undefined, { capacityPolicy }),

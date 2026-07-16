@@ -100,6 +100,7 @@ export function createBeastDaemonApp(options: BeastDaemonAppOptions): Hono {
   app.route('/', agentRoutes({
     agents: services.agents,
     dispatch: services.dispatch,
+    maintenance: services.maintenance,
     runs: services.runs,
     operatorToken: options.operatorToken,
     security,

@@ -33,15 +33,15 @@ export const useDashboardStore = create<DashboardStore>()((set) => ({
   ...initialState,
 
   setSnapshot: (snapshot) =>
-    set({
+    set((current) => ({
       skills: snapshot.skills,
       security: snapshot.security,
       providers: snapshot.providers,
       availability: snapshot.availability ?? null,
-      maintenance: snapshot.maintenance ?? null,
+      maintenance: snapshot.maintenance ?? current.maintenance,
       loading: false,
       error: null,
-    }),
+    })),
 
   toggleSkill: (name) =>
     set((s) => ({

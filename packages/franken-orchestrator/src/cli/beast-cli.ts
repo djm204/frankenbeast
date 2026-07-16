@@ -6,7 +6,7 @@ import { collectBeastConfig } from './beast-prompts.js';
 import type { ProjectPaths } from './project-root.js';
 import { createBeastControlClient } from './beast-control-client.js';
 import type { BeastExecutionMode, BeastRun, BeastRunAttempt } from '../beasts/types.js';
-import type { MaintenanceModeState } from '../beasts/services/maintenance-mode-service.js';
+import { MaintenanceModeService, type MaintenanceModeState } from '../beasts/services/maintenance-mode-service.js';
 import { spawnSync } from 'node:child_process';
 
 type BeastControlClient = Omit<ReturnType<typeof createBeastControlClient>, 'dispose'> & {
@@ -104,6 +104,24 @@ interface BeastCommandDeps {
 
 export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> {
   const { args, io, paths, print } = deps;
+  if (args.beastAction === 'maintenance') {
+    const maintenance = MaintenanceModeService.forProjectRoot(paths.root);
+    const action = args.beastTarget ?? 'status';
+    if (action === 'on') {
+      print(JSON.stringify(maintenance.activate({ reason: maintenanceReason(args.networkSet) }), null, 2));
+      return;
+    }
+    if (action === 'off') {
+      print(JSON.stringify(maintenance.deactivate(), null, 2));
+      return;
+    }
+    if (action !== 'status') {
+      throw new Error(`Unknown maintenance action: ${action}. Valid: status, on, off`);
+    }
+    print(JSON.stringify(maintenance.getState(), null, 2));
+    return;
+  }
+
   const services = createBeastServices(paths);
   let control = deps.control;
   let ownsControl = false;
@@ -226,22 +244,6 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
         const header = run ? containerLogHeader(run, services.runs.listAttempts(args.beastTarget)) : [];
         const logs = await services.runs.readLogs(args.beastTarget);
         print([...header, ...logs].join('\n'));
-        return;
-      }
-      case 'maintenance': {
-        const action = args.beastTarget ?? 'status';
-        if (action === 'on') {
-          print(JSON.stringify(services.maintenance.activate({ reason: maintenanceReason(args.networkSet) }), null, 2));
-          return;
-        }
-        if (action === 'off') {
-          print(JSON.stringify(services.maintenance.deactivate(), null, 2));
-          return;
-        }
-        if (action !== 'status') {
-          throw new Error(`Unknown maintenance action: ${action}. Valid: status, on, off`);
-        }
-        print(JSON.stringify(services.maintenance.getState(), null, 2));
         return;
       }
       case 'stop': {

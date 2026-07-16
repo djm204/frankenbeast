@@ -102,6 +102,7 @@ export function DashboardPage({ client }: DashboardPageProps) {
         security: confirmedSecurity,
         providers: currentSnapshot.providers,
         availability: currentSnapshot.availability ?? undefined,
+        maintenance: currentSnapshot.maintenance ?? undefined,
       });
     }
   }, [setSnapshot]);

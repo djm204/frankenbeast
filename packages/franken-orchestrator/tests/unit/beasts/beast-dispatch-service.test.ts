@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -47,6 +48,47 @@ describe('BeastDispatchService', () => {
       config: {
         provider: 'claude',
         objective: 'Implement the dispatch panel',
+        chunkDirectory: 'docs/chunks',
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'pfk',
+      executionMode: 'process',
+    })).rejects.toThrow(MaintenanceModeError);
+    expect(executors.process.start).not.toHaveBeenCalled();
+    expect(repo.listRuns()).toHaveLength(0);
+  });
+
+  it('fails closed when a persisted maintenance state file is not an object', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const maintenanceStateFile = join(workDir, 'maintenance-mode.json');
+    writeFileSync(maintenanceStateFile, 'null\n');
+    const maintenance = new MaintenanceModeService(maintenanceStateFile);
+    const executors = {
+      process: {
+        start: vi.fn(async () => repo.createAttempt('placeholder', { status: 'running' })),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+      container: {
+        start: vi.fn(),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs, { maintenance });
+
+    expect(maintenance.getState()).toMatchObject({
+      enabled: true,
+      reason: expect.stringContaining('Maintenance state is unreadable'),
+    });
+    await expect(dispatch.createRun({
+      definitionId: 'martin-loop',
+      config: {
+        provider: 'claude',
+        objective: 'Do not fail open',
         chunkDirectory: 'docs/chunks',
       },
       dispatchedBy: 'dashboard',

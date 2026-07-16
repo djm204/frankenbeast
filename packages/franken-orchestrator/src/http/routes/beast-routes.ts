@@ -13,6 +13,7 @@ import {
 } from '../../beasts/services/beast-interview-service.js';
 import { BeastRunService, UnknownBeastRunError } from '../../beasts/services/beast-run-service.js';
 import { CapacityReservationError } from '../../beasts/services/capacity-reservation-policy.js';
+import type { MaintenanceModeService } from '../../beasts/services/maintenance-mode-service.js';
 import { MaintenanceModeError } from '../../beasts/services/maintenance-mode-service.js';
 import type { AgentService } from '../../beasts/services/agent-service.js';
 import type { BeastEventBus } from '../../beasts/events/beast-event-bus.js';
@@ -102,6 +103,9 @@ class InterviewSessionNotFoundHttpError extends HttpError {
 }
 
 function throwKnownRunError(runId: string, error: unknown): never {
+  if (error instanceof MaintenanceModeError) {
+    throw new HttpError(423, 'MAINTENANCE_MODE_ACTIVE', error.message, { maintenance: error.state });
+  }
   throwCapacityReservationError(error);
   if (error instanceof UnknownBeastRunError) {
     throw beastRunNotFound(runId);
@@ -147,6 +151,7 @@ export interface BeastRoutesDeps {
   dispatch: BeastDispatchService;
   runs: BeastRunService;
   interviews: BeastInterviewService;
+  maintenance?: MaintenanceModeService | undefined;
   metrics: BeastMetrics;
   operatorToken: string;
   security: TransportSecurityService;
