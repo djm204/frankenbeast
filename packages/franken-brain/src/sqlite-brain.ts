@@ -184,6 +184,27 @@ export interface MemoryProvenanceRecord {
   approvedAt: string;
 }
 
+export interface MemoryAttributionListOptions {
+  /** Filter attribution records to a target store. Defaults to all supported stores. */
+  targetStore?: MemoryCandidateTargetStore;
+  /** Filter attribution records to an exact memory key. */
+  key?: string;
+  /** Filter attribution records to any exact memory key in this set. */
+  keys?: string[];
+  /** Include only unprefixed keys plus keys matching any of these prefixes. */
+  visibleKeyPrefixes?: string[];
+  /** Include keys that do not match any visible/excluded key prefix. */
+  includeUnprefixedKeys?: boolean;
+  /** Prefixes that define non-shared scoped keys when includeUnprefixedKeys is set. */
+  unprefixedKeyPrefixExclusions?: string[];
+  /** Exclude attribution records whose memory key starts with any of these prefixes. */
+  excludeKeyPrefixes?: string[];
+  /** Case-insensitive substring filter for the decoded source string. */
+  source?: string;
+  /** Maximum attribution records to return. Defaults to 50, max 1000. */
+  limit?: number;
+}
+
 export type MemoryConflictResolution =
   | 'keep_existing'
   | 'replace_existing'
@@ -937,6 +958,9 @@ class SqliteWorkingMemory implements IWorkingMemory {
     const deleteKey = this.db.prepare(
       `DELETE FROM working_memory WHERE key = ?`,
     );
+    const deleteProvenance = this.db.prepare(
+      `DELETE FROM memory_review_provenance WHERE target_store = 'working' AND memory_key = ?`,
+    );
     const upsert = this.db.prepare(
       `INSERT INTO working_memory (key, value, updated_at, schema_version) VALUES (?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, schema_version = excluded.schema_version
@@ -952,11 +976,13 @@ class SqliteWorkingMemory implements IWorkingMemory {
       }
 
       for (const key of this.deletedKeys) {
+        deleteProvenance.run(key);
         if (!this.dirtyKeys.has(key)) {
           deleteKey.run(key);
         }
       }
       for (const key of this.dirtyKeys) {
+        deleteProvenance.run(key);
         const serialized = this.serialized.get(key);
         if (serialized !== undefined) {
           upsert.run(
@@ -1030,6 +1056,11 @@ class SqliteWorkingMemory implements IWorkingMemory {
         return;
       }
     }
+    this.db
+      .prepare(
+        `DELETE FROM memory_review_provenance WHERE target_store = 'working' AND memory_key = ?`,
+      )
+      .run(key);
     this.db
       .prepare(
         `INSERT INTO working_memory (key, value, updated_at, schema_version) VALUES (?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
@@ -3029,7 +3060,9 @@ export class SqliteMemoryReviewQueue {
           `SELECT * FROM memory_review_provenance WHERE target_store = ? AND memory_key = ?`,
         )
         .get(targetStore, key) as MemoryProvenanceRow | undefined;
-      const result = row ? this.rowToProvenance(row) : null;
+      const result = row && this.provenanceMatchesCurrentWorkingMemory(row)
+        ? this.rowToProvenance(row)
+        : null;
       this.audit?.({
         operation: 'review.provenanceFor',
         store: 'review',
@@ -3048,6 +3081,104 @@ export class SqliteMemoryReviewQueue {
       });
       throw error;
     }
+  }
+
+  listProvenance(
+    options: MemoryAttributionListOptions = {},
+  ): MemoryProvenanceRecord[] {
+    const limit = this.resolveAttributionLimit(options.limit);
+    if (options.targetStore !== undefined && options.targetStore !== 'working') {
+      throw new Error(`Unsupported memory attribution target store: ${options.targetStore}`);
+    }
+    if (options.key !== undefined && options.key.trim().length === 0) {
+      throw new Error('Memory attribution key filter must not be empty');
+    }
+    if (options.keys !== undefined && options.keys.some(key => key.trim().length === 0)) {
+      throw new Error('Memory attribution key filter must not be empty');
+    }
+    if (options.keys !== undefined && options.keys.length === 0) {
+      return [];
+    }
+    if (options.key !== undefined && options.keys !== undefined) {
+      throw new Error('Memory attribution key and keys filters are mutually exclusive');
+    }
+    if (options.source !== undefined && options.source.trim().length === 0) {
+      throw new Error('Memory attribution source filter must not be empty');
+    }
+
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (options.targetStore !== undefined) {
+      conditions.push('target_store = ?');
+      params.push(options.targetStore);
+    }
+    if (options.key !== undefined) {
+      conditions.push('memory_key = ?');
+      params.push(options.key);
+    }
+    if (options.keys !== undefined && options.keys.length > 0) {
+      conditions.push(`memory_key IN (${options.keys.map(() => '?').join(', ')})`);
+      params.push(...options.keys);
+    }
+    const visibleKeyPrefixes = options.visibleKeyPrefixes ?? [];
+    if (visibleKeyPrefixes.length > 0) {
+      const visibleConditions = visibleKeyPrefixes.map(() => "memory_key LIKE ? ESCAPE '\\'");
+      params.push(...visibleKeyPrefixes.map(prefix => `${prefix.replace(/[\\%_]/g, char => `\\${char}`)}%`));
+      if (options.includeUnprefixedKeys) {
+        const unprefixedExclusions = options.unprefixedKeyPrefixExclusions ?? visibleKeyPrefixes;
+        visibleConditions.push(...unprefixedExclusions.map(() => "memory_key NOT LIKE ? ESCAPE '\\'"));
+        params.push(...unprefixedExclusions.map(prefix => `${prefix.replace(/[\\%_]/g, char => `\\${char}`)}%`));
+      }
+      conditions.push(options.includeUnprefixedKeys
+        ? `(${visibleConditions.slice(0, visibleKeyPrefixes.length).join(' OR ')} OR (${visibleConditions.slice(visibleKeyPrefixes.length).join(' AND ')}))`
+        : `(${visibleConditions.join(' OR ')})`);
+    }
+    for (const prefix of options.excludeKeyPrefixes ?? []) {
+      conditions.push("memory_key NOT LIKE ? ESCAPE '\\'");
+      params.push(`${prefix.replace(/[\\%_]/g, char => `\\${char}`)}%`);
+    }
+    const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM memory_review_provenance${where} ORDER BY approved_at DESC, memory_key ASC`,
+      )
+      .all(...params) as MemoryProvenanceRow[];
+    const sourceFilter = options.source?.trim().toLowerCase();
+    const attributions: MemoryProvenanceRecord[] = [];
+    for (const row of rows) {
+      if (!this.provenanceMatchesCurrentWorkingMemory(row)) {
+        continue;
+      }
+      const provenance = this.rowToProvenance(row);
+      if (sourceFilter && !provenance.source.toLowerCase().includes(sourceFilter)) {
+        continue;
+      }
+      attributions.push(provenance);
+      if (attributions.length >= limit) break;
+    }
+    return attributions;
+  }
+
+  private resolveAttributionLimit(limit: number | undefined): number {
+    if (limit === undefined) return 50;
+    if (
+      !Number.isFinite(limit) ||
+      !Number.isSafeInteger(limit) ||
+      limit < 1 ||
+      limit > 1000
+    ) {
+      throw new Error('Memory attribution limit must be a positive integer between 1 and 1000');
+    }
+    return limit;
+  }
+
+  private provenanceMatchesCurrentWorkingMemory(row: MemoryProvenanceRow): boolean {
+    if (row.target_store !== 'working') return false;
+    const workingRow = this.db
+      .prepare(`SELECT value FROM working_memory WHERE key = ?`)
+      .get(row.memory_key) as { value: string } | undefined;
+    if (!workingRow) return false;
+    return this.decodeText(workingRow.value) === this.decodeText(row.value);
   }
 
   conflictsFor(id: string): MemoryConflict[] {
