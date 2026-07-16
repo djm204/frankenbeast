@@ -41,6 +41,11 @@ function splitCsvArg(value: unknown, fallback?: string[]): string[] | undefined 
 
 const DEFAULT_MEMORY_QUERY_LIMIT = 20;
 const MAX_MEMORY_QUERY_LIMIT = 1000;
+const MEMORY_REVIEW_STATUSES = ['pending', 'approved', 'rejected', 'never_store', 'suppressed'] as const;
+const MEMORY_REVIEW_ACTIONS = ['approve', 'reject', 'never_store'] as const;
+
+type MemoryReviewStatus = (typeof MEMORY_REVIEW_STATUSES)[number];
+type MemoryReviewAction = (typeof MEMORY_REVIEW_ACTIONS)[number];
 
 function parseMemoryQueryLimit(value: unknown): { ok: true; value: number } | { ok: false; message: string } {
   if (value === undefined) return { ok: true, value: DEFAULT_MEMORY_QUERY_LIMIT };
@@ -91,6 +96,33 @@ function parseStringArg(name: string, value: unknown): { ok: true; value: string
     return { ok: false, message: `${name} must be a string` };
   }
   return { ok: true, value };
+}
+
+function parseMemoryReviewConfidence(value: unknown): { ok: true; value: number } | { ok: false; message: string } {
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    return { ok: false, message: 'confidence must be a number between 0 and 1' };
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+    return { ok: false, message: 'confidence must be a number between 0 and 1' };
+  }
+  return { ok: true, value: parsed };
+}
+
+function parseMemoryReviewStatus(value: unknown): { ok: true; value: MemoryReviewStatus } | { ok: false; message: string } {
+  const status = value === undefined ? 'pending' : String(value);
+  if (MEMORY_REVIEW_STATUSES.includes(status as MemoryReviewStatus)) {
+    return { ok: true, value: status as MemoryReviewStatus };
+  }
+  return { ok: false, message: `status must be one of: ${MEMORY_REVIEW_STATUSES.join(', ')}` };
+}
+
+function parseMemoryReviewAction(value: unknown): { ok: true; value: MemoryReviewAction } | { ok: false; message: string } {
+  const action = String(value);
+  if (MEMORY_REVIEW_ACTIONS.includes(action as MemoryReviewAction)) {
+    return { ok: true, value: action as MemoryReviewAction };
+  }
+  return { ok: false, message: `action must be one of: ${MEMORY_REVIEW_ACTIONS.join(', ')}` };
 }
 
 export function createAdapterSet(dbPath: string, options: { root?: string | undefined; configPath?: string | undefined } = {}): AdapterSet {
@@ -278,6 +310,129 @@ const TOOLS: ToolFull[] = [
           }, null, 2),
         }],
       };
+    },
+  },
+  {
+    name: 'fbeast_memory_review_propose',
+    server: 'memory',
+    description: 'Queue a proposed working-memory promotion for operator review instead of storing it immediately',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        key: { type: 'string', description: 'Working-memory key proposed for promotion' },
+        value: { type: 'string', description: 'Proposed memory value' },
+        source: { type: 'string', description: 'Where the proposed memory came from, such as chat:turn-42 or repo-config' },
+        evidenceId: { type: 'string', description: 'Optional stable evidence identifier for deduplication/audit' },
+        confidence: { type: 'number', description: 'Confidence from 0 to 1 that the memory should be promoted' },
+        reason: { type: 'string', description: 'Operator-visible reason for promotion' },
+      },
+      required: ['key', 'value', 'source', 'confidence', 'reason'],
+    },
+    makeHandler: ({ brain }) => async (args) => {
+      const key = parseNonEmptyStringArg('key', args['key']);
+      const value = parseStringArg('value', args['value']);
+      const source = parseNonEmptyStringArg('source', args['source']);
+      const reason = parseNonEmptyStringArg('reason', args['reason']);
+      const confidence = parseMemoryReviewConfidence(args['confidence']);
+      if (key.ok === false) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_review_propose ${key.message}` }], isError: true };
+      }
+      if (value.ok === false) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_review_propose ${value.message}` }], isError: true };
+      }
+      if (source.ok === false) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_review_propose ${source.message}` }], isError: true };
+      }
+      if (reason.ok === false) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_review_propose ${reason.message}` }], isError: true };
+      }
+      if (confidence.ok === false) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_review_propose ${confidence.message}` }], isError: true };
+      }
+      const evidenceId = args['evidenceId'] === undefined ? undefined : parseNonEmptyStringArg('evidenceId', args['evidenceId']);
+      if (evidenceId && !evidenceId.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_review_propose ${evidenceId.message}` }], isError: true };
+      }
+      const candidate = await brain.proposeMemory({
+        key: key.value,
+        value: value.value,
+        source: source.value,
+        reason: reason.value,
+        confidence: confidence.value,
+        ...(evidenceId?.value ? { evidenceId: evidenceId.value } : {}),
+      });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            id: candidate.id,
+            status: candidate.status,
+            createdAt: candidate.createdAt,
+            updatedAt: candidate.updatedAt,
+          }, null, 2),
+        }],
+      };
+    },
+  },
+  {
+    name: 'fbeast_memory_review_list',
+    server: 'memory',
+    description: 'List queued memory promotion candidates by review status',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', description: 'Review status to list; defaults to pending', enum: [...MEMORY_REVIEW_STATUSES] },
+      },
+    },
+    makeHandler: ({ brain }) => async (args) => {
+      const status = parseMemoryReviewStatus(args['status']);
+      if (!status.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_review_list ${status.message}` }], isError: true };
+      }
+      const candidates = await brain.listMemoryReview(status.value);
+      return { content: [{ type: 'text', text: JSON.stringify({ status: status.value, count: candidates.length, candidates }, null, 2) }] };
+    },
+  },
+  {
+    name: 'fbeast_memory_review_decide',
+    server: 'memory',
+    description: 'Approve, reject, or mark a queued memory promotion as never-store',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Candidate id returned by fbeast_memory_review_propose/list' },
+        action: { type: 'string', description: 'Decision to apply', enum: [...MEMORY_REVIEW_ACTIONS] },
+        reviewer: { type: 'string', description: 'Optional reviewer/operator id' },
+        note: { type: 'string', description: 'Optional reviewer note' },
+      },
+      required: ['id', 'action'],
+    },
+    makeHandler: ({ brain }) => async (args) => {
+      const id = parseNonEmptyStringArg('id', args['id']);
+      const action = parseMemoryReviewAction(args['action']);
+      if (!id.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_review_decide ${id.message}` }], isError: true };
+      }
+      if (!action.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_review_decide ${action.message}` }], isError: true };
+      }
+      const reviewer = args['reviewer'] === undefined ? undefined : parseNonEmptyStringArg('reviewer', args['reviewer']);
+      if (reviewer && !reviewer.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_review_decide ${reviewer.message}` }], isError: true };
+      }
+      const note = args['note'] === undefined ? undefined : parseStringArg('note', args['note']);
+      if (note && !note.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_review_decide ${note.message}` }], isError: true };
+      }
+      const candidate = await brain.decideMemoryReview({
+        id: id.value,
+        action: action.value,
+        options: {
+          ...(reviewer?.value ? { reviewer: reviewer.value } : {}),
+          ...(note?.value !== undefined ? { note: note.value } : {}),
+        },
+      });
+      return { content: [{ type: 'text', text: JSON.stringify(candidate, null, 2) }] };
     },
   },
 

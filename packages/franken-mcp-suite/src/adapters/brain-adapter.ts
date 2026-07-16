@@ -1,5 +1,8 @@
 import {
   SqliteBrain,
+  type MemoryCandidate,
+  type MemoryCandidateStatus,
+  type MemoryReviewDecisionOptions,
   type RightToForgetReport,
   type RightToForgetSelector,
 } from "@franken/brain";
@@ -61,6 +64,20 @@ export interface BrainAdapter {
   rightToForget(
     input: RightToForgetSelector & AgentScopedInput,
   ): Promise<RightToForgetReport>;
+  proposeMemory(input: {
+    key: string;
+    value: string;
+    source: string;
+    reason: string;
+    confidence: number;
+    evidenceId?: string;
+  }): Promise<MemoryCandidate>;
+  listMemoryReview(status?: MemoryCandidateStatus): Promise<MemoryCandidate[]>;
+  decideMemoryReview(input: {
+    id: string;
+    action: 'approve' | 'reject' | 'never_store';
+    options?: MemoryReviewDecisionOptions;
+  }): Promise<MemoryCandidate>;
 }
 
 const SUPPORTED_MEMORY_TYPES = ["working", "episodic"] as const;
@@ -468,6 +485,36 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           ? { key: scopedWorkingKey(selector.key, agentId) }
           : {}),
       });
+    },
+
+    async proposeMemory(input) {
+      return brain.memoryReview.propose({
+        targetStore: 'working',
+        key: input.key,
+        value: input.value,
+        source: input.source,
+        ...(input.evidenceId ? { evidenceId: input.evidenceId } : {}),
+        confidence: input.confidence,
+        reason: input.reason,
+      });
+    },
+
+    async listMemoryReview(status = 'pending') {
+      return brain.memoryReview.list(status);
+    },
+
+    async decideMemoryReview(input) {
+      const options = input.options ?? {};
+      if (input.action === 'approve') {
+        return brain.memoryReview.approve(input.id, options);
+      }
+      if (input.action === 'reject') {
+        return brain.memoryReview.reject(input.id, options);
+      }
+      if (input.action === 'never_store') {
+        return brain.memoryReview.neverStore(input.id, options);
+      }
+      throw new Error(`Unsupported memory review action: ${String(input.action)}`);
     },
   };
 }

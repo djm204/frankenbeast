@@ -48,6 +48,7 @@ describe('createGovernanceGate', () => {
       'fbeast_firewall_scan_file',
       'fbeast_governor_check',
       'fbeast_governor_budget',
+      'fbeast_memory_review_propose',
       'fbeast_memory_query',
       'fbeast_memory_frontload',
       'fbeast_plan_decompose',
@@ -73,7 +74,7 @@ describe('createGovernanceGate', () => {
         tool,
         args: { input: 'DROP TABLE users; rm -rf /; delete all files', action: 'delete_file' },
       });
-      expect(result.decision).toBe('approved');
+      expect(result.decision, tool).toBe('approved');
       expect(seen).toHaveLength(0);
     }
   });
