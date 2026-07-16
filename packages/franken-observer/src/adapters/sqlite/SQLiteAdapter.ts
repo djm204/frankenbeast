@@ -62,6 +62,121 @@ interface FlushedSpanState {
 export interface SQLiteAdapterOptions {
   /** Maximum flushed-span snapshots retained for repeated-flush dirty checks. */
   maxFlushedSpanSnapshots?: number
+  /** SQLite busy timeout in milliseconds. Default: 5000. */
+  busyTimeoutMs?: number
+  /** Bounded retries after SQLite reports busy/locked. Default: 3. */
+  maxLockRetries?: number
+  /** Base delay in milliseconds for lock retry backoff. Default: 25. */
+  lockRetryBaseDelayMs?: number
+  /** Max delay in milliseconds for lock retry backoff. Default: 250. */
+  lockRetryMaxDelayMs?: number
+  /** Add random jitter up to the base delay. Default: true. */
+  lockRetryJitter?: boolean
+  /** Injectable sleep for tests. */
+  lockRetrySleep?: (ms: number) => Promise<void>
+  /** Receives retry and exhaustion diagnostics without exposing row payloads. */
+  onLockRetryDiagnostic?: (diagnostic: SQLiteLockRetryDiagnostic) => void
+}
+
+export interface SQLiteLockRetryDiagnostic {
+  dbPath: string
+  operationClass: string
+  attempt: number
+  maxRetries: number
+  elapsedMs: number
+  nextDelayMs?: number
+  errorMessage: string
+  nextAction: string
+}
+
+export class SQLiteLockRetryExhaustedError extends Error {
+  constructor(
+    message: string,
+    public readonly diagnostic: SQLiteLockRetryDiagnostic,
+    public override readonly cause: unknown,
+  ) {
+    super(message)
+    this.name = 'SQLiteLockRetryExhaustedError'
+  }
+}
+
+interface NormalizedLockRetryOptions {
+  busyTimeoutMs: number
+  maxRetries: number
+  baseDelayMs: number
+  maxDelayMs: number
+  jitter: boolean
+  sleep: (ms: number) => Promise<void>
+  onDiagnostic?: (diagnostic: SQLiteLockRetryDiagnostic) => void
+}
+
+function normalizeNonNegativeInteger(value: number | undefined, fallback: number, name: string, max: number): number {
+  const resolved = value ?? fallback
+  if (!Number.isInteger(resolved) || resolved < 0 || resolved > max) {
+    throw new Error(`${name} must be an integer between 0 and ${max}`)
+  }
+  return resolved
+}
+
+function normalizePositiveInteger(value: number | undefined, fallback: number, name: string, max: number): number {
+  const resolved = value ?? fallback
+  if (!Number.isInteger(resolved) || resolved <= 0 || resolved > max) {
+    throw new Error(`${name} must be an integer between 1 and ${max}`)
+  }
+  return resolved
+}
+
+function normalizeLockRetryOptions(options: SQLiteAdapterOptions): NormalizedLockRetryOptions {
+  const busyTimeoutMs = normalizePositiveInteger(options.busyTimeoutMs, 5_000, 'busyTimeoutMs', 60_000)
+  const maxRetries = normalizeNonNegativeInteger(options.maxLockRetries, 3, 'maxLockRetries', 10)
+  const baseDelayMs = normalizePositiveInteger(options.lockRetryBaseDelayMs, 25, 'lockRetryBaseDelayMs', 60_000)
+  const maxDelayMs = normalizePositiveInteger(options.lockRetryMaxDelayMs, 250, 'lockRetryMaxDelayMs', 60_000)
+  if (baseDelayMs > maxDelayMs) {
+    throw new Error('lockRetryBaseDelayMs must be less than or equal to lockRetryMaxDelayMs')
+  }
+  return {
+    busyTimeoutMs,
+    maxRetries,
+    baseDelayMs,
+    maxDelayMs,
+    jitter: options.lockRetryJitter ?? true,
+    sleep: options.lockRetrySleep ?? (ms => new Promise<void>(resolve => setTimeout(resolve, ms))),
+    onDiagnostic: options.onLockRetryDiagnostic,
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function isSqliteLockError(error: unknown): boolean {
+  const maybe = error as { code?: unknown }
+  const code = typeof maybe?.code === 'string' ? maybe.code : ''
+  if (code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED') return true
+  return /database is (?:busy|locked)|SQLITE_(?:BUSY|LOCKED)/i.test(errorMessage(error))
+}
+
+function snapshotTrace(trace: Trace): Trace {
+  return {
+    id: trace.id,
+    goal: trace.goal,
+    status: trace.status,
+    startedAt: trace.startedAt,
+    endedAt: trace.endedAt,
+    spans: trace.spans.map(span => ({
+      id: span.id,
+      traceId: span.traceId,
+      parentSpanId: span.parentSpanId,
+      name: span.name,
+      status: span.status,
+      startedAt: span.startedAt,
+      endedAt: span.endedAt,
+      durationMs: span.durationMs,
+      errorMessage: span.errorMessage,
+      metadata: JSON.parse(JSON.stringify(span.metadata)) as Record<string, unknown>,
+      thoughtBlocks: [...span.thoughtBlocks],
+    })),
+  }
 }
 
 /**
@@ -102,57 +217,80 @@ function rowToSpan(row: SpanRow): Span {
 export class SQLiteAdapter implements ExportAdapter {
   private readonly db: Database.Database
   private readonly maxFlushedSpanSnapshots: number
+  private readonly lockRetry: NormalizedLockRetryOptions
+  private readonly filePath: string
   private readonly flushedSpans = new Map<string, Map<string, FlushedSpanState>>()
   private flushedSpanSnapshotCount = 0
+  private writeTail: Promise<unknown> | undefined
+  private closeAfterWrites = false
+  private closed = false
 
   constructor(filePath: string, options: SQLiteAdapterOptions = {}) {
+    const lockRetry = normalizeLockRetryOptions(options)
     mkdirSync(dirname(filePath), { recursive: true })
     this.db = new Database(filePath)
+    this.filePath = filePath
+    this.lockRetry = lockRetry
     this.maxFlushedSpanSnapshots = Math.max(
       0,
       Math.floor(options.maxFlushedSpanSnapshots ?? 10_000),
     )
-    this.db.pragma('busy_timeout = 5000')
-    this.db.pragma('journal_mode = WAL')
-    this.db.pragma('foreign_keys = ON')
-    this.db.exec(CREATE_TABLES)
+    try {
+      this.db.pragma(`busy_timeout = ${this.lockRetry.busyTimeoutMs}`)
+      this.withSqliteLockRetrySync('initialize SQLite adapter', () => {
+        this.db.pragma('journal_mode = WAL')
+        this.db.pragma('foreign_keys = ON')
+        this.db.exec(CREATE_TABLES)
+      })
+    } catch (error) {
+      this.db.close()
+      throw error
+    }
   }
 
   async flush(trace: Trace): Promise<void> {
+    const snapshot = snapshotTrace(trace)
+    return this.enqueueSqliteWrite(() => this.flushNow(snapshot))
+  }
+
+  private async flushNow(trace: Trace): Promise<void> {
     warnIfTraceHasActiveSpans(trace, 'SQLiteAdapter')
-    const upsertTrace = this.db.prepare(UPSERT_TRACE)
-    const upsertSpan = this.db.prepare(UPSERT_SPAN)
-    const flushedInTransaction: Span[] = []
+    const flushedInTransaction = await this.withSqliteLockRetry('flush trace transaction', () => {
+      const upsertTrace = this.db.prepare(UPSERT_TRACE)
+      const upsertSpan = this.db.prepare(UPSERT_SPAN)
+      const flushed: Span[] = []
 
-    const transaction = this.db.transaction((t: Trace) => {
-      upsertTrace.run({
-        id: t.id,
-        goal: t.goal,
-        status: t.status,
-        startedAt: t.startedAt,
-        endedAt: t.endedAt ?? null,
-      })
-      for (const span of t.spans) {
-        if (!this.shouldFlushSpan(span)) continue
-
-        upsertSpan.run({
-          id: span.id,
-          traceId: span.traceId,
-          parentSpanId: span.parentSpanId ?? null,
-          name: span.name,
-          status: span.status,
-          startedAt: span.startedAt,
-          endedAt: span.endedAt ?? null,
-          durationMs: span.durationMs ?? null,
-          errorMessage: span.errorMessage ?? null,
-          metadata: JSON.stringify(span.metadata),
-          thoughtBlocks: JSON.stringify(span.thoughtBlocks),
+      const transaction = this.db.transaction((t: Trace) => {
+        upsertTrace.run({
+          id: t.id,
+          goal: t.goal,
+          status: t.status,
+          startedAt: t.startedAt,
+          endedAt: t.endedAt ?? null,
         })
-        flushedInTransaction.push(span)
-      }
-    })
+        for (const span of t.spans) {
+          if (!this.shouldFlushSpan(span)) continue
 
-    transaction(trace)
+          upsertSpan.run({
+            id: span.id,
+            traceId: span.traceId,
+            parentSpanId: span.parentSpanId ?? null,
+            name: span.name,
+            status: span.status,
+            startedAt: span.startedAt,
+            endedAt: span.endedAt ?? null,
+            durationMs: span.durationMs ?? null,
+            errorMessage: span.errorMessage ?? null,
+            metadata: JSON.stringify(span.metadata),
+            thoughtBlocks: JSON.stringify(span.thoughtBlocks),
+          })
+          flushed.push(span)
+        }
+      })
+
+      transaction(trace)
+      return flushed
+    })
     for (const span of flushedInTransaction) {
       this.rememberFlushedSpan(span)
     }
@@ -237,46 +375,58 @@ export class SQLiteAdapter implements ExportAdapter {
   }
 
   async queryByTraceId(traceId: string): Promise<Trace | null> {
-    const traceRow = this.db.prepare(SELECT_TRACE).get(traceId) as TraceRow | undefined
-    if (traceRow === undefined) return null
+    return this.withSqliteLockRetry('query trace by id', () => {
+      const traceRow = this.db.prepare(SELECT_TRACE).get(traceId) as TraceRow | undefined
+      if (traceRow === undefined) return null
 
-    const spanRows = this.db.prepare(SELECT_SPANS).all(traceId) as SpanRow[]
+      const spanRows = this.db.prepare(SELECT_SPANS).all(traceId) as SpanRow[]
 
-    return {
-      id: traceRow.id,
-      goal: traceRow.goal,
-      status: traceRow.status as Trace['status'],
-      startedAt: traceRow.startedAt,
-      endedAt: traceRow.endedAt ?? undefined,
-      spans: spanRows.map(rowToSpan),
-    }
+      return {
+        id: traceRow.id,
+        goal: traceRow.goal,
+        status: traceRow.status as Trace['status'],
+        startedAt: traceRow.startedAt,
+        endedAt: traceRow.endedAt ?? undefined,
+        spans: spanRows.map(rowToSpan),
+      }
+    })
   }
 
   async listTraceIds(): Promise<string[]> {
-    const rows = this.db.prepare(SELECT_ALL_TRACE_IDS).all() as { id: string }[]
-    return rows.map(r => r.id)
+    return this.withSqliteLockRetry('list trace ids', () => {
+      const rows = this.db.prepare(SELECT_ALL_TRACE_IDS).all() as { id: string }[]
+      return rows.map(r => r.id)
+    })
   }
 
   async listTraceSummaries(): Promise<TraceSummary[]> {
-    const rows = this.db.prepare(SELECT_TRACE_SUMMARIES).all() as TraceSummaryRow[]
-    return rows.map(row => ({
-      id: row.id,
-      goal: row.goal,
-      status: row.status as Trace['status'],
-      spanCount: row.spanCount,
-      startedAt: row.startedAt,
-    }))
+    return this.withSqliteLockRetry('list trace summaries', () => {
+      const rows = this.db.prepare(SELECT_TRACE_SUMMARIES).all() as TraceSummaryRow[]
+      return rows.map(row => ({
+        id: row.id,
+        goal: row.goal,
+        status: row.status as Trace['status'],
+        spanCount: row.spanCount,
+        startedAt: row.startedAt,
+      }))
+    })
   }
 
   async deleteTrace(traceId: string): Promise<void> {
-    const deleteSpans = this.db.prepare(DELETE_SPANS_BY_TRACE)
-    const deleteTrace = this.db.prepare(DELETE_TRACE)
-    const transaction = this.db.transaction((id: string) => {
-      deleteSpans.run(id)
-      deleteTrace.run(id)
-    })
+    return this.enqueueSqliteWrite(() => this.deleteTraceNow(traceId))
+  }
 
-    transaction(traceId)
+  private async deleteTraceNow(traceId: string): Promise<void> {
+    await this.withSqliteLockRetry('delete trace transaction', () => {
+      const deleteSpans = this.db.prepare(DELETE_SPANS_BY_TRACE)
+      const deleteTrace = this.db.prepare(DELETE_TRACE)
+      const transaction = this.db.transaction((id: string) => {
+        deleteSpans.run(id)
+        deleteTrace.run(id)
+      })
+
+      transaction(traceId)
+    })
     const flushed = this.flushedSpans.get(traceId)
     if (flushed !== undefined) {
       this.flushedSpanSnapshotCount -= flushed.size
@@ -284,8 +434,135 @@ export class SQLiteAdapter implements ExportAdapter {
     }
   }
 
-  /** Release the DB connection. Call when shutting down. */
-  close(): void {
+  private enqueueSqliteWrite<T>(action: () => Promise<T>): Promise<T> {
+    if (this.closed || this.closeAfterWrites) {
+      return Promise.reject(new Error('SQLiteAdapter is closed'))
+    }
+
+    const queued = this.writeTail === undefined ? action() : this.writeTail.then(action)
+    const settled = queued.catch(() => undefined).finally(() => {
+      if (this.writeTail !== settled) return
+      this.writeTail = undefined
+      if (this.closeAfterWrites) {
+        this.closeNow()
+      }
+    })
+    this.writeTail = settled
+    return queued
+  }
+
+  private closeNow(): void {
+    if (this.closed) return
+    this.closed = true
     this.db.close()
   }
+
+  private emitLockRetryDiagnostic(diagnostic: SQLiteLockRetryDiagnostic): void {
+    try {
+      this.lockRetry.onDiagnostic?.(diagnostic)
+    } catch {
+      // Diagnostics are best-effort. A logging/metrics hook must not change
+      // storage retry or exhaustion behavior.
+    }
+  }
+
+  private async withSqliteLockRetry<T>(operationClass: string, action: () => T): Promise<T> {
+    const startedAt = Date.now()
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return action()
+      } catch (error) {
+        if (!isSqliteLockError(error)) {
+          throw error
+        }
+
+        const elapsedMs = Date.now() - startedAt
+        const exhausted = attempt >= this.lockRetry.maxRetries
+        const nextDelayMs = exhausted ? undefined : this.nextLockRetryDelay(attempt)
+        const diagnostic: SQLiteLockRetryDiagnostic = {
+          dbPath: this.filePath,
+          operationClass,
+          attempt: attempt + 1,
+          maxRetries: this.lockRetry.maxRetries,
+          elapsedMs,
+          ...(nextDelayMs === undefined ? {} : { nextDelayMs }),
+          errorMessage: errorMessage(error),
+          nextAction: exhausted
+            ? 'SQLite lock retry budget exhausted; inspect concurrent writers or increase busy timeout/retry budget.'
+            : 'Retrying SQLite operation after bounded backoff.',
+        }
+        this.emitLockRetryDiagnostic(diagnostic)
+
+        if (exhausted) {
+          throw new SQLiteLockRetryExhaustedError(
+            `[SQLiteAdapter] SQLite lock persisted for ${operationClass} on ${this.filePath} after ${attempt + 1} attempts over ${elapsedMs}ms. Next action: ${diagnostic.nextAction}`,
+            diagnostic,
+            error,
+          )
+        }
+
+        await this.lockRetry.sleep(nextDelayMs ?? 0)
+      }
+    }
+  }
+
+  private withSqliteLockRetrySync<T>(operationClass: string, action: () => T): T {
+    const startedAt = Date.now()
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return action()
+      } catch (error) {
+        if (!isSqliteLockError(error)) {
+          throw error
+        }
+
+        const elapsedMs = Date.now() - startedAt
+        const exhausted = attempt >= this.lockRetry.maxRetries
+        const nextDelayMs = exhausted ? undefined : this.nextLockRetryDelay(attempt)
+        const diagnostic: SQLiteLockRetryDiagnostic = {
+          dbPath: this.filePath,
+          operationClass,
+          attempt: attempt + 1,
+          maxRetries: this.lockRetry.maxRetries,
+          elapsedMs,
+          ...(nextDelayMs === undefined ? {} : { nextDelayMs }),
+          errorMessage: errorMessage(error),
+          nextAction: exhausted
+            ? 'SQLite lock retry budget exhausted; inspect concurrent writers or increase busy timeout/retry budget.'
+            : 'Retrying SQLite operation after bounded backoff.',
+        }
+        this.emitLockRetryDiagnostic(diagnostic)
+
+        if (exhausted) {
+          throw new SQLiteLockRetryExhaustedError(
+            `[SQLiteAdapter] SQLite lock persisted for ${operationClass} on ${this.filePath} after ${attempt + 1} attempts over ${elapsedMs}ms. Next action: ${diagnostic.nextAction}`,
+            diagnostic,
+            error,
+          )
+        }
+
+        sleepSync(nextDelayMs ?? 0)
+      }
+    }
+  }
+
+  private nextLockRetryDelay(attempt: number): number {
+    const base = Math.min(this.lockRetry.baseDelayMs * 2 ** attempt, this.lockRetry.maxDelayMs)
+    if (!this.lockRetry.jitter) return base
+    return Math.min(base + Math.random() * this.lockRetry.baseDelayMs, this.lockRetry.maxDelayMs)
+  }
+
+  /** Release the DB connection. Call when shutting down. */
+  close(): void {
+    this.closeAfterWrites = true
+    if (this.writeTail === undefined) {
+      this.closeNow()
+    }
+  }
+}
+
+function sleepSync(ms: number): void {
+  if (ms <= 0) return
+  const signal = new Int32Array(new SharedArrayBuffer(4))
+  Atomics.wait(signal, 0, 0, ms)
 }

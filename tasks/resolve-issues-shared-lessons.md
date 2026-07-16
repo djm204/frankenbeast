@@ -1,5 +1,11 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-16 — SQLite lock retry review fixes
+- When adding async retries around sync SQLite adapters, serialize all mutating operations that can overlap through one write queue; otherwise a sleeping retry can be overtaken by later flush/delete calls and reintroduce stale rows.
+- Capture mutable trace/span payloads before enqueueing delayed SQLite writes, and include statement preparation inside the retry wrapper so schema/contention locks during `prepare()` get the same diagnostics as transaction failures.
+- Validate retry/backoff options before opening a native SQLite handle; constructor validation failures should not leak a handle that can keep the database locked.
+- Retry initialization pragmas/schema creation too, make diagnostic callbacks best-effort, and defer `close()` until pending queued writes settle so shutdown cannot race an async write tail.
+
 ## 2026-07-16 — Queue priority aging
 - For issue scheduler aging, score only eligible work with age boosts; blocked/HITL work should carry a large safety penalty and zero age boost so stale unsafe cards never bypass human/dependency gates. Include priority rank, effective rank, age, blocker status, risk lane, freshness, and an explanation string in liveness/fairness output.
 - For issue-runner queue-depth/backpressure, count only startable eligible issues; blocked/HITL cards should not inflate queue depth. Defer gated issues before any plan decomposition when no plan chunks already exist, but preserve zero-token completion only for exact one-shot issue checkpoints (`impl:issue-N:done` and `harden:issue-N:done`); chunk-shaped checkpoint keys require plan coverage before completion.
