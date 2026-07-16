@@ -550,8 +550,33 @@ function sqliteTableExists(db: Database.Database, tableName: string): boolean {
   return row?.name === tableName;
 }
 
+const SAFE_AUDIT_DECISIONS = new Set([
+  "approved",
+  "denied",
+  "review_recommended",
+  "validation_error",
+  "unknown_tool",
+  "error",
+  "unknown",
+]);
+
+const AUDIT_DECISION_PRECEDENCE: Record<string, number> = {
+  error: 5,
+  denied: 4,
+  validation_error: 3,
+  unknown_tool: 3,
+  review_recommended: 2,
+  approved: 1,
+  unknown: 0,
+};
+
+function safeAuditDecision(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  return SAFE_AUDIT_DECISIONS.has(value) ? value : "unknown";
+}
+
 function auditDecisionFromPayload(payload: Record<string, unknown>): string {
-  const explicitDecision = stringAuditField(payload, "decision");
+  const explicitDecision = safeAuditDecision(stringAuditField(payload, "decision"));
   if (explicitDecision) return explicitDecision;
   const ok = payload["ok"];
   if (ok === false) return "error";
@@ -594,42 +619,69 @@ function richerAuditField(left: string | undefined, right: string | undefined): 
   return right.length > left.length ? right : left;
 }
 
+function strongerAuditDecision(left: string, right: string): string {
+  const leftDecision = safeAuditDecision(left) ?? "unknown";
+  const rightDecision = safeAuditDecision(right) ?? "unknown";
+  return (AUDIT_DECISION_PRECEDENCE[rightDecision] ?? 0) > (AUDIT_DECISION_PRECEDENCE[leftDecision] ?? 0)
+    ? rightDecision
+    : leftDecision;
+}
+
 function mergeAuditEvents(left: MemoryAccessAuditEvent, right: MemoryAccessAuditEvent): MemoryAccessAuditEvent {
-  const merged: MemoryAccessAuditEvent = {
-    ...left,
-    operation: richerAuditField(left.operation, right.operation) ?? left.operation,
-    targetStore: richerAuditField(left.targetStore, right.targetStore) ?? left.targetStore,
-    targetClass: richerAuditField(left.targetClass, right.targetClass) ?? left.targetClass,
-    decision: richerAuditField(left.decision, right.decision) ?? left.decision,
-    reason: richerAuditField(left.reason, right.reason) ?? left.reason,
-  };
+  const mergedDecision = strongerAuditDecision(left.decision, right.decision);
   const agentId = richerAuditField(left.agentId, right.agentId);
   const cardId = richerAuditField(left.cardId, right.cardId);
   const profile = richerAuditField(left.profile, right.profile);
   const repo = richerAuditField(left.repo, right.repo);
+  const rightSuppliedRicherMetadata = (agentId !== undefined && agentId === right.agentId && left.agentId !== right.agentId)
+    || (cardId !== undefined && cardId === right.cardId && left.cardId !== right.cardId)
+    || (profile !== undefined && profile === right.profile && left.profile !== right.profile)
+    || (repo !== undefined && repo === right.repo && left.repo !== right.repo);
+  const rightDecisionIsStronger = mergedDecision === safeAuditDecision(right.decision)
+    && mergedDecision !== safeAuditDecision(left.decision);
+  const merged: MemoryAccessAuditEvent = {
+    ...left,
+    source: rightSuppliedRicherMetadata || rightDecisionIsStronger ? right.source : left.source,
+    operation: richerAuditField(left.operation, right.operation) ?? left.operation,
+    targetStore: richerAuditField(left.targetStore, right.targetStore) ?? left.targetStore,
+    targetClass: richerAuditField(left.targetClass, right.targetClass) ?? left.targetClass,
+    decision: mergedDecision,
+    reason: rightDecisionIsStronger ? right.reason : (richerAuditField(left.reason, right.reason) ?? left.reason),
+  };
   if (agentId !== undefined) merged.agentId = agentId;
   if (cardId !== undefined) merged.cardId = cardId;
   if (profile !== undefined) merged.profile = profile;
   if (repo !== undefined) merged.repo = repo;
   return merged;
 }
-
 function dedupeMemoryAccessEvents(events: MemoryAccessAuditEvent[]): MemoryAccessAuditEvent[] {
   const deduped: MemoryAccessAuditEvent[] = [];
+  const mergedSources: Array<Set<MemoryAccessAuditEvent["source"]>> = [];
   for (const event of events) {
     const eventTime = auditTimestampMs(event.timestamp);
-    const duplicateIndex = deduped.findIndex((candidate) => {
-      if (!auditEventsCorrelate(candidate, event)) return false;
+    let duplicateIndex = -1;
+    let closestDistance = Number.POSITIVE_INFINITY;
+    for (let index = 0; index < deduped.length; index += 1) {
+      const candidate = deduped[index];
+      if (!candidate || candidate.source === event.source) continue;
+      if (mergedSources[index]?.has(event.source)) continue;
+      if (!auditEventsCorrelate(candidate, event)) continue;
       const candidateTime = auditTimestampMs(candidate.timestamp);
-      return Math.abs(candidateTime - eventTime) <= 10_000;
-    });
+      const distance = Math.abs(candidateTime - eventTime);
+      if (distance <= 10_000 && distance < closestDistance) {
+        duplicateIndex = index;
+        closestDistance = distance;
+      }
+    }
     if (duplicateIndex < 0) {
       deduped.push(event);
+      mergedSources.push(new Set([event.source]));
       continue;
     }
     const existing = deduped[duplicateIndex];
     if (existing !== undefined) {
       deduped[duplicateIndex] = mergeAuditEvents(existing, event);
+      mergedSources[duplicateIndex]?.add(event.source);
     }
   }
   return deduped;
@@ -681,6 +733,23 @@ function filterMemoryAccessEvents(events: MemoryAccessAuditEvent[], input: Memor
     if (untilMs !== undefined && eventMs > untilMs) return false;
     return true;
   });
+}
+
+function hasPostScanAuditFilter(input: MemoryAccessAuditReportInput): boolean {
+  return input.agentId !== undefined
+    || input.profile !== undefined
+    || input.repo !== undefined
+    || input.tool !== undefined
+    || input.operation !== undefined
+    || input.decision !== undefined;
+}
+
+function sqlLimitClause(limit: number | undefined): string {
+  return limit === undefined ? "" : "LIMIT ?";
+}
+
+function sqlLimitParams(limit: number | undefined): number[] {
+  return limit === undefined ? [] : [limit];
 }
 
 function stableRedactedKey(key: string): string {
@@ -1023,7 +1092,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
 
     async memoryAccessAuditReport(input = {}) {
       const limit = resolveQueryLimit(input.limit ?? MAX_QUERY_LIMIT);
-      const scanLimit = Math.max(limit * 50, MAX_QUERY_LIMIT);
+      const scanLimit = hasPostScanAuditFilter(input) ? undefined : Math.max(limit * 50, MAX_QUERY_LIMIT);
       const reportDb = new Database(dbPath);
       configureBrainAdapterDb(reportDb);
       try {
@@ -1038,8 +1107,8 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           FROM governor_log
           ${governorWhere}
           ORDER BY id DESC
-          LIMIT ?
-        `).all(...governorTimeFilter.params, scanLimit) as Array<{ action: string; context: string; decision: string; reason: string | null; createdAt: string }>
+          ${sqlLimitClause(scanLimit)}
+        `).all(...governorTimeFilter.params, ...sqlLimitParams(scanLimit)) as Array<{ action: string; context: string; decision: string; reason: string | null; createdAt: string }>
           : [];
         for (const row of governorRows) {
           const context = parseAuditContext(row.context);
@@ -1077,8 +1146,8 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
             AND (payload LIKE '%fbeast_memory%' OR payload LIKE '%execute_tool%')
             ${auditTimeCondition}
           ORDER BY id DESC
-          LIMIT ?
-        `).all(...auditTimeFilter.params, scanLimit) as Array<{ eventType: string; payload: string; createdAt: string }>
+          ${sqlLimitClause(scanLimit)}
+        `).all(...auditTimeFilter.params, ...sqlLimitParams(scanLimit)) as Array<{ eventType: string; payload: string; createdAt: string }>
           : [];
         for (const row of auditRows) {
           const payload = parseAuditContext(row.payload);
@@ -1107,7 +1176,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           });
         }
 
-        const filtered = dedupeMemoryAccessEvents(filterMemoryAccessEvents(events, input))
+        const filtered = filterMemoryAccessEvents(dedupeMemoryAccessEvents(events), input)
           .sort((a, b) => auditTimestampMs(b.timestamp) - auditTimestampMs(a.timestamp))
           .slice(0, limit);
         return {

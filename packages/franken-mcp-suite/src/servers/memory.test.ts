@@ -190,6 +190,7 @@ describe("Memory Server", () => {
     const auditReportTool = server.tools.find(
       (t) => t.name === "fbeast_memory_access_audit_report",
     )!;
+    expect(auditReportTool.inputSchema.properties.limit.type).toEqual(["string", "number"]);
     const rightToForgetTool = server.tools.find(
       (t) => t.name === "fbeast_memory_right_to_forget",
     )!;

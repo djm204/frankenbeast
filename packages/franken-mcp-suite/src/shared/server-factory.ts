@@ -17,7 +17,7 @@ export interface ToolResult {
 
 export interface ToolInputSchema {
   type: 'object';
-  properties: Record<string, { type: string; description: string; enum?: readonly unknown[] }>;
+  properties: Record<string, { type: string | readonly string[]; description: string; enum?: readonly unknown[] }>;
   required?: string[];
 }
 

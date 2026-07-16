@@ -120,6 +120,27 @@ vi.mock("better-sqlite3", () => ({
                 reason: "dry-run approval",
                 createdAt: "2026-07-16T13:10:00.000Z",
               },
+              {
+                action: "fbeast_memory_query",
+                context: JSON.stringify({ agentId: "agent-rapid", profile: "rapid-repeat-test", type: "working" }),
+                decision: "approved",
+                reason: "allowed first",
+                createdAt: "2026-07-16T13:20:00.000Z",
+              },
+              {
+                action: "fbeast_memory_query",
+                context: JSON.stringify({ agentId: "agent-rapid", profile: "rapid-repeat-test", type: "working" }),
+                decision: "approved",
+                reason: "allowed second",
+                createdAt: "2026-07-16T13:20:02.000Z",
+              },
+              {
+                action: "fbeast_memory_query",
+                context: JSON.stringify({ agentId: "agent-error-merge", profile: "error-merge-test", type: "working" }),
+                decision: "approved",
+                reason: "allowed before handler failure",
+                createdAt: "2026-07-16T13:30:00.000Z",
+              },
             ];
           }
           if (sql.includes("FROM audit_trail")) {
@@ -153,6 +174,26 @@ vi.mock("better-sqlite3", () => ({
                 eventType: "tool_call",
                 payload: JSON.stringify({ toolName: "fbeast_memory_right_to_forget", ok: true, args: { agentId: "agent-dry-redacted", profile: "rtf-redacted-test", dryRun: true } }),
                 createdAt: "2026-07-16T13:10:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ toolName: "fbeast_memory_query", ok: true, args: { agentId: "agent-rapid", profile: "rapid-repeat-test", type: "working" } }),
+                createdAt: "2026-07-16T13:20:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ toolName: "fbeast_memory_query", ok: true, args: { agentId: "agent-rapid", profile: "rapid-repeat-test", type: "working" } }),
+                createdAt: "2026-07-16T13:20:07.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ toolName: "fbeast_memory_query", ok: false, args: { agentId: "agent-error-merge", profile: "error-merge-test", type: "working" }, error: "handler failed" }),
+                createdAt: "2026-07-16T13:30:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ toolName: "fbeast_memory_query", decision: "sk-secret-decision", args: { agentId: "agent-decision", profile: "decision-secret-test", type: "working" } }),
+                createdAt: "2026-07-16T13:40:00.000Z",
               },
             ];
           }
@@ -748,7 +789,7 @@ describe("createBrainAdapter", () => {
 
     expect(report.count).toBe(1);
     expect(report.events[0]).toMatchObject({
-      source: "governor_log",
+      source: "audit_trail",
       tool: "fbeast_memory_store",
       operation: "write",
     });
@@ -756,7 +797,6 @@ describe("createBrainAdapter", () => {
     const agentReport = await brain.memoryAccessAuditReport({ agentId: "agent-actual", profile: "duplicate-test", limit: 20 });
     expect(agentReport.count).toBe(1);
     expect(agentReport.events[0]).toMatchObject({
-      source: "audit_trail",
       agentId: "agent-actual",
       tool: "fbeast_memory_store",
     });
@@ -807,6 +847,50 @@ describe("createBrainAdapter", () => {
     const prepareSql = databaseInstances.flatMap((db) => db.prepare.mock.calls.map(([sql]) => String(sql)));
     expect(prepareSql.find((sql) => sql.includes("FROM governor_log"))).toContain("LIMIT ?");
     expect(prepareSql.find((sql) => sql.includes("FROM audit_trail"))).toContain("LIMIT ?");
+  });
+
+  it("does not cap source scans before applying metadata filters", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    await brain.memoryAccessAuditReport({ profile: "sparse-duplicate-test", limit: 5 });
+
+    const prepareSql = databaseInstances.at(-1)!.prepare.mock.calls.map(([sql]) => String(sql));
+    expect(prepareSql.find((sql) => sql.includes("FROM governor_log"))).not.toContain("LIMIT ?");
+    expect(prepareSql.find((sql) => sql.includes("FROM audit_trail"))).not.toContain("LIMIT ?");
+  });
+
+  it("keeps rapid repeated memory accesses as separate audit events", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "rapid-repeat-test", limit: 20 });
+
+    expect(report.count).toBe(2);
+    expect(report.summary.byTool).toEqual({ fbeast_memory_query: 2 });
+    expect(report.summary.byAgent).toEqual({ "agent-rapid": 2 });
+  });
+
+  it("preserves handler failure decisions when merging governed and observed rows", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "error-merge-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      decision: "error",
+      reason: "handler failed",
+    });
+    expect(report.summary.byDecision).toEqual({ error: 1 });
+  });
+
+  it("does not echo untrusted audit decision strings", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "decision-secret-test", limit: 20 });
+    const serialized = JSON.stringify(report);
+
+    expect(report.events[0]).toMatchObject({ decision: "unknown" });
+    expect(report.summary.byDecision).toEqual({ unknown: 1 });
+    expect(serialized).not.toContain("sk-secret-decision");
   });
 
   it("classifies failed handler audit events as errors", async () => {
