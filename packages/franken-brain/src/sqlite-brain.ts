@@ -1028,8 +1028,18 @@ class SqliteWorkingMemory implements IWorkingMemory {
       return { state: 'absent' };
     }
     const serialized = this.encryption?.decrypt(row.value) ?? row.value;
+    const value = parseStoredWorkingMemoryValue(serialized);
+    if (isExpiredWorkingMemoryValue(value)) {
+      const [preserved] = this.deleteExpiredPersistedRows([{ key, serialized }]);
+      if (!preserved) {
+        return { state: 'absent' };
+      }
+      const preservedValue = parseStoredWorkingMemoryValue(preserved.serialized);
+      this.persistedSerialized.set(key, preserved.serialized);
+      return { state: 'present', value: preservedValue };
+    }
     this.persistedSerialized.set(key, serialized);
-    return { state: 'present', value: parseStoredWorkingMemoryValue(serialized) };
+    return { state: 'present', value };
   }
 
 

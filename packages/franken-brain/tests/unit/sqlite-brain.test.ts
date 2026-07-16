@@ -1591,6 +1591,46 @@ describe('SqliteBrain', () => {
       }
     });
 
+    it('ignores expired persisted working memory during conflict approval checks', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-conflict-expired-persisted-'));
+      const dbPath = join(dir, 'brain.db');
+
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date('2099-01-01T00:00:00.000Z'));
+        const writer = new SqliteBrain(dbPath);
+        writer.working.set('user.preference.session-mode', {
+          value: 'focus',
+          category: 'temporary-operational',
+          expiresAt: '2099-01-01T00:00:01.000Z',
+        });
+        writer.flush();
+        writer.close();
+
+        vi.setSystemTime(new Date('2099-01-01T00:00:02.000Z'));
+        const reviewer = new SqliteBrain(dbPath, undefined, {
+          hydrateWorkingMemoryFromDb: false,
+        });
+        const fresh = reviewer.memoryReview.propose({
+          targetStore: 'working',
+          key: 'user.preference.session-mode',
+          value: 'normal',
+          source: 'chat:turn-7c',
+          confidence: 0.8,
+          reason: 'Fresh preference after temporary fact expired.',
+        });
+
+        expect(reviewer.working.has('user.preference.session-mode')).toBe(false);
+        expect(reviewer.memoryReview.conflictsFor(fresh.id)).toEqual([]);
+        expect(() => reviewer.memoryReview.approve(fresh.id, { reviewer: 'operator' })).not.toThrow();
+        expect(reviewer.working.get('user.preference.session-mode')).toBe('normal');
+        reviewer.close();
+      } finally {
+        vi.useRealTimers();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('fails fast for invalid conflict resolution strings', () => {
       const initial = brain.memoryReview.propose({
         targetStore: 'working',
