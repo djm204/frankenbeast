@@ -51,9 +51,15 @@ describe("issue #1753 backup ownership and retention policy docs", () => {
       expect(policy).toContain(dataClass);
     }
 
-    expect(policy).toContain("docs/runtime-artifact-data-classification.md");
-    expect(policy).toContain("highest-sensitivity class");
-    expect(policy).toContain("Maximum retention");
+    for (const requiredText of [
+      "docs/runtime-artifact-data-classification.md",
+      "highest-sensitivity class",
+      "Maximum retention",
+      "Runtime state bundle (`kanban`, approvals, liveness, runs, other)",
+      "7 days maximum for production and staging/dev",
+    ]) {
+      expect(policy).toContain(requiredText);
+    }
   });
 
   it("links operators to restore commands, planned tooling issues, and emergency escalation guidance", () => {
@@ -64,7 +70,9 @@ describe("issue #1753 backup ownership and retention policy docs", () => {
       "docs/dr/tabletop-exercise-template.md",
       "docs/dr/incident-command-checklist.md",
       "npm run dr:runtime-config-rollback:dry-run",
+      "--target <target.json>",
       "npm run dr:worker-push-rollback:dry-run",
+      "--branch <branch>",
       "https://github.com/djm204/frankenbeast/issues/1835",
       "https://github.com/djm204/frankenbeast/issues/1839",
       "If either owner is unavailable for 30 minutes during an active incident",
