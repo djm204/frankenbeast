@@ -30,6 +30,7 @@ export type {
   IssueDependencyStatus,
   IssueSchedulerFairnessBucket,
   IssueSchedulerFairnessReport,
+  IssueSchedulerFairnessReportOptions,
   IssueWorkerCardProcessSnapshot,
   DuplicateWorkerCardProcessFinding,
 } from './issue-runner.js';

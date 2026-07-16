@@ -190,15 +190,29 @@ export interface DuplicateWorkerCardProcessFinding {
 
 export interface IssueSchedulerFairnessBucket {
   readonly severity: 'critical' | 'high' | 'medium' | 'low' | 'unprioritized';
+  /** Sampled issue numbers for PM/liveness output; `count` is authoritative when this list is truncated. */
   readonly issueNumbers: readonly number[];
   readonly count: number;
+  readonly issueNumbersTruncated?: true | undefined;
+  readonly omittedIssueNumberCount?: number | undefined;
 }
 
 export interface IssueSchedulerFairnessReport {
   readonly totalIssues: number;
+  /** Sampled severity-ordered issue numbers for PM/liveness output; `totalIssues` is authoritative when truncated. */
   readonly scheduledIssueNumbers: readonly number[];
   readonly buckets: readonly IssueSchedulerFairnessBucket[];
   readonly warnings: readonly string[];
+  readonly scheduledIssueNumbersTruncated?: true | undefined;
+  readonly omittedScheduledIssueNumberCount?: number | undefined;
+  readonly warningsTruncated?: true | undefined;
+  readonly omittedWarningCount?: number | undefined;
+  readonly warningSummary?: readonly string[] | undefined;
+}
+
+export interface IssueSchedulerFairnessReportOptions {
+  readonly maxIssueNumbersPerList?: number | undefined;
+  readonly maxWarnings?: number | undefined;
 }
 
 export interface IssueRunnerConfig {
@@ -228,6 +242,8 @@ const NO_SEVERITY = 4;
 const TOKENS_PER_DOLLAR = 1_000_000;
 const ONE_SHOT_MAX_ITERATIONS = 50;
 const ONE_SHOT_STALE_MATE_LIMIT = 3;
+const DEFAULT_SCHEDULER_FAIRNESS_ISSUE_NUMBER_LIMIT = 50;
+const DEFAULT_SCHEDULER_FAIRNESS_WARNING_LIMIT = 50;
 
 function limitExceeded(value: number | undefined, limit: number | undefined): value is number {
   return limit !== undefined && value !== undefined && value > limit;
@@ -633,14 +649,43 @@ function sortBySeverity(issues: readonly GithubIssue[]): GithubIssue[] {
   return [...issues].sort((a, b) => extractSeverity(a.labels) - extractSeverity(b.labels));
 }
 
+function boundedPositiveInteger(value: number | undefined, fallback: number): number {
+  if (value === undefined) return fallback;
+  const candidate: number = value;
+  return Number.isSafeInteger(candidate) && candidate > 0 ? candidate : fallback;
+}
+
+function sampleNumbers(values: readonly number[], limit: number): { sample: readonly number[]; omitted: number } {
+  if (values.length <= limit) return { sample: values, omitted: 0 };
+  return { sample: values.slice(0, limit), omitted: values.length - limit };
+}
+
+function sampleStrings(values: readonly string[], limit: number): { sample: readonly string[]; omitted: number } {
+  if (values.length <= limit) return { sample: values, omitted: 0 };
+  return { sample: values.slice(0, limit), omitted: values.length - limit };
+}
+
 export function buildIssueSchedulerFairnessReport(
   issues: readonly GithubIssue[],
   triageResults: readonly TriageResult[],
+  options: IssueSchedulerFairnessReportOptions = {},
 ): IssueSchedulerFairnessReport {
   const scheduled = sortBySeverity(issues);
   const triagedIssueNumbers = new Set(triageResults.map(triage => triage.issueNumber));
   const buckets = new Map<IssueSchedulerFairnessBucket['severity'], number[]>();
   const warnings: string[] = [];
+  const warningCounters = {
+    unprioritized: 0,
+    missingTriage: 0,
+  };
+  const issueNumberLimit = boundedPositiveInteger(
+    options.maxIssueNumbersPerList,
+    DEFAULT_SCHEDULER_FAIRNESS_ISSUE_NUMBER_LIMIT,
+  );
+  const warningLimit = boundedPositiveInteger(
+    options.maxWarnings,
+    DEFAULT_SCHEDULER_FAIRNESS_WARNING_LIMIT,
+  );
 
   for (const severity of ['critical', 'high', 'medium', 'low', 'unprioritized'] as const) {
     buckets.set(severity, []);
@@ -651,23 +696,58 @@ export function buildIssueSchedulerFairnessReport(
     buckets.get(severity)!.push(issue.number);
 
     if (severity === 'unprioritized') {
+      warningCounters.unprioritized += 1;
       warnings.push(`issue #${issue.number} has no recognized severity label and is scheduled after prioritized work`);
     }
 
     if (!triagedIssueNumbers.has(issue.number)) {
+      warningCounters.missingTriage += 1;
       warnings.push(`issue #${issue.number} has no triage result and will fail before execution if approved`);
     }
   }
 
+  const scheduledSample = sampleNumbers(scheduled.map(issue => issue.number), issueNumberLimit);
+  const warningSample = sampleStrings(warnings, warningLimit);
+  const warningSummary = [
+    warningCounters.unprioritized > 0
+      ? `${warningCounters.unprioritized} unprioritized issue(s) are scheduled after prioritized work`
+      : undefined,
+    warningCounters.missingTriage > 0
+      ? `${warningCounters.missingTriage} issue(s) are missing triage results and require labels/triage before safe execution`
+      : undefined,
+  ].filter((entry): entry is string => entry !== undefined);
+
   return {
     totalIssues: issues.length,
-    scheduledIssueNumbers: scheduled.map(issue => issue.number),
-    buckets: [...buckets.entries()].map(([severity, issueNumbers]) => ({
-      severity,
-      issueNumbers,
-      count: issueNumbers.length,
-    })),
-    warnings,
+    scheduledIssueNumbers: scheduledSample.sample,
+    ...(scheduledSample.omitted > 0
+      ? {
+          scheduledIssueNumbersTruncated: true as const,
+          omittedScheduledIssueNumberCount: scheduledSample.omitted,
+        }
+      : {}),
+    buckets: [...buckets.entries()].map(([severity, issueNumbers]) => {
+      const bucketSample = sampleNumbers(issueNumbers, issueNumberLimit);
+      return {
+        severity,
+        issueNumbers: bucketSample.sample,
+        count: issueNumbers.length,
+        ...(bucketSample.omitted > 0
+          ? {
+              issueNumbersTruncated: true as const,
+              omittedIssueNumberCount: bucketSample.omitted,
+            }
+          : {}),
+      };
+    }),
+    warnings: warningSample.sample,
+    ...(warningSample.omitted > 0
+      ? {
+          warningsTruncated: true as const,
+          omittedWarningCount: warningSample.omitted,
+          warningSummary,
+        }
+      : {}),
   };
 }
 
