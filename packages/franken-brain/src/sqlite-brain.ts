@@ -200,12 +200,8 @@ export function calculateMemoryConfidenceDecay(
     options.confidence,
     'confidence',
   );
-  const floor = normalizeUnitInterval(options.floor ?? 0, 'floor');
-  if (floor > confidence) {
-    throw new MemoryConfidenceDecayError(
-      'Memory confidence decay floor cannot exceed the initial confidence',
-    );
-  }
+  const requestedFloor = normalizeUnitInterval(options.floor ?? 0, 'floor');
+  const floor = Math.min(requestedFloor, confidence);
   const halfLifeMs = options.halfLifeMs ?? DEFAULT_MEMORY_CONFIDENCE_HALF_LIFE_MS;
   if (!Number.isFinite(halfLifeMs) || halfLifeMs <= 0) {
     throw new MemoryConfidenceDecayError(

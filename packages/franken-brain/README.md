@@ -97,8 +97,8 @@ const provenance = brain.memoryReview.provenanceFor(
 // old memory certainty without mutating the stored record. The result is
 // structured so PM/liveness tools can log the age, half-life, and applied floor.
 const confidence = calculateMemoryConfidenceDecay({
-  confidence: provenance[0]?.confidence ?? 0.5,
-  observedAt: provenance[0]?.approvedAt ?? new Date().toISOString(),
+  confidence: provenance?.confidence ?? 0.5,
+  observedAt: provenance?.approvedAt ?? new Date().toISOString(),
   halfLifeMs: 30 * 24 * 60 * 60 * 1000,
   floor: 0.1,
 });

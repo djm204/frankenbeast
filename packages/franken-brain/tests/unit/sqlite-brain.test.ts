@@ -80,6 +80,17 @@ describe('SqliteBrain', () => {
         halfLifeMs: 24 * 60 * 60 * 1000,
         floor: 0.2,
       }).confidence).toBe(0.2);
+
+      expect(calculateMemoryConfidenceDecay({
+        confidence: 0.05,
+        observedAt: '2026-01-01T00:00:00.000Z',
+        now: '2026-01-31T00:00:00.000Z',
+        halfLifeMs: 24 * 60 * 60 * 1000,
+        floor: 0.1,
+      })).toMatchObject({
+        confidence: 0.05,
+        floor: 0.05,
+      });
     });
 
     it('rejects invalid confidence, floor, half-life, and timestamps explicitly', () => {
@@ -89,9 +100,9 @@ describe('SqliteBrain', () => {
       })).toThrow(MemoryConfidenceDecayError);
       expect(() => calculateMemoryConfidenceDecay({
         confidence: 0.2,
-        floor: 0.3,
+        floor: -0.1,
         observedAt: '2026-01-01T00:00:00.000Z',
-      })).toThrow('floor cannot exceed');
+      })).toThrow('floor must be a finite number between 0 and 1');
       expect(() => calculateMemoryConfidenceDecay({
         confidence: 0.2,
         halfLifeMs: 0,
