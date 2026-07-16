@@ -82,7 +82,7 @@ export interface WorkflowOutcomeAttributionReport {
   totalElapsedMs: number
 }
 
-const SENSITIVE_METADATA_KEY_PATTERN = /(raw.*prompt|prompt|input|secret|token|password|credential|api[-_]?key|authorization|auth[-_]?header|bearer)/i
+const SENSITIVE_METADATA_KEY_PATTERN = /(raw.*prompt|prompt|input|secret|token|password|credential|api[-_]?key|authorization|auth[-_]?header|bearer|private[-_]?key|access[-_]?key|cookie|^auth$)/i
 const VALID_PR_STATES = ['none', 'draft', 'open', 'merged', 'closed'] as const
 const VALID_ISSUE_STATES = ['open', 'closed', 'not-planned', 'unknown'] as const
 
@@ -135,7 +135,9 @@ function sanitizeMetadataValue(value: unknown, seen = new WeakSet<object>()): un
   if (Array.isArray(value)) {
     if (seen.has(value)) return '[Circular]'
     seen.add(value)
-    return Object.freeze(value.map(item => sanitizeMetadataValue(item, seen)))
+    const sanitizedArray = Object.freeze(value.map(item => sanitizeMetadataValue(item, seen)))
+    seen.delete(value)
+    return sanitizedArray
   }
 
   if (typeof value !== 'object' || value === null) {
@@ -150,6 +152,7 @@ function sanitizeMetadataValue(value: unknown, seen = new WeakSet<object>()): un
     if (SENSITIVE_METADATA_KEY_PATTERN.test(key)) continue
     sanitized[key] = sanitizeMetadataValue(nestedValue, seen)
   }
+  seen.delete(value)
 
   return freezeRecord(sanitized)
 }
@@ -186,6 +189,7 @@ export class OutcomeAttribution {
     assertNonEmptyString(input.decisionType, 'decisionType')
     assertNonEmptyString(input.contextSummary, 'contextSummary')
     assertNonEmptyString(input.chosenAction, 'chosenAction')
+    assertOptionalStringArray(input.alternatives, 'alternatives')
     const timestamp = input.timestamp ?? defaultTimestamp()
     assertIsoTimestamp(timestamp, 'timestamp')
 
@@ -313,7 +317,11 @@ export class OutcomeAttribution {
       report.blockerCount += joined.blockerCount
       report.rollbackCount += joined.rollback ? 1 : 0
       report.failureCount += joined.failure ? 1 : 0
-      report.totalElapsedMs += joined.elapsedMs
+      const nextTotalElapsedMs = report.totalElapsedMs + joined.elapsedMs
+      if (!Number.isSafeInteger(nextTotalElapsedMs)) {
+        throw new RangeError(`OutcomeAttribution: totalElapsedMs for workflow ${joined.workflowId} exceeds Number.MAX_SAFE_INTEGER`)
+      }
+      report.totalElapsedMs = nextTotalElapsedMs
       reports.set(joined.workflowId, report)
     }
 

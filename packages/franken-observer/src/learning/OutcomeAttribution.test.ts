@@ -290,4 +290,65 @@ describe('OutcomeAttribution', () => {
       }),
     ).toThrow(/outcome timestamp must be greater than or equal to decision timestamp/)
   })
+
+  it('preserves non-cyclic shared metadata references after sanitizing each path', () => {
+    const attribution = new OutcomeAttribution()
+    const shared = { safeContext: 'kept', accessKey: 'drop-me' }
+
+    attribution.recordDecision({
+      workflowId: 'issue-1693',
+      decisionType: 'shared-metadata',
+      contextSummary: 'Two labels point at same object',
+      chosenAction: 'sanitize per traversal path',
+      metadata: { first: shared, second: shared, privateKey: 'drop-top' },
+    })
+
+    expect(attribution.decisions()[0]!.metadata).toEqual({
+      first: { safeContext: 'kept' },
+      second: { safeContext: 'kept' },
+    })
+  })
+
+  it('rejects malformed alternatives and aggregate elapsed-time overflow', () => {
+    const attribution = new OutcomeAttribution()
+
+    expect(() =>
+      attribution.recordDecision({
+        workflowId: 'issue-1693',
+        decisionType: 'bad-alternatives',
+        contextSummary: 'Validate JS alternatives',
+        chosenAction: 'reject malformed alternatives',
+        alternatives: 'abc' as never,
+      }),
+    ).toThrow(/alternatives must be an array/)
+
+    const firstDecision = attribution.recordDecision({
+      workflowId: 'issue-1693',
+      decisionType: 'overflow',
+      contextSummary: 'First large elapsed value',
+      chosenAction: 'record safe integer',
+      timestamp: '2026-07-16T18:00:00.000Z',
+    })
+    const secondDecision = attribution.recordDecision({
+      workflowId: 'issue-1693',
+      decisionType: 'overflow',
+      contextSummary: 'Second large elapsed value',
+      chosenAction: 'detect unsafe aggregate',
+      timestamp: '2026-07-16T18:00:00.000Z',
+    })
+
+    for (const decision of [firstDecision, secondDecision]) {
+      attribution.recordOutcome({
+        decisionId: decision.decisionId,
+        workflowId: 'issue-1693',
+        verification: 'large but individually safe',
+        prState: 'merged',
+        issueState: 'closed',
+        elapsedMs: Number.MAX_SAFE_INTEGER,
+        timestamp: '2026-07-16T18:00:00.000Z',
+      })
+    }
+
+    expect(() => attribution.reportByWorkflow()).toThrow(/totalElapsedMs.*exceeds Number.MAX_SAFE_INTEGER/)
+  })
 })
