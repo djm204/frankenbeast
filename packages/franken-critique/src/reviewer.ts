@@ -48,6 +48,27 @@ function readMetadataString(
   return undefined;
 }
 
+function readNestedContextMetadata(
+  metadata: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  const context = metadata.context;
+  return context !== null &&
+    typeof context === 'object' &&
+    !Array.isArray(context)
+    ? (context as Readonly<Record<string, unknown>>)
+    : {};
+}
+
+function readReviewContextString(
+  metadata: Readonly<Record<string, unknown>>,
+  keys: readonly string[],
+): string | undefined {
+  return (
+    readMetadataString(metadata, keys) ??
+    readMetadataString(readNestedContextMetadata(metadata), keys)
+  );
+}
+
 function createLessonInjectionContextFromInput(
   input: EvaluationInput,
 ): LessonInjectionContext {
@@ -56,11 +77,11 @@ function createLessonInjectionContextFromInput(
     role?: string;
     profile?: string;
   } = {};
-  const repo = readMetadataString(input.metadata, ['repo', 'repository']);
+  const repo = readReviewContextString(input.metadata, ['repo', 'repository']);
   if (repo !== undefined) {
     context.repo = repo;
   }
-  const role = readMetadataString(input.metadata, [
+  const role = readReviewContextString(input.metadata, [
     'role',
     'reviewerRole',
     'agentRole',
@@ -68,7 +89,10 @@ function createLessonInjectionContextFromInput(
   if (role !== undefined) {
     context.role = role;
   }
-  const profile = readMetadataString(input.metadata, ['profile', 'profileId']);
+  const profile = readReviewContextString(input.metadata, [
+    'profile',
+    'profileId',
+  ]);
   if (profile !== undefined) {
     context.profile = profile;
   }

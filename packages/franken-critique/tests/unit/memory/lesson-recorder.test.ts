@@ -1732,6 +1732,37 @@ describe('LessonRecorder', () => {
       }),
     ).toBe(false);
 
+    const importedRepoWithMalformedAudit = {
+      ...baseLesson,
+      lessonScope: {
+        schemaVersion: 'lesson-scope-v1',
+        scope: 'repo',
+        allowedRepos: ['djm204/frankenbeast'],
+        provenance: { source: 'recorded', taskId: 'scope-task' },
+        auditTrail: [{ changedAt: reviewedAt, actor: 42, toScope: 'repo' }],
+      } as unknown as CritiqueLesson['lessonScope'],
+    };
+    expect(
+      isLessonApplicable(importedRepoWithMalformedAudit, {
+        repo: 'djm204/frankenbeast',
+      }),
+    ).toBe(false);
+
+    const importedRepoWithMissingAudit = {
+      ...baseLesson,
+      lessonScope: {
+        schemaVersion: 'lesson-scope-v1',
+        scope: 'repo',
+        allowedRepos: ['djm204/frankenbeast'],
+        provenance: { source: 'recorded', taskId: 'scope-task' },
+      } as unknown as CritiqueLesson['lessonScope'],
+    };
+    expect(
+      isLessonApplicable(importedRepoWithMissingAudit, {
+        repo: 'djm204/frankenbeast',
+      }),
+    ).toBe(false);
+
     const unknownSchemaRepoScope = {
       ...repoScoped,
       lessonScope: {

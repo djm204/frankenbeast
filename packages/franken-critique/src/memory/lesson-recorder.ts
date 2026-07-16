@@ -1979,13 +1979,24 @@ function hasValidScopeAuditTrail(
   scope: LessonScopeMetadata,
   currentScope: LessonScopeKind,
 ): boolean {
-  return scope.auditTrail.some(
-    (entry) =>
-      parseScopeTimestamp(entry.changedAt) !== undefined &&
-      entry.toScope === currentScope &&
-      entry.actor.trim().length > 0 &&
-      entry.reason.trim().length > 0,
-  );
+  if (!Array.isArray(scope.auditTrail)) {
+    return false;
+  }
+  return scope.auditTrail.some((entry) => {
+    if (entry === null || typeof entry !== 'object') {
+      return false;
+    }
+    const candidate = entry as Partial<LessonScopeAuditEntry>;
+    return (
+      typeof candidate.changedAt === 'string' &&
+      parseScopeTimestamp(candidate.changedAt) !== undefined &&
+      candidate.toScope === currentScope &&
+      typeof candidate.actor === 'string' &&
+      candidate.actor.trim().length > 0 &&
+      typeof candidate.reason === 'string' &&
+      candidate.reason.trim().length > 0
+    );
+  });
 }
 
 function parseScopeTimestamp(timestamp: string): number | undefined {
