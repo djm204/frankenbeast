@@ -58,7 +58,7 @@ describe('IssueFetcher', () => {
 
       await expect(fetcher.fetch({})).resolves.toEqual([]);
 
-      expect(execFn).toHaveBeenCalledOnce();
+      expect(execFn).toHaveBeenCalled();
       const [file, args] = execFn.mock.calls[0]!;
       expect(file).toBe('gh');
       expect(args).toContain('issue');
@@ -79,16 +79,31 @@ describe('IssueFetcher', () => {
       expect(args[limitIdx + 1]).toBe('1000');
     });
 
-    it('adds a default oldest-first search sort so aged backlog items are fetched before local scheduling', async () => {
+    it('adds default oldest, urgent, and recent searches so urgent issues cannot fall outside the aged window', async () => {
       const execFn = vi.fn(makeExecFn(SAMPLE_GH_OUTPUT));
       const fetcher = new IssueFetcher(execFn);
 
       await fetcher.fetch({});
 
-      const [, args] = execFn.mock.calls[0]!;
-      const searchIdx = args.indexOf('--search');
-      expect(searchIdx).toBeGreaterThan(-1);
-      expect(args[searchIdx + 1]).toBe('sort:created-asc');
+      expect(execFn).toHaveBeenCalledTimes(3);
+      const searches = execFn.mock.calls.map(([, args]) => args[args.indexOf('--search') + 1]);
+      expect(searches[0]).toBe('sort:created-asc');
+      expect(searches[1]).toContain('label:critical');
+      expect(searches[1]).toContain('sort:created-desc');
+      expect(searches[2]).toBe('sort:created-desc');
+    });
+
+    it('deduplicates issues returned by the default supplemental fetch windows', async () => {
+      const duplicateOutput = JSON.stringify([
+        JSON.parse(SAMPLE_GH_OUTPUT)[0],
+      ]);
+      const execFn = vi.fn(makeExecFn(duplicateOutput));
+      const fetcher = new IssueFetcher(execFn);
+
+      const issues = await fetcher.fetch({});
+
+      expect(issues).toHaveLength(1);
+      expect(issues[0]!.number).toBe(42);
     });
 
     it('uses custom --limit when provided', async () => {

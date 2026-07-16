@@ -755,10 +755,12 @@ function issueBlockerStatus(issue: GithubIssue): IssueBlockerStatus {
   if (status && ['blocked', 'paused', 'parked'].includes(status)) return 'blocked';
   if (status && ['triage', 'needs_input', 'needs-input', 'hitl', 'review-required'].includes(status)) return 'hitl';
   const labels = normalizedLabels(issue);
-  if (labels.some(label => ['hitl', 'human-in-the-loop', 'needs-input', 'needs_input', 'needs-human', 'review-required'].includes(label))) {
+  if (labels.some(label => ['hitl', 'human-in-the-loop', 'needs-input', 'needs_input', 'needs-human', 'review-required'].includes(label)
+    || ['status:hitl', 'status:needs-input', 'status:review-required'].includes(label))) {
     return 'hitl';
   }
-  if (labels.some(label => ['blocked', 'blocked_status', 'parked', 'paused'].includes(label))) return 'blocked';
+  if (labels.some(label => ['blocked', 'blocked_status', 'parked', 'paused'].includes(label)
+    || ['status:blocked', 'status:paused', 'status:parked'].includes(label))) return 'blocked';
   return 'eligible';
 }
 
@@ -1077,11 +1079,18 @@ function checkpointEntriesAreCompleteWithoutPlan(
 
   const issueToken = `issue-${issueNumber}`;
   const doneEntries = [...entries].filter((entry) => entry.endsWith(':done') && entry.includes(issueToken));
-  const oneShotImplKey = `impl:${issueToken}:done`;
-  const oneShotHardenKey = `harden:${issueToken}:done`;
+  const isDoneEntryForIssue = (entry: string, taskPrefix: 'impl' | 'harden'): boolean => {
+    if (!entry.startsWith(`${taskPrefix}:`) || !entry.endsWith(':done')) return false;
+    const index = entry.indexOf(issueToken);
+    if (index < 0) return false;
+    const before = entry[index - 1];
+    const after = entry[index + issueToken.length];
+    return !(before !== undefined && /\d/.test(before))
+      && !(after !== undefined && /\d/.test(after));
+  };
 
-  return doneEntries.includes(oneShotImplKey)
-    && doneEntries.includes(oneShotHardenKey);
+  return doneEntries.some(entry => isDoneEntryForIssue(entry, 'impl'))
+    && doneEntries.some(entry => isDoneEntryForIssue(entry, 'harden'));
 }
 
 function checkpointHasTaskProgress(issueCheckpoint: ICheckpointStore, taskId: string): boolean {

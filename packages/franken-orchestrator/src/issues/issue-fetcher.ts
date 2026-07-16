@@ -6,9 +6,12 @@ type ExecCallback = (error: Error | null, stdout: string, stderr: string) => voi
 type ExecFn = (file: string, args: string[], callback: ExecCallback) => void;
 
 const DEFAULT_ISSUE_FETCH_LIMIT = 1_000;
+const DEFAULT_ISSUE_FETCH_URGENT_LIMIT = 200;
+const DEFAULT_ISSUE_FETCH_RECENT_LIMIT = 200;
 const MIN_ISSUE_FETCH_BUFFER_BYTES = 2_097_152;
 const MAX_ISSUE_FETCH_BUFFER_BYTES = 128 * 1_024 * 1_024;
 const APPROX_MAX_GITHUB_ISSUE_BODY_BYTES = 65_536;
+const DEFAULT_URGENT_ISSUE_SEARCH = '(label:critical OR label:p0 OR label:p1 OR label:"priority:critical" OR label:"priority:high") sort:created-desc';
 
 interface RawGithubIssue {
   readonly number: number;
@@ -29,6 +32,32 @@ export class IssueFetcher implements IIssueFetcher {
   }
 
   async fetch(options: IssueFetchOptions): Promise<GithubIssue[]> {
+    const explicitLimit = options.limit !== undefined;
+    const raw = explicitLimit || options.search
+      ? await this.fetchIssuePage(options, options.search, options.limit ?? DEFAULT_ISSUE_FETCH_LIMIT)
+      : this.mergeIssuePages([
+          await this.fetchIssuePage(options, 'sort:created-asc', DEFAULT_ISSUE_FETCH_LIMIT),
+          await this.fetchIssuePage(options, DEFAULT_URGENT_ISSUE_SEARCH, DEFAULT_ISSUE_FETCH_URGENT_LIMIT),
+          await this.fetchIssuePage(options, 'sort:created-desc', DEFAULT_ISSUE_FETCH_RECENT_LIMIT),
+        ]);
+
+    return raw.map((issue) => ({
+      number: issue.number,
+      title: issue.title,
+      body: issue.body,
+      labels: issue.labels.map((l) => l.name),
+      state: issue.state,
+      url: issue.url,
+      createdAt: issue.createdAt,
+      updatedAt: issue.updatedAt,
+    }));
+  }
+
+  private async fetchIssuePage(
+    options: IssueFetchOptions,
+    search: string | undefined,
+    limit: number,
+  ): Promise<RawGithubIssue[]> {
     const args = ['issue', 'list', '--json', 'number,title,body,labels,state,url,createdAt,updatedAt'];
 
     if (options.repo) {
@@ -45,17 +74,14 @@ export class IssueFetcher implements IIssueFetcher {
       args.push('--milestone', options.milestone);
     }
 
-    if (options.search) {
-      args.push('--search', options.search);
-    } else {
-      args.push('--search', 'sort:created-asc');
+    if (search) {
+      args.push('--search', search);
     }
 
     if (options.assignee) {
       args.push('--assignee', options.assignee);
     }
 
-    const limit = options.limit ?? DEFAULT_ISSUE_FETCH_LIMIT;
     args.push('--limit', String(limit));
 
     const maxPayloadBytes = Math.min(
@@ -64,7 +90,7 @@ export class IssueFetcher implements IIssueFetcher {
     );
 
     const stdout = await this.run('gh', args, maxPayloadBytes);
-    const raw = parseSafeJson(stdout, {
+    return parseSafeJson(stdout, {
       context: 'GitHub issue list payload',
       maxBytes: maxPayloadBytes,
       maxDepth: 48,
@@ -72,17 +98,16 @@ export class IssueFetcher implements IIssueFetcher {
       maxObjectKeys: 100_000,
       maxArrayItems: Math.max(limit * 64, 2_000),
     }) as RawGithubIssue[];
+  }
 
-    return raw.map((issue) => ({
-      number: issue.number,
-      title: issue.title,
-      body: issue.body,
-      labels: issue.labels.map((l) => l.name),
-      state: issue.state,
-      url: issue.url,
-      createdAt: issue.createdAt,
-      updatedAt: issue.updatedAt,
-    }));
+  private mergeIssuePages(pages: readonly RawGithubIssue[][]): RawGithubIssue[] {
+    const byNumber = new Map<number, RawGithubIssue>();
+    for (const page of pages) {
+      for (const issue of page) {
+        byNumber.set(issue.number, issue);
+      }
+    }
+    return [...byNumber.values()];
   }
 
   async inferRepo(): Promise<string> {
