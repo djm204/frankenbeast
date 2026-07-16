@@ -32,11 +32,14 @@ describe('local-to-PR dry run helper', () => {
     expect(report.branch).toBe('resolve/issue-1700-feat-onboarding-add-guided-local-to-pr-dry-run-mode');
     expect(report.steps.map((step) => step.id)).toEqual([
       'checkout',
+      'duplicate-check',
       'branch',
+      'enter-worktree',
       'noop-change',
       'test-selection',
-      'pr-body',
+      'commit',
       'push',
+      'pr-body',
       'codex',
       'cleanup',
     ]);
@@ -45,6 +48,13 @@ describe('local-to-PR dry run helper', () => {
     }
     expect(report.generatedPr.body).toContain('Closes #1700');
     expect(report.generatedPr.body).toContain('No remote mutations were executed during the dry run.');
+  });
+
+  it('requires an explicit issue number', () => {
+    expect(() => buildLocalToPrDryRun({
+      root: '/repo',
+      title: 'feat(onboarding): add guided local-to-PR dry run mode',
+    })).toThrow('issue is required');
   });
 
   it('surfaces actionable remediation for auth, install, and git-state failures', () => {
@@ -79,8 +89,8 @@ describe('local-to-PR dry run helper', () => {
     expect([0, 1]).toContain(result.status);
     const parsed = JSON.parse(result.stdout) as ReturnType<typeof buildLocalToPrDryRun>;
     expect(parsed.dryRun).toBe(true);
-    expect(parsed.steps.some((step) => step.command.startsWith('git push') && step.dryRunAction === 'skip')).toBe(true);
-    expect(parsed.steps.some((step) => step.command.startsWith('gh pr create') && step.dryRunAction === 'skip')).toBe(true);
+    expect(parsed.steps.some((step) => step.command.includes('git push') && step.dryRunAction === 'skip')).toBe(true);
+    expect(parsed.steps.some((step) => step.command.includes('gh pr create') && step.command.includes('--body-file') && step.dryRunAction === 'skip')).toBe(true);
     expect(result.stdout).not.toContain('"dryRunAction": "execute"');
   });
 

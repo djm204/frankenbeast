@@ -27,7 +27,6 @@ function parseArgs(argv) {
     json: false,
     root: process.cwd(),
     repo: DEFAULT_REPO,
-    issue: 1700,
     title: DEFAULT_ISSUE_TITLE,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -55,6 +54,9 @@ function parseArgs(argv) {
         else if (arg?.startsWith('--title=')) options.title = arg.slice('--title='.length);
         else throw new Error(`Unknown argument: ${arg}`);
     }
+  }
+  if (!options.help && options.issue === undefined) {
+    throw new Error('--issue is required so the rehearsal cannot target the sample issue by accident');
   }
   return options;
 }
@@ -99,6 +101,16 @@ function npmPin(manifest) {
 
 function check(id, status, detail, remediation, command) {
   return { id, status, detail, remediation, command };
+}
+
+function quoteShell(value) {
+  const text = String(value);
+  if (/^[A-Za-z0-9_./:=@+-]+$/u.test(text)) return text;
+  return `'${text.replace(/'/gu, `'"'"'`)}'`;
+}
+
+function formatCommand(command) {
+  return command.map((part) => quoteShell(part)).join(' ');
 }
 
 export function buildPrerequisiteChecks(options, runner = run) {
@@ -161,7 +173,10 @@ function step(id, title, command, effect, dryRunAction, reason, phase = 'workflo
 
 export function buildLocalToPrDryRun(options) {
   const root = resolve(options.root ?? process.cwd());
-  const issue = options.issue ?? 1700;
+  if (options.issue === undefined) {
+    throw new Error('issue is required');
+  }
+  const issue = options.issue;
   const title = options.title ?? DEFAULT_ISSUE_TITLE;
   const repo = options.repo ?? DEFAULT_REPO;
   const worktreePlan = buildIssueWorktreePlan({ issue, title, repo, cwd: root });
@@ -181,13 +196,16 @@ export function buildLocalToPrDryRun(options) {
 
   const steps = [
     step('checkout', 'Fetch and verify the default branch for a current checkout', 'git fetch origin main', 'network-read', 'check', 'Read-only network fetch exposes auth/connectivity problems without mutating remotes.', 'checkout'),
-    step('branch', 'Create the issue branch/worktree', `git worktree add -b ${branch} ${worktreePlan.worktreePath} origin/main`, 'local-write', 'simulate', 'A real run creates a local worktree; the dry run prints the exact command only.', 'branch'),
-    step('noop-change', 'Create a no-op rehearsal change', `printf '\n' >> docs/onboarding/local-to-pr-dry-run.rehearsal.md`, 'local-write', 'simulate', 'No file is written; this represents the contributor making a harmless scoped edit.', 'change'),
-    step('test-selection', 'Select focused and broader verification commands', 'npm run test:root -- tests/unit/local-to-pr-dry-run.test.ts && npm run typecheck', 'local-read/compute', 'simulate', 'Tests are listed but not executed so the rehearsal remains fast and side-effect free.', 'test'),
-    step('pr-body', 'Generate the PR title/body without opening a PR', `gh pr create --repo ${repo} --title ${JSON.stringify(prTitle)} --body ${JSON.stringify(prBody)} --draft`, 'remote-mutation', 'skip', 'Opening a PR publishes to GitHub; dry-run mode only prints the generated title/body.', 'pr'),
-    step('push', 'Publish the branch', `git push -u origin ${branch}`, 'remote-mutation', 'skip', 'Pushing mutates the remote branch namespace and is forbidden in the dry run.', 'pr'),
+    step('duplicate-check', 'Check for existing PRs and branches for this issue', worktreePlan.commands.duplicateChecks.map(formatCommand).join(' && '), 'network-read', 'check', 'Read-only duplicate checks preserve the one-issue/one-PR invariant before any branch is created.', 'checkout'),
+    step('branch', 'Create the issue branch/worktree', worktreePlan.commands.create.map(formatCommand).join(' && '), 'local-write', 'simulate', 'A real run creates a local worktree; the dry run prints the exact command only.', 'branch'),
+    step('enter-worktree', 'Run follow-up commands inside the new issue worktree', `cd ${quoteShell(worktreePlan.worktreePath)}`, 'local-read', 'simulate', 'Every subsequent command is rooted at the scoped issue worktree so edits land on the new branch.', 'branch'),
+    step('noop-change', 'Create a no-op rehearsal change', `cd ${quoteShell(worktreePlan.worktreePath)} && printf '\n' >> docs/onboarding/local-to-pr-dry-run.rehearsal.md`, 'local-write', 'simulate', 'No file is written; this represents the contributor making a harmless scoped edit inside the issue worktree.', 'change'),
+    step('test-selection', 'Select focused and broader verification commands', `cd ${quoteShell(worktreePlan.worktreePath)} && npm run test:root -- tests/unit/local-to-pr-dry-run.test.ts && npm run typecheck`, 'local-read/compute', 'simulate', 'Tests are listed but not executed so the rehearsal remains fast and side-effect free.', 'test'),
+    step('commit', 'Commit the rehearsal change locally', `cd ${quoteShell(worktreePlan.worktreePath)} && git add docs/onboarding/local-to-pr-dry-run.rehearsal.md && git commit -m ${quoteShell('docs(onboarding): rehearse local-to-PR workflow')}`, 'local-write', 'simulate', 'The real path needs a commit before any push or PR can have a diff; dry-run mode does not write the index or history.', 'change'),
+    step('push', 'Publish the branch after the local commit exists', `cd ${quoteShell(worktreePlan.worktreePath)} && git push -u origin ${quoteShell(branch)}`, 'remote-mutation', 'skip', 'Pushing mutates the remote branch namespace and is forbidden in the dry run.', 'pr'),
+    step('pr-body', 'Generate the PR title/body without opening a PR', `cd ${quoteShell(worktreePlan.worktreePath)} && cat > /tmp/frankenbeast-local-to-pr-body.md <<'EOF'\n${prBody}\nEOF\ngh pr create --repo ${quoteShell(repo)} --head ${quoteShell(branch)} --title ${quoteShell(prTitle)} --body-file /tmp/frankenbeast-local-to-pr-body.md --draft`, 'remote-mutation', 'skip', 'Opening a PR publishes to GitHub; dry-run mode only prints the generated title/body after the branch would already be pushed.', 'pr'),
     step('codex', 'Request Codex review after the real PR exists', 'gh pr comment <PR_NUMBER> --body "@codex review"', 'remote-mutation', 'skip', 'Review comments mutate GitHub and require a real PR; skipped in rehearsal.', 'review'),
-    step('cleanup', 'Clean up rehearsal branch/worktree', `git worktree remove ${worktreePlan.worktreePath} && git branch -D ${branch}`, 'local-write', 'simulate', 'Cleanup is printed for operators to run after a real local rehearsal; this dry run does not delete anything.', 'cleanup'),
+    step('cleanup', 'Clean up rehearsal branch/worktree', `git worktree remove ${quoteShell(worktreePlan.worktreePath)} && git branch -D ${quoteShell(branch)}`, 'local-write', 'simulate', 'Cleanup is printed for operators to run after a real local rehearsal; this dry run does not delete anything.', 'cleanup'),
   ];
 
   return {
