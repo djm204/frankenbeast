@@ -40,7 +40,52 @@ vi.mock("better-sqlite3", () => ({
   ) {
     const db = {
       pragma: vi.fn(),
-      prepare: vi.fn(() => ({ all: vi.fn(() => []) })),
+      prepare: vi.fn((sql: string) => ({
+        all: vi.fn(() => {
+          if (sql.includes("FROM governor_log")) {
+            return [
+              {
+                action: "fbeast_memory_query",
+                context: JSON.stringify({ agentId: "agent-a", profile: "default", repo: "djm204/frankenbeast", type: "working" }),
+                decision: "approved",
+                reason: "allowed",
+                createdAt: "2026-07-16T10:00:00.000Z",
+              },
+              {
+                action: "fbeast_memory_review_decide",
+                context: JSON.stringify({ agentId: "agent-b", action: "approve" }),
+                decision: "approved",
+                reason: "reviewed",
+                createdAt: "2026-07-16T11:00:00.000Z",
+              },
+              {
+                action: "fbeast_memory_store",
+                context: JSON.stringify({ agentId: "agent-c", cardId: "t_abc123", profile: "default", repo: "djm204/frankenbeast", type: "working", value: "ghp_secretvalue123456" }),
+                decision: "denied",
+                reason: "blocked token ghp_secretvalue123456",
+                createdAt: "2026-07-16T10:30:00.000Z",
+              },
+              {
+                action: "shell_command",
+                context: "rm -rf tmp",
+                decision: "review_recommended",
+                reason: "dangerous",
+                createdAt: "2026-07-16T12:00:00.000Z",
+              },
+            ];
+          }
+          if (sql.includes("FROM audit_trail")) {
+            return [
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ toolName: "fbeast_memory_export", profile: "default", repo: "djm204/frankenbeast" }),
+                createdAt: "2026-07-16T09:00:00.000Z",
+              },
+            ];
+          }
+          return [];
+        }),
+      })),
       close: vi.fn(),
       options,
     };
@@ -544,6 +589,51 @@ describe("createBrainAdapter", () => {
 
     expect(brainInstances[0].rightToForget).toHaveBeenCalledWith({
       key: "__fbeast_agent_memory__/Alpha%20Team!/profile",
+    });
+  });
+
+  it("builds a redacted memory access audit report from governance and observer logs", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "default", limit: 20 });
+    const serialized = JSON.stringify(report);
+
+    expect(report.count).toBe(3);
+    expect(report.events.map((event) => event.tool)).toEqual([
+      "fbeast_memory_store",
+      "fbeast_memory_query",
+      "fbeast_memory_export",
+    ]);
+    expect(report.summary.byOperation).toEqual({ write: 1, read: 2 });
+    expect(report.summary.byDecision).toEqual({ denied: 1, approved: 2 });
+    expect(report.events[0]).toMatchObject({
+      agentId: "agent-c",
+      cardId: "t_abc123",
+      operation: "write",
+      targetStore: "working",
+      decision: "denied",
+    });
+    expect(serialized).not.toContain("rm -rf");
+    expect(serialized).not.toContain("ghp_secretvalue123456");
+  });
+
+  it("filters memory access audit reports by agent, operation, and decision", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({
+      agentId: "agent-b",
+      operation: "review:approve",
+      decision: "approved",
+      limit: 20,
+    });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      agentId: "agent-b",
+      tool: "fbeast_memory_review_decide",
+      operation: "review:approve",
+      targetClass: "memory-review-candidate",
+      decision: "approved",
     });
   });
 

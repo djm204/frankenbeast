@@ -62,6 +62,43 @@ export interface MemoryExportInput extends MemoryScopeInput {
   limit?: number;
 }
 
+export interface MemoryAccessAuditReportInput {
+  agentId?: string;
+  profile?: string;
+  repo?: string;
+  since?: string;
+  until?: string;
+  operation?: string;
+  decision?: string;
+  limit?: number;
+}
+
+export interface MemoryAccessAuditEvent {
+  timestamp: string;
+  agentId?: string;
+  cardId?: string;
+  profile?: string;
+  repo?: string;
+  tool: string;
+  operation: string;
+  targetStore: string;
+  targetClass: string;
+  decision: string;
+  reason: string;
+}
+
+export interface MemoryAccessAuditReport {
+  generatedAt: string;
+  filters: MemoryAccessAuditReportInput;
+  count: number;
+  events: MemoryAccessAuditEvent[];
+  summary: {
+    byTool: Record<string, number>;
+    byOperation: Record<string, number>;
+    byDecision: Record<string, number>;
+  };
+}
+
 export interface MemoryExportWorkingEntry {
   key: string;
   value: unknown;
@@ -100,6 +137,7 @@ export interface BrainAdapter {
   }): Promise<void>;
   frontload(input?: MemoryScopeInput): Promise<BrainFrontloadSection[]>;
   exportProjectMemory(input?: MemoryExportInput): Promise<ProjectMemoryExport>;
+  memoryAccessAuditReport(input?: MemoryAccessAuditReportInput): Promise<MemoryAccessAuditReport>;
   forget(key: string, input?: AgentScopedInput): Promise<boolean>;
   rightToForget(
     input: RightToForgetSelector & AgentScopedInput,
@@ -393,6 +431,92 @@ const SECRET_EXPORT_VALUES: Array<[RegExp, string]> = [
   [/\btoken\s+[A-Za-z0-9._~+/=-]{20,}\b/gi, "token [redacted]"],
   [/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[redacted-email]"],
 ];
+
+const MEMORY_ACCESS_TOOL_OPERATIONS: Record<string, { operation: string; targetStore: string; targetClass: string }> = {
+  fbeast_memory_store: { operation: "write", targetStore: "working|episodic", targetClass: "memory-entry" },
+  fbeast_memory_query: { operation: "read", targetStore: "working|episodic", targetClass: "memory-query" },
+  fbeast_memory_frontload: { operation: "read", targetStore: "working|episodic", targetClass: "memory-frontload" },
+  fbeast_memory_export: { operation: "read", targetStore: "working|episodic", targetClass: "memory-export" },
+  fbeast_memory_forget: { operation: "delete", targetStore: "working", targetClass: "memory-entry" },
+  fbeast_memory_right_to_forget: { operation: "delete", targetStore: "working|episodic|derived", targetClass: "right-to-forget" },
+  fbeast_memory_review_propose: { operation: "review", targetStore: "working", targetClass: "memory-review-candidate" },
+  fbeast_memory_review_list: { operation: "read", targetStore: "working", targetClass: "memory-review-queue" },
+  fbeast_memory_review_conflicts: { operation: "read", targetStore: "working", targetClass: "memory-review-conflict" },
+  fbeast_memory_review_decide: { operation: "review", targetStore: "working", targetClass: "memory-review-candidate" },
+  fbeast_memory_access_audit_report: { operation: "read", targetStore: "audit", targetClass: "memory-access-audit" },
+};
+
+function unqualifyToolName(toolName: string): string {
+  const marker = "__";
+  const index = toolName.lastIndexOf(marker);
+  return index >= 0 ? toolName.slice(index + marker.length) : toolName;
+}
+
+function parseAuditContext(context: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(context) as unknown;
+    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Redacted/non-JSON contexts are still valid audit evidence.
+  }
+  return {};
+}
+
+function stringAuditField(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function inferMemoryAccess(toolName: string, context: Record<string, unknown>): { operation: string; targetStore: string; targetClass: string } {
+  const unqualified = unqualifyToolName(toolName);
+  const defaults = MEMORY_ACCESS_TOOL_OPERATIONS[unqualified] ?? { operation: "unknown", targetStore: "memory", targetClass: "memory-access" };
+  const nestedTool = stringAuditField(context, "tool");
+  if (unqualified === "execute_tool" && nestedTool) {
+    const nestedArgs = context["args"] !== null && typeof context["args"] === "object" && !Array.isArray(context["args"])
+      ? context["args"] as Record<string, unknown>
+      : {};
+    return inferMemoryAccess(nestedTool, nestedArgs);
+  }
+  const explicitOperation = stringAuditField(context, "operation");
+  const action = stringAuditField(context, "action");
+  const type = stringAuditField(context, "type");
+  return {
+    operation: explicitOperation ?? (unqualified === "fbeast_memory_review_decide" && action ? `review:${action}` : defaults.operation),
+    targetStore: type ?? defaults.targetStore,
+    targetClass: defaults.targetClass,
+  };
+}
+
+function includeMemoryAuditTool(toolName: string): boolean {
+  const unqualified = unqualifyToolName(toolName);
+  if (unqualified === "execute_tool") return true;
+  return Object.prototype.hasOwnProperty.call(MEMORY_ACCESS_TOOL_OPERATIONS, unqualified);
+}
+
+function summarizeAuditEvents(events: MemoryAccessAuditEvent[]): MemoryAccessAuditReport["summary"] {
+  const summary: MemoryAccessAuditReport["summary"] = { byTool: {}, byOperation: {}, byDecision: {} };
+  for (const event of events) {
+    summary.byTool[event.tool] = (summary.byTool[event.tool] ?? 0) + 1;
+    summary.byOperation[event.operation] = (summary.byOperation[event.operation] ?? 0) + 1;
+    summary.byDecision[event.decision] = (summary.byDecision[event.decision] ?? 0) + 1;
+  }
+  return summary;
+}
+
+function filterMemoryAccessEvents(events: MemoryAccessAuditEvent[], input: MemoryAccessAuditReportInput): MemoryAccessAuditEvent[] {
+  return events.filter((event) => {
+    if (input.agentId !== undefined && event.agentId !== input.agentId) return false;
+    if (input.profile !== undefined && event.profile !== input.profile) return false;
+    if (input.repo !== undefined && event.repo !== input.repo) return false;
+    if (input.operation !== undefined && event.operation !== input.operation) return false;
+    if (input.decision !== undefined && event.decision !== input.decision) return false;
+    if (input.since !== undefined && event.timestamp < input.since) return false;
+    if (input.until !== undefined && event.timestamp > input.until) return false;
+    return true;
+  });
+}
 
 function stableRedactedKey(key: string): string {
   const digest = createHash("sha256").update(key).digest("hex").slice(0, 12);
@@ -730,6 +854,87 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
         working,
         episodic,
       };
+    },
+
+    async memoryAccessAuditReport(input = {}) {
+      const limit = resolveQueryLimit(input.limit ?? MAX_QUERY_LIMIT);
+      const reportDb = new Database(dbPath);
+      configureBrainAdapterDb(reportDb);
+      try {
+        const events: MemoryAccessAuditEvent[] = [];
+        const governorRows = reportDb.prepare(`
+          SELECT action, context, decision, reason, created_at AS createdAt
+          FROM governor_log
+          ORDER BY id DESC
+          LIMIT ?
+        `).all(limit) as Array<{ action: string; context: string; decision: string; reason: string | null; createdAt: string }>;
+        for (const row of governorRows) {
+          if (!includeMemoryAuditTool(row.action)) continue;
+          const context = parseAuditContext(row.context);
+          const access = inferMemoryAccess(row.action, context);
+          const profile = stringAuditField(context, "profile") ?? stringAuditField(context, "activeProfile");
+          const agentId = stringAuditField(context, "agentId");
+          const cardId = stringAuditField(context, "cardId") ?? stringAuditField(context, "taskId");
+          const repo = stringAuditField(context, "repo");
+          events.push({
+            timestamp: row.createdAt,
+            ...(agentId ? { agentId } : {}),
+            ...(cardId ? { cardId } : {}),
+            ...(profile ? { profile } : {}),
+            ...(repo ? { repo } : {}),
+            tool: unqualifyToolName(row.action),
+            operation: access.operation,
+            targetStore: access.targetStore,
+            targetClass: access.targetClass,
+            decision: row.decision,
+            reason: redactExportString(row.reason ?? ""),
+          });
+        }
+
+        const auditRows = reportDb.prepare(`
+          SELECT event_type AS eventType, payload, created_at AS createdAt
+          FROM audit_trail
+          WHERE event_type = 'tool_call'
+          ORDER BY id DESC
+          LIMIT ?
+        `).all(limit) as Array<{ eventType: string; payload: string; createdAt: string }>;
+        for (const row of auditRows) {
+          const payload = parseAuditContext(row.payload);
+          const toolName = stringAuditField(payload, "toolName") ?? "unknown";
+          if (!includeMemoryAuditTool(toolName)) continue;
+          const access = inferMemoryAccess(toolName, payload);
+          const agentId = stringAuditField(payload, "agentId");
+          const cardId = stringAuditField(payload, "cardId") ?? stringAuditField(payload, "taskId");
+          const profile = stringAuditField(payload, "profile");
+          const repo = stringAuditField(payload, "repo");
+          events.push({
+            timestamp: row.createdAt,
+            ...(agentId ? { agentId } : {}),
+            ...(cardId ? { cardId } : {}),
+            ...(profile ? { profile } : {}),
+            ...(repo ? { repo } : {}),
+            tool: unqualifyToolName(toolName),
+            operation: access.operation,
+            targetStore: access.targetStore,
+            targetClass: access.targetClass,
+            decision: "approved",
+            reason: "post-tool audit event",
+          });
+        }
+
+        const filtered = filterMemoryAccessEvents(events, input)
+          .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+          .slice(0, limit);
+        return {
+          generatedAt: isoNow(),
+          filters: input,
+          count: filtered.length,
+          events: filtered,
+          summary: summarizeAuditEvents(filtered),
+        };
+      } finally {
+        reportDb.close();
+      }
     },
 
     async forget(key, input = {}) {

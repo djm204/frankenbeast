@@ -44,6 +44,7 @@ const MAX_MEMORY_QUERY_LIMIT = 1000;
 const MEMORY_REVIEW_STATUSES = ['pending', 'approved', 'rejected', 'never_store', 'suppressed'] as const;
 const MEMORY_REVIEW_ACTIONS = ['approve', 'reject', 'never_store', 'resolve_conflict'] as const;
 const MEMORY_CONFLICT_RESOLUTIONS = ['keep_existing', 'replace_existing', 'reject_candidate'] as const;
+const MEMORY_ACCESS_AUDIT_DECISIONS = ['approved', 'review_recommended', 'denied'] as const;
 
 type MemoryReviewStatus = (typeof MEMORY_REVIEW_STATUSES)[number];
 type MemoryReviewAction = (typeof MEMORY_REVIEW_ACTIONS)[number];
@@ -57,6 +58,28 @@ function parseMemoryQueryLimit(value: unknown): { ok: true; value: number } | { 
 function parseMemoryExportLimit(value: unknown): { ok: true; value: number } | { ok: false; message: string } {
   if (value === undefined) return { ok: true, value: MAX_MEMORY_QUERY_LIMIT };
   return parsePositiveMemoryLimit(value);
+}
+
+function parseMemoryAccessAuditLimit(value: unknown): { ok: true; value: number } | { ok: false; message: string } {
+  if (value === undefined) return { ok: true, value: MAX_MEMORY_QUERY_LIMIT };
+  return parsePositiveMemoryLimit(value);
+}
+
+function parseMemoryAccessAuditStringFilter(name: string, value: unknown): { ok: true; value?: string } | { ok: false; message: string } {
+  if (value === undefined) return { ok: true };
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return { ok: false, message: `${name} must be a non-empty string when provided` };
+  }
+  return { ok: true, value: value.trim() };
+}
+
+function parseMemoryAccessAuditDecision(value: unknown): { ok: true; value?: string } | { ok: false; message: string } {
+  if (value === undefined) return { ok: true };
+  const decision = String(value);
+  if (MEMORY_ACCESS_AUDIT_DECISIONS.includes(decision as (typeof MEMORY_ACCESS_AUDIT_DECISIONS)[number])) {
+    return { ok: true, value: decision };
+  }
+  return { ok: false, message: `decision must be one of: ${MEMORY_ACCESS_AUDIT_DECISIONS.join(', ')}` };
 }
 
 function parsePositiveMemoryLimit(value: unknown): { ok: true; value: number } | { ok: false; message: string } {
@@ -582,6 +605,49 @@ const TOOLS: ToolFull[] = [
         },
       });
       return { content: [{ type: 'text', text: JSON.stringify(candidate, null, 2) }] };
+    },
+  },
+
+  {
+    name: 'fbeast_memory_access_audit_report',
+    server: 'memory',
+    description: 'Report memory read/write/review/delete access by agent, profile, repo, tool, operation, and decision without exposing memory contents',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agentId: { type: 'string', description: 'Filter by agent id when available' },
+        profile: { type: 'string', description: 'Filter by active/profile name when available' },
+        repo: { type: 'string', description: 'Filter by repository identifier when available' },
+        since: { type: 'string', description: 'Inclusive lower timestamp bound (ISO string or SQLite timestamp)' },
+        until: { type: 'string', description: 'Inclusive upper timestamp bound (ISO string or SQLite timestamp)' },
+        operation: { type: 'string', description: 'Filter by operation, such as read, write, delete, review, or review:approve' },
+        decision: { type: 'string', description: 'Filter by governance decision', enum: [...MEMORY_ACCESS_AUDIT_DECISIONS] },
+        limit: { type: 'string', description: 'Max audit events returned (default 1000)' },
+      },
+    },
+    makeHandler: ({ brain }) => async (args) => {
+      const limit = parseMemoryAccessAuditLimit(args['limit']);
+      if (!limit.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_access_audit_report ${limit.message}` }], isError: true };
+      }
+      const decision = parseMemoryAccessAuditDecision(args['decision']);
+      if (!decision.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_access_audit_report ${decision.message}` }], isError: true };
+      }
+      const filters: Record<string, string> = {};
+      for (const name of ['agentId', 'profile', 'repo', 'since', 'until', 'operation'] as const) {
+        const parsed = parseMemoryAccessAuditStringFilter(name, args[name]);
+        if (!parsed.ok) {
+          return { content: [{ type: 'text', text: `Error: fbeast_memory_access_audit_report ${parsed.message}` }], isError: true };
+        }
+        if (parsed.value !== undefined) filters[name] = parsed.value;
+      }
+      const report = await brain.memoryAccessAuditReport({
+        ...filters,
+        ...(decision.value ? { decision: decision.value } : {}),
+        limit: limit.value,
+      });
+      return { content: [{ type: 'text', text: JSON.stringify(report, null, 2) }] };
     },
   },
 
