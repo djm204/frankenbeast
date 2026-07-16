@@ -711,6 +711,22 @@ describe('stuck-run watchdog', () => {
     expect(findings).toEqual([]);
   });
 
+  it('keeps successful terminal cards quiet even when stale blocker metadata mentions crashes', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_done_with_stale_crash_blocker',
+        pid: 7406,
+        status: 'done',
+        alive: true,
+        blockerCategory: 'process-crash',
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([]);
+  });
+
   it('reports terminal crash statuses when alive is false without waitingOn hints', () => {
     const findings = detectStuckRunWatchdogFindings([
       {
@@ -808,6 +824,39 @@ describe('stuck-run watchdog', () => {
       processStatus: 'alive',
       kanbanState: 'failed',
     });
+  });
+
+  it('lets explicit crash status override stale blocker hints', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_failed_stale_ci_wait',
+        pid: 7407,
+        status: 'failed',
+        blockerCategory: 'ci-wait',
+        lastStateTransitionAt: '2026-07-16T11:58:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_failed_stale_ci_wait',
+      blockerCategory: 'process-crash',
+      confidence: 'medium',
+      processStatus: 'alive',
+      kanbanState: 'failed',
+    });
+  });
+
+  it('does not infer crashes from ordinary process wait wording without stale evidence', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_waiting_on_child_process',
+        pid: 7407,
+        status: 'processing',
+        waitingOn: 'waiting on child process',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([]);
   });
 
   it('reports stale heartbeat snapshots even when optional activity timestamps are absent', () => {

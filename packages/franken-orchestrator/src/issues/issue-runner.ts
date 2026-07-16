@@ -690,6 +690,12 @@ const TERMINAL_WORKER_CARD_STATUSES = new Set([
   'stopped',
 ]);
 
+const CRASH_WORKER_CARD_STATUSES = new Set([
+  'crashed',
+  'exited',
+  'failed',
+]);
+
 function activeWorkerCardProcess(snapshot: IssueWorkerCardProcessSnapshot): boolean {
   if (snapshot.alive === false) return false;
   if (!snapshot.cardId.trim()) return false;
@@ -711,9 +717,10 @@ function stale(age: number | undefined, threshold: number): boolean {
 }
 
 function explicitProcessCrash(snapshot: IssueWorkerCardProcessSnapshot): boolean {
-  if (snapshot.blockerCategory === 'process-crash') return true;
   const status = snapshot.status?.trim().toLowerCase() ?? '';
-  return /crash|exit|fail/.test(status);
+  if (CRASH_WORKER_CARD_STATUSES.has(status)) return true;
+  return snapshot.blockerCategory === 'process-crash'
+    && (status === '' || !TERMINAL_WORKER_CARD_STATUSES.has(status));
 }
 
 function redactStuckRunEvidenceText(value: string): string {
@@ -728,13 +735,15 @@ function redactStuckRunEvidenceText(value: string): string {
 function normalizeStuckRunBlockerCategory(
   snapshot: IssueWorkerCardProcessSnapshot,
 ): IssueStuckRunBlockerCategory {
+  const status = snapshot.status?.trim().toLowerCase() ?? '';
   if (snapshot.alive === false) return 'process-crash';
+  if (CRASH_WORKER_CARD_STATUSES.has(status)) return 'process-crash';
   if (snapshot.blockerCategory && snapshot.blockerCategory !== 'unknown') return snapshot.blockerCategory;
   const text = `${snapshot.status ?? ''} ${snapshot.waitingOn ?? ''}`.toLowerCase();
   if (/\bapproval\b|\bhitl\b|\bhuman\b|approval[- ]?token|pending approval|operator approval|approval-cop|approve/.test(text)) return 'approval-gate';
   if (/provider|codex|rate limit|quota|llm|model/.test(text)) return 'provider-wait';
   if (/\bci\b|ci[- ]?check|status check|check run|workflow|merge queue|github actions?/.test(text)) return 'ci-wait';
-  if (/crash|exit|dead|pid|process|fail/.test(text)) return 'process-crash';
+  if (/\b(crash(?:ed|ing)?|exit(?:ed|ing)?|dead|pid|fail(?:ed|ure|ing)?)\b/.test(text)) return 'process-crash';
   if (/dispatcher|kanban|current_run|current run|respawn|heartbeat/.test(text)) return 'dispatcher-bug';
   return 'unknown';
 }
@@ -825,7 +834,7 @@ export function detectStuckRunWatchdogFindings(
       continue;
     }
 
-    if (processStatus !== 'dead' && staleCount < minimumStaleSignals) continue;
+    if (processStatus !== 'dead' && category !== 'process-crash' && staleCount < minimumStaleSignals) continue;
 
     const evidence = [
       `heartbeatAgeMs=${heartbeatAgeMs ?? 'unknown'}`,
