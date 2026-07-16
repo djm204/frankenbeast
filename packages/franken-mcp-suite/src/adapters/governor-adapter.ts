@@ -272,8 +272,10 @@ function sanitizeMemoryExportGovernanceArgs(args: Record<string, unknown>): Reco
   if (typeof args['limit'] === 'number') {
     safe['limit'] = args['limit'];
   }
-  if (typeof args['operatorApproval'] === 'string') {
+  if (typeof args['operatorApproval'] === 'string' && args['operatorApproval'] === 'trusted-operator-approved') {
     safe['operatorApproval'] = args['operatorApproval'];
+  } else if (Object.prototype.hasOwnProperty.call(args, 'operatorApproval')) {
+    safe['operatorApproval'] = MEMORY_EXPORT_CONTEXT_REDACTION;
   }
   if (typeof args['projectId'] === 'string') {
     safe['projectId'] = args['projectId'];

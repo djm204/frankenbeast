@@ -482,9 +482,17 @@ function redactEpisodicSummary(
   redaction: MemoryExportRedactionMode,
 ): string {
   if (redaction === "none") return summary;
+  const colon = summary.indexOf(":");
+  if (colon > 0 && colon <= 200) {
+    const key = summary.slice(0, colon).trim();
+    const value = summary.slice(colon + 1).trimStart();
+    if (key.length > 0 && SENSITIVE_EXPORT_KEY.test(key)) {
+      const redactedValue = redactExportValue(value, key);
+      return `${redactExportKey(key, redaction)}: ${String(redactedValue)}`;
+    }
+  }
   const fullStringRedaction = redactExportString(summary);
   if (fullStringRedaction !== summary) return fullStringRedaction;
-  const colon = summary.indexOf(":");
   if (colon > 0 && colon <= 200) {
     const key = summary.slice(0, colon).trim();
     const value = summary.slice(colon + 1).trimStart();

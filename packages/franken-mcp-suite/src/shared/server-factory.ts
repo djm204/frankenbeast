@@ -396,9 +396,10 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
   const sanitized = sanitizeToolArgumentsForAudit(args);
   const unqualifiedToolName = unqualifyMcpToolName(toolName);
   const isMemoryReviewPropose = unqualifiedToolName === MEMORY_REVIEW_PROPOSE_TOOL;
+  const isDirectMemoryExport = unqualifiedToolName === MEMORY_EXPORT_TOOL;
   const isDirectMemoryReviewDecide = unqualifiedToolName === MEMORY_REVIEW_DECIDE_TOOL;
   const isDirectRightToForget = unqualifiedToolName === 'fbeast_memory_right_to_forget';
-  const auditedTool = unqualifiedToolName === 'fbeast_memory_right_to_forget'
+  const auditedTool = isDirectMemoryExport || isDirectMemoryReviewDecide || isMemoryReviewPropose || isDirectRightToForget
     ? unqualifiedToolName
     : typeof sanitized['tool'] === 'string'
       ? unqualifyMcpToolName(sanitized['tool'])

@@ -120,7 +120,7 @@ vi.mock("@franken/brain", () => ({
           {
             id: "evt-shared",
             type: "success",
-            summary: "password: hunter2",
+            summary: "password: correct horse battery staple",
             details: {
               apiKey: "sk_" + "secretvalue123456",
               "bob@example.com": "operator",
@@ -395,6 +395,8 @@ describe("createBrainAdapter", () => {
     expect(serialized).not.toContain("sk_" + "secretvalue123456");
     expect(serialized).not.toContain("OPENSSH PRIVATE KEY");
     expect(serialized).not.toContain("hunter2");
+    expect(serialized).not.toContain("correct horse battery staple");
+    expect(serialized).not.toContain("horse battery staple");
     expect(serialized).not.toContain("short-password-alias");
     expect(serialized).not.toContain("legacy-password-alias");
     expect(serialized).not.toContain("hooks.slack.com/services/T000/B000/SECRET");

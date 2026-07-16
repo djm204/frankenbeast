@@ -458,6 +458,20 @@ describe('createMcpServer', () => {
       });
     });
 
+    it('redacts caller-controlled tool envelopes on direct memory export validation errors', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_export', {
+        tool: 'not_the_memory_tool',
+        agentId: 'alice@example.test',
+        password: 'secret-value-that-must-not-leak',
+        redaction: 'safe',
+      })).toEqual({
+        tool: '[memory-export-args-redacted]',
+        agentId: '[memory-export-args-redacted]',
+        password: '[memory-export-args-redacted]',
+        redaction: 'safe',
+      });
+    });
+
     it('redacts direct right-to-forget selectors even when malformed args include envelope-like properties', () => {
       expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_right_to_forget', {
         tool: 'not_the_memory_tool',
