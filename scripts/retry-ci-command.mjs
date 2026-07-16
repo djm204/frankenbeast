@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 
+import { verifyExternalHelperInvocation } from './lib/external-helper-allowlist.mjs';
+
 const RETRY_ENV = 'CI_TEST_RETRIES';
 const DEFAULT_RETRIES = 0;
 
@@ -56,6 +58,12 @@ async function main() {
   const [command, ...args] = splitCommand(process.argv.slice(2));
   const retries = parseRetryCount(process.env[RETRY_ENV]);
   const totalAttempts = retries + 1;
+
+  await verifyExternalHelperInvocation({
+    helperId: 'ci-retry-command',
+    command: [command, ...args],
+    repoRoot: process.cwd(),
+  });
 
   let lastExitCode = 1;
   for (let attempt = 1; attempt <= totalAttempts; attempt += 1) {
