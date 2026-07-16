@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.0](https://github.com/djm204/frankenbeast/compare/live-bench-v0.2.12...live-bench-v0.3.0) (2026-07-16)
+
+
+### Features
+
+* **learning:** add workflow regression benchmark ([#2356](https://github.com/djm204/frankenbeast/issues/2356)) ([b9101f5](https://github.com/djm204/frankenbeast/commit/b9101f5a7d0ddace3cd730532a15b4e72af8fb05))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/observer bumped from 0.8.2 to 0.9.0
+
 ## [0.2.12](https://github.com/djm204/frankenbeast/compare/live-bench-v0.2.11...live-bench-v0.2.12) (2026-07-15)
 
 
