@@ -5,6 +5,11 @@
 - For issue-runner queue-depth/backpressure, count only startable eligible issues; blocked/HITL cards should not inflate queue depth. Defer gated issues before any plan decomposition when no plan chunks already exist, but preserve zero-token completion only for exact one-shot issue checkpoints (`impl:issue-N:done` and `harden:issue-N:done`); chunk-shaped checkpoint keys require plan coverage before completion.
 - Issue backlog aging depends on fetching old backlog rows before local score sorting. `gh issue list` must use a backlog-safe high limit and oldest-first search sort by default so stale medium/low issues are not excluded by the GitHub CLI's recent-item window before aging runs.
 
+## 2026-07-16 — Dead-letter queue Codex closeout
+- DLQ/DR restore output redaction must cover provider token literals (for example `sk-*`, `xox*`) and credentialed database URLs even when they appear inside free-text fields such as `target`, `lastError`, or nested payload strings; test fixtures should prove output does not leak the original secret substrings.
+- For DLQ file locks, treat unparseable lock timestamps as malformed stale-lock candidates and fall back to mtime-based reaping; otherwise a syntactically valid lock JSON with `acquiredAt: not-a-date` can wedge writers forever.
+- When reaping malformed DLQ locks, revalidate the moved file identity after `rename` before unlinking so a stale-lock race cannot delete a fresh active lock; when persisting retry exhaustion, normalize blank caller timestamps before writing so later queue reads do not reject the whole DLQ.
+
 ## 2026-07-15 — Webhook DNS pinning review fixes
 - For outbound webhook SSRF hardening, validate object-form allowlist origins for credentials too; URL normalization can otherwise hide deceptive `userinfo@host` entries.
 - When a webhook hostname is DNS-validated before delivery, the actual transport must consume the validated address: custom fetches should receive an IP-pinned URL plus original Host header, default HTTPS should try later validated addresses after network failures, and pinned HTTPS error bodies need async-iterable response coverage.
@@ -32,6 +37,7 @@
 - When verifying workspace package typechecks in a fresh worktree, build dependency packages (or run root `npm run build`) before package-local `tsc --noEmit`; otherwise unresolved workspace package declarations can look like feature regressions.
 
 ## 2026-07-15 — Beast process cleanup review fixes
+- For Beast worktree cleanup, scope candidates to the orchestrator-owned worktree root and branch prefix, then require a deleted tracked agent or missing agent owner before deletion; default scan APIs should be dry-run and return owner/activity/card/PR evidence for review. Even with explicit destructive cleanup, skip dirty, locked, or active-run worktrees rather than forcing data loss or aborting startup.
 - For Beast cleanup paths, treat persisted process-group ownership as verified only when the stored start-time token matches the current `/proc` start time; missing or unreadable start times should fail closed to direct-PID signaling to avoid killing a PID-reused process group.
 - Keep cleanup ownership delegated through execution-mode wrappers: container executors must forward `cleanupPendingRun()` so queued container runs can be cancelled before an attempt exists.
 - CLI signal cleanup should register and unregister all handled signals symmetrically, and long-running `restart` commands should track the target run before awaiting restart so SIGINT/SIGHUP can clean up in-flight work.
