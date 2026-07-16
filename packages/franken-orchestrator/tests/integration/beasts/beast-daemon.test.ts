@@ -284,6 +284,48 @@ describe('beast daemon', () => {
     }
   });
 
+  it('does not leave operator read-only degraded mode while dependency reads fail', async () => {
+    const services = makeDaemonServices([]).services;
+    const app = createBeastDaemonApp({ services, operatorToken });
+
+    const enter = await app.request('/v1/beasts/availability/degraded', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ reason: 'operator maintenance' }),
+    });
+    expect(enter.status).toBe(200);
+
+    vi.mocked(services.agents.listAgents).mockImplementation(() => {
+      throw new Error('agent store offline');
+    });
+    const deniedLeave = await app.request('/v1/beasts/availability/degraded', {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${operatorToken}` },
+    });
+    expect(deniedLeave.status).toBe(503);
+    expect(await deniedLeave.json()).toMatchObject({
+      error: {
+        code: 'READ_ONLY_DEGRADED_MODE_ACTIVE',
+        details: {
+          mode: 'read-only-degraded',
+          readOnly: true,
+          source: 'operator',
+        },
+      },
+    });
+
+    vi.mocked(services.agents.listAgents).mockReturnValue([]);
+    const leave = await app.request('/v1/beasts/availability/degraded', {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${operatorToken}` },
+    });
+    expect(leave.status).toBe(200);
+    expect(await leave.json()).toMatchObject({ data: { mode: 'read-write', readOnly: false } });
+  });
+
   it('enters read-only degraded mode automatically when health dependency reads fail', async () => {
     const services = makeDaemonServices([]).services;
     vi.mocked(services.agents.listAgents).mockImplementation(() => {

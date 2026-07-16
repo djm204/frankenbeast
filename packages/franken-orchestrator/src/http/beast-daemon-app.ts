@@ -170,17 +170,20 @@ export function createBeastDaemonApp(options: BeastDaemonAppOptions): Hono {
 
   app.delete('/v1/beasts/availability/degraded', auth, (c) => {
     const snapshot = availabilityMode.snapshot();
-    if (snapshot.source === 'automatic') {
-      const recovered = dependencyCountSnapshot(services, availabilityMode).availability;
-      if (recovered.readOnly) {
+    if (snapshot.readOnly) {
+      try {
+        services.agents.listAgents();
+        services.runs.listRuns();
+      } catch (error) {
+        console.warn('[beasts-daemon] Dependency read failed while leaving read-only degraded mode', error);
+        const blocked = availabilityMode.enterReadOnlyDegraded('Health dependency read failed', 'automatic');
         throw new HttpError(
           503,
           'READ_ONLY_DEGRADED_MODE_ACTIVE',
-          'Automatic read-only degraded mode remains active because dependency reads are still failing',
-          availabilityModeDenialDetails(recovered),
+          'Read-only degraded mode remains active because dependency reads are still failing',
+          availabilityModeDenialDetails(blocked),
         );
       }
-      return c.json({ data: recovered });
     }
     return c.json({ data: availabilityMode.leaveReadOnlyDegraded() });
   });
