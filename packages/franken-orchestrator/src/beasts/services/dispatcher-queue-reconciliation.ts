@@ -4,7 +4,7 @@ import { isoNow } from '@franken/types';
 
 export type DispatcherQueueReconciliationCode =
   | 'queued-run-restored'
-  | 'live-running-attempt-restored'
+  | 'terminal-attempt-restored'
   | 'stale-running-attempt-failed'
   | 'missing-running-attempt-failed'
   | 'pending-approval-restored'
@@ -152,29 +152,37 @@ function reconcileActiveRun(
     return finding;
   }
 
-  const pid = attempt.pid;
-  if (typeof pid === 'number' && pid > 0 && isPidAlive(pid)) {
-    syncTrackedAgent(repository, run, 'running', reconciledAt);
+  if (TERMINAL_RUN_STATUSES.has(attempt.status)) {
+    const restoredRun = repository.updateRun(run.id, {
+      status: attempt.status,
+      finishedAt: attempt.finishedAt ?? reconciledAt,
+      latestExitCode: attempt.exitCode ?? null,
+      stopReason: attempt.stopReason ?? null,
+    });
+    syncTrackedAgent(repository, restoredRun, trackedAgentStatusForRun(attempt.status), reconciledAt);
     const finding: DispatcherQueueReconciliationFinding = {
-      code: 'live-running-attempt-restored',
+      code: 'terminal-attempt-restored',
       runId: run.id,
       trackedAgentId: run.trackedAgentId,
       attemptId: attempt.id,
-      pid,
+      pid: attempt.pid,
       fromStatus: run.status,
-      toStatus: run.status,
-      message: `Run ${run.id} has a live recorded worker PID ${pid} after dispatcher restart.`,
+      toStatus: attempt.status,
+      message: `Run ${run.id} was running but its current attempt was already ${attempt.status}; restored the persisted terminal attempt result.`,
     };
     appendReconciliationEvent(repository, finding, reconciledAt);
     return finding;
   }
 
+  const pid = attempt.pid;
   const failedAttempt = repository.updateAttempt(attempt.id, {
     status: 'failed',
     finishedAt: reconciledAt,
-    stopReason: typeof pid === 'number' && pid > 0
-      ? 'dispatcher_restart_stale_pid'
-      : 'dispatcher_restart_missing_pid',
+    stopReason: typeof pid === 'number' && pid > 0 && isPidAlive(pid)
+      ? 'dispatcher_restart_unattached_pid'
+      : typeof pid === 'number' && pid > 0
+        ? 'dispatcher_restart_stale_pid'
+        : 'dispatcher_restart_missing_pid',
   });
   const failedRun = repository.updateRun(run.id, {
     status: 'failed',
@@ -192,7 +200,7 @@ function reconcileActiveRun(
     fromStatus: run.status,
     toStatus: 'failed',
     message: typeof pid === 'number' && pid > 0
-      ? `Run ${run.id} recorded PID ${pid}, but it is not live after dispatcher restart; marked failed for retry.`
+      ? `Run ${run.id} recorded PID ${pid}, but the restarted dispatcher cannot reattach exit handling safely; marked failed for retry.`
       : `Run ${run.id} was running with no positive PID after dispatcher restart; marked failed for retry.`,
   };
   appendReconciliationEvent(repository, finding, reconciledAt);
@@ -204,7 +212,10 @@ function reconcileTerminalRun(
   run: BeastRun,
   reconciledAt: string,
 ): DispatcherQueueReconciliationFinding {
-  syncTrackedAgent(repository, run, trackedAgentStatusForRun(run.status), reconciledAt);
+  const trackedAgent = run.trackedAgentId ? repository.getTrackedAgent(run.trackedAgentId) : undefined;
+  if (!trackedAgent?.dispatchRunId || trackedAgent.dispatchRunId === run.id) {
+    syncTrackedAgent(repository, run, trackedAgentStatusForRun(run.status), reconciledAt);
+  }
   const finding: DispatcherQueueReconciliationFinding = {
     code: 'terminal-run-restored',
     runId: run.id,
