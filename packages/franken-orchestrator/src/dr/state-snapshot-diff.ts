@@ -118,7 +118,7 @@ function recordId(
   if (subsystem === 'workerIds' && (typeof record === 'string' || typeof record === 'number')) return String(record);
   if (!isRecord(record)) return fallback;
   const idKeys = subsystem === 'approvals'
-    ? ['id', 'tokenId', 'token_id', 'approvalId', 'approval_id']
+    ? ['id', 'tokenId', 'token_id', 'approvalId', 'approval_id', 'token', 'value']
     : options.preferFallbackOverMutableDisplayName
       ? ['id', 'taskId', 'task_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key']
       : ['id', 'taskId', 'task_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key', 'name'];
@@ -135,6 +135,10 @@ function recordId(
     }
   }
   return fallback;
+}
+
+function hasRecordIdentityKey(value: Record<string, unknown>): boolean {
+  return ['id', 'taskId', 'task_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'tokenId', 'token_id', 'approvalId', 'approval_id'].some((key) => key in value);
 }
 
 function sensitiveApprovalValueForComparison(key: string, value: unknown): unknown {
@@ -166,6 +170,20 @@ function scopedRecordCompareValue(subsystem: StateSnapshotDiffSubsystem, value: 
     key,
     sensitiveApprovalValueForComparison(key, nested),
   ]));
+}
+
+function redactSourceForOutput(subsystem: StateSnapshotDiffSubsystem, source: string): string {
+  const masked = maskOpaqueSecretLiterals(source);
+  if (subsystem !== 'approvals') return masked;
+  return masked.split('/').map((segment) => {
+    if (/^(?:approvals?|approval[-_]?tokens?|tokens?|ledger|state|snapshots?)(?:\.jsonl?)?(?::\d+)?(?::approvals?)?$/iu.test(segment)) {
+      return segment;
+    }
+    if (/^[^:]+\.jsonl?(?::\d+)?$/iu.test(segment) && !/(?:token|secret|credential|bearer|refresh|access|password|api[-_]?key)/iu.test(segment)) {
+      return segment;
+    }
+    return `<sha256:${shortDigest(segment)}>`;
+  }).join('/');
 }
 
 function addRecord(
@@ -211,8 +229,8 @@ function addObjectMapRecords(
 
 function likelySubsystemFromPath(relativePath: string): StateSnapshotDiffSubsystem | undefined {
   const normalized = relativePath.toLowerCase().replaceAll(sep, '/');
-  if (/tasks?|cards?|kanban/.test(normalized)) return 'tasks';
   if (/approvals?|tokens?|ledger/.test(normalized)) return 'approvals';
+  if (/tasks?|cards?|kanban/.test(normalized)) return 'tasks';
   if (/workers?/.test(normalized)) return 'workerIds';
   if (/memory|memories/.test(normalized)) return 'memory';
   if (/cron|schedule|jobs?/.test(normalized)) return 'cron';
@@ -248,6 +266,7 @@ function extractRecordsFromJson(records: MutableSubsystemRecords, parsed: unknow
     const rootArrays: ReadonlyArray<[StateSnapshotDiffSubsystem, readonly string[]]> = [
       ['tasks', ['tasks', 'cards', 'kanbanCards', 'kanban_cards']],
       ['approvals', ['approvals', 'approvalTokens', 'approval_tokens', 'tokens', 'ledger']],
+      ['workerIds', ['workerIds', 'worker_ids', 'workers']],
       ['memory', ['memory', 'memories', 'memoryRecords', 'memory_records']],
       ['cron', ['cron', 'cronJobs', 'cron_jobs', 'jobs']],
     ];
@@ -269,6 +288,8 @@ function extractRecordsFromJson(records: MutableSubsystemRecords, parsed: unknow
       const values = Object.values(parsed);
       if (values.length > 0 && values.every(isRecord)) {
         addObjectMapRecords(records, pathSubsystem, parsed, source);
+      } else if (pathSubsystem !== 'tasks' && !hasRecordIdentityKey(parsed) && values.length > 0 && values.every((value) => !isRecord(value) && !Array.isArray(value))) {
+        addObjectMapRecords(records, pathSubsystem, parsed, source);
       } else {
         addRecord(records, pathSubsystem, recordId(parsed, source, pathSubsystem), parsed, source);
       }
@@ -278,7 +299,7 @@ function extractRecordsFromJson(records: MutableSubsystemRecords, parsed: unknow
   const workerIds = new Set<string>();
   extractWorkerIds(parsed, workerIds);
   for (const workerId of workerIds) {
-    addRecord(records, 'workerIds', workerId, { id: workerId }, source);
+    if (!records.workerIds.has(workerId)) addRecord(records, 'workerIds', workerId, { id: workerId }, source);
   }
 }
 
@@ -361,7 +382,7 @@ function diffSubsystem(
   for (const [id, afterRecord] of after) {
     const beforeRecord = before.get(id);
     if (beforeRecord === undefined) {
-      added.push({ type: 'added', id, after: redactForOutput(afterRecord.value), afterSource: afterRecord.source });
+      added.push({ type: 'added', id, after: redactForOutput(afterRecord.value), afterSource: redactSourceForOutput(subsystem, afterRecord.source) });
     } else if (stableStringify(beforeRecord.compareValue) !== stableStringify(afterRecord.compareValue)) {
       changed.push({
         type: 'changed',
@@ -369,14 +390,14 @@ function diffSubsystem(
         before: redactForOutput(beforeRecord.value),
         after: redactForOutput(afterRecord.value),
         changedFields: changedFields(beforeRecord.compareValue, afterRecord.compareValue),
-        beforeSource: beforeRecord.source,
-        afterSource: afterRecord.source,
+        beforeSource: redactSourceForOutput(subsystem, beforeRecord.source),
+        afterSource: redactSourceForOutput(subsystem, afterRecord.source),
       });
     }
   }
   for (const [id, beforeRecord] of before) {
     if (!after.has(id)) {
-      removed.push({ type: 'removed', id, before: redactForOutput(beforeRecord.value), beforeSource: beforeRecord.source });
+      removed.push({ type: 'removed', id, before: redactForOutput(beforeRecord.value), beforeSource: redactSourceForOutput(subsystem, beforeRecord.source) });
     }
   }
 

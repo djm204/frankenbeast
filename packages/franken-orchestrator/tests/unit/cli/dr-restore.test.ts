@@ -274,6 +274,57 @@ describe('dr restore-dry-run CLI', () => {
     expect(rawOutput).not.toContain(afterApprovalValue);
   });
 
+  it('redacts approval sources and handles path-scoped primitive maps without file-level noise', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dr-snapshot-path-edge-'));
+    const beforeDir = join(dir, 'before');
+    const afterDir = join(dir, 'after');
+    const output: string[] = [];
+    const beforeKanbanToken = 'kanban' + 'ApprovalTokenBefore123';
+    const afterKanbanToken = 'kanban' + 'ApprovalTokenAfter456';
+    const beforeFileToken = 'file' + 'ApprovalSecretBefore123';
+    const afterFileToken = 'file' + 'ApprovalSecretAfter456';
+
+    try {
+      await mkdir(join(beforeDir, 'kanban'), { recursive: true });
+      await mkdir(join(afterDir, 'kanban'), { recursive: true });
+      await mkdir(join(beforeDir, 'approvals'), { recursive: true });
+      await mkdir(join(afterDir, 'approvals'), { recursive: true });
+      await writeFile(join(beforeDir, 'kanban', 'approval-tokens.json'), JSON.stringify([beforeKanbanToken]), 'utf8');
+      await writeFile(join(afterDir, 'kanban', 'approval-tokens.json'), JSON.stringify([afterKanbanToken]), 'utf8');
+      await writeFile(join(beforeDir, 'approvals', `${beforeFileToken}.json`), JSON.stringify({ id: 'approval-file-before', state: 'pending' }), 'utf8');
+      await writeFile(join(afterDir, 'approvals', `${afterFileToken}.json`), JSON.stringify({ id: 'approval-file-after', state: 'pending' }), 'utf8');
+      await writeFile(join(beforeDir, 'memory.json'), JSON.stringify({ k1: 'old', k2: 'same' }), 'utf8');
+      await writeFile(join(afterDir, 'memory.json'), JSON.stringify({ k1: 'new', k2: 'same', k3: 'added' }), 'utf8');
+      await writeFile(join(beforeDir, 'workers.json'), JSON.stringify({ workerIds: ['worker-a', 'worker-stable'] }), 'utf8');
+      await writeFile(join(afterDir, 'workers.json'), JSON.stringify({ workerIds: ['worker-stable', 'worker-b'] }), 'utf8');
+
+      await handleDrCommand({
+        action: 'snapshot-diff',
+        backupManifestPath: beforeDir,
+        liveManifestPath: afterDir,
+        print: (message) => output.push(message),
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+
+    const rawOutput = output.join('\n');
+    const report = JSON.parse(rawOutput) as {
+      summary: { bySubsystem: Record<string, { added: number; removed: number; changed: number }> };
+      diffs: Array<{ subsystem: string; added: Array<{ id: string }>; removed: Array<{ id: string }>; changed: Array<{ id: string }> }>;
+    };
+
+    expect(report.summary.bySubsystem.approvals).toEqual({ added: 2, removed: 2, changed: 0 });
+    expect(report.summary.bySubsystem.memory).toEqual({ added: 1, removed: 0, changed: 1 });
+    expect(report.summary.bySubsystem.workerIds).toEqual({ added: 1, removed: 1, changed: 0 });
+    expect(report.diffs.find((diff) => diff.subsystem === 'memory')?.changed[0]?.id).toBe('k1');
+    expect(report.diffs.find((diff) => diff.subsystem === 'memory')?.added[0]?.id).toBe('k3');
+    expect(rawOutput).not.toContain(beforeKanbanToken);
+    expect(rawOutput).not.toContain(afterKanbanToken);
+    expect(rawOutput).not.toContain(beforeFileToken);
+    expect(rawOutput).not.toContain(afterFileToken);
+  });
+
   it('reads JSONL snapshots and hashes approval record identifiers', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'franken-dr-snapshot-jsonl-diff-'));
     const beforeDir = join(dir, 'before');
