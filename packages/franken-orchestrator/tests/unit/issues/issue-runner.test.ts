@@ -1588,6 +1588,7 @@ describe('IssueRunner', () => {
 
     it('defers partially checkpointed blocked issueRuntime work until the gate clears', async () => {
       const logger = mockLogger();
+      const graphBuilder = mockGraphBuilder();
       const issueRuntime = makeIssueRuntimeSupport();
       vi.mocked(issueRuntime.checkpointForIssue).mockReturnValue(mockCheckpoint(new Set(['impl:01_issue-17:done'])));
       vi.mocked(issueRuntime.artifactsForIssue).mockReturnValue({
@@ -1599,6 +1600,7 @@ describe('IssueRunner', () => {
       const config = makeConfig({
         issues: [makeIssue({ number: 17, labels: ['blocked'] })],
         triageResults: [makeTriage(17)],
+        graphBuilder,
         issueRuntime,
         logger,
       });
@@ -1613,11 +1615,11 @@ describe('IssueRunner', () => {
       expect(logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('[issues] Deferred issue #17: deferred by scheduler: blocked issue'),
         expect.objectContaining({
-          graphHasCheckpointProgress: true,
-          graphComplete: false,
+          schedulingScore: expect.objectContaining({ blockerStatus: 'blocked' }),
         }),
         'issues',
       );
+      expect(graphBuilder.buildChunkDefinitionsForIssue).not.toHaveBeenCalled();
       expect(mockRun).not.toHaveBeenCalled();
     });
 

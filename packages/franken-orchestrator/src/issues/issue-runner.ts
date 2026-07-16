@@ -1066,6 +1066,17 @@ function checkpointEntriesHaveIssueProgress(
   return checkpointEntriesHavePlanProgress(entries, issueNumber, planDir);
 }
 
+function checkpointEntriesAreCompleteWithoutPlan(
+  entries: ReadonlySet<string> | undefined,
+  issueSpecificCheckpoint: boolean,
+): boolean {
+  if (!issueSpecificCheckpoint || entries === undefined || entries.size === 0) return false;
+  const doneEntries = [...entries];
+  return doneEntries.every((entry) => entry.endsWith(':done'))
+    && doneEntries.some((entry) => entry.startsWith('impl:'))
+    && doneEntries.some((entry) => entry.startsWith('harden:'));
+}
+
 function checkpointHasTaskProgress(issueCheckpoint: ICheckpointStore, taskId: string): boolean {
   return (
     issueCheckpoint.has(issueCompletionKey(taskId)) ||
@@ -1273,7 +1284,29 @@ export class IssueRunner {
     const checkpointedPlanChunkPaths = checkpointHasIssueProgress ? listPlanChunkPaths(planDir) : [];
     const schedulingScore = evaluateIssueSchedulingScore(issue);
 
-    if (schedulingScore.blockerStatus !== 'eligible' && !checkpointHasIssueProgress) {
+    if (
+      schedulingScore.blockerStatus !== 'eligible'
+      && checkpointedPlanChunkPaths.length === 0
+      && checkpointEntriesAreCompleteWithoutPlan(checkpointEntries, issueRuntime !== undefined)
+    ) {
+      logger?.info(
+        `[issues] Issue #${issue.number} already completed (checkpoint)`,
+        { issueNumber: issue.number, schedulingScore, checkpointCompleteWithoutPlan: true },
+        'issues',
+      );
+      appendIssueLog(logFile, `Issue #${issue.number} already complete from checkpoint`);
+      return {
+        issueNumber: issue.number,
+        issueTitle: issue.title,
+        status: 'fixed',
+        tokensUsed: 0,
+      };
+    }
+
+    if (
+      schedulingScore.blockerStatus !== 'eligible'
+      && (!checkpointHasIssueProgress || checkpointedPlanChunkPaths.length === 0)
+    ) {
       const reason = `deferred by scheduler: ${schedulingScore.blockerStatus} issue is waiting on human/dependency gate`;
       logger?.warn(
         `[issues] Deferred issue #${issue.number}: ${reason}`,
