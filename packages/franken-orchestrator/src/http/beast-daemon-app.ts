@@ -61,19 +61,24 @@ function dependencyCountSnapshot(services: BeastServiceBundle, availabilityMode:
   readonly availability: AvailabilityModeSnapshot;
 } {
   try {
+    const agents = services.agents.listAgents().length;
+    const runs = services.runs.listRuns().length;
+    const availability = availabilityMode.snapshot();
+    const recoveredAvailability = availability.readOnly && availability.source === 'automatic'
+      ? availabilityMode.leaveReadOnlyDegraded()
+      : availability;
     return {
-      agents: services.agents.listAgents().length,
-      runs: services.runs.listRuns().length,
-      availability: availabilityMode.snapshot(),
+      agents,
+      runs,
+      availability: recoveredAvailability,
     };
   } catch (error) {
-    const reason = error instanceof Error && error.message
-      ? `Health dependency read failed: ${error.message}`
-      : 'Health dependency read failed';
+    const diagnostic = error instanceof Error && error.message ? error.message : String(error);
+    console.warn('[beasts-daemon] Health dependency read failed; entering read-only degraded mode', diagnostic);
     return {
       agents: null,
       runs: null,
-      availability: availabilityMode.enterReadOnlyDegraded(reason, 'automatic'),
+      availability: availabilityMode.enterReadOnlyDegraded('Health dependency read failed', 'automatic'),
     };
   }
 }

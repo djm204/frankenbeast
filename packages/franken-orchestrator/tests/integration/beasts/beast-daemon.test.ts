@@ -301,7 +301,7 @@ describe('beast daemon', () => {
       availability: {
         mode: 'read-only-degraded',
         readOnly: true,
-        reason: 'Health dependency read failed: agent store offline',
+        reason: 'Health dependency read failed',
         source: 'automatic',
       },
     });
@@ -324,6 +324,18 @@ describe('beast daemon', () => {
           readOnly: true,
           source: 'automatic',
         },
+      },
+    });
+
+    vi.mocked(services.agents.listAgents).mockReturnValue([]);
+    const recoveredHealth = await app.request('/health');
+    expect(recoveredHealth.status).toBe(200);
+    expect(await recoveredHealth.json()).toMatchObject({
+      ok: true,
+      status: 'ok',
+      availability: {
+        mode: 'read-write',
+        readOnly: false,
       },
     });
   });
