@@ -168,6 +168,26 @@ function contextValueTargetsTool(value: unknown, toolName: string): boolean {
   return typeof value === 'string' && unqualifyMcpActionName(value) === toolName;
 }
 
+function trustedGovernanceProvenance(context: string): Record<string, string> {
+  try {
+    const parsed = JSON.parse(context) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const record = parsed as Record<string, unknown>;
+    return {
+      ...(record['__fbeastGovernanceSource'] === 'central-dispatch' ? { __fbeastGovernanceSource: 'central-dispatch' } : {}),
+      ...(record['__fbeastHookSource'] === 'fbeast-hook' ? { __fbeastHookSource: 'fbeast-hook' } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
+
+function redactedGovernanceEnvelope(context: string, redaction: string, extras: Record<string, unknown> = {}): string {
+  const provenance = trustedGovernanceProvenance(context);
+  if (Object.keys(provenance).length === 0) return redaction;
+  return JSON.stringify({ ...provenance, ...extras, context: redaction });
+}
+
 function contextTargetsTool(context: string, toolName: string): boolean {
   try {
     const parsed = JSON.parse(context) as unknown;
@@ -218,7 +238,8 @@ function memoryReviewDecisionArgsFromContext(context: string, options: { require
 
 function redactRightToForgetGovernanceContext(action: string, context: string): string {
   if (unqualifyMcpActionName(action) !== 'fbeast_memory_right_to_forget') return context;
-  return '[right-to-forget-context-redacted]';
+  const dryRun = isRightToForgetDryRun(action, context);
+  return redactedGovernanceEnvelope(context, '[right-to-forget-context-redacted]', { dryRun });
 }
 
 function redactMemoryReviewProposalGovernanceContext(action: string, context: string): string {
@@ -264,6 +285,12 @@ function redactMemoryReviewDecisionGovernanceContext(action: string, context: st
 
 function sanitizeMemoryExportGovernanceArgs(args: Record<string, unknown>): Record<string, unknown> {
   const safe: Record<string, unknown> = {};
+  if (args['__fbeastGovernanceSource'] === 'central-dispatch') {
+    safe['__fbeastGovernanceSource'] = 'central-dispatch';
+  }
+  if (args['__fbeastHookSource'] === 'fbeast-hook') {
+    safe['__fbeastHookSource'] = 'fbeast-hook';
+  }
   if (typeof args['readScope'] === 'string' && ['all', 'shared', 'agent'].includes(args['readScope'])) {
     safe['readScope'] = args['readScope'];
   }

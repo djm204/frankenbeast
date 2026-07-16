@@ -88,6 +88,7 @@ describe('fbeast-hook runtime', () => {
     expect(result.exitCode).toBe(0);
     expect(result.observerLogs).toHaveLength(1);
     expect(JSON.parse(result.observerLogs[0]!.metadata)).toEqual({
+      __fbeastHookSource: 'fbeast-hook',
       toolName: 'read_file',
       payload: streamedPayload,
       phase: 'post-tool',
@@ -103,6 +104,7 @@ describe('fbeast-hook runtime', () => {
     expect(result.exitCode).toBe(0);
     expect(result.observerLogs).toHaveLength(1);
     expect(JSON.parse(result.observerLogs[0]!.metadata)).toEqual({
+      __fbeastHookSource: 'fbeast-hook',
       toolName: 'fbeast_memory_review_propose',
       payload: '[memory-review-result-redacted]',
       phase: 'post-tool',
@@ -119,6 +121,7 @@ describe('fbeast-hook runtime', () => {
     expect(result.exitCode).toBe(0);
     expect(result.observerLogs).toHaveLength(1);
     expect(JSON.parse(result.observerLogs[0]!.metadata)).toEqual({
+      __fbeastHookSource: 'fbeast-hook',
       toolName: 'fbeast_memory_export',
       payload: '[memory-review-result-redacted]',
       phase: 'post-tool',
@@ -135,6 +138,7 @@ describe('fbeast-hook runtime', () => {
     expect(result.exitCode).toBe(0);
     expect(result.observerLogs).toHaveLength(1);
     expect(JSON.parse(result.observerLogs[0]!.metadata)).toEqual({
+      __fbeastHookSource: 'fbeast-hook',
       toolName: 'execute_tool',
       payload: '[memory-review-result-redacted]',
       phase: 'post-tool',
@@ -151,6 +155,7 @@ describe('fbeast-hook runtime', () => {
     expect(result.exitCode).toBe(0);
     expect(result.observerLogs).toHaveLength(1);
     expect(JSON.parse(result.observerLogs[0]!.metadata)).toEqual({
+      __fbeastHookSource: 'fbeast-hook',
       toolName: 'mcp__fbeast-memory__fbeast_memory_review_list',
       payload: '[memory-review-result-redacted]',
       phase: 'post-tool',
@@ -166,6 +171,7 @@ describe('fbeast-hook runtime', () => {
     expect(result.exitCode).toBe(0);
     expect(result.observerLogs).toHaveLength(1);
     expect(JSON.parse(result.observerLogs[0]!.metadata)).toEqual({
+      __fbeastHookSource: 'fbeast-hook',
       toolName: 'read_file',
       payload: '',
       phase: 'post-tool',

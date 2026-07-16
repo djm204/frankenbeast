@@ -172,7 +172,7 @@ export async function runHook(
     const rawPostPayload = payload || streamedPayload;
     await resolvedDeps.observer.log({
       event: 'tool_call',
-      metadata: JSON.stringify({ toolName, payload: redactPostToolPayload(toolName, rawPostPayload), phase }),
+      metadata: JSON.stringify({ [HOOK_GOVERNANCE_SOURCE_KEY]: HOOK_GOVERNANCE_SOURCE, toolName, payload: redactPostToolPayload(toolName, rawPostPayload), phase }),
       sessionId: resolvedDeps.sessionId(),
     });
     process.stdout.write(JSON.stringify({ logged: true }) + '\n');

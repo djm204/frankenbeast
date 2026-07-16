@@ -162,6 +162,13 @@ vi.mock("better-sqlite3", () => ({
                 reason: "hook pre-tool approval",
                 createdAt: "2026-07-16T14:00:00.000Z",
               },
+              {
+                action: "fbeast_memory_right_to_forget",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", dryRun: false, context: "[right-to-forget-context-redacted]" }),
+                decision: "approved",
+                reason: "redacted central deletion approval",
+                createdAt: "2026-07-16T14:05:00.000Z",
+              },
             ];
           }
           if (sql.includes("FROM audit_trail")) {
@@ -233,8 +240,28 @@ vi.mock("better-sqlite3", () => ({
               },
               {
                 eventType: "tool_call",
-                payload: JSON.stringify({ toolName: "fbeast_memory_store", phase: "post-tool", ok: true, args: { agentId: "agent-hook-post", profile: "hook-test", type: "working" } }),
+                payload: JSON.stringify({ toolName: "fbeast_memory_query", phase: "post-tool", ok: true, args: { agentId: "agent-forged-phase", profile: "forgery-test", type: "working" } }),
+                createdAt: "2026-07-16T13:55:06.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ source: "central-dispatch", toolName: "execute_tool", ok: true, args: { toolName: "execute_tool", agentId: "agent-self-execute", profile: "execute-self-test" } }),
+                createdAt: "2026-07-16T13:58:00.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastHookSource: "fbeast-hook", toolName: "fbeast_memory_store", phase: "post-tool", ok: true, args: { agentId: "agent-hook-post", profile: "hook-test", type: "working" } }),
                 createdAt: "2026-07-16T14:00:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ source: "central-dispatch", toolName: "fbeast_memory_store", ok: true, args: { agentId: "agent-source-dedupe", profile: "source-dedupe-test", type: "working" } }),
+                createdAt: "2026-07-16T14:10:00.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastHookSource: "fbeast-hook", toolName: "fbeast_memory_store", phase: "post-tool", ok: true, args: { agentId: "agent-source-dedupe", profile: "source-dedupe-test", type: "working" } }),
+                createdAt: "2026-07-16T14:10:05.000Z",
               },
             ];
           }
@@ -876,8 +903,8 @@ describe("createBrainAdapter", () => {
 
     const report = await brain.memoryAccessAuditReport({ tool: "fbeast_memory_right_to_forget", limit: 20 });
 
-    expect(report.count).toBe(3);
-    expect(report.summary.byOperation).toEqual({ "delete:dry_run": 2, delete: 1 });
+    expect(report.count).toBe(4);
+    expect(report.summary.byOperation).toEqual({ "delete:dry_run": 2, delete: 2 });
   });
 
   it("bounds memory access audit source scans in SQL", async () => {
@@ -952,6 +979,37 @@ describe("createBrainAdapter", () => {
 
     expect(report.count).toBe(0);
     expect(report.events).toEqual([]);
+  });
+
+  it("ignores self-recursive execute_tool audit wrappers", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "execute-self-test", limit: 20 });
+
+    expect(report.count).toBe(0);
+    expect(report.events).toEqual([]);
+  });
+
+  it("keeps redacted central governor provenance for memory deletions", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ tool: "fbeast_memory_right_to_forget", decision: "approved", limit: 20 });
+
+    expect(report.events.some((event) => event.operation === "delete" && event.reason === "redacted central deletion approval")).toBe(true);
+  });
+
+  it("deduplicates central dispatch and hook audit-trail rows without merging repeated hook rows", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "source-dedupe-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      source: "audit_trail",
+      tool: "fbeast_memory_store",
+      agentId: "agent-source-dedupe",
+      operation: "write",
+    });
   });
 
   it("includes trusted hook-based memory access records", async () => {

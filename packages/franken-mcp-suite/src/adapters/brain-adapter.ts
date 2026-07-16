@@ -89,6 +89,12 @@ export interface MemoryAccessAuditEvent {
   reason: string;
 }
 
+type MemoryAccessAuditSourceDetail = "central-dispatch" | "fbeast-hook";
+
+interface MemoryAccessAuditEventInternal extends MemoryAccessAuditEvent {
+  sourceDetail?: MemoryAccessAuditSourceDetail;
+}
+
 export interface MemoryAccessAuditReport {
   generatedAt: string;
   filters: MemoryAccessAuditReportInput;
@@ -498,12 +504,21 @@ function nestedAuditTool(context: Record<string, unknown>): string | undefined {
     ?? stringAuditField(context, "toolName");
 }
 
+function nestedMemoryAuditContext(toolName: string, context: Record<string, unknown>): { tool: string; args: Record<string, unknown> } | undefined {
+  if (unqualifyToolName(toolName) !== "execute_tool") return undefined;
+  const nestedTool = nestedAuditTool(context);
+  if (!nestedTool) return undefined;
+  const nestedArgs = auditToolArgs(context);
+  if (unqualifyToolName(nestedTool) === "execute_tool" && nestedArgs === context) return undefined;
+  return { tool: nestedTool, args: nestedArgs };
+}
+
 function inferMemoryAccess(toolName: string, context: Record<string, unknown>): { operation: string; targetStore: string; targetClass: string } {
   const unqualified = unqualifyToolName(toolName);
   const defaults = MEMORY_ACCESS_TOOL_OPERATIONS[unqualified] ?? { operation: "unknown", targetStore: "memory", targetClass: "memory-access" };
-  const nestedTool = nestedAuditTool(context);
-  if (unqualified === "execute_tool" && nestedTool) {
-    return inferMemoryAccess(nestedTool, auditToolArgs(context));
+  const nested = nestedMemoryAuditContext(toolName, context);
+  if (nested) {
+    return inferMemoryAccess(nested.tool, nested.args);
   }
   const accessArgs = auditToolArgs(context);
   const action = stringAuditField(accessArgs, "action");
@@ -524,9 +539,9 @@ function memoryAuditToolName(toolName: string, context: Record<string, unknown> 
   const unqualified = unqualifyToolName(toolName);
   if (Object.prototype.hasOwnProperty.call(MEMORY_ACCESS_TOOL_OPERATIONS, unqualified)) return unqualified;
   if (unqualified !== "execute_tool") return undefined;
-  const nestedTool = nestedAuditTool(context);
-  if (!nestedTool) return undefined;
-  return memoryAuditToolName(nestedTool, auditToolArgs(context));
+  const nested = nestedMemoryAuditContext(toolName, context);
+  if (!nested) return undefined;
+  return memoryAuditToolName(nested.tool, nested.args);
 }
 
 function includeMemoryAuditTool(toolName: string, context: Record<string, unknown> = {}): boolean {
@@ -563,7 +578,13 @@ function hasTrustedGovernorProvenance(context: Record<string, unknown>): boolean
 
 function hasTrustedAuditTrailProvenance(payload: Record<string, unknown>): boolean {
   return payload["source"] === CENTRAL_AUDIT_SOURCE
-    || payload["phase"] === "post-tool";
+    || payload[HOOK_GOVERNANCE_SOURCE_KEY] === HOOK_GOVERNANCE_SOURCE;
+}
+
+function auditTrailSourceDetail(payload: Record<string, unknown>): MemoryAccessAuditSourceDetail | undefined {
+  if (payload["source"] === CENTRAL_AUDIT_SOURCE) return "central-dispatch";
+  if (payload[HOOK_GOVERNANCE_SOURCE_KEY] === HOOK_GOVERNANCE_SOURCE) return "fbeast-hook";
+  return undefined;
 }
 
 const SAFE_AUDIT_DECISIONS = new Set([
@@ -619,7 +640,7 @@ function auditOperationsCorrelate(left: string, right: string): boolean {
   return left === right;
 }
 
-function auditEventsCorrelate(left: MemoryAccessAuditEvent, right: MemoryAccessAuditEvent): boolean {
+function auditEventsCorrelate(left: MemoryAccessAuditEventInternal, right: MemoryAccessAuditEventInternal): boolean {
   return left.tool === right.tool
     && auditOperationsCorrelate(left.operation, right.operation)
     && auditValuesCorrelate(left.agentId, right.agentId)
@@ -649,7 +670,7 @@ function strongerAuditDecision(left: string, right: string): string {
     : leftDecision;
 }
 
-function mergeAuditEvents(left: MemoryAccessAuditEvent, right: MemoryAccessAuditEvent): MemoryAccessAuditEvent {
+function mergeAuditEvents(left: MemoryAccessAuditEventInternal, right: MemoryAccessAuditEventInternal): MemoryAccessAuditEventInternal {
   const mergedDecision = strongerAuditDecision(left.decision, right.decision);
   const agentId = richerAuditField(left.agentId, right.agentId);
   const cardId = richerAuditField(left.cardId, right.cardId);
@@ -676,17 +697,22 @@ function mergeAuditEvents(left: MemoryAccessAuditEvent, right: MemoryAccessAudit
   if (repo !== undefined) merged.repo = repo;
   return merged;
 }
-function dedupeMemoryAccessEvents(events: MemoryAccessAuditEvent[]): MemoryAccessAuditEvent[] {
-  const deduped: MemoryAccessAuditEvent[] = [];
-  const mergedSources: Array<Set<MemoryAccessAuditEvent["source"]>> = [];
+function auditEventSourceKey(event: MemoryAccessAuditEventInternal): string {
+  return event.sourceDetail === undefined ? event.source : `${event.source}:${event.sourceDetail}`;
+}
+
+function dedupeMemoryAccessEvents(events: MemoryAccessAuditEventInternal[]): MemoryAccessAuditEventInternal[] {
+  const deduped: MemoryAccessAuditEventInternal[] = [];
+  const mergedSources: Array<Set<string>> = [];
   for (const event of events) {
     const eventTime = auditTimestampMs(event.timestamp);
+    const eventSourceKey = auditEventSourceKey(event);
     let duplicateIndex = -1;
     let closestDistance = Number.POSITIVE_INFINITY;
     for (let index = 0; index < deduped.length; index += 1) {
       const candidate = deduped[index];
-      if (!candidate || candidate.source === event.source) continue;
-      if (mergedSources[index]?.has(event.source)) continue;
+      if (!candidate || auditEventSourceKey(candidate) === eventSourceKey) continue;
+      if (mergedSources[index]?.has(eventSourceKey)) continue;
       if (!auditEventsCorrelate(candidate, event)) continue;
       const candidateTime = auditTimestampMs(candidate.timestamp);
       const distance = Math.abs(candidateTime - eventTime);
@@ -697,16 +723,22 @@ function dedupeMemoryAccessEvents(events: MemoryAccessAuditEvent[]): MemoryAcces
     }
     if (duplicateIndex < 0) {
       deduped.push(event);
-      mergedSources.push(new Set([event.source]));
+      mergedSources.push(new Set([eventSourceKey]));
       continue;
     }
     const existing = deduped[duplicateIndex];
     if (existing !== undefined) {
       deduped[duplicateIndex] = mergeAuditEvents(existing, event);
-      mergedSources[duplicateIndex]?.add(event.source);
+      mergedSources[duplicateIndex]?.add(eventSourceKey);
     }
   }
   return deduped;
+}
+
+function publicAuditEvent(event: MemoryAccessAuditEventInternal): MemoryAccessAuditEvent {
+  const publicEvent: Partial<MemoryAccessAuditEventInternal> = { ...event };
+  delete publicEvent.sourceDetail;
+  return publicEvent as MemoryAccessAuditEvent;
 }
 
 function sqliteAuditTimestamp(value: string): string {
@@ -1118,7 +1150,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
       const reportDb = new Database(dbPath);
       configureBrainAdapterDb(reportDb);
       try {
-        const events: MemoryAccessAuditEvent[] = [];
+        const events: MemoryAccessAuditEventInternal[] = [];
         const governorTimeFilter = auditSqlTimeClause("created_at", input);
         const governorWhere = governorTimeFilter.clause
           ? `${governorTimeFilter.clause} AND (action LIKE '%fbeast_memory%' OR action LIKE '%execute_tool%' OR context LIKE '%fbeast_memory%')`
@@ -1169,17 +1201,18 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
             AND json_valid(payload)
             AND (
               json_extract(payload, '$.source') = ?
-              OR json_extract(payload, '$.phase') = 'post-tool'
+              OR json_extract(payload, '$.__fbeastHookSource') = ?
             )
             AND (payload LIKE '%fbeast_memory%' OR payload LIKE '%execute_tool%')
             ${auditTimeCondition}
           ORDER BY id DESC
           ${sqlLimitClause(scanLimit)}
-        `).all(CENTRAL_AUDIT_SOURCE, ...auditTimeFilter.params, ...sqlLimitParams(scanLimit)) as Array<{ eventType: string; payload: string; createdAt: string }>
+        `).all(CENTRAL_AUDIT_SOURCE, HOOK_GOVERNANCE_SOURCE, ...auditTimeFilter.params, ...sqlLimitParams(scanLimit)) as Array<{ eventType: string; payload: string; createdAt: string }>
           : [];
         for (const row of auditRows) {
           const payload = parseAuditContext(row.payload);
           if (!hasTrustedAuditTrailProvenance(payload)) continue;
+          const sourceDetail = auditTrailSourceDetail(payload);
           const toolName = stringAuditField(payload, "toolName") ?? stringAuditField(payload, "tool") ?? "unknown";
           if (!includeMemoryAuditTool(toolName, payload)) continue;
           const access = inferMemoryAccess(toolName, payload);
@@ -1196,6 +1229,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
             ...(profile ? { profile } : {}),
             ...(repo ? { repo } : {}),
             source: "audit_trail" as const,
+            ...(sourceDetail ? { sourceDetail } : {}),
             tool: auditedTool,
             operation: access.operation,
             targetStore: access.targetStore,
@@ -1207,7 +1241,8 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
 
         const filtered = filterMemoryAccessEvents(dedupeMemoryAccessEvents(events), input)
           .sort((a, b) => auditTimestampMs(b.timestamp) - auditTimestampMs(a.timestamp))
-          .slice(0, limit);
+          .slice(0, limit)
+          .map(publicAuditEvent);
         return {
           generatedAt: isoNow(),
           filters: input,
