@@ -59,6 +59,7 @@ export interface BeastWorktreeCleanupInput extends Omit<BeastWorktreeCleanupPlan
 
 const DEFAULT_WORKTREES_DIR = join('.frankenbeast', '.worktrees');
 const DEFAULT_BRANCH_PREFIX = 'beast/';
+const ACTIVE_RUN_STATUSES = new Set(['queued', 'interviewing', 'running', 'pending_approval']);
 
 function defaultRunGit(args: readonly string[], cwd: string): string {
   return execFileSync('git', [...args], {
@@ -118,6 +119,10 @@ function worktreeAgentId(worktreesRoot: string, worktreePath: string): string | 
   return relativePath;
 }
 
+function isActiveRun(run: BeastRun): boolean {
+  return ACTIVE_RUN_STATUSES.has(run.status);
+}
+
 function runActivityTime(run: BeastRun): string | undefined {
   return run.lastHeartbeatAt ?? run.finishedAt ?? run.startedAt ?? run.createdAt;
 }
@@ -149,12 +154,18 @@ export function planAbandonedBeastWorktreeCleanup(
     runs.push(run);
     runsByAgentId.set(run.trackedAgentId, runs);
   }
+  const activeRunAgentIds = new Set(
+    input.runs
+      .filter((run) => run.trackedAgentId && isActiveRun(run))
+      .map((run) => run.trackedAgentId as string),
+  );
   return input.worktrees
     .map((worktree): BeastWorktreeCleanupCandidate | undefined => {
       if (!worktree.branch?.startsWith(branchPrefix)) return undefined;
       const agentId = worktreeAgentId(worktreesRoot, worktree.path);
       if (!agentId) return undefined;
       const agent = agentsById.get(agentId);
+      if (activeRunAgentIds.has(agentId)) return undefined;
       const agentRuns = runsByAgentId.get(agentId) ?? [];
       const lastActivityAt = newestTime(agentRuns.map(runActivityTime));
       const latestRun = [...agentRuns].sort((left, right) => runActivityTime(right)?.localeCompare(runActivityTime(left) ?? '') ?? 0)[0];
@@ -188,14 +199,21 @@ export function cleanupAbandonedBeastWorktrees(input: BeastWorktreeCleanupInput)
 
   if (input.dryRun !== false) return plan;
 
+  const cleaned: BeastWorktreeCleanupCandidate[] = [];
   for (const candidate of plan) {
-    runGit(['worktree', 'remove', '--force', candidate.path], input.projectRoot);
-    if (branchExists(runGit, input.projectRoot, candidate.branchName)) {
-      runGit(['branch', '-D', candidate.branchName], input.projectRoot);
+    try {
+      if (runGit(['status', '--porcelain'], candidate.path).length > 0) continue;
+      runGit(['worktree', 'remove', '--force', candidate.path], input.projectRoot);
+      if (branchExists(runGit, input.projectRoot, candidate.branchName)) {
+        runGit(['branch', '-D', candidate.branchName], input.projectRoot);
+      }
+      cleaned.push(candidate);
+    } catch {
+      continue;
     }
   }
 
-  return plan;
+  return cleaned;
 }
 
 function isGitRepository(runGit: GitRunner, projectRoot: string): boolean {

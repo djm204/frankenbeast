@@ -116,6 +116,29 @@ describe('git worktree isolation', () => {
     expect(plan.map((entry) => entry.branchName)).toEqual([`beast/${deletedAgent.id}`, 'beast/agent-orphan']);
   });
 
+  it('refuses deleted or missing-owner worktrees that still have active runs', () => {
+    const projectRoot = '/repo';
+    const worktreesDir = '/repo/.frankenbeast/.worktrees';
+    const deletedAgent = trackedAgent('agent-deleted', 'deleted');
+
+    const plan = planAbandonedBeastWorktreeCleanup({
+      agents: [deletedAgent],
+      branchPrefix: 'beast/',
+      projectRoot,
+      runs: [
+        beastRun({ id: 'run-deleted', status: 'running', trackedAgentId: deletedAgent.id }),
+        beastRun({ id: 'run-orphan', status: 'queued', trackedAgentId: 'agent-orphan' }),
+      ],
+      worktrees: [
+        { path: `${worktreesDir}/${deletedAgent.id}`, branch: `beast/${deletedAgent.id}` },
+        { path: `${worktreesDir}/agent-orphan`, branch: 'beast/agent-orphan' },
+      ],
+      worktreesDir,
+    });
+
+    expect(plan).toEqual([]);
+  });
+
   it('keeps cleanup dry-run by default', () => {
     const projectRoot = '/repo';
     const runGit = vi.fn((args: readonly string[]): string => {
@@ -142,6 +165,44 @@ describe('git worktree isolation', () => {
 
     expect(cleaned).toHaveLength(1);
     expect(runGit).not.toHaveBeenCalledWith(['worktree', 'remove', '--force', '/repo/.frankenbeast/.worktrees/agent-z'], projectRoot);
+  });
+
+  it('skips dirty or locked worktrees during destructive cleanup', () => {
+    const projectRoot = '/repo';
+    const runGit = vi.fn((args: readonly string[], cwd: string): string => {
+      if (args[0] === 'rev-parse' && args[1] === '--is-inside-work-tree') return 'true';
+      if (args[0] === 'worktree' && args[1] === 'list') {
+        return [
+          'worktree /repo/.frankenbeast/.worktrees/agent-dirty',
+          'HEAD abc',
+          'branch refs/heads/beast/agent-dirty',
+          '',
+          'worktree /repo/.frankenbeast/.worktrees/agent-locked',
+          'HEAD abc',
+          'branch refs/heads/beast/agent-locked',
+          '',
+        ].join('\n');
+      }
+      if (args[0] === 'status') return cwd.endsWith('agent-dirty') ? ' M output.txt' : '';
+      if (args[0] === 'worktree' && args[1] === 'remove' && String(args[3]).endsWith('agent-locked')) {
+        throw new Error('locked');
+      }
+      return '';
+    });
+
+    const cleaned = cleanupAbandonedBeastWorktrees({
+      agents: [],
+      branchPrefix: 'beast/',
+      dryRun: false,
+      projectRoot,
+      runGit,
+      runs: [],
+      worktreesDir: '.frankenbeast/.worktrees',
+    });
+
+    expect(cleaned).toEqual([]);
+    expect(runGit).not.toHaveBeenCalledWith(['branch', '-D', 'beast/agent-dirty'], projectRoot);
+    expect(runGit).not.toHaveBeenCalledWith(['branch', '-D', 'beast/agent-locked'], projectRoot);
   });
 
   it('executes the abandoned-worktree cleanup plan in sorted order and deletes owned branches', () => {
