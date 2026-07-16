@@ -249,3 +249,8 @@
 - 2026-07-15 — Webhook egress allowlists: match exact public HTTPS targets, reject credentials/query/fragment/path traversal, mirror private-host aliases from the orchestrator egress policy, resolve DNS before every network attempt including retries, and add regression tests for DNS rebinding-style private answers.
 - 2026-07-15 — MCP memory scoping: avoid encoding agent scope solely in user-visible keys or summaries. Store explicit scope metadata, use reversible internal key encoding for physical storage, keep logical keys in query/frontload output, and fetch/filter uncapped episodic rows before applying visible result limits so other agents' rows cannot starve the requested scope.
 - 2026-07-15 — DR backup review hardening: encrypted state backups should back up only the requested state tree plus explicit sibling DBs, never keys/cache/old artifacts; reject live SQLite sidecars (`-wal`, `-shm`, `-journal`), validate dry-run restore targets, and quarantine approval ledgers rather than reactivating stale approvals.
+
+## 2026-07-16 — LlmCacheStore read-path schema validation
+- For JSON cache stores, validate both schemaVersion and the runtime shape (`content` type) before returning entries, otherwise stale/malformed files can be reused as cache hits.
+- Add regression tests that write an explicitly mismatched schema version and a wrong-shaped payload to prove stale cache entries are rejected.
+- Keep Codex review follow-ups separate from CI: CI green + no fresh Codex findings is not sufficient when Codex usage-limited responses occur; treat limits as blocked merge gates and retry only after credits reset.
