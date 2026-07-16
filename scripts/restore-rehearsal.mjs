@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 import Database from 'better-sqlite3';
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
-import { access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, dirname, parse, resolve, sep, join } from 'node:path';
+import { dirname, join, parse, resolve, sep } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { load as parseYaml } from 'js-yaml';
+import { createEncryptedStateBackup, restoreEncryptedStateBackup } from '../packages/franken-orchestrator/src/dr/state-backup.ts';
+
+const SCRIPT_PATH = fileURLToPath(import.meta.url);
+const REPO_ROOT = resolve(dirname(SCRIPT_PATH), '..');
 
 const EXPECTED = Object.freeze({
   taskId: 'fixture-task-restore-rehearsal',
@@ -18,17 +22,25 @@ const EXPECTED = Object.freeze({
   heartbeatIntervalSeconds: 300,
 });
 
+function isSameOrParent(candidate, child) {
+  const parent = resolve(candidate);
+  const target = resolve(child);
+  return target === parent || target.startsWith(`${parent}${sep}`);
+}
+
 function assertSafeIsolatedRoot(path, label) {
   const target = resolve(path);
   const home = process.env.HOME ? resolve(process.env.HOME) : undefined;
   const root = parse(target).root;
-  const unsafe = new Set([
+  const unsafeExact = new Set([
     root,
     home,
     process.cwd(),
     dirname(process.cwd()),
+    REPO_ROOT,
+    dirname(REPO_ROOT),
   ].filter(Boolean));
-  if (unsafe.has(target) || target.split(sep).filter(Boolean).length < 2) {
+  if (unsafeExact.has(target) || target.split(sep).filter(Boolean).length < 2 || isSameOrParent(target, REPO_ROOT)) {
     throw new Error(`${label} must be an isolated scratch directory, not a home, repository, or filesystem root`);
   }
 }
@@ -79,6 +91,7 @@ async function buildFixtureState(sourceRoot) {
   const approvalDir = join(profileRoot, 'approvals');
   await ensureDir(approvalDir);
   await ensureDir(join(profileRoot, 'cron'));
+  await ensureDir(join(sourceRoot, 'runs', 'fixture-run-001'));
 
   writeKanbanFixture(join(profileRoot, 'kanban.db'));
   await writeFile(join(approvalDir, 'ledger.json'), `${JSON.stringify({
@@ -104,43 +117,43 @@ async function buildFixtureState(sourceRoot) {
     '  - default',
     '',
   ].join('\n'));
+  await writeFile(join(sourceRoot, 'runs', 'fixture-run-001', 'metadata.json'), `${JSON.stringify({
+    taskId: EXPECTED.taskId,
+    workerId: EXPECTED.workerId,
+  }, null, 2)}\n`);
   await writeFile(join(sourceRoot, 'manifest.json'), `${JSON.stringify({
     fixture: 'restore-rehearsal',
     createdBy: 'scripts/restore-rehearsal.mjs',
-    includes: ['profiles/default/kanban.db', 'profiles/default/approvals/ledger.json', 'profiles/default/config.yaml'],
+    includes: [
+      'profiles/default/kanban.db',
+      'profiles/default/approvals/ledger.json',
+      'profiles/default/config.yaml',
+      'runs/fixture-run-001/metadata.json',
+    ],
   }, null, 2)}\n`);
 }
 
-async function copyRecursive(source, target) {
-  await ensureDir(dirname(target));
-  await rm(target, { recursive: true, force: true });
-  await mkdir(target, { recursive: true });
-  const { cp } = await import('node:fs/promises');
-  await cp(source, target, {
-    recursive: true,
-    dereference: false,
-    errorOnExist: false,
-    force: true,
+async function backupState(sourceRoot, backupRoot, keyFilePath) {
+  await ensureDir(backupRoot);
+  const backupPath = join(backupRoot, 'fixture-source.franken-dr.json');
+  await createEncryptedStateBackup({
+    stateDir: sourceRoot,
+    outputPath: backupPath,
+    keyFilePath,
+    generatedAt: '2026-07-16T00:00:00.000Z',
   });
-}
-
-async function backupState(sourceRoot, backupRoot) {
-  const sourceName = basename(sourceRoot);
-  const backupPath = join(backupRoot, `${sourceName}-backup`);
-  await copyRecursive(sourceRoot, backupPath);
-  await writeFile(join(backupPath, 'backup-manifest.json'), `${JSON.stringify({
-    sourceName,
-    backedUpAt: 'fixture-time',
-    tool: 'restore-rehearsal',
-  }, null, 2)}\n`);
   return backupPath;
 }
 
-async function restoreState(backupPath, restoreRoot) {
-  if (!(await pathExists(join(backupPath, 'backup-manifest.json')))) {
-    throw new Error(`backup manifest missing from ${backupPath}`);
+async function restoreState(backupPath, restoreRoot, keyFilePath) {
+  if (!(await pathExists(backupPath))) {
+    throw new Error(`backup artifact missing from ${backupPath}`);
   }
-  await copyRecursive(backupPath, restoreRoot);
+  await restoreEncryptedStateBackup({
+    backupPath,
+    targetDir: restoreRoot,
+    keyFilePath,
+  });
   return restoreRoot;
 }
 
@@ -166,8 +179,9 @@ async function assertRestoredState(restoreRoot) {
   }
 
   let ledger;
+  const restoredApprovalLedgerPath = join(restoreRoot, '_quarantine', 'approvals', 'profiles', 'default', 'approvals', 'ledger.json');
   try {
-    ledger = JSON.parse(await readFile(join(profileRoot, 'approvals', 'ledger.json'), 'utf8'));
+    ledger = JSON.parse(await readFile(restoredApprovalLedgerPath, 'utf8'));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`approval ledger is not valid JSON: ${message}`);
@@ -206,10 +220,12 @@ async function runCorruptedFixtureCase(root) {
   const sourceRoot = join(root, 'corrupt-source');
   const backupRoot = join(root, 'corrupt-backups');
   const restoreRoot = join(root, 'corrupt-restore');
+  const keyFilePath = join(root, 'corrupt-backup.key');
+  await writeFile(keyFilePath, 'restore rehearsal corrupt fixture key material', { mode: 0o600 });
   await buildFixtureState(sourceRoot);
-  const backupPath = await backupState(sourceRoot, backupRoot);
-  await writeFile(join(backupPath, 'profiles', 'default', 'approvals', 'ledger.json'), '{"entries": [');
-  await restoreState(backupPath, restoreRoot);
+  await writeFile(join(sourceRoot, 'profiles', 'default', 'approvals', 'ledger.json'), '{"entries": [');
+  const backupPath = await backupState(sourceRoot, backupRoot, keyFilePath);
+  await restoreState(backupPath, restoreRoot, keyFilePath);
   try {
     await assertRestoredState(restoreRoot);
   } catch (error) {
@@ -237,9 +253,11 @@ export async function runRestoreRehearsal(options = {}) {
     const sourceRoot = join(root, 'fixture-source');
     const backupRoot = join(root, 'backups');
     const restoreRoot = join(root, 'restore-target');
+    const keyFilePath = join(root, 'restore-rehearsal.key');
+    await writeFile(keyFilePath, 'restore rehearsal fixture key material', { mode: 0o600 });
     await buildFixtureState(sourceRoot);
-    const backupPath = await backupState(sourceRoot, backupRoot);
-    await restoreState(backupPath, restoreRoot);
+    const backupPath = await backupState(sourceRoot, backupRoot, keyFilePath);
+    await restoreState(backupPath, restoreRoot, keyFilePath);
     const restored = await assertRestoredState(restoreRoot);
     const corruptError = options.includeCorruptCase === false
       ? undefined
@@ -283,7 +301,7 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.info(`Usage: node scripts/restore-rehearsal.mjs [--root TMP_DIR] [--keep-temp] [--skip-corrupt-case] [--format human|json]\n\nBuilds synthetic Kanban, approval-ledger, and liveness config fixture state, backs it up, restores it into an isolated temporary root, and verifies the expected records survive. The default run also corrupts a fixture approval ledger and requires a clear restore assertion error.`);
+  console.info(`Usage: tsx scripts/restore-rehearsal.mjs [--root TMP_DIR] [--keep-temp] [--skip-corrupt-case] [--format human|json]\n\nBuilds synthetic Kanban, approval-ledger, and liveness config fixture state, backs it up through the encrypted DR backup path, restores it into an isolated temporary root, and verifies the expected records survive. The default run also corrupts a fixture approval ledger and requires a clear restore assertion error.`);
 }
 
 async function main() {
@@ -296,7 +314,7 @@ async function main() {
   if (options.format === 'json') {
     console.log(JSON.stringify(result, null, 2));
   } else if (options.format === 'human') {
-    console.log('[restore-rehearsal] ok - fixture backup restored into isolated temp root');
+    console.log('[restore-rehearsal] ok - encrypted fixture backup restored into isolated temp root');
     console.log(`[restore-rehearsal] task=${result.restored.task.id} comments=${result.restored.comments} approval=${result.restored.approvalId} workers=${result.restored.workerIds.join(',')}`);
     if (result.corruptFixture.ok === true) {
       console.log(`[restore-rehearsal] corrupt-fixture ok - ${result.corruptFixture.error}`);
@@ -306,7 +324,7 @@ async function main() {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

@@ -230,7 +230,7 @@ on:
         'the DR restore rehearsal gate',
       );
 
-      expect(packageJson.scripts?.['dr:restore-rehearsal']).toBe('node scripts/restore-rehearsal.mjs');
+      expect(packageJson.scripts?.['dr:restore-rehearsal']).toBe('tsx scripts/restore-rehearsal.mjs');
       expect(packageJson.scripts?.['ci:dr:restore-rehearsal']).toBe('npm run dr:restore-rehearsal');
       expect(restoreStep.run).toBe('npm run ci:dr:restore-rehearsal');
       expect(content.indexOf('npm run bootstrap:dry-run')).toBeLessThan(content.indexOf('npm run ci:dr:restore-rehearsal'));

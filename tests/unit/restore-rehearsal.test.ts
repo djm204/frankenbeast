@@ -45,19 +45,29 @@ describe('restore rehearsal fixture', () => {
     expect(result.ok).toBe(true);
     expect(result.root).toBe(resolve(keepRoot));
     expect(existsSync(resolve(keepRoot, 'fixture-source', 'profiles', 'default', 'kanban.db'))).toBe(true);
-    expect(existsSync(resolve(keepRoot, 'restore-target', 'profiles', 'default', 'approvals', 'ledger.json'))).toBe(true);
+    expect(existsSync(resolve(keepRoot, 'backups', 'fixture-source.franken-dr.json'))).toBe(true);
+    expect(existsSync(resolve(
+      keepRoot,
+      'restore-target',
+      '_quarantine',
+      'approvals',
+      'profiles',
+      'default',
+      'approvals',
+      'ledger.json',
+    ))).toBe(true);
     expect(result.corruptFixture.ok).toBe('skipped');
   });
 
   it('prints deterministic CLI evidence and the corrupt-fixture failure reason', () => {
-    const result = spawnSync(process.execPath, [SCRIPT], {
+    const result = spawnSync('npx', ['tsx', SCRIPT], {
       cwd: ROOT,
       encoding: 'utf8',
     });
 
     expect(result.status).toBe(0);
     expect(result.stderr).toBe('');
-    expect(result.stdout).toContain('[restore-rehearsal] ok - fixture backup restored into isolated temp root');
+    expect(result.stdout).toContain('[restore-rehearsal] ok - encrypted fixture backup restored into isolated temp root');
     expect(result.stdout).toContain('task=fixture-task-restore-rehearsal');
     expect(result.stdout).toContain('approval=approval-fixture-001');
     expect(result.stdout).toContain('workers=worker-fixture-001');
@@ -65,7 +75,7 @@ describe('restore rehearsal fixture', () => {
   });
 
   it('refuses to use the repository root as the rehearsal root', () => {
-    const result = spawnSync(process.execPath, [SCRIPT, '--root', ROOT], {
+    const result = spawnSync('npx', ['tsx', SCRIPT, '--root', ROOT], {
       cwd: ROOT,
       encoding: 'utf8',
     });
