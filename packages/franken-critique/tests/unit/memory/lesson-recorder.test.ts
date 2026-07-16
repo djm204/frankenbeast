@@ -1745,9 +1745,9 @@ describe('LessonRecorder', () => {
 
     expect(roleScoped.lessonScope).toMatchObject({
       scope: 'role',
-      allowedRepos: ['djm204/frankenbeast'],
       allowedRoles: ['reviewer'],
     });
+    expect(roleScoped.lessonScope?.allowedRepos).toBeUndefined();
     expect(roleScoped.lessonScope?.auditTrail).toEqual([
       expect.objectContaining({
         actor: 'pm-reviewer',
@@ -1781,6 +1781,34 @@ describe('LessonRecorder', () => {
       expiresAt: '2026-07-20T00:00:00.000Z',
     });
     expect(promoted.lessonScope?.allowedTasks).toBeUndefined();
+
+    const narrowedGlobal = updateLessonScope(baseLesson, {
+      scope: 'global',
+      allowedRoles: ['reviewer'],
+      actor: 'pm-reviewer',
+      reason: 'Global reviewer-only guidance.',
+      changedAt: '2026-07-13T05:00:00.000Z',
+    });
+    const metadataOnlyReview = updateLessonScope(narrowedGlobal, {
+      scope: 'global',
+      actor: 'pm-reviewer',
+      reason: 'Refresh audit metadata without widening.',
+      changedAt: '2026-07-13T06:00:00.000Z',
+    });
+    expect(metadataOnlyReview.lessonScope?.allowedRoles).toEqual(['reviewer']);
+
+    const demoted = updateLessonScope(promoted, {
+      scope: 'task',
+      allowedTasks: ['scope-task'],
+      actor: 'pm-reviewer',
+      reason: 'Demote back to task-local.',
+      changedAt: '2026-07-13T07:00:00.000Z',
+    });
+    expect(demoted.lessonScope).toMatchObject({
+      scope: 'task',
+      allowedTasks: ['scope-task'],
+    });
+    expect(demoted.lessonScope?.allowedRepos).toBeUndefined();
   });
 
   it('ignores scoped-out prior lessons during promotion critique', async () => {

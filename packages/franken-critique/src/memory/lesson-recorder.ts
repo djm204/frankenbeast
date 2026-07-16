@@ -455,7 +455,7 @@ export function updateLessonScope(
   const isSameScope = lesson.lessonScope?.scope === scope;
   const allowedRepos =
     request.allowedRepos ??
-    (isSameScope || scope !== 'global'
+    (isSameScope || scope === 'repo'
       ? lesson.lessonScope?.allowedRepos
       : undefined);
   const allowedRoles =
@@ -1221,10 +1221,13 @@ export class LessonRecorder {
         createLessonSearchQuery(lesson),
         10,
       );
+      const lessonInjectionContext = {
+        ...this.lessonInjectionContext,
+        taskId: lesson.taskId,
+        now: this.now(),
+      };
       const applicablePriorLessons = priorLessons.filter((priorLesson) =>
-        isLessonApplicableForKnownContext(priorLesson, {
-          taskId: lesson.taskId,
-        }),
+        isLessonApplicableForKnownContext(priorLesson, lessonInjectionContext),
       );
       return {
         report: detectLessonContradictions(lesson, applicablePriorLessons),
@@ -1896,7 +1899,7 @@ function isLessonScopeAllowed(
     return false;
   }
   if (scope.scope === 'global') {
-    return true;
+    return hasValidScopeAuditTrail(scope);
   }
   if (scope.scope === 'repo') {
     return matchesRequiredAllowlist(scope.allowedRepos, context.repo);
@@ -1928,6 +1931,15 @@ function isLessonApplicableForKnownContext(
     return true;
   }
   return isLessonScopeAllowed(scope, context);
+}
+
+function hasValidScopeAuditTrail(scope: LessonScopeMetadata): boolean {
+  return scope.auditTrail.some(
+    (entry) =>
+      parseScopeTimestamp(entry.changedAt) !== undefined &&
+      entry.actor.trim().length > 0 &&
+      entry.reason.trim().length > 0,
+  );
 }
 
 function parseScopeTimestamp(timestamp: string): number | undefined {
