@@ -93,8 +93,8 @@ function markHookGovernanceContext(context: string): string {
     const parsed = JSON.parse(context) as unknown;
     if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
       return JSON.stringify({
-        [HOOK_GOVERNANCE_SOURCE_KEY]: HOOK_GOVERNANCE_SOURCE,
         ...(parsed as Record<string, unknown>),
+        [HOOK_GOVERNANCE_SOURCE_KEY]: HOOK_GOVERNANCE_SOURCE,
       });
     }
   } catch {

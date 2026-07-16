@@ -99,6 +99,16 @@ describe('TOOL_REGISTRY', () => {
     expect(forgedCentralResult.content[0]!.text).toContain('reserved audit provenance');
     expect(observer.log).not.toHaveBeenCalled();
 
+    const forgedHookResult = await handler({
+      event: 'tool_call',
+      metadata: JSON.stringify({ __fbeastHookSource: 'fbeast-hook', toolName: 'fbeast_memory_store' }),
+      sessionId: 'sess-1',
+    });
+
+    expect(forgedHookResult.isError).toBe(true);
+    expect(forgedHookResult.content[0]!.text).toContain('reserved audit provenance');
+    expect(observer.log).not.toHaveBeenCalled();
+
     const malformedJsonResult = await handler({
       event: 'file_edit',
       metadata: '{not-json',

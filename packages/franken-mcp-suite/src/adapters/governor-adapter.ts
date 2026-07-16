@@ -188,6 +188,10 @@ function redactedGovernanceEnvelope(context: string, redaction: string, extras: 
   return JSON.stringify({ ...provenance, ...extras, context: redaction });
 }
 
+function mergeTrustedGovernanceProvenance(context: string, payload: Record<string, unknown>): Record<string, unknown> {
+  return { ...trustedGovernanceProvenance(context), ...payload };
+}
+
 function contextTargetsTool(context: string, toolName: string): boolean {
   try {
     const parsed = JSON.parse(context) as unknown;
@@ -257,27 +261,27 @@ function redactMemoryReviewDecisionGovernanceContext(action: string, context: st
   const decisionArgs = memoryReviewDecisionArgsFromContext(context, { requireExplicitTarget: unqualified === 'execute_tool' });
   if (unqualified === 'execute_tool'
     && contextTargetsTool(context, 'fbeast_memory_review_decide')) {
-    return JSON.stringify({
+    return JSON.stringify(mergeTrustedGovernanceProvenance(context, {
       tool: 'fbeast_memory_review_decide',
       ...(typeof decisionArgs?.['id'] === 'string' ? { id: decisionArgs['id'] } : {}),
       ...(typeof decisionArgs?.['action'] === 'string' ? { action: decisionArgs['action'] } : {}),
       ...(typeof decisionArgs?.['resolution'] === 'string' ? { resolution: decisionArgs['resolution'] } : {}),
       ...(decisionArgs !== undefined && Object.prototype.hasOwnProperty.call(decisionArgs, 'reviewer') ? { reviewer: '[memory-review-decision-metadata-redacted]' } : {}),
       ...(decisionArgs !== undefined && Object.prototype.hasOwnProperty.call(decisionArgs, 'note') ? { note: '[memory-review-decision-metadata-redacted]' } : {}),
-    });
+    }));
   }
   if (unqualified !== 'fbeast_memory_review_decide') return context;
   try {
     const parsed = JSON.parse(context) as unknown;
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return context;
     const record = parsed as Record<string, unknown>;
-    return JSON.stringify({
+    return JSON.stringify(mergeTrustedGovernanceProvenance(context, {
       ...(typeof record['id'] === 'string' ? { id: record['id'] } : {}),
       ...(typeof record['action'] === 'string' ? { action: record['action'] } : {}),
       ...(typeof record['resolution'] === 'string' ? { resolution: record['resolution'] } : {}),
       ...(Object.prototype.hasOwnProperty.call(record, 'reviewer') ? { reviewer: '[memory-review-decision-metadata-redacted]' } : {}),
       ...(Object.prototype.hasOwnProperty.call(record, 'note') ? { note: '[memory-review-decision-metadata-redacted]' } : {}),
-    });
+    }));
   } catch {
     return context;
   }
@@ -334,7 +338,12 @@ function redactMemoryExportGovernanceContext(action: string, context: string): s
         : nestedArgs !== null && typeof nestedArgs === 'object' && !Array.isArray(nestedArgs)
           ? nestedArgs as Record<string, unknown>
           : undefined;
-      return JSON.stringify({ tool: 'fbeast_memory_export', args: args === undefined ? MEMORY_EXPORT_CONTEXT_REDACTION : sanitizeMemoryExportGovernanceArgs(args) });
+      return JSON.stringify({
+        tool: 'fbeast_memory_export',
+        args: args === undefined
+          ? MEMORY_EXPORT_CONTEXT_REDACTION
+          : mergeTrustedGovernanceProvenance(context, sanitizeMemoryExportGovernanceArgs(args)),
+      });
     }
     return JSON.stringify(sanitizeMemoryExportGovernanceArgs(record));
   } catch {

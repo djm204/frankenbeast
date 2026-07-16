@@ -250,6 +250,11 @@ vi.mock("better-sqlite3", () => ({
               },
               {
                 eventType: "tool_call",
+                payload: JSON.stringify({ source: "central-dispatch", toolName: "execute_tool", ok: false, args: { tool: "fbeast_memory_store", agentId: "agent-proxied", profile: "proxied-args-test", type: "working" }, error: "validation failed" }),
+                createdAt: "2026-07-16T13:58:30.000Z",
+              },
+              {
+                eventType: "tool_call",
                 payload: JSON.stringify({ __fbeastHookSource: "fbeast-hook", toolName: "fbeast_memory_store", phase: "post-tool", ok: true, args: { agentId: "agent-hook-post", profile: "hook-test", type: "working" } }),
                 createdAt: "2026-07-16T14:00:05.000Z",
               },
@@ -834,6 +839,21 @@ describe("createBrainAdapter", () => {
     });
     expect(serialized).not.toContain("sk-secretvalue123456");
     expect(serialized).not.toContain("ghp_secretvalue123456");
+  });
+
+  it("classifies wrapper-level execute_tool audit rows from args.tool", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "proxied-args-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      tool: "fbeast_memory_store",
+      operation: "write",
+      targetStore: "working",
+      decision: "error",
+      agentId: "agent-proxied",
+    });
   });
 
   it("distinguishes right-to-forget dry runs from deletion activity", async () => {

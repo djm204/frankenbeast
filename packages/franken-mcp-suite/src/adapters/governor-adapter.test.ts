@@ -118,6 +118,35 @@ describe('GovernorAdapter', () => {
     expect(rows.map((row) => row.context).join('\n')).not.toContain('secret');
   });
 
+  it('preserves trusted hook provenance when redacting proxied memory export context', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({
+      action: 'execute_tool',
+      context: JSON.stringify({
+        __fbeastHookSource: 'fbeast-hook',
+        tool: 'fbeast_memory_export',
+        args: { readScope: 'agent', agentId: 'alice@example.test', redaction: 'safe' },
+      }),
+    })).resolves.toMatchObject({ decision: 'approved' });
+
+    const db = new Database(dbPath);
+    const row = db.prepare(`SELECT context FROM governor_log WHERE action = ?`).get('execute_tool') as { context: string };
+    db.close();
+
+    expect(JSON.parse(row.context)).toEqual({
+      tool: 'fbeast_memory_export',
+      args: {
+        __fbeastHookSource: 'fbeast-hook',
+        readScope: 'agent',
+        redaction: 'safe',
+        agentId: '[memory-export-context-redacted]',
+      },
+    });
+    expect(row.context).not.toContain('alice@example.test');
+  });
+
   it('denies raw destructive patterns (rm -rf)', async () => {
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
     const result = await governor.check({ action: 'rm -rf /data', context: '{}' });
@@ -416,6 +445,35 @@ describe('GovernorAdapter', () => {
       action: 'mcp__fbeast-proxy__execute_tool',
       context: '{"tool_input":{"tool":"mcp__fbeast-memory__fbeast_memory_review_decide","args":{"id":"memcand_1","action":"reject","note":"Rejected because candidate contains rm -rf /"}}}',
     })).resolves.toMatchObject({ decision: 'approved' });
+  });
+
+  it('preserves trusted hook provenance when redacting memory review decisions', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: JSON.stringify({
+        __fbeastHookSource: 'fbeast-hook',
+        tool_input: {
+          tool: 'mcp__fbeast-memory__fbeast_memory_review_decide',
+          args: { id: 'memcand_1', action: 'reject', note: 'Rejected because candidate contains rm -rf /' },
+        },
+      }),
+    })).resolves.toMatchObject({ decision: 'approved' });
+
+    const db = new Database(dbPath);
+    const row = db.prepare(`SELECT context FROM governor_log WHERE action = ?`).get('mcp__fbeast-proxy__execute_tool') as { context: string };
+    db.close();
+
+    expect(JSON.parse(row.context)).toEqual({
+      __fbeastHookSource: 'fbeast-hook',
+      tool: 'fbeast_memory_review_decide',
+      id: 'memcand_1',
+      action: 'reject',
+      note: '[memory-review-decision-metadata-redacted]',
+    });
+    expect(row.context).not.toContain('rm -rf');
   });
 
   it('does not infer memory review decisions from stripped generic execute_tool args', async () => {

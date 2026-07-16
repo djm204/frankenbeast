@@ -52,7 +52,8 @@ function parseJsonObject(value: string): Record<string, unknown> | undefined {
 
 function usesReservedObserverProvenance(metadata: string): boolean {
   const parsed = parseJsonObject(metadata);
-  return parsed?.['source'] === RESERVED_AUDIT_SOURCE;
+  return parsed?.['source'] === RESERVED_AUDIT_SOURCE
+    || parsed?.[RESERVED_HOOK_SOURCE_KEY] === RESERVED_HOOK_SOURCE;
 }
 
 function usesReservedGovernorProvenance(context: string): boolean {

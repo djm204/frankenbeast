@@ -498,10 +498,15 @@ function auditToolArgs(context: Record<string, unknown>): Record<string, unknown
 
 function nestedAuditTool(context: Record<string, unknown>): string | undefined {
   const toolInput = nestedObjectField(context, "tool_input");
+  const directTool = stringAuditField(context, "tool") ?? stringAuditField(context, "toolName");
+  const directArgs = nestedObjectField(context, "args");
+  const proxiedArgTool = directArgs && directTool !== undefined && unqualifyToolName(directTool) === "execute_tool"
+    ? stringAuditField(directArgs, "tool") ?? stringAuditField(directArgs, "toolName")
+    : undefined;
   return stringAuditField(toolInput ?? {}, "tool")
     ?? stringAuditField(toolInput ?? {}, "toolName")
-    ?? stringAuditField(context, "tool")
-    ?? stringAuditField(context, "toolName");
+    ?? proxiedArgTool
+    ?? directTool;
 }
 
 function nestedMemoryAuditContext(toolName: string, context: Record<string, unknown>): { tool: string; args: Record<string, unknown> } | undefined {
