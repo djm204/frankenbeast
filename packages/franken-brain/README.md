@@ -1,6 +1,6 @@
 # @franken/brain — MOD-03: Memory Systems
 
-Current public API: `SqliteBrain`, `SqliteMemoryReviewQueue`, `SqliteMemoryAccessAuditTrail`, `WorkingMemoryLimitError`, `UnsupportedMemorySchemaVersionError`, memory-encryption error classes, `DEFAULT_WORKING_MEMORY_LIMITS`, `CURRENT_MEMORY_SCHEMA_VERSION`, and the `WorkingMemoryLimits`, `SqliteBrainOptions`, `MemoryCandidateProposal`, `MemoryCandidate`, `MemoryCandidateEdit`, `MemoryCandidateStatus`, `MemoryReviewDecisionOptions`, `MemoryProvenanceRecord`, `MemoryAccessAuditEvent`, `MemoryAccessAuditListOptions`, `MemoryAccessAuditOperation`, `MemoryAccessAuditOutcome`, `MemoryAccessAuditStore`, `MemorySchemaMetadata`, `MemorySchemaStoreMetadata`, `MemorySchemaMigrationOptions`, `MemorySchemaMigrationOperation`, `MemorySchemaMigrationResult`, `MemoryEncryptionOptions`, `MemoryEncryptionMetadata`, `MemoryEncryptionMigrationOptions`, and `MemoryEncryptionMigrationResult` types.
+Current public API: `SqliteBrain`, `SqliteMemoryReviewQueue`, `SqliteMemoryAccessAuditTrail`, `WorkingMemoryLimitError`, `UnsupportedMemorySchemaVersionError`, memory-encryption error classes, `MemoryConfidenceDecayError`, `DEFAULT_WORKING_MEMORY_LIMITS`, `DEFAULT_MEMORY_CONFIDENCE_HALF_LIFE_MS`, `CURRENT_MEMORY_SCHEMA_VERSION`, `calculateMemoryConfidenceDecay`, and the `WorkingMemoryLimits`, `SqliteBrainOptions`, `MemoryCandidateProposal`, `MemoryCandidate`, `MemoryCandidateEdit`, `MemoryCandidateStatus`, `MemoryReviewDecisionOptions`, `MemoryProvenanceRecord`, `MemoryAccessAuditEvent`, `MemoryAccessAuditListOptions`, `MemoryAccessAuditOperation`, `MemoryAccessAuditOutcome`, `MemoryAccessAuditStore`, `MemorySchemaMetadata`, `MemorySchemaStoreMetadata`, `MemorySchemaMigrationOptions`, `MemorySchemaMigrationOperation`, `MemorySchemaMigrationResult`, `MemoryEncryptionOptions`, `MemoryEncryptionMetadata`, `MemoryEncryptionMigrationOptions`, `MemoryEncryptionMigrationResult`, `MemoryConfidenceDecayOptions`, and `MemoryConfidenceDecayResult` types.
 
 `@franken/brain` provides SQLite-backed working memory, episodic event recall, and recovery checkpoints for the Frankenbeast runtime. Older design docs described a `MemoryOrchestrator` with ChromaDB-backed semantic memory and PII-decorator stores; those classes are not exported by the current package.
 
@@ -31,7 +31,10 @@ npm run lint              # eslint src/ tests/
 ## Usage
 
 ```typescript
-import { SqliteBrain } from '@franken/brain';
+import {
+  SqliteBrain,
+  calculateMemoryConfidenceDecay,
+} from '@franken/brain';
 
 const brain = new SqliteBrain('.fbeast/beast.db');
 
@@ -89,6 +92,37 @@ const provenance = brain.memoryReview.provenanceFor(
   'working',
   'user.preference.response-style',
 );
+// Contradictory candidates for an existing key are surfaced before approval so
+// callers can explicitly keep the durable fact, replace it, or reject the new
+// candidate with an auditable decision note.
+const changedPreference = brain.memoryReview.propose({
+  targetStore: 'working',
+  key: 'user.preference.response-style',
+  value: 'detailed',
+  source: 'chat:turn-43',
+  confidence: 0.75,
+  reason: 'A later message appeared to contradict the stored preference.',
+});
+const conflicts = brain.memoryReview.conflictsFor(changedPreference.id);
+if (conflicts.length > 0) {
+  brain.memoryReview.resolveConflict(changedPreference.id, {
+    resolution: 'keep_existing', // or 'replace_existing' / 'reject_candidate'
+    reviewer: 'operator',
+  });
+}
+
+// Confidence decay gives injection/retrieval code a deterministic way to lower
+// old memory certainty without mutating the stored record. The result is
+// structured so PM/liveness tools can log the age, half-life, and applied floor.
+const confidence = calculateMemoryConfidenceDecay({
+  confidence: provenance?.confidence ?? 0.5,
+  observedAt: provenance?.approvedAt ?? new Date().toISOString(),
+  halfLifeMs: 30 * 24 * 60 * 60 * 1000,
+  floor: 0.1,
+});
+if (confidence.confidence < 0.3) {
+  console.log('Memory is low-confidence; ask for confirmation before injection.');
+}
 
 // Access auditing records memory operations with hashed keys/queries and
 // metadata only; raw memory keys and values are not written to the audit table.

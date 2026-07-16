@@ -53,6 +53,18 @@ Use this checklist for a first local checkout or when rebuilding a development e
   ./scripts/bootstrap.sh --dry-run
   ```
 
+### Progress badges and status output
+
+The bootstrap script prints deterministic status badges as it advances through onboarding:
+
+```text
+[onboarding:1/6:prerequisites] start - checking Node.js, npm, and Corepack
+[onboarding:1/6:prerequisites] ok - Node.js v22.13.0 satisfies the repository engine range
+[onboarding:6/6:done] complete - onboarding bootstrap reached 6/6 steps
+```
+
+Read each badge as `[onboarding:<current>/<total>:<stage>] <state> - <detail>`. Automation can key on the stable `onboarding` prefix, fraction, stage, and state values (`start`, `ok`, `error`, `complete`) while humans can follow the detail text. If option parsing fails before the first stage, the stage is `args`; otherwise `error` badges keep the active stage name so PM/liveness tooling can identify the failed stage without parsing prose.
+
 - [ ] Review `.env` and fill in only the values you need:
 
   ```bash
@@ -100,6 +112,20 @@ Use this checklist for a first local checkout or when rebuilding a development e
   fbeast --help
   frankenbeast --help
   ```
+
+## Architecture reading path
+
+Use this path when you are new to Frankenbeast or when an agent handoff says "read the architecture docs first." It is intentionally ordered from current implementation to deeper historical context.
+
+1. **Current implementation before history** — start with [`docs/RAMP_UP.md`](docs/RAMP_UP.md) for the shortest current package map, Beast Loop summary, CLI/runtime wiring notes, known limitations, and build/test commands.
+2. **Repository-level model** — read [`README.md#architecture`](README.md#architecture) for the public Beast Loop diagram and current 10-package workspace framing.
+3. **Detailed architecture** — read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), especially the System Overview, package table, Beast Loop, Current Local CLI Path, orchestrator internals, and dashboard/control-plane sections. Use the package inventory tables as authoritative when diagrams still use MOD labels.
+4. **Runtime handoff flow** — read [`docs/DATA_FLOW.md`](docs/DATA_FLOW.md) to connect user input, planning, execution, observer/cost records, and closure artifacts.
+5. **Port and package boundaries** — read [`docs/CONTRACT_MATRIX.md`](docs/CONTRACT_MATRIX.md) before changing cross-package interfaces or assuming a module owns a capability.
+6. **Consolidation rationale** — read [ADR-031](docs/adr/031-architecture-consolidation-provider-agnostic.md) to understand why formerly separate MOD packages were consolidated into the orchestrator or MCP suite.
+7. **Topic-specific ADRs/guides** — only after the current path above, branch into relevant ADRs under `docs/adr/` or operational guides under `docs/guides/`.
+
+Edge case: many older diagrams and `docs/plans/` files describe target or historical architecture. Do not start with `docs/plans/` when onboarding, and do not treat a plan diagram as live behavior until you verify it against the current package inventory in `docs/RAMP_UP.md` and `docs/ARCHITECTURE.md`.
 
 ## Run UI
 
@@ -217,6 +243,8 @@ Use this checklist for a first local checkout or when rebuilding a development e
 - [ ] After changing `network.secureBackend`, re-store or migrate any existing secret refs. Changing config alone does not move already stored secret values between backends.
 
 ## Troubleshooting
+
+If a PM, liveness monitor, or operator reports a stalled worker, use the dedicated [troubleshooting guide for stalled workers](docs/guides/troubleshooting-stalled-workers.md) before respawning or deleting worktrees. It walks through live task/PR evidence, active versus blocked versus stale classifications, safe recovery actions, and the handoff fields future workers need.
 
 - [ ] `npm install` fails with an engine error:
   - Check `node --version` against the root `engines.node` range.

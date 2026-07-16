@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import Database from 'better-sqlite3';
 import { BrainSnapshotSchema, ExecutionStateSchema, type BrainSnapshot, type EpisodicEvent } from '@franken/types';
@@ -70,6 +71,39 @@ export interface MemorySnapshotDiffReport {
   };
 }
 
+export interface DuplicateMemoryReportEntry {
+  readonly kind: 'working' | 'episodic';
+  readonly key?: string;
+  readonly eventId?: number;
+  readonly eventKey?: string;
+  readonly type?: EpisodicEvent['type'];
+  readonly createdAt?: string;
+}
+
+export interface DuplicateMemoryReportGroup {
+  readonly id: string;
+  readonly normalizedHash: string;
+  readonly normalizedPreview: string;
+  readonly suggestedCanonical: DuplicateMemoryReportEntry;
+  readonly entries: DuplicateMemoryReportEntry[];
+}
+
+export interface DuplicateMemoryConsolidationReport {
+  readonly ok: true;
+  readonly command: 'memory duplicate-report';
+  readonly snapshot: { readonly path: string; readonly timestamp: string };
+  readonly summary: {
+    readonly duplicateGroups: number;
+    readonly duplicateEntries: number;
+    readonly workingDuplicateGroups: number;
+    readonly workingDuplicateEntries: number;
+    readonly episodicDuplicateGroups: number;
+    readonly episodicDuplicateEntries: number;
+  };
+  readonly groups: DuplicateMemoryReportGroup[];
+  readonly guidance: string[];
+}
+
 export interface MemoryBackupVerificationReport {
   readonly ok: true;
   readonly command: 'memory verify-backup';
@@ -93,10 +127,11 @@ export interface MemoryBackupVerificationReport {
 }
 
 export interface MemoryCommandDeps {
-  readonly action: 'snapshot-diff' | 'verify-backup' | undefined;
+  readonly action: 'snapshot-diff' | 'verify-backup' | 'duplicate-report' | undefined;
   readonly beforePath?: string | undefined;
   readonly afterPath?: string | undefined;
   readonly backupPath?: string | undefined;
+  readonly snapshotPath?: string | undefined;
   readonly print: (message: string) => void;
 }
 
@@ -318,6 +353,124 @@ function readSchemaStores(db: Database.Database, tables: Set<string>): MemoryBac
   });
 }
 
+
+function normalizedMemoryText(value: unknown): string {
+  return stableStringify(value)
+    .toLowerCase()
+    .replace(/\s+/gu, ' ')
+    .trim();
+}
+
+function hashNormalizedText(text: string): string {
+  return createHash('sha256').update(text).digest('hex');
+}
+
+function previewNormalizedText(text: string): string {
+  return text.length > 160 ? `${text.slice(0, 157)}...` : text;
+}
+
+function episodicDuplicatePayload(event: EpisodicEvent): unknown {
+  return {
+    type: event.type,
+    step: event.step ?? null,
+    summary: event.summary,
+    details: event.details ?? null,
+  };
+}
+
+function makeEventEntry(event: EpisodicEvent, index: number): DuplicateMemoryReportEntry {
+  return {
+    kind: 'episodic',
+    ...(event.id !== undefined ? { eventId: event.id } : {}),
+    eventKey: eventDiffKey(event, index),
+    type: event.type,
+    createdAt: event.createdAt,
+  };
+}
+
+function sortEntries(entries: DuplicateMemoryReportEntry[]): DuplicateMemoryReportEntry[] {
+  return [...entries].sort((left, right) => {
+    const leftKey = left.kind === 'working'
+      ? `0:${left.key ?? ''}`
+      : `1:${left.createdAt ?? ''}:${left.eventId ?? ''}:${left.eventKey ?? ''}`;
+    const rightKey = right.kind === 'working'
+      ? `0:${right.key ?? ''}`
+      : `1:${right.createdAt ?? ''}:${right.eventId ?? ''}:${right.eventKey ?? ''}`;
+    return leftKey.localeCompare(rightKey);
+  });
+}
+
+function buildDuplicateGroups(groups: Map<string, DuplicateMemoryReportEntry[]>): DuplicateMemoryReportGroup[] {
+  return Array.from(groups.entries())
+    .filter(([, entries]) => entries.length > 1)
+    .map(([normalized, entries], index) => {
+      const sortedEntries = sortEntries(entries);
+      const normalizedHash = hashNormalizedText(normalized);
+      return {
+        id: `dup-${String(index + 1).padStart(3, '0')}`,
+        normalizedHash,
+        normalizedPreview: previewNormalizedText(normalized),
+        suggestedCanonical: sortedEntries[0]!,
+        entries: sortedEntries,
+      };
+    })
+    .sort((left, right) => {
+      const leftFirst = left.entries[0];
+      const rightFirst = right.entries[0];
+      const leftKey = leftFirst?.kind === 'working' ? leftFirst.key ?? '' : leftFirst?.eventKey ?? '';
+      const rightKey = rightFirst?.kind === 'working' ? rightFirst.key ?? '' : rightFirst?.eventKey ?? '';
+      return leftKey.localeCompare(rightKey) || left.normalizedHash.localeCompare(right.normalizedHash);
+    })
+    .map((group, index) => ({ ...group, id: `dup-${String(index + 1).padStart(3, '0')}` }));
+}
+
+export function generateDuplicateMemoryReport(path: string, snapshot: BrainSnapshot): DuplicateMemoryConsolidationReport {
+  const workingCandidates = new Map<string, DuplicateMemoryReportEntry[]>();
+  for (const [key, value] of Object.entries(snapshot.working)) {
+    const normalized = normalizedMemoryText(value);
+    if (normalized.length === 0) continue;
+    const entries = workingCandidates.get(normalized) ?? [];
+    entries.push({ kind: 'working', key });
+    workingCandidates.set(normalized, entries);
+  }
+
+  const episodicCandidates = new Map<string, DuplicateMemoryReportEntry[]>();
+  snapshot.episodic.forEach((event, index) => {
+    const normalized = normalizedMemoryText(episodicDuplicatePayload(event));
+    if (normalized.length === 0) return;
+    const entries = episodicCandidates.get(normalized) ?? [];
+    entries.push(makeEventEntry(event, index));
+    episodicCandidates.set(normalized, entries);
+  });
+
+  const workingGroups = buildDuplicateGroups(workingCandidates);
+  const episodicGroups = buildDuplicateGroups(episodicCandidates);
+  const groups = [...workingGroups, ...episodicGroups]
+    .map((group, index) => ({ ...group, id: `dup-${String(index + 1).padStart(3, '0')}` }));
+  const duplicateEntries = groups.reduce((total, group) => total + group.entries.length, 0);
+
+  return {
+    ok: true,
+    command: 'memory duplicate-report',
+    snapshot: { path, timestamp: snapshot.timestamp },
+    summary: {
+      duplicateGroups: groups.length,
+      duplicateEntries,
+      workingDuplicateGroups: workingGroups.length,
+      workingDuplicateEntries: workingGroups.reduce((total, group) => total + group.entries.length, 0),
+      episodicDuplicateGroups: episodicGroups.length,
+      episodicDuplicateEntries: episodicGroups.reduce((total, group) => total + group.entries.length, 0),
+    },
+    groups,
+    guidance: groups.length > 0
+      ? [
+        'Review each group before deleting memory; the suggestedCanonical entry is deterministic, not an automatic deletion decision.',
+        'Consolidate duplicates by preserving the canonical fact/event and removing or merging the remaining entries through the normal memory deletion/review workflow.',
+      ]
+      : ['No duplicate working-memory values or episodic event payloads were found in this snapshot.'],
+  };
+}
+
 export function diffMemorySnapshots(
   beforePath: string,
   before: BrainSnapshot,
@@ -446,7 +599,7 @@ async function readSnapshot(path: string): Promise<BrainSnapshot> {
 }
 
 export async function handleMemoryCommand(deps: MemoryCommandDeps): Promise<void> {
-  const { action, beforePath, afterPath, backupPath, print } = deps;
+  const { action, beforePath, afterPath, backupPath, snapshotPath, print } = deps;
   if (action === 'verify-backup') {
     if (!backupPath) {
       throw new Error('memory verify-backup requires one SQLite backup file: <backup.sqlite>');
@@ -454,8 +607,16 @@ export async function handleMemoryCommand(deps: MemoryCommandDeps): Promise<void
     print(JSON.stringify(verifyMemoryBackup(backupPath), null, 2));
     return;
   }
+  if (action === 'duplicate-report') {
+    if (!snapshotPath) {
+      throw new Error('memory duplicate-report requires one BrainSnapshot JSON file: <snapshot.json>');
+    }
+    const snapshot = await readSnapshot(snapshotPath);
+    print(JSON.stringify(generateDuplicateMemoryReport(snapshotPath, snapshot), null, 2));
+    return;
+  }
   if (action !== 'snapshot-diff') {
-    throw new Error('Usage: frankenbeast memory snapshot-diff <before-snapshot.json> <after-snapshot.json> OR frankenbeast memory verify-backup <backup.sqlite>');
+    throw new Error('Usage: frankenbeast memory snapshot-diff <before-snapshot.json> <after-snapshot.json> OR frankenbeast memory duplicate-report <snapshot.json> OR frankenbeast memory verify-backup <backup.sqlite>');
   }
   if (!beforePath || !afterPath) {
     throw new Error('memory snapshot-diff requires two BrainSnapshot JSON files: <before> <after>');

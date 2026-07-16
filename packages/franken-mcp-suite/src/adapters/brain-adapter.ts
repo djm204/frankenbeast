@@ -2,6 +2,8 @@ import {
   SqliteBrain,
   type MemoryCandidate,
   type MemoryCandidateStatus,
+  type MemoryConflict,
+  type MemoryConflictResolution,
   type MemoryReviewDecisionOptions,
   type RightToForgetReport,
   type RightToForgetSelector,
@@ -71,11 +73,14 @@ export interface BrainAdapter {
     reason: string;
     confidence: number;
     evidenceId?: string;
+    agentId?: string;
   }): Promise<MemoryCandidate>;
   listMemoryReview(status?: MemoryCandidateStatus): Promise<MemoryCandidate[]>;
+  conflictsForMemoryReview(id: string): Promise<MemoryConflict[]>;
   decideMemoryReview(input: {
     id: string;
-    action: 'approve' | 'reject' | 'never_store';
+    action: 'approve' | 'reject' | 'never_store' | 'resolve_conflict';
+    resolution?: MemoryConflictResolution;
     options?: MemoryReviewDecisionOptions;
   }): Promise<MemoryCandidate>;
 }
@@ -214,10 +219,7 @@ function parseScopedWorkingEntry(
   value: unknown,
 ): { key: string; value: string; agentId?: string; expiresAt?: string } {
   const unwrapped = unwrapWorkingMemoryValue(value);
-  if (
-    key.startsWith(AGENT_WORKING_KEY_PREFIX) &&
-    isAgentScopedWorkingValue(value)
-  ) {
+  if (key.startsWith(AGENT_WORKING_KEY_PREFIX)) {
     const rest = key.slice(AGENT_WORKING_KEY_PREFIX.length);
     const slash = rest.indexOf("/");
     if (slash > 0) {
@@ -225,7 +227,9 @@ function parseScopedWorkingEntry(
         return {
           key: decodeScopeComponent(rest.slice(slash + 1)),
           value: unwrapped.text,
-          agentId: value.agentId,
+          agentId: isAgentScopedWorkingValue(value)
+            ? value.agentId
+            : decodeScopeComponent(rest.slice(0, slash)),
           ...(unwrapped.expiresAt ? { expiresAt: unwrapped.expiresAt } : {}),
         };
       } catch {
@@ -490,7 +494,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
     async proposeMemory(input) {
       return brain.memoryReview.propose({
         targetStore: 'working',
-        key: input.key,
+        key: scopedWorkingKey(input.key, input.agentId),
         value: input.value,
         source: input.source,
         ...(input.evidenceId ? { evidenceId: input.evidenceId } : {}),
@@ -503,6 +507,10 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
       return brain.memoryReview.list(status);
     },
 
+    async conflictsForMemoryReview(id) {
+      return brain.memoryReview.conflictsFor(id);
+    },
+
     async decideMemoryReview(input) {
       const options = input.options ?? {};
       if (input.action === 'approve') {
@@ -513,6 +521,15 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
       }
       if (input.action === 'never_store') {
         return brain.memoryReview.neverStore(input.id, options);
+      }
+      if (input.action === 'resolve_conflict') {
+        if (!input.resolution) {
+          throw new Error('resolution is required when action is resolve_conflict');
+        }
+        return brain.memoryReview.resolveConflict(input.id, {
+          ...options,
+          resolution: input.resolution,
+        });
       }
       throw new Error(`Unsupported memory review action: ${String(input.action)}`);
     },

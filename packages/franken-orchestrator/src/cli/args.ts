@@ -50,7 +50,7 @@ export type BeastAction =
 
 export type SkillAction = 'list' | 'add' | 'scaffold' | 'remove' | 'enable' | 'disable' | 'info' | undefined;
 export type SecurityAction = 'status' | 'set' | undefined;
-export type MemoryAction = 'snapshot-diff' | 'verify-backup' | undefined;
+export type MemoryAction = 'snapshot-diff' | 'verify-backup' | 'duplicate-report' | undefined;
 export type DrAction = 'backup' | 'list' | 'verify' | 'restore' | 'restore-dry-run' | undefined;
 
 export interface CliArgs {
@@ -63,6 +63,7 @@ export interface CliArgs {
   memorySnapshotBefore?: string | undefined;
   memorySnapshotAfter?: string | undefined;
   memoryBackupPath?: string | undefined;
+  memoryDuplicateReportPath?: string | undefined;
   drAction?: DrAction;
   drBackupManifestPath?: string | undefined;
   drLiveManifestPath?: string | undefined;
@@ -116,7 +117,7 @@ export interface CliArgs {
 
 const VALID_SUBCOMMANDS = new Set(['init', 'interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'beasts-daemon', 'network', 'memory', 'dr', 'skill', 'security']);
 const VALID_NETWORK_ACTIONS = new Set(['up', 'down', 'status', 'start', 'stop', 'restart', 'logs', 'config', 'credentials', 'help']);
-const VALID_MEMORY_ACTIONS = new Set(['snapshot-diff', 'verify-backup']);
+const VALID_MEMORY_ACTIONS = new Set(['snapshot-diff', 'verify-backup', 'duplicate-report']);
 const VALID_DR_ACTIONS = new Set(['backup', 'list', 'verify', 'restore', 'restore-dry-run']);
 const VALID_BEAST_ACTIONS = new Set(['catalog', 'create', 'spawn', 'list', 'status', 'logs', 'stop', 'kill', 'restart', 'resume', 'delete']);
 const VALID_SKILL_ACTIONS = new Set(['list', 'add', 'scaffold', 'remove', 'enable', 'disable', 'info']);
@@ -242,6 +243,8 @@ Network Commands:
 Memory Commands:
   memory snapshot-diff <before> <after>
                                   Print a structured JSON diff between two BrainSnapshot files
+  memory duplicate-report <snapshot.json>
+                                  Print duplicate working/episodic memory consolidation candidates as structured JSON
   memory verify-backup <backup.sqlite>
                                   Verify a read-only SQLite memory backup and print structured JSON
 
@@ -535,6 +538,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   let memorySnapshotBefore: string | undefined;
   let memorySnapshotAfter: string | undefined;
   let memoryBackupPath: string | undefined;
+  let memoryDuplicateReportPath: string | undefined;
   let drAction: DrAction;
   let drBackupManifestPath: string | undefined;
   let drLiveManifestPath: string | undefined;
@@ -578,6 +582,11 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       memoryBackupPath = positionals[1];
       if (positionals.length > 2) {
         throw new TypeError(`Unexpected argument '${positionals[2]}'. memory verify-backup accepts exactly one backup file`);
+      }
+    } else if (memoryAction === 'duplicate-report') {
+      memoryDuplicateReportPath = positionals[1];
+      if (positionals.length > 2) {
+        throw new TypeError(`Unexpected argument '${positionals[2]}'. memory duplicate-report accepts exactly one snapshot file`);
       }
     } else {
       memorySnapshotBefore = positionals[1];
@@ -743,6 +752,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     memorySnapshotBefore,
     memorySnapshotAfter,
     memoryBackupPath,
+    memoryDuplicateReportPath,
     drAction,
     drBackupManifestPath,
     drLiveManifestPath,

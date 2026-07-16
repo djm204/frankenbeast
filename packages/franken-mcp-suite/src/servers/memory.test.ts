@@ -28,6 +28,7 @@ function createBrainStub(overrides: Partial<BrainAdapter> = {}): BrainAdapter {
       updatedAt: "2026-07-15T00:00:00.000Z",
     }),
     listMemoryReview: vi.fn().mockResolvedValue([]),
+    conflictsForMemoryReview: vi.fn().mockResolvedValue([]),
     decideMemoryReview: vi.fn().mockResolvedValue({
       id: "memcand_1",
       targetStore: "working",
@@ -59,6 +60,7 @@ describe("Memory Server", () => {
       "fbeast_memory_right_to_forget",
       "fbeast_memory_review_propose",
       "fbeast_memory_review_list",
+      "fbeast_memory_review_conflicts",
       "fbeast_memory_review_decide",
     ]);
     const storeTool = server.tools.find(
@@ -198,6 +200,113 @@ describe("Memory Server", () => {
     expect(deletionResult.content[0]!.text).not.toContain("secret");
   });
 
+
+  it("quarantines sensitive working memory instead of storing or echoing the value", async () => {
+    const sensitiveValue = "example value that must not be echoed";
+    const brain = createBrainStub({
+      store: vi.fn(),
+      proposeMemory: vi.fn().mockResolvedValue({
+        id: "memcand_secret",
+        targetStore: "working",
+        key: "OPENAI_API_KEY",
+        value: sensitiveValue,
+        source: "fbeast_memory_store:quarantine",
+        evidenceId: "quarantine:OPENAI_API_KEY",
+        confidence: 1,
+        reason: "Sensitive memory quarantined for operator review (key-name-indicates-secret).",
+        status: "pending",
+        createdAt: "2026-07-16T00:00:00.000Z",
+        updatedAt: "2026-07-16T00:00:00.000Z",
+      }),
+    });
+    const server = createMemoryServer({ brain });
+
+    const result = await server.callTool("fbeast_memory_store", {
+      key: "OPENAI_API_KEY",
+      value: sensitiveValue,
+      type: "working",
+      agentId: "worker-alpha",
+    });
+
+    expect(brain.store).not.toHaveBeenCalled();
+    expect(brain.proposeMemory).toHaveBeenCalledWith({
+      key: "OPENAI_API_KEY",
+      value: sensitiveValue,
+      source: "fbeast_memory_store:quarantine",
+      evidenceId: "quarantine:OPENAI_API_KEY",
+      confidence: 1,
+      reason: expect.stringContaining("key-name-indicates-secret"),
+      agentId: "worker-alpha",
+    });
+    const payload = JSON.parse(result.content[0]!.text);
+    expect(payload).toMatchObject({
+      status: "quarantined",
+      id: "memcand_secret",
+      key: "OPENAI_API_KEY",
+      agentId: "worker-alpha",
+      reason: "key-name-indicates-secret",
+      stored: false,
+    });
+    expect(result.content[0]!.text).not.toContain(sensitiveValue);
+  });
+
+  it("reports suppressed sensitive memory quarantine candidates without a review action", async () => {
+    const brain = createBrainStub({
+      store: vi.fn(),
+      proposeMemory: vi.fn().mockResolvedValue({
+        id: "memcand_suppressed",
+        targetStore: "working",
+        key: "OPENAI_API_KEY",
+        value: "example value that must not be echoed",
+        source: "fbeast_memory_store:quarantine",
+        evidenceId: "quarantine:OPENAI_API_KEY",
+        confidence: 1,
+        reason: "Sensitive memory quarantined for operator review (key-name-indicates-secret).",
+        status: "suppressed",
+        suppressionReason: "never_store",
+        createdAt: "2026-07-16T00:00:00.000Z",
+        updatedAt: "2026-07-16T00:00:00.000Z",
+      }),
+    });
+    const server = createMemoryServer({ brain });
+
+    const result = await server.callTool("fbeast_memory_store", {
+      key: "OPENAI_API_KEY",
+      value: "example value that must not be echoed",
+      type: "working",
+    });
+
+    expect(brain.store).not.toHaveBeenCalled();
+    const payload = JSON.parse(result.content[0]!.text);
+    expect(payload).toMatchObject({
+      status: "suppressed",
+      id: "memcand_suppressed",
+      suppressionReason: "never_store",
+      stored: false,
+    });
+    expect(payload.reviewAction).toBeUndefined();
+    expect(result.content[0]!.text).not.toContain("example value that must not be echoed");
+  });
+
+  it("keeps benign token-budget working memory on the direct store path", async () => {
+    const brain = createBrainStub({ store: vi.fn().mockResolvedValue(undefined), proposeMemory: vi.fn() });
+    const server = createMemoryServer({ brain });
+
+    const result = await server.callTool("fbeast_memory_store", {
+      key: "token_budget_notes",
+      value: "Keep summaries concise when token budget is low.",
+      type: "working",
+    });
+
+    expect(result.content[0]!.text).toBe("Stored memory: token_budget_notes");
+    expect(brain.store).toHaveBeenCalledWith({
+      key: "token_budget_notes",
+      value: "Keep summaries concise when token budget is low.",
+      type: "working",
+    });
+    expect(brain.proposeMemory).not.toHaveBeenCalled();
+  });
+
   it("rejects blank agent ids before storing private memory as shared", async () => {
     const brain = createBrainStub({
       query: vi.fn().mockResolvedValue([]),
@@ -320,6 +429,31 @@ describe("Memory Server", () => {
     expect(brain.listMemoryReview).toHaveBeenCalledWith("pending");
     expect(JSON.parse(listResult.content[0]!.text)).toMatchObject({ status: "pending", count: 1 });
 
+    vi.mocked(brain.conflictsForMemoryReview).mockResolvedValue([
+      {
+        targetStore: "working",
+        key: "user.preference.response-style",
+        conflictType: "value_mismatch",
+        proposedCandidateId: "memcand_1",
+        existingValue: "verbose",
+        proposedValue: "concise",
+        guidance: "Choose keep_existing, replace_existing, or reject_candidate.",
+      },
+    ]);
+    const conflictsResult = await server.callTool("fbeast_memory_review_conflicts", { id: "memcand_1" });
+    expect(brain.conflictsForMemoryReview).toHaveBeenCalledWith("memcand_1");
+    expect(JSON.parse(conflictsResult.content[0]!.text)).toMatchObject({
+      id: "memcand_1",
+      count: 1,
+      conflicts: [
+        {
+          key: "user.preference.response-style",
+          existingValue: "verbose",
+          proposedValue: "concise",
+        },
+      ],
+    });
+
     const decideResult = await server.callTool("fbeast_memory_review_decide", {
       id: "memcand_1",
       action: "approve",
@@ -332,6 +466,20 @@ describe("Memory Server", () => {
       options: { reviewer: "operator", note: "Confirmed." },
     });
     expect(JSON.parse(decideResult.content[0]!.text)).toMatchObject({ id: "memcand_1", status: "approved" });
+
+    await server.callTool("fbeast_memory_review_decide", {
+      id: "memcand_2",
+      action: "resolve_conflict",
+      resolution: "replace_existing",
+      reviewer: "operator",
+      note: "Newer evidence wins.",
+    });
+    expect(brain.decideMemoryReview).toHaveBeenLastCalledWith({
+      id: "memcand_2",
+      action: "resolve_conflict",
+      resolution: "replace_existing",
+      options: { reviewer: "operator", note: "Newer evidence wins." },
+    });
   });
 
   it("rejects invalid memory review queue input before calling the brain adapter", async () => {
@@ -356,6 +504,22 @@ describe("Memory Server", () => {
     expect(badAction.isError).toBe(true);
     expect(badAction.content[0]!.text).toContain("action must be one of");
     expect(brain.decideMemoryReview).not.toHaveBeenCalled();
+
+    const badResolution = await server.callTool("fbeast_memory_review_decide", {
+      id: "memcand_1",
+      action: "resolve_conflict",
+      resolution: "overwrite",
+    });
+    expect(badResolution.isError).toBe(true);
+    expect(badResolution.content[0]!.text).toContain("resolution must be one of");
+    expect(brain.decideMemoryReview).not.toHaveBeenCalled();
+
+    const blankConflictId = await server.callTool("fbeast_memory_review_conflicts", {
+      id: "   ",
+    });
+    expect(blankConflictId.isError).toBe(true);
+    expect(blankConflictId.content[0]!.text).toContain("id must be a non-empty string");
+    expect(brain.conflictsForMemoryReview).not.toHaveBeenCalled();
   });
 });
 

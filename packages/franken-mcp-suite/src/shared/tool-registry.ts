@@ -42,10 +42,12 @@ function splitCsvArg(value: unknown, fallback?: string[]): string[] | undefined 
 const DEFAULT_MEMORY_QUERY_LIMIT = 20;
 const MAX_MEMORY_QUERY_LIMIT = 1000;
 const MEMORY_REVIEW_STATUSES = ['pending', 'approved', 'rejected', 'never_store', 'suppressed'] as const;
-const MEMORY_REVIEW_ACTIONS = ['approve', 'reject', 'never_store'] as const;
+const MEMORY_REVIEW_ACTIONS = ['approve', 'reject', 'never_store', 'resolve_conflict'] as const;
+const MEMORY_CONFLICT_RESOLUTIONS = ['keep_existing', 'replace_existing', 'reject_candidate'] as const;
 
 type MemoryReviewStatus = (typeof MEMORY_REVIEW_STATUSES)[number];
 type MemoryReviewAction = (typeof MEMORY_REVIEW_ACTIONS)[number];
+type MemoryConflictResolution = (typeof MEMORY_CONFLICT_RESOLUTIONS)[number];
 
 function parseMemoryQueryLimit(value: unknown): { ok: true; value: number } | { ok: false; message: string } {
   if (value === undefined) return { ok: true, value: DEFAULT_MEMORY_QUERY_LIMIT };
@@ -98,6 +100,30 @@ function parseStringArg(name: string, value: unknown): { ok: true; value: string
   return { ok: true, value };
 }
 
+const SENSITIVE_MEMORY_KEY_PATTERNS = [
+  /(^|[._:-])(api[-_]?key|apikey)([._:-]|$)/i,
+  /(^|[._:-])(access[-_]?token|refresh[-_]?token|auth[-_]?token|bearer[-_]?token)([._:-]|$)/i,
+  /(^|[._:-])(password|passphrase|secret|credential|credentials)([._:-]|$)/i,
+  /(^|[._:-])private[-_]?key([._:-]|$)/i,
+];
+
+const SENSITIVE_MEMORY_VALUE_PATTERNS = [
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+  /\b(?:sk|gho|ghp|glpat|xox[baprs])-[A-Za-z0-9_\-]{12,}\b/,
+  /\b(?:Bearer|token)\s+[A-Za-z0-9._~+/=-]{20,}\b/i,
+];
+
+function sensitiveMemoryQuarantineReason(key: string, value: string): string | undefined {
+  const normalizedKey = key.trim();
+  if (SENSITIVE_MEMORY_KEY_PATTERNS.some((pattern) => pattern.test(normalizedKey))) {
+    return 'key-name-indicates-secret';
+  }
+  if (SENSITIVE_MEMORY_VALUE_PATTERNS.some((pattern) => pattern.test(value))) {
+    return 'value-shape-indicates-secret';
+  }
+  return undefined;
+}
+
 function parseMemoryReviewConfidence(value: unknown): { ok: true; value: number } | { ok: false; message: string } {
   if (typeof value !== 'string' && typeof value !== 'number') {
     return { ok: false, message: 'confidence must be a number between 0 and 1' };
@@ -123,6 +149,14 @@ function parseMemoryReviewAction(value: unknown): { ok: true; value: MemoryRevie
     return { ok: true, value: action as MemoryReviewAction };
   }
   return { ok: false, message: `action must be one of: ${MEMORY_REVIEW_ACTIONS.join(', ')}` };
+}
+
+function parseMemoryConflictResolution(value: unknown): { ok: true; value: MemoryConflictResolution } | { ok: false; message: string } {
+  const resolution = String(value);
+  if (MEMORY_CONFLICT_RESOLUTIONS.includes(resolution as MemoryConflictResolution)) {
+    return { ok: true, value: resolution as MemoryConflictResolution };
+  }
+  return { ok: false, message: `resolution must be one of: ${MEMORY_CONFLICT_RESOLUTIONS.join(', ')}` };
 }
 
 export function createAdapterSet(dbPath: string, options: { root?: string | undefined; configPath?: string | undefined } = {}): AdapterSet {
@@ -169,6 +203,41 @@ const TOOLS: ToolFull[] = [
       if (ttlMs !== undefined && type !== 'working') {
         return { content: [{ type: 'text', text: 'Error: fbeast_memory_store ttlMs is only supported for working memory entries' }], isError: true };
       }
+      const quarantineReason = sensitiveMemoryQuarantineReason(key, value);
+      if (quarantineReason) {
+        if (type !== 'working') {
+          return { content: [{ type: 'text', text: 'Error: fbeast_memory_store sensitive episodic memory must be reviewed and cannot be stored directly' }], isError: true };
+        }
+        if (ttlMs !== undefined) {
+          return { content: [{ type: 'text', text: 'Error: fbeast_memory_store sensitive temporary memory must be reviewed and cannot be stored with ttlMs' }], isError: true };
+        }
+        const candidate = await brain.proposeMemory({
+          key,
+          value,
+          source: 'fbeast_memory_store:quarantine',
+          evidenceId: `quarantine:${key}`,
+          confidence: 1,
+          reason: `Sensitive memory quarantined for operator review (${quarantineReason}). Approve through fbeast_memory_review_decide to persist, reject to discard, or never_store to suppress reinference.`,
+          ...(agentId.value ? { agentId: agentId.value } : {}),
+        });
+        const isPending = candidate.status === 'pending';
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              status: isPending ? 'quarantined' : candidate.status,
+              id: candidate.id,
+              key,
+              ...(agentId.value ? { agentId: agentId.value } : {}),
+              reason: quarantineReason,
+              ...(candidate.suppressionReason ? { suppressionReason: candidate.suppressionReason } : {}),
+              ...(isPending ? { reviewAction: 'Use fbeast_memory_review_decide with approve, reject, or never_store.' } : {}),
+              stored: false,
+            }, null, 2),
+          }],
+        };
+      }
+
       await brain.store({
         key,
         value,
@@ -394,14 +463,35 @@ const TOOLS: ToolFull[] = [
     },
   },
   {
+    name: 'fbeast_memory_review_conflicts',
+    server: 'memory',
+    description: 'Show conflict details, existing value/provenance, and guidance for a pending memory promotion candidate',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Candidate id returned by fbeast_memory_review_propose/list' },
+      },
+      required: ['id'],
+    },
+    makeHandler: ({ brain }) => async (args) => {
+      const id = parseNonEmptyStringArg('id', args['id']);
+      if (!id.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_review_conflicts ${id.message}` }], isError: true };
+      }
+      const conflicts = await brain.conflictsForMemoryReview(id.value);
+      return { content: [{ type: 'text', text: JSON.stringify({ id: id.value, count: conflicts.length, conflicts }, null, 2) }] };
+    },
+  },
+  {
     name: 'fbeast_memory_review_decide',
     server: 'memory',
-    description: 'Approve, reject, or mark a queued memory promotion as never-store',
+    description: 'Approve, reject, mark never-store, or resolve a conflicting queued memory promotion',
     inputSchema: {
       type: 'object',
       properties: {
         id: { type: 'string', description: 'Candidate id returned by fbeast_memory_review_propose/list' },
         action: { type: 'string', description: 'Decision to apply', enum: [...MEMORY_REVIEW_ACTIONS] },
+        resolution: { type: 'string', description: 'Conflict resolution to apply when action is resolve_conflict', enum: [...MEMORY_CONFLICT_RESOLUTIONS] },
         reviewer: { type: 'string', description: 'Optional reviewer/operator id' },
         note: { type: 'string', description: 'Optional reviewer note' },
       },
@@ -416,6 +506,10 @@ const TOOLS: ToolFull[] = [
       if (!action.ok) {
         return { content: [{ type: 'text', text: `Error: fbeast_memory_review_decide ${action.message}` }], isError: true };
       }
+      const resolution = action.value === 'resolve_conflict' ? parseMemoryConflictResolution(args['resolution']) : undefined;
+      if (resolution && !resolution.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_review_decide ${resolution.message}` }], isError: true };
+      }
       const reviewer = args['reviewer'] === undefined ? undefined : parseNonEmptyStringArg('reviewer', args['reviewer']);
       if (reviewer && !reviewer.ok) {
         return { content: [{ type: 'text', text: `Error: fbeast_memory_review_decide ${reviewer.message}` }], isError: true };
@@ -427,6 +521,7 @@ const TOOLS: ToolFull[] = [
       const candidate = await brain.decideMemoryReview({
         id: id.value,
         action: action.value,
+        ...(resolution?.ok ? { resolution: resolution.value } : {}),
         options: {
           ...(reviewer?.value ? { reviewer: reviewer.value } : {}),
           ...(note?.value !== undefined ? { note: note.value } : {}),
