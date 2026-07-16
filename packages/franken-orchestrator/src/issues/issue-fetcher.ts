@@ -11,7 +11,7 @@ const DEFAULT_ISSUE_FETCH_RECENT_LIMIT = 200;
 const MIN_ISSUE_FETCH_BUFFER_BYTES = 2_097_152;
 const MAX_ISSUE_FETCH_BUFFER_BYTES = 128 * 1_024 * 1_024;
 const APPROX_MAX_GITHUB_ISSUE_BODY_BYTES = 65_536;
-const DEFAULT_URGENT_ISSUE_QUERY = '(label:critical OR label:p0 OR label:p1 OR label:high OR label:"priority:p0" OR label:"priority:p1" OR label:"priority:critical" OR label:"priority:high")';
+const DEFAULT_PRIORITY_ISSUE_QUERY = '(label:critical OR label:p0 OR label:p1 OR label:p2 OR label:p3 OR label:high OR label:medium OR label:low OR label:"priority:p0" OR label:"priority:p1" OR label:"priority:p2" OR label:"priority:p3" OR label:"priority:critical" OR label:"priority:high" OR label:"priority:medium" OR label:"priority:low")';
 const ISSUE_FETCH_PRIORITY_RANKS: Readonly<Record<string, number>> = {
   p0: 0,
   'priority:p0': 0,
@@ -74,8 +74,8 @@ export class IssueFetcher implements IIssueFetcher {
     try {
       return this.mergeIssuePages(
         [
-          await this.fetchIssuePage(options, `${DEFAULT_URGENT_ISSUE_QUERY} sort:created-desc`, limit),
-          await this.fetchIssuePage(options, `${DEFAULT_URGENT_ISSUE_QUERY} sort:created-asc`, limit),
+          await this.fetchIssuePage(options, `${DEFAULT_PRIORITY_ISSUE_QUERY} sort:created-desc`, limit),
+          await this.fetchIssuePage(options, `${DEFAULT_PRIORITY_ISSUE_QUERY} sort:created-asc`, limit),
           await this.fetchIssuePage(options, 'sort:created-desc', Math.min(DEFAULT_ISSUE_FETCH_RECENT_LIMIT, limit)),
           await this.fetchIssuePage(options, 'sort:created-asc', limit),
         ],

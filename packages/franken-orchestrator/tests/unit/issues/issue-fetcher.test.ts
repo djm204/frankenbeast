@@ -89,11 +89,27 @@ describe('IssueFetcher', () => {
       expect(searches[0]).toContain('label:high');
       expect(searches[0]).toContain('label:"priority:p0"');
       expect(searches[0]).toContain('label:"priority:p1"');
+      expect(searches[0]).toContain('label:"priority:p2"');
+      expect(searches[0]).toContain('label:"priority:low"');
       expect(searches[0]).toContain('sort:created-desc');
       expect(searches[1]).toContain('label:critical');
       expect(searches[1]).toContain('sort:created-asc');
       expect(searches[2]).toBe('sort:created-desc');
       expect(searches[3]).toBe('sort:created-asc');
+    });
+
+    it('fetches old medium and low priority pages before relying on unfiltered oldest backlog', async () => {
+      const execFn = vi.fn(makeExecFn(SAMPLE_GH_OUTPUT));
+      const fetcher = new IssueFetcher(execFn);
+
+      await fetcher.fetch({});
+
+      const oldestPrioritySearch = execFn.mock.calls[1]![1][execFn.mock.calls[1]![1].indexOf('--search') + 1];
+      expect(oldestPrioritySearch).toContain('label:medium');
+      expect(oldestPrioritySearch).toContain('label:low');
+      expect(oldestPrioritySearch).toContain('label:"priority:p2"');
+      expect(oldestPrioritySearch).toContain('label:"priority:p3"');
+      expect(oldestPrioritySearch).toContain('sort:created-asc');
     });
 
     it('deduplicates issues returned by the default supplemental fetch windows', async () => {
