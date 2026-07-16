@@ -41,7 +41,7 @@ export const DEFAULT_WORKING_MEMORY_LIMITS: WorkingMemoryLimits = {
   maxTotalBytes: 64 * 1024 * 1024,
 };
 
-export const CURRENT_MEMORY_SCHEMA_VERSION = 1;
+export const CURRENT_MEMORY_SCHEMA_VERSION = 2;
 
 export interface MemorySchemaStoreMetadata {
   store: string;
@@ -2769,7 +2769,7 @@ export class SqliteMemoryReviewQueue {
       }
       const now = isoNow();
       const sourceType = normalizeMemorySourceType(proposal.sourceType, proposal.source);
-      const sourceId = proposal.sourceId ?? deriveMemorySourceId(proposal.source) ?? undefined;
+      const sourceId = proposal.sourceId;
       const candidate: MemoryCandidate = {
         ...proposal,
         sourceType,
@@ -4247,8 +4247,8 @@ export class SqliteMemoryReviewQueue {
       .prepare(
         `INSERT INTO memory_review_suppressions (
           signature, suppression_reason, target_store, memory_key, value, source,
-          evidence_id, reason, reviewer, note, created_at, schema_version
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
+          source_id, evidence_id, reason, reviewer, note, created_at, schema_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
         ON CONFLICT(signature) DO UPDATE SET
           suppression_reason = excluded.suppression_reason,
           reviewer = excluded.reviewer,
@@ -4264,6 +4264,7 @@ export class SqliteMemoryReviewQueue {
           reason === 'never_store' ? NEVER_STORE_REDACTED_VALUE : candidate.value,
         ),
         this.encodeText(candidate.source),
+        this.encodeSourceId(candidate.sourceId, candidate.source),
         candidate.evidenceId ? this.encodeText(candidate.evidenceId) : null,
         this.encodeText(candidate.reason),
         options.reviewer ? this.encodeText(options.reviewer) : null,
@@ -4295,7 +4296,7 @@ export class SqliteMemoryReviewQueue {
     this.db
       .prepare(
         `UPDATE memory_review_candidates
-         SET value = ?, source = ?, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL, updated_at = ?
+         SET value = ?, source = ?, source_id = NULL, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL, updated_at = ?
          WHERE target_store = ? AND memory_key = ?`,
       )
       .run(
@@ -4309,7 +4310,7 @@ export class SqliteMemoryReviewQueue {
     this.db
       .prepare(
         `UPDATE memory_review_suppressions
-         SET value = ?, source = ?, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL
+         SET value = ?, source = ?, source_id = NULL, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL
          WHERE target_store = ? AND memory_key = ?`,
       )
       .run(
@@ -4356,6 +4357,7 @@ export class SqliteMemoryReviewQueue {
         memory_key: string;
         value: string;
         source: string;
+        source_id: string | null;
         evidence_id: string | null;
       }>;
     for (const row of rows) {
@@ -4365,6 +4367,7 @@ export class SqliteMemoryReviewQueue {
       }
       if (
         this.decodeText(row.source) === candidate.source &&
+        (row.source_id ? this.decodeText(row.source_id) : undefined) === candidate.sourceId &&
         (row.evidence_id ? this.decodeText(row.evidence_id) : undefined) ===
           candidate.evidenceId
       ) {
@@ -4438,6 +4441,7 @@ export class SqliteMemoryReviewQueue {
             proposal.targetStore,
             proposal.key,
             proposal.source,
+            proposal.sourceId ?? '',
             proposal.evidenceId ?? '',
             stableStringify(normalizedValue),
           ],
@@ -4505,9 +4509,8 @@ export class SqliteMemoryReviewQueue {
     return this.encodeText(stringifyWorkingMemoryValue('memory candidate', value));
   }
 
-  private encodeSourceId(sourceId: string | undefined, source: string): string | null {
-    const resolved = sourceId ?? deriveMemorySourceId(source);
-    return resolved ? this.encodeText(resolved) : null;
+  private encodeSourceId(sourceId: string | undefined, _source: string): string | null {
+    return sourceId ? this.encodeText(sourceId) : null;
   }
 
   private decodeValue(value: string): unknown {
@@ -4534,10 +4537,6 @@ function normalizeMemorySourceType(
   return 'unknown';
 }
 
-function deriveMemorySourceId(source: string): string | null {
-  const match = /^[a-z][a-z0-9_-]*:(.+)$/i.exec(source.trim());
-  return match?.[1]?.trim() || null;
-}
 
 function validateOptionalIsoTimestamp(value: string | undefined, fieldName: string): void {
   if (value === undefined) return;
@@ -5010,6 +5009,7 @@ export class SqliteBrain implements IBrain {
         memory_key TEXT NOT NULL,
         value TEXT NOT NULL,
         source TEXT NOT NULL,
+        source_id TEXT,
         evidence_id TEXT,
         reason TEXT NOT NULL,
         reviewer TEXT,
@@ -5406,6 +5406,7 @@ export class SqliteBrain implements IBrain {
       {
         value: parseStoredWorkingMemoryValue(this.encryption?.decrypt(row.value) ?? row.value),
         source: this.encryption?.decrypt(row.source) ?? row.source,
+        sourceId: row.source_id ? this.encryption?.decrypt(row.source_id) ?? row.source_id : undefined,
         evidenceId: row.evidence_id ? this.encryption?.decrypt(row.evidence_id) ?? row.evidence_id : undefined,
         reason: this.encryption?.decrypt(row.reason) ?? row.reason,
         reviewer: row.reviewer ? this.encryption?.decrypt(row.reviewer) ?? row.reviewer : undefined,
@@ -5419,7 +5420,7 @@ export class SqliteBrain implements IBrain {
     if (matches.length === 0) return;
     const redactCandidates = this.db.prepare(
       `UPDATE memory_review_candidates
-       SET memory_key = ?, value = ?, source = ?, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL,
+       SET memory_key = ?, value = ?, source = ?, source_id = NULL, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL,
            status = CASE WHEN status = 'pending' THEN 'suppressed' ELSE status END,
            suppression_reason = CASE WHEN status = 'pending' THEN 'never_store' ELSE suppression_reason END,
            decided_at = CASE WHEN status = 'pending' THEN ? ELSE decided_at END,
@@ -5428,12 +5429,12 @@ export class SqliteBrain implements IBrain {
     );
     const redactProvenance = this.db.prepare(
       `UPDATE memory_review_provenance
-       SET memory_key = ?, value = ?, source = ?, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL
+       SET memory_key = ?, value = ?, source = ?, source_id = NULL, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL
        WHERE target_store = ? AND memory_key = ?`,
     );
     const redactSuppression = this.db.prepare(
       `UPDATE memory_review_suppressions
-       SET memory_key = ?, value = ?, source = ?, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL
+       SET memory_key = ?, value = ?, source = ?, source_id = NULL, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL
        WHERE signature = ?`,
     );
     const redactedValue = this.encryption?.encrypt(stringifyWorkingMemoryValue('memory candidate', NEVER_STORE_REDACTED_VALUE)) ?? stringifyWorkingMemoryValue('memory candidate', NEVER_STORE_REDACTED_VALUE);
@@ -5680,6 +5681,23 @@ function migrateMemorySchemaDatabase(
       .prepare(`PRAGMA table_info(${store})`)
       .all() as Array<{ name: string }>;
     const columns = new Set(columnRows.map((row) => row.name));
+    if (store === 'memory_review_candidates') {
+      for (const column of ['source_type', 'source_id', 'expires_at', 'revalidate_at']) {
+        if (!columns.has(column)) {
+          operations.push({ table: store, action: `add ${column} column` });
+        }
+      }
+    }
+    if (store === 'memory_review_provenance') {
+      for (const column of ['source_type', 'source_id', 'created_at', 'expires_at', 'revalidate_at']) {
+        if (!columns.has(column)) {
+          operations.push({ table: store, action: `add ${column} column` });
+        }
+      }
+    }
+    if (store === 'memory_review_suppressions' && !columns.has('source_id')) {
+      operations.push({ table: store, action: 'add source_id column' });
+    }
     if (!columns.has('schema_version')) {
       operations.push({
         table: store,
@@ -5797,9 +5815,13 @@ function migrateMemorySchemaDatabase(
         memory_key TEXT NOT NULL,
         value TEXT NOT NULL,
         source TEXT NOT NULL,
+        source_type TEXT,
+        source_id TEXT,
         evidence_id TEXT,
         confidence REAL NOT NULL,
         reason TEXT NOT NULL,
+        expires_at TEXT,
+        revalidate_at TEXT,
         status TEXT NOT NULL,
         suppression_reason TEXT,
         reviewer TEXT,
@@ -5817,6 +5839,8 @@ function migrateMemorySchemaDatabase(
         value TEXT NOT NULL,
         candidate_id TEXT NOT NULL,
         source TEXT NOT NULL,
+        source_type TEXT,
+        source_id TEXT,
         evidence_id TEXT,
         confidence REAL NOT NULL,
         reason TEXT NOT NULL,
@@ -5836,6 +5860,7 @@ function migrateMemorySchemaDatabase(
         memory_key TEXT NOT NULL,
         value TEXT NOT NULL,
         source TEXT NOT NULL,
+        source_id TEXT,
         evidence_id TEXT,
         reason TEXT NOT NULL,
         reviewer TEXT,
@@ -5846,6 +5871,22 @@ function migrateMemorySchemaDatabase(
       CREATE INDEX IF NOT EXISTS idx_memory_review_suppressions_target_key
         ON memory_review_suppressions(target_store, memory_key);
     `);
+    ensureColumns(db, 'memory_review_candidates', {
+      source_type: 'TEXT',
+      source_id: 'TEXT',
+      expires_at: 'TEXT',
+      revalidate_at: 'TEXT',
+    });
+    ensureColumns(db, 'memory_review_provenance', {
+      source_type: 'TEXT',
+      source_id: 'TEXT',
+      created_at: 'TEXT',
+      expires_at: 'TEXT',
+      revalidate_at: 'TEXT',
+    });
+    ensureColumns(db, 'memory_review_suppressions', {
+      source_id: 'TEXT',
+    });
     for (const store of stores) {
       const columnRows = db
         .prepare(`PRAGMA table_info(${store})`)
@@ -6803,6 +6844,7 @@ function reviewPayloadMatchesSelector(
   payload: {
     value: unknown;
     source: string;
+    sourceId?: string | undefined;
     evidenceId?: string | undefined;
     reason: string;
     reviewer?: string | undefined;

@@ -1564,7 +1564,7 @@ describe('SqliteBrain', () => {
         }),
       });
       expect(entry?.compact).toContain('user.preference.response-style="concise"');
-      expect(entry?.compact).toContain('source=user:msg-42');
+      expect(entry?.compact).toContain('source=user:"msg-42"');
       expect(entry?.compact).toContain('confidence=');
       expect(entry?.compact).toContain('revalidate=2026-08-01T00:00:00.000Z');
     });
@@ -1575,6 +1575,7 @@ describe('SqliteBrain', () => {
         key: 'user.location.city',
         value: 'Paris',
         source: 'inferred:session-7',
+        sourceId: 'session-7',
         confidence: 0.6,
         reason: 'User mentioned a Paris train connection; this is inferred.',
         expiresAt: '2026-07-15T00:00:00.000Z',
