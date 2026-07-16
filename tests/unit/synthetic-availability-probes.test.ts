@@ -42,7 +42,7 @@ describe('synthetic availability probes', () => {
         repo: 'djm204/frankenbeast',
         kanbanDbPath: kanbanPath,
         providerCommand: ['node', '--version'],
-        dashboardHealthUrl: 'http://127.0.0.1:3737/health',
+        dashboardHealthUrl: 'http://127.0.0.1:5173/health',
         approvalLedgerPath: ledgerPath,
         timeoutMs: 250,
       },
@@ -77,7 +77,7 @@ describe('synthetic availability probes', () => {
       'number,title,state',
     ]);
     expect(JSON.stringify(execCalls)).not.toMatch(/issue edit|issue close|pr merge|kanban complete|approval/i);
-    expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:3737/health', expect.objectContaining({ method: 'GET' }));
+    expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:5173/health', expect.objectContaining({ method: 'GET' }));
 
     rmSync(tmp, { recursive: true, force: true });
   });
@@ -89,7 +89,7 @@ describe('synthetic availability probes', () => {
         repo: 'djm204/frankenbeast',
         kanbanDbPath: '/missing/kanban.db',
         providerCommand: ['node', '--version'],
-        dashboardHealthUrl: 'http://127.0.0.1:3737/health',
+        dashboardHealthUrl: 'http://127.0.0.1:5173/health',
         approvalLedgerPath: '/missing/ledger.json',
         timeoutMs: 100,
       },
@@ -133,7 +133,7 @@ describe('synthetic availability probes', () => {
       readFile: vi.fn(async () => '{}'),
     });
 
-    expect(execFile).toHaveBeenCalledWith('node', ['-e', 'process.exit(1)'], 1);
+    expect(execFile).toHaveBeenCalledWith('node', ['-e', 'process.exit(1)'], 100);
   });
 
   it('emits compact one-line JSON for JSONL-friendly cron logs', () => {
@@ -167,7 +167,7 @@ describe('synthetic availability probes', () => {
     const report = await runSyntheticAvailabilityProbes({
       config: {
         repo: 'djm204/frankenbeast',
-        providerCommand: 'curl -H "Authorization: Bearer secret-token" --api-key super-secret http://127.0.0.1/health',
+        providerCommand: 'curl -H "Authorization: Bearer ***" --api-key super-secret http://127.0.0.1/health',
         timeoutMs: 100,
       },
       execFile: vi.fn(async (file: string) => (file === 'gh' ? '[]' : 'provider ok')),
@@ -182,6 +182,30 @@ describe('synthetic availability probes', () => {
     expect(providerProbe?.detail.command).not.toContain('super-secret');
   });
 
+  it('redacts space-separated secrets from provider failure output', async () => {
+    const { runSyntheticAvailabilityProbes } = await loadScript();
+    const report = await runSyntheticAvailabilityProbes({
+      config: {
+        repo: 'djm204/frankenbeast',
+        providerCommand: 'provider status',
+        timeoutMs: 100,
+      },
+      execFile: vi.fn(async (file: string) => {
+        if (file === 'gh') return '[]';
+        throw new Error('provider exited with code 1: --api-key super-secret token another-secret Bearer bearer-secret');
+      }),
+      fetch: vi.fn(async () => ({ ok: true, status: 200 })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      readFile: vi.fn(async () => '{}'),
+    });
+
+    const providerProbe = (report.probes as Array<Record<string, string>>).find((probe) => probe.name === 'provider_status');
+    expect(providerProbe?.error).toContain('[REDACTED]');
+    expect(providerProbe?.error).not.toContain('super-secret');
+    expect(providerProbe?.error).not.toContain('another-secret');
+    expect(providerProbe?.error).not.toContain('bearer-secret');
+  });
+
   it('terminates timed-out provider commands before returning a report', () => {
     const result = spawnSync(process.execPath, [SCRIPT, '--json', '--repo', 'djm204/frankenbeast', '--provider-command', `node -e "process.on('SIGTERM',()=>{}); setInterval(()=>{},1000)"`, '--timeout-ms', '100'], {
       cwd: ROOT,
@@ -194,7 +218,7 @@ describe('synthetic availability probes', () => {
     const report = JSON.parse(result.stdout.trim());
     const providerProbe = report.probes.find((probe: Record<string, string>) => probe.name === 'provider_status');
     expect(providerProbe.status).toBe('unavailable');
-    expect(providerProbe.error).toContain('terminated');
+    expect(providerProbe.error).toContain('timed out');
   });
 
   it('renders compact text output and documents cron/CI usage', async () => {

@@ -45,7 +45,7 @@ function parseCliArgs(argv) {
     repo: process.env.FRANKENBEAST_AVAILABILITY_REPO,
     kanbanDbPath: process.env.FRANKENBEAST_AVAILABILITY_KANBAN_DB ?? process.env.HERMES_KANBAN_DB,
     providerCommand: parseCommandLine(process.env.FRANKENBEAST_AVAILABILITY_PROVIDER_COMMAND) ?? ['node', '--version'],
-    dashboardHealthUrl: process.env.FRANKENBEAST_AVAILABILITY_DASHBOARD_URL ?? 'http://127.0.0.1:3737/health',
+    dashboardHealthUrl: process.env.FRANKENBEAST_AVAILABILITY_DASHBOARD_URL ?? 'http://127.0.0.1:5173/health',
     approvalLedgerPath: process.env.FRANKENBEAST_AVAILABILITY_APPROVAL_LEDGER,
     timeoutMs: DEFAULT_TIMEOUT_MS,
     output: 'text',
@@ -78,12 +78,12 @@ function parseCliArgs(argv) {
 }
 
 function usage() {
-  return `Usage: node scripts/synthetic-availability-probes.mjs [--json|--text] [options]\n\nRead-only synthetic availability probes for critical Frankenbeast workflows.\n\nOptions:\n  --repo <owner/repo>          GitHub repo for issue inventory probe\n  --kanban-db <path>           Kanban SQLite database path\n  --provider-command <cmd>     Read-only provider status command (default: node --version)\n  --dashboard-url <url>        Dashboard health URL (default: http://127.0.0.1:3737/health)\n  --approval-ledger <path>     Approval ledger JSON path\n  --timeout-ms <ms>            Per-probe timeout (default: ${DEFAULT_TIMEOUT_MS})\n  --json                      Emit compact machine-readable JSON/JSONL\n  --pretty-json               Emit pretty-printed JSON for humans\n  --text                      Emit compact text (default)`;
+  return `Usage: node scripts/synthetic-availability-probes.mjs [--json|--text] [options]\n\nRead-only synthetic availability probes for critical Frankenbeast workflows.\n\nOptions:\n  --repo <owner/repo>          GitHub repo for issue inventory probe\n  --kanban-db <path>           Kanban SQLite database path\n  --provider-command <cmd>     Read-only provider status command (default: node --version)\n  --dashboard-url <url>        Dashboard health URL (default: http://127.0.0.1:5173/health)\n  --approval-ledger <path>     Approval ledger JSON path\n  --timeout-ms <ms>            Per-probe timeout (default: ${DEFAULT_TIMEOUT_MS})\n  --json                      Emit compact machine-readable JSON/JSONL\n  --pretty-json               Emit pretty-printed JSON for humans\n  --text                      Emit compact text (default)`;
 }
 
 function normalizeError(error) {
-  if (error instanceof Error) return error.message;
-  return String(error);
+  const message = error instanceof Error ? error.message : String(error);
+  return redactText(message);
 }
 
 async function withTimeout(operation, timeoutMs) {
@@ -174,7 +174,8 @@ async function defaultExecFile(file, args, timeoutMs) {
 function redactText(value) {
   return String(value)
     .replace(/Bearer\s+\S+/giu, 'Bearer [REDACTED]')
-    .replace(/((?:token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)[\w.-]*\s*[=:]\s*)\S+/giu, '$1[REDACTED]');
+    .replace(/((?:token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)[\w.-]*\s*[=:]\s*)\S+/giu, '$1[REDACTED]')
+    .replace(/((?:--?[\w-]*(?:token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)[\w-]*|token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)\s+)\S+/giu, '$1[REDACTED]');
 }
 
 function redactCommand(command) {
@@ -221,8 +222,7 @@ async function probeProviderStatus(config, deps) {
   const command = parseCommandLine(config.providerCommand);
   if (!command || command.length === 0) throw new Error('missing provider status command');
   const [file, ...args] = command;
-  const commandTimeoutMs = Math.max(1, config.timeoutMs - 100);
-  const stdout = await deps.execFile(file, args, commandTimeoutMs);
+  const stdout = await deps.execFile(file, args, config.timeoutMs);
   return { command: redactCommand(command).join(' '), outputBytes: String(stdout ?? '').length };
 }
 
@@ -250,7 +250,7 @@ export async function runSyntheticAvailabilityProbes(options = {}) {
   const config = {
     timeoutMs: DEFAULT_TIMEOUT_MS,
     providerCommand: ['node', '--version'],
-    dashboardHealthUrl: 'http://127.0.0.1:3737/health',
+    dashboardHealthUrl: 'http://127.0.0.1:5173/health',
     ...(options.config ?? {}),
   };
   if (!Number.isFinite(config.timeoutMs) || config.timeoutMs <= 0) {
