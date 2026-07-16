@@ -247,34 +247,6 @@ function unqualifyMcpToolName(toolName: string): string {
   return index >= 0 ? toolName.slice(index + marker.length) : toolName;
 }
 
-function redactMemoryExportArgs(sanitized: Record<string, unknown>, redaction = '[memory-export-args-redacted]'): Record<string, unknown> {
-  if (Object.prototype.hasOwnProperty.call(sanitized, 'invalid')) {
-    sanitized['invalid'] = redaction;
-    return sanitized;
-  }
-  for (const key of Object.keys(sanitized)) {
-    if (key === 'agentId') {
-      sanitized[key] = '[memory-export-agent-redacted]';
-    } else if (key === 'readScope' && !MEMORY_EXPORT_SAFE_READ_SCOPES.has(String(sanitized[key]))) {
-      sanitized[key] = redaction;
-    } else if (key === 'redaction' && !MEMORY_EXPORT_SAFE_REDACTIONS.has(String(sanitized[key]))) {
-      sanitized[key] = redaction;
-    } else if (key === 'limit' && typeof sanitized[key] !== 'string') {
-      sanitized[key] = redaction;
-    } else if (!MEMORY_EXPORT_SAFE_AUDIT_KEYS.has(key)) {
-      sanitized[key] = redaction;
-    }
-  }
-  return sanitized;
-}
-
-function redactMemoryExportEnvelope(sanitized: Record<string, unknown>, redaction = '[memory-export-args-redacted]'): Record<string, unknown> {
-  for (const key of Object.keys(sanitized)) {
-    sanitized[key] = key === 'tool' ? sanitized[key] : redaction;
-  }
-  return sanitized;
-}
-
 function redactMemoryReviewProposalArgs(sanitized: Record<string, unknown>, redaction = '[memory-review-proposal-redacted]'): Record<string, unknown> {
   if (Object.prototype.hasOwnProperty.call(sanitized, 'invalid')) {
     sanitized['invalid'] = redaction;
@@ -353,7 +325,7 @@ function redactMemoryExportArgs(sanitized: Record<string, unknown>, redaction = 
       sanitized[key] = redaction;
     } else if (key === 'redaction' && !MEMORY_EXPORT_SAFE_REDACTIONS.has(String(sanitized[key]))) {
       sanitized[key] = redaction;
-    } else if (key === 'limit' && typeof sanitized[key] !== 'string') {
+    } else if (key === 'limit' && typeof sanitized[key] !== 'number') {
       sanitized[key] = redaction;
     } else if (!MEMORY_EXPORT_SAFE_AUDIT_KEYS.has(key)) {
       sanitized[key] = redaction;
@@ -428,18 +400,6 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
     }
     if (isDirectMemoryReviewDecide) {
       return redactMemoryReviewDecisionArgs(sanitized);
-    }
-    return sanitized;
-  }
-  if (auditedTool === MEMORY_EXPORT_TOOL || auditedAction === MEMORY_EXPORT_TOOL) {
-    if (unqualifiedToolName === 'execute_tool') {
-      return redactMemoryExportEnvelope(sanitized);
-    }
-    if (auditedAction === MEMORY_EXPORT_TOOL && Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
-      sanitized['context'] = '[memory-export-args-redacted]';
-    }
-    if (unqualifiedToolName === MEMORY_EXPORT_TOOL) {
-      return redactMemoryExportArgs(sanitized);
     }
     return sanitized;
   }

@@ -384,6 +384,36 @@ describe('createMcpServer', () => {
       });
     });
 
+    it('redacts memory export agent identifiers before recording audit args', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_export', {
+        readScope: 'agent',
+        agentId: 'alice@example.test',
+        redaction: 'safe',
+        limit: 10,
+        extra: 'sensitive detail',
+      })).toEqual({
+        readScope: 'agent',
+        agentId: '[memory-export-args-redacted]',
+        redaction: 'safe',
+        limit: 10,
+        extra: '[memory-export-args-redacted]',
+      });
+    });
+
+    it('redacts proxied memory export envelopes before recording audit args', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
+        tool: 'fbeast_memory_export',
+        args: { readScope: 'agent', agentId: 'alice@example.test', redaction: 'safe' },
+      })).toEqual({
+        tool: 'fbeast_memory_export',
+        args: {
+          readScope: 'agent',
+          agentId: '[memory-export-args-redacted]',
+          redaction: 'safe',
+        },
+      });
+    });
+
     it('redacts direct right-to-forget selectors even when malformed args include envelope-like properties', () => {
       expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_right_to_forget', {
         tool: 'not_the_memory_tool',
@@ -472,12 +502,12 @@ describe('createMcpServer', () => {
         readScope: 'agent',
         agentId: 'alice@example.test',
         redaction: 'safe',
-        limit: '5',
+        limit: 5,
       })).toEqual({
         readScope: 'agent',
         agentId: '[memory-export-args-redacted]',
         redaction: 'safe',
-        limit: '5',
+        limit: 5,
       });
 
       expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {

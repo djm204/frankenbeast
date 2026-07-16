@@ -62,7 +62,6 @@ vi.mock("@franken/brain", () => ({
             "-----BEGIN " +
             "OPENSSH PRIVATE KEY-----\nsecret\n-----END " +
             "OPENSSH PRIVATE KEY-----",
-          "status-page": "password=hunter2 session_cookie=abc123value Authorization: Basic dXNlcjpwYXNz postgres://alice:hunter2@db.internal/app",
           "status-page": "password=hunter2 session_cookie=abc123value",
           "basic-auth": "Authorization: Basic dXNlcjpwYXNz",
           "database-url": "postgres://alice:hunter2@db.internal/app",
@@ -366,6 +365,11 @@ describe("createBrainAdapter", () => {
     expect(serialized).not.toContain("OPENSSH PRIVATE KEY");
     expect(serialized).not.toContain("hunter2");
     expect(serialized).not.toContain("abc123value");
+    expect(serialized).not.toContain("dXNlcjpwYXNz");
+    expect(serialized).not.toContain("postgres://alice:hunter2@db.internal/app");
+    expect(serialized).not.toContain('"password":123456');
+    expect(serialized).not.toContain('"token":true');
+    expect(serialized).not.toContain("987654");
     expect(serialized).not.toContain("alice@example.com");
     expect(serialized).not.toContain("bob@example.com");
     expect(serialized).not.toContain("apiKey");
