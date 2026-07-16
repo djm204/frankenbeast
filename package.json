@@ -54,7 +54,7 @@
     "test:coverage": "npm run test:coverage:root && turbo run test:coverage --filter=\"./packages/*\" --concurrency=1",
     "test:coverage:root": "vitest run --coverage",
     "dr:restore-rehearsal": "node scripts/restore-rehearsal.mjs",
-    "ci:dr:restore-rehearsal": "node scripts/retry-ci-command.mjs -- npm run dr:restore-rehearsal"
+    "ci:dr:restore-rehearsal": "npm run dr:restore-rehearsal"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
