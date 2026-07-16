@@ -519,6 +519,30 @@ describe('createMcpServer', () => {
       });
     });
 
+    it('redacts memory source attribution filters in the exported audit sanitizer', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_source_attribution', {
+        key: 'user.private.email',
+        source: 'chat:turn-42',
+        limit: '5',
+      })).toEqual({
+        key: '[memory-source-attribution-args-redacted]',
+        source: '[memory-source-attribution-args-redacted]',
+        limit: '5',
+      });
+
+      expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
+        tool: 'fbeast_memory_source_attribution',
+        args: { key: 'user.private.email', source: 'chat:turn-42', limit: '5' },
+      })).toEqual({
+        tool: 'fbeast_memory_source_attribution',
+        args: {
+          key: '[memory-source-attribution-args-redacted]',
+          source: '[memory-source-attribution-args-redacted]',
+          limit: '5',
+        },
+      });
+    });
+
 
     it('redacts invalid and unknown right-to-forget audit payloads wholesale', () => {
       expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_right_to_forget', 'alice@example.test')).toEqual({

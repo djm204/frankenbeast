@@ -90,7 +90,7 @@ For Beast controls, run the orchestrator/backend setup flow with `frankenbeast i
 
 | Server | Tools | Description |
 |--------|-------|-------------|
-| `fbeast-memory` | `fbeast_memory_store`, `fbeast_memory_query`, `fbeast_memory_frontload`, `fbeast_memory_forget`, `fbeast_memory_right_to_forget`, `fbeast_memory_review_propose`, `fbeast_memory_review_list`, `fbeast_memory_review_decide` | Key-value, episodic, review-queued promotion, and auditable deletion memory via SqliteBrain |
+| `fbeast-memory` | `fbeast_memory_store`, `fbeast_memory_query`, `fbeast_memory_frontload`, `fbeast_memory_forget`, `fbeast_memory_right_to_forget`, `fbeast_memory_review_propose`, `fbeast_memory_review_list`, `fbeast_memory_source_attribution`, `fbeast_memory_review_decide` | Key-value, episodic, review-queued promotion, source attribution, and auditable deletion memory via SqliteBrain |
 | `fbeast-observer` | `fbeast_observer_log`, `fbeast_observer_log_cost`, `fbeast_observer_cost`, `fbeast_observer_trail`, `fbeast_observer_verify` | Audit trail with chained hashes, token/cost logging and summaries |
 | `fbeast-governor` | `fbeast_governor_check`, `fbeast_governor_budget` | Action safety assessment and budget status |
 | `fbeast-planner` | `fbeast_plan_decompose`, `fbeast_plan_status`, `fbeast_plan_validate` | Task DAG planning, status visualization, and validation |
@@ -109,6 +109,8 @@ Memory reads support explicit per-agent scope controls on `fbeast_memory_query` 
 To create agent-scoped entries through `fbeast_memory_store`, pass `agentId`; working-memory entries are stored under an internal reserved key with explicit scope metadata, and episodic entries carry the same metadata in event details. `fbeast_memory_forget` accepts the same optional `agentId` so callers can delete scoped working-memory entries using the logical key they stored. `readScope: "agent"` requires a non-empty `agentId` and rejects the request before touching memory when the id is missing, making failures deterministic and preventing accidental broad reads.
 
 `fbeast_memory_right_to_forget` performs user-directed memory deletion by exact key, category metadata, source scope, or sensitive query text. The report returns only a selector hash, deleted counts, remaining-reference count, and optional audit event id; it does not echo the deleted content. Non-dry-run deletions also install hashed reinference guards so future working-memory writes matching forgotten keys, categories, source scopes, or query tokens are rejected.
+
+`fbeast_memory_source_attribution` is the operator-facing viewer for approved working-memory provenance. It returns structured JSON with `count` and `attributions[]`; each attribution includes the memory key, approved value, source, optional evidence id, candidate id, confidence, reason, reviewer/note when present, and approval timestamp. Use `key` for an exact memory-key lookup, `source` for a case-insensitive source substring filter, and `limit` to cap results. Empty lookups return `{ "count": 0, "attributions": [] }` so automation can distinguish “no attribution found” from a tool failure.
 
 ### Skill health endpoint
 
@@ -185,7 +187,7 @@ sensitive payloads into logs or issue comments.
 
 ## Combined server
 
-`fbeast-mcp` runs all 25 tools in a single MCP server process.
+`fbeast-mcp` runs all 26 tools in a single MCP server process.
 
 ## Tool argument shape hardening
 

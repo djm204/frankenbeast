@@ -144,6 +144,17 @@ export interface MemoryProvenanceRecord {
   approvedAt: string;
 }
 
+export interface MemoryAttributionListOptions {
+  /** Filter attribution records to a target store. Defaults to all supported stores. */
+  targetStore?: MemoryCandidateTargetStore;
+  /** Filter attribution records to an exact memory key. */
+  key?: string;
+  /** Case-insensitive substring filter for the decoded source string. */
+  source?: string;
+  /** Maximum attribution records to return. Defaults to 50, max 1000. */
+  limit?: number;
+}
+
 export interface MemoryEncryptionMetadata {
   algorithm: 'aes-256-gcm';
   stores: Array<{ store: string; encrypted: boolean }>;
@@ -1825,6 +1836,62 @@ export class SqliteMemoryReviewQueue {
       )
       .get(targetStore, key) as MemoryProvenanceRow | undefined;
     return row ? this.rowToProvenance(row) : null;
+  }
+
+  listProvenance(
+    options: MemoryAttributionListOptions = {},
+  ): MemoryProvenanceRecord[] {
+    const limit = this.resolveAttributionLimit(options.limit);
+    if (options.targetStore !== undefined && options.targetStore !== 'working') {
+      throw new Error(`Unsupported memory attribution target store: ${options.targetStore}`);
+    }
+    if (options.key !== undefined && options.key.trim().length === 0) {
+      throw new Error('Memory attribution key filter must not be empty');
+    }
+    if (options.source !== undefined && options.source.trim().length === 0) {
+      throw new Error('Memory attribution source filter must not be empty');
+    }
+
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (options.targetStore !== undefined) {
+      conditions.push('target_store = ?');
+      params.push(options.targetStore);
+    }
+    if (options.key !== undefined) {
+      conditions.push('memory_key = ?');
+      params.push(options.key);
+    }
+    const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM memory_review_provenance${where} ORDER BY approved_at DESC, memory_key ASC`,
+      )
+      .all(...params) as MemoryProvenanceRow[];
+    const sourceFilter = options.source?.trim().toLowerCase();
+    const attributions: MemoryProvenanceRecord[] = [];
+    for (const row of rows) {
+      const provenance = this.rowToProvenance(row);
+      if (sourceFilter && !provenance.source.toLowerCase().includes(sourceFilter)) {
+        continue;
+      }
+      attributions.push(provenance);
+      if (attributions.length >= limit) break;
+    }
+    return attributions;
+  }
+
+  private resolveAttributionLimit(limit: number | undefined): number {
+    if (limit === undefined) return 50;
+    if (
+      !Number.isFinite(limit) ||
+      !Number.isSafeInteger(limit) ||
+      limit < 1 ||
+      limit > 1000
+    ) {
+      throw new Error('Memory attribution limit must be a positive integer between 1 and 1000');
+    }
+    return limit;
   }
 
   private validateProposal(proposal: MemoryCandidateProposal): void {

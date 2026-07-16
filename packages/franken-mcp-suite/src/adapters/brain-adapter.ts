@@ -1,7 +1,9 @@
 import {
   SqliteBrain,
+  type MemoryAttributionListOptions,
   type MemoryCandidate,
   type MemoryCandidateStatus,
+  type MemoryProvenanceRecord,
   type MemoryReviewDecisionOptions,
   type RightToForgetReport,
   type RightToForgetSelector,
@@ -78,6 +80,7 @@ export interface BrainAdapter {
     action: 'approve' | 'reject' | 'never_store';
     options?: MemoryReviewDecisionOptions;
   }): Promise<MemoryCandidate>;
+  memoryAttribution(input?: MemoryAttributionListOptions): Promise<MemoryProvenanceRecord[]>;
 }
 
 const SUPPORTED_MEMORY_TYPES = ["working", "episodic"] as const;
@@ -515,6 +518,10 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
         return brain.memoryReview.neverStore(input.id, options);
       }
       throw new Error(`Unsupported memory review action: ${String(input.action)}`);
+    },
+
+    async memoryAttribution(input = {}) {
+      return brain.memoryReview.listProvenance(input);
     },
   };
 }

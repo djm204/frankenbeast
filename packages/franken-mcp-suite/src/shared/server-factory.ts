@@ -236,6 +236,8 @@ const MEMORY_REVIEW_PROPOSE_SAFE_TYPES = new Set(['working', 'episodic']);
 const MEMORY_REVIEW_DECIDE_TOOL = 'fbeast_memory_review_decide';
 const MEMORY_REVIEW_DECIDE_SAFE_AUDIT_KEYS = new Set(['id', 'action']);
 const MEMORY_REVIEW_DECIDE_SAFE_ACTIONS = new Set(['approve', 'reject', 'never_store']);
+const MEMORY_SOURCE_ATTRIBUTION_TOOL = 'fbeast_memory_source_attribution';
+const MEMORY_SOURCE_ATTRIBUTION_SAFE_AUDIT_KEYS = new Set(['limit']);
 
 function unqualifyMcpToolName(toolName: string): string {
   const marker = '__';
@@ -311,11 +313,45 @@ function redactMemoryReviewDecisionEnvelope(sanitized: Record<string, unknown>, 
   return sanitized;
 }
 
+function redactMemorySourceAttributionArgs(sanitized: Record<string, unknown>, redaction = '[memory-source-attribution-args-redacted]'): Record<string, unknown> {
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'invalid')) {
+    sanitized['invalid'] = redaction;
+    return sanitized;
+  }
+  for (const key of Object.keys(sanitized)) {
+    if (!MEMORY_SOURCE_ATTRIBUTION_SAFE_AUDIT_KEYS.has(key)) {
+      sanitized[key] = redaction;
+    } else if (key === 'limit' && typeof sanitized[key] !== 'string' && typeof sanitized[key] !== 'number') {
+      sanitized[key] = redaction;
+    }
+  }
+  return sanitized;
+}
+
+function redactMemorySourceAttributionEnvelope(sanitized: Record<string, unknown>, redaction = '[memory-source-attribution-args-redacted]'): Record<string, unknown> {
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'args')) {
+    const args = sanitized['args'];
+    sanitized['args'] = isObjectLike(args) && !Array.isArray(args)
+      ? redactMemorySourceAttributionArgs(args as Record<string, unknown>, redaction)
+      : redaction;
+  }
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
+    sanitized['context'] = redaction;
+  }
+  for (const key of Object.keys(sanitized)) {
+    if (!['tool', 'action', 'args', 'context'].includes(key)) {
+      sanitized[key] = redaction;
+    }
+  }
+  return sanitized;
+}
+
 export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unknown): Record<string, unknown> {
   const sanitized = sanitizeToolArgumentsForAudit(args);
   const unqualifiedToolName = unqualifyMcpToolName(toolName);
   const isMemoryReviewPropose = unqualifiedToolName === MEMORY_REVIEW_PROPOSE_TOOL;
   const isDirectMemoryReviewDecide = unqualifiedToolName === MEMORY_REVIEW_DECIDE_TOOL;
+  const isDirectMemorySourceAttribution = unqualifiedToolName === MEMORY_SOURCE_ATTRIBUTION_TOOL;
   const isDirectRightToForget = unqualifiedToolName === 'fbeast_memory_right_to_forget';
   const auditedTool = unqualifiedToolName === 'fbeast_memory_right_to_forget'
     ? unqualifiedToolName
@@ -344,6 +380,18 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
     }
     if (isDirectMemoryReviewDecide) {
       return redactMemoryReviewDecisionArgs(sanitized);
+    }
+    return sanitized;
+  }
+  if (auditedTool === MEMORY_SOURCE_ATTRIBUTION_TOOL || auditedAction === MEMORY_SOURCE_ATTRIBUTION_TOOL) {
+    if (unqualifiedToolName === 'execute_tool') {
+      return redactMemorySourceAttributionEnvelope(sanitized);
+    }
+    if (auditedAction === MEMORY_SOURCE_ATTRIBUTION_TOOL && Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
+      sanitized['context'] = '[memory-source-attribution-args-redacted]';
+    }
+    if (isDirectMemorySourceAttribution) {
+      return redactMemorySourceAttributionArgs(sanitized);
     }
     return sanitized;
   }

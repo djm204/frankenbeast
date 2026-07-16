@@ -20,6 +20,7 @@ export {
   type MemoryCandidateEdit,
   type MemoryReviewDecisionOptions,
   type MemoryProvenanceRecord,
+  type MemoryAttributionListOptions,
   type MemorySchemaMetadata,
   type MemorySchemaStoreMetadata,
   type MemorySchemaMigrationOptions,

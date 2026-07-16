@@ -1664,6 +1664,52 @@ describe('SqliteBrain', () => {
         reviewer: 'operator',
         note: 'Verified in repository settings.',
       });
+      expect(brain.memoryReview.listProvenance({ key: 'env.repo.default-branch' })).toMatchObject([
+        {
+          candidateId: candidate.id,
+          targetStore: 'working',
+          key: 'env.repo.default-branch',
+          value: 'main',
+          source: 'repo-config',
+          confidence: 0.8,
+        },
+      ]);
+    });
+
+    it('filters memory provenance by source and validates invalid viewer filters', () => {
+      const repoCandidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.repo.default-branch',
+        value: 'main',
+        source: 'repo-config',
+        confidence: 0.8,
+        reason: 'Observed from GitHub repository metadata.',
+      });
+      const chatCandidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.response-style',
+        value: 'concise',
+        source: 'chat:turn-42',
+        confidence: 0.92,
+        reason: 'User explicitly requested concise responses.',
+      });
+      brain.memoryReview.approve(repoCandidate.id, { reviewer: 'operator' });
+      brain.memoryReview.approve(chatCandidate.id, { reviewer: 'operator' });
+
+      expect(brain.memoryReview.listProvenance({ source: 'CHAT', limit: 10 })).toMatchObject([
+        {
+          candidateId: chatCandidate.id,
+          key: 'user.preference.response-style',
+          source: 'chat:turn-42',
+        },
+      ]);
+      expect(brain.memoryReview.listProvenance({ key: 'missing.memory' })).toEqual([]);
+      expect(() => brain.memoryReview.listProvenance({ key: '   ' })).toThrow(
+        /key filter must not be empty/,
+      );
+      expect(() => brain.memoryReview.listProvenance({ limit: 0 })).toThrow(
+        /limit must be a positive integer/,
+      );
     });
 
     it('prunes expired temporary facts before approved working-memory writes enforce limits', () => {
