@@ -164,6 +164,17 @@ export { LlmSkillHandler } from './skills/llm-skill-handler.js';
 export { LlmPlanner } from './skills/llm-planner.js';
 export { quoteUntrustedPayload, wrapUntrustedContent } from './prompt/untrusted-content.js';
 export type { UntrustedContentSource } from './prompt/untrusted-content.js';
+export { buildProjectMemorySnapshot } from './memory/project-memory-snapshot.js';
+export type {
+  BuildProjectMemorySnapshotInput,
+  ProjectMemoryRecord,
+  ProjectMemorySensitivity,
+  ProjectMemorySnapshot,
+  ProjectMemorySnapshotEntry,
+  ProjectMemorySnapshotEntryProvenance,
+  ProjectMemorySnapshotProvenance,
+  ProjectMemorySnapshotSelector,
+} from './memory/project-memory-snapshot.js';
 
 // Planning
 export { ChunkFileGraphBuilder } from './planning/chunk-file-graph-builder.js';
