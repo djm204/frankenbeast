@@ -331,7 +331,7 @@ describe("createBrainAdapter", () => {
     });
     expect(alphaRows.map((row) => row.key)).toContain("task-1");
     expect(alphaRows.map((row) => row.key)).toContain("private-task");
-    expect(alphaRows.map((row) => row.value)).toContain("private entry");
+    expect(alphaRows.some((row) => row.key === "private-task" && String(row.value).includes("private entry"))).toBe(true);
     expect(alphaRows.map((row) => row.value)).not.toContain("beta entry");
 
     const sharedRows = await brain.query({
