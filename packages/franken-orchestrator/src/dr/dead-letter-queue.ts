@@ -36,6 +36,7 @@ interface QueueLockFile {
 const LOCK_RETRY_DELAY_MS = 25;
 const LOCK_TIMEOUT_MS = 5_000;
 const STALE_LOCK_MS = 30_000;
+const LIVE_LOCK_MAX_MS = 5 * 60_000;
 const LOCK_OWNER_PREFIX = `${process.pid}:${randomUUID()}`;
 
 export interface RecordRetryExhaustionOptions {
@@ -193,7 +194,7 @@ async function reapStaleQueueLock(lockPath: string, now = Date.now()): Promise<b
     observed = parseQueueLock(await readFile(lockPath, 'utf8'));
     const acquiredAt = Date.parse(observed.acquiredAt);
     if (!Number.isFinite(acquiredAt) || now - acquiredAt < STALE_LOCK_MS) return false;
-    if (isProcessAlive(observed.pid)) return false;
+    if (isProcessAlive(observed.pid) && now - acquiredAt < LIVE_LOCK_MAX_MS) return false;
   } catch {
     return reapMalformedQueueLock(lockPath, now);
   }

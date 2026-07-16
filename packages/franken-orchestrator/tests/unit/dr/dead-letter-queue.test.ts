@@ -165,6 +165,34 @@ describe('dead-letter queue for failed automation actions', () => {
     }
   });
 
+  it('reaps very old locks even if the recorded pid is live to avoid pid-reuse wedges', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dlq-'));
+    const queuePath = join(dir, 'dead-letter.json');
+    const lockPath = `${queuePath}.lock`;
+
+    try {
+      await writeFile(lockPath, JSON.stringify({
+        owner: 'reused-pid-lock',
+        pid: process.pid,
+        acquiredAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+      }), 'utf8');
+
+      const entry = await recordRetryExhaustionToDeadLetterQueue({
+        queuePath,
+        actionClass: 'codex-review-trigger',
+        target: 'pr-2342',
+        attempts: 3,
+        maxAttempts: 3,
+        lastError: 'pid-reused lock should not strand the queue',
+        replaySafety: 'safe',
+      });
+
+      expect(await listDeadLetterEntries(queuePath)).toEqual([entry]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('reaps stale malformed lock files left by crashed writers', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'franken-dlq-'));
     const queuePath = join(dir, 'dead-letter.json');
