@@ -17,6 +17,35 @@ const snapshot: DashboardSnapshot = {
   providers: [
     { name: 'openai', type: 'llm', available: true, failoverOrder: 1 },
   ],
+  availability: {
+    status: 'degraded',
+    dependencies: [
+      {
+        name: 'openai',
+        type: 'provider:llm',
+        status: 'healthy',
+        summary: 'openai is available for failover slot #2.',
+        remediationHint: 'No remediation needed.',
+        safeWork: ['Provider-backed work can use this provider.'],
+      },
+      {
+        name: 'github-api',
+        type: 'github',
+        status: 'degraded',
+        summary: 'GitHub API is rate limited for issue enrichment.',
+        remediationHint: 'Wait for the API reset or reduce polling.',
+        safeWork: ['Continue code review on already-fetched PRs.'],
+      },
+      {
+        name: 'discord-webhook',
+        type: 'comms',
+        status: 'unavailable',
+        summary: 'Discord webhook delivery is unavailable.',
+        remediationHint: 'Verify the webhook URL and downstream Discord status.',
+        safeWork: ['Continue local implementation and tests.'],
+      },
+    ],
+  },
 };
 
 function mockClient(overrides: Partial<DashboardApiClient> = {}): DashboardApiClient {
@@ -44,6 +73,22 @@ describe('DashboardPage', () => {
   afterEach(() => {
     cleanup();
     useDashboardStore.getState().reset();
+  });
+
+  it('renders partial dependency outages with remediation and safe work guidance', async () => {
+    const client = mockClient();
+
+    render(<DashboardPage client={client} />);
+
+    expect(await screen.findByLabelText('Dependency availability')).toBeTruthy();
+    expect(screen.getByText(/Overall status:/).textContent).toContain('Degraded');
+    expect(screen.getByText('discord-webhook')).toBeTruthy();
+    expect(screen.getByText('[unavailable]')).toBeTruthy();
+    expect(screen.getByText('Discord webhook delivery is unavailable.')).toBeTruthy();
+    expect(screen.getByText(/Verify the webhook URL and downstream Discord status/)).toBeTruthy();
+    expect(screen.getByText(/Continue local implementation and tests/)).toBeTruthy();
+    expect(screen.getByText('github-api')).toBeTruthy();
+    expect(screen.getByText('[degraded]')).toBeTruthy();
   });
 
   it('shows a load failure with a retry action instead of hiding it in the console', async () => {
