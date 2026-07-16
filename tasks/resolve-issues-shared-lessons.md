@@ -20,6 +20,12 @@
 - For DLQ file locks, treat unparseable lock timestamps as malformed stale-lock candidates and fall back to mtime-based reaping; otherwise a syntactically valid lock JSON with `acquiredAt: not-a-date` can wedge writers forever.
 - When reaping malformed DLQ locks, revalidate the moved file identity after `rename` before unlinking so a stale-lock race cannot delete a fresh active lock; when persisting retry exhaustion, normalize blank caller timestamps before writing so later queue reads do not reject the whole DLQ.
 
+## 2026-07-15 — Memory access audit privacy
+- Memory access audit hashes should use keyed HMACs, not bare SHA-256, and the tests should assert same-selector stability plus raw-value absence rather than pinning an unsalted digest.
+- Keep audit-only HMAC key material separate from exported right-to-forget/deletion guard snapshot keys; audit-only writes must not cause `serialize()` to expose `deletionGuardHashKey`.
+- Put sensitive learning/review keys through the audit event `key` hashing field rather than plaintext `details`, and audit deletion-guard rejections before rethrowing so denied writes are visible without leaking selectors.
+- When broadening audit coverage, wire every public persisted-memory surface through a shared audit sink (working, episodic learning/recall, recovery checkpoint/clear, review queue/provenance, right-to-forget) and update schema metadata tests for the extra audit/hash-key rows.
+
 ## 2026-07-15 — Webhook DNS pinning review fixes
 - For outbound webhook SSRF hardening, validate object-form allowlist origins for credentials too; URL normalization can otherwise hide deceptive `userinfo@host` entries.
 - When a webhook hostname is DNS-validated before delivery, the actual transport must consume the validated address: custom fetches should receive an IP-pinned URL plus original Host header, default HTTPS should try later validated addresses after network failures, and pinned HTTPS error bodies need async-iterable response coverage.
