@@ -95,8 +95,8 @@ function uidMatches(
 }
 
 function argsMatch(attempt: ProcessCleanupAttemptSnapshot, processEntry: ProcessTableEntry): boolean {
-  if (!attempt.expectedArgs) return false;
-  const actualArgs = processEntry.args ?? [];
+  if (!attempt.expectedArgs || !processEntry.args) return false;
+  const actualArgs = processEntry.args;
   return actualArgs.length === attempt.expectedArgs.length
     && attempt.expectedArgs.every((arg, index) => actualArgs[index] === arg);
 }
@@ -117,6 +117,17 @@ function isLiveMatchingWorker(
     && uidMatches(attempt, processEntry, currentUid)
     && argsMatch(attempt, processEntry)
     && startTimeMatches(attempt, processEntry);
+}
+
+function isMatchingOrphanCandidate(
+  attempt: ProcessCleanupAttemptSnapshot,
+  processEntry: ProcessTableEntry,
+  currentUid: number | undefined,
+): boolean {
+  return commandMatches(attempt, processEntry)
+    && cwdMatches(attempt, processEntry)
+    && uidMatches(attempt, processEntry, currentUid)
+    && argsMatch(attempt, processEntry);
 }
 
 function finding(input: ProcessCleanupFinding): ProcessCleanupFinding {
@@ -388,7 +399,7 @@ export function buildProcessCleanupPlan(options: ProcessCleanupPlanOptions): Pro
     if (!recordedProcess || !isLiveMatchingWorker(attempt, recordedProcess, options.currentUid)) continue;
     for (const processEntry of options.processes) {
       if (claimedPids.has(processEntry.pid) || orphanPids.has(processEntry.pid)) continue;
-      if (!isLiveMatchingWorker(attempt, processEntry, options.currentUid)) continue;
+      if (!isMatchingOrphanCandidate(attempt, processEntry, options.currentUid)) continue;
       orphanPids.add(processEntry.pid);
       findings.push(finding({
         code: 'orphan-duplicate-process',

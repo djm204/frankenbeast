@@ -57,7 +57,7 @@ describe('process cleanup plan', () => {
         { pid: 102, command: '/usr/bin/node', args: ['dist/cli/run.js', 'beast'], cwd: '/repo', uid: 1000, startTimeTicks: '102-start' },
         { pid: 103, command: '/bin/bash', args: ['-lc', 'sleep 60'], cwd: '/repo', uid: 1000 },
         { pid: 104, command: '/usr/bin/node', args: ['dist/cli/run.js', 'beast'], cwd: '/tmp/other', uid: 1000 },
-        { pid: 202, command: '/usr/bin/node', args: ['dist/cli/run.js', 'beast'], cwd: '/repo', uid: 1000, startTimeTicks: '102-start' },
+        { pid: 202, command: '/usr/bin/node', args: ['dist/cli/run.js', 'beast'], cwd: '/repo', uid: 1000, startTimeTicks: '202-start' },
       ],
     });
 
@@ -208,6 +208,35 @@ describe('process cleanup plan', () => {
       ],
       processes: [
         { pid: 501, command: '/usr/bin/node', args: ['dist/cli/run.js', 'beast', '--other-card'], cwd: '/repo', uid: 1000, startTimeTicks: '501-start' },
+      ],
+    });
+
+    expect(report.findings.map((finding) => finding.code)).toEqual(['wrong-args']);
+    expect(report.actions).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: 'terminate-orphan' }),
+    ]));
+  });
+
+  it('fails closed when process args could not be captured', () => {
+    const report = buildProcessCleanupPlan({
+      checkedAt: '2026-07-16T12:00:00.000Z',
+      dryRun: true,
+      currentUid: 1000,
+      attempts: [
+        {
+          runId: 'run-missing-argv',
+          attemptId: 'attempt-missing-argv',
+          status: 'running',
+          pid: 551,
+          expectedCommand: '/usr/bin/node',
+          expectedArgs: [],
+          expectedCwd: '/repo',
+          expectedStartTimeTicks: '551-start',
+        },
+      ],
+      processes: [
+        { pid: 551, command: '/usr/bin/node', cwd: '/repo', uid: 1000, startTimeTicks: '551-start' },
+        { pid: 552, command: '/usr/bin/node', cwd: '/repo', uid: 1000, startTimeTicks: '552-start' },
       ],
     });
 
