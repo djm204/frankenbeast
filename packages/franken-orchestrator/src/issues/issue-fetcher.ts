@@ -42,6 +42,8 @@ export class IssueFetcher implements IIssueFetcher {
 
     if (options.search) {
       args.push('--search', options.search);
+    } else {
+      args.push('--search', 'sort:created-asc');
     }
 
     if (options.assignee) {

@@ -79,6 +79,18 @@ describe('IssueFetcher', () => {
       expect(args[limitIdx + 1]).toBe('1000');
     });
 
+    it('adds a default oldest-first search sort so aged backlog items are fetched before local scheduling', async () => {
+      const execFn = vi.fn(makeExecFn(SAMPLE_GH_OUTPUT));
+      const fetcher = new IssueFetcher(execFn);
+
+      await fetcher.fetch({});
+
+      const [, args] = execFn.mock.calls[0]!;
+      const searchIdx = args.indexOf('--search');
+      expect(searchIdx).toBeGreaterThan(-1);
+      expect(args[searchIdx + 1]).toBe('sort:created-asc');
+    });
+
     it('uses custom --limit when provided', async () => {
       const execFn = vi.fn(makeExecFn(SAMPLE_GH_OUTPUT));
       const fetcher = new IssueFetcher(execFn);

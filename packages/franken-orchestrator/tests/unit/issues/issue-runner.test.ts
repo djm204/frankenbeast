@@ -1317,6 +1317,39 @@ describe('IssueRunner', () => {
       expect(mockRun).not.toHaveBeenCalled();
     });
 
+    it('does not mark missing-plan issueRuntime checkpoints complete from chunk-shaped one-shot entries', async () => {
+      const logger = mockLogger();
+      const graphBuilder = mockGraphBuilder();
+      const issueRuntime = makeIssueRuntimeSupport();
+      vi.mocked(issueRuntime.checkpointForIssue).mockReturnValue(mockCheckpoint(new Set([
+        'impl:01_issue-17:done',
+        'harden:01_issue-17:done',
+      ])));
+      vi.mocked(issueRuntime.artifactsForIssue).mockReturnValue({
+        planName: 'issue-17',
+        planDir: '.tmp/missing-test-issue-17',
+        checkpointFile: '.tmp/test-issue-17.checkpoint',
+        logFile: '.tmp/test-issue-17.log',
+      });
+      const config = makeConfig({
+        issues: [makeIssue({ number: 17, labels: ['blocked'] })],
+        triageResults: [makeTriage(17)],
+        graphBuilder,
+        issueRuntime,
+        logger,
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({
+        issueNumber: 17,
+        status: 'skipped',
+        error: expect.stringContaining('deferred by scheduler: blocked issue'),
+      });
+      expect(graphBuilder.buildChunkDefinitionsForIssue).not.toHaveBeenCalled();
+      expect(mockRun).not.toHaveBeenCalled();
+    });
+
     it('preserves shared-checkpoint completions before evaluating backpressure', async () => {
       const checkpoint = mockCheckpoint(new Set(['impl:01_issue-15:done', 'harden:01_issue-15:done']));
       const signals = vi.fn(() => ({

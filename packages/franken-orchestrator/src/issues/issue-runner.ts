@@ -1077,9 +1077,12 @@ function checkpointEntriesAreCompleteWithoutPlan(
 
   const doneEntries = [...entries];
   const issueToken = `issue-${issueNumber}`;
+  const oneShotImplKey = `impl:${issueToken}:done`;
+  const oneShotHardenKey = `harden:${issueToken}:done`;
+
   return doneEntries.every((entry) => entry.endsWith(':done') && entry.includes(issueToken))
-    && doneEntries.some((entry) => entry.startsWith('impl:'))
-    && doneEntries.some((entry) => entry.startsWith('harden:'));
+    && doneEntries.includes(oneShotImplKey)
+    && doneEntries.includes(oneShotHardenKey);
 }
 
 function checkpointHasTaskProgress(issueCheckpoint: ICheckpointStore, taskId: string): boolean {
