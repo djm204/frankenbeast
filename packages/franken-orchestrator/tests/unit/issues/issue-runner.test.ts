@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses, detectWorkerHeartbeatMonotonicityAnomalies, evaluateIssueSchedulingScore, planKanbanStateMutation } from '../../../src/issues/issue-runner.js';
+import { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses, detectWorkerHeartbeatMonotonicityAnomalies, detectStuckRunWatchdogFindings, evaluateIssueSchedulingScore, planKanbanStateMutation } from '../../../src/issues/issue-runner.js';
 import type { IssueBackpressureSignals, IssueBackpressureThresholds, IssueRunnerConfig } from '../../../src/issues/issue-runner.js';
 import type { GithubIssue, TriageResult } from '../../../src/issues/types.js';
 import type { PlanGraph, ICheckpointStore, ILogger, BeastLoopDeps } from '../../../src/deps.js';
@@ -572,6 +572,119 @@ describe('duplicate worker-card process detector', () => {
     ]);
 
     expect(findings).toEqual([]);
+  });
+});
+
+describe('stuck-run watchdog', () => {
+  const nowMs = Date.parse('2026-07-16T12:00:00.000Z');
+
+  it('classifies crashed workers and recommends stale PID/current-run cleanup', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_crashed',
+        pid: 7401,
+        runId: 'run-crash',
+        issueNumber: 1678,
+        owner: 'doctor',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:55:00.000Z',
+        lastOutputAt: '2026-07-16T11:55:30.000Z',
+        lastToolActivityAt: '2026-07-16T11:54:00.000Z',
+        lastStateTransitionAt: '2026-07-16T11:50:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([
+      expect.objectContaining({
+        cardId: 't_crashed',
+        pid: 7401,
+        runId: 'run-crash',
+        issueNumber: 1678,
+        blockerCategory: 'process-crash',
+        confidence: 'high',
+        processStatus: 'dead',
+        kanbanState: 'running',
+        heartbeatAgeMs: 5 * 60 * 1000,
+        outputAgeMs: 270_000,
+        recommendedAction: expect.stringContaining('clear the stale PID/current-run pointer'),
+      }),
+    ]);
+  });
+
+  it('uses known blocker hints to report approval gates with concrete remediation', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_approval',
+        pid: 7402,
+        runId: 'run-approval',
+        status: 'running',
+        alive: true,
+        blockerCategory: 'approval-gate',
+        waitingOn: 'approval token for git push --force-with-lease',
+        lastHeartbeatAt: '2026-07-16T10:00:00.000Z',
+        lastOutputAt: '2026-07-16T10:05:00.000Z',
+        lastToolActivityAt: '2026-07-16T10:05:00.000Z',
+        lastStateTransitionAt: '2026-07-16T09:30:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_approval',
+      blockerCategory: 'approval-gate',
+      confidence: 'high',
+      heartbeatAgeMs: 7_200_000,
+      toolActivityAgeMs: 6_900_000,
+      stateTransitionAgeMs: 9_000_000,
+      processStatus: 'alive',
+      recommendedAction: expect.stringContaining('approval-cop'),
+      evidence: expect.arrayContaining([
+        'waitingOn=approval token for git push --force-with-lease',
+        'blockerCategory=approval-gate',
+      ]),
+    });
+  });
+
+  it('guards against false positives for healthy long-running CI/provider waits', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_ci_wait',
+        pid: 7403,
+        status: 'running',
+        alive: true,
+        blockerCategory: 'ci-wait',
+        waitingOn: 'CI checks are still queued',
+        lastHeartbeatAt: '2026-07-16T11:45:00.000Z',
+        lastOutputAt: '2026-07-16T11:40:00.000Z',
+        lastToolActivityAt: '2026-07-16T10:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T10:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([]);
+  });
+
+  it('escalates stale provider waits after every activity signal exceeds grace', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_provider',
+        pid: 7404,
+        status: 'running',
+        alive: true,
+        waitingOn: 'provider quota reset',
+        lastHeartbeatAt: '2026-07-16T08:30:00.000Z',
+        lastOutputAt: '2026-07-16T08:25:00.000Z',
+        lastToolActivityAt: '2026-07-16T08:20:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:15:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_provider',
+      blockerCategory: 'provider-wait',
+      confidence: 'high',
+      recommendedAction: expect.stringContaining('provider quota'),
+    });
   });
 });
 
