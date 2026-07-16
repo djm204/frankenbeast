@@ -161,8 +161,9 @@ describe('IssueFetcher', () => {
       expect(execFn.mock.calls[1]![1]).not.toContain('--search');
     });
 
-    it('keeps medium-priority issues ahead of unlabeled issues before truncation', async () => {
-      const makeIssues = (numbers: readonly number[], labels: readonly string[] = []) => JSON.stringify(
+    it('applies priority aging before default fetch truncation', async () => {
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-07-16T00:00:00Z'));
+      const makeIssues = (numbers: readonly number[], labels: readonly string[] = [], createdAt = '2026-07-15T00:00:00Z') => JSON.stringify(
         numbers.map((number) => ({
           number,
           title: `Issue ${number}`,
@@ -170,18 +171,24 @@ describe('IssueFetcher', () => {
           labels: labels.map((name) => ({ name })),
           state: 'OPEN',
           url: `https://github.com/org/repo/issues/${number}`,
+          createdAt,
         })),
       );
       const execFn = vi.fn<ExecFn>()
+        .mockImplementationOnce(makeExecFn(makeIssues(Array.from({ length: 1000 }, (_, index) => 100 + index), ['priority:high'])))
         .mockImplementationOnce(makeExecFn(makeIssues([])))
         .mockImplementationOnce(makeExecFn(makeIssues([])))
-        .mockImplementationOnce(makeExecFn(makeIssues(Array.from({ length: 200 }, (_, index) => 100 + index))))
-        .mockImplementationOnce(makeExecFn(makeIssues([9999], ['priority:p2'])));
+        .mockImplementationOnce(makeExecFn(makeIssues([9999], ['priority:low'], '2026-06-01T00:00:00Z')));
       const fetcher = new IssueFetcher(execFn);
 
-      const issues = await fetcher.fetch({});
+      try {
+        const issues = await fetcher.fetch({});
 
-      expect(issues[0]!.number).toBe(9999);
+        expect(issues.map((issue) => issue.number)).toContain(9999);
+        expect(issues.findIndex((issue) => issue.number === 9999)).toBeLessThan(1000);
+      } finally {
+        nowSpy.mockRestore();
+      }
     });
 
     it('caps the merged default supplemental windows at the advertised default limit', async () => {

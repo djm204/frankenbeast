@@ -31,6 +31,9 @@ const ISSUE_FETCH_PRIORITY_RANKS: Readonly<Record<string, number>> = {
   low: 3,
 };
 const DEFAULT_ISSUE_FETCH_PRIORITY_RANK = 99;
+const ISSUE_FETCH_ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const ISSUE_FETCH_PRIORITY_AGING_DAYS_PER_RANK = 14;
+const ISSUE_FETCH_MAX_PRIORITY_AGE_BOOST = 2;
 
 interface RawGithubIssue {
   readonly number: number;
@@ -151,9 +154,21 @@ export class IssueFetcher implements IIssueFetcher {
   }
 
   private compareIssueFetchOrder(a: RawGithubIssue, b: RawGithubIssue): number {
-    return this.issuePriorityRank(a) - this.issuePriorityRank(b)
+    return this.issueEffectivePriorityRank(a) - this.issueEffectivePriorityRank(b)
       || this.issueCreatedAtMs(a) - this.issueCreatedAtMs(b)
       || a.number - b.number;
+  }
+
+  private issueEffectivePriorityRank(issue: RawGithubIssue): number {
+    const priorityRank = this.issuePriorityRank(issue);
+    if (priorityRank === 0 || priorityRank === DEFAULT_ISSUE_FETCH_PRIORITY_RANK) {
+      return priorityRank;
+    }
+    const ageBoost = Math.min(
+      ISSUE_FETCH_MAX_PRIORITY_AGE_BOOST,
+      Math.floor(this.issueAgeDays(issue) / ISSUE_FETCH_PRIORITY_AGING_DAYS_PER_RANK),
+    );
+    return Math.max(1, priorityRank - ageBoost);
   }
 
   private issuePriorityRank(issue: RawGithubIssue): number {
@@ -161,6 +176,12 @@ export class IssueFetcher implements IIssueFetcher {
       const rank = ISSUE_FETCH_PRIORITY_RANKS[label.name.toLowerCase()] ?? DEFAULT_ISSUE_FETCH_PRIORITY_RANK;
       return Math.min(best, rank);
     }, DEFAULT_ISSUE_FETCH_PRIORITY_RANK);
+  }
+
+  private issueAgeDays(issue: RawGithubIssue): number {
+    const createdAtMs = this.issueCreatedAtMs(issue);
+    if (createdAtMs === Number.MAX_SAFE_INTEGER) return 0;
+    return Math.max(0, Math.floor((Date.now() - createdAtMs) / ISSUE_FETCH_ONE_DAY_MS));
   }
 
   private issueCreatedAtMs(issue: RawGithubIssue): number {

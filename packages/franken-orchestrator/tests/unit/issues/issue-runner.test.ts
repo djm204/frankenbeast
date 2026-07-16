@@ -1568,6 +1568,8 @@ describe('IssueRunner', () => {
     it('classifies priority labels used by the urgent default issue fetch', () => {
       expect(evaluateIssueSchedulingScore(makeIssue({ number: 81, labels: ['priority:critical'] })).priority).toBe('critical');
       expect(evaluateIssueSchedulingScore(makeIssue({ number: 82, labels: ['priority:high'] })).priority).toBe('high');
+      expect(evaluateIssueSchedulingScore(makeIssue({ number: 83, labels: ['priority:medium'] })).priority).toBe('medium');
+      expect(evaluateIssueSchedulingScore(makeIssue({ number: 84, labels: ['priority:low'] })).priority).toBe('low');
     });
 
     it('treats status-prefixed blocked labels as scheduler gates', () => {

@@ -279,9 +279,11 @@ const SEVERITY_ORDER: Record<string, number> = {
   high: 1,
   p2: 2,
   'priority:p2': 2,
+  'priority:medium': 2,
   medium: 2,
   p3: 3,
   'priority:p3': 3,
+  'priority:low': 3,
   low: 3,
 };
 
