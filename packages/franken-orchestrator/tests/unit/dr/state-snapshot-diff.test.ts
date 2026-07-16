@@ -126,4 +126,64 @@ describe('state snapshot diff', () => {
     expect(taskDiff?.added).toHaveLength(0);
     expect(taskDiff?.removed).toHaveLength(0);
   });
+
+  it('recognizes stable identity fields in path-scoped object files', async () => {
+    const before = await snapshotDir({
+      'workers/worker-a.json': { workerId: 'worker-a', status: 'idle' },
+    });
+    const after = await snapshotDir({
+      'workers/worker-a.json': { workerId: 'worker-a', status: 'busy' },
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const workerDiff = report.diffs.find((diff) => diff.subsystem === 'workerIds');
+
+    expect(workerDiff?.added).toHaveLength(0);
+    expect(workerDiff?.removed).toHaveLength(0);
+    expect(workerDiff?.changed).toHaveLength(1);
+    expect(workerDiff?.changed[0]?.id).toBe('worker-a');
+    expect(workerDiff?.changed[0]?.changedFields).toEqual(['status']);
+  });
+
+  it('normalizes Windows-style sources before redaction and generic collection detection', async () => {
+    const before = await snapshotDir({
+      'approvals\\opaque-before-token.json': { id: 'approval-1', digest: 'sha256:backup-secret-token-before', decision: 'pending' },
+      'tasks\\state.json': { tasks: [{ id: 'task-1', status: 'ready' }] },
+    });
+    const after = await snapshotDir({
+      'approvals\\opaque-after-token.json': { id: 'approval-1', digest: 'sha256:backup-secret-token-after', decision: 'approved' },
+      'tasks\\state.json': { tasks: [{ id: 'task-1', status: 'done' }] },
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const approvalChange = report.diffs.find((diff) => diff.subsystem === 'approvals')?.changed[0];
+    const taskDiff = report.diffs.find((diff) => diff.subsystem === 'tasks');
+    const serialized = JSON.stringify(report);
+
+    expect(approvalChange?.beforeSource).toMatch(/^approvals\/<sha256:[a-f0-9]{16}>$/u);
+    expect(approvalChange?.afterSource).toMatch(/^approvals\/<sha256:[a-f0-9]{16}>$/u);
+    expect(serialized).not.toContain('opaque-before-token');
+    expect(serialized).not.toContain('opaque-after-token');
+    expect(taskDiff?.changed).toHaveLength(1);
+    expect(taskDiff?.changed[0]?.id).toBe('task-1');
+    expect(taskDiff?.added).toHaveLength(0);
+    expect(taskDiff?.removed).toHaveLength(0);
+  });
+
+  it('does not double-count subsystem-directory collection wrappers', async () => {
+    const before = await snapshotDir({
+      'tasks/export.json': { tasks: [{ id: 'task-1', status: 'ready' }] },
+    });
+    const after = await snapshotDir({
+      'tasks/export.json': { tasks: [{ id: 'task-1', status: 'done' }] },
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const taskDiff = report.diffs.find((diff) => diff.subsystem === 'tasks');
+
+    expect(taskDiff?.changed).toHaveLength(1);
+    expect(taskDiff?.changed[0]?.id).toBe('task-1');
+    expect(taskDiff?.added).toHaveLength(0);
+    expect(taskDiff?.removed).toHaveLength(0);
+  });
 });

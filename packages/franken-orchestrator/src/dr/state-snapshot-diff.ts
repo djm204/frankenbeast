@@ -86,6 +86,10 @@ function redactForOutput(value: unknown): unknown {
   return JSON.parse(maskOpaqueSecretLiterals(JSON.stringify(redacted))) as unknown;
 }
 
+function normalizeSnapshotSourcePath(source: string): string {
+  return source.replaceAll(sep, '/').replaceAll('\\', '/');
+}
+
 export function maskOpaqueSecretLiterals(text: string): string {
   return text
     .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/gu, '<redacted>')
@@ -139,7 +143,27 @@ function recordId(
 }
 
 function hasRecordIdentityKey(value: Record<string, unknown>): boolean {
-  return ['id', 'taskId', 'task_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'tokenId', 'token_id', 'approvalId', 'approval_id'].some((key) => key in value);
+  return [
+    'id',
+    'taskId',
+    'task_id',
+    'jobId',
+    'job_id',
+    'workerId',
+    'worker_id',
+    'currentWorkerId',
+    'current_worker_id',
+    'cardId',
+    'card_id',
+    'memoryKey',
+    'memory_key',
+    'tokenId',
+    'token_id',
+    'approvalId',
+    'approval_id',
+    'key',
+    'name',
+  ].some((key) => key in value);
 }
 
 function sensitiveApprovalValueForComparison(key: string, value: unknown): unknown {
@@ -174,7 +198,7 @@ function scopedRecordCompareValue(subsystem: StateSnapshotDiffSubsystem, value: 
 }
 
 function redactSourceForOutput(subsystem: StateSnapshotDiffSubsystem, source: string): string {
-  const masked = maskOpaqueSecretLiterals(source);
+  const masked = normalizeSnapshotSourcePath(maskOpaqueSecretLiterals(source));
   if (subsystem !== 'approvals') return masked;
   return masked.split('/').map((segment) => {
     if (/^(?:approvals?|approval[-_]?tokens?|tokens?|ledger|state|snapshots?)(?:\.jsonl?)?(?::\d+)?(?::approvals?)?$/iu.test(segment)) {
@@ -185,7 +209,7 @@ function redactSourceForOutput(subsystem: StateSnapshotDiffSubsystem, source: st
 }
 
 function isGenericCollectionSource(source: string): boolean {
-  return /(?:^|\/)(?:state|index|tasks|cards|kanban|approvals?|approval[-_]?tokens?|tokens?|ledger|workers?|memory|memories|cron|jobs)\.jsonl?(?::\d+)?$/iu.test(source);
+  return /(?:^|\/)(?:state|index|tasks|cards|kanban|approvals?|approval[-_]?tokens?|tokens?|ledger|workers?|memory|memories|cron|jobs)\.jsonl?(?::\d+)?$/iu.test(normalizeSnapshotSourcePath(source));
 }
 
 function addRecord(
@@ -233,7 +257,7 @@ function addObjectMapRecords(
 }
 
 function likelySubsystemFromPath(relativePath: string): StateSnapshotDiffSubsystem | undefined {
-  const normalized = relativePath.toLowerCase().replaceAll(sep, '/');
+  const normalized = normalizeSnapshotSourcePath(relativePath).toLowerCase();
   if (/approvals?|tokens?|ledger/.test(normalized)) return 'approvals';
   if (/tasks?|cards?|kanban/.test(normalized)) return 'tasks';
   if (/workers?/.test(normalized)) return 'workerIds';
@@ -290,7 +314,7 @@ function extractRecordsFromJson(records: MutableSubsystemRecords, parsed: unknow
       }
     }
 
-    if (pathSubsystem !== undefined && (!foundRootCollection || !isGenericCollectionSource(source))) {
+    if (pathSubsystem !== undefined && (!foundRootCollection || hasRecordIdentityKey(parsed))) {
       const values = Object.values(parsed);
       if (values.length > 0 && values.every(isRecord)) {
         addObjectMapRecords(records, pathSubsystem, parsed, source);
