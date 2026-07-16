@@ -422,6 +422,34 @@ Record npm test passed or failed.
     ).toBe('placeholder');
   });
 
+  it('rejects label-only bullet skeletons without colons', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '- Issue/task\n- Business goal\n- Out-of-scope boundaries',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('rejects TODO skeleton lines that repeat required keywords', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        'TODO: issue, business goal, and out-of-scope boundaries',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
   it('preserves child-heading content inside a required parent section', () => {
     const validation = validateAgentHandoffTemplate(
       completeTemplate.replace(

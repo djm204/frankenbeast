@@ -648,6 +648,9 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
     if (activeFence !== null) {
       continue;
     }
+    if (/^\s*(?:[-*]\s*)?(?:todo|tbd|placeholder|please\s+fill\s+in)\s*:/i.test(line)) {
+      continue;
+    }
 
     const nextLine = lines[index + 1] ?? '';
     const isPopulatedTableHeader =
@@ -698,7 +701,12 @@ function isEmptyTemplateLabel(line: string): boolean {
     .replace(/\([^)]*\)/g, ' ')
     .replace(/\b(?:required|optional)\b/gi, ' ')
     .replace(/[^A-Za-z0-9 /_:-]/g, ' ');
-  return /^\s*(?:[-*]\s*)?[A-Za-z0-9 /_-]+:\s*$/.test(normalizedLabel);
+  return (
+    /^\s*(?:[-*]\s*)?[A-Za-z0-9 /_-]+:\s*$/.test(normalizedLabel) ||
+    /^\s*(?:[-*]\s*)?(?:issue|issue task|task|business goal|goal|out of scope boundaries|boundaries|status|current status|decisions|remaining work|command|commands|test command|test commands|outcome|result|owner|next action|artifact|artifacts|link|links|lesson|lessons)\s*$/i.test(
+      normalizedLabel,
+    )
+  );
 }
 
 function isMarkdownTableHeader(line: string, nextLine: string): boolean {

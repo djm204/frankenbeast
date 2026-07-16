@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = join(__dirname, '..');
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const onboarding = () => readFileSync(join(root, 'ONBOARDING.md'), 'utf8');
 
 describe('issue #1775 agent handoff template validator docs', () => {
