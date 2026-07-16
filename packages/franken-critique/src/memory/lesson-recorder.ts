@@ -25,6 +25,11 @@ import type {
   LessonMultiAgentCritique,
   FailureRecordMetadata,
   FailureCluster,
+  LessonInjectionContext,
+  LessonScopeAuditEntry,
+  LessonScopeKind,
+  LessonScopeMetadata,
+  LessonScopeProvenance,
 } from '../types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
 import type { TaskId } from '../types/common.js';
@@ -84,6 +89,8 @@ const LESSON_CRITIQUE_NEEDS_EDIT_GUIDANCE =
   'Lesson candidate needs edits or additional evidence before promotion; keep it out of durable guidance until the findings are addressed.';
 const LESSON_CRITIQUE_REJECT_GUIDANCE =
   'Lesson candidate was rejected by critique and should not be promoted to durable guidance.';
+const LESSON_SCOPE_REVIEW_GUIDANCE =
+  'Reviewers may promote or demote lesson scope only with an audit entry; injection must deny lessons whose scope does not match the current repo, role, profile, task, or expiry.';
 
 interface InternalLessonPrivacyRedaction extends LessonPrivacyRedaction {
   readonly original: string;
@@ -413,6 +420,67 @@ export interface LessonHumanFeedbackRequest {
   readonly revisedCorrectionApplied?: string;
 }
 
+export interface LessonScopeReviewRequest {
+  readonly scope: LessonScopeKind;
+  readonly allowedRepos?: readonly string[];
+  readonly allowedRoles?: readonly string[];
+  readonly allowedProfiles?: readonly string[];
+  readonly allowedTasks?: readonly TaskId[];
+  readonly provenance?: LessonScopeProvenance;
+  readonly expiresAt?: string;
+  readonly actor: string;
+  readonly reason: string;
+  readonly changedAt: string;
+}
+
+export function updateLessonScope(
+  lesson: CritiqueLesson,
+  request: LessonScopeReviewRequest,
+): CritiqueLesson {
+  const changedAt = normalizeTimestamp(request.changedAt);
+  const actor = requireNonEmptyString(request.actor, 'scope reviewer actor');
+  const reason = requireNonEmptyString(request.reason, 'scope review reason');
+  const scope = normalizeLessonScopeKind(request.scope);
+  const auditEntry: LessonScopeAuditEntry = {
+    changedAt,
+    actor,
+    ...(lesson.lessonScope?.scope !== undefined
+      ? { fromScope: lesson.lessonScope.scope }
+      : {}),
+    toScope: scope,
+    reason,
+  };
+  const lessonScope = createLessonScopeMetadata({
+    scope,
+    ...(request.allowedRepos !== undefined
+      ? { allowedRepos: request.allowedRepos }
+      : {}),
+    ...(request.allowedRoles !== undefined
+      ? { allowedRoles: request.allowedRoles }
+      : {}),
+    ...(request.allowedProfiles !== undefined
+      ? { allowedProfiles: request.allowedProfiles }
+      : {}),
+    ...(request.allowedTasks !== undefined
+      ? { allowedTasks: request.allowedTasks }
+      : {}),
+    provenance: request.provenance ??
+      lesson.lessonScope?.provenance ?? {
+        source: 'human-review',
+        taskId: lesson.taskId,
+        note: LESSON_SCOPE_REVIEW_GUIDANCE,
+      },
+    ...(request.expiresAt !== undefined
+      ? { expiresAt: request.expiresAt }
+      : {}),
+    auditTrail: [...(lesson.lessonScope?.auditTrail ?? []), auditEntry],
+  });
+  return {
+    ...lesson,
+    lessonScope,
+  };
+}
+
 export function applyHumanFeedbackToLesson(
   lesson: CritiqueLesson,
   request: LessonHumanFeedbackRequest,
@@ -570,16 +638,23 @@ function isManualReviewResolvableCritiqueFinding(
   );
 }
 
-export function isLessonApplicable(lesson: CritiqueLesson): boolean {
+export function isLessonApplicable(
+  lesson: CritiqueLesson,
+  context: LessonInjectionContext = {},
+): boolean {
   if (lesson.quarantine !== undefined) {
     return false;
   }
   if (lesson.experimentSandbox?.promotionBlocked === true) {
     return false;
   }
-  return (
-    lesson.lifecycleStatus === undefined || lesson.lifecycleStatus === 'active'
-  );
+  if (
+    lesson.lifecycleStatus !== undefined &&
+    lesson.lifecycleStatus !== 'active'
+  ) {
+    return false;
+  }
+  return isLessonScopeAllowed(lesson.lessonScope, context);
 }
 
 function isLessonComparableForDuplicate(lesson: CritiqueLesson): boolean {
@@ -613,8 +688,12 @@ export function critiqueProposedLesson(
       severity: 'critical',
       message:
         'Privacy filter rejected this lesson candidate before durable promotion.',
-      evidenceRefs: addEvidenceRef(evidenceRefs, `privacy:${privacyFilter.originalHash}`),
-      suggestion: 'Discard the candidate or rewrite it without transient/private data.',
+      evidenceRefs: addEvidenceRef(
+        evidenceRefs,
+        `privacy:${privacyFilter.originalHash}`,
+      ),
+      suggestion:
+        'Discard the candidate or rewrite it without transient/private data.',
     });
   }
 
@@ -636,9 +715,14 @@ export function critiqueProposedLesson(
       checklistItem: 'scope',
       verdict: 'needs-edit',
       severity: 'warning',
-      message: 'Reviewer feedback does not include suggestions for every finding.',
-      evidenceRefs: addEvidenceRef(evidenceRefs, 'reviewer-feedback:missing-suggestions'),
-      suggestion: 'Add remediation guidance so the lesson is scoped and actionable.',
+      message:
+        'Reviewer feedback does not include suggestions for every finding.',
+      evidenceRefs: addEvidenceRef(
+        evidenceRefs,
+        'reviewer-feedback:missing-suggestions',
+      ),
+      suggestion:
+        'Add remediation guidance so the lesson is scoped and actionable.',
     });
   }
 
@@ -650,8 +734,12 @@ export function critiqueProposedLesson(
       severity: 'warning',
       message:
         'Lesson candidate contains redacted sensitive signals and requires manual review even though only stable evidence refs are exposed.',
-      evidenceRefs: addEvidenceRef(evidenceRefs, `privacy:${lesson.privacyFilter.originalHash}`),
-      suggestion: 'Have a human reviewer inspect the redacted candidate before promotion.',
+      evidenceRefs: addEvidenceRef(
+        evidenceRefs,
+        `privacy:${lesson.privacyFilter.originalHash}`,
+      ),
+      suggestion:
+        'Have a human reviewer inspect the redacted candidate before promotion.',
     });
   }
 
@@ -668,7 +756,8 @@ export function critiqueProposedLesson(
       message:
         'High-risk critique signal requires manual review before promotion.',
       evidenceRefs: addEvidenceRef(evidenceRefs, 'risk:critical-finding'),
-      suggestion: 'Confirm the lesson is safe, scoped, and not overgeneralized.',
+      suggestion:
+        'Confirm the lesson is safe, scoped, and not overgeneralized.',
     });
   }
 
@@ -691,7 +780,8 @@ export function critiqueProposedLesson(
       message:
         'Historical duplicate lessons were not checked, so promotion needs manual review.',
       evidenceRefs: addEvidenceRef(evidenceRefs, 'duplicate:not_checked'),
-      suggestion: 'Run lesson search or have a reviewer confirm no matching prior guidance exists.',
+      suggestion:
+        'Run lesson search or have a reviewer confirm no matching prior guidance exists.',
     });
   } else if (duplicate) {
     findings.push({
@@ -701,8 +791,12 @@ export function critiqueProposedLesson(
       severity: 'warning',
       message:
         'A comparable prior lesson already covers the same failure description.',
-      evidenceRefs: addEvidenceRef(evidenceRefs, `duplicate:${getLessonId(duplicate)}`),
-      suggestion: 'Update or link the existing lesson instead of promoting a duplicate.',
+      evidenceRefs: addEvidenceRef(
+        evidenceRefs,
+        `duplicate:${getLessonId(duplicate)}`,
+      ),
+      suggestion:
+        'Update or link the existing lesson instead of promoting a duplicate.',
     });
   }
 
@@ -720,7 +814,8 @@ export function critiqueProposedLesson(
       message:
         'Historical lesson conflicts were not checked, so promotion needs manual review.',
       evidenceRefs: addEvidenceRef(evidenceRefs, 'contradiction:not_checked'),
-      suggestion: 'Run lesson search or have a reviewer confirm no conflicting prior guidance exists.',
+      suggestion:
+        'Run lesson search or have a reviewer confirm no conflicting prior guidance exists.',
     });
   }
   if (contradictionReport.status === 'contradiction_detected') {
@@ -731,10 +826,16 @@ export function critiqueProposedLesson(
       severity: 'critical',
       message:
         'Potential contradiction with existing lesson guidance blocks promotion until reconciled.',
-      evidenceRefs: contradictionReport.contradictions.map((contradiction) =>
-        addEvidenceRef(evidenceRefs, `conflict:${contradiction.conflictingLessonId}`),
-      ).flat(),
-      suggestion: 'Resolve or supersede the conflicting lesson before promotion.',
+      evidenceRefs: contradictionReport.contradictions
+        .map((contradiction) =>
+          addEvidenceRef(
+            evidenceRefs,
+            `conflict:${contradiction.conflictingLessonId}`,
+          ),
+        )
+        .flat(),
+      suggestion:
+        'Resolve or supersede the conflicting lesson before promotion.',
     });
   }
 
@@ -1045,7 +1146,9 @@ export class LessonRecorder {
           ...lesson,
           contradictionReport: contradictionContext.report,
         };
-        const admittedBaseLesson = this.withAdmissionTimestamp(lessonWithContradiction);
+        const admittedBaseLesson = this.withDefaultLessonScope(
+          this.withAdmissionTimestamp(lessonWithContradiction),
+        );
         const admittedLesson = {
           ...admittedBaseLesson,
           proposedLessonCritique: critiqueProposedLesson(
@@ -1571,6 +1674,33 @@ export class LessonRecorder {
     }
   }
 
+  private withDefaultLessonScope(lesson: CritiqueLesson): CritiqueLesson {
+    if (lesson.lessonScope !== undefined) {
+      return lesson;
+    }
+    return {
+      ...lesson,
+      lessonScope: createLessonScopeMetadata({
+        scope: 'task',
+        allowedTasks: [lesson.taskId],
+        provenance: {
+          source: 'critique-loop',
+          taskId: lesson.taskId,
+          note: 'Newly recorded critique lessons default to one-task scope until reviewed for broader sharing.',
+        },
+        auditTrail: [
+          {
+            changedAt: lesson.timestamp,
+            actor: 'lesson-recorder',
+            toScope: 'task',
+            reason:
+              'Default one-task scope prevents cross-agent sharing before review.',
+          },
+        ],
+      }),
+    };
+  }
+
   private withAdmissionTimestamp(lesson: CritiqueLesson): CritiqueLesson {
     if (!lesson.cooldown) {
       return lesson;
@@ -1599,6 +1729,177 @@ export class LessonRecorder {
       },
     };
   }
+}
+
+interface LessonScopeMetadataInput {
+  readonly scope: LessonScopeKind;
+  readonly allowedRepos?: readonly string[];
+  readonly allowedRoles?: readonly string[];
+  readonly allowedProfiles?: readonly string[];
+  readonly allowedTasks?: readonly TaskId[];
+  readonly provenance: LessonScopeProvenance;
+  readonly expiresAt?: string;
+  readonly auditTrail: readonly LessonScopeAuditEntry[];
+}
+
+function createLessonScopeMetadata(
+  input: LessonScopeMetadataInput,
+): LessonScopeMetadata {
+  const scope = normalizeLessonScopeKind(input.scope);
+  const metadata: LessonScopeMetadata = {
+    schemaVersion: 'lesson-scope-v1',
+    scope,
+    ...(input.allowedRepos !== undefined
+      ? { allowedRepos: normalizeScopeList(input.allowedRepos, 'allowedRepos') }
+      : {}),
+    ...(input.allowedRoles !== undefined
+      ? { allowedRoles: normalizeScopeList(input.allowedRoles, 'allowedRoles') }
+      : {}),
+    ...(input.allowedProfiles !== undefined
+      ? {
+          allowedProfiles: normalizeScopeList(
+            input.allowedProfiles,
+            'allowedProfiles',
+          ),
+        }
+      : {}),
+    ...(input.allowedTasks !== undefined
+      ? {
+          allowedTasks: normalizeScopeList(
+            input.allowedTasks,
+            'allowedTasks',
+          ) as TaskId[],
+        }
+      : {}),
+    provenance: input.provenance,
+    ...(input.expiresAt !== undefined
+      ? { expiresAt: normalizeTimestamp(input.expiresAt) }
+      : {}),
+    auditTrail: input.auditTrail.map((entry) => ({
+      ...entry,
+      changedAt: normalizeTimestamp(entry.changedAt),
+      actor: requireNonEmptyString(entry.actor, 'scope audit actor'),
+      reason: requireNonEmptyString(entry.reason, 'scope audit reason'),
+      toScope: normalizeLessonScopeKind(entry.toScope),
+      ...(entry.fromScope !== undefined
+        ? { fromScope: normalizeLessonScopeKind(entry.fromScope) }
+        : {}),
+    })),
+  };
+  assertScopeHasRequiredAllowlist(metadata);
+  return metadata;
+}
+
+function normalizeLessonScopeKind(scope: LessonScopeKind): LessonScopeKind {
+  if (
+    scope !== 'global' &&
+    scope !== 'repo' &&
+    scope !== 'role' &&
+    scope !== 'profile' &&
+    scope !== 'task'
+  ) {
+    throw new RangeError(`Unsupported lesson scope: ${String(scope)}`);
+  }
+  return scope;
+}
+
+function normalizeScopeList(
+  values: readonly string[],
+  label: string,
+): readonly string[] {
+  const normalized = values.map((value) =>
+    requireNonEmptyString(value, label).trim(),
+  );
+  if (normalized.length === 0) {
+    throw new RangeError(
+      `${label} must contain at least one value when provided.`,
+    );
+  }
+  return Array.from(new Set(normalized)).sort();
+}
+
+function assertScopeHasRequiredAllowlist(scope: LessonScopeMetadata): void {
+  if (scope.scope === 'repo' && (scope.allowedRepos?.length ?? 0) === 0) {
+    throw new RangeError(
+      'Repo-scoped lessons require at least one allowed repo.',
+    );
+  }
+  if (scope.scope === 'role' && (scope.allowedRoles?.length ?? 0) === 0) {
+    throw new RangeError(
+      'Role-scoped lessons require at least one allowed role.',
+    );
+  }
+  if (scope.scope === 'profile' && (scope.allowedProfiles?.length ?? 0) === 0) {
+    throw new RangeError(
+      'Profile-scoped lessons require at least one allowed profile.',
+    );
+  }
+  if (scope.scope === 'task' && (scope.allowedTasks?.length ?? 0) === 0) {
+    throw new RangeError(
+      'Task-scoped lessons require at least one allowed task.',
+    );
+  }
+}
+
+function isLessonScopeAllowed(
+  scope: LessonScopeMetadata | undefined,
+  context: LessonInjectionContext,
+): boolean {
+  if (scope === undefined || isEmptyLessonInjectionContext(context)) {
+    return true;
+  }
+  const nowMs = Date.parse(context.now ?? new Date().toISOString());
+  if (scope.expiresAt !== undefined && Date.parse(scope.expiresAt) <= nowMs) {
+    return false;
+  }
+  if (!matchesOptionalAllowlist(scope.allowedRepos, context.repo)) {
+    return false;
+  }
+  if (!matchesOptionalAllowlist(scope.allowedRoles, context.role)) {
+    return false;
+  }
+  if (!matchesOptionalAllowlist(scope.allowedProfiles, context.profile)) {
+    return false;
+  }
+  if (scope.scope === 'global') {
+    return true;
+  }
+  if (scope.scope === 'repo') {
+    return matchesRequiredAllowlist(scope.allowedRepos, context.repo);
+  }
+  if (scope.scope === 'role') {
+    return matchesRequiredAllowlist(scope.allowedRoles, context.role);
+  }
+  if (scope.scope === 'profile') {
+    return matchesRequiredAllowlist(scope.allowedProfiles, context.profile);
+  }
+  return matchesRequiredAllowlist(scope.allowedTasks, context.taskId);
+}
+
+function isEmptyLessonInjectionContext(
+  context: LessonInjectionContext,
+): boolean {
+  return (
+    context.repo === undefined &&
+    context.role === undefined &&
+    context.profile === undefined &&
+    context.taskId === undefined &&
+    context.now === undefined
+  );
+}
+
+function matchesOptionalAllowlist(
+  allowed: readonly string[] | undefined,
+  actual: string | undefined,
+): boolean {
+  return allowed === undefined || matchesRequiredAllowlist(allowed, actual);
+}
+
+function matchesRequiredAllowlist(
+  allowed: readonly string[] | undefined,
+  actual: string | undefined,
+): boolean {
+  return actual !== undefined && allowed?.includes(actual) === true;
 }
 
 export function detectLessonContradictions(
