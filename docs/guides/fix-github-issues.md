@@ -161,3 +161,7 @@ Before execution starts, `IssueRunner` emits `[issues] Scheduler fairness report
 - `warnings[]`: explicit edge cases, such as unprioritized issues that will run after prioritized work or approved issues missing triage results.
 
 Library callers can produce the same deterministic payload directly with `buildIssueSchedulerFairnessReport(issues, triageResults)`. Treat non-empty `warnings[]` as operator guidance: either add the missing labels/triage data before approving the run, or record why the fallback order is acceptable.
+
+### Large backlog liveness/refill scaling assumptions
+
+Issue scheduler liveness output is intended to stay bounded even when a refill run sees hundreds or thousands of issues/cards. `buildIssueSchedulerFairnessReport()` samples issue-number lists and warnings while keeping authoritative counts (`totalIssues`, bucket `count`, omitted counts, and `warningSummary`). Operators should rely on the counts and summaries for backlog health, then drill into GitHub/Kanban for the full list only when a specific bucket or warning class needs action. Callers that need a tighter UI payload can pass `maxIssueNumbersPerList` and `maxWarnings`; the defaults keep output concise without hiding blocker classes.

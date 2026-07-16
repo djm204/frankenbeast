@@ -1,0 +1,42 @@
+{
+  "description": "Large backlog liveness/refill fixture for bounded scheduler fairness output.",
+  "issueCount": 120,
+  "cardCount": 120,
+  "severitySplit": {
+    "high": 80,
+    "unprioritized": 40
+  },
+  "triage": {
+    "missingEvery": 3,
+    "expectedMissingCount": 40
+  },
+  "cardStates": {
+    "running": 60,
+    "blocked": 20,
+    "done": 20,
+    "ready": 20
+  },
+  "operationBounds": {
+    "maxIssueNumbersPerList": 5,
+    "maxWarnings": 6
+  },
+  "expectations": {
+    "scheduledIssueNumbers": [10000, 10001, 10002, 10003, 10004],
+    "omittedScheduledIssueNumberCount": 115,
+    "highBucket": {
+      "count": 80,
+      "issueNumbers": [10000, 10001, 10002, 10003, 10004],
+      "omittedIssueNumberCount": 75
+    },
+    "unprioritizedBucket": {
+      "count": 40,
+      "issueNumbers": [10080, 10081, 10082, 10083, 10084],
+      "omittedIssueNumberCount": 35
+    },
+    "omittedWarningCount": 74,
+    "warningSummary": [
+      "40 unprioritized issue(s) are scheduled after prioritized work",
+      "40 issue(s) are missing triage results and require labels/triage before safe execution"
+    ]
+  }
+}

@@ -78,6 +78,32 @@ interface FlakyLivenessReplayFixture {
   readonly edgeCases: readonly FlakyLivenessReplaySnapshot[];
 }
 
+interface LargeBacklogLivenessRefillFixture {
+  readonly description: string;
+  readonly issueCount: number;
+  readonly cardCount: number;
+  readonly severitySplit: { readonly high: number; readonly unprioritized: number };
+  readonly triage: { readonly missingEvery: number; readonly expectedMissingCount: number };
+  readonly cardStates: Readonly<Record<string, number>>;
+  readonly operationBounds: { readonly maxIssueNumbersPerList: number; readonly maxWarnings: number };
+  readonly expectations: {
+    readonly scheduledIssueNumbers: readonly number[];
+    readonly omittedScheduledIssueNumberCount: number;
+    readonly highBucket: {
+      readonly count: number;
+      readonly issueNumbers: readonly number[];
+      readonly omittedIssueNumberCount: number;
+    };
+    readonly unprioritizedBucket: {
+      readonly count: number;
+      readonly issueNumbers: readonly number[];
+      readonly omittedIssueNumberCount: number;
+    };
+    readonly omittedWarningCount: number;
+    readonly warningSummary: readonly string[];
+  };
+}
+
 function readBurstDispatchLoadFixture(): BurstDispatchLoadFixture {
   return JSON.parse(
     readFileSync(join(__dirname, 'fixtures', 'burst-dispatch-load.json'), 'utf8'),
@@ -88,6 +114,12 @@ function readFlakyLivenessReplayFixture(): FlakyLivenessReplayFixture {
   return JSON.parse(
     readFileSync(join(__dirname, 'fixtures', 'flaky-liveness-replay.json'), 'utf8'),
   ) as FlakyLivenessReplayFixture;
+}
+
+function readLargeBacklogLivenessRefillFixture(): LargeBacklogLivenessRefillFixture {
+  return JSON.parse(
+    readFileSync(join(__dirname, 'fixtures', 'large-backlog-liveness-refill.json'), 'utf8'),
+  ) as LargeBacklogLivenessRefillFixture;
 }
 
 vi.mock('../../../src/beast-loop.js', () => {
@@ -506,6 +538,39 @@ describe('IssueRunner', () => {
       expect(report.warnings).toEqual([
         'issue #41 has no triage result and will fail before execution if approved',
       ]);
+    });
+
+    it('bounds scheduler liveness payloads under large refill queues while preserving authoritative counts', () => {
+      const fixture = readLargeBacklogLivenessRefillFixture();
+      const issues = Array.from({ length: fixture.issueCount }, (_, index) => makeIssue({
+        number: 10_000 + index,
+        labels: index < fixture.severitySplit.high ? ['high'] : [],
+      }));
+      const triages = issues
+        .filter((_, index) => index % fixture.triage.missingEvery !== 0)
+        .map(issue => makeTriage(issue.number));
+
+      const report = buildIssueSchedulerFairnessReport(issues, triages, fixture.operationBounds);
+
+      expect(fixture.description).toContain('Large backlog liveness/refill fixture');
+      expect(Object.values(fixture.cardStates).reduce((total, count) => total + count, 0)).toBe(fixture.cardCount);
+      expect(report.totalIssues).toBe(fixture.issueCount);
+      expect(report.scheduledIssueNumbers).toEqual(fixture.expectations.scheduledIssueNumbers);
+      expect(report.scheduledIssueNumbers.length).toBeLessThanOrEqual(fixture.operationBounds.maxIssueNumbersPerList);
+      expect(report.scheduledIssueNumbersTruncated).toBe(true);
+      expect(report.omittedScheduledIssueNumberCount).toBe(fixture.expectations.omittedScheduledIssueNumberCount);
+      expect(report.buckets.find(bucket => bucket.severity === 'high')).toMatchObject({
+        ...fixture.expectations.highBucket,
+        issueNumbersTruncated: true,
+      });
+      expect(report.buckets.find(bucket => bucket.severity === 'unprioritized')).toMatchObject({
+        ...fixture.expectations.unprioritizedBucket,
+        issueNumbersTruncated: true,
+      });
+      expect(report.warnings).toHaveLength(fixture.operationBounds.maxWarnings);
+      expect(report.warningsTruncated).toBe(true);
+      expect(report.omittedWarningCount).toBe(fixture.expectations.omittedWarningCount);
+      expect(report.warningSummary).toEqual(fixture.expectations.warningSummary);
     });
 
     it('logs the scheduler fairness report before executing approved issues', async () => {
