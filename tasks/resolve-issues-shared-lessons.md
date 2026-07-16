@@ -32,6 +32,9 @@
 - On drain timeout, close HTTP intake but keep shutdown ownership, wait for already-admitted mutating routes to finish, then stop live child runs, dispose services, release the PID file, and report the timeout; otherwise the CLI can exit while a just-created run is orphaned.
 - Treat draining sibling daemons as fail-fast for chat-server startup rather than proxying to a 503 daemon or starting route-less/local Beast control that will not recover without restart.
 
+## 2026-07-15 — Cron wrapper Codex closeout
+- Cron script wrappers that emit structured failure envelopes need regression coverage for quoted/escaped secret values in both stderr and argv snippets, full Authorization schemes, descendant cleanup after parent termination, and long stderr-drain timers; old inline comments can be superseded only after pushing, resolving the exact Codex threads, and obtaining a fresh current-head review.
+
 ## 2026-07-15 — Issue-runner dependency circuit breaker verification
 - For availability/refill features that add dependency-specific throttles, model the dependency name in structured signals and configure named breakers so unrelated degraded dependencies do not create a global outage. Regression tests should cover the intended open condition plus an unrelated dependency and a retry/open-until edge case.
 - After `npm ci` in a fresh worktree, package-local orchestrator typecheck may fail until dependent workspaces have been built; run `npm run build` (or build the needed workspace packages) before re-running package-local `tsc --noEmit`.
