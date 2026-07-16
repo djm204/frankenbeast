@@ -92,7 +92,7 @@ describe('dr restore-dry-run CLI', () => {
           createdAt: '2026-07-16T08:05:00.000Z',
           replaySafety: 'side-effect-approval-required',
           status: 'open',
-          payload: { command: 'curl -H "Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456" https://api.github.com/repos/djm204/frankenbeast' },
+          payload: { command: 'curl --password notasecret -H "Authorization: Bearer abcdef...3456" https://api.github.com/repos/djm204/frankenbeast' },
         }],
       }), 'utf8');
 
@@ -114,6 +114,7 @@ describe('dr restore-dry-run CLI', () => {
       expect(JSON.parse(inspectOutput)).toMatchObject({ command: 'dr dead-letter-inspect', entry: { id: 'dlq_test' } });
       expect(inspectOutput).not.toContain('ghp_deadlettersecretdeadlettersecret');
       expect(inspectOutput).not.toContain('abcdefghijklmnopqrstuvwxyz123456');
+      expect(inspectOutput).not.toContain('notasecret');
       expect(inspectOutput).toContain('<redacted>');
 
       await handleDrCommand({ action: 'dead-letter-replay-dry-run', backupManifestPath: queuePath, liveManifestPath: 'dlq_test', generatedAt: '2026-07-16T08:06:00.000Z', print: (message) => output.push(message) });

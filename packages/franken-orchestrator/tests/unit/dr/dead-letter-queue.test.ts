@@ -147,7 +147,7 @@ describe('dead-letter queue for failed automation actions', () => {
     const lockPath = `${queuePath}.lock`;
 
     try {
-      await writeFile(lockPath, JSON.stringify({ owner: 'crashed-worker', pid: 1, acquiredAt: '2000-01-01T00:00:00.000Z' }), 'utf8');
+      await writeFile(lockPath, JSON.stringify({ owner: 'stale-test-lock', pid: 999_999, acquiredAt: '2000-01-01T00:00:00.000Z' }), 'utf8');
 
       const entry = await recordRetryExhaustionToDeadLetterQueue({
         queuePath,

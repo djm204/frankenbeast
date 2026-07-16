@@ -187,6 +187,7 @@ async function reapStaleQueueLock(lockPath: string, now = Date.now()): Promise<b
     observed = parseQueueLock(await readFile(lockPath, 'utf8'));
     const acquiredAt = Date.parse(observed.acquiredAt);
     if (!Number.isFinite(acquiredAt) || now - acquiredAt < STALE_LOCK_MS) return false;
+    if (isProcessAlive(observed.pid)) return false;
   } catch {
     return false;
   }
@@ -200,6 +201,15 @@ async function reapStaleQueueLock(lockPath: string, now = Date.now()): Promise<b
       return false;
     }
     await unlink(stalePath).catch(() => undefined);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
     return true;
   } catch {
     return false;
