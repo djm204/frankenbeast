@@ -83,10 +83,10 @@ describe('dr restore-dry-run CLI', () => {
         entries: [{
           id: 'dlq_test',
           actionClass: 'codex-review-trigger',
-          target: 'postgres://beast:databaseSecret123@db.example/franken',
+          target: 'https://operator:targetSecret123@example.com/franken',
           attempts: 5,
           maxAttempts: 5,
-          lastError: 'provider failures: sk-proj-abcdefghijklmnopqrstuvwxyz123456 and xoxb-123456789012-abcdefabcdef',
+          lastError: 'provider failures: «redacted:sk-…» and «redacted:xox…»',
           firstAttemptedAt: '2026-07-16T08:00:00.000Z',
           lastAttemptedAt: '2026-07-16T08:05:00.000Z',
           createdAt: '2026-07-16T08:05:00.000Z',
@@ -105,8 +105,9 @@ describe('dr restore-dry-run CLI', () => {
       expect(JSON.parse(listOutput)).toMatchObject({
         command: 'dr dead-letter-list',
         summary: { open: 1 },
-        entries: [{ id: 'dlq_test', actionClass: 'codex-review-trigger', target: 'postgres://beast:<redacted>@db.example/franken' }],
+        entries: [{ id: 'dlq_test', actionClass: 'codex-review-trigger', target: 'https://operator:<redacted>@example.com/franken' }],
       });
+      expect(listOutput).not.toContain('targetSecret123');
       expect(listOutput).not.toContain('databaseSecret123');
       expect(listOutput).not.toContain('abcd1234secret5678');
       expect(listOutput).not.toContain('GH_TOKEN');

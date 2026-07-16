@@ -221,6 +221,11 @@ async function reapMalformedQueueLock(lockPath: string, now = Date.now()): Promi
     if (now - info.mtimeMs < STALE_LOCK_MS) return false;
     const stalePath = `${lockPath}.malformed.${now}`;
     await rename(lockPath, stalePath);
+    const moved = await stat(stalePath);
+    if (moved.dev !== info.dev || moved.ino !== info.ino || moved.mtimeMs !== info.mtimeMs || moved.size !== info.size) {
+      await rename(stalePath, lockPath).catch(() => undefined);
+      return false;
+    }
     await unlink(stalePath).catch(() => undefined);
     return true;
   } catch {
@@ -402,7 +407,8 @@ export async function recordRetryExhaustionToDeadLetterQueue(
   if (!options.lastError.trim()) throw new Error('Cannot dead-letter automation action: lastError is required');
   const replaySafety = validateReplaySafety(options.replaySafety);
 
-  const exhaustedAt = options.exhaustedAt ?? new Date().toISOString();
+  const exhaustedAt = options.exhaustedAt?.trim() || new Date().toISOString();
+  const firstAttemptedAt = options.firstAttemptedAt?.trim() || exhaustedAt;
   const entry: DeadLetterEntry = {
     id: entryIdFor(options, exhaustedAt),
     actionClass: options.actionClass,
@@ -410,7 +416,7 @@ export async function recordRetryExhaustionToDeadLetterQueue(
     attempts: options.attempts,
     maxAttempts: options.maxAttempts,
     lastError: options.lastError,
-    firstAttemptedAt: options.firstAttemptedAt ?? exhaustedAt,
+    firstAttemptedAt,
     lastAttemptedAt: exhaustedAt,
     createdAt: exhaustedAt,
     replaySafety,

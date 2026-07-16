@@ -116,6 +116,32 @@ describe('dead-letter queue for failed automation actions', () => {
     }
   });
 
+  it('normalizes blank retry exhaustion timestamps before writing entries', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dlq-'));
+    const queuePath = join(dir, 'dead-letter.json');
+
+    try {
+      const entry = await recordRetryExhaustionToDeadLetterQueue({
+        queuePath,
+        actionClass: 'approval-cop-command',
+        target: 'pr-2342',
+        attempts: 3,
+        maxAttempts: 3,
+        lastError: 'blank timestamp from caller',
+        replaySafety: 'safe',
+        firstAttemptedAt: ' ',
+        exhaustedAt: '',
+      });
+
+      expect(entry.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(entry.lastAttemptedAt).toBe(entry.createdAt);
+      expect(entry.firstAttemptedAt).toBe(entry.createdAt);
+      expect(await listDeadLetterEntries(queuePath)).toEqual([entry]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('serializes concurrent dead-letter appends to preserve every exhausted action', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'franken-dlq-'));
     const queuePath = join(dir, 'dead-letter.json');
