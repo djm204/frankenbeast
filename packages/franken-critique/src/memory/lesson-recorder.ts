@@ -450,20 +450,17 @@ export function updateLessonScope(
     toScope: scope,
     reason,
   };
+  const allowedRepos = request.allowedRepos ?? lesson.lessonScope?.allowedRepos;
+  const allowedRoles = request.allowedRoles ?? lesson.lessonScope?.allowedRoles;
+  const allowedProfiles =
+    request.allowedProfiles ?? lesson.lessonScope?.allowedProfiles;
+  const allowedTasks = request.allowedTasks ?? lesson.lessonScope?.allowedTasks;
   const lessonScope = createLessonScopeMetadata({
     scope,
-    ...(request.allowedRepos !== undefined
-      ? { allowedRepos: request.allowedRepos }
-      : {}),
-    ...(request.allowedRoles !== undefined
-      ? { allowedRoles: request.allowedRoles }
-      : {}),
-    ...(request.allowedProfiles !== undefined
-      ? { allowedProfiles: request.allowedProfiles }
-      : {}),
-    ...(request.allowedTasks !== undefined
-      ? { allowedTasks: request.allowedTasks }
-      : {}),
+    ...(allowedRepos !== undefined ? { allowedRepos } : {}),
+    ...(allowedRoles !== undefined ? { allowedRoles } : {}),
+    ...(allowedProfiles !== undefined ? { allowedProfiles } : {}),
+    ...(allowedTasks !== undefined ? { allowedTasks } : {}),
     provenance: request.provenance ??
       lesson.lessonScope?.provenance ?? {
         source: 'human-review',
@@ -1205,9 +1202,12 @@ export class LessonRecorder {
         createLessonSearchQuery(lesson),
         10,
       );
+      const applicablePriorLessons = priorLessons.filter((priorLesson) =>
+        isLessonApplicable(priorLesson, { taskId: lesson.taskId }),
+      );
       return {
-        report: detectLessonContradictions(lesson, priorLessons),
-        priorLessons,
+        report: detectLessonContradictions(lesson, applicablePriorLessons),
+        priorLessons: applicablePriorLessons,
       };
     } catch {
       return {
@@ -1263,6 +1263,7 @@ export class LessonRecorder {
         const cooldownBaseMs = Date.parse(recordedAt);
         this.pruneExpiredCooldowns(cooldownBaseMs);
         const cooldownKey = createCooldownKey(
+          taskId,
           evalResult.evaluatorName,
           findingMessages,
         );
@@ -1851,9 +1852,15 @@ function isLessonScopeAllowed(
   if (isEmptyLessonInjectionContext(context)) {
     return false;
   }
-  const nowMs = Date.parse(context.now ?? new Date().toISOString());
-  if (scope.expiresAt !== undefined && Date.parse(scope.expiresAt) <= nowMs) {
+  const nowMs = parseScopeTimestamp(context.now ?? new Date().toISOString());
+  if (nowMs === undefined) {
     return false;
+  }
+  if (scope.expiresAt !== undefined) {
+    const expiresAtMs = parseScopeTimestamp(scope.expiresAt);
+    if (expiresAtMs === undefined || expiresAtMs <= nowMs) {
+      return false;
+    }
   }
   if (!matchesOptionalAllowlist(scope.allowedRepos, context.repo)) {
     return false;
@@ -1862,6 +1869,9 @@ function isLessonScopeAllowed(
     return false;
   }
   if (!matchesOptionalAllowlist(scope.allowedProfiles, context.profile)) {
+    return false;
+  }
+  if (!matchesOptionalAllowlist(scope.allowedTasks, context.taskId)) {
     return false;
   }
   if (scope.scope === 'global') {
@@ -1877,6 +1887,11 @@ function isLessonScopeAllowed(
     return matchesRequiredAllowlist(scope.allowedProfiles, context.profile);
   }
   return matchesRequiredAllowlist(scope.allowedTasks, context.taskId);
+}
+
+function parseScopeTimestamp(timestamp: string): number | undefined {
+  const parsed = Date.parse(timestamp);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function isEmptyLessonInjectionContext(
@@ -2824,15 +2839,18 @@ function createLessonId(
 }
 
 function createCooldownKey(
+  taskId: TaskId,
   evaluatorName: string,
   findingMessages: readonly string[],
 ): string {
   const normalizedFindings = JSON.stringify({
+    taskId,
     evaluatorName,
     findings: findingMessages.map((message) => message.trim()).sort(),
   });
   return [
     'critique-lesson',
+    sanitizeLessonIdPart(taskId),
     sanitizeLessonIdPart(evaluatorName),
     stableHash(normalizedFindings),
   ].join(':');
