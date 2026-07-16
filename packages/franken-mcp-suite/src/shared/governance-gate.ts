@@ -10,7 +10,7 @@ function stringifyArgs(args: Record<string, unknown>): string {
 }
 
 const MEMORY_SELECTOR_KEYS = new Set(['key', 'category', 'sourceScope', 'query', 'agentId']);
-const MEMORY_POLICY_EVIDENCE_KEYS = ['key', 'category', 'sourceScope', 'query', 'dryRun', 'redaction', 'agentId', 'profile', 'activeProfile', 'crossProfile'] as const;
+const MEMORY_POLICY_EVIDENCE_KEYS = ['key', 'category', 'sourceScope', 'query', 'dryRun', 'redaction', 'operatorApproval', 'agentId', 'profile', 'activeProfile', 'crossProfile'] as const;
 
 function isUnredactedMemoryExport(tool: string, args: Record<string, unknown>): boolean {
   return tool === 'fbeast_memory_export' && args.redaction === 'none';

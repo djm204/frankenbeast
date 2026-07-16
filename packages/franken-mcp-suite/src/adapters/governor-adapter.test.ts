@@ -169,7 +169,7 @@ describe('GovernorAdapter', () => {
     expect(result.reason).toContain('Memory edits persist');
   });
 
-  it('approves explicit trusted-operator unredacted memory exports', async () => {
+  it('requires trusted-operator review for unredacted memory exports without approval evidence', async () => {
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
 
     await expect(governor.check({
@@ -180,8 +180,15 @@ describe('GovernorAdapter', () => {
       action: 'fbeast_memory_export',
       context: '{"redaction":"none"}',
     })).resolves.toMatchObject({
+      decision: 'review_recommended',
+      reason: expect.stringContaining('trusted-operator approval'),
+    });
+    await expect(governor.check({
+      action: 'fbeast_memory_export',
+      context: '{"redaction":"none","operatorApproval":"trusted-operator-approved"}',
+    })).resolves.toMatchObject({
       decision: 'approved',
-      reason: expect.stringContaining('trusted-operator MCP path'),
+      reason: expect.stringContaining('trusted-operator approval evidence'),
     });
     await expect(governor.check({
       action: 'execute_tool',
@@ -190,9 +197,16 @@ describe('GovernorAdapter', () => {
         args: { redaction: 'none', readScope: 'shared' },
       }),
     })).resolves.toMatchObject({
-      decision: 'approved',
-      reason: expect.stringContaining('trusted-operator MCP path'),
+      decision: 'review_recommended',
+      reason: expect.stringContaining('trusted-operator approval'),
     });
+    await expect(governor.check({
+      action: 'execute_tool',
+      context: JSON.stringify({
+        tool: 'fbeast_memory_export',
+        args: { redaction: 'none', readScope: 'shared', operatorApproval: 'trusted-operator-approved' },
+      }),
+    })).resolves.toMatchObject({ decision: 'approved' });
     await expect(governor.check({
       action: 'execute_tool',
       context: JSON.stringify({
@@ -202,8 +216,8 @@ describe('GovernorAdapter', () => {
         },
       }),
     })).resolves.toMatchObject({
-      decision: 'approved',
-      reason: expect.stringContaining('trusted-operator MCP path'),
+      decision: 'review_recommended',
+      reason: expect.stringContaining('trusted-operator approval'),
     });
   });
 

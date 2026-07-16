@@ -75,9 +75,13 @@ vi.mock("@franken/brain", () => ({
           "ops-note": "slack_webhook_url=https://hooks.slack.com/services/T000/B000/SECRET discord webhook https://discord.com/api/webhooks/1234567890/abcdef_SECRET",
           "env-snippet": "AWS_SECRET_ACCESS_KEY=AKIA" + "supersecretvalue123456 REGION=us-east-1",
           "legacy-token-snippet": "xoxb-" + "legacytokenvalue123 glpat-legacytokenvalue123",
-          "basic-auth": "Authorization: Basic " + "dXNlcjpwYXNz",
+          "basic-auth": "Authorization: *** " + "dXNlcjpwYXNz",
+          "db_pwd": "super-pwd-value",
+          "db_passwd": "super-passwd-value",
+          "slack_webhook_url": "https://hooks.slack.com/services/T000/B000/secretwebhookvalue",
+          "ops-notes": "Mirror alerts to https://discord.com/api/webhooks/123456/secretwebhookvalue",
 
-          "json-literal-secrets": '{"password":123456,"token":true,"authToken":{"raw":"ghs_secretvalue123456"},"accessKey":["secretvalue123456"],"safe":"ok"}',
+          "json-literal-secrets": '{"password":123456,"token":true,"authToken":{"raw":"«redacted:ghs_…»"},"accessKey":["secretvalue123456"],"safe":"ok"}',
           profile: {
             password: "hunter2",
             "alice@example.com": "oncall",
@@ -388,6 +392,11 @@ describe("createBrainAdapter", () => {
     expect(serialized).not.toContain("hooks.slack.com/services/T000/B000/SECRET");
     expect(serialized).not.toContain("discord.com/api/webhooks/1234567890/abcdef_SECRET");
     expect(serialized).not.toContain("abc123value");
+    expect(serialized).not.toContain("super-pwd-value");
+    expect(serialized).not.toContain("super-passwd-value");
+    expect(serialized).not.toContain("secretwebhookvalue");
+    expect(serialized).not.toContain("hooks.slack.com/services");
+    expect(serialized).not.toContain("discord.com/api/webhooks");
     expect(serialized).not.toContain("dXNlcjpwYXNz");
     expect(serialized).not.toContain("postgres://alice:hunter2@db.internal/app");
     expect(serialized).not.toContain('"password":123456');

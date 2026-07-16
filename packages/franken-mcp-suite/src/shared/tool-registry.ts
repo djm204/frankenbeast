@@ -340,6 +340,7 @@ const TOOLS: ToolFull[] = [
         readScope: { type: 'string', description: 'Read scope: all (legacy), shared (hide agent-scoped entries), or agent (shared plus entries for agentId)', enum: ['all', 'shared', 'agent'] },
         agentId: { type: 'string', description: 'Agent id required when readScope is agent' },
         redaction: { type: 'string', description: 'Redaction mode: safe (default) masks secrets/PII; none emits raw values for trusted operator-only exports', enum: ['safe', 'none'] },
+        operatorApproval: { type: 'string', description: 'Set to trusted-operator-approved only after explicit trusted-operator approval for redaction=none exports' },
         limit: { type: 'string', description: 'Max entries per memory store (default 1000)' },
       },
     },

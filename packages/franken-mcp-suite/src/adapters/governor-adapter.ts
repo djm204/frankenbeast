@@ -272,6 +272,9 @@ function sanitizeMemoryExportGovernanceArgs(args: Record<string, unknown>): Reco
   if (typeof args['limit'] === 'number') {
     safe['limit'] = args['limit'];
   }
+  if (typeof args['operatorApproval'] === 'string') {
+    safe['operatorApproval'] = args['operatorApproval'];
+  }
   if (typeof args['projectId'] === 'string') {
     safe['projectId'] = args['projectId'];
   }
@@ -484,30 +487,40 @@ function assessHighRiskAction(action: string, context: string): GovernorCheckRes
   return { decision: 'review_recommended', reason: `High-risk policy requires approval for ${action}: ${result.reason}` };
 }
 
-function isTrustedOperatorMemoryExport(action: string, context: string): boolean {
+const TRUSTED_OPERATOR_EXPORT_APPROVAL = 'trusted-operator-approved';
+
+function memoryExportArgsFromContext(action: string, context: string): Record<string, unknown> | undefined {
   const unqualifiedAction = unqualifyMcpActionName(action);
   const isDirectExport = unqualifiedAction === 'fbeast_memory_export';
   const isProxiedExport = unqualifiedAction === 'execute_tool' && contextTargetsTool(context, 'fbeast_memory_export');
-  if (!isDirectExport && !isProxiedExport) return false;
+  if (!isDirectExport && !isProxiedExport) return undefined;
   try {
     const parsed = JSON.parse(context) as unknown;
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
     const record = parsed as Record<string, unknown>;
-    if (isDirectExport) return record.redaction === 'none';
+    if (isDirectExport) return record;
     const directArgs = record['args'];
     if (directArgs !== null && typeof directArgs === 'object' && !Array.isArray(directArgs)) {
-      return (directArgs as Record<string, unknown>).redaction === 'none';
+      return directArgs as Record<string, unknown>;
     }
     const toolInput = record['tool_input'];
-    if (toolInput === null || typeof toolInput !== 'object' || Array.isArray(toolInput)) return false;
+    if (toolInput === null || typeof toolInput !== 'object' || Array.isArray(toolInput)) return undefined;
     const nestedArgs = (toolInput as Record<string, unknown>)['args'];
-    return nestedArgs !== null
-      && typeof nestedArgs === 'object'
-      && !Array.isArray(nestedArgs)
-      && (nestedArgs as Record<string, unknown>).redaction === 'none';
+    return nestedArgs !== null && typeof nestedArgs === 'object' && !Array.isArray(nestedArgs)
+      ? nestedArgs as Record<string, unknown>
+      : undefined;
   } catch {
-    return /"redaction"\s*:\s*"none"/i.test(context);
+    return /"redaction"\s*:\s*"none"/i.test(context) ? { redaction: 'none' } : undefined;
   }
+}
+
+function isTrustedOperatorMemoryExport(action: string, context: string): boolean {
+  return memoryExportArgsFromContext(action, context)?.redaction === 'none';
+}
+
+function isApprovedTrustedOperatorMemoryExport(action: string, context: string): boolean {
+  const args = memoryExportArgsFromContext(action, context);
+  return args?.redaction === 'none' && args.operatorApproval === TRUSTED_OPERATOR_EXPORT_APPROVAL;
 }
 
 function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; model: string }): boolean {
@@ -522,15 +535,22 @@ function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; m
 
 function assessAction(action: string, context: string): GovernorCheckResult {
   const unqualifiedAction = unqualifyMcpActionName(action);
-  if (isTrustedOperatorMemoryExport(unqualifiedAction, context)) {
+  const highRiskResult = assessHighRiskAction(unqualifiedAction, context);
+  if (highRiskResult !== undefined) return highRiskResult;
+
+  if (isApprovedTrustedOperatorMemoryExport(unqualifiedAction, context)) {
     return {
       decision: 'approved',
-      reason: 'Unredacted fbeast_memory_export is explicitly requested and restricted to the trusted-operator MCP path.',
+      reason: 'Unredacted fbeast_memory_export has explicit trusted-operator approval evidence.',
     };
   }
 
-  const highRiskResult = assessHighRiskAction(unqualifiedAction, context);
-  if (highRiskResult !== undefined) return highRiskResult;
+  if (isTrustedOperatorMemoryExport(unqualifiedAction, context)) {
+    return {
+      decision: 'review_recommended',
+      reason: `Unredacted fbeast_memory_export requires trusted-operator approval; retry with operatorApproval="${TRUSTED_OPERATOR_EXPORT_APPROVAL}" only after approval.`,
+    };
+  }
 
   const isMemoryReviewDecision = unqualifiedAction === 'fbeast_memory_review_decide'
     || (unqualifiedAction === 'execute_tool'
