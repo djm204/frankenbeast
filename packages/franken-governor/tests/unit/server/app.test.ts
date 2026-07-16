@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { createGovernorApp } from '../../../src/server/app.js';
 import { createSessionToken } from '../../../src/security/session-token.js';
 import { SessionTokenStore } from '../../../src/security/session-token-store.js';
+import { ApprovalWaiterRegistry } from '../../../src/gateway/approval-waiter-registry.js';
 
 const SIGNING_FIXTURE = ['test', 'signing', 'fixture'].join('-');
 
@@ -742,6 +743,32 @@ describe('Governor Hono Server', () => {
       // Pending approval is cleared after resolution
       const after = await (await app.request('/health')).json();
       expect(after.pendingApprovals).toBe(0);
+    });
+
+    it('passes Slack action suffixes through as response feedback for anomaly acknowledgements', async () => {
+      const registry = new ApprovalWaiterRegistry();
+      const app = createGovernorApp({
+        slackSigningSecret: SLACK_SECRET,
+        allowUnsignedApprovalsForTests: true,
+        registry,
+      });
+      const waitPromise = registry.waitFor('req-ack', 'task-1', 'Deploy');
+      await seedApproval(app, 'req-ack');
+
+      const rawBody = JSON.stringify({
+        actions: [{ action_id: 'approve:ACK-APPROVAL-ANOMALY-req-ack', value: 'req-ack' }],
+      });
+      const res = await app.request('/v1/webhook/slack', {
+        method: 'POST',
+        headers: { ...slackHeaders(rawBody) },
+        body: rawBody,
+      });
+
+      expect(res.status).toBe(200);
+      await expect(waitPromise).resolves.toMatchObject({
+        decision: 'APPROVE',
+        feedback: 'ACK-APPROVAL-ANOMALY-req-ack',
+      });
     });
 
     it('returns 404 for a signed callback referencing an unknown request', async () => {

@@ -43,7 +43,7 @@ const DEFAULT_MEMORY_QUERY_LIMIT = 20;
 const MAX_MEMORY_QUERY_LIMIT = 1000;
 const MEMORY_REVIEW_STATUSES = ['pending', 'approved', 'rejected', 'never_store', 'suppressed'] as const;
 const MEMORY_REVIEW_ACTIONS = ['approve', 'reject', 'never_store', 'resolve_conflict'] as const;
-const MEMORY_CONFLICT_RESOLUTIONS = ['keep_existing', 'replace_existing', 'reject_candidate'] as const;
+const MEMORY_CONFLICT_RESOLUTIONS = ['keep_existing', 'replace_existing', 'keep_both_scoped', 'reject_candidate', 'expire_existing'] as const;
 
 type MemoryReviewStatus = (typeof MEMORY_REVIEW_STATUSES)[number];
 type MemoryReviewAction = (typeof MEMORY_REVIEW_ACTIONS)[number];
@@ -587,6 +587,7 @@ const TOOLS: ToolFull[] = [
         id: { type: 'string', description: 'Candidate id returned by fbeast_memory_review_propose/list' },
         action: { type: 'string', description: 'Decision to apply', enum: [...MEMORY_REVIEW_ACTIONS] },
         resolution: { type: 'string', description: 'Conflict resolution to apply when action is resolve_conflict', enum: [...MEMORY_CONFLICT_RESOLUTIONS] },
+        scopedKey: { type: 'string', description: 'Required when resolution is keep_both_scoped; stores the candidate under this explicit non-conflicting key' },
         reviewer: { type: 'string', description: 'Optional reviewer/operator id' },
         note: { type: 'string', description: 'Optional reviewer note' },
       },
@@ -605,6 +606,12 @@ const TOOLS: ToolFull[] = [
       if (resolution && !resolution.ok) {
         return { content: [{ type: 'text', text: `Error: fbeast_memory_review_decide ${resolution.message}` }], isError: true };
       }
+      const scopedKey = resolution?.ok && resolution.value === 'keep_both_scoped'
+        ? parseNonEmptyStringArg('scopedKey', args['scopedKey'])
+        : undefined;
+      if (scopedKey && !scopedKey.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_review_decide ${scopedKey.message}` }], isError: true };
+      }
       const reviewer = args['reviewer'] === undefined ? undefined : parseNonEmptyStringArg('reviewer', args['reviewer']);
       if (reviewer && !reviewer.ok) {
         return { content: [{ type: 'text', text: `Error: fbeast_memory_review_decide ${reviewer.message}` }], isError: true };
@@ -617,6 +624,7 @@ const TOOLS: ToolFull[] = [
         id: id.value,
         action: action.value,
         ...(resolution?.ok ? { resolution: resolution.value } : {}),
+        ...(scopedKey?.ok ? { scopedKey: scopedKey.value } : {}),
         options: {
           ...(reviewer?.value ? { reviewer: reviewer.value } : {}),
           ...(note?.value !== undefined ? { note: note.value } : {}),

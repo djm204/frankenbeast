@@ -10,6 +10,7 @@ import {
   type DashboardDependencySnapshot,
   type DashboardProviderSnapshot,
 } from './dashboard-status.js';
+import type { MaintenanceModeState } from '../../beasts/services/maintenance-mode-service.js';
 
 const DASHBOARD_SNAPSHOT_POLL_MS = 1_000;
 const DASHBOARD_HEARTBEAT_MS = 30_000;
@@ -20,11 +21,12 @@ export interface DashboardRouteDeps {
   getSecurityConfig: () => SecurityConfig;
   getProviders: () => DashboardProviderSnapshot[];
   getDependencies?: (() => DashboardDependencySnapshot[]) | undefined;
+  getMaintenanceMode?: (() => MaintenanceModeState | Promise<MaintenanceModeState>) | undefined;
   operatorToken?: string | undefined;
   ticketStore?: SseConnectionTicketStore | undefined;
 }
 
-function buildSnapshot(deps: DashboardRouteDeps) {
+async function buildSnapshot(deps: DashboardRouteDeps) {
   const skills = deps.skillManager.listInstalled();
   const enabledSkills = new Set(deps.skillManager.getEnabledSkills());
   const security = deps.getSecurityConfig();
@@ -39,6 +41,7 @@ function buildSnapshot(deps: DashboardRouteDeps) {
     security,
     providers,
     availability,
+    maintenance: await deps.getMaintenanceMode?.(),
   };
 }
 
@@ -80,8 +83,8 @@ export function createDashboardRoutes(deps: DashboardRouteDeps): Hono {
   const operatorToken = deps.operatorToken;
 
   // GET /api/dashboard — aggregated snapshot of all dashboard state
-  app.get('/', (c) => {
-    return c.json(buildSnapshot(deps));
+  app.get('/', async (c) => {
+    return c.json(await buildSnapshot(deps));
   });
 
   // POST /api/dashboard/events/ticket — authenticated callers mint a one-shot
@@ -117,7 +120,7 @@ export function createDashboardRoutes(deps: DashboardRouteDeps): Hono {
     }
 
     return streamSSE(c, async (stream) => {
-      let lastSnapshot = JSON.stringify(buildSnapshot(deps));
+      let lastSnapshot = JSON.stringify(await buildSnapshot(deps));
 
       // Send initial snapshot
       await stream.writeSSE({
@@ -135,7 +138,7 @@ export function createDashboardRoutes(deps: DashboardRouteDeps): Hono {
       const snapshotInterval = setInterval(async () => {
         let nextSnapshot: string;
         try {
-          nextSnapshot = JSON.stringify(buildSnapshot(deps));
+          nextSnapshot = JSON.stringify(await buildSnapshot(deps));
         } catch {
           return;
         }

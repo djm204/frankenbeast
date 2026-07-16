@@ -514,7 +514,7 @@ frankenbeast issues --label bug --repo owner/repo
 --search <query>        GitHub search syntax
 --milestone <name>      Filter by milestone
 --assignee <user>       Filter by assignee
---limit <n>             Max issues to fetch (default: 30)
+--limit <n>             Max issues to fetch (default: 1000)
 --repo <owner/repo>     Target repository (auto-inferred if omitted)
 --target-upstream       Use the checkout's upstream remote as the target repo
 --dry-run               Preview triage without executing

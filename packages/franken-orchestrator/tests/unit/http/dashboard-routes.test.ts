@@ -38,6 +38,12 @@ function createMockDeps(): DashboardRouteDeps {
     getProviders: vi.fn().mockReturnValue([
       { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0 },
     ]),
+    getMaintenanceMode: vi.fn().mockReturnValue({
+      enabled: true,
+      reason: 'database migration',
+      startedAt: '2026-07-16T10:00:00.000Z',
+      allowedCommands: ['beasts list', 'beasts status <run-id>'],
+    }),
     operatorToken: TEST_DASHBOARD_TOKEN,
     ticketStore: ticketStore = new SseConnectionTicketStore(),
   };
@@ -79,6 +85,12 @@ describe('dashboard routes', () => {
       expect(body.providers).toEqual([
         { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0 },
       ]);
+      expect(body.maintenance).toEqual({
+        enabled: true,
+        reason: 'database migration',
+        startedAt: '2026-07-16T10:00:00.000Z',
+        allowedCommands: ['beasts list', 'beasts status <run-id>'],
+      });
       expect(body.availability).toEqual({
         status: 'healthy',
         dependencies: [

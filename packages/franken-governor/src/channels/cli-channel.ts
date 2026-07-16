@@ -30,13 +30,17 @@ export class CliChannel implements ApprovalChannel {
   }
 
   async requestApproval(request: ApprovalRequest): Promise<ApprovalResponse> {
-    const decision = await this.promptForDecision(request);
+    const { decision, feedback: inlineFeedback } = await this.promptForDecision(request);
     const base = {
       requestId: request.requestId,
       decision,
       respondedBy: this.operatorName,
       respondedAt: new Date(deterministicNow()),
     };
+
+    if (inlineFeedback !== undefined) {
+      return { ...base, feedback: inlineFeedback };
+    }
 
     if (decision === 'REGEN') {
       const feedback = await this.readline.question('Feedback: ');
@@ -46,13 +50,21 @@ export class CliChannel implements ApprovalChannel {
     return base;
   }
 
-  private async promptForDecision(request: ApprovalRequest): Promise<ResponseCode> {
+  private async promptForDecision(request: ApprovalRequest): Promise<{
+    readonly decision: ResponseCode;
+    readonly feedback?: string;
+  }> {
     const prompt = this.formatPrompt(request);
 
     while (true) {
       const input = await this.readline.question(prompt);
-      const decision = INPUT_MAP[input.trim().toLowerCase()];
-      if (decision !== undefined) return decision;
+      const trimmed = input.trim();
+      const [command = '', ...feedbackParts] = trimmed.split(/\s+/u);
+      const decision = INPUT_MAP[command.toLowerCase()];
+      if (decision !== undefined) {
+        const feedback = feedbackParts.join(' ').trim();
+        return feedback.length > 0 ? { decision, feedback } : { decision };
+      }
     }
   }
 
@@ -60,7 +72,7 @@ export class CliChannel implements ApprovalChannel {
     const lines = [
       '',
       formatApprovalPromptWithBoundaries(request, { includePlanDiff: true }),
-      `\n[a]pprove  [r]egenerate  a[x]bort  [d]ebug\n> `,
+      `\n[a]pprove  [r]egenerate  a[x]bort  [d]ebug\nAppend an acknowledgement token after the decision when a SECURITY NOTICE requires one.\n> `,
     ].filter(Boolean);
 
     return lines.join('\n');

@@ -121,6 +121,7 @@ export interface BrainAdapter {
     id: string;
     action: 'approve' | 'reject' | 'never_store' | 'resolve_conflict';
     resolution?: MemoryConflictResolution;
+    scopedKey?: string;
     options?: MemoryReviewDecisionOptions;
   }): Promise<MemoryCandidate>;
   memoryAttribution(input?: MemoryAttributionListOptions & MemoryScopeInput): Promise<MemoryProvenanceRecord[]>;
@@ -794,6 +795,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
         return brain.memoryReview.resolveConflict(input.id, {
           ...options,
           resolution: input.resolution,
+          ...(input.scopedKey ? { scopedKey: input.scopedKey } : {}),
         });
       }
       throw new Error(`Unsupported memory review action: ${String(input.action)}`);

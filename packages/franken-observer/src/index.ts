@@ -7,6 +7,7 @@ export { TokenCounter } from './cost/TokenCounter.js'
 export { CostCalculator } from './cost/CostCalculator.js'
 export { CircuitBreaker } from './cost/CircuitBreaker.js'
 export { ModelAttribution } from './cost/ModelAttribution.js'
+export { OutcomeAttribution } from './learning/OutcomeAttribution.js'
 export { DEFAULT_PRICING } from './cost/defaultPricing.js'
 export { InMemoryAdapter } from './export/InMemoryAdapter.js'
 export type { InMemoryAdapterOptions } from './export/InMemoryAdapter.js'
@@ -22,7 +23,7 @@ export {
   extractFromHeaders,
   injectIntoHeaders,
 } from './propagation/W3CTraceContext.js'
-export { SQLiteAdapter } from './adapters/sqlite/SQLiteAdapter.js'
+export { SQLiteAdapter, SQLiteLockRetryExhaustedError } from './adapters/sqlite/SQLiteAdapter.js'
 export { EvalRunner } from './evals/EvalRunner.js'
 export { ToolCallAccuracyEval } from './evals/deterministic/ToolCallAccuracy.js'
 export { ArchitecturalAdherenceEval } from './evals/deterministic/ArchitecturalAdherence.js'
@@ -62,7 +63,7 @@ export type { LoopDetectionResult, LoopDetectorOptions } from './incident/LoopDe
 export type { InterruptSignal } from './incident/InterruptEmitter.js'
 export type { PostMortemOptions } from './incident/PostMortemGenerator.js'
 export type { LangfuseAdapterOptions, FetchFn } from './adapters/langfuse/LangfuseAdapter.js'
-export type { SQLiteAdapterOptions } from './adapters/sqlite/SQLiteAdapter.js'
+export type { SQLiteAdapterOptions, SQLiteLockRetryDiagnostic } from './adapters/sqlite/SQLiteAdapter.js'
 export type { PrometheusAdapterOptions } from './adapters/prometheus/PrometheusAdapter.js'
 export type { TempoAdapterOptions, TempoBasicAuth } from './adapters/tempo/TempoAdapter.js'
 export type {
@@ -123,6 +124,16 @@ export type { TokenRecord, TokenTotals } from './cost/TokenCounter.js'
 export type { CostCalculatorOptions } from './cost/CostCalculator.js'
 export type { CircuitBreakerOptions, CircuitBreakerResult } from './cost/CircuitBreaker.js'
 export type { AttributionEntry, AttributionRow } from './cost/ModelAttribution.js'
+export type {
+  AgentDecisionRecord,
+  AgentDecisionRecordInput,
+  DecisionOutcomeIssueState,
+  DecisionOutcomePrState,
+  DecisionOutcomeRecord,
+  DecisionOutcomeRecordInput,
+  JoinedDecisionOutcome,
+  WorkflowOutcomeAttributionReport,
+} from './learning/OutcomeAttribution.js'
 export type { ModelPricing, PricingTable } from './cost/defaultPricing.js'
 export type {
   OTELPayload,

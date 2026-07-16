@@ -525,6 +525,21 @@ describe("Memory Server", () => {
       resolution: "replace_existing",
       options: { reviewer: "operator", note: "Newer evidence wins." },
     });
+
+    await server.callTool("fbeast_memory_review_decide", {
+      id: "memcand_3",
+      action: "resolve_conflict",
+      resolution: "keep_both_scoped",
+      scopedKey: "user.preference.response-style.scope.docs",
+      reviewer: "operator",
+    });
+    expect(brain.decideMemoryReview).toHaveBeenLastCalledWith({
+      id: "memcand_3",
+      action: "resolve_conflict",
+      resolution: "keep_both_scoped",
+      scopedKey: "user.preference.response-style.scope.docs",
+      options: { reviewer: "operator" },
+    });
   });
 
   it("exposes memory source attribution with filters and empty-result structure", async () => {
@@ -637,6 +652,15 @@ describe("Memory Server", () => {
     });
     expect(badResolution.isError).toBe(true);
     expect(badResolution.content[0]!.text).toContain("resolution must be one of");
+    expect(brain.decideMemoryReview).not.toHaveBeenCalled();
+
+    const missingScopedKey = await server.callTool("fbeast_memory_review_decide", {
+      id: "memcand_1",
+      action: "resolve_conflict",
+      resolution: "keep_both_scoped",
+    });
+    expect(missingScopedKey.isError).toBe(true);
+    expect(missingScopedKey.content[0]!.text).toContain("scopedKey must be a non-empty string");
     expect(brain.decideMemoryReview).not.toHaveBeenCalled();
 
     const blankConflictId = await server.callTool("fbeast_memory_review_conflicts", {

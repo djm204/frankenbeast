@@ -11,12 +11,12 @@ export class GovernorAuditRecorder implements AuditRecorder {
     response: ApprovalResponse,
     options: AuditRecordOptions = {},
   ): Promise<void> {
-    const signatureVerificationFailed = options.securityFailure === 'signature-verification';
+    const securityFailed = options.securityFailure !== undefined;
     const trace: EpisodicTraceRecord = {
       id: request.requestId,
       type: 'episodic',
       projectId: request.projectId,
-      status: signatureVerificationFailed ? 'failure' : this.toStatus(response.decision),
+      status: securityFailed ? 'failure' : this.toStatus(response.decision),
       createdAt: deterministicNow(),
       taskId: request.taskId,
       toolName: 'hitl-gateway',
@@ -52,8 +52,8 @@ export class GovernorAuditRecorder implements AuditRecorder {
   private buildTags(response: ApprovalResponse, options: AuditRecordOptions = {}): string[] {
     const tags: string[] = ['hitl'];
 
-    if (options.securityFailure === 'signature-verification') {
-      tags.push('hitl:signature-verification-failed', 'hitl:security-failure');
+    if (options.securityFailure !== undefined) {
+      tags.push(`hitl:${options.securityFailure}-failed`, 'hitl:security-failure');
       return tags;
     }
 

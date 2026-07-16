@@ -212,7 +212,20 @@ curl -sS http://127.0.0.1:4050/v1/beasts/runs/<run-id>/logs \
   -H "x-frankenbeast-operator-token: $OPERATOR_TOKEN"
 ```
 
-## 6. Stop, restart, resume, or delete
+## 6. Log retention
+
+Dashboard run logs are retained as line-oriented JSON under the Beast logs directory (`.fbeast/.build/beasts/logs/<run-id>/<attempt-id>.log`). They are bounded by default to a 10 MiB active file plus three rotated siblings (`.1`, `.2`, `.3`) per attempt. Rotation keeps recent stdout/stderr records and their `stream`, `message`, and `createdAt` metadata available for incident review while preventing long-running agents or noisy background process output from exhausting disk.
+
+Operators can tune retention with environment variables before starting `beasts-daemon` or `chat-server`:
+
+| Variable | Default | Behavior |
+|----------|---------|----------|
+| `FBEAST_RUN_LOG_MAX_BYTES` | `10485760` | Maximum active per-attempt run log size in bytes before rotation. Values below 128 bytes are raised to the safety floor. |
+| `FBEAST_RUN_LOG_MAX_ROTATED_FILES` | `3` | Number of rotated per-attempt log files to retain, capped at 100 to keep rotation bounded. Set to `0` to truncate in place instead of preserving rotated evidence. |
+
+If a single stdout/stderr message is larger than the active-file cap, Frankenbeast truncates that one record and adds `truncatedBytes` plus a visible truncation marker rather than allowing one noisy line to break the configured bound. Keep the rotated-file count above zero in production so critical evidence is rotated before truncation.
+
+## 7. Stop, restart, resume, or delete
 
 From the selected agent detail panel:
 
