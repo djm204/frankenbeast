@@ -1717,9 +1717,7 @@ function createFailureClusterKey(parts: {
 
 function inferTaskFamily(taskId: TaskId, text: string): string {
   const explicitFamily =
-    /\b(?:task family|family)\s*[:=]\s*([a-z][a-z0-9 _/-]{2,60})/i.exec(
-      text,
-    )?.[1];
+    /\btask[-\s]+family\s*[:=]\s*([a-z][a-z0-9 _/-]{2,60})/i.exec(text)?.[1];
   const raw = explicitFamily ?? taskId;
   const normalized = raw
     .replace(/\bt_[0-9a-f]{6,}\b/gi, ' ')
@@ -1750,7 +1748,7 @@ function inferToolName(
 ): string | undefined {
   const lower = `${evaluatorName} ${text}`.toLowerCase();
   const toolPatterns: readonly [string, RegExp][] = [
-    ['vitest', /\bvitest\b|\btest(?:s|ing)?\b/],
+    ['vitest', /\bvitest\b/],
     ['typescript', /\b(?:typescript|tsc|typecheck)\b/],
     ['eslint', /\b(?:eslint|lint)\b/],
     ['prettier', /\bprettier\b|\bformat(?:ting)?\b/],
@@ -1776,11 +1774,7 @@ function inferErrorClass(
   if (/\b(?:timeout|timed out|hang|hung)\b/.test(lower)) {
     return `${severity}:timeout`;
   }
-  if (
-    /\b(?:assertion|expected|received|failed test|tests? failed|vitest failed)\b/.test(
-      lower,
-    )
-  ) {
+  if (hasTestFailureContext(lower)) {
     return `${severity}:test-failure`;
   }
   if (/\b(?:type error|typescript|tsc|typecheck)\b/.test(lower)) {
@@ -1793,6 +1787,19 @@ function inferErrorClass(
     return `${severity}:missing-contract`;
   }
   return `${severity}:review-finding`;
+}
+
+function hasTestFailureContext(text: string): boolean {
+  const explicitTestFailure =
+    /\b(?:failed test|tests? failed|vitest failed|test runner|runner output)\b/.test(
+      text,
+    );
+  const assertionWords = /\b(?:assertion|expected|received)\b/.test(text);
+  const testLocationOrRunner =
+    /\b(?:vitest|jest|mocha|pytest|test\/|tests\/|\.test\.[cm]?[jt]sx?|\.spec\.[cm]?[jt]sx?)\b/.test(
+      text,
+    );
+  return explicitTestFailure || (assertionWords && testLocationOrRunner);
 }
 
 function inferRootCause(text: string): string {

@@ -2538,6 +2538,90 @@ describe('LessonRecorder', () => {
     );
   });
 
+  it('does not infer arbitrary family prose as an explicit task family', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'style-reviewer', [
+          {
+            message:
+              'CSS font-family: Inter rule is missing fallback coverage in packages/franken-web',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'frontend-auth-201');
+
+    const recordedLesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(recordedLesson.failureRecord).toMatchObject({
+      taskFamily: 'frontend auth',
+      packageName: 'packages/franken-web',
+    });
+  });
+
+  it('does not route generic test-command mentions to Vitest clusters', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'handoff-reviewer', [
+          {
+            message:
+              'PM handoff omitted the required test command for packages/franken-critique',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'frontend-auth-202');
+
+    const recordedLesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(recordedLesson.failureRecord).toMatchObject({
+      taskFamily: 'frontend auth',
+      packageName: 'packages/franken-critique',
+      errorClass: 'critical:missing-contract',
+      rootCause: 'verification-evidence',
+    });
+    expect(recordedLesson.failureRecord?.toolName).toBeUndefined();
+  });
+
+  it('requires test context before classifying expected/received prose as a test failure', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'schema-reviewer', [
+          {
+            message:
+              'Expected PM handoff to include owner and evidence; received an incomplete summary',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'frontend-auth-203');
+
+    const recordedLesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(recordedLesson.failureRecord).toMatchObject({
+      errorClass: 'warning:review-finding',
+      rootCause: 'verification-evidence',
+    });
+  });
+
   it('records equivalent lessons again after the cooldown expires', async () => {
     const port = createMockMemoryPort();
     let now = new Date('2026-07-12T10:00:00.000Z');
