@@ -215,8 +215,26 @@ on:
       expect(content).toMatch(/name:\s*Validate bootstrap script \(dry-run\)/);
       expect(content).toContain('npm run bootstrap:dry-run');
       expect(content.indexOf('npm ci')).toBeLessThan(content.indexOf('npm run bootstrap:dry-run'));
-      expect(content.indexOf('npm run bootstrap:dry-run')).toBeLessThan(content.indexOf('npm run audit:dependencies'));
+      expect(content.indexOf('npm run bootstrap:dry-run')).toBeLessThan(content.indexOf('npm run ci:dr:restore-rehearsal'));
       expect(content).toContain('CI_BOOTSTRAP_DRY_RUN: "1"');
+    });
+
+    it('runs the isolated disaster recovery restore rehearsal before later audit gates', () => {
+      const packageJson = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8')) as {
+        scripts?: Record<string, string>;
+      };
+      const steps = expectSteps(expectCiJob(workflow));
+      const restoreStep = expectStepByName(
+        steps,
+        'Disaster recovery restore rehearsal',
+        'the DR restore rehearsal gate',
+      );
+
+      expect(packageJson.scripts?.['dr:restore-rehearsal']).toBe('tsx scripts/restore-rehearsal.mjs');
+      expect(packageJson.scripts?.['ci:dr:restore-rehearsal']).toBe('npm run dr:restore-rehearsal');
+      expect(restoreStep.run).toBe('npm run ci:dr:restore-rehearsal');
+      expect(content.indexOf('npm run bootstrap:dry-run')).toBeLessThan(content.indexOf('npm run ci:dr:restore-rehearsal'));
+      expect(content.indexOf('npm run ci:dr:restore-rehearsal')).toBeLessThan(content.indexOf('npm run audit:dependencies'));
     });
 
     it('runs CI test commands with a fixed deterministic seed matrix', () => {
