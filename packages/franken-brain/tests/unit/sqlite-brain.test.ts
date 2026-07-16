@@ -20,6 +20,9 @@ import {
   MemoryEncryptionWrongKeyError,
   CURRENT_MEMORY_SCHEMA_VERSION,
   DEFAULT_WORKING_MEMORY_LIMITS,
+  DEFAULT_MEMORY_CONFIDENCE_HALF_LIFE_MS,
+  MemoryConfidenceDecayError,
+  calculateMemoryConfidenceDecay,
 } from '../../src/sqlite-brain.js';
 
 describe('SqliteBrain', () => {
@@ -36,6 +39,69 @@ describe('SqliteBrain', () => {
 
   afterEach(() => {
     brain.close();
+  });
+
+  describe('memory confidence decay', () => {
+    it('returns deterministic decayed confidence with structured evidence', () => {
+      const result = calculateMemoryConfidenceDecay({
+        confidence: 0.8,
+        observedAt: '2026-01-01T00:00:00.000Z',
+        now: '2026-01-16T00:00:00.000Z',
+        halfLifeMs: DEFAULT_MEMORY_CONFIDENCE_HALF_LIFE_MS,
+      });
+
+      expect(result).toEqual({
+        initialConfidence: 0.8,
+        confidence: 0.8 * Math.SQRT1_2,
+        decayFactor: Math.SQRT1_2,
+        ageMs: 15 * 24 * 60 * 60 * 1000,
+        halfLifeMs: DEFAULT_MEMORY_CONFIDENCE_HALF_LIFE_MS,
+        floor: 0,
+      });
+    });
+
+    it('clamps future observations to zero age and respects a confidence floor', () => {
+      expect(calculateMemoryConfidenceDecay({
+        confidence: 0.4,
+        observedAt: '2026-01-02T00:00:00.000Z',
+        now: '2026-01-01T00:00:00.000Z',
+        floor: 0.1,
+      })).toMatchObject({
+        confidence: 0.4,
+        decayFactor: 1,
+        ageMs: 0,
+        floor: 0.1,
+      });
+
+      expect(calculateMemoryConfidenceDecay({
+        confidence: 0.4,
+        observedAt: '2026-01-01T00:00:00.000Z',
+        now: '2026-01-31T00:00:00.000Z',
+        halfLifeMs: 24 * 60 * 60 * 1000,
+        floor: 0.2,
+      }).confidence).toBe(0.2);
+    });
+
+    it('rejects invalid confidence, floor, half-life, and timestamps explicitly', () => {
+      expect(() => calculateMemoryConfidenceDecay({
+        confidence: 1.1,
+        observedAt: '2026-01-01T00:00:00.000Z',
+      })).toThrow(MemoryConfidenceDecayError);
+      expect(() => calculateMemoryConfidenceDecay({
+        confidence: 0.2,
+        floor: 0.3,
+        observedAt: '2026-01-01T00:00:00.000Z',
+      })).toThrow('floor cannot exceed');
+      expect(() => calculateMemoryConfidenceDecay({
+        confidence: 0.2,
+        halfLifeMs: 0,
+        observedAt: '2026-01-01T00:00:00.000Z',
+      })).toThrow('halfLifeMs must be a positive finite number');
+      expect(() => calculateMemoryConfidenceDecay({
+        confidence: 0.2,
+        observedAt: 'not-a-date',
+      })).toThrow('observedAt must be a valid date');
+    });
   });
 
   describe('working memory', () => {

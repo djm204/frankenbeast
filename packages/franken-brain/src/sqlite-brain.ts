@@ -162,6 +162,90 @@ export interface MemoryEncryptionMigrationResult {
   operations: MemorySchemaMigrationOperation[];
 }
 
+export interface MemoryConfidenceDecayOptions {
+  /** Confidence assigned when the memory was written, from 0 to 1. */
+  confidence: number;
+  /** When the confidence evidence was observed or persisted. */
+  observedAt: string | Date;
+  /** Evaluation time. Defaults to the current clock time. */
+  now?: string | Date;
+  /** Half-life in milliseconds. Defaults to 30 days. */
+  halfLifeMs?: number;
+  /** Minimum returned confidence after decay. Defaults to 0. */
+  floor?: number;
+}
+
+export interface MemoryConfidenceDecayResult {
+  initialConfidence: number;
+  confidence: number;
+  decayFactor: number;
+  ageMs: number;
+  halfLifeMs: number;
+  floor: number;
+}
+
+export const DEFAULT_MEMORY_CONFIDENCE_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1000;
+
+export class MemoryConfidenceDecayError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MemoryConfidenceDecayError';
+  }
+}
+
+export function calculateMemoryConfidenceDecay(
+  options: MemoryConfidenceDecayOptions,
+): MemoryConfidenceDecayResult {
+  const confidence = normalizeUnitInterval(
+    options.confidence,
+    'confidence',
+  );
+  const floor = normalizeUnitInterval(options.floor ?? 0, 'floor');
+  if (floor > confidence) {
+    throw new MemoryConfidenceDecayError(
+      'Memory confidence decay floor cannot exceed the initial confidence',
+    );
+  }
+  const halfLifeMs = options.halfLifeMs ?? DEFAULT_MEMORY_CONFIDENCE_HALF_LIFE_MS;
+  if (!Number.isFinite(halfLifeMs) || halfLifeMs <= 0) {
+    throw new MemoryConfidenceDecayError(
+      'Memory confidence decay halfLifeMs must be a positive finite number',
+    );
+  }
+  const observedAtMs = parseDecayTimestamp(options.observedAt, 'observedAt');
+  const nowMs = parseDecayTimestamp(options.now ?? new Date(), 'now');
+  const ageMs = Math.max(0, nowMs - observedAtMs);
+  const decayFactor = Math.pow(0.5, ageMs / halfLifeMs);
+  const decayedConfidence = Math.max(floor, confidence * decayFactor);
+  return {
+    initialConfidence: confidence,
+    confidence: decayedConfidence,
+    decayFactor,
+    ageMs,
+    halfLifeMs,
+    floor,
+  };
+}
+
+function normalizeUnitInterval(value: number, fieldName: string): number {
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    throw new MemoryConfidenceDecayError(
+      `Memory confidence decay ${fieldName} must be a finite number between 0 and 1`,
+    );
+  }
+  return value;
+}
+
+function parseDecayTimestamp(value: string | Date, fieldName: string): number {
+  const timestamp = value instanceof Date ? value.getTime() : Date.parse(value);
+  if (!Number.isFinite(timestamp)) {
+    throw new MemoryConfidenceDecayError(
+      `Memory confidence decay ${fieldName} must be a valid date or ISO timestamp`,
+    );
+  }
+  return timestamp;
+}
+
 export class MemoryEncryptionKeyUnavailableError extends Error {
   constructor(
     message = 'Memory encryption is enabled but no key material is available',

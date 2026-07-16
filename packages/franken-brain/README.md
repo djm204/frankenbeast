@@ -1,6 +1,6 @@
 # @franken/brain — MOD-03: Memory Systems
 
-Current public API: `SqliteBrain`, `SqliteMemoryReviewQueue`, `WorkingMemoryLimitError`, `UnsupportedMemorySchemaVersionError`, memory-encryption error classes, `DEFAULT_WORKING_MEMORY_LIMITS`, `CURRENT_MEMORY_SCHEMA_VERSION`, and the `WorkingMemoryLimits`, `SqliteBrainOptions`, `MemoryCandidateProposal`, `MemoryCandidate`, `MemoryCandidateEdit`, `MemoryCandidateStatus`, `MemoryReviewDecisionOptions`, `MemoryProvenanceRecord`, `MemorySchemaMetadata`, `MemorySchemaStoreMetadata`, `MemorySchemaMigrationOptions`, `MemorySchemaMigrationOperation`, `MemorySchemaMigrationResult`, `MemoryEncryptionOptions`, `MemoryEncryptionMetadata`, `MemoryEncryptionMigrationOptions`, and `MemoryEncryptionMigrationResult` types.
+Current public API: `SqliteBrain`, `SqliteMemoryReviewQueue`, `WorkingMemoryLimitError`, `UnsupportedMemorySchemaVersionError`, memory-encryption error classes, `MemoryConfidenceDecayError`, `DEFAULT_WORKING_MEMORY_LIMITS`, `DEFAULT_MEMORY_CONFIDENCE_HALF_LIFE_MS`, `CURRENT_MEMORY_SCHEMA_VERSION`, `calculateMemoryConfidenceDecay`, and the `WorkingMemoryLimits`, `SqliteBrainOptions`, `MemoryCandidateProposal`, `MemoryCandidate`, `MemoryCandidateEdit`, `MemoryCandidateStatus`, `MemoryReviewDecisionOptions`, `MemoryProvenanceRecord`, `MemorySchemaMetadata`, `MemorySchemaStoreMetadata`, `MemorySchemaMigrationOptions`, `MemorySchemaMigrationOperation`, `MemorySchemaMigrationResult`, `MemoryEncryptionOptions`, `MemoryEncryptionMetadata`, `MemoryEncryptionMigrationOptions`, `MemoryEncryptionMigrationResult`, `MemoryConfidenceDecayOptions`, and `MemoryConfidenceDecayResult` types.
 
 `@franken/brain` provides SQLite-backed working memory, episodic event recall, and recovery checkpoints for the Frankenbeast runtime. Older design docs described a `MemoryOrchestrator` with ChromaDB-backed semantic memory and PII-decorator stores; those classes are not exported by the current package.
 
@@ -31,7 +31,10 @@ npm run lint              # eslint src/ tests/
 ## Usage
 
 ```typescript
-import { SqliteBrain } from '@franken/brain';
+import {
+  SqliteBrain,
+  calculateMemoryConfidenceDecay,
+} from '@franken/brain';
 
 const brain = new SqliteBrain('.fbeast/beast.db');
 
@@ -89,6 +92,19 @@ const provenance = brain.memoryReview.provenanceFor(
   'working',
   'user.preference.response-style',
 );
+
+// Confidence decay gives injection/retrieval code a deterministic way to lower
+// old memory certainty without mutating the stored record. The result is
+// structured so PM/liveness tools can log the age, half-life, and applied floor.
+const confidence = calculateMemoryConfidenceDecay({
+  confidence: provenance[0]?.confidence ?? 0.5,
+  observedAt: provenance[0]?.approvedAt ?? new Date().toISOString(),
+  halfLifeMs: 30 * 24 * 60 * 60 * 1000,
+  floor: 0.1,
+});
+if (confidence.confidence < 0.3) {
+  console.log('Memory is low-confidence; ask for confirmation before injection.');
+}
 
 // Rejected candidates and never-store decisions are remembered so duplicate
 // weak evidence or sensitive values do not silently reappear in the queue.
