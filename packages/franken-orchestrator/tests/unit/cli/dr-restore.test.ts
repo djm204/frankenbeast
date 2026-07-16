@@ -151,6 +151,8 @@ describe('dr restore-dry-run CLI', () => {
     const output: string[] = [];
     const beforeRefreshToken = 'local' + 'RefreshToken123';
     const afterRefreshToken = 'other' + 'RefreshToken456';
+    const beforeMapToken = 'map' + 'ApprovalTokenBefore123';
+    const afterMapToken = 'map' + 'ApprovalTokenAfter456';
 
     try {
       await mkdir(beforeDir, { recursive: true });
@@ -160,6 +162,7 @@ describe('dr restore-dry-run CLI', () => {
           'task-1': { id: 'task-1', status: 'running' },
         },
         approvalTokens: [beforeRefreshToken, 'stable' + 'RefreshToken789'],
+        approvals: { [beforeMapToken]: true, ['stable' + 'ApprovalToken789']: true },
       }), 'utf8');
       await writeFile(join(afterDir, 'state.json'), JSON.stringify({
         tasks: {
@@ -167,6 +170,7 @@ describe('dr restore-dry-run CLI', () => {
           'task-2': { id: 'task-2', status: 'ready' },
         },
         approvalTokens: ['stable' + 'RefreshToken789', afterRefreshToken],
+        approvals: { ['stable' + 'ApprovalToken789']: true, [afterMapToken]: true },
       }), 'utf8');
 
       await handleDrCommand({
@@ -186,11 +190,13 @@ describe('dr restore-dry-run CLI', () => {
     };
 
     expect(report.summary.bySubsystem.tasks).toEqual({ added: 1, removed: 0, changed: 1 });
-    expect(report.summary.bySubsystem.approvals).toEqual({ added: 1, removed: 1, changed: 0 });
+    expect(report.summary.bySubsystem.approvals).toEqual({ added: 2, removed: 2, changed: 0 });
     expect(report.diffs.find((diff) => diff.subsystem === 'tasks')?.added[0]?.id).toBe('task-2');
     expect(report.diffs.find((diff) => diff.subsystem === 'tasks')?.changed[0]?.id).toBe('task-1');
     expect(rawOutput).not.toContain(beforeRefreshToken);
     expect(rawOutput).not.toContain(afterRefreshToken);
+    expect(rawOutput).not.toContain(beforeMapToken);
+    expect(rawOutput).not.toContain(afterMapToken);
     expect(rawOutput).toContain('<redacted>');
   });
 
@@ -200,18 +206,23 @@ describe('dr restore-dry-run CLI', () => {
     const afterDir = join(dir, 'after');
     const output: string[] = [];
     const rawApprovalId = 'opaque' + 'ApprovalCredential123';
+    const rawApprovalValue = 'opaque' + 'ApprovalValue456';
+    const beforeLineToken = 'line' + 'ApprovalTokenBefore123';
+    const afterLineToken = 'line' + 'ApprovalTokenAfter456';
 
     try {
       await mkdir(beforeDir, { recursive: true });
       await mkdir(afterDir, { recursive: true });
       await writeFile(join(beforeDir, 'snapshots.jsonl'), [
         JSON.stringify({ tasks: [{ id: 'jsonl-task', status: 'running' }] }),
-        JSON.stringify({ approvals: [{ id: rawApprovalId, state: 'pending' }] }),
+        JSON.stringify({ approvals: [{ id: rawApprovalId, state: 'pending', value: rawApprovalValue }] }),
       ].join('\n'), 'utf8');
       await writeFile(join(afterDir, 'snapshots.jsonl'), [
         JSON.stringify({ tasks: [{ id: 'jsonl-task', status: 'done' }] }),
-        JSON.stringify({ approvals: [{ id: rawApprovalId, state: 'used' }] }),
+        JSON.stringify({ approvals: [{ id: rawApprovalId, state: 'used', value: rawApprovalValue }] }),
       ].join('\n'), 'utf8');
+      await writeFile(join(beforeDir, 'approval-tokens.jsonl'), [beforeLineToken, 'stable' + 'LineApproval789'].map(JSON.stringify).join('\n'), 'utf8');
+      await writeFile(join(afterDir, 'approval-tokens.jsonl'), ['stable' + 'LineApproval789', afterLineToken].map(JSON.stringify).join('\n'), 'utf8');
 
       await handleDrCommand({
         action: 'snapshot-diff',
@@ -231,11 +242,14 @@ describe('dr restore-dry-run CLI', () => {
     const approvalChange = report.diffs.find((diff) => diff.subsystem === 'approvals')?.changed[0];
 
     expect(report.summary.bySubsystem.tasks).toEqual({ added: 0, removed: 0, changed: 1 });
-    expect(report.summary.bySubsystem.approvals).toEqual({ added: 0, removed: 0, changed: 1 });
+    expect(report.summary.bySubsystem.approvals).toEqual({ added: 1, removed: 1, changed: 1 });
     expect(approvalChange?.id).toMatch(/^approval:[a-f0-9]{16}$/u);
     expect(approvalChange?.beforeSource).toBe('snapshots.jsonl:2:approvals');
     expect(approvalChange?.afterSource).toBe('snapshots.jsonl:2:approvals');
     expect(rawOutput).not.toContain(rawApprovalId);
+    expect(rawOutput).not.toContain(rawApprovalValue);
+    expect(rawOutput).not.toContain(beforeLineToken);
+    expect(rawOutput).not.toContain(afterLineToken);
   });
 
   it('prints dead-letter list, inspect, dry-run replay, and retire JSON', async () => {

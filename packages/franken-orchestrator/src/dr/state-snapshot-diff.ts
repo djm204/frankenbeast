@@ -131,12 +131,14 @@ function recordId(record: unknown, fallback: string, subsystem?: StateSnapshotDi
 function scopedRecordValue(subsystem: StateSnapshotDiffSubsystem, value: unknown): unknown {
   if (subsystem !== 'approvals') return value;
   if (!isRecord(value)) {
-    return { token: value };
+    return { token: '<redacted>' };
   }
-  if (Object.prototype.hasOwnProperty.call(value, 'id')) {
-    return { ...value, id: '<redacted>' };
-  }
-  return value;
+  return Object.fromEntries(Object.entries(value).map(([key, nested]) => [
+    key,
+    /^(?:id|token|tokens|value|secret|password|credential|bearer|refresh|access|api[-_]?key)$/iu.test(key)
+      ? '<redacted>'
+      : nested,
+  ]));
 }
 
 function addRecord(
@@ -175,7 +177,8 @@ function addObjectMapRecords(
     .sort(([a], [b]) => a.localeCompare(b))
     .forEach(([key, value]) => {
       const fallback = subsystem === 'approvals' ? safeApprovalId(key) : key;
-      addRecord(records, subsystem, recordId(value, fallback, subsystem), value, source);
+      const recordValue = subsystem === 'approvals' && !isRecord(value) ? { id: key, value } : value;
+      addRecord(records, subsystem, recordId(recordValue, fallback, subsystem), recordValue, source);
     });
 }
 
@@ -210,6 +213,8 @@ function extractRecordsFromJson(records: MutableSubsystemRecords, parsed: unknow
   const pathSubsystem = likelySubsystemFromPath(source);
   if (Array.isArray(parsed) && pathSubsystem !== undefined) {
     addArrayRecords(records, pathSubsystem, parsed, source);
+  } else if (pathSubsystem !== undefined && !isRecord(parsed)) {
+    addRecord(records, pathSubsystem, recordId(parsed, source, pathSubsystem), parsed, source);
   }
 
   if (isRecord(parsed)) {
