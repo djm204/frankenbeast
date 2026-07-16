@@ -35,9 +35,13 @@ Create an evidence bundle path first. Writing evidence under `/tmp` or an incide
 ```bash
 INCIDENT_ID=<ticket-or-kanban-card>
 EVIDENCE_DIR=/tmp/frankenbeast-dr-$INCIDENT_ID
+umask 077
 mkdir -p "$EVIDENCE_DIR"
+chmod 700 "$EVIDENCE_DIR"
 date -u +%Y-%m-%dT%H:%M:%SZ | tee "$EVIDENCE_DIR/started-at.txt"
 ```
+
+Keep the evidence directory private before copying any Kanban DB, approval queue, dead-letter queue, command output, or user state into it. If an existing incident directory is reused, verify `stat -c '%a %U %G' "$EVIDENCE_DIR"` before capture and stop if it is not operator-owned and mode `700`.
 
 ### Worktree inventory
 
@@ -212,6 +216,17 @@ cp -a <dead-letter-queue-file> "$EVIDENCE_DIR/dead-letter-before-repair.json"
 git -C <repo> bundle create "$EVIDENCE_DIR/repo-before-repair.bundle" --all
 ```
 
+If any suspect worktree is dirty, corrupt, or about to be removed, preserve the working tree separately because the Git bundle only captures commits and refs, not uncommitted or untracked files:
+
+```bash
+git -C <worktree> status --short --branch > "$EVIDENCE_DIR/worktree-<name>-status.txt" 2>&1 || true
+git -C <worktree> diff > "$EVIDENCE_DIR/worktree-<name>-tracked.diff" 2>&1 || true
+git -C <worktree> ls-files --others --exclude-standard -z > "$EVIDENCE_DIR/worktree-<name>-untracked.zlist" 2>/dev/null || true
+tar --create --gzip --file "$EVIDENCE_DIR/worktree-<name>-snapshot.tgz" --directory <worktree> .
+```
+
+Do not run `git reset --hard`, `git clean`, or `git worktree remove --force` until the incident commander has reviewed those worktree artifacts and confirmed that the snapshot contains every uncommitted file that may matter.
+
 If a backup command reads secret, user-private, or approval-token data, record only the backup path, digest, owner, and retention deadline in the incident log:
 
 ```bash
@@ -282,6 +297,10 @@ approval-cop run -- git -C <repo> worktree prune --verbose
 approval-cop run -- git -C <worktree> reset --hard <expected-head>
 
 # Non-destructive replacement after cleanup approval has completed.
+# Use this when the issue branch already exists.
+git -C <repo> worktree add <worktree> <branch>
+
+# Use this only when the recovery branch must be created from origin/main.
 git -C <repo> worktree add -b <branch> <worktree> origin/main
 ```
 
@@ -318,12 +337,11 @@ Repair options:
 # HITL/approval-cop required: retire a stale approval token or queue item after backup and exact evidence review.
 approval-cop run -- approval-cop retire <token-or-entry-id> --reason "stale after incident <id>"
 
-# HITL/approval-cop required: retire a dead-letter entry after manual handling is proven.
-approval-cop run -- frankenbeast dr dead-letter-retire <queue-file> <entry-id> "handled manually in <incident-id>"
-
-# HITL/approval-cop required: replay only a side-effecting queue action after the dry-run output and command text are approved.
-approval-cop run -- <exact-command-from-reviewed-dry-run>
+# HITL/approval-cop required: retire or quarantine a dead-letter entry after dry-run output proves no supported replay executor is available, or after separate manual handling is proven.
+approval-cop run -- frankenbeast dr dead-letter-retire <queue-file> <entry-id> "retired after dry-run classification in <incident-id>"
 ```
+
+Do not reconstruct and run dead-letter side effects by hand. The current `dead-letter-replay-dry-run` command is evidence-only; it reports action class, target, replay safety, and the last error so operators can retire, quarantine, or wait for supported replay tooling instead of inventing a manual replay command during an incident.
 
 Verification:
 
@@ -389,7 +407,7 @@ Use when Kanban, approval, cron, memory, or liveness records must be compared ag
 Read-only precheck:
 
 ```bash
-frankenbeast dr restore-preview --backup <backup-manifest> --live <live-manifest> --recovery-mode --json | tee "$EVIDENCE_DIR/restore-preview.json"
+frankenbeast dr restore-dry-run <backup-manifest.json> <live-manifest.json> | tee "$EVIDENCE_DIR/restore-dry-run.json"
 ```
 
 Repair options:
@@ -402,7 +420,7 @@ approval-cop run -- <exact-restore-or-quarantine-command>
 Verification:
 
 ```bash
-frankenbeast dr restore-preview --backup <backup-manifest> --live <live-manifest> --recovery-mode --json
+frankenbeast dr restore-dry-run <backup-manifest.json> <live-manifest.json>
 ```
 
 Expected healthy verification:
