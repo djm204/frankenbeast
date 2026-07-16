@@ -146,6 +146,17 @@ Read the [coding-agent PR etiquette guide](docs/onboarding/coding-agent-pr-etiqu
 
 Read the [PM-swarm runtime glossary](docs/onboarding/pm-swarm-runtime-glossary.md) before interpreting PM-swarm Kanban comments, liveness reports, doctor treatment notes, or issue-worker handoffs. It defines the runtime vocabulary used to decode liveness, refill, Codex, approval-cop, and worker handoff terms without creating duplicate branches, worktrees, or PRs.
 
+## Issue worktree bootstrap
+
+When a PM or issue handoff gives you one GitHub issue to fix, start from a dedicated branch/worktree instead of the main checkout:
+
+```bash
+npm run issue:worktree -- --dry-run --issue 1769 --title "feat(onboarding): add issue-to-worktree bootstrap helper"
+npm run issue:worktree -- --issue 1769 --title "feat(onboarding): add issue-to-worktree bootstrap helper"
+```
+
+The helper prints structured issue, branch, worktree path, duplicate-PR check, and verification commands before it mutates anything. By default it creates `../resolve-wt/issue-<number>` from the selected remote's `main` branch, uses a `resolve/issue-<number>-<slug>` branch, and configures the worktree commit identity as `David Mendez <me@davidmendez.dev>`. Use `--reuse --branch <existing-branch>` only when resuming an already-created issue branch; never use it to combine unrelated issues.
+
 ## Architecture reading path
 
 Use this path when you are new to Frankenbeast or when an agent handoff says "read the architecture docs first." It is intentionally ordered from current implementation to deeper historical context.

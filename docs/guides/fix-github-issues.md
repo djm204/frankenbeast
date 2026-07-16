@@ -42,6 +42,17 @@ The `frankenbeast issues` subcommand runs a 4-stage pipeline:
 
 Each issue gets its own git branch (`issue-{number}`) and PR with `Fixes #{number}` in the body.
 
+## Issue-to-worktree bootstrap helper
+
+For one-issue/one-PR worker handoffs, use the root helper before coding so branch and worktree names are deterministic and easy for PM/liveness tooling to audit:
+
+```bash
+npm run issue:worktree -- --dry-run --issue 1769 --title "feat(onboarding): add issue-to-worktree bootstrap helper"
+npm run issue:worktree -- --issue 1769 --title "feat(onboarding): add issue-to-worktree bootstrap helper"
+```
+
+The dry run emits the issue number, `resolve/issue-<number>-<slug>` branch, target `../resolve-wt/issue-<number>` worktree, duplicate open-PR check, and exact git verification commands. A real run fetches the base ref, creates the branch/worktree from the selected remote's `main` branch, and configures the worktree commit identity as `David Mendez <me@davidmendez.dev>`. If a previous worker already created the branch, pass `--reuse --branch <existing-branch>` to attach a worktree without creating a duplicate branch; the helper rejects invalid issue numbers, unsafe branch names, and malformed `OWNER/REPO` values before running git.
+
 ## Examples
 
 ### Fix all critical issues
