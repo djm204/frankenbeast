@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { lookup as dnsLookup } from 'node:dns/promises'
 import { request as httpsRequest } from 'node:https'
 import { isIP } from 'node:net'
@@ -18,6 +19,52 @@ export interface WebhookRetryOptions {
    * thundering-herd on shared endpoints. Default: true.
    */
   jitter?: boolean
+}
+
+export type WebhookDeliveryReceiptStatus = 'sent' | 'skipped' | 'failed'
+
+export interface WebhookDeliveryReceipt {
+  /** Caller-supplied key that makes a logical notification safe to retry. */
+  idempotencyKey?: string
+  /** Logical delivery target. Defaults to the configured webhook URL. */
+  target: string
+  /** Whether this call sent, skipped a duplicate, or failed after delivery was attempted. */
+  status: WebhookDeliveryReceiptStatus
+  /** ISO timestamp for when this receipt was recorded. */
+  timestamp: string
+  /** SHA-256 digest of the serialized payload sent or considered for delivery. */
+  contentHash: string
+  /** Redacted failure summary for failed receipts. */
+  error?: string
+}
+
+export interface WebhookSendOptions {
+  /** Stable key for the logical notification, e.g. `status:<run-id>:discord`. */
+  idempotencyKey?: string
+  /** Optional logical target override when one notifier fronts multiple channels. */
+  target?: string
+}
+
+export interface WebhookDeliveryReceiptStore {
+  findLatest: (idempotencyKey: string, target: string) => WebhookDeliveryReceipt | undefined | Promise<WebhookDeliveryReceipt | undefined>
+  save: (receipt: WebhookDeliveryReceipt) => void | Promise<void>
+}
+
+export class InMemoryWebhookDeliveryReceiptStore implements WebhookDeliveryReceiptStore {
+  private readonly receipts = new Map<string, WebhookDeliveryReceipt>()
+
+  findLatest(idempotencyKey: string, target: string): WebhookDeliveryReceipt | undefined {
+    return this.receipts.get(this.keyFor(idempotencyKey, target))
+  }
+
+  save(receipt: WebhookDeliveryReceipt): void {
+    if (!receipt.idempotencyKey) return
+    this.receipts.set(this.keyFor(receipt.idempotencyKey, receipt.target), receipt)
+  }
+
+  private keyFor(idempotencyKey: string, target: string): string {
+    return `${idempotencyKey}\u0000${target}`
+  }
 }
 
 export interface WebhookAllowedTarget {
@@ -81,6 +128,12 @@ export interface WebhookNotifierOptions {
    * Defaults to a Promise-based `setTimeout` wrapper.
    */
   sleep?: (ms: number) => Promise<void>
+  /**
+   * Receipt store used when `send()` receives an idempotency key. The default
+   * in-memory store prevents duplicate deliveries within one process; pass a
+   * durable store for cron/status runners that need cross-process receipts.
+   */
+  deliveryReceiptStore?: WebhookDeliveryReceiptStore
 }
 
 /**
@@ -109,6 +162,10 @@ export interface WebhookNotifierOptions {
  */
 function isTransientStatus(status: number): boolean {
   return status === 429 || (status >= 500 && status <= 599)
+}
+
+function hashWebhookPayload(payload: unknown): string {
+  return createHash('sha256').update(JSON.stringify(payload)).digest('hex')
 }
 
 function validateNonNegativeInteger(value: number, fieldName: string): number {
@@ -400,6 +457,7 @@ export class WebhookNotifier {
   private readonly dnsLookupFn: WebhookDnsLookup | null
   private readonly retry: Required<WebhookRetryOptions> | null
   private readonly sleepFn: (ms: number) => Promise<void>
+  private readonly receiptStore: WebhookDeliveryReceiptStore
 
   constructor(options: WebhookNotifierOptions) {
     this.url = options.url
@@ -424,6 +482,7 @@ export class WebhookNotifier {
       ? null
       : async hostname => (await dnsLookup(hostname, { all: true })).map(result => result.address))
     this.sleepFn = options.sleep ?? ((ms: number) => new Promise(r => setTimeout(r, ms)))
+    this.receiptStore = options.deliveryReceiptStore ?? new InMemoryWebhookDeliveryReceiptStore()
     this.retry = options.retry
       ? {
           maxRetries: validateNonNegativeInteger(options.retry.maxRetries, 'retry.maxRetries'),
@@ -434,65 +493,105 @@ export class WebhookNotifier {
       : null
   }
 
-  async send(payload: unknown): Promise<void> {
+  async send(payload: unknown, options: WebhookSendOptions = {}): Promise<WebhookDeliveryReceipt> {
     this.assertTargetAllowed()
+
+    const receiptTarget = options.target ?? this.url
+    const contentHash = hashWebhookPayload(payload)
+    const receiptBase = {
+      idempotencyKey: options.idempotencyKey,
+      target: receiptTarget,
+      contentHash,
+    }
+    if (options.idempotencyKey) {
+      const existing = await this.receiptStore.findLatest(options.idempotencyKey, receiptTarget)
+      if (existing?.contentHash === contentHash && (existing.status === 'sent' || existing.status === 'skipped')) {
+        const skippedReceipt: WebhookDeliveryReceipt = {
+          ...receiptBase,
+          status: 'skipped',
+          timestamp: new Date().toISOString(),
+        }
+        await this.receiptStore.save(skippedReceipt)
+        return skippedReceipt
+      }
+    }
 
     const maxAttempts = this.retry ? 1 + this.retry.maxRetries : 1
     let lastError: unknown
 
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      if (attempt > 0 && this.retry) {
-        const { baseDelayMs, maxDelayMs, jitter } = this.retry
-        const base = Math.min(baseDelayMs * Math.pow(2, attempt - 1), maxDelayMs)
-        const jittered = jitter ? base + seededRandom.random() * baseDelayMs : base
-        // Clamp after adding jitter so maxDelayMs remains a true upper bound.
-        const delay = Math.min(jittered, maxDelayMs)
-        await this.sleepFn(delay)
-      }
+    try {
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        if (attempt > 0 && this.retry) {
+          const { baseDelayMs, maxDelayMs, jitter } = this.retry
+          const base = Math.min(baseDelayMs * Math.pow(2, attempt - 1), maxDelayMs)
+          const jittered = jitter ? base + seededRandom.random() * baseDelayMs : base
+          // Clamp after adding jitter so maxDelayMs remains a true upper bound.
+          const delay = Math.min(jittered, maxDelayMs)
+          await this.sleepFn(delay)
+        }
 
-      let resolvedAddresses: readonly string[] = []
-      try {
-        resolvedAddresses = await this.resolveAllowedTargetAddresses()
-      } catch (err) {
-        lastError = err
-        if (this.retry && isTransientDnsError(err) && attempt < maxAttempts - 1) {
+        let resolvedAddresses: readonly string[] = []
+        try {
+          resolvedAddresses = await this.resolveAllowedTargetAddresses()
+        } catch (err) {
+          lastError = err
+          if (this.retry && isTransientDnsError(err) && attempt < maxAttempts - 1) {
+            continue
+          }
+          throw err
+        }
+
+        let response: WebhookFetchResponse
+        try {
+          response = await this.fetchWebhook(resolvedAddresses, {
+            method: 'POST',
+            redirect: 'manual',
+            headers: {
+              'Content-Type': 'application/json',
+              ...this.extraHeaders,
+            },
+            body: JSON.stringify(payload),
+          })
+        } catch (err) {
+          lastError = err
           continue
         }
-        throw err
-      }
 
-      let response: WebhookFetchResponse
-      try {
-        response = await this.fetchWebhook(resolvedAddresses, {
-          method: 'POST',
-          redirect: 'manual',
-          headers: {
-            'Content-Type': 'application/json',
-            ...this.extraHeaders,
-          },
-          body: JSON.stringify(payload),
-        })
-      } catch (err) {
-        lastError = err
-        continue
-      }
-
-      if (!response.ok) {
-        const shouldReadBody = !this.retry || !isTransientStatus(response.status) || attempt === maxAttempts - 1
-        const responseBody = shouldReadBody ? await this.readResponseBody(response) : ''
-        const bodySuffix = responseBody ? `: ${responseBody}` : ''
-        lastError = new Error(
-          `Webhook delivery failed: ${response.status}${response.statusText ? ` ${response.statusText}` : ''} for ${sanitizeWebhookEndpoint(this.url)}${bodySuffix}`,
-        )
-        if (!this.retry || !isTransientStatus(response.status) || attempt === maxAttempts - 1) {
-          throw lastError
+        if (!response.ok) {
+          const shouldReadBody = !this.retry || !isTransientStatus(response.status) || attempt === maxAttempts - 1
+          const responseBody = shouldReadBody ? await this.readResponseBody(response) : ''
+          const bodySuffix = responseBody ? `: ${responseBody}` : ''
+          lastError = new Error(
+            `Webhook delivery failed: ${response.status}${response.statusText ? ` ${response.statusText}` : ''} for ${sanitizeWebhookEndpoint(this.url)}${bodySuffix}`,
+          )
+          if (!this.retry || !isTransientStatus(response.status) || attempt === maxAttempts - 1) {
+            throw lastError
+          }
+          continue
         }
-        continue
+        const sentReceipt: WebhookDeliveryReceipt = {
+          ...receiptBase,
+          status: 'sent',
+          timestamp: new Date().toISOString(),
+        }
+        if (options.idempotencyKey) {
+          await this.receiptStore.save(sentReceipt)
+        }
+        return sentReceipt
       }
-      return
-    }
 
-    throw lastError
+      throw lastError
+    } catch (err) {
+      if (options.idempotencyKey) {
+        await this.receiptStore.save({
+          ...receiptBase,
+          status: 'failed',
+          timestamp: new Date().toISOString(),
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+      throw err
+    }
   }
 
   private async readResponseBody(response: WebhookFetchResponse): Promise<string> {

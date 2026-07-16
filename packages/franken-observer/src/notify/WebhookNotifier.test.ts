@@ -3,7 +3,7 @@ import { request as httpsRequest } from 'node:https'
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { seededRandom } from '@franken/types'
-import { WebhookNotifier } from './WebhookNotifier.js'
+import { InMemoryWebhookDeliveryReceiptStore, WebhookNotifier } from './WebhookNotifier.js'
 import type { FetchFn } from '../adapters/langfuse/LangfuseAdapter.js'
 
 vi.mock('node:https', () => ({
@@ -100,6 +100,70 @@ describe('WebhookNotifier', () => {
       const [, init] = mockFetch.mock.calls[0]
       const body = JSON.parse(init.body as string)
       expect(body).toEqual({ type: 'circuit-breaker', spendUsd: 1.5, limitUsd: 1.0 })
+    })
+
+    it('records a sent receipt and skips a duplicate idempotency key for the same target and content', async () => {
+      const store = new InMemoryWebhookDeliveryReceiptStore()
+      const notifier = createNotifier({ deliveryReceiptStore: store })
+      const payload = { type: 'status', runId: 'run-1', state: 'green' }
+
+      const firstReceipt = await notifier.send(payload, { idempotencyKey: 'status:run-1:discord' })
+      const secondReceipt = await notifier.send(payload, { idempotencyKey: 'status:run-1:discord' })
+
+      expect(firstReceipt).toMatchObject({ status: 'sent', idempotencyKey: 'status:run-1:discord', target: webhookUrl })
+      expect(secondReceipt).toMatchObject({ status: 'skipped', idempotencyKey: 'status:run-1:discord', target: webhookUrl })
+      expect(secondReceipt.contentHash).toBe(firstReceipt.contentHash)
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+    })
+
+    it('sends changed content for the same idempotency key and target', async () => {
+      const store = new InMemoryWebhookDeliveryReceiptStore()
+      const notifier = createNotifier({ deliveryReceiptStore: store })
+
+      const firstReceipt = await notifier.send({ type: 'approval', state: 'pending' }, { idempotencyKey: 'approval:42' })
+      const secondReceipt = await notifier.send({ type: 'approval', state: 'approved' }, { idempotencyKey: 'approval:42' })
+
+      expect(firstReceipt.status).toBe('sent')
+      expect(secondReceipt.status).toBe('sent')
+      expect(secondReceipt.contentHash).not.toBe(firstReceipt.contentHash)
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+    })
+
+    it('records failed receipts and allows retrying the same idempotency key after failure', async () => {
+      const store = new InMemoryWebhookDeliveryReceiptStore()
+      const saved = vi.spyOn(store, 'save')
+      mockFetch
+        .mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Service Unavailable' })
+        .mockResolvedValueOnce({ ok: true, status: 200, statusText: 'OK' })
+      const notifier = createNotifier({ deliveryReceiptStore: store })
+      const payload = { type: 'doctor', taskId: 't_123', state: 'blocked' }
+
+      await expect(notifier.send(payload, { idempotencyKey: 'doctor:t_123:blocked' })).rejects.toThrow('503')
+      const retryReceipt = await notifier.send(payload, { idempotencyKey: 'doctor:t_123:blocked' })
+
+      expect(saved.mock.calls[0]?.[0]).toMatchObject({ status: 'failed', idempotencyKey: 'doctor:t_123:blocked' })
+      expect(retryReceipt.status).toBe('sent')
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+    })
+
+    it('sends the same idempotency key and content when the target changes', async () => {
+      const store = new InMemoryWebhookDeliveryReceiptStore()
+      const notifier = createNotifier({ deliveryReceiptStore: store })
+      const payload = { type: 'status', runId: 'run-2', state: 'green' }
+
+      const discordReceipt = await notifier.send(payload, {
+        idempotencyKey: 'status:run-2',
+        target: 'discord:ops',
+      })
+      const slackReceipt = await notifier.send(payload, {
+        idempotencyKey: 'status:run-2',
+        target: 'slack:ops',
+      })
+
+      expect(discordReceipt).toMatchObject({ status: 'sent', target: 'discord:ops' })
+      expect(slackReceipt).toMatchObject({ status: 'sent', target: 'slack:ops' })
+      expect(slackReceipt.contentHash).toBe(discordReceipt.contentHash)
+      expect(mockFetch).toHaveBeenCalledTimes(2)
     })
 
     it('merges custom headers with Content-Type', async () => {
