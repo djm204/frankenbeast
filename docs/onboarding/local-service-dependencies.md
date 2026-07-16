@@ -9,7 +9,7 @@ Structured source: `docs/onboarding/local-service-dependencies.manifest.json`.
 | Capability being exercised | Local service dependency | Required? | Verification |
 | --- | --- | --- | --- |
 | Repository install, docs checks, root unit tests | None beyond Node.js and npm | No Docker required | `npm run bootstrap -- --no-docker`; `npm run test:root` |
-| Semantic memory and memory-backed MCP flows | ChromaDB | Yes when using local semantic memory | `curl -fsS http://localhost:8000/api/v2/heartbeat` or the v1 heartbeat fallback |
+| Semantic-memory seed and verification scripts | ChromaDB | Yes when using local semantic memory scripts | `curl -fsS http://localhost:8000/api/v2/heartbeat` |
 | Local observability dashboards | Grafana | Yes for dashboard viewing only | `curl -fsS http://localhost:3000/api/health` |
 | Distributed trace viewing/export smoke tests | Tempo | Yes for OTLP trace export | `curl -fsS http://localhost:3200/ready` |
 | Local chat, Beast runs, dashboard chat turns | Provider CLI login or API-backed provider keys | Yes for real model calls | `command -v claude || command -v codex || command -v gemini`, or exported provider API key |
@@ -22,14 +22,14 @@ Structured source: `docs/onboarding/local-service-dependencies.manifest.json`.
 - Start only when you are using semantic memory locally:
 
   ```bash
-  docker compose up -d chroma
+  docker compose up -d chromadb
   export CHROMA_URL=http://localhost:8000
-  curl -fsS http://localhost:8000/api/v2/heartbeat || curl -fsS http://localhost:8000/api/v1/heartbeat
+  curl -fsS http://localhost:8000/api/v2/heartbeat
   ```
 
-- Required for: `npm run local:seed`, memory-backed MCP workflows, and semantic-memory verification.
-- Not required for: repository install, root documentation tests, CLI help output, or dashboard shell startup.
-- Failure symptom: memory seed/lookup errors mention connection refused or an unavailable Chroma endpoint.
+- Required for: `npm run local:seed`, `npm run local:verify-setup`, and semantic-memory verification that talks to ChromaDB.
+- Not required for: repository install, root documentation tests, CLI help output, dashboard shell startup, or file-backed MCP memory tools.
+- Failure symptom: memory seed/verification errors mention connection refused, an unavailable Chroma endpoint, or a missing v2 tenant/database API.
 
 ### Grafana
 
@@ -73,6 +73,7 @@ Structured source: `docs/onboarding/local-service-dependencies.manifest.json`.
 
 - Required for: stored operator tokens, stored provider credentials, and runtime paths that resolve secret refs.
 - Not required for: repository bootstrap, docs-only checks, or tests that inject secrets directly.
+- Health check: verify `.fbeast/config.json`, then prove the selected backend is usable: local encrypted vault plus `FRANKENBEAST_PASSPHRASE`, `BW_SESSION` for Bitwarden, an authenticated `op` CLI session for 1Password, or OS keychain availability.
 - Edge case: changing `network.secureBackend` does not migrate existing secret refs. Re-store or migrate secrets after switching between `local-encrypted`, `os-keychain`, `1password`, and `bitwarden`.
 
 ## Negative guidance

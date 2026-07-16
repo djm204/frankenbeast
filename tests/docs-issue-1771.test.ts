@@ -44,6 +44,20 @@ describe('issue #1771 local service dependency explainer', () => {
     expect(serviceIds).toEqual(['chromadb', 'grafana', 'tempo', 'provider-cli', 'secret-backend']);
     expect(new Set(serviceIds).size).toBe(serviceIds.length);
 
+    const chromadb = manifest.services.find((service) => service.id === 'chromadb');
+    expect(chromadb).toMatchObject({
+      startCommand: 'docker compose up -d chromadb',
+      healthCheck: 'curl -fsS http://localhost:8000/api/v2/heartbeat',
+    });
+    expect(chromadb?.requiredFor).not.toContain('memory-backed MCP workflows');
+    expect(chromadb?.notRequiredFor).toContain('file-backed MCP memory');
+
+    const secretBackend = manifest.services.find((service) => service.id === 'secret-backend');
+    expect(secretBackend?.healthCheck).toContain('test -f .fbeast/config.json');
+    expect(secretBackend?.healthCheck).toContain('.fbeast/secrets.enc');
+    expect(secretBackend?.healthCheck).toContain('BW_SESSION');
+    expect(secretBackend?.healthCheck).not.toContain('|| true');
+
     for (const service of manifest.services) {
       expect(service.id).toMatch(/^[a-z0-9-]+$/);
       expect(service.name.length).toBeGreaterThan(0);

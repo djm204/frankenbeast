@@ -5,13 +5,13 @@
     {
       "id": "chromadb",
       "name": "ChromaDB",
-      "requiredFor": ["semantic memory", "local memory seeding", "memory-backed MCP workflows"],
-      "notRequiredFor": ["workspace install", "root unit tests", "orchestrator CLI help", "dashboard shell startup"],
-      "startCommand": "docker compose up -d chroma",
-      "healthCheck": "curl -fsS http://localhost:8000/api/v2/heartbeat || curl -fsS http://localhost:8000/api/v1/heartbeat",
+      "requiredFor": ["semantic memory scripts", "local memory seeding", "semantic-memory verification"],
+      "notRequiredFor": ["workspace install", "root unit tests", "orchestrator CLI help", "dashboard shell startup", "file-backed MCP memory"],
+      "startCommand": "docker compose up -d chromadb",
+      "healthCheck": "curl -fsS http://localhost:8000/api/v2/heartbeat",
       "env": ["CHROMA_URL=http://localhost:8000"],
-      "failureSymptom": "Semantic memory seed, lookup, or MCP memory tools fail with connection refused or unavailable Chroma endpoint errors.",
-      "handoffNote": "Mention whether CHROMA_URL is set and whether the heartbeat endpoint responded before assigning memory-related work."
+      "failureSymptom": "Semantic memory seed or verification scripts fail with connection refused, unavailable Chroma endpoint, or missing v2 tenant/database API errors.",
+      "handoffNote": "Mention whether CHROMA_URL is set, whether the v2 heartbeat responded, and whether the work uses semantic-memory scripts rather than file-backed MCP memory."
     },
     {
       "id": "grafana",
@@ -52,10 +52,10 @@
       "requiredFor": ["operator token lookup", "stored provider credentials", "Beast controls after init"],
       "notRequiredFor": ["repository bootstrap", "docs-only checks", "unit tests with injected secrets"],
       "startCommand": "node packages/franken-orchestrator/dist/cli/run.js init",
-      "healthCheck": "test -f .fbeast/config.json && (test -f .fbeast/secrets.enc || true)",
+      "healthCheck": "test -f .fbeast/config.json && (test -f .fbeast/secrets.enc || test -n \"${BW_SESSION:-}\" || op account get >/dev/null 2>&1 || security find-generic-password -s frankenbeast >/dev/null 2>&1)",
       "env": ["FRANKENBEAST_PASSPHRASE", "BW_SESSION"],
       "failureSymptom": "Runtime config contains secret refs but commands cannot resolve operator tokens or provider credentials.",
-      "handoffNote": "Record the configured network.secureBackend and whether existing secret refs were re-stored after backend changes."
+      "handoffNote": "Record the configured network.secureBackend and the backend-specific proof: local encrypted vault plus FRANKENBEAST_PASSPHRASE, BW_SESSION, op CLI session, or OS keychain availability."
     }
   ],
   "edgeCases": [
