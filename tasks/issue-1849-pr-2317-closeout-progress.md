@@ -16,4 +16,6 @@
   - Replied to and resolved second follow-up Codex comments 3593888473, 3593888475, 3593888477.
 - [ ] Trigger fresh @codex review within invocation cap and wait for current-head clean.
   - Triggered latest review with approved cap override at `2026-07-16T08:45:37Z`.
+  - Current unresolved Codex round on head `f6f55fca` has four actionable threads: working.delete rollback, episodic.record atomicity, required backup audit table, and review.propose atomicity. Implemented fixes locally and targeted tests pass; full package gates/push/review still pending.
+  - Verification after local fixes: targeted `@franken/brain` memory-access-audit test passed (33 tests); targeted `@franken/orchestrator` memory-snapshot-diff test passed (34 tests); package `typecheck && lint && build` passed for brain and orchestrator; root `npm run typecheck` and `npm run build` passed; root `npm run test` still fails in unrelated `@franken/live-bench` CLI smoke timeout tests.
 - [ ] Merge PR only after green CI and fresh Codex clean; otherwise block with exact blocker.

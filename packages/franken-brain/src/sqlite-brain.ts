@@ -1439,24 +1439,73 @@ class SqliteWorkingMemory implements IWorkingMemory {
       return false;
     }
 
-    this.totalBytes -= this.sizes.get(key) ?? 0;
-    this.sizes.delete(key);
-    this.serialized.delete(key);
-    this.dirtyKeys.delete(key);
-    if (this.persistedSerialized.has(key)) {
-      this.deletedKeys.add(key);
-    } else {
-      this.deletedKeys.delete(key);
+    const previousValue = this.store.get(key);
+    const previousSize = this.sizes.get(key);
+    const previousSerialized = this.serialized.get(key);
+    const previousWasDirty = this.dirtyKeys.has(key);
+    const previousWasDeleted = this.deletedKeys.has(key);
+    const previousTotalBytes = this.totalBytes;
+    let mutationApplied = false;
+
+    try {
+      this.totalBytes -= this.sizes.get(key) ?? 0;
+      this.sizes.delete(key);
+      this.serialized.delete(key);
+      this.dirtyKeys.delete(key);
+      if (this.persistedSerialized.has(key)) {
+        this.deletedKeys.add(key);
+      } else {
+        this.deletedKeys.delete(key);
+      }
+      const deleted = this.store.delete(key);
+      mutationApplied = true;
+      this.audit?.({
+        operation: 'working.delete',
+        store: 'working',
+        key,
+        outcome: deleted ? 'success' : 'miss',
+        details: { deleted },
+      });
+      return deleted;
+    } catch (error) {
+      if (mutationApplied) {
+        this.store.set(key, previousValue);
+        if (previousSize === undefined) {
+          this.sizes.delete(key);
+        } else {
+          this.sizes.set(key, previousSize);
+        }
+        if (previousSerialized === undefined) {
+          this.serialized.delete(key);
+        } else {
+          this.serialized.set(key, previousSerialized);
+        }
+        this.totalBytes = previousTotalBytes;
+        if (previousWasDirty) {
+          this.dirtyKeys.add(key);
+        } else {
+          this.dirtyKeys.delete(key);
+        }
+        if (previousWasDeleted) {
+          this.deletedKeys.add(key);
+        } else {
+          this.deletedKeys.delete(key);
+        }
+      }
+      try {
+        this.audit?.({
+          operation: 'working.delete',
+          store: 'working',
+          key,
+          outcome: 'error',
+          details: { errorName: error instanceof Error ? error.name : 'Error' },
+        });
+      } catch {
+        // Preserve the original audit/write failure while keeping the in-memory
+        // delete all-or-nothing.
+      }
+      throw error;
     }
-    const deleted = this.store.delete(key);
-    this.audit?.({
-      operation: 'working.delete',
-      store: 'working',
-      key,
-      outcome: deleted ? 'success' : 'miss',
-      details: { deleted },
-    });
-    return deleted;
   }
 
   snapshotIncludingPersistedEntries(options: { expireRuntimeGuardedEntries?: boolean; expirePersistedTtlEntries?: boolean } = {}): Array<{ key: string; value: unknown; source: 'persisted' | 'runtime' }> {
@@ -1846,21 +1895,28 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
 
   record(event: EpisodicEvent): void {
     try {
-      assertEpisodicNotDeletionGuarded(this.db, event, this.encryption);
-      this.insertEvent(event);
-      this.audit?.({
-        operation: 'episodic.record',
-        store: 'episodic',
-        outcome: 'success',
-        details: { type: event.type },
+      const tx = this.db.transaction(() => {
+        assertEpisodicNotDeletionGuarded(this.db, event, this.encryption);
+        this.insertEvent(event);
+        this.audit?.({
+          operation: 'episodic.record',
+          store: 'episodic',
+          outcome: 'success',
+          details: { type: event.type },
+        });
       });
+      tx.immediate();
     } catch (error) {
-      this.audit?.({
-        operation: 'episodic.record',
-        store: 'episodic',
-        outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
-        details: { errorName: error instanceof Error ? error.name : 'Error' },
-      });
+      try {
+        this.audit?.({
+          operation: 'episodic.record',
+          store: 'episodic',
+          outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
+          details: { errorName: error instanceof Error ? error.name : 'Error' },
+        });
+      } catch {
+        // Avoid masking the mutation/audit failure that rolled back the record.
+      }
       throw error;
     }
   }
@@ -2503,6 +2559,13 @@ export class SqliteMemoryReviewQueue {
       const suppression = this.findCandidateSuppression(proposal);
       if (suppression) {
         result = this.suppressedCandidate(proposal, suppression);
+        this.audit?.({
+          operation: 'review.propose',
+          store: 'review',
+          key: result.key,
+          outcome: 'denied',
+          details: { status: result.status },
+        });
         return;
       }
       const now = isoNow();
@@ -2535,28 +2598,32 @@ export class SqliteMemoryReviewQueue {
           candidate.updatedAt,
         );
       result = candidate;
+      this.audit?.({
+        operation: 'review.propose',
+        store: 'review',
+        key: result.key,
+        outcome: 'success',
+        details: { status: result.status },
+      });
     });
     try {
       tx.immediate();
     } catch (error) {
-      this.audit?.({
-        operation: 'review.propose',
-        store: 'review',
-        key: proposal.key,
-        outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
-        details: {
-          errorName: error instanceof Error ? error.name : 'Error',
-        },
-      });
+      try {
+        this.audit?.({
+          operation: 'review.propose',
+          store: 'review',
+          key: proposal.key,
+          outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
+          details: {
+            errorName: error instanceof Error ? error.name : 'Error',
+          },
+        });
+      } catch {
+        // Preserve transaction rollback semantics if audit persistence is what failed.
+      }
       throw error;
     }
-    this.audit?.({
-      operation: 'review.propose',
-      store: 'review',
-      key: result!.key,
-      outcome: result!.status === 'suppressed' ? 'denied' : 'success',
-      details: { status: result!.status },
-    });
     return this.withMergeSuggestions(result!);
   }
 

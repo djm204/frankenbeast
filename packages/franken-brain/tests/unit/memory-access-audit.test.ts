@@ -54,6 +54,72 @@ describe('memory access audit trail', () => {
     }
   });
 
+  it('rolls back working deletes when success audit persistence fails', () => {
+    const brain = new SqliteBrain(':memory:');
+    brain.working.set('delete.audit.rollback', 'keep me');
+    const db = (brain as unknown as { db: Database.Database }).db;
+    db.exec(`
+      CREATE TRIGGER fail_working_delete_audit
+      BEFORE INSERT ON memory_access_audit_events
+      WHEN NEW.operation = 'working.delete'
+      BEGIN
+        SELECT RAISE(ABORT, 'simulated working delete audit failure');
+      END;
+    `);
+
+    expect(() => brain.working.delete('delete.audit.rollback')).toThrow('simulated working delete audit failure');
+    expect(brain.working.get('delete.audit.rollback')).toBe('keep me');
+
+    brain.close();
+  });
+
+  it('rolls back episodic records when success audit persistence fails', () => {
+    const brain = new SqliteBrain(':memory:');
+    const db = (brain as unknown as { db: Database.Database }).db;
+    db.exec(`
+      CREATE TRIGGER fail_episodic_record_audit
+      BEFORE INSERT ON memory_access_audit_events
+      WHEN NEW.operation = 'episodic.record'
+      BEGIN
+        SELECT RAISE(ABORT, 'simulated episodic record audit failure');
+      END;
+    `);
+
+    expect(() => brain.episodic.record({
+      type: 'observation',
+      summary: 'must not commit without audit',
+      createdAt: new Date().toISOString(),
+    })).toThrow('simulated episodic record audit failure');
+    expect(brain.episodic.count()).toBe(0);
+
+    brain.close();
+  });
+
+  it('rolls back review proposals when success audit persistence fails', () => {
+    const brain = new SqliteBrain(':memory:');
+    const db = (brain as unknown as { db: Database.Database }).db;
+    db.exec(`
+      CREATE TRIGGER fail_review_propose_audit
+      BEFORE INSERT ON memory_access_audit_events
+      WHEN NEW.operation = 'review.propose'
+      BEGIN
+        SELECT RAISE(ABORT, 'simulated review propose audit failure');
+      END;
+    `);
+
+    expect(() => brain.memoryReview.propose({
+      targetStore: 'working',
+      key: 'proposal.audit.rollback',
+      value: 'must not commit without audit',
+      source: 'operator',
+      confidence: 0.9,
+      reason: 'Proposal should roll back when audit fails.',
+    })).toThrow('simulated review propose audit failure');
+    expect(brain.memoryReview.list()).toHaveLength(0);
+
+    brain.close();
+  });
+
   it('filters audit events by operation and limit', () => {
     const brain = new SqliteBrain(':memory:');
 
