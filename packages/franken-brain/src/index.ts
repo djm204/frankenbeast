@@ -27,6 +27,7 @@ export {
   type MemoryMergeSuggestionProvenance,
   type MemoryReviewDecisionOptions,
   type MemoryProvenanceRecord,
+  type MemoryAttributionListOptions,
   type MemoryConflictResolution,
   type MemoryConflict,
   type MemoryConflictEvidence,

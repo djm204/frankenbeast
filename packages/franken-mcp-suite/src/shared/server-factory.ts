@@ -234,6 +234,8 @@ const MEMORY_REVIEW_PROPOSE_TOOL = 'fbeast_memory_review_propose';
 const MEMORY_REVIEW_PROPOSE_SAFE_AUDIT_KEYS = new Set(['type', 'confidence']);
 const MEMORY_REVIEW_PROPOSE_SAFE_TYPES = new Set(['working', 'episodic']);
 const MEMORY_REVIEW_DECIDE_TOOL = 'fbeast_memory_review_decide';
+const MEMORY_SOURCE_ATTRIBUTION_TOOL = 'fbeast_memory_source_attribution';
+const MEMORY_SOURCE_ATTRIBUTION_SAFE_AUDIT_KEYS = new Set(['limit']);
 const MEMORY_EXPORT_TOOL = 'fbeast_memory_export';
 const MEMORY_EXPORT_SAFE_AUDIT_KEYS = new Set(['readScope', 'redaction', 'limit', 'projectId']);
 const MEMORY_EXPORT_SAFE_READ_SCOPES = new Set(['all', 'shared', 'agent']);
@@ -303,6 +305,47 @@ function redactMemoryReviewDecisionEnvelope(sanitized: Record<string, unknown>, 
     const args = sanitized['args'];
     sanitized['args'] = isObjectLike(args) && !Array.isArray(args)
       ? redactMemoryReviewDecisionArgs(args as Record<string, unknown>, redaction)
+      : redaction;
+  }
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
+    sanitized['context'] = redaction;
+  }
+  for (const key of Object.keys(sanitized)) {
+    if (!['tool', 'action', 'args', 'context'].includes(key)) {
+      sanitized[key] = redaction;
+    }
+  }
+  return sanitized;
+}
+
+function isSafeMemorySourceAttributionLimit(value: unknown): boolean {
+  if (typeof value !== 'string' && typeof value !== 'number') return false;
+  const text = String(value).trim();
+  if (!/^\d+$/.test(text)) return false;
+  const parsed = Number(text);
+  return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= 1000;
+}
+
+function redactMemorySourceAttributionArgs(sanitized: Record<string, unknown>, redaction = '[memory-source-attribution-args-redacted]'): Record<string, unknown> {
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'invalid')) {
+    sanitized['invalid'] = redaction;
+    return sanitized;
+  }
+  for (const key of Object.keys(sanitized)) {
+    if (!MEMORY_SOURCE_ATTRIBUTION_SAFE_AUDIT_KEYS.has(key)) {
+      sanitized[key] = redaction;
+    } else if (key === 'limit' && !isSafeMemorySourceAttributionLimit(sanitized[key])) {
+      sanitized[key] = redaction;
+    }
+  }
+  return sanitized;
+}
+
+function redactMemorySourceAttributionEnvelope(sanitized: Record<string, unknown>, redaction = '[memory-source-attribution-args-redacted]'): Record<string, unknown> {
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'args')) {
+    const args = sanitized['args'];
+    sanitized['args'] = isObjectLike(args) && !Array.isArray(args)
+      ? redactMemorySourceAttributionArgs(args as Record<string, unknown>, redaction)
       : redaction;
   }
   if (Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
@@ -398,8 +441,10 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
   const isMemoryReviewPropose = unqualifiedToolName === MEMORY_REVIEW_PROPOSE_TOOL;
   const isDirectMemoryExport = unqualifiedToolName === MEMORY_EXPORT_TOOL;
   const isDirectMemoryReviewDecide = unqualifiedToolName === MEMORY_REVIEW_DECIDE_TOOL;
+  const isDirectMemorySourceAttribution = unqualifiedToolName === MEMORY_SOURCE_ATTRIBUTION_TOOL;
+  const isDirectMemoryStore = unqualifiedToolName === MEMORY_STORE_TOOL;
   const isDirectRightToForget = unqualifiedToolName === 'fbeast_memory_right_to_forget';
-  const auditedTool = isDirectMemoryExport || isDirectMemoryReviewDecide || isMemoryReviewPropose || isDirectRightToForget
+  const auditedTool = isDirectMemoryExport || isDirectMemoryReviewDecide || isMemoryReviewPropose || isDirectMemoryStore || isDirectMemorySourceAttribution || isDirectRightToForget
     ? unqualifiedToolName
     : typeof sanitized['tool'] === 'string'
       ? unqualifyMcpToolName(sanitized['tool'])
@@ -450,6 +495,18 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
     }
     if (isDirectMemoryReviewDecide) {
       return redactMemoryReviewDecisionArgs(sanitized);
+    }
+    return sanitized;
+  }
+  if (auditedTool === MEMORY_SOURCE_ATTRIBUTION_TOOL || auditedAction === MEMORY_SOURCE_ATTRIBUTION_TOOL) {
+    if (unqualifiedToolName === 'execute_tool') {
+      return redactMemorySourceAttributionEnvelope(sanitized);
+    }
+    if (auditedAction === MEMORY_SOURCE_ATTRIBUTION_TOOL && Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
+      sanitized['context'] = '[memory-source-attribution-args-redacted]';
+    }
+    if (isDirectMemorySourceAttribution) {
+      return redactMemorySourceAttributionArgs(sanitized);
     }
     return sanitized;
   }
