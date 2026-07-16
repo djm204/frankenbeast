@@ -20,6 +20,15 @@ For CI-style validation without mutating files or installing dependencies, run:
 ./scripts/bootstrap.sh --dry-run
 ```
 
+If you are not sure which first-run steps apply to your role, generate a guided checklist before mutating the checkout:
+
+```bash
+npm run first-run:checklist -- --persona contributor
+npm --silent run first-run:checklist -- --persona coding-agent --json
+```
+
+The generator is read-only and returns deterministic Markdown or JSON checklist items with commands, docs, required/optional status, and the next action.
+
 If Corepack is not available yet, install it first with `npm install -g corepack`; the bootstrap script then activates and verifies the root `packageManager` pin.
 
 Dependency locking is centralized at the workspace root: commit updates to the root `package-lock.json` only. Package workspaces under `packages/*` must not carry their own nested `package-lock.json` files; run installs from the repository root so npm records workspace dependency changes in the root lockfile. Standalone example projects under `examples/` may keep their own lockfiles because they are scaffolded outside the monorepo workspace.

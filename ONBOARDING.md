@@ -61,6 +61,15 @@ Use this checklist for a first local checkout or when rebuilding a development e
 
   The command prints stable `[new-worker-preflight:<check>] ok|warn|fail - ...` badges by default, or a JSON object with `ok` and `checks` when `--json` is supplied. Use `npm --silent` or `node scripts/new-worker-preflight.mjs --json` for machine-parsed JSON so npm lifecycle banners do not prefix stdout. It verifies the supported Node.js/npm pin, required `git`/`gh`/`jq` commands, GitHub CLI authentication for `github.com`, the project git identity (`David Mendez <me@davidmendez.dev>`), Frankenbeast repository root, and whether the current worktree already has uncommitted files. Use `--skip-github-auth` only for offline docs/tests; run without it before opening PRs.
 
+- [ ] Generate a guided checklist when you need a smaller first-run path than the full document. Pick the persona that matches the work:
+
+  ```bash
+  npm run first-run:checklist -- --persona operator
+  npm --silent run first-run:checklist -- --persona coding-agent --json
+  ```
+
+  The generator prints deterministic Markdown by default, or JSON with `persona`, `root`, `items`, `docs`, and `nextAction` for PM/liveness tooling. It never mutates files or runs setup commands; it points each checklist item at the command and docs to run next. Valid personas are `operator`, `coding-agent`, and `contributor`; unknown personas fail closed with an explicit error instead of falling back to a misleading generic checklist.
+
 ### Progress badges and status output
 
 The bootstrap script prints deterministic status badges as it advances through onboarding:
