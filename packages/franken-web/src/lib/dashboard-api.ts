@@ -39,11 +39,19 @@ export interface DashboardAvailability {
   dependencies: DashboardDependency[];
 }
 
+export interface DashboardMaintenanceMode {
+  enabled: boolean;
+  reason?: string;
+  startedAt?: string;
+  allowedCommands: string[];
+}
+
 export interface DashboardSnapshot {
   skills: DashboardSkill[];
   security: DashboardSecurity;
   providers: DashboardProvider[];
   availability?: DashboardAvailability;
+  maintenance?: DashboardMaintenanceMode;
 }
 
 export class DashboardApiClient {

@@ -1439,6 +1439,42 @@ button {
   color: #ffd0ca;
 }
 
+.maintenance-banner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: start;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  border: 1px solid rgba(255, 205, 86, 0.42);
+  border-radius: 1rem;
+  background: rgba(255, 205, 86, 0.1);
+  color: #ffe7a3;
+}
+
+.maintenance-banner strong {
+  display: block;
+  margin-bottom: 0.3rem;
+}
+
+.maintenance-banner p,
+.maintenance-banner dl {
+  margin: 0;
+}
+
+.maintenance-banner dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.25rem 0.6rem;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.maintenance-banner dd {
+  margin: 0;
+  font-family: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+}
+
 .dashboard-alerts {
   display: grid;
   gap: 0.75rem;

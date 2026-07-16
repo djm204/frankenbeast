@@ -115,6 +115,152 @@ describe('SqliteBrain', () => {
     });
   });
 
+  describe('skill evolution review gate', () => {
+    it('creates a review item after repeated sanitized skill failures', () => {
+      for (const evidenceId of ['task-1', 'task-2', 'task-3']) {
+        brain.episodic.recordSkillFailure({
+          skillName: 'resolve-issues',
+          workflowName: 'issue-to-pr',
+          failureSignature: 'Codex feedback was not folded back into the skill',
+          evidenceId,
+          step: 'codex-review',
+          suggestedPatchArea: 'Codex review loop pitfalls',
+          createdAt: '2026-07-16T10:00:00.000Z',
+        });
+      }
+
+      const [item] = brain.createSkillEvolutionReviewGate({ threshold: 3 });
+
+      expect(item).toEqual(expect.objectContaining({
+        id: expect.stringMatching(/^memcand_/),
+        key: expect.stringMatching(/^skill-evolution\.review\.resolve-issues\.[a-f0-9]{16}$/),
+        status: 'pending',
+        value: expect.objectContaining({
+          kind: 'skill-evolution-review',
+          skillName: 'resolve-issues',
+          workflowName: 'issue-to-pr',
+          failurePattern: 'Codex feedback was not folded back into the skill',
+          failureCount: 3,
+          suggestedPatchArea: 'Codex review loop pitfalls',
+          evidencePointers: ['task-1', 'task-2', 'task-3'],
+        }),
+      }));
+      expect(JSON.stringify(item)).not.toContain('stack trace');
+      expect(brain.createSkillEvolutionReviewGate({ threshold: 3 })).toEqual([]);
+    });
+
+    it('does not create a review item for unrelated one-off failures', () => {
+      brain.episodic.recordSkillFailure({
+        skillName: 'resolve-issues',
+        failureSignature: 'stale branch setup',
+        evidenceId: 'task-a',
+      });
+      brain.episodic.recordSkillFailure({
+        skillName: 'github-pr-workflow',
+        failureSignature: 'stale branch setup',
+        evidenceId: 'task-b',
+      });
+      brain.episodic.record({
+        type: 'failure',
+        summary: 'Unstructured build failure unrelated to a skill',
+        createdAt: '2026-07-16T10:10:00.000Z',
+      });
+
+      expect(brain.createSkillEvolutionReviewGate({ threshold: 2 })).toEqual([]);
+      expect(brain.memoryReview.list()).toEqual([]);
+    });
+
+    it('requires unique evidence pointers and skips unsanitized replayed failure details', () => {
+      for (const evidenceId of ['repeat-run', 'repeat-run', 'repeat-run']) {
+        brain.episodic.recordSkillFailure({
+          skillName: 'resolve-issues',
+          failureSignature: 'same failed run was retried',
+          evidenceId,
+        });
+      }
+      brain.episodic.record({
+        type: 'failure',
+        step: 'skill-evolution',
+        summary: 'Legacy raw skill-evolution failure',
+        createdAt: '2026-07-16T10:10:00.000Z',
+        details: {
+          category: 'skill-evolution',
+          skillName: 'resolve-issues',
+          failurePattern: 'x'.repeat(300),
+          evidenceId: 'legacy-run',
+          suggestedPatchArea: 'raw '.repeat(80),
+        },
+      });
+
+      expect(brain.createSkillEvolutionReviewGate({ threshold: 2 })).toEqual([]);
+      expect(brain.memoryReview.list()).toEqual([]);
+    });
+
+    it('omits suppressed duplicate review proposals from created items', () => {
+      for (const evidenceId of ['suppressed-1', 'suppressed-2']) {
+        brain.episodic.recordSkillFailure({
+          skillName: 'resolve-issues',
+          failureSignature: 'stale cli flag repeated',
+          evidenceId,
+        });
+      }
+      const [item] = brain.createSkillEvolutionReviewGate({ threshold: 2 });
+      expect(item).toBeDefined();
+      brain.memoryReview.reject(item!.id, { reviewer: 'operator' });
+
+      for (const evidenceId of ['suppressed-3', 'suppressed-4']) {
+        brain.episodic.recordSkillFailure({
+          skillName: 'resolve-issues',
+          failureSignature: 'stale cli flag repeated',
+          evidenceId,
+        });
+      }
+
+      expect(brain.createSkillEvolutionReviewGate({ threshold: 2 })).toEqual([]);
+    });
+
+    it('lets reviewers edit, accept, or discard generated skill review items', () => {
+      for (const evidenceId of ['run-1', 'run-2']) {
+        brain.episodic.recordSkillFailure({
+          skillName: 'kanban-worker',
+          failureSignature: 'worker exited without completing or blocking',
+          evidenceId,
+          suggestedPatchArea: 'Kanban lifecycle closeout section',
+        });
+      }
+      const [item] = brain.createSkillEvolutionReviewGate({ threshold: 2 });
+      expect(item).toBeDefined();
+
+      const edited = brain.memoryReview.edit(item!.id, {
+        value: {
+          ...item!.value,
+          suggestedPatchArea: 'Require kanban_complete or kanban_block before exit',
+        },
+        reason: 'Reviewer narrowed the patch area to the closeout requirement.',
+      });
+      expect(edited.value).toMatchObject({
+        suggestedPatchArea: 'Require kanban_complete or kanban_block before exit',
+      });
+      const accepted = brain.memoryReview.approve(item!.id, { reviewer: 'operator' });
+      expect(accepted.status).toBe('approved');
+      expect(brain.working.get(item!.key)).toMatchObject({
+        kind: 'skill-evolution-review',
+        suggestedPatchArea: 'Require kanban_complete or kanban_block before exit',
+      });
+
+      for (const evidenceId of ['run-3', 'run-4']) {
+        brain.episodic.recordSkillFailure({
+          skillName: 'kanban-worker',
+          failureSignature: 'missing heartbeat on long operation',
+          evidenceId,
+        });
+      }
+      const [discardable] = brain.createSkillEvolutionReviewGate({ threshold: 2 });
+      expect(discardable).toBeDefined();
+      expect(brain.memoryReview.reject(discardable!.id, { reviewer: 'operator' }).status).toBe('rejected');
+    });
+  });
+
   describe('working memory', () => {
     it('stores and retrieves values', () => {
       brain.working.set('key', 'value');
@@ -1371,6 +1517,119 @@ describe('SqliteBrain', () => {
         reviewer: 'operator',
         note: 'Verified in repository settings.',
       });
+      expect(brain.memoryReview.listProvenance({ key: 'env.repo.default-branch' })).toMatchObject([
+        {
+          candidateId: candidate.id,
+          targetStore: 'working',
+          key: 'env.repo.default-branch',
+          value: 'main',
+          source: 'repo-config',
+          confidence: 0.8,
+        },
+      ]);
+    });
+
+    it('filters memory provenance by source and validates invalid viewer filters', () => {
+      const repoCandidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.repo.default-branch',
+        value: 'main',
+        source: 'repo-config',
+        confidence: 0.8,
+        reason: 'Observed from GitHub repository metadata.',
+      });
+      const chatCandidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.response-style',
+        value: 'concise',
+        source: 'chat:turn-42',
+        confidence: 0.92,
+        reason: 'User explicitly requested concise responses.',
+      });
+      brain.memoryReview.approve(repoCandidate.id, { reviewer: 'operator' });
+      brain.memoryReview.approve(chatCandidate.id, { reviewer: 'operator' });
+
+      expect(brain.memoryReview.listProvenance({ source: 'CHAT', limit: 10 })).toMatchObject([
+        {
+          candidateId: chatCandidate.id,
+          key: 'user.preference.response-style',
+          source: 'chat:turn-42',
+        },
+      ]);
+      expect(brain.memoryReview.listProvenance({ keys: [] })).toEqual([]);
+      expect(brain.memoryReview.listProvenance({ key: 'missing.memory' })).toEqual([]);
+      expect(() => brain.memoryReview.listProvenance({ key: '   ' })).toThrow(
+        /key filter must not be empty/,
+      );
+      expect(() => brain.memoryReview.listProvenance({ limit: 0 })).toThrow(
+        /limit must be a positive integer/,
+      );
+    });
+
+    it('hides stale provenance after direct working-memory overwrite or deletion', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.response-style',
+        value: 'concise',
+        source: 'chat:turn-42',
+        confidence: 0.92,
+        reason: 'User explicitly requested concise responses.',
+      });
+      brain.memoryReview.approve(candidate.id, { reviewer: 'operator' });
+      expect(brain.memoryReview.listProvenance({ key: candidate.key })).toHaveLength(1);
+
+      brain.working.set(candidate.key, 'verbose');
+      brain.serialize();
+
+      expect(brain.memoryReview.provenanceFor('working', candidate.key)).toBeNull();
+      expect(brain.memoryReview.listProvenance({ key: candidate.key })).toEqual([]);
+
+      const second = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.repo.default-branch',
+        value: 'main',
+        source: 'repo-config',
+        confidence: 0.8,
+        reason: 'Observed from GitHub repository metadata.',
+      });
+      brain.memoryReview.approve(second.id, { reviewer: 'operator' });
+      expect(brain.memoryReview.listProvenance({ key: second.key })).toHaveLength(1);
+
+      brain.working.delete(second.key);
+      brain.serialize();
+
+      expect(brain.memoryReview.provenanceFor('working', second.key)).toBeNull();
+      expect(brain.memoryReview.listProvenance({ key: second.key })).toEqual([]);
+
+      brain.working.set(second.key, 'main');
+      brain.serialize();
+
+      expect(brain.working.get(second.key)).toBe('main');
+      expect(brain.memoryReview.provenanceFor('working', second.key)).toBeNull();
+      expect(brain.memoryReview.listProvenance({ key: second.key })).toEqual([]);
+    });
+
+    it('preserves provenance when direct working-memory set repeats the approved value', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.response-style',
+        value: 'concise',
+        source: 'chat:turn-42',
+        confidence: 0.92,
+        reason: 'User explicitly requested concise responses.',
+      });
+      brain.memoryReview.approve(candidate.id, { reviewer: 'operator' });
+      expect(brain.memoryReview.listProvenance({ key: candidate.key })).toHaveLength(1);
+
+      brain.working.set(candidate.key, 'concise');
+      brain.serialize();
+
+      expect(brain.memoryReview.provenanceFor('working', candidate.key)).toMatchObject({
+        candidateId: candidate.id,
+        key: candidate.key,
+        value: 'concise',
+      });
+      expect(brain.memoryReview.listProvenance({ key: candidate.key })).toHaveLength(1);
     });
 
     it('surfaces contradictory working-memory candidates before approval', () => {
@@ -3319,6 +3578,38 @@ describe('SqliteBrain', () => {
         verifier?.close();
         rmSync(dir, { recursive: true, force: true });
       }
+    });
+
+    it('keeps working-memory provenance until pending changes are flushed durably', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'preference.source-attribution',
+        value: 'approved',
+        source: 'chat:turn-22',
+        confidence: 0.9,
+        reason: 'Approved memory for attribution durability regression.',
+      });
+      brain.memoryReview.approve(candidate.id, { reviewer: 'operator' });
+
+      brain.working.set('preference.source-attribution', 'pending change');
+      expect(
+        brain.memoryReview.provenanceFor('working', 'preference.source-attribution'),
+      ).not.toBeNull();
+
+      brain.working.set('preference.source-attribution', 'approved');
+      brain.flush();
+      expect(
+        brain.memoryReview.provenanceFor('working', 'preference.source-attribution'),
+      ).not.toBeNull();
+
+      brain.working.delete('preference.source-attribution');
+      expect(
+        brain.memoryReview.provenanceFor('working', 'preference.source-attribution'),
+      ).not.toBeNull();
+      brain.flush();
+      expect(
+        brain.memoryReview.provenanceFor('working', 'preference.source-attribution'),
+      ).toBeNull();
     });
 
     it('clears stale review suppressions before hydrating snapshot working memory', () => {

@@ -18,6 +18,7 @@ npm install @franken/observer
 - [Quick start](#quick-start)
 - [Core tracing](#core-tracing)
 - [Token & cost tracking](#token--cost-tracking)
+- [Decision outcome attribution](#decision-outcome-attribution)
 - [Export backends](#export-backends)
 - [OTEL serialisation](#otel-serialisation)
 - [Evaluation framework](#evaluation-framework)
@@ -260,6 +261,44 @@ attribution.report()
 //     { model: 'claude-sonnet-4-6', totalCalls: 1, successfulCalls: 1, failedCalls: 0, successRate: 1.0, totalCostUsd: 0.0045 },
 //     { model: 'claude-opus-4-6',   totalCalls: 1, successfulCalls: 0, failedCalls: 1, successRate: 0.0, totalCostUsd: 0.0105 },
 //   ]
+```
+
+---
+
+## Decision outcome attribution
+
+`OutcomeAttribution` records compact decision summaries and joins them to later workflow outcomes so learning dashboards can compare which choices correlate with merge success, approval churn, blockers, rollback, or failure. It intentionally stores summaries and labels rather than raw prompts; metadata keys such as `rawPrompt`, `prompt`, `input`, `secret`, `token`, `password`, `credential`, and API key variants are dropped by default.
+
+```ts
+import { OutcomeAttribution } from '@franken/observer'
+
+const attribution = new OutcomeAttribution()
+
+const decision = attribution.recordDecision({
+  workflowId: 'issue-1693',
+  decisionType: 'review-gate',
+  contextSummary: 'PR needs real Codex connector before merge',
+  chosenAction: 'trigger @codex review',
+  alternatives: ['manual-review fallback'],
+})
+
+attribution.recordOutcome({
+  decisionId: decision.decisionId,
+  workflowId: 'issue-1693',
+  verification: 'CI green and current-head Codex clean',
+  prState: 'merged',
+  issueState: 'closed',
+  elapsedMs: 3_600_000,
+  blockers: [],
+  rollback: false,
+  failure: false,
+})
+
+attribution.joinedOutcomes()
+// → [{ decisionType: 'review-gate', chosenAction: 'trigger @codex review', success: true, ... }]
+
+attribution.reportByWorkflow()
+// → [{ workflowId: 'issue-1693', decisionCount: 1, attributedOutcomeCount: 1, ... }]
 ```
 
 ---

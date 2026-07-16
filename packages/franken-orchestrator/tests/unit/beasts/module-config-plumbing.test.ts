@@ -383,5 +383,12 @@ describe('ModuleConfig plumbing', () => {
       const args = parseArgs(['beasts', 'spawn', 'martin-loop']);
       expect(args.moduleConfig).toBeUndefined();
     });
+    it('parses maintenance mode action and reason guardrail commands', async () => {
+      const { parseArgs } = await import('../../../src/cli/args.js');
+      const args = parseArgs(['beasts', 'maintenance', 'on', '--set', 'reason=database migration']);
+      expect(args.beastAction).toBe('maintenance');
+      expect(args.beastTarget).toBe('on');
+      expect(args.networkSet).toEqual(['reason=database migration']);
+    });
   });
 });

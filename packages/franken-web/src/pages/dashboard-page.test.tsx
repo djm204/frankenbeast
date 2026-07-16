@@ -91,6 +91,27 @@ describe('DashboardPage', () => {
     expect(screen.getByText('[degraded]')).toBeTruthy();
   });
 
+  it('renders a maintenance mode banner with dispatch guardrail guidance', async () => {
+    const client = mockClient({
+      fetchSnapshot: vi.fn().mockResolvedValue({
+        ...snapshot,
+        maintenance: {
+          enabled: true,
+          reason: 'database migration',
+          startedAt: '2026-07-16T10:00:00.000Z',
+          allowedCommands: ['beasts list', 'beasts status <run-id>'],
+        },
+      }),
+    });
+
+    render(<DashboardPage client={client} />);
+
+    const banner = await screen.findByRole('status');
+    expect(banner.textContent).toContain('Maintenance mode is active');
+    expect(banner.textContent).toContain('database migration');
+    expect(banner.textContent).toContain('beasts status <run-id>');
+  });
+
   it('shows a load failure with a retry action instead of hiding it in the console', async () => {
     const client = mockClient({
       fetchSnapshot: vi.fn()

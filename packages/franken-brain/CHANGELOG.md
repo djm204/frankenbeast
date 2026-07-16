@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.12.0](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.11.0...@franken/brain-v0.12.0) (2026-07-16)
+
+
+### Features
+
+* **learning:** add skill evolution review gate ([#2413](https://github.com/djm204/frankenbeast/issues/2413)) ([25cec22](https://github.com/djm204/frankenbeast/commit/25cec22c6512dc810f5a013b91db89242c7c78ce))
+* **memory:** add source attribution viewer ([#2329](https://github.com/djm204/frankenbeast/issues/2329)) ([9a47d63](https://github.com/djm204/frankenbeast/commit/9a47d63ce4bed21908af873ed7588794ae19d25a))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.12.0 to 0.13.0
+
 ## [0.11.0](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.10.1...@franken/brain-v0.11.0) (2026-07-16)
 
 

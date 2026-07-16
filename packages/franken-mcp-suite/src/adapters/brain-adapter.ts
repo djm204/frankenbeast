@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import {
   SqliteBrain,
+  type MemoryAttributionListOptions,
   type MemoryCandidate,
   type MemoryCandidateStatus,
   type MemoryConflict,
   type MemoryConflictResolution,
+  type MemoryProvenanceRecord,
   type MemoryReviewDecisionOptions,
   type RightToForgetReport,
   type RightToForgetSelector,
@@ -122,10 +124,12 @@ export interface BrainAdapter {
     scopedKey?: string;
     options?: MemoryReviewDecisionOptions;
   }): Promise<MemoryCandidate>;
+  memoryAttribution(input?: MemoryAttributionListOptions & MemoryScopeInput): Promise<MemoryProvenanceRecord[]>;
 }
 
 const SUPPORTED_MEMORY_TYPES = ["working", "episodic"] as const;
 const DEFAULT_QUERY_LIMIT = 20;
+const DEFAULT_ATTRIBUTION_LIMIT = 50;
 const MAX_QUERY_LIMIT = 1000;
 const AGENT_WORKING_KEY_PREFIX = "__fbeast_agent_memory__/";
 const AGENT_MEMORY_SCOPE_MARKER = "fbeast:agent-memory";
@@ -357,8 +361,8 @@ function takeVisibleEntries<T>(
   return entries.filter(canRead).slice(0, limit);
 }
 
-function resolveQueryLimit(limit: number | undefined): number {
-  if (limit === undefined) return DEFAULT_QUERY_LIMIT;
+function resolveQueryLimit(limit: number | undefined, defaultLimit = DEFAULT_QUERY_LIMIT): number {
+  if (limit === undefined) return defaultLimit;
   if (
     !Number.isFinite(limit) ||
     !Number.isSafeInteger(limit) ||
@@ -795,6 +799,48 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
         });
       }
       throw new Error(`Unsupported memory review action: ${String(input.action)}`);
+    },
+
+    async memoryAttribution(input = {}) {
+      const readScope = resolveMemoryReadScope(input);
+      const requestedLimit = resolveQueryLimit(input.limit, DEFAULT_ATTRIBUTION_LIMIT);
+      const scopedAgentKeyPrefix = readScope.agentId
+        ? `${AGENT_WORKING_KEY_PREFIX}${encodeScopeComponent(readScope.agentId)}/`
+        : undefined;
+      const provenanceKeys = input.key === undefined || readScope.readScope !== "agent"
+        ? undefined
+        : [input.key, scopedWorkingKey(input.key, readScope.agentId)];
+      const lookupKey = input.key === undefined || readScope.readScope === "agent"
+        ? undefined
+        : input.key;
+      const attributions: MemoryProvenanceRecord[] = brain.memoryReview.listProvenance({
+        ...(input.targetStore !== undefined ? { targetStore: input.targetStore } : {}),
+        ...(provenanceKeys !== undefined ? { keys: provenanceKeys } : {}),
+        ...(lookupKey !== undefined ? { key: lookupKey } : {}),
+        ...(input.source !== undefined ? { source: input.source } : {}),
+        ...(readScope.readScope === "shared" ? { excludeKeyPrefixes: [AGENT_WORKING_KEY_PREFIX] } : {}),
+        ...(readScope.readScope === "agent" && input.key === undefined && scopedAgentKeyPrefix !== undefined
+          ? {
+              visibleKeyPrefixes: [scopedAgentKeyPrefix],
+              includeUnprefixedKeys: true,
+              unprefixedKeyPrefixExclusions: [AGENT_WORKING_KEY_PREFIX],
+            }
+          : {}),
+        limit: requestedLimit,
+      });
+
+      return attributions
+        .map((attribution) => {
+          const entry = parseScopedWorkingExportEntry(attribution.key, attribution.value);
+          return { attribution, entry };
+        })
+        .filter(({ entry }) => canReadMemoryEntry(entry.agentId, readScope))
+        .slice(0, requestedLimit)
+        .map(({ attribution, entry }) => ({
+          ...attribution,
+          key: entry.key,
+          value: entry.value,
+        }));
     },
   };
 }

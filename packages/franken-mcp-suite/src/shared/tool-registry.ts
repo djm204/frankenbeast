@@ -517,6 +517,47 @@ const TOOLS: ToolFull[] = [
     },
   },
   {
+    name: 'fbeast_memory_source_attribution',
+    server: 'memory',
+    description: 'View source attribution and approval provenance for persisted working-memory entries',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        key: { type: 'string', description: 'Optional exact working-memory key to inspect' },
+        source: { type: 'string', description: 'Optional case-insensitive substring filter for attribution source' },
+        limit: { type: 'string', description: 'Max attribution records (default 50, max 1000)' },
+        readScope: { type: 'string', description: 'Read scope: all (legacy), shared (hide agent-scoped entries), or agent (shared plus entries for agentId)', enum: ['all', 'shared', 'agent'] },
+        agentId: { type: 'string', description: 'Agent id required when readScope is agent' },
+      },
+    },
+    makeHandler: ({ brain }) => async (args) => {
+      const key = args['key'] === undefined ? undefined : parseNonEmptyStringArg('key', args['key']);
+      if (key && !key.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_source_attribution ${key.message}` }], isError: true };
+      }
+      const source = args['source'] === undefined ? undefined : parseNonEmptyStringArg('source', args['source']);
+      if (source && !source.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_source_attribution ${source.message}` }], isError: true };
+      }
+      const parsedLimit = args['limit'] === undefined ? undefined : parseMemoryQueryLimit(args['limit']);
+      if (parsedLimit && !parsedLimit.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_source_attribution ${parsedLimit.message}` }], isError: true };
+      }
+      const scopeArgs = parseMemoryReadScopeArgs(args);
+      if (!scopeArgs.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_source_attribution ${scopeArgs.message}` }], isError: true };
+      }
+      const attributions = await brain.memoryAttribution({
+        targetStore: 'working',
+        ...(key?.value ? { key: key.value } : {}),
+        ...(source?.value ? { source: source.value } : {}),
+        ...(parsedLimit?.value ? { limit: parsedLimit.value } : {}),
+        ...scopeArgs.value,
+      });
+      return { content: [{ type: 'text', text: JSON.stringify({ count: attributions.length, attributions }, null, 2) }] };
+    },
+  },
+  {
     name: 'fbeast_memory_review_conflicts',
     server: 'memory',
     description: 'Show conflict details, existing value/provenance, and guidance for a pending memory promotion candidate',

@@ -1,4 +1,7 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { handleBeastCommand } from '../../../src/cli/beast-cli.js';
 import type { CliArgs } from '../../../src/cli/args.js';
 import type { ProjectPaths } from '../../../src/cli/project-root.js';
@@ -28,8 +31,10 @@ const mockServices = vi.hoisted(() => ({
   dispose: vi.fn(),
 }));
 
+const mockCreateBeastServices = vi.hoisted(() => vi.fn(() => mockServices));
+
 vi.mock('../../../src/beasts/create-beast-services.js', () => ({
-  createBeastServices: () => mockServices,
+  createBeastServices: mockCreateBeastServices,
 }));
 
 const mockControlClient = vi.hoisted(() => ({
@@ -83,6 +88,25 @@ beforeEach(() => {
   }
   vi.clearAllMocks();
   vi.mocked(spawnSync).mockReturnValue({ status: 0, stderr: '' } as any);
+});
+
+describe('handleBeastCommand() maintenance', () => {
+  it('reads maintenance status without starting the Beast service bundle', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'franken-maint-cli-'));
+    const deps = makeDeps({
+      args: { subcommand: 'beasts', beastAction: 'maintenance', beastTarget: 'status' } as CliArgs,
+      paths: { root, fbeast: join(root, '.fbeast') } as unknown as ProjectPaths,
+    });
+
+    try {
+      await handleBeastCommand(deps);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+
+    expect(mockCreateBeastServices).not.toHaveBeenCalled();
+    expect(deps.print).toHaveBeenCalledWith(expect.stringContaining('"enabled": false'));
+  });
 });
 
 describe('handleBeastCommand() catalog', () => {

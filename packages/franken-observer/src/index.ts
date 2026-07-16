@@ -7,6 +7,7 @@ export { TokenCounter } from './cost/TokenCounter.js'
 export { CostCalculator } from './cost/CostCalculator.js'
 export { CircuitBreaker } from './cost/CircuitBreaker.js'
 export { ModelAttribution } from './cost/ModelAttribution.js'
+export { OutcomeAttribution } from './learning/OutcomeAttribution.js'
 export { DEFAULT_PRICING } from './cost/defaultPricing.js'
 export { InMemoryAdapter } from './export/InMemoryAdapter.js'
 export type { InMemoryAdapterOptions } from './export/InMemoryAdapter.js'
@@ -123,6 +124,16 @@ export type { TokenRecord, TokenTotals } from './cost/TokenCounter.js'
 export type { CostCalculatorOptions } from './cost/CostCalculator.js'
 export type { CircuitBreakerOptions, CircuitBreakerResult } from './cost/CircuitBreaker.js'
 export type { AttributionEntry, AttributionRow } from './cost/ModelAttribution.js'
+export type {
+  AgentDecisionRecord,
+  AgentDecisionRecordInput,
+  DecisionOutcomeIssueState,
+  DecisionOutcomePrState,
+  DecisionOutcomeRecord,
+  DecisionOutcomeRecordInput,
+  JoinedDecisionOutcome,
+  WorkflowOutcomeAttributionReport,
+} from './learning/OutcomeAttribution.js'
 export type { ModelPricing, PricingTable } from './cost/defaultPricing.js'
 export type {
   OTELPayload,
