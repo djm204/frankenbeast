@@ -475,4 +475,59 @@ describe('state snapshot diff', () => {
     expect(taskDiff?.changed).toHaveLength(0);
   });
 
+
+  it('redacts sensitive non-approval source names in parse errors', async () => {
+    const before = await snapshotDir({
+      'tasks/token=PathSecret123.json': '{',
+    });
+    const after = await snapshotDir({
+      'tasks/token=PathSecret123.json': { id: 'task-1', status: 'ready' },
+    });
+
+    try {
+      await diffStateSnapshotDirectories(before, after);
+      throw new Error('expected diffStateSnapshotDirectories to reject');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      expect(message).not.toContain('token=PathSecret123');
+      expect(message).toContain('token=<redacted>');
+    }
+  });
+
+  it('keeps explicit subsystem directories authoritative over generic filenames', async () => {
+    const before = await snapshotDir({
+      'memory/state.json': { id: 'memory-1', tasks: ['old'], note: 'before' },
+    });
+    const after = await snapshotDir({
+      'memory/state.json': { id: 'memory-1', tasks: ['new'], note: 'after' },
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const memoryDiff = report.diffs.find((diff) => diff.subsystem === 'memory');
+    const taskDiff = report.diffs.find((diff) => diff.subsystem === 'tasks');
+
+    expect(memoryDiff?.changed).toHaveLength(1);
+    expect(memoryDiff?.changed[0]?.id).toBe('memory-1');
+    expect(memoryDiff?.changed[0]?.changedFields).toEqual(['note', 'tasks']);
+    expect(taskDiff?.added).toHaveLength(0);
+    expect(taskDiff?.removed).toHaveLength(0);
+    expect(taskDiff?.changed).toHaveLength(0);
+  });
+
+  it('redacts sensitive snapshot root paths on load failures', async () => {
+    const before = await snapshotDir({
+      'tasks.json': [{ id: 'task-1', status: 'ready' }],
+    });
+    const missingAfter = join(before, '..', 'token=PathSecret123-missing');
+
+    try {
+      await diffStateSnapshotDirectories(before, missingAfter);
+      throw new Error('expected diffStateSnapshotDirectories to reject');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      expect(message).not.toContain('token=PathSecret123');
+      expect(message).toContain('token=<redacted>');
+    }
+  });
+
 });

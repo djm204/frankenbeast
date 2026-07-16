@@ -201,7 +201,7 @@ function scopedRecordCompareValue(subsystem: StateSnapshotDiffSubsystem, value: 
 
 function redactSourceForOutput(subsystem: StateSnapshotDiffSubsystem, source: string): string {
   const normalized = normalizeSnapshotSourcePath(source);
-  if (subsystem !== 'approvals') return maskOpaqueSecretLiterals(normalized);
+  if (subsystem !== 'approvals') return maskOpaqueSecretLiterals(redactLogData(normalized) as string);
   return normalized.split('/').map((segment) => {
     if (/^(?:approvals?|approval[-_]?tokens?|tokens?|ledger|state|snapshots?)(?:\.jsonl?)?(?::\d+)?(?::approvals?)?$/iu.test(segment)) {
       return segment;
@@ -357,7 +357,7 @@ function extractRecordsFromJson(records: MutableSubsystemRecords, parsed: unknow
     ];
     let foundRootCollection = false;
     for (const [subsystem, keys] of rootArrays) {
-      if (pathSubsystem !== undefined && !isGenericCollectionSource(source) && subsystem !== pathSubsystem) continue;
+      if (pathSubsystem !== undefined && (!isGenericCollectionSource(source) || hasExplicitParentSubsystem(source)) && subsystem !== pathSubsystem) continue;
       for (const key of keys) {
         const value = parsed[key];
         if (Array.isArray(value)) {
@@ -410,9 +410,20 @@ async function collectSnapshotFiles(directory: string, current = directory, coll
 
 function sourceForError(source: string): string {
   const subsystem = likelySubsystemFromPath(source);
+  const normalized = normalizeSnapshotSourcePath(source);
   return subsystem === undefined
-    ? normalizeSnapshotSourcePath(maskOpaqueSecretLiterals(source))
+    ? maskOpaqueSecretLiterals(redactLogData(normalized) as string)
     : redactSourceForOutput(subsystem, source);
+}
+
+function errorMessageForOutput(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return maskOpaqueSecretLiterals(redactLogData(message) as string);
+}
+
+function hasExplicitParentSubsystem(source: string): boolean {
+  const segments = normalizeSnapshotSourcePath(source).toLowerCase().split('/').filter((segment) => segment !== '');
+  return segments.slice(0, -1).some((segment) => subsystemFromSegment(segment) !== undefined);
 }
 
 function parseSnapshotFile(raw: string, source: string): ReadonlyArray<{ parsed: unknown; sourceSuffix: string }> {
@@ -440,8 +451,13 @@ function parseSnapshotFile(raw: string, source: string): ReadonlyArray<{ parsed:
 }
 
 async function loadSnapshotDirectory(directory: string): Promise<MutableSubsystemRecords> {
-  const rootStat = await stat(directory);
-  if (!rootStat.isDirectory()) throw new Error(`State snapshot path must be a directory: ${directory}`);
+  let rootStat;
+  try {
+    rootStat = await stat(directory);
+  } catch (error) {
+    throw new Error(`Unable to read state snapshot directory ${sourceForError(directory)}: ${errorMessageForOutput(error)}`);
+  }
+  if (!rootStat.isDirectory()) throw new Error(`State snapshot path must be a directory: ${sourceForError(directory)}`);
   const records = emptyRecords();
   const files = await collectSnapshotFiles(directory);
   for (const file of files.sort()) {
@@ -450,7 +466,11 @@ async function loadSnapshotDirectory(directory: string): Promise<MutableSubsyste
     if (fileStat.size > MAX_JSON_FILE_BYTES) {
       throw new Error(`State snapshot file is too large: ${sourceForError(source)}`);
     }
-    const parsedRecords = parseSnapshotFile(await readFile(file, 'utf8'), source);
+    const raw = await readFile(file, 'utf8');
+    if (Buffer.byteLength(raw, 'utf8') > MAX_JSON_FILE_BYTES) {
+      throw new Error(`State snapshot file is too large: ${sourceForError(source)}`);
+    }
+    const parsedRecords = parseSnapshotFile(raw, source);
     for (const { parsed, sourceSuffix } of parsedRecords) {
       extractRecordsFromJson(records, parsed, `${source}${sourceSuffix}`);
     }
