@@ -280,6 +280,12 @@
 - 2026-07-15 — MCP memory scoping: avoid encoding agent scope solely in user-visible keys or summaries. Store explicit scope metadata, use reversible internal key encoding for physical storage, keep logical keys in query/frontload output, and fetch/filter uncapped episodic rows before applying visible result limits so other agents' rows cannot starve the requested scope.
 - 2026-07-15 — DR backup review hardening: encrypted state backups should back up only the requested state tree plus explicit sibling DBs, never keys/cache/old artifacts; reject live SQLite sidecars (`-wal`, `-shm`, `-journal`), validate dry-run restore targets, and quarantine approval ledgers rather than reactivating stale approvals.
 
+## 2026-07-16 — Maintenance-mode tracked-agent cleanup
+- When maintenance blocks Beast dispatch after a tracked agent has been created, mark the agent `stopped` and append an `agent.dispatch.paused` event in every dispatch path, including chat-backed `AgentInitService.dispatchAgent`.
+- HTTP maintenance cleanup for stale `trackedAgentId` values must never mask the intended 423 response; ignore missing-agent cleanup failures but rethrow unexpected cleanup errors.
+- Do not keep daemon chat Beast context after a 423 maintenance response from final dispatch; clear it so a later arbitrary chat message cannot auto-resume a completed interview after maintenance is disabled.
+- Only stop maintenance-blocked tracked agents that are still `initializing`; direct run requests can name unrelated running/deleted agents, and maintenance errors happen before createRun validates/links that ID.
+
 ## 2026-07-16 — LlmCacheStore read-path schema validation
 - For JSON cache stores, validate both schemaVersion and the runtime shape (`content` type) before returning entries, otherwise stale/malformed files can be reused as cache hits.
 - Add regression tests that write an explicitly mismatched schema version and a wrong-shaped payload to prove stale cache entries are rejected.

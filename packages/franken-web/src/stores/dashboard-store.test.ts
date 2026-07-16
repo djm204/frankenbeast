@@ -48,6 +48,25 @@ describe('dashboard-store', () => {
       useDashboardStore.getState().setSnapshot(makeMockSnapshot());
       expect(useDashboardStore.getState().loading).toBe(false);
     });
+
+    it('preserves maintenance state across partial snapshots that omit it', () => {
+      useDashboardStore.getState().setSnapshot({
+        ...makeMockSnapshot(),
+        maintenance: {
+          enabled: true,
+          reason: 'database migration',
+          startedAt: '2026-07-16T10:00:00.000Z',
+          allowedCommands: ['beasts maintenance off'],
+        },
+      });
+
+      useDashboardStore.getState().setSnapshot(makeMockSnapshot());
+
+      expect(useDashboardStore.getState().maintenance).toMatchObject({
+        enabled: true,
+        reason: 'database migration',
+      });
+    });
   });
 
   describe('toggleSkill', () => {
