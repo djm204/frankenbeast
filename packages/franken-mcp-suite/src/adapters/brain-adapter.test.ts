@@ -70,12 +70,12 @@ vi.mock("@franken/brain", () => ({
             "OPENSSH PRIVATE KEY-----\nsecret\n-----END " +
             "OPENSSH PRIVATE KEY-----",
           "status-page": "password=hunter2 session_cookie=abc123value",
-          "db_pwd": "short-password-alias",
           "legacy-db-passwd": "legacy-password-alias",
           "ops-note": "slack_webhook_url=https://hooks.slack.com/services/T000/B000/SECRET discord webhook https://discord.com/api/webhooks/1234567890/abcdef_SECRET",
           "env-snippet": "AWS_SECRET_ACCESS_KEY=AKIA" + "supersecretvalue123456 REGION=us-east-1",
           "legacy-token-snippet": "xoxb-" + "legacytokenvalue123 glpat-legacytokenvalue123",
-          "basic-auth": "Authorization: *** " + "dXNlcjpwYXNz",
+          "basic-auth": "Authorization: Basic " + "dXNlcjpwYXNz",
+          "token-auth": "Authorization: Token secret-token-value-that-must-not-leak",
           "db_pwd": "super-pwd-value",
           "db_passwd": "super-passwd-value",
           "slack_webhook_url": "https://hooks.slack.com/services/T000/B000/secretwebhookvalue",
@@ -85,6 +85,7 @@ vi.mock("@franken/brain", () => ({
           profile: {
             password: "hunter2",
             "alice@example.com": "oncall",
+            "bob@example.com": "backup",
           },
           "object-secret": {
             password: "hunter2",
@@ -341,7 +342,7 @@ describe("createBrainAdapter", () => {
       query: "entry",
       readScope: "agent",
       agentId: "alpha",
-      limit: 20,
+      limit: 30,
     });
     expect(alphaRows.map((row) => row.key)).toContain("task-1");
     expect(alphaRows.map((row) => row.key)).toContain("private-task");
@@ -405,15 +406,19 @@ describe("createBrainAdapter", () => {
     expect(serialized).not.toContain("hooks.slack.com/services");
     expect(serialized).not.toContain("discord.com/api/webhooks");
     expect(serialized).not.toContain("dXNlcjpwYXNz");
+    expect(serialized).not.toContain("secret-token-value-that-must-not-leak");
     expect(serialized).not.toContain("postgres://alice:hunter2@db.internal/app");
     expect(serialized).not.toContain("//alice:hunter2@db.internal/app");
     expect(serialized).not.toContain('"password":123456');
     expect(serialized).not.toContain('"token":true');
     expect(serialized).not.toContain("987654");
+    expect(serialized).toContain("oncall");
+    expect(serialized).toContain("backup");
     expect(serialized).not.toContain("alice@example.com");
     expect(serialized).not.toContain("bob@example.com");
     expect(serialized).not.toContain("apiKey");
     expect(serialized).not.toContain("dXNlcjpwYXNz");
+    expect(serialized).not.toContain("secret-token-value-that-must-not-leak");
     expect(serialized).not.toContain("postgres://alice:hunter2");
     expect(serialized).not.toContain("ghs_secretvalue123456");
     expect(serialized).not.toContain("secretvalue123456");
@@ -437,7 +442,7 @@ describe("createBrainAdapter", () => {
     const exported = await brain.exportProjectMemory({
       readScope: "agent",
       agentId: "alpha",
-      limit: 20,
+      limit: 30,
     });
 
     expect(exported.scope).toEqual({

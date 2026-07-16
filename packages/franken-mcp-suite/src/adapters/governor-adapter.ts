@@ -487,8 +487,6 @@ function assessHighRiskAction(action: string, context: string): GovernorCheckRes
   return { decision: 'review_recommended', reason: `High-risk policy requires approval for ${action}: ${result.reason}` };
 }
 
-const TRUSTED_OPERATOR_EXPORT_APPROVAL = 'trusted-operator-approved';
-
 function memoryExportArgsFromContext(action: string, context: string): Record<string, unknown> | undefined {
   const unqualifiedAction = unqualifyMcpActionName(action);
   const isDirectExport = unqualifiedAction === 'fbeast_memory_export';
@@ -518,11 +516,6 @@ function isTrustedOperatorMemoryExport(action: string, context: string): boolean
   return memoryExportArgsFromContext(action, context)?.redaction === 'none';
 }
 
-function isApprovedTrustedOperatorMemoryExport(action: string, context: string): boolean {
-  const args = memoryExportArgsFromContext(action, context);
-  return args?.redaction === 'none' && args.operatorApproval === TRUSTED_OPERATOR_EXPORT_APPROVAL;
-}
-
 function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; model: string }): boolean {
   if (row.cost_usd > 0 || row.cost_source === 'explicit') {
     return false;
@@ -538,17 +531,10 @@ function assessAction(action: string, context: string): GovernorCheckResult {
   const highRiskResult = assessHighRiskAction(unqualifiedAction, context);
   if (highRiskResult !== undefined) return highRiskResult;
 
-  if (isApprovedTrustedOperatorMemoryExport(unqualifiedAction, context)) {
-    return {
-      decision: 'approved',
-      reason: 'Unredacted fbeast_memory_export has explicit trusted-operator approval evidence.',
-    };
-  }
-
   if (isTrustedOperatorMemoryExport(unqualifiedAction, context)) {
     return {
       decision: 'review_recommended',
-      reason: `Unredacted fbeast_memory_export requires trusted-operator approval; retry with operatorApproval="${TRUSTED_OPERATOR_EXPORT_APPROVAL}" only after approval.`,
+      reason: 'Unredacted fbeast_memory_export requires a separate trusted-operator approval outside the caller-supplied tool arguments.',
     };
   }
 

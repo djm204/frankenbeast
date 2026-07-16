@@ -377,8 +377,7 @@ function resolveExportLimit(limit: number | undefined): number {
 
 const SENSITIVE_EXPORT_KEY = /(?:password|passphrase|passw?d|pwd|secret|token|api[_-]?key|access[_-]?key|authorization|credential|private[_-]?key|session|cookie|webhook(?:[_-]?url)?)/i;
 const SECRET_EXPORT_VALUES: Array<[RegExp, string]> = [
-  [/\bAuthorization\s*:\s*Basic\s+\S+/gi, "Authorization: Basic ***"],
-  [/\bAuthorization\s*:\s*\*+\s+\S+/gi, "Authorization: ***"],
+  [/\bAuthorization\s*:\s*[^\r\n]+/gi, "Authorization: [redacted]"],
   [/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]"],
   [/\bBasic\s+[A-Za-z0-9._~+/-]+=*/gi, "Basic [redacted]"],
   [/https:\/\/hooks\.slack(?:-gov)?\.com\/services\/[^\s"'<>]+/gi, "[redacted-webhook-url]"],
@@ -444,9 +443,10 @@ function redactExportValue(
   }
   const output: Record<string, unknown> = {};
   for (const [key, nested] of Object.entries(value)) {
-    const outputKey = SENSITIVE_EXPORT_KEY.test(key)
+    const redactedKey = SENSITIVE_EXPORT_KEY.test(key)
       ? stableRedactedKey(key)
       : redactExportString(key);
+    const outputKey = redactedKey === key ? key : stableRedactedKey(key);
     output[outputKey] = redactExportValue(nested, key, seen);
   }
   return output;
