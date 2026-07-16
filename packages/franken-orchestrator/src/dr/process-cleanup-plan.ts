@@ -95,16 +95,16 @@ function uidMatches(
 }
 
 function argsMatch(attempt: ProcessCleanupAttemptSnapshot, processEntry: ProcessTableEntry): boolean {
-  if (!attempt.expectedArgs || attempt.expectedArgs.length === 0) {
-    return true;
-  }
+  if (!attempt.expectedArgs) return false;
   const actualArgs = processEntry.args ?? [];
-  return attempt.expectedArgs.every((arg, index) => actualArgs[index] === arg);
+  return actualArgs.length === attempt.expectedArgs.length
+    && attempt.expectedArgs.every((arg, index) => actualArgs[index] === arg);
 }
 
 function startTimeMatches(attempt: ProcessCleanupAttemptSnapshot, processEntry: ProcessTableEntry): boolean {
-  return attempt.expectedStartTimeTicks === undefined
-    || attempt.expectedStartTimeTicks === processEntry.startTimeTicks;
+  return typeof attempt.expectedStartTimeTicks === 'string'
+    && attempt.expectedStartTimeTicks.length > 0
+    && attempt.expectedStartTimeTicks === processEntry.startTimeTicks;
 }
 
 function isLiveMatchingWorker(
@@ -383,6 +383,7 @@ export function buildProcessCleanupPlan(options: ProcessCleanupPlanOptions): Pro
   const orphanPids = new Set<number>();
   for (const attempt of options.attempts) {
     if (!attempt.expectedCommand || !attempt.expectedCwd) continue;
+    if (typeof attempt.pid === 'number' && (recordedPidCounts.get(attempt.pid) ?? 0) > 1) continue;
     const recordedProcess = typeof attempt.pid === 'number' ? processByPid.get(attempt.pid) : undefined;
     if (!recordedProcess || !isLiveMatchingWorker(attempt, recordedProcess, options.currentUid)) continue;
     for (const processEntry of options.processes) {

@@ -34,6 +34,7 @@ describe('process cleanup plan', () => {
           expectedCommand: '/usr/bin/node',
           expectedArgs: ['dist/cli/run.js', 'beast'],
           expectedCwd: '/repo',
+          expectedStartTimeTicks: '102-start',
         },
         {
           runId: 'run-wrong-command',
@@ -53,10 +54,10 @@ describe('process cleanup plan', () => {
         },
       ],
       processes: [
-        { pid: 102, command: '/usr/bin/node', args: ['dist/cli/run.js', 'beast'], cwd: '/repo', uid: 1000 },
+        { pid: 102, command: '/usr/bin/node', args: ['dist/cli/run.js', 'beast'], cwd: '/repo', uid: 1000, startTimeTicks: '102-start' },
         { pid: 103, command: '/bin/bash', args: ['-lc', 'sleep 60'], cwd: '/repo', uid: 1000 },
         { pid: 104, command: '/usr/bin/node', args: ['dist/cli/run.js', 'beast'], cwd: '/tmp/other', uid: 1000 },
-        { pid: 202, command: '/usr/bin/node', args: ['dist/cli/run.js', 'beast'], cwd: '/repo', uid: 1000 },
+        { pid: 202, command: '/usr/bin/node', args: ['dist/cli/run.js', 'beast'], cwd: '/repo', uid: 1000, startTimeTicks: '102-start' },
       ],
     });
 
@@ -186,5 +187,101 @@ describe('process cleanup plan', () => {
     expect(report.findings).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'live-matching-worker' }),
     ]));
+  });
+
+  it('does not treat a process with trailing args as a matching worker', () => {
+    const report = buildProcessCleanupPlan({
+      checkedAt: '2026-07-16T12:00:00.000Z',
+      dryRun: true,
+      currentUid: 1000,
+      attempts: [
+        {
+          runId: 'run-extra-args',
+          attemptId: 'attempt-extra-args',
+          status: 'running',
+          pid: 501,
+          expectedCommand: '/usr/bin/node',
+          expectedArgs: ['dist/cli/run.js', 'beast'],
+          expectedCwd: '/repo',
+          expectedStartTimeTicks: '501-start',
+        },
+      ],
+      processes: [
+        { pid: 501, command: '/usr/bin/node', args: ['dist/cli/run.js', 'beast', '--other-card'], cwd: '/repo', uid: 1000, startTimeTicks: '501-start' },
+      ],
+    });
+
+    expect(report.findings.map((finding) => finding.code)).toEqual(['wrong-args']);
+    expect(report.actions).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: 'terminate-orphan' }),
+    ]));
+  });
+
+  it('requires process-start evidence before matching workers or planning orphan cleanup', () => {
+    const report = buildProcessCleanupPlan({
+      checkedAt: '2026-07-16T12:00:00.000Z',
+      dryRun: true,
+      currentUid: 1000,
+      attempts: [
+        {
+          runId: 'run-no-start-token',
+          attemptId: 'attempt-no-start-token',
+          status: 'running',
+          pid: 601,
+          expectedCommand: '/usr/bin/node',
+          expectedArgs: ['dist/cli/run.js', 'beast'],
+          expectedCwd: '/repo',
+        },
+      ],
+      processes: [
+        { pid: 601, command: '/usr/bin/node', args: ['dist/cli/run.js', 'beast'], cwd: '/repo', uid: 1000, startTimeTicks: '601-start' },
+        { pid: 602, command: '/usr/bin/node', args: ['dist/cli/run.js', 'beast'], cwd: '/repo', uid: 1000, startTimeTicks: '602-start' },
+      ],
+    });
+
+    expect(report.findings.map((finding) => finding.code)).toEqual(['wrong-start-time']);
+    expect(report.actions).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: 'terminate-orphan' }),
+    ]));
+  });
+
+  it('skips orphan cleanup when recorded PID ownership is duplicated', () => {
+    const report = buildProcessCleanupPlan({
+      checkedAt: '2026-07-16T12:00:00.000Z',
+      dryRun: true,
+      currentUid: 1000,
+      attempts: [
+        {
+          runId: 'run-duplicate-a',
+          attemptId: 'attempt-duplicate-a',
+          status: 'running',
+          pid: 701,
+          expectedCommand: '/usr/bin/node',
+          expectedArgs: ['dist/cli/run.js', 'beast'],
+          expectedCwd: '/repo',
+          expectedStartTimeTicks: '701-start',
+        },
+        {
+          runId: 'run-duplicate-b',
+          attemptId: 'attempt-duplicate-b',
+          status: 'running',
+          pid: 701,
+          expectedCommand: '/usr/bin/node',
+          expectedArgs: ['dist/cli/run.js', 'beast'],
+          expectedCwd: '/repo',
+          expectedStartTimeTicks: '701-start',
+        },
+      ],
+      processes: [
+        { pid: 701, command: '/usr/bin/node', args: ['dist/cli/run.js', 'beast'], cwd: '/repo', uid: 1000, startTimeTicks: '701-start' },
+        { pid: 702, command: '/usr/bin/node', args: ['dist/cli/run.js', 'beast'], cwd: '/repo', uid: 1000, startTimeTicks: '701-start' },
+      ],
+    });
+
+    expect(report.findings.map((finding) => finding.code)).toEqual([
+      'duplicate-recorded-pid',
+      'duplicate-recorded-pid',
+    ]);
+    expect(report.actions.filter((action) => action.action === 'terminate-orphan')).toHaveLength(0);
   });
 });
