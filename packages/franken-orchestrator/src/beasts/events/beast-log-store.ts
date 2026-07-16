@@ -4,6 +4,7 @@ import { isoNow } from '@franken/types';
 
 const DEFAULT_MAX_LOG_FILE_BYTES = 10 * 1024 * 1024;
 const DEFAULT_MAX_ROTATED_LOG_FILES = 3;
+const MAX_ROTATED_LOG_FILES = 100;
 const MIN_LOG_FILE_BYTES = 128;
 
 export interface BeastLogStoreOptions {
@@ -30,7 +31,7 @@ export class BeastLogStore {
     options: BeastLogStoreOptions = {},
   ) {
     this.maxLogFileBytes = Math.max(options.maxLogFileBytes ?? DEFAULT_MAX_LOG_FILE_BYTES, MIN_LOG_FILE_BYTES);
-    this.maxRotatedLogFiles = options.maxRotatedLogFiles ?? DEFAULT_MAX_ROTATED_LOG_FILES;
+    this.maxRotatedLogFiles = Math.min(options.maxRotatedLogFiles ?? DEFAULT_MAX_ROTATED_LOG_FILES, MAX_ROTATED_LOG_FILES);
   }
 
   async append(
@@ -119,6 +120,7 @@ export class BeastLogStore {
     if (Buffer.byteLength(bounded) > this.maxLogFileBytes) {
       return `${JSON.stringify({
         stream: record.stream,
+        createdAt: record.createdAt,
         message: '[truncated]',
         truncatedBytes: Buffer.byteLength(record.message),
       })}\n`;
@@ -144,6 +146,7 @@ export class BeastLogStore {
 
     const currentBytes = await fileSize(filePath);
     if (currentBytes === 0 || currentBytes + nextWriteBytes <= this.maxLogFileBytes) {
+      await this.removeRotationsAboveRetention(filePath);
       return;
     }
 

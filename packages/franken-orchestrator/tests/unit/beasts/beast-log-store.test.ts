@@ -102,8 +102,12 @@ describe('BeastLogStore', () => {
 
       const activePath = join(dir, 'run-minimum', 'attempt-1.log');
       const contents = await readFile(activePath, 'utf-8');
+      const parsed = JSON.parse(contents.trim()) as { createdAt?: string; message: string };
       expect((await stat(activePath)).size).toBeLessThanOrEqual(128);
-      expect(JSON.parse(contents.trim())).toMatchObject({ message: expect.stringContaining('[truncated]') });
+      expect(parsed).toMatchObject({
+        createdAt: '2026-03-11T00:00:00.000Z',
+        message: expect.stringContaining('[truncated]'),
+      });
     });
   });
 
@@ -174,6 +178,40 @@ describe('BeastLogStore', () => {
       expect(existsSync(`${activePath}.1`)).toBe(false);
       expect(existsSync(`${activePath}.2`)).toBe(false);
       expect((await stat(activePath)).size).toBeLessThanOrEqual(160);
+    });
+  });
+
+  it('prunes stale rotations even when the active log stays below the size cap', async () => {
+    await withTempDir(async (dir) => {
+      const activePath = join(dir, 'run-prune-without-rotation', 'attempt-1.log');
+      await mkdir(join(dir, 'run-prune-without-rotation'), { recursive: true });
+      await writeFile(activePath, `${JSON.stringify({ stream: 'stdout', message: 'active', createdAt: '2026-03-11T00:00:00.000Z' })}\n`);
+      await writeFile(`${activePath}.1`, 'old-1\n');
+      await writeFile(`${activePath}.2`, 'old-2\n');
+
+      const logs = new BeastLogStore(dir, { maxLogFileBytes: 1_000, maxRotatedLogFiles: 0 });
+      await logs.append('run-prune-without-rotation', 'attempt-1', 'stdout', 'small', '2026-03-11T00:00:01.000Z');
+
+      expect(existsSync(`${activePath}.1`)).toBe(false);
+      expect(existsSync(`${activePath}.2`)).toBe(false);
+      expect((await stat(activePath)).size).toBeLessThanOrEqual(1_000);
+    });
+  });
+
+  it('caps configured rotated-file retention to avoid unbounded rotation loops', async () => {
+    await withTempDir(async (dir) => {
+      const activePath = join(dir, 'run-capped-retention', 'attempt-1.log');
+      await mkdir(join(dir, 'run-capped-retention'), { recursive: true });
+      await writeFile(activePath, `${JSON.stringify({ stream: 'stdout', message: 'active'.repeat(20), createdAt: '2026-03-11T00:00:00.000Z' })}\n`);
+      await writeFile(`${activePath}.99`, 'old-99\n');
+      await writeFile(`${activePath}.100`, 'old-100\n');
+      await writeFile(`${activePath}.101`, 'old-101\n');
+
+      const logs = new BeastLogStore(dir, { maxLogFileBytes: 160, maxRotatedLogFiles: Number.MAX_SAFE_INTEGER });
+      await logs.append('run-capped-retention', 'attempt-1', 'stdout', 'new'.repeat(30), '2026-03-11T00:00:01.000Z');
+
+      expect(await readFile(`${activePath}.100`, 'utf-8')).toBe('old-99\n');
+      expect(existsSync(`${activePath}.101`)).toBe(false);
     });
   });
 });
