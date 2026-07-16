@@ -96,6 +96,7 @@ describe('dr restore-dry-run CLI', () => {
       await writeFile(join(stateDir, 'logs', 'run-1.log'), [
         'starting run',
         'OPENAI_API_KEY=test-key-needs-redaction',
+        'Authorization: Bearer bearerCredentialForReview123',
         'finished run',
       ].join('\n'), 'utf8');
 
@@ -141,6 +142,7 @@ describe('dr restore-dry-run CLI', () => {
       expect(reportText).not.toContain('private memory body');
       expect(reportText).not.toContain('secret task title');
       expect(reportText).not.toContain('test-key-needs-redaction');
+      expect(reportText).not.toContain('bearerCredentialForReview123');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

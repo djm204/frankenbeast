@@ -33,7 +33,21 @@ export function isSensitiveLogKey(key: string): boolean {
 }
 
 export function redactSensitiveText(text: string): string {
-  return redactSensitiveTextWithProvenance(text).value;
+  return maskOpaqueSecretLiterals(redactSensitiveTextWithProvenance(text).value);
+}
+
+export function maskOpaqueSecretLiterals(text: string): string {
+  return text
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/gu, REDACTED)
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{12,}\b/gu, REDACTED)
+    .replace(/\bsk-[A-Za-z0-9_-]{12,}\b/gu, REDACTED)
+    .replace(/\bxox[baprs]-[A-Za-z0-9-]{10,}\b/gu, REDACTED)
+    .replace(/\b([A-Za-z][A-Za-z0-9+.-]*:\/\/[^:\s"'/@]+):[^@\s"']+@/gu, `$1:${REDACTED}@`)
+    .replace(/\b((?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/[^:\s"']+):[^@\s"']+@/giu, `$1:${REDACTED}@`)
+    .replace(/\b(?:Bearer|Basic|Bot)\s+[A-Za-z0-9._~+/=-]{8,}\b/giu, (match) => `${match.split(/\s+/u)[0]} ${REDACTED}`)
+    .replace(/((?:^|[\s"'])--(?:api-?key|auth|authorization|bearer|password|secret|token)\s+)[^\s"']+/giu, `$1${REDACTED}`)
+    .replace(/((?:^|[\s"'])--(?:api-?key|auth|authorization|bearer|password|secret|token)=)[^\s"']+/giu, `$1${REDACTED}`)
+    .replace(/("--(?:api-?key|auth|authorization|bearer|password|secret|token)"\s*,\s*")[^"]+/giu, `$1${REDACTED}`);
 }
 
 export function redactSensitiveTextWithProvenance(text: string, path = '$'): RedactionResult<string> {

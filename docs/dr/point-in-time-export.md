@@ -3,9 +3,11 @@
 Use `frankenbeast dr export` when incident responders need a compact evidence bundle without copying raw secrets or restoring state.
 
 ```bash
-frankenbeast dr export .fbeast/state /tmp/franken-incident-export.json
-frankenbeast --dry-run dr export .fbeast/state /tmp/franken-incident-export.json
+frankenbeast dr export .fbeast /tmp/franken-incident-export.json
+frankenbeast --dry-run dr export .fbeast /tmp/franken-incident-export.json
 ```
+
+The source directory should be the full `.fbeast` evidence root in the default layout, so sibling config, state, run, and log paths are captured together.
 
 The export is a JSON report with:
 
