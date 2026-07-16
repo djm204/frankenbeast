@@ -123,7 +123,7 @@ describe('dashboard routes', () => {
             type: 'provider:claude-cli',
             status: 'unavailable',
             remediationHint: 'Check claude credentials, CLI installation, or upstream provider status.',
-            safeWork: ['Route provider-backed work to the next available failover provider.', 'Continue work that does not require this provider.'],
+            safeWork: ['Route provider-backed work to another available provider.', 'Continue work that does not require this provider.'],
           },
           {
             name: 'codex',
@@ -137,6 +137,33 @@ describe('dashboard routes', () => {
             summary: 'GitHub API is rate limited for issue enrichment.',
             remediationHint: 'Wait for the API reset or reduce polling.',
             safeWork: ['Continue code review on already-fetched PRs.'],
+          },
+        ],
+      });
+    });
+
+    it('routes provider-backed work to a healthy primary when a later fallback is unavailable', async () => {
+      const deps = createMockDeps();
+      deps.getProviders = vi.fn().mockReturnValue([
+        { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0, model: 'sonnet' },
+        { name: 'codex', type: 'codex-cli', available: false, failoverOrder: 1, model: 'gpt-5.3-codex-spark' },
+      ]);
+      const app = createDashboardRoutes(deps);
+      const res = await app.request('/');
+
+      expect(res.status).toBe(200);
+      const body = await res.json() as Record<string, unknown>;
+      expect(body.availability).toMatchObject({
+        status: 'degraded',
+        dependencies: [
+          {
+            name: 'claude',
+            status: 'healthy',
+          },
+          {
+            name: 'codex',
+            status: 'unavailable',
+            safeWork: ['Route provider-backed work to another available provider.', 'Continue work that does not require this provider.'],
           },
         ],
       });

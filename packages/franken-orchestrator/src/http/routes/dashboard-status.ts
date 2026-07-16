@@ -47,7 +47,9 @@ function providerToDependency(
   allProviders: readonly DashboardProviderSnapshot[],
 ): DashboardDependencySnapshot {
   const status: DashboardDependencyStatus = provider.available ? 'healthy' : 'unavailable';
-  const hasFailover = allProviders.some((candidate) => candidate.available && candidate.failoverOrder > provider.failoverOrder);
+  const hasAvailableAlternateProvider = allProviders.some((candidate) => (
+    candidate.name !== provider.name && candidate.available
+  ));
   const modelSuffix = provider.model ? ` using ${provider.model}` : '';
 
   return normalizeDependency({
@@ -62,8 +64,8 @@ function providerToDependency(
       : `Check ${provider.name} credentials, CLI installation, or upstream provider status.`,
     safeWork: provider.available
       ? ['Provider-backed work can use this provider.']
-      : hasFailover
-        ? ['Route provider-backed work to the next available failover provider.', 'Continue work that does not require this provider.']
+      : hasAvailableAlternateProvider
+        ? ['Route provider-backed work to another available provider.', 'Continue work that does not require this provider.']
         : ['Defer new provider-backed work until a provider is available.', 'Continue local-only review or documentation work.'],
   });
 }
