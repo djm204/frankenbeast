@@ -11,7 +11,7 @@ async function snapshotDir(files: Record<string, unknown>): Promise<string> {
   for (const [relativePath, value] of Object.entries(files)) {
     const path = join(root, relativePath);
     await mkdir(path.slice(0, path.lastIndexOf('/')), { recursive: true });
-    await writeFile(path, JSON.stringify(value), 'utf8');
+    await writeFile(path, typeof value === 'string' ? value : JSON.stringify(value), 'utf8');
   }
   return root;
 }
@@ -67,5 +67,63 @@ describe('state snapshot diff', () => {
     expect(memoryDiff?.changed).toHaveLength(1);
     expect(memoryDiff?.changed[0]?.id).toBe('operator-memory');
     expect(memoryDiff?.changed[0]?.changedFields).toEqual(['note', 'tasks']);
+    expect(report.diffs.find((diff) => diff.subsystem === 'tasks')?.changed).toHaveLength(0);
+  });
+
+  it('redacts approvalId values and hashes approval source fallbacks', async () => {
+    const before = await snapshotDir({
+      'approvals/opaque-before-token.json': { approvalId: 'approval-secret-before', decision: 'pending' },
+      'approvals/opaque-path-token.json': { decision: 'pending' },
+    });
+    const after = await snapshotDir({
+      'approvals/opaque-after-token.json': { approvalId: 'approval-secret-after', decision: 'approved' },
+      'approvals/opaque-path-token-next.json': { decision: 'approved' },
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const approvalDiff = report.diffs.find((diff) => diff.subsystem === 'approvals');
+    const serialized = JSON.stringify(approvalDiff);
+
+    expect(serialized).not.toContain('approval-secret');
+    expect(serialized).not.toContain('opaque-path-token');
+    expect(serialized).toContain('"approvalId":"<redacted>"');
+    for (const change of [...approvalDiff?.added ?? [], ...approvalDiff?.removed ?? []]) {
+      expect(change.id).toMatch(/^approval:[a-f0-9]{16}(?:#\d+)?$/u);
+    }
+  });
+
+  it('preserves approval map keys when values are objects', async () => {
+    const before = await snapshotDir({
+      'approvals/state.json': { approvals: { tokenA: { id: 'approval-1', state: 'pending' } } },
+    });
+    const after = await snapshotDir({
+      'approvals/state.json': { approvals: { tokenB: { id: 'approval-1', state: 'pending' } } },
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const approvalDiff = report.diffs.find((diff) => diff.subsystem === 'approvals');
+
+    expect(approvalDiff?.added).toHaveLength(1);
+    expect(approvalDiff?.removed).toHaveLength(1);
+    expect(approvalDiff?.changed).toHaveLength(0);
+    expect(approvalDiff?.added[0]?.id).toMatch(/^approval:[a-f0-9]{16}$/u);
+    expect(approvalDiff?.removed[0]?.id).toMatch(/^approval:[a-f0-9]{16}$/u);
+  });
+
+  it('does not double-count collection wrappers in generic JSONL files', async () => {
+    const before = await snapshotDir({
+      'tasks.jsonl': `${JSON.stringify({ tasks: [{ id: 'task-1', status: 'ready' }] })}\n`,
+    });
+    const after = await snapshotDir({
+      'tasks.jsonl': `${JSON.stringify({ tasks: [{ id: 'task-1', status: 'done' }] })}\n`,
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const taskDiff = report.diffs.find((diff) => diff.subsystem === 'tasks');
+
+    expect(taskDiff?.changed).toHaveLength(1);
+    expect(taskDiff?.changed[0]?.id).toBe('task-1');
+    expect(taskDiff?.added).toHaveLength(0);
+    expect(taskDiff?.removed).toHaveLength(0);
   });
 });

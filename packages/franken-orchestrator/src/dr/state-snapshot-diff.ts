@@ -134,6 +134,7 @@ function recordId(
       return String(value);
     }
   }
+  if (subsystem === 'approvals') return safeApprovalId(fallback);
   return fallback;
 }
 
@@ -142,7 +143,7 @@ function hasRecordIdentityKey(value: Record<string, unknown>): boolean {
 }
 
 function sensitiveApprovalValueForComparison(key: string, value: unknown): unknown {
-  if (/^(?:id|token|tokens|value|secret|password|credential|bearer|refresh|access|digest|api[-_]?key)$/iu.test(key)) {
+  if (/^(?:id|approval[-_]?id|token|tokens|value|secret|password|credential|bearer|refresh|access|digest|api[-_]?key)$/iu.test(key)) {
     return `<sha256:${shortDigest(value)}>`;
   }
   return value;
@@ -155,7 +156,7 @@ function scopedRecordValue(subsystem: StateSnapshotDiffSubsystem, value: unknown
   }
   return Object.fromEntries(Object.entries(value).map(([key, nested]) => [
     key,
-    /^(?:id|token|tokens|value|secret|password|credential|bearer|refresh|access|digest|api[-_]?key)$/iu.test(key)
+    /^(?:id|approval[-_]?id|token|tokens|value|secret|password|credential|bearer|refresh|access|digest|api[-_]?key)$/iu.test(key)
       ? '<redacted>'
       : nested,
   ]));
@@ -184,7 +185,7 @@ function redactSourceForOutput(subsystem: StateSnapshotDiffSubsystem, source: st
 }
 
 function isGenericCollectionSource(source: string): boolean {
-  return /(?:^|\/)(?:state|index|tasks|cards|kanban|approvals?|approval[-_]?tokens?|tokens?|ledger|workers?|memory|memories|cron|jobs)\.jsonl?$/iu.test(source);
+  return /(?:^|\/)(?:state|index|tasks|cards|kanban|approvals?|approval[-_]?tokens?|tokens?|ledger|workers?|memory|memories|cron|jobs)\.jsonl?(?::\d+)?$/iu.test(source);
 }
 
 function addRecord(
@@ -224,7 +225,10 @@ function addObjectMapRecords(
     .forEach(([key, value]) => {
       const fallback = subsystem === 'approvals' ? safeApprovalId(key) : key;
       const recordValue = subsystem === 'approvals' && !isRecord(value) ? { id: key, value } : value;
-      addRecord(records, subsystem, recordId(recordValue, fallback, subsystem, { preferFallbackOverMutableDisplayName: true }), recordValue, source);
+      const id = subsystem === 'approvals'
+        ? fallback
+        : recordId(recordValue, fallback, subsystem, { preferFallbackOverMutableDisplayName: true });
+      addRecord(records, subsystem, id, recordValue, source);
     });
 }
 
@@ -273,6 +277,7 @@ function extractRecordsFromJson(records: MutableSubsystemRecords, parsed: unknow
     ];
     let foundRootCollection = false;
     for (const [subsystem, keys] of rootArrays) {
+      if (pathSubsystem !== undefined && !isGenericCollectionSource(source) && subsystem !== pathSubsystem) continue;
       for (const key of keys) {
         const value = parsed[key];
         if (Array.isArray(value)) {
