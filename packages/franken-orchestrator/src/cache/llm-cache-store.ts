@@ -62,12 +62,31 @@ export class LlmCacheStore {
   private async read(filePath: string): Promise<StoredCacheEntry | undefined> {
     try {
       const raw = await readFile(filePath, 'utf8');
-      return JSON.parse(raw) as StoredCacheEntry;
+      const stored = JSON.parse(raw) as unknown;
+
+      if (!this.isValidStoredCacheEntry(stored)) {
+        return undefined;
+      }
+
+      return stored;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError) {
+      if ((error as { code?: string }).code === 'ENOENT' || error instanceof SyntaxError) {
         return undefined;
       }
       throw error;
     }
+  }
+
+  private isValidStoredCacheEntry(value: unknown): value is StoredCacheEntry {
+    if (!value || typeof value !== 'object') {
+      return false;
+    }
+
+    const entry = value as Partial<StoredCacheEntry>;
+    return (
+      typeof entry.schemaVersion === 'number' &&
+      entry.schemaVersion === this.options.schemaVersion &&
+      typeof entry.content === 'string'
+    );
   }
 }

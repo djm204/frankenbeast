@@ -6,9 +6,16 @@ import type { BeastMetrics } from '../telemetry/beast-metrics.js';
 import type { BeastExecutors } from './beast-dispatch-service.js';
 import { BeastCatalogService } from './beast-catalog-service.js';
 import { isoNow } from '@franken/types';
+import {
+  CapacityReservationError,
+  type CapacityReservationPolicy,
+  type CapacityReservationWorkItem,
+  capacityItemFromConfig,
+} from './capacity-reservation-policy.js';
 
 export interface BeastRunServiceOptions {
   eventBus?: BeastEventBus;
+  capacityPolicy?: CapacityReservationPolicy | undefined;
 }
 
 export class UnknownBeastRunError extends Error {
@@ -60,7 +67,7 @@ export class BeastRunService {
   }
 
   async start(runId: string, _actor: string): Promise<BeastRun> {
-    const run = this.requireRun(runId);
+    const run = this.reserveTrackedAgentCapacityForStart(this.requireRun(runId));
     const definition = this.getDefinitionOrThrow(run.definitionId);
     const priorAttemptId = run.currentAttemptId;
     const priorAttemptCount = run.attemptCount;
@@ -275,6 +282,7 @@ export class BeastRunService {
   async restart(runId: string, actor: string): Promise<BeastRun> {
     const run = this.requireRun(runId);
     if (run.status === 'running') {
+      this.assertTrackedAgentCapacity(run);
       await this.stop(runId, actor);
     }
     return this.start(runId, actor);
@@ -321,6 +329,57 @@ export class BeastRunService {
     if (run) {
       this.syncTrackedAgent(run);
     }
+  }
+
+  private assertTrackedAgentCapacity(run: BeastRun): void {
+    if (!run.trackedAgentId || !this.serviceOptions.capacityPolicy) return;
+    const trackedAgent = this.repository.getTrackedAgent(run.trackedAgentId);
+    if (!trackedAgent || trackedAgent.status === 'deleted') return;
+
+    const activeItems = this.activeCapacityItems(run.id);
+    const decision = this.serviceOptions.capacityPolicy.canStart(
+      capacityItemFromConfig(trackedAgent.id, run.configSnapshot),
+      activeItems,
+    );
+    if (!decision.allowed) {
+      throw new CapacityReservationError(decision, this.serviceOptions.capacityPolicy.describe(activeItems));
+    }
+  }
+
+  private reserveTrackedAgentCapacityForStart(run: BeastRun): BeastRun {
+    if (!run.trackedAgentId || !this.serviceOptions.capacityPolicy) return run;
+    const trackedAgent = this.repository.getTrackedAgent(run.trackedAgentId);
+    if (!trackedAgent || trackedAgent.status === 'deleted') return run;
+
+    const reservedAt = isoNow();
+    return this.repository.transaction(() => {
+      const currentRun = this.requireRun(run.id);
+      const currentTrackedAgent = this.repository.getTrackedAgent(run.trackedAgentId!);
+      if (!currentTrackedAgent || currentTrackedAgent.status === 'deleted') return currentRun;
+
+      this.assertTrackedAgentCapacity(currentRun);
+      if (currentTrackedAgent.status === 'dispatching' && currentTrackedAgent.dispatchRunId === currentRun.id) {
+        return currentRun;
+      }
+
+      this.repository.updateTrackedAgent(run.trackedAgentId!, {
+        status: 'dispatching',
+        dispatchRunId: currentRun.id,
+        updatedAt: reservedAt,
+      });
+      return currentRun;
+    });
+  }
+
+  private activeCapacityItems(excludeRunId: string): CapacityReservationWorkItem[] {
+    return this.repository.listRuns()
+      .filter(run => run.id !== excludeRunId)
+      .filter(run => run.trackedAgentId)
+      .filter(run => run.status === 'queued'
+        || run.status === 'interviewing'
+        || run.status === 'pending_approval'
+        || run.status === 'running')
+      .map(run => capacityItemFromConfig(run.trackedAgentId!, run.configSnapshot));
   }
 
   private syncTrackedAgent(run: BeastRun): void {

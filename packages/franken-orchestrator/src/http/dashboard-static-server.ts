@@ -61,6 +61,10 @@ export interface DashboardStaticServerOptions extends DashboardStaticResponseOpt
 function response(body: BodyInit | null, init: ResponseInit = {}): Response {
   const headers = new Headers(init.headers);
   headers.set('x-frankenbeast-service', SERVICE_IDENTITY);
+  headers.set('Content-Security-Policy', "frame-ancestors 'none'");
+  headers.set('X-Frame-Options', 'DENY');
+  headers.set('X-Content-Type-Options', 'nosniff');
+  headers.set('Referrer-Policy', 'same-origin');
   return new Response(body, { ...init, headers });
 }
 
@@ -128,6 +132,8 @@ async function createProxyResponse(
   const targetUrl = resolveProxyTargetUrl(apiTarget, sourceUrl);
   const headers = new Headers(request.headers);
   removeHopByHopHeaders(headers);
+  headers.set('x-forwarded-host', sourceUrl.host);
+  headers.set('x-forwarded-proto', sourceUrl.protocol.replace(/:$/, ''));
   if (options.operatorToken) {
     headers.set('authorization', `Bearer ${options.operatorToken}`);
   }
@@ -367,7 +373,12 @@ function attachBackendUpgradeProxy(server: HttpServer, options: DashboardStaticS
     }
 
     const targetUrl = resolveProxyTargetUrl(apiTarget, requestUrl);
-    const headers = { ...req.headers, host: targetUrl.host };
+    const headers = {
+      ...req.headers,
+      host: targetUrl.host,
+      'x-forwarded-host': requestUrl.host,
+      'x-forwarded-proto': requestUrl.protocol.replace(/:$/, ''),
+    };
     if (options.operatorToken) {
       headers.authorization = `Bearer ${options.operatorToken}`;
     }

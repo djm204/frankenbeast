@@ -148,7 +148,7 @@ frankenbeast/
 ├── docker-compose.yml           # optional ChromaDB/Grafana/Tempo stack
 ├── docs/
 ├── packages/
-│   ├── franken-brain/           # @franken/brain: SQLite-backed working/episodic/recovery memory
+│   ├── franken-brain/           # @franken/brain: SQLite-backed working/episodic/recovery memory; temporary working facts can carry expiresAt TTL metadata
 │   ├── franken-planner/         # @franken/planner: DAG planning primitives and strategies
 │   ├── franken-observer/        # trace/cost/eval/loop observability
 │   ├── franken-critique/        # critique pipeline and correction requests

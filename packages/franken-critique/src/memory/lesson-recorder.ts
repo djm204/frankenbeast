@@ -14,6 +14,9 @@ import type {
   LessonQuarantineEvidence,
   LessonQuarantineMetadata,
   LessonUnquarantineMetadata,
+  LessonCandidateCategory,
+  LessonPrivacyFilterDecision,
+  LessonPrivacyRedaction,
   LessonFeedbackSignalSource,
   LessonFeedbackWeight,
   LessonFeedbackWeighting,
@@ -49,6 +52,123 @@ const AGENT_IMPROVEMENT_SCORECARD_GUIDANCE =
   'Use this per-agent scorecard in worker retrospectives and PM handoff summaries to compare improvement over time without parsing free-form lesson prose.';
 const LEARNING_BACKLOG_PRIORITIZATION_GUIDANCE =
   'Use this report to sort newly observed learning backlog items before promotion, retirement, or PM routing; higher priority items should receive durable mitigation before low-risk documentation follow-up.';
+const PRIVACY_FILTER_TASK_STATE_REASON =
+  'Lesson candidate describes transient task or PR state and is rejected before durable learning.';
+const PRIVACY_FILTER_ADMIT_REASON =
+  'Lesson candidate passed the privacy filter before durable learning.';
+const PRIVACY_FILTER_SENSITIVE_REASON =
+  'Lesson candidate was redacted and flagged for explicit review before promotion because it contained sensitive data.';
+
+interface InternalLessonPrivacyRedaction extends LessonPrivacyRedaction {
+  readonly original: string;
+}
+
+interface InternalLessonPrivacyFilterDecision
+  extends Omit<LessonPrivacyFilterDecision, 'redactions'> {
+  readonly redactions: readonly InternalLessonPrivacyRedaction[];
+}
+
+interface LessonCandidatePrivacyFilterResult {
+  readonly decision: InternalLessonPrivacyFilterDecision;
+  readonly rejectedDecisions: readonly InternalLessonPrivacyFilterDecision[];
+  readonly findings: readonly SanitizedLessonFinding[];
+}
+
+interface SanitizedLessonFinding {
+  readonly message: string;
+  readonly severity: string;
+  readonly location?: string | undefined;
+  readonly suggestion?: string | undefined;
+}
+
+interface PrivacyRedactionRule {
+  readonly kind: InternalLessonPrivacyRedaction['kind'];
+  readonly label: string;
+  readonly pattern: RegExp;
+  readonly replacement: string;
+}
+
+const PRIVACY_REDACTION_RULES: readonly PrivacyRedactionRule[] = [
+  {
+    kind: 'secret',
+    label: 'github-token',
+    pattern: /\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{30,})\b/g,
+    replacement: '[REDACTED_GITHUB_TOKEN]',
+  },
+  {
+    kind: 'secret',
+    label: 'openai-api-key',
+    pattern: /\bsk-[A-Za-z0-9_-]{20,}\b/g,
+    replacement: '[REDACTED_API_KEY]',
+  },
+  {
+    kind: 'secret',
+    label: 'bearer-token',
+    pattern: /\bBearer[ \t]+[A-Za-z0-9._~+/=-]{20,}\b/gi,
+    replacement: 'Bearer [REDACTED_TOKEN]',
+  },
+  {
+    kind: 'secret',
+    label: 'assigned-secret',
+    pattern:
+      /\b(?:api[_-]?key|secret|token|password)\s*[:=]\s*['\"]?[^\s'\",;]{8,}/gi,
+    replacement: '[REDACTED_SECRET_ASSIGNMENT]',
+  },
+  {
+    kind: 'secret',
+    label: 'connection-string',
+    pattern: /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^\s'\")]+/gi,
+    replacement: '[REDACTED_CONNECTION_STRING]',
+  },
+  {
+    kind: 'personal-data',
+    label: 'email-address',
+    pattern: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
+    replacement: '[REDACTED_EMAIL]',
+  },
+  {
+    kind: 'personal-data',
+    label: 'phone-number',
+    pattern: /\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g,
+    replacement: '[REDACTED_PHONE]',
+  },
+  {
+    kind: 'task-state',
+    label: 'task-reference',
+    pattern:
+      /\b(?:(?:PR|pull request|issue|ticket)\s*#?\d+|(?:commit|sha)\s+[0-9a-f]{7,40}|task\s+t_[0-9a-f]{6,}|(?:impl|harden):issue-\d+|issue-\d+)\b/gi,
+    replacement: '[REDACTED_TASK_REFERENCE]',
+  },
+];
+
+const CUSTOMER_DATA_PATTERNS: readonly RegExp[] = [
+  /\bcustomer\s+(?:account\s+)?(?:[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\s+)?[A-Za-z0-9][A-Za-z0-9_.:-]*\b/i,
+  /\b[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*\b/,
+  /\b[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*)\b/,
+  /\b[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*\b/,
+];
+
+const TASK_STATE_PATTERNS: readonly RegExp[] = [
+  /\b(?:PR|pull request)\s*#?\d+\b/i,
+  /\bissue\s*#\d+\b/i,
+  /\bticket\s*#?\d+\b/i,
+  /\b(?:merged|opened|closed|pushed|committed)\s+(?:PR|pull request|branch|commit)\b/i,
+  /\b(?:commit|sha)\s+[0-9a-f]{7,40}\b/i,
+  /\btask\s+t_[0-9a-f]{6,}\b/i,
+  /\b(?:impl|harden):issue-\d+\b/i,
+  /\bissue-\d+\b/i,
+];
+
+const PREFERENCE_PATTERNS: readonly RegExp[] = [
+  /\b(?:user|operator|maintainer|team)\s+(?:prefers|expects|wants|likes|dislikes)\b/i,
+];
+
+const ENVIRONMENT_FACT_PATTERNS: readonly RegExp[] = [
+  /\b(?:repo|repository|project|package|workspace)\s+(?:uses|requires|runs|is)\b/i,
+  /\b@franken\/[a-z0-9-]+\b/i,
+  /\bfrankenbeast\b/i,
+];
+
 const LESSON_FEEDBACK_WEIGHTING_GUIDANCE =
   'Explicit user corrections and approvals are primary learning signals; inferred success or failure may inform routing but must not override direct human feedback.';
 const LESSON_FEEDBACK_WEIGHTS: Record<
@@ -557,7 +677,12 @@ export class LessonRecorder {
     );
 
     for (const iteration of failingIterations) {
-      const lessons = this.extractLessons(iteration, result.iterations, taskId);
+      const lessons = this.extractLessons(
+        iteration,
+        result.iterations,
+        taskId,
+        recordingResult,
+      );
       for (const extractedLesson of lessons) {
         await this.recordExtractedLesson(extractedLesson, recordingResult);
       }
@@ -683,6 +808,7 @@ export class LessonRecorder {
     failingIteration: CritiqueIteration,
     allIterations: readonly CritiqueIteration[],
     taskId: TaskId,
+    recordingResult: MutableLessonRecordingResult,
   ): CritiqueLesson[] {
     const lessons: CritiqueLesson[] = [];
     const passingIteration = allIterations.find(
@@ -695,6 +821,24 @@ export class LessonRecorder {
       );
 
       if (evalResult.verdict === 'fail' && critiqueFindings.length > 0) {
+        const privacyFilterResult = createLessonPrivacyFilterResult(
+          taskId,
+          evalResult.evaluatorName,
+          critiqueFindings,
+        );
+        const privacyDecision = toPublicPrivacyDecision(
+          privacyFilterResult.decision,
+        );
+        if (privacyFilterResult.decision.action === 'reject') {
+          recordingResult.rejectedByPrivacy.push(privacyDecision);
+          continue;
+        }
+        for (const rejectedDecision of privacyFilterResult.rejectedDecisions) {
+          recordingResult.rejectedByPrivacy.push(
+            toPublicPrivacyDecision(rejectedDecision),
+          );
+        }
+        const filteredFindings = privacyFilterResult.findings;
         const resolvedIteration =
           passingIteration?.index ?? failingIteration.index;
         const lessonId = createLessonId(
@@ -702,7 +846,7 @@ export class LessonRecorder {
           evalResult.evaluatorName,
           failingIteration.index,
         );
-        const findingMessages = critiqueFindings.map((f) => f.message);
+        const findingMessages = filteredFindings.map((f) => f.message);
         const recordedAt = this.now();
         const cooldownBaseMs = Date.parse(recordedAt);
         this.pruneExpiredCooldowns(cooldownBaseMs);
@@ -716,13 +860,13 @@ export class LessonRecorder {
         const blockerPatternUpdate = this.previewBlockerPatterns(
           taskId,
           evalResult.evaluatorName,
-          critiqueFindings,
+          filteredFindings,
           recordedAt,
         );
         const failedTestSkillCandidate = createFailedTestSkillCandidate(
           failingIteration.index,
           evalResult.evaluatorName,
-          critiqueFindings,
+          filteredFindings,
         );
 
         const lesson: CritiqueLesson = {
@@ -762,7 +906,7 @@ export class LessonRecorder {
           reviewerFeedback: createReviewerFeedbackCapture(
             failingIteration.index,
             evalResult.evaluatorName,
-            critiqueFindings,
+            filteredFindings,
           ),
           ...(failedTestSkillCandidate ? { failedTestSkillCandidate } : {}),
           postPrLessonExtractionTemplate:
@@ -775,7 +919,7 @@ export class LessonRecorder {
                   evalResult.evaluatorName,
                   failingIteration,
                   allIterations,
-                  critiqueFindings,
+                  filteredFindings,
                   recordedAt,
                 ),
               }
@@ -802,6 +946,7 @@ export class LessonRecorder {
           ...(blockerPatternUpdate.patterns.length > 0
             ? { blockerPatterns: blockerPatternUpdate.patterns }
             : {}),
+          privacyFilter: privacyDecision,
         };
         this.pendingBlockerObservations.set(
           lesson,
@@ -1182,6 +1327,7 @@ function getPendingBlockerAdmissions(
 interface MutableLessonRecordingResult extends LessonRecordingResult {
   recorded: number;
   suppressedByCooldown: LessonCooldownSuppression[];
+  rejectedByPrivacy: LessonPrivacyFilterDecision[];
   minedBlockerPatterns: CrossTaskBlockerPattern[];
   learningBacklogItems: LearningBacklogPrioritizationItem[];
 }
@@ -1193,6 +1339,7 @@ function createMutableLessonRecordingResult(
   const result = {
     recorded: 0,
     suppressedByCooldown: [],
+    rejectedByPrivacy: [],
     minedBlockerPatterns: [],
   } as unknown as MutableLessonRecordingResult;
   Object.defineProperty(result, 'learningBacklogItems', {
@@ -1775,6 +1922,394 @@ function dedupeFailureSignals(
     });
   }
   return uniqueFailures;
+}
+
+function createLessonPrivacyFilterResult(
+  taskId: TaskId,
+  evaluatorName: string,
+  findings: readonly {
+    readonly message: string;
+    readonly severity: string;
+    readonly location?: string | undefined;
+    readonly suggestion?: string | undefined;
+  }[],
+): LessonCandidatePrivacyFilterResult {
+  const metadataText = [taskId, evaluatorName].join('\n');
+  const metadataDecision = createPrivacyDecision(metadataText);
+  if (metadataDecision.sensitive) {
+    return {
+      decision: {
+        ...metadataDecision,
+        action: 'reject',
+        approvalRequired: false,
+        reason:
+          'Lesson candidate metadata contained sensitive data and is rejected before durable learning.',
+      },
+      rejectedDecisions: [],
+      findings: [],
+    };
+  }
+
+  const admittedFindings: SanitizedLessonFinding[] = [];
+  const rejectedDecisions: InternalLessonPrivacyFilterDecision[] = [];
+  const admittedDecisions: InternalLessonPrivacyFilterDecision[] = [];
+
+  for (const finding of findings) {
+    const findingText = createFindingPrivacyText(finding);
+    const findingDecision = createPrivacyDecision(findingText);
+    if (findingDecision.action === 'reject') {
+      rejectedDecisions.push(findingDecision);
+      continue;
+    }
+    admittedDecisions.push(findingDecision);
+    admittedFindings.push({
+      message: redactSensitiveText(finding.message, findingDecision.redactions),
+      severity: finding.severity,
+      ...(finding.location
+        ? {
+            location: redactSensitiveText(
+              finding.location,
+              findingDecision.redactions,
+            ),
+          }
+        : {}),
+      ...(finding.suggestion
+        ? {
+            suggestion: redactSensitiveText(
+              finding.suggestion,
+              findingDecision.redactions,
+            ),
+          }
+        : {}),
+    });
+  }
+
+  const rawText = [
+    metadataText,
+    ...findings.map((finding) => createFindingPrivacyText(finding)),
+  ].join('\n');
+  if (admittedFindings.length === 0) {
+    return {
+      decision: {
+        ...createPrivacyDecision(rawText),
+        action: 'reject',
+        approvalRequired: false,
+        reason: PRIVACY_FILTER_TASK_STATE_REASON,
+      },
+      rejectedDecisions,
+      findings: [],
+    };
+  }
+
+  const redactions = mergePrivacyRedactions(
+    admittedDecisions.flatMap((decision) => decision.redactions),
+  );
+  const flags = new Set<string>();
+  for (const decision of admittedDecisions) {
+    for (const flag of decision.flags) {
+      flags.add(flag);
+    }
+  }
+  const category = combineLessonCandidateCategories(
+    admittedDecisions.map((decision) => decision.category),
+  );
+  const sensitive = admittedDecisions.some((decision) => decision.sensitive);
+  const decision: InternalLessonPrivacyFilterDecision = {
+    schemaVersion: 'lesson-privacy-filter-v1',
+    category,
+    action: 'admit',
+    sensitive,
+    approvalRequired: sensitive,
+    flags: Array.from(flags).sort(),
+    redactions,
+    originalHash: stableHash(rawText),
+    reason: sensitive ? PRIVACY_FILTER_SENSITIVE_REASON : PRIVACY_FILTER_ADMIT_REASON,
+  };
+
+  return {
+    decision,
+    rejectedDecisions,
+    findings: admittedFindings,
+  };
+}
+
+function createPrivacyDecision(
+  rawText: string,
+  options: { readonly flagCustomerData?: boolean } = {},
+): InternalLessonPrivacyFilterDecision {
+  const redactions = collectPrivacyRedactions(rawText);
+  const flags = new Set<string>();
+  for (const redaction of redactions) {
+    flags.add(redaction.kind);
+    flags.add(redaction.label);
+  }
+  const containsCustomerData =
+    options.flagCustomerData !== false &&
+    CUSTOMER_DATA_PATTERNS.some((pattern) => pattern.test(rawText));
+  if (containsCustomerData) {
+    flags.add('customer-data');
+    for (const segment of rawText.split('\n').flatMap(extractCustomerSegments)) {
+      if (
+        redactions.some(
+          (redaction) =>
+            redaction.kind === 'customer-data' && redaction.original === segment,
+        )
+      ) {
+        continue;
+      }
+      redactions.push({
+        kind: 'customer-data',
+        label: 'customer-context',
+        replacement:
+          'Customer data redacted [REDACTED_CUSTOMER_DATA]; validate privacy boundaries before recording lessons',
+        original: segment,
+      });
+    }
+  }
+  const category = classifyLessonCandidate(rawText);
+  const sensitive = redactions.length > 0 || flags.has('customer-data');
+  const action =
+    category === 'task-state' || category === 'discard' ? 'reject' : 'admit';
+  return {
+    schemaVersion: 'lesson-privacy-filter-v1',
+    category,
+    action,
+    sensitive,
+    approvalRequired: action === 'admit' && sensitive,
+    flags: Array.from(flags).sort(),
+    redactions,
+    originalHash: stableHash(rawText),
+    reason:
+      action === 'reject'
+        ? PRIVACY_FILTER_TASK_STATE_REASON
+        : sensitive
+          ? PRIVACY_FILTER_SENSITIVE_REASON
+          : PRIVACY_FILTER_ADMIT_REASON,
+  };
+}
+
+function extractCustomerSegments(text: string): string[] {
+  const segments =
+    text.match(
+      /\b[Cc]ustomer(?:\s+account)?(?:\s+[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})?(?:\s+[A-Za-z0-9_.:-]+){1,3}\b|\b[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b|\b[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*)(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b|\b[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b/g,
+    ) ?? [];
+  return segments.flatMap((segment) => {
+    const emailMatch = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.exec(segment);
+    if (!emailMatch) {
+      return [segment];
+    }
+    const trailingIdentifier = segment.slice(emailMatch.index + emailMatch[0].length).trim();
+    return trailingIdentifier ? [trailingIdentifier] : [];
+  });
+}
+
+function createFindingPrivacyText(finding: {
+  readonly message: string;
+  readonly location?: string | undefined;
+  readonly suggestion?: string | undefined;
+}): string {
+  return [finding.message, finding.suggestion ?? '', finding.location ?? ''].join(
+    '\n',
+  );
+}
+
+function mergePrivacyRedactions(
+  redactions: readonly InternalLessonPrivacyRedaction[],
+): InternalLessonPrivacyRedaction[] {
+  const merged: InternalLessonPrivacyRedaction[] = [];
+  const seen = new Set<string>();
+  for (const redaction of redactions) {
+    const key = `${redaction.kind}:${redaction.label}:${redaction.original}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    merged.push(redaction);
+  }
+  return merged;
+}
+
+function combineLessonCandidateCategories(
+  categories: readonly LessonCandidateCategory[],
+): LessonCandidateCategory {
+  if (categories.includes('procedure')) {
+    return 'procedure';
+  }
+  if (categories.includes('environment-fact')) {
+    return 'environment-fact';
+  }
+  if (categories.includes('preference')) {
+    return 'preference';
+  }
+  return categories[0] ?? 'discard';
+}
+
+function toPublicPrivacyDecision(
+  decision: InternalLessonPrivacyFilterDecision,
+): LessonPrivacyFilterDecision {
+  return {
+    ...decision,
+    redactions: decision.redactions.map(({ original: _original, ...rest }) =>
+      rest,
+    ),
+  };
+}
+
+function classifyLessonCandidate(text: string): LessonCandidateCategory {
+  if (!text.trim()) {
+    return 'discard';
+  }
+  const containsTaskState = TASK_STATE_PATTERNS.some((pattern) =>
+    pattern.test(text),
+  );
+  if (containsTaskState && !containsReusableLessonSignal(text)) {
+    return 'task-state';
+  }
+  if (PREFERENCE_PATTERNS.some((pattern) => pattern.test(text))) {
+    return 'preference';
+  }
+  if (ENVIRONMENT_FACT_PATTERNS.some((pattern) => pattern.test(text))) {
+    return 'environment-fact';
+  }
+  return 'procedure';
+}
+
+function containsReusableLessonSignal(text: string): boolean {
+  if (PREFERENCE_PATTERNS.some((pattern) => pattern.test(text))) {
+    return true;
+  }
+  if (ENVIRONMENT_FACT_PATTERNS.some((pattern) => pattern.test(text))) {
+    return true;
+  }
+  if (/\b(?:always|avoid|ensure|prefer|require|validate|verify)\b/i.test(text)) {
+    return true;
+  }
+  if (/\b(?:merged|opened|closed|pushed|committed)\b/i.test(text)) {
+    return false;
+  }
+  return /\b(?:before|check|run)\b/i.test(
+    text,
+  );
+}
+
+function collectPrivacyRedactions(
+  text: string,
+): InternalLessonPrivacyRedaction[] {
+  const redactions: InternalLessonPrivacyRedaction[] = [];
+  const seen = new Set<string>();
+  for (const rule of PRIVACY_REDACTION_RULES) {
+    const pattern = new RegExp(rule.pattern.source, rule.pattern.flags);
+    for (const match of text.matchAll(pattern)) {
+      const original = match[0];
+      const key = `${rule.kind}:${rule.label}:${original}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      redactions.push({
+        kind: rule.kind,
+        label: rule.label,
+        replacement: rule.replacement,
+        original,
+      });
+      for (const nested of splitCrossFieldSecretRedactions(rule, original)) {
+        const nestedKey = `${rule.kind}:${rule.label}:${nested}`;
+        if (seen.has(nestedKey)) {
+          continue;
+        }
+        seen.add(nestedKey);
+        redactions.push({
+          kind: rule.kind,
+          label: rule.label,
+          replacement: rule.replacement,
+          original: nested,
+        });
+      }
+    }
+  }
+  return redactions;
+}
+
+function splitCrossFieldSecretRedactions(
+  rule: PrivacyRedactionRule,
+  original: string,
+): string[] {
+  if (rule.kind !== 'secret' || !original.includes('\n')) {
+    return [];
+  }
+  const secretValue = original
+    .split(/[:=]/)
+    .at(-1)
+    ?.trim()
+    .replace(/^["']/, '');
+  return secretValue && secretValue !== original ? [secretValue] : [];
+}
+
+function redactSensitiveText(
+  text: string,
+  redactions: readonly InternalLessonPrivacyRedaction[],
+): string {
+  const spans = redactions.flatMap((redaction) =>
+    findRedactionSpans(text, redaction),
+  );
+  if (spans.length === 0) {
+    return text;
+  }
+  spans.sort(
+    (left, right) =>
+      left.start - right.start ||
+      right.end - right.start - (left.end - left.start),
+  );
+  const chosen: RedactionSpan[] = [];
+  for (const span of spans) {
+    const previous = chosen.at(-1);
+    if (previous && span.start < previous.end) {
+      if (span.end - span.start > previous.end - previous.start) {
+        chosen[chosen.length - 1] = span;
+      }
+      continue;
+    }
+    chosen.push(span);
+  }
+  let redacted = '';
+  let cursor = 0;
+  for (const span of chosen) {
+    redacted += text.slice(cursor, span.start);
+    redacted += span.replacement;
+    cursor = span.end;
+  }
+  redacted += text.slice(cursor);
+  return redacted;
+}
+
+interface RedactionSpan {
+  readonly start: number;
+  readonly end: number;
+  readonly replacement: string;
+}
+
+function findRedactionSpans(
+  text: string,
+  redaction: InternalLessonPrivacyRedaction,
+): RedactionSpan[] {
+  if (!redaction.original) {
+    return [];
+  }
+  const spans: RedactionSpan[] = [];
+  let searchFrom = 0;
+  while (searchFrom < text.length) {
+    const start = text.indexOf(redaction.original, searchFrom);
+    if (start === -1) {
+      break;
+    }
+    spans.push({
+      start,
+      end: start + redaction.original.length,
+      replacement: redaction.replacement,
+    });
+    searchFrom = start + redaction.original.length;
+  }
+  return spans;
 }
 
 function stableHash(value: string): string {

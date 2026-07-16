@@ -20,6 +20,7 @@ import {
   DEFAULT_MAX_BODY_SIZE,
   SKILL_CONTEXT_MAX_BODY_SIZE,
   errorHandler,
+  localBrowserControlProtection,
   requestId,
   requestSizeLimit,
 } from './middleware.js';
@@ -157,6 +158,9 @@ export function createChatApp(opts: ChatAppOptions): Hono {
 
   const app = new Hono();
   app.use('*', requestId);
+  app.use('*', localBrowserControlProtection(
+    opts.allowedOrigins ? { allowedOrigins: opts.allowedOrigins } : {},
+  ));
   if (opts.allowedOrigins && opts.allowedOrigins.length > 0) {
     const allowedOrigins = new Set(opts.allowedOrigins.filter((origin) => origin !== '*'));
     if (allowedOrigins.size > 0) {
@@ -347,6 +351,13 @@ async function proxyToBeastDaemon(
   const targetUrl = new URL(`${sourceUrl.pathname}${sourceUrl.search}`, daemon.baseUrl);
   const headers = new Headers(request.headers);
   removeHopByHopHeaders(headers);
+  const browserOrigin = parseBrowserOrigin(headers.get('origin'));
+  if (!headers.has('x-forwarded-host')) {
+    headers.set('x-forwarded-host', browserOrigin?.host ?? sourceUrl.host);
+  }
+  if (!headers.has('x-forwarded-proto')) {
+    headers.set('x-forwarded-proto', browserOrigin?.protocol.replace(/:$/, '') ?? sourceUrl.protocol.replace(/:$/, ''));
+  }
   if (!headers.has('authorization')) {
     const headerToken = headers.get('x-frankenbeast-operator-token')?.trim();
     const forwardedToken = operatorToken ?? (headerToken ? headerToken : undefined);
@@ -362,6 +373,17 @@ async function proxyToBeastDaemon(
     Object.assign(init, { duplex: 'half' });
   }
   return fetch(targetUrl, init);
+}
+
+function parseBrowserOrigin(origin: string | null): URL | undefined {
+  if (!origin) {
+    return undefined;
+  }
+  try {
+    return new URL(origin);
+  } catch {
+    return undefined;
+  }
 }
 
 function removeHopByHopHeaders(headers: Headers): void {

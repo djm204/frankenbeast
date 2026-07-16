@@ -97,4 +97,99 @@ describe('memory access audit trail', () => {
 
     brain.close();
   });
+
+  it('audits denied working restores and checkpoint writes', () => {
+    const brain = new SqliteBrain(':memory:');
+
+    brain.rightToForget({ query: 'forgotten-restore-secret' });
+
+    expect(() => brain.working.restore({ restored: 'forgotten-restore-secret' })).toThrow(/right-to-forget/);
+    expect(() => brain.recovery.checkpoint({
+      runId: 'run-forgotten-secret',
+      phase: 'execution',
+      step: 1,
+      context: { note: 'forgotten-restore-secret' },
+      timestamp: '2026-07-15T20:00:00.000Z',
+    })).toThrow(/right-to-forget/);
+
+    const restoreAudit = brain.accessAudit.list({ operation: 'working.restore' });
+    const checkpointAudit = brain.accessAudit.list({ operation: 'recovery.checkpoint' });
+    expect(restoreAudit[0]).toMatchObject({ operation: 'working.restore', outcome: 'denied' });
+    expect(checkpointAudit[0]).toMatchObject({ operation: 'recovery.checkpoint', outcome: 'denied' });
+    expect(JSON.stringify([...restoreAudit, ...checkpointAudit])).not.toContain('forgotten-restore-secret');
+
+    brain.close();
+  });
+
+  it('marks empty checkpoint reads as audit misses', () => {
+    const brain = new SqliteBrain(':memory:');
+
+    expect(brain.recovery.lastCheckpoint()).toBeNull();
+
+    expect(brain.accessAudit.list({ operation: 'recovery.lastCheckpoint' })).toMatchObject([
+      { operation: 'recovery.lastCheckpoint', store: 'recovery', outcome: 'miss' },
+    ]);
+
+    brain.close();
+  });
+
+  it('audits denied review edits and approvals without raw selectors', () => {
+    const brain = new SqliteBrain(':memory:');
+    const editCandidate = brain.memoryReview.propose({
+      targetStore: 'working',
+      key: 'review.edit.target',
+      value: 'safe value',
+      source: 'operator',
+      confidence: 0.9,
+      reason: 'Candidate for review edit denial.',
+    });
+    const approveCandidate = brain.memoryReview.propose({
+      targetStore: 'working',
+      key: 'review.approve.target',
+      value: 'forgotten-review-secret',
+      source: 'operator',
+      confidence: 0.9,
+      reason: 'Candidate for review approval denial.',
+    });
+
+    brain.rightToForget({ query: 'forgotten-review-secret' });
+
+    expect(() => brain.memoryReview.edit(editCandidate.id, {
+      value: 'forgotten-review-secret',
+      reason: 'Attempted guarded edit.',
+    })).toThrow(/right-to-forget/);
+    expect(brain.memoryReview.approve(approveCandidate.id, { reviewer: 'operator' })).toMatchObject({
+      status: 'suppressed',
+    });
+
+    const editAudit = brain.accessAudit.list({ operation: 'review.edit' });
+    const approveAudit = brain.accessAudit.list({ operation: 'review.approve' });
+    expect(editAudit[0]).toMatchObject({ operation: 'review.edit', outcome: 'denied' });
+    expect(approveAudit[0]).toMatchObject({ operation: 'review.approve', outcome: 'denied' });
+    expect(JSON.stringify([...editAudit, ...approveAudit])).not.toContain('forgotten-review-secret');
+
+    brain.close();
+  });
+
+  it('hashes never-store audits with the original candidate key', () => {
+    const brain = new SqliteBrain(':memory:');
+    const candidate = brain.memoryReview.propose({
+      targetStore: 'working',
+      key: 'env.secret.original-key',
+      value: 'secret value',
+      source: 'operator',
+      confidence: 0.99,
+      reason: 'Sensitive candidate should never persist.',
+    });
+    const proposeHash = brain.accessAudit.list({ operation: 'review.propose' })[0]?.keyHash;
+
+    brain.memoryReview.neverStore(candidate.id, { reviewer: 'operator' });
+
+    const neverStoreAudit = brain.accessAudit.list({ operation: 'review.neverStore' });
+    expect(neverStoreAudit[0]).toMatchObject({ operation: 'review.neverStore', outcome: 'success' });
+    expect(neverStoreAudit[0]?.keyHash).toBe(proposeHash);
+    expect(JSON.stringify(neverStoreAudit)).not.toContain('env.secret.original-key');
+
+    brain.close();
+  });
 });

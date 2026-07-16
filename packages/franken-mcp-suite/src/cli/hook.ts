@@ -68,6 +68,28 @@ async function readStdinPayload(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+const MEMORY_REVIEW_RESULT_TOOLS = new Set([
+  'fbeast_memory_review_propose',
+  'fbeast_memory_review_list',
+  'fbeast_memory_review_decide',
+  // Proxy mode reports the wrapper tool name to post-tool hooks and streams only
+  // the tool response, so the resolved target tool is unavailable here. Redact
+  // proxy response payloads rather than risking persistence of memory-review
+  // candidate values returned via execute_tool.
+  'execute_tool',
+]);
+
+function unqualifyMcpToolName(toolName: string): string {
+  const marker = '__';
+  const index = toolName.lastIndexOf(marker);
+  return index >= 0 ? toolName.slice(index + marker.length) : toolName;
+}
+
+function redactPostToolPayload(toolName: string, payload: string): string {
+  if (!MEMORY_REVIEW_RESULT_TOOLS.has(unqualifyMcpToolName(toolName))) return payload;
+  return '[memory-review-result-redacted]';
+}
+
 export async function runHook(
   argv: string[] = process.argv.slice(2),
   deps?: HookDeps,
@@ -125,9 +147,10 @@ export async function runHook(
     const streamedPayload = payload === '' && streamPostToolPayload
       ? await (resolvedDeps.readPostToolPayload?.() ?? readStdinPayload())
       : '';
+    const rawPostPayload = payload || streamedPayload;
     await resolvedDeps.observer.log({
       event: 'tool_call',
-      metadata: JSON.stringify({ toolName, payload: payload || streamedPayload, phase }),
+      metadata: JSON.stringify({ toolName, payload: redactPostToolPayload(toolName, rawPostPayload), phase }),
       sessionId: resolvedDeps.sessionId(),
     });
     process.stdout.write(JSON.stringify({ logged: true }) + '\n');

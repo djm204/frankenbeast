@@ -3,7 +3,7 @@ import type { BeastServiceBundle } from '../beasts/create-beast-services.js';
 import { agentRoutes } from './routes/agent-routes.js';
 import { beastRoutes } from './routes/beast-routes.js';
 import { createBeastSseRoutes } from './routes/beast-sse-routes.js';
-import { HttpError, errorHandler } from './middleware.js';
+import { HttpError, errorHandler, localBrowserControlProtection } from './middleware.js';
 import { TransportSecurityService } from './security/transport-security.js';
 import { isoNow } from '@franken/types';
 
@@ -35,6 +35,7 @@ export function createBeastDaemonApp(options: BeastDaemonAppOptions): Hono {
   const services = options.services;
 
   app.onError(errorHandler);
+  app.use('*', localBrowserControlProtection());
 
   app.get('/health', (c) => {
     c.header('x-frankenbeast-service', 'beasts-daemon');
