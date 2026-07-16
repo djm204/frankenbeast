@@ -889,28 +889,36 @@ function isMaintenanceModeState(value: unknown): value is MaintenanceModeState {
 }
 
 async function fetchBeastsDaemonMaintenanceMode(baseUrl: string, operatorToken: string): Promise<MaintenanceModeState> {
-  const guardedFetch = createEgressGuardedFetch({ lane: 'test' });
-  const response = await guardedFetch(`${baseUrl}/v1/beasts/maintenance`, {
-    headers: { Authorization: `Bearer ${operatorToken}` },
-    signal: AbortSignal.timeout(1000),
-  });
-  if (!response.ok) {
+  try {
+    const guardedFetch = createEgressGuardedFetch({ lane: 'test' });
+    const response = await guardedFetch(`${baseUrl}/v1/beasts/maintenance`, {
+      headers: { Authorization: `Bearer ${operatorToken}` },
+      signal: AbortSignal.timeout(1000),
+    });
+    if (!response.ok) {
+      return {
+        enabled: true,
+        reason: `Unable to read beasts-daemon maintenance state (${response.status}); dispatch visibility is degraded.`,
+        allowedCommands: [],
+      };
+    }
+    const body: unknown = await response.json();
+    const data = body && typeof body === 'object' ? (body as Record<string, unknown>).data : undefined;
+    if (isMaintenanceModeState(data)) {
+      return data;
+    }
     return {
       enabled: true,
-      reason: `Unable to read beasts-daemon maintenance state (${response.status}); dispatch visibility is degraded.`,
+      reason: 'Unable to parse beasts-daemon maintenance state; dispatch visibility is degraded.',
+      allowedCommands: [],
+    };
+  } catch {
+    return {
+      enabled: true,
+      reason: 'Unable to reach beasts-daemon maintenance state; dispatch visibility is degraded.',
       allowedCommands: [],
     };
   }
-  const body: unknown = await response.json();
-  const data = body && typeof body === 'object' ? (body as Record<string, unknown>).data : undefined;
-  if (isMaintenanceModeState(data)) {
-    return data;
-  }
-  return {
-    enabled: true,
-    reason: 'Unable to parse beasts-daemon maintenance state; dispatch visibility is degraded.',
-    allowedCommands: [],
-  };
 }
 
 async function resolveDetectedBeastsDaemonUrl(

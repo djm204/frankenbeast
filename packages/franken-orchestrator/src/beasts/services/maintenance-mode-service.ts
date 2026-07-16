@@ -40,8 +40,11 @@ export class MaintenanceModeService {
 
   getState(): MaintenanceModeState {
     const parsed = this.readStateFile();
-    if (!parsed?.enabled) {
+    if (!parsed) {
       return this.disabledState();
+    }
+    if (parsed.enabled !== true) {
+      return parsed.enabled === false ? this.disabledState() : this.unreadableState();
     }
     return {
       enabled: true,
@@ -97,10 +100,11 @@ export class MaintenanceModeService {
     }
   }
 
-  private unreadableState(): Record<string, unknown> {
+  private unreadableState(): Record<string, unknown> & MaintenanceModeState {
     return {
       enabled: true,
       reason: `Maintenance state is unreadable; dispatch is paused until ${this.stateFile} is repaired or removed.`,
+      allowedCommands: DEFAULT_ALLOWED_COMMANDS,
     };
   }
 }

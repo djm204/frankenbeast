@@ -623,6 +623,7 @@ async function dispatchReplacementAgentRun(
   agent: TrackedAgent,
   existingRun: ReturnType<BeastRunService['getRun']>,
 ) {
+  deps.maintenance?.assertDispatchAllowed();
   assertAgentCapacityAvailable(deps, agent);
   if (existingRun?.status === 'running') {
     await deps.runs.stop(existingRun.id, 'operator');
