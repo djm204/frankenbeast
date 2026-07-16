@@ -78,6 +78,10 @@
 ## 2026-07-13 — Operator session-token review hardening
 - Approval-session tokens must be scoped to the policy actually approved: skill triggers can use selected tool scope, but budget/custom/non-skill approvals should stay task-scoped even when a tool is selected so same-tool actions in other tasks do not bypass prompts.
 - Never reuse an approval-session token for fail-closed trigger-evaluation errors; even a valid same-scope token must fall back to a fresh operator prompt when evaluator context/logic throws.
+
+## 2026-07-16 — Codex usage-limit handling in init Codex hooks fixes
+- When Codex responds with usage-limit comments after `@codex review`, treat it as a hard stop for that review round and do not keep triggering repeated reviews.
+- For `writeCodexHooks` recovery work, prefer recover+backup flows on malformed existing JSON so user hooks are not silently dropped, and add tests that explicitly assert backup creation and hook-preserving write paths.
 - When a gateway returns an issued approval token, the planner/CoT path needs an explicit state handoff into later rationales; otherwise adapter-level token issuance is documented but not usable by normal planner executions.
 - Multi-policy approval prompts must surface every fired policy reason, not just a preferred non-skill trigger, so operators see destructive/HITL skill risk alongside budget or other policy risk.
 - If a CoT rationale can carry reusable approval tokens, keep candidate token IDs per prior approval rather than a single overwrite slot; the governor can validate candidates against the current scope and ignore non-matching tokens.
