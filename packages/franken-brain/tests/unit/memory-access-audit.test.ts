@@ -496,4 +496,87 @@ describe('memory access audit trail', () => {
     expect(audit.details?.id).toBe('missing-candidate');
     expect(audit.keyHash).toBeUndefined();
   });
+
+  it('audits checkpoint list reads after successful reads and failed reads as errors', () => {
+    const brain = new SqliteBrain(':memory:');
+    brain.recovery.checkpoint({
+      runId: 'run-1',
+      phase: 'audit',
+      step: 1,
+      context: {},
+      timestamp: '2026-07-16T16:00:00.000Z',
+    });
+
+    expect(brain.recovery.listCheckpoints()).toHaveLength(1);
+    expect(brain.accessAudit.list({ operation: 'recovery.listCheckpoints', limit: 1 })[0]).toMatchObject({
+      operation: 'recovery.listCheckpoints',
+      store: 'recovery',
+      outcome: 'success',
+      details: { count: 1 },
+    });
+
+    const db = (brain as unknown as { db: Database.Database }).db;
+    db.exec('DROP TABLE checkpoints');
+    expect(() => brain.recovery.listCheckpoints()).toThrow(/checkpoints/);
+    expect(brain.accessAudit.list({ operation: 'recovery.listCheckpoints', limit: 1 })[0]).toMatchObject({
+      operation: 'recovery.listCheckpoints',
+      store: 'recovery',
+      outcome: 'error',
+    });
+
+    brain.close();
+  });
+
+  it('audits resolution prompt reads and conflict-resolution approvals', () => {
+    const brain = new SqliteBrain(':memory:');
+    const initial = brain.memoryReview.propose({
+      targetStore: 'working',
+      key: 'review.conflict.audit',
+      value: 'old value',
+      source: 'operator',
+      confidence: 0.6,
+      reason: 'Initial value.',
+    });
+    brain.memoryReview.approve(initial.id, { reviewer: 'operator' });
+    const scoped = brain.memoryReview.propose({
+      targetStore: 'working',
+      key: 'review.conflict.audit',
+      value: 'new value',
+      source: 'operator',
+      confidence: 0.9,
+      reason: 'Conflicting value.',
+    });
+
+    expect(brain.memoryReview.resolutionPromptFor(scoped.id)).toMatchObject({
+      candidateId: scoped.id,
+      oldEntry: { value: 'old value' },
+      newCandidate: { value: 'new value' },
+    });
+    expect(brain.accessAudit.list({ operation: 'review.resolutionPromptFor', limit: 1 })[0]).toMatchObject({
+      operation: 'review.resolutionPromptFor',
+      store: 'review',
+      outcome: 'success',
+    });
+
+    const resolved = brain.memoryReview.resolveConflict(scoped.id, {
+      resolution: 'keep_both_scoped',
+      scopedKey: 'review.conflict.audit.scoped',
+      reviewer: 'operator',
+    });
+    expect(resolved.status).toBe('approved');
+    expect(brain.accessAudit.list({ operation: 'review.approve', limit: 1 })[0]).toMatchObject({
+      operation: 'review.approve',
+      outcome: 'success',
+      details: { id: scoped.id, resolution: 'keep_both_scoped' },
+    });
+    expect(brain.accessAudit.list({ operation: 'working.set', limit: 1 })[0]).toMatchObject({
+      operation: 'working.set',
+      outcome: 'success',
+      details: { source: 'review.approve', candidateId: scoped.id, resolution: 'keep_both_scoped' },
+    });
+    expect(JSON.stringify(brain.accessAudit.list({ operation: 'review.resolutionPromptFor' }))).not.toContain('old value');
+    expect(JSON.stringify(brain.accessAudit.list({ operation: 'review.resolutionPromptFor' }))).not.toContain('new value');
+
+    brain.close();
+  });
 });

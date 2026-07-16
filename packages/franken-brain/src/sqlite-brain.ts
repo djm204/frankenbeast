@@ -293,6 +293,7 @@ export type MemoryAccessAuditOperation =
   | 'review.approve'
   | 'review.reject'
   | 'review.neverStore'
+  | 'review.resolutionPromptFor'
   | 'review.provenanceFor'
   | 'review.conflictsFor'
   | 'privacy.rightToForget';
@@ -2318,15 +2319,26 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
   }
 
   listCheckpoints(): Array<{ id: string; timestamp: string }> {
-    this.audit?.({
-      operation: 'recovery.listCheckpoints',
-      store: 'recovery',
-      outcome: 'success',
-    });
-    const rows = this.db
-      .prepare(`SELECT id, created_at FROM checkpoints ORDER BY id ASC`)
-      .all() as Array<{ id: number; created_at: string }>;
-    return rows.map((r) => ({ id: String(r.id), timestamp: r.created_at }));
+    try {
+      const rows = this.db
+        .prepare(`SELECT id, created_at FROM checkpoints ORDER BY id ASC`)
+        .all() as Array<{ id: number; created_at: string }>;
+      this.audit?.({
+        operation: 'recovery.listCheckpoints',
+        store: 'recovery',
+        outcome: 'success',
+        details: { count: rows.length },
+      });
+      return rows.map((r) => ({ id: String(r.id), timestamp: r.created_at }));
+    } catch (error) {
+      this.audit?.({
+        operation: 'recovery.listCheckpoints',
+        store: 'recovery',
+        outcome: 'error',
+        details: { errorName: error instanceof Error ? error.name : 'Error' },
+      });
+      throw error;
+    }
   }
 
   clearCheckpoints(): void {
@@ -2845,69 +2857,118 @@ export class SqliteMemoryReviewQueue {
   }
 
   resolutionPromptFor(id: string): MemoryResolutionPrompt | null {
-    if (id.startsWith('memcand_suppressed_')) return null;
-    const candidate = this.requireCandidate(id);
-    if (candidate.status !== 'pending') return null;
-    const [conflict] = this.detectConflicts(candidate);
-    if (!conflict) return null;
-    const oldEntry = {
-      value: conflict.existingValue,
-      ...(conflict.existingProvenance?.source
-        ? { source: conflict.existingProvenance.source }
-        : {}),
-      ...(conflict.existingProvenance?.evidenceId
-        ? { evidenceId: conflict.existingProvenance.evidenceId }
-        : {}),
-      ...(conflict.existingProvenance?.confidence !== undefined
-        ? { confidence: conflict.existingProvenance.confidence }
-        : {}),
-      ...(conflict.existingProvenance?.reason
-        ? { reason: conflict.existingProvenance.reason }
-        : {}),
-    };
-    const newCandidate = {
-      value: candidate.value,
-      source: candidate.source,
-      ...(candidate.evidenceId ? { evidenceId: candidate.evidenceId } : {}),
-      confidence: candidate.confidence,
-      reason: candidate.reason,
-    };
-    return {
-      candidateId: candidate.id,
-      targetStore: candidate.targetStore,
-      key: candidate.key,
-      conflictType: conflict.conflictType,
-      oldEntry,
-      newCandidate,
-      sourceEvidence: {
+    try {
+      if (id.startsWith('memcand_suppressed_')) {
+        this.audit?.({
+          operation: 'review.resolutionPromptFor',
+          store: 'review',
+          outcome: 'miss',
+          details: { id, reason: 'suppressed-placeholder' },
+        });
+        return null;
+      }
+      const candidate = this.requireCandidate(id);
+      if (candidate.status !== 'pending') {
+        this.audit?.({
+          operation: 'review.resolutionPromptFor',
+          store: 'review',
+          key: candidate.key,
+          outcome: 'miss',
+          details: { id, status: candidate.status, targetStore: candidate.targetStore },
+        });
+        return null;
+      }
+      const [conflict] = this.detectConflicts(candidate);
+      if (!conflict) {
+        this.audit?.({
+          operation: 'review.resolutionPromptFor',
+          store: 'review',
+          key: candidate.key,
+          outcome: 'miss',
+          details: { id, status: candidate.status, targetStore: candidate.targetStore },
+        });
+        return null;
+      }
+      const oldEntry = {
+        value: conflict.existingValue,
         ...(conflict.existingProvenance?.source
-          ? {
-              old: {
-                source: conflict.existingProvenance.source,
-                ...(conflict.existingProvenance.evidenceId
-                  ? { evidenceId: conflict.existingProvenance.evidenceId }
-                  : {}),
-              },
-            }
+          ? { source: conflict.existingProvenance.source }
           : {}),
-        new: {
-          source: candidate.source,
-          ...(candidate.evidenceId ? { evidenceId: candidate.evidenceId } : {}),
+        ...(conflict.existingProvenance?.evidenceId
+          ? { evidenceId: conflict.existingProvenance.evidenceId }
+          : {}),
+        ...(conflict.existingProvenance?.confidence !== undefined
+          ? { confidence: conflict.existingProvenance.confidence }
+          : {}),
+        ...(conflict.existingProvenance?.reason
+          ? { reason: conflict.existingProvenance.reason }
+          : {}),
+      };
+      const newCandidate = {
+        value: candidate.value,
+        source: candidate.source,
+        ...(candidate.evidenceId ? { evidenceId: candidate.evidenceId } : {}),
+        confidence: candidate.confidence,
+        reason: candidate.reason,
+      };
+      this.audit?.({
+        operation: 'review.resolutionPromptFor',
+        store: 'review',
+        key: candidate.key,
+        outcome: 'success',
+        details: { id, status: candidate.status, targetStore: candidate.targetStore },
+      });
+      return {
+        candidateId: candidate.id,
+        targetStore: candidate.targetStore,
+        key: candidate.key,
+        conflictType: conflict.conflictType,
+        oldEntry,
+        newCandidate,
+        sourceEvidence: {
+          ...(conflict.existingProvenance?.source
+            ? {
+                old: {
+                  source: conflict.existingProvenance.source,
+                  ...(conflict.existingProvenance.evidenceId
+                    ? { evidenceId: conflict.existingProvenance.evidenceId }
+                    : {}),
+                },
+              }
+            : {}),
+          new: {
+            source: candidate.source,
+            ...(candidate.evidenceId ? { evidenceId: candidate.evidenceId } : {}),
+          },
         },
-      },
-      recommendedAction:
-        candidate.confidence >= (conflict.existingProvenance?.confidence ?? 0)
-          ? 'replace_existing'
-          : 'keep_existing',
-      availableActions: [
-        'keep_existing',
-        'replace_existing',
-        'keep_both_scoped',
-        'reject_candidate',
-        'expire_existing',
-      ],
-      guidance: conflict.guidance,
-    };
+        recommendedAction:
+          candidate.confidence >= (conflict.existingProvenance?.confidence ?? 0)
+            ? 'replace_existing'
+            : 'keep_existing',
+        availableActions: [
+          'keep_existing',
+          'replace_existing',
+          'keep_both_scoped',
+          'reject_candidate',
+          'expire_existing',
+        ],
+        guidance: conflict.guidance,
+      };
+    } catch (error) {
+      const candidate = this.tryCandidate(id);
+      this.audit?.({
+        operation: 'review.resolutionPromptFor',
+        store: 'review',
+        ...(candidate ? { key: candidate.key } : {}),
+        outcome: 'error',
+        details: {
+          id,
+          ...(candidate ? { status: candidate.status, targetStore: candidate.targetStore } : {}),
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
+      throw error;
+    }
   }
 
   resolveConflict(
@@ -3042,9 +3103,43 @@ export class SqliteMemoryReviewQueue {
       });
       approvedCandidate = this.requireCandidate(id);
     });
-    tx.immediate();
+    try {
+      tx.immediate();
+    } catch (error) {
+      const candidate = this.tryCandidate(id);
+      this.audit?.({
+        operation: 'review.approve',
+        store: 'review',
+        ...(candidate ? { key: scopedKey } : {}),
+        outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
+        details: {
+          id,
+          ...(candidate ? { status: candidate.status, targetStore: candidate.targetStore } : {}),
+          resolution: 'keep_both_scoped',
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
+      throw error;
+    }
     finalizeWorkingFlush?.();
-    return approvedCandidate ?? this.requireCandidate(id, 'approved');
+    const result = approvedCandidate ?? this.requireCandidate(id, 'approved');
+    this.audit?.({
+      operation: 'review.approve',
+      store: 'review',
+      key: result.key,
+      outcome: result.status === 'suppressed' ? 'denied' : 'success',
+      details: { id, status: result.status, targetStore: result.targetStore, resolution: 'keep_both_scoped' },
+    });
+    if (result.status === 'approved' && result.targetStore === 'working') {
+      this.audit?.({
+        operation: 'working.set',
+        store: 'working',
+        key: result.key,
+        outcome: 'success',
+        details: { source: 'review.approve', candidateId: id, resolution: 'keep_both_scoped' },
+      });
+    }
+    return result;
   }
 
   private expireExistingAndApprove(
@@ -3096,9 +3191,43 @@ export class SqliteMemoryReviewQueue {
       });
       approvedCandidate = this.requireCandidate(id);
     });
-    tx.immediate();
+    try {
+      tx.immediate();
+    } catch (error) {
+      const candidate = this.tryCandidate(id);
+      this.audit?.({
+        operation: 'review.approve',
+        store: 'review',
+        ...(candidate ? { key: candidate.key } : {}),
+        outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
+        details: {
+          id,
+          ...(candidate ? { status: candidate.status, targetStore: candidate.targetStore } : {}),
+          resolution: 'expire_existing',
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
+      throw error;
+    }
     finalizeWorkingFlush?.();
-    return approvedCandidate ?? this.requireCandidate(id, 'approved');
+    const result = approvedCandidate ?? this.requireCandidate(id, 'approved');
+    this.audit?.({
+      operation: 'review.approve',
+      store: 'review',
+      key: result.key,
+      outcome: result.status === 'suppressed' ? 'denied' : 'success',
+      details: { id, status: result.status, targetStore: result.targetStore, resolution: 'expire_existing' },
+    });
+    if (result.status === 'approved' && result.targetStore === 'working') {
+      this.audit?.({
+        operation: 'working.set',
+        store: 'working',
+        key: result.key,
+        outcome: 'success',
+        details: { source: 'review.approve', candidateId: id, resolution: 'expire_existing' },
+      });
+    }
+    return result;
   }
 
   private assertConflictUnchanged(
@@ -4938,9 +5067,10 @@ function assertMemoryEncryptionState(
 
   verifyExistingEncryptedStores(db, cipher);
   const storesWithoutStatus = metadata.stores.filter(
-    (store) => !store.encrypted,
+    (store) => store.store !== 'memory_access_audit_events' && !store.encrypted,
   );
   const plaintextStores = metadata.stores.filter((store) =>
+    store.store !== 'memory_access_audit_events' &&
     hasPlaintextStoreRows(db, store.store as MemoryStoreName, cipher),
   );
   if (plaintextStores.length > 0) {
@@ -5012,7 +5142,7 @@ function readMemoryEncryptionMetadata(
   if (!tableExists(db, 'memory_encryption_status')) {
     return {
       algorithm: MEMORY_ENCRYPTION_ALGORITHM,
-      stores: ENCRYPTED_MEMORY_STORES.map((store) => ({ store, encrypted: false })),
+      stores: MEMORY_STORES.map((store) => ({ store, encrypted: false })),
     };
   }
   const rows = db
@@ -5023,9 +5153,11 @@ function readMemoryEncryptionMetadata(
   );
   return {
     algorithm: MEMORY_ENCRYPTION_ALGORITHM,
-    stores: ENCRYPTED_MEMORY_STORES.map((store) => ({
+    stores: MEMORY_STORES.map((store) => ({
       store,
-      encrypted: encryptedByStore.get(store) ?? false,
+      encrypted: store === 'memory_access_audit_events'
+        ? false
+        : (encryptedByStore.get(store) ?? false),
     })),
   };
 }

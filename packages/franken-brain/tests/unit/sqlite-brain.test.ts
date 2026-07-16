@@ -3700,10 +3700,16 @@ describe('SqliteBrain', () => {
           context: { secret: 'checkpoint payload' },
           timestamp: '2026-07-13T00:01:00.000Z',
         });
+        expect(encrypted.getMemoryEncryptionMetadata().stores).toEqual(
+          expect.arrayContaining([
+            { store: 'memory_access_audit_events', encrypted: false },
+          ]),
+        );
         expect(
           encrypted
             .getMemoryEncryptionMetadata()
-            .stores.every((store) => store.encrypted),
+            .stores.filter((store) => store.store !== 'memory_access_audit_events')
+            .every((store) => store.encrypted),
         ).toBe(true);
         encrypted.close();
 
@@ -3891,10 +3897,16 @@ describe('SqliteBrain', () => {
 
         const reopened = new SqliteBrain(dbPath, undefined, { encryption });
         expect(reopened.working.get('legacy')).toBe('plaintext memory');
+        expect(reopened.getMemoryEncryptionMetadata().stores).toEqual(
+          expect.arrayContaining([
+            { store: 'memory_access_audit_events', encrypted: false },
+          ]),
+        );
         expect(
           reopened
             .getMemoryEncryptionMetadata()
-            .stores.every((store) => store.encrypted),
+            .stores.filter((store) => store.store !== 'memory_access_audit_events')
+            .every((store) => store.encrypted),
         ).toBe(true);
         reopened.close();
       } finally {
