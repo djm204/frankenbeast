@@ -73,11 +73,17 @@ describe('git worktree isolation', () => {
       'HEAD def456',
       'branch refs/heads/beast/agent-a',
       '',
+      'worktree /repo/.frankenbeast/.worktrees/agent-locked',
+      'HEAD ghi789',
+      'branch refs/heads/beast/agent-locked',
+      'locked because operator is inspecting it',
+      '',
       'worktree /repo/.frankenbeast/.worktrees/detached',
       'detached',
     ].join('\n'))).toEqual([
       { path: '/repo', branch: 'main' },
       { path: '/repo/.frankenbeast/.worktrees/agent-a', branch: 'beast/agent-a' },
+      { path: '/repo/.frankenbeast/.worktrees/agent-locked', branch: 'beast/agent-locked', locked: true },
       { path: '/repo/.frankenbeast/.worktrees/detached' },
     ]);
   });
@@ -98,6 +104,8 @@ describe('git worktree isolation', () => {
       { path: join(projectRoot, '.frankenbeast', '.worktrees', stoppedAgent.id), branch: `beast/${stoppedAgent.id}` },
       { path: join(projectRoot, '.frankenbeast', '.worktrees', deletedAgent.id), branch: `beast/${deletedAgent.id}` },
       { path: join(projectRoot, '.frankenbeast', '.worktrees', 'agent-orphan'), branch: 'beast/agent-orphan' },
+      { path: join(projectRoot, '.frankenbeast', '.worktrees', 'agent-mismatch'), branch: 'beast/agent-other' },
+      { path: join(projectRoot, '.frankenbeast', '.worktrees', 'agent-locked'), branch: 'beast/agent-locked', locked: true },
       { path: join(projectRoot, '.frankenbeast', '.worktrees', 'foreign'), branch: 'feature/foreign' },
       { path: '/tmp/outside', branch: 'beast/outside' },
     ];

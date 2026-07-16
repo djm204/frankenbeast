@@ -26,6 +26,7 @@ export interface BeastWorktreeAllocation {
 }
 
 export interface GitWorktreeRecord {
+  readonly locked?: boolean | undefined;
   readonly path: string;
   readonly branch?: string | undefined;
 }
@@ -84,10 +85,14 @@ function branchNameFromRef(ref: string): string {
 
 export function parseGitWorktreePorcelain(output: string): GitWorktreeRecord[] {
   const records: GitWorktreeRecord[] = [];
-  let current: { path?: string; branch?: string | undefined } = {};
+  let current: { path?: string; branch?: string | undefined; locked?: boolean | undefined } = {};
   const flush = () => {
     if (current.path) {
-      records.push({ path: current.path, ...(current.branch ? { branch: current.branch } : {}) });
+      records.push({
+        path: current.path,
+        ...(current.branch ? { branch: current.branch } : {}),
+        ...(current.locked ? { locked: true } : {}),
+      });
     }
     current = {};
   };
@@ -101,6 +106,7 @@ export function parseGitWorktreePorcelain(output: string): GitWorktreeRecord[] {
     const value = rest.join(' ');
     if (key === 'worktree') current.path = value;
     if (key === 'branch') current.branch = branchNameFromRef(value);
+    if (key === 'locked') current.locked = true;
   }
   flush();
   return records;
@@ -162,8 +168,10 @@ export function planAbandonedBeastWorktreeCleanup(
   return input.worktrees
     .map((worktree): BeastWorktreeCleanupCandidate | undefined => {
       if (!worktree.branch?.startsWith(branchPrefix)) return undefined;
+      if (worktree.locked) return undefined;
       const agentId = worktreeAgentId(worktreesRoot, worktree.path);
       if (!agentId) return undefined;
+      if (worktree.branch !== `${branchPrefix}${agentId}`) return undefined;
       const agent = agentsById.get(agentId);
       if (activeRunAgentIds.has(agentId)) return undefined;
       const agentRuns = runsByAgentId.get(agentId) ?? [];
@@ -202,7 +210,7 @@ export function cleanupAbandonedBeastWorktrees(input: BeastWorktreeCleanupInput)
   const cleaned: BeastWorktreeCleanupCandidate[] = [];
   for (const candidate of plan) {
     try {
-      if (runGit(['status', '--porcelain'], candidate.path).length > 0) continue;
+      if (runGit(['status', '--porcelain', '--ignored'], candidate.path).length > 0) continue;
       runGit(['worktree', 'remove', '--force', candidate.path], input.projectRoot);
       if (branchExists(runGit, input.projectRoot, candidate.branchName)) {
         runGit(['branch', '-D', candidate.branchName], input.projectRoot);
