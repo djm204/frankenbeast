@@ -110,12 +110,14 @@ describe('dr restore-dry-run CLI', () => {
         },
       }), 'utf8');
       const longSingleLinePrefix = 'x'.repeat(9000);
+      const boundaryBearer = ['boundary', 'credential', 'for', 'tail'].join('-');
       await writeFile(join(stateDir, 'logs', 'run-1.log'), [
         'starting run',
         'OPENAI_API_KEY=test-key-needs-redaction',
         'X-API-Key: reviewHeaderValueForMasking',
         'Authorization: Bearer bearerValueForMasking123',
         'redis tls rediss://:redissValueForMasking@cache.example:6380/0',
+        `Authorization: Bearer ${longSingleLinePrefix}${boundaryBearer}`,
         `${longSingleLinePrefix}tail-marker`,
         'finished run',
       ].join('\n'), 'utf8');
@@ -205,6 +207,7 @@ describe('dr restore-dry-run CLI', () => {
       expect(reportText).not.toContain('test-key-needs-redaction');
       expect(reportText).not.toContain('reviewHeaderValueForMasking');
       expect(reportText).not.toContain(longSingleLinePrefix);
+      expect(reportText).not.toContain(boundaryBearer);
       expect(reportText).not.toContain('bearerValueForMasking123');
       expect(reportText).not.toContain('redissValueForMasking');
     } finally {

@@ -9,6 +9,7 @@ import { redactLogData, redactSensitiveText } from '../logging/redaction.js';
 
 export const POINT_IN_TIME_EXPORT_SCHEMA_VERSION = 1;
 const MAX_LOG_TAIL_LINE_CHARS = 8192;
+const MAX_TEXT_EVIDENCE_BYTES = 2 * 1024 * 1024;
 
 export interface PointInTimeExportOptions {
   readonly stateDir: string;
@@ -224,11 +225,22 @@ function summarizeSqliteMemoryStore(absolutePath: string, checksum: FileChecksum
   }
 }
 
-async function checksumFor(root: string, absolutePath: string, data: Buffer): Promise<FileChecksum> {
+async function checksumForPath(root: string, absolutePath: string): Promise<FileChecksum> {
+  const hasher = createHash('sha256');
+  let bytes = 0;
+  await new Promise<void>((resolvePromise, reject) => {
+    const stream = createReadStream(absolutePath);
+    stream.on('data', (chunk: Buffer) => {
+      bytes += chunk.byteLength;
+      hasher.update(chunk);
+    });
+    stream.on('error', reject);
+    stream.on('end', resolvePromise);
+  });
   return {
     path: normalizeRelative(root, absolutePath),
-    bytes: data.byteLength,
-    sha256: sha256(data),
+    bytes,
+    sha256: `sha256:${hasher.digest('hex')}`,
   };
 }
 
@@ -245,15 +257,18 @@ async function checksumAndTailFor(root: string, absolutePath: string, limit: num
       const text = chunk.toString('utf8');
       const parts = `${pending}${text}`.split(/\r?\n/u);
       pending = parts.pop() ?? '';
-      if (pending.length > MAX_LOG_TAIL_LINE_CHARS) pending = pending.slice(-MAX_LOG_TAIL_LINE_CHARS);
       for (const line of parts) {
-        lines.push(redactSensitiveText(line.slice(-MAX_LOG_TAIL_LINE_CHARS)));
+        const redacted = redactSensitiveText(line);
+        lines.push(redacted.slice(-MAX_LOG_TAIL_LINE_CHARS));
         if (lines.length > limit) lines.splice(0, lines.length - limit);
       }
     });
     stream.on('error', reject);
     stream.on('end', () => {
-      if (pending.length > 0) lines.push(redactSensitiveText(pending.slice(-MAX_LOG_TAIL_LINE_CHARS)));
+      if (pending.length > 0) {
+        const redacted = redactSensitiveText(pending);
+        lines.push(redacted.slice(-MAX_LOG_TAIL_LINE_CHARS));
+      }
       if (lines.length > limit) lines.splice(0, lines.length - limit);
       resolvePromise();
     });
@@ -343,9 +358,7 @@ export async function createPointInTimeExport(options: PointInTimeExportOptions)
       continue;
     }
 
-    const data = await readFile(resolved);
-    const text = data.toString('utf8');
-    const checksum = await checksumFor(sourceDir, resolved, data);
+    const checksum = await checksumForPath(sourceDir, resolved);
     files.push(checksum);
 
     if (basename(checksum.path).endsWith('.db')) {
@@ -356,6 +369,12 @@ export async function createPointInTimeExport(options: PointInTimeExportOptions)
       const memorySummary = isMemoryStorePath(checksum.path) ? summarizeSqliteMemoryStore(resolved, { ...checksum }) : undefined;
       if (memorySummary !== undefined) memory.push(memorySummary);
     }
+
+    const shouldReadText = checksum.bytes <= MAX_TEXT_EVIDENCE_BYTES
+      && (checksum.path.endsWith('.json') || section === 'approvals' || section === 'memory' || section === 'tasks' || section === 'runs');
+    if (!shouldReadText) continue;
+
+    const text = await readFile(resolved, 'utf8');
 
     const pendingApprovalSummary = splitChatPendingApprovals(checksum, text);
     if (pendingApprovalSummary !== undefined) approvals.push(pendingApprovalSummary);

@@ -85,18 +85,23 @@ describe('logging redaction', () => {
     const redissPassword = ['tls', 'cache', 'pass'].join('');
     const apiKey = ['header', 'api', 'key'].join('');
     const result = redactSensitiveTextWithProvenance(
-      `Authorization: Bearer ${bearer} X-API-Key: ${apiKey} redis://:${password}@localhost:6379/0 rediss://:${redissPassword}@cache.example:6380/0`,
+      `Authorization: Bearer ${bearer} Proxy-Authorization: Digest ${apiKey} X-API-Key: ${apiKey} redis://:${password}@localhost:6379/0 rediss://:${redissPassword}@cache.example:6380/0`,
       '$.message',
     );
 
-    expect(result.value).toContain('X-API-Key: <redacted>');
-    expect(result.value).toContain('redis://:<redacted>@localhost:6379/0');
-    expect(result.value).toContain('rediss://:<redacted>@cache.example:6380/0');
+    expect(result.value).toBe('Authorization: Bearer <redacted> Proxy-Authorization: <redacted> X-API-Key: <redacted> redis://:<redacted>@localhost:6379/0 rediss://:<redacted>@cache.example:6380/0');
     expect(result.value).not.toContain(bearer);
     expect(result.value).not.toContain(password);
     expect(result.value).not.toContain(redissPassword);
     expect(result.value).not.toContain(apiKey);
     expect(result.decisions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: '$.message',
+        key: 'Proxy-Authorization',
+        source: 'text-assignment',
+        rule: 'sensitive-key',
+        replacement: '<redacted>',
+      }),
       expect.objectContaining({
         path: '$.message',
         key: 'X-API-Key',

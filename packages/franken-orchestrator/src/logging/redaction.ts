@@ -69,7 +69,20 @@ export function redactSensitiveTextWithProvenance(text: string, path = '$'): Red
     return `${prefix}"${REDACTED}"`;
   });
 
-  const headerRedacted = jsonRedacted.replace(HEADER_STYLE_FIELD_RE, (match, key: string, value: string) => {
+  const withAuthorizationSchemesRedacted = jsonRedacted.replace(/\b((?:Proxy-)?Authorization)\s*:\s*(Bearer|Basic|Bot)\s+(.+?)(?=\s+[A-Za-z_][A-Za-z0-9_-]*\s*:|$)/giu, (_match, key: string, scheme: string) => {
+    decisions.push(createDecision(path, key, 'text-assignment'));
+    return `${key}: ${scheme} ${REDACTED}`;
+  });
+
+  const withAuthorizationHeadersRedacted = withAuthorizationSchemesRedacted.replace(/\b((?:Proxy-)?Authorization)\s*:\s*(.+?)(?=\s+[A-Za-z_][A-Za-z0-9_-]*\s*:|$)/giu, (match, key: string, value: string) => {
+    if (/^(?:Bearer|Basic|Bot)\b/iu.test(value.trimStart())) {
+      return match;
+    }
+    decisions.push(createDecision(path, key, 'text-assignment'));
+    return `${key}: ${REDACTED}`;
+  });
+
+  const headerRedacted = withAuthorizationHeadersRedacted.replace(HEADER_STYLE_FIELD_RE, (match, key: string) => {
     if (!isSensitiveLogKey(key)) {
       return match;
     }
