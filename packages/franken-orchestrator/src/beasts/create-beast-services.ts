@@ -38,7 +38,7 @@ export interface BeastServiceBundle {
 
 export function createBeastServices(paths: BeastServicePaths): BeastServiceBundle {
   const repository = new SQLiteBeastRepository(paths.beastsDb);
-  const logStore = new BeastLogStore(paths.beastLogsDir);
+  const logStore = new BeastLogStore(paths.beastLogsDir, createBeastLogStoreOptionsFromEnv());
   const projectRoot = resolve(paths.root ?? process.env.FBEAST_ROOT ?? process.cwd());
   const runConfigDir = join(projectRoot, '.fbeast', '.build', 'run-configs');
   const catalog = new BeastCatalogService();
@@ -104,6 +104,18 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   };
 }
 
+function createBeastLogStoreOptionsFromEnv(): { maxLogFileBytes?: number; maxRotatedLogFiles?: number } {
+  const maxLogFileBytes = parsePositiveIntegerEnv('FBEAST_RUN_LOG_MAX_BYTES', process.env.FBEAST_RUN_LOG_MAX_BYTES);
+  const maxRotatedLogFiles = parseNonNegativeIntegerEnv(
+    'FBEAST_RUN_LOG_MAX_ROTATED_FILES',
+    process.env.FBEAST_RUN_LOG_MAX_ROTATED_FILES,
+  );
+  return {
+    ...(maxLogFileBytes === undefined ? {} : { maxLogFileBytes }),
+    ...(maxRotatedLogFiles === undefined ? {} : { maxRotatedLogFiles }),
+  };
+}
+
 function createCapacityReservationPolicyFromEnv(): CapacityReservationPolicy | undefined {
   const totalSlots = parsePositiveInteger(process.env.FBEAST_AGENT_CAPACITY_TOTAL);
   const reservations = parseCapacityReservations(process.env.FBEAST_AGENT_CAPACITY_RESERVATIONS);
@@ -122,10 +134,23 @@ function createCapacityReservationPolicyFromEnv(): CapacityReservationPolicy | u
 }
 
 function parsePositiveInteger(value: string | undefined): number | undefined {
+  return parsePositiveIntegerEnv('FBEAST_AGENT_CAPACITY_TOTAL', value);
+}
+
+function parsePositiveIntegerEnv(name: string, value: string | undefined): number | undefined {
   if (!value) return undefined;
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 1) {
-    throw new RangeError(`FBEAST_AGENT_CAPACITY_TOTAL must be a positive integer, received ${value}`);
+    throw new RangeError(`${name} must be a positive integer, received ${value}`);
+  }
+  return parsed;
+}
+
+function parseNonNegativeIntegerEnv(name: string, value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new RangeError(`${name} must be a non-negative integer, received ${value}`);
   }
   return parsed;
 }
