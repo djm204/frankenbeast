@@ -266,35 +266,10 @@ function redactMemorySourceAttributionGovernanceContext(action: string, context:
   const unqualified = unqualifyMcpActionName(action);
   if (unqualified === 'fbeast_memory_source_attribution'
     || (unqualified === 'execute_tool'
-      && (contextTargetsTool(context, 'fbeast_memory_source_attribution')
-        || contextLooksLikeMemorySourceAttributionArgs(context)))) {
+      && contextTargetsTool(context, 'fbeast_memory_source_attribution'))) {
     return '{}';
   }
   return context;
-}
-
-function contextLooksLikeMemorySourceAttributionArgs(context: string): boolean {
-  try {
-    const parsed = JSON.parse(context) as unknown;
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
-    const record = parsed as Record<string, unknown>;
-    const keys = Object.keys(record);
-    const hasExplicitAttributionMarker = Object.prototype.hasOwnProperty.call(record, 'source')
-      || Object.prototype.hasOwnProperty.call(record, 'readScope')
-      || Object.prototype.hasOwnProperty.call(record, 'targetStore');
-    return keys.length > 0
-      && hasExplicitAttributionMarker
-      && keys.every(key => [
-        'key',
-        'source',
-        'limit',
-        'readScope',
-        'agentId',
-        'targetStore',
-      ].includes(key));
-  } catch {
-    return false;
-  }
 }
 
 function sanitizeMemoryExportGovernanceArgs(args: Record<string, unknown>): Record<string, unknown> {
