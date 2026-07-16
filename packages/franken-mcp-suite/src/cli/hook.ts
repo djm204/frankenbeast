@@ -68,14 +68,15 @@ async function readStdinPayload(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-const MEMORY_REVIEW_RESULT_TOOLS = new Set([
+const MEMORY_RESULT_PAYLOAD_REDACTION_TOOLS = new Set([
+  'fbeast_memory_export',
   'fbeast_memory_review_propose',
   'fbeast_memory_review_list',
   'fbeast_memory_review_decide',
   // Proxy mode reports the wrapper tool name to post-tool hooks and streams only
   // the tool response, so the resolved target tool is unavailable here. Redact
-  // proxy response payloads rather than risking persistence of memory-review
-  // candidate values returned via execute_tool.
+  // proxy response payloads rather than risking persistence of exported memory
+  // or memory-review candidate values returned via execute_tool.
   'execute_tool',
 ]);
 
@@ -86,7 +87,7 @@ function unqualifyMcpToolName(toolName: string): string {
 }
 
 function redactPostToolPayload(toolName: string, payload: string): string {
-  if (!MEMORY_REVIEW_RESULT_TOOLS.has(unqualifyMcpToolName(toolName))) return payload;
+  if (!MEMORY_RESULT_PAYLOAD_REDACTION_TOOLS.has(unqualifyMcpToolName(toolName))) return payload;
   return '[memory-review-result-redacted]';
 }
 
