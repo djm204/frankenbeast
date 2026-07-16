@@ -239,8 +239,8 @@ describe('dispatcher queue reconciliation after restart', () => {
 
     expect(report.findings.map(finding => finding.code)).toEqual(expect.arrayContaining([
       'pending-approval-restored',
-      'queued-run-restored',
     ]));
+    expect(report.findings.map(finding => finding.code)).not.toContain('queued-run-restored');
     expect(repo.getRun(oldRun.id)).toMatchObject({ status: 'queued' });
     expect(repo.getTrackedAgent(agent.id)).toMatchObject({
       status: 'awaiting_approval',
@@ -386,6 +386,108 @@ describe('dispatcher queue reconciliation after restart', () => {
       finishedAt: '2026-03-20T00:02:00.000Z',
     });
     expect(repo.getTrackedAgent(agent.id)).toMatchObject({ status: 'stopped', dispatchRunId: run.id });
+  });
+
+  it('does not log reconciliation events for already-linked queued runs', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-dispatcher-reconcile-'));
+    const repo = createRepo(workDir);
+    const agent = createAgent(repo, 'already queued worker');
+    const run = repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: { objective: 'queued', chunkDirectory: '.' },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-20T00:00:01.000Z',
+    });
+    repo.updateTrackedAgent(agent.id, {
+      status: 'dispatching',
+      dispatchRunId: run.id,
+      updatedAt: '2026-03-20T00:00:02.000Z',
+    });
+
+    const report = reconcileDispatcherQueueAfterRestart(repo, {
+      now: () => '2026-03-20T00:05:00.000Z',
+      isPidAlive: () => false,
+    });
+
+    expect(report.findings.map(finding => finding.code)).not.toContain('queued-run-restored');
+    expect(repo.listEvents(run.id).some(event => event.type === 'run.reconciliation.dispatcher_restart')).toBe(false);
+  });
+
+  it('clears stale exit metadata when failing running runs with missing attempts', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-dispatcher-reconcile-'));
+    const repo = createRepo(workDir);
+    const agent = createAgent(repo, 'missing attempt worker');
+    const run = repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: { objective: 'missing attempt', chunkDirectory: '.' },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-20T00:00:01.000Z',
+    });
+    repo.updateRun(run.id, {
+      status: 'running',
+      currentAttemptId: 'attempt_missing',
+      latestExitCode: 42,
+      finishedAt: '2026-03-20T00:00:30.000Z',
+    });
+
+    const report = reconcileDispatcherQueueAfterRestart(repo, {
+      now: () => '2026-03-20T00:05:00.000Z',
+      isPidAlive: () => false,
+    });
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      code: 'missing-running-attempt-failed',
+      runId: run.id,
+    }));
+    expect(repo.getRun(run.id)).toMatchObject({
+      status: 'failed',
+      stopReason: 'dispatcher_restart_missing_attempt',
+      finishedAt: '2026-03-20T00:05:00.000Z',
+    });
+    expect(repo.getRun(run.id)?.currentAttemptId).toBeUndefined();
+    expect(repo.getRun(run.id)?.latestExitCode).toBeUndefined();
+  });
+
+  it('quarantines live legacy attempts that predate process ownership metadata', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-dispatcher-reconcile-'));
+    const repo = createRepo(workDir);
+    const agent = createAgent(repo, 'legacy live worker');
+    const run = repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: { objective: 'legacy', chunkDirectory: '.' },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-20T00:00:01.000Z',
+    });
+    const attempt = repo.createAttempt(run.id, {
+      status: 'running',
+      pid: 5555,
+    });
+
+    const report = reconcileDispatcherQueueAfterRestart(repo, {
+      now: () => '2026-03-20T00:05:00.000Z',
+      isPidAlive: (pid) => pid === 5555,
+    });
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      code: 'live-running-attempt-quarantined',
+      runId: run.id,
+      attemptId: attempt.id,
+      pid: 5555,
+    }));
+    expect(repo.getRun(run.id)).toMatchObject({ status: 'running', currentAttemptId: attempt.id });
+    expect(repo.getTrackedAgent(agent.id)).toMatchObject({ status: 'running', dispatchRunId: run.id });
   });
 
   it('preserves owned process groups when the original group leader has exited', async () => {

@@ -97,6 +97,7 @@ export function reconcileDispatcherQueueAfterRestart(
         getProcessStartTimeTicks,
         isProcessGroupAlive,
       );
+      if (!finding) continue;
       findings.push(finding);
       if (finding.fromStatus !== finding.toStatus || finding.code === 'missing-running-attempt-failed' || finding.code === 'stale-running-attempt-failed') {
         changedRuns += 1;
@@ -121,7 +122,7 @@ function reconcileActiveRun(
   isPidAlive: (pid: number) => boolean,
   getProcessStartTimeTicks: (pid: number) => string | undefined,
   isProcessGroupAlive: (pid: number) => boolean,
-): DispatcherQueueReconciliationFinding {
+): DispatcherQueueReconciliationFinding | undefined {
   if (attempt && TERMINAL_RUN_STATUSES.has(attempt.status)) {
     const restoredRun = repository.updateRun(run.id, {
       status: attempt.status,
@@ -145,7 +146,9 @@ function reconcileActiveRun(
   }
 
   if (run.status === 'pending_approval') {
-    syncTrackedAgentIfRunOwnsDispatch(repository, run, 'awaiting_approval', reconciledAt);
+    if (!syncTrackedAgentIfRunOwnsDispatch(repository, run, 'awaiting_approval', reconciledAt)) {
+      return undefined;
+    }
     const finding: DispatcherQueueReconciliationFinding = {
       code: 'pending-approval-restored',
       runId: run.id,
@@ -161,7 +164,9 @@ function reconcileActiveRun(
   }
 
   if (run.status === 'queued' || run.status === 'interviewing') {
-    syncTrackedAgentIfRunOwnsDispatch(repository, run, 'dispatching', reconciledAt);
+    if (!syncTrackedAgentIfRunOwnsDispatch(repository, run, 'dispatching', reconciledAt)) {
+      return undefined;
+    }
     const finding: DispatcherQueueReconciliationFinding = {
       code: 'queued-run-restored',
       runId: run.id,
@@ -181,6 +186,7 @@ function reconcileActiveRun(
       status: 'failed',
       finishedAt: reconciledAt,
       currentAttemptId: null,
+      latestExitCode: null,
       stopReason: 'dispatcher_restart_missing_attempt',
     });
     syncTrackedAgentIfRunOwnsDispatch(repository, failedRun, 'failed', reconciledAt);
@@ -406,10 +412,17 @@ function attemptOwnsLiveProcess(
 ): boolean {
   const pid = attempt.pid;
   if (typeof pid !== 'number' || pid <= 0) return false;
-  if (attempt.executorMetadata?.processGroupOwned !== true) return false;
-  if (attempt.executorMetadata?.processGroupLeaderPid !== pid) return false;
-  const expectedStartTime = attempt.executorMetadata?.processStartTimeTicks;
-  if (typeof expectedStartTime !== 'string' || expectedStartTime.length === 0) return false;
+  const metadata = attempt.executorMetadata;
+  const hasOwnershipMetadata = metadata?.processGroupOwned !== undefined
+    || metadata?.processGroupLeaderPid !== undefined
+    || metadata?.processStartTimeTicks !== undefined;
+  if (metadata?.processGroupOwned !== true || metadata?.processGroupLeaderPid !== pid) {
+    return !hasOwnershipMetadata && isPidAlive(pid);
+  }
+  const expectedStartTime = metadata.processStartTimeTicks;
+  if (typeof expectedStartTime !== 'string' || expectedStartTime.length === 0) {
+    return isPidAlive(pid);
+  }
   if (isPidAlive(pid)) {
     return getProcessStartTimeTicks(pid) === expectedStartTime;
   }
