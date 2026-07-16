@@ -99,6 +99,27 @@ vi.mock("better-sqlite3", () => ({
                 reason: "allowed",
                 createdAt: "2026-07-16T12:30:00.000Z",
               },
+              {
+                action: "fbeast_memory_store",
+                context: JSON.stringify({ profile: "sparse-duplicate-test", repo: "djm204/frankenbeast", type: "working" }),
+                decision: "approved",
+                reason: "allowed",
+                createdAt: "2026-07-16T12:50:00.000Z",
+              },
+              {
+                action: "fbeast_memory_store",
+                context: JSON.stringify({ agentId: "[right-to-forget-selector-redacted]", profile: "placeholder-duplicate-test", repo: "djm204/frankenbeast", type: "working" }),
+                decision: "approved",
+                reason: "allowed",
+                createdAt: "2026-07-16T13:00:00.000Z",
+              },
+              {
+                action: "fbeast_memory_right_to_forget",
+                context: "[right-to-forget-context-redacted]",
+                decision: "approved",
+                reason: "dry-run approval",
+                createdAt: "2026-07-16T13:10:00.000Z",
+              },
             ];
           }
           if (sql.includes("FROM audit_trail")) {
@@ -117,6 +138,21 @@ vi.mock("better-sqlite3", () => ({
                 eventType: "tool_call",
                 payload: JSON.stringify({ toolName: "fbeast_memory_query", ok: false, profile: "error-test", error: "limit must be numeric" }),
                 createdAt: "2026-07-16T12:40:00.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ toolName: "fbeast_memory_store", ok: true, args: { agentId: "agent-sparse", profile: "sparse-duplicate-test", repo: "djm204/frankenbeast", type: "working" } }),
+                createdAt: "2026-07-16T12:50:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ toolName: "fbeast_memory_store", ok: true, args: { agentId: "agent-placeholder", profile: "placeholder-duplicate-test", repo: "djm204/frankenbeast", type: "working" } }),
+                createdAt: "2026-07-16T13:00:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ toolName: "fbeast_memory_right_to_forget", ok: true, args: { agentId: "agent-dry-redacted", profile: "rtf-redacted-test", dryRun: true } }),
+                createdAt: "2026-07-16T13:10:05.000Z",
               },
             ];
           }
@@ -724,6 +760,53 @@ describe("createBrainAdapter", () => {
       agentId: "agent-actual",
       tool: "fbeast_memory_store",
     });
+  });
+
+  it("preserves richer observer metadata when deduping sparse governed rows", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "sparse-duplicate-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      tool: "fbeast_memory_store",
+      operation: "write",
+      agentId: "agent-sparse",
+      profile: "sparse-duplicate-test",
+    });
+    expect(report.summary.byAgent).toEqual({ "agent-sparse": 1 });
+  });
+
+  it("deduplicates nonstandard redaction placeholders with observer metadata", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "placeholder-duplicate-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      tool: "fbeast_memory_store",
+      agentId: "agent-placeholder",
+      profile: "placeholder-duplicate-test",
+    });
+  });
+
+  it("keeps dry-run classification when deduping redacted right-to-forget rows", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ tool: "fbeast_memory_right_to_forget", limit: 20 });
+
+    expect(report.count).toBe(2);
+    expect(report.summary.byOperation).toEqual({ "delete:dry_run": 2 });
+  });
+
+  it("bounds memory access audit source scans in SQL", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    await brain.memoryAccessAuditReport({ limit: 5 });
+
+    const prepareSql = databaseInstances.flatMap((db) => db.prepare.mock.calls.map(([sql]) => String(sql)));
+    expect(prepareSql.find((sql) => sql.includes("FROM governor_log"))).toContain("LIMIT ?");
+    expect(prepareSql.find((sql) => sql.includes("FROM audit_trail"))).toContain("LIMIT ?");
   });
 
   it("classifies failed handler audit events as errors", async () => {

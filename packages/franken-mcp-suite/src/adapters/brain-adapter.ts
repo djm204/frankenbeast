@@ -561,7 +561,11 @@ function auditDecisionFromPayload(payload: Record<string, unknown>): string {
 
 function isRedactedAuditValue(value: string | undefined): boolean {
   if (!value) return false;
-  return value.includes("[redacted]") || value.includes("«redacted:") || value.includes("***");
+  const normalized = value.toLowerCase();
+  return normalized.includes("[redacted]")
+    || /\[[^\]]*redacted[^\]]*\]/i.test(value)
+    || normalized.includes("«redacted:")
+    || value.includes("***");
 }
 
 function auditValuesCorrelate(left: string | undefined, right: string | undefined): boolean {
@@ -570,25 +574,65 @@ function auditValuesCorrelate(left: string | undefined, right: string | undefine
   return left === right;
 }
 
+function auditOperationsCorrelate(left: string, right: string): boolean {
+  if (left === right) return true;
+  return (left === "delete" && right === "delete:dry_run")
+    || (left === "delete:dry_run" && right === "delete");
+}
+
 function auditEventsCorrelate(left: MemoryAccessAuditEvent, right: MemoryAccessAuditEvent): boolean {
   return left.tool === right.tool
-    && left.operation === right.operation
+    && auditOperationsCorrelate(left.operation, right.operation)
     && auditValuesCorrelate(left.agentId, right.agentId)
     && auditValuesCorrelate(left.profile, right.profile)
     && auditValuesCorrelate(left.repo, right.repo);
 }
 
+function richerAuditField(left: string | undefined, right: string | undefined): string | undefined {
+  if (left === undefined || isRedactedAuditValue(left)) return right ?? left;
+  if (right === undefined || isRedactedAuditValue(right)) return left;
+  return right.length > left.length ? right : left;
+}
+
+function mergeAuditEvents(left: MemoryAccessAuditEvent, right: MemoryAccessAuditEvent): MemoryAccessAuditEvent {
+  const merged: MemoryAccessAuditEvent = {
+    ...left,
+    operation: richerAuditField(left.operation, right.operation) ?? left.operation,
+    targetStore: richerAuditField(left.targetStore, right.targetStore) ?? left.targetStore,
+    targetClass: richerAuditField(left.targetClass, right.targetClass) ?? left.targetClass,
+    decision: richerAuditField(left.decision, right.decision) ?? left.decision,
+    reason: richerAuditField(left.reason, right.reason) ?? left.reason,
+  };
+  const agentId = richerAuditField(left.agentId, right.agentId);
+  const cardId = richerAuditField(left.cardId, right.cardId);
+  const profile = richerAuditField(left.profile, right.profile);
+  const repo = richerAuditField(left.repo, right.repo);
+  if (agentId !== undefined) merged.agentId = agentId;
+  if (cardId !== undefined) merged.cardId = cardId;
+  if (profile !== undefined) merged.profile = profile;
+  if (repo !== undefined) merged.repo = repo;
+  return merged;
+}
+
 function dedupeMemoryAccessEvents(events: MemoryAccessAuditEvent[]): MemoryAccessAuditEvent[] {
-  const governorEvents = events.filter((event) => event.source === "governor_log");
-  return events.filter((event) => {
-    if (event.source !== "audit_trail") return true;
+  const deduped: MemoryAccessAuditEvent[] = [];
+  for (const event of events) {
     const eventTime = auditTimestampMs(event.timestamp);
-    return !governorEvents.some((governorEvent) => {
-      if (!auditEventsCorrelate(governorEvent, event)) return false;
-      const governorTime = auditTimestampMs(governorEvent.timestamp);
-      return Math.abs(governorTime - eventTime) <= 10_000;
+    const duplicateIndex = deduped.findIndex((candidate) => {
+      if (!auditEventsCorrelate(candidate, event)) return false;
+      const candidateTime = auditTimestampMs(candidate.timestamp);
+      return Math.abs(candidateTime - eventTime) <= 10_000;
     });
-  });
+    if (duplicateIndex < 0) {
+      deduped.push(event);
+      continue;
+    }
+    const existing = deduped[duplicateIndex];
+    if (existing !== undefined) {
+      deduped[duplicateIndex] = mergeAuditEvents(existing, event);
+    }
+  }
+  return deduped;
 }
 
 function sqliteAuditTimestamp(value: string): string {
@@ -979,6 +1023,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
 
     async memoryAccessAuditReport(input = {}) {
       const limit = resolveQueryLimit(input.limit ?? MAX_QUERY_LIMIT);
+      const scanLimit = Math.max(limit * 50, MAX_QUERY_LIMIT);
       const reportDb = new Database(dbPath);
       configureBrainAdapterDb(reportDb);
       try {
@@ -993,7 +1038,8 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           FROM governor_log
           ${governorWhere}
           ORDER BY id DESC
-        `).all(...governorTimeFilter.params) as Array<{ action: string; context: string; decision: string; reason: string | null; createdAt: string }>
+          LIMIT ?
+        `).all(...governorTimeFilter.params, scanLimit) as Array<{ action: string; context: string; decision: string; reason: string | null; createdAt: string }>
           : [];
         for (const row of governorRows) {
           const context = parseAuditContext(row.context);
@@ -1031,7 +1077,8 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
             AND (payload LIKE '%fbeast_memory%' OR payload LIKE '%execute_tool%')
             ${auditTimeCondition}
           ORDER BY id DESC
-        `).all(...auditTimeFilter.params) as Array<{ eventType: string; payload: string; createdAt: string }>
+          LIMIT ?
+        `).all(...auditTimeFilter.params, scanLimit) as Array<{ eventType: string; payload: string; createdAt: string }>
           : [];
         for (const row of auditRows) {
           const payload = parseAuditContext(row.payload);
