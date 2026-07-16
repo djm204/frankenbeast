@@ -214,6 +214,25 @@ describe('dead-letter queue for failed automation actions', () => {
       }), 'utf8');
 
       await expect(listDeadLetterEntries(queuePath)).rejects.toThrow(/retry limit has not been exhausted/);
+
+      await writeFile(queuePath, JSON.stringify({
+        schemaVersion: 1,
+        entries: [{
+          id: 'dlq_zero_limit',
+          actionClass: 'codex-review-trigger',
+          target: 'pr-2342',
+          attempts: 0,
+          maxAttempts: 0,
+          lastError: 'invalid retry limit',
+          firstAttemptedAt: '2026-07-16T08:00:00.000Z',
+          lastAttemptedAt: '2026-07-16T08:01:00.000Z',
+          createdAt: '2026-07-16T08:01:00.000Z',
+          replaySafety: 'safe',
+          status: 'open',
+        }],
+      }), 'utf8');
+
+      await expect(listDeadLetterEntries(queuePath)).rejects.toThrow(/maxAttempts must be at least 1/);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

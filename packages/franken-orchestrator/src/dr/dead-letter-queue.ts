@@ -125,6 +125,9 @@ function parseEntry(value: unknown): DeadLetterEntry {
     ...(value.retiredAt === undefined ? {} : { retiredAt: requireString(value.retiredAt, 'retiredAt') }),
     ...(value.retiredReason === undefined ? {} : { retiredReason: requireString(value.retiredReason, 'retiredReason') }),
   };
+  if (entry.maxAttempts < 1) {
+    throw new Error('Invalid dead-letter queue entry: maxAttempts must be at least 1');
+  }
   if (entry.attempts > entry.maxAttempts) {
     throw new Error('Invalid dead-letter queue entry: attempts cannot exceed maxAttempts');
   }
