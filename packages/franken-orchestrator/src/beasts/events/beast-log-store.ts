@@ -25,13 +25,17 @@ export class BeastLogStore {
   private readonly maxLogFileBytes: number;
   private readonly maxRotatedLogFiles: number;
   private readonly appendQueues = new Map<string, Promise<void>>();
+  private readonly retentionPrunedLogPaths = new Set<string>();
 
   constructor(
     private readonly logDir: string,
     options: BeastLogStoreOptions = {},
   ) {
     this.maxLogFileBytes = Math.max(options.maxLogFileBytes ?? DEFAULT_MAX_LOG_FILE_BYTES, MIN_LOG_FILE_BYTES);
-    this.maxRotatedLogFiles = Math.min(options.maxRotatedLogFiles ?? DEFAULT_MAX_ROTATED_LOG_FILES, MAX_ROTATED_LOG_FILES);
+    this.maxRotatedLogFiles = Math.max(
+      0,
+      Math.min(options.maxRotatedLogFiles ?? DEFAULT_MAX_ROTATED_LOG_FILES, MAX_ROTATED_LOG_FILES),
+    );
   }
 
   async append(
@@ -152,7 +156,7 @@ export class BeastLogStore {
     }
 
     if (currentBytes === 0 || currentBytes + nextWriteBytes <= this.maxLogFileBytes) {
-      await this.removeRotationsAboveRetention(filePath);
+      await this.removeRotationsAboveRetentionOnce(filePath);
       return;
     }
 
@@ -190,6 +194,12 @@ export class BeastLogStore {
     }
   }
 
+  private async removeRotationsAboveRetentionOnce(filePath: string): Promise<void> {
+    if (this.retentionPrunedLogPaths.has(filePath)) return;
+    await this.removeRotationsAboveRetention(filePath);
+    this.retentionPrunedLogPaths.add(filePath);
+  }
+
   private async listReadableLogPaths(filePath: string): Promise<string[]> {
     const dir = dirname(filePath);
     const prefix = `${basename(filePath)}.`;
@@ -197,7 +207,7 @@ export class BeastLogStore {
       const entries = await readdir(dir);
       const rotatedPaths = entries
         .map((entry) => ({ entry, index: parseRotationIndex(entry, prefix) }))
-        .filter(({ index }) => index >= 1 && index <= this.maxRotatedLogFiles)
+        .filter(({ index }) => index >= 1)
         .sort((left, right) => right.index - left.index)
         .map(({ entry }) => join(dir, entry));
       return [...rotatedPaths, filePath];

@@ -67,6 +67,22 @@ describe('BeastLogStore', () => {
     });
   });
 
+  it('reads all existing rotations even when the reader uses default retention', async () => {
+    await withTempDir(async (dir) => {
+      const activePath = join(dir, 'run-reader-retention', 'attempt-1.log');
+      await mkdir(join(dir, 'run-reader-retention'), { recursive: true });
+      await writeFile(`${activePath}.4`, 'old-4\n');
+      await writeFile(`${activePath}.10`, 'old-10\n');
+      await writeFile(activePath, 'active\n');
+
+      await expect(new BeastLogStore(dir).read('run-reader-retention', 'attempt-1')).resolves.toEqual([
+        'old-10',
+        'old-4',
+        'active',
+      ]);
+    });
+  });
+
   it('truncates oversized process-output messages so one noisy line cannot break the cap', async () => {
     await withTempDir(async (dir) => {
       const logs = new BeastLogStore(dir, { maxLogFileBytes: 260, maxRotatedLogFiles: 1 });
@@ -181,6 +197,25 @@ describe('BeastLogStore', () => {
     });
   });
 
+  it('clamps negative rotated-file retention without deleting active or sibling logs', async () => {
+    await withTempDir(async (dir) => {
+      const activePath = join(dir, 'run-negative-retention', 'attempt-1.log');
+      const siblingPath = join(dir, 'run-negative-retention', 'attempt-2.log');
+      await mkdir(join(dir, 'run-negative-retention'), { recursive: true });
+      await writeFile(activePath, `${JSON.stringify({ stream: 'stdout', message: 'active', createdAt: '2026-03-11T00:00:00.000Z' })}\n`);
+      await writeFile(siblingPath, 'sibling\n');
+      await writeFile(`${activePath}.1`, 'old-1\n');
+
+      const logs = new BeastLogStore(dir, { maxLogFileBytes: 1_000, maxRotatedLogFiles: -1 });
+      await logs.append('run-negative-retention', 'attempt-1', 'stdout', 'small', '2026-03-11T00:00:01.000Z');
+
+      expect(existsSync(activePath)).toBe(true);
+      expect(await readFile(activePath, 'utf-8')).toContain('small');
+      expect(await readFile(siblingPath, 'utf-8')).toBe('sibling\n');
+      expect(existsSync(`${activePath}.1`)).toBe(false);
+    });
+  });
+
   it('truncates an already oversized active log instead of rotating it into retained evidence', async () => {
     await withTempDir(async (dir) => {
       const activePath = join(dir, 'run-oversized-existing', 'attempt-1.log');
@@ -210,6 +245,24 @@ describe('BeastLogStore', () => {
       expect(existsSync(`${activePath}.1`)).toBe(false);
       expect(existsSync(`${activePath}.2`)).toBe(false);
       expect((await stat(activePath)).size).toBeLessThanOrEqual(1_000);
+    });
+  });
+
+  it('does not scan and prune stale rotations on every below-cap append', async () => {
+    await withTempDir(async (dir) => {
+      const activePath = join(dir, 'run-prune-once', 'attempt-1.log');
+      await mkdir(join(dir, 'run-prune-once'), { recursive: true });
+      await writeFile(activePath, `${JSON.stringify({ stream: 'stdout', message: 'active', createdAt: '2026-03-11T00:00:00.000Z' })}\n`);
+      await writeFile(`${activePath}.2`, 'old-2\n');
+
+      const logs = new BeastLogStore(dir, { maxLogFileBytes: 1_000, maxRotatedLogFiles: 1 });
+      await logs.append('run-prune-once', 'attempt-1', 'stdout', 'first-small', '2026-03-11T00:00:01.000Z');
+      expect(existsSync(`${activePath}.2`)).toBe(false);
+
+      await writeFile(`${activePath}.2`, 'externally-recreated-stale-rotation\n');
+      await logs.append('run-prune-once', 'attempt-1', 'stdout', 'second-small', '2026-03-11T00:00:02.000Z');
+
+      expect(existsSync(`${activePath}.2`)).toBe(true);
     });
   });
 
