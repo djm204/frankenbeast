@@ -199,8 +199,8 @@ function isTransientStatus(status: number): boolean {
   return status === 429 || (status >= 500 && status <= 599)
 }
 
-function hashWebhookPayload(payload: unknown): string {
-  return createHash('sha256').update(JSON.stringify(payload)).digest('hex')
+function hashWebhookBody(body: string): string {
+  return createHash('sha256').update(body).digest('hex')
 }
 
 function validateNonNegativeInteger(value: number, fieldName: string): number {
@@ -532,7 +532,8 @@ export class WebhookNotifier {
     this.assertTargetAllowed()
 
     const receiptTarget = options.target ?? `${sanitizeWebhookEndpoint(this.url)}#${createHash('sha256').update(this.url).digest('hex').slice(0, 12)}`
-    const contentHash = hashWebhookPayload(payload)
+    const requestBody = JSON.stringify(payload)
+    const contentHash = hashWebhookBody(requestBody)
     const receiptBase = {
       idempotencyKey: options.idempotencyKey,
       target: receiptTarget,
@@ -541,13 +542,11 @@ export class WebhookNotifier {
     if (options.idempotencyKey) {
       const existing = await this.receiptStore.findByContent(options.idempotencyKey, receiptTarget, contentHash)
       if (existing && existing.status !== 'failed' && !isStalePendingReceipt(existing)) {
-        const skippedReceipt: WebhookDeliveryReceipt = {
+        return {
           ...receiptBase,
           status: 'skipped',
           timestamp: new Date().toISOString(),
         }
-        await this.receiptStore.save(skippedReceipt)
-        return skippedReceipt
       }
 
       const reserved = await this.receiptStore.reserve({
@@ -556,13 +555,11 @@ export class WebhookNotifier {
         timestamp: new Date().toISOString(),
       })
       if (!reserved) {
-        const skippedReceipt: WebhookDeliveryReceipt = {
+        return {
           ...receiptBase,
           status: 'skipped',
           timestamp: new Date().toISOString(),
         }
-        await this.receiptStore.save(skippedReceipt)
-        return skippedReceipt
       }
     }
 
@@ -601,7 +598,7 @@ export class WebhookNotifier {
               'Content-Type': 'application/json',
               ...this.extraHeaders,
             },
-            body: JSON.stringify(payload),
+            body: requestBody,
           })
         } catch (err) {
           lastError = err
@@ -640,7 +637,7 @@ export class WebhookNotifier {
             ...receiptBase,
             status: 'failed',
             timestamp: new Date().toISOString(),
-            error: err instanceof Error ? err.message : String(err),
+            error: redactWebhookSecrets(err instanceof Error ? err.message : String(err)),
           })
         } catch {
           // Preserve the original webhook delivery error; receipt persistence

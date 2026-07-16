@@ -102,6 +102,21 @@ describe('WebhookNotifier', () => {
       expect(body).toEqual({ type: 'circuit-breaker', spendUsd: 1.5, limitUsd: 1.0 })
     })
 
+    it('hashes the same JSON body bytes that it POSTs for idempotency receipts', async () => {
+      const notifier = createNotifier()
+      let counter = 0
+      const payload = {
+        toJSON: () => ({ type: 'status', counter: ++counter }),
+      }
+
+      const receipt = await notifier.send(payload, { idempotencyKey: 'status:to-json' })
+      const [, init] = mockFetch.mock.calls[0]
+
+      expect(init.body).toBe('{"type":"status","counter":1}')
+      expect(receipt.contentHash).toBe('d0914105d3bbe1c64b6f4371dd0a9cd208f2d7b84a8810a11a0dcad554c593e7')
+      expect(counter).toBe(1)
+    })
+
     it('records a sent receipt and skips a duplicate idempotency key for the same target and content', async () => {
       const store = new InMemoryWebhookDeliveryReceiptStore()
       const notifier = createNotifier({ deliveryReceiptStore: store })
@@ -126,6 +141,7 @@ describe('WebhookNotifier', () => {
 
     it('reserves an idempotency key before delivery so overlapping sends do not duplicate POSTs', async () => {
       const store = new InMemoryWebhookDeliveryReceiptStore()
+      const saved = vi.spyOn(store, 'save')
       let releaseFetch!: () => void
       mockFetch.mockImplementationOnce(
         () => new Promise(resolve => {
@@ -142,6 +158,7 @@ describe('WebhookNotifier', () => {
 
       expect(firstReceipt.status).toBe('sent')
       expect(secondReceipt.status).toBe('skipped')
+      expect(saved.mock.calls.some(call => call[0].status === 'skipped')).toBe(false)
       expect(mockFetch).toHaveBeenCalledTimes(1)
     })
 
@@ -245,6 +262,25 @@ describe('WebhookNotifier', () => {
       await expect(notifier.send({ type: 'status' }, { idempotencyKey: 'status:failed-save' })).rejects.toThrow(
         'Webhook delivery failed: 503 Service Unavailable',
       )
+    })
+
+    it('redacts webhook secrets before saving failed receipt errors', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('connect failed for https://discord.com/api/webhooks/123/secret-token'))
+      const store = new InMemoryWebhookDeliveryReceiptStore()
+      const saved = vi.spyOn(store, 'save')
+      const notifier = createNotifier({
+        url: 'https://discord.com/api/webhooks/123/secret-token',
+        allowedTargets: ['https://discord.com/api/webhooks/'],
+        deliveryReceiptStore: store,
+      })
+
+      await expect(notifier.send({ type: 'status' }, { idempotencyKey: 'status:redacted-error' })).rejects.toThrow(
+        'secret-token',
+      )
+
+      const failedReceipt = saved.mock.calls.find(call => call[0].status === 'failed')?.[0]
+      expect(failedReceipt?.error).toContain('[REDACTED]')
+      expect(failedReceipt?.error).not.toContain('secret-token')
     })
 
     it('sanitizes the webhook URL before using it as the default receipt target', async () => {
