@@ -42,10 +42,12 @@ function splitCsvArg(value: unknown, fallback?: string[]): string[] | undefined 
 const DEFAULT_MEMORY_QUERY_LIMIT = 20;
 const MAX_MEMORY_QUERY_LIMIT = 1000;
 const MEMORY_REVIEW_STATUSES = ['pending', 'approved', 'rejected', 'never_store', 'suppressed'] as const;
-const MEMORY_REVIEW_ACTIONS = ['approve', 'reject', 'never_store'] as const;
+const MEMORY_REVIEW_ACTIONS = ['approve', 'reject', 'never_store', 'resolve_conflict'] as const;
+const MEMORY_CONFLICT_RESOLUTIONS = ['keep_existing', 'replace_existing', 'reject_candidate'] as const;
 
 type MemoryReviewStatus = (typeof MEMORY_REVIEW_STATUSES)[number];
 type MemoryReviewAction = (typeof MEMORY_REVIEW_ACTIONS)[number];
+type MemoryConflictResolution = (typeof MEMORY_CONFLICT_RESOLUTIONS)[number];
 
 function parseMemoryQueryLimit(value: unknown): { ok: true; value: number } | { ok: false; message: string } {
   if (value === undefined) return { ok: true, value: DEFAULT_MEMORY_QUERY_LIMIT };
@@ -123,6 +125,14 @@ function parseMemoryReviewAction(value: unknown): { ok: true; value: MemoryRevie
     return { ok: true, value: action as MemoryReviewAction };
   }
   return { ok: false, message: `action must be one of: ${MEMORY_REVIEW_ACTIONS.join(', ')}` };
+}
+
+function parseMemoryConflictResolution(value: unknown): { ok: true; value: MemoryConflictResolution } | { ok: false; message: string } {
+  const resolution = String(value);
+  if (MEMORY_CONFLICT_RESOLUTIONS.includes(resolution as MemoryConflictResolution)) {
+    return { ok: true, value: resolution as MemoryConflictResolution };
+  }
+  return { ok: false, message: `resolution must be one of: ${MEMORY_CONFLICT_RESOLUTIONS.join(', ')}` };
 }
 
 export function createAdapterSet(dbPath: string, options: { root?: string | undefined; configPath?: string | undefined } = {}): AdapterSet {
@@ -396,12 +406,13 @@ const TOOLS: ToolFull[] = [
   {
     name: 'fbeast_memory_review_decide',
     server: 'memory',
-    description: 'Approve, reject, or mark a queued memory promotion as never-store',
+    description: 'Approve, reject, mark never-store, or resolve a conflicting queued memory promotion',
     inputSchema: {
       type: 'object',
       properties: {
         id: { type: 'string', description: 'Candidate id returned by fbeast_memory_review_propose/list' },
         action: { type: 'string', description: 'Decision to apply', enum: [...MEMORY_REVIEW_ACTIONS] },
+        resolution: { type: 'string', description: 'Conflict resolution to apply when action is resolve_conflict', enum: [...MEMORY_CONFLICT_RESOLUTIONS] },
         reviewer: { type: 'string', description: 'Optional reviewer/operator id' },
         note: { type: 'string', description: 'Optional reviewer note' },
       },
@@ -416,6 +427,10 @@ const TOOLS: ToolFull[] = [
       if (!action.ok) {
         return { content: [{ type: 'text', text: `Error: fbeast_memory_review_decide ${action.message}` }], isError: true };
       }
+      const resolution = action.value === 'resolve_conflict' ? parseMemoryConflictResolution(args['resolution']) : undefined;
+      if (resolution && !resolution.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_review_decide ${resolution.message}` }], isError: true };
+      }
       const reviewer = args['reviewer'] === undefined ? undefined : parseNonEmptyStringArg('reviewer', args['reviewer']);
       if (reviewer && !reviewer.ok) {
         return { content: [{ type: 'text', text: `Error: fbeast_memory_review_decide ${reviewer.message}` }], isError: true };
@@ -427,6 +442,7 @@ const TOOLS: ToolFull[] = [
       const candidate = await brain.decideMemoryReview({
         id: id.value,
         action: action.value,
+        ...(resolution?.ok ? { resolution: resolution.value } : {}),
         options: {
           ...(reviewer?.value ? { reviewer: reviewer.value } : {}),
           ...(note?.value !== undefined ? { note: note.value } : {}),

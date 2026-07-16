@@ -1501,6 +1501,95 @@ describe('SqliteBrain', () => {
       ).toThrow(/no unresolved conflict/);
     });
 
+    it('revalidates keep-existing conflict decisions before rejecting the candidate', () => {
+      const initial = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.changed-before-keep',
+        value: 'vim',
+        source: 'chat:turn-5a',
+        confidence: 0.9,
+        reason: 'Original editor preference.',
+      });
+      brain.memoryReview.approve(initial.id, { reviewer: 'operator' });
+      const contradictory = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.changed-before-keep',
+        value: 'emacs',
+        source: 'chat:turn-5b',
+        confidence: 0.8,
+        reason: 'Later editor preference.',
+      });
+      const conflicts = brain.memoryReview.conflictsFor(contradictory.id);
+      expect(conflicts).toHaveLength(1);
+      brain.working.set('user.preference.changed-before-keep', 'helix');
+
+      const review = brain.memoryReview as unknown as {
+        rejectCandidate(
+          id: string,
+          options: { reviewer: string },
+          guard: { expectedExistingValue: unknown; expectedCandidateValue: unknown },
+        ): unknown;
+      };
+      expect(() =>
+        review.rejectCandidate(
+          contradictory.id,
+          { reviewer: 'operator' },
+          {
+            expectedExistingValue: conflicts[0]?.existingValue,
+            expectedCandidateValue: contradictory.value,
+          },
+        ),
+      ).toThrow(/conflict changed before resolution/);
+      expect(brain.memoryReview.list('pending')).toEqual([
+        expect.objectContaining({ id: contradictory.id }),
+      ]);
+    });
+
+    it('pins the proposed value when approving a replacement conflict', () => {
+      const initial = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.repo.changed-before-replace',
+        value: 'master',
+        source: 'legacy-config',
+        confidence: 0.7,
+        reason: 'Old repository metadata.',
+      });
+      brain.memoryReview.approve(initial.id, { reviewer: 'operator' });
+      const corrected = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.repo.changed-before-replace',
+        value: 'main',
+        source: 'repo-config',
+        confidence: 0.95,
+        reason: 'Current GitHub repository metadata.',
+      });
+      const conflicts = brain.memoryReview.conflictsFor(corrected.id);
+      expect(conflicts).toHaveLength(1);
+      brain.memoryReview.edit(corrected.id, { value: 'trunk' });
+
+      const review = brain.memoryReview as unknown as {
+        approveCandidate(
+          id: string,
+          options: { reviewer: string },
+          guard: { expectedExistingValue: unknown; expectedCandidateValue: unknown },
+        ): unknown;
+      };
+      expect(() =>
+        review.approveCandidate(
+          corrected.id,
+          { reviewer: 'operator' },
+          {
+            expectedExistingValue: conflicts[0]?.existingValue,
+            expectedCandidateValue: corrected.value,
+          },
+        ),
+      ).toThrow(/proposed value changed before approval/);
+      expect(brain.working.get('env.repo.changed-before-replace')).toBe('master');
+      expect(brain.memoryReview.list('pending')).toEqual([
+        expect.objectContaining({ id: corrected.id, value: 'trunk' }),
+      ]);
+    });
+
     it('detects conflicts against persisted facts when runtime hydration is disabled', () => {
       const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-conflict-persisted-'));
       const dbPath = join(dir, 'brain.db');

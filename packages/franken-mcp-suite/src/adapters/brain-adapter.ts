@@ -2,6 +2,7 @@ import {
   SqliteBrain,
   type MemoryCandidate,
   type MemoryCandidateStatus,
+  type MemoryConflictResolution,
   type MemoryReviewDecisionOptions,
   type RightToForgetReport,
   type RightToForgetSelector,
@@ -75,7 +76,8 @@ export interface BrainAdapter {
   listMemoryReview(status?: MemoryCandidateStatus): Promise<MemoryCandidate[]>;
   decideMemoryReview(input: {
     id: string;
-    action: 'approve' | 'reject' | 'never_store';
+    action: 'approve' | 'reject' | 'never_store' | 'resolve_conflict';
+    resolution?: MemoryConflictResolution;
     options?: MemoryReviewDecisionOptions;
   }): Promise<MemoryCandidate>;
 }
@@ -513,6 +515,15 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
       }
       if (input.action === 'never_store') {
         return brain.memoryReview.neverStore(input.id, options);
+      }
+      if (input.action === 'resolve_conflict') {
+        if (!input.resolution) {
+          throw new Error('resolution is required when action is resolve_conflict');
+        }
+        return brain.memoryReview.resolveConflict(input.id, {
+          ...options,
+          resolution: input.resolution,
+        });
       }
       throw new Error(`Unsupported memory review action: ${String(input.action)}`);
     },

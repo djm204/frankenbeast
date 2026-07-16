@@ -332,6 +332,20 @@ describe("Memory Server", () => {
       options: { reviewer: "operator", note: "Confirmed." },
     });
     expect(JSON.parse(decideResult.content[0]!.text)).toMatchObject({ id: "memcand_1", status: "approved" });
+
+    await server.callTool("fbeast_memory_review_decide", {
+      id: "memcand_2",
+      action: "resolve_conflict",
+      resolution: "replace_existing",
+      reviewer: "operator",
+      note: "Newer evidence wins.",
+    });
+    expect(brain.decideMemoryReview).toHaveBeenLastCalledWith({
+      id: "memcand_2",
+      action: "resolve_conflict",
+      resolution: "replace_existing",
+      options: { reviewer: "operator", note: "Newer evidence wins." },
+    });
   });
 
   it("rejects invalid memory review queue input before calling the brain adapter", async () => {
@@ -355,6 +369,15 @@ describe("Memory Server", () => {
     });
     expect(badAction.isError).toBe(true);
     expect(badAction.content[0]!.text).toContain("action must be one of");
+    expect(brain.decideMemoryReview).not.toHaveBeenCalled();
+
+    const badResolution = await server.callTool("fbeast_memory_review_decide", {
+      id: "memcand_1",
+      action: "resolve_conflict",
+      resolution: "overwrite",
+    });
+    expect(badResolution.isError).toBe(true);
+    expect(badResolution.content[0]!.text).toContain("resolution must be one of");
     expect(brain.decideMemoryReview).not.toHaveBeenCalled();
   });
 });

@@ -1766,7 +1766,7 @@ export class SqliteMemoryReviewQueue {
   private approveCandidate(
     id: string,
     options: MemoryReviewDecisionOptions,
-    replaceConflict?: { expectedExistingValue: unknown },
+    conflictGuard?: { expectedExistingValue: unknown; expectedCandidateValue: unknown },
   ): MemoryCandidate {
     const now = isoNow();
     let finalizeWorkingFlush: (() => void) | undefined;
@@ -1790,22 +1790,8 @@ export class SqliteMemoryReviewQueue {
         return;
       }
       const conflicts = this.detectConflicts(candidate);
-      if (replaceConflict) {
-        if (conflicts.length === 0) {
-          throw new Error(
-            `Memory candidate ${id} no longer has an unresolved conflict`,
-          );
-        }
-        if (
-          !memoryValuesEqual(
-            conflicts[0]?.existingValue,
-            replaceConflict.expectedExistingValue,
-          )
-        ) {
-          throw new Error(
-            `Memory candidate ${id} conflict changed before approval; re-run conflictsFor() before replacing`,
-          );
-        }
+      if (conflictGuard) {
+        this.assertConflictUnchanged(id, candidate, conflicts, 'approval', conflictGuard);
       } else if (conflicts.length > 0) {
         throw new Error(
           `Memory candidate ${id} conflicts with an existing value; call resolveConflict() with replace_existing to approve the replacement`,
@@ -1856,11 +1842,28 @@ export class SqliteMemoryReviewQueue {
     id: string,
     options: MemoryReviewDecisionOptions = {},
   ): MemoryCandidate {
+    return this.rejectCandidate(id, options);
+  }
+
+  private rejectCandidate(
+    id: string,
+    options: MemoryReviewDecisionOptions = {},
+    conflictGuard?: { expectedExistingValue: unknown; expectedCandidateValue: unknown },
+  ): MemoryCandidate {
     const now = isoNow();
     let rejectedCandidate: MemoryCandidate | undefined;
     const tx = this.db.transaction(() => {
       const candidate = this.requireCandidate(id, 'pending');
       this.assertDecisionOptionsNotDeletionGuarded(options);
+      if (conflictGuard) {
+        this.assertConflictUnchanged(
+          id,
+          candidate,
+          this.detectConflicts(candidate),
+          'resolution',
+          conflictGuard,
+        );
+      }
       this.insertSuppression(candidate, 'rejected', now, options);
       this.markDecision(id, 'rejected', now, options);
       rejectedCandidate = this.requireCandidate(id);
@@ -1927,6 +1930,10 @@ export class SqliteMemoryReviewQueue {
     if (conflicts.length === 0) {
       throw new Error(`Memory candidate ${id} has no unresolved conflict`);
     }
+    const conflictGuard = {
+      expectedExistingValue: conflicts[0]?.existingValue,
+      expectedCandidateValue: candidate.value,
+    };
 
     const decisionOptions: MemoryReviewDecisionOptions = {
       ...(options.reviewer ? { reviewer: options.reviewer } : {}),
@@ -1937,17 +1944,41 @@ export class SqliteMemoryReviewQueue {
       return this.approveCandidate(id, {
         ...decisionOptions,
         note: decisionOptions.note ?? 'Memory conflict resolved by replacing the existing value.',
-      }, { expectedExistingValue: conflicts[0]?.existingValue });
+      }, conflictGuard);
     }
 
-    return this.reject(id, {
+    return this.rejectCandidate(id, {
       ...decisionOptions,
       note: decisionOptions.note ?? (
         options.resolution === 'keep_existing'
           ? 'Memory conflict resolved by keeping the existing value.'
           : 'Memory conflict resolved by rejecting the contradictory candidate.'
       ),
-    });
+    }, conflictGuard);
+  }
+
+  private assertConflictUnchanged(
+    id: string,
+    candidate: MemoryCandidate,
+    conflicts: MemoryConflict[],
+    decision: 'approval' | 'resolution',
+    guard: { expectedExistingValue: unknown; expectedCandidateValue: unknown },
+  ): void {
+    if (conflicts.length === 0) {
+      throw new Error(
+        `Memory candidate ${id} no longer has an unresolved conflict`,
+      );
+    }
+    if (!memoryValuesEqual(candidate.value, guard.expectedCandidateValue)) {
+      throw new Error(
+        `Memory candidate ${id} proposed value changed before ${decision}; re-run conflictsFor() before resolving`,
+      );
+    }
+    if (!memoryValuesEqual(conflicts[0]?.existingValue, guard.expectedExistingValue)) {
+      throw new Error(
+        `Memory candidate ${id} conflict changed before ${decision}; re-run conflictsFor() before resolving`,
+      );
+    }
   }
 
   private detectConflicts(candidate: MemoryCandidate): MemoryConflict[] {
