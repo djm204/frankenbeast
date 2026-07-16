@@ -67,6 +67,10 @@ import { loadRunConfigFromEnv, type RunConfig } from './run-config-loader.js';
 import { resolveProviderCatalogEntry, resolveProviderType, type ProviderConfig } from '../providers/provider-config.js';
 import type { ProviderRegistry as LlmProviderRegistry } from '../providers/provider-registry.js';
 import { redactLogData } from '../logging/redaction.js';
+import {
+  type DashboardAvailabilitySnapshot,
+  type DashboardProviderSnapshot,
+} from '../http/routes/dashboard-status.js';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -617,7 +621,7 @@ export function buildDashboardProviderSnapshot(
   config: OrchestratorConfig,
   providerRegistry?: LlmProviderRegistry | undefined,
   extraProviderNames: readonly string[] = [],
-): Array<{ name: string; type: string; available: boolean; failoverOrder: number; model?: string }> {
+): DashboardProviderSnapshot[] {
   if (config.consolidatedProviders?.length) {
     return config.consolidatedProviders.map((provider, index) => ({
       name: provider.name,
@@ -1662,12 +1666,12 @@ export interface NetworkCommandSupervisorLike {
   up(options: {
     services: ResolvedNetworkService[];
     detached: boolean;
-    mode: 'secure' | 'insecure';
-    secureBackend: string;
-  }): Promise<{ services: { id: string; url?: string | undefined; status?: 'started' | 'already-running' | undefined }[] }>;
-  stopAll(state: Awaited<ReturnType<NetworkCommandSupervisorLike['up']>>): Promise<void>;
+    mode?: string;
+    secureBackend?: string;
+  }): Promise<{ services: Array<{ id: string; status?: string | undefined; url?: string | undefined }> }>;
   down(): Promise<void>;
-  status(): Promise<{ mode?: string; secureBackend?: string; services: Array<{ id: string; status: string }> }>;
+  stopAll(state: Awaited<ReturnType<NetworkCommandSupervisorLike['up']>>): Promise<void>;
+  status(): Promise<{ mode?: string; secureBackend?: string; services: Array<{ id: string; status: string }>; availability?: DashboardAvailabilitySnapshot }>;
   stop(target: string | 'all'): Promise<void>;
   logs(target: string | 'all'): Promise<string[]>;
 }
@@ -1739,7 +1743,7 @@ async function waitForTerminationSignal(root: string): Promise<void> {
   });
 }
 
-function formatStatus(status: { mode?: string; secureBackend?: string; services: Array<{ id: string; status: string }> }): string[] {
+function formatStatus(status: { mode?: string; secureBackend?: string; services: Array<{ id: string; status: string }>; availability?: DashboardAvailabilitySnapshot }): string[] {
   const lines = [
     `Mode: ${status.mode ?? 'unknown'}`,
   ];
@@ -1750,6 +1754,19 @@ function formatStatus(status: { mode?: string; secureBackend?: string; services:
 
   for (const service of status.services) {
     lines.push(`${service.id}: ${service.status}`);
+  }
+
+  if (status.availability) {
+    lines.push(`Dependency availability: ${status.availability.status}`);
+    for (const dependency of status.availability.dependencies) {
+      lines.push(`dependency ${dependency.name} (${dependency.type}): ${dependency.status} — ${dependency.summary}`);
+      if (dependency.remediationHint) {
+        lines.push(`  remediation: ${dependency.remediationHint}`);
+      }
+      if (dependency.safeWork.length > 0) {
+        lines.push(`  safe work: ${dependency.safeWork.join(' ')}`);
+      }
+    }
   }
 
   return lines;
