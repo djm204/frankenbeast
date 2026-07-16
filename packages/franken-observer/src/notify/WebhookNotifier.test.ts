@@ -177,6 +177,51 @@ describe('WebhookNotifier', () => {
       expect(mockFetch).toHaveBeenCalledTimes(2)
     })
 
+    it('does not let stale reservations overwrite newer successful receipts', async () => {
+      const store = new InMemoryWebhookDeliveryReceiptStore()
+      const staleReservation = {
+        idempotencyKey: 'status:stale-owner',
+        target: 'ops',
+        contentHash: 'same-content',
+        reservationId: 'old-owner',
+        status: 'pending' as const,
+        timestamp: '2000-01-01T00:00:00.000Z',
+      }
+      await store.reserve(staleReservation)
+      expect(
+        await store.completeReservation('new-owner', {
+          ...staleReservation,
+          reservationId: 'new-owner',
+          status: 'sent',
+          timestamp: new Date().toISOString(),
+        }),
+      ).toBe(false)
+      await store.save({
+        ...staleReservation,
+        reservationId: 'new-owner',
+        status: 'pending',
+        timestamp: '2000-01-01T00:10:00.000Z',
+      })
+      expect(
+        await store.completeReservation('new-owner', {
+          ...staleReservation,
+          reservationId: 'new-owner',
+          status: 'sent',
+          timestamp: '2000-01-01T00:10:01.000Z',
+        }),
+      ).toBe(true)
+      expect(
+        await store.completeReservation('old-owner', {
+          ...staleReservation,
+          reservationId: 'old-owner',
+          status: 'failed',
+          timestamp: '2000-01-01T00:10:02.000Z',
+        }),
+      ).toBe(false)
+
+      expect(await store.findLatest('status:stale-owner', 'ops')).toMatchObject({ status: 'sent', reservationId: 'new-owner' })
+    })
+
     it('sends changed content for the same idempotency key and target', async () => {
       const store = new InMemoryWebhookDeliveryReceiptStore()
       const notifier = createNotifier({ deliveryReceiptStore: store })
@@ -222,27 +267,28 @@ describe('WebhookNotifier', () => {
       expect(mockFetch).toHaveBeenCalledTimes(2)
     })
 
-    it('does not record a failed receipt after a webhook was delivered but sent receipt persistence failed', async () => {
-      const saved: string[] = []
+    it('does not reject after a webhook was delivered but sent receipt persistence failed', async () => {
+      const completed: string[] = []
       const store = {
         findLatest: vi.fn(),
         findByContent: vi.fn(),
         reserve: vi.fn().mockResolvedValue(true),
-        save: vi.fn(async receipt => {
-          saved.push(receipt.status)
+        completeReservation: vi.fn(async (_reservationId, receipt) => {
+          completed.push(receipt.status)
           if (receipt.status === 'sent') {
             throw new Error('receipt store unavailable')
           }
+          return true
         }),
+        save: vi.fn(),
       }
       const notifier = createNotifier({ deliveryReceiptStore: store })
 
-      await expect(notifier.send({ type: 'status' }, { idempotencyKey: 'status:store-failure' })).rejects.toThrow(
-        'receipt store unavailable',
-      )
+      const receipt = await notifier.send({ type: 'status' }, { idempotencyKey: 'status:store-failure' })
 
+      expect(receipt.status).toBe('sent')
       expect(mockFetch).toHaveBeenCalledTimes(1)
-      expect(saved).toEqual(['sent'])
+      expect(completed).toEqual(['sent'])
     })
 
     it('preserves the original webhook error when failed receipt persistence also fails', async () => {
@@ -251,11 +297,13 @@ describe('WebhookNotifier', () => {
         findLatest: vi.fn(),
         findByContent: vi.fn(),
         reserve: vi.fn().mockResolvedValue(true),
-        save: vi.fn(async receipt => {
+        completeReservation: vi.fn(async (_reservationId, receipt) => {
           if (receipt.status === 'failed') {
             throw new Error('receipt store unavailable')
           }
+          return true
         }),
+        save: vi.fn(),
       }
       const notifier = createNotifier({ deliveryReceiptStore: store })
 

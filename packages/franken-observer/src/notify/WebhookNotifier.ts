@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { lookup as dnsLookup } from 'node:dns/promises'
 import { request as httpsRequest } from 'node:https'
 import { isIP } from 'node:net'
@@ -34,6 +34,8 @@ export interface WebhookDeliveryReceipt {
   timestamp: string
   /** SHA-256 digest of the serialized payload sent or considered for delivery. */
   contentHash: string
+  /** Opaque reservation owner used to avoid stale attempts overwriting newer receipts. */
+  reservationId?: string
   /** Redacted failure summary for failed receipts. */
   error?: string
 }
@@ -53,6 +55,7 @@ export interface WebhookDeliveryReceiptStore {
     contentHash: string,
   ) => WebhookDeliveryReceipt | undefined | Promise<WebhookDeliveryReceipt | undefined>
   reserve: (receipt: WebhookDeliveryReceipt) => boolean | Promise<boolean>
+  completeReservation: (reservationId: string, receipt: WebhookDeliveryReceipt) => boolean | Promise<boolean>
   save: (receipt: WebhookDeliveryReceipt) => void | Promise<void>
 }
 
@@ -73,6 +76,17 @@ export class InMemoryWebhookDeliveryReceiptStore implements WebhookDeliveryRecei
     const contentKey = this.contentKeyFor(receipt.idempotencyKey, receipt.target, receipt.contentHash)
     const existing = this.contentReceipts.get(contentKey)
     if (existing && existing.status !== 'failed' && !isStalePendingReceipt(existing)) {
+      return false
+    }
+    this.save(receipt)
+    return true
+  }
+
+  completeReservation(reservationId: string, receipt: WebhookDeliveryReceipt): boolean {
+    if (!receipt.idempotencyKey) return true
+    const contentKey = this.contentKeyFor(receipt.idempotencyKey, receipt.target, receipt.contentHash)
+    const current = this.contentReceipts.get(contentKey)
+    if (current?.reservationId !== reservationId) {
       return false
     }
     this.save(receipt)
@@ -534,6 +548,7 @@ export class WebhookNotifier {
     const receiptTarget = options.target ?? `${sanitizeWebhookEndpoint(this.url)}#${createHash('sha256').update(this.url).digest('hex').slice(0, 12)}`
     const requestBody = JSON.stringify(payload)
     const contentHash = hashWebhookBody(requestBody)
+    const reservationId = options.idempotencyKey ? randomUUID() : undefined
     const receiptBase = {
       idempotencyKey: options.idempotencyKey,
       target: receiptTarget,
@@ -551,6 +566,7 @@ export class WebhookNotifier {
 
       const reserved = await this.receiptStore.reserve({
         ...receiptBase,
+        reservationId,
         status: 'pending',
         timestamp: new Date().toISOString(),
       })
@@ -623,17 +639,23 @@ export class WebhookNotifier {
           status: 'sent',
           timestamp: new Date().toISOString(),
         }
-        if (options.idempotencyKey) {
-          await this.receiptStore.save(sentReceipt)
+        if (options.idempotencyKey && reservationId) {
+          try {
+            await this.receiptStore.completeReservation(reservationId, sentReceipt)
+          } catch {
+            // The webhook was already accepted by the remote endpoint. Do not
+            // surface receipt persistence failures as delivery failures, because
+            // callers commonly retry rejected sends and would duplicate the POST.
+          }
         }
         return sentReceipt
       }
 
       throw lastError
     } catch (err) {
-      if (options.idempotencyKey && !delivered) {
+      if (options.idempotencyKey && !delivered && reservationId) {
         try {
-          await this.receiptStore.save({
+          await this.receiptStore.completeReservation(reservationId, {
             ...receiptBase,
             status: 'failed',
             timestamp: new Date().toISOString(),
