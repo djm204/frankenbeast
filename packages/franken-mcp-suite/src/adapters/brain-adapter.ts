@@ -246,6 +246,26 @@ function unwrapWorkingMemoryValue(value: unknown): { text: string; expiresAt?: s
   return { text: typeof value === "string" ? value : JSON.stringify(value) };
 }
 
+function unwrapWorkingMemoryExportValue(value: unknown): { value: unknown; expiresAt?: string } {
+  if (isAgentScopedWorkingValue(value)) {
+    const record = value as unknown as Record<string, unknown>;
+    return {
+      value: value.value,
+      ...(typeof value.expiresAt === "string" && isTemporaryOperationalValue(record) ? { expiresAt: value.expiresAt } : {}),
+    };
+  }
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    const record = value as Record<string, unknown> & { value?: unknown; expiresAt?: unknown };
+    if ('value' in record && typeof record.expiresAt === 'string' && isTemporaryOperationalValue(record)) {
+      return {
+        value: record.value,
+        expiresAt: record.expiresAt,
+      };
+    }
+  }
+  return { value };
+}
+
 function parseScopedWorkingEntry(
   key: string,
   value: unknown,
@@ -263,7 +283,7 @@ function parseScopedWorkingExportEntry(
   key: string,
   value: unknown,
 ): { key: string; value: unknown; agentId?: string; expiresAt?: string } {
-  const unwrapped = unwrapWorkingMemoryValue(value);
+  const unwrapped = unwrapWorkingMemoryExportValue(value);
   if (
     key.startsWith(AGENT_WORKING_KEY_PREFIX) &&
     isAgentScopedWorkingValue(value)
@@ -274,7 +294,7 @@ function parseScopedWorkingExportEntry(
       try {
         return {
           key: decodeScopeComponent(rest.slice(slash + 1)),
-          value: unwrapped.text,
+          value: unwrapped.value,
           agentId: value.agentId,
           ...(unwrapped.expiresAt ? { expiresAt: unwrapped.expiresAt } : {}),
         };
@@ -285,7 +305,7 @@ function parseScopedWorkingExportEntry(
   }
   return {
     key,
-    value: unwrapped.text,
+    value: unwrapped.value,
     ...(unwrapped.expiresAt ? { expiresAt: unwrapped.expiresAt } : {}),
   };
 }
@@ -371,7 +391,10 @@ function resolveExportLimit(limit: number | undefined): number {
 
 const SENSITIVE_EXPORT_KEY = /(?:password|passphrase|secret|token|api[_-]?key|authorization|credential|private[_-]?key|session|cookie)/i;
 const SECRET_EXPORT_VALUES: Array<[RegExp, string]> = [
+  [/\bAuthorization\s*:\s*Basic\s+\S+/gi, "Authorization: Basic [redacted]"],
   [/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]"],
+  [/\bBasic\s+[A-Za-z0-9._~+/-]+=*/gi, "Basic [redacted]"],
+  [/\b([A-Za-z][A-Za-z0-9+.-]*:\/\/)\S+@/g, "$1[redacted]@"],
   [/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g, "[redacted-private-key]"],
   [/\b((?:password|passphrase|secret|token|api[_-]?key|authorization|credential|private[_-]?key|session(?:[_-]?cookie)?|cookie))\s*([:=])\s*([^\s,;&]+)/gi, "$1$2[redacted]"],
   [/\b(?:sk|pk|rk)-[A-Za-z0-9][A-Za-z0-9_-]{7,}\b/g, "[redacted-secret]"],
@@ -387,7 +410,7 @@ function stableRedactedKey(key: string): string {
 
 function redactExportString(value: string): string {
   const withJsonSecretsRedacted = value.replace(
-    /"((?:password|passphrase|secret|token|api[_-]?key|authorization|credential|private[_-]?key|session(?:[_-]?cookie)?|cookie))"\s*:\s*"(?:\\.|[^"\\])*"/gi,
+    /"((?:password|passphrase|secret|token|api[_-]?key|authorization|credential|private[_-]?key|session(?:[_-]?cookie)?|cookie))"\s*:\s*(?:"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)/gi,
     (_match, key: string) => `"${stableRedactedKey(key)}":"[redacted]"`,
   );
   return SECRET_EXPORT_VALUES.reduce(

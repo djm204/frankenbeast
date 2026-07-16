@@ -467,6 +467,34 @@ describe('createMcpServer', () => {
       });
     });
 
+    it('redacts memory export agent identifiers in the exported audit sanitizer', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_export', {
+        readScope: 'agent',
+        agentId: 'alice@example.test',
+        redaction: 'safe',
+        limit: '5',
+      })).toEqual({
+        readScope: 'agent',
+        agentId: '[memory-export-args-redacted]',
+        redaction: 'safe',
+        limit: '5',
+      });
+
+      expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
+        tool: 'fbeast_memory_export',
+        args: { readScope: 'agent', agentId: 'alice@example.test', redaction: 'safe' },
+        value: 'outside envelope',
+      })).toEqual({
+        tool: 'fbeast_memory_export',
+        args: {
+          readScope: 'agent',
+          agentId: '[memory-export-args-redacted]',
+          redaction: 'safe',
+        },
+        value: '[memory-export-args-redacted]',
+      });
+    });
+
     it('redacts memory review decision metadata in the exported audit sanitizer', () => {
       expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_review_decide', {
         id: 'memcand_123',

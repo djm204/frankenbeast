@@ -62,13 +62,18 @@ vi.mock("@franken/brain", () => ({
             "-----BEGIN " +
             "OPENSSH PRIVATE KEY-----\nsecret\n-----END " +
             "OPENSSH PRIVATE KEY-----",
+          "status-page": "password=hunter2 session_cookie=abc123value Authorization: Basic dXNlcjpwYXNz postgres://alice:hunter2@db.internal/app",
           "status-page": "password=hunter2 session_cookie=abc123value",
+          "basic-auth": "Authorization: Basic dXNlcjpwYXNz",
+          "database-url": "postgres://alice:hunter2@db.internal/app",
+          "json-literal-secrets": '{"password":123456,"token":true,"safe":"ok"}',
           profile: {
             password: "hunter2",
             "alice@example.com": "oncall",
           },
           "object-secret": {
             password: "hunter2",
+            nested: { token: 987654 },
             "alice@example.com": "oncall",
           },
           "__fbeast_agent_memory__/alpha/private-task": {
@@ -364,6 +369,10 @@ describe("createBrainAdapter", () => {
     expect(serialized).not.toContain("alice@example.com");
     expect(serialized).not.toContain("bob@example.com");
     expect(serialized).not.toContain("apiKey");
+    expect(serialized).not.toContain("dXNlcjpwYXNz");
+    expect(serialized).not.toContain("postgres://alice:hunter2");
+    expect(serialized).not.toContain("123456");
+    expect(serialized).not.toContain('"token":true');
   });
 
   it("redacts agent export scope identifiers in safe mode", async () => {

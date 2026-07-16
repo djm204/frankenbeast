@@ -236,11 +236,43 @@ const MEMORY_REVIEW_PROPOSE_SAFE_TYPES = new Set(['working', 'episodic']);
 const MEMORY_REVIEW_DECIDE_TOOL = 'fbeast_memory_review_decide';
 const MEMORY_REVIEW_DECIDE_SAFE_AUDIT_KEYS = new Set(['id', 'action']);
 const MEMORY_REVIEW_DECIDE_SAFE_ACTIONS = new Set(['approve', 'reject', 'never_store']);
+const MEMORY_EXPORT_TOOL = 'fbeast_memory_export';
+const MEMORY_EXPORT_SAFE_AUDIT_KEYS = new Set(['readScope', 'redaction', 'limit', 'projectId']);
+const MEMORY_EXPORT_SAFE_READ_SCOPES = new Set(['all', 'shared', 'agent']);
+const MEMORY_EXPORT_SAFE_REDACTIONS = new Set(['safe', 'none']);
 
 function unqualifyMcpToolName(toolName: string): string {
   const marker = '__';
   const index = toolName.lastIndexOf(marker);
   return index >= 0 ? toolName.slice(index + marker.length) : toolName;
+}
+
+function redactMemoryExportArgs(sanitized: Record<string, unknown>, redaction = '[memory-export-args-redacted]'): Record<string, unknown> {
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'invalid')) {
+    sanitized['invalid'] = redaction;
+    return sanitized;
+  }
+  for (const key of Object.keys(sanitized)) {
+    if (key === 'agentId') {
+      sanitized[key] = '[memory-export-agent-redacted]';
+    } else if (key === 'readScope' && !MEMORY_EXPORT_SAFE_READ_SCOPES.has(String(sanitized[key]))) {
+      sanitized[key] = redaction;
+    } else if (key === 'redaction' && !MEMORY_EXPORT_SAFE_REDACTIONS.has(String(sanitized[key]))) {
+      sanitized[key] = redaction;
+    } else if (key === 'limit' && typeof sanitized[key] !== 'string') {
+      sanitized[key] = redaction;
+    } else if (!MEMORY_EXPORT_SAFE_AUDIT_KEYS.has(key)) {
+      sanitized[key] = redaction;
+    }
+  }
+  return sanitized;
+}
+
+function redactMemoryExportEnvelope(sanitized: Record<string, unknown>, redaction = '[memory-export-args-redacted]'): Record<string, unknown> {
+  for (const key of Object.keys(sanitized)) {
+    sanitized[key] = key === 'tool' ? sanitized[key] : redaction;
+  }
+  return sanitized;
 }
 
 function redactMemoryReviewProposalArgs(sanitized: Record<string, unknown>, redaction = '[memory-review-proposal-redacted]'): Record<string, unknown> {
@@ -311,6 +343,46 @@ function redactMemoryReviewDecisionEnvelope(sanitized: Record<string, unknown>, 
   return sanitized;
 }
 
+function redactMemoryExportArgs(sanitized: Record<string, unknown>, redaction = '[memory-export-args-redacted]'): Record<string, unknown> {
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'invalid')) {
+    sanitized['invalid'] = redaction;
+    return sanitized;
+  }
+  for (const key of Object.keys(sanitized)) {
+    if (key === 'readScope' && !MEMORY_EXPORT_SAFE_READ_SCOPES.has(String(sanitized[key]))) {
+      sanitized[key] = redaction;
+    } else if (key === 'redaction' && !MEMORY_EXPORT_SAFE_REDACTIONS.has(String(sanitized[key]))) {
+      sanitized[key] = redaction;
+    } else if (key === 'limit' && typeof sanitized[key] !== 'string') {
+      sanitized[key] = redaction;
+    } else if (!MEMORY_EXPORT_SAFE_AUDIT_KEYS.has(key)) {
+      sanitized[key] = redaction;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'agentId')) {
+    sanitized['agentId'] = redaction;
+  }
+  return sanitized;
+}
+
+function redactMemoryExportEnvelope(sanitized: Record<string, unknown>, redaction = '[memory-export-args-redacted]'): Record<string, unknown> {
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'args')) {
+    const args = sanitized['args'];
+    sanitized['args'] = isObjectLike(args) && !Array.isArray(args)
+      ? redactMemoryExportArgs(args as Record<string, unknown>, redaction)
+      : redaction;
+  }
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
+    sanitized['context'] = redaction;
+  }
+  for (const key of Object.keys(sanitized)) {
+    if (!['tool', 'action', 'args', 'context'].includes(key)) {
+      sanitized[key] = redaction;
+    }
+  }
+  return sanitized;
+}
+
 export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unknown): Record<string, unknown> {
   const sanitized = sanitizeToolArgumentsForAudit(args);
   const unqualifiedToolName = unqualifyMcpToolName(toolName);
@@ -323,6 +395,18 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
       ? unqualifyMcpToolName(sanitized['tool'])
       : unqualifiedToolName;
   const auditedAction = typeof sanitized['action'] === 'string' ? unqualifyMcpToolName(sanitized['action']) : undefined;
+  if (auditedTool === MEMORY_EXPORT_TOOL || auditedAction === MEMORY_EXPORT_TOOL) {
+    if (unqualifiedToolName === 'execute_tool') {
+      return redactMemoryExportEnvelope(sanitized);
+    }
+    if (auditedAction === MEMORY_EXPORT_TOOL && Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
+      sanitized['context'] = '[memory-export-args-redacted]';
+    }
+    if (unqualifiedToolName === MEMORY_EXPORT_TOOL) {
+      return redactMemoryExportArgs(sanitized);
+    }
+    return sanitized;
+  }
   if (auditedTool === MEMORY_REVIEW_PROPOSE_TOOL || auditedAction === MEMORY_REVIEW_PROPOSE_TOOL) {
     if (unqualifiedToolName === 'execute_tool') {
       return redactMemoryReviewProposalEnvelope(sanitized);
@@ -344,6 +428,18 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
     }
     if (isDirectMemoryReviewDecide) {
       return redactMemoryReviewDecisionArgs(sanitized);
+    }
+    return sanitized;
+  }
+  if (auditedTool === MEMORY_EXPORT_TOOL || auditedAction === MEMORY_EXPORT_TOOL) {
+    if (unqualifiedToolName === 'execute_tool') {
+      return redactMemoryExportEnvelope(sanitized);
+    }
+    if (auditedAction === MEMORY_EXPORT_TOOL && Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
+      sanitized['context'] = '[memory-export-args-redacted]';
+    }
+    if (unqualifiedToolName === MEMORY_EXPORT_TOOL) {
+      return redactMemoryExportArgs(sanitized);
     }
     return sanitized;
   }
