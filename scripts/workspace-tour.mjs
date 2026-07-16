@@ -70,7 +70,7 @@ function stateDir(id, path, purpose, createdBy) {
 }
 
 function afterDependencyBuild(packageName, command) {
-  return `npx turbo run build --filter=${packageName}... && ${command}`;
+  return `npx turbo run build --filter=...${packageName} && ${command}`;
 }
 
 function buildTour(root) {

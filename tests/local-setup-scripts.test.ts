@@ -254,7 +254,7 @@ describe('local setup scripts', () => {
         id: 'orchestrator',
         path: 'packages/franken-orchestrator',
         packageName: '@franken/orchestrator',
-        testCommand: expect.stringContaining('npm test --workspace @franken/orchestrator'),
+        testCommand: expect.stringContaining('npx turbo run build --filter=...@franken/orchestrator && npm run build --workspace @franken/orchestrator && npm run typecheck --workspace @franken/orchestrator && npm test --workspace @franken/orchestrator'),
       }),
       expect.objectContaining({ id: 'mcp-suite', packageName: '@franken/mcp-suite' }),
       expect.objectContaining({ id: 'web', packageName: '@franken/web' }),
