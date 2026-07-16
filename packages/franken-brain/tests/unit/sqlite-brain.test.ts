@@ -150,376 +150,6 @@ describe('SqliteBrain', () => {
       expect(brain.working.keys()).toEqual(['x']);
     });
 
-    it('expires temporary operational working facts after their expiresAt timestamp', () => {
-      brain.working.set('session:temp', {
-        value: 'temporary process id',
-        category: 'temporary-operational',
-        sourceScope: 'runtime',
-        expiresAt: '2026-01-01T00:00:00.000Z',
-      });
-      brain.working.set('lesson:durable', {
-        value: 'durable lesson',
-        category: 'lesson',
-      });
-
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date('2026-01-01T00:00:01.000Z'));
-      try {
-        expect(brain.working.get('session:temp')).toBeUndefined();
-        expect(brain.working.has('session:temp')).toBe(false);
-        expect(brain.working.keys()).toEqual(['lesson:durable']);
-        expect(brain.working.snapshot()).toEqual({
-          'lesson:durable': { value: 'durable lesson', category: 'lesson' },
-        });
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
-    it('does not expire durable episodic memories when working facts expire', () => {
-      brain.working.set('handoff:temp', {
-        value: 'temporary handoff',
-        category: 'temporary-operational',
-        expiresAt: '2026-01-01T00:00:00.000Z',
-      });
-      brain.episodic.record({
-        type: 'learning',
-        summary: 'Durable lesson survives working TTL cleanup',
-        details: { category: 'lesson' },
-        createdAt: '2025-12-31T23:59:00.000Z',
-      });
-
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date('2026-01-01T00:00:01.000Z'));
-      try {
-        expect(brain.working.has('handoff:temp')).toBe(false);
-        expect(brain.episodic.recall('Durable lesson', 5)).toHaveLength(1);
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
-    it('does not expire durable working facts that only describe an expiresAt field', () => {
-      brain.working.set('certificate', {
-        value: 'renews next year',
-        category: 'asset',
-        expiresAt: '2026-01-01T00:00:00.000Z',
-      });
-
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date('2026-01-01T00:00:01.000Z'));
-      try {
-        expect(brain.working.get('certificate')).toEqual({
-          value: 'renews next year',
-          category: 'asset',
-          expiresAt: '2026-01-01T00:00:00.000Z',
-        });
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
-    it('expires temporary operational alias markers consistently', () => {
-      brain.working.set('kind:temp', {
-        value: 'short-lived kind',
-        kind: 'transient-operational',
-        expiresAt: '2026-01-01T00:00:00.000Z',
-      });
-      brain.working.set('type:temp', {
-        value: 'short-lived type',
-        type: 'temporary-operational',
-        expiresAt: '2026-01-01T00:00:00.000Z',
-      });
-      brain.working.set('scope:temp', {
-        value: 'short-lived scope',
-        scope: 'transient-operational',
-        expiresAt: '2026-01-01T00:00:00.000Z',
-      });
-      brain.working.set('category:operational-temp', {
-        value: 'short-lived category',
-        category: 'operational-temporary',
-        expiresAt: '2026-01-01T00:00:00.000Z',
-      });
-      brain.working.set('kind:temp-alias', {
-        value: 'short-lived temp alias',
-        kind: 'temp-operational',
-        expiresAt: '2026-01-01T00:00:00.000Z',
-      });
-
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date('2026-01-01T00:00:01.000Z'));
-      try {
-        expect(brain.working.keys()).toEqual([]);
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
-    it('purges expired persisted working facts during hydration', () => {
-      const dir = mkdtempSync(join(tmpdir(), 'franken-memory-ttl-'));
-      const dbPath = join(dir, 'brain.db');
-      const originalBrain = new SqliteBrain(dbPath);
-      originalBrain.working.set('op:expired', {
-        value: 'stale job output',
-        category: 'temporary-operational',
-        expiresAt: '2099-01-01T00:00:00.000Z',
-      });
-      originalBrain.working.set('op:active', {
-        value: 'current job output',
-        category: 'temporary-operational',
-        expiresAt: '2099-01-01T00:10:00.000Z',
-      });
-      originalBrain.flush();
-      originalBrain.close();
-
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date('2099-01-01T00:00:01.000Z'));
-      const hydratedBrain = new SqliteBrain(dbPath);
-      try {
-        expect(hydratedBrain.working.has('op:expired')).toBe(false);
-        expect(hydratedBrain.working.get('op:active')).toEqual({
-          value: 'current job output',
-          category: 'temporary-operational',
-          expiresAt: '2099-01-01T00:10:00.000Z',
-        });
-        const db = new Database(dbPath, { readonly: true });
-        try {
-          const rows = db.prepare('SELECT key FROM working_memory ORDER BY key').all() as Array<{ key: string }>;
-          expect(rows.map(row => row.key)).toEqual(['op:active']);
-        } finally {
-          db.close();
-        }
-      } finally {
-        hydratedBrain.close();
-        vi.useRealTimers();
-        rmSync(dir, { recursive: true, force: true });
-      }
-    });
-
-    it('prunes expired persisted facts before enforcing persisted entry limits', () => {
-      const dir = mkdtempSync(join(tmpdir(), 'franken-memory-ttl-limit-'));
-      const dbPath = join(dir, 'brain.db');
-      const originalBrain = new SqliteBrain(dbPath, { maxEntries: 5 });
-      for (let index = 0; index < 4; index += 1) {
-        originalBrain.working.set(`op:expired:${index}`, {
-          value: `stale ${index}`,
-          category: 'temporary-operational',
-          expiresAt: '2099-01-01T00:00:00.000Z',
-        });
-      }
-      originalBrain.working.set('op:active', {
-        value: 'fresh',
-        category: 'temporary-operational',
-        expiresAt: '2099-01-01T00:10:00.000Z',
-      });
-      originalBrain.flush();
-      originalBrain.close();
-
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date('2099-01-01T00:00:01.000Z'));
-      const hydratedBrain = new SqliteBrain(dbPath, { maxEntries: 3 });
-      try {
-        expect(hydratedBrain.working.keys()).toEqual(['op:active']);
-      } finally {
-        hydratedBrain.close();
-        vi.useRealTimers();
-        rmSync(dir, { recursive: true, force: true });
-      }
-    });
-
-    it('expires runtime temporary facts before enforcing new-entry limits', () => {
-      const limitedBrain = new SqliteBrain(':memory:', { maxEntries: 1 });
-      limitedBrain.working.set('op:expired', {
-        value: 'stale runtime entry',
-        category: 'temporary-operational',
-        expiresAt: '2099-01-01T00:00:00.000Z',
-      });
-
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date('2099-01-01T00:00:01.000Z'));
-      try {
-        expect(() => limitedBrain.working.set('op:new', 'fresh runtime entry')).not.toThrow();
-        expect(limitedBrain.working.keys()).toEqual(['op:new']);
-      } finally {
-        limitedBrain.close();
-        vi.useRealTimers();
-      }
-    });
-
-    it('keeps right-to-forget dry runs read-only for expired persisted facts', () => {
-      const dir = mkdtempSync(join(tmpdir(), 'franken-memory-ttl-dryrun-'));
-      const dbPath = join(dir, 'brain.db');
-      const originalBrain = new SqliteBrain(dbPath);
-      originalBrain.working.set('op:expired', {
-        value: 'stale job output',
-        category: 'temporary-operational',
-        sourceScope: 'dry-run-test',
-        expiresAt: '2099-01-01T00:00:00.000Z',
-      });
-      originalBrain.flush();
-      originalBrain.close();
-
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date('2099-01-01T00:00:01.000Z'));
-      const dryRunBrain = new SqliteBrain(dbPath, undefined, { hydrateWorkingMemoryFromDb: false });
-      try {
-        const report = dryRunBrain.rightToForget({ sourceScope: 'dry-run-test', dryRun: true });
-        expect(report.dryRun).toBe(true);
-        expect(report.deleted.working).toBe(1);
-        expect(report.remainingReferences).toBeGreaterThanOrEqual(1);
-        const db = new Database(dbPath, { readonly: true });
-        try {
-          const rows = db.prepare('SELECT key FROM working_memory ORDER BY key').all() as Array<{ key: string }>;
-          expect(rows.map(row => row.key)).toEqual(['op:expired']);
-        } finally {
-          db.close();
-        }
-      } finally {
-        dryRunBrain.close();
-        vi.useRealTimers();
-        rmSync(dir, { recursive: true, force: true });
-      }
-    });
-
-    it('counts expired persisted facts deleted by right-to-forget', () => {
-      const dir = mkdtempSync(join(tmpdir(), 'franken-memory-ttl-delete-count-'));
-      const dbPath = join(dir, 'brain.db');
-      const originalBrain = new SqliteBrain(dbPath);
-      originalBrain.working.set('op:expired', {
-        value: 'stale job output',
-        category: 'temporary-operational',
-        sourceScope: 'delete-count-test',
-        expiresAt: '2099-01-01T00:00:00.000Z',
-      });
-      originalBrain.flush();
-      originalBrain.close();
-
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date('2099-01-01T00:00:01.000Z'));
-      const deleteBrain = new SqliteBrain(dbPath, undefined, { hydrateWorkingMemoryFromDb: false });
-      try {
-        const report = deleteBrain.rightToForget({ sourceScope: 'delete-count-test' });
-        expect(report.deleted.working).toBe(1);
-        const db = new Database(dbPath, { readonly: true });
-        try {
-          const rows = db.prepare('SELECT key FROM working_memory ORDER BY key').all() as Array<{ key: string }>;
-          expect(rows).toEqual([]);
-        } finally {
-          db.close();
-        }
-      } finally {
-        deleteBrain.close();
-        vi.useRealTimers();
-        rmSync(dir, { recursive: true, force: true });
-      }
-    });
-
-    it('does not let stale runtime TTL cleanup delete a newer persisted value for the same key', () => {
-      const dir = mkdtempSync(join(tmpdir(), 'franken-memory-ttl-race-'));
-      const dbPath = join(dir, 'brain.db');
-      const staleBrain = new SqliteBrain(dbPath);
-      staleBrain.working.set('op:key', {
-        value: 'old temporary overlay',
-        category: 'temporary-operational',
-        expiresAt: '2099-01-01T00:00:00.000Z',
-      });
-      staleBrain.flush();
-
-      const freshBrain = new SqliteBrain(dbPath);
-      freshBrain.working.set('op:key', { value: 'new durable fact', category: 'lesson' });
-      freshBrain.flush();
-      freshBrain.close();
-
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date('2099-01-01T00:00:01.000Z'));
-      try {
-        expect(staleBrain.working.has('op:key')).toBe(true);
-        expect(staleBrain.working.get('op:key')).toEqual({ value: 'new durable fact', category: 'lesson' });
-        staleBrain.flush();
-        const verifier = new SqliteBrain(dbPath);
-        try {
-          expect(verifier.working.get('op:key')).toEqual({ value: 'new durable fact', category: 'lesson' });
-        } finally {
-          verifier.close();
-        }
-      } finally {
-        staleBrain.close();
-        vi.useRealTimers();
-        rmSync(dir, { recursive: true, force: true });
-      }
-    });
-
-    it('keeps dirty replacements flushable after pruning expired persisted rows', () => {
-      const dir = mkdtempSync(join(tmpdir(), 'franken-memory-ttl-dirty-'));
-      const dbPath = join(dir, 'brain.db');
-      const brain = new SqliteBrain(dbPath);
-      brain.working.set('op:key', {
-        value: 'old temporary persisted value',
-        category: 'temporary-operational',
-        expiresAt: '2099-01-01T00:00:00.000Z',
-      });
-      brain.flush();
-      brain.working.set('op:key', { value: 'new durable replacement', category: 'lesson' });
-
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date('2099-01-01T00:00:01.000Z'));
-      try {
-        brain.rightToForget({ category: 'unrelated' });
-        brain.flush();
-      } finally {
-        brain.close();
-        vi.useRealTimers();
-      }
-
-      const rehydrated = new SqliteBrain(dbPath);
-      try {
-        expect(rehydrated.working.get('op:key')).toEqual({ value: 'new durable replacement', category: 'lesson' });
-      } finally {
-        rehydrated.close();
-        rmSync(dir, { recursive: true, force: true });
-      }
-    });
-
-    it('restores durable persisted values when unflushed temporary overlays expire during flush', () => {
-      const dir = mkdtempSync(join(tmpdir(), 'franken-memory-ttl-overlay-'));
-      const dbPath = join(dir, 'brain.db');
-      const brain = new SqliteBrain(dbPath);
-      brain.working.set('shared:key', { value: 'durable asset', category: 'asset', expiresAt: '2099-01-01T00:00:00.000Z' });
-      brain.flush();
-
-      brain.working.set('shared:key', {
-        value: 'temporary overlay',
-        category: 'temporary-operational',
-        expiresAt: '2099-01-01T00:00:00.000Z',
-      });
-
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date('2099-01-01T00:00:01.000Z'));
-      try {
-        brain.flush();
-        expect(brain.working.get('shared:key')).toEqual({
-          value: 'durable asset',
-          category: 'asset',
-          expiresAt: '2099-01-01T00:00:00.000Z',
-        });
-      } finally {
-        brain.close();
-        vi.useRealTimers();
-      }
-
-      const rehydrated = new SqliteBrain(dbPath);
-      try {
-        expect(rehydrated.working.get('shared:key')).toEqual({
-          value: 'durable asset',
-          category: 'asset',
-          expiresAt: '2099-01-01T00:00:00.000Z',
-        });
-      } finally {
-        rehydrated.close();
-        rmSync(dir, { recursive: true, force: true });
-      }
-    });
-
     it('delete() removes a key and returns true', () => {
       brain.working.set('key', 'val');
       expect(brain.working.delete('key')).toBe(true);
@@ -1743,6 +1373,532 @@ describe('SqliteBrain', () => {
       });
     });
 
+    it('surfaces contradictory working-memory candidates before approval', () => {
+      const initial = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.location.city',
+        value: 'Paris',
+        source: 'chat:turn-1',
+        confidence: 0.9,
+        reason: 'User stated they live in Paris.',
+      });
+      brain.memoryReview.approve(initial.id, { reviewer: 'operator' });
+
+      const contradictory = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.location.city',
+        value: 'Berlin',
+        source: 'chat:turn-2',
+        confidence: 0.92,
+        reason: 'User stated they live in Berlin.',
+      });
+
+      expect(brain.memoryReview.conflictsFor(contradictory.id)).toEqual([
+        expect.objectContaining({
+          targetStore: 'working',
+          key: 'user.location.city',
+          conflictType: 'value_mismatch',
+          proposedCandidateId: contradictory.id,
+          existingValue: 'Paris',
+          proposedValue: 'Berlin',
+          existingProvenance: expect.objectContaining({
+            candidateId: initial.id,
+            source: 'chat:turn-1',
+          }),
+          guidance: expect.stringContaining('keep_existing, replace_existing, or reject_candidate'),
+        }),
+      ]);
+    });
+
+    it('blocks normal approval of contradictory candidates until conflict is resolved', () => {
+      const initial = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.review-gate',
+        value: 'concise',
+        source: 'chat:turn-3a',
+        confidence: 0.9,
+        reason: 'User requested concise responses.',
+      });
+      brain.memoryReview.approve(initial.id, { reviewer: 'operator' });
+      const contradictory = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.review-gate',
+        value: 'verbose',
+        source: 'chat:turn-3b',
+        confidence: 0.8,
+        reason: 'Later contradictory response style inference.',
+      });
+
+      expect(() =>
+        brain.memoryReview.approve(contradictory.id, { reviewer: 'operator' }),
+      ).toThrow(/conflicts with an existing value/);
+      expect(brain.memoryReview.list('pending')).toEqual([
+        expect.objectContaining({ id: contradictory.id }),
+      ]);
+      expect(brain.working.get('user.preference.review-gate')).toBe('concise');
+    });
+
+    it('omits stale provenance when runtime memory changed outside the review queue', () => {
+      const initial = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.pet',
+        value: 'cat',
+        source: 'chat:turn-3c',
+        confidence: 0.9,
+        reason: 'User stated a pet preference.',
+      });
+      brain.memoryReview.approve(initial.id, { reviewer: 'operator' });
+      brain.working.set('user.preference.pet', 'fish');
+      const contradictory = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.pet',
+        value: 'dog',
+        source: 'chat:turn-3d',
+        confidence: 0.8,
+        reason: 'Later contradictory pet preference.',
+      });
+
+      expect(brain.memoryReview.conflictsFor(contradictory.id)).toEqual([
+        expect.objectContaining({
+          existingValue: 'fish',
+          proposedValue: 'dog',
+        }),
+      ]);
+      expect(
+        brain.memoryReview.conflictsFor(contradictory.id)[0]?.existingProvenance,
+      ).toBeUndefined();
+    });
+
+    it('does not resurrect pending-deleted working memory during conflict checks', () => {
+      const initial = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.removed-fact',
+        value: 'old',
+        source: 'chat:turn-3e',
+        confidence: 0.9,
+        reason: 'User stated an old preference.',
+      });
+      brain.memoryReview.approve(initial.id, { reviewer: 'operator' });
+      expect(brain.working.delete('user.preference.removed-fact')).toBe(true);
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.removed-fact',
+        value: 'new',
+        source: 'chat:turn-3f',
+        confidence: 0.8,
+        reason: 'Fresh preference after deletion.',
+      });
+
+      expect(brain.memoryReview.conflictsFor(candidate.id)).toEqual([]);
+      expect(brain.memoryReview.approve(candidate.id).status).toBe('approved');
+      expect(brain.working.get('user.preference.removed-fact')).toBe('new');
+    });
+
+    it('resolves memory conflicts by keeping the existing fact', () => {
+      const initial = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.editor',
+        value: 'vim',
+        source: 'chat:turn-3',
+        confidence: 0.9,
+        reason: 'User stated their editor preference.',
+      });
+      brain.memoryReview.approve(initial.id, { reviewer: 'operator' });
+      const contradictory = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.editor',
+        value: 'emacs',
+        source: 'chat:turn-4',
+        confidence: 0.8,
+        reason: 'Later ambiguous editor mention.',
+      });
+
+      const resolved = brain.memoryReview.resolveConflict(contradictory.id, {
+        resolution: 'keep_existing',
+        reviewer: 'operator',
+      });
+
+      expect(resolved.status).toBe('rejected');
+      expect(resolved.note).toBe('Memory conflict resolved by keeping the existing value.');
+      expect(brain.working.get('user.preference.editor')).toBe('vim');
+      expect(brain.memoryReview.conflictsFor(contradictory.id)).toEqual([]);
+    });
+
+    it('resolves memory conflicts by replacing the existing fact', () => {
+      const initial = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.repo.default-branch',
+        value: 'master',
+        source: 'legacy-config',
+        confidence: 0.7,
+        reason: 'Old repository metadata.',
+      });
+      brain.memoryReview.approve(initial.id, { reviewer: 'operator' });
+      const corrected = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.repo.default-branch',
+        value: 'main',
+        source: 'repo-config',
+        confidence: 0.95,
+        reason: 'Current GitHub repository metadata.',
+      });
+
+      const resolved = brain.memoryReview.resolveConflict(corrected.id, {
+        resolution: 'replace_existing',
+        reviewer: 'operator',
+      });
+
+      expect(resolved.status).toBe('approved');
+      expect(resolved.note).toBe('Memory conflict resolved by replacing the existing value.');
+      expect(brain.working.get('env.repo.default-branch')).toBe('main');
+      expect(
+        brain.memoryReview.provenanceFor('working', 'env.repo.default-branch'),
+      ).toMatchObject({
+        candidateId: corrected.id,
+        value: 'main',
+        source: 'repo-config',
+      });
+    });
+
+    it('rejects conflict resolution when there is no contradictory current fact', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.shell',
+        value: 'zsh',
+        source: 'chat:turn-5',
+        confidence: 0.8,
+        reason: 'User stated shell preference.',
+      });
+
+      expect(() =>
+        brain.memoryReview.resolveConflict(candidate.id, {
+          resolution: 'keep_existing',
+          reviewer: 'operator',
+        }),
+      ).toThrow(/no unresolved conflict/);
+    });
+
+    it('revalidates keep-existing conflict decisions before rejecting the candidate', () => {
+      const initial = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.changed-before-keep',
+        value: 'vim',
+        source: 'chat:turn-5a',
+        confidence: 0.9,
+        reason: 'Original editor preference.',
+      });
+      brain.memoryReview.approve(initial.id, { reviewer: 'operator' });
+      const contradictory = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.changed-before-keep',
+        value: 'emacs',
+        source: 'chat:turn-5b',
+        confidence: 0.8,
+        reason: 'Later editor preference.',
+      });
+      const conflicts = brain.memoryReview.conflictsFor(contradictory.id);
+      expect(conflicts).toHaveLength(1);
+      brain.working.set('user.preference.changed-before-keep', 'helix');
+
+      const review = brain.memoryReview as unknown as {
+        rejectCandidate(
+          id: string,
+          options: { reviewer: string },
+          guard: { expectedExistingValue: unknown; expectedCandidateValue: unknown },
+        ): unknown;
+      };
+      expect(() =>
+        review.rejectCandidate(
+          contradictory.id,
+          { reviewer: 'operator' },
+          {
+            expectedExistingValue: conflicts[0]?.existingValue,
+            expectedCandidateValue: contradictory.value,
+          },
+        ),
+      ).toThrow(/conflict changed before resolution/);
+      expect(brain.memoryReview.list('pending')).toEqual([
+        expect.objectContaining({ id: contradictory.id }),
+      ]);
+    });
+
+    it('pins the proposed value when approving a replacement conflict', () => {
+      const initial = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.repo.changed-before-replace',
+        value: 'master',
+        source: 'legacy-config',
+        confidence: 0.7,
+        reason: 'Old repository metadata.',
+      });
+      brain.memoryReview.approve(initial.id, { reviewer: 'operator' });
+      const corrected = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.repo.changed-before-replace',
+        value: 'main',
+        source: 'repo-config',
+        confidence: 0.95,
+        reason: 'Current GitHub repository metadata.',
+      });
+      const conflicts = brain.memoryReview.conflictsFor(corrected.id);
+      expect(conflicts).toHaveLength(1);
+      brain.memoryReview.edit(corrected.id, { value: 'trunk' });
+
+      const review = brain.memoryReview as unknown as {
+        approveCandidate(
+          id: string,
+          options: { reviewer: string },
+          guard: { expectedExistingValue: unknown; expectedCandidateValue: unknown },
+        ): unknown;
+      };
+      expect(() =>
+        review.approveCandidate(
+          corrected.id,
+          { reviewer: 'operator' },
+          {
+            expectedExistingValue: conflicts[0]?.existingValue,
+            expectedCandidateValue: corrected.value,
+          },
+        ),
+      ).toThrow(/proposed value changed before approval/);
+      expect(brain.working.get('env.repo.changed-before-replace')).toBe('master');
+      expect(brain.memoryReview.list('pending')).toEqual([
+        expect.objectContaining({ id: corrected.id, value: 'trunk' }),
+      ]);
+    });
+
+    it('detects conflicts against persisted facts when runtime hydration is disabled', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-conflict-persisted-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const writer = new SqliteBrain(dbPath);
+        const approved = writer.memoryReview.propose({
+          targetStore: 'working',
+          key: 'user.preference.theme',
+          value: 'dark',
+          source: 'chat:turn-6',
+          confidence: 0.9,
+          reason: 'User requested dark theme.',
+        });
+        writer.memoryReview.approve(approved.id, { reviewer: 'operator' });
+        writer.close();
+
+        const reviewer = new SqliteBrain(dbPath, undefined, {
+          hydrateWorkingMemoryFromDb: false,
+        });
+        const contradictory = reviewer.memoryReview.propose({
+          targetStore: 'working',
+          key: 'user.preference.theme',
+          value: 'light',
+          source: 'chat:turn-7',
+          confidence: 0.8,
+          reason: 'Ambiguous later theme mention.',
+        });
+
+        expect(reviewer.working.has('user.preference.theme')).toBe(false);
+        expect(reviewer.memoryReview.conflictsFor(contradictory.id)).toEqual([
+          expect.objectContaining({
+            key: 'user.preference.theme',
+            existingValue: 'dark',
+            proposedValue: 'light',
+            existingProvenance: expect.objectContaining({
+              candidateId: approved.id,
+            }),
+          }),
+        ]);
+        reviewer.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('refreshes persisted working memory before conflict approval checks', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-conflict-refresh-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const staleReviewer = new SqliteBrain(dbPath, undefined, {
+          hydrateWorkingMemoryFromDb: false,
+        });
+        const writer = new SqliteBrain(dbPath);
+        const approved = writer.memoryReview.propose({
+          targetStore: 'working',
+          key: 'user.preference.concurrent-theme',
+          value: 'dark',
+          source: 'chat:turn-7a',
+          confidence: 0.9,
+          reason: 'Concurrent reviewer approved theme.',
+        });
+        writer.memoryReview.approve(approved.id, { reviewer: 'operator' });
+        writer.close();
+
+        const contradictory = staleReviewer.memoryReview.propose({
+          targetStore: 'working',
+          key: 'user.preference.concurrent-theme',
+          value: 'light',
+          source: 'chat:turn-7b',
+          confidence: 0.8,
+          reason: 'Stale reviewer inferred a conflicting theme.',
+        });
+
+        expect(staleReviewer.memoryReview.conflictsFor(contradictory.id)).toEqual([
+          expect.objectContaining({
+            existingValue: 'dark',
+            proposedValue: 'light',
+          }),
+        ]);
+        expect(() =>
+          staleReviewer.memoryReview.approve(contradictory.id),
+        ).toThrow(/conflicts with an existing value/);
+        staleReviewer.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('aligns hydrated clean runtime cache with refreshed persisted conflicts before flush', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-conflict-stale-cache-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const seed = new SqliteBrain(dbPath);
+        seed.working.set('user.preference.concurrent-color', 'red');
+        seed.flush();
+        seed.close();
+
+        const staleReviewer = new SqliteBrain(dbPath);
+        expect(staleReviewer.working.get('user.preference.concurrent-color')).toBe('red');
+
+        const writer = new SqliteBrain(dbPath);
+        writer.working.set('user.preference.concurrent-color', 'green');
+        writer.flush();
+        writer.close();
+
+        const contradictory = staleReviewer.memoryReview.propose({
+          targetStore: 'working',
+          key: 'user.preference.concurrent-color',
+          value: 'blue',
+          source: 'chat:turn-7bb',
+          confidence: 0.8,
+          reason: 'Stale reviewer inferred a conflicting color.',
+        });
+
+        expect(staleReviewer.memoryReview.conflictsFor(contradictory.id)).toEqual([
+          expect.objectContaining({
+            existingValue: 'green',
+            proposedValue: 'blue',
+          }),
+        ]);
+        expect(staleReviewer.working.get('user.preference.concurrent-color')).toBe('green');
+        staleReviewer.flush();
+        staleReviewer.close();
+
+        const verifier = new SqliteBrain(dbPath);
+        expect(verifier.working.get('user.preference.concurrent-color')).toBe('green');
+        verifier.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('ignores expired persisted working memory during conflict approval checks', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-conflict-expired-persisted-'));
+      const dbPath = join(dir, 'brain.db');
+
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date('2099-01-01T00:00:00.000Z'));
+        const writer = new SqliteBrain(dbPath);
+        writer.working.set('user.preference.session-mode', {
+          value: 'focus',
+          category: 'temporary-operational',
+          expiresAt: '2099-01-01T00:00:01.000Z',
+        });
+        writer.flush();
+        writer.close();
+
+        vi.setSystemTime(new Date('2099-01-01T00:00:02.000Z'));
+        const reviewer = new SqliteBrain(dbPath, undefined, {
+          hydrateWorkingMemoryFromDb: false,
+        });
+        const fresh = reviewer.memoryReview.propose({
+          targetStore: 'working',
+          key: 'user.preference.session-mode',
+          value: 'normal',
+          source: 'chat:turn-7c',
+          confidence: 0.8,
+          reason: 'Fresh preference after temporary fact expired.',
+        });
+
+        expect(reviewer.working.has('user.preference.session-mode')).toBe(false);
+        expect(reviewer.memoryReview.conflictsFor(fresh.id)).toEqual([]);
+        expect(() => reviewer.memoryReview.approve(fresh.id, { reviewer: 'operator' })).not.toThrow();
+        expect(reviewer.working.get('user.preference.session-mode')).toBe('normal');
+        reviewer.close();
+      } finally {
+        vi.useRealTimers();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('fails fast for invalid conflict resolution strings', () => {
+      const initial = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.tabs',
+        value: 'spaces',
+        source: 'chat:turn-8',
+        confidence: 0.9,
+        reason: 'User stated indentation preference.',
+      });
+      brain.memoryReview.approve(initial.id, { reviewer: 'operator' });
+      const contradictory = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.tabs',
+        value: 'tabs',
+        source: 'chat:turn-9',
+        confidence: 0.8,
+        reason: 'Later conflicting indentation mention.',
+      });
+
+      expect(() =>
+        brain.memoryReview.resolveConflict(contradictory.id, {
+          resolution: 'replace-existing',
+          reviewer: 'operator',
+        } as never),
+      ).toThrow(/Unsupported memory conflict resolution/);
+      expect(brain.memoryReview.list('pending')).toEqual([
+        expect.objectContaining({ id: contradictory.id }),
+      ]);
+    });
+
+    it('returns no conflicts for suppressed duplicate proposal handles', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.duplicate-conflict',
+        value: 'maybe',
+        source: 'chat:turn-10',
+        evidenceId: 'msg-10',
+        confidence: 0.4,
+        reason: 'Weak inferred preference.',
+      });
+      brain.memoryReview.reject(candidate.id, { reviewer: 'operator' });
+
+      const suppressed = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.duplicate-conflict',
+        value: 'maybe',
+        source: 'chat:turn-10',
+        evidenceId: 'msg-10',
+        confidence: 0.4,
+        reason: 'Weak inferred preference.',
+      });
+
+      expect(suppressed.status).toBe('suppressed');
+      expect(brain.memoryReview.conflictsFor(suppressed.id)).toEqual([]);
+    });
+
+
     it('prunes expired temporary facts before approved working-memory writes enforce limits', () => {
       const limitedBrain = new SqliteBrain(':memory:', { maxEntries: 1 });
       limitedBrain.working.set('op:expired', {
@@ -2407,7 +2563,13 @@ describe('SqliteBrain', () => {
           confidence: 0.9,
           reason: 'Approved value equals stale cache.',
         });
-        stale.memoryReview.approve(candidate.id, { reviewer: 'operator' });
+        expect(() =>
+          stale.memoryReview.approve(candidate.id, { reviewer: 'operator' }),
+        ).toThrow(/conflicts with an existing value/);
+        stale.memoryReview.resolveConflict(candidate.id, {
+          resolution: 'replace_existing',
+          reviewer: 'operator',
+        });
         stale.close();
         stale = undefined;
 

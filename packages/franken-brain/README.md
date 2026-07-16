@@ -92,6 +92,24 @@ const provenance = brain.memoryReview.provenanceFor(
   'working',
   'user.preference.response-style',
 );
+// Contradictory candidates for an existing key are surfaced before approval so
+// callers can explicitly keep the durable fact, replace it, or reject the new
+// candidate with an auditable decision note.
+const changedPreference = brain.memoryReview.propose({
+  targetStore: 'working',
+  key: 'user.preference.response-style',
+  value: 'detailed',
+  source: 'chat:turn-43',
+  confidence: 0.75,
+  reason: 'A later message appeared to contradict the stored preference.',
+});
+const conflicts = brain.memoryReview.conflictsFor(changedPreference.id);
+if (conflicts.length > 0) {
+  brain.memoryReview.resolveConflict(changedPreference.id, {
+    resolution: 'keep_existing', // or 'replace_existing' / 'reject_candidate'
+    reviewer: 'operator',
+  });
+}
 
 // Confidence decay gives injection/retrieval code a deterministic way to lower
 // old memory certainty without mutating the stored record. The result is

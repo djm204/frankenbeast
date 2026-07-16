@@ -144,6 +144,26 @@ export interface MemoryProvenanceRecord {
   approvedAt: string;
 }
 
+export type MemoryConflictResolution =
+  | 'keep_existing'
+  | 'replace_existing'
+  | 'reject_candidate';
+
+export interface MemoryConflict {
+  targetStore: MemoryCandidateTargetStore;
+  key: string;
+  conflictType: 'value_mismatch';
+  proposedCandidateId: string;
+  existingValue: unknown;
+  proposedValue: unknown;
+  existingProvenance?: MemoryProvenanceRecord;
+  guidance: string;
+}
+
+export interface MemoryConflictResolutionOptions extends MemoryReviewDecisionOptions {
+  resolution: MemoryConflictResolution;
+}
+
 export interface MemoryEncryptionMetadata {
   algorithm: 'aes-256-gcm';
   stores: Array<{ store: string; encrypted: boolean }>;
@@ -1070,6 +1090,61 @@ class SqliteWorkingMemory implements IWorkingMemory {
     return result;
   }
 
+  reviewValueState(key: string):
+    | { state: 'present'; value: unknown }
+    | { state: 'deleted' }
+    | { state: 'absent' } {
+    if (this.deletedKeys.has(key)) return { state: 'deleted' };
+    if (this.dirtyKeys.has(key)) {
+      return this.store.has(key)
+        ? { state: 'present', value: this.get(key) }
+        : { state: 'deleted' };
+    }
+    const row = this.db
+      .prepare(`SELECT value FROM working_memory WHERE key = ?`)
+      .get(key) as { value: string } | undefined;
+    if (!row) {
+      this.persistedSerialized.delete(key);
+      this.syncCleanRuntimeKeyToAbsent(key);
+      return { state: 'absent' };
+    }
+    const serialized = this.encryption?.decrypt(row.value) ?? row.value;
+    const value = parseStoredWorkingMemoryValue(serialized);
+    if (isExpiredWorkingMemoryValue(value)) {
+      const [preserved] = this.deleteExpiredPersistedRows([{ key, serialized }]);
+      if (!preserved) {
+        this.syncCleanRuntimeKeyToAbsent(key);
+        return { state: 'absent' };
+      }
+      const preservedValue = parseStoredWorkingMemoryValue(preserved.serialized);
+      this.persistedSerialized.set(key, preserved.serialized);
+      this.syncCleanRuntimeKeyToPersisted(key, preservedValue, preserved.serialized);
+      return { state: 'present', value: preservedValue };
+    }
+    this.persistedSerialized.set(key, serialized);
+    this.syncCleanRuntimeKeyToPersisted(key, value, serialized);
+    return { state: 'present', value };
+  }
+
+  private syncCleanRuntimeKeyToAbsent(key: string): void {
+    if (this.dirtyKeys.has(key) || this.deletedKeys.has(key) || !this.store.has(key)) return;
+    this.totalBytes -= this.sizes.get(key) ?? 0;
+    this.store.delete(key);
+    this.sizes.delete(key);
+    this.serialized.delete(key);
+  }
+
+  private syncCleanRuntimeKeyToPersisted(key: string, value: unknown, serialized: string): void {
+    if (this.dirtyKeys.has(key) || this.deletedKeys.has(key) || !this.store.has(key)) return;
+    if (this.serialized.get(key) === serialized) return;
+    const prepared = this.prepareEntry(key, value);
+    this.totalBytes = this.totalBytes - (this.sizes.get(key) ?? 0) + prepared.size;
+    this.store.set(key, prepared.normalized);
+    this.sizes.set(key, prepared.size);
+    this.serialized.set(key, prepared.serialized);
+  }
+
+
   deletePersistedKeys(keys: readonly string[]): (() => void) | undefined {
     if (keys.length === 0) return;
     const deleteKey = this.db.prepare(`DELETE FROM working_memory WHERE key = ?`);
@@ -1787,6 +1862,14 @@ export class SqliteMemoryReviewQueue {
     id: string,
     options: MemoryReviewDecisionOptions = {},
   ): MemoryCandidate {
+    return this.approveCandidate(id, options);
+  }
+
+  private approveCandidate(
+    id: string,
+    options: MemoryReviewDecisionOptions,
+    conflictGuard?: { expectedExistingValue: unknown; expectedCandidateValue: unknown },
+  ): MemoryCandidate {
     const now = isoNow();
     let finalizeWorkingFlush: (() => void) | undefined;
     let approvedCandidate: MemoryCandidate | undefined;
@@ -1807,6 +1890,14 @@ export class SqliteMemoryReviewQueue {
         this.markSuppressed(id, suppressionReason, now, options);
         approvedCandidate = this.requireCandidate(id);
         return;
+      }
+      const conflicts = this.detectConflicts(candidate);
+      if (conflictGuard) {
+        this.assertConflictUnchanged(id, candidate, conflicts, 'approval', conflictGuard);
+      } else if (conflicts.length > 0) {
+        throw new Error(
+          `Memory candidate ${id} conflicts with an existing value; call resolveConflict() with replace_existing to approve the replacement`,
+        );
       }
       finalizeWorkingFlush =
         this.working.persistKeyAfterCommit(candidate.key, candidate.value) ?? undefined;
@@ -1853,11 +1944,28 @@ export class SqliteMemoryReviewQueue {
     id: string,
     options: MemoryReviewDecisionOptions = {},
   ): MemoryCandidate {
+    return this.rejectCandidate(id, options);
+  }
+
+  private rejectCandidate(
+    id: string,
+    options: MemoryReviewDecisionOptions = {},
+    conflictGuard?: { expectedExistingValue: unknown; expectedCandidateValue: unknown },
+  ): MemoryCandidate {
     const now = isoNow();
     let rejectedCandidate: MemoryCandidate | undefined;
     const tx = this.db.transaction(() => {
       const candidate = this.requireCandidate(id, 'pending');
       this.assertDecisionOptionsNotDeletionGuarded(options);
+      if (conflictGuard) {
+        this.assertConflictUnchanged(
+          id,
+          candidate,
+          this.detectConflicts(candidate),
+          'resolution',
+          conflictGuard,
+        );
+      }
       this.insertSuppression(candidate, 'rejected', now, options);
       this.markDecision(id, 'rejected', now, options);
       rejectedCandidate = this.requireCandidate(id);
@@ -1905,6 +2013,118 @@ export class SqliteMemoryReviewQueue {
       )
       .get(targetStore, key) as MemoryProvenanceRow | undefined;
     return row ? this.rowToProvenance(row) : null;
+  }
+
+  conflictsFor(id: string): MemoryConflict[] {
+    if (id.startsWith('memcand_suppressed_')) return [];
+    const candidate = this.requireCandidate(id);
+    if (candidate.status !== 'pending') return [];
+    return this.detectConflicts(candidate);
+  }
+
+  resolveConflict(
+    id: string,
+    options: MemoryConflictResolutionOptions,
+  ): MemoryCandidate {
+    this.assertValidConflictResolution(options.resolution);
+    const candidate = this.requireCandidate(id, 'pending');
+    const conflicts = this.detectConflicts(candidate);
+    if (conflicts.length === 0) {
+      throw new Error(`Memory candidate ${id} has no unresolved conflict`);
+    }
+    const conflictGuard = {
+      expectedExistingValue: conflicts[0]?.existingValue,
+      expectedCandidateValue: candidate.value,
+    };
+
+    const decisionOptions: MemoryReviewDecisionOptions = {
+      ...(options.reviewer ? { reviewer: options.reviewer } : {}),
+      ...(options.note ? { note: options.note } : {}),
+    };
+
+    if (options.resolution === 'replace_existing') {
+      return this.approveCandidate(id, {
+        ...decisionOptions,
+        note: decisionOptions.note ?? 'Memory conflict resolved by replacing the existing value.',
+      }, conflictGuard);
+    }
+
+    return this.rejectCandidate(id, {
+      ...decisionOptions,
+      note: decisionOptions.note ?? (
+        options.resolution === 'keep_existing'
+          ? 'Memory conflict resolved by keeping the existing value.'
+          : 'Memory conflict resolved by rejecting the contradictory candidate.'
+      ),
+    }, conflictGuard);
+  }
+
+  private assertConflictUnchanged(
+    id: string,
+    candidate: MemoryCandidate,
+    conflicts: MemoryConflict[],
+    decision: 'approval' | 'resolution',
+    guard: { expectedExistingValue: unknown; expectedCandidateValue: unknown },
+  ): void {
+    if (conflicts.length === 0) {
+      throw new Error(
+        `Memory candidate ${id} no longer has an unresolved conflict`,
+      );
+    }
+    if (!memoryValuesEqual(candidate.value, guard.expectedCandidateValue)) {
+      throw new Error(
+        `Memory candidate ${id} proposed value changed before ${decision}; re-run conflictsFor() before resolving`,
+      );
+    }
+    if (!memoryValuesEqual(conflicts[0]?.existingValue, guard.expectedExistingValue)) {
+      throw new Error(
+        `Memory candidate ${id} conflict changed before ${decision}; re-run conflictsFor() before resolving`,
+      );
+    }
+  }
+
+  private detectConflicts(candidate: MemoryCandidate): MemoryConflict[] {
+    if (candidate.targetStore !== 'working') return [];
+    const existingValue = this.existingWorkingValue(candidate.key);
+    if (existingValue === undefined || memoryValuesEqual(existingValue, candidate.value)) return [];
+    const existingProvenance = this.provenanceFor(candidate.targetStore, candidate.key) ?? undefined;
+    const matchingProvenance = existingProvenance &&
+      memoryValuesEqual(existingProvenance.value, existingValue)
+      ? existingProvenance
+      : undefined;
+    return [
+      {
+        targetStore: candidate.targetStore,
+        key: candidate.key,
+        conflictType: 'value_mismatch',
+        proposedCandidateId: candidate.id,
+        existingValue,
+        proposedValue: candidate.value,
+        ...(matchingProvenance ? { existingProvenance: matchingProvenance } : {}),
+        guidance:
+          'A pending memory candidate contradicts the current value for the same key. Resolve with keep_existing, replace_existing, or reject_candidate before treating the fact as durable.',
+      },
+    ];
+  }
+
+  private existingWorkingValue(key: string): unknown {
+    const runtime = this.working.reviewValueState(key);
+    return runtime.state === 'present' ? runtime.value : undefined;
+  }
+
+  private assertValidConflictResolution(
+    resolution: MemoryConflictResolution,
+  ): void {
+    if (
+      resolution === 'keep_existing' ||
+      resolution === 'replace_existing' ||
+      resolution === 'reject_candidate'
+    ) {
+      return;
+    }
+    throw new Error(
+      `Unsupported memory conflict resolution: ${String(resolution)}`,
+    );
   }
 
   private validateProposal(proposal: MemoryCandidateProposal): void {
@@ -2306,6 +2526,11 @@ function canonicalMemoryValue(value: unknown): unknown {
   return parseStoredWorkingMemoryValue(
     stringifyWorkingMemoryValue('memory candidate', value),
   );
+}
+
+function memoryValuesEqual(left: unknown, right: unknown): boolean {
+  return stableStringify(canonicalMemoryValue(left)) ===
+    stableStringify(canonicalMemoryValue(right));
 }
 
 function stableStringify(value: unknown): string {

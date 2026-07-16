@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createAdapterSet, TOOL_STUBS, TOOL_REGISTRY, searchTools, type AdapterSet } from './tool-registry.js';
 
-const EXPECTED_COUNT = 25;
+const EXPECTED_COUNT = 26;
 
 describe('TOOL_STUBS', () => {
-  it('contains exactly 25 tools', () => {
+  it('contains exactly 26 tools', () => {
     expect(TOOL_STUBS).toHaveLength(EXPECTED_COUNT);
   });
 
@@ -20,7 +20,7 @@ describe('TOOL_STUBS', () => {
 });
 
 describe('TOOL_REGISTRY', () => {
-  it('contains exactly 25 tools', () => {
+  it('contains exactly 26 tools', () => {
     expect(TOOL_REGISTRY.size).toBe(EXPECTED_COUNT);
   });
 
@@ -37,7 +37,7 @@ describe('TOOL_REGISTRY', () => {
     }
   });
 
-  it('TOOL_STUBS and TOOL_REGISTRY contain the same 25 tool names', () => {
+  it('TOOL_STUBS and TOOL_REGISTRY contain the same 26 tool names', () => {
     const stubNames = new Set(TOOL_STUBS.map((s) => s.name));
     const registryNames = new Set(TOOL_REGISTRY.keys());
     expect(stubNames).toEqual(registryNames);
@@ -156,14 +156,14 @@ describe('TOOL_REGISTRY', () => {
 });
 
 describe('searchTools', () => {
-  it('returns all 25 tools when called with no query', () => {
+  it('returns all 26 tools when called with no query', () => {
     expect(searchTools()).toHaveLength(EXPECTED_COUNT);
     expect(searchTools(undefined)).toHaveLength(EXPECTED_COUNT);
   });
 
-  it('returns exactly 8 tools for query "memory"', () => {
+  it('returns exactly 9 tools for query "memory"', () => {
     const results = searchTools('memory');
-    expect(results).toHaveLength(8);
+    expect(results).toHaveLength(9);
     for (const r of results) {
       expect(r.server).toBe('memory');
     }
