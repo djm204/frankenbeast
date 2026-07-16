@@ -210,10 +210,18 @@ export function cleanupAbandonedBeastWorktrees(input: BeastWorktreeCleanupInput)
   const cleaned: BeastWorktreeCleanupCandidate[] = [];
   for (const candidate of plan) {
     try {
-      if (runGit(['status', '--porcelain', '--ignored'], candidate.path).length > 0) continue;
-      runGit(['worktree', 'remove', '--force', candidate.path], input.projectRoot);
+      if (!existsSync(candidate.path)) {
+        runGit(['worktree', 'prune'], input.projectRoot);
+        if (branchExists(runGit, input.projectRoot, candidate.branchName)) {
+          runGit(['branch', '-d', candidate.branchName], input.projectRoot);
+        }
+        cleaned.push(candidate);
+        continue;
+      }
+      if (runGit(['status', '--porcelain'], candidate.path).length > 0) continue;
+      runGit(['worktree', 'remove', candidate.path], input.projectRoot);
       if (branchExists(runGit, input.projectRoot, candidate.branchName)) {
-        runGit(['branch', '-D', candidate.branchName], input.projectRoot);
+        runGit(['branch', '-d', candidate.branchName], input.projectRoot);
       }
       cleaned.push(candidate);
     } catch {

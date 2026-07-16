@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -176,25 +176,27 @@ describe('git worktree isolation', () => {
   });
 
   it('skips dirty or locked worktrees during destructive cleanup', () => {
-    const projectRoot = '/repo';
+    const projectRoot = mkdtempSync(join(tmpdir(), 'franken-cleanup-skip-'));
+    const dirtyPath = join(projectRoot, '.frankenbeast', '.worktrees', 'agent-dirty');
+    const lockedPath = join(projectRoot, '.frankenbeast', '.worktrees', 'agent-locked');
+    mkdirSync(dirtyPath, { recursive: true });
+    mkdirSync(lockedPath, { recursive: true });
     const runGit = vi.fn((args: readonly string[], cwd: string): string => {
       if (args[0] === 'rev-parse' && args[1] === '--is-inside-work-tree') return 'true';
       if (args[0] === 'worktree' && args[1] === 'list') {
         return [
-          'worktree /repo/.frankenbeast/.worktrees/agent-dirty',
+          `worktree ${dirtyPath}`,
           'HEAD abc',
           'branch refs/heads/beast/agent-dirty',
           '',
-          'worktree /repo/.frankenbeast/.worktrees/agent-locked',
+          `worktree ${lockedPath}`,
           'HEAD abc',
           'branch refs/heads/beast/agent-locked',
+          'locked because operator is inspecting it',
           '',
         ].join('\n');
       }
       if (args[0] === 'status') return cwd.endsWith('agent-dirty') ? ' M output.txt' : '';
-      if (args[0] === 'worktree' && args[1] === 'remove' && String(args[3]).endsWith('agent-locked')) {
-        throw new Error('locked');
-      }
       return '';
     });
 
@@ -214,15 +216,19 @@ describe('git worktree isolation', () => {
   });
 
   it('executes the abandoned-worktree cleanup plan in sorted order and deletes owned branches', () => {
-    const projectRoot = '/repo';
+    const projectRoot = mkdtempSync(join(tmpdir(), 'franken-cleanup-execute-'));
+    const agentAPath = join(projectRoot, '.frankenbeast', '.worktrees', 'agent-a');
+    const agentZPath = join(projectRoot, '.frankenbeast', '.worktrees', 'agent-z');
+    mkdirSync(agentAPath, { recursive: true });
+    mkdirSync(agentZPath, { recursive: true });
     const runGit = vi.fn((args: readonly string[]): string => {
       if (args[0] === 'rev-parse' && args[1] === '--is-inside-work-tree') return 'true';
       if (args[0] === 'worktree' && args[1] === 'list') {
         return [
-          'worktree /repo/.frankenbeast/.worktrees/agent-z',
+          `worktree ${agentZPath}`,
           'branch refs/heads/beast/agent-z',
           '',
-          'worktree /repo/.frankenbeast/.worktrees/agent-a',
+          `worktree ${agentAPath}`,
           'branch refs/heads/beast/agent-a',
         ].join('\n');
       }
@@ -241,15 +247,9 @@ describe('git worktree isolation', () => {
     });
 
     expect(result.map((entry) => entry.agentId)).toEqual(['agent-a', 'agent-z']);
-    expect(runGit).toHaveBeenCalledWith(
-      ['worktree', 'remove', '--force', '/repo/.frankenbeast/.worktrees/agent-a'],
-      projectRoot,
-    );
-    expect(runGit).toHaveBeenCalledWith(['branch', '-D', 'beast/agent-a'], projectRoot);
-    expect(runGit).toHaveBeenCalledWith(
-      ['worktree', 'remove', '--force', '/repo/.frankenbeast/.worktrees/agent-z'],
-      projectRoot,
-    );
-    expect(runGit).toHaveBeenCalledWith(['branch', '-D', 'beast/agent-z'], projectRoot);
+    expect(runGit).toHaveBeenCalledWith(['worktree', 'remove', agentAPath], projectRoot);
+    expect(runGit).toHaveBeenCalledWith(['branch', '-d', 'beast/agent-a'], projectRoot);
+    expect(runGit).toHaveBeenCalledWith(['worktree', 'remove', agentZPath], projectRoot);
+    expect(runGit).toHaveBeenCalledWith(['branch', '-d', 'beast/agent-z'], projectRoot);
   });
 });
