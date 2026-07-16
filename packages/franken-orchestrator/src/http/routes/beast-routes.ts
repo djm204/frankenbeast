@@ -204,6 +204,15 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
     return c.json({ data: await getContainerRuntimeStatus() });
   });
 
+  app.get('/v1/beasts/maintenance', (c) => {
+    return c.json({
+      data: deps.maintenance?.getState() ?? {
+        enabled: false,
+        allowedCommands: [],
+      },
+    });
+  });
+
   app.post('/v1/beasts/runs', async (c) => {
     const body = validateBody(CreateRunBody, await parseJsonBody(c));
     let run;

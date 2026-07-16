@@ -60,7 +60,7 @@ import type { ISecretStore } from '../network/secret-store.js';
 import { resolveSecurityConfig, type SecurityConfig } from '../middleware/security-profiles.js';
 import { startBeastDaemon } from '../http/beast-daemon-server.js';
 import { createBeastServices } from '../beasts/create-beast-services.js';
-import { MaintenanceModeService } from '../beasts/services/maintenance-mode-service.js';
+import { MaintenanceModeService, type MaintenanceModeState } from '../beasts/services/maintenance-mode-service.js';
 import { TransportSecurityService } from '../http/security/transport-security.js';
 import { CommsConfigSchema, type CommsConfig } from '../comms/config/comms-config.js';
 import { assertLocalPlaintextOrSecureHttpUrl, localPlaintextOrSecureEndpoint } from '../network/network-url.js';
@@ -880,6 +880,39 @@ async function waitForBeastsDaemonEndpoint(baseUrl: string, expected: { root: st
   return 'unavailable';
 }
 
+function isMaintenanceModeState(value: unknown): value is MaintenanceModeState {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.enabled === 'boolean'
+    && Array.isArray(record.allowedCommands)
+    && record.allowedCommands.every((command) => typeof command === 'string');
+}
+
+async function fetchBeastsDaemonMaintenanceMode(baseUrl: string, operatorToken: string): Promise<MaintenanceModeState> {
+  const guardedFetch = createEgressGuardedFetch({ lane: 'test' });
+  const response = await guardedFetch(`${baseUrl}/v1/beasts/maintenance`, {
+    headers: { Authorization: `Bearer ${operatorToken}` },
+    signal: AbortSignal.timeout(1000),
+  });
+  if (!response.ok) {
+    return {
+      enabled: true,
+      reason: `Unable to read beasts-daemon maintenance state (${response.status}); dispatch visibility is degraded.`,
+      allowedCommands: [],
+    };
+  }
+  const body: unknown = await response.json();
+  const data = body && typeof body === 'object' ? (body as Record<string, unknown>).data : undefined;
+  if (isMaintenanceModeState(data)) {
+    return data;
+  }
+  return {
+    enabled: true,
+    reason: 'Unable to parse beasts-daemon maintenance state; dispatch visibility is degraded.',
+    allowedCommands: [],
+  };
+}
+
 async function resolveDetectedBeastsDaemonUrl(
   root: string,
   config: OrchestratorConfig,
@@ -1350,7 +1383,13 @@ async function runChatCommandIfRequested(
               skillManager,
               getSecurityConfig: () => resolveConfigSecurity(mutableConfig),
               getProviders: () => buildDashboardProviderSnapshot(mutableConfig, providerRegistry, [resolveSelectedProvider(args, mutableConfig), ...(args.providers ?? [])]),
-              getMaintenanceMode: () => (localBeastServices?.maintenance ?? MaintenanceModeService.forProjectRoot(root)).getState(),
+              getMaintenanceMode: () => {
+                if (localBeastServices) return localBeastServices.maintenance.getState();
+                if (beastDaemonUrl && beastOperatorToken) {
+                  return fetchBeastsDaemonMaintenanceMode(beastDaemonUrl, beastOperatorToken);
+                }
+                return MaintenanceModeService.forProjectRoot(root).getState();
+              },
             },
           }
         : {}),
