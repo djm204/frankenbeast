@@ -7,6 +7,8 @@ import {
   type MemoryConflict,
   type MemoryConflictResolution,
   type MemoryProvenanceRecord,
+  type MemoryRetentionReport,
+  type MemoryRetentionReportOptions,
   type MemoryReviewDecisionOptions,
   type RightToForgetReport,
   type RightToForgetSelector,
@@ -102,6 +104,7 @@ export interface BrainAdapter {
   }): Promise<void>;
   frontload(input?: MemoryScopeInput): Promise<BrainFrontloadSection[]>;
   exportProjectMemory(input?: MemoryExportInput): Promise<ProjectMemoryExport>;
+  memoryRetentionReport(input?: MemoryRetentionReportOptions): Promise<MemoryRetentionReport>;
   forget(key: string, input?: AgentScopedInput): Promise<boolean>;
   rightToForget(
     input: RightToForgetSelector & AgentScopedInput,
@@ -735,6 +738,10 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
         working,
         episodic,
       };
+    },
+
+    async memoryRetentionReport(input = {}) {
+      return brain.memoryRetentionReport(input);
     },
 
     async forget(key, input = {}) {

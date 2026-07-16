@@ -115,6 +115,69 @@ describe('SqliteBrain', () => {
     });
   });
 
+  describe('memory retention policy report', () => {
+    it('documents policy ordering and protects user preferences from compaction', () => {
+      brain.working.set('user.preference.response-style', 'concise');
+      brain.working.set('env.node.version', { value: '20.x', memoryClass: 'environment_fact' });
+      brain.working.set('scratch.task-state', { value: 'temporary analysis', memoryClass: 'transient_observation' });
+      brain.working.set('ops.tmp', {
+        value: 'short lived process state',
+        category: 'temporary-operational',
+        sourceScope: 'test',
+        expiresAt: '2027-01-01T00:30:00.000Z',
+      });
+
+      const report = brain.memoryRetentionReport({
+        now: '2027-01-01T00:00:00.000Z',
+        maxEntries: 2,
+      });
+
+      expect(report.policies.map((policy) => policy.class)).toContain('user_preference');
+      expect(report.entries.find((entry) => entry.key === 'user.preference.response-style')).toMatchObject({
+        class: 'user_preference',
+        action: 'protect',
+        protected: true,
+      });
+      expect(report.entries.find((entry) => entry.key === 'ops.tmp')).toMatchObject({
+        class: 'temporary_operational',
+        action: 'nearing_expiry',
+      });
+      expect(report.compactionCandidates.map((entry) => entry.key)).toEqual([
+        'scratch.task-state',
+        'env.node.version',
+      ]);
+      expect(report.compactionCandidates).not.toContainEqual(
+        expect.objectContaining({ key: 'user.preference.response-style' }),
+      );
+    });
+
+    it('reports episodic entries nearing expiry or compaction by class', () => {
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'temporary task progress that should not become durable memory',
+        details: { memoryClass: 'transient_observation' },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      brain.episodic.record({
+        type: 'decision',
+        summary: 'repo convention: use conventional commits',
+        details: { memoryClass: 'project_convention' },
+        createdAt: '2024-01-01T00:00:00.000Z',
+      });
+
+      const report = brain.memoryRetentionReport({ now: '2026-01-09T00:00:00.000Z' });
+
+      expect(report.entries.find((entry) => entry.class === 'transient_observation')).toMatchObject({
+        store: 'episodic',
+        action: 'compact',
+      });
+      expect(report.entries.find((entry) => entry.class === 'project_convention')).toMatchObject({
+        store: 'episodic',
+        action: 'compact',
+      });
+    });
+  });
+
   describe('skill evolution review gate', () => {
     it('creates a review item after repeated sanitized skill failures', () => {
       for (const evidenceId of ['task-1', 'task-2', 'task-3']) {
