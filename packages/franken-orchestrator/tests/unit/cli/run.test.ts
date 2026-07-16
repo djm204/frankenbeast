@@ -2408,6 +2408,44 @@ describe('main() execution', () => {
     }));
   });
 
+  it('auto-proxies chat-server beast routes when a live local daemon is read-only degraded', async () => {
+    const root = join(tmpdir(), `frankenbeast-run-test-${Date.now()}-daemon-degraded`);
+    tempDirs.push(root);
+    mkdirSync(join(root, '.frankenbeast'), { recursive: true });
+    writeFileSync(join(root, '.frankenbeast', 'beasts-daemon.pid'), `${process.pid}\n`);
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      ok: false,
+      status: 'degraded',
+      service: 'beasts-daemon',
+      root,
+      pid: process.pid,
+      availability: {
+        mode: 'read-only-degraded',
+        readOnly: true,
+        reason: 'sqlite unavailable',
+        source: 'automatic',
+      },
+    }, { status: 503 })));
+    mockParseArgs.mockReturnValue({
+      ...mockParseArgs(),
+      subcommand: 'chat-server',
+      baseDir: root,
+    });
+
+    await main();
+
+    expect(mockCreateBeastServices).not.toHaveBeenCalled();
+    expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
+      beastDaemon: expect.objectContaining({
+        baseUrl: 'http://127.0.0.1:4050',
+        operatorToken: TEST_DASHBOARD_OPERATOR_TOKEN,
+      }),
+    }));
+    expect(mockStartChatServer).toHaveBeenCalledWith(expect.not.objectContaining({
+      beastControl: expect.anything(),
+    }));
+  });
+
   it('refuses to start chat-server while detected daemon is draining', async () => {
     const root = join(tmpdir(), `frankenbeast-run-test-${Date.now()}-daemon-draining`);
     tempDirs.push(root);
