@@ -115,6 +115,103 @@ describe('SqliteBrain', () => {
     });
   });
 
+  describe('skill evolution review gate', () => {
+    it('creates a review item after repeated sanitized skill failures', () => {
+      for (const evidenceId of ['task-1', 'task-2', 'task-3']) {
+        brain.episodic.recordSkillFailure({
+          skillName: 'resolve-issues',
+          workflowName: 'issue-to-pr',
+          failureSignature: 'Codex feedback was not folded back into the skill',
+          evidenceId,
+          step: 'codex-review',
+          suggestedPatchArea: 'Codex review loop pitfalls',
+          createdAt: '2026-07-16T10:00:00.000Z',
+        });
+      }
+
+      const [item] = brain.createSkillEvolutionReviewGate({ threshold: 3 });
+
+      expect(item).toEqual(expect.objectContaining({
+        id: expect.stringMatching(/^memcand_/),
+        key: expect.stringMatching(/^skill-evolution\.review\.resolve-issues\.[a-f0-9]{16}$/),
+        status: 'pending',
+        value: expect.objectContaining({
+          kind: 'skill-evolution-review',
+          skillName: 'resolve-issues',
+          workflowName: 'issue-to-pr',
+          failurePattern: 'Codex feedback was not folded back into the skill',
+          failureCount: 3,
+          suggestedPatchArea: 'Codex review loop pitfalls',
+          evidencePointers: ['task-1', 'task-2', 'task-3'],
+        }),
+      }));
+      expect(JSON.stringify(item)).not.toContain('stack trace');
+      expect(brain.createSkillEvolutionReviewGate({ threshold: 3 })).toEqual([]);
+    });
+
+    it('does not create a review item for unrelated one-off failures', () => {
+      brain.episodic.recordSkillFailure({
+        skillName: 'resolve-issues',
+        failureSignature: 'stale branch setup',
+        evidenceId: 'task-a',
+      });
+      brain.episodic.recordSkillFailure({
+        skillName: 'github-pr-workflow',
+        failureSignature: 'stale branch setup',
+        evidenceId: 'task-b',
+      });
+      brain.episodic.record({
+        type: 'failure',
+        summary: 'Unstructured build failure unrelated to a skill',
+        createdAt: '2026-07-16T10:10:00.000Z',
+      });
+
+      expect(brain.createSkillEvolutionReviewGate({ threshold: 2 })).toEqual([]);
+      expect(brain.memoryReview.list()).toEqual([]);
+    });
+
+    it('lets reviewers edit, accept, or discard generated skill review items', () => {
+      for (const evidenceId of ['run-1', 'run-2']) {
+        brain.episodic.recordSkillFailure({
+          skillName: 'kanban-worker',
+          failureSignature: 'worker exited without completing or blocking',
+          evidenceId,
+          suggestedPatchArea: 'Kanban lifecycle closeout section',
+        });
+      }
+      const [item] = brain.createSkillEvolutionReviewGate({ threshold: 2 });
+      expect(item).toBeDefined();
+
+      const edited = brain.memoryReview.edit(item!.id, {
+        value: {
+          ...item!.value,
+          suggestedPatchArea: 'Require kanban_complete or kanban_block before exit',
+        },
+        reason: 'Reviewer narrowed the patch area to the closeout requirement.',
+      });
+      expect(edited.value).toMatchObject({
+        suggestedPatchArea: 'Require kanban_complete or kanban_block before exit',
+      });
+      const accepted = brain.memoryReview.approve(item!.id, { reviewer: 'operator' });
+      expect(accepted.status).toBe('approved');
+      expect(brain.working.get(item!.key)).toMatchObject({
+        kind: 'skill-evolution-review',
+        suggestedPatchArea: 'Require kanban_complete or kanban_block before exit',
+      });
+
+      for (const evidenceId of ['run-3', 'run-4']) {
+        brain.episodic.recordSkillFailure({
+          skillName: 'kanban-worker',
+          failureSignature: 'missing heartbeat on long operation',
+          evidenceId,
+        });
+      }
+      const [discardable] = brain.createSkillEvolutionReviewGate({ threshold: 2 });
+      expect(discardable).toBeDefined();
+      expect(brain.memoryReview.reject(discardable!.id, { reviewer: 'operator' }).status).toBe('rejected');
+    });
+  });
+
   describe('working memory', () => {
     it('stores and retrieves values', () => {
       brain.working.set('key', 'value');

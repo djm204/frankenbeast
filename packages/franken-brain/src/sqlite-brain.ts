@@ -20,6 +20,7 @@ import type {
   EpisodicEventType,
   LearningCooldownOptions,
   LearningRecordResult,
+  SkillFailureSignature,
 } from '@franken/types';
 import { isoNow } from '@franken/types';
 
@@ -238,6 +239,33 @@ export interface MemoryConflictResolutionOptions extends MemoryReviewDecisionOpt
   resolution: MemoryConflictResolution;
   /** Required when resolution is keep_both_scoped. Stores the candidate under this non-conflicting key. */
   scopedKey?: string;
+}
+
+export interface SkillEvolutionReviewGateOptions {
+  /** Number of matching failures required before creating a review item. Defaults to 3. */
+  threshold?: number;
+  /** Number of recent failure events to inspect. Defaults to 100. */
+  lookback?: number;
+  /** Confidence used for generated review candidates. Defaults to 0.8. */
+  confidence?: number;
+}
+
+export interface SkillEvolutionReviewValue {
+  kind: 'skill-evolution-review';
+  skillName: string;
+  workflowName?: string;
+  failurePattern: string;
+  failureSignatureHash: string;
+  failureCount: number;
+  suggestedPatchArea: string;
+  evidencePointers: string[];
+}
+
+export interface SkillEvolutionReviewItem {
+  id: string;
+  key: string;
+  status: MemoryCandidateStatus;
+  value: SkillEvolutionReviewValue;
 }
 
 export interface MemoryEncryptionMetadata {
@@ -1469,6 +1497,47 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       this.db.exec('ROLLBACK');
       throw error;
     }
+  }
+
+  recordSkillFailure(input: SkillFailureSignature): void {
+    const skillName = sanitizeSkillEvolutionText(input.skillName, 'skillName');
+    const failurePattern = sanitizeSkillEvolutionText(input.failureSignature, 'failureSignature');
+    const evidenceId = sanitizeSkillEvolutionText(input.evidenceId, 'evidenceId');
+    const workflowName = input.workflowName
+      ? sanitizeSkillEvolutionText(input.workflowName, 'workflowName')
+      : undefined;
+    const step = input.step
+      ? sanitizeSkillEvolutionText(input.step, 'step')
+      : 'skill-evolution';
+    const suggestedPatchArea = input.suggestedPatchArea
+      ? sanitizeSkillEvolutionText(input.suggestedPatchArea, 'suggestedPatchArea')
+      : 'Review the workflow skill instructions that govern this failure pattern.';
+    const createdAt = input.createdAt ?? isoNow();
+    const createdAtMs = Date.parse(createdAt);
+    if (!Number.isFinite(createdAtMs)) {
+      throw new Error(`Skill failure createdAt must be a valid ISO timestamp: ${createdAt}`);
+    }
+    const failureSignatureHash = hashSkillEvolutionSignature({
+      skillName,
+      failurePattern,
+      ...(workflowName ? { workflowName } : {}),
+    });
+
+    this.record({
+      type: 'failure',
+      step,
+      summary: `Workflow skill failure recorded for ${skillName}`,
+      createdAt: new Date(createdAtMs).toISOString(),
+      details: {
+        category: 'skill-evolution',
+        skillName,
+        ...(workflowName ? { workflowName } : {}),
+        failurePattern,
+        failureSignatureHash,
+        suggestedPatchArea,
+        evidenceId,
+      },
+    });
   }
 
   private insertEvent(event: EpisodicEvent): void {
@@ -3167,6 +3236,98 @@ export class SqliteBrain implements IBrain {
       encryption,
     );
     SqliteBrain.registerLiveBrain(this.dbPath, this);
+  }
+
+  createSkillEvolutionReviewGate(
+    options: SkillEvolutionReviewGateOptions = {},
+  ): SkillEvolutionReviewItem[] {
+    const threshold = options.threshold ?? 3;
+    const lookback = options.lookback ?? 100;
+    const confidence = options.confidence ?? 0.8;
+    if (!Number.isInteger(threshold) || threshold < 2) {
+      throw new RangeError('Skill evolution review threshold must be an integer >= 2');
+    }
+    if (!Number.isInteger(lookback) || lookback < threshold) {
+      throw new RangeError('Skill evolution review lookback must be an integer >= threshold');
+    }
+    if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+      throw new RangeError('Skill evolution review confidence must be a finite number between 0 and 1');
+    }
+
+    const pendingKeys = new Set(
+      this.memoryReview
+        .list('pending')
+        .filter(candidate => isSkillEvolutionReviewValue(candidate.value))
+        .map(candidate => candidate.key),
+    );
+    const groups = new Map<string, {
+      skillName: string;
+      workflowName?: string;
+      failurePattern: string;
+      failureSignatureHash: string;
+      suggestedPatchArea: string;
+      evidencePointers: Set<string>;
+      count: number;
+    }>();
+
+    for (const event of this.episodic.recentFailures(lookback)) {
+      const signal = skillEvolutionSignalFromEvent(event);
+      if (!signal) continue;
+      const groupKey = `${normalizeLearningKey(signal.skillName)}:${signal.failureSignatureHash}`;
+      const existing = groups.get(groupKey);
+      if (existing) {
+        existing.count += 1;
+        existing.evidencePointers.add(signal.evidenceId);
+      } else {
+        groups.set(groupKey, {
+          skillName: signal.skillName,
+          ...(signal.workflowName ? { workflowName: signal.workflowName } : {}),
+          failurePattern: signal.failurePattern,
+          failureSignatureHash: signal.failureSignatureHash,
+          suggestedPatchArea: signal.suggestedPatchArea,
+          evidencePointers: new Set([signal.evidenceId]),
+          count: 1,
+        });
+      }
+    }
+
+    const created: SkillEvolutionReviewItem[] = [];
+    for (const group of groups.values()) {
+      if (group.count < threshold) continue;
+      const key = skillEvolutionReviewKey(group.skillName, group.failureSignatureHash);
+      if (pendingKeys.has(key) || this.memoryReview.provenanceFor('working', key)) {
+        continue;
+      }
+      const value: SkillEvolutionReviewValue = {
+        kind: 'skill-evolution-review',
+        skillName: group.skillName,
+        ...(group.workflowName ? { workflowName: group.workflowName } : {}),
+        failurePattern: group.failurePattern,
+        failureSignatureHash: group.failureSignatureHash,
+        failureCount: group.count,
+        suggestedPatchArea: group.suggestedPatchArea,
+        evidencePointers: [...group.evidencePointers].sort(),
+      };
+      const candidate = this.memoryReview.propose({
+        targetStore: 'working',
+        key,
+        value,
+        source: 'episodic-skill-evolution-gate',
+        evidenceId: value.evidencePointers[0] ?? key,
+        confidence,
+        reason: `Repeated ${group.count} failures for ${group.skillName} match the same sanitized failure signature; review the workflow skill before more agents repeat it.`,
+      });
+      pendingKeys.add(key);
+      if (isSkillEvolutionReviewValue(candidate.value)) {
+        created.push({
+          id: candidate.id,
+          key: candidate.key,
+          status: candidate.status,
+          value: candidate.value,
+        });
+      }
+    }
+    return created;
   }
 
   private static registerLiveBrain(dbPath: string, brain: SqliteBrain): void {
@@ -5204,6 +5365,101 @@ const STOPWORDS = new Set([
 ]);
 
 // --- Helpers ---
+
+const MAX_SKILL_EVOLUTION_TEXT_LENGTH = 240;
+
+type SkillEvolutionSignal = {
+  skillName: string;
+  workflowName?: string;
+  failurePattern: string;
+  failureSignatureHash: string;
+  suggestedPatchArea: string;
+  evidenceId: string;
+};
+
+function sanitizeSkillEvolutionText(value: string, fieldName: string): string {
+  const normalized = value.trim().replace(/\s+/g, ' ');
+  if (!normalized) {
+    throw new Error(`Skill evolution ${fieldName} must be a non-empty string`);
+  }
+  if (normalized.length > MAX_SKILL_EVOLUTION_TEXT_LENGTH) {
+    throw new Error(
+      `Skill evolution ${fieldName} must be ${MAX_SKILL_EVOLUTION_TEXT_LENGTH} characters or fewer; store raw logs externally and pass an evidence pointer`,
+    );
+  }
+  return normalized;
+}
+
+function hashSkillEvolutionSignature(input: {
+  skillName: string;
+  workflowName?: string;
+  failurePattern: string;
+}): string {
+  return createHash('sha256')
+    .update(JSON.stringify({
+      skillName: normalizeLearningKey(input.skillName),
+      workflowName: input.workflowName ? normalizeLearningKey(input.workflowName) : undefined,
+      failurePattern: normalizeLearningKey(input.failurePattern),
+    }))
+    .digest('hex');
+}
+
+function skillEvolutionReviewKey(skillName: string, failureSignatureHash: string): string {
+  const slug = normalizeForMatch(skillName)
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || 'skill';
+  return `skill-evolution.review.${slug}.${failureSignatureHash.slice(0, 16)}`;
+}
+
+function skillEvolutionString(record: Record<string, unknown>, name: string): string | undefined {
+  const value = record[name];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function skillEvolutionSignalFromEvent(event: EpisodicEvent): SkillEvolutionSignal | null {
+  if (event.type !== 'failure') return null;
+  const details = event.details;
+  if (details === undefined || details === null || Array.isArray(details) || typeof details !== 'object') {
+    return null;
+  }
+  const record = details as Record<string, unknown>;
+  if (record.category !== 'skill-evolution') return null;
+  const skillName = skillEvolutionString(record, 'skillName');
+  const failurePattern = skillEvolutionString(record, 'failurePattern')
+    ?? skillEvolutionString(record, 'failureSignature');
+  const evidenceId = skillEvolutionString(record, 'evidenceId');
+  if (!skillName || !failurePattern || !evidenceId) return null;
+  const workflowName = skillEvolutionString(record, 'workflowName');
+  const failureSignatureHash = skillEvolutionString(record, 'failureSignatureHash')
+    ?? hashSkillEvolutionSignature({
+      skillName,
+      failurePattern,
+      ...(workflowName ? { workflowName } : {}),
+    });
+  return {
+    skillName,
+    ...(workflowName ? { workflowName } : {}),
+    failurePattern,
+    failureSignatureHash,
+    suggestedPatchArea: skillEvolutionString(record, 'suggestedPatchArea')
+      ?? 'Review the workflow skill instructions that govern this failure pattern.',
+    evidenceId,
+  };
+}
+
+function isSkillEvolutionReviewValue(value: unknown): value is SkillEvolutionReviewValue {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return record.kind === 'skill-evolution-review'
+    && typeof record.skillName === 'string'
+    && typeof record.failurePattern === 'string'
+    && typeof record.failureSignatureHash === 'string'
+    && typeof record.failureCount === 'number'
+    && typeof record.suggestedPatchArea === 'string'
+    && Array.isArray(record.evidencePointers)
+    && record.evidencePointers.every(pointer => typeof pointer === 'string');
+}
 
 function escapeLike(s: string): string {
   return s.replace(/[%_\\]/g, '\\$&');
