@@ -348,6 +348,71 @@ describe('extractPostTaskLessonCandidates', () => {
       expect.arrayContaining([expect.objectContaining({ kind: 'verification' })]),
     );
   });
+
+  it('preserves preferences that mention test artifacts', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-test-log-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ["Please don't include test logs in final summaries"],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'preference',
+        suggestedDestination: 'memory',
+        privacyFilter: expect.objectContaining({ action: 'admit' }),
+      }),
+    );
+  });
+
+  it('keeps task-state verification from rejecting valid lessons', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-task-state-verification',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      toolFailures: ['Use gh run view when gh pr checks returns 502'],
+      verificationSteps: ['Verified against PR #123'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'skill',
+        privacyFilter: expect.objectContaining({ action: 'admit' }),
+        evidence: expect.arrayContaining([
+          expect.objectContaining({ kind: 'verification' }),
+        ]),
+      }),
+    );
+  });
+
+  it('routes documentation update candidates to docs review', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-docs-update',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Always add this to the runbook'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'procedure',
+        suggestedDestination: 'docs',
+      }),
+    );
+  });
+
+  it('discards repo-name progress mentions without durable facts', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-repo-progress',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      summary: 'Updated Frankenbeast PR #123 after review',
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        privacyFilter: expect.objectContaining({ action: 'reject' }),
+      }),
+    );
+  });
 });
 
 describe('LessonRecorder', () => {

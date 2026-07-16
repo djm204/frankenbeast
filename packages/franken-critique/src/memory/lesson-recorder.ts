@@ -1160,9 +1160,15 @@ function choosePostTaskLessonDestination(
   if (kind === 'tool-failure') return 'skill';
   if (kind === 'user-correction' && category === 'preference') return 'memory';
   if (category === 'environment-fact') return 'memory';
+  if (isDocumentationUpdateLesson(text)) return 'docs';
   if (category === 'procedure') return 'skill';
-  if (/\b(?:docs?|readme|runbook|guide|operator)\b/i.test(text)) return 'docs';
   return 'memory';
+}
+
+function isDocumentationUpdateLesson(text: string): boolean {
+  return /\b(?:add|document|record|publish|update|write)\b.{0,80}\b(?:docs?|readme|runbook|guide)\b|\b(?:docs?|readme|runbook|guide)\b.{0,80}\b(?:add|document|record|publish|update|write)\b/i.test(
+    text,
+  );
 }
 
 function inferPostTaskLessonCategory(
@@ -1197,6 +1203,16 @@ function recategorizePostTaskPrivacyDecision(
 }
 
 function isRawUserPreferenceCorrection(text: string): boolean {
+  if (
+    /^(?:please\s+)?(?:keep|avoid|do\s+not|don't|never|prefer)\b/i.test(
+      text,
+    ) &&
+    /\b(?:include|mention|expose|save|record|persist|show|share|summar(?:y|ies|ize)|final)\b/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
   if (/\b(?:use|run|command|cli|tool|fallback|workaround|workflow|procedure|steps?|script|test|verify|retry)\b/i.test(text)) {
     return false;
   }
@@ -1207,6 +1223,7 @@ function isRawUserPreferenceCorrection(text: string): boolean {
 
 function hasExplicitPostTaskLessonSignal(text: string): boolean {
   if (PREFERENCE_PATTERNS.some((pattern) => pattern.test(text))) return true;
+  if (isOneOffPostTaskProgress(text)) return false;
   if (ENVIRONMENT_FACT_PATTERNS.some((pattern) => pattern.test(text))) {
     return true;
   }
@@ -1221,6 +1238,12 @@ function hasExplicitPostTaskLessonSignal(text: string): boolean {
   return /\b(?:always|avoid|ensure|prefer|require|validate|verify|retry|redact|must|should|use|fallback|workaround)\b/i.test(
     text,
   );
+}
+
+function isOneOffPostTaskProgress(text: string): boolean {
+  return /\b(?:updated|implemented|fixed|merged|reviewed|pushed|opened|addressed|completed)\b/i.test(
+    text,
+  ) && /\b(?:pr|pull\s+request|issue|ticket|task|commit|review)\b/i.test(text);
 }
 
 interface PostTaskVerificationEvidenceItem {
@@ -1388,7 +1411,9 @@ function mergePostTaskPrivacyFilters(
   const flags = Array.from(
     new Set([...base.flags, ...attached.flatMap((item) => item.flags)]),
   ).sort();
-  const hasRejectedEvidence = attached.some((item) => item.action === 'reject');
+  const hasRejectedEvidence = attached.some(
+    (item) => item.action === 'reject' && item.category !== 'task-state',
+  );
   const sensitive = base.sensitive || attached.some((item) => item.sensitive);
   return {
     ...base,
