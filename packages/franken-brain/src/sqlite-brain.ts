@@ -3254,80 +3254,84 @@ export class SqliteBrain implements IBrain {
       throw new RangeError('Skill evolution review confidence must be a finite number between 0 and 1');
     }
 
-    const pendingKeys = new Set(
-      this.memoryReview
-        .list('pending')
-        .filter(candidate => isSkillEvolutionReviewValue(candidate.value))
-        .map(candidate => candidate.key),
-    );
-    const groups = new Map<string, {
-      skillName: string;
-      workflowName?: string;
-      failurePattern: string;
-      failureSignatureHash: string;
-      suggestedPatchArea: string;
-      evidencePointers: Set<string>;
-      count: number;
-    }>();
+    const createReviewItems = this.db.transaction(() => {
+      const pendingKeys = new Set(
+        this.memoryReview
+          .list('pending')
+          .filter(candidate => isSkillEvolutionReviewValue(candidate.value))
+          .map(candidate => candidate.key),
+      );
+      const groups = new Map<string, {
+        skillName: string;
+        workflowName?: string;
+        failurePattern: string;
+        failureSignatureHash: string;
+        suggestedPatchArea: string;
+        evidencePointers: Set<string>;
+      }>();
 
-    for (const event of this.episodic.recentFailures(lookback)) {
-      const signal = skillEvolutionSignalFromEvent(event);
-      if (!signal) continue;
-      const groupKey = `${normalizeLearningKey(signal.skillName)}:${signal.failureSignatureHash}`;
-      const existing = groups.get(groupKey);
-      if (existing) {
-        existing.count += 1;
-        existing.evidencePointers.add(signal.evidenceId);
-      } else {
-        groups.set(groupKey, {
-          skillName: signal.skillName,
-          ...(signal.workflowName ? { workflowName: signal.workflowName } : {}),
-          failurePattern: signal.failurePattern,
-          failureSignatureHash: signal.failureSignatureHash,
-          suggestedPatchArea: signal.suggestedPatchArea,
-          evidencePointers: new Set([signal.evidenceId]),
-          count: 1,
-        });
+      for (const event of this.episodic.recentFailures(lookback)) {
+        const signal = skillEvolutionSignalFromEvent(event);
+        if (!signal) continue;
+        const groupKey = `${normalizeLearningKey(signal.skillName)}:${signal.failureSignatureHash}`;
+        const existing = groups.get(groupKey);
+        if (existing) {
+          existing.evidencePointers.add(signal.evidenceId);
+        } else {
+          groups.set(groupKey, {
+            skillName: signal.skillName,
+            ...(signal.workflowName ? { workflowName: signal.workflowName } : {}),
+            failurePattern: signal.failurePattern,
+            failureSignatureHash: signal.failureSignatureHash,
+            suggestedPatchArea: signal.suggestedPatchArea,
+            evidencePointers: new Set([signal.evidenceId]),
+          });
+        }
       }
-    }
 
-    const created: SkillEvolutionReviewItem[] = [];
-    for (const group of groups.values()) {
-      if (group.count < threshold) continue;
-      const key = skillEvolutionReviewKey(group.skillName, group.failureSignatureHash);
-      if (pendingKeys.has(key) || this.memoryReview.provenanceFor('working', key)) {
-        continue;
-      }
-      const value: SkillEvolutionReviewValue = {
-        kind: 'skill-evolution-review',
-        skillName: group.skillName,
-        ...(group.workflowName ? { workflowName: group.workflowName } : {}),
-        failurePattern: group.failurePattern,
-        failureSignatureHash: group.failureSignatureHash,
-        failureCount: group.count,
-        suggestedPatchArea: group.suggestedPatchArea,
-        evidencePointers: [...group.evidencePointers].sort(),
-      };
-      const candidate = this.memoryReview.propose({
-        targetStore: 'working',
-        key,
-        value,
-        source: 'episodic-skill-evolution-gate',
-        evidenceId: value.evidencePointers[0] ?? key,
-        confidence,
-        reason: `Repeated ${group.count} failures for ${group.skillName} match the same sanitized failure signature; review the workflow skill before more agents repeat it.`,
-      });
-      pendingKeys.add(key);
-      if (isSkillEvolutionReviewValue(candidate.value)) {
-        created.push({
-          id: candidate.id,
-          key: candidate.key,
-          status: candidate.status,
-          value: candidate.value,
+      const created: SkillEvolutionReviewItem[] = [];
+      for (const group of groups.values()) {
+        const uniqueEvidenceCount = group.evidencePointers.size;
+        if (uniqueEvidenceCount < threshold) continue;
+        const key = skillEvolutionReviewKey(group.skillName, group.failureSignatureHash);
+        const suppressedReviewKey = this.db
+          .prepare(`SELECT 1 FROM memory_review_suppressions WHERE target_store = ? AND memory_key = ? LIMIT 1`)
+          .get('working', key);
+        if (pendingKeys.has(key) || suppressedReviewKey || this.memoryReview.provenanceFor('working', key)) {
+          continue;
+        }
+        const value: SkillEvolutionReviewValue = {
+          kind: 'skill-evolution-review',
+          skillName: group.skillName,
+          ...(group.workflowName ? { workflowName: group.workflowName } : {}),
+          failurePattern: group.failurePattern,
+          failureSignatureHash: group.failureSignatureHash,
+          failureCount: uniqueEvidenceCount,
+          suggestedPatchArea: group.suggestedPatchArea,
+          evidencePointers: [...group.evidencePointers].sort(),
+        };
+        const candidate = this.memoryReview.propose({
+          targetStore: 'working',
+          key,
+          value,
+          source: 'episodic-skill-evolution-gate',
+          evidenceId: value.evidencePointers[0] ?? key,
+          confidence,
+          reason: `Repeated ${uniqueEvidenceCount} failures for ${group.skillName} match the same sanitized failure signature; review the workflow skill before more agents repeat it.`,
         });
+        pendingKeys.add(key);
+        if (candidate.status === 'pending' && isSkillEvolutionReviewValue(candidate.value)) {
+          created.push({
+            id: candidate.id,
+            key: candidate.key,
+            status: candidate.status,
+            value: candidate.value,
+          });
+        }
       }
-    }
-    return created;
+      return created;
+    });
+    return createReviewItems();
   }
 
   private static registerLiveBrain(dbPath: string, brain: SqliteBrain): void {
@@ -5414,7 +5418,12 @@ function skillEvolutionReviewKey(skillName: string, failureSignatureHash: string
 
 function skillEvolutionString(record: Record<string, unknown>, name: string): string | undefined {
   const value = record[name];
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function sanitizedSkillEvolutionString(record: Record<string, unknown>, name: string): string | undefined {
+  const value = skillEvolutionString(record, name);
+  return value === undefined ? undefined : sanitizeSkillEvolutionText(value, name);
 }
 
 function skillEvolutionSignalFromEvent(event: EpisodicEvent): SkillEvolutionSignal | null {
@@ -5425,27 +5434,33 @@ function skillEvolutionSignalFromEvent(event: EpisodicEvent): SkillEvolutionSign
   }
   const record = details as Record<string, unknown>;
   if (record.category !== 'skill-evolution') return null;
-  const skillName = skillEvolutionString(record, 'skillName');
-  const failurePattern = skillEvolutionString(record, 'failurePattern')
-    ?? skillEvolutionString(record, 'failureSignature');
-  const evidenceId = skillEvolutionString(record, 'evidenceId');
-  if (!skillName || !failurePattern || !evidenceId) return null;
-  const workflowName = skillEvolutionString(record, 'workflowName');
-  const failureSignatureHash = skillEvolutionString(record, 'failureSignatureHash')
-    ?? hashSkillEvolutionSignature({
+  try {
+    const skillName = sanitizedSkillEvolutionString(record, 'skillName');
+    const failurePattern = sanitizedSkillEvolutionString(record, 'failurePattern')
+      ?? sanitizedSkillEvolutionString(record, 'failureSignature');
+    const evidenceId = sanitizedSkillEvolutionString(record, 'evidenceId');
+    if (!skillName || !failurePattern || !evidenceId) return null;
+    const workflowName = sanitizedSkillEvolutionString(record, 'workflowName');
+    const storedFailureSignatureHash = skillEvolutionString(record, 'failureSignatureHash');
+    const failureSignatureHash = storedFailureSignatureHash && /^[a-f0-9]{64}$/i.test(storedFailureSignatureHash)
+      ? storedFailureSignatureHash.toLowerCase()
+      : hashSkillEvolutionSignature({
+          skillName,
+          failurePattern,
+          ...(workflowName ? { workflowName } : {}),
+        });
+    return {
       skillName,
-      failurePattern,
       ...(workflowName ? { workflowName } : {}),
-    });
-  return {
-    skillName,
-    ...(workflowName ? { workflowName } : {}),
-    failurePattern,
-    failureSignatureHash,
-    suggestedPatchArea: skillEvolutionString(record, 'suggestedPatchArea')
-      ?? 'Review the workflow skill instructions that govern this failure pattern.',
-    evidenceId,
-  };
+      failurePattern,
+      failureSignatureHash,
+      suggestedPatchArea: sanitizedSkillEvolutionString(record, 'suggestedPatchArea')
+        ?? 'Review the workflow skill instructions that govern this failure pattern.',
+      evidenceId,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function isSkillEvolutionReviewValue(value: unknown): value is SkillEvolutionReviewValue {

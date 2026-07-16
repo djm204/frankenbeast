@@ -170,6 +170,55 @@ describe('SqliteBrain', () => {
       expect(brain.memoryReview.list()).toEqual([]);
     });
 
+    it('requires unique evidence pointers and skips unsanitized replayed failure details', () => {
+      for (const evidenceId of ['repeat-run', 'repeat-run', 'repeat-run']) {
+        brain.episodic.recordSkillFailure({
+          skillName: 'resolve-issues',
+          failureSignature: 'same failed run was retried',
+          evidenceId,
+        });
+      }
+      brain.episodic.record({
+        type: 'failure',
+        step: 'skill-evolution',
+        summary: 'Legacy raw skill-evolution failure',
+        createdAt: '2026-07-16T10:10:00.000Z',
+        details: {
+          category: 'skill-evolution',
+          skillName: 'resolve-issues',
+          failurePattern: 'x'.repeat(300),
+          evidenceId: 'legacy-run',
+          suggestedPatchArea: 'raw '.repeat(80),
+        },
+      });
+
+      expect(brain.createSkillEvolutionReviewGate({ threshold: 2 })).toEqual([]);
+      expect(brain.memoryReview.list()).toEqual([]);
+    });
+
+    it('omits suppressed duplicate review proposals from created items', () => {
+      for (const evidenceId of ['suppressed-1', 'suppressed-2']) {
+        brain.episodic.recordSkillFailure({
+          skillName: 'resolve-issues',
+          failureSignature: 'stale cli flag repeated',
+          evidenceId,
+        });
+      }
+      const [item] = brain.createSkillEvolutionReviewGate({ threshold: 2 });
+      expect(item).toBeDefined();
+      brain.memoryReview.reject(item!.id, { reviewer: 'operator' });
+
+      for (const evidenceId of ['suppressed-3', 'suppressed-4']) {
+        brain.episodic.recordSkillFailure({
+          skillName: 'resolve-issues',
+          failureSignature: 'stale cli flag repeated',
+          evidenceId,
+        });
+      }
+
+      expect(brain.createSkillEvolutionReviewGate({ threshold: 2 })).toEqual([]);
+    });
+
     it('lets reviewers edit, accept, or discard generated skill review items', () => {
       for (const evidenceId of ['run-1', 'run-2']) {
         brain.episodic.recordSkillFailure({
