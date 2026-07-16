@@ -1,10 +1,9 @@
-import { appendFile, mkdir, readFile, rename, stat, truncate, unlink } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { appendFile, mkdir, readFile, readdir, rename, stat, truncate, unlink } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 import { isoNow } from '@franken/types';
 
 const DEFAULT_MAX_LOG_FILE_BYTES = 10 * 1024 * 1024;
 const DEFAULT_MAX_ROTATED_LOG_FILES = 3;
-const TRUNCATION_SUFFIX_BYTES = 64;
 const MIN_LOG_FILE_BYTES = 128;
 
 export interface BeastLogStoreOptions {
@@ -24,6 +23,7 @@ interface LogRecord {
 export class BeastLogStore {
   private readonly maxLogFileBytes: number;
   private readonly maxRotatedLogFiles: number;
+  private readonly appendQueues = new Map<string, Promise<void>>();
 
   constructor(
     private readonly logDir: string,
@@ -41,6 +41,45 @@ export class BeastLogStore {
     createdAt = isoNow(),
   ): Promise<void> {
     const filePath = this.resolvePath(runId, attemptId);
+    const previous = this.appendQueues.get(filePath) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(() => this.appendSerialized(filePath, stream, message, createdAt));
+    const queued = current.finally(() => {
+      if (this.appendQueues.get(filePath) === queued) {
+        this.appendQueues.delete(filePath);
+      }
+    });
+    this.appendQueues.set(filePath, queued);
+    await current;
+  }
+
+  async read(runId: string, attemptId: string): Promise<string[]> {
+    const filePath = this.resolvePath(runId, attemptId);
+    const paths = await this.listReadableLogPaths(filePath);
+    const lines: string[] = [];
+
+    for (const path of paths) {
+      try {
+        const raw = await readFile(path, 'utf-8');
+        lines.push(
+          ...raw
+            .split('\n')
+            .map((line) => line.trim())
+            .filter(Boolean),
+        );
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
+
+    return lines;
+  }
+
+  private async appendSerialized(
+    filePath: string,
+    stream: 'stdout' | 'stderr',
+    message: string,
+    createdAt: string,
+  ): Promise<void> {
     try {
       await mkdir(dirname(filePath), { recursive: true });
       const line = this.serializeBoundedRecord({ stream, message, createdAt });
@@ -53,48 +92,27 @@ export class BeastLogStore {
     }
   }
 
-  async read(runId: string, attemptId: string): Promise<string[]> {
-    try {
-      const raw = await readFile(this.resolvePath(runId, attemptId), 'utf-8');
-      return raw
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return [];
-      }
-      throw error;
-    }
-  }
-
   private serializeBoundedRecord(record: LogRecord): string {
     const full = `${JSON.stringify(record)}\n`;
     if (Buffer.byteLength(full) <= this.maxLogFileBytes) {
       return full;
     }
 
-    const baseRecord = { ...record, message: '', truncatedBytes: 0 };
-    const overhead = Buffer.byteLength(`${JSON.stringify(baseRecord)}\n`) + TRUNCATION_SUFFIX_BYTES;
-    const maxMessageBytes = Math.max(0, this.maxLogFileBytes - overhead);
-    let currentMessage = truncateUtf8(record.message, maxMessageBytes);
-    let truncatedBytes = Math.max(0, Buffer.byteLength(record.message) - Buffer.byteLength(currentMessage));
-    let bounded = `${JSON.stringify({
-      ...record,
-      message: `${currentMessage}\n[truncated ${truncatedBytes} bytes to enforce log size cap]`,
-      truncatedBytes,
-    })}\n`;
+    const recordBytes = Buffer.byteLength(record.message);
+    let low = 0;
+    let high = recordBytes;
+    let bounded = this.serializeTruncatedRecord(record, '');
 
-    while (Buffer.byteLength(bounded) > this.maxLogFileBytes && currentMessage.length > 0) {
-      const previousMessage = currentMessage;
-      currentMessage = truncateUtf8(currentMessage, Math.max(0, Buffer.byteLength(currentMessage) - 16));
-      truncatedBytes = Math.max(0, Buffer.byteLength(record.message) - Buffer.byteLength(currentMessage));
-      bounded = `${JSON.stringify({
-        ...record,
-        message: `${currentMessage}\n[truncated ${truncatedBytes} bytes to enforce log size cap]`,
-        truncatedBytes,
-      })}\n`;
-      if (currentMessage === previousMessage) break;
+    while (low <= high) {
+      const midpoint = Math.floor((low + high) / 2);
+      const currentMessage = truncateUtf8(record.message, midpoint);
+      const candidate = this.serializeTruncatedRecord(record, currentMessage);
+      if (Buffer.byteLength(candidate) <= this.maxLogFileBytes) {
+        bounded = candidate;
+        low = midpoint + 1;
+      } else {
+        high = midpoint - 1;
+      }
     }
 
     if (Buffer.byteLength(bounded) > this.maxLogFileBytes) {
@@ -107,6 +125,15 @@ export class BeastLogStore {
     }
 
     return bounded;
+  }
+
+  private serializeTruncatedRecord(record: LogRecord, messagePrefix: string): string {
+    const truncatedBytes = Math.max(0, Buffer.byteLength(record.message) - Buffer.byteLength(messagePrefix));
+    return `${JSON.stringify({
+      ...record,
+      message: `${messagePrefix}\n[truncated ${truncatedBytes} bytes to enforce log size cap]`,
+      truncatedBytes,
+    })}\n`;
   }
 
   private async rotateOrTruncateBeforeAppend(filePath: string, nextWriteBytes: number): Promise<void> {
@@ -129,11 +156,45 @@ export class BeastLogStore {
   }
 
   private async rotateFiles(filePath: string): Promise<void> {
+    await this.removeRotationsAboveRetention(filePath);
     await rmIfExists(`${filePath}.${this.maxRotatedLogFiles}`);
     for (let index = this.maxRotatedLogFiles - 1; index >= 1; index -= 1) {
       await renameIfExists(`${filePath}.${index}`, `${filePath}.${index + 1}`);
     }
     await renameIfExists(filePath, `${filePath}.1`);
+  }
+
+  private async removeRotationsAboveRetention(filePath: string): Promise<void> {
+    const dir = dirname(filePath);
+    const prefix = `${basename(filePath)}.`;
+    try {
+      const entries = await readdir(dir);
+      await Promise.all(
+        entries
+          .map((entry) => ({ entry, index: parseRotationIndex(entry, prefix) }))
+          .filter(({ index }) => index > this.maxRotatedLogFiles)
+          .map(({ entry }) => rmIfExists(join(dir, entry))),
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+
+  private async listReadableLogPaths(filePath: string): Promise<string[]> {
+    const dir = dirname(filePath);
+    const prefix = `${basename(filePath)}.`;
+    try {
+      const entries = await readdir(dir);
+      const rotatedPaths = entries
+        .map((entry) => ({ entry, index: parseRotationIndex(entry, prefix) }))
+        .filter(({ index }) => index >= 1 && index <= this.maxRotatedLogFiles)
+        .sort((left, right) => right.index - left.index)
+        .map(({ entry }) => join(dir, entry));
+      return [...rotatedPaths, filePath];
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [filePath];
+      throw error;
+    }
   }
 
   private async truncateActiveFile(filePath: string): Promise<void> {
@@ -179,4 +240,11 @@ function truncateUtf8(value: string, maxBytes: number): string {
   const buffer = Buffer.from(value);
   if (buffer.length <= maxBytes) return value;
   return buffer.subarray(0, maxBytes).toString('utf8').replace(/\uFFFD+$/u, '');
+}
+
+function parseRotationIndex(entry: string, prefix: string): number {
+  if (!entry.startsWith(prefix)) return 0;
+  const suffix = entry.slice(prefix.length);
+  if (!/^\d+$/u.test(suffix)) return 0;
+  return Number(suffix);
 }
