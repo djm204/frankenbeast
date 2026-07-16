@@ -95,6 +95,18 @@ describe('BeastLogStore', () => {
     });
   });
 
+  it('keeps the oversized-record fallback within the minimum cap', async () => {
+    await withTempDir(async (dir) => {
+      const logs = new BeastLogStore(dir, { maxLogFileBytes: 128, maxRotatedLogFiles: 1 });
+      await logs.append('run-minimum', 'attempt-1', 'stderr', '\u0000'.repeat(10_000), '2026-03-11T00:00:00.000Z');
+
+      const activePath = join(dir, 'run-minimum', 'attempt-1.log');
+      const contents = await readFile(activePath, 'utf-8');
+      expect((await stat(activePath)).size).toBeLessThanOrEqual(128);
+      expect(JSON.parse(contents.trim())).toMatchObject({ message: expect.stringContaining('[truncated]') });
+    });
+  });
+
   it('serializes concurrent appends so active logs stay within the configured cap', async () => {
     await withTempDir(async (dir) => {
       const logs = new BeastLogStore(dir, { maxLogFileBytes: 260, maxRotatedLogFiles: 3 });
@@ -145,6 +157,23 @@ describe('BeastLogStore', () => {
       expect(existsSync(`${activePath}.1`)).toBe(true);
       expect(existsSync(`${activePath}.2`)).toBe(false);
       expect(existsSync(`${activePath}.3`)).toBe(false);
+    });
+  });
+
+  it('removes stale rotations when retention is disabled', async () => {
+    await withTempDir(async (dir) => {
+      const activePath = join(dir, 'run-no-retention', 'attempt-1.log');
+      await mkdir(join(dir, 'run-no-retention'), { recursive: true });
+      await writeFile(activePath, `${JSON.stringify({ stream: 'stdout', message: 'active', createdAt: '2026-03-11T00:00:00.000Z' })}\n`);
+      await writeFile(`${activePath}.1`, 'old-1\n');
+      await writeFile(`${activePath}.2`, 'old-2\n');
+
+      const logs = new BeastLogStore(dir, { maxLogFileBytes: 160, maxRotatedLogFiles: 0 });
+      await logs.append('run-no-retention', 'attempt-1', 'stdout', `new-${'z'.repeat(80)}`, '2026-03-11T00:00:01.000Z');
+
+      expect(existsSync(`${activePath}.1`)).toBe(false);
+      expect(existsSync(`${activePath}.2`)).toBe(false);
+      expect((await stat(activePath)).size).toBeLessThanOrEqual(160);
     });
   });
 });

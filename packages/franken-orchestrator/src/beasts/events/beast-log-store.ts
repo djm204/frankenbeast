@@ -42,13 +42,14 @@ export class BeastLogStore {
   ): Promise<void> {
     const filePath = this.resolvePath(runId, attemptId);
     const previous = this.appendQueues.get(filePath) ?? Promise.resolve();
-    const current = previous.catch(() => undefined).then(() => this.appendSerialized(filePath, stream, message, createdAt));
-    const queued = current.finally(() => {
+    const current = previous.then(() => this.appendSerialized(filePath, stream, message, createdAt));
+    const queued = current.catch(() => undefined);
+    this.appendQueues.set(filePath, queued);
+    void queued.then(() => {
       if (this.appendQueues.get(filePath) === queued) {
         this.appendQueues.delete(filePath);
       }
     });
-    this.appendQueues.set(filePath, queued);
     await current;
   }
 
@@ -118,8 +119,7 @@ export class BeastLogStore {
     if (Buffer.byteLength(bounded) > this.maxLogFileBytes) {
       return `${JSON.stringify({
         stream: record.stream,
-        message: '[truncated oversized log record to enforce log size cap]',
-        createdAt: record.createdAt,
+        message: '[truncated]',
         truncatedBytes: Buffer.byteLength(record.message),
       })}\n`;
     }
@@ -148,6 +148,7 @@ export class BeastLogStore {
     }
 
     if (this.maxRotatedLogFiles < 1) {
+      await this.removeRotationsAboveRetention(filePath);
       await this.truncateActiveFile(filePath);
       return;
     }
