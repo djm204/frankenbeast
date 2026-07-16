@@ -486,11 +486,70 @@ ${completeTemplate}`);
     ).toBe('Scope and objective');
   });
 
+  it('respects the opening fence delimiter when scanning sections', () => {
+    const validation = validateAgentHandoffTemplate(
+      [
+        'Example only:',
+        '````md',
+        '## Scope and objective',
+        'Issue #1775, business goal, and out-of-scope boundaries.',
+        '```ts',
+        "const heading = '## nested example';",
+        '```',
+        '````',
+        '',
+        completeTemplate,
+      ].join('\n'),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')
+        ?.matchedHeading,
+    ).toBe('Scope and objective');
+  });
+
+  it('rejects decorated label-only fields', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '- Issue/task (required):\n- Business goal (required):\n- Out-of-scope boundaries (required):',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('preserves populated table rows as verification evidence', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.',
+        '| Command | Outcome |\n| --- | --- |\n| npm test | passed |',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+  });
+
   it('preserves markdown link text when checking artifact guidance', () => {
     const validation = validateAgentHandoffTemplate(
       completeTemplate.replace(
-        'Record branch, PR, docs, telemetry, and other inspectable artifacts or links.',
+        'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
         'Link the [PR](../pull/123) and [runbook](../runbook) for inspectable artifacts.',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+  });
+
+  it('preserves markdown autolinks as artifact evidence', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
+        '<https://github.com/org/repo/pull/123>',
       ),
     );
 

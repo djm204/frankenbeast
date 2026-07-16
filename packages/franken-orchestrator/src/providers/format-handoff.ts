@@ -504,18 +504,27 @@ function extractMarkdownSections(template: string): MarkdownSection[] {
   const sections: Array<{ heading: string; level: number; content: string[] }> =
     [];
   const openSectionIndexes: number[] = [];
-  let inFence = false;
+  let activeFence: string | null = null;
 
   for (const line of template.split(/\r?\n/)) {
-    if (/^\s*```/.test(line)) {
+    const fence = /^\s*(`{3,}|~{3,})/.exec(line);
+    if (fence) {
       for (const sectionIndex of openSectionIndexes) {
         sections[sectionIndex]?.content.push(line);
       }
-      inFence = !inFence;
+      const marker = fence[1] ?? '';
+      if (activeFence === null) {
+        activeFence = marker;
+      } else if (
+        marker[0] === activeFence[0] &&
+        marker.length >= activeFence.length
+      ) {
+        activeFence = null;
+      }
       continue;
     }
 
-    const heading = inFence ? null : /^(#{1,6})\s+(.+?)\s*$/.exec(line);
+    const heading = activeFence ? null : /^(#{1,6})\s+(.+?)\s*$/.exec(line);
     if (heading) {
       const level = heading[1]?.length ?? 1;
       while (openSectionIndexes.length > 0) {
@@ -576,6 +585,7 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
     const withoutPlaceholders = line
       .replace(/^```.*$/g, ' ')
       .replace(/\[([^\]]+)\]\(([^)]*)\)/g, '$1 $2')
+      .replace(/<((?:https?:\/\/|\.\.?\/|#)[^>\s]+)>/g, '$1')
       .replace(/`([^`]*)`/g, '$1')
       .replace(/<[^>]*>/g, ' ')
       .replace(/\{\{[^}]*\}\}/g, ' ')
@@ -598,7 +608,12 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
 }
 
 function isEmptyTemplateLabel(line: string): boolean {
-  return /^\s*(?:[-*]\s*)?[A-Za-z0-9 /_-]+:\s*$/.test(line);
+  const normalizedLabel = line
+    .replace(/\[[ x-]\]/gi, ' ')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\b(?:required|optional)\b/gi, ' ')
+    .replace(/[^A-Za-z0-9 /_:-]/g, ' ');
+  return /^\s*(?:[-*]\s*)?[A-Za-z0-9 /_-]+:\s*$/.test(normalizedLabel);
 }
 
 function isMarkdownTableHeader(line: string, nextLine: string): boolean {
@@ -619,7 +634,15 @@ function isEmptyTableRow(line: string): boolean {
     .filter((cell) => cell.length > 0);
   return (
     cells.length > 0 &&
-    cells.every((cell) => /^[a-z0-9 /_-]{1,32}$/i.test(cell))
+    cells.every(
+      (cell) =>
+        /^(?:issue|issue task|task|business goal|goal|out of scope boundaries|boundaries|status|current status|decisions|remaining work|command|commands|outcome|result|owner|next action|artifact|artifacts|link|links|lesson|lessons)$/.test(
+          cell,
+        ) ||
+        /^(?:tbd|todo|n\/?a|unknown|placeholder|fill in|to be decided)$/i.test(
+          cell,
+        ),
+    )
   );
 }
 
