@@ -57,6 +57,7 @@ export type DrAction =
   | 'verify'
   | 'restore'
   | 'restore-dry-run'
+  | 'snapshot-diff'
   | 'dead-letter-list'
   | 'dead-letter-inspect'
   | 'dead-letter-replay-dry-run'
@@ -134,6 +135,7 @@ const VALID_DR_ACTIONS = new Set([
   'verify',
   'restore',
   'restore-dry-run',
+  'snapshot-diff',
   'dead-letter-list',
   'dead-letter-inspect',
   'dead-letter-replay-dry-run',
@@ -638,6 +640,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       ? 4
       : drAction === 'verify'
         || drAction === 'restore-dry-run'
+        || drAction === 'snapshot-diff'
         || drAction === 'dead-letter-inspect'
         || drAction === 'dead-letter-replay-dry-run'
           ? 3

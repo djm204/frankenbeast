@@ -15,6 +15,11 @@ describe('dr restore-dry-run CLI', () => {
     expect(args.drAction).toBe('restore-dry-run');
     expect(args.drBackupManifestPath).toBe('/backup/manifest.json');
     expect(args.drLiveManifestPath).toBe('/live/manifest.json');
+
+    const diffArgs = parseArgs(['dr', 'snapshot-diff', '/healthy/export', '/incident/export']);
+    expect(diffArgs.drAction).toBe('snapshot-diff');
+    expect(diffArgs.drBackupManifestPath).toBe('/healthy/export');
+    expect(diffArgs.drLiveManifestPath).toBe('/incident/export');
   });
 
   it('parses encrypted backup, verify, list, restore, and dead-letter commands', () => {
@@ -70,6 +75,73 @@ describe('dr restore-dry-run CLI', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it('diffs state snapshot directories by subsystem with redacted output', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dr-snapshot-diff-'));
+    const beforeDir = join(dir, 'before');
+    const afterDir = join(dir, 'after');
+    const output: string[] = [];
+    const beforePassword = 'before' + 'Secret123';
+    const afterPassword = 'after' + 'Secret456';
+    const beforeToken = 'ghp_' + 'beforeSecret1234567890';
+    const afterToken = 'ghp_' + 'afterSecret1234567890';
+    const afterApiKey = 'sk-' + 'afterSecret123456';
+
+    try {
+      await mkdir(beforeDir, { recursive: true });
+      await mkdir(afterDir, { recursive: true });
+      await writeFile(join(beforeDir, 'state.json'), JSON.stringify({
+        tasks: [
+          { id: 'task-removed', status: 'done', title: 'old task' },
+          { id: 'task-changed', status: 'running', workerId: 'worker-old', password: beforePassword },
+        ],
+        approvals: [{ id: 'approval-changed', state: 'pending', token: beforeToken }],
+        memory: [{ id: 'memory-same', digest: 'same' }],
+        cron: [{ id: 'cron-removed', status: 'running' }],
+      }), 'utf8');
+      await writeFile(join(afterDir, 'state.json'), JSON.stringify({
+        tasks: [
+          { id: 'task-added', status: 'ready', title: 'new task' },
+          { id: 'task-changed', status: 'blocked', workerId: 'worker-new', password: afterPassword },
+        ],
+        approvals: [{ id: 'approval-changed', state: 'used', token: afterToken }],
+        memory: [{ id: 'memory-same', digest: 'same' }, { id: 'memory-added', value: { apiKey: afterApiKey } }],
+        cron: [{ id: 'cron-added', status: 'paused' }],
+      }), 'utf8');
+
+      await handleDrCommand({
+        action: 'snapshot-diff',
+        backupManifestPath: beforeDir,
+        liveManifestPath: afterDir,
+        print: (message) => output.push(message),
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+
+    const rawOutput = output.join('\n');
+    const report = JSON.parse(rawOutput) as {
+      command: string;
+      textSummary: string;
+      summary: { added: number; removed: number; changed: number; bySubsystem: Record<string, { added: number; removed: number; changed: number }> };
+      diffs: Array<{ subsystem: string; added: Array<{ id: string }>; removed: Array<{ id: string }>; changed: Array<{ id: string; before: unknown; after: unknown; changedFields: string[] }> }>;
+    };
+
+    expect(report.command).toBe('dr snapshot-diff');
+    expect(report.textSummary).toContain('State snapshot diff: 4 added, 3 removed, 2 changed.');
+    expect(report.summary.bySubsystem.tasks).toEqual({ added: 1, removed: 1, changed: 1 });
+    expect(report.summary.bySubsystem.approvals).toEqual({ added: 0, removed: 0, changed: 1 });
+    expect(report.summary.bySubsystem.workerIds).toEqual({ added: 1, removed: 1, changed: 0 });
+    expect(report.summary.bySubsystem.memory).toEqual({ added: 1, removed: 0, changed: 0 });
+    expect(report.summary.bySubsystem.cron).toEqual({ added: 1, removed: 1, changed: 0 });
+    expect(report.diffs.find((diff) => diff.subsystem === 'tasks')?.changed[0]?.changedFields).toEqual(['password', 'status', 'workerId']);
+    expect(rawOutput).not.toContain(beforePassword);
+    expect(rawOutput).not.toContain(afterPassword);
+    expect(rawOutput).not.toContain(beforeToken);
+    expect(rawOutput).not.toContain(afterToken);
+    expect(rawOutput).not.toContain(afterApiKey);
+    expect(rawOutput).toContain('<redacted>');
   });
 
   it('prints dead-letter list, inspect, dry-run replay, and retire JSON', async () => {

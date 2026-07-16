@@ -34,6 +34,7 @@ frankenbeast interview
 frankenbeast plan --design-doc <file>
 frankenbeast run --plan-dir <dir>
 frankenbeast issues
+frankenbeast dr snapshot-diff ./healthy-export ./incident-export
 frankenbeast dr dead-letter-list .fbeast/dead-letter-actions.json
 frankenbeast dr dead-letter-replay-dry-run .fbeast/dead-letter-actions.json <entry-id>
 frankenbeast chat-server
@@ -84,6 +85,16 @@ frankenbeast dr dead-letter-retire <queue-file> <entry-id> "handled manually"
 ```
 
 The replay command is dry-run only. Entries classified as side-effecting report that explicit operator approval is required before any future replay executor may run them, while retired or unsafe entries are not replayable.
+
+## Disaster recovery state snapshot diff
+
+Incident responders can compare two state snapshot/export directories without manually reading every JSON dump:
+
+```bash
+frankenbeast dr snapshot-diff <before-dir> <after-dir>
+```
+
+The command scans JSON files in each directory and emits a redacted JSON report containing both `summary` counts and a human-readable `textSummary`. It groups added, removed, and changed records by tasks/cards, approval tokens, worker IDs, memory records, and cron jobs where those records are present.
 
 ## Flaky liveness fixture replay
 
