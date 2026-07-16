@@ -244,6 +244,19 @@ describe('beast daemon', () => {
         },
       });
 
+      const oversizedEnter = await app.request('/v1/beasts/availability/degraded', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${operatorToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ reason: 'x'.repeat(1024 * 1024) }),
+      });
+      expect(oversizedEnter.status).toBe(413);
+      expect(await oversizedEnter.json()).toMatchObject({
+        error: { code: 'PAYLOAD_TOO_LARGE' },
+      });
+
       const leave = await app.request('/v1/beasts/availability/degraded', {
         method: 'DELETE',
         headers: { authorization: `Bearer ${operatorToken}` },
@@ -280,7 +293,8 @@ describe('beast daemon', () => {
 
     const health = await app.request('/health');
     expect(health.status).toBe(503);
-    expect(await health.json()).toMatchObject({
+    const healthBody = await health.json();
+    expect(healthBody).toMatchObject({
       status: 'degraded',
       agents: null,
       runs: null,
@@ -291,6 +305,11 @@ describe('beast daemon', () => {
         source: 'automatic',
       },
     });
+
+    const repeatHealth = await app.request('/health');
+    expect(repeatHealth.status).toBe(503);
+    const repeatHealthBody = await repeatHealth.json();
+    expect(repeatHealthBody.availability.enteredAt).toBe(healthBody.availability.enteredAt);
 
     const deniedMutation = await app.request('/v1/beasts/agents/agent-1/start', {
       method: 'POST',

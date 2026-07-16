@@ -29,6 +29,9 @@ export class InMemoryAvailabilityModeState implements AvailabilityModeState {
     source: 'automatic' | 'operator',
     now = new Date().toISOString(),
   ): AvailabilityModeSnapshot {
+    if (this.current.readOnly && source === 'automatic') {
+      return this.current;
+    }
     this.current = {
       mode: 'read-only-degraded',
       readOnly: true,

@@ -4,7 +4,13 @@ import { requireBeastOperatorAuth } from '../beasts/http/beast-auth.js';
 import { agentRoutes } from './routes/agent-routes.js';
 import { beastRoutes } from './routes/beast-routes.js';
 import { createBeastSseRoutes } from './routes/beast-sse-routes.js';
-import { HttpError, errorHandler, localBrowserControlProtection } from './middleware.js';
+import {
+  BEAST_CONTROL_MAX_BODY_SIZE,
+  HttpError,
+  errorHandler,
+  localBrowserControlProtection,
+  requestSizeLimit,
+} from './middleware.js';
 import { TransportSecurityService } from './security/transport-security.js';
 import { isoNow } from '@franken/types';
 import {
@@ -143,7 +149,7 @@ export function createBeastDaemonApp(options: BeastDaemonAppOptions): Hono {
     }, draining || dependencyCounts.availability.readOnly ? 503 : 200);
   });
 
-  app.post('/v1/beasts/availability/degraded', auth, async (c) => {
+  app.post('/v1/beasts/availability/degraded', auth, requestSizeLimit(BEAST_CONTROL_MAX_BODY_SIZE), async (c) => {
     let reason = 'operator-requested';
     try {
       const body = await c.req.json() as { reason?: unknown };
