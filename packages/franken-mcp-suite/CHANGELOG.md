@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.5.0](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.4.0...franken-mcp-suite-v0.5.0) (2026-07-16)
+
+
+### Features
+
+* **memory:** add source attribution viewer ([#2329](https://github.com/djm204/frankenbeast/issues/2329)) ([9a47d63](https://github.com/djm204/frankenbeast/commit/9a47d63ce4bed21908af873ed7588794ae19d25a))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.12.0 to 0.13.0
+    * @franken/brain bumped from 0.11.0 to 0.12.0
+    * @franken/critique bumped from 0.9.0 to 0.9.1
+    * @franken/governor bumped from 0.7.1 to 0.7.2
+    * @franken/observer bumped from 0.9.0 to 0.10.0
+    * @franken/orchestrator bumped from 0.50.0 to 0.51.0
+    * @franken/planner bumped from 0.4.19 to 0.4.20
+
 ## [0.4.0](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.3.4...franken-mcp-suite-v0.4.0) (2026-07-16)
 
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/djm204/frankenbeast/compare/franken-web-v0.4.0...franken-web-v0.5.0) (2026-07-16)
+
+
+### Features
+
+* **beasts:** add maintenance dispatch guardrails ([#2400](https://github.com/djm204/frankenbeast/issues/2400)) ([f50e966](https://github.com/djm204/frankenbeast/commit/f50e966246a1a05902fd0054ffa79bb59ffe35e7))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.12.0 to 0.13.0
+
 ## [0.4.0](https://github.com/djm204/frankenbeast/compare/franken-web-v0.3.0...franken-web-v0.4.0) (2026-07-16)
 
 

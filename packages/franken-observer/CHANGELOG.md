@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.10.0](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.9.0...franken-observer-v0.10.0) (2026-07-16)
+
+
+### Features
+
+* **observer:** add decision outcome attribution ([#2412](https://github.com/djm204/frankenbeast/issues/2412)) ([081eba6](https://github.com/djm204/frankenbeast/commit/081eba6568b2ea05f64409bdd81308a262748756)), closes [#1693](https://github.com/djm204/frankenbeast/issues/1693)
+
+
+### Bug Fixes
+
+* **observer:** retry sqlite lock failures ([7723f66](https://github.com/djm204/frankenbeast/commit/7723f66f67591e6e3fafe3af97bca6a53fb2c77b))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.12.0 to 0.13.0
+
 ## [0.9.0](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.8.2...franken-observer-v0.9.0) (2026-07-16)
 
 
