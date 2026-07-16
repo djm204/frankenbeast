@@ -149,16 +149,58 @@ describe('IssueFetcher', () => {
       );
       const execFn = vi.fn<ExecFn>()
         .mockImplementationOnce(makeFailingExecFn('advanced issue search is not supported on this GitHub host'))
-        .mockImplementationOnce(makeExecFn(makeIssues([2, 1])));
+        .mockImplementationOnce(makeExecFn(makeIssues([2])))
+        .mockImplementationOnce(makeExecFn(makeIssues([1])));
       const fetcher = new IssueFetcher(execFn);
 
       const issues = await fetcher.fetch({});
 
       expect(issues.map((issue) => issue.number)).toEqual([1, 2]);
-      expect(execFn).toHaveBeenCalledTimes(2);
-      const firstSearchIndex = execFn.mock.calls[0]![1].indexOf('--search');
-      expect(execFn.mock.calls[0]![1][firstSearchIndex + 1]).toContain('label:critical');
-      expect(execFn.mock.calls[1]![1]).not.toContain('--search');
+      expect(execFn).toHaveBeenCalledTimes(3);
+      const searches = execFn.mock.calls.map(([, args]) => args[args.indexOf('--search') + 1]);
+      expect(searches[0]).toContain('label:critical');
+      expect(searches[1]).toBe('sort:created-desc');
+      expect(searches[2]).toBe('sort:created-asc');
+    });
+
+    it('falls back to plain issue list when simple search sorting is unsupported', async () => {
+      const output = JSON.stringify([
+        { number: 3, title: 'Issue 3', body: 'body', labels: [], state: 'OPEN', url: 'https://github.com/org/repo/issues/3' },
+      ]);
+      const execFn = vi.fn<ExecFn>()
+        .mockImplementationOnce(makeFailingExecFn('advanced issue search is not supported on this GitHub host'))
+        .mockImplementationOnce(makeFailingExecFn('search is unsupported on this GitHub host'))
+        .mockImplementationOnce(makeExecFn(output));
+      const fetcher = new IssueFetcher(execFn);
+
+      const issues = await fetcher.fetch({});
+
+      expect(issues.map((issue) => issue.number)).toEqual([3]);
+      expect(execFn.mock.calls[2]![1]).not.toContain('--search');
+    });
+
+    it('keeps eligible issues ahead of gated critical issues before truncation', async () => {
+      const makeIssues = (numbers: readonly number[], labels: readonly string[]) => JSON.stringify(
+        numbers.map((number) => ({
+          number,
+          title: `Issue ${number}`,
+          body: 'body',
+          labels: labels.map((name) => ({ name })),
+          state: 'OPEN',
+          url: `https://github.com/org/repo/issues/${number}`,
+          createdAt: '2026-07-15T00:00:00Z',
+        })),
+      );
+      const execFn = vi.fn<ExecFn>()
+        .mockImplementationOnce(makeExecFn(makeIssues(Array.from({ length: 1000 }, (_, index) => 100 + index), ['critical', 'status:blocked'])))
+        .mockImplementationOnce(makeExecFn(makeIssues([])))
+        .mockImplementationOnce(makeExecFn(makeIssues([])))
+        .mockImplementationOnce(makeExecFn(makeIssues([9999], ['priority:low'])));
+      const fetcher = new IssueFetcher(execFn);
+
+      const issues = await fetcher.fetch({});
+
+      expect(issues[0]!.number).toBe(9999);
     });
 
     it('applies priority aging before default fetch truncation', async () => {
@@ -240,9 +282,9 @@ describe('IssueFetcher', () => {
 
       await fetcher.fetch({ limit: 50 });
 
-      const [, args] = execFn.mock.calls[0]!;
-      const limitIdx = args.indexOf('--limit');
-      expect(args[limitIdx + 1]).toBe('50');
+      const limits = execFn.mock.calls.map(([, args]) => args[args.indexOf('--limit') + 1]);
+      expect(limits).toContain('50');
+      expect(limits.at(-1)).toBe('50');
     });
 
     it('adds each label as separate --label flag', async () => {

@@ -54,10 +54,9 @@ export class IssueFetcher implements IIssueFetcher {
   }
 
   async fetch(options: IssueFetchOptions): Promise<GithubIssue[]> {
-    const explicitLimit = options.limit !== undefined;
-    const raw = explicitLimit || options.search
+    const raw = options.search
       ? await this.fetchIssuePage(options, options.search, options.limit ?? DEFAULT_ISSUE_FETCH_LIMIT)
-      : await this.fetchDefaultIssuePages(options);
+      : await this.fetchDefaultIssuePages(options, options.limit ?? DEFAULT_ISSUE_FETCH_LIMIT);
 
     return raw.map((issue) => ({
       number: issue.number,
@@ -71,25 +70,38 @@ export class IssueFetcher implements IIssueFetcher {
     }));
   }
 
-  private async fetchDefaultIssuePages(options: IssueFetchOptions): Promise<RawGithubIssue[]> {
+  private async fetchDefaultIssuePages(options: IssueFetchOptions, limit: number): Promise<RawGithubIssue[]> {
     try {
       return this.mergeIssuePages(
         [
-          await this.fetchIssuePage(options, `${DEFAULT_URGENT_ISSUE_QUERY} sort:created-desc`, DEFAULT_ISSUE_FETCH_URGENT_LIMIT),
-          await this.fetchIssuePage(options, `${DEFAULT_URGENT_ISSUE_QUERY} sort:created-asc`, DEFAULT_ISSUE_FETCH_URGENT_LIMIT),
-          await this.fetchIssuePage(options, 'sort:created-desc', DEFAULT_ISSUE_FETCH_RECENT_LIMIT),
-          await this.fetchIssuePage(options, 'sort:created-asc', DEFAULT_ISSUE_FETCH_LIMIT),
+          await this.fetchIssuePage(options, `${DEFAULT_URGENT_ISSUE_QUERY} sort:created-desc`, limit),
+          await this.fetchIssuePage(options, `${DEFAULT_URGENT_ISSUE_QUERY} sort:created-asc`, limit),
+          await this.fetchIssuePage(options, 'sort:created-desc', Math.min(DEFAULT_ISSUE_FETCH_RECENT_LIMIT, limit)),
+          await this.fetchIssuePage(options, 'sort:created-asc', limit),
         ],
-        DEFAULT_ISSUE_FETCH_LIMIT,
+        limit,
       );
     } catch (err) {
       if (!this.isUnsupportedAdvancedSearchError(err)) {
         throw err;
       }
-      return this.mergeIssuePages(
-        [await this.fetchIssuePage(options, undefined, DEFAULT_ISSUE_FETCH_LIMIT)],
-        DEFAULT_ISSUE_FETCH_LIMIT,
-      );
+      try {
+        return this.mergeIssuePages(
+          [
+            await this.fetchIssuePage(options, 'sort:created-desc', DEFAULT_ISSUE_FETCH_RECENT_LIMIT),
+            await this.fetchIssuePage(options, 'sort:created-asc', limit),
+          ],
+          limit,
+        );
+      } catch (fallbackErr) {
+        if (!this.isUnsupportedAdvancedSearchError(fallbackErr)) {
+          throw fallbackErr;
+        }
+        return this.mergeIssuePages(
+          [await this.fetchIssuePage(options, undefined, limit)],
+          limit,
+        );
+      }
     }
   }
 
@@ -134,9 +146,9 @@ export class IssueFetcher implements IIssueFetcher {
       context: 'GitHub issue list payload',
       maxBytes: maxPayloadBytes,
       maxDepth: 48,
-      maxContainers: Math.max(limit * 64, 20_000),
+      maxContainers: Math.max(limit * 128, 20_000),
       maxObjectKeys: 100_000,
-      maxArrayItems: Math.max(limit * 64, 2_000),
+      maxArrayItems: Math.max(limit * 128, 2_000),
     }) as RawGithubIssue[];
   }
 
@@ -154,9 +166,23 @@ export class IssueFetcher implements IIssueFetcher {
   }
 
   private compareIssueFetchOrder(a: RawGithubIssue, b: RawGithubIssue): number {
-    return this.issueEffectivePriorityRank(a) - this.issueEffectivePriorityRank(b)
+    return this.issueBlockerRank(a) - this.issueBlockerRank(b)
+      || this.issueEffectivePriorityRank(a) - this.issueEffectivePriorityRank(b)
       || this.issueCreatedAtMs(a) - this.issueCreatedAtMs(b)
       || a.number - b.number;
+  }
+
+  private issueBlockerRank(issue: RawGithubIssue): number {
+    const labels = issue.labels.map((label) => label.name.trim().toLowerCase());
+    if (labels.some((label) => ['hitl', 'human-in-the-loop', 'needs-input', 'needs_input', 'needs-human', 'review-required'].includes(label)
+      || ['status:hitl', 'status:needs-input', 'status:review-required'].includes(label))) {
+      return 1;
+    }
+    if (labels.some((label) => ['blocked', 'blocked_status', 'parked', 'paused'].includes(label)
+      || ['status:blocked', 'status:paused', 'status:parked'].includes(label))) {
+      return 2;
+    }
+    return 0;
   }
 
   private issueEffectivePriorityRank(issue: RawGithubIssue): number {
