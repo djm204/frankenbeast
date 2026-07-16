@@ -289,7 +289,7 @@ Capture durable lessons, Codex or CI feedback, and reusable notes for future han
 
   it('returns structured missing-section findings for incomplete templates', () => {
     const validation = validateAgentHandoffTemplate(`## Scope
-Describe the issue and goal.
+Name issue #1775, business goal, and out-of-scope boundaries.
 
 ## Verification
 Record npm test passed or failed.
@@ -315,6 +315,54 @@ Record npm test passed or failed.
       status: 'placeholder',
       matchedHeading: 'Verification evidence',
     });
+  });
+
+  it('rejects field labels that only point at placeholders', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '- Issue: <issue>\n- Goal: <goal>\n- Boundaries: <out-of-scope boundaries>',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(validation.findings.find((finding) => finding.id === 'scope')?.status).toBe('placeholder');
+  });
+
+  it('preserves child-heading content inside a required parent section', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.',
+        '### Commands\n`npm test` passed with exit 0.\n### Outcome\nGreen verification evidence is recorded.',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(validation.findings.find((finding) => finding.id === 'verification')?.status).toBe('pass');
+  });
+
+  it('requires a distinct matched section for each handoff dimension', () => {
+    const validation = validateAgentHandoffTemplate(`# Agent handoff
+
+## Scope current state verification blockers artifacts learning
+Issue #1775 goal is onboarding; out-of-scope boundaries are unrelated refactors. Completed status and decisions remain pending. npm test passed. No blocker, owner PM, next action continue. PR branch docs artifact. Lesson is reusable.
+`);
+
+    expect(validation.valid).toBe(false);
+    expect(validation.findings.find((finding) => finding.id === 'scope')?.status).toBe('pass');
+    expect(validation.missingSections).toEqual(['state', 'verification', 'blockers', 'artifacts', 'learning']);
+  });
+
+  it('rejects sections that omit required content signals', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        'Write a summary for the next worker.',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(validation.findings.find((finding) => finding.id === 'scope')?.status).toBe('placeholder');
   });
 });
 

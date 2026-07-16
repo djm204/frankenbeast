@@ -39,6 +39,7 @@ export interface AgentHandoffTemplateRequirement {
   readonly label: string;
   readonly headingPatterns: readonly RegExp[];
   readonly guidance: string;
+  readonly requiredContentPatterns: readonly RegExp[];
 }
 
 export interface AgentHandoffTemplateFinding {
@@ -117,36 +118,61 @@ export const AGENT_HANDOFF_TEMPLATE_REQUIREMENTS: readonly AgentHandoffTemplateR
     label: 'Scope and objective',
     headingPatterns: [/\bscope\b/i, /\bobjective\b/i, /\bgoal\b/i],
     guidance: 'Add a section that names the issue/task, business goal, and out-of-scope boundaries.',
+    requiredContentPatterns: [
+      /\b(issue|task)\b/i,
+      /\b(goal|objective|business goal)\b/i,
+      /\b(out[- ]of[- ]scope|boundary|boundaries)\b/i,
+    ],
   },
   {
     id: 'state',
     label: 'Current state and decisions',
     headingPatterns: [/\bcurrent state\b/i, /\bstatus\b/i, /\bdecisions?\b/i],
     guidance: 'Add a section for completed work, current phase, key decisions, and remaining work.',
+    requiredContentPatterns: [
+      /\b(completed|done|current|phase|status)\b/i,
+      /\b(decision|decisions|decided)\b/i,
+      /\b(remaining|next|todo|pending)\b/i,
+    ],
   },
   {
     id: 'verification',
     label: 'Verification evidence',
     headingPatterns: [/\bverification\b/i, /\btests?\b/i, /\bvalidation\b/i],
     guidance: 'Add a section for deterministic test, lint, build, or verifier commands and outcomes.',
+    requiredContentPatterns: [
+      /\b(test|lint|typecheck|build|verify|verification|npm|pnpm|yarn|vitest|tsc|eslint|pytest)\b/i,
+      /\b(pass(?:ed)?|fail(?:ed)?|exit|outcome|green|succeed(?:ed)?|0 errors)\b/i,
+    ],
   },
   {
     id: 'blockers',
     label: 'Blockers and next action',
     headingPatterns: [/\bblockers?\b/i, /\bnext action\b/i, /\bnext steps?\b/i],
     guidance: 'Add a section that makes blockers, owner, and the next action explicit.',
+    requiredContentPatterns: [
+      /\b(blocker|blockers|blocked|risk|none)\b/i,
+      /\b(owner|assignee|responsible)\b/i,
+      /\b(next action|next step|next steps|follow[- ]?up|continue)\b/i,
+    ],
   },
   {
     id: 'artifacts',
     label: 'Artifacts and links',
     headingPatterns: [/\bartifacts?\b/i, /\blinks?\b/i, /\bbranches?\b/i, /\bpull requests?\b/i],
     guidance: 'Add a section for concrete artifacts such as branch, PR, worktree, docs, or telemetry links.',
+    requiredContentPatterns: [
+      /\b(branch|pr|pull request|worktree|diff|doc|docs|telemetry|artifact|artifacts|https?:\/\/)\b/i,
+    ],
   },
   {
     id: 'learning',
     label: 'Learning and reuse',
     headingPatterns: [/\blearnings?\b/i, /\blessons?\b/i, /\bretrospective\b/i, /\breuse\b/i],
     guidance: 'Add a section for durable lessons, review feedback, and reusable follow-up guidance.',
+    requiredContentPatterns: [
+      /\b(lesson|lessons|learning|retrospective|reuse|reusable|codex|ci feedback|review feedback)\b/i,
+    ],
   },
 ];
 
@@ -251,10 +277,13 @@ export function validateAgentHandoffTemplate(
   template: string,
 ): AgentHandoffTemplateValidation {
   const sections = extractMarkdownSections(template);
+  const usedSectionIndexes = new Set<number>();
   const findings = AGENT_HANDOFF_TEMPLATE_REQUIREMENTS.map((requirement) => {
-    const section = sections.find((candidate) =>
-      requirement.headingPatterns.some((pattern) => pattern.test(candidate.heading)),
+    const sectionIndex = sections.findIndex((candidate, candidateIndex) =>
+      !usedSectionIndexes.has(candidateIndex)
+        && requirement.headingPatterns.some((pattern) => pattern.test(candidate.heading)),
     );
+    const section = sectionIndex >= 0 ? sections[sectionIndex] : undefined;
     if (!section) {
       return {
         id: requirement.id,
@@ -263,7 +292,13 @@ export function validateAgentHandoffTemplate(
         guidance: requirement.guidance,
       } satisfies AgentHandoffTemplateFinding;
     }
-    if (!hasSubstantiveTemplateGuidance(section.content)) {
+    usedSectionIndexes.add(sectionIndex);
+
+    const searchableContent = normalizeEvidence(stripPlaceholderOnlyTemplateFields(section.content));
+    const hasRequiredContent = requirement.requiredContentPatterns.every((pattern) =>
+      pattern.test(searchableContent),
+    );
+    if (!hasSubstantiveTemplateGuidance(section.content) || !hasRequiredContent) {
       return {
         id: requirement.id,
         label: requirement.label,
@@ -391,36 +426,75 @@ function buildHandoffEvidenceCorpus(
   return entries;
 }
 
-function extractMarkdownSections(template: string): Array<{ heading: string; content: string }> {
-  const sections: Array<{ heading: string; content: string[] }> = [];
-  let current: { heading: string; content: string[] } | null = null;
+interface MarkdownSection {
+  readonly heading: string;
+  readonly level: number;
+  readonly content: string;
+}
+
+function extractMarkdownSections(template: string): MarkdownSection[] {
+  const sections: Array<{ heading: string; level: number; content: string[] }> = [];
+  const openSectionIndexes: number[] = [];
+
   for (const line of template.split(/\r?\n/)) {
-    const heading = /^#{1,6}\s+(.+?)\s*$/.exec(line);
+    const heading = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
     if (heading) {
-      current = { heading: normalizeEvidence(heading[1] ?? ''), content: [] };
-      sections.push(current);
+      const level = heading[1]?.length ?? 1;
+      while (openSectionIndexes.length > 0) {
+        const current = sections[openSectionIndexes[openSectionIndexes.length - 1]!];
+        if (current && current.level < level) {
+          break;
+        }
+        openSectionIndexes.pop();
+      }
+      for (const sectionIndex of openSectionIndexes) {
+        sections[sectionIndex]?.content.push(line);
+      }
+      const section = {
+        heading: normalizeEvidence(heading[2] ?? ''),
+        level,
+        content: [] as string[],
+      };
+      sections.push(section);
+      openSectionIndexes.push(sections.length - 1);
       continue;
     }
-    current?.content.push(line);
+
+    for (const sectionIndex of openSectionIndexes) {
+      sections[sectionIndex]?.content.push(line);
+    }
   }
+
   return sections.map((section) => ({
     heading: section.heading,
+    level: section.level,
     content: section.content.join('\n'),
   }));
 }
 
 function hasSubstantiveTemplateGuidance(content: string): boolean {
-  const withoutFences = content.replace(/```[\s\S]*?```/g, ' ');
-  const normalized = normalizeEvidence(
-    withoutFences
-      .replace(/`[^`]*`/g, ' ')
-      .replace(/<[^>]*>/g, ' ')
-      .replace(/\[[^\]]*\]/g, ' ')
-      .replace(/[{}]/g, ' ')
-      .replace(/\b(?:tbd|todo|n\/?a|none|unknown|placeholder|fill in|to be decided)\b/gi, ' ')
-      .replace(/[_.-]{2,}/g, ' '),
-  );
+  const normalized = normalizeEvidence(stripPlaceholderOnlyTemplateFields(content));
   return /[A-Za-z0-9]/.test(normalized) && normalized.split(' ').some((token) => token.length >= 4);
+}
+
+function stripPlaceholderOnlyTemplateFields(content: string): string {
+  return content
+    .split(/\r?\n/)
+    .map((line) => {
+      const withoutPlaceholders = line
+        .replace(/^```.*$/g, ' ')
+        .replace(/`([^`]*)`/g, '$1')
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/\[[^\]]*\]/g, ' ')
+        .replace(/\{\{[^}]*\}\}/g, ' ')
+        .replace(/[{}]/g, ' ')
+        .replace(/\b(?:tbd|todo|n\/?a|unknown|placeholder|fill in|to be decided)\b/gi, ' ')
+        .replace(/[_.-]{2,}/g, ' ');
+      return /^\s*(?:[-*]\s*)?[A-Za-z0-9 /_-]+:\s*$/.test(withoutPlaceholders)
+        ? ''
+        : withoutPlaceholders;
+    })
+    .join('\n');
 }
 
 function formatWorkingEvidence(
