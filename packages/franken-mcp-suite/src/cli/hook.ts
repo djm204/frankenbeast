@@ -6,6 +6,8 @@ import { createObserverAdapter, type ObserverAdapter } from '../adapters/observe
 
 /** Env var carrying the governor context (policy-relevant command text). */
 export const TOOL_CONTEXT_ENV = 'FBEAST_TOOL_CONTEXT';
+export const HOOK_GOVERNANCE_SOURCE_KEY = '__fbeastHookSource';
+export const HOOK_GOVERNANCE_SOURCE = 'fbeast-hook';
 
 export interface HookDeps {
   governor: GovernorAdapter;
@@ -86,6 +88,25 @@ function unqualifyMcpToolName(toolName: string): string {
   return index >= 0 ? toolName.slice(index + marker.length) : toolName;
 }
 
+function markHookGovernanceContext(context: string): string {
+  try {
+    const parsed = JSON.parse(context) as unknown;
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return JSON.stringify({
+        [HOOK_GOVERNANCE_SOURCE_KEY]: HOOK_GOVERNANCE_SOURCE,
+        ...(parsed as Record<string, unknown>),
+      });
+    }
+  } catch {
+    // Non-JSON legacy hook contexts are still governed; wrap them so downstream
+    // audit reports can distinguish trusted hook rows from public governor probes.
+  }
+  return JSON.stringify({
+    [HOOK_GOVERNANCE_SOURCE_KEY]: HOOK_GOVERNANCE_SOURCE,
+    contextText: context,
+  });
+}
+
 function redactPostToolPayload(toolName: string, payload: string): string {
   if (!MEMORY_RESULT_PAYLOAD_REDACTION_TOOLS.has(unqualifyMcpToolName(toolName))) return payload;
   return '[memory-review-result-redacted]';
@@ -129,7 +150,7 @@ export async function runHook(
     // (`fbeast-hook pre-tool <tool> <payload>`) so they keep governance coverage
     // when the env var is unset.
     // Redact inline credentials before the governor sees/logs the context.
-    const context = redactSecrets(resolvedDeps.readContext() || payload);
+    const context = markHookGovernanceContext(redactSecrets(resolvedDeps.readContext() || payload));
     const decision = await resolvedDeps.governor.check({ action: toolName, context });
     if (decision.decision !== 'approved') {
       process.stderr.write(`${decision.reason}\n`);

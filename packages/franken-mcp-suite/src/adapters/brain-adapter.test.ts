@@ -155,6 +155,13 @@ vi.mock("better-sqlite3", () => ({
                 reason: "public governor probe",
                 createdAt: "2026-07-16T13:55:00.000Z",
               },
+              {
+                action: "fbeast_memory_query",
+                context: JSON.stringify({ __fbeastHookSource: "fbeast-hook", agentId: "agent-hook-pre", profile: "hook-test", type: "working" }),
+                decision: "approved",
+                reason: "hook pre-tool approval",
+                createdAt: "2026-07-16T14:00:00.000Z",
+              },
             ];
           }
           if (sql.includes("FROM audit_trail")) {
@@ -223,6 +230,11 @@ vi.mock("better-sqlite3", () => ({
                 eventType: "tool_call",
                 payload: JSON.stringify({ source: "observer-user", toolName: "fbeast_memory_store", ok: true, args: { agentId: "agent-forged-observer", profile: "forgery-test", type: "working" } }),
                 createdAt: "2026-07-16T13:55:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ toolName: "fbeast_memory_store", phase: "post-tool", ok: true, args: { agentId: "agent-hook-post", profile: "hook-test", type: "working" } }),
+                createdAt: "2026-07-16T14:00:05.000Z",
               },
             ];
           }
@@ -940,6 +952,23 @@ describe("createBrainAdapter", () => {
 
     expect(report.count).toBe(0);
     expect(report.events).toEqual([]);
+  });
+
+  it("includes trusted hook-based memory access records", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "hook-test", limit: 20 });
+
+    expect(report.count).toBe(2);
+    expect(report.events.map((event) => event.tool)).toEqual([
+      "fbeast_memory_store",
+      "fbeast_memory_query",
+    ]);
+    expect(report.events.map((event) => event.source)).toEqual([
+      "audit_trail",
+      "governor_log",
+    ]);
+    expect(report.summary.byOperation).toEqual({ write: 1, read: 1 });
   });
 
   it("classifies failed handler audit events as errors", async () => {

@@ -24,9 +24,11 @@ describe('fbeast-hook runtime', () => {
     });
 
     expect(result.exitCode).toBe(0);
-    expect(result.checkCalls).toEqual([
-      { action: 'shell', context: '--db=/tmp/x; rm -rf /tmp/y' },
-    ]);
+    expect(result.checkCalls[0]!.action).toBe('shell');
+    expect(JSON.parse(result.checkCalls[0]!.context)).toEqual({
+      __fbeastHookSource: 'fbeast-hook',
+      contextText: '--db=/tmp/x; rm -rf /tmp/y',
+    });
   });
 
   it('treats tokens after -- as positionals, not options', async () => {
@@ -35,7 +37,11 @@ describe('fbeast-hook runtime', () => {
     });
 
     expect(result.exitCode).toBe(0);
-    expect(result.checkCalls).toEqual([{ action: 'Bash', context: 'rm -rf /' }]);
+    expect(result.checkCalls[0]!.action).toBe('Bash');
+    expect(JSON.parse(result.checkCalls[0]!.context)).toEqual({
+      __fbeastHookSource: 'fbeast-hook',
+      contextText: 'rm -rf /',
+    });
   });
 
   it('falls back to the positional payload when the context env var is unset (legacy callers)', async () => {
@@ -45,7 +51,11 @@ describe('fbeast-hook runtime', () => {
     const result = await runHookForTest(['pre-tool', 'Bash', 'rm -rf /legacy']);
 
     expect(result.exitCode).toBe(0);
-    expect(result.checkCalls).toEqual([{ action: 'Bash', context: 'rm -rf /legacy' }]);
+    expect(result.checkCalls[0]!.action).toBe('Bash');
+    expect(JSON.parse(result.checkCalls[0]!.context)).toEqual({
+      __fbeastHookSource: 'fbeast-hook',
+      contextText: 'rm -rf /legacy',
+    });
   });
 
   it('redacts inline credentials from the governor context before it is checked/logged', async () => {

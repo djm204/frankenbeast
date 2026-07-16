@@ -39,11 +39,37 @@ function splitCsvArg(value: unknown, fallback?: string[]): string[] | undefined 
   return parsed.length > 0 ? parsed : fallback;
 }
 
+function parseJsonObject(value: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function usesReservedObserverProvenance(metadata: string): boolean {
+  const parsed = parseJsonObject(metadata);
+  return parsed?.['source'] === RESERVED_AUDIT_SOURCE;
+}
+
+function usesReservedGovernorProvenance(context: string): boolean {
+  const parsed = parseJsonObject(context);
+  return parsed?.[RESERVED_GOVERNANCE_SOURCE_KEY] === RESERVED_AUDIT_SOURCE
+    || parsed?.[RESERVED_HOOK_SOURCE_KEY] === RESERVED_HOOK_SOURCE;
+}
+
 const DEFAULT_MEMORY_QUERY_LIMIT = 20;
 const MAX_MEMORY_QUERY_LIMIT = 1000;
 const MEMORY_REVIEW_STATUSES = ['pending', 'approved', 'rejected', 'never_store', 'suppressed'] as const;
 const MEMORY_REVIEW_ACTIONS = ['approve', 'reject', 'never_store', 'resolve_conflict'] as const;
 const MEMORY_CONFLICT_RESOLUTIONS = ['keep_existing', 'replace_existing', 'reject_candidate'] as const;
+const RESERVED_AUDIT_SOURCE = 'central-dispatch';
+const RESERVED_GOVERNANCE_SOURCE_KEY = '__fbeastGovernanceSource';
+const RESERVED_HOOK_SOURCE_KEY = '__fbeastHookSource';
+const RESERVED_HOOK_SOURCE = 'fbeast-hook';
 
 type MemoryReviewStatus = (typeof MEMORY_REVIEW_STATUSES)[number];
 type MemoryReviewAction = (typeof MEMORY_REVIEW_ACTIONS)[number];
@@ -847,6 +873,9 @@ const TOOLS: ToolFull[] = [
       if (!metadataArg.ok) {
         return { content: [{ type: 'text', text: `Error: fbeast_observer_log ${metadataArg.message}` }], isError: true };
       }
+      if (usesReservedObserverProvenance(metadataArg.value)) {
+        return { content: [{ type: 'text', text: 'Error: fbeast_observer_log reserved audit provenance is internal-only' }], isError: true };
+      }
       const sessionIdArg = parseNonEmptyStringArg('sessionId', args['sessionId']);
       if (!sessionIdArg.ok) {
         return { content: [{ type: 'text', text: `Error: fbeast_observer_log ${sessionIdArg.message}` }], isError: true };
@@ -959,6 +988,9 @@ const TOOLS: ToolFull[] = [
     makeHandler: ({ governor }) => async (args) => {
       const action = String(args['action']);
       const context = String(args['context']);
+      if (usesReservedGovernorProvenance(context)) {
+        return { content: [{ type: 'text', text: 'Error: fbeast_governor_check reserved governance provenance is internal-only' }], isError: true };
+      }
       const { decision, reason } = await governor.check({ action, context });
       return { content: [{ type: 'text', text: `**Decision:** ${decision}\n**Reason:** ${reason}` }] };
     },

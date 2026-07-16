@@ -552,6 +552,18 @@ function sqliteTableExists(db: Database.Database, tableName: string): boolean {
 
 const CENTRAL_AUDIT_SOURCE = "central-dispatch";
 const GOVERNANCE_SOURCE_KEY = "__fbeastGovernanceSource";
+const HOOK_GOVERNANCE_SOURCE_KEY = "__fbeastHookSource";
+const HOOK_GOVERNANCE_SOURCE = "fbeast-hook";
+
+function hasTrustedGovernorProvenance(context: Record<string, unknown>): boolean {
+  return context[GOVERNANCE_SOURCE_KEY] === CENTRAL_AUDIT_SOURCE
+    || context[HOOK_GOVERNANCE_SOURCE_KEY] === HOOK_GOVERNANCE_SOURCE;
+}
+
+function hasTrustedAuditTrailProvenance(payload: Record<string, unknown>): boolean {
+  return payload["source"] === CENTRAL_AUDIT_SOURCE
+    || payload["phase"] === "post-tool";
+}
 
 const SAFE_AUDIT_DECISIONS = new Set([
   "approved",
@@ -1121,7 +1133,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           : [];
         for (const row of governorRows) {
           const context = parseAuditContext(row.context);
-          if (context[GOVERNANCE_SOURCE_KEY] !== CENTRAL_AUDIT_SOURCE) continue;
+          if (!hasTrustedGovernorProvenance(context)) continue;
           if (!includeMemoryAuditTool(row.action, context)) continue;
           const access = inferMemoryAccess(row.action, context);
           const accessArgs = auditToolArgs(context);
@@ -1154,7 +1166,10 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           FROM audit_trail
           WHERE event_type = 'tool_call'
             AND json_valid(payload)
-            AND json_extract(payload, '$.source') = ?
+            AND (
+              json_extract(payload, '$.source') = ?
+              OR json_extract(payload, '$.phase') = 'post-tool'
+            )
             AND (payload LIKE '%fbeast_memory%' OR payload LIKE '%execute_tool%')
             ${auditTimeCondition}
           ORDER BY id DESC
@@ -1163,7 +1178,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           : [];
         for (const row of auditRows) {
           const payload = parseAuditContext(row.payload);
-          if (payload["source"] !== CENTRAL_AUDIT_SOURCE) continue;
+          if (!hasTrustedAuditTrailProvenance(payload)) continue;
           const toolName = stringAuditField(payload, "toolName") ?? stringAuditField(payload, "tool") ?? "unknown";
           if (!includeMemoryAuditTool(toolName, payload)) continue;
           const access = inferMemoryAccess(toolName, payload);
