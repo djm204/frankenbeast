@@ -410,6 +410,20 @@ Record npm test passed or failed.
     ).toBe('pass');
   });
 
+  it('preserves populated child-heading labels as required content signals', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '### Issue/task\n#1775\n### Business goal\nImprove handoff onboarding.\n### Out-of-scope boundaries\nNo unrelated refactors.',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('pass');
+  });
+
   it('requires a distinct matched section for each handoff dimension', () => {
     const validation = validateAgentHandoffTemplate(`# Agent handoff
 
@@ -577,6 +591,20 @@ ${completeTemplate}`);
     expect(validation.valid).toBe(true);
   });
 
+  it('preserves populated table headers as required content signals', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '| Issue/task | Business goal | Boundaries |\n| --- | --- | --- |\n| #1775 | Improve onboarding | No unrelated refactors |',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('pass');
+  });
+
   it('rejects blank table rows with label-only cells regardless of case', () => {
     const validation = validateAgentHandoffTemplate(
       completeTemplate
@@ -656,11 +684,44 @@ ${completeTemplate}`);
     ).toBe('pass');
   });
 
+  it('reserves underspecified overlapping headings for their own requirement', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate
+        .replace(
+          '## Current state and decisions\nSummarize completed work, current phase, key decisions, and remaining work.\n\n',
+          '',
+        )
+        .replace(
+          '## Blockers and next action\nState blockers, owner, exact next action, and when the receiving worker should stop.',
+          '## Status and next steps\nNo blockers; next action continue.',
+        ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'state')?.status,
+    ).toBe('missing');
+    expect(
+      validation.findings.find((finding) => finding.id === 'blockers'),
+    ).toMatchObject({ status: 'placeholder', matchedHeading: 'Status and next steps' });
+  });
+
   it('preserves markdown link text when checking artifact guidance', () => {
     const validation = validateAgentHandoffTemplate(
       completeTemplate.replace(
         'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
         'Link the [PR](../pull/123) and [runbook](../runbook) for inspectable artifacts.',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+  });
+
+  it('preserves reference-style markdown link text when checking artifact guidance', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
+        'See [PR][pr] and [docs][docs] for inspectable artifact references.\n\n[pr]: ../pull/123\n[docs]: ../docs',
       ),
     );
 

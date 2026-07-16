@@ -3,6 +3,7 @@ import type { BrainSnapshot, EpisodicEvent } from '@franken/types';
 /** Rough char-to-token ratio (1 token ≈ 4 chars) */
 const CHARS_PER_TOKEN = 4;
 const MAX_RUBRIC_EVIDENCE_CHARS = 120;
+const CHILD_HEADING_LABEL_PREFIX = '__handoff_child_heading__ ';
 
 export type PmHandoffRubricStatus = 'pass' | 'needs-attention';
 
@@ -353,7 +354,7 @@ export function validateAgentHandoffTemplate(
             (futureRequirement) =>
               futureRequirement.headingPatterns.some((pattern) =>
                 pattern.test(section.heading),
-              ) && sectionSatisfiesRequirement(section, futureRequirement),
+              ),
           ),
       );
       if (placeholderCandidate) {
@@ -552,6 +553,11 @@ function extractMarkdownSections(template: string): MarkdownSection[] {
         level,
         content: [] as string[],
       };
+      for (const sectionIndex of openSectionIndexes) {
+        sections[sectionIndex]?.content.push(
+          `${CHILD_HEADING_LABEL_PREFIX}${section.heading}`,
+        );
+      }
       sections.push(section);
       openSectionIndexes.push(sections.length - 1);
       continue;
@@ -570,8 +576,12 @@ function extractMarkdownSections(template: string): MarkdownSection[] {
 }
 
 function hasSubstantiveTemplateGuidance(content: string): boolean {
+  const contentWithoutChildHeadingLabels = content.replace(
+    new RegExp(`^${escapeRegExp(CHILD_HEADING_LABEL_PREFIX)}.*$`, 'gim'),
+    ' ',
+  );
   const normalized = normalizeEvidence(
-    stripPlaceholderOnlyTemplateFields(content),
+    stripPlaceholderOnlyTemplateFields(contentWithoutChildHeadingLabels),
   );
   return (
     /[A-Za-z0-9]/.test(normalized) &&
@@ -604,7 +614,10 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
     }
 
     const nextLine = lines[index + 1] ?? '';
-    if (isMarkdownTableHeader(line, nextLine)) {
+    const isPopulatedTableHeader =
+      isMarkdownTableHeader(line, nextLine) &&
+      hasPopulatedTableRows(lines, index + 2);
+    if (isMarkdownTableHeader(line, nextLine) && !isPopulatedTableHeader) {
       index += 1;
       continue;
     }
@@ -615,6 +628,7 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
     const withoutPlaceholders = line
       .replace(/^```.*$/g, ' ')
       .replace(/\[([^\]]+)\]\(([^)]*)\)/g, '$1 $2')
+      .replace(/\[([^\]]+)\]\[[^\]]*\]/g, '$1')
       .replace(/\[[^\]]*\]/g, ' ')
       .replace(/<((?:https?:\/\/|\.\.?\/|#)[^>\s]+)>/g, '$1')
       .replace(/`([^`]*)`/g, '$1')
@@ -628,7 +642,7 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
       .replace(/[_.-]{2,}/g, ' ');
     if (
       isEmptyTemplateLabel(withoutPlaceholders) ||
-      isEmptyTableRow(withoutPlaceholders)
+      (!isPopulatedTableHeader && isEmptyTableRow(withoutPlaceholders))
     ) {
       continue;
     }
@@ -653,6 +667,22 @@ function isMarkdownTableHeader(line: string, nextLine: string): boolean {
 
 function isMarkdownTableSeparator(line: string): boolean {
   return /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+}
+
+function hasPopulatedTableRows(lines: readonly string[], startIndex: number): boolean {
+  for (let index = startIndex; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+    if (!line.includes('|')) {
+      break;
+    }
+    if (isMarkdownTableSeparator(line)) {
+      continue;
+    }
+    if (!isEmptyTableRow(line)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function isEmptyTableRow(line: string): boolean {
@@ -760,6 +790,10 @@ function splitEvidenceKey(key: string): string {
 
 function normalizeEvidence(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function truncateEvidence(value: string): string {
