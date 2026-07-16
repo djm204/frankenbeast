@@ -303,11 +303,7 @@ export interface PostPrLessonExtractionTemplate {
 }
 
 export type LessonCandidateCategory =
-  | 'procedure'
-  | 'preference'
-  | 'environment-fact'
-  | 'task-state'
-  | 'discard';
+  'procedure' | 'preference' | 'environment-fact' | 'task-state' | 'discard';
 
 /** Redaction applied before a learned lesson candidate can reach durable memory. */
 export interface LessonPrivacyRedaction {
@@ -362,6 +358,51 @@ export interface LessonCooldownSuppression {
 }
 
 /** A recurring critical finding observed across more than one task. */
+export interface FailureRecordEvidencePointer {
+  /** Non-transcript pointer proving where this failure signal came from. */
+  readonly kind: 'review-finding' | 'test-traceability';
+  readonly id: string;
+  readonly location?: string;
+}
+
+/** Structured, transcript-free metadata for one recovered failure. */
+export interface FailureRecordMetadata {
+  readonly schemaVersion: 'failure-record-v1';
+  readonly taskId: TaskId;
+  readonly taskFamily: string;
+  readonly packageName?: string;
+  readonly toolName?: string;
+  readonly errorClass: string;
+  readonly rootCause: string;
+  readonly resolution: string;
+  readonly evidencePointer: FailureRecordEvidencePointer;
+  readonly clusterKey: string;
+}
+
+/** A repeated failure family suitable for PM learning/doc/test routing. */
+export interface FailureCluster {
+  readonly key: string;
+  readonly taskFamily: string;
+  readonly packageName?: string;
+  readonly toolName?: string;
+  readonly errorClass: string;
+  readonly rootCause: string;
+  readonly occurrences: number;
+  readonly examples: readonly Pick<
+    FailureRecordMetadata,
+    'evidencePointer' | 'resolution'
+  >[];
+  readonly suggestedActions: readonly string[];
+}
+
+/** Transcript-free report of top recurring failure themes. */
+export interface FailureClusterReport {
+  readonly schemaVersion: 'failure-cluster-report-v1';
+  readonly generatedAt: string;
+  readonly guidance: string;
+  readonly clusters: readonly FailureCluster[];
+}
+
 export interface CrossTaskBlockerPattern {
   /** Stable key that identifies equivalent blocker findings across tasks. */
   readonly key: string;
@@ -392,7 +433,10 @@ export interface LearningBacklogPrioritizationItem {
   readonly id: string;
   /** Source signal that created this backlog item. */
   readonly source:
-    'recorded-lesson' | 'cooldown-suppression' | 'blocker-pattern';
+    | 'recorded-lesson'
+    | 'cooldown-suppression'
+    | 'blocker-pattern'
+    | 'failure-cluster';
   /** Coarse priority bucket for operator routing. */
   readonly priority: LearningBacklogPriority;
   /** Numeric score used for deterministic sorting inside a priority bucket. */
@@ -460,6 +504,8 @@ export interface LessonRecordingResult {
   readonly rejectedByPrivacy: readonly LessonPrivacyFilterDecision[];
   /** Cross-task blocker patterns discovered while recording this critique result. */
   readonly minedBlockerPatterns: readonly CrossTaskBlockerPattern[];
+  /** Top recurring task-family failure clusters observed without retaining raw transcripts. */
+  readonly failureClusterReport: FailureClusterReport;
   /** Prioritized PM/liveness follow-up generated from this record call's learning signals. */
   readonly learningBacklogPrioritizationReport: LearningBacklogPrioritizationReport;
 }
@@ -487,6 +533,8 @@ export interface CritiqueLesson {
   readonly rollbackWorkflow?: LessonRollbackWorkflow;
   /** Structured reviewer feedback that produced the lesson and should be reusable in PM handoffs. */
   readonly reviewerFeedback?: ReviewerFeedbackLessonCapture;
+  /** Structured task-family/package/tool/root-cause metadata for clustering recovered failures. */
+  readonly failureRecord?: FailureRecordMetadata;
   /** Present when a recovered failed test is a candidate for future skill creation/update. */
   readonly failedTestSkillCandidate?: FailedTestSkillCandidate;
   /** Structured template for extracting reusable lessons from post-PR review/merge evidence. */

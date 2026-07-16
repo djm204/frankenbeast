@@ -8,6 +8,15 @@ function createBrainStub(overrides: Partial<BrainAdapter> = {}): BrainAdapter {
     query: vi.fn().mockResolvedValue([]),
     store: vi.fn().mockResolvedValue(undefined),
     frontload: vi.fn().mockResolvedValue([]),
+    exportProjectMemory: vi.fn().mockResolvedValue({
+      version: 1,
+      exportedAt: "2026-07-15T00:00:00.000Z",
+      scope: { readScope: "all" },
+      redaction: "safe",
+      counts: { working: 0, episodic: 0 },
+      working: [],
+      episodic: [],
+    }),
     forget: vi.fn().mockResolvedValue(false),
     rightToForget: vi.fn().mockResolvedValue({
       selectorHash: "hashed-selector",
@@ -48,7 +57,7 @@ function createBrainStub(overrides: Partial<BrainAdapter> = {}): BrainAdapter {
 }
 
 describe("Memory Server", () => {
-  it("exposes memory tools including the promotion review queue", () => {
+  it("exposes memory tools including export and the promotion review queue", () => {
     const server = createMemoryServer({ brain: createBrainStub() });
 
     const names = server.tools.map((t) => t.name);
@@ -56,6 +65,7 @@ describe("Memory Server", () => {
       "fbeast_memory_store",
       "fbeast_memory_query",
       "fbeast_memory_frontload",
+      "fbeast_memory_export",
       "fbeast_memory_forget",
       "fbeast_memory_right_to_forget",
       "fbeast_memory_review_propose",
@@ -113,6 +123,15 @@ describe("Memory Server", () => {
           { type: "working", entries: ["adr: use adapters"] },
         ]),
       forget: vi.fn().mockResolvedValue(true),
+      exportProjectMemory: vi.fn().mockResolvedValue({
+        version: 1,
+        exportedAt: "2026-04-10T00:00:00.000Z",
+        scope: { readScope: "shared" },
+        redaction: "safe",
+        counts: { working: 1, episodic: 0 },
+        working: [{ key: "adr", value: "use adapters" }],
+        episodic: [],
+      }),
       rightToForget: vi.fn().mockResolvedValue({
         selectorHash: "hashed-selector",
         dryRun: false,
@@ -134,6 +153,9 @@ describe("Memory Server", () => {
     )!;
     const forgetTool = server.tools.find(
       (t) => t.name === "fbeast_memory_forget",
+    )!;
+    const exportTool = server.tools.find(
+      (t) => t.name === "fbeast_memory_export",
     )!;
     const rightToForgetTool = server.tools.find(
       (t) => t.name === "fbeast_memory_right_to_forget",
@@ -179,6 +201,24 @@ describe("Memory Server", () => {
     });
     expect(brain.frontload).toHaveBeenCalledWith({ readScope: "shared" });
     expect(frontloadResult.content[0]!.text).toContain("adr: use adapters");
+
+    const exportResult = await exportTool.handler({
+      projectId: "test-project",
+      readScope: "shared",
+      redaction: "safe",
+      limit: "5",
+    });
+    expect(brain.exportProjectMemory).toHaveBeenCalledWith({
+      readScope: "shared",
+      redaction: "safe",
+      limit: 5,
+    });
+    expect(exportResult.content[0]!.text).toContain('"redaction": "safe"');
+    await exportTool.handler({ readScope: "shared" });
+    expect(brain.exportProjectMemory).toHaveBeenLastCalledWith({
+      readScope: "shared",
+      limit: 1000,
+    });
 
     const forgetResult = await forgetTool.handler({ key: "adr", agentId: "agent-a" });
     expect(brain.forget).toHaveBeenCalledWith("adr", { agentId: "agent-a" });
@@ -313,6 +353,7 @@ describe("Memory Server", () => {
       store: vi.fn(),
       frontload: vi.fn(),
       forget: vi.fn(),
+      exportProjectMemory: vi.fn(),
       rightToForget: vi.fn(),
     });
     const server = createMemoryServer({ brain });
@@ -348,6 +389,7 @@ describe("Memory Server", () => {
         store: vi.fn(),
         frontload: vi.fn(),
         forget: vi.fn(),
+        exportProjectMemory: vi.fn(),
         rightToForget: vi.fn(),
       });
       const server = createMemoryServer({ brain });
@@ -370,6 +412,7 @@ describe("Memory Server", () => {
       store: vi.fn(),
       frontload: vi.fn(),
       forget: vi.fn(),
+      exportProjectMemory: vi.fn(),
       rightToForget: vi.fn(),
     });
     const queryTool = createToolDefsForServer("memory", { brain }).find(
@@ -530,6 +573,7 @@ describe("Memory Server read scope validation", () => {
       store: vi.fn(),
       frontload: vi.fn(),
       forget: vi.fn(),
+      exportProjectMemory: vi.fn(),
       rightToForget: vi.fn(),
     });
     const server = createMemoryServer({ brain });

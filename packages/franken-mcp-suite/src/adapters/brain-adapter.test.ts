@@ -57,10 +57,45 @@ vi.mock("@franken/brain", () => ({
         snapshot: vi.fn(() => ({
           "task-1": "working entry",
           "agents/oncall/runbook": "shared runbook",
+          "temporary-operational": {
+            value: "rotate release key",
+            category: "temporary-operational",
+            sourceScope: "mcp-memory-store",
+            expiresAt: "2026-07-16T06:00:00.000Z",
+          },
+          "github-token": "ghp_" + "supersecretvalue123456",
+          "public-key": "sk-" + "secretvalue123456",
+          "deployment-notes":
+            "-----BEGIN " +
+            "OPENSSH PRIVATE KEY-----\nsecret\n-----END " +
+            "OPENSSH PRIVATE KEY-----",
+          "status-page": "password=hunter2 session_cookie=abc123value",
+          "legacy-db-passwd": "legacy-password-alias",
+          "ops-note": "slack_webhook_url=https://hooks.slack.com/services/T000/B000/SECRET discord webhook https://discord.com/api/webhooks/1234567890/abcdef_SECRET",
+          "env-snippet": "AWS_SECRET_ACCESS_KEY=AKIA" + "supersecretvalue123456 REGION=us-east-1",
+          "legacy-token-snippet": "xoxb-" + "legacytokenvalue123 glpat-legacytokenvalue123",
+          "basic-auth": "Authorization: Basic " + "dXNlcjpwYXNz",
+          "token-auth": "Authorization: Token secret-token-value-that-must-not-leak",
+          "db_pwd": "super-pwd-value",
+          "db_passwd": "super-passwd-value",
+          "slack_webhook_url": "https://hooks.slack.com/services/T000/B000/secretwebhookvalue",
+          "ops-notes": "Mirror alerts to https://discord.com/api/webhooks/123456/secretwebhookvalue",
+
+          "json-literal-secrets": '{"password":123456,"token":true,"authToken":{"raw":"«redacted:ghs_…»"},"accessKey":["secretvalue123456"],"safe":"ok"}',
+          profile: {
+            password: "hunter2",
+            "alice@example.com": "oncall",
+            "bob@example.com": "backup",
+          },
+          "object-secret": {
+            password: "hunter2",
+            nested: { token: 987654 },
+            "alice@example.com": "oncall",
+          },
           "__fbeast_agent_memory__/alpha/private-task": {
             __fbeastMemoryScope: "fbeast:agent-memory",
             agentId: "alpha",
-            value: "alpha entry",
+            value: "private entry",
           },
           "__fbeast_agent_memory__/beta/private-task": {
             __fbeastMemoryScope: "fbeast:agent-memory",
@@ -76,6 +111,7 @@ vi.mock("@franken/brain", () => ({
         recall: vi.fn(() => [
           {
             id: "evt-1",
+            type: "success",
             summary: "episode summary",
             createdAt: "2026-07-06T00:00:00.000Z",
           },
@@ -83,11 +119,26 @@ vi.mock("@franken/brain", () => ({
         recent: vi.fn(() => [
           {
             id: "evt-shared",
-            summary: "shared episode",
+            type: "success",
+            summary: "password: correct horse battery staple",
+            details: {
+              apiKey: "sk_" + "secretvalue123456",
+              "bob@example.com": "operator",
+              __fbeastMemoryScope: "fbeast:agent-memory",
+              agentId: "alice@example.com",
+            },
+            createdAt: "2026-07-06T00:00:00.000Z",
+          },
+          {
+            id: "evt-credentialed-uri",
+            type: "success",
+            summary: "postgres://alice:hunter2@db.internal/app",
+            details: {},
             createdAt: "2026-07-06T00:00:00.000Z",
           },
           {
             id: "evt-alpha",
+            type: "success",
             summary: "alpha episode",
             details: {
               __fbeastMemoryScope: "fbeast:agent-memory",
@@ -97,6 +148,7 @@ vi.mock("@franken/brain", () => ({
           },
           {
             id: "evt-beta",
+            type: "success",
             summary: "beta episode",
             details: {
               __fbeastMemoryScope: "fbeast:agent-memory",
@@ -290,18 +342,18 @@ describe("createBrainAdapter", () => {
       query: "entry",
       readScope: "agent",
       agentId: "alpha",
-      limit: 10,
+      limit: 30,
     });
     expect(alphaRows.map((row) => row.key)).toContain("task-1");
     expect(alphaRows.map((row) => row.key)).toContain("private-task");
-    expect(alphaRows.map((row) => row.value)).toContain("alpha entry");
+    expect(alphaRows.some((row) => row.key === "private-task" && String(row.value).includes("private entry"))).toBe(true);
     expect(alphaRows.map((row) => row.value)).not.toContain("beta entry");
 
     const sharedRows = await brain.query({
       query: "entry",
       type: "working",
       readScope: "shared",
-      limit: 10,
+      limit: 20,
     });
     expect(sharedRows.map((row) => row.key)).toEqual(["task-1"]);
 
@@ -312,7 +364,7 @@ describe("createBrainAdapter", () => {
     const text = sections.flatMap((section) => section.entries).join("\n");
     expect(text).toContain("task-1: working entry");
     expect(text).toContain("agents/oncall/runbook: shared runbook");
-    expect(text).toContain("private-task: alpha entry");
+    expect(text).toContain("private-task: private entry");
     expect(text).toContain("alpha episode");
     expect(text).not.toContain("beta entry");
     expect(text).not.toContain("beta episode");
@@ -320,6 +372,93 @@ describe("createBrainAdapter", () => {
     const mockBrain = brainInstances[0];
     expect(mockBrain.episodic.recall).toHaveBeenCalledWith("entry", -1);
     expect(mockBrain.episodic.recent).toHaveBeenCalledWith(-1);
+  });
+
+  it("exports scoped project memory with safe redaction by default", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const exported = await brain.exportProjectMemory({
+      readScope: "shared",
+      limit: 20,
+    });
+    const serialized = JSON.stringify(exported);
+
+    expect(exported.version).toBe(1);
+    expect(exported.redaction).toBe("safe");
+    expect(exported.scope).toEqual({ readScope: "shared" });
+    expect(exported.working.map((entry) => entry.key)).toContain("task-1");
+    expect(exported.working.map((entry) => entry.key)).toContain("agents/oncall/runbook");
+    expect(exported.working.map((entry) => entry.value)).not.toContain("beta entry");
+    expect(serialized).toContain("[redacted]");
+    expect(serialized).not.toContain("ghp_" + "supersecretvalue123456");
+    expect(serialized).not.toContain("sk-" + "secretvalue123456");
+    expect(serialized).not.toContain("sk_" + "secretvalue123456");
+    expect(serialized).not.toContain("OPENSSH PRIVATE KEY");
+    expect(serialized).not.toContain("hunter2");
+    expect(serialized).not.toContain("correct horse battery staple");
+    expect(serialized).not.toContain("horse battery staple");
+    expect(serialized).not.toContain("short-password-alias");
+    expect(serialized).not.toContain("legacy-password-alias");
+    expect(serialized).not.toContain("hooks.slack.com/services/T000/B000/SECRET");
+    expect(serialized).not.toContain("discord.com/api/webhooks/1234567890/abcdef_SECRET");
+    expect(serialized).not.toContain("abc123value");
+    expect(serialized).not.toContain("super-pwd-value");
+    expect(serialized).not.toContain("super-passwd-value");
+    expect(serialized).not.toContain("secretwebhookvalue");
+    expect(serialized).not.toContain("hooks.slack.com/services");
+    expect(serialized).not.toContain("discord.com/api/webhooks");
+    expect(serialized).not.toContain("dXNlcjpwYXNz");
+    expect(serialized).not.toContain("secret-token-value-that-must-not-leak");
+    expect(serialized).not.toContain("postgres://alice:hunter2@db.internal/app");
+    expect(serialized).not.toContain("//alice:hunter2@db.internal/app");
+    expect(serialized).not.toContain('"password":123456');
+    expect(serialized).not.toContain('"token":true');
+    expect(serialized).not.toContain("987654");
+    expect(serialized).toContain("oncall");
+    expect(serialized).toContain("backup");
+    expect(serialized).not.toContain("alice@example.com");
+    expect(serialized).not.toContain("bob@example.com");
+    expect(serialized).not.toContain("apiKey");
+    expect(serialized).not.toContain("dXNlcjpwYXNz");
+    expect(serialized).not.toContain("secret-token-value-that-must-not-leak");
+    expect(serialized).not.toContain("postgres://alice:hunter2");
+    expect(serialized).not.toContain("ghs_secretvalue123456");
+    expect(serialized).not.toContain("secretvalue123456");
+    expect(serialized).not.toContain("AKIA" + "supersecretvalue123456");
+    expect(serialized).not.toContain("xoxb-legacytokenvalue123");
+    expect(serialized).not.toContain("glpat-legacytokenvalue123");
+    expect(serialized).not.toContain("123456");
+    expect(serialized).not.toContain('"token":true');
+    expect(exported.working).toContainEqual(
+      expect.objectContaining({
+        key: "temporary-operational",
+        value: "rotate release key",
+        expiresAt: "2026-07-16T06:00:00.000Z",
+      }),
+    );
+  });
+
+  it("redacts all agent export identifiers in safe mode", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const exported = await brain.exportProjectMemory({
+      readScope: "agent",
+      agentId: "alpha",
+      limit: 40,
+    });
+
+    expect(exported.scope).toEqual({
+      readScope: "agent",
+      agentId: "[redacted-agent-id]",
+    });
+    expect(exported.working).toContainEqual(expect.objectContaining({
+      key: "private-task",
+      agentId: "[redacted-agent-id]",
+      value: "private entry",
+    }));
+    const exportedText = JSON.stringify(exported);
+    expect(exportedText).not.toContain('"agentId":"alpha"');
+    expect(exportedText).not.toContain('"agentId":"beta"');
   });
 
   it("rejects agent read scope without an agent id before reading memory", async () => {

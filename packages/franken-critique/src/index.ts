@@ -42,6 +42,10 @@ export type {
   LessonFeedbackSignalSource,
   LessonFeedbackWeight,
   LessonFeedbackWeighting,
+  FailureRecordEvidencePointer,
+  FailureRecordMetadata,
+  FailureCluster,
+  FailureClusterReport,
   CrossTaskBlockerPattern,
   LearningBacklogPriority,
   LearningBacklogPrioritizationItem,
@@ -111,6 +115,7 @@ export {
 export type {
   BlockerPatternObservation,
   BlockerPatternState,
+  FailureClusterState,
   LessonRecorderOptions,
   LessonQuarantineRequest,
   LessonFailureSignal,

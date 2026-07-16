@@ -17,6 +17,7 @@ const DESTRUCTIVE_ACTIONS = new Set([
   'fbeast_memory_right_to_forget',
 ]);
 const MEMORY_REVIEW_PROPOSE_CONTEXT_REDACTION = '[memory-review-proposal-context-redacted]';
+const MEMORY_EXPORT_CONTEXT_REDACTION = '[memory-export-context-redacted]';
 
 const HIGH_RISK_ACTIONS: Readonly<Record<string, HighRiskActionClass>> = {
   fbeast_memory_store: 'memory',
@@ -57,6 +58,7 @@ export const NON_EXECUTING_TOOLS: ReadonlySet<string> = new Set([
   'fbeast_memory_review_propose',
   'fbeast_memory_query',
   'fbeast_memory_frontload',
+  'fbeast_memory_export',
   'fbeast_plan_decompose',
   'fbeast_plan_status',
   'fbeast_plan_validate',
@@ -259,10 +261,66 @@ function redactMemoryReviewDecisionGovernanceContext(action: string, context: st
   }
 }
 
+function sanitizeMemoryExportGovernanceArgs(args: Record<string, unknown>): Record<string, unknown> {
+  const safe: Record<string, unknown> = {};
+  if (typeof args['readScope'] === 'string' && ['all', 'shared', 'agent'].includes(args['readScope'])) {
+    safe['readScope'] = args['readScope'];
+  }
+  if (typeof args['redaction'] === 'string' && ['safe', 'none'].includes(args['redaction'])) {
+    safe['redaction'] = args['redaction'];
+  }
+  if (typeof args['limit'] === 'number') {
+    safe['limit'] = args['limit'];
+  }
+  if (typeof args['operatorApproval'] === 'string' && args['operatorApproval'] === 'trusted-operator-approved') {
+    safe['operatorApproval'] = args['operatorApproval'];
+  } else if (Object.prototype.hasOwnProperty.call(args, 'operatorApproval')) {
+    safe['operatorApproval'] = MEMORY_EXPORT_CONTEXT_REDACTION;
+  }
+  if (typeof args['projectId'] === 'string') {
+    safe['projectId'] = args['projectId'];
+  }
+  if (Object.prototype.hasOwnProperty.call(args, 'agentId')) {
+    safe['agentId'] = MEMORY_EXPORT_CONTEXT_REDACTION;
+  }
+  return safe;
+}
+
+function redactMemoryExportGovernanceContext(action: string, context: string): string {
+  const unqualified = unqualifyMcpActionName(action);
+  const directExport = unqualified === 'fbeast_memory_export';
+  const proxiedExport = unqualified === 'execute_tool' && contextTargetsTool(context, 'fbeast_memory_export');
+  if (!directExport && !proxiedExport) return context;
+  try {
+    const parsed = JSON.parse(context) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return MEMORY_EXPORT_CONTEXT_REDACTION;
+    const record = parsed as Record<string, unknown>;
+    if (proxiedExport) {
+      const directArgs = record['args'];
+      const toolInput = record['tool_input'];
+      const nestedArgs = toolInput !== null && typeof toolInput === 'object' && !Array.isArray(toolInput)
+        ? (toolInput as Record<string, unknown>)['args']
+        : undefined;
+      const args = directArgs !== null && typeof directArgs === 'object' && !Array.isArray(directArgs)
+        ? directArgs as Record<string, unknown>
+        : nestedArgs !== null && typeof nestedArgs === 'object' && !Array.isArray(nestedArgs)
+          ? nestedArgs as Record<string, unknown>
+          : undefined;
+      return JSON.stringify({ tool: 'fbeast_memory_export', args: args === undefined ? MEMORY_EXPORT_CONTEXT_REDACTION : sanitizeMemoryExportGovernanceArgs(args) });
+    }
+    return JSON.stringify(sanitizeMemoryExportGovernanceArgs(record));
+  } catch {
+    return MEMORY_EXPORT_CONTEXT_REDACTION;
+  }
+}
+
 function redactGovernanceContext(action: string, context: string): string {
-  return redactMemoryReviewDecisionGovernanceContext(
+  return redactMemoryExportGovernanceContext(
     action,
-    redactMemoryReviewProposalGovernanceContext(action, redactRightToForgetGovernanceContext(action, context)),
+    redactMemoryReviewDecisionGovernanceContext(
+      action,
+      redactMemoryReviewProposalGovernanceContext(action, redactRightToForgetGovernanceContext(action, context)),
+    ),
   );
 }
 
@@ -431,6 +489,35 @@ function assessHighRiskAction(action: string, context: string): GovernorCheckRes
   return { decision: 'review_recommended', reason: `High-risk policy requires approval for ${action}: ${result.reason}` };
 }
 
+function memoryExportArgsFromContext(action: string, context: string): Record<string, unknown> | undefined {
+  const unqualifiedAction = unqualifyMcpActionName(action);
+  const isDirectExport = unqualifiedAction === 'fbeast_memory_export';
+  const isProxiedExport = unqualifiedAction === 'execute_tool' && contextTargetsTool(context, 'fbeast_memory_export');
+  if (!isDirectExport && !isProxiedExport) return undefined;
+  try {
+    const parsed = JSON.parse(context) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const record = parsed as Record<string, unknown>;
+    if (isDirectExport) return record;
+    const directArgs = record['args'];
+    if (directArgs !== null && typeof directArgs === 'object' && !Array.isArray(directArgs)) {
+      return directArgs as Record<string, unknown>;
+    }
+    const toolInput = record['tool_input'];
+    if (toolInput === null || typeof toolInput !== 'object' || Array.isArray(toolInput)) return undefined;
+    const nestedArgs = (toolInput as Record<string, unknown>)['args'];
+    return nestedArgs !== null && typeof nestedArgs === 'object' && !Array.isArray(nestedArgs)
+      ? nestedArgs as Record<string, unknown>
+      : undefined;
+  } catch {
+    return /"redaction"\s*:\s*"none"/i.test(context) ? { redaction: 'none' } : undefined;
+  }
+}
+
+function isTrustedOperatorMemoryExport(action: string, context: string): boolean {
+  return memoryExportArgsFromContext(action, context)?.redaction === 'none';
+}
+
 function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; model: string }): boolean {
   if (row.cost_usd > 0 || row.cost_source === 'explicit') {
     return false;
@@ -445,6 +532,13 @@ function assessAction(action: string, context: string): GovernorCheckResult {
   const unqualifiedAction = unqualifyMcpActionName(action);
   const highRiskResult = assessHighRiskAction(unqualifiedAction, context);
   if (highRiskResult !== undefined) return highRiskResult;
+
+  if (isTrustedOperatorMemoryExport(unqualifiedAction, context)) {
+    return {
+      decision: 'review_recommended',
+      reason: 'Unredacted fbeast_memory_export requires a separate trusted-operator approval outside the caller-supplied tool arguments.',
+    };
+  }
 
   const isMemoryReviewDecision = unqualifiedAction === 'fbeast_memory_review_decide'
     || (unqualifiedAction === 'execute_tool'
