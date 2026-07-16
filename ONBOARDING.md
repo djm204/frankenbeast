@@ -70,6 +70,15 @@ Use this checklist for a first local checkout or when rebuilding a development e
 
   The generator prints deterministic Markdown by default, or JSON with `persona`, `root`, `items`, `docs`, and `nextAction` for PM/liveness tooling. It never mutates files or runs setup commands; it points each checklist item at the command and docs to run next. Valid personas are `operator`, `coding-agent`, and `contributor`; unknown personas fail closed with an explicit error instead of falling back to a misleading generic checklist.
 
+- [ ] Take the interactive workspace tour when you need a deterministic package map before choosing files:
+
+  ```bash
+  npm run workspace:tour
+  npm --silent run workspace:tour -- --json
+  ```
+
+  The tour prints package responsibilities, common ticket routing hints, key docs, generated-file locations, focused test commands, runtime state paths, and safe first commands. JSON mode exposes the same data for agent prompts and PM handoffs, while the docs-drift section reports missing expected package, doc, script, or test paths.
+
 ### Progress badges and status output
 
 The bootstrap script prints deterministic status badges as it advances through onboarding:
