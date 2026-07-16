@@ -217,6 +217,7 @@ export type MemoryAccessAuditOperation =
   | 'review.reject'
   | 'review.neverStore'
   | 'review.provenanceFor'
+  | 'review.conflictsFor'
   | 'privacy.rightToForget';
 
 export interface MemoryAccessAuditEvent {
@@ -1561,9 +1562,19 @@ class SqliteWorkingMemory implements IWorkingMemory {
     // leaves the previous state intact instead of a half-restored one.
     const entries = Object.entries(snap);
     if (entries.length > this.limits.maxEntries) {
-      throw new WorkingMemoryLimitError(
+      const error = new WorkingMemoryLimitError(
         `Snapshot has ${entries.length} entries, exceeding maxEntries (${this.limits.maxEntries})`,
       );
+      this.audit?.({
+        operation: 'working.restore',
+        store: 'working',
+        outcome: 'error',
+        details: {
+          count: entries.length,
+          errorName: error.name,
+        },
+      });
+      throw error;
     }
     let total = 0;
     const prepared: Array<[string, unknown, string, number]> = [];
@@ -1590,9 +1601,20 @@ class SqliteWorkingMemory implements IWorkingMemory {
       }
     }
     if (!Number.isSafeInteger(total) || total > this.limits.maxTotalBytes) {
-      throw new WorkingMemoryLimitError(
+      const error = new WorkingMemoryLimitError(
         `Snapshot is ${total} bytes, exceeding maxTotalBytes (${this.limits.maxTotalBytes})`,
       );
+      this.audit?.({
+        operation: 'working.restore',
+        store: 'working',
+        outcome: 'error',
+        details: {
+          count: entries.length,
+          totalBytes: total,
+          errorName: error.name,
+        },
+      });
+      throw error;
     }
 
     this.clear({ audit: false });
@@ -1817,59 +1839,73 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
   }
 
   recall(query: string, limit = 10): EpisodicEvent[] {
-    this.audit?.({
-      operation: 'episodic.recall',
-      store: 'episodic',
-      query,
-      outcome: 'success',
-      details: { limit },
-    });
-    if (this.encryption) {
-      return this.recallEncrypted(query, limit);
-    }
+    try {
+      let result: EpisodicEvent[];
+      if (this.encryption) {
+        result = this.recallEncrypted(query, limit);
+      } else {
+        const keywords = query
+          .toLowerCase()
+          .split(/\s+/)
+          .filter((w) => w.length > 2)
+          .filter((w) => !STOPWORDS.has(w));
 
-    const keywords = query
-      .toLowerCase()
-      .split(/\s+/)
-      .filter((w) => w.length > 2)
-      .filter((w) => !STOPWORDS.has(w));
-
-    if (keywords.length === 0) {
-      return this.recent(limit);
-    }
-
-    if (keywords.length <= MAX_RECALL_KEYWORDS_PER_QUERY) {
-      return collectRowsToEvents(
-        (batchLimit, offset) =>
-          this.recallKeywordChunk(keywords, batchLimit, offset),
-        limit,
-        this.encryption,
-      );
-    }
-
-    const rowsById = new Map<
-      number,
-      EpisodicRow & { relevance_score: number }
-    >();
-    for (const chunk of chunkArray(keywords, MAX_RECALL_KEYWORDS_PER_QUERY)) {
-      for (const row of this.recallKeywordChunk(chunk)) {
-        const existing = rowsById.get(row.id);
-        if (existing) {
-          existing.relevance_score += row.relevance_score;
+        if (keywords.length === 0) {
+          result = this.recent(limit);
+        } else if (keywords.length <= MAX_RECALL_KEYWORDS_PER_QUERY) {
+          result = collectRowsToEvents(
+            (batchLimit, offset) =>
+              this.recallKeywordChunk(keywords, batchLimit, offset),
+            limit,
+            this.encryption,
+          );
         } else {
-          rowsById.set(row.id, { ...row });
+          const rowsById = new Map<
+            number,
+            EpisodicRow & { relevance_score: number }
+          >();
+          for (const chunk of chunkArray(keywords, MAX_RECALL_KEYWORDS_PER_QUERY)) {
+            for (const row of this.recallKeywordChunk(chunk)) {
+              const existing = rowsById.get(row.id);
+              if (existing) {
+                existing.relevance_score += row.relevance_score;
+              } else {
+                rowsById.set(row.id, { ...row });
+              }
+            }
+          }
+
+          const sortedRows = [...rowsById.values()].sort(
+            (a, b) =>
+              b.relevance_score - a.relevance_score ||
+              b.created_at.localeCompare(a.created_at) ||
+              b.id - a.id,
+          );
+
+          result = rowsToEvents(sortedRows, limit, this.encryption);
         }
       }
+      this.audit?.({
+        operation: 'episodic.recall',
+        store: 'episodic',
+        query,
+        outcome: 'success',
+        details: { limit, count: result.length },
+      });
+      return result;
+    } catch (error) {
+      this.audit?.({
+        operation: 'episodic.recall',
+        store: 'episodic',
+        query,
+        outcome: 'error',
+        details: {
+          limit,
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
+      throw error;
     }
-
-    const sortedRows = [...rowsById.values()].sort(
-      (a, b) =>
-        b.relevance_score - a.relevance_score ||
-        b.created_at.localeCompare(a.created_at) ||
-        b.id - a.id,
-    );
-
-    return rowsToEvents(sortedRows, limit, this.encryption);
   }
 
   private recallEncrypted(query: string, limit = 10): EpisodicEvent[] {
@@ -2578,10 +2614,53 @@ export class SqliteMemoryReviewQueue {
   }
 
   conflictsFor(id: string): MemoryConflict[] {
-    if (id.startsWith('memcand_suppressed_')) return [];
-    const candidate = this.requireCandidate(id);
-    if (candidate.status !== 'pending') return [];
-    return this.detectConflicts(candidate);
+    if (id.startsWith('memcand_suppressed_')) {
+      this.audit?.({
+        operation: 'review.conflictsFor',
+        store: 'review',
+        outcome: 'miss',
+        details: { id, status: 'suppressed' },
+      });
+      return [];
+    }
+    try {
+      const candidate = this.requireCandidate(id);
+      if (candidate.status !== 'pending') {
+        this.audit?.({
+          operation: 'review.conflictsFor',
+          store: 'review',
+          key: candidate.key,
+          outcome: 'miss',
+          details: { id, status: candidate.status, targetStore: candidate.targetStore },
+        });
+        return [];
+      }
+      const conflicts = this.detectConflicts(candidate);
+      this.audit?.({
+        operation: 'review.conflictsFor',
+        store: 'review',
+        key: candidate.key,
+        outcome: conflicts.length > 0 ? 'success' : 'miss',
+        details: {
+          id,
+          status: candidate.status,
+          targetStore: candidate.targetStore,
+          count: conflicts.length,
+        },
+      });
+      return conflicts;
+    } catch (error) {
+      this.audit?.({
+        operation: 'review.conflictsFor',
+        store: 'review',
+        outcome: 'error',
+        details: {
+          id,
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
+      throw error;
+    }
   }
 
   resolveConflict(

@@ -260,4 +260,56 @@ describe('memory access audit trail', () => {
 
     brain.close();
   });
+
+  it('audits aggregate restore limit failures', () => {
+    const maxEntriesBrain = new SqliteBrain(':memory:', { maxEntries: 1 });
+    expect(() => maxEntriesBrain.working.restore({ one: 1, two: 2 })).toThrow(/maxEntries/);
+    expect(maxEntriesBrain.accessAudit.list({ operation: 'working.restore' })[0]).toMatchObject({
+      operation: 'working.restore',
+      outcome: 'error',
+    });
+    maxEntriesBrain.close();
+
+    const maxTotalBrain = new SqliteBrain(':memory:', { maxTotalBytes: 30 });
+    expect(() => maxTotalBrain.working.restore({ one: 'x'.repeat(20), two: 'y'.repeat(20) })).toThrow(/maxTotalBytes/);
+    expect(maxTotalBrain.accessAudit.list({ operation: 'working.restore' })[0]).toMatchObject({
+      operation: 'working.restore',
+      outcome: 'error',
+    });
+    maxTotalBrain.close();
+  });
+
+  it('audits review conflict inspections with hashed candidate keys', () => {
+    const brain = new SqliteBrain(':memory:');
+    brain.working.set('conflict.audit.target', 'existing');
+    const expectedHash = brain.accessAudit.list({ operation: 'working.set' })[0]?.keyHash;
+    const candidate = brain.memoryReview.propose({
+      targetStore: 'working',
+      key: 'conflict.audit.target',
+      value: 'new value',
+      source: 'operator',
+      confidence: 0.9,
+      reason: 'Candidate for conflict audit.',
+    });
+
+    expect(brain.memoryReview.conflictsFor(candidate.id)).toHaveLength(1);
+
+    const audit = brain.accessAudit.list({ operation: 'review.conflictsFor' });
+    expect(audit[0]).toMatchObject({ operation: 'review.conflictsFor', outcome: 'success' });
+    expect(audit[0]?.keyHash).toBe(expectedHash);
+
+    brain.close();
+  });
+
+  it('records recall failures as errors instead of successes', () => {
+    const brain = new SqliteBrain(':memory:');
+    brain.episodic.record({ type: 'task', summary: 'needle event', createdAt: new Date().toISOString() });
+
+    expect(() => brain.episodic.recall('needle', Infinity)).toThrow();
+
+    const audit = brain.accessAudit.list({ operation: 'episodic.recall' });
+    expect(audit[0]).toMatchObject({ operation: 'episodic.recall', outcome: 'error' });
+
+    brain.close();
+  });
 });
