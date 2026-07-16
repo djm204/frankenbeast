@@ -86,15 +86,19 @@ function nodeMeetsRange(version) {
     || (major >= 24 && major < 26);
 }
 
-function packageManagerNpmVersion(root) {
+function rootManifest(root) {
   try {
-    const manifest = JSON.parse(readFileSync(`${root}/package.json`, 'utf8'));
-    return typeof manifest.packageManager === 'string'
-      ? manifest.packageManager.match(/^npm@(\d+\.\d+\.\d+)$/u)?.[1]
-      : undefined;
+    return JSON.parse(readFileSync(`${root}/package.json`, 'utf8'));
   } catch {
     return undefined;
   }
+}
+
+function packageManagerNpmVersion(root) {
+  const manifest = rootManifest(root);
+  return typeof manifest?.packageManager === 'string'
+    ? manifest.packageManager.match(/^npm@(\d+\.\d+\.\d+)$/u)?.[1]
+    : undefined;
 }
 
 function commandVersion(command, args = ['--version']) {
@@ -130,7 +134,7 @@ function preflight(options) {
   const repoRoot = run('git', ['rev-parse', '--show-toplevel'], { cwd: options.root });
   if (!repoRoot.ok) {
     checks.push({ id: 'repository-root', status: 'fail', detail: 'not inside a git checkout', action: 'Clone djm204/frankenbeast and run this command from the repository root or issue worktree.' });
-  } else if (!existsSync(`${repoRoot.stdout}/package.json`) || packageManagerNpmVersion(repoRoot.stdout) === undefined) {
+  } else if (!existsSync(`${repoRoot.stdout}/package.json`) || rootManifest(repoRoot.stdout)?.name !== 'frankenbeast') {
     checks.push({ id: 'repository-root', status: 'fail', detail: `${repoRoot.stdout} is not the Frankenbeast repository root`, action: 'Run from the Frankenbeast repository root or an isolated issue worktree.' });
   } else {
     checks.push({ id: 'repository-root', status: 'ok', detail: repoRoot.stdout });
@@ -147,7 +151,7 @@ function preflight(options) {
   if (options.skipGithubAuth) {
     checks.push({ id: 'github-auth', status: 'warn', detail: 'skipped by --skip-github-auth', action: 'Run without --skip-github-auth before opening PRs or reading private issues.' });
   } else {
-    const auth = run('gh', ['auth', 'status'], { cwd: options.root });
+    const auth = run('gh', ['auth', 'status', '--hostname', 'github.com'], { cwd: options.root });
     checks.push(auth.ok
       ? { id: 'github-auth', status: 'ok', detail: 'gh auth status succeeded' }
       : { id: 'github-auth', status: 'fail', detail: 'gh auth status failed', action: `Run: gh auth login. ${auth.detail}` });

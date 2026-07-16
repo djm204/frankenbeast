@@ -56,10 +56,10 @@ Use this checklist for a first local checkout or when rebuilding a development e
 - [ ] New issue workers: before coding, run the environment preflight from the repository root or issue worktree:
 
   ```bash
-  npm run new-worker:preflight -- --json
+  npm --silent run new-worker:preflight -- --json
   ```
 
-  The command prints stable `[new-worker-preflight:<check>] ok|warn|fail - ...` badges by default, or a JSON object with `ok` and `checks` when `--json` is supplied. It verifies the supported Node.js/npm pin, required `git`/`gh`/`jq` commands, GitHub CLI authentication, the project git identity (`David Mendez <me@davidmendez.dev>`), repository root, and whether the current worktree already has uncommitted files. Use `--skip-github-auth` only for offline docs/tests; run without it before opening PRs.
+  The command prints stable `[new-worker-preflight:<check>] ok|warn|fail - ...` badges by default, or a JSON object with `ok` and `checks` when `--json` is supplied. Use `npm --silent` or `node scripts/new-worker-preflight.mjs --json` for machine-parsed JSON so npm lifecycle banners do not prefix stdout. It verifies the supported Node.js/npm pin, required `git`/`gh`/`jq` commands, GitHub CLI authentication for `github.com`, the project git identity (`David Mendez <me@davidmendez.dev>`), Frankenbeast repository root, and whether the current worktree already has uncommitted files. Use `--skip-github-auth` only for offline docs/tests; run without it before opening PRs.
 
 ### Progress badges and status output
 

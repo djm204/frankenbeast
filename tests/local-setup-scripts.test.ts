@@ -37,9 +37,9 @@ function makePreflightFixture(options: { includeJq?: boolean; npmVersion?: strin
   const bin = join(dir, 'bin');
   mkdirSync(root, { recursive: true });
   mkdirSync(bin, { recursive: true });
-  writeFileSync(join(root, 'package.json'), JSON.stringify({ packageManager: 'npm@11.5.1' }));
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'frankenbeast', packageManager: 'npm@11.5.1' }));
   writeExecutable(join(bin, 'npm'), `printf '%s\\n' '${options.npmVersion ?? '11.5.1'}'\n`);
-  writeExecutable(join(bin, 'gh'), `if [ \"$1\" = '--version' ]; then printf 'gh version 2.0.0\\n'; exit 0; fi\nif [ \"$1\" = 'auth' ] && [ \"$2\" = 'status' ]; then printf 'Logged in\\n'; exit 0; fi\nprintf 'unexpected gh args: %s %s\\n' \"$1\" \"$2\" >&2\nexit 1\n`);
+  writeExecutable(join(bin, 'gh'), `if [ \"$1\" = '--version' ]; then printf 'gh version 2.0.0\\n'; exit 0; fi\nif [ \"$1\" = 'auth' ] && [ \"$2\" = 'status' ] && [ \"$3\" = '--hostname' ] && [ \"$4\" = 'github.com' ]; then printf 'Logged in to github.com\\n'; exit 0; fi\nprintf 'unexpected gh args: %s %s %s %s\\n' \"$1\" \"$2\" \"$3\" \"$4\" >&2\nexit 1\n`);
   writeExecutable(join(bin, 'git'), `case \"$1\" in\n  --version) printf 'git version 2.53.0\\n' ;;\n  rev-parse) printf '%s\\n' '${root}' ;;\n  config) if [ \"$2\" = 'user.name' ]; then printf 'David Mendez\\n'; else printf 'me@davidmendez.dev\\n'; fi ;;\n  status) exit 0 ;;\n  *) printf 'unexpected git args: %s %s\\n' \"$1\" \"$2\" >&2; exit 1 ;;\nesac\n`);
   if (options.includeJq !== false) {
     writeExecutable(join(bin, 'jq'), `printf 'jq-1.8.1\\n'\n`);
@@ -210,10 +210,10 @@ describe('local setup scripts', () => {
     expect(manifest.scripts?.['new-worker:preflight']).toBe('node scripts/new-worker-preflight.mjs');
     expect(readme).toContain('npm run local:seed');
     expect(readme).toContain('npm run local:verify-setup');
-    expect(readme).toContain('npm run new-worker:preflight -- --json');
+    expect(readme).toContain('npm --silent run new-worker:preflight -- --json');
     expect(onboarding).toContain('npm run local:seed');
     expect(onboarding).toContain('npm run local:verify-setup');
-    expect(onboarding).toContain('npm run new-worker:preflight -- --json');
+    expect(onboarding).toContain('npm --silent run new-worker:preflight -- --json');
     expect(onboarding).toContain('[new-worker-preflight:<check>] ok|warn|fail');
     expect(seedScript).toContain('Usage: npm run local:seed');
     expect(verifyScript).toContain('Usage: npm run local:verify-setup');
@@ -256,6 +256,28 @@ describe('local setup scripts', () => {
         id: 'jq-command',
         status: 'fail',
         action: expect.stringContaining('Install jq'),
+      }));
+    } finally {
+      rmSync(fixture.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('new-worker preflight rejects npm-managed repositories that are not Frankenbeast', () => {
+    const fixture = makePreflightFixture();
+    try {
+      writeFileSync(join(fixture.root, 'package.json'), JSON.stringify({ name: 'not-frankenbeast', packageManager: 'npm@11.5.1' }));
+      const result = spawnSync(process.execPath, ['scripts/new-worker-preflight.mjs', '--json', '--root', fixture.root], {
+        cwd: ROOT,
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${fixture.bin}:${process.env.PATH ?? ''}` },
+      });
+      expect(result.status).toBe(1);
+      const report = JSON.parse(result.stdout) as { ok: boolean; checks: Array<{ id: string; status: string; detail: string }> };
+      expect(report.ok).toBe(false);
+      expect(report.checks).toContainEqual(expect.objectContaining({
+        id: 'repository-root',
+        status: 'fail',
+        detail: expect.stringContaining('is not the Frankenbeast repository root'),
       }));
     } finally {
       rmSync(fixture.dir, { recursive: true, force: true });
