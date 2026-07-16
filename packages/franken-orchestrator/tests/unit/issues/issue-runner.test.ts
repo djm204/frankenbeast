@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses } from '../../../src/issues/issue-runner.js';
+import { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses, detectWorkerHeartbeatMonotonicityAnomalies } from '../../../src/issues/issue-runner.js';
 import type { IssueBackpressureSignals, IssueBackpressureThresholds, IssueRunnerConfig } from '../../../src/issues/issue-runner.js';
 import type { GithubIssue, TriageResult } from '../../../src/issues/types.js';
 import type { PlanGraph, ICheckpointStore, ILogger, BeastLoopDeps } from '../../../src/deps.js';
@@ -294,6 +294,106 @@ function makeIssueRuntimeSupport(): IssueRuntimeSupport {
 
 
 describe('duplicate worker-card process detector', () => {
+  it('detects duplicate and regressive heartbeat writes with worker diagnostics', () => {
+    const findings = detectWorkerHeartbeatMonotonicityAnomalies([
+      {
+        cardId: 't_worker_1',
+        pid: 4201,
+        runId: 'run-10',
+        source: 'kanban-heartbeat-writer',
+        heartbeatSequence: 1,
+        lastHeartbeatAt: '2026-07-15T09:10:00.000Z',
+      },
+      {
+        cardId: 't_worker_1',
+        pid: 4201,
+        runId: 'run-10',
+        source: 'kanban-heartbeat-writer',
+        heartbeatSequence: 1,
+        lastHeartbeatAt: '2026-07-15T09:10:00.000Z',
+      },
+      {
+        cardId: 't_worker_1',
+        pid: 4201,
+        runId: 'run-10',
+        source: 'kanban-heartbeat-writer',
+        heartbeatSequence: 0,
+        lastHeartbeatAt: '2026-07-15T09:09:59.000Z',
+      },
+      {
+        cardId: 't_worker_1',
+        pid: 4201,
+        runId: 'run-10',
+        source: 'kanban-heartbeat-writer',
+        heartbeatSequence: 1,
+        lastHeartbeatAt: '2026-07-15T09:10:00.000Z',
+      },
+      {
+        cardId: 't_worker_1',
+        pid: 4202,
+        runId: 'run-12',
+        source: 'kanban-heartbeat-writer',
+        heartbeatSequence: 1,
+        lastHeartbeatAt: '2026-07-15T09:10:01.000Z',
+      },
+      {
+        cardId: 't_worker_2',
+        pid: 4300,
+        runId: 'run-11',
+        source: 'kanban-heartbeat-writer',
+        heartbeatSequence: 1,
+        lastHeartbeatAt: '2026-07-15T09:10:00.000Z',
+      },
+      {
+        cardId: 't_worker_2',
+        pid: 4300,
+        runId: 'run-11',
+        source: 'kanban-heartbeat-writer',
+        heartbeatSequence: 2,
+        lastHeartbeatAt: '2026-07-15T09:11:00.000Z',
+      },
+    ]);
+
+    expect(findings).toEqual([
+      {
+        cardId: 't_worker_1',
+        runId: 'run-10',
+        source: 'kanban-heartbeat-writer',
+        severity: 'warning',
+        code: 'duplicate-heartbeat',
+        priorSequence: 1,
+        newSequence: 1,
+        priorHeartbeatAt: '2026-07-15T09:10:00.000Z',
+        newHeartbeatAt: '2026-07-15T09:10:00.000Z',
+        message: 'Worker card t_worker_1 heartbeat did not advance: prior sequence 1 at 2026-07-15T09:10:00.000Z, new sequence 1 at 2026-07-15T09:10:00.000Z from kanban-heartbeat-writer',
+      },
+      {
+        cardId: 't_worker_1',
+        runId: 'run-10',
+        source: 'kanban-heartbeat-writer',
+        severity: 'warning',
+        code: 'regressive-heartbeat',
+        priorSequence: 1,
+        newSequence: 0,
+        priorHeartbeatAt: '2026-07-15T09:10:00.000Z',
+        newHeartbeatAt: '2026-07-15T09:09:59.000Z',
+        message: 'Worker card t_worker_1 heartbeat regressed: prior sequence 1 at 2026-07-15T09:10:00.000Z, new sequence 0 at 2026-07-15T09:09:59.000Z from kanban-heartbeat-writer',
+      },
+      {
+        cardId: 't_worker_1',
+        runId: 'run-10',
+        source: 'kanban-heartbeat-writer',
+        severity: 'warning',
+        code: 'duplicate-heartbeat',
+        priorSequence: 1,
+        newSequence: 1,
+        priorHeartbeatAt: '2026-07-15T09:10:00.000Z',
+        newHeartbeatAt: '2026-07-15T09:10:00.000Z',
+        message: 'Worker card t_worker_1 heartbeat did not advance: prior sequence 1 at 2026-07-15T09:10:00.000Z, new sequence 1 at 2026-07-15T09:10:00.000Z from kanban-heartbeat-writer',
+      },
+    ]);
+  });
+
   it('reports duplicate live process ownership for the same worker card with structured guidance', () => {
     const findings = detectDuplicateWorkerCardProcesses([
       {

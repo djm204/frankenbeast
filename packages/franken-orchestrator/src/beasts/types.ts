@@ -64,6 +64,7 @@ export interface BeastRun {
   readonly currentAttemptId?: string | undefined;
   readonly attemptCount: number;
   readonly lastHeartbeatAt?: string | undefined;
+  readonly lastHeartbeatSequence?: number | undefined;
   readonly stopReason?: string | undefined;
   readonly latestExitCode?: number | undefined;
 }
