@@ -1,6 +1,6 @@
 {
   "name": "@franken/brain",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "description": "MOD-03: Memory Systems for the Frankenbeast AI agent",
   "type": "module",
   "main": "dist/index.js",
