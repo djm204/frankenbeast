@@ -56,6 +56,8 @@ Use the text format for human status snippets:
 ```bash
 node scripts/synthetic-availability-probes.mjs --text \
   --repo djm204/frankenbeast \
+  --kanban-db "$HERMES_KANBAN_DB" \
   --provider-command "your-provider-health-command --json" \
-  --dashboard-url http://127.0.0.1:3737/health
+  --dashboard-url http://127.0.0.1:3737/health \
+  --approval-ledger .fbeast/approvals/ledger.json
 ```

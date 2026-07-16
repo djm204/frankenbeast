@@ -516,6 +516,91 @@ describe('synthetic availability probes', () => {
     expect(providerProbe?.error).toContain('http://%');
   });
 
+  it('redacts credential-bearing URL paths from probe output', async () => {
+    const { runSyntheticAvailabilityProbes } = await loadScript();
+    const report = await runSyntheticAvailabilityProbes({
+      config: {
+        repo: 'djm204/frankenbeast',
+        providerCommand: ['node', '--version'],
+        dashboardHealthUrl: 'https://hooks.slack.com/services/T000/B000/secret-webhook-token',
+        timeoutMs: 100,
+      },
+      execFile: vi.fn(async (file: string) => (file === 'gh' ? '[]' : 'provider ok')),
+      fetch: vi.fn(async () => ({ ok: true, status: 200 })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      readFile: vi.fn(async () => '{}'),
+    });
+
+    const dashboardProbe = (report.probes as Array<any>).find((probe) => probe.name === 'dashboard_health');
+    expect(dashboardProbe?.detail.url).toBe('https://hooks.slack.com/services/[REDACTED]');
+    expect(JSON.stringify(report)).not.toContain('secret-webhook-token');
+  });
+
+  it('redacts bare token literals and quoted structured secret values from provider errors', async () => {
+    const { runSyntheticAvailabilityProbes } = await loadScript();
+    const report = await runSyntheticAvailabilityProbes({
+      config: {
+        repo: 'djm204/frankenbeast',
+        providerCommand: 'provider status',
+        timeoutMs: 100,
+      },
+      execFile: vi.fn(async (file: string) => {
+        if (file === 'gh') return '[]';
+        throw new Error('provider failed: {"access_token":"sk-abcdefghijklmnop"} TOKEN="quoted value with spaces" xoxb-123456789-secret');
+      }),
+      fetch: vi.fn(async () => ({ ok: true, status: 200 })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      readFile: vi.fn(async () => '{}'),
+    });
+
+    const providerProbe = (report.probes as Array<any>).find((probe) => probe.name === 'provider_status');
+    expect(providerProbe?.error).toContain('[REDACTED]');
+    expect(providerProbe?.error).not.toContain('sk-abcdefghijklmnop');
+    expect(providerProbe?.error).not.toContain('quoted value with spaces');
+    expect(providerProbe?.error).not.toContain('xoxb-123456789-secret');
+  });
+
+  it('redacts private-key style command arguments from provider command reports', async () => {
+    const { runSyntheticAvailabilityProbes } = await loadScript();
+    const report = await runSyntheticAvailabilityProbes({
+      config: {
+        repo: 'djm204/frankenbeast',
+        providerCommand: ['provider', 'status', '--private-key', '-----BEGIN-PRIVATE-KEY-----', 'SIGNING_KEY=signing-secret'],
+        timeoutMs: 100,
+      },
+      execFile: vi.fn(async (file: string) => (file === 'gh' ? '[]' : 'provider ok')),
+      fetch: vi.fn(async () => ({ ok: true, status: 200 })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      readFile: vi.fn(async () => '{}'),
+    });
+
+    const providerProbe = (report.probes as Array<any>).find((probe) => probe.name === 'provider_status');
+    expect(providerProbe?.detail.command).toContain('--private-key [REDACTED]');
+    expect(providerProbe?.detail.command).toContain('SIGNING_KEY=[REDACTED]');
+    expect(providerProbe?.detail.command).not.toContain('BEGIN-PRIVATE-KEY');
+    expect(providerProbe?.detail.command).not.toContain('signing-secret');
+  });
+
+  it('marks an empty Kanban database unavailable instead of healthy', async () => {
+    const { runSyntheticAvailabilityProbes } = await loadScript();
+    const report = await runSyntheticAvailabilityProbes({
+      config: {
+        repo: 'djm204/frankenbeast',
+        kanbanDbPath: '/tmp/empty-kanban.db',
+        providerCommand: ['node', '--version'],
+        timeoutMs: 100,
+      },
+      execFile: vi.fn(async (file: string) => (file === 'gh' ? '[]' : 'provider ok')),
+      fetch: vi.fn(async () => ({ ok: true, status: 200 })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 0 }) }), close: vi.fn() })),
+      readFile: vi.fn(async () => '{}'),
+    });
+
+    const kanbanProbe = (report.probes as Array<any>).find((probe) => probe.name === 'kanban_read');
+    expect(kanbanProbe?.status).toBe('unavailable');
+    expect(kanbanProbe?.error).toContain('no tables');
+  });
+
   it('terminates timed-out provider commands before returning a report', () => {
     const result = spawnSync(process.execPath, [SCRIPT, '--json', '--repo', 'djm204/frankenbeast', '--provider-command', `node -e "process.on('SIGTERM',()=>{}); setInterval(()=>{},1000)"`, '--timeout-ms', '100'], {
       cwd: ROOT,

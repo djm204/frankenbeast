@@ -6,7 +6,12 @@ import { pathToFileURL } from 'node:url';
 
 const DEFAULT_TIMEOUT_MS = 5_000;
 const OUTPUT_LIMIT_BYTES = 1024 * 1024;
-const SECRET_ARG_PATTERN = /(?:token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)/iu;
+const SECRET_LABEL_SOURCE = String.raw`(?:token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential|private[-_]?key|signing[-_]?key)`;
+const SECRET_ARG_PATTERN = new RegExp(SECRET_LABEL_SOURCE, 'iu');
+const SECRET_ASSIGNMENT_PATTERN = new RegExp(String.raw`((?:["']?${SECRET_LABEL_SOURCE}[\w.-]*["']?\s*[=:]\s*))(["'])([^"']+)\2`, 'giu');
+const SECRET_UNQUOTED_ASSIGNMENT_PATTERN = new RegExp(String.raw`((?:${SECRET_LABEL_SOURCE})[\w.-]*\s*[=:]\s*)\S+`, 'giu');
+const SECRET_FLAG_VALUE_PATTERN = new RegExp(String.raw`((?:--?[\w-]*(?:${SECRET_LABEL_SOURCE})[\w-]*|(?:${SECRET_LABEL_SOURCE})[\w.-]*)\s+)\S+`, 'giu');
+const TOKEN_LITERAL_PATTERN = /\b(?:sk-[A-Za-z0-9_-]{8,}|xox[abprs]-[A-Za-z0-9-]{8,}|ghp_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{8,}|AKIA[0-9A-Z]{12,})\b/gu;
 const BASIC_AUTH_FLAGS = new Set(['-u', '-U', '--user', '--proxy-user']);
 function parseCommandLine(value) {
   if (!value) return undefined;
@@ -198,8 +203,19 @@ function redactText(value) {
     .replace(/Bearer\s+\S+/giu, 'Bearer [REDACTED]')
     .replace(/Basic\s+\S+/giu, 'Basic [REDACTED]')
     .replace(/[a-z][a-z0-9+.-]*:\/\/[^\s'"<>]+/giu, (match) => redactUrl(match))
-    .replace(/((?:token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)[\w.-]*\s*[=:]\s*)\S+/giu, '$1[REDACTED]')
-    .replace(/((?:--?[\w-]*(?:token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)[\w-]*|(?:token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)[\w.-]*)\s+)\S+/giu, '$1[REDACTED]');
+    .replace(SECRET_ASSIGNMENT_PATTERN, '$1$2[REDACTED]$2')
+    .replace(SECRET_UNQUOTED_ASSIGNMENT_PATTERN, '$1[REDACTED]')
+    .replace(SECRET_FLAG_VALUE_PATTERN, '$1[REDACTED]')
+    .replace(TOKEN_LITERAL_PATTERN, '[REDACTED]');
+}
+
+function redactPathSegment(segment, url) {
+  if (/^bot[^/]{8,}$/iu.test(segment)) return 'bot[REDACTED]';
+  TOKEN_LITERAL_PATTERN.lastIndex = 0;
+  if (TOKEN_LITERAL_PATTERN.test(segment)) return '[REDACTED]';
+  TOKEN_LITERAL_PATTERN.lastIndex = 0;
+  if (/hooks\.slack\.com$/iu.test(url.hostname) && url.pathname.startsWith('/services/')) return '[REDACTED]';
+  return segment;
 }
 
 function redactUrl(value) {
@@ -209,18 +225,31 @@ function redactUrl(value) {
     url.password = '';
     url.search = '';
     url.hash = '';
+    if (/hooks\.slack\.com$/iu.test(url.hostname) && url.pathname.startsWith('/services/')) {
+      url.pathname = '/services/[REDACTED]';
+    } else {
+      url.pathname = url.pathname
+        .split('/')
+        .map((segment) => redactPathSegment(segment, url))
+        .join('/');
+    }
     return url.toString();
   } catch {
     return String(value);
   }
 }
+function isSecretArgumentLabel(value) {
+  const text = String(value ?? '');
+  return /^Bearer$/iu.test(text) || (!/^-----BEGIN-/u.test(text) && SECRET_ARG_PATTERN.test(text) && (/^--?[A-Za-z]/u.test(text) || /^[\w.-]+$/u.test(text)));
+}
+
 function redactCommand(command) {
   return command.map((part, index) => {
     const previous = command[index - 1] ?? '';
     const basicAuthAssignment = part.match(/^(--(?:proxy-)?user=).+/iu);
     if (basicAuthAssignment) return `${basicAuthAssignment[1]}[REDACTED]`;
-    if (BASIC_AUTH_FLAGS.has(previous)) return '[REDACTED]';
-    if (part.startsWith('Bearer ') || /^Bearer$/iu.test(previous) || SECRET_ARG_PATTERN.test(previous)) return '[REDACTED]';
+    if (BASIC_AUTH_FLAGS.has(previous) || isSecretArgumentLabel(previous)) return '[REDACTED]';
+    if (part.startsWith('Bearer ')) return '[REDACTED]';
     const redactedUrl = redactUrl(part);
     if (redactedUrl !== part) return redactedUrl;
     if (SECRET_ARG_PATTERN.test(part)) {
@@ -266,7 +295,9 @@ async function probeKanbanRead(config, deps) {
   const db = await deps.openSqliteReadOnly(config.kanbanDbPath);
   try {
     const tableRow = db.prepare("SELECT count(*) AS count FROM sqlite_master WHERE type = 'table'").get();
-    return { path: config.kanbanDbPath, tables: Number(tableRow?.count ?? 0) };
+    const tables = Number(tableRow?.count ?? 0);
+    if (tables <= 0) throw new Error('kanban db contains no tables');
+    return { path: config.kanbanDbPath, tables };
   } finally {
     db.close?.();
   }
