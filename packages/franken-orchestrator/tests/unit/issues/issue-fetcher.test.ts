@@ -149,18 +149,39 @@ describe('IssueFetcher', () => {
       );
       const execFn = vi.fn<ExecFn>()
         .mockImplementationOnce(makeFailingExecFn('advanced issue search is not supported on this GitHub host'))
-        .mockImplementationOnce(makeExecFn(makeIssues([2])))
-        .mockImplementationOnce(makeExecFn(makeIssues([1])));
+        .mockImplementationOnce(makeExecFn(makeIssues([2, 1])));
       const fetcher = new IssueFetcher(execFn);
 
       const issues = await fetcher.fetch({});
 
       expect(issues.map((issue) => issue.number)).toEqual([1, 2]);
-      expect(execFn).toHaveBeenCalledTimes(3);
-      const searches = execFn.mock.calls.map(([, args]) => args[args.indexOf('--search') + 1]);
-      expect(searches[0]).toContain('label:critical');
-      expect(searches[1]).toBe('sort:created-desc');
-      expect(searches[2]).toBe('sort:created-asc');
+      expect(execFn).toHaveBeenCalledTimes(2);
+      const firstSearchIndex = execFn.mock.calls[0]![1].indexOf('--search');
+      expect(execFn.mock.calls[0]![1][firstSearchIndex + 1]).toContain('label:critical');
+      expect(execFn.mock.calls[1]![1]).not.toContain('--search');
+    });
+
+    it('keeps medium-priority issues ahead of unlabeled issues before truncation', async () => {
+      const makeIssues = (numbers: readonly number[], labels: readonly string[] = []) => JSON.stringify(
+        numbers.map((number) => ({
+          number,
+          title: `Issue ${number}`,
+          body: 'body',
+          labels: labels.map((name) => ({ name })),
+          state: 'OPEN',
+          url: `https://github.com/org/repo/issues/${number}`,
+        })),
+      );
+      const execFn = vi.fn<ExecFn>()
+        .mockImplementationOnce(makeExecFn(makeIssues([])))
+        .mockImplementationOnce(makeExecFn(makeIssues([])))
+        .mockImplementationOnce(makeExecFn(makeIssues(Array.from({ length: 200 }, (_, index) => 100 + index))))
+        .mockImplementationOnce(makeExecFn(makeIssues([9999], ['priority:p2'])));
+      const fetcher = new IssueFetcher(execFn);
+
+      const issues = await fetcher.fetch({});
+
+      expect(issues[0]!.number).toBe(9999);
     });
 
     it('caps the merged default supplemental windows at the advertised default limit', async () => {
@@ -186,6 +207,24 @@ describe('IssueFetcher', () => {
       expect(issues).toHaveLength(1000);
       expect(issues[0]!.number).toBe(1);
       expect(issues.at(-1)!.number).toBe(1000);
+    });
+
+    it('parses heavily labeled default-sized payloads', async () => {
+      const output = JSON.stringify(Array.from({ length: 1000 }, (_, index) => ({
+        number: index + 1,
+        title: `Issue ${index + 1}`,
+        body: 'body',
+        labels: Array.from({ length: 20 }, (__, labelIndex) => ({ name: `label-${labelIndex}` })),
+        state: 'OPEN',
+        url: `https://github.com/org/repo/issues/${index + 1}`,
+      })));
+      const execFn = vi.fn(makeExecFn(output));
+      const fetcher = new IssueFetcher(execFn);
+
+      const issues = await fetcher.fetch({ limit: 1000 });
+
+      expect(issues).toHaveLength(1000);
+      expect(issues[0]!.labels).toHaveLength(20);
     });
 
     it('uses custom --limit when provided', async () => {

@@ -21,6 +21,14 @@ const ISSUE_FETCH_PRIORITY_RANKS: Readonly<Record<string, number>> = {
   'priority:p1': 1,
   'priority:high': 1,
   high: 1,
+  p2: 2,
+  'priority:p2': 2,
+  'priority:medium': 2,
+  medium: 2,
+  p3: 3,
+  'priority:p3': 3,
+  'priority:low': 3,
+  low: 3,
 };
 const DEFAULT_ISSUE_FETCH_PRIORITY_RANK = 99;
 
@@ -76,10 +84,7 @@ export class IssueFetcher implements IIssueFetcher {
         throw err;
       }
       return this.mergeIssuePages(
-        [
-          await this.fetchIssuePage(options, 'sort:created-desc', DEFAULT_ISSUE_FETCH_RECENT_LIMIT),
-          await this.fetchIssuePage(options, 'sort:created-asc', DEFAULT_ISSUE_FETCH_LIMIT),
-        ],
+        [await this.fetchIssuePage(options, undefined, DEFAULT_ISSUE_FETCH_LIMIT)],
         DEFAULT_ISSUE_FETCH_LIMIT,
       );
     }
@@ -126,7 +131,7 @@ export class IssueFetcher implements IIssueFetcher {
       context: 'GitHub issue list payload',
       maxBytes: maxPayloadBytes,
       maxDepth: 48,
-      maxContainers: 20_000,
+      maxContainers: Math.max(limit * 64, 20_000),
       maxObjectKeys: 100_000,
       maxArrayItems: Math.max(limit * 64, 2_000),
     }) as RawGithubIssue[];
