@@ -1115,9 +1115,7 @@ export class LessonRecorder {
     }
     if (
       !cluster.observations.some(
-        (observation) =>
-          observation.taskFamily === record.taskFamily &&
-          observation.evidencePointer.id === record.evidencePointer.id,
+        (observation) => observation.taskId === record.taskId,
       )
     ) {
       cluster.observations.push(record);
@@ -1661,6 +1659,9 @@ function createFailureRecordMetadata(options: {
   readonly resolution: string;
   readonly evidenceId: string;
 }): FailureRecordMetadata {
+  const primaryText = options.findings
+    .map((finding) => `${finding.message} ${finding.location ?? ''}`)
+    .join('\n');
   const joinedText = options.findings
     .map(
       (finding) =>
@@ -1672,7 +1673,7 @@ function createFailureRecordMetadata(options: {
   const packageName = inferPackageName(joinedText);
   const toolName = inferToolName(options.evaluatorName, joinedText);
   const errorClass = inferErrorClass(options.findings, joinedText);
-  const rootCause = inferRootCause(joinedText);
+  const rootCause = inferRootCause(primaryText);
   const clusterKey = createFailureClusterKey({
     taskFamily,
     ...(packageName ? { packageName } : {}),
@@ -1683,6 +1684,7 @@ function createFailureRecordMetadata(options: {
 
   return {
     schemaVersion: 'failure-record-v1',
+    taskId: options.taskId,
     taskFamily,
     ...(packageName ? { packageName } : {}),
     ...(toolName ? { toolName } : {}),
@@ -1731,7 +1733,8 @@ function inferTaskFamily(taskId: TaskId, text: string): string {
 }
 
 function inferPackageName(text: string): string | undefined {
-  const workspaceMatch = /\b@franken(?:beast)?\/[a-z0-9-]+\b/i.exec(text)?.[0];
+  const workspaceMatch =
+    /(?:^|[\s([{"'`])(@franken(?:beast)?\/[a-z0-9-]+)\b/i.exec(text)?.[1];
   if (workspaceMatch) {
     return workspaceMatch.toLowerCase();
   }
@@ -1791,7 +1794,12 @@ function inferErrorClass(
 
 function hasTestFailureContext(text: string): boolean {
   const explicitTestFailure =
-    /\b(?:failed test|tests? failed|vitest failed|test runner|runner output)\b/.test(
+    /\b(?:failed test|tests? failed|vitest failed)\b/.test(text);
+  const failedRunnerOutput =
+    /\b(?:failed|failing|broken)\b[\s\S]{0,80}\b(?:test runner|runner output)\b/.test(
+      text,
+    ) ||
+    /\b(?:test runner|runner output)\b[\s\S]{0,80}\b(?:failed|failing|broken)\b/.test(
       text,
     );
   const assertionWords = /\b(?:assertion|expected|received)\b/.test(text);
@@ -1799,7 +1807,11 @@ function hasTestFailureContext(text: string): boolean {
     /\b(?:vitest|jest|mocha|pytest|test\/|tests\/|\.test\.[cm]?[jt]sx?|\.spec\.[cm]?[jt]sx?)\b/.test(
       text,
     );
-  return explicitTestFailure || (assertionWords && testLocationOrRunner);
+  return (
+    explicitTestFailure ||
+    failedRunnerOutput ||
+    (assertionWords && testLocationOrRunner)
+  );
 }
 
 function inferRootCause(text: string): string {
@@ -1809,14 +1821,14 @@ function inferRootCause(text: string): string {
       'verification-evidence',
       /\b(?:verification|evidence|handoff|test command|test result)\b/,
     ],
-    [
-      'missing-required-contract',
-      /\b(?:missing|absent|required|omitted|not included)\b/,
-    ],
     ['type-safety', /\b(?:type|typescript|tsc|declaration|schema)\b/],
     [
       'authentication-or-secret',
       /\b(?:auth|token|credential|secret|permission)\b/,
+    ],
+    [
+      'missing-required-contract',
+      /\b(?:missing|absent|required|omitted|not included)\b/,
     ],
     [
       'timeout-or-liveness',

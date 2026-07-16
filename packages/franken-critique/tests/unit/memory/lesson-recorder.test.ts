@@ -2538,6 +2538,49 @@ describe('LessonRecorder', () => {
     );
   });
 
+  it('does not count same-task cooldown suppressions as recurrent failure clusters', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 60_000,
+      now: (): Date => new Date('2026-07-12T10:00:00.000Z'),
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning-reviewer', [
+          {
+            message:
+              'Vitest failed for packages/franken-critique because verification evidence was omitted',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'fail', 'learning-reviewer', [
+          {
+            message:
+              'Vitest failed for packages/franken-critique because verification evidence was omitted',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(2, 'pass'),
+      ],
+    };
+
+    const summary = await recorder.record(result, 'frontend-auth-101');
+
+    expect(summary.suppressedByCooldown).toHaveLength(1);
+    expect(summary.failureClusterReport.clusters).toEqual([
+      expect.objectContaining({
+        taskFamily: 'frontend auth',
+        occurrences: 1,
+      }),
+    ]);
+    expect(summary.learningBacklogPrioritizationReport.items).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ source: 'failure-cluster' }),
+      ]),
+    );
+  });
+
   it('does not infer arbitrary family prose as an explicit task family', async () => {
     const port = createMockMemoryPort();
     const recorder = new LessonRecorder(port);
@@ -2574,7 +2617,7 @@ describe('LessonRecorder', () => {
         createIteration(0, 'fail', 'handoff-reviewer', [
           {
             message:
-              'PM handoff omitted the required test command for packages/franken-critique',
+              'PM handoff omitted the required test runner output for packages/franken-critique',
             severity: 'critical',
           },
         ]),
@@ -2593,6 +2636,61 @@ describe('LessonRecorder', () => {
       rootCause: 'verification-evidence',
     });
     expect(recordedLesson.failureRecord?.toolName).toBeUndefined();
+  });
+
+  it('detects scoped package names in failure cluster metadata', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'schema-reviewer', [
+          {
+            message:
+              '@franken/critique omitted required exported type metadata in the public API',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'frontend-auth-204');
+
+    const recordedLesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(recordedLesson.failureRecord).toMatchObject({
+      packageName: '@franken/critique',
+    });
+  });
+
+  it('infers root cause from findings before generic suggestions', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'type-reviewer', [
+          {
+            message:
+              'TypeScript declaration for packages/franken-critique omitted a required exported contract',
+            severity: 'critical',
+            suggestion:
+              'Attach verification evidence to the PM handoff after fixing the export.',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'frontend-auth-205');
+
+    const recordedLesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(recordedLesson.failureRecord).toMatchObject({
+      errorClass: 'critical:typecheck',
+      rootCause: 'type-safety',
+    });
   });
 
   it('requires test context before classifying expected/received prose as a test failure', async () => {

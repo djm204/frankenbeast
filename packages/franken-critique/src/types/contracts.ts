@@ -329,6 +329,7 @@ export interface FailureRecordEvidencePointer {
 /** Structured, transcript-free metadata for one recovered failure. */
 export interface FailureRecordMetadata {
   readonly schemaVersion: 'failure-record-v1';
+  readonly taskId: TaskId;
   readonly taskFamily: string;
   readonly packageName?: string;
   readonly toolName?: string;
