@@ -98,6 +98,30 @@ function parseStringArg(name: string, value: unknown): { ok: true; value: string
   return { ok: true, value };
 }
 
+const SENSITIVE_MEMORY_KEY_PATTERNS = [
+  /(^|[._:-])(api[-_]?key|apikey)([._:-]|$)/i,
+  /(^|[._:-])(access[-_]?token|refresh[-_]?token|auth[-_]?token|bearer[-_]?token)([._:-]|$)/i,
+  /(^|[._:-])(password|passphrase|secret|credential|credentials)([._:-]|$)/i,
+  /(^|[._:-])private[-_]?key([._:-]|$)/i,
+];
+
+const SENSITIVE_MEMORY_VALUE_PATTERNS = [
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+  /\b(?:sk|gho|ghp|glpat|xox[baprs])-[A-Za-z0-9_\-]{12,}\b/,
+  /\b(?:Bearer|token)\s+[A-Za-z0-9._~+/=-]{20,}\b/i,
+];
+
+function sensitiveMemoryQuarantineReason(key: string, value: string): string | undefined {
+  const normalizedKey = key.trim();
+  if (SENSITIVE_MEMORY_KEY_PATTERNS.some((pattern) => pattern.test(normalizedKey))) {
+    return 'key-name-indicates-secret';
+  }
+  if (SENSITIVE_MEMORY_VALUE_PATTERNS.some((pattern) => pattern.test(value))) {
+    return 'value-shape-indicates-secret';
+  }
+  return undefined;
+}
+
 function parseMemoryReviewConfidence(value: unknown): { ok: true; value: number } | { ok: false; message: string } {
   if (typeof value !== 'string' && typeof value !== 'number') {
     return { ok: false, message: 'confidence must be a number between 0 and 1' };
@@ -169,6 +193,41 @@ const TOOLS: ToolFull[] = [
       if (ttlMs !== undefined && type !== 'working') {
         return { content: [{ type: 'text', text: 'Error: fbeast_memory_store ttlMs is only supported for working memory entries' }], isError: true };
       }
+      const quarantineReason = sensitiveMemoryQuarantineReason(key, value);
+      if (quarantineReason) {
+        if (type !== 'working') {
+          return { content: [{ type: 'text', text: 'Error: fbeast_memory_store sensitive episodic memory must be reviewed and cannot be stored directly' }], isError: true };
+        }
+        if (ttlMs !== undefined) {
+          return { content: [{ type: 'text', text: 'Error: fbeast_memory_store sensitive temporary memory must be reviewed and cannot be stored with ttlMs' }], isError: true };
+        }
+        const candidate = await brain.proposeMemory({
+          key,
+          value,
+          source: 'fbeast_memory_store:quarantine',
+          evidenceId: `quarantine:${key}`,
+          confidence: 1,
+          reason: `Sensitive memory quarantined for operator review (${quarantineReason}). Approve through fbeast_memory_review_decide to persist, reject to discard, or never_store to suppress reinference.`,
+          ...(agentId.value ? { agentId: agentId.value } : {}),
+        });
+        const isPending = candidate.status === 'pending';
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              status: isPending ? 'quarantined' : candidate.status,
+              id: candidate.id,
+              key,
+              ...(agentId.value ? { agentId: agentId.value } : {}),
+              reason: quarantineReason,
+              ...(candidate.suppressionReason ? { suppressionReason: candidate.suppressionReason } : {}),
+              ...(isPending ? { reviewAction: 'Use fbeast_memory_review_decide with approve, reject, or never_store.' } : {}),
+              stored: false,
+            }, null, 2),
+          }],
+        };
+      }
+
       await brain.store({
         key,
         value,
