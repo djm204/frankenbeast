@@ -193,14 +193,17 @@ describe('extractPostTaskLessonCandidates', () => {
       verificationSteps: ['Ran npm test'],
     });
 
-    expect(report.candidates).toHaveLength(1);
+    expect(report.candidates).toHaveLength(2);
     expect(report.candidates[0]).toEqual(
       expect.objectContaining({
         suggestedDestination: 'skill',
-        evidence: expect.arrayContaining([
-          expect.objectContaining({ kind: 'tool-failure' }),
-          expect.objectContaining({ kind: 'verification' }),
-        ]),
+        evidence: [expect.objectContaining({ kind: 'tool-failure' })],
+      }),
+    );
+    expect(report.candidates[1]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        evidence: [expect.objectContaining({ kind: 'verification' })],
       }),
     );
   });

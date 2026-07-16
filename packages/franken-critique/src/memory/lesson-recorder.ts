@@ -1032,15 +1032,13 @@ export function extractPostTaskLessonCandidates(
       : rawTaskId
   ) as TaskId;
   const generatedAt = normalizeTimestamp(input.completedAt);
-  const verificationEvidence = createPostTaskVerificationEvidence(
-    input.verificationSteps ?? [],
-  );
   const candidates: PostTaskLessonCandidate[] = [];
 
   const addCandidate = (
     kind: PostTaskLessonEvidenceKind,
     text: string,
     reference?: string,
+    options: { readonly forceDiscard?: boolean } = {},
   ): void => {
     const normalizedText = text.trim().replace(/\s+/g, ' ');
     if (!normalizedText) return;
@@ -1052,12 +1050,14 @@ export function extractPostTaskLessonCandidates(
       normalizedText,
       privacyDecision.redactions,
     );
-    const category = privacyDecision.category;
-    const suggestedDestination = choosePostTaskLessonDestination(
-      category,
-      kind,
-      sanitizedText,
-    );
+    const category = options.forceDiscard ? 'task-state' : privacyDecision.category;
+    const suggestedDestination = options.forceDiscard
+      ? 'discard'
+      : choosePostTaskLessonDestination(
+          category,
+          kind,
+          sanitizedText,
+        );
     const discarded = suggestedDestination === 'discard';
     const evidence: PostTaskLessonEvidence[] = [
       {
@@ -1065,7 +1065,6 @@ export function extractPostTaskLessonCandidates(
         summary: summarizePostTaskEvidence(kind, sanitizedText),
         ...(reference ? { reference } : {}),
       },
-      ...(!discarded ? verificationEvidence : []),
     ];
     candidates.push({
       id: `post-task-lesson:${stableHash(`${taskId}\n${kind}\n${sanitizedText}`)}`,
@@ -1092,11 +1091,20 @@ export function extractPostTaskLessonCandidates(
   for (const failure of input.toolFailures ?? []) {
     addCandidate('tool-failure', failure);
   }
+  for (const verificationStep of input.verificationSteps ?? []) {
+    addCandidate('verification', verificationStep, undefined, {
+      forceDiscard: !hasExplicitPostTaskLessonSignal(verificationStep),
+    });
+  }
   if (input.summary) {
-    addCandidate('completion-summary', input.summary);
+    addCandidate('completion-summary', input.summary, undefined, {
+      forceDiscard: !hasExplicitPostTaskLessonSignal(input.summary),
+    });
   }
   for (const note of input.notes ?? []) {
-    addCandidate('task-note', note);
+    addCandidate('task-note', note, undefined, {
+      forceDiscard: !hasExplicitPostTaskLessonSignal(note),
+    });
   }
 
   return {
@@ -1126,27 +1134,10 @@ function choosePostTaskLessonDestination(
   return 'memory';
 }
 
-function createPostTaskVerificationEvidence(
-  verificationSteps: readonly string[],
-): PostTaskLessonEvidence[] {
-  return verificationSteps.flatMap((step) => {
-    const normalizedStep = step.trim().replace(/\s+/g, ' ');
-    if (!normalizedStep) return [];
-    const decision = createPrivacyDecision(normalizedStep, {
-      flagCustomerData: true,
-    });
-    if (decision.action === 'reject') return [];
-    const sanitizedStep = redactSensitiveText(
-      normalizedStep,
-      decision.redactions,
-    );
-    return [
-      {
-        kind: 'verification',
-        summary: summarizePostTaskEvidence('verification', sanitizedStep),
-      },
-    ];
-  });
+function hasExplicitPostTaskLessonSignal(text: string): boolean {
+  return /\b(?:always|avoid|prefer|require|must|should|when|before|after|retry|redact|validate|verify)\b/i.test(
+    text,
+  );
 }
 
 function summarizePostTaskEvidence(
