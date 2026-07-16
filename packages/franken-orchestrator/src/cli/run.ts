@@ -890,8 +890,7 @@ function isMaintenanceModeState(value: unknown): value is MaintenanceModeState {
 
 async function fetchBeastsDaemonMaintenanceMode(baseUrl: string, operatorToken: string): Promise<MaintenanceModeState> {
   try {
-    const guardedFetch = createEgressGuardedFetch({ lane: 'test' });
-    const response = await guardedFetch(`${baseUrl}/v1/beasts/maintenance`, {
+    const response = await fetch(`${baseUrl}/v1/beasts/maintenance`, {
       headers: { Authorization: `Bearer ${operatorToken}` },
       signal: AbortSignal.timeout(1000),
     });

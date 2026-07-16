@@ -169,6 +169,13 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       });
     } catch (error) {
       if (error instanceof MaintenanceModeError) {
+        deps.agents.updateAgent(agent.id, { status: 'stopped' });
+        deps.agents.appendEvent(agent.id, {
+          level: 'warning',
+          type: 'agent.dispatch.paused',
+          message: error.message,
+          payload: { maintenance: error.state },
+        });
         return c.json({
           error: {
             code: 'MAINTENANCE_MODE_ACTIVE',

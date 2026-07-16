@@ -134,13 +134,26 @@ export class BeastDaemonDispatchAdapter {
       };
     }
 
-    const run = await this.createRun({
-      definitionId,
-      config: progress.config,
-      sessionId,
-      ...(context.agentId ? { trackedAgentId: context.agentId } : {}),
-      ...(context.executionMode ? { executionMode: context.executionMode } : {}),
-    });
+    let run;
+    try {
+      run = await this.createRun({
+        definitionId,
+        config: progress.config,
+        sessionId,
+        ...(context.agentId ? { trackedAgentId: context.agentId } : {}),
+        ...(context.executionMode ? { executionMode: context.executionMode } : {}),
+      });
+    } catch (error) {
+      if (error instanceof BeastDaemonRequestError && error.status === 423 && error.code === 'MAINTENANCE_MODE_ACTIVE') {
+        return {
+          kind: 'dispatch',
+          definitionId,
+          assistantMessage: formatMaintenanceDaemonMessage(error),
+          beastContext: context,
+        };
+      }
+      throw error;
+    }
 
     return {
       kind: 'dispatch',
@@ -278,6 +291,23 @@ export class BeastDaemonDispatchAdapter {
     }
     return `${label} interview: ${prompt} Options: ${options.join(', ')}`;
   }
+}
+
+function formatMaintenanceDaemonMessage(error: BeastDaemonRequestError): string {
+  const maintenance = error.details && typeof error.details === 'object'
+    ? (error.details as Record<string, unknown>).maintenance
+    : undefined;
+  const state = maintenance && typeof maintenance === 'object'
+    ? maintenance as Record<string, unknown>
+    : undefined;
+  const reason = typeof state?.reason === 'string' && state.reason.trim().length > 0
+    ? ` Reason: ${state.reason}`
+    : '';
+  const allowedCommands = Array.isArray(state?.allowedCommands)
+    ? state.allowedCommands.filter((command): command is string => typeof command === 'string')
+    : [];
+  const allowed = allowedCommands.length > 0 ? ` Allowed commands: ${allowedCommands.join(', ')}.` : '';
+  return `Maintenance mode is active; new Beast dispatch is paused.${reason}${allowed}`;
 }
 
 export type BeastDispatchPort = {

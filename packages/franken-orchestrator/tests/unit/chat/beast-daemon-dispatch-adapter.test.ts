@@ -110,6 +110,67 @@ describe('BeastDaemonDispatchAdapter', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('returns maintenance guidance when daemon dispatch is paused', async () => {
+    const context = {
+      agentId: 'agent-1',
+      definitionId: 'martin-loop',
+      interviewSessionId: 'interview-1',
+      status: 'interviewing' as const,
+    };
+    const fetchMock = vi.fn(async (url: URL | RequestInfo) => {
+      const target = url.toString();
+      if (target.endsWith('/v1/beasts/catalog')) {
+        return Response.json({ data: definitions });
+      }
+      if (target.endsWith('/v1/beasts/interviews/interview-1/answer')) {
+        return Response.json({
+          data: {
+            complete: true,
+            config: { objective: 'Ship it' },
+            session: { id: 'interview-1', definitionId: 'martin-loop' },
+          },
+        });
+      }
+      if (target.endsWith('/v1/beasts/runs')) {
+        return Response.json({
+          error: {
+            code: 'MAINTENANCE_MODE_ACTIVE',
+            message: 'Maintenance mode is active; new Beast dispatch is paused. Reason: deploy',
+            details: {
+              maintenance: {
+                enabled: true,
+                reason: 'deploy',
+                allowedCommands: ['beasts list', 'beasts maintenance off'],
+              },
+            },
+          },
+        }, { status: 423, statusText: 'Locked' });
+      }
+      return Response.json({ error: 'unexpected' }, { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const adapter = new BeastDaemonDispatchAdapter({
+      baseUrl: 'http://127.0.0.1:4050',
+      operatorToken: TEST_DAEMON_TOKEN,
+    });
+
+    const result = await adapter.handle('Ship it', {
+      projectId: 'project',
+      sessionId: 'session-1',
+      transcript: [],
+      beastContext: context,
+    });
+
+    expect(result).toMatchObject({
+      kind: 'dispatch',
+      definitionId: 'martin-loop',
+      assistantMessage: expect.stringContaining('Maintenance mode is active'),
+      beastContext: context,
+    });
+    expect(result?.assistantMessage).toContain('Reason: deploy');
+    expect(result?.assistantMessage).toContain('beasts maintenance off');
+  });
+
   it('propagates daemon catalog failures for launch requests', async () => {
     const fetchMock = vi.fn(async () => Response.json({ error: 'unauthorized' }, { status: 401, statusText: 'Unauthorized' }));
     vi.stubGlobal('fetch', fetchMock);
