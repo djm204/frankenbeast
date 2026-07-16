@@ -517,9 +517,11 @@ function extractMarkdownSections(template: string): MarkdownSection[] {
   const sections: Array<{ heading: string; level: number; content: string[] }> =
     [];
   const openSectionIndexes: number[] = [];
+  const lines = template.split(/\r?\n/);
   let activeFence: string | null = null;
 
-  for (const line of template.split(/\r?\n/)) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
     const fence = /^\s*(`{3,}|~{3,})/.exec(line);
     if (fence) {
       for (const sectionIndex of openSectionIndexes) {
@@ -534,6 +536,40 @@ function extractMarkdownSections(template: string): MarkdownSection[] {
       ) {
         activeFence = null;
       }
+      continue;
+    }
+
+    const nextLine = lines[index + 1] ?? '';
+    const setextHeading =
+      activeFence === null &&
+      line.trim().length > 0 &&
+      !line.includes('|') &&
+      /^\s*(=+|-+)\s*$/.test(nextLine)
+        ? /^\s*(=+|-+)\s*$/.exec(nextLine)
+        : null;
+    if (setextHeading) {
+      const level = setextHeading[1]?.startsWith('=') ? 1 : 2;
+      while (openSectionIndexes.length > 0) {
+        const current =
+          sections[openSectionIndexes[openSectionIndexes.length - 1]!];
+        if (current && current.level < level) {
+          break;
+        }
+        openSectionIndexes.pop();
+      }
+      const section = {
+        heading: normalizeEvidence(line),
+        level,
+        content: [] as string[],
+      };
+      for (const sectionIndex of openSectionIndexes) {
+        sections[sectionIndex]?.content.push(
+          `${CHILD_HEADING_LABEL_PREFIX}${section.heading}`,
+        );
+      }
+      sections.push(section);
+      openSectionIndexes.push(sections.length - 1);
+      index += 1;
       continue;
     }
 
@@ -626,6 +662,10 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
     }
 
     const withoutPlaceholders = line
+      .replace(
+        /\b[A-Za-z0-9 /_-]+:\s*(?:<[^>]*>|\{\{[^}]*\}\}|\{[^}]*\}|\[[^\]]*\]|\b(?:tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)\b)\s*(?:[;,.]|$)/gi,
+        ' ',
+      )
       .replace(/^```.*$/g, ' ')
       .replace(/\[([^\]]+)\]\(([^)]*)\)/g, '$1 $2')
       .replace(/\[([^\]]+)\]\[[^\]]*\]/g, '$1')
@@ -636,7 +676,7 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
       .replace(/\{\{[^}]*\}\}/g, ' ')
       .replace(/\{[^}]*\}/g, ' ')
       .replace(
-        /\b(?:tbd|todo|n\/?a|unknown|placeholder|fill in|to be decided)\b/gi,
+        /\b(?:tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)\b/gi,
         ' ',
       )
       .replace(/[_.-]{2,}/g, ' ');
@@ -678,7 +718,11 @@ function hasPopulatedTableRows(lines: readonly string[], startIndex: number): bo
     if (isMarkdownTableSeparator(line)) {
       continue;
     }
-    if (!isEmptyTableRow(line)) {
+    const strippedLine = stripPlaceholderOnlyTemplateFields(line);
+    if (
+      normalizeEvidence(strippedLine).length > 0 &&
+      !isEmptyTableRow(strippedLine)
+    ) {
       return true;
     }
   }
@@ -694,13 +738,13 @@ function isEmptyTableRow(line: string): boolean {
     .map((cell) => normalizeEvidence(cell))
     .filter((cell) => cell.length > 0);
   return (
-    cells.length > 0 &&
+    cells.length === 0 ||
     cells.every(
       (cell) =>
         /^(?:issue|issue task|task|business goal|goal|out of scope boundaries|boundaries|status|current status|decisions|remaining work|command|commands|test command|test commands|outcome|result|owner|next action|artifact|artifacts|link|links|lesson|lessons)$/i.test(
           cell,
         ) ||
-        /^(?:tbd|todo|n\/?a|unknown|placeholder|fill in|to be decided)$/i.test(
+        /^(?:tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)$/i.test(
           cell,
         ),
     )

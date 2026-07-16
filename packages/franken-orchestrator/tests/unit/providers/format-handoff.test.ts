@@ -312,6 +312,19 @@ Capture durable lessons, Codex or CI feedback, and reusable notes for future han
     expect(validation.operatorGuidance).toContain('every required section');
   });
 
+  it('accepts setext markdown headings for actionable sections', () => {
+    const setextTemplate = completeTemplate
+      .replace('## Scope and objective', 'Scope and objective\n---')
+      .replace('## Current state and decisions', 'Current state and decisions\n---')
+      .replace('## Verification and evidence', 'Verification and evidence\n---')
+      .replace('## Blockers and next action', 'Blockers and next action\n---')
+      .replace('## Artifacts and links', 'Artifacts and links\n---');
+
+    const validation = validateAgentHandoffTemplate(setextTemplate);
+
+    expect(validation.valid).toBe(true);
+  });
+
   it('returns structured missing-section findings for incomplete templates', () => {
     const validation = validateAgentHandoffTemplate(`## Scope
 Name issue #1775, business goal, and out-of-scope boundaries.
@@ -385,7 +398,21 @@ Record npm test passed or failed.
     const validation = validateAgentHandoffTemplate(
       completeTemplate.replace(
         'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
-        '- Issue/task: [issue]\n- Business goal: [business goal]\n- Out-of-scope boundaries: [boundaries]',
+        '- Issue: [issue]\n- Business goal: [goal]\n- Out-of-scope boundaries: [boundaries]',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('rejects inline placeholder-only field fragments', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        'Issue: TODO; Goal: TODO; Boundaries: TODO',
       ),
     );
 
@@ -462,7 +489,21 @@ Issue #1775 goal is onboarding; out-of-scope boundaries are unrelated refactors.
     const validation = validateAgentHandoffTemplate(
       completeTemplate.replace(
         'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
-        '### Issue\n### Business goal\n### Out-of-scope boundaries',
+        '### Issue/task\n### Business goal\n### Out-of-scope boundaries',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('does not count placeholder child heading bodies as guidance', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '### Issue/task\nPlease fill in\n### Business goal\nTODO\n### Out-of-scope boundaries\n{boundaries}',
       ),
     );
 
@@ -626,6 +667,20 @@ ${completeTemplate}`);
       validation.findings.find((finding) => finding.id === 'verification')
         ?.status,
     ).toBe('placeholder');
+  });
+
+  it('rejects populated-looking table rows whose cells are placeholders', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '| Issue/task | Business goal | Boundaries |\n| --- | --- | --- |\n| <issue> | {goal} | [boundaries] |',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
   });
 
   it('accepts a singular Branch heading for artifact guidance', () => {
