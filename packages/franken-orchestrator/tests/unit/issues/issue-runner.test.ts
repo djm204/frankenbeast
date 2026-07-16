@@ -716,6 +716,28 @@ describe('stuck-run watchdog', () => {
     });
   });
 
+  it('classifies dead workers as crashes even when stale wait hints remain', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_dead_ci_wait',
+        pid: 7407,
+        status: 'running',
+        alive: false,
+        blockerCategory: 'ci-wait',
+        waitingOn: 'CI checks were queued before the process exited',
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_dead_ci_wait',
+      blockerCategory: 'process-crash',
+      confidence: 'high',
+      processStatus: 'dead',
+    });
+  });
+
   it('reports terminal crash statuses even when liveness probes are omitted', () => {
     const findings = detectStuckRunWatchdogFindings([
       {
@@ -758,6 +780,26 @@ describe('stuck-run watchdog', () => {
     });
   });
 
+  it('reports stale heartbeat-only snapshots when heartbeat is the only provided activity signal', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_stale_heartbeat_only_no_start',
+        pid: 7408,
+        status: 'running',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_stale_heartbeat_only_no_start',
+      blockerCategory: 'unknown',
+      confidence: 'low',
+      heartbeatAgeMs: 14_400_000,
+      processStatus: 'alive',
+    });
+  });
+
   it('reports partial stale snapshots when all provided activity signals are stale', () => {
     const findings = detectStuckRunWatchdogFindings([
       {
@@ -793,9 +835,23 @@ describe('stuck-run watchdog', () => {
     expect(findings[0]).toMatchObject({
       cardId: 't_missing_pid',
       pid: 0,
-      processStatus: 'dead',
-      confidence: 'high',
+      processStatus: 'unknown',
+      confidence: 'low',
     });
+  });
+
+  it('does not treat fresh unreadable PID snapshots as dead crashes', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_fresh_missing_pid',
+        pid: 0,
+        status: 'running',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T11:55:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([]);
   });
 
   it('redacts token-like values from waitingOn evidence', () => {
