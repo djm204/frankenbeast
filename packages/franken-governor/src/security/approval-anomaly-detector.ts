@@ -208,6 +208,9 @@ export function normalizeApprovalAnomalyDetectorConfig(
     ...DEFAULT_APPROVAL_ANOMALY_CONFIG,
     ...config,
   };
+  if (typeof merged.enabled !== 'boolean') {
+    throw new Error('Invalid approval anomaly detector config: enabled must be a boolean');
+  }
   for (const [key, value] of Object.entries(merged)) {
     if (key === 'enabled') continue;
     if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || !Number.isInteger(value)) {

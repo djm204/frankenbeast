@@ -25,10 +25,12 @@ These rules are intentionally narrow. Normal batches from different workers or w
 When an approval request is flagged, the approval prompt is decorated with a `SECURITY NOTICE` and an acknowledgement token such as:
 
 ```text
-ACK-APPROVAL-ANOMALY-req-123
+ACK-APPROVAL-ANOMALY-cmVxLTEyMw
 ```
 
-An anomalous request that receives a normal `APPROVE` is converted to `ABORT` and audited as `securityFailure: "approval-anomaly"`. To proceed anyway, the operator must include the exact acknowledgement token in trusted response feedback (for example `a ACK-APPROVAL-ANOMALY-req-123` in the CLI channel, or an authenticated Slack action id carrying the same token). Caller-supplied request metadata is intentionally not accepted as acknowledgement material because guarded workers can populate their own request metadata.
+The token suffix is the request id encoded with base64url (`req-123` becomes `cmVxLTEyMw`), so request-id delimiters cannot make acknowledgement matching ambiguous.
+
+An anomalous request that receives a normal `APPROVE` is converted to `ABORT` and audited as `securityFailure: "approval-anomaly"`. To proceed anyway, the operator must include the exact acknowledgement token in trusted response feedback (for example `a ACK-APPROVAL-ANOMALY-cmVxLTEyMw` in the CLI channel, or an authenticated Slack action id carrying the same token). Caller-supplied request metadata is intentionally not accepted as acknowledgement material because guarded workers can populate their own request metadata.
 
 ## Metadata callers should provide
 

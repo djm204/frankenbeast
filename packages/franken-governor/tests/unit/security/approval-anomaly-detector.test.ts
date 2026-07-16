@@ -219,5 +219,7 @@ describe('ApprovalAnomalyDetector', () => {
   it('rejects invalid tuning values that would disable anomaly checks', () => {
     expect(() => new ApprovalAnomalyDetector({ windowMs: -1 })).toThrow(/positive integer/u);
     expect(() => new ApprovalAnomalyDetector({ maxRapidRetries: Number.NaN })).toThrow(/positive integer/u);
+    expect(() => new ApprovalAnomalyDetector({ enabled: 0 as unknown as boolean })).toThrow(/enabled must be a boolean/u);
+    expect(() => new ApprovalAnomalyDetector({ enabled: null as unknown as boolean })).toThrow(/enabled must be a boolean/u);
   });
 });
