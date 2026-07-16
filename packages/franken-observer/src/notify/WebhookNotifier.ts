@@ -1,6 +1,11 @@
+import { lookup as dnsLookup } from 'node:dns/promises'
+import { request as httpsRequest } from 'node:https'
+import { isIP } from 'node:net'
+
+import { seededRandom } from '@franken/types'
+
 import type { FetchFn } from '../adapters/langfuse/LangfuseAdapter.js'
 
-import { seededRandom } from '@franken/types';
 export interface WebhookRetryOptions {
   /** Maximum number of retry attempts after the initial try. Default: 0 (no retry). */
   maxRetries: number
@@ -15,6 +20,25 @@ export interface WebhookRetryOptions {
   jitter?: boolean
 }
 
+export interface WebhookAllowedTarget {
+  /** Trusted webhook origin, for example `https://discord.com`. */
+  origin: string
+  /** Optional URL path prefix that the configured webhook URL must start with. */
+  pathnamePrefix?: string
+}
+
+type WebhookDnsLookup = (hostname: string) => Promise<readonly string[]>
+type WebhookFetchInit = NonNullable<Parameters<FetchFn>[1]> & {
+  headers: Record<string, string>
+  body?: string
+  /** Validated DNS address for custom transports that can pin the connection while preserving URL authority. */
+  resolvedAddress?: string
+  originalHostname?: string
+}
+type WebhookFetchResponse = Awaited<ReturnType<FetchFn>> & {
+  body?: ({ getReader?: () => ReadableStreamDefaultReader<Uint8Array> } & Partial<AsyncIterable<Uint8Array | Buffer | string>>) | null
+}
+
 export interface WebhookNotifierOptions {
   /** URL to POST the JSON payload to. */
   url: string
@@ -24,6 +48,13 @@ export interface WebhookNotifierOptions {
    * `allowUnlistedTarget: true` for a deliberate legacy/unsafe opt-out.
    */
   allowedTargetOrigins?: readonly string[]
+  /**
+   * Explicit allowlist of webhook targets. String entries may include an
+   * optional pathname prefix; object entries separate the origin and prefix.
+   * Prefer this over `allowedTargetOrigins` when only a specific provider path
+   * such as `/api/webhooks/` should receive payloads.
+   */
+  allowedTargets?: readonly (string | WebhookAllowedTarget)[]
   /**
    * Explicit unsafe opt-out for legacy deployments that cannot provide an
    * allowlist yet. Prefer `allowedTargetOrigins` for normal operation.
@@ -37,6 +68,12 @@ export interface WebhookNotifierOptions {
   headers?: Record<string, string>
   /** Injectable for testing. Defaults to globalThis.fetch. */
   fetch?: FetchFn
+  /**
+   * Optional DNS resolver used to verify public hostnames before delivery.
+   * Defaults to Node's DNS lookup when using the default fetch; injected fetches
+   * must opt in explicitly so unit tests and custom transports stay deterministic.
+   */
+  dnsLookup?: WebhookDnsLookup
   /** Retry configuration. Omit to send exactly once (backwards-compatible). */
   retry?: WebhookRetryOptions
   /**
@@ -88,12 +125,149 @@ function validateFiniteNonNegativeNumber(value: number, fieldName: string): numb
   return value
 }
 
-function parseUrlOrigin(value: string, fieldName: string): string {
+interface NormalizedWebhookTarget {
+  origin: string
+  pathnamePrefix?: string
+}
+
+function parseAbsoluteUrl(value: string, fieldName: string): URL {
   try {
-    return new URL(value).origin
+    return new URL(value)
   } catch {
     throw new TypeError(`${fieldName} must be an absolute URL`)
   }
+}
+
+function validateHttpsUrl(url: URL, fieldName: string): void {
+  if (url.protocol !== 'https:') {
+    throw new TypeError(`${fieldName} must use https:`)
+  }
+}
+
+function validateUrlHasNoCredentials(url: URL, fieldName: string): void {
+  if (url.username || url.password) {
+    throw new TypeError(`${fieldName} must not include credentials`)
+  }
+}
+
+function validateUrlHasNoQueryOrFragment(url: URL, fieldName: string): void {
+  if (url.search || url.hash) {
+    throw new TypeError(`${fieldName} must not include a query or fragment`)
+  }
+}
+
+function extractShortcutIpv4Octets(host: string): [number, number, number, number] | undefined {
+  const suffixes = ['.nip.io', '.sslip.io', '.xip.io']
+  const suffix = suffixes.find(candidate => host.endsWith(candidate))
+  if (!suffix) {
+    return undefined
+  }
+  const labels = host.slice(0, -suffix.length).split(/[.-]/u).filter(Boolean)
+  const octets = labels.slice(-4).map(Number)
+  if (octets.length !== 4 || octets.some(octet => !Number.isInteger(octet) || octet < 0 || octet > 255)) {
+    return undefined
+  }
+  return octets as [number, number, number, number]
+}
+
+function ipv4FromMappedIpv6(ip: string): string | undefined {
+  const normalizedIp = ip.toLowerCase()
+  const dotted = /^(?:::ffff:|0:0:0:0:0:ffff:)(\d{1,3}(?:\.\d{1,3}){3})$/u.exec(normalizedIp)
+  if (dotted) {
+    return dotted[1]
+  }
+
+  const hexMapped = /^(?:::ffff:|0:0:0:0:0:ffff:)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/u.exec(normalizedIp)
+  if (!hexMapped) {
+    return undefined
+  }
+  const high = Number.parseInt(hexMapped[1], 16)
+  const low = Number.parseInt(hexMapped[2], 16)
+  if (!Number.isInteger(high) || !Number.isInteger(low) || high < 0 || high > 0xffff || low < 0 || low > 0xffff) {
+    return undefined
+  }
+  return `${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`
+}
+
+function isPrivateIpv4(ip: string): boolean {
+  const octets = ip.split('.').map(Number)
+  if (octets.length !== 4 || octets.some(octet => !Number.isInteger(octet) || octet < 0 || octet > 255)) {
+    return false
+  }
+  const [firstOctet, secondOctet] = octets as [number, number, number, number]
+  return firstOctet === 0 ||
+    firstOctet === 10 ||
+    firstOctet === 127 ||
+    (firstOctet === 169 && secondOctet === 254) ||
+    (firstOctet === 172 && secondOctet >= 16 && secondOctet <= 31) ||
+    (firstOctet === 192 && secondOctet === 168) ||
+    (firstOctet === 100 && secondOctet >= 64 && secondOctet <= 127) ||
+    firstOctet >= 224
+}
+
+function isPrivateIpv6(ip: string): boolean {
+  const mappedIpv4 = ipv4FromMappedIpv6(ip)
+  if (mappedIpv4) {
+    return isPrivateIpv4(mappedIpv4)
+  }
+  const firstHextet = Number.parseInt(ip.split(':', 1)[0] || '0', 16)
+  return ip === '::' ||
+    ip === '::1' ||
+    (Number.isInteger(firstHextet) && firstHextet >= 0xfe80 && firstHextet <= 0xfeff) ||
+    ip.startsWith('fc') ||
+    ip.startsWith('fd') ||
+    ip.startsWith('ff')
+}
+
+function validatePublicWebhookHost(url: URL, fieldName: string): void {
+  const hostname = normalizeHostnameForValidation(url.hostname)
+  const shortcutIpv4 = extractShortcutIpv4Octets(hostname)
+  if (hostname === 'localhost' ||
+    hostname.endsWith('.localhost') ||
+    hostname === 'lvh.me' ||
+    hostname.endsWith('.lvh.me') ||
+    hostname === 'metadata' ||
+    hostname === 'instance-data' ||
+    hostname === 'metadata.google.internal' ||
+    hostname.endsWith('.local') ||
+    hostname.endsWith('.internal') ||
+    hostname.endsWith('.svc') ||
+    hostname.endsWith('.cluster.local') ||
+    (shortcutIpv4 && isPrivateIpv4(shortcutIpv4.join('.')))) {
+    throw new TypeError(`${fieldName} host ${hostname} is not allowed`)
+  }
+
+  const ipVersion = isIP(hostname)
+  if (ipVersion === 4) {
+    if (isPrivateIpv4(hostname)) {
+      throw new TypeError(`${fieldName} host ${hostname} is not allowed`)
+    }
+  }
+
+  if (ipVersion === 6) {
+    if (isPrivateIpv6(hostname)) {
+      throw new TypeError(`${fieldName} host ${hostname} is not allowed`)
+    }
+  }
+}
+
+function normalizeHostnameForValidation(hostname: string): string {
+  return hostname.replace(/^\[|\]$/g, '').replace(/\.+$/g, '').toLowerCase()
+}
+
+function isTransientDnsError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+  const code = (error as { code?: unknown }).code
+  return code === 'EAI_AGAIN' || code === 'ETIMEOUT' || code === 'ETIMEDOUT' || code === 'ECONNRESET'
+}
+
+function parseUrlOrigin(value: string, fieldName: string): string {
+  const url = parseAbsoluteUrl(value, fieldName)
+  validateHttpsUrl(url, fieldName)
+  validatePublicWebhookHost(url, fieldName)
+  return url.origin
 }
 
 function normalizeAllowedTargetOrigins(origins: readonly string[] | undefined): ReadonlySet<string> | null {
@@ -102,6 +276,77 @@ function normalizeAllowedTargetOrigins(origins: readonly string[] | undefined): 
   }
 
   return new Set(origins.map(origin => parseUrlOrigin(origin, 'allowedTargetOrigins entry')))
+}
+
+function validateWebhookPathname(pathname: string, fieldName: string): void {
+  if (/%(?:2e|2f|5c)/iu.test(pathname)) {
+    throw new TypeError(`${fieldName} must not include encoded dot segments or separators`)
+  }
+  const segments = pathname.split('/')
+  if (segments.includes('.') || segments.includes('..')) {
+    throw new TypeError(`${fieldName} must not include dot segments`)
+  }
+}
+
+function normalizePathnamePrefix(pathnamePrefix: string | undefined, fieldName: string): string | undefined {
+  if (pathnamePrefix === undefined || pathnamePrefix === '' || pathnamePrefix === '/') {
+    return undefined
+  }
+  validateWebhookPathname(pathnamePrefix, fieldName)
+  if (!pathnamePrefix.startsWith('/')) {
+    throw new TypeError(`${fieldName} must start with /`)
+  }
+  return pathnamePrefix
+}
+
+function assertOriginOnly(url: URL, fieldName: string): void {
+  if (url.pathname !== '/' || url.search !== '' || url.hash !== '') {
+    throw new TypeError(`${fieldName} must not include a path, query, or fragment; use pathnamePrefix for path scoping`)
+  }
+}
+
+function pathMatchesPrefix(pathname: string, pathnamePrefix: string | undefined): boolean {
+  if (!pathnamePrefix) {
+    return true
+  }
+  if (pathname === pathnamePrefix) {
+    return true
+  }
+  const boundaryPrefix = pathnamePrefix.endsWith('/') ? pathnamePrefix : `${pathnamePrefix}/`
+  return pathname.startsWith(boundaryPrefix)
+}
+
+function normalizeAllowedTargets(
+  targets: readonly (string | WebhookAllowedTarget)[] | undefined,
+): readonly NormalizedWebhookTarget[] {
+  if (!targets || targets.length === 0) {
+    return []
+  }
+
+  return targets.map((target, index) => {
+    if (typeof target === 'string') {
+      const url = parseAbsoluteUrl(target, `allowedTargets[${index}]`)
+      validateHttpsUrl(url, `allowedTargets[${index}]`)
+      validateUrlHasNoCredentials(url, `allowedTargets[${index}]`)
+      validateUrlHasNoQueryOrFragment(url, `allowedTargets[${index}]`)
+      validatePublicWebhookHost(url, `allowedTargets[${index}]`)
+      validateWebhookPathname(url.pathname, `allowedTargets[${index}].pathname`)
+      return {
+        origin: url.origin,
+        pathnamePrefix: normalizePathnamePrefix(url.pathname, `allowedTargets[${index}].pathnamePrefix`),
+      }
+    }
+
+    const url = parseAbsoluteUrl(target.origin, `allowedTargets[${index}].origin`)
+    validateHttpsUrl(url, `allowedTargets[${index}].origin`)
+    validateUrlHasNoCredentials(url, `allowedTargets[${index}].origin`)
+    validatePublicWebhookHost(url, `allowedTargets[${index}].origin`)
+    assertOriginOnly(url, `allowedTargets[${index}].origin`)
+    return {
+      origin: url.origin,
+      pathnamePrefix: normalizePathnamePrefix(target.pathnamePrefix, `allowedTargets[${index}].pathnamePrefix`),
+    }
+  })
 }
 
 const MAX_ERROR_BODY_CHARS = 2048
@@ -144,26 +389,40 @@ function sanitizeWebhookEndpoint(value: string): string {
 
 export class WebhookNotifier {
   private readonly url: string
+  private readonly parsedUrl: URL
   private readonly targetOrigin: string
   private readonly allowedTargetOrigins: ReadonlySet<string> | null
+  private readonly allowedTargets: readonly NormalizedWebhookTarget[]
   private readonly allowUnlistedTarget: boolean
   private readonly extraHeaders: Record<string, string>
   private readonly fetchFn: FetchFn
+  private readonly usePinnedDefaultFetch: boolean
+  private readonly dnsLookupFn: WebhookDnsLookup | null
   private readonly retry: Required<WebhookRetryOptions> | null
   private readonly sleepFn: (ms: number) => Promise<void>
 
   constructor(options: WebhookNotifierOptions) {
     this.url = options.url
-    this.targetOrigin = parseUrlOrigin(options.url, 'url')
+    this.parsedUrl = parseAbsoluteUrl(options.url, 'url')
+    validateHttpsUrl(this.parsedUrl, 'url')
+    validateUrlHasNoCredentials(this.parsedUrl, 'url')
+    validatePublicWebhookHost(this.parsedUrl, 'url')
+    validateWebhookPathname(this.parsedUrl.pathname, 'url pathname')
+    this.targetOrigin = this.parsedUrl.origin
     this.allowedTargetOrigins = normalizeAllowedTargetOrigins(options.allowedTargetOrigins)
+    this.allowedTargets = normalizeAllowedTargets(options.allowedTargets)
     this.allowUnlistedTarget = options.allowUnlistedTarget ?? false
-    if (!this.allowUnlistedTarget && this.allowedTargetOrigins === null) {
+    if (!this.allowUnlistedTarget && this.allowedTargetOrigins === null && this.allowedTargets.length === 0) {
       throw new Error(
-        'Webhook target allowlist is required; set allowedTargetOrigins or explicitly opt out with allowUnlistedTarget: true',
+        'Webhook target allowlist is required; set allowedTargets or allowedTargetOrigins, or explicitly opt out with allowUnlistedTarget: true',
       )
     }
     this.extraHeaders = options.headers ?? {}
     this.fetchFn = options.fetch ?? (globalThis.fetch as unknown as FetchFn)
+    this.usePinnedDefaultFetch = !options.fetch
+    this.dnsLookupFn = options.dnsLookup ?? (options.fetch
+      ? null
+      : async hostname => (await dnsLookup(hostname, { all: true })).map(result => result.address))
     this.sleepFn = options.sleep ?? ((ms: number) => new Promise(r => setTimeout(r, ms)))
     this.retry = options.retry
       ? {
@@ -191,9 +450,20 @@ export class WebhookNotifier {
         await this.sleepFn(delay)
       }
 
-      let response: Awaited<ReturnType<FetchFn>>
+      let resolvedAddresses: readonly string[] = []
       try {
-        response = await this.fetchFn(this.url, {
+        resolvedAddresses = await this.resolveAllowedTargetAddresses()
+      } catch (err) {
+        lastError = err
+        if (this.retry && isTransientDnsError(err) && attempt < maxAttempts - 1) {
+          continue
+        }
+        throw err
+      }
+
+      let response: WebhookFetchResponse
+      try {
+        response = await this.fetchWebhook(resolvedAddresses, {
           method: 'POST',
           redirect: 'manual',
           headers: {
@@ -225,14 +495,16 @@ export class WebhookNotifier {
     throw lastError
   }
 
-  private async readResponseBody(response: Awaited<ReturnType<FetchFn>>): Promise<string> {
+  private async readResponseBody(response: WebhookFetchResponse): Promise<string> {
     try {
       const readable = response as {
-        body?: { getReader?: () => ReadableStreamDefaultReader<Uint8Array> } | null
+        body?: ({ getReader?: () => ReadableStreamDefaultReader<Uint8Array> } & Partial<AsyncIterable<Uint8Array | Buffer | string>>) | null
         text?: () => Promise<string>
       }
-      const body = readable.body && typeof readable.body.getReader === 'function'
-        ? await this.readBoundedStream(readable.body as ReadableStream<Uint8Array>)
+      const body = readable.body
+        ? typeof readable.body.getReader === 'function'
+          ? await this.readBoundedStream(readable.body as ReadableStream<Uint8Array>)
+          : await this.readBoundedAsyncIterable(readable.body)
         : ''
       const redactedBody = redactWebhookSecrets(body)
       return redactedBody.length > MAX_ERROR_BODY_CHARS
@@ -299,11 +571,149 @@ export class WebhookNotifier {
     return truncated || timedOut ? `${decoded}…` : decoded
   }
 
+  private async readBoundedAsyncIterable(body: unknown): Promise<string> {
+    const iterable = body && typeof body === 'object'
+      ? body as AsyncIterable<Uint8Array | Buffer | string>
+      : undefined
+    const iteratorFactory = iterable?.[Symbol.asyncIterator]
+    if (typeof iteratorFactory !== 'function') {
+      return ''
+    }
+
+    const iterator = iteratorFactory.call(iterable)
+    const chunks: Uint8Array[] = []
+    let totalBytes = 0
+    let truncated = false
+    let timedOut = false
+    const deadlineMs = Date.now() + ERROR_BODY_READ_TIMEOUT_MS
+
+    while (totalBytes < MAX_ERROR_BODY_CHARS) {
+      const remainingMs = deadlineMs - Date.now()
+      if (remainingMs <= 0) {
+        timedOut = true
+        break
+      }
+      let timeoutId: ReturnType<typeof setTimeout> | undefined
+      const result = await Promise.race<IteratorResult<Uint8Array | Buffer | string> | 'timeout'>([
+        iterator.next(),
+        new Promise<'timeout'>(resolve => {
+          timeoutId = setTimeout(() => resolve('timeout'), remainingMs)
+        }),
+      ]).finally(() => {
+        if (timeoutId) clearTimeout(timeoutId)
+      })
+      if (result === 'timeout') {
+        timedOut = true
+        break
+      }
+      if (result.done || result.value === undefined) {
+        break
+      }
+      const bytes = typeof result.value === 'string' ? Buffer.from(result.value) : Buffer.from(result.value)
+      const remainingBytes = MAX_ERROR_BODY_CHARS - totalBytes
+      if (bytes.byteLength > remainingBytes) {
+        chunks.push(bytes.subarray(0, remainingBytes))
+        totalBytes += remainingBytes
+        truncated = true
+        break
+      }
+      chunks.push(bytes)
+      totalBytes += bytes.byteLength
+    }
+
+    if (truncated || timedOut) {
+      ;(body as { destroy?: () => void })?.destroy?.()
+      const cleanup = iterator.return?.(undefined)
+      if (cleanup && typeof (cleanup as Promise<IteratorResult<Uint8Array | Buffer | string>>).catch === 'function') {
+        void (cleanup as Promise<IteratorResult<Uint8Array | Buffer | string>>).catch(() => undefined)
+      }
+    }
+
+    const decoded = new TextDecoder().decode(Buffer.concat(chunks).subarray(0, MAX_ERROR_BODY_CHARS)).trim()
+    return truncated || timedOut ? `${decoded}…` : decoded
+  }
+
+  private async resolveAllowedTargetAddresses(): Promise<readonly string[]> {
+    const hostname = normalizeHostnameForValidation(this.parsedUrl.hostname)
+    if (!this.dnsLookupFn || isIP(hostname) !== 0) {
+      return []
+    }
+    const addresses = await this.dnsLookupFn(hostname)
+    if (addresses.length === 0) {
+      throw new Error(`Webhook DNS lookup returned no addresses for host ${hostname}`)
+    }
+    for (const address of addresses) {
+      const parsedAddress = parseAbsoluteUrl(`https://${isIP(address) === 6 ? `[${address}]` : address}/`, 'resolved webhook address')
+      validatePublicWebhookHost(parsedAddress, 'resolved webhook address')
+    }
+    return addresses
+  }
+
+  private async fetchWebhook(resolvedAddresses: readonly string[], init: WebhookFetchInit): Promise<WebhookFetchResponse> {
+    if (resolvedAddresses.length === 0) {
+      return this.fetchFn(this.url, init)
+    }
+    if (!this.usePinnedDefaultFetch) {
+      throw new Error(
+        'Injected fetch cannot safely pin DNS-validated webhook addresses; use the default HTTPS transport when dnsLookup is enabled',
+      )
+    }
+
+    let lastError: unknown
+    for (const address of resolvedAddresses) {
+      try {
+        return await this.fetchWithPinnedAddress(address, init)
+      } catch (err) {
+        lastError = err
+      }
+    }
+
+    throw lastError
+  }
+
+  private async fetchWithPinnedAddress(address: string, init: WebhookFetchInit): Promise<WebhookFetchResponse> {
+    const originalHostname = normalizeHostnameForValidation(this.parsedUrl.hostname)
+    const body = typeof init.body === 'string' ? init.body : init.body ? String(init.body) : undefined
+    return new Promise((resolve, reject) => {
+      const request = httpsRequest({
+        hostname: address,
+        port: this.parsedUrl.port || 443,
+        path: `${this.parsedUrl.pathname}${this.parsedUrl.search}`,
+        method: init.method,
+        servername: originalHostname,
+        headers: {
+          ...init.headers,
+          Host: this.parsedUrl.host,
+          ...(body ? { 'Content-Length': Buffer.byteLength(body) } : {}),
+        },
+      }, response => {
+        resolve({
+          ok: response.statusCode !== undefined && response.statusCode >= 200 && response.statusCode < 300,
+          status: response.statusCode ?? 0,
+          statusText: response.statusMessage,
+          body: response as unknown as WebhookFetchResponse['body'],
+        })
+      })
+      request.on('error', reject)
+      if (body) {
+        request.write(body)
+      }
+      request.end()
+    })
+  }
+
   private assertTargetAllowed(): void {
     if (this.allowUnlistedTarget) {
       return
     }
-    if (!this.allowedTargetOrigins?.has(this.targetOrigin)) {
+    const targetAllowedByOrigin = this.allowedTargetOrigins?.has(this.targetOrigin) ?? false
+    const targetAllowedByPath = this.allowedTargets.some(target => {
+      if (target.origin !== this.targetOrigin) {
+        return false
+      }
+      return pathMatchesPrefix(this.parsedUrl.pathname, target.pathnamePrefix)
+    })
+    if (!targetAllowedByOrigin && !targetAllowedByPath) {
       throw new Error(`Webhook target origin ${this.targetOrigin} is not allowed`)
     }
   }

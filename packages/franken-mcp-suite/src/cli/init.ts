@@ -381,10 +381,9 @@ function writeCodexHooks(root: string, scripts: { preTool: string; postTool: str
   mkdirSync(codexDir, { recursive: true });
   const hooksPath = join(codexDir, 'hooks.json');
 
-  let existing: Record<string, unknown> = {};
-  if (existsSync(hooksPath)) {
-    try { existing = JSON.parse(readFileSync(hooksPath, 'utf-8')); } catch { /* ignore */ }
-  }
+  const existing: Record<string, unknown> = existsSync(hooksPath)
+    ? readJsonObjectFileOrRecover(hooksPath, readFileSync(hooksPath, 'utf-8'))
+    : {};
 
   const existingHooks = isObjectRecord(existing['hooks']) ? existing['hooks'] : {};
 
@@ -408,7 +407,7 @@ function writeCodexHooks(root: string, scripts: { preTool: string; postTool: str
     ],
   };
 
-  writeFileSync(hooksPath, JSON.stringify(existing, null, 2) + '\n');
+  writeJsonFileAtomic(hooksPath, existing);
 }
 
 const AGENTS_MD_START = '<!-- fbeast-start -->';

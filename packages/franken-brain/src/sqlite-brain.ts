@@ -403,6 +403,43 @@ function stringifyWorkingMemoryValue(key: string, value: unknown): string {
   );
 }
 
+function workingMemoryStringField(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function isTemporaryOperationalMarker(value: unknown): boolean {
+  const normalized = workingMemoryStringField(value)?.trim().toLowerCase();
+  return (
+    normalized === 'temporary-operational'
+    || normalized === 'operational-temporary'
+    || normalized === 'temp-operational'
+    || normalized === 'operational-temp'
+    || normalized === 'transient-operational'
+  );
+}
+
+function isTemporaryOperationalWorkingMemoryValue(value: unknown): value is { expiresAt: string } {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as { category?: unknown; kind?: unknown; type?: unknown; scope?: unknown; expiresAt?: unknown };
+  return (
+    typeof record.expiresAt === 'string'
+    && (
+      isTemporaryOperationalMarker(record.category)
+      || isTemporaryOperationalMarker(record.kind)
+      || isTemporaryOperationalMarker(record.type)
+      || isTemporaryOperationalMarker(record.scope)
+    )
+  );
+}
+
+function isExpiredWorkingMemoryValue(value: unknown, nowMs = Date.now()): boolean {
+  if (!isTemporaryOperationalWorkingMemoryValue(value)) return false;
+  const expiresAtMs = Date.parse(value.expiresAt);
+  return Number.isFinite(expiresAtMs) && expiresAtMs <= nowMs;
+}
+
 class SqliteWorkingMemory implements IWorkingMemory {
   private store = new Map<string, unknown>();
   private sizes = new Map<string, number>();
@@ -444,22 +481,41 @@ class SqliteWorkingMemory implements IWorkingMemory {
   /** Hydrate in-memory state from persisted SQLite working_memory rows. */
   private loadFromDb(): void {
     const rows = this.loadPersistedSerializedFromDb();
-    if (rows.length > this.limits.maxEntries) {
-      throw new WorkingMemoryLimitError(
-        `Persisted working memory has ${rows.length} entries, exceeding maxEntries (${this.limits.maxEntries})`,
-      );
-    }
 
     const prepared: Array<[string, unknown, string, number]> = [];
+    const expiredRows: Array<{ key: string; serialized: string }> = [];
     let total = 0;
     for (const row of rows) {
       const parsed = parseStoredWorkingMemoryValue(row.value);
+      if (isExpiredWorkingMemoryValue(parsed)) {
+        expiredRows.push({ key: row.key, serialized: row.value });
+        continue;
+      }
       const { normalized, serialized, size } = this.prepareEntry(
         row.key,
         parsed,
       );
       total += size;
       prepared.push([row.key, normalized, serialized, size]);
+    }
+    const preservedRows = this.deleteExpiredPersistedRows(expiredRows);
+    const preparedKeys = new Set(prepared.map(([key]) => key));
+    for (const row of preservedRows) {
+      if (preparedKeys.has(row.key)) continue;
+      const parsed = parseStoredWorkingMemoryValue(row.serialized);
+      if (isExpiredWorkingMemoryValue(parsed)) continue;
+      const { normalized, serialized, size } = this.prepareEntry(
+        row.key,
+        parsed,
+      );
+      total += size;
+      prepared.push([row.key, normalized, serialized, size]);
+      preparedKeys.add(row.key);
+    }
+    if (prepared.length > this.limits.maxEntries) {
+      throw new WorkingMemoryLimitError(
+        `Persisted working memory has ${prepared.length} entries after TTL cleanup, exceeding maxEntries (${this.limits.maxEntries})`,
+      );
     }
     if (!Number.isSafeInteger(total) || total > this.limits.maxTotalBytes) {
       throw new WorkingMemoryLimitError(
@@ -585,6 +641,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
   persistKeyAfterCommit(key: string, value: unknown): (() => void) | void {
     const { normalized, serialized, size } = this.prepareEntry(key, value);
     assertNotDeletionGuarded(this.db, key, serialized, this.encryption);
+    this.expireRuntimeTtlKeys();
 
     if (!this.store.has(key) && this.store.size >= this.limits.maxEntries) {
       throw new WorkingMemoryLimitError(
@@ -670,6 +727,20 @@ class SqliteWorkingMemory implements IWorkingMemory {
     const prepared: Array<[string, unknown, string, number]> = [];
     let total = 0;
     for (const [key, value] of this.store) {
+      if (isExpiredWorkingMemoryValue(value)) {
+        const runtimeSerialized = this.serialized.get(key);
+        const persistedSerialized = this.persistedSerialized.get(key);
+        this.deleteExpiredPersistedRows([{ key, serialized: runtimeSerialized }]);
+        if (persistedSerialized !== undefined && persistedSerialized !== runtimeSerialized) {
+          const persistedValue = parseStoredWorkingMemoryValue(persistedSerialized);
+          if (!isExpiredWorkingMemoryValue(persistedValue)) {
+            const preparedPersisted = this.prepareEntry(key, persistedValue);
+            total += preparedPersisted.size;
+            prepared.push([key, preparedPersisted.normalized, preparedPersisted.serialized, preparedPersisted.size]);
+          }
+        }
+        continue;
+      }
       const { normalized, serialized, size } = this.prepareEntry(key, value);
       try {
         assertNotDeletionGuarded(this.db, key, serialized, this.encryption);
@@ -721,8 +792,38 @@ class SqliteWorkingMemory implements IWorkingMemory {
   }
 
   get(key: string): unknown {
-    if (this.expireRuntimeKeyIfGuarded(key)) return undefined;
+    if (this.expireRuntimeKeyIfUnavailable(key)) return undefined;
     return cloneStoredWorkingMemoryValue(this.store.get(key));
+  }
+
+  private expireRuntimeKeyIfUnavailable(key: string): boolean {
+    return this.expireRuntimeKeyIfTtlExpired(key) || this.expireRuntimeKeyIfGuarded(key);
+  }
+
+  private expireRuntimeKeyIfTtlExpired(key: string): boolean {
+    const value = this.store.get(key);
+    if (!isExpiredWorkingMemoryValue(value)) return false;
+    const serialized = this.serialized.get(key);
+    this.totalBytes -= this.sizes.get(key) ?? 0;
+    this.store.delete(key);
+    this.sizes.delete(key);
+    this.serialized.delete(key);
+    this.dirtyKeys.delete(key);
+    this.deletedKeys.delete(key);
+    this.deleteExpiredPersistedRows([{ key, serialized }]);
+    const persisted = this.persistedSerialized.get(key);
+    if (persisted !== undefined && persisted !== serialized) {
+      const parsed = parseStoredWorkingMemoryValue(persisted);
+      if (!isExpiredWorkingMemoryValue(parsed)) {
+        const { normalized, serialized: restoredSerialized, size } = this.prepareEntry(key, parsed);
+        this.store.set(key, normalized);
+        this.sizes.set(key, size);
+        this.serialized.set(key, restoredSerialized);
+        this.totalBytes += size;
+        return false;
+      }
+    }
+    return true;
   }
 
   private expireRuntimeKeyIfGuarded(key: string): boolean {
@@ -762,7 +863,51 @@ class SqliteWorkingMemory implements IWorkingMemory {
 
   private expireRuntimeKeysMatchingCurrentGuards(): void {
     for (const key of Array.from(this.store.keys())) {
-      this.expireRuntimeKeyIfGuarded(key);
+      this.expireRuntimeKeyIfUnavailable(key);
+    }
+  }
+
+  private deleteExpiredPersistedRows(
+    rows: ReadonlyArray<{ key: string; serialized: string | undefined }>,
+  ): Array<{ key: string; serialized: string }> {
+    const preservedRows: Array<{ key: string; serialized: string }> = [];
+    if (rows.length === 0) return preservedRows;
+    const selectValue = this.db.prepare(`SELECT value FROM working_memory WHERE key = ?`);
+    const deleteKey = this.db.prepare(`DELETE FROM working_memory WHERE key = ?`);
+    for (const { key, serialized } of rows) {
+      const row = selectValue.get(key) as { value: string } | undefined;
+      if (row === undefined) {
+        this.persistedSerialized.delete(key);
+        this.deletedKeys.delete(key);
+        this.dirtyKeys.delete(key);
+        continue;
+      }
+      const currentSerialized = this.encryption?.decrypt(row.value) ?? row.value;
+      if (serialized !== undefined && currentSerialized !== serialized) {
+        this.persistedSerialized.set(key, currentSerialized);
+        preservedRows.push({ key, serialized: currentSerialized });
+        continue;
+      }
+      const parsed = parseStoredWorkingMemoryValue(currentSerialized);
+      if (!isExpiredWorkingMemoryValue(parsed)) {
+        this.persistedSerialized.set(key, currentSerialized);
+        preservedRows.push({ key, serialized: currentSerialized });
+        continue;
+      }
+      deleteKey.run(key);
+      this.persistedSerialized.delete(key);
+      this.deletedKeys.delete(key);
+      const currentRuntimeSerialized = this.serialized.get(key);
+      if (currentRuntimeSerialized === undefined || currentRuntimeSerialized === currentSerialized) {
+        this.dirtyKeys.delete(key);
+      }
+    }
+    return preservedRows;
+  }
+
+  private expireRuntimeTtlKeys(): void {
+    for (const key of Array.from(this.store.keys())) {
+      this.expireRuntimeKeyIfTtlExpired(key);
     }
   }
 
@@ -791,6 +936,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
   set(key: string, value: unknown): void {
     const { normalized, serialized, size } = this.prepareEntry(key, value);
     assertNotDeletionGuarded(this.db, key, serialized, this.encryption);
+    this.expireRuntimeTtlKeys();
 
     if (!this.store.has(key) && this.store.size >= this.limits.maxEntries) {
       throw new WorkingMemoryLimitError(
@@ -836,15 +982,24 @@ class SqliteWorkingMemory implements IWorkingMemory {
     return this.store.delete(key);
   }
 
-  snapshotIncludingPersistedEntries(options: { expireRuntimeGuardedEntries?: boolean } = {}): Array<{ key: string; value: unknown; source: 'persisted' | 'runtime' }> {
+  snapshotIncludingPersistedEntries(options: { expireRuntimeGuardedEntries?: boolean; expirePersistedTtlEntries?: boolean } = {}): Array<{ key: string; value: unknown; source: 'persisted' | 'runtime' }> {
     const result: Array<{ key: string; value: unknown; source: 'persisted' | 'runtime' }> = [];
+    const expiredPersistedRows: Array<{ key: string; serialized: string }> = [];
     for (const { key, value: serialized } of this.loadPersistedSerializedFromDb()) {
+      const value = parseStoredWorkingMemoryValue(serialized);
+      if (isExpiredWorkingMemoryValue(value)) {
+        if (options.expirePersistedTtlEntries ?? true) {
+          expiredPersistedRows.push({ key, serialized });
+          continue;
+        }
+      }
       result.push({
         key,
-        value: parseStoredWorkingMemoryValue(serialized),
+        value,
         source: 'persisted',
       });
     }
+    this.deleteExpiredPersistedRows(expiredPersistedRows);
     for (const [key, value] of Object.entries(this.snapshotEntries({ expireGuardedEntries: options.expireRuntimeGuardedEntries ?? true }))) {
       result.push({
         key,
@@ -959,7 +1114,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
   }
 
   has(key: string): boolean {
-    if (this.expireRuntimeKeyIfGuarded(key)) return false;
+    if (this.expireRuntimeKeyIfUnavailable(key)) return false;
     return this.store.has(key);
   }
 
@@ -2527,7 +2682,7 @@ export class SqliteBrain implements IBrain {
     if (dryRun) {
       const workingMatches = memoryType === 'episodic'
         ? []
-        : this.matchingWorkingKeys(normalizedSelector, { expireRuntimeGuards: false });
+        : this.matchingWorkingKeys(normalizedSelector, { expireRuntimeGuards: false, expirePersistedTtlEntries: false });
       deletedWorkingKeys = new Set(workingMatches.map(match => match.key));
       const reviewMatches = memoryType === 'episodic'
         ? []
@@ -2551,7 +2706,7 @@ export class SqliteBrain implements IBrain {
       const tx = this.db.transaction(() => {
         const workingMatches = memoryType === 'episodic'
           ? []
-          : this.matchingWorkingKeys(normalizedSelector, { expireRuntimeGuards: true });
+          : this.matchingWorkingKeys(normalizedSelector, { expireRuntimeGuards: true, expirePersistedTtlEntries: false });
         const persistedWorkingMatches = new Set(workingMatches.filter(match => match.source === 'persisted').map(match => match.key));
         runtimeWorkingKeysToDelete = new Set(workingMatches.filter(match => match.source === 'runtime').map(match => match.key));
         deletedWorkingKeys = new Set(workingMatches.map(match => match.key));
@@ -2640,12 +2795,15 @@ export class SqliteBrain implements IBrain {
         episodic: episodicMatchCount,
         derived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
       },
-      remainingReferences: this.countRemainingReferences(normalizedSelector, { expireRuntimeGuards: false }),
+      remainingReferences: this.countRemainingReferences(normalizedSelector, { expireRuntimeGuards: false, expirePersistedTtlEntries: false }),
     };
   }
 
-  private matchingWorkingKeys(selector: NormalizedRightToForgetSelector, options: { expireRuntimeGuards?: boolean } = {}): Array<{ key: string; source: 'persisted' | 'runtime' }> {
-    return this.working.snapshotIncludingPersistedEntries({ expireRuntimeGuardedEntries: options.expireRuntimeGuards ?? true })
+  private matchingWorkingKeys(selector: NormalizedRightToForgetSelector, options: { expireRuntimeGuards?: boolean; expirePersistedTtlEntries?: boolean } = {}): Array<{ key: string; source: 'persisted' | 'runtime' }> {
+    return this.working.snapshotIncludingPersistedEntries({
+      expireRuntimeGuardedEntries: options.expireRuntimeGuards ?? true,
+      expirePersistedTtlEntries: options.expirePersistedTtlEntries ?? true,
+    })
       .filter(({ key, value }) => workingEntryMatchesSelector(key, value, selector))
       .map(({ key, source }) => ({ key, source }));
   }
@@ -2782,12 +2940,15 @@ export class SqliteBrain implements IBrain {
     return `${NEVER_STORE_REDACTED_VALUE}:${suffix}`;
   }
 
-  private countRemainingReferences(selector: NormalizedRightToForgetSelector, options: { expireRuntimeGuards?: boolean } = {}): number {
+  private countRemainingReferences(selector: NormalizedRightToForgetSelector, options: { expireRuntimeGuards?: boolean; expirePersistedTtlEntries?: boolean } = {}): number {
     const memoryType = selector.type ?? 'all';
     let count = 0;
     if (memoryType !== 'episodic') {
       count += new Set([
-        ...this.matchingWorkingKeys(selector, { expireRuntimeGuards: options.expireRuntimeGuards ?? true }).map(match => match.key),
+        ...this.matchingWorkingKeys(selector, {
+          expireRuntimeGuards: options.expireRuntimeGuards ?? true,
+          expirePersistedTtlEntries: options.expirePersistedTtlEntries ?? true,
+        }).map(match => match.key),
         ...SqliteBrain.matchingLiveWorkingKeys(this.dbPath, selector, { expireRuntimeGuards: options.expireRuntimeGuards ?? true }),
       ]).size;
     }

@@ -4,11 +4,19 @@ import {
   buildRestoreDryRunReport,
   type RestorePreviewManifest,
 } from '../dr/restore-preview.js';
+import {
+  createEncryptedStateBackup,
+  readStateBackupEnvelope,
+  restoreEncryptedStateBackup,
+  verifyEncryptedStateBackup,
+} from '../dr/state-backup.js';
 
 export interface DrCommandDeps {
-  readonly action: 'restore-dry-run' | undefined;
+  readonly action: 'backup' | 'list' | 'verify' | 'restore' | 'restore-dry-run' | undefined;
   readonly backupManifestPath?: string | undefined;
   readonly liveManifestPath?: string | undefined;
+  readonly keyFilePath?: string | undefined;
+  readonly dryRun?: boolean | undefined;
   readonly generatedAt?: string | undefined;
   readonly print: (message: string) => void;
 }
@@ -64,9 +72,69 @@ export async function readRestoreManifest(manifestPath: string): Promise<Restore
 }
 
 export async function handleDrCommand(deps: DrCommandDeps): Promise<void> {
-  const { action, backupManifestPath, liveManifestPath, print } = deps;
+  const { action, backupManifestPath, liveManifestPath, keyFilePath, print } = deps;
+  if (action === 'backup') {
+    if (!backupManifestPath || !liveManifestPath || !keyFilePath) {
+      throw new Error('dr backup requires <state-dir> <backup-file> <key-file>');
+    }
+    const envelope = await createEncryptedStateBackup({
+      stateDir: backupManifestPath,
+      outputPath: liveManifestPath,
+      keyFilePath,
+      ...(deps.generatedAt === undefined ? {} : { generatedAt: deps.generatedAt }),
+    });
+    print(JSON.stringify({
+      ok: true,
+      command: 'dr backup',
+      backupPath: liveManifestPath,
+      encrypted: envelope.encryption.encrypted,
+      algorithm: envelope.encryption.algorithm,
+      artifactDigest: envelope.encryption.artifactDigest,
+      manifest: envelope.manifest,
+    }, null, 2));
+    return;
+  }
+
+  if (action === 'list') {
+    if (!backupManifestPath) {
+      throw new Error('dr list requires <backup-file>');
+    }
+    const envelope = await readStateBackupEnvelope(backupManifestPath);
+    print(JSON.stringify({
+      ok: true,
+      command: 'dr list',
+      encrypted: envelope.encryption.encrypted,
+      verified: false,
+      verificationRequired: 'Run dr verify <backup-file> <key-file> before trusting manifest metadata or restoring this backup.',
+      algorithm: envelope.encryption.algorithm,
+      manifest: envelope.manifest,
+    }, null, 2));
+    return;
+  }
+
+  if (action === 'verify') {
+    if (!backupManifestPath || !liveManifestPath) {
+      throw new Error('dr verify requires <backup-file> <key-file>');
+    }
+    print(JSON.stringify(await verifyEncryptedStateBackup(backupManifestPath, liveManifestPath), null, 2));
+    return;
+  }
+
+  if (action === 'restore') {
+    if (!backupManifestPath || !liveManifestPath || !keyFilePath) {
+      throw new Error('dr restore requires <backup-file> <target-dir> <key-file>');
+    }
+    print(JSON.stringify(await restoreEncryptedStateBackup({
+      backupPath: backupManifestPath,
+      targetDir: liveManifestPath,
+      keyFilePath,
+      dryRun: deps.dryRun === true,
+    }), null, 2));
+    return;
+  }
+
   if (action !== 'restore-dry-run') {
-    throw new Error('Usage: frankenbeast dr restore-dry-run <backup-manifest.json> <live-manifest.json>');
+    throw new Error('Usage: frankenbeast dr <backup|list|verify|restore|restore-dry-run> ...');
   }
   if (!backupManifestPath || !liveManifestPath) {
     throw new Error('dr restore-dry-run requires two manifest JSON files: <backup-manifest.json> <live-manifest.json>');

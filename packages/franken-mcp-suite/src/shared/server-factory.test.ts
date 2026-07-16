@@ -408,6 +408,117 @@ describe('createMcpServer', () => {
       });
     });
 
+    it('redacts proposed memory candidates in the exported audit sanitizer', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_review_propose', {
+        key: 'secret-api-key',
+        value: 'store token abc123',
+        type: 'working',
+        source: 'operator pasted secret',
+        reason: 'contains DROP TABLE text for review',
+        confidence: 0.8,
+      })).toEqual({
+        key: '[memory-review-proposal-redacted]',
+        value: '[memory-review-proposal-redacted]',
+        type: 'working',
+        source: '[memory-review-proposal-redacted]',
+        reason: '[memory-review-proposal-redacted]',
+        confidence: 0.8,
+      });
+
+      expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
+        tool: 'fbeast_memory_review_propose',
+        args: { key: 'secret-api-key', value: 'token abc123', type: 'working' },
+        value: 'token abc123 outside args',
+      })).toEqual({
+        tool: 'fbeast_memory_review_propose',
+        args: '[memory-review-proposal-redacted]',
+        value: '[memory-review-proposal-redacted]',
+      });
+
+      expect(sanitizeToolArgumentsForAuditTrail('mcp__fbeast-proxy__execute_tool', {
+        tool: 'mcp__fbeast-memory__fbeast_memory_review_propose',
+        args: { key: 'secret-api-key', value: 'token abc123', type: 'working' },
+      })).toEqual({
+        tool: 'mcp__fbeast-memory__fbeast_memory_review_propose',
+        args: '[memory-review-proposal-redacted]',
+      });
+
+      expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
+        tool: 'fbeast_memory_review_propose',
+        action: 'token abc123 outside args',
+        key: 'secret-api-key',
+        value: 'token abc123 outside args',
+        source: 'malformed wrapper',
+      })).toEqual({
+        tool: 'fbeast_memory_review_propose',
+        action: '[memory-review-proposal-redacted]',
+        key: '[memory-review-proposal-redacted]',
+        value: '[memory-review-proposal-redacted]',
+        source: '[memory-review-proposal-redacted]',
+        args: '[memory-review-proposal-redacted]',
+      });
+
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_governor_check', {
+        action: 'mcp__fbeast-memory__fbeast_memory_review_propose',
+        context: '{"value":"token abc123"}',
+      })).toEqual({
+        action: 'mcp__fbeast-memory__fbeast_memory_review_propose',
+        context: '[memory-review-proposal-redacted]',
+      });
+    });
+
+    it('redacts memory review decision metadata in the exported audit sanitizer', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_review_decide', {
+        id: 'memcand_123',
+        action: 'reject',
+        reviewer: 'alice@example.test',
+        note: 'Looks like token abc123',
+      })).toEqual({
+        id: '[memory-review-decision-metadata-redacted]',
+        action: 'reject',
+        reviewer: '[memory-review-decision-metadata-redacted]',
+        note: '[memory-review-decision-metadata-redacted]',
+      });
+
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_review_decide', {
+        id: 'memcand_123',
+        action: 'token abc123',
+        note: 'Looks like token abc123',
+      })).toEqual({
+        id: '[memory-review-decision-metadata-redacted]',
+        action: '[memory-review-decision-metadata-redacted]',
+        note: '[memory-review-decision-metadata-redacted]',
+      });
+
+      expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
+        tool: 'fbeast_memory_review_decide',
+        args: {
+          id: 'memcand_1',
+          action: 'reject',
+          reviewer: 'alice',
+          note: 'Rejected because candidate contains token abc123 and rm -rf /',
+        },
+      })).toEqual({
+        tool: 'fbeast_memory_review_decide',
+        args: {
+          id: '[memory-review-decision-metadata-redacted]',
+          action: 'reject',
+          reviewer: '[memory-review-decision-metadata-redacted]',
+          note: '[memory-review-decision-metadata-redacted]',
+        },
+      });
+
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_review_decide', {
+        id: 'memcand_1',
+        action: 'candidate text token abc123',
+        note: 'Rejected because candidate contains token abc123 and rm -rf /',
+      })).toEqual({
+        id: '[memory-review-decision-metadata-redacted]',
+        action: '[memory-review-decision-metadata-redacted]',
+        note: '[memory-review-decision-metadata-redacted]',
+      });
+    });
+
 
     it('redacts invalid and unknown right-to-forget audit payloads wholesale', () => {
       expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_right_to_forget', 'alice@example.test')).toEqual({

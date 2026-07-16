@@ -48,7 +48,7 @@ describe('createGovernanceGate', () => {
       'fbeast_firewall_scan_file',
       'fbeast_governor_check',
       'fbeast_governor_budget',
-      'fbeast_memory_store',
+      'fbeast_memory_review_propose',
       'fbeast_memory_query',
       'fbeast_memory_frontload',
       'fbeast_plan_decompose',
@@ -74,7 +74,7 @@ describe('createGovernanceGate', () => {
         tool,
         args: { input: 'DROP TABLE users; rm -rf /; delete all files', action: 'delete_file' },
       });
-      expect(result.decision).toBe('approved');
+      expect(result.decision, tool).toBe('approved');
       expect(seen).toHaveLength(0);
     }
   });
@@ -87,36 +87,48 @@ describe('createGovernanceGate', () => {
     expect(seen).toHaveLength(1);
   });
 
-  it('routes right-to-forget through governance with redacted selector context', async () => {
-    const { governor, seen } = spyGovernor('denied');
+  it('routes right-to-forget mutations through the shared governor with redacted selector evidence', async () => {
+    const { governor, seen } = spyGovernor('review_recommended');
     const gate = createGovernanceGate(governor);
     const result = await gate.check({
       tool: 'fbeast_memory_right_to_forget',
       args: { query: 'alice@example.test', category: 'pii', dryRun: false },
     });
-    expect(result.decision).toBe('denied');
-    expect(seen).toEqual([
-      {
-        action: 'fbeast_memory_right_to_forget',
-        context: JSON.stringify({
-          query: '[right-to-forget-selector-redacted]',
-          category: '[right-to-forget-selector-redacted]',
-          dryRun: false,
-        }),
-      },
-    ]);
-    expect(seen[0]!.context).not.toContain('alice@example.test');
+    expect(result.decision).toBe('review_recommended');
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.action).toBe('fbeast_memory_right_to_forget');
+    expect(JSON.parse(seen[0]!.context)).toEqual({
+      query: '[right-to-forget-selector-redacted]',
+      category: '[right-to-forget-selector-redacted]',
+      dryRun: false,
+    });
   });
 
-  it('routes a destructive tool through the shared governor without a gate-level override', async () => {
-    // Classification now lives in the governor adapter, not the gate. The gate
-    // must NOT exempt or re-decide fbeast_memory_forget: it passes the call to
-    // the governor and returns the governor's decision verbatim, so every caller
-    // agrees on the same answer.
+  it('routes ordinary memory stores through the shared governor with selector-only evidence', async () => {
+    const { governor, seen } = spyGovernor('review_recommended');
+    const gate = createGovernanceGate(governor);
+
+    const result = await gate.check({ tool: 'fbeast_memory_store', args: { key: 'lesson', value: 'secret text', type: 'working' } });
+
+    expect(result).toEqual({ decision: 'review_recommended', reason: 'r' });
+    expect(seen).toEqual([{ action: 'fbeast_memory_store', context: JSON.stringify({ key: '[right-to-forget-selector-redacted]' }) }]);
+  });
+
+  it('routes right-to-forget dry-runs through the shared governor with structured dryRun evidence', async () => {
+    const { governor, seen } = spyGovernor('approved');
+    const gate = createGovernanceGate(governor);
+
+    const result = await gate.check({ tool: 'fbeast_memory_right_to_forget', args: { query: 'alice@example.test', dryRun: true } });
+
+    expect(result.decision).toBe('approved');
+    expect(seen).toEqual([{ action: 'fbeast_memory_right_to_forget', context: JSON.stringify({ query: '[right-to-forget-selector-redacted]', dryRun: true }) }]);
+  });
+
+  it('routes high-risk memory deletes through the shared governor', async () => {
     const { governor, seen } = spyGovernor('review_recommended');
     const gate = createGovernanceGate(governor);
     const result = await gate.check({ tool: 'fbeast_memory_forget', args: { key: 'note' } });
     expect(result.decision).toBe('review_recommended');
-    expect(seen).toEqual([{ action: 'fbeast_memory_forget', context: JSON.stringify({ key: 'note' }) }]);
+    expect(seen).toEqual([{ action: 'fbeast_memory_forget', context: JSON.stringify({ key: '[right-to-forget-selector-redacted]' }) }]);
   });
 });

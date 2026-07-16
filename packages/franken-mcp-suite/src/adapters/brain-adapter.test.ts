@@ -21,6 +21,11 @@ const { databaseInstances, brainInstances } = vi.hoisted(() => {
       record: ReturnType<typeof vi.fn>;
     };
     rightToForget: ReturnType<typeof vi.fn>;
+    memoryReview: {
+      approve: ReturnType<typeof vi.fn>;
+      reject: ReturnType<typeof vi.fn>;
+      neverStore: ReturnType<typeof vi.fn>;
+    };
     flush: ReturnType<typeof vi.fn>;
   }> = [];
   return { databaseInstances, brainInstances };
@@ -107,6 +112,11 @@ vi.mock("@franken/brain", () => ({
         deleted: { working: 1, episodic: 0, derived: 0 },
         remainingReferences: 0,
       })),
+      memoryReview: {
+        approve: vi.fn(() => ({ id: "memcand_1", status: "approved" })),
+        reject: vi.fn(() => ({ id: "memcand_1", status: "rejected" })),
+        neverStore: vi.fn(() => ({ id: "memcand_1", status: "never_store" })),
+      },
       flush: vi.fn(),
     };
     brainInstances.push(brain);
@@ -177,6 +187,70 @@ describe("createBrainAdapter", () => {
       limit: 5,
     });
     expect(episodicResult.some((row) => row.type === "episodic")).toBe(true);
+  });
+
+  it("stores temporary operational working facts with expiresAt metadata when ttlMs is provided", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    try {
+      const brain = createBrainAdapter("/tmp/beast.db");
+      await brain.store({ key: "run:tmp", value: "short-lived status", type: "working", ttlMs: 60_000 });
+
+      const mockBrain = brainInstances[0];
+      expect(mockBrain.working.set).toHaveBeenCalledWith("run:tmp", {
+        value: "short-lived status",
+        category: "temporary-operational",
+        sourceScope: "mcp-memory-store",
+        expiresAt: "2026-01-01T00:01:00.000Z",
+      });
+      expect(mockBrain.flush).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects unsafe working-memory TTLs before writing memory", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+    const mockBrain = brainInstances[0];
+
+    for (const invalidTtlMs of [NaN, Infinity, 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      await expect(
+        brain.store({ key: "run:tmp", value: "status", type: "working", ttlMs: invalidTtlMs as number }),
+      ).rejects.toThrow("ttlMs must be a positive integer");
+    }
+
+    expect(mockBrain.working.set).not.toHaveBeenCalled();
+    expect(mockBrain.flush).not.toHaveBeenCalled();
+  });
+
+  it("rejects ttlMs for episodic memory because episodic records are durable", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+    const mockBrain = brainInstances[0];
+
+    await expect(
+      brain.store({ key: "evt-ttl", value: "should stay durable", type: "episodic", ttlMs: 60_000 }),
+    ).rejects.toThrow("ttlMs is only supported for working memory");
+
+    expect(mockBrain.episodic.record).not.toHaveBeenCalled();
+    expect(mockBrain.working.set).not.toHaveBeenCalled();
+  });
+
+  it("does not label durable working values with expiresAt fields as TTL-expiring", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+    const mockBrain = brainInstances[0];
+    mockBrain.working.snapshot.mockReturnValue({
+      asset: { value: "certificate metadata", category: "asset", expiresAt: "2099-01-01T00:00:00.000Z" },
+      tmp: { value: "runtime status", category: "temporary-operational", expiresAt: "2099-01-01T00:00:00.000Z" },
+      tmpAlias: { value: "aliased runtime status", category: "operational-temporary", expiresAt: "2099-01-01T00:00:00.000Z" },
+    });
+
+    const result = await brain.query({ query: "", type: "working", limit: 5 });
+
+    expect(result).toEqual([
+      { key: "asset", value: JSON.stringify({ value: "certificate metadata", category: "asset", expiresAt: "2099-01-01T00:00:00.000Z" }), type: "working" },
+      { key: "tmp", value: "runtime status (expires 2099-01-01T00:00:00.000Z)", type: "working" },
+      { key: "tmpAlias", value: "aliased runtime status (expires 2099-01-01T00:00:00.000Z)", type: "working" },
+    ]);
   });
 
   it("rejects unsafe query limits before reading memory", async () => {
@@ -324,6 +398,18 @@ describe("createBrainAdapter", () => {
     expect(brainInstances[0].rightToForget).toHaveBeenCalledWith({
       key: "__fbeast_agent_memory__/Alpha%20Team!/profile",
     });
+  });
+
+  it("fails closed for unsupported memory review actions at the adapter boundary", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+    const mockBrain = brainInstances[0];
+
+    await expect(brain.decideMemoryReview({
+      id: "memcand_1",
+      action: "never-store" as "never_store",
+    })).rejects.toThrow("Unsupported memory review action: never-store");
+
+    expect(mockBrain.memoryReview.neverStore).not.toHaveBeenCalled();
   });
 
   it("rejects unsupported memory type", async () => {

@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { BrainSnapshotSchema } from '@franken/types';
 import type {
   EpisodicEvent,
@@ -1645,6 +1645,34 @@ describe('SqliteBrain', () => {
 
       expect(suppressed.status).toBe('suppressed');
       expect(brain.memoryReview.conflictsFor(suppressed.id)).toEqual([]);
+    });
+
+
+    it('prunes expired temporary facts before approved working-memory writes enforce limits', () => {
+      const limitedBrain = new SqliteBrain(':memory:', { maxEntries: 1 });
+      limitedBrain.working.set('op:expired', {
+        value: 'stale runtime entry',
+        category: 'temporary-operational',
+        expiresAt: '2099-01-01T00:00:00.000Z',
+      });
+      const candidate = limitedBrain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.repo.default-branch',
+        value: 'main',
+        source: 'repo-config',
+        confidence: 0.8,
+        reason: 'Observed from GitHub repository metadata.',
+      });
+
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2099-01-01T00:00:01.000Z'));
+      try {
+        expect(() => limitedBrain.memoryReview.approve(candidate.id, { reviewer: 'operator' })).not.toThrow();
+        expect(limitedBrain.working.keys()).toEqual(['env.repo.default-branch']);
+      } finally {
+        limitedBrain.close();
+        vi.useRealTimers();
+      }
     });
 
     it('edits a candidate before approval and writes the edited memory', () => {

@@ -765,7 +765,16 @@ const notifier = new WebhookNotifier({
 })
 ```
 
-Webhook targets are deny-by-default: configure `allowedTargetOrigins` with the trusted webhook origins that may receive HITL payloads. The configured `url` must resolve to one of those origins before any network request is attempted, and redirects are not followed automatically so an allowlisted endpoint cannot forward the POST body to an unlisted origin. Legacy deployments can set `allowUnlistedTarget: true` as an explicit unsafe opt-out while they migrate to an allowlist.
+Webhook targets are deny-by-default: configure `allowedTargets` with the trusted webhook destinations that may receive HITL payloads. Each entry must use `https`, must not point at `localhost` or private/link-local IP ranges, and may include a pathname prefix to restrict delivery to a provider route such as Discord's webhook API:
+
+```ts
+const discordNotifier = new WebhookNotifier({
+  url: process.env.DISCORD_WEBHOOK_URL!,
+  allowedTargets: ['https://discord.com/api/webhooks/'],
+})
+```
+
+`allowedTargetOrigins` remains available for origin-wide allowlists such as `['https://hooks.slack.com']`, but path-scoped `allowedTargets` is preferred when an operator can name the exact provider path. The configured `url` is validated when the notifier is constructed and re-checked immediately before `send()` attempts any network request. Redirects are not followed automatically, so an allowlisted endpoint cannot forward the POST body to an unlisted origin. Legacy deployments can set `allowUnlistedTarget: true` as an explicit unsafe opt-out while they migrate to an allowlist.
 
 ---
 

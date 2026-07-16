@@ -8,9 +8,16 @@ import { BeastCatalogService } from './beast-catalog-service.js';
 import { wallClockNow } from '@franken/types';
 import { UnknownBeastDefinitionError } from '../errors.js';
 import { GitConfigSchema, LlmConfigSchema, PromptConfigSchema } from '../../cli/run-config-loader.js';
+import {
+  CapacityReservationError,
+  type CapacityReservationPolicy,
+  type CapacityReservationWorkItem,
+  capacityItemFromConfig,
+} from './capacity-reservation-policy.js';
 
 export interface BeastDispatchServiceOptions {
   eventBus?: BeastEventBus;
+  capacityPolicy?: CapacityReservationPolicy | undefined;
 }
 
 export interface BeastExecutors {
@@ -28,6 +35,12 @@ const SHARED_RUNTIME_CONFIG_KEYS = [
   'maxDurationMs',
   'maxTotalTokens',
   'reflection',
+  'label',
+  'labels',
+  'issueLabels',
+  'category',
+  'categories',
+  'issue',
 ] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -89,6 +102,15 @@ function normalizeSharedRuntimeConfigValue(key: string, value: unknown): unknown
       return typeof value === 'number' ? value : undefined;
     case 'reflection':
       return typeof value === 'boolean' ? value : undefined;
+    case 'label':
+    case 'category':
+      return typeof value === 'string' ? value : undefined;
+    case 'labels':
+    case 'issueLabels':
+    case 'categories':
+      return Array.isArray(value) && value.every((entry) => typeof entry === 'string') ? value : undefined;
+    case 'issue':
+      return isRecord(value) ? value : undefined;
     default:
       return undefined;
   }
@@ -164,6 +186,10 @@ export class BeastDispatchService {
     const run = this.repository.transaction(() => {
       if (request.trackedAgentId) {
         this.repository.requireTrackedAgent(request.trackedAgentId);
+        this.assertTrackedAgentCapacity(request.trackedAgentId, {
+          ...request.config,
+          ...configSnapshot,
+        });
       }
 
       const createdRun = this.repository.createRun({
@@ -310,6 +336,31 @@ export class BeastDispatchService {
 
   private executorFor(mode: BeastExecutionMode): BeastExecutor {
     return mode === 'container' ? this.executors.container : this.executors.process;
+  }
+
+  private assertTrackedAgentCapacity(
+    trackedAgentId: string,
+    candidateConfig: Readonly<Record<string, unknown>>,
+  ): void {
+    if (!this.options.capacityPolicy) return;
+    const activeItems = this.activeCapacityItems();
+    const decision = this.options.capacityPolicy.canStart(
+      capacityItemFromConfig(trackedAgentId, candidateConfig),
+      activeItems,
+    );
+    if (!decision.allowed) {
+      throw new CapacityReservationError(decision, this.options.capacityPolicy.describe(activeItems));
+    }
+  }
+
+  private activeCapacityItems(): CapacityReservationWorkItem[] {
+    return this.repository.listRuns()
+      .filter(run => run.trackedAgentId)
+      .filter(run => run.status === 'queued'
+        || run.status === 'interviewing'
+        || run.status === 'pending_approval'
+        || run.status === 'running')
+      .map(run => capacityItemFromConfig(run.trackedAgentId!, run.configSnapshot));
   }
 
   private resolveAgentModuleConfig(trackedAgentId?: string): ModuleConfig | undefined {

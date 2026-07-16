@@ -80,6 +80,11 @@ export class LlmSkillHandler {
         continue;
       }
 
+      if (this.isExplicitlyStaleOrArchived(entry.text.toLowerCase().trimStart())) {
+        omitted = entries.length - selectedLines.length;
+        break;
+      }
+
       const truncated = this.fitTruncatedLine(selectedLines, line, omittedAfterThis);
       if (truncated) {
         selectedLines.push(truncated);

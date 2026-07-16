@@ -1,9 +1,22 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-15 — Webhook DNS pinning review fixes
+- For outbound webhook SSRF hardening, validate object-form allowlist origins for credentials too; URL normalization can otherwise hide deceptive `userinfo@host` entries.
+- When a webhook hostname is DNS-validated before delivery, the actual transport must consume the validated address: custom fetches should receive an IP-pinned URL plus original Host header, default HTTPS should try later validated addresses after network failures, and pinned HTTPS error bodies need async-iterable response coverage.
+
+## 2026-07-15 — High-risk governor policy review fixes
+- When adding policy-as-code for high-risk action classes, wire the class map into every shared governor path before non-executing exemptions; otherwise new classes can exist in the policy module but never gate hook/public/central checks.
+- For memory governance evidence, pass only selector/dry-run/profile fields into hook/governor context and redact selectors before logging; never serialize full memory tool payloads because schema-rejected extras or stored values can leak secrets into governor logs.
+- High-risk shell-command inference must parse common CLI variants, not just simple substrings: allow read-only GitHub inspection (`gh issue/pr view|list`), gate mutating GitHub subcommands such as labels/runs/secrets even behind inherited flags, recognize `git` global options before `push`, deny Git remote writes without a concrete target, avoid matching ordinary `service` path/package names as process control, include `crontab` edits, and match real webhook hosts like `hooks.slack.com/services` and Discord `/api/webhooks/`.
+
 ## 2026-07-15 — Skill installer path hardening review fixes
 - For installer path hardening, guard every public surface that can surface unsafe-path errors, not just install routes; context/read/write routes should return generic unsafe-path messages and tests should assert absolute roots/targets are not leaked.
 - If an installer snapshots a root realpath at construction, handle missing-root recovery explicitly: revalidate the missing root's parent before `mkdir`, reject symlinked/repointed parents, then recheck the recreated root before creating child directories.
 - When Codex reaches the configured review-invocation cap with new findings, fix/reply/resolve and stop for explicit approval before triggering another review; do not merge on stale clean signals after the head changed.
+
+## 2026-07-15 — Memory TTL policy
+- For temporary operational facts, keep TTL metadata on working-memory values (`expiresAt`) and enforce expiration on all read/list/hydration paths; also filter expired runtime rows before flush so stale operational state cannot be re-persisted.
+- When verifying workspace package typechecks in a fresh worktree, build dependency packages (or run root `npm run build`) before package-local `tsc --noEmit`; otherwise unresolved workspace package declarations can look like feature regressions.
 
 ## 2026-07-15 — Beast process cleanup review fixes
 - For Beast cleanup paths, treat persisted process-group ownership as verified only when the stored start-time token matches the current `/proc` start time; missing or unreadable start times should fail closed to direct-PID signaling to avoid killing a PID-reused process group.
@@ -12,11 +25,19 @@
 - After a dispatch `onRunCreated` callback, re-read persisted run state before startNow execution; signal cleanup can mark a just-created run stopped before any attempt exists.
 - Keep post-spawn metadata providers inside the same cleanup try/catch as attempt persistence so provider failures cannot leave a spawned process without an attempt record.
 
+## 2026-07-15 — Local dashboard CSRF/clickjacking hardening
+- Local UI CSRF gates must account for every dashboard serving path: Hono API, built static dashboard, Vite dev server, static proxy, and chat-server-to-daemon compatibility proxy. Pair frame denial headers with both API and HTML/static responses.
+- When comparing Origin for browser mutations, check explicit `allowedOrigins` before rejecting on `Sec-Fetch-Site`, and trust implicit same-origin only for loopback hosts (`localhost`, `127.0.0.1`, `[::1]`) to avoid DNS-rebinding Host equality bypasses.
+- Multi-hop dashboard proxies should preserve existing `x-forwarded-host`/`x-forwarded-proto` rather than overwriting them at inner hops; otherwise daemon-side same-origin checks see the wrong origin and break valid dashboard Beast mutations.
+
 ## 2026-07-15 — Graceful shutdown drain gates
 - For daemon drain modes, make one outer mutation-admission middleware own both the draining check and in-flight counter; nested route-specific re-checks can reject already-admitted requests after shutdown begins.
 - If shutdown times out waiting for in-flight mutations, do not release ownership markers such as pid files until mutations are quiesced or definitively aborted; otherwise a replacement daemon can start while the old handler still mutates shared state.
 - On drain timeout, close HTTP intake but keep shutdown ownership, wait for already-admitted mutating routes to finish, then stop live child runs, dispose services, release the PID file, and report the timeout; otherwise the CLI can exit while a just-created run is orphaned.
 - Treat draining sibling daemons as fail-fast for chat-server startup rather than proxying to a 503 daemon or starting route-less/local Beast control that will not recover without restart.
+
+## 2026-07-15 — Cron wrapper Codex closeout
+- Cron script wrappers that emit structured failure envelopes need regression coverage for quoted/escaped secret values in both stderr and argv snippets, full Authorization schemes, descendant cleanup after parent termination, and long stderr-drain timers; old inline comments can be superseded only after pushing, resolving the exact Codex threads, and obtaining a fresh current-head review.
 
 ## 2026-07-15 — Issue-runner dependency circuit breaker verification
 - For availability/refill features that add dependency-specific throttles, model the dependency name in structured signals and configure named breakers so unrelated degraded dependencies do not create a global outage. Regression tests should cover the intended open condition plus an unrelated dependency and a retry/open-until edge case.
@@ -57,6 +78,10 @@
 ## 2026-07-13 — Operator session-token review hardening
 - Approval-session tokens must be scoped to the policy actually approved: skill triggers can use selected tool scope, but budget/custom/non-skill approvals should stay task-scoped even when a tool is selected so same-tool actions in other tasks do not bypass prompts.
 - Never reuse an approval-session token for fail-closed trigger-evaluation errors; even a valid same-scope token must fall back to a fresh operator prompt when evaluator context/logic throws.
+
+## 2026-07-16 — Codex usage-limit handling in init Codex hooks fixes
+- When Codex responds with usage-limit comments after `@codex review`, treat it as a hard stop for that review round and do not keep triggering repeated reviews.
+- For `writeCodexHooks` recovery work, prefer recover+backup flows on malformed existing JSON so user hooks are not silently dropped, and add tests that explicitly assert backup creation and hook-preserving write paths.
 - When a gateway returns an issued approval token, the planner/CoT path needs an explicit state handoff into later rationales; otherwise adapter-level token issuance is documented but not usable by normal planner executions.
 - Multi-policy approval prompts must surface every fired policy reason, not just a preferred non-skill trigger, so operators see destructive/HITL skill risk alongside budget or other policy risk.
 - If a CoT rationale can carry reusable approval tokens, keep candidate token IDs per prior approval rather than a single overwrite slot; the governor can validate candidates against the current scope and ignore non-matching tokens.
@@ -224,4 +249,12 @@
 - 2026-07-14 — Egress policy wiring: provider/comms adapters that perform outbound HTTP must receive the live runtime egress policy from their construction routes, not just expose standalone guarded fetch helpers. For SDKs without a first-class fetch injection point, add a narrow wrapper with tests that prove the guarded fetch is active during the SDK request and that global fetch is restored afterward.
 - 2026-07-15 — Security scanner ReDoS: for untrusted source/env scanners, size bounds must run before allocation/decoding where possible (`stat` before `readFile`), and regex-based string literal extraction should be replaced with a linear parser for adversarial escape/unterminated literal cases. Codex may reproduce small payload DoS with only tens of backslashes, so add a targeted regression for that exact input class.
 - 2026-07-15 — Codex-cap cleanup rounds: when Codex findings arrive at the review-trigger cap, fix/reply/resolve every actionable thread and verify CI/unresolved-thread state, but do not fire an over-cap `@codex review` without explicit human approval; block with the exact refused trigger command and latest passing commit so the next worker can resume cleanly.
+
+- 2026-07-15 — Webhook egress allowlists: match exact public HTTPS targets, reject credentials/query/fragment/path traversal, mirror private-host aliases from the orchestrator egress policy, resolve DNS before every network attempt including retries, and add regression tests for DNS rebinding-style private answers.
 - 2026-07-15 — MCP memory scoping: avoid encoding agent scope solely in user-visible keys or summaries. Store explicit scope metadata, use reversible internal key encoding for physical storage, keep logical keys in query/frontload output, and fetch/filter uncapped episodic rows before applying visible result limits so other agents' rows cannot starve the requested scope.
+- 2026-07-15 — DR backup review hardening: encrypted state backups should back up only the requested state tree plus explicit sibling DBs, never keys/cache/old artifacts; reject live SQLite sidecars (`-wal`, `-shm`, `-journal`), validate dry-run restore targets, and quarantine approval ledgers rather than reactivating stale approvals.
+
+## 2026-07-16 — LlmCacheStore read-path schema validation
+- For JSON cache stores, validate both schemaVersion and the runtime shape (`content` type) before returning entries, otherwise stale/malformed files can be reused as cache hits.
+- Add regression tests that write an explicitly mismatched schema version and a wrong-shaped payload to prove stale cache entries are rejected.
+- Keep Codex review follow-ups separate from CI: CI green + no fresh Codex findings is not sufficient when Codex usage-limited responses occur; treat limits as blocked merge gates and retry only after credits reset.

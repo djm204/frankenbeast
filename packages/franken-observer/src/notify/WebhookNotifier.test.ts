@@ -1,11 +1,19 @@
+import { EventEmitter } from 'node:events'
+import { request as httpsRequest } from 'node:https'
+
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { seededRandom } from '@franken/types'
 import { WebhookNotifier } from './WebhookNotifier.js'
+import type { FetchFn } from '../adapters/langfuse/LangfuseAdapter.js'
+
+vi.mock('node:https', () => ({
+  request: vi.fn(),
+}))
 import { CircuitBreaker } from '../cost/CircuitBreaker.js'
 import { LoopDetector } from '../incident/LoopDetector.js'
 
 describe('WebhookNotifier', () => {
-  let mockFetch: ReturnType<typeof vi.fn>
+  let mockFetch: ReturnType<typeof vi.fn> & FetchFn
 
   const drainAlreadyQueuedMicrotasks = async () => {
     // CircuitBreaker emits limit events synchronously. The below-limit negative
@@ -21,6 +29,28 @@ describe('WebhookNotifier', () => {
       controller.close()
     },
   })
+  const mockPinnedHttpsResponse = (statusCode = 204, statusMessage = 'No Content', bodyChunks: readonly string[] = []) => {
+    const request = new EventEmitter() as EventEmitter & { write: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> }
+    request.write = vi.fn()
+    request.end = vi.fn(() => {
+      const response = new EventEmitter() as EventEmitter & {
+        statusCode: number
+        statusMessage: string
+        [Symbol.asyncIterator]: () => AsyncIterator<Buffer>
+      }
+      response.statusCode = statusCode
+      response.statusMessage = statusMessage
+      response[Symbol.asyncIterator] = async function * () {
+        for (const chunk of bodyChunks) {
+          yield Buffer.from(chunk)
+        }
+      }
+      const callback = vi.mocked(httpsRequest).mock.calls.at(-1)?.[1]
+      callback?.(response as never)
+    })
+    vi.mocked(httpsRequest).mockReturnValue(request as never)
+    return request
+  }
 
   const createNotifier = (options: Partial<ConstructorParameters<typeof WebhookNotifier>[0]> = {}) =>
     new WebhookNotifier({
@@ -31,7 +61,8 @@ describe('WebhookNotifier', () => {
     })
 
   beforeEach(() => {
-    mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: 'OK' })
+    mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: 'OK' }) as ReturnType<typeof vi.fn> & FetchFn
+    vi.mocked(httpsRequest).mockReset()
   })
 
   describe('send()', () => {
@@ -352,6 +383,320 @@ describe('WebhookNotifier', () => {
       expect(mockFetch).not.toHaveBeenCalled()
     })
 
+    it('allows Discord webhook targets that match an allowed provider path', async () => {
+      const notifier = new WebhookNotifier({
+        url: 'https://discord.com/api/webhooks/123456/secret-token',
+        allowedTargets: ['https://discord.com/api/webhooks/'],
+        fetch: mockFetch,
+      })
+
+      await notifier.send({ type: 'test' })
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+      expect(mockFetch.mock.calls[0][0]).toBe('https://discord.com/api/webhooks/123456/secret-token')
+    })
+
+    it('rejects malformed webhook URLs during configuration load', () => {
+      expect(() => new WebhookNotifier({
+        url: 'not a url',
+        allowedTargets: ['https://discord.com/api/webhooks/'],
+        fetch: mockFetch,
+      })).toThrow('url must be an absolute URL')
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('rejects localhost and private network webhook targets during configuration load', () => {
+      expect(() => new WebhookNotifier({
+        url: 'https://localhost/api/webhooks/123/secret',
+        allowedTargets: ['https://localhost/api/webhooks/'],
+        fetch: mockFetch,
+      })).toThrow('url host localhost is not allowed')
+      expect(() => new WebhookNotifier({
+        url: 'https://localhost./api/webhooks/123/secret',
+        allowedTargets: ['https://localhost./api/webhooks/'],
+        fetch: mockFetch,
+      })).toThrow('url host localhost is not allowed')
+      expect(() => new WebhookNotifier({
+        url: 'https://[::1]/api/webhooks/123/secret',
+        allowedTargets: ['https://[::1]/api/webhooks/'],
+        fetch: mockFetch,
+      })).toThrow('url host ::1 is not allowed')
+      expect(() => new WebhookNotifier({
+        url: 'https://[::ffff:192.168.1.10]/api/webhooks/123/secret',
+        allowedTargets: ['https://[::ffff:192.168.1.10]/api/webhooks/'],
+        fetch: mockFetch,
+      })).toThrow('url host ::ffff:c0a8:10a is not allowed')
+      expect(() => new WebhookNotifier({
+        url: 'https://[fe90::1]/api/webhooks/123/secret',
+        allowedTargets: ['https://[fe90::1]/api/webhooks/'],
+        fetch: mockFetch,
+      })).toThrow('url host fe90::1 is not allowed')
+      expect(() => new WebhookNotifier({
+        url: 'https://[fec0::1]/api/webhooks/123/secret',
+        allowedTargets: ['https://[fec0::1]/api/webhooks/'],
+        fetch: mockFetch,
+      })).toThrow('url host fec0::1 is not allowed')
+      expect(() => new WebhookNotifier({
+        url: 'https://192.168.1.10/api/webhooks/123/secret',
+        allowedTargets: ['https://192.168.1.10/api/webhooks/'],
+        fetch: mockFetch,
+      })).toThrow('url host 192.168.1.10 is not allowed')
+      expect(() => new WebhookNotifier({
+        url: 'https://100.64.0.1/api/webhooks/123/secret',
+        allowedTargets: ['https://100.64.0.1/api/webhooks/'],
+        fetch: mockFetch,
+      })).toThrow('url host 100.64.0.1 is not allowed')
+      expect(() => new WebhookNotifier({
+        url: 'https://224.0.0.1/api/webhooks/123/secret',
+        allowedTargets: ['https://224.0.0.1/api/webhooks/'],
+        fetch: mockFetch,
+      })).toThrow('url host 224.0.0.1 is not allowed')
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('does not treat public IPv6 addresses with ffff tail hextets as IPv4-mapped', async () => {
+      const notifier = new WebhookNotifier({
+        url: 'https://[2001:4860::ffff:c0a8:10a]/api/webhooks/123/secret',
+        allowedTargets: ['https://[2001:4860::ffff:c0a8:10a]/api/webhooks/'],
+        fetch: mockFetch,
+      })
+
+      await notifier.send({ type: 'test' })
+
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+    })
+
+    it('denies webhook targets outside configured path prefixes before sending', async () => {
+      const notifier = new WebhookNotifier({
+        url: 'https://discord.com/api/oauth2/authorize',
+        allowedTargets: [{ origin: 'https://discord.com', pathnamePrefix: '/api/webhooks/' }],
+        fetch: mockFetch,
+      })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook target origin https://discord.com is not allowed',
+      )
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('rejects private-host webhook aliases during configuration load', () => {
+      const unsafeUrls = [
+        'https://127.0.0.1.nip.io/api/webhooks/123/secret',
+        'https://lvh.me/api/webhooks/123/secret',
+        'https://foo.lvh.me/api/webhooks/123/secret',
+        'https://metadata.google.internal/computeMetadata/v1',
+      ]
+
+      for (const url of unsafeUrls) {
+        expect(() => new WebhookNotifier({
+          url,
+          allowedTargets: [url],
+          fetch: mockFetch,
+        })).toThrow(/host .* is not allowed/u)
+      }
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('rejects encoded path traversal before sending', () => {
+      expect(() => new WebhookNotifier({
+        url: 'https://discord.com/api/webhooks/%2e%2e%2fadmin',
+        allowedTargets: ['https://discord.com/api/webhooks/'],
+        fetch: mockFetch,
+      })).toThrow('url pathname must not include encoded dot segments or separators')
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('rejects query strings in string-form allowed targets', () => {
+      expect(() => new WebhookNotifier({
+        url: 'https://example.com/api/webhooks/123?token=other',
+        allowedTargets: ['https://example.com/api/webhooks/123?token=secret'],
+        fetch: mockFetch,
+      })).toThrow('allowedTargets[0] must not include a query or fragment')
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('resolves hostnames and rejects private resolved addresses before sending', async () => {
+      const dnsLookup = vi.fn(async () => ['169.254.169.254'])
+      const notifier = new WebhookNotifier({
+        url: 'https://webhooks.example.com/api/webhooks/123/secret',
+        allowedTargets: ['https://webhooks.example.com/api/webhooks/'],
+        fetch: mockFetch,
+        dnsLookup,
+      })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'resolved webhook address host 169.254.169.254 is not allowed',
+      )
+      expect(dnsLookup).toHaveBeenCalledWith('webhooks.example.com')
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('fails closed when custom fetches opt into DNS validation because they cannot pin the connection address', async () => {
+      const dnsLookup = vi.fn(async () => ['203.0.113.10'])
+      const notifier = new WebhookNotifier({
+        url: 'https://webhooks.example.com:8443/api/webhooks/123/secret',
+        allowedTargets: ['https://webhooks.example.com:8443/api/webhooks/'],
+        fetch: mockFetch,
+        dnsLookup,
+      })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Injected fetch cannot safely pin DNS-validated webhook addresses',
+      )
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('preserves response bodies from the default pinned HTTPS transport', async () => {
+      mockPinnedHttpsResponse(500, 'Internal Server Error', ['provider diagnostic'])
+      const dnsLookup = vi.fn(async () => ['203.0.113.10'])
+      const notifier = new WebhookNotifier({
+        url: 'https://webhooks.example.com/api/webhooks/123/secret',
+        allowedTargets: ['https://webhooks.example.com/api/webhooks/'],
+        dnsLookup,
+      })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery failed: 500 Internal Server Error for https://webhooks.example.com/[REDACTED]/[REDACTED]/[REDACTED]/[REDACTED]: provider diagnostic',
+      )
+    })
+
+    it('stops waiting on stalled async-iterable response bodies from the default pinned HTTPS transport', async () => {
+      const request = new EventEmitter() as EventEmitter & { write: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> }
+      request.write = vi.fn()
+      request.end = vi.fn(() => {
+        const response = new EventEmitter() as EventEmitter & {
+          statusCode: number
+          statusMessage: string
+          [Symbol.asyncIterator]: () => AsyncIterator<Buffer>
+          destroyed?: boolean
+          destroy: ReturnType<typeof vi.fn>
+        }
+        response.statusCode = 500
+        response.statusMessage = 'Internal Server Error'
+        response.destroy = vi.fn(() => { response.destroyed = true })
+        response[Symbol.asyncIterator] = async function * () {
+          yield Buffer.from('partial diagnostic')
+          await new Promise(() => undefined)
+        }
+        const callback = vi.mocked(httpsRequest).mock.calls.at(-1)?.[1]
+        callback?.(response as never)
+      })
+      vi.mocked(httpsRequest).mockReturnValue(request as never)
+      const dnsLookup = vi.fn(async () => ['203.0.113.10'])
+      const notifier = new WebhookNotifier({
+        url: 'https://webhooks.example.com/api/webhooks/123/secret',
+        allowedTargets: ['https://webhooks.example.com/api/webhooks/'],
+        dnsLookup,
+      })
+      const startedAt = Date.now()
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery failed: 500 Internal Server Error for https://webhooks.example.com/[REDACTED]/[REDACTED]/[REDACTED]/[REDACTED]: partial diagnostic',
+      )
+      expect(Date.now() - startedAt).toBeLessThan(750)
+    })
+
+    it('tries later validated DNS addresses when the first pinned address fails', async () => {
+      const firstRequest = new EventEmitter() as EventEmitter & { write: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> }
+      firstRequest.write = vi.fn()
+      firstRequest.end = vi.fn(() => firstRequest.emit('error', new Error('ECONNREFUSED')))
+      const secondRequest = mockPinnedHttpsResponse()
+      vi.mocked(httpsRequest)
+        .mockReturnValueOnce(firstRequest as never)
+        .mockReturnValueOnce(secondRequest as never)
+      const dnsLookup = vi.fn(async () => ['203.0.113.10', '203.0.113.11'])
+      const notifier = new WebhookNotifier({
+        url: 'https://webhooks.example.com/api/webhooks/123/secret',
+        allowedTargets: ['https://webhooks.example.com/api/webhooks/'],
+        dnsLookup,
+      })
+
+      await notifier.send({ type: 'test' })
+
+      expect(httpsRequest).toHaveBeenCalledTimes(2)
+      expect(vi.mocked(httpsRequest).mock.calls[0][0]).toEqual(expect.objectContaining({ hostname: '203.0.113.10' }))
+      expect(vi.mocked(httpsRequest).mock.calls[1][0]).toEqual(expect.objectContaining({ hostname: '203.0.113.11' }))
+    })
+
+    it('pins the DNS-validated address for default HTTPS delivery', async () => {
+      const request = mockPinnedHttpsResponse()
+      const dnsLookup = vi.fn(async () => ['203.0.113.10'])
+      const notifier = new WebhookNotifier({
+        url: 'https://webhooks.example.com:8443/api/webhooks/123/secret',
+        allowedTargets: ['https://webhooks.example.com:8443/api/webhooks/'],
+        dnsLookup,
+      })
+
+      await notifier.send({ type: 'test' })
+
+      expect(httpsRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          hostname: '203.0.113.10',
+          port: '8443',
+          path: '/api/webhooks/123/secret',
+          method: 'POST',
+          servername: 'webhooks.example.com',
+          headers: expect.objectContaining({
+            Host: 'webhooks.example.com:8443',
+            'Content-Length': Buffer.byteLength(JSON.stringify({ type: 'test' })),
+          }),
+        }),
+        expect.any(Function),
+      )
+      expect(request.write).toHaveBeenCalledWith(JSON.stringify({ type: 'test' }))
+      expect(request.end).toHaveBeenCalledTimes(1)
+    })
+
+    it('retries transient DNS validation failures before delivery', async () => {
+      mockPinnedHttpsResponse()
+      const transientDnsError = Object.assign(new Error('temporary DNS failure'), { code: 'EAI_AGAIN' })
+      const dnsLookup = vi.fn()
+        .mockRejectedValueOnce(transientDnsError)
+        .mockResolvedValueOnce(['203.0.113.10'])
+      const notifier = new WebhookNotifier({
+        url: 'https://webhooks.example.com/api/webhooks/123/secret',
+        allowedTargets: ['https://webhooks.example.com/api/webhooks/'],
+        dnsLookup,
+        retry: { maxRetries: 1, jitter: false },
+        sleep: vi.fn().mockResolvedValue(undefined),
+      })
+
+      await notifier.send({ type: 'test' })
+
+      expect(dnsLookup).toHaveBeenCalledTimes(2)
+      expect(httpsRequest).toHaveBeenCalledTimes(1)
+    })
+
+    it('enforces path-prefix boundaries before sending', async () => {
+      const notifier = new WebhookNotifier({
+        url: 'https://discord.com/api/webhooks-anything',
+        allowedTargets: [{ origin: 'https://discord.com', pathnamePrefix: '/api/webhooks' }],
+        fetch: mockFetch,
+      })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook target origin https://discord.com is not allowed',
+      )
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('rejects object-form allowed target origins that include paths', () => {
+      expect(() => new WebhookNotifier({
+        url: 'https://discord.com/api/webhooks/123/secret',
+        allowedTargets: [{ origin: 'https://discord.com/api/webhooks/' }],
+        fetch: mockFetch,
+      })).toThrow('allowedTargets[0].origin must not include a path, query, or fragment')
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('rejects credentials in object-form allowed target origins', () => {
+      expect(() => new WebhookNotifier({
+        url: 'https://evil.example/api/webhooks/123/secret',
+        allowedTargets: [{ origin: 'https://reviewed.example@evil.example' }],
+        fetch: mockFetch,
+      })).toThrow('allowedTargets[0].origin must not include credentials')
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
     it('allows explicit unsafe opt-out for legacy deployments', async () => {
       const notifier = new WebhookNotifier({
         url: 'https://legacy.example.net/signal',
@@ -430,6 +775,27 @@ describe('WebhookNotifier', () => {
       await notifier.send({ type: 'test' })
       expect(mockFetch).toHaveBeenCalledTimes(2)
       expect(sleepFn).toHaveBeenCalledTimes(1)
+    })
+
+    it('revalidates DNS before each retry attempt', async () => {
+      mockPinnedHttpsResponse(503, 'Service Unavailable')
+      const sleepFn = vi.fn().mockResolvedValue(undefined)
+      const dnsLookup = vi.fn()
+        .mockResolvedValueOnce(['203.0.113.10'])
+        .mockResolvedValueOnce(['169.254.169.254'])
+      const notifier = new WebhookNotifier({
+        url: 'https://hooks.example.com/signal',
+        allowedTargetOrigins,
+        dnsLookup,
+        retry: { maxRetries: 1 },
+        sleep: sleepFn,
+      })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'resolved webhook address host 169.254.169.254 is not allowed',
+      )
+      expect(dnsLookup).toHaveBeenCalledTimes(2)
+      expect(httpsRequest).toHaveBeenCalledTimes(1)
     })
 
     it('throws after exhausting all retries', async () => {
