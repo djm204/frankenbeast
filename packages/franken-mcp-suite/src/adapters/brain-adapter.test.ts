@@ -442,7 +442,7 @@ describe("createBrainAdapter", () => {
     const exported = await brain.exportProjectMemory({
       readScope: "agent",
       agentId: "alpha",
-      limit: 30,
+      limit: 40,
     });
 
     expect(exported.scope).toEqual({
