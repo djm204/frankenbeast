@@ -1032,6 +1032,9 @@ export function extractPostTaskLessonCandidates(
       : rawTaskId
   ) as TaskId;
   const generatedAt = normalizeTimestamp(input.completedAt);
+  const verificationEvidence = createPostTaskVerificationEvidence(
+    input.verificationSteps ?? [],
+  );
   const candidates: PostTaskLessonCandidate[] = [];
 
   const addCandidate = (
@@ -1050,7 +1053,19 @@ export function extractPostTaskLessonCandidates(
       normalizedText,
       privacyDecision.redactions,
     );
-    const category = options.forceDiscard ? 'task-state' : privacyDecision.category;
+    const category = options.forceDiscard
+      ? 'task-state'
+      : inferPostTaskLessonCategory(
+          kind,
+          sanitizedText,
+          privacyDecision.category,
+        );
+    if (!options.forceDiscard && category !== privacyDecision.category) {
+      publicDecision = {
+        ...publicDecision,
+        category,
+      };
+    }
     if (options.forceDiscard) {
       publicDecision = {
         ...publicDecision,
@@ -1103,11 +1118,6 @@ export function extractPostTaskLessonCandidates(
       forceDiscard: !hasExplicitPostTaskLessonSignal(failure),
     });
   }
-  for (const verificationStep of input.verificationSteps ?? []) {
-    addCandidate('verification', verificationStep, undefined, {
-      forceDiscard: !hasExplicitPostTaskLessonSignal(verificationStep),
-    });
-  }
   if (input.summary) {
     addCandidate('completion-summary', input.summary, undefined, {
       forceDiscard: !hasExplicitPostTaskLessonSignal(input.summary),
@@ -1119,11 +1129,16 @@ export function extractPostTaskLessonCandidates(
     });
   }
 
+  const reportCandidates = attachPostTaskVerificationEvidence(
+    dedupePostTaskLessonCandidates(candidates),
+    verificationEvidence,
+  );
+
   return {
     schemaVersion: 'post-task-lesson-extraction-v1',
     taskId,
     generatedAt,
-    candidates: dedupePostTaskLessonCandidates(candidates),
+    candidates: reportCandidates,
     governance: {
       persistentWritesRequireReview: true,
       allowedDestinations: ['skill', 'memory', 'docs', 'discard'],
@@ -1146,8 +1161,118 @@ function choosePostTaskLessonDestination(
   return 'memory';
 }
 
+function inferPostTaskLessonCategory(
+  kind: PostTaskLessonEvidenceKind,
+  text: string,
+  fallback: LessonCandidateCategory,
+): LessonCandidateCategory {
+  if (kind === 'user-correction' && isRawUserPreferenceCorrection(text)) {
+    return 'preference';
+  }
+  return fallback;
+}
+
+function isRawUserPreferenceCorrection(text: string): boolean {
+  return /^(?:please\s+)?(?:keep|avoid|do\s+not|don't|never|always|prefer)\b/i.test(
+    text,
+  );
+}
+
 function hasExplicitPostTaskLessonSignal(text: string): boolean {
-  return containsReusableLessonSignal(text);
+  if (PREFERENCE_PATTERNS.some((pattern) => pattern.test(text))) return true;
+  if (ENVIRONMENT_FACT_PATTERNS.some((pattern) => pattern.test(text))) {
+    return true;
+  }
+  return /\b(?:always|avoid|ensure|prefer|require|validate|verify|retry|redact|must|should)\b/i.test(
+    text,
+  );
+}
+
+interface PostTaskVerificationEvidenceItem {
+  readonly evidence: PostTaskLessonEvidence;
+  readonly privacyFilter: LessonPrivacyFilterDecision;
+}
+
+function createPostTaskVerificationEvidence(
+  verificationSteps: readonly string[],
+): PostTaskVerificationEvidenceItem[] {
+  return verificationSteps.flatMap((step) => {
+    const normalizedStep = step.trim().replace(/\s+/g, ' ');
+    if (!normalizedStep) return [];
+    const decision = createPrivacyDecision(normalizedStep, {
+      flagCustomerData: true,
+    });
+    const sanitizedStep = redactSensitiveText(
+      normalizedStep,
+      decision.redactions,
+    );
+    return [
+      {
+        evidence: {
+          kind: 'verification',
+          summary: summarizePostTaskEvidence('verification', sanitizedStep),
+        },
+        privacyFilter: toPublicPrivacyDecision(decision),
+      },
+    ];
+  });
+}
+
+function attachPostTaskVerificationEvidence(
+  candidates: readonly PostTaskLessonCandidate[],
+  verificationEvidence: readonly PostTaskVerificationEvidenceItem[],
+): readonly PostTaskLessonCandidate[] {
+  if (verificationEvidence.length === 0) return candidates;
+  const reviewableCandidates = candidates.filter(
+    (candidate) => candidate.suggestedDestination !== 'discard',
+  );
+  if (reviewableCandidates.length !== 1) return candidates;
+  const [targetCandidate] = reviewableCandidates;
+  return candidates.map((candidate) =>
+    candidate === targetCandidate
+      ? {
+          ...candidate,
+          evidence: [
+            ...candidate.evidence,
+            ...verificationEvidence.map((item) => item.evidence),
+          ],
+          privacyFilter: mergePostTaskPrivacyFilters(
+            candidate.privacyFilter,
+            verificationEvidence.map((item) => item.privacyFilter),
+          ),
+        }
+      : candidate,
+  );
+}
+
+function mergePostTaskPrivacyFilters(
+  base: LessonPrivacyFilterDecision,
+  attached: readonly LessonPrivacyFilterDecision[],
+): LessonPrivacyFilterDecision {
+  if (attached.length === 0) return base;
+  const redactions = [...base.redactions, ...attached.flatMap((item) => item.redactions)];
+  const flags = Array.from(
+    new Set([...base.flags, ...attached.flatMap((item) => item.flags)]),
+  ).sort();
+  const hasRejectedEvidence = attached.some((item) => item.action === 'reject');
+  const sensitive = base.sensitive || attached.some((item) => item.sensitive);
+  return {
+    ...base,
+    action: base.action === 'reject' || hasRejectedEvidence ? 'reject' : 'admit',
+    sensitive,
+    approvalRequired:
+      base.approvalRequired || sensitive || hasRejectedEvidence,
+    flags,
+    redactions,
+    originalHash: stableHash(
+      [base.originalHash, ...attached.map((item) => item.originalHash)].join('\n'),
+    ),
+    reason: hasRejectedEvidence
+      ? 'Attached verification evidence requires reviewer privacy handling before durable learning.'
+      : sensitive
+        ? PRIVACY_FILTER_SENSITIVE_REASON
+        : base.reason,
+  };
 }
 
 function summarizePostTaskEvidence(

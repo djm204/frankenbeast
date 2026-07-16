@@ -137,6 +137,22 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('routes raw user preference corrections to memory review', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-raw-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['Please keep summaries concise'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'preference',
+        suggestedDestination: 'memory',
+        privacyFilter: expect.objectContaining({ category: 'preference' }),
+      }),
+    );
+  });
+
   it('discards raw tool failures without reusable workaround guidance', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-raw-tool-failure',
@@ -234,7 +250,7 @@ describe('extractPostTaskLessonCandidates', () => {
     expect(JSON.stringify(report)).not.toContain('ACME-123');
   });
 
-  it('keeps verification steps as evidence rather than standalone lessons', () => {
+  it('attaches verification steps to a single pending lesson candidate', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-verification-evidence',
       completedAt: '2026-07-16T00:00:00.000Z',
@@ -242,17 +258,14 @@ describe('extractPostTaskLessonCandidates', () => {
       verificationSteps: ['Ran npm test'],
     });
 
-    expect(report.candidates).toHaveLength(2);
+    expect(report.candidates).toHaveLength(1);
     expect(report.candidates[0]).toEqual(
       expect.objectContaining({
         suggestedDestination: 'skill',
-        evidence: [expect.objectContaining({ kind: 'tool-failure' })],
-      }),
-    );
-    expect(report.candidates[1]).toEqual(
-      expect.objectContaining({
-        suggestedDestination: 'discard',
-        evidence: [expect.objectContaining({ kind: 'verification' })],
+        evidence: expect.arrayContaining([
+          expect.objectContaining({ kind: 'tool-failure' }),
+          expect.objectContaining({ kind: 'verification' }),
+        ]),
       }),
     );
   });
