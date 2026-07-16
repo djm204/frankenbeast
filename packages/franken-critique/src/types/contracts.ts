@@ -337,7 +337,8 @@ export interface PostTaskLessonCandidate {
 
 /** Task-completion inputs used to mine reviewed lesson candidates. */
 export interface PostTaskLessonExtractionInput {
-  readonly taskId: TaskId;
+  /** Raw task identifier from completion context; sanitized before report output. */
+  readonly taskId: string;
   readonly completedAt: string;
   readonly summary?: string;
   readonly userCorrections?: readonly string[];

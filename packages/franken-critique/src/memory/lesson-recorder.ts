@@ -1019,9 +1019,22 @@ const POST_TASK_LESSON_GOVERNANCE_GUIDANCE =
 export function extractPostTaskLessonCandidates(
   input: PostTaskLessonExtractionInput,
 ): PostTaskLessonExtractionReport {
-  requireNonEmptyString(input.taskId, 'post-task lesson taskId');
-  const taskId = input.taskId as TaskId;
+  const rawTaskId = requireNonEmptyString(
+    input.taskId,
+    'post-task lesson taskId',
+  );
+  const taskIdDecision = createPrivacyDecision(rawTaskId, {
+    flagCustomerData: true,
+  });
+  const taskId = (
+    taskIdDecision.sensitive
+      ? `redacted-task:${stableHash(rawTaskId)}`
+      : rawTaskId
+  ) as TaskId;
   const generatedAt = normalizeTimestamp(input.completedAt);
+  const verificationEvidence = createPostTaskVerificationEvidence(
+    input.verificationSteps ?? [],
+  );
   const candidates: PostTaskLessonCandidate[] = [];
 
   const addCandidate = (
@@ -1031,10 +1044,9 @@ export function extractPostTaskLessonCandidates(
   ): void => {
     const normalizedText = text.trim().replace(/\s+/g, ' ');
     if (!normalizedText) return;
-    const privacyDecision = createPrivacyDecision(
-      `${taskId}\n${kind}\n${normalizedText}`,
-      { flagCustomerData: true },
-    );
+    const privacyDecision = createPrivacyDecision(normalizedText, {
+      flagCustomerData: true,
+    });
     const publicDecision = toPublicPrivacyDecision(privacyDecision);
     const sanitizedText = redactSensitiveText(
       normalizedText,
@@ -1053,6 +1065,7 @@ export function extractPostTaskLessonCandidates(
         summary: summarizePostTaskEvidence(kind, sanitizedText),
         ...(reference ? { reference } : {}),
       },
+      ...(!discarded ? verificationEvidence : []),
     ];
     candidates.push({
       id: `post-task-lesson:${stableHash(`${taskId}\n${kind}\n${sanitizedText}`)}`,
@@ -1078,9 +1091,6 @@ export function extractPostTaskLessonCandidates(
   }
   for (const failure of input.toolFailures ?? []) {
     addCandidate('tool-failure', failure);
-  }
-  for (const verificationStep of input.verificationSteps ?? []) {
-    addCandidate('verification', verificationStep);
   }
   if (input.summary) {
     addCandidate('completion-summary', input.summary);
@@ -1108,11 +1118,35 @@ function choosePostTaskLessonDestination(
   text: string,
 ): PostTaskLessonDestination {
   if (category === 'task-state' || category === 'discard') return 'discard';
+  if (kind === 'tool-failure') return 'skill';
   if (kind === 'user-correction' && category === 'preference') return 'memory';
   if (category === 'environment-fact') return 'memory';
   if (/\b(?:docs?|readme|runbook|guide|operator)\b/i.test(text)) return 'docs';
-  if (kind === 'tool-failure' || category === 'procedure') return 'skill';
+  if (category === 'procedure') return 'skill';
   return 'memory';
+}
+
+function createPostTaskVerificationEvidence(
+  verificationSteps: readonly string[],
+): PostTaskLessonEvidence[] {
+  return verificationSteps.flatMap((step) => {
+    const normalizedStep = step.trim().replace(/\s+/g, ' ');
+    if (!normalizedStep) return [];
+    const decision = createPrivacyDecision(normalizedStep, {
+      flagCustomerData: true,
+    });
+    if (decision.action === 'reject') return [];
+    const sanitizedStep = redactSensitiveText(
+      normalizedStep,
+      decision.redactions,
+    );
+    return [
+      {
+        kind: 'verification',
+        summary: summarizePostTaskEvidence('verification', sanitizedStep),
+      },
+    ];
+  });
 }
 
 function summarizePostTaskEvidence(

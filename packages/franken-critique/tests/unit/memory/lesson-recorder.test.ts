@@ -123,12 +123,12 @@ describe('extractPostTaskLessonCandidates', () => {
       expect.objectContaining({
         category: 'procedure',
         suggestedDestination: 'skill',
-        evidence: [
+        evidence: expect.arrayContaining([
           expect.objectContaining({
             kind: 'tool-failure',
             summary: expect.stringContaining('gh pr checks'),
           }),
-        ],
+        ]),
         review: expect.objectContaining({
           status: 'pending-review',
           persistentWriteAllowed: false,
@@ -153,6 +153,54 @@ describe('extractPostTaskLessonCandidates', () => {
           approvalRequired: false,
           persistentWriteAllowed: false,
         }),
+      }),
+    );
+  });
+
+  it('classifies candidate text independently from issue-shaped task ids', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'impl:issue-42',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Prefer retrying gh run view when GitHub check summaries are stale'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'procedure',
+        suggestedDestination: 'skill',
+        review: expect.objectContaining({ status: 'pending-review' }),
+      }),
+    );
+  });
+
+  it('redacts sensitive task ids before returning review reports', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'customer owner@example.com account ACME-123',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['User prefers lessons to avoid copying customer identifiers'],
+    });
+
+    expect(report.taskId).toMatch(/^redacted-task:/);
+    expect(JSON.stringify(report)).not.toContain('owner@example.com');
+    expect(JSON.stringify(report)).not.toContain('ACME-123');
+  });
+
+  it('keeps verification steps as evidence rather than standalone lessons', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-verification-evidence',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      toolFailures: ['When docs build fails after dependency install, retry with npm ci before changing docs'],
+      verificationSteps: ['Ran npm test'],
+    });
+
+    expect(report.candidates).toHaveLength(1);
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'skill',
+        evidence: expect.arrayContaining([
+          expect.objectContaining({ kind: 'tool-failure' }),
+          expect.objectContaining({ kind: 'verification' }),
+        ]),
       }),
     );
   });
