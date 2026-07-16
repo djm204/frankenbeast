@@ -36,6 +36,7 @@ export interface DispatcherQueueReconciliationOptions {
   readonly now?: () => string;
   readonly isPidAlive?: (pid: number) => boolean;
   readonly getProcessStartTimeTicks?: (pid: number) => string | undefined;
+  readonly isProcessGroupAlive?: (pid: number) => boolean;
 }
 
 const ACTIVE_RUN_STATUSES = new Set<BeastRunStatus>(['queued', 'interviewing', 'running', 'pending_approval']);
@@ -48,12 +49,18 @@ export function reconcileDispatcherQueueAfterRestart(
   const now = options.now ?? isoNow;
   const isPidAlive = options.isPidAlive ?? defaultIsPidAlive;
   const getProcessStartTimeTicks = options.getProcessStartTimeTicks ?? defaultProcessStartTimeTicks;
+  const isProcessGroupAlive = options.isProcessGroupAlive ?? defaultIsProcessGroupAlive;
   const reconciledAt = now();
   const findings: DispatcherQueueReconciliationFinding[] = [];
   let changedRuns = 0;
 
   repository.transaction(() => {
-    const duplicates = detectDuplicateLiveAgentRuns(repository, isPidAlive, getProcessStartTimeTicks);
+    const duplicates = detectDuplicateLiveAgentRuns(
+      repository,
+      isPidAlive,
+      getProcessStartTimeTicks,
+      isProcessGroupAlive,
+    );
     for (const duplicate of duplicates) {
       findings.push(duplicate);
       repository.appendEvent(duplicate.runId, {
@@ -88,6 +95,7 @@ export function reconcileDispatcherQueueAfterRestart(
         reconciledAt,
         isPidAlive,
         getProcessStartTimeTicks,
+        isProcessGroupAlive,
       );
       findings.push(finding);
       if (finding.fromStatus !== finding.toStatus || finding.code === 'missing-running-attempt-failed' || finding.code === 'stale-running-attempt-failed') {
@@ -112,7 +120,30 @@ function reconcileActiveRun(
   reconciledAt: string,
   isPidAlive: (pid: number) => boolean,
   getProcessStartTimeTicks: (pid: number) => string | undefined,
+  isProcessGroupAlive: (pid: number) => boolean,
 ): DispatcherQueueReconciliationFinding {
+  if (attempt && TERMINAL_RUN_STATUSES.has(attempt.status)) {
+    const restoredRun = repository.updateRun(run.id, {
+      status: attempt.status,
+      finishedAt: attempt.finishedAt ?? reconciledAt,
+      latestExitCode: attempt.exitCode ?? null,
+      stopReason: attempt.stopReason ?? null,
+    });
+    syncTrackedAgentIfRunOwnsDispatch(repository, restoredRun, trackedAgentStatusForRun(attempt.status), reconciledAt);
+    const finding: DispatcherQueueReconciliationFinding = {
+      code: 'terminal-attempt-restored',
+      runId: run.id,
+      trackedAgentId: run.trackedAgentId,
+      attemptId: attempt.id,
+      pid: attempt.pid,
+      fromStatus: run.status,
+      toStatus: attempt.status,
+      message: `Run ${run.id} was ${run.status} but its current attempt was already ${attempt.status}; restored the persisted terminal attempt result.`,
+    };
+    appendReconciliationEvent(repository, finding, reconciledAt);
+    return finding;
+  }
+
   if (run.status === 'pending_approval') {
     syncTrackedAgentIfRunOwnsDispatch(repository, run, 'awaiting_approval', reconciledAt);
     const finding: DispatcherQueueReconciliationFinding = {
@@ -165,31 +196,15 @@ function reconcileActiveRun(
     return finding;
   }
 
-  if (TERMINAL_RUN_STATUSES.has(attempt.status)) {
-    const restoredRun = repository.updateRun(run.id, {
-      status: attempt.status,
-      finishedAt: attempt.finishedAt ?? reconciledAt,
-      latestExitCode: attempt.exitCode ?? null,
-      stopReason: attempt.stopReason ?? null,
-    });
-    syncTrackedAgentIfRunOwnsDispatch(repository, restoredRun, trackedAgentStatusForRun(attempt.status), reconciledAt);
-    const finding: DispatcherQueueReconciliationFinding = {
-      code: 'terminal-attempt-restored',
-      runId: run.id,
-      trackedAgentId: run.trackedAgentId,
-      attemptId: attempt.id,
-      pid: attempt.pid,
-      fromStatus: run.status,
-      toStatus: attempt.status,
-      message: `Run ${run.id} was running but its current attempt was already ${attempt.status}; restored the persisted terminal attempt result.`,
-    };
-    appendReconciliationEvent(repository, finding, reconciledAt);
-    return finding;
-  }
-
   const pid = attempt.pid;
-  if (attemptOwnsLiveProcess(attempt, isPidAlive, getProcessStartTimeTicks)) {
-    syncTrackedAgentIfRunOwnsDispatch(repository, run, 'running', reconciledAt);
+  if (attemptOwnsLiveProcess(attempt, isPidAlive, getProcessStartTimeTicks, isProcessGroupAlive)) {
+    const liveRun = repository.updateRun(run.id, {
+      status: 'running',
+      finishedAt: null,
+      latestExitCode: null,
+      stopReason: null,
+    });
+    syncTrackedAgentIfRunOwnsDispatch(repository, liveRun, 'running', reconciledAt);
     const finding: DispatcherQueueReconciliationFinding = {
       code: 'live-running-attempt-quarantined',
       runId: run.id,
@@ -259,13 +274,19 @@ function detectDuplicateLiveAgentRuns(
   repository: SQLiteBeastRepository,
   isPidAlive: (pid: number) => boolean,
   getProcessStartTimeTicks: (pid: number) => string | undefined,
+  isProcessGroupAlive: (pid: number) => boolean,
 ): DispatcherQueueReconciliationFinding[] {
   const liveRunsByAgent = new Map<string, Array<{ run: BeastRun; attempt: BeastRunAttempt; pid: number }>>();
   for (const run of repository.listRuns()) {
     if (!run.trackedAgentId || run.status !== 'running' || !run.currentAttemptId) continue;
     const attempt = repository.getAttempt(run.currentAttemptId);
     const pid = attempt?.pid;
-    if (!attempt || typeof pid !== 'number' || pid <= 0 || !attemptOwnsLiveProcess(attempt, isPidAlive, getProcessStartTimeTicks)) continue;
+    if (!attempt || typeof pid !== 'number' || pid <= 0 || !attemptOwnsLiveProcess(
+      attempt,
+      isPidAlive,
+      getProcessStartTimeTicks,
+      isProcessGroupAlive,
+    )) continue;
     const existing = liveRunsByAgent.get(run.trackedAgentId) ?? [];
     existing.push({ run, attempt, pid });
     liveRunsByAgent.set(run.trackedAgentId, existing);
@@ -381,14 +402,28 @@ function attemptOwnsLiveProcess(
   attempt: BeastRunAttempt,
   isPidAlive: (pid: number) => boolean,
   getProcessStartTimeTicks: (pid: number) => string | undefined,
+  isProcessGroupAlive: (pid: number) => boolean,
 ): boolean {
   const pid = attempt.pid;
-  if (typeof pid !== 'number' || pid <= 0 || !isPidAlive(pid)) return false;
+  if (typeof pid !== 'number' || pid <= 0) return false;
   if (attempt.executorMetadata?.processGroupOwned !== true) return false;
   if (attempt.executorMetadata?.processGroupLeaderPid !== pid) return false;
   const expectedStartTime = attempt.executorMetadata?.processStartTimeTicks;
   if (typeof expectedStartTime !== 'string' || expectedStartTime.length === 0) return false;
-  return getProcessStartTimeTicks(pid) === expectedStartTime;
+  if (isPidAlive(pid)) {
+    return getProcessStartTimeTicks(pid) === expectedStartTime;
+  }
+  return isProcessGroupAlive(pid);
+}
+
+function defaultIsProcessGroupAlive(pid: number): boolean {
+  if (pid <= 0 || process.platform === 'win32') return false;
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
 }
 
 function defaultIsPidAlive(pid: number): boolean {
