@@ -186,4 +186,58 @@ describe('state snapshot diff', () => {
     expect(taskDiff?.added).toHaveLength(0);
     expect(taskDiff?.removed).toHaveLength(0);
   });
+
+  it('uses path identity for single-record files with only mutable names', async () => {
+    const before = await snapshotDir({
+      'cron/job-1.json': { name: 'nightly backup', schedule: '0 1 * * *' },
+    });
+    const after = await snapshotDir({
+      'cron/job-1.json': { name: 'daily backup', schedule: '0 1 * * *' },
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const cronDiff = report.diffs.find((diff) => diff.subsystem === 'cron');
+
+    expect(cronDiff?.changed).toHaveLength(1);
+    expect(cronDiff?.changed[0]?.id).toBe('cron/job-1.json');
+    expect(cronDiff?.changed[0]?.changedFields).toEqual(['name']);
+    expect(cronDiff?.added).toHaveLength(0);
+    expect(cronDiff?.removed).toHaveLength(0);
+  });
+
+  it('redacts non-approval email identifiers and source paths', async () => {
+    const before = await snapshotDir({
+      'memory/alice@example.com.json': { note: 'before' },
+      'memory/state.json': { memory: { 'bob@example.com': { note: 'old' } } },
+    });
+    const after = await snapshotDir({
+      'memory/alice@example.com.json': { note: 'after' },
+      'memory/state.json': { memory: { 'bob@example.com': { note: 'new' } } },
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const memoryDiff = report.diffs.find((diff) => diff.subsystem === 'memory');
+    const serialized = JSON.stringify(memoryDiff);
+
+    expect(serialized).not.toContain('alice@example.com');
+    expect(serialized).not.toContain('bob@example.com');
+    expect(serialized).toContain('<redacted-email>');
+    expect(memoryDiff?.changed.map((change) => change.id)).toContain('<redacted-email>');
+  });
+
+  it('masks password-only database URLs in redacted output', async () => {
+    const secret = ['prod', 'Secret'].join('');
+    const before = await snapshotDir({
+      'cron/job-1.json': { id: 'job-1', redisUrl: `redis://:${secret}@cache:6379/0` },
+    });
+    const after = await snapshotDir({
+      'cron/job-1.json': { id: 'job-1', redisUrl: `redis://:${secret}@cache:6379/1` },
+    });
+
+    const report = await diffStateSnapshotDirectories(before, after);
+    const serialized = JSON.stringify(report.diffs.find((diff) => diff.subsystem === 'cron'));
+
+    expect(serialized).not.toContain(secret);
+    expect(serialized).toContain('redis://:<redacted>@cache:6379');
+  });
 });

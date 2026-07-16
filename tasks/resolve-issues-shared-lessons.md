@@ -1,5 +1,9 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-16 — Snapshot diff Codex closeout
+- State snapshot diff redaction must cover metadata as well as values: record ids, source filenames, map keys, and password-only connection URLs (for example Redis URLs with no username) need regression coverage so incident reports cannot leak PII or credentials through supposedly redacted metadata.
+- For one-record-per-file snapshot exports, prefer immutable ids when present but fall back to the source path instead of mutable display names such as `name`; otherwise a rename appears as remove+add instead of one changed record.
+
 ## 2026-07-16 — Dead-letter queue Codex closeout
 - DLQ/DR restore output redaction must cover provider token literals (for example `sk-*`, `xox*`) and credentialed database URLs even when they appear inside free-text fields such as `target`, `lastError`, or nested payload strings; test fixtures should prove output does not leak the original secret substrings.
 - For DLQ file locks, treat unparseable lock timestamps as malformed stale-lock candidates and fall back to mtime-based reaping; otherwise a syntactically valid lock JSON with `acquiredAt: not-a-date` can wedge writers forever.

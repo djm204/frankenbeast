@@ -96,8 +96,9 @@ export function maskOpaqueSecretLiterals(text: string): string {
     .replace(/\bgithub_pat_[A-Za-z0-9_]{12,}\b/gu, '<redacted>')
     .replace(/\bsk-[A-Za-z0-9_-]{12,}\b/gu, '<redacted>')
     .replace(/\bxox[baprs]-[A-Za-z0-9-]{10,}\b/gu, '<redacted>')
-    .replace(/\b([A-Za-z][A-Za-z0-9+.-]*:\/\/[^:\s"'/@]+):[^@\s"']+@/gu, '$1:<redacted>@')
-    .replace(/\b((?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/[^:\s"']+):[^@\s"']+@/giu, '$1:<redacted>@')
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu, '<redacted-email>')
+    .replace(/\b([A-Za-z][A-Za-z0-9+.-]*:\/\/(?:[^:\s"'/@]+)?):[^@\s"']+@/gu, '$1:<redacted>@')
+    .replace(/\b((?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/(?:[^:\s"'/@]+)?):[^@\s"']+@/giu, '$1:<redacted>@')
     .replace(/\b(?:Bearer|Basic|Bot)\s+[A-Za-z0-9._~+/=-]{8,}\b/giu, (match) => `${match.split(/\s+/u)[0]} <redacted>`)
     .replace(/((?:^|[\s"'])--(?:api-?key|auth|authorization|bearer|password|secret|token)\s+)[^\s"']+/giu, '$1<redacted>')
     .replace(/((?:^|[\s"'])--(?:api-?key|auth|authorization|bearer|password|secret|token)=)[^\s"']+/giu, '$1<redacted>')
@@ -208,6 +209,11 @@ function redactSourceForOutput(subsystem: StateSnapshotDiffSubsystem, source: st
   }).join('/');
 }
 
+function redactIdForOutput(subsystem: StateSnapshotDiffSubsystem, id: string): string {
+  if (subsystem === 'approvals') return id;
+  return maskOpaqueSecretLiterals(id);
+}
+
 function isGenericCollectionSource(source: string): boolean {
   return /(?:^|\/)(?:state|index|tasks|cards|kanban|approvals?|approval[-_]?tokens?|tokens?|ledger|workers?|memory|memories|cron|jobs)\.jsonl?(?::\d+)?$/iu.test(normalizeSnapshotSourcePath(source));
 }
@@ -288,7 +294,7 @@ function extractRecordsFromJson(records: MutableSubsystemRecords, parsed: unknow
   if (Array.isArray(parsed) && pathSubsystem !== undefined) {
     addArrayRecords(records, pathSubsystem, parsed, source);
   } else if (pathSubsystem !== undefined && !isRecord(parsed)) {
-    addRecord(records, pathSubsystem, recordId(parsed, source, pathSubsystem), parsed, source);
+    addRecord(records, pathSubsystem, recordId(parsed, source, pathSubsystem, { preferFallbackOverMutableDisplayName: true }), parsed, source);
   }
 
   if (isRecord(parsed)) {
@@ -321,7 +327,7 @@ function extractRecordsFromJson(records: MutableSubsystemRecords, parsed: unknow
       } else if (pathSubsystem !== 'tasks' && !hasRecordIdentityKey(parsed) && values.length > 0 && values.every((value) => !isRecord(value) && !Array.isArray(value))) {
         addObjectMapRecords(records, pathSubsystem, parsed, source);
       } else {
-        addRecord(records, pathSubsystem, recordId(parsed, source, pathSubsystem), parsed, source);
+        addRecord(records, pathSubsystem, recordId(parsed, source, pathSubsystem, { preferFallbackOverMutableDisplayName: true }), parsed, source);
       }
     }
   }
@@ -412,11 +418,11 @@ function diffSubsystem(
   for (const [id, afterRecord] of after) {
     const beforeRecord = before.get(id);
     if (beforeRecord === undefined) {
-      added.push({ type: 'added', id, after: redactForOutput(afterRecord.value), afterSource: redactSourceForOutput(subsystem, afterRecord.source) });
+      added.push({ type: 'added', id: redactIdForOutput(subsystem, id), after: redactForOutput(afterRecord.value), afterSource: redactSourceForOutput(subsystem, afterRecord.source) });
     } else if (stableStringify(beforeRecord.compareValue) !== stableStringify(afterRecord.compareValue)) {
       changed.push({
         type: 'changed',
-        id,
+        id: redactIdForOutput(subsystem, id),
         before: redactForOutput(beforeRecord.value),
         after: redactForOutput(afterRecord.value),
         changedFields: changedFields(beforeRecord.compareValue, afterRecord.compareValue),
@@ -427,7 +433,7 @@ function diffSubsystem(
   }
   for (const [id, beforeRecord] of before) {
     if (!after.has(id)) {
-      removed.push({ type: 'removed', id, before: redactForOutput(beforeRecord.value), beforeSource: redactSourceForOutput(subsystem, beforeRecord.source) });
+      removed.push({ type: 'removed', id: redactIdForOutput(subsystem, id), before: redactForOutput(beforeRecord.value), beforeSource: redactSourceForOutput(subsystem, beforeRecord.source) });
     }
   }
 
