@@ -1,5 +1,10 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-16 — SQLite lock retry review fixes
+- When adding async retries around sync SQLite adapters, serialize all mutating operations that can overlap through one write queue; otherwise a sleeping retry can be overtaken by later flush/delete calls and reintroduce stale rows.
+- Capture mutable trace/span payloads before enqueueing delayed SQLite writes, and include statement preparation inside the retry wrapper so schema/contention locks during `prepare()` get the same diagnostics as transaction failures.
+- Validate retry/backoff options before opening a native SQLite handle; constructor validation failures should not leak a handle that can keep the database locked.
+
 ## 2026-07-16 — Dead-letter queue Codex closeout
 - DLQ/DR restore output redaction must cover provider token literals (for example `sk-*`, `xox*`) and credentialed database URLs even when they appear inside free-text fields such as `target`, `lastError`, or nested payload strings; test fixtures should prove output does not leak the original secret substrings.
 - For DLQ file locks, treat unparseable lock timestamps as malformed stale-lock candidates and fall back to mtime-based reaping; otherwise a syntactically valid lock JSON with `acquiredAt: not-a-date` can wedge writers forever.
