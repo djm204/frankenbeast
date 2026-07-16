@@ -49,7 +49,7 @@ export type {
 } from './types.js';
 
 // Issues
-export { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses } from './issues/index.js';
+export { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses, detectWorkerHeartbeatMonotonicityAnomalies } from './issues/index.js';
 export type {
   IssueRunnerConfig,
   IssueBackpressureConfig,
@@ -70,6 +70,7 @@ export type {
   IssueSchedulerFairnessReport,
   IssueSchedulerFairnessReportOptions,
   IssueWorkerCardProcessSnapshot,
+  WorkerHeartbeatMonotonicityFinding,
   DuplicateWorkerCardProcessFinding,
 } from './issues/index.js';
 

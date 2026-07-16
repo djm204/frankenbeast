@@ -624,13 +624,14 @@ function timestampDidNotAdvance(
 export function detectWorkerHeartbeatMonotonicityAnomalies(
   snapshots: readonly IssueWorkerCardProcessSnapshot[],
 ): WorkerHeartbeatMonotonicityFinding[] {
-  const priorByCard = new Map<string, IssueWorkerCardProcessSnapshot>();
+  const highWaterByRun = new Map<string, IssueWorkerCardProcessSnapshot>();
   const findings: WorkerHeartbeatMonotonicityFinding[] = [];
 
   for (const snapshot of snapshots) {
     if (!activeWorkerCardProcess(snapshot)) continue;
     const cardId = snapshot.cardId.trim();
-    const prior = priorByCard.get(cardId);
+    const baselineKey = `${cardId}\0${snapshot.runId ?? 'unknown-run'}`;
+    const prior = highWaterByRun.get(baselineKey);
     if (prior) {
       const priorHeartbeatAt = isoTimestamp(prior.lastHeartbeatAt);
       const newHeartbeatAt = isoTimestamp(snapshot.lastHeartbeatAt);
@@ -654,9 +655,10 @@ export function detectWorkerHeartbeatMonotonicityAnomalies(
           ...(newHeartbeatAt ? { newHeartbeatAt } : {}),
           message: `Worker card ${cardId} heartbeat ${code === 'regressive-heartbeat' ? 'regressed' : 'did not advance'}: prior sequence ${prior.heartbeatSequence ?? 'unknown'} at ${priorHeartbeatAt ?? 'unknown'}, new sequence ${snapshot.heartbeatSequence ?? 'unknown'} at ${newHeartbeatAt ?? 'unknown'} from ${source}`,
         });
+        continue;
       }
     }
-    priorByCard.set(cardId, snapshot);
+    highWaterByRun.set(baselineKey, snapshot);
   }
 
   return findings;

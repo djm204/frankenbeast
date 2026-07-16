@@ -321,6 +321,22 @@ describe('duplicate worker-card process detector', () => {
         lastHeartbeatAt: '2026-07-15T09:09:59.000Z',
       },
       {
+        cardId: 't_worker_1',
+        pid: 4201,
+        runId: 'run-10',
+        source: 'kanban-heartbeat-writer',
+        heartbeatSequence: 1,
+        lastHeartbeatAt: '2026-07-15T09:10:00.000Z',
+      },
+      {
+        cardId: 't_worker_1',
+        pid: 4202,
+        runId: 'run-12',
+        source: 'kanban-heartbeat-writer',
+        heartbeatSequence: 1,
+        lastHeartbeatAt: '2026-07-15T09:10:01.000Z',
+      },
+      {
         cardId: 't_worker_2',
         pid: 4300,
         runId: 'run-11',
@@ -362,6 +378,18 @@ describe('duplicate worker-card process detector', () => {
         priorHeartbeatAt: '2026-07-15T09:10:00.000Z',
         newHeartbeatAt: '2026-07-15T09:09:59.000Z',
         message: 'Worker card t_worker_1 heartbeat regressed: prior sequence 1 at 2026-07-15T09:10:00.000Z, new sequence 0 at 2026-07-15T09:09:59.000Z from kanban-heartbeat-writer',
+      },
+      {
+        cardId: 't_worker_1',
+        runId: 'run-10',
+        source: 'kanban-heartbeat-writer',
+        severity: 'warning',
+        code: 'duplicate-heartbeat',
+        priorSequence: 1,
+        newSequence: 1,
+        priorHeartbeatAt: '2026-07-15T09:10:00.000Z',
+        newHeartbeatAt: '2026-07-15T09:10:00.000Z',
+        message: 'Worker card t_worker_1 heartbeat did not advance: prior sequence 1 at 2026-07-15T09:10:00.000Z, new sequence 1 at 2026-07-15T09:10:00.000Z from kanban-heartbeat-writer',
       },
     ]);
   });
