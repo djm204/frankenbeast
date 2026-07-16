@@ -221,7 +221,9 @@ export class SQLiteAdapter implements ExportAdapter {
   private readonly filePath: string
   private readonly flushedSpans = new Map<string, Map<string, FlushedSpanState>>()
   private flushedSpanSnapshotCount = 0
-  private writeTail: Promise<unknown> = Promise.resolve()
+  private writeTail: Promise<unknown> | undefined
+  private closeAfterWrites = false
+  private closed = false
 
   constructor(filePath: string, options: SQLiteAdapterOptions = {}) {
     const lockRetry = normalizeLockRetryOptions(options)
@@ -233,10 +235,17 @@ export class SQLiteAdapter implements ExportAdapter {
       0,
       Math.floor(options.maxFlushedSpanSnapshots ?? 10_000),
     )
-    this.db.pragma(`busy_timeout = ${this.lockRetry.busyTimeoutMs}`)
-    this.db.pragma('journal_mode = WAL')
-    this.db.pragma('foreign_keys = ON')
-    this.db.exec(CREATE_TABLES)
+    try {
+      this.db.pragma(`busy_timeout = ${this.lockRetry.busyTimeoutMs}`)
+      this.withSqliteLockRetrySync('initialize SQLite adapter', () => {
+        this.db.pragma('journal_mode = WAL')
+        this.db.pragma('foreign_keys = ON')
+        this.db.exec(CREATE_TABLES)
+      })
+    } catch (error) {
+      this.db.close()
+      throw error
+    }
   }
 
   async flush(trace: Trace): Promise<void> {
@@ -426,9 +435,35 @@ export class SQLiteAdapter implements ExportAdapter {
   }
 
   private enqueueSqliteWrite<T>(action: () => Promise<T>): Promise<T> {
-    const queued = this.writeTail.then(action)
-    this.writeTail = queued.catch(() => undefined)
+    if (this.closed || this.closeAfterWrites) {
+      return Promise.reject(new Error('SQLiteAdapter is closed'))
+    }
+
+    const queued = this.writeTail === undefined ? action() : this.writeTail.then(action)
+    const settled = queued.catch(() => undefined).finally(() => {
+      if (this.writeTail !== settled) return
+      this.writeTail = undefined
+      if (this.closeAfterWrites) {
+        this.closeNow()
+      }
+    })
+    this.writeTail = settled
     return queued
+  }
+
+  private closeNow(): void {
+    if (this.closed) return
+    this.closed = true
+    this.db.close()
+  }
+
+  private emitLockRetryDiagnostic(diagnostic: SQLiteLockRetryDiagnostic): void {
+    try {
+      this.lockRetry.onDiagnostic?.(diagnostic)
+    } catch {
+      // Diagnostics are best-effort. A logging/metrics hook must not change
+      // storage retry or exhaustion behavior.
+    }
   }
 
   private async withSqliteLockRetry<T>(operationClass: string, action: () => T): Promise<T> {
@@ -456,7 +491,7 @@ export class SQLiteAdapter implements ExportAdapter {
             ? 'SQLite lock retry budget exhausted; inspect concurrent writers or increase busy timeout/retry budget.'
             : 'Retrying SQLite operation after bounded backoff.',
         }
-        this.lockRetry.onDiagnostic?.(diagnostic)
+        this.emitLockRetryDiagnostic(diagnostic)
 
         if (exhausted) {
           throw new SQLiteLockRetryExhaustedError(
@@ -471,6 +506,46 @@ export class SQLiteAdapter implements ExportAdapter {
     }
   }
 
+  private withSqliteLockRetrySync<T>(operationClass: string, action: () => T): T {
+    const startedAt = Date.now()
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return action()
+      } catch (error) {
+        if (!isSqliteLockError(error)) {
+          throw error
+        }
+
+        const elapsedMs = Date.now() - startedAt
+        const exhausted = attempt >= this.lockRetry.maxRetries
+        const nextDelayMs = exhausted ? undefined : this.nextLockRetryDelay(attempt)
+        const diagnostic: SQLiteLockRetryDiagnostic = {
+          dbPath: this.filePath,
+          operationClass,
+          attempt: attempt + 1,
+          maxRetries: this.lockRetry.maxRetries,
+          elapsedMs,
+          ...(nextDelayMs === undefined ? {} : { nextDelayMs }),
+          errorMessage: errorMessage(error),
+          nextAction: exhausted
+            ? 'SQLite lock retry budget exhausted; inspect concurrent writers or increase busy timeout/retry budget.'
+            : 'Retrying SQLite operation after bounded backoff.',
+        }
+        this.emitLockRetryDiagnostic(diagnostic)
+
+        if (exhausted) {
+          throw new SQLiteLockRetryExhaustedError(
+            `[SQLiteAdapter] SQLite lock persisted for ${operationClass} on ${this.filePath} after ${attempt + 1} attempts over ${elapsedMs}ms. Next action: ${diagnostic.nextAction}`,
+            diagnostic,
+            error,
+          )
+        }
+
+        sleepSync(nextDelayMs ?? 0)
+      }
+    }
+  }
+
   private nextLockRetryDelay(attempt: number): number {
     const base = Math.min(this.lockRetry.baseDelayMs * 2 ** attempt, this.lockRetry.maxDelayMs)
     if (!this.lockRetry.jitter) return base
@@ -479,6 +554,15 @@ export class SQLiteAdapter implements ExportAdapter {
 
   /** Release the DB connection. Call when shutting down. */
   close(): void {
-    this.db.close()
+    this.closeAfterWrites = true
+    if (this.writeTail === undefined) {
+      this.closeNow()
+    }
   }
+}
+
+function sleepSync(ms: number): void {
+  if (ms <= 0) return
+  const signal = new Int32Array(new SharedArrayBuffer(4))
+  Atomics.wait(signal, 0, 0, ms)
 }

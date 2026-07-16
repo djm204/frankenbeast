@@ -57,6 +57,49 @@ describe('SQLiteAdapter', () => {
     expect(Database).not.toHaveBeenCalled()
   })
 
+  it('retries SQLite locks raised during adapter initialization', () => {
+    const diagnostics = vi.fn()
+    pragmaMock
+      .mockImplementationOnce(() => undefined)
+      .mockImplementationOnce(() => {
+        throw sqliteBusyError()
+      })
+      .mockImplementationOnce(() => undefined)
+      .mockImplementationOnce(() => undefined)
+
+    const adapter = new SQLiteAdapter('/tmp/traces.db', {
+      maxLockRetries: 1,
+      lockRetryBaseDelayMs: 1,
+      lockRetryMaxDelayMs: 1,
+      lockRetryJitter: false,
+      onLockRetryDiagnostic: diagnostics,
+    })
+
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({
+      operationClass: 'initialize SQLite adapter',
+      attempt: 1,
+      errorMessage: 'database is locked',
+    }))
+    expect(execMock).toHaveBeenCalledTimes(1)
+    adapter.close()
+  })
+
+  it('closes an opened database handle if initialization exhausts lock retries', () => {
+    pragmaMock
+      .mockImplementationOnce(() => undefined)
+      .mockImplementationOnce(() => {
+        throw sqliteBusyError()
+      })
+
+    expect(() => new SQLiteAdapter('/tmp/traces.db', {
+      maxLockRetries: 0,
+      lockRetryBaseDelayMs: 1,
+      lockRetryMaxDelayMs: 1,
+      lockRetryJitter: false,
+    })).toThrow(SQLiteLockRetryExhaustedError)
+    expect(closeMock).toHaveBeenCalledTimes(1)
+  })
+
   it('snapshots traces before queued writes observe later mutations', async () => {
     const upsertTraceRun = vi.fn()
     const upsertSpanRun = vi.fn()
@@ -107,6 +150,36 @@ describe('SQLiteAdapter', () => {
     expect(sleep.mock.calls.map(call => call[0])).toEqual([10, 20])
     expect(diagnostics).toHaveBeenCalledTimes(2)
     expect(transactionMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('keeps retry diagnostics best-effort when the diagnostic hook throws', async () => {
+    const sleep = vi.fn().mockResolvedValue(undefined)
+    const diagnostics = vi.fn(() => {
+      throw new Error('metrics sink down')
+    })
+    prepareMock.mockReturnValue({ run: vi.fn() })
+    let attempts = 0
+    transactionMock.mockImplementation(fn => (trace: unknown) => {
+      attempts += 1
+      if (attempts === 1) throw sqliteBusyError()
+      return fn(trace)
+    })
+
+    const adapter = new SQLiteAdapter('/tmp/traces.db', {
+      maxLockRetries: 1,
+      lockRetryBaseDelayMs: 5,
+      lockRetryMaxDelayMs: 5,
+      lockRetryJitter: false,
+      lockRetrySleep: sleep,
+      onLockRetryDiagnostic: diagnostics,
+    })
+    const trace = TraceContext.createTrace('goal')
+
+    await adapter.flush(trace)
+
+    expect(diagnostics).toHaveBeenCalledTimes(1)
+    expect(sleep).toHaveBeenCalledWith(5)
+    expect(transactionMock).toHaveBeenCalledTimes(2)
   })
 
   it('reports persistent SQLite locks with path, operation, elapsed time, and next action', async () => {
@@ -254,6 +327,31 @@ describe('SQLiteAdapter', () => {
     expect(deleteSpansRun).toHaveBeenCalledWith(trace.id)
     expect(deleteTraceRun).toHaveBeenCalledWith(trace.id)
     expect(transactionMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('drains pending writes before closing the SQLite handle', async () => {
+    const upsertTraceRun = vi.fn()
+    const upsertSpanRun = vi.fn()
+    prepareMock
+      .mockReturnValueOnce({ run: upsertTraceRun })
+      .mockReturnValueOnce({ run: upsertSpanRun })
+    transactionMock.mockImplementation(fn => (trace: unknown) => fn(trace))
+
+    const adapter = new SQLiteAdapter('/tmp/traces.db')
+    const trace = TraceContext.createTrace('goal')
+    const span = TraceContext.startSpan(trace, { name: 'first' })
+    TraceContext.endSpan(span)
+
+    const flush = adapter.flush(trace)
+    adapter.close()
+
+    expect(closeMock).not.toHaveBeenCalled()
+    await flush
+    await Promise.resolve()
+
+    expect(upsertTraceRun).toHaveBeenCalledWith(expect.objectContaining({ id: trace.id }))
+    expect(closeMock).toHaveBeenCalledTimes(1)
+    await expect(adapter.flush(trace)).rejects.toThrow('SQLiteAdapter is closed')
   })
 
   it('retries SQLite locks raised while preparing delete statements', async () => {
