@@ -1335,6 +1335,14 @@ class SqliteWorkingMemory implements IWorkingMemory {
 
   set(key: string, value: unknown): void {
     let serialized: string | undefined;
+    const previousHadKey = this.store.has(key);
+    const previousValue = this.store.get(key);
+    const previousSize = this.sizes.get(key);
+    const previousSerialized = this.serialized.get(key);
+    const previousWasDirty = this.dirtyKeys.has(key);
+    const previousWasDeleted = this.deletedKeys.has(key);
+    const previousTotalBytes = this.totalBytes;
+    let mutationApplied = false;
     try {
       const prepared = this.prepareEntry(key, value);
       serialized = prepared.serialized;
@@ -1366,6 +1374,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
         this.dirtyKeys.add(key);
       }
       this.deletedKeys.delete(key);
+      mutationApplied = true;
       this.audit?.({
         operation: 'working.set',
         store: 'working',
@@ -1374,6 +1383,34 @@ class SqliteWorkingMemory implements IWorkingMemory {
         details: { valueBytes: Buffer.byteLength(serialized, 'utf8') },
       });
     } catch (error) {
+      if (mutationApplied) {
+        if (previousHadKey) {
+          this.store.set(key, previousValue);
+        } else {
+          this.store.delete(key);
+        }
+        if (previousSize === undefined) {
+          this.sizes.delete(key);
+        } else {
+          this.sizes.set(key, previousSize);
+        }
+        if (previousSerialized === undefined) {
+          this.serialized.delete(key);
+        } else {
+          this.serialized.set(key, previousSerialized);
+        }
+        this.totalBytes = previousTotalBytes;
+        if (previousWasDirty) {
+          this.dirtyKeys.add(key);
+        } else {
+          this.dirtyKeys.delete(key);
+        }
+        if (previousWasDeleted) {
+          this.deletedKeys.add(key);
+        } else {
+          this.deletedKeys.delete(key);
+        }
+      }
       this.audit?.({
         operation: 'working.set',
         store: 'working',
@@ -2342,12 +2379,22 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
   }
 
   clearCheckpoints(): void {
-    this.db.prepare(`DELETE FROM checkpoints`).run();
-    this.audit?.({
-      operation: 'recovery.clearCheckpoints',
-      store: 'recovery',
-      outcome: 'success',
-    });
+    try {
+      this.db.prepare(`DELETE FROM checkpoints`).run();
+      this.audit?.({
+        operation: 'recovery.clearCheckpoints',
+        store: 'recovery',
+        outcome: 'success',
+      });
+    } catch (error) {
+      this.audit?.({
+        operation: 'recovery.clearCheckpoints',
+        store: 'recovery',
+        outcome: 'error',
+        details: { errorName: error instanceof Error ? error.name : 'Error' },
+      });
+      throw error;
+    }
   }
 }
 
@@ -2738,12 +2785,17 @@ export class SqliteMemoryReviewQueue {
     let finalizeWorkingFlush: (() => void) | undefined;
     let neverStoredCandidate: MemoryCandidate | undefined;
     let originalKey: string | undefined;
+    let purgedWorkingKey: string | undefined;
     const tx = this.db.transaction(() => {
       const candidate = this.requireCandidate(id, 'pending');
       originalKey = candidate.key;
       this.assertDecisionOptionsNotDeletionGuarded(options);
+      const shouldAuditWorkingDelete = candidate.targetStore === 'working' && this.working.has(candidate.key);
       this.insertSuppression(candidate, 'never_store', now, options);
       finalizeWorkingFlush = this.working.purgeKey(candidate.key) ?? undefined;
+      if (shouldAuditWorkingDelete) {
+        purgedWorkingKey = candidate.key;
+      }
       this.db
         .prepare(
           `DELETE FROM memory_review_provenance WHERE target_store = ? AND memory_key = ?`,
@@ -2783,6 +2835,15 @@ export class SqliteMemoryReviewQueue {
       outcome: 'success',
       details: { id, status: result.status, targetStore: result.targetStore },
     });
+    if (purgedWorkingKey !== undefined) {
+      this.audit?.({
+        operation: 'working.delete',
+        store: 'working',
+        key: purgedWorkingKey,
+        outcome: 'success',
+        details: { source: 'review.neverStore', candidateId: id },
+      });
+    }
     return result;
   }
 
@@ -2790,20 +2851,31 @@ export class SqliteMemoryReviewQueue {
     targetStore: MemoryCandidateTargetStore,
     key: string,
   ): MemoryProvenanceRecord | null {
-    const row = this.db
-      .prepare(
-        `SELECT * FROM memory_review_provenance WHERE target_store = ? AND memory_key = ?`,
-      )
-      .get(targetStore, key) as MemoryProvenanceRow | undefined;
-    const result = row ? this.rowToProvenance(row) : null;
-    this.audit?.({
-      operation: 'review.provenanceFor',
-      store: 'review',
-      key,
-      outcome: result ? 'success' : 'miss',
-      details: { targetStore },
-    });
-    return result;
+    try {
+      const row = this.db
+        .prepare(
+          `SELECT * FROM memory_review_provenance WHERE target_store = ? AND memory_key = ?`,
+        )
+        .get(targetStore, key) as MemoryProvenanceRow | undefined;
+      const result = row ? this.rowToProvenance(row) : null;
+      this.audit?.({
+        operation: 'review.provenanceFor',
+        store: 'review',
+        key,
+        outcome: result ? 'success' : 'miss',
+        details: { targetStore },
+      });
+      return result;
+    } catch (error) {
+      this.audit?.({
+        operation: 'review.provenanceFor',
+        store: 'review',
+        key,
+        outcome: 'error',
+        details: { targetStore, errorName: error instanceof Error ? error.name : 'Error' },
+      });
+      throw error;
+    }
   }
 
   conflictsFor(id: string): MemoryConflict[] {
@@ -4311,6 +4383,24 @@ export class SqliteBrain implements IBrain {
       reviewMatchCount = memoryType === 'episodic'
         ? 0
         : this.matchingReviewPayloads(normalizedSelector).length;
+      const accessEvent: MemoryAccessAuditInput = {
+        operation: 'privacy.rightToForget',
+        store: 'privacy',
+        outcome: 'success',
+        details: {
+          selectorHash,
+          dryRun: true,
+          deletedWorking: deletedWorkingKeys.size,
+          deletedEpisodic: episodicMatchCount,
+          deletedCheckpoints: checkpointMatchCount,
+          deletedReviewPayloads: reviewMatchCount,
+          deletedDerived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
+          deletedTotalDerived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
+        },
+      };
+      if (normalizedSelector.query !== undefined) accessEvent.query = normalizedSelector.query;
+      if (normalizedSelector.key !== undefined) accessEvent.key = normalizedSelector.key;
+      this.auditRecorder(accessEvent);
     } else {
       try {
         const tx = this.db.transaction(() => {
@@ -4430,6 +4520,25 @@ export class SqliteBrain implements IBrain {
         throw error;
       }
     }
+
+    const accessEvent: MemoryAccessAuditInput = {
+      operation: 'privacy.rightToForget',
+      store: 'privacy',
+      outcome: 'success',
+      details: {
+        selectorHash,
+        dryRun: true,
+        deletedWorking: deletedWorkingKeys.size,
+        deletedEpisodic: episodicMatchCount,
+        deletedCheckpoints: checkpointMatchCount,
+        deletedReviewPayloads: reviewMatchCount,
+        deletedDerived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
+        deletedTotalDerived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
+      },
+    };
+    if (normalizedSelector.query !== undefined) accessEvent.query = normalizedSelector.query;
+    if (normalizedSelector.key !== undefined) accessEvent.key = normalizedSelector.key;
+    this.auditRecorder(accessEvent);
 
     return {
       selectorHash,

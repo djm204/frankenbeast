@@ -579,4 +579,102 @@ describe('memory access audit trail', () => {
 
     brain.close();
   });
+
+  it('keeps failed working set audit writes from mutating runtime memory', () => {
+    const brain = new SqliteBrain(':memory:');
+    const db = (brain as unknown as { db: Database.Database }).db;
+    db.exec(`
+      CREATE TRIGGER fail_working_set_audit
+      BEFORE INSERT ON memory_access_audit_events
+      WHEN NEW.operation = 'working.set'
+      BEGIN
+        SELECT RAISE(ABORT, 'simulated working set audit failure');
+      END;
+    `);
+
+    expect(() => brain.working.set('audit-failed-key', 'value')).toThrow('simulated working set audit failure');
+    expect(brain.working.get('audit-failed-key')).toBeUndefined();
+
+    brain.close();
+  });
+
+  it('audits clear-checkpoint failures before rethrowing', () => {
+    const brain = new SqliteBrain(':memory:');
+    brain.recovery.checkpoint({
+      runId: 'clear-failure-run',
+      phase: 'audit',
+      step: 1,
+      context: {},
+      timestamp: '2026-07-16T17:00:00.000Z',
+    });
+    const db = (brain as unknown as { db: Database.Database }).db;
+    db.exec(`
+      CREATE TRIGGER fail_checkpoint_clear
+      BEFORE DELETE ON checkpoints
+      BEGIN
+        SELECT RAISE(ABORT, 'simulated checkpoint clear failure');
+      END;
+    `);
+
+    expect(() => brain.recovery.clearCheckpoints()).toThrow('simulated checkpoint clear failure');
+    expect(brain.accessAudit.list({ operation: 'recovery.clearCheckpoints', limit: 1 })[0]).toMatchObject({
+      operation: 'recovery.clearCheckpoints',
+      outcome: 'error',
+    });
+
+    brain.close();
+  });
+
+  it('audits provenance lookup failures before rethrowing', () => {
+    const brain = new SqliteBrain(':memory:');
+    const db = (brain as unknown as { db: Database.Database }).db;
+    db.exec('DROP TABLE memory_review_provenance');
+
+    expect(() => brain.memoryReview.provenanceFor('working', 'missing-provenance')).toThrow(/memory_review_provenance/);
+    expect(brain.accessAudit.list({ operation: 'review.provenanceFor', limit: 1 })[0]).toMatchObject({
+      operation: 'review.provenanceFor',
+      outcome: 'error',
+    });
+
+    brain.close();
+  });
+
+  it('audits dry-run right-to-forget scans', () => {
+    const brain = new SqliteBrain(':memory:');
+    brain.working.set('dry-run-forget-key', 'dry-run-forget-secret');
+
+    const report = brain.rightToForget({ query: 'dry-run-forget-secret', dryRun: true });
+    const audit = brain.accessAudit.list({ operation: 'privacy.rightToForget', limit: 1 })[0];
+
+    expect(report.dryRun).toBe(true);
+    expect(audit).toMatchObject({ operation: 'privacy.rightToForget', outcome: 'success' });
+    expect(audit.details).toMatchObject({ dryRun: true, deletedWorking: 1 });
+
+    brain.close();
+  });
+
+  it('audits working deletes caused by never-store purges', () => {
+    const brain = new SqliteBrain(':memory:');
+    brain.working.set('never-store-existing-key', 'sensitive working value');
+    const candidate = brain.memoryReview.propose({
+      targetStore: 'working',
+      key: 'never-store-existing-key',
+      value: 'sensitive working value',
+      source: 'operator',
+      confidence: 0.9,
+      reason: 'Candidate for never-store purge audit.',
+    });
+
+    brain.memoryReview.neverStore(candidate.id, { reviewer: 'operator' });
+    const audit = brain.accessAudit.list({ operation: 'working.delete', limit: 1 })[0];
+
+    expect(audit).toMatchObject({
+      operation: 'working.delete',
+      store: 'working',
+      outcome: 'success',
+      details: { source: 'review.neverStore', candidateId: candidate.id },
+    });
+
+    brain.close();
+  });
 });
