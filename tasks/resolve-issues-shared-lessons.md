@@ -1,5 +1,10 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-16 — Synthetic availability probe review fixes
+- Availability probes should fail closed for real dependencies: do not default provider checks to `node --version` or dashboard checks to a static UI health URL, require explicit provider/backend health targets, and cover missing-target behavior in tests so cron copies cannot produce false-green uptime.
+- For cron/CI probe JSON logs, redact both `key=value` and whitespace-separated secret forms, including split `Authorization: Bearer <token>` argv sequences, before serializing command details or error messages.
+- When Codex reaches the normal five-trigger cap but posts new valid findings, fix/reply/resolve them and stop for explicit approval before issuing another `@codex review`; zero unresolved threads plus green CI is not a substitute for a fresh current-head clean.
+
 ## 2026-07-16 — Dead-letter queue Codex closeout
 - DLQ/DR restore output redaction must cover provider token literals (for example `sk-*`, `xox*`) and credentialed database URLs even when they appear inside free-text fields such as `target`, `lastError`, or nested payload strings; test fixtures should prove output does not leak the original secret substrings.
 - For DLQ file locks, treat unparseable lock timestamps as malformed stale-lock candidates and fall back to mtime-based reaping; otherwise a syntactically valid lock JSON with `acquiredAt: not-a-date` can wedge writers forever.
