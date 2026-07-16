@@ -482,6 +482,8 @@ function redactEpisodicSummary(
   redaction: MemoryExportRedactionMode,
 ): string {
   if (redaction === "none") return summary;
+  const fullStringRedaction = redactExportString(summary);
+  if (fullStringRedaction !== summary) return fullStringRedaction;
   const colon = summary.indexOf(":");
   if (colon > 0 && colon <= 200) {
     const key = summary.slice(0, colon).trim();
@@ -491,7 +493,7 @@ function redactEpisodicSummary(
       return `${redactExportKey(key, redaction)}: ${String(redactedValue)}`;
     }
   }
-  return redactExportString(summary);
+  return fullStringRedaction;
 }
 
 export function createBrainAdapter(dbPath: string): BrainAdapter {

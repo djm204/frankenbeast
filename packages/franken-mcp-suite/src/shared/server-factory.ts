@@ -328,6 +328,8 @@ function redactMemoryExportArgs(sanitized: Record<string, unknown>, redaction = 
       sanitized[key] = redaction;
     } else if (key === 'limit' && typeof sanitized[key] !== 'number') {
       sanitized[key] = redaction;
+    } else if (key === 'projectId' && typeof sanitized[key] !== 'string') {
+      sanitized[key] = redaction;
     } else if (!MEMORY_EXPORT_SAFE_AUDIT_KEYS.has(key)) {
       sanitized[key] = redaction;
     }

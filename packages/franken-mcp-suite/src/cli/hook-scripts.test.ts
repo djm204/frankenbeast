@@ -420,6 +420,40 @@ describe('Codex hook scripts', () => {
     expect(context).not.toContain('SECRET_TOKEN_SHOULD_NOT_LEAK');
   });
 
+  it('forwards proxied memory export target and approval evidence to the pre-tool hook', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const contextFile = join(root, 'context.txt');
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'execute_tool',
+      tool_input: {
+        tool: 'fbeast_memory_export',
+        args: {
+          redaction: 'none',
+          operatorApproval: 'trusted-operator-approved',
+          agentId: 'alice@example.test',
+          value: 'SECRET_TOKEN_SHOULD_NOT_LEAK',
+        },
+      },
+      session_id: 'sess-1',
+    }, binDir, { FBEAST_CAPTURE_CONTEXT_FILE: contextFile });
+
+    expect(result.status, result.stderr).toBe(0);
+    const context = readFileSync(contextFile, 'utf8');
+    expect(JSON.parse(context)).toEqual({
+      tool: 'fbeast_memory_export',
+      args: {
+        redaction: 'none',
+        operatorApproval: 'trusted-operator-approved',
+      },
+    });
+    expect(context).not.toContain('alice@example.test');
+    expect(context).not.toContain('SECRET_TOKEN_SHOULD_NOT_LEAK');
+  });
+
   it('does not forward file-content fields, so destructive-looking content is not seen by the governor', () => {
     const root = makeTempRoot();
     tempRoots.push(root);

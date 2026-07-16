@@ -129,6 +129,13 @@ vi.mock("@franken/brain", () => ({
             createdAt: "2026-07-06T00:00:00.000Z",
           },
           {
+            id: "evt-credentialed-uri",
+            type: "success",
+            summary: "postgres://alice:hunter2@db.internal/app",
+            details: {},
+            createdAt: "2026-07-06T00:00:00.000Z",
+          },
+          {
             id: "evt-alpha",
             type: "success",
             summary: "alpha episode",
@@ -399,6 +406,7 @@ describe("createBrainAdapter", () => {
     expect(serialized).not.toContain("discord.com/api/webhooks");
     expect(serialized).not.toContain("dXNlcjpwYXNz");
     expect(serialized).not.toContain("postgres://alice:hunter2@db.internal/app");
+    expect(serialized).not.toContain("//alice:hunter2@db.internal/app");
     expect(serialized).not.toContain('"password":123456');
     expect(serialized).not.toContain('"token":true');
     expect(serialized).not.toContain("987654");
