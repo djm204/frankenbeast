@@ -11,7 +11,7 @@ export type {
 export { IssueFetcher } from './issue-fetcher.js';
 export { IssueTriage } from './issue-triage.js';
 export { IssueGraphBuilder } from './issue-graph-builder.js';
-export { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses, detectWorkerHeartbeatMonotonicityAnomalies } from './issue-runner.js';
+export { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses, detectWorkerHeartbeatMonotonicityAnomalies, planKanbanStateMutation } from './issue-runner.js';
 export type {
   IssueRunnerConfig,
   IssueBackpressureConfig,
@@ -32,6 +32,13 @@ export type {
   IssueSchedulerFairnessReport,
   IssueSchedulerFairnessReportOptions,
   IssueWorkerCardProcessSnapshot,
+  KanbanStateMutationDecision,
+  KanbanStateMutationDecisionAction,
+  KanbanStateMutationOperation,
+  KanbanStateMutationRecord,
+  KanbanStateMutationRequest,
+  KanbanTaskCommentSnapshot,
+  KanbanTaskStateSnapshot,
   WorkerHeartbeatMonotonicityFinding,
   DuplicateWorkerCardProcessFinding,
 } from './issue-runner.js';

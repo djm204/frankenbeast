@@ -1,7 +1,8 @@
+import { createHash } from 'node:crypto';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses, detectWorkerHeartbeatMonotonicityAnomalies, evaluateIssueSchedulingScore } from '../../../src/issues/issue-runner.js';
+import { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses, detectWorkerHeartbeatMonotonicityAnomalies, evaluateIssueSchedulingScore, planKanbanStateMutation } from '../../../src/issues/issue-runner.js';
 import type { IssueBackpressureSignals, IssueBackpressureThresholds, IssueRunnerConfig } from '../../../src/issues/issue-runner.js';
 import type { GithubIssue, TriageResult } from '../../../src/issues/types.js';
 import type { PlanGraph, ICheckpointStore, ILogger, BeastLoopDeps } from '../../../src/deps.js';
@@ -292,6 +293,106 @@ function makeIssueRuntimeSupport(): IssueRuntimeSupport {
   };
 }
 
+
+
+describe('kanban state mutation idempotency planning', () => {
+  it('skips repeated comment, block, unblock, and complete mutations when state already converged', () => {
+    expect(planKanbanStateMutation(
+      { taskId: 't_retry', status: 'running', comments: [{ body: 'doctor note', idempotencyKey: 'comment:t_retry:doctor', createdAt: '2026-07-16T10:00:00Z' }] },
+      { operation: 'comment', idempotencyKey: 'comment:t_retry:doctor', body: 'doctor note' },
+    )).toMatchObject({ action: 'skip', reason: 'comment mutation already converged on an existing matching comment' });
+
+    expect(planKanbanStateMutation(
+      { taskId: 't_retry', status: 'blocked', blockReason: 'usage limit' },
+      { operation: 'block', idempotencyKey: 'block:t_retry:usage-limit', body: 'usage limit' },
+    )).toMatchObject({ action: 'skip', reason: 'task t_retry is already blocked with the requested reason' });
+
+    expect(planKanbanStateMutation(
+      { taskId: 't_retry', status: 'running' },
+      { operation: 'unblock', idempotencyKey: 'unblock:t_retry:doctor' },
+    )).toMatchObject({ action: 'skip', reason: 'task t_retry is already not blocked' });
+
+    expect(planKanbanStateMutation(
+      { taskId: 't_retry', status: 'completed', completionSummary: 'merged PR' },
+      { operation: 'complete', idempotencyKey: 'complete:t_retry:merged', body: 'merged PR' },
+    )).toMatchObject({ action: 'skip', reason: 'task t_retry is already complete with the requested summary' });
+  });
+
+  it('uses idempotency records before comments so retrying a reserved mutation is quiet', () => {
+    expect(planKanbanStateMutation(
+      {
+        taskId: 't_retry',
+        status: 'running',
+        appliedMutations: [{
+          operation: 'comment',
+          idempotencyKey: 'comment:t_retry:liveness',
+          contentHash: 'same-body',
+          appliedAt: '2026-07-16T10:00:00Z',
+        }],
+      },
+      { operation: 'comment', idempotencyKey: 'comment:t_retry:liveness', contentHash: 'same-body' },
+    )).toMatchObject({
+      action: 'skip',
+      reason: 'mutation idempotency key was already applied with matching operation/content',
+      evidence: expect.arrayContaining(['appliedAt=2026-07-16T10:00:00.000Z']),
+    });
+  });
+
+  it('recognizes retries that provide the body when the stored content hash is a digest', () => {
+    const body = 'doctor note\n';
+    const digest = createHash('sha256').update(body).digest('hex');
+
+    expect(planKanbanStateMutation(
+      {
+        taskId: 't_retry',
+        status: 'running',
+        appliedMutations: [{
+          operation: 'comment',
+          idempotencyKey: 'comment:t_retry:liveness',
+          contentHash: digest,
+        }],
+      },
+      { operation: 'comment', idempotencyKey: 'comment:t_retry:liveness', body },
+    )).toMatchObject({ action: 'skip' });
+  });
+
+  it('does not let audit comments prove non-comment state mutations', () => {
+    expect(planKanbanStateMutation(
+      {
+        taskId: 't_retry',
+        status: 'running',
+        revision: 7,
+        comments: [{ body: 'blocked: usage limit', idempotencyKey: 'block:t_retry:usage-limit' }],
+      },
+      { operation: 'block', idempotencyKey: 'block:t_retry:usage-limit', expectedRevision: 7, body: 'usage limit' },
+    )).toMatchObject({ action: 'apply' });
+  });
+
+  it('applies new mutations when numeric and serialized revisions match', () => {
+    expect(planKanbanStateMutation(
+      { taskId: 't_retry', status: 'running', revision: '7' },
+      { operation: 'block', idempotencyKey: 'block:t_retry:new', expectedRevision: 7, body: 'fresh blocker' },
+    )).toMatchObject({ action: 'apply' });
+  });
+
+  it('applies new mutations only when the compare-and-set revision matches', () => {
+    expect(planKanbanStateMutation(
+      { taskId: 't_retry', status: 'running', revision: 7 },
+      { operation: 'block', idempotencyKey: 'block:t_retry:new', expectedRevision: 7, body: 'fresh blocker' },
+    )).toMatchObject({ action: 'apply' });
+  });
+
+  it('returns explicit conflict evidence for stale concurrent updates', () => {
+    expect(planKanbanStateMutation(
+      { taskId: 't_retry', status: 'running', revision: 8 },
+      { operation: 'block', idempotencyKey: 'block:t_retry:stale', expectedRevision: 7, body: 'fresh blocker' },
+    )).toMatchObject({
+      action: 'conflict',
+      reason: 'kanban state revision changed before mutation could be applied',
+      evidence: expect.arrayContaining(['expectedRevision=7', 'actualRevision=8', 'status=running']),
+    });
+  });
+});
 
 describe('duplicate worker-card process detector', () => {
   it('detects duplicate and regressive heartbeat writes with worker diagnostics', () => {
