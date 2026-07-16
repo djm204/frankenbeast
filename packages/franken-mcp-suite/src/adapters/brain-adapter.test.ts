@@ -71,8 +71,9 @@ vi.mock("@franken/brain", () => ({
             "OPENSSH PRIVATE KEY-----",
           "status-page": "password=hunter2 session_cookie=abc123value",
           "env-snippet": "AWS_SECRET_ACCESS_KEY=AKIA" + "supersecretvalue123456 REGION=us-east-1",
+          "legacy-token-snippet": "xoxb-" + "legacytokenvalue123 glpat-legacytokenvalue123",
           "basic-auth": "Authorization: Basic " + "dXNlcjpwYXNz",
-          "database-url": "postgres://alice:hunter2@db.internal/app",
+
           "json-literal-secrets": '{"password":123456,"token":true,"authToken":{"raw":"ghs_secretvalue123456"},"accessKey":["secretvalue123456"],"safe":"ok"}',
           profile: {
             password: "hunter2",
@@ -86,7 +87,7 @@ vi.mock("@franken/brain", () => ({
           "__fbeast_agent_memory__/alpha/private-task": {
             __fbeastMemoryScope: "fbeast:agent-memory",
             agentId: "alpha",
-            value: "alpha entry",
+            value: "private entry",
           },
           "__fbeast_agent_memory__/beta/private-task": {
             __fbeastMemoryScope: "fbeast:agent-memory",
@@ -326,18 +327,18 @@ describe("createBrainAdapter", () => {
       query: "entry",
       readScope: "agent",
       agentId: "alpha",
-      limit: 10,
+      limit: 20,
     });
     expect(alphaRows.map((row) => row.key)).toContain("task-1");
     expect(alphaRows.map((row) => row.key)).toContain("private-task");
-    expect(alphaRows.map((row) => row.value)).toContain("alpha entry");
+    expect(alphaRows.map((row) => row.value)).toContain("private entry");
     expect(alphaRows.map((row) => row.value)).not.toContain("beta entry");
 
     const sharedRows = await brain.query({
       query: "entry",
       type: "working",
       readScope: "shared",
-      limit: 10,
+      limit: 20,
     });
     expect(sharedRows.map((row) => row.key)).toEqual(["task-1"]);
 
@@ -348,7 +349,7 @@ describe("createBrainAdapter", () => {
     const text = sections.flatMap((section) => section.entries).join("\n");
     expect(text).toContain("task-1: working entry");
     expect(text).toContain("agents/oncall/runbook: shared runbook");
-    expect(text).toContain("private-task: alpha entry");
+    expect(text).toContain("private-task: private entry");
     expect(text).toContain("alpha episode");
     expect(text).not.toContain("beta entry");
     expect(text).not.toContain("beta episode");
@@ -393,6 +394,8 @@ describe("createBrainAdapter", () => {
     expect(serialized).not.toContain("ghs_secretvalue123456");
     expect(serialized).not.toContain("secretvalue123456");
     expect(serialized).not.toContain("AKIA" + "supersecretvalue123456");
+    expect(serialized).not.toContain("xoxb-legacytokenvalue123");
+    expect(serialized).not.toContain("glpat-legacytokenvalue123");
     expect(serialized).not.toContain("123456");
     expect(serialized).not.toContain('"token":true');
     expect(exported.working).toContainEqual(
@@ -404,19 +407,27 @@ describe("createBrainAdapter", () => {
     );
   });
 
-  it("redacts agent export scope identifiers in safe mode", async () => {
+  it("redacts all agent export identifiers in safe mode", async () => {
     const brain = createBrainAdapter("/tmp/beast.db");
 
     const exported = await brain.exportProjectMemory({
       readScope: "agent",
-      agentId: "alice@example.com",
-      limit: 10,
+      agentId: "alpha",
+      limit: 20,
     });
 
     expect(exported.scope).toEqual({
       readScope: "agent",
-      agentId: "[redacted-email]",
+      agentId: "[redacted-agent-id]",
     });
+    expect(exported.working).toContainEqual(expect.objectContaining({
+      key: "private-task",
+      agentId: "[redacted-agent-id]",
+      value: "private entry",
+    }));
+    const exportedText = JSON.stringify(exported);
+    expect(exportedText).not.toContain('"agentId":"alpha"');
+    expect(exportedText).not.toContain('"agentId":"beta"');
   });
 
   it("rejects agent read scope without an agent id before reading memory", async () => {

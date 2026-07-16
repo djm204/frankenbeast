@@ -374,6 +374,7 @@ function resolveExportLimit(limit: number | undefined): number {
 const SENSITIVE_EXPORT_KEY = /(?:password|passphrase|secret|token|api[_-]?key|access[_-]?key|authorization|credential|private[_-]?key|session|cookie)/i;
 const SECRET_EXPORT_VALUES: Array<[RegExp, string]> = [
   [/\bAuthorization\s*:\s*Basic\s+\S+/gi, "Authorization: Basic ***"],
+  [/\bAuthorization\s*:\s*\*+\s+\S+/gi, "Authorization: [redacted]"],
   [/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]"],
   [/\bBasic\s+[A-Za-z0-9._~+/-]+=*/gi, "Basic [redacted]"],
   [/\b([A-Za-z][A-Za-z0-9+.-]*:\/\/)\S+@/g, "$1[redacted]@"],
@@ -383,12 +384,18 @@ const SECRET_EXPORT_VALUES: Array<[RegExp, string]> = [
   [/\b(?:sk|pk|rk)-[A-Za-z0-9][A-Za-z0-9_-]{7,}\b/g, "[redacted-secret]"],
   [/\b(?:sk|gh[opusr])_[A-Za-z0-9_]{8,}\b/g, "[redacted-secret]"],
   [/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[redacted-secret]"],
+  [/\b(?:gho|ghp|glpat|xox[baprs])-[A-Za-z0-9_-]{12,}\b/g, "[redacted-secret]"],
+  [/\btoken\s+[A-Za-z0-9._~+/=-]{20,}\b/gi, "token [redacted]"],
   [/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[redacted-email]"],
 ];
 
 function stableRedactedKey(key: string): string {
   const digest = createHash("sha256").update(key).digest("hex").slice(0, 12);
   return `[redacted-key:${digest}]`;
+}
+
+function stableRedactedAgentId(_agentId: string): string {
+  return "[redacted-agent-id]";
 }
 
 function redactExportString(value: string): string {
@@ -416,6 +423,9 @@ function redactExportValue(
   keyHint?: string,
   seen: WeakSet<object> = new WeakSet(),
 ): unknown {
+  if (keyHint === "agentId" && typeof value === "string") {
+    return stableRedactedAgentId(value);
+  }
   if (keyHint && SENSITIVE_EXPORT_KEY.test(keyHint)) {
     return "[redacted]";
   }
@@ -446,6 +456,7 @@ function redactExportField<T>(
   redaction: MemoryExportRedactionMode,
   keyHint?: string,
 ): T | unknown {
+  if (redaction !== "none" && keyHint === "agentId") return "[redacted-agent-id]";
   return redaction === "none" ? value : redactExportValue(value, keyHint);
 }
 

@@ -483,10 +483,26 @@ function assessHighRiskAction(action: string, context: string): GovernorCheckRes
 }
 
 function isTrustedOperatorMemoryExport(action: string, context: string): boolean {
-  if (action !== 'fbeast_memory_export') return false;
+  const unqualifiedAction = unqualifyMcpActionName(action);
+  const isDirectExport = unqualifiedAction === 'fbeast_memory_export';
+  const isProxiedExport = unqualifiedAction === 'execute_tool' && contextTargetsTool(context, 'fbeast_memory_export');
+  if (!isDirectExport && !isProxiedExport) return false;
   try {
-    const parsed = JSON.parse(context) as Record<string, unknown>;
-    return parsed.redaction === 'none';
+    const parsed = JSON.parse(context) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+    const record = parsed as Record<string, unknown>;
+    if (isDirectExport) return record.redaction === 'none';
+    const directArgs = record['args'];
+    if (directArgs !== null && typeof directArgs === 'object' && !Array.isArray(directArgs)) {
+      return (directArgs as Record<string, unknown>).redaction === 'none';
+    }
+    const toolInput = record['tool_input'];
+    if (toolInput === null || typeof toolInput !== 'object' || Array.isArray(toolInput)) return false;
+    const nestedArgs = (toolInput as Record<string, unknown>)['args'];
+    return nestedArgs !== null
+      && typeof nestedArgs === 'object'
+      && !Array.isArray(nestedArgs)
+      && (nestedArgs as Record<string, unknown>).redaction === 'none';
   } catch {
     return /"redaction"\s*:\s*"none"/i.test(context);
   }

@@ -183,6 +183,28 @@ describe('GovernorAdapter', () => {
       decision: 'review_recommended',
       reason: expect.stringContaining('trusted-operator approval'),
     });
+    await expect(governor.check({
+      action: 'execute_tool',
+      context: JSON.stringify({
+        tool: 'fbeast_memory_export',
+        args: { redaction: 'none', readScope: 'shared' },
+      }),
+    })).resolves.toMatchObject({
+      decision: 'review_recommended',
+      reason: expect.stringContaining('trusted-operator approval'),
+    });
+    await expect(governor.check({
+      action: 'execute_tool',
+      context: JSON.stringify({
+        tool_input: {
+          tool: 'mcp__franken_mcp__fbeast_memory_export',
+          args: { redaction: 'none', readScope: 'shared' },
+        },
+      }),
+    })).resolves.toMatchObject({
+      decision: 'review_recommended',
+      reason: expect.stringContaining('trusted-operator approval'),
+    });
   });
 
   it('routes non-memory high-risk action classes through policy-as-code', async () => {
