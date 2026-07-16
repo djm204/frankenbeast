@@ -44,8 +44,8 @@ function parseCliArgs(argv) {
   const config = {
     repo: process.env.FRANKENBEAST_AVAILABILITY_REPO,
     kanbanDbPath: process.env.FRANKENBEAST_AVAILABILITY_KANBAN_DB ?? process.env.HERMES_KANBAN_DB,
-    providerCommand: parseCommandLine(process.env.FRANKENBEAST_AVAILABILITY_PROVIDER_COMMAND) ?? ['node', '--version'],
-    dashboardHealthUrl: process.env.FRANKENBEAST_AVAILABILITY_DASHBOARD_URL ?? 'http://127.0.0.1:5173/health',
+    providerCommand: parseCommandLine(process.env.FRANKENBEAST_AVAILABILITY_PROVIDER_COMMAND),
+    dashboardHealthUrl: process.env.FRANKENBEAST_AVAILABILITY_DASHBOARD_URL,
     approvalLedgerPath: process.env.FRANKENBEAST_AVAILABILITY_APPROVAL_LEDGER,
     timeoutMs: DEFAULT_TIMEOUT_MS,
     output: 'text',
@@ -78,7 +78,7 @@ function parseCliArgs(argv) {
 }
 
 function usage() {
-  return `Usage: node scripts/synthetic-availability-probes.mjs [--json|--text] [options]\n\nRead-only synthetic availability probes for critical Frankenbeast workflows.\n\nOptions:\n  --repo <owner/repo>          GitHub repo for issue inventory probe\n  --kanban-db <path>           Kanban SQLite database path\n  --provider-command <cmd>     Read-only provider status command (default: node --version)\n  --dashboard-url <url>        Dashboard health URL (default: http://127.0.0.1:5173/health)\n  --approval-ledger <path>     Approval ledger JSON path\n  --timeout-ms <ms>            Per-probe timeout (default: ${DEFAULT_TIMEOUT_MS})\n  --json                      Emit compact machine-readable JSON/JSONL\n  --pretty-json               Emit pretty-printed JSON for humans\n  --text                      Emit compact text (default)`;
+  return `Usage: node scripts/synthetic-availability-probes.mjs [--json|--text] [options]\n\nRead-only synthetic availability probes for critical Frankenbeast workflows.\n\nOptions:\n  --repo <owner/repo>          GitHub repo for issue inventory probe\n  --kanban-db <path>           Kanban SQLite database path\n  --provider-command <cmd>     Read-only provider status command (required; no fake default)\n  --dashboard-url <url>        Dashboard/backend health URL (required; no fake default)\n  --approval-ledger <path>     Approval ledger JSON path\n  --timeout-ms <ms>            Per-probe timeout (default: ${DEFAULT_TIMEOUT_MS})\n  --json                      Emit compact machine-readable JSON/JSONL\n  --pretty-json               Emit pretty-printed JSON for humans\n  --text                      Emit compact text (default)`;
 }
 
 function normalizeError(error) {
@@ -181,7 +181,7 @@ function redactText(value) {
 function redactCommand(command) {
   return command.map((part, index) => {
     const previous = command[index - 1] ?? '';
-    if (part.startsWith('Bearer ') || SECRET_ARG_PATTERN.test(previous)) return '[REDACTED]';
+    if (part.startsWith('Bearer ') || /^Bearer$/iu.test(previous) || SECRET_ARG_PATTERN.test(previous)) return '[REDACTED]';
     if (SECRET_ARG_PATTERN.test(part)) {
       const separator = part.includes('=') ? '=' : part.includes(':') ? ':' : null;
       if (separator) return `${part.slice(0, part.indexOf(separator) + 1)}[REDACTED]`;
@@ -249,8 +249,7 @@ async function probeApprovalLedgerParse(config, deps) {
 export async function runSyntheticAvailabilityProbes(options = {}) {
   const config = {
     timeoutMs: DEFAULT_TIMEOUT_MS,
-    providerCommand: ['node', '--version'],
-    dashboardHealthUrl: 'http://127.0.0.1:5173/health',
+
     ...(options.config ?? {}),
   };
   if (!Number.isFinite(config.timeoutMs) || config.timeoutMs <= 0) {

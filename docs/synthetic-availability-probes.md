@@ -28,8 +28,8 @@ Each result includes:
 node scripts/synthetic-availability-probes.mjs --json \
   --repo djm204/frankenbeast \
   --kanban-db "$HERMES_KANBAN_DB" \
-  --provider-command "node --version" \
-  --dashboard-url http://127.0.0.1:5173/health \
+  --provider-command "your-provider-health-command --json" \
+  --dashboard-url http://127.0.0.1:3737/health \
   --approval-ledger .fbeast/approvals/ledger.json
 ```
 
@@ -40,7 +40,7 @@ The process exits `0` when all probes are healthy, `1` when any probe is unavail
 Example cron entry that runs every five minutes and appends JSON evidence:
 
 ```cron
-*/5 * * * * cd /srv/frankenbeast && node scripts/synthetic-availability-probes.mjs --json --repo djm204/frankenbeast --kanban-db /var/lib/hermes/kanban.db --provider-command "node --version" --dashboard-url http://127.0.0.1:5173/health --approval-ledger /var/lib/hermes/approvals/ledger.json >> /var/log/frankenbeast-availability-probes.jsonl 2>&1
+*/5 * * * * cd /srv/frankenbeast && node scripts/synthetic-availability-probes.mjs --json --repo djm204/frankenbeast --kanban-db /var/lib/hermes/kanban.db --provider-command "your-provider-health-command --json" --dashboard-url http://127.0.0.1:3737/health --approval-ledger /var/lib/hermes/approvals/ledger.json >> /var/log/frankenbeast-availability-probes.jsonl 2>&1
 ```
 
 Environment variable equivalents are available for schedulers that prefer static commands:
@@ -54,5 +54,8 @@ Environment variable equivalents are available for schedulers that prefer static
 Use the text format for human status snippets:
 
 ```bash
-node scripts/synthetic-availability-probes.mjs --text --repo djm204/frankenbeast
+node scripts/synthetic-availability-probes.mjs --text \
+  --repo djm204/frankenbeast \
+  --provider-command "your-provider-health-command --json" \
+  --dashboard-url http://127.0.0.1:3737/health
 ```

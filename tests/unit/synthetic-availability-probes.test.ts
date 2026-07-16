@@ -182,6 +182,25 @@ describe('synthetic availability probes', () => {
     expect(providerProbe?.detail.command).not.toContain('super-secret');
   });
 
+  it('redacts bearer token values after split bearer schemes in command reports', async () => {
+    const { runSyntheticAvailabilityProbes } = await loadScript();
+    const report = await runSyntheticAvailabilityProbes({
+      config: {
+        repo: 'djm204/frankenbeast',
+        providerCommand: ['curl', '-H', 'Authorization:', 'Bearer', 'bearer-token-value'],
+        timeoutMs: 100,
+      },
+      execFile: vi.fn(async (file: string) => (file === 'gh' ? '[]' : 'provider ok')),
+      fetch: vi.fn(async () => ({ ok: true, status: 200 })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      readFile: vi.fn(async () => '{}'),
+    });
+
+    const providerProbe = (report.probes as Array<Record<string, Record<string, string>>>).find((probe) => probe.name === 'provider_status');
+    expect(providerProbe?.detail.command).toContain('[REDACTED]');
+    expect(providerProbe?.detail.command).not.toContain('bearer-token-value');
+  });
+
   it('redacts space-separated secrets from provider failure output', async () => {
     const { runSyntheticAvailabilityProbes } = await loadScript();
     const report = await runSyntheticAvailabilityProbes({
