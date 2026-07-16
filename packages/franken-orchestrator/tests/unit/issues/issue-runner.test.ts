@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses } from '../../../src/issues/issue-runner.js';
+import { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses, evaluateIssueSchedulingScore } from '../../../src/issues/issue-runner.js';
 import type { IssueBackpressureSignals, IssueBackpressureThresholds, IssueRunnerConfig } from '../../../src/issues/issue-runner.js';
 import type { GithubIssue, TriageResult } from '../../../src/issues/types.js';
 import type { PlanGraph, ICheckpointStore, ILogger, BeastLoopDeps } from '../../../src/deps.js';
@@ -515,7 +515,7 @@ describe('IssueRunner', () => {
 
       const report = buildIssueSchedulerFairnessReport(issues, triages);
 
-      expect(report).toEqual({
+      expect(report).toMatchObject({
         totalIssues: 4,
         scheduledIssueNumbers: [33, 34, 32, 31],
         buckets: [
@@ -527,6 +527,67 @@ describe('IssueRunner', () => {
         ],
         warnings: ['issue #31 has no recognized severity label and is scheduled after prioritized work'],
       });
+      expect(report.effectivePriorities).toEqual([
+        expect.objectContaining({ issueNumber: 33, priority: 'critical', blockerStatus: 'eligible' }),
+        expect.objectContaining({ issueNumber: 34, priority: 'medium', blockerStatus: 'eligible' }),
+        expect.objectContaining({ issueNumber: 32, priority: 'low', blockerStatus: 'eligible' }),
+        expect.objectContaining({ issueNumber: 31, priority: 'unprioritized', blockerStatus: 'eligible' }),
+      ]);
+    });
+
+    it('ages eligible queued medium/low work ahead of newer high-priority work without bypassing blocked/HITL safety', async () => {
+      const nowMs = Date.parse('2026-07-16T00:00:00.000Z');
+      const issues = [
+        makeIssue({
+          number: 61,
+          labels: ['high'],
+          createdAt: '2026-07-15T00:00:00.000Z',
+          updatedAt: '2026-07-15T12:00:00.000Z',
+        }),
+        makeIssue({
+          number: 62,
+          labels: ['medium', 'orchestrator'],
+          createdAt: '2026-06-10T00:00:00.000Z',
+          updatedAt: '2026-06-20T00:00:00.000Z',
+        }),
+        makeIssue({
+          number: 63,
+          labels: ['low'],
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-02T00:00:00.000Z',
+        }),
+        makeIssue({
+          number: 64,
+          labels: ['medium', 'blocked'],
+          createdAt: '2026-04-01T00:00:00.000Z',
+          updatedAt: '2026-04-02T00:00:00.000Z',
+        }),
+        makeIssue({
+          number: 65,
+          labels: ['medium', 'hitl'],
+          createdAt: '2026-04-01T00:00:00.000Z',
+          updatedAt: '2026-04-02T00:00:00.000Z',
+        }),
+      ];
+      const triages = issues.map(issue => makeTriage(issue.number));
+      const config = makeConfig({ issues, triageResults: triages });
+
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(nowMs));
+      const report = buildIssueSchedulerFairnessReport(issues, triages, { nowMs });
+      const outcomes = await runner.run(config);
+      vi.useRealTimers();
+
+      expect(report.scheduledIssueNumbers).toEqual([62, 63, 61, 64, 65]);
+      expect(outcomes.map(outcome => outcome.issueNumber)).toEqual([62, 63, 61, 64, 65]);
+      expect(report.effectivePriorities).toEqual([
+        expect.objectContaining({ issueNumber: 62, priority: 'medium', ageDays: 36, ageBoost: 2, effectivePriorityRank: 0, blockerStatus: 'eligible', riskLane: 'orchestrator', freshness: 'stale' }),
+        expect.objectContaining({ issueNumber: 63, priority: 'low', ageDays: 76, ageBoost: 2, effectivePriorityRank: 1, blockerStatus: 'eligible', riskLane: 'standard', freshness: 'stale' }),
+        expect.objectContaining({ issueNumber: 61, priority: 'high', ageDays: 1, ageBoost: 0, effectivePriorityRank: 1, blockerStatus: 'eligible', riskLane: 'standard', freshness: 'fresh' }),
+        expect.objectContaining({ issueNumber: 64, priority: 'medium', ageBoost: 0, blockerStatus: 'blocked' }),
+        expect.objectContaining({ issueNumber: 65, priority: 'medium', ageBoost: 0, blockerStatus: 'hitl' }),
+      ]);
+      expect(evaluateIssueSchedulingScore(issues[3]!, nowMs).explanation).toContain('blocker=blocked');
     });
 
     it('reports missing triage as an explicit scheduler fairness edge case', () => {

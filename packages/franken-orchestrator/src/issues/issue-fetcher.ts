@@ -12,6 +12,8 @@ interface RawGithubIssue {
   readonly labels: ReadonlyArray<{ readonly name: string }>;
   readonly state: string;
   readonly url: string;
+  readonly createdAt?: string | undefined;
+  readonly updatedAt?: string | undefined;
 }
 
 export class IssueFetcher implements IIssueFetcher {
@@ -22,7 +24,7 @@ export class IssueFetcher implements IIssueFetcher {
   }
 
   async fetch(options: IssueFetchOptions): Promise<GithubIssue[]> {
-    const args = ['issue', 'list', '--json', 'number,title,body,labels,state,url'];
+    const args = ['issue', 'list', '--json', 'number,title,body,labels,state,url,createdAt,updatedAt'];
 
     if (options.repo) {
       args.push('--repo', options.repo);
@@ -66,6 +68,8 @@ export class IssueFetcher implements IIssueFetcher {
       labels: issue.labels.map((l) => l.name),
       state: issue.state,
       url: issue.url,
+      createdAt: issue.createdAt,
+      updatedAt: issue.updatedAt,
     }));
   }
 

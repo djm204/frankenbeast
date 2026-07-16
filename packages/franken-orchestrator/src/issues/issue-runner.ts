@@ -201,6 +201,8 @@ export interface IssueSchedulerFairnessReport {
   readonly totalIssues: number;
   /** Sampled severity-ordered issue numbers for PM/liveness output; `totalIssues` is authoritative when truncated. */
   readonly scheduledIssueNumbers: readonly number[];
+  /** Sampled scheduling scores so PM/liveness output can explain effective priority decisions. */
+  readonly effectivePriorities: readonly IssueSchedulingScore[];
   readonly buckets: readonly IssueSchedulerFairnessBucket[];
   readonly warnings: readonly string[];
   readonly scheduledIssueNumbersTruncated?: true | undefined;
@@ -213,6 +215,24 @@ export interface IssueSchedulerFairnessReport {
 export interface IssueSchedulerFairnessReportOptions {
   readonly maxIssueNumbersPerList?: number | undefined;
   readonly maxWarnings?: number | undefined;
+  readonly nowMs?: number | undefined;
+}
+
+export type IssueBlockerStatus = 'eligible' | 'blocked' | 'hitl';
+export type IssueFreshness = 'fresh' | 'normal' | 'stale' | 'unknown';
+
+export interface IssueSchedulingScore {
+  readonly issueNumber: number;
+  readonly priority: IssueSchedulerFairnessBucket['severity'];
+  readonly priorityRank: number;
+  readonly effectivePriorityRank: number;
+  readonly ageDays: number;
+  readonly ageBoost: number;
+  readonly blockerStatus: IssueBlockerStatus;
+  readonly riskLane: string;
+  readonly freshness: IssueFreshness;
+  readonly score: number;
+  readonly explanation: string;
 }
 
 export interface IssueRunnerConfig {
@@ -232,9 +252,17 @@ export interface IssueRunnerConfig {
 }
 
 const SEVERITY_ORDER: Record<string, number> = {
+  p0: 0,
+  'priority:p0': 0,
   critical: 0,
+  p1: 1,
+  'priority:p1': 1,
   high: 1,
+  p2: 2,
+  'priority:p2': 2,
   medium: 2,
+  p3: 3,
+  'priority:p3': 3,
   low: 3,
 };
 
@@ -244,6 +272,11 @@ const ONE_SHOT_MAX_ITERATIONS = 50;
 const ONE_SHOT_STALE_MATE_LIMIT = 3;
 const DEFAULT_SCHEDULER_FAIRNESS_ISSUE_NUMBER_LIMIT = 50;
 const DEFAULT_SCHEDULER_FAIRNESS_WARNING_LIMIT = 50;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const PRIORITY_AGING_DAYS_PER_RANK = 14;
+const MAX_PRIORITY_AGE_BOOST = 2;
+const FRESHNESS_PENALTY_DAYS = 1;
+const STALE_FRESHNESS_DAYS = 14;
 
 function limitExceeded(value: number | undefined, limit: number | undefined): value is number {
   return limit !== undefined && value !== undefined && value > limit;
@@ -630,6 +663,78 @@ function extractSeverity(labels: readonly string[]): number {
   return NO_SEVERITY;
 }
 
+function normalizedLabels(issue: GithubIssue): string[] {
+  return issue.labels.map(label => label.trim().toLowerCase()).filter(label => label.length > 0);
+}
+
+function issueBlockerStatus(issue: GithubIssue): IssueBlockerStatus {
+  const status = issue.status?.trim().toLowerCase();
+  if (status && ['blocked', 'paused', 'parked'].includes(status)) return 'blocked';
+  if (status && ['triage', 'needs_input', 'needs-input', 'hitl', 'review-required'].includes(status)) return 'hitl';
+  const labels = normalizedLabels(issue);
+  if (labels.some(label => ['hitl', 'human-in-the-loop', 'needs-input', 'needs_input', 'needs-human', 'review-required'].includes(label))) {
+    return 'hitl';
+  }
+  if (labels.some(label => ['blocked', 'blocked_status', 'parked', 'paused'].includes(label))) return 'blocked';
+  return 'eligible';
+}
+
+function issueRiskLane(issue: GithubIssue): string {
+  for (const label of normalizedLabels(issue)) {
+    if (label.startsWith('risk:') || label.startsWith('lane:')) return label;
+    if (['low-risk', 'docs', 'test', 'tests', 'security', 'orchestrator', 'web', 'mcp', 'fallback'].includes(label)) return label;
+  }
+  return 'standard';
+}
+
+function riskLaneWeight(riskLane: string): number {
+  switch (riskLane) {
+    case 'low-risk':
+    case 'docs':
+    case 'test':
+    case 'tests':
+    case 'lane:low-risk':
+      return -0.1;
+    case 'security':
+    case 'risk:high':
+      return 0.25;
+    default:
+      return 0;
+  }
+}
+
+function timestampMs(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const ms = new Date(value).getTime();
+  return Number.isFinite(ms) ? ms : undefined;
+}
+
+function ageDays(issue: GithubIssue, nowMs: number): number {
+  const createdMs = timestampMs(issue.createdAt);
+  if (createdMs === undefined || createdMs > nowMs) return 0;
+  return Math.floor((nowMs - createdMs) / ONE_DAY_MS);
+}
+
+function issueFreshness(issue: GithubIssue, nowMs: number): IssueFreshness {
+  const updatedMs = timestampMs(issue.updatedAt);
+  if (updatedMs === undefined || updatedMs > nowMs) return 'unknown';
+  const days = (nowMs - updatedMs) / ONE_DAY_MS;
+  if (days < FRESHNESS_PENALTY_DAYS) return 'fresh';
+  if (days >= STALE_FRESHNESS_DAYS) return 'stale';
+  return 'normal';
+}
+
+function freshnessWeight(freshness: IssueFreshness): number {
+  switch (freshness) {
+    case 'fresh':
+      return 0.2;
+    case 'stale':
+      return -0.1;
+    default:
+      return 0;
+  }
+}
+
 function severityName(rank: number): IssueSchedulerFairnessBucket['severity'] {
   switch (rank) {
     case 0:
@@ -645,8 +750,42 @@ function severityName(rank: number): IssueSchedulerFairnessBucket['severity'] {
   }
 }
 
-function sortBySeverity(issues: readonly GithubIssue[]): GithubIssue[] {
-  return [...issues].sort((a, b) => extractSeverity(a.labels) - extractSeverity(b.labels));
+export function evaluateIssueSchedulingScore(issue: GithubIssue, nowMs: number = Date.now()): IssueSchedulingScore {
+  const priorityRank = extractSeverity(issue.labels);
+  const priority = severityName(priorityRank);
+  const blockerStatus = issueBlockerStatus(issue);
+  const age = ageDays(issue, nowMs);
+  const ageBoost = blockerStatus === 'eligible'
+    ? Math.min(MAX_PRIORITY_AGE_BOOST, Math.floor(age / PRIORITY_AGING_DAYS_PER_RANK))
+    : 0;
+  const effectivePriorityRank = Math.max(0, priorityRank - ageBoost);
+  const riskLane = issueRiskLane(issue);
+  const freshness = issueFreshness(issue, nowMs);
+  const unsafePenalty = blockerStatus === 'eligible' ? 0 : 100;
+  const score = effectivePriorityRank + unsafePenalty + riskLaneWeight(riskLane) + freshnessWeight(freshness);
+  return {
+    issueNumber: issue.number,
+    priority,
+    priorityRank,
+    effectivePriorityRank,
+    ageDays: age,
+    ageBoost,
+    blockerStatus,
+    riskLane,
+    freshness,
+    score,
+    explanation: `priority=${priority}(${priorityRank}) age=${age}d boost=${ageBoost} blocker=${blockerStatus} riskLane=${riskLane} freshness=${freshness} effective=${effectivePriorityRank}`,
+  };
+}
+
+function sortBySchedulingScore(issues: readonly GithubIssue[], nowMs: number = Date.now()): GithubIssue[] {
+  return [...issues].sort((a, b) => {
+    const scoreA = evaluateIssueSchedulingScore(a, nowMs);
+    const scoreB = evaluateIssueSchedulingScore(b, nowMs);
+    if (scoreA.score !== scoreB.score) return scoreA.score - scoreB.score;
+    if (scoreA.ageDays !== scoreB.ageDays) return scoreB.ageDays - scoreA.ageDays;
+    return a.number - b.number;
+  });
 }
 
 function boundedPositiveInteger(value: number | undefined, fallback: number): number {
@@ -670,7 +809,8 @@ export function buildIssueSchedulerFairnessReport(
   triageResults: readonly TriageResult[],
   options: IssueSchedulerFairnessReportOptions = {},
 ): IssueSchedulerFairnessReport {
-  const scheduled = sortBySeverity(issues);
+  const nowMs = options.nowMs ?? Date.now();
+  const scheduled = sortBySchedulingScore(issues, nowMs);
   const triagedIssueNumbers = new Set(triageResults.map(triage => triage.issueNumber));
   const buckets = new Map<IssueSchedulerFairnessBucket['severity'], number[]>();
   const warnings: string[] = [];
@@ -707,6 +847,7 @@ export function buildIssueSchedulerFairnessReport(
   }
 
   const scheduledSample = sampleNumbers(scheduled.map(issue => issue.number), issueNumberLimit);
+  const scheduledSampleNumbers = new Set(scheduledSample.sample);
   const warningSample = sampleStrings(warnings, warningLimit);
   const warningSummary = [
     warningCounters.unprioritized > 0
@@ -720,6 +861,9 @@ export function buildIssueSchedulerFairnessReport(
   return {
     totalIssues: issues.length,
     scheduledIssueNumbers: scheduledSample.sample,
+    effectivePriorities: scheduled
+      .filter(issue => scheduledSampleNumbers.has(issue.number))
+      .map(issue => evaluateIssueSchedulingScore(issue, nowMs)),
     ...(scheduledSample.omitted > 0
       ? {
           scheduledIssueNumbersTruncated: true as const,
@@ -940,7 +1084,7 @@ export class IssueRunner {
 
     if (issues.length === 0) return [];
 
-    const sorted = sortBySeverity(issues);
+    const sorted = sortBySchedulingScore(issues);
     logger?.info('[issues] Scheduler fairness report', buildIssueSchedulerFairnessReport(issues, triageResults), 'issues');
     const budgetTokens = budget * TOKENS_PER_DOLLAR;
     let cumulativeTokens = 0;
