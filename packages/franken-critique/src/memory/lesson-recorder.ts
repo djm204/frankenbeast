@@ -499,9 +499,14 @@ export function applyHumanFeedbackToLesson(
 }
 
 function removeStaleLessonValidation(lesson: CritiqueLesson): CritiqueLesson {
-  const { contradictionReport, testTraceability, ...lessonWithoutValidation } =
-    lesson;
+  const {
+    contradictionReport,
+    proposedLessonCritique,
+    testTraceability,
+    ...lessonWithoutValidation
+  } = lesson;
   void contradictionReport;
+  void proposedLessonCritique;
   void testTraceability;
   return lessonWithoutValidation;
 }
@@ -520,7 +525,7 @@ export function isLessonApplicable(lesson: CritiqueLesson): boolean {
 
 export function critiqueProposedLesson(
   lesson: CritiqueLesson,
-  priorLessons: readonly CritiqueLesson[] = [],
+  priorLessons?: readonly CritiqueLesson[],
   generatedAt: string = lesson.timestamp,
 ): LessonMultiAgentCritique {
   const findings: LessonCritiqueAgentFinding[] = [];
@@ -597,8 +602,9 @@ export function critiqueProposedLesson(
     });
   }
 
-  const duplicate = priorLessons.find(
+  const duplicate = priorLessons?.find(
     (prior) =>
+      prior !== lesson &&
       sameEvaluator(lesson, prior) &&
       normalizeText(prior.failureDescription) ===
         normalizeText(lesson.failureDescription),
@@ -617,7 +623,10 @@ export function critiqueProposedLesson(
   }
 
   const contradictionReport =
-    lesson.contradictionReport ?? detectLessonContradictions(lesson, priorLessons);
+    lesson.contradictionReport ??
+    (priorLessons === undefined
+      ? detectLessonContradictions(lesson)
+      : detectLessonContradictions(lesson, priorLessons));
   evidenceRefs.add(`contradiction:${contradictionReport.status}`);
   if (contradictionReport.status === 'not_checked') {
     findings.push({
@@ -639,9 +648,9 @@ export function critiqueProposedLesson(
       severity: 'critical',
       message:
         'Potential contradiction with existing lesson guidance blocks promotion until reconciled.',
-      evidenceRefs: contradictionReport.contradictions.map(
-        (contradiction) => `conflict:${contradiction.conflictingLessonId}`,
-      ),
+      evidenceRefs: contradictionReport.contradictions.map((contradiction) =>
+        addEvidenceRef(evidenceRefs, `conflict:${contradiction.conflictingLessonId}`),
+      ).flat(),
       suggestion: 'Resolve or supersede the conflicting lesson before promotion.',
     });
   }

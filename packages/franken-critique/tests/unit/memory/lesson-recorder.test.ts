@@ -1594,6 +1594,7 @@ describe('LessonRecorder', () => {
       'Require explicit human validation before promoting inferred learning signals.',
     );
     expect(corrected.contradictionReport).toBeUndefined();
+    expect(corrected.proposedLessonCritique).toBeUndefined();
     expect(corrected.testTraceability).toBeUndefined();
     expect(corrected.quarantine?.reviewItem.lessonId).toBe(
       lesson.testTraceability?.[0]?.lessonId,
@@ -3420,6 +3421,68 @@ describe('LessonRecorder', () => {
         }),
       ]),
     );
+  });
+
+  it('preserves not-checked conflict status when critique helper has no prior lesson search result', () => {
+    const lesson = createLesson({
+      testTraceability: [
+        {
+          lessonId: 'unchecked-lesson',
+          taskId: 'lesson-task',
+          evaluatorName: 'factuality',
+          failingIteration: 0,
+          resolvedIteration: 1,
+          sourceFindingMessages: ['Cache guidance lacked provenance checks'],
+          testId: 'unchecked-lesson:regression',
+          verificationCommand: 'npm run test --workspace @franken/critique',
+        },
+      ],
+    });
+
+    expect(critiqueProposedLesson(lesson)).toMatchObject({
+      verdict: 'needs-edit',
+      manualReviewRequired: true,
+      findings: expect.arrayContaining([
+        expect.objectContaining({ checklistItem: 'conflict', verdict: 'needs-edit' }),
+      ]),
+    });
+    expect(critiqueProposedLesson(lesson, [])).toMatchObject({
+      verdict: 'accepted',
+      manualReviewRequired: false,
+    });
+  });
+
+  it('does not flag the candidate itself as a duplicate prior lesson', () => {
+    const lesson = createLesson({
+      testTraceability: [
+        {
+          lessonId: 'self-safe-lesson',
+          taskId: 'lesson-task',
+          evaluatorName: 'factuality',
+          failingIteration: 0,
+          resolvedIteration: 1,
+          sourceFindingMessages: ['Cache guidance lacked provenance checks'],
+          testId: 'self-safe-lesson:regression',
+          verificationCommand: 'npm run test --workspace @franken/critique',
+        },
+      ],
+      contradictionReport: {
+        status: 'clear',
+        guidance: 'No deterministic lesson contradiction was detected among comparable prior lessons.',
+        verificationCommand: 'npm run test --workspace @franken/critique',
+        contradictions: [],
+      },
+    });
+
+    const critique = critiqueProposedLesson(lesson, [lesson]);
+
+    expect(critique.verdict).toBe('accepted');
+    expect(
+      critique.findings.some(
+        (finding) =>
+          finding.checklistItem === 'duplication' && finding.verdict === 'needs-edit',
+      ),
+    ).toBe(false);
   });
 
   it('marks high-risk or conflicting proposed lessons as needs-edit/manual-review', () => {
