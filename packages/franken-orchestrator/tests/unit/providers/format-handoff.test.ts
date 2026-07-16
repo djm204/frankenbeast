@@ -534,6 +534,68 @@ ${completeTemplate}`);
     expect(validation.valid).toBe(true);
   });
 
+  it('rejects blank table rows with label-only cells regardless of case', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate
+        .replace(
+          'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+          '| Issue | |\n| Business Goal | |\n| Boundaries | |',
+        )
+        .replace(
+          'List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.',
+          '| Test Command | |\n| Outcome | |',
+        ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+    expect(
+      validation.findings.find((finding) => finding.id === 'verification')
+        ?.status,
+    ).toBe('placeholder');
+  });
+
+  it('accepts a singular Branch heading for artifact guidance', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate
+        .replace('## Artifacts and links', '## Branch')
+        .replace(
+          'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
+          'Record branch resolve/issue-1775, PR #2331, and worktree artifact links.',
+        ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'artifacts')
+        ?.matchedHeading,
+    ).toBe('Branch');
+  });
+
+  it('does not consume an overlapping placeholder heading before a later matching requirement', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate
+        .replace(
+          '## Current state and decisions\nSummarize completed work, current phase, key decisions, and remaining work.\n\n',
+          '',
+        )
+        .replace(
+          '## Blockers and next action\nState blockers, owner, exact next action, and when the receiving worker should stop.',
+          '## Status and next steps\nNo blockers; owner PM; next action continue.',
+        ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'state')?.status,
+    ).toBe('missing');
+    expect(
+      validation.findings.find((finding) => finding.id === 'blockers')?.status,
+    ).toBe('pass');
+  });
+
   it('preserves markdown link text when checking artifact guidance', () => {
     const validation = validateAgentHandoffTemplate(
       completeTemplate.replace(

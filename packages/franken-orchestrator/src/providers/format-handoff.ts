@@ -192,6 +192,7 @@ export const AGENT_HANDOFF_TEMPLATE_REQUIREMENTS: readonly AgentHandoffTemplateR
         /\bartifacts?\b/i,
         /\blinks?\b/i,
         /\bbranches?\b/i,
+        /\bbranch\b/i,
         /\bpull requests?\b/i,
       ],
       guidance:
@@ -319,50 +320,60 @@ export function validateAgentHandoffTemplate(
 ): AgentHandoffTemplateValidation {
   const sections = extractMarkdownSections(template);
   const usedSectionIndexes = new Set<number>();
-  const findings = AGENT_HANDOFF_TEMPLATE_REQUIREMENTS.map((requirement) => {
-    const candidates = sections
-      .map((section, index) => ({ section, index }))
-      .filter(
-        ({ section, index }) =>
-          !usedSectionIndexes.has(index) &&
-          requirement.headingPatterns.some((pattern) =>
-            pattern.test(section.heading),
+  const findings = AGENT_HANDOFF_TEMPLATE_REQUIREMENTS.map(
+    (requirement, requirementIndex) => {
+      const candidates = sections
+        .map((section, index) => ({ section, index }))
+        .filter(
+          ({ section, index }) =>
+            !usedSectionIndexes.has(index) &&
+            requirement.headingPatterns.some((pattern) =>
+              pattern.test(section.heading),
+            ),
+        );
+      const usableCandidate = candidates.find(({ section }) =>
+        sectionSatisfiesRequirement(section, requirement),
+      );
+
+      if (usableCandidate) {
+        usedSectionIndexes.add(usableCandidate.index);
+        return {
+          id: requirement.id,
+          label: requirement.label,
+          status: 'pass',
+          guidance: requirement.guidance,
+          matchedHeading: usableCandidate.section.heading,
+        } satisfies AgentHandoffTemplateFinding;
+      }
+
+      const placeholderCandidate = candidates.find(
+        ({ section }) =>
+          !AGENT_HANDOFF_TEMPLATE_REQUIREMENTS.slice(requirementIndex + 1).some(
+            (futureRequirement) =>
+              futureRequirement.headingPatterns.some((pattern) =>
+                pattern.test(section.heading),
+              ) && sectionSatisfiesRequirement(section, futureRequirement),
           ),
       );
-    const usableCandidate = candidates.find(({ section }) =>
-      sectionSatisfiesRequirement(section, requirement),
-    );
+      if (placeholderCandidate) {
+        usedSectionIndexes.add(placeholderCandidate.index);
+        return {
+          id: requirement.id,
+          label: requirement.label,
+          status: 'placeholder',
+          guidance: `${requirement.guidance} The section exists but only contains placeholders or empty guidance.`,
+          matchedHeading: placeholderCandidate.section.heading,
+        } satisfies AgentHandoffTemplateFinding;
+      }
 
-    if (usableCandidate) {
-      usedSectionIndexes.add(usableCandidate.index);
       return {
         id: requirement.id,
         label: requirement.label,
-        status: 'pass',
+        status: 'missing',
         guidance: requirement.guidance,
-        matchedHeading: usableCandidate.section.heading,
       } satisfies AgentHandoffTemplateFinding;
-    }
-
-    const placeholderCandidate = candidates[0];
-    if (placeholderCandidate) {
-      usedSectionIndexes.add(placeholderCandidate.index);
-      return {
-        id: requirement.id,
-        label: requirement.label,
-        status: 'placeholder',
-        guidance: `${requirement.guidance} The section exists but only contains placeholders or empty guidance.`,
-        matchedHeading: placeholderCandidate.section.heading,
-      } satisfies AgentHandoffTemplateFinding;
-    }
-
-    return {
-      id: requirement.id,
-      label: requirement.label,
-      status: 'missing',
-      guidance: requirement.guidance,
-    } satisfies AgentHandoffTemplateFinding;
-  });
+    },
+  );
   const passed = findings.filter((finding) => finding.status === 'pass').length;
   const missingSections = findings
     .filter((finding) => finding.status !== 'pass')
@@ -636,7 +647,7 @@ function isEmptyTableRow(line: string): boolean {
     cells.length > 0 &&
     cells.every(
       (cell) =>
-        /^(?:issue|issue task|task|business goal|goal|out of scope boundaries|boundaries|status|current status|decisions|remaining work|command|commands|outcome|result|owner|next action|artifact|artifacts|link|links|lesson|lessons)$/.test(
+        /^(?:issue|issue task|task|business goal|goal|out of scope boundaries|boundaries|status|current status|decisions|remaining work|command|commands|test command|test commands|outcome|result|owner|next action|artifact|artifacts|link|links|lesson|lessons)$/i.test(
           cell,
         ) ||
         /^(?:tbd|todo|n\/?a|unknown|placeholder|fill in|to be decided)$/i.test(
