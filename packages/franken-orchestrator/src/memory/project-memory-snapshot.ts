@@ -96,17 +96,17 @@ function matchesSelector(
   minConfidence: number,
   allowedSensitivity: ReadonlySet<ProjectMemorySensitivity>,
 ): boolean {
-  const confidence = normalizeConfidence(memory.confidence ?? 1, `confidence for memory ${memory.id}`);
-  if (confidence < minConfidence) return false;
+  if (!matchesRequiredScope(memory.projects, selector.projectId)) return false;
+  if (!matchesOptionalScope(memory.repos, selector.repo)) return false;
+  if (!matchesOptionalScope(memory.taskTypes, selector.taskType)) return false;
+  if (!matchesOptionalScope(memory.roles, selector.role)) return false;
 
   const sensitivity = memory.sensitivity;
   if (sensitivity === undefined) return false;
   if (!allowedSensitivity.has(sensitivity)) return false;
 
-  if (!matchesRequiredScope(memory.projects, selector.projectId)) return false;
-  if (!matchesOptionalScope(memory.repos, selector.repo)) return false;
-  if (!matchesOptionalScope(memory.taskTypes, selector.taskType)) return false;
-  if (!matchesOptionalScope(memory.roles, selector.role)) return false;
+  const confidence = normalizeConfidence(memory.confidence ?? 1, `confidence for memory ${memory.id}`);
+  if (confidence < minConfidence) return false;
 
   return true;
 }
@@ -156,8 +156,8 @@ function renderProjectMemorySnapshotText(snapshot: Omit<ProjectMemorySnapshot, '
 
   for (const entry of snapshot.entries) {
     const provenance = [
-      `source=${entry.provenance.source}`,
-      entry.provenance.evidenceId === undefined ? undefined : `evidence=${entry.provenance.evidenceId}`,
+      `source=${quoteSnapshotMetadata(entry.provenance.source)}`,
+      entry.provenance.evidenceId === undefined ? undefined : `evidence=${quoteSnapshotMetadata(entry.provenance.evidenceId)}`,
       `age=${entry.provenance.ageDays}d`,
       `confidence=${entry.confidence.toFixed(2)}`,
       `sensitivity=${entry.sensitivity}`,
@@ -169,6 +169,10 @@ function renderProjectMemorySnapshotText(snapshot: Omit<ProjectMemorySnapshot, '
 }
 
 function quoteSnapshotMemoryText(text: string): string {
+  return JSON.stringify(text);
+}
+
+function quoteSnapshotMetadata(text: string): string {
   return JSON.stringify(text);
 }
 

@@ -50,7 +50,7 @@ Every included entry carries compact provenance metadata:
 - `ageDays`: computed age at snapshot generation;
 - `confidence` and `sensitivity`.
 
-The rendered `snapshot.text` is suitable for attaching to a PM handoff. Entry text is JSON-quoted so newlines and prompt-like content cannot break out of the bullet/provenance wrapper. Keep the structured `snapshot.entries` when a machine-readable audit trail is needed.
+The rendered `snapshot.text` is suitable for attaching to a PM handoff. Entry text and provenance string fields are JSON-quoted so newlines and prompt-like content cannot break out of the bullet/provenance wrapper. Keep the structured `snapshot.entries` when a machine-readable audit trail is needed.
 
 ## PM guidance
 
