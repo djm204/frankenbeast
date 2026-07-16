@@ -525,7 +525,10 @@ function extractMarkdownSections(template: string): MarkdownSection[] {
     const fence = /^\s*(`{3,}|~{3,})/.exec(line);
     if (fence) {
       for (const sectionIndex of openSectionIndexes) {
-        sections[sectionIndex]?.content.push(line);
+        const section = sections[sectionIndex];
+        if (section && section.level > 1) {
+          section.content.push(line);
+        }
       }
       const marker = fence[1] ?? '';
       if (activeFence === null) {
@@ -573,7 +576,9 @@ function extractMarkdownSections(template: string): MarkdownSection[] {
       continue;
     }
 
-    const heading = activeFence ? null : /^(#{1,6})\s+(.+?)\s*$/.exec(line);
+    const heading = activeFence
+      ? null
+      : /^\s{0,3}(#{1,6})\s+(.+?)\s*$/.exec(line);
     if (heading) {
       const level = heading[1]?.length ?? 1;
       while (openSectionIndexes.length > 0) {
@@ -600,7 +605,10 @@ function extractMarkdownSections(template: string): MarkdownSection[] {
     }
 
     for (const sectionIndex of openSectionIndexes) {
-      sections[sectionIndex]?.content.push(line);
+      const section = sections[sectionIndex];
+      if (section && section.level > 1) {
+        section.content.push(line);
+      }
     }
   }
 
@@ -669,9 +677,12 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
       continue;
     }
 
-    const withoutPlaceholders = line
+    const effectiveLine = isPopulatedTableHeader
+      ? populatedTableHeaderLabels(line, lines, index + 2)
+      : line;
+    const withoutPlaceholders = effectiveLine
       .replace(
-        /\b[A-Za-z0-9 /_-]+(?:\s+-\s+|:)\s*(?:<[^>]*>|\{\{[^}]*\}\}|\{[^}]*\}|\[[^\]]*\]|[-–—]+|\b(?:tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)\b)\s*(?:[;,.]|$)/gi,
+        /\b[A-Za-z0-9 /_-]+(?:\s+-\s+|:)\s*(?:<[^>]*>|\{\{[^}]*\}\}|\{[^}]*\}|\[[^\]]*\](?!\(|\[)|[-–—]+|\b(?:tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)\b)\s*(?:[;,.]|$)/gi,
         ' ',
       )
       .replace(/^```.*$/g, ' ')
@@ -711,7 +722,7 @@ function isEmptyTemplateLabel(line: string): boolean {
   );
   return (
     /^\s*(?:[-*]\s*)?[A-Za-z0-9 /_-]+:\s*$/.test(normalizedLabel) ||
-    /^(?:issue|issue task|task|business goal|goal|out of scope boundaries|boundaries|status|current status|decisions|remaining work|command|commands|test command|test commands|outcome|result|owner|next action|artifact|artifacts|link|links|lesson|lessons)$/i.test(
+    /^(?:issue(?: details)?|issue task|task|business goal|business objective|goal|objective|out of scope boundaries|boundary notes|boundaries|status|current status|decisions|remaining work|command|commands|test command|test commands|outcome|result|owner|next action|artifact|artifacts|link|links|lesson|lessons)$/i.test(
       normalizedLabelKey,
     )
   );
@@ -719,7 +730,7 @@ function isEmptyTemplateLabel(line: string): boolean {
 
 function isPlaceholderOnlyFieldLine(line: string): boolean {
   const normalized = normalizeEvidence(line.replace(/^\s*[-*]\s*/, ''));
-  return /^[A-Za-z0-9 /_-]+(?::|\s+-\s+)(?:<[^>]*>|\{\{[^}]*\}\}|\{[^}]*\}|\[[^\]]*\]|[-–—]+|\b(?:tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)\b)\s*$/i.test(
+  return /^[A-Za-z0-9 /_-]+(?::|\s+-\s+)(?:<[^>]*>|\{\{[^}]*\}\}|\{[^}]*\}|\[[^\]]*\](?!\(|\[)|[-–—]+|\b(?:tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)\b)\s*$/i.test(
     normalized,
   );
 }
@@ -750,6 +761,48 @@ function hasPopulatedTableRows(lines: readonly string[], startIndex: number): bo
     }
   }
   return false;
+}
+
+function populatedTableHeaderLabels(
+  headerLine: string,
+  lines: readonly string[],
+  startIndex: number,
+): string {
+  const headers = splitMarkdownTableCells(headerLine);
+  const populatedColumns = new Set<number>();
+  for (let index = startIndex; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+    if (!line.includes('|')) {
+      break;
+    }
+    if (isMarkdownTableSeparator(line)) {
+      continue;
+    }
+    splitMarkdownTableCells(line).forEach((cell, cellIndex) => {
+      if (cellHasPopulatedTemplateValue(cell)) {
+        populatedColumns.add(cellIndex);
+      }
+    });
+  }
+  return headers.filter((_, index) => populatedColumns.has(index)).join(' ');
+}
+
+function splitMarkdownTableCells(line: string): string[] {
+  return line
+    .replace(/^\s*\|/, '')
+    .replace(/\|\s*$/, '')
+    .split('|')
+    .map((cell) => cell.trim());
+}
+
+function cellHasPopulatedTemplateValue(cell: string): boolean {
+  const stripped = normalizeEvidence(stripPlaceholderOnlyTemplateFields(cell));
+  return (
+    stripped.length > 0 &&
+    !/^(?:[-–—]+|tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)$/i.test(
+      stripped,
+    )
+  );
 }
 
 function isEmptyTableRow(line: string): boolean {

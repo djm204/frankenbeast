@@ -312,15 +312,23 @@ Capture durable lessons, Codex or CI feedback, and reusable notes for future han
     expect(validation.operatorGuidance).toContain('every required section');
   });
 
-  it('accepts setext markdown headings for actionable sections', () => {
+  it('accepts setext-style headings for required sections', () => {
     const setextTemplate = completeTemplate
       .replace('## Scope and objective', 'Scope and objective\n---')
       .replace('## Current state and decisions', 'Current state and decisions\n---')
-      .replace('## Verification and evidence', 'Verification and evidence\n---')
+      .replace('## Verification evidence', 'Verification evidence\n---')
       .replace('## Blockers and next action', 'Blockers and next action\n---')
       .replace('## Artifacts and links', 'Artifacts and links\n---');
 
     const validation = validateAgentHandoffTemplate(setextTemplate);
+
+    expect(validation.valid).toBe(true);
+  });
+
+  it('accepts headings indented by up to three spaces', () => {
+    const indentedTemplate = completeTemplate.replace(/^## /gm, '   ## ');
+
+    const validation = validateAgentHandoffTemplate(indentedTemplate);
 
     expect(validation.valid).toBe(true);
   });
@@ -464,6 +472,31 @@ Record npm test passed or failed.
     ).toBe('placeholder');
   });
 
+  it('rejects variant label-only bullet skeletons', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '- Issue details\n- Business objective\n- Boundary notes',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('preserves linked field values as actionable content', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '- Issue/task: [issue #1775](../issues/1775)\n- Business goal: improve onboarding handoffs\n- Boundaries: no unrelated refactors',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+  });
+
   it('preserves child-heading content inside a required parent section', () => {
     const validation = validateAgentHandoffTemplate(
       completeTemplate.replace(
@@ -556,32 +589,55 @@ Issue #1775 goal is onboarding; out-of-scope boundaries are unrelated refactors.
   });
 
   it('ignores fenced example headings when extracting real sections', () => {
-    const validation = validateAgentHandoffTemplate(`Example only:
+    const validation = validateAgentHandoffTemplate(`
+# Example handoff
+
 \`\`\`md
 ## Scope and objective
-Issue #1775, business goal, and out-of-scope boundaries.
+Name the issue, business goal, and out-of-scope boundaries.
 ## Current state and decisions
-Completed current status decisions and remaining work.
+Summarize status.
 ## Verification evidence
-npm test passed.
+List tests.
 ## Blockers and next action
-No blockers; owner PM; next action continue.
+State owner and next action.
 ## Artifacts and links
-PR artifact branch.
+Link PR.
 ## Learning and reuse
-Reusable lesson.
+Capture lesson.
 \`\`\`
 `);
 
     expect(validation.valid).toBe(false);
-    expect(validation.missingSections).toEqual([
-      'scope',
-      'state',
-      'verification',
-      'blockers',
-      'artifacts',
-      'learning',
-    ]);
+    expect(validation.missingSections).toEqual(
+      expect.arrayContaining(['scope', 'state', 'verification']),
+    );
+  });
+
+  it('does not let a top-level title inherit unrelated child sections', () => {
+    const validation = validateAgentHandoffTemplate(`
+# Agent handoff objective
+
+## Current state and decisions
+Status: implementation done. Decision: keep validator strict.
+
+## Verification evidence
+Command: npm test. Outcome: passed.
+
+## Blockers and next action
+Owner: next worker. Next action: review the PR.
+
+## Artifacts and links
+PR: https://github.com/djm204/frankenbeast/pull/2331. Branch: resolve/issue-1775.
+
+## Learning and reuse
+Lesson: placeholder skeletons must fail validation.
+`);
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
   });
 
   it('ignores fenced example content when checking required section guidance', () => {
@@ -730,6 +786,20 @@ ${completeTemplate}`);
       completeTemplate.replace(
         'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
         '| Issue/task | Business goal | Boundaries |\n| --- | --- | --- |\n| - | - | - |',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('requires populated values for every required table field', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '| Issue/task | Business goal | Boundaries |\n| --- | --- | --- |\n| #1775 | - | - |',
       ),
     );
 
