@@ -2,6 +2,7 @@
 
 ## 2026-07-16 — Queue priority aging
 - For issue scheduler aging, score only eligible work with age boosts; blocked/HITL work should carry a large safety penalty and zero age boost so stale unsafe cards never bypass human/dependency gates. Include priority rank, effective rank, age, blocker status, risk lane, freshness, and an explanation string in liveness/fairness output.
+- For issue-runner queue-depth/backpressure, count only startable eligible issues; blocked/HITL cards should not inflate queue depth. Defer gated issues before any plan decomposition when no plan chunks already exist, but preserve zero-token completion for issue-specific checkpoints that already contain both impl and harden done entries.
 
 ## 2026-07-15 — Webhook DNS pinning review fixes
 - For outbound webhook SSRF hardening, validate object-form allowlist origins for credentials too; URL normalization can otherwise hide deceptive `userinfo@host` entries.
