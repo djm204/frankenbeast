@@ -145,6 +145,12 @@ export class BeastLogStore {
     }
 
     const currentBytes = await fileSize(filePath);
+    if (currentBytes > this.maxLogFileBytes) {
+      await this.removeRotationsAboveRetention(filePath);
+      await this.truncateActiveFile(filePath);
+      return;
+    }
+
     if (currentBytes === 0 || currentBytes + nextWriteBytes <= this.maxLogFileBytes) {
       await this.removeRotationsAboveRetention(filePath);
       return;

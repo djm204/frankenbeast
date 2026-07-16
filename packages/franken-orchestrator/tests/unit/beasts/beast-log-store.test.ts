@@ -181,6 +181,21 @@ describe('BeastLogStore', () => {
     });
   });
 
+  it('truncates an already oversized active log instead of rotating it into retained evidence', async () => {
+    await withTempDir(async (dir) => {
+      const activePath = join(dir, 'run-oversized-existing', 'attempt-1.log');
+      await mkdir(join(dir, 'run-oversized-existing'), { recursive: true });
+      await writeFile(activePath, 'legacy-unbounded-log\n'.repeat(50));
+
+      const logs = new BeastLogStore(dir, { maxLogFileBytes: 160, maxRotatedLogFiles: 2 });
+      await logs.append('run-oversized-existing', 'attempt-1', 'stdout', 'new-small-record', '2026-03-11T00:00:01.000Z');
+
+      expect(existsSync(`${activePath}.1`)).toBe(false);
+      expect(await readFile(activePath, 'utf-8')).toContain('new-small-record');
+      expect((await stat(activePath)).size).toBeLessThanOrEqual(160);
+    });
+  });
+
   it('prunes stale rotations even when the active log stays below the size cap', async () => {
     await withTempDir(async (dir) => {
       const activePath = join(dir, 'run-prune-without-rotation', 'attempt-1.log');
@@ -202,7 +217,7 @@ describe('BeastLogStore', () => {
     await withTempDir(async (dir) => {
       const activePath = join(dir, 'run-capped-retention', 'attempt-1.log');
       await mkdir(join(dir, 'run-capped-retention'), { recursive: true });
-      await writeFile(activePath, `${JSON.stringify({ stream: 'stdout', message: 'active'.repeat(20), createdAt: '2026-03-11T00:00:00.000Z' })}\n`);
+      await writeFile(activePath, `${JSON.stringify({ stream: 'stdout', message: 'active'.repeat(8), createdAt: '2026-03-11T00:00:00.000Z' })}\n`);
       await writeFile(`${activePath}.99`, 'old-99\n');
       await writeFile(`${activePath}.100`, 'old-100\n');
       await writeFile(`${activePath}.101`, 'old-101\n');
