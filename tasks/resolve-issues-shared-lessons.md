@@ -16,6 +16,8 @@
 
 ## 2026-07-15 — Memory TTL policy
 - For temporary operational facts, keep TTL metadata on working-memory values (`expiresAt`) and enforce expiration on all read/list/hydration paths; also filter expired runtime rows before flush so stale operational state cannot be re-persisted.
+- Memory-review conflict checks can read persisted rows even when runtime hydration is disabled; parse/delete expired persisted TTL rows before returning `present`, otherwise stale temporary facts block normal approval as false conflicts.
+- For memory-review conflict resolvers, gate normal approval as well as optional preflight APIs; conflict checks must distinguish dirty runtime changes, pending local deletes, unhydrated persisted values, stale provenance, and concurrent DB updates before allowing replacement.
 - When verifying workspace package typechecks in a fresh worktree, build dependency packages (or run root `npm run build`) before package-local `tsc --noEmit`; otherwise unresolved workspace package declarations can look like feature regressions.
 
 ## 2026-07-15 — Beast process cleanup review fixes
