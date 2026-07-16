@@ -88,6 +88,8 @@ npm test
 
 Root scripts currently include `build`, `typecheck`, `test`, `test:ci`, `test:integration`, `test:eval`, `test:e2e`, `test:live:bench`, `test:root`, `test:root:watch`, and `test:coverage`. Older `build:all` / `test:all` commands are not root scripts. Use `test:ci` for the same root-plus-package test target that CI runs locally; it first builds the shared `@franken/types` workspace so fresh checkouts can resolve workspace package exports, and it intentionally excludes Docker smoke, security, dependency, lint, live benchmark, and the broader orchestrator E2E gate that remains a separate CI step. CI runs a deterministic orchestrator E2E smoke subset through the dedicated `ci:test:e2e` retry-wrapped step so the decision is visible outside the aggregate `test:ci` command. `test:integration` runs deterministic workspace integration suites through Turborepo, while `test:eval` and `test:live:bench` are explicit opt-ins outside default `npm test`; `test:live:bench` delegates to the gated `@franken/live-bench` `test:live` task, which sets `FBEAST_LIVE_BENCH_E2E=1`.
 
+When a worker or contributor needs a narrower verification command, use the [test command decision tree](../onboarding/test-command-decision-tree.md) before broadening to package-level or CI-equivalent gates.
+
 ## 5. Try the orchestrator CLI
 
 The repository root is private and does not publish a root `frankenbeast` binary

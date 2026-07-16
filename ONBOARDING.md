@@ -105,6 +105,8 @@ Read each badge as `[onboarding:<current>/<total>:<stage>] <state> - <detail>`. 
   npm test
   ```
 
+  If you are unsure which narrower command fits your change, follow the [test command decision tree](docs/onboarding/test-command-decision-tree.md) before broadening to package or CI-level gates.
+
 - [ ] Optionally link the local CLIs for iterative development:
 
   ```bash
