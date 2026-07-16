@@ -320,48 +320,47 @@ export function validateAgentHandoffTemplate(
   const sections = extractMarkdownSections(template);
   const usedSectionIndexes = new Set<number>();
   const findings = AGENT_HANDOFF_TEMPLATE_REQUIREMENTS.map((requirement) => {
-    const sectionIndex = sections.findIndex(
-      (candidate, candidateIndex) =>
-        !usedSectionIndexes.has(candidateIndex) &&
-        requirement.headingPatterns.some((pattern) =>
-          pattern.test(candidate.heading),
-        ),
+    const candidates = sections
+      .map((section, index) => ({ section, index }))
+      .filter(
+        ({ section, index }) =>
+          !usedSectionIndexes.has(index) &&
+          requirement.headingPatterns.some((pattern) =>
+            pattern.test(section.heading),
+          ),
+      );
+    const usableCandidate = candidates.find(({ section }) =>
+      sectionSatisfiesRequirement(section, requirement),
     );
-    const section = sectionIndex >= 0 ? sections[sectionIndex] : undefined;
-    if (!section) {
+
+    if (usableCandidate) {
+      usedSectionIndexes.add(usableCandidate.index);
       return {
         id: requirement.id,
         label: requirement.label,
-        status: 'missing',
+        status: 'pass',
         guidance: requirement.guidance,
+        matchedHeading: usableCandidate.section.heading,
       } satisfies AgentHandoffTemplateFinding;
     }
-    usedSectionIndexes.add(sectionIndex);
 
-    const searchableContent = normalizeEvidence(
-      stripPlaceholderOnlyTemplateFields(section.content),
-    );
-    const hasRequiredContent = requirement.requiredContentPatterns.every(
-      (pattern) => pattern.test(searchableContent),
-    );
-    if (
-      !hasSubstantiveTemplateGuidance(section.content) ||
-      !hasRequiredContent
-    ) {
+    const placeholderCandidate = candidates[0];
+    if (placeholderCandidate) {
+      usedSectionIndexes.add(placeholderCandidate.index);
       return {
         id: requirement.id,
         label: requirement.label,
         status: 'placeholder',
         guidance: `${requirement.guidance} The section exists but only contains placeholders or empty guidance.`,
-        matchedHeading: section.heading,
+        matchedHeading: placeholderCandidate.section.heading,
       } satisfies AgentHandoffTemplateFinding;
     }
+
     return {
       id: requirement.id,
       label: requirement.label,
-      status: 'pass',
+      status: 'missing',
       guidance: requirement.guidance,
-      matchedHeading: section.heading,
     } satisfies AgentHandoffTemplateFinding;
   });
   const passed = findings.filter((finding) => finding.status === 'pass').length;
@@ -486,13 +485,37 @@ interface MarkdownSection {
   readonly content: string;
 }
 
+function sectionSatisfiesRequirement(
+  section: MarkdownSection,
+  requirement: AgentHandoffTemplateRequirement,
+): boolean {
+  const searchableContent = normalizeEvidence(
+    stripPlaceholderOnlyTemplateFields(section.content),
+  );
+  return (
+    hasSubstantiveTemplateGuidance(section.content) &&
+    requirement.requiredContentPatterns.every((pattern) =>
+      pattern.test(searchableContent),
+    )
+  );
+}
+
 function extractMarkdownSections(template: string): MarkdownSection[] {
   const sections: Array<{ heading: string; level: number; content: string[] }> =
     [];
   const openSectionIndexes: number[] = [];
+  let inFence = false;
 
   for (const line of template.split(/\r?\n/)) {
-    const heading = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
+    if (/^\s*```/.test(line)) {
+      for (const sectionIndex of openSectionIndexes) {
+        sections[sectionIndex]?.content.push(line);
+      }
+      inFence = !inFence;
+      continue;
+    }
+
+    const heading = inFence ? null : /^(#{1,6})\s+(.+?)\s*$/.exec(line);
     if (heading) {
       const level = heading[1]?.length ?? 1;
       while (openSectionIndexes.length > 0) {
@@ -502,9 +525,6 @@ function extractMarkdownSections(template: string): MarkdownSection[] {
           break;
         }
         openSectionIndexes.pop();
-      }
-      for (const sectionIndex of openSectionIndexes) {
-        sections[sectionIndex]?.content.push(line);
       }
       const section = {
         heading: normalizeEvidence(heading[2] ?? ''),
@@ -539,26 +559,68 @@ function hasSubstantiveTemplateGuidance(content: string): boolean {
 }
 
 function stripPlaceholderOnlyTemplateFields(content: string): string {
-  return content
-    .split(/\r?\n/)
-    .map((line) => {
-      const withoutPlaceholders = line
-        .replace(/^```.*$/g, ' ')
-        .replace(/`([^`]*)`/g, '$1')
-        .replace(/<[^>]*>/g, ' ')
-        .replace(/\[[^\]]*\]/g, ' ')
-        .replace(/\{\{[^}]*\}\}/g, ' ')
-        .replace(/[{}]/g, ' ')
-        .replace(
-          /\b(?:tbd|todo|n\/?a|unknown|placeholder|fill in|to be decided)\b/gi,
-          ' ',
-        )
-        .replace(/[_.-]{2,}/g, ' ');
-      return /^\s*(?:[-*]\s*)?[A-Za-z0-9 /_-]+:\s*$/.test(withoutPlaceholders)
-        ? ''
-        : withoutPlaceholders;
-    })
-    .join('\n');
+  const lines = content.split(/\r?\n/);
+  const stripped: string[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+    const nextLine = lines[index + 1] ?? '';
+    if (isMarkdownTableHeader(line, nextLine)) {
+      index += 1;
+      continue;
+    }
+    if (isMarkdownTableSeparator(line)) {
+      continue;
+    }
+
+    const withoutPlaceholders = line
+      .replace(/^```.*$/g, ' ')
+      .replace(/\[([^\]]+)\]\(([^)]*)\)/g, '$1 $2')
+      .replace(/`([^`]*)`/g, '$1')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\{\{[^}]*\}\}/g, ' ')
+      .replace(/[{}]/g, ' ')
+      .replace(
+        /\b(?:tbd|todo|n\/?a|unknown|placeholder|fill in|to be decided)\b/gi,
+        ' ',
+      )
+      .replace(/[_.-]{2,}/g, ' ');
+    if (
+      isEmptyTemplateLabel(withoutPlaceholders) ||
+      isEmptyTableRow(withoutPlaceholders)
+    ) {
+      continue;
+    }
+    stripped.push(withoutPlaceholders);
+  }
+
+  return stripped.join('\n');
+}
+
+function isEmptyTemplateLabel(line: string): boolean {
+  return /^\s*(?:[-*]\s*)?[A-Za-z0-9 /_-]+:\s*$/.test(line);
+}
+
+function isMarkdownTableHeader(line: string, nextLine: string): boolean {
+  return line.includes('|') && isMarkdownTableSeparator(nextLine);
+}
+
+function isMarkdownTableSeparator(line: string): boolean {
+  return /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+}
+
+function isEmptyTableRow(line: string): boolean {
+  if (!line.includes('|')) {
+    return false;
+  }
+  const cells = line
+    .split('|')
+    .map((cell) => normalizeEvidence(cell))
+    .filter((cell) => cell.length > 0);
+  return (
+    cells.length > 0 &&
+    cells.every((cell) => /^[a-z0-9 /_-]{1,32}$/i.test(cell))
+  );
 }
 
 function formatWorkingEvidence(

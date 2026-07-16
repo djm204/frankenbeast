@@ -415,6 +415,87 @@ Issue #1775 goal is onboarding; out-of-scope boundaries are unrelated refactors.
       validation.findings.find((finding) => finding.id === 'scope')?.status,
     ).toBe('placeholder');
   });
+
+  it('does not count empty child headings as guidance', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '### Issue\n### Business goal\n### Out-of-scope boundaries',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('ignores fenced example headings when extracting real sections', () => {
+    const validation = validateAgentHandoffTemplate(`Example only:
+\`\`\`md
+## Scope and objective
+Issue #1775, business goal, and out-of-scope boundaries.
+## Current state and decisions
+Completed current status decisions and remaining work.
+## Verification evidence
+npm test passed.
+## Blockers and next action
+No blockers; owner PM; next action continue.
+## Artifacts and links
+PR artifact branch.
+## Learning and reuse
+Reusable lesson.
+\`\`\`
+`);
+
+    expect(validation.valid).toBe(false);
+    expect(validation.missingSections).toEqual([
+      'scope',
+      'state',
+      'verification',
+      'blockers',
+      'artifacts',
+      'learning',
+    ]);
+  });
+
+  it('strips empty table skeletons before checking required content', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '| Issue | Business goal | Out-of-scope boundaries |\n| --- | --- | --- |',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('prefers later usable sections over earlier matching placeholders', () => {
+    const validation = validateAgentHandoffTemplate(`## Goal
+<TBD>
+
+${completeTemplate}`);
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')
+        ?.matchedHeading,
+    ).toBe('Scope and objective');
+  });
+
+  it('preserves markdown link text when checking artifact guidance', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Record branch, PR, docs, telemetry, and other inspectable artifacts or links.',
+        'Link the [PR](../pull/123) and [runbook](../runbook) for inspectable artifacts.',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+  });
 });
 
 describe('truncateSnapshot', () => {
