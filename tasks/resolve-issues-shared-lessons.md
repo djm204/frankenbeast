@@ -1,6 +1,7 @@
 # Resolve Issues Shared Lessons
 
 ## 2026-07-16 — Memory attribution scope and MCP inventory review fixes
+- For hook/governor memory audit closeout, treat `__fbeastHookSource` as reserved provenance on both pre-tool and observer paths: public observer logs must reject forged hook markers, hook JSON wrapping must write trusted provenance after spreading user context, execute_tool audit reports should infer nested memory tools from `args.tool`, and redaction helpers must merge trusted provenance back into sanitized memory export/review-decision contexts.
 - MCP memory tooling: adding a new registry tool must update package README combined-server tool counts and `tool-registry.test.ts` aggregate/search count expectations, not only server-specific tests, or full `@franken/mcp-suite` CI fails despite targeted memory tests passing.
 - Memory attribution privacy: source-attribution viewers must honor the same `readScope`/`agentId` controls as memory query/frontload and translate internal scoped working keys back to logical keys before returning results; governor redaction for proxied attribution calls should match the narrow attribution-argument shape so ordinary memory store/proposal calls are not over-redacted.
 
