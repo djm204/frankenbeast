@@ -278,19 +278,20 @@ function contextLooksLikeMemorySourceAttributionArgs(context: string): boolean {
     const parsed = JSON.parse(context) as unknown;
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
     const record = parsed as Record<string, unknown>;
-    return Object.keys(record).length > 0
-      && Object.keys(record).every(key => [
+    const keys = Object.keys(record);
+    const hasExplicitAttributionMarker = Object.prototype.hasOwnProperty.call(record, 'source')
+      || Object.prototype.hasOwnProperty.call(record, 'readScope')
+      || Object.prototype.hasOwnProperty.call(record, 'targetStore');
+    return keys.length > 0
+      && hasExplicitAttributionMarker
+      && keys.every(key => [
         'key',
         'source',
         'limit',
         'readScope',
         'agentId',
         'targetStore',
-      ].includes(key))
-      && (Object.prototype.hasOwnProperty.call(record, 'key')
-        || Object.prototype.hasOwnProperty.call(record, 'source')
-        || Object.prototype.hasOwnProperty.call(record, 'readScope')
-        || Object.prototype.hasOwnProperty.call(record, 'agentId'));
+      ].includes(key));
   } catch {
     return false;
   }
