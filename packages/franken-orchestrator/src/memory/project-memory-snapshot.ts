@@ -99,10 +99,11 @@ function matchesSelector(
   const confidence = normalizeConfidence(memory.confidence ?? 1, `confidence for memory ${memory.id}`);
   if (confidence < minConfidence) return false;
 
-  const sensitivity = memory.sensitivity ?? 'internal';
+  const sensitivity = memory.sensitivity;
+  if (sensitivity === undefined) return false;
   if (!allowedSensitivity.has(sensitivity)) return false;
 
-  if (!matchesOptionalScope(memory.projects, selector.projectId)) return false;
+  if (!matchesRequiredScope(memory.projects, selector.projectId)) return false;
   if (!matchesOptionalScope(memory.repos, selector.repo)) return false;
   if (!matchesOptionalScope(memory.taskTypes, selector.taskType)) return false;
   if (!matchesOptionalScope(memory.roles, selector.role)) return false;
@@ -115,6 +116,10 @@ function matchesOptionalScope(values: readonly string[] | undefined, selectorVal
   return values.includes(selectorValue);
 }
 
+function matchesRequiredScope(values: readonly string[] | undefined, selectorValue: string): boolean {
+  return values !== undefined && values.includes(selectorValue);
+}
+
 function toSnapshotEntry(memory: ProjectMemoryRecord, nowMs: number): ProjectMemorySnapshotEntry {
   const observedAt = normalizeDate(memory.provenance.observedAt, `observedAt for memory ${memory.id}`).toISOString();
   const observedMs = Date.parse(observedAt);
@@ -122,7 +127,7 @@ function toSnapshotEntry(memory: ProjectMemoryRecord, nowMs: number): ProjectMem
     id: memory.id,
     text: memory.text,
     confidence: normalizeConfidence(memory.confidence ?? 1, `confidence for memory ${memory.id}`),
-    sensitivity: memory.sensitivity ?? 'internal',
+    sensitivity: memory.sensitivity ?? 'sensitive',
     provenance: {
       ...memory.provenance,
       observedAt,
@@ -157,10 +162,14 @@ function renderProjectMemorySnapshotText(snapshot: Omit<ProjectMemorySnapshot, '
       `confidence=${entry.confidence.toFixed(2)}`,
       `sensitivity=${entry.sensitivity}`,
     ].filter((part): part is string => part !== undefined).join('; ');
-    lines.push(`- ${entry.text} [${provenance}]`);
+    lines.push(`- ${quoteSnapshotMemoryText(entry.text)} [${provenance}]`);
   }
 
   return lines.join('\n');
+}
+
+function quoteSnapshotMemoryText(text: string): string {
+  return JSON.stringify(text);
 }
 
 function normalizeDate(value: string | Date, fieldName: string): Date {

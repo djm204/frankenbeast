@@ -33,12 +33,12 @@ const snapshot = buildProjectMemorySnapshot({
 
 Filtering dimensions:
 
-- `projectId`: required project scope.
+- `projectId`: required project scope; records must explicitly include the project id to fail closed on unscoped profile memories.
 - `repo`: optional repository scope, for example `djm204/frankenbeast`.
 - `taskType`: optional task family such as `memory`, `web`, `security`, or `docs`.
 - `role`: optional handoff audience such as `worker`, `pm`, or `reviewer`.
 - `minConfidence`: excludes low-confidence recollections.
-- `allowedSensitivity`: defaults to `public` and `internal`; sensitive and secret records must be explicitly opted in.
+- `allowedSensitivity`: defaults to `public` and `internal`; sensitive and secret records must be explicitly opted in. Records with no sensitivity label are excluded.
 
 ## Auditing and regeneration
 
@@ -50,7 +50,7 @@ Every included entry carries compact provenance metadata:
 - `ageDays`: computed age at snapshot generation;
 - `confidence` and `sensitivity`.
 
-The rendered `snapshot.text` is suitable for attaching to a PM handoff. Keep the structured `snapshot.entries` when a machine-readable audit trail is needed.
+The rendered `snapshot.text` is suitable for attaching to a PM handoff. Entry text is JSON-quoted so newlines and prompt-like content cannot break out of the bullet/provenance wrapper. Keep the structured `snapshot.entries` when a machine-readable audit trail is needed.
 
 ## PM guidance
 
