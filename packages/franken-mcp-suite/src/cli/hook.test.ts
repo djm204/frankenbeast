@@ -83,11 +83,10 @@ describe('runHook', () => {
       '{"ok":true,"content":[{"type":"text","text":"safe"}]}',
     ], deps);
 
-    expect(log).toHaveBeenCalledWith(expect.objectContaining({
-      event: 'tool_call',
-      sessionId: 'session-1',
-    }));
-    expect(JSON.parse(log.mock.calls[0]![0].metadata)).toEqual({
+    const firstLog = log.mock.calls[0]?.[0] as { event: string; metadata: string; sessionId: string };
+    expect(firstLog.event).toBe('tool_call');
+    expect(firstLog.sessionId).toBe('session-1');
+    expect(JSON.parse(firstLog.metadata)).toEqual({
       __fbeastHookSource: 'fbeast-hook',
       toolName: 'fbeast_memory_query',
       args: {

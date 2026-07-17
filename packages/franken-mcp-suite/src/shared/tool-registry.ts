@@ -50,6 +50,12 @@ function parseJsonObject(value: string): Record<string, unknown> | undefined {
   }
 }
 
+function hasDuplicateJsonKey(value: string, key: string): boolean {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const matches = value.match(new RegExp(`"${escaped}"\\s*:`, 'g'));
+  return (matches?.length ?? 0) > 1;
+}
+
 function usesReservedObserverProvenance(metadata: string): boolean {
   const parsed = parseJsonObject(metadata);
   return parsed?.['source'] === RESERVED_AUDIT_SOURCE
@@ -58,7 +64,9 @@ function usesReservedObserverProvenance(metadata: string): boolean {
 
 function usesReservedGovernorProvenance(context: string): boolean {
   const parsed = parseJsonObject(context);
-  return parsed?.[RESERVED_GOVERNANCE_SOURCE_KEY] === RESERVED_AUDIT_SOURCE
+  return hasDuplicateJsonKey(context, RESERVED_GOVERNANCE_SOURCE_KEY)
+    || hasDuplicateJsonKey(context, RESERVED_HOOK_SOURCE_KEY)
+    || parsed?.[RESERVED_GOVERNANCE_SOURCE_KEY] === RESERVED_AUDIT_SOURCE
     || parsed?.[RESERVED_HOOK_SOURCE_KEY] === RESERVED_HOOK_SOURCE;
 }
 
