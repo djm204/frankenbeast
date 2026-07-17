@@ -30,7 +30,7 @@
     "local:link": "npm run build && npm link --workspace=@franken/mcp-suite --workspace=@franken/orchestrator",
     "local:seed": "tsx scripts/seed.ts",
     "local:verify-cli": "fbeast --help && fbeast mcp --help && frankenbeast --help",
-    "local:verify-setup": "node scripts/verify-setup.mjs",
+    "local:verify-setup": "node scripts/verify-setup.mjs --require-services",
     "setup:healthcheck": "node scripts/verify-setup.mjs",
     "new-worker:preflight": "node scripts/new-worker-preflight.mjs",
     "profile:capability-self-test": "node scripts/profile-capability-self-test.mjs",

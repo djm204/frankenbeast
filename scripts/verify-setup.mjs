@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Usage: npm run local:verify-setup
-// Usage: node scripts/verify-setup.mjs [--dry-run] [--env-file <path>] [--json]
+// Usage: node scripts/verify-setup.mjs [--dry-run] [--env-file <path>] [--json] [--require-services]
 import { execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { connect } from 'node:net';
@@ -26,7 +26,7 @@ const COMMON_LOCAL_PORTS = [
 ];
 const results = [];
 function parseOptions(argv) {
-    const options = { dryRun: false, envFile: '.env', json: false };
+    const options = { dryRun: false, envFile: '.env', json: false, requireServices: false };
     for (let i = 0; i < argv.length; i += 1) {
         const arg = argv[i];
         if (arg === '--dry-run') {
@@ -35,6 +35,10 @@ function parseOptions(argv) {
         }
         if (arg === '--json') {
             options.json = true;
+            continue;
+        }
+        if (arg === '--require-services') {
+            options.requireServices = true;
             continue;
         }
         if (arg === '--env-file') {
@@ -55,7 +59,7 @@ function parseOptions(argv) {
             continue;
         }
         if (arg === '-h' || arg === '--help') {
-            printLine('Usage: npx tsx scripts/verify-setup.ts [--dry-run] [--env-file <path>] [--json]');
+            printLine('Usage: node scripts/verify-setup.mjs [--dry-run] [--env-file <path>] [--json] [--require-services]');
             process.exit(0);
         }
         throw new Error(`Unknown argument: ${arg}`);
@@ -182,13 +186,26 @@ function checkRequiredBootstrapEnv(path, parsed) {
     });
     check('required-bootstrap-env-vars', 'Required bootstrap env vars', missing.length === 0, missing.length === 0 ? `Found in ${path} or process.env` : `Missing: ${missing.join(', ')}`, `Copy .env.example to ${path} and fill the missing FRANKEN_* values before bootstrapping.`);
 }
-async function checkHttp(name, url) {
+async function checkHttp(name, url, required = false) {
+    const id = `http-${name.toLowerCase().replace(/[^a-z0-9]+/gu, '-')}`;
+    const optionalAction = 'If this optional service is required for your task, start it with docker compose up -d and re-run npm run local:verify-setup.';
     try {
         const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
-        check(`http-${name.toLowerCase().replace(/[^a-z0-9]+/gu, '-')}`, name, res.ok, `${res.status} ${res.statusText}`, 'Start optional services with docker compose up -d, or run npm run bootstrap -- --with-docker before retrying.');
+        if (res.ok || required) {
+            check(id, name, res.ok, `${res.status} ${res.statusText}`, 'Start optional services with docker compose up -d, or run npm run bootstrap -- --with-docker before retrying.', required);
+        }
+        else {
+            warn(id, name, `${res.status} ${res.statusText}`, optionalAction);
+        }
     }
     catch (error) {
-        check(`http-${name.toLowerCase().replace(/[^a-z0-9]+/gu, '-')}`, name, false, error instanceof Error ? error.message : String(error), 'Start optional services with docker compose up -d, verify the service port is reachable, then retry.');
+        const detail = error instanceof Error ? error.message : String(error);
+        if (required) {
+            check(id, name, false, detail, 'Start optional services with docker compose up -d, verify the service port is reachable, then retry.', true);
+        }
+        else {
+            warn(id, name, detail, optionalAction);
+        }
     }
 }
 function probePort(port, timeoutMs = 500) {
@@ -262,11 +279,11 @@ async function main() {
     else {
         // ChromaDB
         const chromaUrl = process.env['CHROMA_URL'] ?? envFile.get('CHROMA_URL') ?? 'http://localhost:8000';
-        await checkHttp('ChromaDB', `${chromaUrl}/api/v2/heartbeat`);
+        await checkHttp('ChromaDB', `${chromaUrl}/api/v2/heartbeat`, options.requireServices);
         // Grafana
-        await checkHttp('Grafana', 'http://localhost:3000/api/health');
+        await checkHttp('Grafana', 'http://localhost:3000/api/health', options.requireServices);
         // Tempo
-        await checkHttp('Tempo', 'http://localhost:3200/ready');
+        await checkHttp('Tempo', 'http://localhost:3200/ready', options.requireServices);
     }
     const failedRequired = results.filter((result) => result.status === 'fail' && result.required);
     const report = {

@@ -642,7 +642,7 @@ npm run local:verify-setup
 
 `CHROMA_URL` points Frankenbeast's local setup scripts at the ChromaDB HTTP API.
 Both `npm run local:seed` (`scripts/seed.ts`) and `npm run local:verify-setup`
-(`scripts/verify-setup.ts`) read it from the environment or the copied `.env`
+(`scripts/verify-setup.mjs`) read it from the environment or the copied `.env`
 file, falling back to `http://localhost:8000` when it is unset. The default
 matches the root `docker-compose.yml`, which publishes ChromaDB on port 8000
 for local development.
@@ -784,7 +784,7 @@ Required HITL approvals fail closed when a run has no interactive TTY. In truste
 | `GOOGLE_API_KEY` | MOD-01 | Runtime only | Gemini adapter API key (Google AI Studio name) |
 | `GEMINI_API_KEY` | MOD-01 | Runtime only | Gemini adapter API key (alternative name) |
 | `OLLAMA_BASE_URL` | Provider registry | Not consumed by the current provider schema; legacy/future Ollama-compatible builds only | Ollama daemon base URL, usually `http://localhost:11434`; set a different HTTP(S) endpoint for remote or non-default daemons only in builds that actually support an Ollama provider. It is intentionally absent from `.env.example` because the default local setup, current provider schema, and current `fbeast mcp beast` presets do not consume it. |
-| `CHROMA_URL` | MOD-03 | If using semantic memory | ChromaDB base URL used by `scripts/seed.ts` and `scripts/verify-setup.ts` (default: `http://localhost:8000`) |
+| `CHROMA_URL` | MOD-03 | If using semantic memory | ChromaDB base URL used by `scripts/seed.ts` and `scripts/verify-setup.mjs` (default: `http://localhost:8000`) |
 | `SLACK_WEBHOOK_URL` | MOD-07 | If using Slack approvals | Slack webhook for HITL notifications |
 | `FRANKENBEAST_MODULE_MEMORY` | MOD-03 | Optional | Memory module config fallback and Beast child-env toggle. Only the literal value `false` records it as disabled when the `memory` config key is unset; current local CLI wiring still constructs the real memory adapter. |
 | `FRANKENBEAST_MODULE_PLANNER` | MOD-04 | Optional | Planner module config fallback and Beast child-env toggle. Only literal `false` records it as disabled when the `planner` config key is unset; current local CLI wiring still uses the graph-builder path. |
@@ -1003,7 +1003,7 @@ frankenbeast/
 │   ├── guides/                  # Quickstart, run/deploy, provider, agent, verification, and issue-workflow guides
 │   └── plans/                   # Design docs and implementation plans
 ├── tests/                       # Root-level integration tests
-├── scripts/                     # seed.ts, verify-setup.ts
+├── scripts/                     # seed.ts, verify-setup.mjs
 ├── packages/
 │   ├── franken-brain/           # MOD-03: Memory Systems
 │   ├── franken-planner/         # MOD-04: Planning & Decomposition

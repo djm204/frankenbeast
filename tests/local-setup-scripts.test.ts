@@ -126,9 +126,9 @@ describe('local setup scripts', () => {
     expect(read('README.md')).toContain('fixed compose defaults for Grafana (http://localhost:3000/api/health)');
     expect(read('README.md')).toContain('Tempo readiness (http://localhost:3200/ready)');
     expect(read('README.md')).toContain('.env.example intentionally does not define a TEMPO_ENDPOINT override');
-    expect(source).toContain("await checkHttp('ChromaDB', `${chromaUrl}/api/v2/heartbeat`)");
-    expect(source).toContain("await checkHttp('Grafana', 'http://localhost:3000/api/health')");
-    expect(source).toContain("await checkHttp('Tempo', 'http://localhost:3200/ready')");
+    expect(source).toContain("await checkHttp('ChromaDB', `${chromaUrl}/api/v2/heartbeat`, options.requireServices)");
+    expect(source).toContain("await checkHttp('Grafana', 'http://localhost:3000/api/health', options.requireServices)");
+    expect(source).toContain("await checkHttp('Tempo', 'http://localhost:3200/ready', options.requireServices)");
     expect(source).toContain('Some checks failed: ${failedChecks}');
     expect(source).toContain('for ChromaDB, Grafana, and Tempo');
     expect(source).not.toMatch(/localhost:9090|Firewall server/u);
@@ -142,6 +142,7 @@ describe('local setup scripts', () => {
     expect(source).toContain('--dry-run');
     expect(source).toContain('--env-file');
     expect(source).toContain('--json');
+    expect(source).toContain('--require-services');
     expect(source).toContain('Required bootstrap env vars');
     expect(source).toContain('if (options.dryRun)');
     expect(source).toContain("envFile.get('CHROMA_URL')");
@@ -210,6 +211,52 @@ describe('local setup scripts', () => {
     }
   });
 
+  it('setup healthcheck warns instead of failing when optional services are down', () => {
+    const fixture = mkdtempSync(join(tmpdir(), 'frankenbeast-healthcheck-'));
+    const root = join(fixture, 'repo');
+    const bin = join(fixture, 'bin');
+    mkdirSync(root, { recursive: true });
+    mkdirSync(join(root, 'node_modules'), { recursive: true });
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(root, 'package-lock.json'), '{}');
+    writeFileSync(join(root, 'frankenbeast.config.example.json'), '{}');
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'frankenbeast', packageManager: 'npm@11.5.1' }));
+    writeFileSync(join(root, '.env.example'), [
+      'CHROMA_URL=http://127.0.0.1:9',
+      'FRANKEN_MAX_TOTAL_TOKENS=1',
+      'FRANKEN_MAX_DURATION_MS=1',
+      'FRANKEN_MAX_CRITIQUE_ITERATIONS=1',
+      'FRANKEN_ENABLE_HEARTBEAT=false',
+      'FRANKEN_ENABLE_TRACING=false',
+      'FRANKEN_ENABLE_REFLECTION=false',
+      'FRANKEN_MIN_CRITIQUE_SCORE=0',
+      '',
+    ].join('\n'));
+    writeExecutable(join(bin, 'npm'), "printf '11.5.1\\n'\n");
+    writeExecutable(join(bin, 'gh'), "if [ \"$1 $2 $3\" = '--version  ' ]; then printf 'gh version 2.0.0\\n'; exit 0; fi\nif [ \"$1 $2 $3 $4\" = 'auth status --hostname github.com' ]; then printf 'ok\\n'; exit 0; fi\nexit 1\n");
+    writeExecutable(join(bin, 'git'), `case \"$1\" in\n  rev-parse) printf '%s\\n' '${root}' ;;\n  status) exit 0 ;;\n  *) exit 0 ;;\nesac\n`);
+
+    try {
+      const result = spawnSync(process.execPath, [join(ROOT, 'scripts/verify-setup.mjs'), '--env-file', '.env.example', '--json'], {
+        cwd: root,
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` },
+      });
+      expect(result.status, result.stderr).toBe(0);
+      const report = JSON.parse(result.stdout) as { ok: boolean; summary: { warn: number; fail: number }; checks: Array<{ id: string; status: string; required: boolean }> };
+      expect(report.ok).toBe(true);
+      expect(report.summary.fail).toBe(0);
+      expect(report.summary.warn).toBeGreaterThan(0);
+      expect(report.checks).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: 'http-chromadb', status: 'warn', required: false }),
+        expect.objectContaining({ id: 'http-grafana', status: 'warn', required: false }),
+        expect.objectContaining({ id: 'http-tempo', status: 'warn', required: false }),
+      ]));
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
   it('seed script uses the Chroma v2 tenant/database collection API', () => {
     const source = read('scripts/seed.ts');
 
@@ -230,7 +277,7 @@ describe('local setup scripts', () => {
     const verifyScript = read('scripts/verify-setup.mjs');
 
     expect(manifest.scripts?.['local:seed']).toBe('tsx scripts/seed.ts');
-    expect(manifest.scripts?.['local:verify-setup']).toBe('node scripts/verify-setup.mjs');
+    expect(manifest.scripts?.['local:verify-setup']).toBe('node scripts/verify-setup.mjs --require-services');
     expect(manifest.scripts?.['setup:healthcheck']).toBe('node scripts/verify-setup.mjs');
     expect(manifest.scripts?.['new-worker:preflight']).toBe('node scripts/new-worker-preflight.mjs');
     expect(manifest.scripts?.['first-run:checklist']).toBe('node scripts/first-run-checklist.mjs');
@@ -254,6 +301,7 @@ describe('local setup scripts', () => {
     expect(read('docs/guides/quickstart.md')).toContain('npm --silent run workspace:tour -- --json');
     expect(seedScript).toContain('Usage: npm run local:seed');
     expect(verifyScript).toContain('Usage: npm run local:verify-setup');
+    expect(verifyScript).toContain('Usage: node scripts/verify-setup.mjs [--dry-run] [--env-file <path>] [--json] [--require-services]');
   });
 
   it('workspace tour emits structured package map and docs-drift output', () => {
