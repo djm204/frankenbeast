@@ -343,7 +343,7 @@ describe('dashboard routes', () => {
       reader.cancel();
 
       // SSE format: id: ...\nevent: snapshot\ndata: ...\n\n
-      expect(text).toContain('id: dashboard:1');
+      expect(text).toMatch(/id: dashboard:[0-9a-f-]{36}:1/);
       expect(text).toContain('event: snapshot');
 
       // Extract the data line for the snapshot event
@@ -361,8 +361,11 @@ describe('dashboard routes', () => {
     it('keeps snapshot ids monotonic across dashboard SSE reconnects', async () => {
       const deps = createMockDeps();
       const app = createDashboardRoutes(deps);
-      const readInitialStreamText = async (ticket: string) => {
-        const res = await app.request(`/events?ticket=${ticket}`);
+      const readInitialStreamText = async (
+        ticket: string,
+        targetApp: ReturnType<typeof createDashboardRoutes> = app,
+      ) => {
+        const res = await targetApp.request(`/events?ticket=${ticket}`);
         const reader = res.body!.getReader();
         const decoder = new TextDecoder();
         let text = '';
@@ -378,8 +381,18 @@ describe('dashboard routes', () => {
       const firstText = await readInitialStreamText(await issueDashboardTicket(app));
       const secondText = await readInitialStreamText(await issueDashboardTicket(app));
 
-      expect(firstText).toContain('id: dashboard:1');
-      expect(secondText).toContain('id: dashboard:2');
+      const firstId = firstText.match(/^id: (dashboard:[0-9a-f-]{36}:1)$/m)?.[1];
+      const secondId = secondText.match(/^id: (dashboard:[0-9a-f-]{36}:2)$/m)?.[1];
+      expect(firstId).toBeDefined();
+      expect(secondId).toBeDefined();
+      const firstEpoch = firstId!.split(':')[1];
+      expect(secondId).toBe(`dashboard:${firstEpoch}:2`);
+
+      const restartedApp = createDashboardRoutes(createMockDeps());
+      const restartedText = await readInitialStreamText(await issueDashboardTicket(restartedApp), restartedApp);
+      const restartedId = restartedText.match(/^id: (dashboard:[0-9a-f-]{36}:1)$/m)?.[1];
+      expect(restartedId).toBeDefined();
+      expect(restartedId!.split(':')[1]).not.toBe(firstEpoch);
     });
 
     it('streams a fresh snapshot when dashboard state changes after connect', async () => {
