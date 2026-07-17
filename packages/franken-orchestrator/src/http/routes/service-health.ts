@@ -77,12 +77,18 @@ function serviceDependency(
 }
 
 function findService(services: readonly NetworkServiceHealthStatus[] | undefined, candidates: readonly string[]): NetworkServiceHealthStatus | undefined {
-  return services?.find((service) => candidates.includes(service.id));
+  for (const candidate of candidates) {
+    const service = services?.find((entry) => entry.id === candidate);
+    if (service) return service;
+  }
+  return undefined;
 }
 
 function backgroundLoopDependencies(services: readonly NetworkServiceHealthStatus[] | undefined): DashboardDependencySnapshot[] {
   const channelEntries = services?.flatMap((service) => (
-    Object.entries(service.channels ?? {}).map(([channel, healthy]) => ({ serviceId: service.id, channel, healthy }))
+    Object.entries(service.channels ?? {})
+      .filter(([, enabled]) => enabled)
+      .map(([channel]) => ({ serviceId: service.id, channel, healthy: service.status === 'running' }))
   )) ?? [];
 
   if (channelEntries.length === 0) {

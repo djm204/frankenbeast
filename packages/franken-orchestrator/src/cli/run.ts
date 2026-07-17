@@ -1403,6 +1403,10 @@ async function runChatCommandIfRequested(
               skillManager,
               getSecurityConfig: () => resolveConfigSecurity(mutableConfig),
               getProviders: () => buildDashboardProviderSnapshot(mutableConfig, providerRegistry, [resolveSelectedProvider(args, mutableConfig), ...(args.providers ?? [])]),
+              getAvailability: async () => {
+                const supervisor = createDefaultNetworkDeps(root).createSupervisor(paths);
+                return buildCliServiceHealthSnapshot(args, mutableConfig, paths, supervisor);
+              },
               getMaintenanceMode: () => {
                 if (localBeastServices) return localBeastServices.maintenance.getState();
                 if (beastDaemonUrl && beastOperatorToken) {
@@ -1497,7 +1501,8 @@ export async function main(): Promise<void> {
     return;
   }
 
-  const suppressBanner = args.subcommand === 'network' && args.networkAction === 'credentials';
+  const suppressBanner = args.subcommand === 'network'
+    && (args.networkAction === 'credentials' || (args.networkAction === 'health' && args.json));
   if (!suppressBanner && process.env.FRANKENBEAST_NETWORK_MANAGED !== '1') {
     printLine(await renderBanner(root));
   }
@@ -1867,6 +1872,16 @@ function buildGithubHealthDependency(): DashboardDependencySnapshot {
 function buildStateStoreHealthDependency(paths: Pick<NetworkPaths, 'frankenbeastDir'>): DashboardDependencySnapshot {
   const candidate = existsSync(paths.frankenbeastDir) ? paths.frankenbeastDir : dirname(paths.frankenbeastDir);
   try {
+    if (existsSync(paths.frankenbeastDir) && !statSync(paths.frankenbeastDir).isDirectory()) {
+      return {
+        name: 'state-store',
+        type: 'state-store',
+        status: 'unavailable',
+        summary: `State path ${paths.frankenbeastDir} exists but is not a directory.`,
+        remediationHint: 'Move or remove the file at the state path, then create a writable .fbeast directory before running managed services.',
+        safeWork: ['Continue read-only inspection; avoid operations that need persisted state.'],
+      };
+    }
     accessSync(candidate, constants.W_OK);
     return {
       name: 'state-store',

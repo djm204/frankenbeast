@@ -48,12 +48,13 @@ describe('buildServiceHealthSnapshot', () => {
     expect(snapshot.dependencies.map((dependency) => [dependency.name, dependency.status])).toContainEqual(['background-loops', 'healthy']);
   });
 
-  it('reports degraded with remediation hints when a background loop channel is failing', () => {
+  it('reports degraded with remediation hints when an enabled background loop channel is stale', () => {
     const snapshot = buildServiceHealthSnapshot({
       providers: [healthyProvider],
       networkServices: [
         { id: 'dashboard-web', status: 'running' },
-        { id: 'chat-server', status: 'running', channels: { dispatch: true, heartbeat: false } },
+        { id: 'chat-server', status: 'running' },
+        { id: 'comms-gateway', status: 'stale', channels: { slack: true, discord: false } },
       ],
       github: healthyGithub,
       stateStore: healthyStateStore,
@@ -62,8 +63,26 @@ describe('buildServiceHealthSnapshot', () => {
     const loops = snapshot.dependencies.find((dependency) => dependency.name === 'background-loops');
     expect(snapshot.status).toBe('degraded');
     expect(loops).toMatchObject({ status: 'degraded' });
-    expect(loops?.summary).toContain('chat-server:heartbeat');
+    expect(loops?.summary).toContain('comms-gateway:slack');
+    expect(loops?.summary).not.toContain('discord');
     expect(loops?.remediationHint).toContain('logs');
+  });
+
+  it('honors candidate priority when selecting the orchestrator API service', () => {
+    const snapshot = buildServiceHealthSnapshot({
+      providers: [healthyProvider],
+      networkServices: [
+        { id: 'beasts-daemon', status: 'running' },
+        { id: 'chat-server', status: 'stale' },
+        { id: 'dashboard-web', status: 'running' },
+      ],
+      github: healthyGithub,
+      stateStore: healthyStateStore,
+    });
+
+    const orchestrator = snapshot.dependencies.find((dependency) => dependency.name === 'orchestrator-api');
+    expect(snapshot.status).toBe('unavailable');
+    expect(orchestrator).toMatchObject({ status: 'unavailable' });
   });
 
   it('reports unavailable with safe-work guidance when a required service is stale', () => {
