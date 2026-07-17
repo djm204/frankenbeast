@@ -52,6 +52,11 @@ const REQUIRED_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
   memory_deletion_hash_keys: ['id', 'key_material', 'created_at'],
   memory_access_audit_events: ['id', 'operation', 'store', 'key_hash', 'query_hash', 'outcome', 'details', 'created_at', 'schema_version'],
 };
+const SCHEMA_V1_MEMORY_REVIEW_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
+  memory_review_candidates: ['id', 'target_store', 'memory_key', 'value', 'source', 'evidence_id', 'confidence', 'reason', 'status', 'suppression_reason', 'reviewer', 'note', 'created_at', 'updated_at', 'decided_at', 'schema_version'],
+  memory_review_provenance: ['target_store', 'memory_key', 'value', 'candidate_id', 'source', 'evidence_id', 'confidence', 'reason', 'reviewer', 'note', 'created_at', 'approved_at', 'schema_version'],
+  memory_review_suppressions: ['signature', 'suppression_reason', 'target_store', 'memory_key', 'value', 'source', 'evidence_id', 'reason', 'reviewer', 'note', 'created_at', 'schema_version'],
+};
 const ENCRYPTED_MEMORY_PREFIX = 'enc:v1:';
 const DELETION_HASH_KEY_ID = 'right-to-forget-hmac-v1';
 const ACCESS_AUDIT_HASH_KEY_ID = 'memory-access-audit-hmac-v1';
@@ -325,12 +330,26 @@ function verifyPayloadColumns(db: Database.Database, table: string, columns: Set
   }
 }
 
-function verifyRequiredColumns(table: string, columns: Set<string>): void {
-  const requiredColumns = REQUIRED_COLUMNS_BY_TABLE[table] ?? [];
+function verifyRequiredColumns(
+  table: string,
+  columns: Set<string>,
+  storeVersions: Map<string, number>,
+): void {
+  const storeVersion = storeVersions.get(table);
+  const requiredColumns = storeVersion !== undefined && storeVersion < CURRENT_MEMORY_SCHEMA_VERSION
+    ? (SCHEMA_V1_MEMORY_REVIEW_COLUMNS_BY_TABLE[table] ?? REQUIRED_COLUMNS_BY_TABLE[table] ?? [])
+    : (REQUIRED_COLUMNS_BY_TABLE[table] ?? []);
   const missingColumns = requiredColumns.filter((column) => !columns.has(column));
   if (missingColumns.length > 0) {
     throw new Error(`Memory backup table ${table} is missing required column(s): ${missingColumns.join(', ')}`);
   }
+}
+
+function readSchemaStoreVersions(db: Database.Database, tables: Set<string>): Map<string, number> {
+  if (!tables.has('memory_schema_versions')) return new Map();
+  return new Map((db
+    .prepare(`SELECT store, version FROM memory_schema_versions`)
+    .all() as Array<{ store: string; version: number }>).map((row) => [row.store, row.version]));
 }
 
 function verifyDeletionGuardKeyLink(db: Database.Database, tables: Set<string>): void {
@@ -604,10 +623,11 @@ export function verifyMemoryBackup(path: string): MemoryBackupVerificationReport
     }
 
     const encryptedStores = readEncryptedStores(db, tables);
+    const storeVersions = readSchemaStoreVersions(db, tables);
     for (const table of MEMORY_BACKUP_TABLES) {
       if (!tables.has(table)) continue;
       const columns = readTableColumns(db, table);
-      verifyRequiredColumns(table, columns);
+      verifyRequiredColumns(table, columns, storeVersions);
       if (columns.has('schema_version')) {
         const future = db
           .prepare(`SELECT schema_version FROM ${sqliteIdentifier(table)} WHERE schema_version > ? LIMIT 1`)

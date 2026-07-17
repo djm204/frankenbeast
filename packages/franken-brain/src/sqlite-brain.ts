@@ -3294,6 +3294,11 @@ export class SqliteMemoryReviewQueue {
         conditions.push("memory_key NOT LIKE ? ESCAPE '\\'");
         params.push(`${prefix.replace(/[\\%_]/g, char => `\\${char}`)}%`);
       }
+      if (options.includeExpired === false) {
+        const nowMs = parseDecayTimestamp(options.now ?? new Date(), 'now');
+        conditions.push('(expires_at IS NULL OR expires_at > ?)');
+        params.push(new Date(nowMs).toISOString());
+      }
       const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
       const rows = this.db
         .prepare(
@@ -3307,11 +3312,7 @@ export class SqliteMemoryReviewQueue {
           continue;
         }
         const provenance = this.rowToProvenance(row);
-        if (sourceFilter && ![
-          provenance.source,
-          provenance.sourceId,
-          provenance.evidenceId,
-        ].filter((value): value is string => value !== undefined).some(value => value.toLowerCase().includes(sourceFilter))) {
+        if (sourceFilter && !provenance.source.toLowerCase().includes(sourceFilter)) {
           continue;
         }
         attributions.push(provenance);
@@ -3373,17 +3374,14 @@ export class SqliteMemoryReviewQueue {
     options: MemoryAttributionListOptions = {},
   ): MemoryCompactedEntry[] {
     const now = options.now ?? new Date();
-    const nowMs = parseDecayTimestamp(now, 'now');
     const limit = this.resolveAttributionLimit(options.limit);
     const provenance = this.listProvenance({
       ...options,
-      includeExpired: true,
-      limit: 1000,
+      includeExpired: options.includeExpired ? true : false,
+      now,
+      limit,
     });
-    return provenance
-      .filter((record) => options.includeExpired || !record.expiresAt || Date.parse(record.expiresAt) > nowMs)
-      .slice(0, limit)
-      .map((record) => this.provenanceToCompactedEntry(record, options, now));
+    return provenance.map((record) => this.provenanceToCompactedEntry(record, options, now));
   }
 
   private provenanceToCompactedEntry(
@@ -4377,7 +4375,7 @@ export class SqliteMemoryReviewQueue {
       }
       if (
         this.decodeText(row.source) === candidate.source &&
-        (row.source_id ? this.decodeText(row.source_id) : undefined) === candidate.sourceId &&
+        optionalTextMatches(row.source_id ? this.decodeText(row.source_id) : undefined, candidate.sourceId) &&
         (row.evidence_id ? this.decodeText(row.evidence_id) : undefined) ===
           candidate.evidenceId
       ) {
@@ -4539,14 +4537,18 @@ function normalizeMemorySourceType(
     throw new Error(`Unsupported memory source type: ${String(sourceType)}`);
   }
   const normalized = source.trim().toLowerCase();
-  if (normalized.startsWith('chat:') || normalized.startsWith('user:')) return 'user';
+  if (normalized === 'chat' || normalized.startsWith('chat:') || normalized.startsWith('chat-') || normalized.startsWith('user:')) return 'user';
   if (normalized.startsWith('inferred:') || normalized.includes('inference')) return 'inferred';
-  if (normalized.startsWith('tool:') || normalized.startsWith('terminal:')) return 'tool';
+  if (normalized.startsWith('tool:') || normalized === 'terminal' || normalized.startsWith('terminal:') || normalized.startsWith('terminal-')) return 'tool';
   if (normalized.startsWith('operator:')) return 'operator';
   if (normalized.startsWith('repo') || normalized.startsWith('system:') || normalized.includes('config')) return 'system';
   return 'unknown';
 }
 
+
+function optionalTextMatches(stored: string | undefined, incoming: string | undefined): boolean {
+  return stored === undefined || incoming === undefined || stored === incoming;
+}
 
 function validateOptionalIsoTimestamp(value: string | undefined, fieldName: string): void {
   if (value === undefined) return;
@@ -6153,17 +6155,17 @@ function readStorePayloads(
     case 'memory_review_candidates':
       return readReviewPayloads(
         db,
-        `SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_candidates`,
+        `SELECT value, source, source_id, evidence_id, reason, reviewer, note FROM memory_review_candidates`,
       );
     case 'memory_review_provenance':
       return readReviewPayloads(
         db,
-        `SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_provenance`,
+        `SELECT value, source, source_id, evidence_id, reason, reviewer, note FROM memory_review_provenance`,
       );
     case 'memory_review_suppressions':
       return readReviewPayloads(
         db,
-        `SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_suppressions`,
+        `SELECT value, source, source_id, evidence_id, reason, reviewer, note FROM memory_review_suppressions`,
       );
     case 'memory_deletion_hash_keys':
       return (
@@ -6180,13 +6182,14 @@ function readReviewPayloads(db: Database.Database, sql: string): string[] {
     db.prepare(sql).all() as Array<{
       value: string;
       source: string;
+      source_id: string | null;
       evidence_id: string | null;
       reason: string;
       reviewer: string | null;
       note: string | null;
     }>
   ).flatMap((row) =>
-    [row.value, row.source, row.evidence_id, row.reason, row.reviewer, row.note].filter(
+    [row.value, row.source, row.source_id, row.evidence_id, row.reason, row.reviewer, row.note].filter(
       (value): value is string => value !== null,
     ),
   );
