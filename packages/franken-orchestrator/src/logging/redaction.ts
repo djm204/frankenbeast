@@ -6,6 +6,14 @@ const ASSIGNMENT_RE = /\b([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*("(?:\\.|[^"\\])*"|'(?:
 const HEADER_STYLE_FIELD_RE = /\b([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)/gu;
 const JSON_FIELD_RE = /("([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*)("(?:\\.|[^"\\])*"|[^,}\]\s]+)/gu;
 const WHOLE_HEADER_STYLE_RE = /\b((?:Set-)?Cookie)\s*:\s*(.+?)(?=\s+[A-Za-z_][A-Za-z0-9_-]*\s*:|$)/giu;
+const CREDENTIAL_URL_RE = /\b((?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/(?:[^:\s"'/@]+)?):[^@\s"']+(@[^\s"']+)/giu;
+const SENSITIVE_VALUE_PATTERNS = [
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gu,
+  /\b(?:sk|gho|ghp|glpat|xox[baprs])-?[A-Za-z0-9_\-]{12,}\b/gu,
+  /\bnpm_[A-Za-z0-9_\-]{12,}\b/gu,
+  /https:\/\/(?:discord(?:app)?\.com|canary\.discord\.com)\/api\/webhooks\/\d+\/[A-Za-z0-9_\-]+/giu,
+  /\b(?:Bearer|token)\s+[A-Za-z0-9._~+/=-]{20,}\b/giu,
+];
 
 export type RedactionDecisionSource = 'text-assignment' | 'text-json-field' | 'text-opaque-literal' | 'object-key';
 
@@ -102,7 +110,11 @@ export function redactSensitiveTextWithProvenance(text: string, path = '$'): Red
     return `${key}: ${REDACTED}`;
   });
 
-  const value = maskOpaqueSecretLiterals(headerRedacted);
+  let value = headerRedacted.replace(CREDENTIAL_URL_RE, `$1:${REDACTED}$2`);
+  value = maskOpaqueSecretLiterals(value);
+  for (const pattern of SENSITIVE_VALUE_PATTERNS) {
+    value = value.replace(pattern, () => REDACTED);
+  }
   if (value !== headerRedacted) {
     decisions.push(createDecision(path, 'opaque-secret-literal', 'text-opaque-literal'));
   }

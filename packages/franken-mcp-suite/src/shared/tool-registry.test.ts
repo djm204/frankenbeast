@@ -4,10 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createAdapterSet, TOOL_STUBS, TOOL_REGISTRY, searchTools, type AdapterSet } from './tool-registry.js';
 
-const EXPECTED_COUNT = 28;
+const EXPECTED_COUNT = 29;
+
+const EXPECTED_MEMORY_COUNT = 12;
 
 describe('TOOL_STUBS', () => {
-  it('contains exactly 28 tools', () => {
+  it('contains exactly 29 tools', () => {
     expect(TOOL_STUBS).toHaveLength(EXPECTED_COUNT);
   });
 
@@ -20,7 +22,7 @@ describe('TOOL_STUBS', () => {
 });
 
 describe('TOOL_REGISTRY', () => {
-  it('contains exactly 28 tools', () => {
+  it('contains exactly 29 tools', () => {
     expect(TOOL_REGISTRY.size).toBe(EXPECTED_COUNT);
   });
 
@@ -37,7 +39,7 @@ describe('TOOL_REGISTRY', () => {
     }
   });
 
-  it('TOOL_STUBS and TOOL_REGISTRY contain the same 28 tool names', () => {
+  it('TOOL_STUBS and TOOL_REGISTRY contain the same 29 tool names', () => {
     const stubNames = new Set(TOOL_STUBS.map((s) => s.name));
     const registryNames = new Set(TOOL_REGISTRY.keys());
     expect(stubNames).toEqual(registryNames);
@@ -59,6 +61,33 @@ describe('TOOL_REGISTRY', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0]!.text).toContain('ttlMs is only supported for working memory');
     expect(brain.store).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed memory retention expiry horizons before invoking the adapter', async () => {
+    const brain = {
+      memoryRetentionReport: vi.fn(),
+    };
+    const handler = TOOL_REGISTRY.get('fbeast_memory_retention_report')!.makeHandler({ brain } as unknown as AdapterSet);
+
+    for (const expiryHorizonMs of ['', '   ', false, null]) {
+      const result = await handler({ expiryHorizonMs });
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain('expiryHorizonMs must be a non-negative number');
+    }
+
+    expect(brain.memoryRetentionReport).not.toHaveBeenCalled();
+  });
+
+  it('accepts string numeric retention budgets from MCP clients', async () => {
+    const brain = {
+      memoryRetentionReport: vi.fn().mockReturnValue({ generatedAt: '2026-01-01T00:00:00.000Z', entries: [] }),
+    };
+    const handler = TOOL_REGISTRY.get('fbeast_memory_retention_report')!.makeHandler({ brain } as unknown as AdapterSet);
+
+    const result = await handler({ expiryHorizonMs: '1000', maxEntries: '5' });
+
+    expect(result.isError).not.toBe(true);
+    expect(brain.memoryRetentionReport).toHaveBeenCalledWith(expect.objectContaining({ expiryHorizonMs: 1000, maxEntries: 5 }));
   });
 
   it('rejects invalid observer log arguments before invoking the registry adapter handler', async () => {
@@ -156,14 +185,14 @@ describe('TOOL_REGISTRY', () => {
 });
 
 describe('searchTools', () => {
-  it('returns all 28 tools when called with no query', () => {
+  it('returns all 29 tools when called with no query', () => {
     expect(searchTools()).toHaveLength(EXPECTED_COUNT);
     expect(searchTools(undefined)).toHaveLength(EXPECTED_COUNT);
   });
 
-  it('returns exactly 11 tools for query "memory"', () => {
+  it('returns exactly 12 tools for query "memory"', () => {
     const results = searchTools('memory');
-    expect(results).toHaveLength(11);
+    expect(results).toHaveLength(EXPECTED_MEMORY_COUNT);
     for (const r of results) {
       expect(r.server).toBe('memory');
     }

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdirSync, rmSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { ChunkFileWriter } from '../../src/planning/chunk-file-writer.js';
@@ -188,7 +188,7 @@ describe('ChunkFileWriter', () => {
     expect(content).not.toContain('Unrelated issue');
   });
 
-  it('clears existing chunk files before writing', () => {
+  it('clears existing writer-owned chunk files after preparing replacements', () => {
     const writer = new ChunkFileWriter(fixtureDir);
 
     // Write set 1
@@ -238,5 +238,125 @@ describe('ChunkFileWriter', () => {
     const content = readFileSync(paths2[0], 'utf-8');
     expect(content).toContain('New X');
     expect(content).not.toContain('Old A');
+  });
+
+  it('moves unrelated executable numbered markdown files aside during rewrites', () => {
+    const writer = new ChunkFileWriter(fixtureDir);
+
+    const unrelatedPath = join(fixtureDir, '01_context.md');
+    writeFileSync(unrelatedPath, '# Operator context\n\nKeep this file.\n', 'utf-8');
+
+    const set1: ChunkDefinition[] = [
+      {
+        id: 'old-chunk-a',
+        objective: 'Old A',
+        files: ['a.ts'],
+        successCriteria: 'A passes',
+        verificationCommand: 'npm test',
+        dependencies: [],
+      },
+    ];
+    writer.write(set1);
+
+    const set2: ChunkDefinition[] = [
+      {
+        id: 'new-chunk-x',
+        objective: 'New X',
+        files: ['x.ts'],
+        successCriteria: 'X passes',
+        verificationCommand: 'npm test',
+        dependencies: [],
+      },
+    ];
+    writer.write(set2);
+
+    const remaining = readdirSync(fixtureDir).sort();
+    expect(remaining).toHaveLength(2);
+    expect(remaining).toContain('01_new-chunk-x.md');
+    const preserved = remaining.find((file) => file.includes('01_context.md'));
+    expect(preserved).toBeDefined();
+    expect(preserved).not.toBe('01_context.md');
+    expect(readFileSync(join(fixtureDir, preserved!), 'utf-8')).toContain('Keep this file.');
+  });
+
+  it('removes stale generated chunks with three-digit numbers', () => {
+    const writer = new ChunkFileWriter(fixtureDir);
+
+    writeFileSync(
+      join(fixtureDir, '100_old-generated.md'),
+      '# Chunk 100: old-generated\n\n## Objective\n\nOld generated chunk.\n',
+      'utf-8',
+    );
+
+    writer.write([
+      {
+        id: 'new-chunk-x',
+        objective: 'New X',
+        files: ['x.ts'],
+        successCriteria: 'X passes',
+        verificationCommand: 'npm test',
+        dependencies: [],
+      },
+    ]);
+
+    const remaining = readdirSync(fixtureDir).sort();
+    expect(remaining).toEqual(['01_new-chunk-x.md']);
+  });
+
+  it('keeps the previous chunk set intact when replacement preparation fails', () => {
+    const writer = new ChunkFileWriter(fixtureDir);
+
+    const set1: ChunkDefinition[] = [
+      {
+        id: 'old-chunk-a',
+        objective: 'Old A',
+        files: ['a.ts'],
+        successCriteria: 'A passes',
+        verificationCommand: 'npm test',
+        dependencies: [],
+      },
+      {
+        id: 'old-chunk-b',
+        objective: 'Old B',
+        files: ['b.ts'],
+        successCriteria: 'B passes',
+        verificationCommand: 'npm test',
+        dependencies: [],
+      },
+    ];
+    writer.write(set1);
+
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1234567890);
+    try {
+      mkdirSync(join(fixtureDir, `.02_new-chunk-y.md.1234567890-${process.pid}.tmp`));
+
+      const set2: ChunkDefinition[] = [
+        {
+          id: 'new-chunk-x',
+          objective: 'New X',
+          files: ['x.ts'],
+          successCriteria: 'X passes',
+          verificationCommand: 'npm test',
+          dependencies: [],
+        },
+        {
+          id: 'new-chunk-y',
+          objective: 'New Y',
+          files: ['y.ts'],
+          successCriteria: 'Y passes',
+          verificationCommand: 'npm test',
+          dependencies: [],
+        },
+      ];
+
+      expect(() => writer.write(set2)).toThrow();
+    } finally {
+      nowSpy.mockRestore();
+    }
+
+    const remaining = readdirSync(fixtureDir).sort();
+    expect(remaining).toEqual(['01_old-chunk-a.md', '02_old-chunk-b.md']);
+    expect(readFileSync(join(fixtureDir, '01_old-chunk-a.md'), 'utf-8')).toContain('Old A');
+    expect(readFileSync(join(fixtureDir, '02_old-chunk-b.md'), 'utf-8')).toContain('Old B');
   });
 });

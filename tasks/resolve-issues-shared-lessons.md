@@ -1,5 +1,10 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-16 — Synthetic availability probe review fixes
+- Availability probes should fail closed for real dependencies: do not default provider checks to `node --version` or dashboard checks to a static UI health URL, require explicit provider/backend health targets, and cover missing-target behavior in tests so cron copies cannot produce false-green uptime.
+- For cron/CI probe JSON logs, redact both `key=value` and whitespace-separated secret forms, including split `Authorization: Bearer *** argv sequences, before serializing command details or error messages.
+- When Codex reaches the normal five-trigger cap but posts new valid findings, fix/reply/resolve them and stop for explicit approval before issuing another `@codex review`; zero unresolved threads plus green CI is not a substitute for a fresh current-head clean.
+
 ## 2026-07-16 — Snapshot diff Codex closeout
 - State snapshot diff redaction must cover metadata as well as values: record ids, source filenames, map keys, primitive-map key/value pairs, parse-error/oversized-file paths, and password-only connection URLs (for example Redis URLs with no username) need regression coverage so incident reports cannot leak PII or credentials through supposedly redacted metadata.
 - For one-record-per-file snapshot exports, prefer immutable ids when present but fall back to the source path instead of mutable display names such as `name`; otherwise a rename appears as remove+add instead of one changed record. Coalesce identical aggregate/per-record duplicates so missing duplicate exports do not count as state drift.

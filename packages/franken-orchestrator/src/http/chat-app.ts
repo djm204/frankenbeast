@@ -6,6 +6,7 @@ import type { ISessionStore } from '../chat/session-store.js';
 import type { ConversationEngine } from '../chat/conversation-engine.js';
 import type { TurnRunner } from '../chat/turn-runner.js';
 import type { ChatRuntime } from '../chat/runtime.js';
+import { FileApprovalAuditLog, type ApprovalAuditLog } from '../chat/approval-audit-log.js';
 import { createChatRuntime } from '../chat/chat-runtime-factory.js';
 import { agentRoutes } from './routes/agent-routes.js';
 import { AgentInitService } from '../beasts/services/agent-init-service.js';
@@ -81,6 +82,7 @@ export interface ChatAppOptions {
   chatRateLimit?: ChatRateLimitOptions;
   chatRateLimiter?: InMemoryRateLimiter;
   chatMutationAdmission?: ChatMutationAdmission;
+  approvalAuditLog?: ApprovalAuditLog;
   /** Optional gateway compatibility proxy for /v1/beasts/* now owned by beasts-daemon. */
   beastDaemon?: { baseUrl: string; operatorToken?: string | undefined };
 }
@@ -155,6 +157,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   const chatRateLimiter = opts.chatRateLimiter
     ?? createChatRateLimiter(opts.chatRateLimit ?? opts.beastControl?.rateLimit ?? DEFAULT_CHAT_RATE_LIMIT);
   const chatMutationAdmission = opts.chatMutationAdmission ?? new ChatMutationAdmission(chatRateLimiter);
+  const approvalAuditLog = opts.approvalAuditLog ?? new FileApprovalAuditLog();
 
   const app = new Hono();
   app.use('*', requestId);
@@ -254,6 +257,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     streamTicketStore: chatStreamTicketStore,
     chatRateLimiter,
     chatMutationAdmission,
+    approvalAuditLog,
     issueSocketTicket: (sessionId) => issueSessionToken({
       expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS,
       secret: sessionTokenSecret,

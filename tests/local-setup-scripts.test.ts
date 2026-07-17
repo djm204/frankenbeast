@@ -334,6 +334,7 @@ describe('local setup scripts', () => {
       expect.objectContaining({ id: 'worker-preflight', command: 'npm --silent run new-worker:preflight -- --json' }),
       expect.objectContaining({ id: 'architecture-reading-path', phase: 'Orientation' }),
       expect.objectContaining({ id: 'pr-etiquette', required: true }),
+      expect.objectContaining({ id: 'first-pr-runbook', docs: expect.arrayContaining(['docs/onboarding/first-pr-agent-runbook.md']) }),
     ]));
     expect(checklist.items).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'optional-services' }),

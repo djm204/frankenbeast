@@ -1,5 +1,7 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { delimiter, join, resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 
 import { readVitestFlag, readVitestFlags } from '../scripts/vitest-env.js';
@@ -71,7 +73,51 @@ describe('Vitest environment flag helper', () => {
     expect(ci).toContain('Run Docker sandbox build smoke test');
     expect(ci).toContain('npm run test:docker:sandbox');
     expect(smokeScript).toContain('DOCKER_BUILD');
-    expect(smokeScript).toContain('Docker sandbox build smoke test skipped: Docker daemon unavailable');
+    expect(smokeScript).toContain("${ciRequiresDocker ? 'failed' : 'skipped'}: Docker daemon unavailable");
+    expect(smokeScript).toContain("const trueLikeCiValues = new Set(['1', 'true', 'yes', 'on'])");
+    expect(smokeScript).toContain("process.env.CI ?? ''");
+    expect(smokeScript).toContain("process.env.GITHUB_ACTIONS ?? ''");
     expect(smokeScript).toContain('Docker sandbox build smoke test passed');
+  });
+
+  it('fails the Docker sandbox smoke script in CI when Docker is unavailable', () => {
+    const binDir = mkdtempSync(join(tmpdir(), 'frankenbeast-no-docker-'));
+    const dockerShim = join(binDir, process.platform === 'win32' ? 'docker.cmd' : 'docker');
+    writeFileSync(dockerShim, '#!/usr/bin/env sh\necho "Docker daemon is unavailable" >&2\nexit 1\n', {
+      mode: 0o755,
+    });
+
+    try {
+      const baseEnv = {
+        ...process.env,
+        PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
+        GITHUB_ACTIONS: undefined,
+      };
+      const script = resolve(ROOT, 'scripts/run-docker-sandbox-smoke.mjs');
+      const localResult = spawnSync(process.execPath, [script], {
+        cwd: ROOT,
+        encoding: 'utf-8',
+        env: { ...baseEnv, CI: undefined },
+      });
+      const ciTrueResult = spawnSync(process.execPath, [script], {
+        cwd: ROOT,
+        encoding: 'utf-8',
+        env: { ...baseEnv, CI: 'true' },
+      });
+      const ciOneResult = spawnSync(process.execPath, [script], {
+        cwd: ROOT,
+        encoding: 'utf-8',
+        env: { ...baseEnv, CI: '1' },
+      });
+
+      expect(localResult.status).toBe(0);
+      expect(localResult.stderr).toContain('Docker sandbox build smoke test skipped');
+      expect(ciTrueResult.status).toBe(1);
+      expect(ciTrueResult.stderr).toContain('Docker sandbox build smoke test failed');
+      expect(ciOneResult.status).toBe(1);
+      expect(ciOneResult.stderr).toContain('Docker sandbox build smoke test failed');
+    } finally {
+      rmSync(binDir, { force: true, recursive: true });
+    }
   });
 });

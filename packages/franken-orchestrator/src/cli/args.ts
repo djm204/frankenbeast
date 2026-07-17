@@ -767,7 +767,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     ? parseFiniteDecimalOption('--budget', values.budget, { minExclusive: 0 })
     : 10;
   const port = values.port !== undefined
-    ? parseIntegerOption('--port', values.port, { min: 0, max: 65535 })
+    ? parseIntegerOption('--port', values.port, { min: 1, max: 65535 })
     : (subcommand === 'chat-server' ? 3737 : subcommand === 'beasts-daemon' ? 4050 : undefined);
 
   const hasModuleFlags = values['no-firewall'] || values['no-skills'] || values['no-memory']

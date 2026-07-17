@@ -88,6 +88,64 @@ export interface SqliteBrainOptions {
   encryption?: MemoryEncryptionOptions;
 }
 
+export type MemoryRetentionClass =
+  | 'user_preference'
+  | 'environment_fact'
+  | 'project_convention'
+  | 'learned_procedure'
+  | 'audit_record'
+  | 'transient_observation'
+  | 'temporary_operational'
+  | 'uncategorized';
+
+export type MemoryRetentionAction =
+  | 'retain'
+  | 'protect'
+  | 'nearing_expiry'
+  | 'expired'
+  | 'compact';
+
+export interface MemoryRetentionPolicy {
+  class: MemoryRetentionClass;
+  retentionDays: number | null;
+  compactPriority: number;
+  protected: boolean;
+  description: string;
+}
+
+export interface MemoryRetentionEntryReport {
+  store: 'working' | 'episodic';
+  key: string;
+  agentId?: string;
+  class: MemoryRetentionClass;
+  action: MemoryRetentionAction;
+  policy: MemoryRetentionPolicy;
+  protected: boolean;
+  ageDays?: number;
+  expiresAt?: string;
+  reason: string;
+}
+
+export interface MemoryRetentionReportOptions {
+  now?: string | Date;
+  expiryHorizonMs?: number;
+  maxEntries?: number;
+}
+
+export interface MemoryRetentionReport {
+  generatedAt: string;
+  policies: MemoryRetentionPolicy[];
+  counts: {
+    total: number;
+    protected: number;
+    expired: number;
+    nearingExpiry: number;
+    compactionCandidates: number;
+  };
+  entries: MemoryRetentionEntryReport[];
+  compactionCandidates: MemoryRetentionEntryReport[];
+}
+
 export type MemoryCandidateTargetStore = 'working';
 export type MemoryCandidateStatus =
   | 'pending'
@@ -155,6 +213,110 @@ type ExistingMemoryMergeCandidate = {
 };
 
 const AGENT_WORKING_KEY_PREFIX = '__fbeast_agent_memory__/';
+
+const MEMORY_RETENTION_POLICIES: Record<MemoryRetentionClass, MemoryRetentionPolicy> = {
+  user_preference: {
+    class: 'user_preference',
+    retentionDays: null,
+    compactPriority: 0,
+    protected: true,
+    description: 'Durable user preferences are protected from automatic compaction.',
+  },
+  learned_procedure: {
+    class: 'learned_procedure',
+    retentionDays: 365,
+    compactPriority: 10,
+    protected: false,
+    description: 'Learned procedures are preserved longer than environment facts.',
+  },
+  audit_record: {
+    class: 'audit_record',
+    retentionDays: null,
+    compactPriority: 0,
+    protected: true,
+    description: 'Audit records preserve deletion and governance trails.',
+  },
+  project_convention: {
+    class: 'project_convention',
+    retentionDays: 365,
+    compactPriority: 20,
+    protected: false,
+    description: 'Project conventions are durable, reviewable facts.',
+  },
+  environment_fact: {
+    class: 'environment_fact',
+    retentionDays: 180,
+    compactPriority: 30,
+    protected: false,
+    description: 'Environment facts expire before durable preferences and procedures.',
+  },
+  uncategorized: {
+    class: 'uncategorized',
+    retentionDays: 30,
+    compactPriority: 60,
+    protected: false,
+    description: 'Unclassified memories receive a conservative short retention window.',
+  },
+  transient_observation: {
+    class: 'transient_observation',
+    retentionDays: 7,
+    compactPriority: 80,
+    protected: false,
+    description: 'Temporary task observations are first-choice compaction candidates.',
+  },
+  temporary_operational: {
+    class: 'temporary_operational',
+    retentionDays: 1,
+    compactPriority: 100,
+    protected: false,
+    description: 'Operational scratch facts should be TTL-backed and expire quickly.',
+  },
+};
+
+const MEMORY_RETENTION_CLASS_ALIASES: Record<string, MemoryRetentionClass> = {
+  'user-preference': 'user_preference',
+  user_preference: 'user_preference',
+  preference: 'user_preference',
+  preferences: 'user_preference',
+  'environment-fact': 'environment_fact',
+  environment_fact: 'environment_fact',
+  environment: 'environment_fact',
+  env: 'environment_fact',
+  'project-convention': 'project_convention',
+  project_convention: 'project_convention',
+  convention: 'project_convention',
+  conventions: 'project_convention',
+  'learned-procedure': 'learned_procedure',
+  learned_procedure: 'learned_procedure',
+  procedure: 'learned_procedure',
+  procedures: 'learned_procedure',
+  workflow: 'learned_procedure',
+  skill: 'learned_procedure',
+  'audit-record': 'audit_record',
+  audit_record: 'audit_record',
+  audit: 'audit_record',
+  'deletion-audit': 'audit_record',
+  'governance-audit': 'audit_record',
+  'transient-observation': 'transient_observation',
+  transient_observation: 'transient_observation',
+  transient: 'transient_observation',
+  observation: 'transient_observation',
+  'task-state': 'transient_observation',
+  'temporary-operational': 'temporary_operational',
+  temporary_operational: 'temporary_operational',
+  'operational-temporary': 'temporary_operational',
+  'temp-operational': 'temporary_operational',
+  'operational-temp': 'temporary_operational',
+  'transient-operational': 'temporary_operational',
+  uncategorized: 'uncategorized',
+  unclassified: 'uncategorized',
+};
+
+const FBEAST_AGENT_MEMORY_SCOPE_MARKER = 'fbeast:agent-memory';
+
+export function memoryRetentionPolicies(): MemoryRetentionPolicy[] {
+  return Object.values(MEMORY_RETENTION_POLICIES).map((policy) => ({ ...policy }));
+}
 
 export interface MemoryCandidateEdit {
   key?: string;
@@ -848,11 +1010,116 @@ function isTemporaryOperationalWorkingMemoryValue(value: unknown): value is { ex
   );
 }
 
+function extractTemporaryOperationalExpiresAt(value: unknown, className: MemoryRetentionClass): string | undefined {
+  if (className !== 'temporary_operational' || !isTemporaryOperationalWorkingMemoryValue(value)) {
+    return undefined;
+  }
+  return value.expiresAt;
+}
+
+function parseAgentScopedEpisodicDetails(details: Record<string, unknown> | undefined): string | undefined {
+  if (!details) return undefined;
+  return details.__fbeastMemoryScope === FBEAST_AGENT_MEMORY_SCOPE_MARKER && typeof details.agentId === 'string'
+    ? details.agentId
+    : undefined;
+}
+
 function isExpiredWorkingMemoryValue(value: unknown, nowMs = Date.now()): boolean {
   if (!isTemporaryOperationalWorkingMemoryValue(value)) return false;
   const expiresAtMs = Date.parse(value.expiresAt);
   return Number.isFinite(expiresAtMs) && expiresAtMs <= nowMs;
 
+}
+
+function normalizeMemoryClassName(value: unknown): MemoryRetentionClass | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, '-');
+  return MEMORY_RETENTION_CLASS_ALIASES[normalized];
+}
+
+function objectStringFields(value: unknown, keys: readonly string[]): string[] {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return [];
+  const record = value as Record<string, unknown>;
+  const values: string[] = [];
+  for (const key of keys) {
+    const field = record[key];
+    if (typeof field === 'string' && field.trim().length > 0) values.push(field);
+  }
+  return values;
+}
+
+function normalizeFirstMemoryClass(values: readonly string[]): MemoryRetentionClass | undefined {
+  for (const value of values) {
+    const className = normalizeMemoryClassName(value);
+    if (className) return className;
+  }
+  return undefined;
+}
+
+function classifyMemoryEntry(input: {
+  store: 'working' | 'episodic';
+  key: string;
+  value: unknown;
+  summary?: string;
+  details?: Record<string, unknown>;
+}): MemoryRetentionClass {
+  if (input.store === 'working' && isTemporaryOperationalWorkingMemoryValue(input.value)) return 'temporary_operational';
+  const classFields = ['memoryClass', 'memory_class', 'class', 'category', 'kind', 'type', 'scope'] as const;
+  const explicitClass = normalizeFirstMemoryClass([
+    ...objectStringFields(input.value, classFields),
+    ...objectStringFields(input.details, classFields),
+  ]);
+  if (explicitClass) return explicitClass;
+  const text = `${input.key} ${input.summary ?? ''} ${valueToSearchText(input.value)} ${input.details ? valueToSearchText(input.details) : ''}`.toLowerCase();
+  if (/\b(user[._:-]?preference|preference|preferences)\b/.test(text)) return 'user_preference';
+  if (/\b(project[._:-]?(convention|rule)|convention|repo[._:-]?convention)\b/.test(text)) return 'project_convention';
+  if (/\b(learned[._:-]?procedure|procedure|workflow|skill|runbook)\b/.test(text)) return 'learned_procedure';
+  if (/\b(environment|env[._:-]?fact|runtime|host|platform|version)\b/.test(text)) return 'environment_fact';
+  if (/\b(transient|temporary|scratch|task[._:-]?state|observation|progress)\b/.test(text)) return 'transient_observation';
+  return input.store === 'episodic' ? 'transient_observation' : 'uncategorized';
+}
+
+function resolveRetentionNow(now: string | Date | undefined): Date {
+  const value = now === undefined ? new Date() : typeof now === 'string' ? new Date(now) : now;
+  if (!Number.isFinite(value.getTime())) {
+    throw new Error('retention report now must be a valid date');
+  }
+  return value;
+}
+
+function ageDays(observedAt: string | undefined, nowMs: number): number | undefined {
+  if (!observedAt) return undefined;
+  const observedMs = Date.parse(observedAt);
+  if (!Number.isFinite(observedMs)) return undefined;
+  return Math.max(0, (nowMs - observedMs) / (24 * 60 * 60 * 1000));
+}
+
+function retentionActionForEntry(input: {
+  className: MemoryRetentionClass;
+  policy: MemoryRetentionPolicy;
+  ageDays?: number;
+  expiresAt?: string;
+  nowMs: number;
+  expiryHorizonMs: number;
+}): { action: MemoryRetentionAction; reason: string } {
+  if (input.policy.protected) {
+    return { action: 'protect', reason: `${input.className} memories are protected from automatic compaction` };
+  }
+  if (input.expiresAt) {
+    const expiresAtMs = Date.parse(input.expiresAt);
+    if (Number.isFinite(expiresAtMs)) {
+      if (expiresAtMs <= input.nowMs) {
+        return { action: 'expired', reason: `TTL expired at ${input.expiresAt}` };
+      }
+      if (expiresAtMs - input.nowMs <= input.expiryHorizonMs) {
+        return { action: 'nearing_expiry', reason: `TTL expires at ${input.expiresAt}` };
+      }
+    }
+  }
+  if (input.policy.retentionDays !== null && input.ageDays !== undefined && input.ageDays >= input.policy.retentionDays) {
+    return { action: 'compact', reason: `${input.className} age ${input.ageDays.toFixed(1)}d exceeds ${input.policy.retentionDays}d retention` };
+  }
+  return { action: 'retain', reason: `${input.className} is within retention policy` };
 }
 
 class SqliteWorkingMemory implements IWorkingMemory {
@@ -1331,6 +1598,12 @@ class SqliteWorkingMemory implements IWorkingMemory {
     }
   }
 
+  private expireRuntimeKeysMatchingCurrentDeletionGuards(): void {
+    for (const key of Array.from(this.store.keys())) {
+      this.expireRuntimeKeyIfGuarded(key);
+    }
+  }
+
   private deleteExpiredPersistedRows(
     rows: ReadonlyArray<{ key: string; serialized: string | undefined }>,
   ): Array<{ key: string; serialized: string }> {
@@ -1570,6 +1843,33 @@ class SqliteWorkingMemory implements IWorkingMemory {
       }
       throw error;
     }
+  }
+
+  retentionEntries(nowIso = isoNow()): Array<{ key: string; value: unknown; updatedAt: string }> {
+    this.expireRuntimeKeysMatchingCurrentDeletionGuards();
+    const rows = this.db
+      .prepare(`SELECT key, value, updated_at as updatedAt FROM working_memory ORDER BY key ASC`)
+      .all() as Array<{ key: string; value: string; updatedAt: string }>;
+    const entries = new Map<string, { key: string; value: unknown; updatedAt: string }>();
+    for (const row of rows) {
+      const serialized = this.encryption?.decrypt(row.value) ?? row.value;
+      entries.set(row.key, {
+        key: row.key,
+        value: parseStoredWorkingMemoryValue(serialized),
+        updatedAt: row.updatedAt,
+      });
+    }
+    for (const key of this.deletedKeys) {
+      entries.delete(key);
+    }
+    for (const [key, value] of this.store.entries()) {
+      entries.set(key, {
+        key,
+        value,
+        updatedAt: this.dirtyKeys.has(key) ? nowIso : entries.get(key)?.updatedAt ?? nowIso,
+      });
+    }
+    return Array.from(entries.values()).sort((a, b) => a.key.localeCompare(b.key));
   }
 
   snapshotIncludingPersistedEntries(options: { expireRuntimeGuardedEntries?: boolean; expirePersistedTtlEntries?: boolean } = {}): Array<{ key: string; value: unknown; source: 'persisted' | 'runtime' }> {
@@ -4867,6 +5167,113 @@ export class SqliteBrain implements IBrain {
     } finally {
       db.close();
     }
+  }
+
+  memoryRetentionReport(options: MemoryRetentionReportOptions = {}): MemoryRetentionReport {
+    const now = resolveRetentionNow(options.now);
+    const nowMs = now.getTime();
+    const expiryHorizonMs = options.expiryHorizonMs ?? 7 * 24 * 60 * 60 * 1000;
+    if (!Number.isFinite(expiryHorizonMs) || expiryHorizonMs < 0) {
+      throw new Error('expiryHorizonMs must be a non-negative finite number');
+    }
+    const maxEntries = options.maxEntries;
+    if (maxEntries !== undefined && (!Number.isSafeInteger(maxEntries) || maxEntries < 1)) {
+      throw new Error('maxEntries must be a positive safe integer');
+    }
+
+    const entries: MemoryRetentionEntryReport[] = [];
+    for (const { key, value, updatedAt } of this.working.retentionEntries(now.toISOString())) {
+      const className = classifyMemoryEntry({ store: 'working', key, value });
+      const policy = MEMORY_RETENTION_POLICIES[className];
+      const expiresAt = extractTemporaryOperationalExpiresAt(value, className);
+      const observedAgeDays = ageDays(updatedAt, nowMs);
+      const decision = retentionActionForEntry({
+        className,
+        policy,
+        ...(observedAgeDays === undefined ? {} : { ageDays: observedAgeDays }),
+        ...(expiresAt ? { expiresAt } : {}),
+        nowMs,
+        expiryHorizonMs,
+      });
+      const agentId = decodeAgentWorkingKeyScope(key);
+      entries.push({
+        store: 'working',
+        key,
+        ...(agentId === undefined ? {} : { agentId }),
+        class: className,
+        action: decision.action,
+        policy: { ...policy },
+        protected: policy.protected,
+        ...(observedAgeDays === undefined ? {} : { ageDays: observedAgeDays }),
+        ...(expiresAt ? { expiresAt } : {}),
+        reason: decision.reason,
+      });
+    }
+
+    for (const event of this.episodic.recent(-1)) {
+      const key = String(event.id ?? event.summary);
+      const className = isRightToForgetAuditEvent(event)
+        ? 'audit_record'
+        : classifyMemoryEntry({
+          store: 'episodic',
+          key,
+          value: event.summary,
+          summary: event.summary,
+          ...(event.details === undefined ? {} : { details: event.details }),
+        });
+      const policy = MEMORY_RETENTION_POLICIES[className];
+      const observedAgeDays = ageDays(event.createdAt, nowMs);
+      const decision = retentionActionForEntry({
+        className,
+        policy,
+        ...(observedAgeDays === undefined ? {} : { ageDays: observedAgeDays }),
+        nowMs,
+        expiryHorizonMs,
+      });
+      const agentId = parseAgentScopedEpisodicDetails(event.details);
+      entries.push({
+        store: 'episodic',
+        key,
+        ...(agentId === undefined ? {} : { agentId }),
+        class: className,
+        action: decision.action,
+        policy: { ...policy },
+        protected: policy.protected,
+        ...(observedAgeDays === undefined ? {} : { ageDays: observedAgeDays }),
+        reason: decision.reason,
+      });
+    }
+
+    if (maxEntries !== undefined) {
+      const nonProtectedBudgetCandidates = entries
+        .filter((entry) => !entry.protected && (entry.action === 'retain' || entry.action === 'nearing_expiry'))
+        .sort((a, b) => b.policy.compactPriority - a.policy.compactPriority || a.key.localeCompare(b.key));
+      const activeEntries = entries.filter((entry) => entry.action !== 'expired');
+      const existingCompactionCount = activeEntries.filter((entry) => entry.action === 'compact').length;
+      const extraBudgetCompactions = Math.max(0, activeEntries.length - maxEntries - existingCompactionCount);
+      for (const entry of nonProtectedBudgetCandidates.slice(0, extraBudgetCompactions)) {
+        entry.action = 'compact';
+        entry.reason = `Memory store has ${activeEntries.length} active entries, over report budget ${maxEntries}; ${entry.class} has compaction priority ${entry.policy.compactPriority}`;
+      }
+    }
+
+    const compactionCandidates = entries
+      .filter((entry) => entry.action === 'compact')
+      .sort((a, b) => b.policy.compactPriority - a.policy.compactPriority || a.key.localeCompare(b.key));
+
+    return {
+      generatedAt: now.toISOString(),
+      policies: memoryRetentionPolicies(),
+      counts: {
+        total: entries.length,
+        protected: entries.filter((entry) => entry.protected).length,
+        expired: entries.filter((entry) => entry.action === 'expired').length,
+        nearingExpiry: entries.filter((entry) => entry.action === 'nearing_expiry').length,
+        compactionCandidates: compactionCandidates.length,
+      },
+      entries,
+      compactionCandidates,
+    };
   }
 
   /** Flush working memory to SQLite before serialization or checkpoint. */
