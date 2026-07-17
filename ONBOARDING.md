@@ -68,7 +68,7 @@ Use this checklist for a first local checkout or when rebuilding a development e
   npm --silent run setup:healthcheck -- --json
   ```
 
-  The healthcheck reports human-readable fixes and JSON `checks` with `id`, `status`, `required`, `detail`, and `action` fields. It verifies Node/npm, dependency install state, GitHub auth, env files, git status, common local ports, and ChromaDB/Grafana/Tempo service endpoints. Warnings such as occupied optional ports do not make the command fail; missing required prerequisites do.
+  The healthcheck reports human-readable fixes and JSON `checks` with `id`, `status`, `required`, `detail`, and `action` fields. It verifies Node/npm, dependency install state, env files, git status, common local ports, optional GitHub auth, and ChromaDB/Grafana/Tempo service endpoints. Warnings such as missing optional auth/services or occupied optional ports do not make the command fail; missing required prerequisites do.
 
 - [ ] PMs or workers that need profile-specific evidence: run the capability self-test with the expected profile schema or explicit flags before dispatching PR-producing work:
 

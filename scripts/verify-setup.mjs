@@ -263,13 +263,11 @@ async function main() {
     checkNodeVersion();
     checkNpmPackageManager();
     checkDependencyInstallState(options.dryRun);
-    checkGitHubAuth(!options.dryRun);
+    checkGitHubAuth(false);
     checkGitStatus();
     // Environment file
     check('environment-file', 'Environment file exists', envFileExists, envFileExists ? options.envFile : `Missing — copy .env.example to ${options.envFile}`, `Copy .env.example to ${options.envFile} and customize local-only secrets.`);
-    if (options.dryRun) {
-        checkRequiredBootstrapEnv(options.envFile, envFile);
-    }
+    checkRequiredBootstrapEnv(options.envFile, envFile);
     // Config example
     check('config-example', 'Config example', existsSync('frankenbeast.config.example.json'), 'frankenbeast.config.example.json', 'Restore frankenbeast.config.example.json from the repository or rebase onto origin/main.');
     await checkCommonLocalPorts();

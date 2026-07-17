@@ -144,11 +144,12 @@ describe('local setup scripts', () => {
     expect(source).toContain('--json');
     expect(source).toContain('--require-services');
     expect(source).toContain('Required bootstrap env vars');
-    expect(source).toContain('if (options.dryRun)');
+    expect(source).toContain('checkRequiredBootstrapEnv(options.envFile, envFile)');
     expect(source).toContain("envFile.get('CHROMA_URL')");
     expect(source).toContain('checks: results');
     expect(source).toContain('action');
     expect(source).toContain("shell: process.platform === 'win32'");
+    expect(source).toContain('checkGitHubAuth(false)');
     expect(source).toContain('Skipping live service probes in dry-run mode');
   });
 
@@ -233,7 +234,7 @@ describe('local setup scripts', () => {
       '',
     ].join('\n'));
     writeExecutable(join(bin, 'npm'), "printf '11.5.1\\n'\n");
-    writeExecutable(join(bin, 'gh'), "if [ \"$1 $2 $3\" = '--version  ' ]; then printf 'gh version 2.0.0\\n'; exit 0; fi\nif [ \"$1 $2 $3 $4\" = 'auth status --hostname github.com' ]; then printf 'ok\\n'; exit 0; fi\nexit 1\n");
+    writeExecutable(join(bin, 'gh'), "exit 1\n");
     writeExecutable(join(bin, 'git'), `case \"$1\" in\n  rev-parse) printf '%s\\n' '${root}' ;;\n  status) exit 0 ;;\n  *) exit 0 ;;\nesac\n`);
 
     try {
@@ -248,6 +249,7 @@ describe('local setup scripts', () => {
       expect(report.summary.fail).toBe(0);
       expect(report.summary.warn).toBeGreaterThan(0);
       expect(report.checks).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: 'github-auth', status: 'warn', required: false }),
         expect.objectContaining({ id: 'http-chromadb', status: 'warn', required: false }),
         expect.objectContaining({ id: 'http-grafana', status: 'warn', required: false }),
         expect.objectContaining({ id: 'http-tempo', status: 'warn', required: false }),
