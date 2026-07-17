@@ -230,24 +230,10 @@ function readRunRecords(db: Database.Database, hasRuns: boolean, hasEvents: bool
     return attachCommentOutput(rows);
   }
 
-  const outputEvents = db.prepare(`
-    SELECT run_id AS runId,
-           MIN(created_at) AS firstOutputAt
-    FROM task_events
-    WHERE run_id IS NOT NULL
-      AND created_at >= @cutoff
-      AND kind IN ('commented', 'heartbeat', 'blocked', 'completed', 'protocol_violation', 'crashed', 'gave_up')
-    GROUP BY run_id
-  `).all({ cutoff }) as Array<{ runId: number; firstOutputAt: number }>;
-  const spawnedEvents = db.prepare(`
-    SELECT run_id AS runId,
-           MIN(created_at) AS spawnedAt
-    FROM task_events
-    WHERE run_id IS NOT NULL
-      AND created_at >= @cutoff
-      AND kind = 'spawned'
-    GROUP BY run_id
-  `).all({ cutoff }) as Array<{ runId: number; spawnedAt: number }>;
+  const outputKinds = ['commented', 'heartbeat', 'blocked', 'completed', 'protocol_violation', 'crashed', 'gave_up'];
+  const runIds = [...new Set(rows.map((row) => row.runId).filter(isNumber))];
+  const outputEvents = readEventMinimums(db, runIds, outputKinds, 'firstOutputAt');
+  const spawnedEvents = readEventMinimums(db, runIds, ['spawned'], 'spawnedAt');
   const firstOutputByRun = new Map(outputEvents.map((row) => [row.runId, row.firstOutputAt]));
   const spawnedByRun = new Map(spawnedEvents.map((row) => [row.runId, row.spawnedAt]));
 
@@ -258,6 +244,25 @@ function readRunRecords(db: Database.Database, hasRuns: boolean, hasEvents: bool
   })));
 }
 
+function readEventMinimums<TField extends 'firstOutputAt' | 'spawnedAt'>(
+  db: Database.Database,
+  runIds: number[],
+  kinds: string[],
+  field: TField,
+): Array<{ runId: number } & Record<TField, number>> {
+  if (runIds.length === 0 || kinds.length === 0) return [];
+  const runPlaceholders = runIds.map(() => '?').join(', ');
+  const kindPlaceholders = kinds.map(() => '?').join(', ');
+  return db.prepare(`
+    SELECT run_id AS runId,
+           MIN(created_at) AS ${field}
+    FROM task_events
+    WHERE run_id IN (${runPlaceholders})
+      AND kind IN (${kindPlaceholders})
+    GROUP BY run_id
+  `).all(...runIds, ...kinds) as Array<{ runId: number } & Record<TField, number>>;
+}
+
 function readApprovalRecords(db: Database.Database, now: number): SloApprovalRecord[] {
   const cutoff = now - Math.max(...WINDOWS.map((window) => window.seconds));
   const rows = db.prepare(`
@@ -265,9 +270,46 @@ function readApprovalRecords(db: Database.Database, now: number): SloApprovalRec
            kind,
            payload,
            created_at AS createdAt
-    FROM task_events
+    FROM task_events e
     WHERE kind IN ('blocked', 'unblocked')
-      AND created_at >= @cutoff
+      AND (
+        created_at >= @cutoff
+        OR (
+          kind = 'blocked'
+          AND payload IS NOT NULL
+          AND lower(payload) GLOB '*approval*'
+          AND EXISTS (
+            SELECT 1 FROM task_events u
+            WHERE u.task_id = e.task_id
+              AND u.kind = 'unblocked'
+              AND u.created_at >= @cutoff
+              AND u.created_at >= e.created_at
+          )
+        )
+        OR (
+          kind = 'blocked'
+          AND payload IS NOT NULL
+          AND lower(payload) GLOB '*hitl*'
+          AND EXISTS (
+            SELECT 1 FROM task_events u
+            WHERE u.task_id = e.task_id
+              AND u.kind = 'unblocked'
+              AND u.created_at >= @cutoff
+              AND u.created_at >= e.created_at
+          )
+        )
+        OR (
+          kind = 'blocked'
+          AND payload IS NOT NULL
+          AND (lower(payload) GLOB '*approval*' OR lower(payload) GLOB '*hitl*')
+          AND NOT EXISTS (
+            SELECT 1 FROM task_events u
+            WHERE u.task_id = e.task_id
+              AND u.kind = 'unblocked'
+              AND u.created_at >= e.created_at
+          )
+        )
+      )
     ORDER BY task_id, created_at
   `).all({ cutoff }) as Array<{ taskId: string; kind: string; payload: string | null; createdAt: number }>;
   const pending = new Map<string, number>();
@@ -387,7 +429,7 @@ function firstOutputDurationMs(run: SloRunRecord, now: number): number | null {
 
 function providerWaitDurationMs(run: SloRunRecord, now: number): number | null {
   if (!isNumber(run.runStartedAt)) return null;
-  const end = run.spawnedAt ?? (isTerminalRun(run) ? run.runEndedAt : now);
+  const end = run.spawnedAt ?? (isTerminalRun(run) ? null : now);
   return durationMs(run.runStartedAt, end);
 }
 

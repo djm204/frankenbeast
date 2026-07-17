@@ -90,7 +90,7 @@ describe('SLO dashboard', () => {
     expect(oneHour.metrics.find((metric) => metric.id === 'run_success_rate')).toMatchObject({ value: 50, unit: 'percent', status: 'breach' });
     expect(oneHour.metrics.find((metric) => metric.id === 'time_to_first_output_p50_ms')?.value).toBe(200_000);
     expect(oneHour.metrics.find((metric) => metric.id === 'time_to_closeout_p50_ms')?.value).toBe(600_000);
-    expect(oneHour.metrics.find((metric) => metric.id === 'provider_wait_p50_ms')?.value).toBe(100_000);
+    expect(oneHour.metrics.find((metric) => metric.id === 'provider_wait_p50_ms')?.value).toBe(115_000);
     expect(oneHour.metrics.find((metric) => metric.id === 'queue_age_p50_ms')?.value).toBe(150_000);
     expect(oneHour.metrics.find((metric) => metric.id === 'approval_latency_p50_ms')?.value).toBe(270_000);
     expect(oneHour.failureCategories).toEqual([
