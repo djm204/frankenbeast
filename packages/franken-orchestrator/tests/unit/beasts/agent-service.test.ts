@@ -53,7 +53,7 @@ describe('AgentService', () => {
     ]));
   });
 
-  it('fails closed for unknown roles and skill-derived tool requests', async () => {
+  it('fails closed for unknown roles, missing roles, missing manifests, and merged alias denials', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-agent-service-'));
     const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const securityLog: unknown[] = [];
@@ -78,8 +78,40 @@ describe('AgentService', () => {
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'ticket-manager', config: {} },
       initConfig: {
+        requestedTools: ['patch'],
+      },
+    })).toThrow(/least-privilege tool manifest denied/i);
+
+    expect(() => service.createAgent({
+      definitionId: 'fallback-ticket-manager',
+      source: 'cli',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'ticket-manager', config: {} },
+      initConfig: {
         agentRole: 'ticket-manager',
-        skills: ['patch', 'terminal.background'],
+      },
+    })).toThrow(/least-privilege tool manifest denied/i);
+
+    expect(() => service.createAgent({
+      definitionId: 'fallback-ticket-manager',
+      source: 'cli',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'ticket-manager', config: {} },
+      initConfig: {
+        agentRole: 'ticket-manager',
+        requestedTools: ['read_file'],
+        tools: ['patch'],
+      },
+    })).toThrow(/least-privilege tool manifest denied/i);
+
+    expect(() => service.createAgent({
+      definitionId: 'fallback-constructor-role',
+      source: 'cli',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'constructor-role', config: {} },
+      initConfig: {
+        agentRole: 'constructor',
+        requestedTools: ['read_file'],
       },
     })).toThrow(/least-privilege tool manifest denied/i);
 
@@ -91,9 +123,24 @@ describe('AgentService', () => {
         reason: expect.stringContaining('not recognized'),
       }),
       expect.objectContaining({
+        role: '<missing-role>',
+        requestedTool: 'patch',
+        reason: expect.stringContaining('must include a role'),
+      }),
+      expect.objectContaining({
+        role: 'ticket-manager',
+        requestedTool: '<missing-tool-manifest>',
+        reason: expect.stringContaining('explicit least-privilege tool manifest'),
+      }),
+      expect.objectContaining({
         role: 'ticket-manager',
         requestedTool: 'patch',
         reason: expect.stringContaining('not allowed'),
+      }),
+      expect.objectContaining({
+        role: 'constructor',
+        requestedTool: 'read_file',
+        reason: expect.stringContaining('not recognized'),
       }),
     ]));
   });
@@ -149,7 +196,7 @@ describe('AgentService', () => {
           command: `${agentRole} lane`,
           config: {},
         },
-        initConfig: { agentRole, requestedTools },
+        initConfig: { agentRole, requestedTools, skills: ['code-review', 'testing'] },
       });
     }
 
