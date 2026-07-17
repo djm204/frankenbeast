@@ -44,6 +44,9 @@ describe('issue #1701 setup troubleshooting matrix docs', () => {
     expect(matrix).toContain('${CHROMA_URL:-http://localhost:8000}/api/v2/heartbeat');
     expect(matrix).toContain('detectCheckpointLock(checkpointPath)');
     expect(matrix).toContain('safeToRemove');
+    expect(matrix).toContain("find .fbeast -type f -name '*.lock' -print");
+    expect(matrix).toContain('tempo otlp: reachable');
+    expect(matrix).toContain('npm run build');
     expect(matrix).toContain('frankenbeast network credentials');
     expect(matrix).toContain('Run `init --repair` only when you intentionally want an interactive repair');
   });

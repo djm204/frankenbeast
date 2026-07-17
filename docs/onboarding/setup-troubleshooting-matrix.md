@@ -81,7 +81,7 @@ git diff --stat
 
 ```bash
 pgrep -af '[f]rankenbeast|[f]beast|node .*[f]ranken' || true
-find .fbeast -maxdepth 2 -type f -name '*.lock' -print
+find .fbeast -type f -name '*.lock' -print
 sed -n '1,80p' docs/runbooks/checkpoint-locks.md
 ```
 
@@ -121,6 +121,7 @@ curl -fsS http://localhost:3000/api/health
 
 # Tempo only:
 curl -fsS http://localhost:3200/ready
+node -e "const net=require('node:net'); const s=net.createConnection(4318, '127.0.0.1').once('connect', () => s.end(() => console.log('tempo otlp: reachable'))).once('error', (error) => { console.error('tempo otlp: ' + error.code); process.exit(1); });"
 ```
 
 ### D10 / V10: secret backend and credential refs
@@ -128,7 +129,7 @@ curl -fsS http://localhost:3200/ready
 Inventory configured refs without printing secret values:
 
 ```bash
-npm run build --workspace @franken/orchestrator
+npm run build
 node packages/franken-orchestrator/dist/cli/run.js init --help
 test -f .fbeast/config.json && node -e "console.log(JSON.parse(require('node:fs').readFileSync('.fbeast/config.json','utf8')).network?.secureBackend)"
 frankenbeast network credentials || node packages/franken-orchestrator/dist/cli/run.js network credentials
