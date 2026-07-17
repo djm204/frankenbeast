@@ -1732,6 +1732,63 @@ describe('LessonRecorder', () => {
       }),
     ).toBe(false);
 
+    const importedRepoWithStaleAuditScope = {
+      ...baseLesson,
+      lessonScope: {
+        schemaVersion: 'lesson-scope-v1',
+        scope: 'repo',
+        allowedRepos: ['djm204/frankenbeast'],
+        provenance: { source: 'recorded', taskId: 'scope-task' },
+        auditTrail: [
+          {
+            changedAt: reviewedAt,
+            actor: 'pm-reviewer',
+            toScope: 'repo',
+            reason: 'Previously attested repo scope.',
+          },
+          {
+            changedAt: '2026-07-13T01:30:00.000Z',
+            actor: 'pm-reviewer',
+            fromScope: 'repo',
+            toScope: 'task',
+            reason: 'Latest review demoted the lesson.',
+          },
+        ],
+      },
+    } satisfies CritiqueLesson;
+    expect(
+      isLessonApplicable(importedRepoWithStaleAuditScope, {
+        repo: 'djm204/frankenbeast',
+      }),
+    ).toBe(false);
+
+    const importedRepoWithMalformedAllowlist = {
+      ...repoScoped,
+      lessonScope: {
+        ...repoScoped.lessonScope!,
+        allowedRepos:
+          'djm204/frankenbeast-archive' as unknown as readonly string[],
+      },
+    } satisfies CritiqueLesson;
+    expect(
+      isLessonApplicable(importedRepoWithMalformedAllowlist, {
+        repo: 'djm204/frankenbeast',
+      }),
+    ).toBe(false);
+
+    const importedRepoWithNormalizedExpiry = {
+      ...repoScoped,
+      lessonScope: {
+        ...repoScoped.lessonScope!,
+        expiresAt: '2026-02-30T00:00:00.000Z',
+      },
+    } satisfies CritiqueLesson;
+    expect(
+      isLessonApplicable(importedRepoWithNormalizedExpiry, {
+        repo: 'djm204/frankenbeast',
+      }),
+    ).toBe(false);
+
     const importedRepoWithMalformedAudit = {
       ...baseLesson,
       lessonScope: {
