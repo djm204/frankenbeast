@@ -282,6 +282,40 @@ describe("createBrainAdapter", () => {
     expect(readDb.close).toHaveBeenCalledOnce();
   });
 
+  it("keeps direct API memory reads isolated by profile database path", async () => {
+    const defaultProfile = createBrainAdapter("/tmp/profiles/default/beast.db");
+    const doctorProfile = createBrainAdapter("/tmp/profiles/doctor/beast.db");
+
+    brainInstances[0]!.working.snapshot.mockReturnValue({
+      "profile-note": "default profile memory",
+    });
+    brainInstances[1]!.working.snapshot.mockReturnValue({
+      "profile-note": "doctor profile memory",
+    });
+
+    const defaultRows = await defaultProfile.query({
+      query: "profile memory",
+      type: "working",
+      readScope: "shared",
+      limit: 10,
+    });
+    const doctorRows = await doctorProfile.query({
+      query: "profile memory",
+      type: "working",
+      readScope: "shared",
+      limit: 10,
+    });
+
+    expect(defaultRows).toEqual([
+      { key: "profile-note", value: "default profile memory", type: "working" },
+    ]);
+    expect(doctorRows).toEqual([
+      { key: "profile-note", value: "doctor profile memory", type: "working" },
+    ]);
+    expect(JSON.stringify(defaultRows)).not.toContain("doctor profile memory");
+    expect(JSON.stringify(doctorRows)).not.toContain("default profile memory");
+  });
+
   it("stores and queries only supported memory types", async () => {
     const brain = createBrainAdapter("/tmp/beast.db");
     await brain.store({

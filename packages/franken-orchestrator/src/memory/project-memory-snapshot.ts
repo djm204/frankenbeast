@@ -9,6 +9,8 @@ export interface ProjectMemorySnapshotProvenance {
 export interface ProjectMemoryRecord {
   readonly id: string;
   readonly text: string;
+  readonly profiles?: readonly string[] | undefined;
+  readonly tenants?: readonly string[] | undefined;
   readonly projects?: readonly string[] | undefined;
   readonly repos?: readonly string[] | undefined;
   readonly taskTypes?: readonly string[] | undefined;
@@ -19,6 +21,8 @@ export interface ProjectMemoryRecord {
 }
 
 export interface ProjectMemorySnapshotSelector {
+  readonly profile?: string | undefined;
+  readonly tenant?: string | undefined;
   readonly projectId: string;
   readonly repo?: string | undefined;
   readonly taskType?: string | undefined;
@@ -96,6 +100,8 @@ function matchesSelector(
   minConfidence: number,
   allowedSensitivity: ReadonlySet<ProjectMemorySensitivity>,
 ): boolean {
+  if (!matchesOptionalScope(memory.profiles, selector.profile)) return false;
+  if (!matchesOptionalScope(memory.tenants, selector.tenant)) return false;
   if (!matchesRequiredScope(memory.projects, selector.projectId)) return false;
   if (!matchesOptionalScope(memory.repos, selector.repo)) return false;
   if (!matchesOptionalScope(memory.taskTypes, selector.taskType)) return false;
@@ -143,6 +149,8 @@ function compareSnapshotEntries(left: ProjectMemorySnapshotEntry, right: Project
 function renderProjectMemorySnapshotText(snapshot: Omit<ProjectMemorySnapshot, 'text'>): string {
   const selector = snapshot.selector;
   const scope = [
+    selector.profile === undefined ? undefined : `profile=${selector.profile}`,
+    selector.tenant === undefined ? undefined : `tenant=${selector.tenant}`,
     selector.repo === undefined ? undefined : `repo=${selector.repo}`,
     selector.taskType === undefined ? undefined : `taskType=${selector.taskType}`,
     selector.role === undefined ? undefined : `role=${selector.role}`,
