@@ -41,7 +41,7 @@ export const DEFAULT_WORKING_MEMORY_LIMITS: WorkingMemoryLimits = {
   maxTotalBytes: 64 * 1024 * 1024,
 };
 
-export const CURRENT_MEMORY_SCHEMA_VERSION = 1;
+export const CURRENT_MEMORY_SCHEMA_VERSION = 2;
 
 export interface MemorySchemaStoreMetadata {
   store: string;
@@ -154,15 +154,24 @@ export type MemoryCandidateStatus =
   | 'never_store'
   | 'suppressed';
 export type MemorySuppressionReason = 'rejected' | 'never_store';
+export type MemorySourceType = 'user' | 'inferred' | 'system' | 'tool' | 'operator' | 'unknown';
 
 export interface MemoryCandidateProposal {
   targetStore: MemoryCandidateTargetStore;
   key: string;
   value: unknown;
   source: string;
+  /** High-level source class used by compact memory-injection displays. Defaults from source prefix. */
+  sourceType?: MemorySourceType;
+  /** Non-secret source identifier, e.g. a message id or run id. */
+  sourceId?: string;
   evidenceId?: string;
   confidence: number;
   reason: string;
+  /** Optional ISO expiry; expired memories are hidden from compact agent reads by default. */
+  expiresAt?: string;
+  /** Optional ISO timestamp for when callers should revalidate this fact. */
+  revalidateAt?: string;
 }
 
 export type MemoryDuplicateMatchType = 'exact' | 'semantic';
@@ -322,9 +331,13 @@ export interface MemoryCandidateEdit {
   key?: string;
   value?: unknown;
   source?: string;
+  sourceType?: MemorySourceType;
+  sourceId?: string;
   evidenceId?: string;
   confidence?: number;
   reason?: string;
+  expiresAt?: string;
+  revalidateAt?: string;
 }
 
 export interface MemoryReviewDecisionOptions {
@@ -338,12 +351,39 @@ export interface MemoryProvenanceRecord {
   value: unknown;
   candidateId: string;
   source: string;
+  sourceType: MemorySourceType;
+  sourceId?: string;
   evidenceId?: string;
   confidence: number;
   reason: string;
   reviewer?: string;
   note?: string;
+  createdAt: string;
   approvedAt: string;
+  expiresAt?: string;
+  revalidateAt?: string;
+}
+
+export interface MemoryCompactedEntry {
+  targetStore: MemoryCandidateTargetStore;
+  key: string;
+  value: unknown;
+  compact: string;
+  metadata: {
+    sourceType: MemorySourceType;
+    source: string;
+    sourceId?: string;
+    evidenceId?: string;
+    confidence: number;
+    decayedConfidence: number;
+    reason: string;
+    createdAt: string;
+    updatedAt: string;
+    expiresAt?: string;
+    revalidateAt?: string;
+    expired: boolean;
+    needsRevalidation: boolean;
+  };
 }
 
 export interface MemoryAttributionListOptions {
@@ -365,6 +405,14 @@ export interface MemoryAttributionListOptions {
   source?: string;
   /** Maximum attribution records to return. Defaults to 50, max 1000. */
   limit?: number;
+  /** Include expired provenance rows in compact/read views. Defaults to false. */
+  includeExpired?: boolean;
+  /** Evaluation timestamp for expiry/revalidation/decay. Defaults to now. */
+  now?: string | Date;
+  /** Confidence floor used when compacting decayed confidence. */
+  confidenceFloor?: number;
+  /** Confidence half-life override for compacting decayed confidence. */
+  confidenceHalfLifeMs?: number;
 }
 
 export type MemoryConflictResolution =
@@ -673,6 +721,7 @@ const ENCRYPTED_MEMORY_STORES = MEMORY_STORES.filter(
 const MEMORY_REVIEW_PAYLOAD_COLUMNS = [
   'value',
   'source',
+  'source_id',
   'evidence_id',
   'reason',
   'reviewer',
@@ -2935,9 +2984,13 @@ type MemoryCandidateRow = {
   memory_key: string;
   value: string;
   source: string;
+  source_type?: MemorySourceType | null;
+  source_id?: string | null;
   evidence_id: string | null;
   confidence: number;
   reason: string;
+  expires_at?: string | null;
+  revalidate_at?: string | null;
   status: MemoryCandidateStatus;
   suppression_reason: MemorySuppressionReason | null;
   reviewer: string | null;
@@ -2953,12 +3006,17 @@ type MemoryProvenanceRow = {
   value: string;
   candidate_id: string;
   source: string;
+  source_type?: MemorySourceType | null;
+  source_id?: string | null;
   evidence_id: string | null;
   confidence: number;
   reason: string;
   reviewer: string | null;
   note: string | null;
+  created_at?: string | null;
   approved_at: string;
+  expires_at?: string | null;
+  revalidate_at?: string | null;
 };
 
 type ReviewPayloadRow = {
@@ -2968,8 +3026,12 @@ type ReviewPayloadRow = {
   memory_key: string;
   value: string;
   source: string;
+  source_type?: MemorySourceType | null;
+  source_id?: string | null;
   evidence_id: string | null;
   reason: string;
+  expires_at?: string | null;
+  revalidate_at?: string | null;
   reviewer: string | null;
   note: string | null;
 };
@@ -3005,9 +3067,14 @@ export class SqliteMemoryReviewQueue {
         });
         return;
       }
+      assertMemoryCandidateNotDeletionGuarded(this.db, proposal, this.encryption);
       const now = isoNow();
+      const sourceType = normalizeMemorySourceType(proposal.sourceType, proposal.source);
+      const sourceId = proposal.sourceId;
       const candidate: MemoryCandidate = {
         ...proposal,
+        sourceType,
+        ...(sourceId ? { sourceId } : {}),
         id: `memcand_${randomBytes(12).toString('base64url')}`,
         status: 'pending',
         createdAt: now,
@@ -3016,10 +3083,10 @@ export class SqliteMemoryReviewQueue {
       this.db
         .prepare(
           `INSERT INTO memory_review_candidates (
-            id, target_store, memory_key, value, source, evidence_id, confidence,
-            reason, status, suppression_reason, reviewer, note, created_at,
+            id, target_store, memory_key, value, source, source_type, source_id, evidence_id, confidence,
+            reason, expires_at, revalidate_at, status, suppression_reason, reviewer, note, created_at,
             updated_at, decided_at, schema_version
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, NULL, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, NULL, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
         )
         .run(
           candidate.id,
@@ -3027,9 +3094,13 @@ export class SqliteMemoryReviewQueue {
           candidate.key,
           this.encodeValue(candidate.value),
           this.encodeText(candidate.source),
+          normalizeMemorySourceType(candidate.sourceType, candidate.source),
+          this.encodeSourceId(candidate.sourceId, candidate.source),
           candidate.evidenceId ? this.encodeText(candidate.evidenceId) : null,
           candidate.confidence,
           this.encodeText(candidate.reason),
+          candidate.expiresAt ?? null,
+          candidate.revalidateAt ?? null,
           candidate.status,
           candidate.createdAt,
           candidate.updatedAt,
@@ -3102,21 +3173,31 @@ export class SqliteMemoryReviewQueue {
           ...edit,
           updatedAt: isoNow(),
         };
+        if (edit.source !== undefined && edit.sourceType === undefined) {
+          updated.sourceType = normalizeMemorySourceType(undefined, updated.source);
+        }
+        if (edit.source !== undefined && edit.sourceId === undefined) {
+          delete updated.sourceId;
+        }
         this.validateProposal(updated);
         assertMemoryCandidateNotDeletionGuarded(this.db, updated, this.encryption);
         this.db
           .prepare(
             `UPDATE memory_review_candidates
-             SET memory_key = ?, value = ?, source = ?, evidence_id = ?, confidence = ?, reason = ?, updated_at = ?
+             SET memory_key = ?, value = ?, source = ?, source_type = ?, source_id = ?, evidence_id = ?, confidence = ?, reason = ?, expires_at = ?, revalidate_at = ?, updated_at = ?
              WHERE id = ? AND status = 'pending'`,
           )
           .run(
             updated.key,
             this.encodeValue(updated.value),
             this.encodeText(updated.source),
+            normalizeMemorySourceType(updated.sourceType, updated.source),
+            this.encodeSourceId(updated.sourceId, updated.source),
             updated.evidenceId ? this.encodeText(updated.evidenceId) : null,
             updated.confidence,
             this.encodeText(updated.reason),
+            updated.expiresAt ?? null,
+            updated.revalidateAt ?? null,
             updated.updatedAt,
             id,
           );
@@ -3208,19 +3289,24 @@ export class SqliteMemoryReviewQueue {
       this.db
         .prepare(
           `INSERT INTO memory_review_provenance (
-            target_store, memory_key, value, candidate_id, source, evidence_id,
-            confidence, reason, reviewer, note, approved_at, schema_version
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
+            target_store, memory_key, value, candidate_id, source, source_type, source_id, evidence_id,
+            confidence, reason, reviewer, note, created_at, approved_at, expires_at, revalidate_at, schema_version
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
           ON CONFLICT(target_store, memory_key) DO UPDATE SET
             value = excluded.value,
             candidate_id = excluded.candidate_id,
             source = excluded.source,
+            source_type = excluded.source_type,
+            source_id = excluded.source_id,
             evidence_id = excluded.evidence_id,
             confidence = excluded.confidence,
             reason = excluded.reason,
             reviewer = excluded.reviewer,
             note = excluded.note,
+            created_at = excluded.created_at,
             approved_at = excluded.approved_at,
+            expires_at = excluded.expires_at,
+            revalidate_at = excluded.revalidate_at,
             schema_version = excluded.schema_version`,
         )
         .run(
@@ -3229,12 +3315,17 @@ export class SqliteMemoryReviewQueue {
           this.encodeValue(candidate.value),
           candidate.id,
           this.encodeText(candidate.source),
+          normalizeMemorySourceType(candidate.sourceType, candidate.source),
+          this.encodeSourceId(candidate.sourceId, candidate.source),
           candidate.evidenceId ? this.encodeText(candidate.evidenceId) : null,
           candidate.confidence,
           this.encodeText(candidate.reason),
           options.reviewer ? this.encodeText(options.reviewer) : null,
           options.note ? this.encodeText(options.note) : null,
+          candidate.createdAt,
           now,
+          candidate.expiresAt ?? null,
+          candidate.revalidateAt ?? null,
         );
       this.markDecision(id, 'approved', now, options);
       approvedCandidate = this.requireCandidate(id);
@@ -3503,6 +3594,9 @@ export class SqliteMemoryReviewQueue {
         conditions.push("memory_key NOT LIKE ? ESCAPE '\\'");
         params.push(`${prefix.replace(/[\\%_]/g, char => `\\${char}`)}%`);
       }
+      const nowMs = options.includeExpired === false
+        ? parseDecayTimestamp(options.now ?? new Date(), 'now')
+        : undefined;
       const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
       const rows = this.db
         .prepare(
@@ -3516,6 +3610,9 @@ export class SqliteMemoryReviewQueue {
           continue;
         }
         const provenance = this.rowToProvenance(row);
+        if (nowMs !== undefined && provenance.expiresAt && Date.parse(provenance.expiresAt) <= nowMs) {
+          continue;
+        }
         if (sourceFilter && !provenance.source.toLowerCase().includes(sourceFilter)) {
           continue;
         }
@@ -3571,6 +3668,84 @@ export class SqliteMemoryReviewQueue {
       excludePrefixCount: options.excludeKeyPrefixes?.length,
       includeUnprefixedKeys: options.includeUnprefixedKeys,
       limit,
+    };
+  }
+
+  listForAgent(
+    options: MemoryAttributionListOptions = {},
+  ): MemoryCompactedEntry[] {
+    const now = options.now ?? new Date();
+    const limit = this.resolveAttributionLimit(options.limit);
+    const provenance = this.listProvenance({
+      ...options,
+      includeExpired: options.includeExpired ? true : false,
+      now,
+      limit: 1000,
+    });
+    return provenance
+      .filter(record => this.provenanceMatchesCurrentWorkingState(record))
+      .slice(0, limit)
+      .map((record) => this.provenanceToCompactedEntry(record, options, now));
+  }
+
+  private provenanceMatchesCurrentWorkingState(record: MemoryProvenanceRecord): boolean {
+    if (record.targetStore !== 'working') return true;
+    const state = this.working.reviewValueState(record.key);
+    if (state.state !== 'present') return false;
+    return stableStringify(canonicalMemoryValue(state.value)) ===
+      stableStringify(canonicalMemoryValue(record.value));
+  }
+
+  private provenanceToCompactedEntry(
+    record: MemoryProvenanceRecord,
+    options: MemoryAttributionListOptions,
+    now: string | Date,
+  ): MemoryCompactedEntry {
+    const nowMs = parseDecayTimestamp(now, 'now');
+    const expiresAtMs = record.expiresAt ? Date.parse(record.expiresAt) : NaN;
+    const revalidateAtMs = record.revalidateAt ? Date.parse(record.revalidateAt) : NaN;
+    const decay = calculateMemoryConfidenceDecay({
+      confidence: record.confidence,
+      observedAt: record.approvedAt,
+      now,
+      ...(options.confidenceHalfLifeMs !== undefined ? { halfLifeMs: options.confidenceHalfLifeMs } : {}),
+      ...(options.confidenceFloor !== undefined ? { floor: options.confidenceFloor } : {}),
+    });
+    const expired = Number.isFinite(expiresAtMs) && expiresAtMs <= nowMs;
+    const needsRevalidation = Number.isFinite(revalidateAtMs) && revalidateAtMs <= nowMs;
+    const sourceId = record.sourceId ?? record.evidenceId;
+    const compact = [
+      `${record.key}=${JSON.stringify(record.value)}`,
+      `source=${record.sourceType}${sourceId ? `:${JSON.stringify(sourceId)}` : ''}`,
+      `confidence=${decay.confidence.toFixed(3)}`,
+      `created=${record.createdAt}`,
+      `updated=${record.approvedAt}`,
+      ...(record.expiresAt ? [`expires=${record.expiresAt}`] : []),
+      ...(record.revalidateAt ? [`revalidate=${record.revalidateAt}`] : []),
+      ...(expired ? ['expired=true'] : []),
+      ...(needsRevalidation ? ['revalidate_due=true'] : []),
+      `reason=${JSON.stringify(record.reason)}`,
+    ].join(' | ');
+    return {
+      targetStore: record.targetStore,
+      key: record.key,
+      value: record.value,
+      compact,
+      metadata: {
+        sourceType: record.sourceType,
+        source: record.source,
+        ...(record.sourceId ? { sourceId: record.sourceId } : {}),
+        ...(record.evidenceId ? { evidenceId: record.evidenceId } : {}),
+        confidence: record.confidence,
+        decayedConfidence: decay.confidence,
+        reason: record.reason,
+        createdAt: record.createdAt,
+        updatedAt: record.approvedAt,
+        ...(record.expiresAt ? { expiresAt: record.expiresAt } : {}),
+        ...(record.revalidateAt ? { revalidateAt: record.revalidateAt } : {}),
+        expired,
+        needsRevalidation,
+      },
     };
   }
 
@@ -3866,19 +4041,24 @@ export class SqliteMemoryReviewQueue {
       this.db
         .prepare(
           `INSERT INTO memory_review_provenance (
-            target_store, memory_key, value, candidate_id, source, evidence_id,
-            confidence, reason, reviewer, note, approved_at, schema_version
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
+            target_store, memory_key, value, candidate_id, source, source_type, source_id, evidence_id,
+            confidence, reason, reviewer, note, created_at, approved_at, expires_at, revalidate_at, schema_version
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
           ON CONFLICT(target_store, memory_key) DO UPDATE SET
             value = excluded.value,
             candidate_id = excluded.candidate_id,
             source = excluded.source,
+            source_type = excluded.source_type,
+            source_id = excluded.source_id,
             evidence_id = excluded.evidence_id,
             confidence = excluded.confidence,
             reason = excluded.reason,
             reviewer = excluded.reviewer,
             note = excluded.note,
+            created_at = excluded.created_at,
             approved_at = excluded.approved_at,
+            expires_at = excluded.expires_at,
+            revalidate_at = excluded.revalidate_at,
             schema_version = excluded.schema_version`,
         )
         .run(
@@ -3887,12 +4067,17 @@ export class SqliteMemoryReviewQueue {
           this.encodeValue(updatedCandidate.value),
           updatedCandidate.id,
           this.encodeText(updatedCandidate.source),
+          normalizeMemorySourceType(updatedCandidate.sourceType, updatedCandidate.source),
+          this.encodeSourceId(updatedCandidate.sourceId, updatedCandidate.source),
           updatedCandidate.evidenceId ? this.encodeText(updatedCandidate.evidenceId) : null,
           updatedCandidate.confidence,
           this.encodeText(updatedCandidate.reason),
           decisionOptions.reviewer ? this.encodeText(decisionOptions.reviewer) : null,
           this.encodeText(decisionOptions.note ?? 'Memory conflict resolved by keeping both values with explicit scope.'),
+          updatedCandidate.createdAt,
           now,
+          updatedCandidate.expiresAt ?? null,
+          updatedCandidate.revalidateAt ?? null,
         );
       this.markDecision(id, 'approved', now, {
         ...decisionOptions,
@@ -3972,9 +4157,9 @@ export class SqliteMemoryReviewQueue {
       this.db
         .prepare(
           `INSERT INTO memory_review_provenance (
-            target_store, memory_key, value, candidate_id, source, evidence_id,
-            confidence, reason, reviewer, note, approved_at, schema_version
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
+            target_store, memory_key, value, candidate_id, source, source_type, source_id, evidence_id,
+            confidence, reason, reviewer, note, created_at, approved_at, expires_at, revalidate_at, schema_version
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
         )
         .run(
           candidate.targetStore,
@@ -3982,12 +4167,17 @@ export class SqliteMemoryReviewQueue {
           this.encodeValue(candidate.value),
           candidate.id,
           this.encodeText(candidate.source),
+          normalizeMemorySourceType(candidate.sourceType, candidate.source),
+          this.encodeSourceId(candidate.sourceId, candidate.source),
           candidate.evidenceId ? this.encodeText(candidate.evidenceId) : null,
           candidate.confidence,
           this.encodeText(candidate.reason),
           decisionOptions.reviewer ? this.encodeText(decisionOptions.reviewer) : null,
           this.encodeText(decisionOptions.note ?? 'Memory conflict resolved by expiring the old value before approving the candidate.'),
+          candidate.createdAt,
           now,
+          candidate.expiresAt ?? null,
+          candidate.revalidateAt ?? null,
         );
       this.markDecision(id, 'approved', now, {
         ...decisionOptions,
@@ -4253,6 +4443,9 @@ export class SqliteMemoryReviewQueue {
     if (proposal.source.trim().length === 0) {
       throw new Error('Memory candidate source must not be empty');
     }
+    normalizeMemorySourceType(proposal.sourceType, proposal.source);
+    validateOptionalIsoTimestamp(proposal.expiresAt, 'expiresAt');
+    validateOptionalIsoTimestamp(proposal.revalidateAt, 'revalidateAt');
     if (proposal.reason.trim().length === 0) {
       throw new Error('Memory candidate reason must not be empty');
     }
@@ -4374,8 +4567,8 @@ export class SqliteMemoryReviewQueue {
       .prepare(
         `INSERT INTO memory_review_suppressions (
           signature, suppression_reason, target_store, memory_key, value, source,
-          evidence_id, reason, reviewer, note, created_at, schema_version
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
+          source_id, evidence_id, reason, reviewer, note, created_at, schema_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
         ON CONFLICT(signature) DO UPDATE SET
           suppression_reason = excluded.suppression_reason,
           reviewer = excluded.reviewer,
@@ -4391,6 +4584,7 @@ export class SqliteMemoryReviewQueue {
           reason === 'never_store' ? NEVER_STORE_REDACTED_VALUE : candidate.value,
         ),
         this.encodeText(candidate.source),
+        this.encodeSourceId(candidate.sourceId, candidate.source),
         candidate.evidenceId ? this.encodeText(candidate.evidenceId) : null,
         this.encodeText(candidate.reason),
         options.reviewer ? this.encodeText(options.reviewer) : null,
@@ -4422,7 +4616,7 @@ export class SqliteMemoryReviewQueue {
     this.db
       .prepare(
         `UPDATE memory_review_candidates
-         SET value = ?, source = ?, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL, updated_at = ?
+         SET value = ?, source = ?, source_id = NULL, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL, updated_at = ?
          WHERE target_store = ? AND memory_key = ?`,
       )
       .run(
@@ -4436,7 +4630,7 @@ export class SqliteMemoryReviewQueue {
     this.db
       .prepare(
         `UPDATE memory_review_suppressions
-         SET value = ?, source = ?, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL
+         SET value = ?, source = ?, source_id = NULL, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL
          WHERE target_store = ? AND memory_key = ?`,
       )
       .run(
@@ -4483,6 +4677,7 @@ export class SqliteMemoryReviewQueue {
         memory_key: string;
         value: string;
         source: string;
+        source_id: string | null;
         evidence_id: string | null;
       }>;
     for (const row of rows) {
@@ -4490,8 +4685,10 @@ export class SqliteMemoryReviewQueue {
       if (stableStringify(canonicalMemoryValue(this.decodeValue(row.value))) !== candidateValue) {
         continue;
       }
+      const storedSourceId = row.source_id ? this.decodeText(row.source_id) : undefined;
       if (
         this.decodeText(row.source) === candidate.source &&
+        (storedSourceId === undefined || storedSourceId === candidate.sourceId) &&
         (row.evidence_id ? this.decodeText(row.evidence_id) : undefined) ===
           candidate.evidenceId
       ) {
@@ -4565,6 +4762,7 @@ export class SqliteMemoryReviewQueue {
             proposal.targetStore,
             proposal.key,
             proposal.source,
+            proposal.sourceId ?? '',
             proposal.evidenceId ?? '',
             stableStringify(normalizedValue),
           ],
@@ -4580,9 +4778,13 @@ export class SqliteMemoryReviewQueue {
       key: row.memory_key,
       value: this.decodeValue(row.value),
       source: this.decodeText(row.source),
+      sourceType: normalizeMemorySourceType(row.source_type ?? undefined, this.decodeText(row.source)),
+      ...(row.source_id ? { sourceId: this.decodeText(row.source_id) } : {}),
       ...(row.evidence_id ? { evidenceId: this.decodeText(row.evidence_id) } : {}),
       confidence: row.confidence,
       reason: this.decodeText(row.reason),
+      ...(row.expires_at ? { expiresAt: row.expires_at } : {}),
+      ...(row.revalidate_at ? { revalidateAt: row.revalidate_at } : {}),
       status: row.status,
       ...(row.suppression_reason
         ? { suppressionReason: row.suppression_reason }
@@ -4602,12 +4804,17 @@ export class SqliteMemoryReviewQueue {
       value: this.decodeValue(row.value),
       candidateId: row.candidate_id,
       source: this.decodeText(row.source),
+      sourceType: normalizeMemorySourceType(row.source_type ?? undefined, this.decodeText(row.source)),
+      ...(row.source_id ? { sourceId: this.decodeText(row.source_id) } : {}),
       ...(row.evidence_id ? { evidenceId: this.decodeText(row.evidence_id) } : {}),
       confidence: row.confidence,
       reason: this.decodeText(row.reason),
       ...(row.reviewer ? { reviewer: this.decodeText(row.reviewer) } : {}),
       ...(row.note ? { note: this.decodeText(row.note) } : {}),
+      createdAt: row.created_at ?? row.approved_at,
       approvedAt: row.approved_at,
+      ...(row.expires_at ? { expiresAt: row.expires_at } : {}),
+      ...(row.revalidate_at ? { revalidateAt: row.revalidate_at } : {}),
     };
   }
 
@@ -4623,8 +4830,52 @@ export class SqliteMemoryReviewQueue {
     return this.encodeText(stringifyWorkingMemoryValue('memory candidate', value));
   }
 
+  private encodeSourceId(sourceId: string | undefined, _source: string): string | null {
+    return sourceId ? this.encodeText(sourceId) : null;
+  }
+
   private decodeValue(value: string): unknown {
     return parseStoredWorkingMemoryValue(this.decodeText(value));
+  }
+}
+
+function normalizeMemorySourceType(
+  sourceType: MemorySourceType | string | undefined | null,
+  source: string,
+): MemorySourceType {
+  if (sourceType !== undefined && sourceType !== null) {
+    if (['user', 'inferred', 'system', 'tool', 'operator', 'unknown'].includes(sourceType)) {
+      return sourceType as MemorySourceType;
+    }
+    throw new Error(`Unsupported memory source type: ${String(sourceType)}`);
+  }
+  const normalized = source.trim().toLowerCase();
+  if (normalized === 'chat' || normalized.startsWith('chat:') || normalized.startsWith('chat-') || normalized.startsWith('user:')) return 'user';
+  if (normalized.startsWith('inferred:') || normalized.includes('inference')) return 'inferred';
+  if (normalized.startsWith('tool:') || normalized === 'terminal' || normalized.startsWith('terminal:') || normalized.startsWith('terminal-')) return 'tool';
+  if (normalized.startsWith('operator:')) return 'operator';
+  if (normalized.startsWith('repo') || normalized.startsWith('system:') || normalized.includes('config')) return 'system';
+  return 'unknown';
+}
+
+
+function optionalTextMatches(stored: string | undefined, incoming: string | undefined): boolean {
+  return stored === undefined || incoming === undefined || stored === incoming;
+}
+
+function validateOptionalIsoTimestamp(value: string | undefined, fieldName: string): void {
+  if (value === undefined) return;
+  if (typeof value !== 'string' || value.trim().length === 0 || !Number.isFinite(Date.parse(value))) {
+    throw new Error(`Memory candidate ${fieldName} must be a valid ISO timestamp when provided`);
+  }
+}
+
+function ensureColumns(db: Database.Database, table: string, columns: Record<string, string>): void {
+  const existing = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(row => row.name));
+  for (const [name, definition] of Object.entries(columns)) {
+    if (!existing.has(name)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
+    }
   }
 }
 
@@ -4977,14 +5228,21 @@ export class SqliteBrain implements IBrain {
     }
   }
 
-  private static expireLiveWorkingMatches(dbPath: string, selector: NormalizedRightToForgetSelector): void {
+  private static expireLiveWorkingMatches(
+    dbPath: string,
+    selector: NormalizedRightToForgetSelector,
+    keysToExpire: readonly string[] = [],
+  ): void {
     const normalizedDbPath = normalizeSqliteDbPath(dbPath);
     if (normalizedDbPath === ':memory:' || selector.type === 'episodic') return;
     const liveBrains = liveSqliteBrainsByPath.get(normalizedDbPath);
     if (!liveBrains) return;
     for (const brain of liveBrains) {
-      const keys = brain.working.matchingRuntimeKeys(selector);
-      brain.working.expireRuntimeKeys(keys, selector);
+      const keys = new Set([
+        ...brain.working.matchingRuntimeKeys(selector),
+        ...keysToExpire,
+      ]);
+      brain.working.expireRuntimeKeys(Array.from(keys), selector);
     }
   }
 
@@ -5038,9 +5296,13 @@ export class SqliteBrain implements IBrain {
         memory_key TEXT NOT NULL,
         value TEXT NOT NULL,
         source TEXT NOT NULL,
+        source_type TEXT,
+        source_id TEXT,
         evidence_id TEXT,
         confidence REAL NOT NULL,
         reason TEXT NOT NULL,
+        expires_at TEXT,
+        revalidate_at TEXT,
         status TEXT NOT NULL,
         suppression_reason TEXT,
         reviewer TEXT,
@@ -5058,12 +5320,17 @@ export class SqliteBrain implements IBrain {
         value TEXT NOT NULL,
         candidate_id TEXT NOT NULL,
         source TEXT NOT NULL,
+        source_type TEXT,
+        source_id TEXT,
         evidence_id TEXT,
         confidence REAL NOT NULL,
         reason TEXT NOT NULL,
         reviewer TEXT,
         note TEXT,
+        created_at TEXT,
         approved_at TEXT NOT NULL,
+        expires_at TEXT,
+        revalidate_at TEXT,
         schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION},
         PRIMARY KEY (target_store, memory_key)
       );
@@ -5074,6 +5341,7 @@ export class SqliteBrain implements IBrain {
         memory_key TEXT NOT NULL,
         value TEXT NOT NULL,
         source TEXT NOT NULL,
+        source_id TEXT,
         evidence_id TEXT,
         reason TEXT NOT NULL,
         reviewer TEXT,
@@ -5113,6 +5381,23 @@ export class SqliteBrain implements IBrain {
       CREATE INDEX IF NOT EXISTS idx_memory_access_audit_operation
         ON memory_access_audit_events(store, operation, created_at DESC);
     `);
+    this.ensureMemoryReviewMetadataColumns();
+  }
+
+  private ensureMemoryReviewMetadataColumns(): void {
+    ensureColumns(this.db, 'memory_review_candidates', {
+      source_type: 'TEXT',
+      source_id: 'TEXT',
+      expires_at: 'TEXT',
+      revalidate_at: 'TEXT',
+    });
+    ensureColumns(this.db, 'memory_review_provenance', {
+      source_type: 'TEXT',
+      source_id: 'TEXT',
+      created_at: 'TEXT',
+      expires_at: 'TEXT',
+      revalidate_at: 'TEXT',
+    });
   }
 
   getMemorySchemaMetadata(): MemorySchemaMetadata {
@@ -5437,7 +5722,11 @@ export class SqliteBrain implements IBrain {
         this.working.deleteRuntimeKeys(Array.from(runtimeWorkingKeysToDelete));
         purgeDeletedSqliteContent(this.db, this.dbPath);
       }
-      SqliteBrain.expireLiveWorkingMatches(this.dbPath, normalizedSelector);
+      SqliteBrain.expireLiveWorkingMatches(
+        this.dbPath,
+        normalizedSelector,
+        Array.from(runtimeWorkingKeysToDelete),
+      );
       return {
         selectorHash,
         dryRun,
@@ -5523,21 +5812,21 @@ export class SqliteBrain implements IBrain {
   private matchingReviewPayloads(selector: NormalizedRightToForgetSelector): ReviewPayloadMatch[] {
     const matches: ReviewPayloadMatch[] = [];
     for (const row of this.db.prepare(
-      `SELECT id, target_store, memory_key, value, source, evidence_id, reason, reviewer, note FROM memory_review_candidates`,
+      `SELECT id, target_store, memory_key, value, source, source_id, evidence_id, reason, reviewer, note FROM memory_review_candidates`,
     ).all() as ReviewPayloadRow[]) {
       if (row.id && this.reviewPayloadRowMatchesSelector(row, selector)) {
         matches.push({ table: 'memory_review_candidates', id: row.id, key: row.memory_key });
       }
     }
     for (const row of this.db.prepare(
-      `SELECT target_store, memory_key, value, source, evidence_id, reason, reviewer, note FROM memory_review_provenance`,
+      `SELECT target_store, memory_key, value, source, source_id, evidence_id, reason, reviewer, note FROM memory_review_provenance`,
     ).all() as ReviewPayloadRow[]) {
       if (this.reviewPayloadRowMatchesSelector(row, selector)) {
         matches.push({ table: 'memory_review_provenance', targetStore: row.target_store, key: row.memory_key });
       }
     }
     for (const row of this.db.prepare(
-      `SELECT signature, target_store, memory_key, value, source, evidence_id, reason, reviewer, note FROM memory_review_suppressions`,
+      `SELECT signature, target_store, memory_key, value, source, source_id, evidence_id, reason, reviewer, note FROM memory_review_suppressions`,
     ).all() as ReviewPayloadRow[]) {
       if (row.signature && this.reviewPayloadRowMatchesSelector(row, selector)) {
         matches.push({ table: 'memory_review_suppressions', signature: row.signature, key: row.memory_key });
@@ -5560,6 +5849,7 @@ export class SqliteBrain implements IBrain {
       {
         value: parseStoredWorkingMemoryValue(this.encryption?.decrypt(row.value) ?? row.value),
         source: this.encryption?.decrypt(row.source) ?? row.source,
+        sourceId: row.source_id ? this.encryption?.decrypt(row.source_id) ?? row.source_id : undefined,
         evidenceId: row.evidence_id ? this.encryption?.decrypt(row.evidence_id) ?? row.evidence_id : undefined,
         reason: this.encryption?.decrypt(row.reason) ?? row.reason,
         reviewer: row.reviewer ? this.encryption?.decrypt(row.reviewer) ?? row.reviewer : undefined,
@@ -5573,7 +5863,7 @@ export class SqliteBrain implements IBrain {
     if (matches.length === 0) return;
     const redactCandidates = this.db.prepare(
       `UPDATE memory_review_candidates
-       SET memory_key = ?, value = ?, source = ?, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL,
+       SET memory_key = ?, value = ?, source = ?, source_id = NULL, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL,
            status = CASE WHEN status = 'pending' THEN 'suppressed' ELSE status END,
            suppression_reason = CASE WHEN status = 'pending' THEN 'never_store' ELSE suppression_reason END,
            decided_at = CASE WHEN status = 'pending' THEN ? ELSE decided_at END,
@@ -5582,12 +5872,12 @@ export class SqliteBrain implements IBrain {
     );
     const redactProvenance = this.db.prepare(
       `UPDATE memory_review_provenance
-       SET memory_key = ?, value = ?, source = ?, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL
+       SET memory_key = ?, value = ?, source = ?, source_id = NULL, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL
        WHERE target_store = ? AND memory_key = ?`,
     );
     const redactSuppression = this.db.prepare(
       `UPDATE memory_review_suppressions
-       SET memory_key = ?, value = ?, source = ?, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL
+       SET memory_key = ?, value = ?, source = ?, source_id = NULL, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL
        WHERE signature = ?`,
     );
     const redactedValue = this.encryption?.encrypt(stringifyWorkingMemoryValue('memory candidate', NEVER_STORE_REDACTED_VALUE)) ?? stringifyWorkingMemoryValue('memory candidate', NEVER_STORE_REDACTED_VALUE);
@@ -5834,6 +6124,23 @@ function migrateMemorySchemaDatabase(
       .prepare(`PRAGMA table_info(${store})`)
       .all() as Array<{ name: string }>;
     const columns = new Set(columnRows.map((row) => row.name));
+    if (store === 'memory_review_candidates') {
+      for (const column of ['source_type', 'source_id', 'expires_at', 'revalidate_at']) {
+        if (!columns.has(column)) {
+          operations.push({ table: store, action: `add ${column} column` });
+        }
+      }
+    }
+    if (store === 'memory_review_provenance') {
+      for (const column of ['source_type', 'source_id', 'created_at', 'expires_at', 'revalidate_at']) {
+        if (!columns.has(column)) {
+          operations.push({ table: store, action: `add ${column} column` });
+        }
+      }
+    }
+    if (store === 'memory_review_suppressions' && !columns.has('source_id')) {
+      operations.push({ table: store, action: 'add source_id column' });
+    }
     if (!columns.has('schema_version')) {
       operations.push({
         table: store,
@@ -5951,9 +6258,13 @@ function migrateMemorySchemaDatabase(
         memory_key TEXT NOT NULL,
         value TEXT NOT NULL,
         source TEXT NOT NULL,
+        source_type TEXT,
+        source_id TEXT,
         evidence_id TEXT,
         confidence REAL NOT NULL,
         reason TEXT NOT NULL,
+        expires_at TEXT,
+        revalidate_at TEXT,
         status TEXT NOT NULL,
         suppression_reason TEXT,
         reviewer TEXT,
@@ -5971,12 +6282,17 @@ function migrateMemorySchemaDatabase(
         value TEXT NOT NULL,
         candidate_id TEXT NOT NULL,
         source TEXT NOT NULL,
+        source_type TEXT,
+        source_id TEXT,
         evidence_id TEXT,
         confidence REAL NOT NULL,
         reason TEXT NOT NULL,
         reviewer TEXT,
         note TEXT,
+        created_at TEXT,
         approved_at TEXT NOT NULL,
+        expires_at TEXT,
+        revalidate_at TEXT,
         schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION},
         PRIMARY KEY (target_store, memory_key)
       );
@@ -5987,6 +6303,7 @@ function migrateMemorySchemaDatabase(
         memory_key TEXT NOT NULL,
         value TEXT NOT NULL,
         source TEXT NOT NULL,
+        source_id TEXT,
         evidence_id TEXT,
         reason TEXT NOT NULL,
         reviewer TEXT,
@@ -5997,6 +6314,22 @@ function migrateMemorySchemaDatabase(
       CREATE INDEX IF NOT EXISTS idx_memory_review_suppressions_target_key
         ON memory_review_suppressions(target_store, memory_key);
     `);
+    ensureColumns(db, 'memory_review_candidates', {
+      source_type: 'TEXT',
+      source_id: 'TEXT',
+      expires_at: 'TEXT',
+      revalidate_at: 'TEXT',
+    });
+    ensureColumns(db, 'memory_review_provenance', {
+      source_type: 'TEXT',
+      source_id: 'TEXT',
+      created_at: 'TEXT',
+      expires_at: 'TEXT',
+      revalidate_at: 'TEXT',
+    });
+    ensureColumns(db, 'memory_review_suppressions', {
+      source_id: 'TEXT',
+    });
     for (const store of stores) {
       const columnRows = db
         .prepare(`PRAGMA table_info(${store})`)
@@ -6251,20 +6584,11 @@ function readStorePayloads(
         }>
       ).map((row) => row.state);
     case 'memory_review_candidates':
-      return readReviewPayloads(
-        db,
-        `SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_candidates`,
-      );
+      return readReviewPayloads(db, 'memory_review_candidates');
     case 'memory_review_provenance':
-      return readReviewPayloads(
-        db,
-        `SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_provenance`,
-      );
+      return readReviewPayloads(db, 'memory_review_provenance');
     case 'memory_review_suppressions':
-      return readReviewPayloads(
-        db,
-        `SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_suppressions`,
-      );
+      return readReviewPayloads(db, 'memory_review_suppressions');
     case 'memory_deletion_hash_keys':
       return (
         db.prepare(`SELECT key_material FROM memory_deletion_hash_keys`).all() as Array<{
@@ -6275,20 +6599,27 @@ function readStorePayloads(
   return [];
 }
 
-function readReviewPayloads(db: Database.Database, sql: string): string[] {
-  return (
-    db.prepare(sql).all() as Array<{
-      value: string;
-      source: string;
-      evidence_id: string | null;
-      reason: string;
-      reviewer: string | null;
-      note: string | null;
-    }>
-  ).flatMap((row) =>
-    [row.value, row.source, row.evidence_id, row.reason, row.reviewer, row.note].filter(
-      (value): value is string => value !== null,
+function readReviewPayloads(db: Database.Database, table: string): string[] {
+  const desiredColumns = [
+    'value',
+    'source',
+    'source_id',
+    'evidence_id',
+    'reason',
+    'reviewer',
+    'note',
+  ];
+  const existing = new Set(
+    (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(
+      row => row.name,
     ),
+  );
+  const columns = desiredColumns.filter(column => existing.has(column));
+  if (columns.length === 0) return [];
+  const selected = columns.join(', ');
+  const rows = db.prepare(`SELECT ${selected} FROM ${table}`).all() as Array<Record<string, string | null>>;
+  return rows.flatMap((row) =>
+    columns.map(column => row[column]).filter((value): value is string => value !== null),
   );
 }
 
@@ -6374,18 +6705,27 @@ function encryptReviewPayloadRows(
   keyColumns: 'id' | 'signature' | 'target_store, memory_key',
 ): void {
   if (!tableExists(db, table)) return;
+  const tableColumns = new Set(
+    (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(
+      (row) => row.name,
+    ),
+  );
+  const payloadColumns = MEMORY_REVIEW_PAYLOAD_COLUMNS.filter((column) =>
+    tableColumns.has(column),
+  );
+  if (payloadColumns.length === 0) return;
   const rows = db
-    .prepare(`SELECT ${keyColumns}, ${MEMORY_REVIEW_PAYLOAD_COLUMNS.join(', ')} FROM ${table}`)
+    .prepare(`SELECT ${keyColumns}, ${payloadColumns.join(', ')} FROM ${table}`)
     .all() as Array<Record<string, string | null>>;
   for (const row of rows) {
-    const assignments = MEMORY_REVIEW_PAYLOAD_COLUMNS.map(
+    const assignments = payloadColumns.map(
       (column) => `${column} = ?`,
     ).join(', ');
     const where =
       keyColumns === 'target_store, memory_key'
         ? `target_store = ? AND memory_key = ?`
         : `${keyColumns} = ?`;
-    const payloadValues = MEMORY_REVIEW_PAYLOAD_COLUMNS.map((column) => {
+    const payloadValues = payloadColumns.map((column) => {
       const value = row[column];
       return value === null || value === undefined
         ? null
@@ -6932,6 +7272,7 @@ function assertMemoryCandidateNotDeletionGuarded(
     stringifyWorkingMemoryValue(proposal.key, {
       value: proposal.value,
       source: proposal.source,
+      sourceId: proposal.sourceId,
       evidenceId: proposal.evidenceId,
       reason: proposal.reason,
     }),
@@ -6945,6 +7286,7 @@ function reviewPayloadMatchesSelector(
   payload: {
     value: unknown;
     source: string;
+    sourceId?: string | undefined;
     evidenceId?: string | undefined;
     reason: string;
     reviewer?: string | undefined;
