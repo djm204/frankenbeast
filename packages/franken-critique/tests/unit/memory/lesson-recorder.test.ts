@@ -1595,6 +1595,40 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('detects full-word documentation update lessons', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-documentation-update',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Update documentation with the npm ci requirement'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'docs',
+        review: expect.objectContaining({ status: 'pending-review' }),
+      }),
+    );
+  });
+
+  it('rejects issue-number task references without hashes', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-bare-issue-reference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Always check issue 123 before replying'],
+      toolFailures: ['When issue 123 checks failed, use gh run view'],
+    });
+
+    expect(report.candidates).toHaveLength(2);
+    for (const candidate of report.candidates) {
+      expect(candidate).toEqual(
+        expect.objectContaining({
+          suggestedDestination: 'discard',
+          review: expect.objectContaining({ status: 'discarded' }),
+        }),
+      );
+    }
+  });
+
   it('discards conditional failure observations without guidance', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-conditional-failure-observation',

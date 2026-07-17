@@ -200,7 +200,7 @@ const CUSTOMER_DATA_PATTERNS: readonly RegExp[] = [
 
 const TASK_STATE_PATTERNS: readonly RegExp[] = [
   /\b(?:PR|pull request)\s*#?\d+\b/i,
-  /\bissue\s*#\d+\b/i,
+  /\bissue\s*#?\d+\b/i,
   /\bticket\s*#?\d+\b/i,
   /\b(?:merged|opened|closed|pushed|committed)\s+(?:PR|pull request|branch|commit)\b/i,
   /\b(?:commit|sha)\s+[0-9a-f]{7,40}\b/i,
@@ -1181,7 +1181,7 @@ function choosePostTaskLessonDestination(
 }
 
 function isDocumentationUpdateLesson(text: string): boolean {
-  if (/^\s*(?:please\s+)?don'?t\s+forget\b.{0,80}\b(?:add|document|record|publish|update|write)\b.{0,80}\b(?:docs?|readme|runbook|guide)\b/i.test(text)) {
+  if (/^\s*(?:please\s+)?don'?t\s+forget\b.{0,80}\b(?:add|document|record|publish|update|write)\b.{0,80}\b(?:docs?|documentation|readme|runbook|guide)\b/i.test(text)) {
     return true;
   }
   if (
@@ -1191,7 +1191,7 @@ function isDocumentationUpdateLesson(text: string): boolean {
   ) {
     return false;
   }
-  return /\b(?:add|added|document|documented|record|recorded|publish|published|update|updated|write|wrote|written)\b.{0,80}\b(?:docs?|readme|runbook|guide)\b|\b(?:docs?|readme|runbook|guide)\b.{0,80}\b(?:add|added|document|documented|record|recorded|publish|published|update|updated|write|wrote|written)\b/i.test(
+  return /\b(?:add|added|document|documented|record|recorded|publish|published|update|updated|write|wrote|written)\b.{0,80}\b(?:docs?|documentation|readme|runbook|guide)\b|\b(?:docs?|documentation|readme|runbook|guide)\b.{0,80}\b(?:add|added|document|documented|record|recorded|publish|published|update|updated|write|wrote|written)\b/i.test(
     text,
   );
 }
