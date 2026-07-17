@@ -8,6 +8,7 @@ import { createObserverAdapter, type ObserverAdapter } from '../adapters/observe
 /** Env var carrying the governor context (policy-relevant command text). */
 export const TOOL_CONTEXT_ENV = 'FBEAST_TOOL_CONTEXT';
 export const TOOL_CONTEXT_FILE_ENV = 'FBEAST_TOOL_CONTEXT_FILE';
+const CENTRAL_GOVERNANCE_SOURCE_KEY = '__fbeastGovernanceSource';
 export const HOOK_GOVERNANCE_SOURCE_KEY = '__fbeastHookSource';
 export const HOOK_GOVERNANCE_SOURCE = 'fbeast-hook';
 
@@ -140,8 +141,11 @@ function markHookGovernanceContext(context: string): string {
   try {
     const parsed = JSON.parse(context) as unknown;
     if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const sanitized = { ...(parsed as Record<string, unknown>) };
+      delete sanitized[CENTRAL_GOVERNANCE_SOURCE_KEY];
+      delete sanitized[HOOK_GOVERNANCE_SOURCE_KEY];
       return JSON.stringify({
-        ...(parsed as Record<string, unknown>),
+        ...sanitized,
         [HOOK_GOVERNANCE_SOURCE_KEY]: HOOK_GOVERNANCE_SOURCE,
       });
     }

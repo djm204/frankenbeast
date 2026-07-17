@@ -564,7 +564,12 @@ function nestedObjectField(context: Record<string, unknown>, key: string): Recor
 function auditToolArgs(context: Record<string, unknown>): Record<string, unknown> {
   const toolInput = nestedObjectField(context, "tool_input");
   if (toolInput) return nestedObjectField(toolInput, "args") ?? toolInput;
-  return nestedObjectField(context, "args") ?? context;
+  const directArgs = nestedObjectField(context, "args");
+  const directTool = stringAuditField(context, "tool") ?? stringAuditField(context, "toolName");
+  if (directArgs && directTool && unqualifyToolName(directTool) === "execute_tool") {
+    return nestedObjectField(directArgs, "args") ?? directArgs;
+  }
+  return directArgs ?? context;
 }
 
 function nestedAuditTool(context: Record<string, unknown>): string | undefined {
@@ -773,15 +778,22 @@ function mergeAuditEvents(left: MemoryAccessAuditEventInternal, right: MemoryAcc
     || (repo !== undefined && repo === right.repo && left.repo !== right.repo);
   const rightDecisionIsStronger = mergedDecision === safeAuditDecision(right.decision)
     && mergedDecision !== safeAuditDecision(left.decision);
-  const merged: MemoryAccessAuditEvent = {
+  const useRightSource = rightSuppliedRicherMetadata || rightDecisionIsStronger;
+  const mergedSourceDetail = useRightSource ? right.sourceDetail : left.sourceDetail;
+  const merged: MemoryAccessAuditEventInternal = {
     ...left,
-    source: rightSuppliedRicherMetadata || rightDecisionIsStronger ? right.source : left.source,
+    source: useRightSource ? right.source : left.source,
     operation: richerAuditField(left.operation, right.operation) ?? left.operation,
     targetStore: richerAuditTargetStore(left.targetStore, right.targetStore) ?? left.targetStore,
     targetClass: richerAuditField(left.targetClass, right.targetClass) ?? left.targetClass,
     decision: mergedDecision,
     reason: rightDecisionIsStronger ? right.reason : (richerAuditField(left.reason, right.reason) ?? left.reason),
   };
+  if (mergedSourceDetail !== undefined) {
+    merged.sourceDetail = mergedSourceDetail;
+  } else {
+    delete merged.sourceDetail;
+  }
   if (agentId !== undefined) merged.agentId = agentId;
   if (cardId !== undefined) merged.cardId = cardId;
   if (profile !== undefined) merged.profile = profile;

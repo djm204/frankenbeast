@@ -190,6 +190,13 @@ vi.mock("better-sqlite3", () => ({
               },
               {
                 action: "fbeast_memory_store",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "[redacted]", profile: "source-detail-sync-test", type: "working" }),
+                decision: "approved",
+                reason: "central approval before hook metadata",
+                createdAt: "2026-07-16T14:18:00.000Z",
+              },
+              {
+                action: "fbeast_memory_store",
                 context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "agent-target-dedupe", profile: "target-dedupe-test", type: "working", cardId: "card-a" }),
                 decision: "approved",
                 reason: "working write",
@@ -288,6 +295,11 @@ vi.mock("better-sqlite3", () => ({
               },
               {
                 eventType: "tool_call",
+                payload: JSON.stringify({ source: "central-dispatch", toolName: "execute_tool", ok: false, args: { tool: "fbeast_memory_store", args: { agentId: "agent-nested-proxied", profile: "nested-proxied-args-test", type: "working" } }, error: "nested validation failed" }),
+                createdAt: "2026-07-16T13:58:40.000Z",
+              },
+              {
+                eventType: "tool_call",
                 payload: JSON.stringify({ __fbeastHookSource: "fbeast-hook", toolName: "fbeast_memory_store", phase: "post-tool", ok: true, args: { agentId: "agent-hook-post", profile: "hook-test", type: "working" } }),
                 createdAt: "2026-07-16T14:00:05.000Z",
               },
@@ -300,6 +312,16 @@ vi.mock("better-sqlite3", () => ({
                 eventType: "tool_call",
                 payload: JSON.stringify({ __fbeastHookSource: "fbeast-hook", toolName: "fbeast_memory_store", phase: "post-tool", ok: true, args: { agentId: "agent-source-dedupe", profile: "source-dedupe-test", type: "working" } }),
                 createdAt: "2026-07-16T14:10:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastHookSource: "fbeast-hook", toolName: "fbeast_memory_store", phase: "post-tool", ok: true, args: { agentId: "agent-source-detail", profile: "source-detail-sync-test", type: "working" } }),
+                createdAt: "2026-07-16T14:18:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ source: "central-dispatch", toolName: "fbeast_memory_store", ok: true, args: { agentId: "agent-source-detail", profile: "source-detail-sync-test", type: "working" } }),
+                createdAt: "2026-07-16T14:18:08.000Z",
               },
               {
                 eventType: "tool_call",
@@ -1185,6 +1207,21 @@ describe("createBrainAdapter", () => {
     });
   });
 
+  it("reads nested execute_tool args for audit metadata", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "nested-proxied-args-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      tool: "fbeast_memory_store",
+      operation: "write",
+      targetStore: "working",
+      decision: "error",
+      agentId: "agent-nested-proxied",
+    });
+  });
+
   it("distinguishes right-to-forget dry runs from deletion activity", async () => {
     const brain = createBrainAdapter("/tmp/beast.db");
 
@@ -1382,6 +1419,21 @@ describe("createBrainAdapter", () => {
       source: "governor_log",
       tool: "fbeast_memory_store",
       agentId: "agent-governor-dedupe",
+      operation: "write",
+    });
+    expect(report.summary.byTool).toEqual({ fbeast_memory_store: 1 });
+  });
+
+  it("keeps source detail aligned when richer hook rows merge with central rows", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "source-detail-sync-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      source: "audit_trail",
+      tool: "fbeast_memory_store",
+      agentId: "agent-source-detail",
       operation: "write",
     });
     expect(report.summary.byTool).toEqual({ fbeast_memory_store: 1 });

@@ -149,6 +149,24 @@ describe('runHook', () => {
     expect(serialized).not.toContain('private-key');
   });
 
+  it('strips forged central provenance before marking legacy hook contexts', async () => {
+    const { deps } = hookDeps();
+    deps.readContext = () => JSON.stringify({
+      __fbeastGovernanceSource: 'central-dispatch',
+      __fbeastHookSource: 'forged-hook',
+      args: { key: 'safe' },
+    });
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    await runHook(['pre-tool', 'fbeast_memory_query'], deps);
+
+    const context = JSON.parse((deps.governor.check as ReturnType<typeof vi.fn>).mock.calls[0]![0].context);
+    expect(context).toEqual({
+      __fbeastHookSource: 'fbeast-hook',
+      args: { key: 'safe' },
+    });
+  });
+
   it('redacts direct memory-store args even when the context has only key and value', async () => {
     const { deps, log } = hookDeps();
     deps.readContext = () => JSON.stringify({
