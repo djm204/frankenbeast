@@ -84,14 +84,13 @@ describe('SLO dashboard', () => {
       'queue_age_p50_ms',
       'approval_latency_p50_ms',
     ]);
-    expect(oneHour.metrics.find((metric) => metric.id === 'run_success_rate')).toMatchObject({ value: 50, unit: 'percent', status: 'breach' });
+    expect(oneHour.metrics.find((metric) => metric.id === 'run_success_rate')).toMatchObject({ value: 66.67, unit: 'percent', status: 'breach' });
     expect(oneHour.metrics.find((metric) => metric.id === 'time_to_first_output_p50_ms')?.value).toBe(200_000);
     expect(oneHour.metrics.find((metric) => metric.id === 'time_to_closeout_p50_ms')?.value).toBe(600_000);
     expect(oneHour.metrics.find((metric) => metric.id === 'provider_wait_p50_ms')?.value).toBe(80_000);
     expect(oneHour.metrics.find((metric) => metric.id === 'queue_age_p50_ms')?.value).toBe(150_000);
     expect(oneHour.metrics.find((metric) => metric.id === 'approval_latency_p50_ms')?.value).toBe(60_000);
     expect(oneHour.failureCategories).toEqual([
-      { category: 'approval', count: 1 },
       { category: 'provider', count: 1 },
     ]);
     expect(dashboard.source).toEqual({ kanban: true, approvals: true, runs: true });
@@ -129,6 +128,38 @@ describe('SLO dashboard', () => {
     expect(dashboard.generatedAt).toBe('1970-01-01T00:18:20.000Z');
     expect(oneHour.metrics.find((metric) => metric.id === 'queue_age_p50_ms')?.value).toBe(950_000);
     expect(oneHour.failureCategories).toEqual([{ category: 'other', count: 1 }]);
+    db.close();
+  });
+
+  it('reads first-output samples from comments when task_events is absent', async () => {
+    const dbPath = join(mkdtempSync(join(tmpdir(), 'fbeast-slo-comments-')), 'kanban.db');
+    const db = new Database(dbPath);
+    db.exec(`
+      CREATE TABLE tasks (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        started_at INTEGER
+      );
+      CREATE TABLE comments (
+        id INTEGER PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        body TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      INSERT INTO tasks (id, title, status, created_at, started_at) VALUES
+        ('t_comment_output', 'comment output', 'running', 1000, 1100);
+      INSERT INTO comments (task_id, body, created_at) VALUES
+        ('t_comment_output', 'worker started producing output', 1200);
+    `);
+
+    const dashboard = await buildSloDashboardFromKanban(
+      createSqliteSloDashboardSource({ kanbanDbPath: dbPath, now: 2_000 }),
+    );
+
+    const oneHour = dashboard.windows[0];
+    expect(oneHour.metrics.find((metric) => metric.id === 'time_to_first_output_p50_ms')?.value).toBe(100_000);
     db.close();
   });
 });

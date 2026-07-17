@@ -142,6 +142,19 @@ describe('dashboard routes', () => {
       });
     });
 
+    it('keeps the dashboard snapshot available when optional SLO loading fails', async () => {
+      const deps = createMockDeps();
+      deps.getSloDashboard = vi.fn().mockRejectedValue(new Error('database is locked'));
+      const app = createDashboardRoutes(deps);
+      const res = await app.request('/');
+
+      expect(res.status).toBe(200);
+      const body = await res.json() as Record<string, unknown>;
+      expect(body.skills).toHaveLength(2);
+      expect(body.availability).toMatchObject({ status: 'healthy' });
+      expect(body.slo).toBeUndefined();
+    });
+
     it('reports partial dependency outages with remediation and safe-work guidance', async () => {
       const deps = createMockDeps();
       deps.getProviders = vi.fn().mockReturnValue([

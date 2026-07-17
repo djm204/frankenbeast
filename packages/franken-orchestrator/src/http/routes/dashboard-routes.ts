@@ -28,6 +28,14 @@ export interface DashboardRouteDeps {
   ticketStore?: SseConnectionTicketStore | undefined;
 }
 
+async function readOptionalSloDashboard(deps: DashboardRouteDeps): Promise<SloDashboard | undefined> {
+  try {
+    return await deps.getSloDashboard?.();
+  } catch {
+    return undefined;
+  }
+}
+
 async function buildSnapshot(deps: DashboardRouteDeps) {
   const skills = deps.skillManager.listInstalled();
   const enabledSkills = new Set(deps.skillManager.getEnabledSkills());
@@ -44,7 +52,7 @@ async function buildSnapshot(deps: DashboardRouteDeps) {
     providers,
     availability,
     maintenance: await deps.getMaintenanceMode?.(),
-    slo: await deps.getSloDashboard?.(),
+    slo: await readOptionalSloDashboard(deps),
   };
 }
 

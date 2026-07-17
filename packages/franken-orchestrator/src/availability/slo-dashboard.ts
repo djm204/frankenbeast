@@ -112,9 +112,10 @@ export function createSqliteSloDashboardSource(options: SqliteSloDashboardSource
     const hasTasks = hasTable(db, 'tasks');
     const hasRuns = hasTable(db, 'task_runs');
     const hasEvents = hasTable(db, 'task_events');
+    const hasComments = hasTable(db, 'comments');
     return {
       now,
-      runs: hasTasks ? readRunRecords(db, hasRuns, hasEvents) : [],
+      runs: hasTasks ? readRunRecords(db, hasRuns, hasEvents, hasComments) : [],
       approvals: hasEvents ? readApprovalRecords(db) : [],
       hasKanbanData: hasTasks,
       hasRunData: hasRuns,
@@ -127,7 +128,7 @@ export function createSqliteSloDashboardSource(options: SqliteSloDashboardSource
 
 function buildWindow(source: SloDashboardSource, label: '1h' | '24h' | '7d', seconds: number): SloWindowDashboard {
   const since = source.now - seconds;
-  const runs = source.runs.filter((run) => recordTimestamp(run) >= since);
+  const runs = source.runs.filter((run) => windowTimestamp(run, source.now) >= since);
   const approvals = source.approvals.filter((approval) => approval.decidedAt >= since);
   const successfulRuns = runs.filter(isSuccessfulRun).length;
   const totalTerminalRuns = runs.filter(isTerminalRun).length;
@@ -160,18 +161,32 @@ function buildWindow(source: SloDashboardSource, label: '1h' | '24h' | '7d', sec
   };
 }
 
-function readRunRecords(db: Database.Database, hasRuns: boolean, hasEvents: boolean): SloRunRecord[] {
+function readRunRecords(db: Database.Database, hasRuns: boolean, hasEvents: boolean, hasComments: boolean): SloRunRecord[] {
   const taskStartedExpr = columnExpr(db, 'tasks', 'started_at', 't', 'NULL');
   const taskCompletedExpr = columnExpr(db, 'tasks', 'completed_at', 't', 'NULL');
+  const attachCommentOutput = (rows: SloRunRecord[]): SloRunRecord[] => {
+    if (!hasComments) return rows;
+    const comments = db.prepare(`
+      SELECT task_id AS taskId,
+             MIN(created_at) AS firstOutputAt
+      FROM comments
+      GROUP BY task_id
+    `).all() as Array<{ taskId: string; firstOutputAt: number }>;
+    const firstCommentByTask = new Map(comments.map((row) => [row.taskId, row.firstOutputAt]));
+    return rows.map((row) => ({
+      ...row,
+      firstOutputAt: row.firstOutputAt ?? firstCommentByTask.get(row.taskId) ?? null,
+    }));
+  };
   if (!hasRuns) {
-    return db.prepare(`
+    return attachCommentOutput(db.prepare(`
       SELECT id AS taskId,
              status AS taskStatus,
              created_at AS taskCreatedAt,
              ${columnExpr(db, 'tasks', 'started_at', undefined, 'NULL')} AS taskStartedAt,
              ${columnExpr(db, 'tasks', 'completed_at', undefined, 'NULL')} AS taskCompletedAt
       FROM tasks
-    `).all() as SloRunRecord[];
+    `).all() as SloRunRecord[]);
   }
 
   const rows = db.prepare(`
@@ -191,7 +206,7 @@ function readRunRecords(db: Database.Database, hasRuns: boolean, hasEvents: bool
   `).all() as SloRunRecord[];
 
   if (!hasEvents) {
-    return rows;
+    return attachCommentOutput(rows);
   }
 
   const outputEvents = db.prepare(`
@@ -213,11 +228,11 @@ function readRunRecords(db: Database.Database, hasRuns: boolean, hasEvents: bool
   const firstOutputByRun = new Map(outputEvents.map((row) => [row.runId, row.firstOutputAt]));
   const spawnedByRun = new Map(spawnedEvents.map((row) => [row.runId, row.spawnedAt]));
 
-  return rows.map((row) => ({
+  return attachCommentOutput(rows.map((row) => ({
     ...row,
     firstOutputAt: row.runId ? firstOutputByRun.get(row.runId) ?? null : null,
     spawnedAt: row.runId ? spawnedByRun.get(row.runId) ?? null : null,
-  }));
+  })));
 }
 
 function readApprovalRecords(db: Database.Database): SloApprovalRecord[] {
@@ -234,7 +249,9 @@ function readApprovalRecords(db: Database.Database): SloApprovalRecord[] {
   const approvals: SloApprovalRecord[] = [];
   for (const row of rows) {
     if (row.kind === 'blocked' && isApprovalBlock(row.payload)) {
-      pending.set(row.taskId, row.createdAt);
+      if (!pending.has(row.taskId)) {
+        pending.set(row.taskId, row.createdAt);
+      }
     } else if (row.kind === 'unblocked') {
       const requestedAt = pending.get(row.taskId);
       if (requestedAt !== undefined && row.createdAt >= requestedAt) {
@@ -332,13 +349,18 @@ function taskDurationSamples(runs: SloRunRecord[], readDuration: (run: SloRunRec
 }
 
 function firstOutputDurationMs(run: SloRunRecord, now: number): number | null {
-  if (!isNumber(run.runStartedAt)) return null;
-  const end = run.firstOutputAt ?? (isTerminalRun(run) ? run.runEndedAt : now);
-  return durationMs(run.runStartedAt, end);
+  const start = run.runStartedAt ?? run.taskStartedAt;
+  if (!isNumber(start)) return null;
+  const end = run.firstOutputAt ?? (isTerminalRun(run) ? run.runEndedAt ?? run.taskCompletedAt : now);
+  return durationMs(start, end);
 }
 
 function recordTimestamp(run: SloRunRecord): number {
   return run.runEndedAt ?? run.taskCompletedAt ?? run.runStartedAt ?? run.taskStartedAt ?? run.taskCreatedAt;
+}
+
+function windowTimestamp(run: SloRunRecord, now: number): number {
+  return isTerminalRun(run) ? recordTimestamp(run) : now;
 }
 
 function isSuccessfulRun(run: SloRunRecord): boolean {
@@ -347,7 +369,7 @@ function isSuccessfulRun(run: SloRunRecord): boolean {
 
 function isTerminalRun(run: SloRunRecord): boolean {
   const value = String(run.outcome ?? run.runStatus ?? run.taskStatus).toLowerCase();
-  return ['completed', 'complete', 'done', 'success', 'failed', 'error', 'crashed', 'timed_out', 'timeout', 'blocked', 'archived', 'cancelled', 'canceled', 'deleted', 'stopped'].includes(value);
+  return ['completed', 'complete', 'done', 'success', 'failed', 'error', 'crashed', 'timed_out', 'timeout', 'archived', 'cancelled', 'canceled', 'deleted', 'stopped'].includes(value);
 }
 
 function sourceTimestamp(source: SloDashboardSource): number {
