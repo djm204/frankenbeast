@@ -181,9 +181,9 @@ describe('GovernorAdapter', () => {
     db.close();
 
     expect(JSON.parse(row.context)).toEqual({
+      __fbeastHookSource: 'fbeast-hook',
       tool: 'fbeast_memory_export',
       args: {
-        __fbeastHookSource: 'fbeast-hook',
         readScope: 'agent',
         redaction: 'safe',
         agentId: '[memory-export-context-redacted]',

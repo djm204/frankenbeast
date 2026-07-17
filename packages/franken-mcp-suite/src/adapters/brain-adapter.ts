@@ -453,6 +453,7 @@ const MEMORY_ACCESS_TOOL_OPERATIONS: Record<string, { operation: string; targetS
   fbeast_memory_query: { operation: "read", targetStore: "working|episodic", targetClass: "memory-query" },
   fbeast_memory_frontload: { operation: "read", targetStore: "working|episodic", targetClass: "memory-frontload" },
   fbeast_memory_export: { operation: "read", targetStore: "working|episodic", targetClass: "memory-export" },
+  fbeast_memory_source_attribution: { operation: "read", targetStore: "working", targetClass: "memory-source-attribution" },
   fbeast_memory_forget: { operation: "delete", targetStore: "working", targetClass: "memory-entry" },
   fbeast_memory_right_to_forget: { operation: "delete", targetStore: "working|episodic|derived", targetClass: "right-to-forget" },
   fbeast_memory_review_propose: { operation: "review", targetStore: "working", targetClass: "memory-review-candidate" },
@@ -583,6 +584,12 @@ const HOOK_GOVERNANCE_SOURCE = "fbeast-hook";
 function hasTrustedGovernorProvenance(context: Record<string, unknown>): boolean {
   return context[GOVERNANCE_SOURCE_KEY] === CENTRAL_AUDIT_SOURCE
     || context[HOOK_GOVERNANCE_SOURCE_KEY] === HOOK_GOVERNANCE_SOURCE;
+}
+
+function governorSourceDetail(context: Record<string, unknown>): MemoryAccessAuditSourceDetail | undefined {
+  if (context[GOVERNANCE_SOURCE_KEY] === CENTRAL_AUDIT_SOURCE) return "central-dispatch";
+  if (context[HOOK_GOVERNANCE_SOURCE_KEY] === HOOK_GOVERNANCE_SOURCE) return "fbeast-hook";
+  return undefined;
 }
 
 function hasTrustedAuditTrailProvenance(payload: Record<string, unknown>): boolean {
@@ -1177,6 +1184,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           const context = parseAuditContext(row.context);
           if (!hasTrustedGovernorProvenance(context)) continue;
           if (!includeMemoryAuditTool(row.action, context)) continue;
+          const sourceDetail = governorSourceDetail(context);
           const access = inferMemoryAccess(row.action, context);
           const accessArgs = auditToolArgs(context);
           const auditedTool = memoryAuditToolName(row.action, context) ?? unqualifyToolName(row.action);
@@ -1191,6 +1199,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
             ...(profile ? { profile } : {}),
             ...(repo ? { repo } : {}),
             source: "governor_log" as const,
+            ...(sourceDetail ? { sourceDetail } : {}),
             tool: auditedTool,
             operation: access.operation,
             targetStore: access.targetStore,

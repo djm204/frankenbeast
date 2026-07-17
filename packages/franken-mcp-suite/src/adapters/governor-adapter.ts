@@ -294,7 +294,7 @@ function redactMemorySourceAttributionGovernanceContext(action: string, context:
     || (unqualified === 'execute_tool'
       && (contextTargetsTool(context, 'fbeast_memory_source_attribution')
         || contextLooksLikeMemorySourceAttributionArgs(context)))) {
-    return '{}';
+    return JSON.stringify(mergeTrustedGovernanceProvenance(context, {}));
   }
   return context;
 }
@@ -371,10 +371,11 @@ function redactMemoryExportGovernanceContext(action: string, context: string): s
           ? nestedArgs as Record<string, unknown>
           : undefined;
       return JSON.stringify({
+        ...trustedGovernanceProvenance(context),
         tool: 'fbeast_memory_export',
         args: args === undefined
           ? MEMORY_EXPORT_CONTEXT_REDACTION
-          : mergeTrustedGovernanceProvenance(context, sanitizeMemoryExportGovernanceArgs(args)),
+          : sanitizeMemoryExportGovernanceArgs(args),
       });
     }
     return JSON.stringify(sanitizeMemoryExportGovernanceArgs(record));

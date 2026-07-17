@@ -172,6 +172,20 @@ vi.mock("better-sqlite3", () => ({
                 reason: "redacted central deletion approval",
                 createdAt: "2026-07-16T14:05:00.000Z",
               },
+              {
+                action: "fbeast_memory_store",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "agent-governor-dedupe", profile: "governor-source-dedupe-test", type: "working" }),
+                decision: "approved",
+                reason: "central approval",
+                createdAt: "2026-07-16T14:15:00.000Z",
+              },
+              {
+                action: "fbeast_memory_store",
+                context: JSON.stringify({ __fbeastHookSource: "fbeast-hook", agentId: "agent-governor-dedupe", profile: "governor-source-dedupe-test", type: "working" }),
+                decision: "approved",
+                reason: "hook approval",
+                createdAt: "2026-07-16T14:15:05.000Z",
+              },
             ];
           }
           if (sql.includes("FROM audit_trail")) {
@@ -270,6 +284,11 @@ vi.mock("better-sqlite3", () => ({
                 eventType: "tool_call",
                 payload: JSON.stringify({ __fbeastHookSource: "fbeast-hook", toolName: "fbeast_memory_store", phase: "post-tool", ok: true, args: { agentId: "agent-source-dedupe", profile: "source-dedupe-test", type: "working" } }),
                 createdAt: "2026-07-16T14:10:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ source: "central-dispatch", toolName: "fbeast_memory_source_attribution", ok: true, args: { profile: "source-attribution-test", readScope: "shared" } }),
+                createdAt: "2026-07-16T14:20:00.000Z",
               },
             ];
           }
@@ -1104,6 +1123,37 @@ describe("createBrainAdapter", () => {
       tool: "fbeast_memory_store",
       agentId: "agent-source-dedupe",
       operation: "write",
+    });
+  });
+
+  it("deduplicates central and hook governor rows for the same memory access", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "governor-source-dedupe-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      source: "governor_log",
+      tool: "fbeast_memory_store",
+      agentId: "agent-governor-dedupe",
+      operation: "write",
+    });
+    expect(report.summary.byTool).toEqual({ fbeast_memory_store: 1 });
+  });
+
+  it("includes source attribution reads in memory access audit reports", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "source-attribution-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      source: "audit_trail",
+      tool: "fbeast_memory_source_attribution",
+      operation: "read",
+      targetStore: "working",
+      targetClass: "memory-source-attribution",
+      decision: "approved",
     });
   });
 
