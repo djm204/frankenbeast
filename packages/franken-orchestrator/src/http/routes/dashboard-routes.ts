@@ -56,6 +56,18 @@ async function buildSnapshot(deps: DashboardRouteDeps) {
   };
 }
 
+function snapshotDiffKey(snapshot: Awaited<ReturnType<typeof buildSnapshot>>): string {
+  const { slo, ...rest } = snapshot;
+  if (!slo) return JSON.stringify(snapshot);
+  return JSON.stringify({
+    ...rest,
+    slo: {
+      ...slo,
+      generatedAt: '<volatile>',
+    },
+  });
+}
+
 function safeTokenCompare(a: string, b: string): boolean {
   const bufA = Buffer.from(a);
   const bufB = Buffer.from(b);
@@ -131,7 +143,9 @@ export function createDashboardRoutes(deps: DashboardRouteDeps): Hono {
     }
 
     return streamSSE(c, async (stream) => {
-      let lastSnapshot = JSON.stringify(await buildSnapshot(deps));
+      const initialSnapshot = await buildSnapshot(deps);
+      let lastSnapshot = JSON.stringify(initialSnapshot);
+      let lastSnapshotDiffKey = snapshotDiffKey(initialSnapshot);
 
       // Send initial snapshot
       await stream.writeSSE({
@@ -148,16 +162,20 @@ export function createDashboardRoutes(deps: DashboardRouteDeps): Hono {
 
       const snapshotInterval = setInterval(async () => {
         let nextSnapshot: string;
+        let nextSnapshotDiffKey: string;
         try {
-          nextSnapshot = JSON.stringify(await buildSnapshot(deps));
+          const snapshot = await buildSnapshot(deps);
+          nextSnapshot = JSON.stringify(snapshot);
+          nextSnapshotDiffKey = snapshotDiffKey(snapshot);
         } catch {
           return;
         }
 
-        if (nextSnapshot === lastSnapshot) {
+        if (nextSnapshotDiffKey === lastSnapshotDiffKey) {
           return;
         }
         lastSnapshot = nextSnapshot;
+        lastSnapshotDiffKey = nextSnapshotDiffKey;
         try {
           await stream.writeSSE({ event: 'snapshot', data: nextSnapshot });
         } catch {

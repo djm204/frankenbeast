@@ -86,7 +86,7 @@ const TARGETS = {
 
 export async function buildSloDashboardFromKanban(source: SloDashboardSource): Promise<SloDashboard> {
   return {
-    generatedAt: new Date(sourceTimestamp(source) * 1000).toISOString(),
+    generatedAt: new Date(source.now * 1000).toISOString(),
     source: {
       kanban: source.hasKanbanData,
       approvals: source.hasApprovalData,
@@ -168,13 +168,18 @@ function readRunRecords(db: Database.Database, hasRuns: boolean, hasEvents: bool
   const taskCompletedExpr = columnExpr(db, 'tasks', 'completed_at', 't', 'NULL');
   const attachCommentOutput = (rows: SloRunRecord[]): SloRunRecord[] => {
     if (!hasComments) return rows;
+    const taskIds = [...new Set(rows.map((row) => row.taskId))];
+    if (taskIds.length === 0) return rows;
+    const earliestStart = Math.min(...rows.map((row) => row.runStartedAt ?? row.taskStartedAt ?? row.taskCreatedAt));
+    const taskPlaceholders = taskIds.map(() => '?').join(', ');
     const comments = db.prepare(`
       SELECT task_id AS taskId,
              created_at AS createdAt
       FROM comments
-      WHERE created_at >= @cutoff
+      WHERE task_id IN (${taskPlaceholders})
+        AND created_at >= ?
       ORDER BY task_id, created_at
-    `).all({ cutoff }) as Array<{ taskId: string; createdAt: number }>;
+    `).all(...taskIds, earliestStart) as Array<{ taskId: string; createdAt: number }>;
     const commentsByTask = new Map<string, number[]>();
     for (const comment of comments) {
       const bucket = commentsByTask.get(comment.taskId) ?? [];
@@ -191,14 +196,18 @@ function readRunRecords(db: Database.Database, hasRuns: boolean, hasEvents: bool
     });
   };
   if (!hasRuns) {
+    const legacyTaskStartedExpr = columnExpr(db, 'tasks', 'started_at', undefined, 'NULL');
+    const legacyTaskCompletedExpr = columnExpr(db, 'tasks', 'completed_at', undefined, 'NULL');
     return attachCommentOutput(db.prepare(`
       SELECT id AS taskId,
              status AS taskStatus,
              created_at AS taskCreatedAt,
-             ${columnExpr(db, 'tasks', 'started_at', undefined, 'NULL')} AS taskStartedAt,
-             ${columnExpr(db, 'tasks', 'completed_at', undefined, 'NULL')} AS taskCompletedAt
+             ${legacyTaskStartedExpr} AS taskStartedAt,
+             ${legacyTaskCompletedExpr} AS taskCompletedAt
       FROM tasks
       WHERE created_at >= @cutoff
+         OR ${legacyTaskStartedExpr} >= @cutoff
+         OR ${legacyTaskCompletedExpr} >= @cutoff
          OR lower(status) NOT IN ('done', 'completed', 'complete', 'success', 'failed', 'error', 'crashed', 'timed_out', 'timeout', 'archived', 'cancelled', 'canceled', 'deleted', 'stopped')
     `).all({ cutoff }) as SloRunRecord[]);
   }
@@ -451,14 +460,6 @@ function isTerminalRun(run: SloRunRecord): boolean {
     return isNumber(run.runEndedAt) || isNumber(run.taskCompletedAt);
   }
   return ['completed', 'complete', 'done', 'success', 'failed', 'error', 'crashed', 'timed_out', 'timeout', 'archived', 'cancelled', 'canceled', 'deleted', 'stopped'].includes(value);
-}
-
-function sourceTimestamp(source: SloDashboardSource): number {
-  const timestamps = [
-    ...source.runs.flatMap((run) => [recordTimestamp(run), run.firstOutputAt, run.spawnedAt]),
-    ...source.approvals.map((approval) => approval.decidedAt),
-  ].filter(isNumber);
-  return timestamps.length > 0 ? Math.max(...timestamps) : 0;
 }
 
 function sampleTimestamp(now: number): number {

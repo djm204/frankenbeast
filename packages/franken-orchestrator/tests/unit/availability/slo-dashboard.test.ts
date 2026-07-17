@@ -98,7 +98,7 @@ describe('SLO dashboard', () => {
       { category: 'provider', count: 1 },
     ]);
     expect(dashboard.source).toEqual({ kanban: true, approvals: true, runs: true });
-    expect(dashboard.generatedAt).toBe('1970-01-01T00:33:00.000Z');
+    expect(dashboard.generatedAt).toBe('1970-01-01T00:33:20.000Z');
     db.close();
   });
 
@@ -129,7 +129,7 @@ describe('SLO dashboard', () => {
 
     const oneHour = dashboard.windows[0];
     expect(dashboard.source).toEqual({ kanban: true, approvals: false, runs: false });
-    expect(dashboard.generatedAt).toBe('1970-01-01T00:18:20.000Z');
+    expect(dashboard.generatedAt).toBe('1970-01-01T00:33:20.000Z');
     expect(oneHour.metrics.find((metric) => metric.id === 'queue_age_p50_ms')?.value).toBe(930_000);
     expect(oneHour.failureCategories).toEqual([{ category: 'other', count: 1 }]);
     db.close();
@@ -165,6 +165,67 @@ describe('SLO dashboard', () => {
 
     const oneHour = dashboard.windows[0];
     expect(oneHour.metrics.find((metric) => metric.id === 'time_to_first_output_p50_ms')?.value).toBe(100_000);
+    db.close();
+  });
+
+  it('includes legacy task-only records started or completed inside the reporting window', async () => {
+    const dbPath = join(mkdtempSync(join(tmpdir(), 'fbeast-slo-legacy-window-')), 'kanban.db');
+    const db = new Database(dbPath);
+    db.exec(`
+      CREATE TABLE tasks (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        started_at INTEGER,
+        completed_at INTEGER
+      );
+      INSERT INTO tasks (id, title, status, created_at, started_at, completed_at) VALUES
+        ('t_old_recent_done', 'old recent done', 'done', 1, 1000, 1900),
+        ('t_old_recent_started', 'old recent started', 'running', 1, 1800, NULL);
+    `);
+
+    const dashboard = await buildSloDashboardFromKanban(
+      createSqliteSloDashboardSource({ kanbanDbPath: dbPath, now: 2_000 }),
+    );
+
+    const oneHour = dashboard.windows[0];
+    expect(oneHour.sampleSize).toBe(2);
+    expect(oneHour.metrics.find((metric) => metric.id === 'time_to_closeout_p50_ms')?.value).toBe(1_899_000);
+    expect(oneHour.metrics.find((metric) => metric.id === 'queue_age_p50_ms')?.value).toBe(1_399_000);
+    db.close();
+  });
+
+  it('preserves old post-start comments for active legacy tasks kept in the window', async () => {
+    const dbPath = join(mkdtempSync(join(tmpdir(), 'fbeast-slo-legacy-comments-old-')), 'kanban.db');
+    const db = new Database(dbPath);
+    db.exec(`
+      CREATE TABLE tasks (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        started_at INTEGER
+      );
+      CREATE TABLE comments (
+        id INTEGER PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        body TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      INSERT INTO tasks (id, title, status, created_at, started_at) VALUES
+        ('t_old_active', 'old active', 'running', 1, 10);
+      INSERT INTO comments (id, task_id, body, created_at) VALUES
+        (1, 't_old_active', 'pre-start note', 5),
+        (2, 't_old_active', 'first output long before cutoff', 20);
+    `);
+
+    const dashboard = await buildSloDashboardFromKanban(
+      createSqliteSloDashboardSource({ kanbanDbPath: dbPath, now: 700_000 }),
+    );
+
+    const sevenDay = dashboard.windows.find((window) => window.label === '7d');
+    expect(sevenDay?.metrics.find((metric) => metric.id === 'time_to_first_output_p50_ms')?.value).toBe(10_000);
     db.close();
   });
 });
