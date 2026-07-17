@@ -910,7 +910,7 @@ export function buildWorkerCrashOnlyRestartContract(
     };
   }
 
-  if (rawExitReason === 'spawn_failed' || /spawn[_ -]?(?:fail(?:ed|ure)?|error)?|start[_ -]?failed|setup|enoent|eacces|protocol[_ -]?violation/i.test(rawExitReason)) {
+  if (rawExitReason === 'spawn_failed' || /^(?:spawn(?:[_ -]?(?:fail(?:ed|ure)?|error))?|start[_ -]?failed|setup|enoent|eacces|protocol[_ -]?violation)$/i.test(rawExitReason.trim())) {
     return {
       disposition: 'hitl',
       nextAction: 'replace-with-doctor',

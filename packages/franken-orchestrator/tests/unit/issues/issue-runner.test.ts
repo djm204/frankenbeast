@@ -940,6 +940,7 @@ describe('stuck-run watchdog', () => {
       pid: 7418,
       status: 'running',
       alive: false,
+      exitReason: 'respawn_guarded(active_pr)',
       activePrUrl: 'https://github.com/djm204/frankenbeast/pull/2560',
       activeWorktreePath: '/tmp/frankenbeast/.worktrees/t_active_owner',
     }, {
