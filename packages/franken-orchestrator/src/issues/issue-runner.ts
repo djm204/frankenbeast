@@ -822,7 +822,12 @@ function liveSiblingPidsByCardId(snapshots: readonly IssueWorkerCardProcessSnaps
   const byCard = new Map<string, Set<number>>();
   for (const snapshot of snapshots) {
     const cardId = snapshot.cardId.trim();
-    if (!cardId || snapshot.alive === false || !Number.isSafeInteger(snapshot.pid) || snapshot.pid <= 0) continue;
+    const status = snapshot.status?.trim().toLowerCase();
+    if (!cardId
+      || snapshot.alive === false
+      || (status && TERMINAL_WORKER_CARD_STATUSES.has(status))
+      || !Number.isSafeInteger(snapshot.pid)
+      || snapshot.pid <= 0) continue;
     const pids = byCard.get(cardId) ?? new Set<number>();
     pids.add(snapshot.pid);
     byCard.set(cardId, pids);
