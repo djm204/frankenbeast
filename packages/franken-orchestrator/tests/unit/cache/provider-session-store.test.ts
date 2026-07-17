@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ProviderSessionStore } from '../../../src/cache/provider-session-store.js';
 
@@ -133,5 +133,67 @@ describe('ProviderSessionStore', () => {
       model: 'claude-sonnet-4-6',
       promptFingerprint: 'fp-110',
     })).resolves.toBeUndefined();
+  });
+
+  it('uses atomic writes that replace valid provider-session JSON only after the replacement is complete', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-provider-session-'));
+    const rootDir = join(workDir, '.fbeast', '.cache', 'llm');
+    const sessionPath = join(rootDir, 'work', 'frankenbeast', 'issue%3A99', 'provider-session.json');
+    const store = new ProviderSessionStore(rootDir, { schemaVersion: 3 });
+
+    await store.save({
+      projectId: 'frankenbeast',
+      workId: 'issue:99',
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      sessionId: 'sess-99',
+      promptFingerprint: 'fp-99',
+      createdAt: '2026-03-13T00:00:00.000Z',
+      updatedAt: '2026-03-13T00:00:00.000Z',
+    });
+
+    await store.save({
+      projectId: 'frankenbeast',
+      workId: 'issue:99',
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      sessionId: 'sess-99-replacement',
+      promptFingerprint: 'fp-99',
+      createdAt: '2026-03-13T00:00:00.000Z',
+      updatedAt: '2026-03-13T00:00:01.000Z',
+    });
+
+    await expect(readFile(sessionPath, 'utf8')).resolves.toContain('sess-99-replacement');
+    await expect(store.load({
+      projectId: 'frankenbeast',
+      workId: 'issue:99',
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      promptFingerprint: 'fp-99',
+    })).resolves.toMatchObject({
+      sessionId: 'sess-99-replacement',
+      schemaVersion: 3,
+    });
+  });
+
+  it('quarantines malformed provider-session JSON and treats corruption as an explicit miss', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-provider-session-'));
+    const rootDir = join(workDir, '.fbeast', '.cache', 'llm');
+    const sessionPath = join(rootDir, 'work', 'frankenbeast', 'issue%3A99', 'provider-session.json');
+    await mkdir(dirname(sessionPath), { recursive: true });
+    await writeFile(sessionPath, '{"sessionId": "truncated"', 'utf8');
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const store = new ProviderSessionStore(rootDir, { schemaVersion: 3 });
+    await expect(store.load({
+      projectId: 'frankenbeast',
+      workId: 'issue:99',
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      promptFingerprint: 'fp-99',
+    })).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Malformed provider session JSON'));
+    await expect(readFile(sessionPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    warn.mockRestore();
   });
 });

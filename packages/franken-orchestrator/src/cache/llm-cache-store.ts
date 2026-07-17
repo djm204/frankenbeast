@@ -1,5 +1,5 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import { readJsonFileOrDefault, warnJsonQuarantined, writeJsonFileAtomic } from '../init/init-json-file.js';
 import type { CacheEntry, CacheStoreOptions, StoredCacheEntry } from './llm-cache-types.js';
 import { encodeCachePathSegment } from './llm-cache-types.js';
 
@@ -55,26 +55,20 @@ export class LlmCacheStore {
   }
 
   private async write(filePath: string, entry: StoredCacheEntry): Promise<void> {
-    await mkdir(dirname(filePath), { recursive: true });
-    await writeFile(filePath, JSON.stringify(entry, null, 2) + '\n', 'utf8');
+    await writeJsonFileAtomic(filePath, entry);
   }
 
   private async read(filePath: string): Promise<StoredCacheEntry | undefined> {
-    try {
-      const raw = await readFile(filePath, 'utf8');
-      const stored = JSON.parse(raw) as unknown;
+    const stored = await readJsonFileOrDefault<unknown>(filePath, () => undefined, {
+      description: 'LLM cache entry',
+      onCorrupt: warnJsonQuarantined,
+    });
 
-      if (!this.isValidStoredCacheEntry(stored)) {
-        return undefined;
-      }
-
-      return stored;
-    } catch (error) {
-      if ((error as { code?: string }).code === 'ENOENT' || error instanceof SyntaxError) {
-        return undefined;
-      }
-      throw error;
+    if (!this.isValidStoredCacheEntry(stored)) {
+      return undefined;
     }
+
+    return stored;
   }
 
   private isValidStoredCacheEntry(value: unknown): value is StoredCacheEntry {

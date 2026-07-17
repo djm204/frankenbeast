@@ -13,17 +13,48 @@ type RawTask = {
 
 class PlanStructureError extends Error {}
 
+export interface LlmPlannerOptions {
+  readonly timeoutMs?: number | undefined;
+}
+
 export class LlmPlanner implements IPlannerModule {
   private readonly llmClient: ILlmClient;
+  private readonly timeoutMs: number | undefined;
 
-  constructor(llmClient: ILlmClient) {
+  constructor(llmClient: ILlmClient, options: LlmPlannerOptions = {}) {
     this.llmClient = llmClient;
+    this.timeoutMs = options.timeoutMs;
   }
 
   async createPlan(intent: PlanIntent): Promise<PlanGraph> {
     const prompt = this.buildPrompt(intent);
-    const response = await this.llmClient.complete(prompt);
+    const response = await this.completeWithTimeout(prompt);
     return this.parsePlan(response, intent);
+  }
+
+  private async completeWithTimeout(prompt: string): Promise<string> {
+    if (this.timeoutMs === undefined) {
+      return this.llmClient.complete(prompt);
+    }
+
+    if (!Number.isFinite(this.timeoutMs) || this.timeoutMs <= 0) {
+      throw new Error(`LlmPlanner timeoutMs must be a positive finite number; received ${this.timeoutMs}`);
+    }
+
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        this.llmClient.complete(prompt),
+        new Promise<string>((resolve) => {
+          timeout = setTimeout(() => resolve(''), this.timeoutMs);
+          timeout.unref?.();
+        }),
+      ]);
+    } finally {
+      if (timeout !== undefined) {
+        clearTimeout(timeout);
+      }
+    }
   }
 
   private buildPrompt(intent: PlanIntent): string {
@@ -81,11 +112,18 @@ export class LlmPlanner implements IPlannerModule {
 
   private buildIdMap(rawTasks: RawTask[]): Map<string, string> {
     const idMap = new Map<string, string>();
+    const seenRawIds = new Set<string>();
 
     rawTasks.forEach((task, index) => {
       const rawId = typeof task?.id === 'string' && task.id.trim().length > 0
         ? task.id.trim()
         : `t${index + 1}`;
+      if (seenRawIds.has(rawId)) {
+        throw new PlanStructureError(
+          `Invalid plan structure: duplicate task id '${rawId}'`,
+        );
+      }
+      seenRawIds.add(rawId);
       idMap.set(rawId, `t${index + 1}`);
     });
 

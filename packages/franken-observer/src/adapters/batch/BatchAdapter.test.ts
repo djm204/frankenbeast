@@ -90,6 +90,53 @@ describe('BatchAdapter — options', () => {
     await batch.stop()
     expect(clearIntervalFn).toHaveBeenCalledWith(42)
   })
+
+  it('unrefs Node-compatible flush interval timers', () => {
+    const timer = { unref: vi.fn() } as unknown as ReturnType<typeof globalThis.setInterval> & {
+      unref: () => void
+    }
+    const setIntervalFn = vi.fn().mockReturnValue(timer)
+
+    new BatchAdapter({
+      adapter: new InMemoryAdapter(),
+      flushIntervalMs: 1000,
+      setInterval: setIntervalFn,
+    })
+
+    expect(timer.unref).toHaveBeenCalledOnce()
+  })
+
+  it('refs flush interval timers while traces are buffered and unrefs them after draining', async () => {
+    let intervalCallback!: () => void
+    const timer = {
+      ref: vi.fn(),
+      unref: vi.fn(),
+    } as unknown as ReturnType<typeof globalThis.setInterval> & {
+      ref: () => void
+      unref: () => void
+    }
+    const setIntervalFn = vi.fn((callback: () => void) => {
+      intervalCallback = callback
+      return timer
+    })
+    const inner = new InMemoryAdapter()
+    const batch = new BatchAdapter({
+      adapter: inner,
+      maxBatchSize: 100,
+      flushIntervalMs: 1000,
+      setInterval: setIntervalFn,
+    })
+
+    await batch.flush(makeTrace('timer-drained'))
+    expect(timer.ref).toHaveBeenCalledOnce()
+
+    intervalCallback()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(await inner.listTraceIds()).toEqual(['timer-drained'])
+    expect(timer.unref).toHaveBeenCalledTimes(2)
+  })
 })
 
 // ── buffering ─────────────────────────────────────────────────────────────────

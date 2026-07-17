@@ -315,3 +315,6 @@
 
 ## 2026-07-16 — DR point-in-time export review fixes
 - Incident exports must summarize the real `.fbeast/beast.db` and `kanban.db` SQLite tables, include chat `pendingApproval` session state as approval evidence, stream/hash large logs instead of buffering them, and apply the same redaction to the serialized artifact that the terminal preview uses.
+
+## 2026-07-17 — Orchestrator chaos-test closeout
+- For orchestrator chaos/stability regressions, keep dropped-provider and thrown-tool cases deterministic: use fake timers around never-settling promises, assert cleanup with zero leaked timers, and build dependent workspaces before package typecheck when source-only workspace packages make bare orchestrator `tsc --noEmit` report missing `@franken/*` declarations.
