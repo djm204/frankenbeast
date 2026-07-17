@@ -931,10 +931,62 @@ describe('stuck-run watchdog', () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]).toMatchObject({
       cardId: 't_repeated_dead_attempts',
-      pid: 7412,
+      pid: 7413,
       restartDisposition: 'retryable',
       nextAction: 'restart-once',
     });
+  });
+
+  it('prefers safer HITL contracts over earlier retryable dead attempts for the same card', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_retry_then_hitl',
+        pid: 7412,
+        runId: 'run-dead-1',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+      {
+        cardId: 't_retry_then_hitl',
+        pid: 7413,
+        runId: 'run-spawn-failed-later',
+        status: 'failed',
+        alive: false,
+        exitReason: 'spawn_failed',
+        lastHeartbeatAt: '2026-07-16T11:31:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      cardId: 't_retry_then_hitl',
+      pid: 7413,
+      restartDisposition: 'hitl',
+      nextAction: 'replace-with-doctor',
+    });
+  });
+
+  it('treats dispatcher restart stop reasons as HITL repair evidence before retrying', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_dispatcher_restart_reason',
+        pid: 7414,
+        runId: 'run-dispatcher-stale-pid',
+        status: 'failed',
+        alive: false,
+        exitReason: 'dispatcher_restart_stale_pid',
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_dispatcher_restart_reason',
+      exitReason: 'dispatcher_restart_stale_pid',
+      restartDisposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+    });
+    expect(finding.recommendedAction).toContain('do not auto-respawn over the blocker');
   });
 
   it('does not emit restart advice after HITL evidence for the same dead card', () => {

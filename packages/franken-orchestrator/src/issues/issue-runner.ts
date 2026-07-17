@@ -873,6 +873,10 @@ function operatorControlledSignalExitReason(exitReason: string): boolean {
   return /^signal_(?:sigterm|sigint|sighup)$/i.test(exitReason.trim());
 }
 
+function dispatcherRestartExitReason(exitReason: string): boolean {
+  return /^dispatcher_restart_/i.test(exitReason.trim());
+}
+
 export function buildWorkerCrashOnlyRestartContract(
   snapshot: IssueWorkerCardProcessSnapshot,
   input: {
@@ -946,6 +950,7 @@ export function buildWorkerCrashOnlyRestartContract(
     || kanbanState === 'pending-approval'
     || input.category === 'approval-gate'
     || input.category === 'dispatcher-bug'
+    || dispatcherRestartExitReason(rawExitReason)
     || knownLongRunningWait(input.category)
   ) {
     return {
@@ -996,6 +1001,34 @@ function deferRemediationForStuckRun(category: IssueStuckRunBlockerCategory): st
   }
 }
 
+function restartContractSafetyRank(contract: IssueWorkerCrashOnlyRestartContract): number {
+  switch (contract.disposition) {
+    case 'hitl':
+      return 3;
+    case 'terminal':
+      return 2;
+    case 'retryable':
+      return 1;
+  }
+}
+
+function snapshotRecencyMs(snapshot: IssueWorkerCardProcessSnapshot): number {
+  return Math.max(
+    0,
+    ...[
+      snapshot.lastHeartbeatAt,
+      snapshot.lastOutputAt,
+      snapshot.lastToolActivityAt,
+      snapshot.lastStateTransitionAt,
+      snapshot.startedAt,
+    ].map((value) => {
+      if (value === undefined) return 0;
+      const parsed = Date.parse(String(value));
+      return Number.isFinite(parsed) ? parsed : 0;
+    }),
+  );
+}
+
 function remediationForCrashOnlyRestartContract(
   contract: IssueWorkerCrashOnlyRestartContract,
   category: IssueStuckRunBlockerCategory,
@@ -1027,7 +1060,9 @@ export function detectStuckRunWatchdogFindings(
   const longRunningWaitGraceMs = options.longRunningWaitGraceMs ?? DEFAULT_STUCK_RUN_WAIT_GRACE_MS;
   const findings: IssueStuckRunWatchdogFinding[] = [];
   const liveSiblings = liveSiblingPidsByCardId(snapshots);
-  const handledDeadRestartCards = new Set<string>();
+  const deadFindingsByCardId = new Map<string, IssueStuckRunWatchdogFinding>();
+  const deadFindingKeysByCardId = new Map<string, { readonly safetyRank: number; readonly recencyMs: number; readonly index: number }>();
+  let findingIndex = 0;
 
   for (const snapshot of snapshots) {
     if (!snapshot.cardId.trim()) continue;
@@ -1093,15 +1128,11 @@ export function detectStuckRunWatchdogFindings(
       kanbanState: status ?? 'unknown',
     });
     const normalizedCardId = snapshot.cardId.trim();
-    if (processStatus === 'dead') {
-      if (handledDeadRestartCards.has(normalizedCardId)) continue;
-      handledDeadRestartCards.add(normalizedCardId);
-    }
     evidence.push(...restartContract.evidence);
 
     const recommendedAction = remediationForCrashOnlyRestartContract(restartContract, category, processStatus);
     const confidence = confidenceForStuckRun(category, staleCount, processStatus);
-    findings.push({
+    const finding: IssueStuckRunWatchdogFinding = {
       cardId: normalizedCardId,
       pid: snapshot.pid,
       ...(snapshot.runId ? { runId: snapshot.runId } : {}),
@@ -1122,10 +1153,34 @@ export function detectStuckRunWatchdogFindings(
       evidence,
       recommendedAction,
       message: `Worker card ${snapshot.cardId.trim()} appears stuck (${category}, ${confidence} confidence): ${recommendedAction}`,
-    });
+    };
+
+    if (processStatus === 'dead') {
+      const candidateKey = {
+        safetyRank: restartContractSafetyRank(restartContract),
+        recencyMs: snapshotRecencyMs(snapshot),
+        index: findingIndex,
+      };
+      const existingKey = deadFindingKeysByCardId.get(normalizedCardId);
+      const candidateIsSafer = existingKey === undefined
+        || candidateKey.safetyRank > existingKey.safetyRank
+        || (candidateKey.safetyRank === existingKey.safetyRank && candidateKey.recencyMs > existingKey.recencyMs)
+        || (
+          candidateKey.safetyRank === existingKey.safetyRank
+          && candidateKey.recencyMs === existingKey.recencyMs
+          && candidateKey.index > existingKey.index
+        );
+      if (candidateIsSafer) {
+        deadFindingKeysByCardId.set(normalizedCardId, candidateKey);
+        deadFindingsByCardId.set(normalizedCardId, finding);
+      }
+    } else {
+      findings.push(finding);
+    }
+    findingIndex += 1;
   }
 
-  return findings.sort((a, b) => a.cardId.localeCompare(b.cardId));
+  return [...findings, ...deadFindingsByCardId.values()].sort((a, b) => a.cardId.localeCompare(b.cardId));
 }
 
 function isoTimestamp(value: string | number | Date | undefined): string | undefined {
