@@ -92,6 +92,31 @@ describe('Critique Hono Server', () => {
       });
 
       expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.message).toBe('Invalid request');
+      expect(body.error.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ path: ['code'] }),
+        ]),
+      );
+    });
+
+    it('returns a structured 400 for malformed JSON', async () => {
+      const app = createCritiqueApp({ pipeline: makePipeline() });
+      const res = await app.request('/v1/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{ "code":',
+      });
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body).toEqual({
+        error: {
+          message: 'Invalid JSON request body',
+          type: 'invalid_json',
+        },
+      });
     });
 
     it('passes context through to pipeline', async () => {
