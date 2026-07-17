@@ -148,6 +148,20 @@ function pickToolPolicyConfig(config: Readonly<Record<string, unknown>>): Readon
   );
 }
 
+function canonicalTrackedAgentToolPolicyConfig(
+  config: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  const policy = pickToolPolicyConfig(config);
+  const rawRole = config.agentRole ?? config.role ?? config.laneRole;
+  const canonicalRole = typeof rawRole === 'string' && rawRole.trim().length > 0
+    ? { agentRole: rawRole.trim() }
+    : {};
+  return {
+    ...Object.fromEntries(Object.entries(policy).filter(([key]) => key !== 'agentRole' && key !== 'role' && key !== 'laneRole')),
+    ...canonicalRole,
+  };
+}
+
 function pickSkillsPolicyConfig(config: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
   return Object.hasOwn(config, 'skills') ? { skills: config.skills } : {};
 }
@@ -158,9 +172,11 @@ function preserveTrackedAgentPolicyConfig(
 ): Readonly<Record<string, unknown>> {
   if (!trackedAgent) return config;
   return {
+    ...pickSkillsPolicyConfig(trackedAgent.initAction.config),
+    ...pickSkillsPolicyConfig(trackedAgent.initConfig),
     ...config,
-    ...pickToolPolicyConfig(trackedAgent.initAction.config),
-    ...pickToolPolicyConfig(trackedAgent.initConfig),
+    ...canonicalTrackedAgentToolPolicyConfig(trackedAgent.initAction.config),
+    ...canonicalTrackedAgentToolPolicyConfig(trackedAgent.initConfig),
   };
 }
 
@@ -424,8 +440,8 @@ export class BeastDispatchService {
         ...pickSkillsPolicyConfig(trackedAgent.initAction.config),
         ...pickSkillsPolicyConfig(trackedAgent.initConfig),
         ...configSnapshot,
-        ...pickToolPolicyConfig(trackedAgent.initAction.config),
-        ...pickToolPolicyConfig(trackedAgent.initConfig),
+        ...canonicalTrackedAgentToolPolicyConfig(trackedAgent.initAction.config),
+        ...canonicalTrackedAgentToolPolicyConfig(trackedAgent.initConfig),
       }
       : { ...request.config, ...configSnapshot };
     const validation = validateAgentRoleTools(policyConfig, {

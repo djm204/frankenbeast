@@ -130,8 +130,14 @@ function selectedSkillsFromConfig(config: Readonly<Record<string, unknown>>): Se
   };
 }
 
-function runtimeToolsFromConfig(config: Readonly<Record<string, unknown>>): string[] {
+function runtimeToolsFromConfig(
+  config: Readonly<Record<string, unknown>>,
+  context: ToolPolicyValidationContext,
+): string[] {
   const tools: string[] = [];
+  if (context.definitionId === 'martin-loop' || context.initActionKind === 'martin-loop') {
+    tools.push(...ROLE_TOOL_MANIFESTS.coding);
+  }
   const gitConfig = config.gitConfig;
   if (typeof gitConfig === 'object' && gitConfig !== null && !Array.isArray(gitConfig)) {
     const prCreation = (gitConfig as Readonly<Record<string, unknown>>).prCreation;
@@ -205,7 +211,7 @@ export function validateAgentRoleTools(
   const rawRole = rawRoleFromConfig(policyConfig, context);
   const role = normalizeRole(rawRole);
   const explicitTools = requestedToolsFromConfig(policyConfig);
-  const runtimeTools = runtimeToolsFromConfig(policyConfig);
+  const runtimeTools = runtimeToolsFromConfig(policyConfig, context);
   const workflowTools = workflowRequiredTools(context);
   const selectedSkills = selectedSkillsFromConfig(policyConfig);
   const skillDenials = skillToolDenials(role ?? rawRole ?? '<missing-role>', selectedSkills.skills, context);

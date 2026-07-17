@@ -216,42 +216,71 @@ describe('AgentService', () => {
     }
   });
 
-  it('allows coding, review, docs, triage, doctor, and ticket-manager requests that match role manifests', async () => {
+  it('allows coding requests that match the martin-loop runtime surface', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-agent-service-'));
     const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const service = new AgentService(repository, () => '2026-03-11T00:00:00.000Z', {
       trustedSkillToolManifests: { 'read-only-context': ['read_file'] },
     });
 
-    const roleRequests = [
-      ['coding', ['read_file', 'write_file', 'patch', 'terminal', 'terminal.background']],
-      ['review', ['read_file', 'search_files', 'terminal', 'github.read', 'github.comment']],
-      ['docs', ['read_file', 'search_files', 'write_file', 'github.pr']],
-      ['triage', ['read_file', 'search_files', 'github.read', 'kanban.comment']],
-      ['doctor', ['read_file', 'search_files', 'terminal', 'github.read', 'kanban.comment']],
-      ['ticket-manager', ['read_file', 'search_files', 'github.read', 'github.comment']],
-    ] as const;
+    service.createAgent({
+      definitionId: 'coding-lane',
+      source: 'api',
+      createdByUser: 'operator',
+      initAction: {
+        kind: 'martin-loop',
+        command: 'coding lane',
+        config: {},
+      },
+      initConfig: {
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'write_file', 'patch', 'terminal', 'terminal.background'],
+        skills: ['read-only-context'],
+        skillToolManifests: { 'read-only-context': ['read_file'] },
+      },
+    });
 
-    for (const [agentRole, requestedTools] of roleRequests) {
-      service.createAgent({
-        definitionId: `${agentRole}-lane`,
-        source: 'api',
-        createdByUser: 'operator',
-        initAction: {
-          kind: 'martin-loop',
-          command: `${agentRole} lane`,
-          config: {},
-        },
-        initConfig: {
-          agentRole,
-          requestedTools,
-          skills: ['read-only-context'],
-          skillToolManifests: { 'read-only-context': ['read_file'] },
-        },
-      });
-    }
+    expect(service.listAgents()).toHaveLength(1);
+  });
 
-    expect(service.listAgents()).toHaveLength(roleRequests.length);
+  it('rejects low-privilege roles when the martin-loop runtime would expose mutation tools', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-agent-service-'));
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const securityLog: unknown[] = [];
+    const service = new AgentService(repository, () => '2026-03-11T00:00:00.000Z', {
+      trustedSkillToolManifests: { 'read-only-context': ['read_file'] },
+      toolPolicyLogger: (entry) => securityLog.push(entry),
+    });
+
+    expect(() => service.createAgent({
+      definitionId: 'triage-lane',
+      source: 'api',
+      createdByUser: 'operator',
+      initAction: {
+        kind: 'martin-loop',
+        command: 'triage lane',
+        config: {},
+      },
+      initConfig: {
+        agentRole: 'triage',
+        requestedTools: ['read_file'],
+        skills: ['read-only-context'],
+      },
+    })).toThrow(/least-privilege tool manifest denied/i);
+
+    expect(securityLog).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: 'triage',
+        requestedTool: 'patch',
+        reason: expect.stringContaining("not allowed for role 'triage'"),
+      }),
+      expect.objectContaining({
+        role: 'triage',
+        requestedTool: 'terminal.background',
+        reason: expect.stringContaining("not allowed for role 'triage'"),
+      }),
+    ]));
+    expect(service.listAgents()).toEqual([]);
   });
 
   it('creates tracked agents and lists them newest first', async () => {

@@ -652,4 +652,91 @@ describe('BeastDispatchService', () => {
       skills: ['context-only'],
     });
   });
+
+  it('preserves tracked-agent skill allowlists when final dispatch config omits skills', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const agents = new AgentService(repo, () => '2026-03-17T00:00:00.000Z');
+    const executors = {
+      process: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const agent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'chat',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: {
+        provider: 'claude',
+        objective: 'Collect interview config',
+        chunkDirectory: 'docs/chunks',
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+        skills: [],
+      },
+    });
+
+    const run = await dispatch.createRun({
+      definitionId: 'martin-loop',
+      trackedAgentId: agent.id,
+      config: {
+        provider: 'claude',
+        objective: 'Run final interview config',
+        chunkDirectory: 'docs/chunks',
+      },
+      dispatchedBy: 'chat',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+    });
+
+    expect(run.configSnapshot).toMatchObject({
+      agentRole: 'coding',
+      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+      skills: [],
+    });
+  });
+
+  it('canonicalizes stored role aliases before merging request policy during dispatch', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const agents = new AgentService(repo, () => '2026-03-17T00:00:00.000Z');
+    const executors = {
+      process: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const agent = agents.createAgent({
+      definitionId: 'triage-lane',
+      source: 'api',
+      createdByUser: 'operator',
+      initAction: { kind: 'chunk-plan', command: 'triage', config: {} },
+      initConfig: {
+        role: 'triage',
+        requestedTools: ['read_file'],
+        skills: [],
+      },
+    });
+
+    await expect(dispatch.createRun({
+      definitionId: 'martin-loop',
+      trackedAgentId: agent.id,
+      config: {
+        provider: 'claude',
+        objective: 'Escalate privileges during dispatch',
+        chunkDirectory: 'docs/chunks',
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'patch'],
+      },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+    })).rejects.toThrow(/least-privilege tool manifest denied/i);
+
+    expect(repo.listRuns()).toHaveLength(0);
+  });
 });
