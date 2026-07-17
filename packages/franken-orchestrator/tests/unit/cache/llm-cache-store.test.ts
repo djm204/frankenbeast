@@ -197,4 +197,27 @@ describe('LlmCacheStore', () => {
     await expect(readFile(path, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     warn.mockRestore();
   });
+
+  it('tolerates concurrent readers racing to quarantine the same malformed cache JSON', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-llm-cache-'));
+    const rootDir = join(workDir, '.fbeast', '.cache', 'llm');
+    const path = join(
+      rootDir,
+      'project',
+      encodeCachePathSegment('frankenbeast'),
+      'stable',
+      `${encodeCachePathSegment('racy-corrupt:key')}.json`,
+    );
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, '{"content": "truncated"', 'utf8');
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const store = new LlmCacheStore(rootDir, { schemaVersion: 1 });
+    await expect(Promise.all([
+      store.loadProjectEntry('frankenbeast', 'racy-corrupt:key'),
+      store.loadProjectEntry('frankenbeast', 'racy-corrupt:key'),
+    ])).resolves.toEqual([undefined, undefined]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Malformed LLM cache entry JSON'));
+    warn.mockRestore();
+  });
 });
