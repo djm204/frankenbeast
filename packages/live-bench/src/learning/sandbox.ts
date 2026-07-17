@@ -30,6 +30,12 @@ const MUTATION_CAPABLE_SANDBOX_TOOLS = new Set([
   'approval_ledger_write',
   'exec_command',
   'create_issue_comment',
+  'delete_file',
+  'edit_file',
+  'move_file',
+  'rename_file',
+  'remove_file',
+  'uninspectable_wrapper_target',
   'github_issue_comment',
   'kanban_complete',
   'kanban_block',
@@ -195,7 +201,7 @@ export async function runLearningSandboxExperiment(
   const completedAt = now();
   const postRunSnapshot = safeSnapshotTree(workspaceDir, originalWorkspaceDir);
   const workspaceMutated = enforcedPolicy.readOnlyFixtureClone && postRunSnapshot.hash !== workspaceSnapshot;
-  if (postRunSnapshot.error && error === undefined) {
+  if (postRunSnapshot.error && enforcedPolicy.readOnlyFixtureClone && error === undefined) {
     error = `Unable to verify read-only sandbox fixture clone: ${postRunSnapshot.error}`;
   } else if (workspaceMutated && error === undefined) {
     error = 'Read-only sandbox fixture clone was mutated during experiment';
@@ -218,7 +224,7 @@ export async function runLearningSandboxExperiment(
     toolCalls,
     blockedToolCalls,
   };
-  writeEvidenceFileSecurely(evidencePath, `${stringifyEvidence(result)}\n`, runDir, originalRunDir, sandboxRoot, originalSandboxRoot);
+  writeEvidenceFileSecurely(evidencePath, `${stringifyEvidence(result)}\n`, runsRoot, realRunsRoot, runDir, originalRunDir, sandboxRoot, originalSandboxRoot);
   return result;
 }
 
@@ -428,9 +434,11 @@ function toolAliases(tool: string, input?: unknown): string[] {
   for (let index = 1; index < prefixedSegments.length; index += 1) {
     aliases.add(prefixedSegments.slice(index).join('_'));
   }
-  for (const wrappedTool of wrappedToolNames(input)) {
-    for (const alias of toolAliases(wrappedTool)) {
-      aliases.add(alias);
+  if (aliases.has('execute_tool') || aliases.has('multi_tool_use.parallel') || aliases.has('parallel')) {
+    for (const wrappedTool of wrappedToolNames(input)) {
+      for (const alias of toolAliases(wrappedTool)) {
+        aliases.add(alias);
+      }
     }
   }
   return [...aliases];
@@ -446,10 +454,15 @@ function wrappedToolNames(input: unknown, seen = new WeakSet<object>()): string[
   seen.add(input);
   const names: string[] = [];
   const descriptors = safeOwnPropertyDescriptors(input);
+  if (descriptors['[non-json object]']) {
+    names.push('uninspectable_wrapper_target');
+  }
   for (const field of ['tool', 'name', 'toolName', 'tool_name', 'recipient_name']) {
     const descriptor = descriptors[field];
     if (descriptor && 'value' in descriptor && typeof descriptor.value === 'string') {
       names.push(descriptor.value);
+    } else if (descriptor && !('value' in descriptor)) {
+      names.push('uninspectable_wrapper_target');
     }
   }
   for (const descriptor of Object.values(descriptors)) {
@@ -568,7 +581,12 @@ function pathExistsNoFollow(path: string): boolean {
   }
 }
 
-function ensureRunParentAnchored(sandboxRoot: string, originalSandboxRoot: string): void {
+function ensureRunParentAnchored(runsRoot: string, originalRunsRoot: string, sandboxRoot: string, originalSandboxRoot: string): void {
+  if (!existsSync(runsRoot) || lstatSync(runsRoot).isSymbolicLink() || !lstatSync(runsRoot).isDirectory() || realpathSync(runsRoot) !== originalRunsRoot) {
+    rmSync(runsRoot, { recursive: true, force: true });
+    mkdirSync(runsRoot, { recursive: true, mode: 0o700 });
+  }
+  chmodSync(runsRoot, 0o700);
   if (!existsSync(sandboxRoot) || lstatSync(sandboxRoot).isSymbolicLink() || !lstatSync(sandboxRoot).isDirectory() || realpathSync(sandboxRoot) !== originalSandboxRoot) {
     rmSync(sandboxRoot, { recursive: true, force: true });
     mkdirSync(sandboxRoot, { recursive: true, mode: 0o700 });
@@ -579,6 +597,8 @@ function ensureRunParentAnchored(sandboxRoot: string, originalSandboxRoot: strin
 function writeEvidenceFileSecurely(
   evidencePath: string,
   contents: string,
+  runsRoot: string,
+  originalRunsRoot: string,
   runDir: string,
   originalRunDir: string,
   sandboxRoot: string,
@@ -588,7 +608,7 @@ function writeEvidenceFileSecurely(
   if (evidenceDir !== runDir) {
     throw new Error(`Evidence path escapes sandbox run directory: ${evidencePath}`);
   }
-  ensureRunParentAnchored(sandboxRoot, originalSandboxRoot);
+  ensureRunParentAnchored(runsRoot, originalRunsRoot, sandboxRoot, originalSandboxRoot);
   if (!existsSync(runDir) || lstatSync(runDir).isSymbolicLink() || !lstatSync(runDir).isDirectory() || realpathSync(runDir) !== originalRunDir) {
     rmSync(runDir, { recursive: true, force: true });
     mkdirSync(runDir, { recursive: true, mode: 0o700 });
@@ -609,8 +629,11 @@ function toJsonSafeEvidence(value: unknown, seen = new WeakSet<object>()): unkno
   if (value === undefined) {
     return '[non-json undefined]';
   }
-  if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') {
     return value;
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : `[non-json number:${String(value)}]`;
   }
   if (typeof value === 'bigint') {
     return `[non-json bigint:${value.toString()}]`;
