@@ -4006,13 +4006,13 @@ export class SqliteBrain implements IBrain {
     }
 
     if (maxEntries !== undefined) {
-      const nonProtectedRetained = entries
-        .filter((entry) => !entry.protected && entry.action === 'retain')
+      const nonProtectedBudgetCandidates = entries
+        .filter((entry) => !entry.protected && (entry.action === 'retain' || entry.action === 'nearing_expiry'))
         .sort((a, b) => b.policy.compactPriority - a.policy.compactPriority || a.key.localeCompare(b.key));
       const activeEntries = entries.filter((entry) => entry.action !== 'expired');
       const existingCompactionCount = activeEntries.filter((entry) => entry.action === 'compact').length;
       const extraBudgetCompactions = Math.max(0, activeEntries.length - maxEntries - existingCompactionCount);
-      for (const entry of nonProtectedRetained.slice(0, extraBudgetCompactions)) {
+      for (const entry of nonProtectedBudgetCandidates.slice(0, extraBudgetCompactions)) {
         entry.action = 'compact';
         entry.reason = `Memory store has ${activeEntries.length} active entries, over report budget ${maxEntries}; ${entry.class} has compaction priority ${entry.policy.compactPriority}`;
       }

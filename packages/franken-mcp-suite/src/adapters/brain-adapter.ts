@@ -390,7 +390,7 @@ function applyRetentionBudget(
   const extraBudgetCompactions = Math.max(0, activeEntries.length - maxEntries - existingCompactionCount);
   if (extraBudgetCompactions === 0) return scopedEntries;
   const retainedCandidates = scopedEntries
-    .filter((entry) => !entry.protected && entry.action === "retain")
+    .filter((entry) => !entry.protected && (entry.action === "retain" || entry.action === "nearing_expiry"))
     .sort((a, b) => b.policy.compactPriority - a.policy.compactPriority || a.key.localeCompare(b.key));
   for (const entry of retainedCandidates.slice(0, extraBudgetCompactions)) {
     entry.action = "compact";

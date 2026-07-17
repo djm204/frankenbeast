@@ -630,6 +630,44 @@ describe("createBrainAdapter", () => {
     expect(report.entries.find((entry) => entry.key === "shared.fresh-high")).toMatchObject({ action: "retain" });
   });
 
+  it("includes scoped near-expiry rows when applying retention budgets", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+    brainInstances[0].memoryRetentionReport.mockReturnValueOnce({
+      generatedAt: "2026-07-16T00:00:00.000Z",
+      policies: [],
+      counts: { total: 2, protected: 0, expired: 0, nearingExpiry: 1, compactionCandidates: 0 },
+      entries: [
+        {
+          store: "working",
+          key: "shared.fresh-low",
+          class: "environment_fact",
+          action: "retain",
+          policy: { class: "environment_fact", retentionDays: 180, compactPriority: 30, protected: false, description: "env" },
+          protected: false,
+          reason: "retain",
+        },
+        {
+          store: "working",
+          key: "shared.near-expiry",
+          class: "temporary_operational",
+          action: "nearing_expiry",
+          policy: { class: "temporary_operational", retentionDays: 1, compactPriority: 100, protected: false, description: "tmp" },
+          protected: false,
+          reason: "TTL expires soon",
+        },
+      ],
+      compactionCandidates: [],
+    });
+
+    const report = await brain.memoryRetentionReport({
+      readScope: "shared",
+      maxEntries: 1,
+    });
+
+    expect(report.compactionCandidates.map((entry) => entry.key)).toEqual(["shared.near-expiry"]);
+    expect(report.entries.find((entry) => entry.key === "shared.near-expiry")).toMatchObject({ action: "compact" });
+  });
+
   it("rejects agent read scope without an agent id before reading memory", async () => {
     const brain = createBrainAdapter("/tmp/beast.db");
     const mockBrain = brainInstances[0];

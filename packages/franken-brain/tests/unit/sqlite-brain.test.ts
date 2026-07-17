@@ -140,11 +140,11 @@ describe('SqliteBrain', () => {
       });
       expect(report.entries.find((entry) => entry.key === 'ops.tmp')).toMatchObject({
         class: 'temporary_operational',
-        action: 'nearing_expiry',
+        action: 'compact',
       });
       expect(report.compactionCandidates.map((entry) => entry.key)).toEqual([
+        'ops.tmp',
         'scratch.task-state',
-        'env.node.version',
       ]);
       expect(report.compactionCandidates).not.toContainEqual(
         expect.objectContaining({ key: 'user.preference.response-style' }),
