@@ -1113,6 +1113,38 @@ describe('ProcessBeastExecutor', () => {
       expect(existsSync(manifestPath)).toBe(false);
     });
 
+    it('signs run config manifests with the transformed child-visible config path', async () => {
+      workDir = await createTempWorkDir();
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const runConfigDir = join(workDir, 'project-root', '.fbeast', '.build', 'run-configs');
+      const supervisor = createSupervisorMock();
+      mkdirSync(join(workDir, 'project-root', '.fbeast', '.build'), { recursive: true });
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, {
+        runConfigDir,
+        transformSpec: (_run, _originalSpec, mergedSpec) => ({
+          ...mergedSpec,
+          env: {
+            ...mergedSpec.env,
+            FRANKENBEAST_RUN_CONFIG: '/workspace/.fbeast/.build/run-configs/run.json',
+          },
+        }),
+      });
+      const run = createTestRun(repo);
+
+      await executor.start(run, martinLoopDefinition);
+
+      const configPath = join(runConfigDir, `${run.id}.json`);
+      const manifestPath = `${configPath}.integrity`;
+      const spawnedEnv = (supervisor.spawn.mock.calls[0]![0] as { env: Record<string, string> }).env;
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as { configPath?: string };
+      expect(spawnedEnv.FRANKENBEAST_RUN_CONFIG).toBe('/workspace/.fbeast/.build/run-configs/run.json');
+      expect(manifest.configPath).toBe(spawnedEnv.FRANKENBEAST_RUN_CONFIG);
+      expect(() => verifyRunConfigIntegrity(configPath, manifestPath, spawnedEnv[RUN_CONFIG_INTEGRITY_SECRET_ENV]!)).toThrow(
+        'runtime config manifest path mismatch',
+      );
+    });
+
     it('redacts sensitive keys and secret-shaped values before writing run config files', async () => {
       workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

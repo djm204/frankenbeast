@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { z } from 'zod';
 import { parseSafeJson } from '../utils/safe-json.js';
 import {
@@ -97,6 +97,10 @@ function verifyRunConfigIntegrityFromEnv(filePath: string): void {
 }
 
 export function loadRunConfig(filePath: string): RunConfig {
+  const info = statSync(filePath);
+  if (info.size > 1_048_576) {
+    throw new RunConfigParseError(filePath, `Run config ${filePath} exceeds maxBytes: ${info.size} > 1048576`);
+  }
   verifyRunConfigIntegrityFromEnv(filePath);
   const raw = readFileSync(filePath, 'utf-8');
   let parsed: unknown;

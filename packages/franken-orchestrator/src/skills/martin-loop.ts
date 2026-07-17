@@ -296,7 +296,9 @@ function spawnIteration(
       ? [...providerArgs, '--', prompt]
       : [...providerArgs, prompt];
 
-    const env = provider.filterEnv(process.env as Record<string, string>);
+    const parentEnv = { ...(process.env as Record<string, string>) };
+    delete parentEnv['FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET'];
+    const env = provider.filterEnv(parentEnv);
 
     const child = spawn(cmd, args, {
       stdio: ['ignore', 'pipe', 'pipe'],

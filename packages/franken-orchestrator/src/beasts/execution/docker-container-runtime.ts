@@ -3,6 +3,8 @@ import type { SandboxPolicy } from './sandbox-policy.js';
 import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
 import { realpathSync, statSync } from 'node:fs';
 
+const RUN_CONFIG_INTEGRITY_SECRET_ENV = 'FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET';
+
 function canonicalExistingPath(path: string): string {
   try {
     return realpathSync(path);
@@ -37,7 +39,7 @@ function containerCommand(command: string, policy: SandboxPolicy): string {
   return basename(command);
 }
 
-function dockerEnvArgs(spec: BeastProcessSpec, policy: SandboxPolicy): string[] {
+function dockerEnv(spec: BeastProcessSpec, policy: SandboxPolicy): { args: string[]; processEnv: Record<string, string> } {
   const args: string[] = [
     '-e',
     'GIT_CONFIG_COUNT=1',
@@ -46,13 +48,20 @@ function dockerEnvArgs(spec: BeastProcessSpec, policy: SandboxPolicy): string[] 
     '-e',
     `GIT_CONFIG_VALUE_0=${policy.workspaceContainerPath}`,
   ];
+  const processEnv: Record<string, string> = {};
   for (const key of policy.envAllowlist) {
     const value = spec.env?.[key];
     if (value !== undefined) {
-      args.push('-e', `${key}=${remapHostWorkspacePath(value, policy)}`);
+      const remappedValue = remapHostWorkspacePath(value, policy);
+      processEnv[key] = remappedValue;
+      if (key === RUN_CONFIG_INTEGRITY_SECRET_ENV) {
+        args.push('-e', key);
+      } else {
+        args.push('-e', `${key}=${remappedValue}`);
+      }
     }
   }
-  return args;
+  return { args, processEnv };
 }
 
 function containerCwd(spec: BeastProcessSpec, policy: SandboxPolicy): string {
@@ -90,6 +99,7 @@ export function toDockerSpec(
   policy: SandboxPolicy,
   options: DockerSpecOptions = {},
 ): BeastProcessSpec {
+  const env = dockerEnv(spec, policy);
   return {
     command: 'docker',
     args: [
@@ -112,12 +122,12 @@ export function toDockerSpec(
       workspaceMount(policy),
       '-w',
       containerCwd(spec, policy),
-      ...dockerEnvArgs(spec, policy),
+      ...env.args,
       policy.image,
       containerCommand(spec.command, policy),
       ...spec.args.map((arg) => remapHostWorkspacePath(arg, policy)),
     ],
     cwd: spec.cwd,
-    env: {},
+    env: env.processEnv,
   };
 }

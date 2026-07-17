@@ -413,6 +413,7 @@ export class CliLlmAdapter implements IAdapter {
   private captureEnv(): Record<string, string> {
     const rawEnv: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) {
+      if (key === 'FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET') continue;
       if (value !== undefined) rawEnv[key] = value;
     }
     return rawEnv;

@@ -710,8 +710,9 @@ export class ProcessBeastExecutor implements BeastExecutor {
     );
     const redactedConfigSnapshot = redactRunConfigSnapshot(isolatedConfigSnapshot, configuredSecrets);
     const serializedRunConfig = JSON.stringify(redactedConfigSnapshot, null, 2);
+    const signedConfigPath = spawnedSpec.env?.FRANKENBEAST_RUN_CONFIG ?? configFilePath;
     const integrityManifest = createRunConfigIntegrityManifest(serializedRunConfig, runConfigIntegritySecret, {
-      configPath: configFilePath,
+      configPath: signedConfigPath,
     });
     writeFileSync(configFilePath, serializedRunConfig, { mode: RUN_CONFIG_FILE_MODE });
     const runConfigOwner = resolveRunConfigOwner(this.options.runConfigOwner);

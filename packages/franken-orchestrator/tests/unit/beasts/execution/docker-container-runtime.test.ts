@@ -104,7 +104,25 @@ describe('toDockerSpec', () => {
       'FRANKENBEAST_RUN_CONFIG=/workspace/.fbeast/rc.json',
     ]));
     expect(spec.args).not.toEqual(expect.arrayContaining(['-e', 'GITHUB_TOKEN=ghp_should_not_leak']));
-    expect(spec.env).toEqual({});
+    expect(spec.env).toMatchObject({ FRANKENBEAST_RUN_CONFIG: '/workspace/.fbeast/rc.json' });
+    expect(spec.env).not.toHaveProperty('GITHUB_TOKEN');
+  });
+
+  it('passes integrity secrets by process env without persisting the value in docker args', () => {
+    const spec = toDockerSpec(
+      {
+        ...base,
+        env: {
+          ...base.env,
+          FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET: 'secret-value',
+        },
+      },
+      { ...DEFAULT_SANDBOX_POLICY, workspaceHostPath: '/proj' },
+    );
+
+    expect(spec.args).toEqual(expect.arrayContaining(['-e', 'FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET']));
+    expect(spec.args).not.toEqual(expect.arrayContaining(['-e', 'FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET=secret-value']));
+    expect(spec.env).toMatchObject({ FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET: 'secret-value' });
   });
 
   it('appends the original command and args after the image', () => {
