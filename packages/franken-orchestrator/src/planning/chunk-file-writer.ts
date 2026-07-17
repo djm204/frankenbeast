@@ -45,7 +45,7 @@ export class ChunkFileWriter {
     });
 
     const tempPaths = preparedFiles.map((file) => file.tempPath);
-    const backups: Array<{ backupPath: string; originalPath: string }> = [];
+    const backups: Array<{ backupPath: string; originalPath: string; deleteOnSuccess: boolean }> = [];
     const installedPaths: string[] = [];
 
     try {
@@ -54,6 +54,7 @@ export class ChunkFileWriter {
       }
 
       const staleChunkFiles = this.findWriterOwnedChunkFiles();
+      const preservedFiles = this.findDiscoverableNonWriterChunkFiles();
       for (const file of preparedFiles) {
         if (existsSync(file.filePath) && !staleChunkFiles.includes(file.filename)) {
           throw new Error(
@@ -66,7 +67,14 @@ export class ChunkFileWriter {
         const originalPath = resolve(this.outputDir, staleFile);
         const backupPath = resolve(this.outputDir, `.${staleFile}.${token}.bak`);
         renameSync(originalPath, backupPath);
-        backups.push({ backupPath, originalPath });
+        backups.push({ backupPath, originalPath, deleteOnSuccess: true });
+      }
+
+      for (const preservedFile of preservedFiles) {
+        const originalPath = resolve(this.outputDir, preservedFile);
+        const backupPath = resolve(this.outputDir, `.preserved-${token}-${preservedFile}.bak`);
+        renameSync(originalPath, backupPath);
+        backups.push({ backupPath, originalPath, deleteOnSuccess: false });
       }
 
       for (const file of preparedFiles) {
@@ -89,7 +97,7 @@ export class ChunkFileWriter {
       throw error;
     }
 
-    for (const backup of backups) {
+    for (const backup of backups.filter((backup) => backup.deleteOnSuccess)) {
       try {
         rmSync(backup.backupPath, { force: true });
       } catch {
@@ -105,6 +113,17 @@ export class ChunkFileWriter {
   private findWriterOwnedChunkFiles(): string[] {
     const files = readdirSync(this.outputDir);
     return files.filter((file) => this.isWriterOwnedChunkFile(file));
+  }
+
+  private findDiscoverableNonWriterChunkFiles(): string[] {
+    const files = readdirSync(this.outputDir);
+    return files.filter(
+      (file) =>
+        file.endsWith('.md') &&
+        !file.startsWith('00_') &&
+        /^\d{2}/.test(file) &&
+        !this.isWriterOwnedChunkFile(file),
+    );
   }
 
   private isWriterOwnedChunkFile(file: string): boolean {

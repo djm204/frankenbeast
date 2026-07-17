@@ -240,7 +240,7 @@ describe('ChunkFileWriter', () => {
     expect(content).not.toContain('Old A');
   });
 
-  it('preserves unrelated numbered markdown files during rewrites', () => {
+  it('moves unrelated executable numbered markdown files aside during rewrites', () => {
     const writer = new ChunkFileWriter(fixtureDir);
 
     const unrelatedPath = join(fixtureDir, '01_context.md');
@@ -271,8 +271,12 @@ describe('ChunkFileWriter', () => {
     writer.write(set2);
 
     const remaining = readdirSync(fixtureDir).sort();
-    expect(remaining).toEqual(['01_context.md', '01_new-chunk-x.md']);
-    expect(readFileSync(unrelatedPath, 'utf-8')).toContain('Keep this file.');
+    expect(remaining).toHaveLength(2);
+    expect(remaining).toContain('01_new-chunk-x.md');
+    const preserved = remaining.find((file) => file.includes('01_context.md'));
+    expect(preserved).toBeDefined();
+    expect(preserved).not.toBe('01_context.md');
+    expect(readFileSync(join(fixtureDir, preserved!), 'utf-8')).toContain('Keep this file.');
   });
 
   it('removes stale generated chunks with three-digit numbers', () => {

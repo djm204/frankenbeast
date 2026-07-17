@@ -97,9 +97,7 @@ export class ChunkFileGraphBuilder implements GraphBuilder {
     const chunks: string[] = [];
     for (const f of entries) {
       // Skip non-chunk files (not .md, the 00_ template, or unnumbered).
-      if (!f.endsWith('.md') || f.startsWith('00_') || !/^\d{2}/.test(f)) {
-        continue;
-      }
+      if (!f.endsWith('.md') || f.startsWith('00_') || !/^\d{2}/.test(f)) continue;
       // A chunk-shaped filename containing control characters is malformed or
       // crafted; reject it explicitly rather than silently omitting it (which
       // would hide the chunk, or yield an empty plan if it was the only one)
@@ -111,26 +109,9 @@ export class ChunkFileGraphBuilder implements GraphBuilder {
             `rename it to remove newlines, carriage returns, and other control characters`,
         );
       }
-      if (!this.isWriterOwnedChunkFile(dir, f)) {
-        continue;
-      }
       chunks.push(f);
     }
     return chunks.sort();
-  }
-
-  private isWriterOwnedChunkFile(dir: string, file: string): boolean {
-    const match = /^(\d{2,})_[a-zA-Z0-9_-]+\.md$/.exec(file);
-    if (!match) {
-      return false;
-    }
-
-    try {
-      const content = readFileSync(join(dir, file), 'utf-8');
-      return new RegExp(`^# Chunk ${match[1]}(?::|\\s|$)`).test(content);
-    } catch {
-      return false;
-    }
   }
 
   private buildImplPrompt(chunkPath: string, chunkId: string, content: string): string {
