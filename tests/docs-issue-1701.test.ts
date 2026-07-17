@@ -40,7 +40,7 @@ describe('issue #1701 setup troubleshooting matrix docs', () => {
     expect(matrix).toContain('5173 3737');
     expect(matrix).toContain('failed=0');
     expect(matrix).toContain('docker compose logs --tail=80 chromadb grafana tempo');
-    expect(matrix).toContain('targeted probes');
+    expect(matrix).toContain('targeted probe for the service you started');
     expect(matrix).toContain('${CHROMA_URL:-http://localhost:8000}/api/v2/heartbeat');
     expect(matrix).toContain('detectCheckpointLock(checkpointPath)');
     expect(matrix).toContain('safeToRemove');

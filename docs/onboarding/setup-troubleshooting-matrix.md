@@ -44,7 +44,10 @@ npm --version && npm run check:package-manager
 node --version
 command -v corepack || true
 npm install -g corepack
-command -v corepack && corepack --version && npm run check:package-manager
+command -v corepack && corepack --version
+corepack enable npm
+corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
+npm --version && npm run check:package-manager
 ```
 
 ### D4 / V4: GitHub CLI access
@@ -80,10 +83,9 @@ git diff --stat
 pgrep -af '[f]rankenbeast|[f]beast|node .*[f]ranken' || true
 find .fbeast -maxdepth 2 -type f -name '*.lock' -print
 sed -n '1,80p' docs/runbooks/checkpoint-locks.md
-npm run local:verify-setup
 ```
 
-For checkpoint locks, do not rely on process-name checks alone. Use the `detectCheckpointLock(checkpointPath)` detector from `docs/runbooks/checkpoint-locks.md`; only move or remove a lock after the detector reports `safeToRemove: true`.
+For checkpoint locks, do not rely on process-name checks alone. Use the `detectCheckpointLock(checkpointPath)` detector from `docs/runbooks/checkpoint-locks.md`; only move or remove a lock after the detector reports `safeToRemove: true`. Verify recovery by rerunning the lock detector and the originally failed command, not by running the full `npm run local:verify-setup` service probe unless the original failure was a full local stack verification.
 
 ### D8 / V8: issue-worker preflight
 
@@ -104,14 +106,20 @@ For the full optional stack, run:
 docker compose ps && npm run local:verify-setup
 ```
 
-For partial stacks, use targeted probes only for the services you started:
+For partial stacks, use only the targeted probe for the service you started:
 
 ```bash
 set -a
 [ ! -f .env ] || . ./.env
 set +a
+
+# ChromaDB only:
 curl -fsS "${CHROMA_URL:-http://localhost:8000}/api/v2/heartbeat"
+
+# Grafana only:
 curl -fsS http://localhost:3000/api/health
+
+# Tempo only:
 curl -fsS http://localhost:3200/ready
 ```
 
@@ -120,6 +128,7 @@ curl -fsS http://localhost:3200/ready
 Inventory configured refs without printing secret values:
 
 ```bash
+npm run build --workspace @franken/orchestrator
 node packages/franken-orchestrator/dist/cli/run.js init --help
 test -f .fbeast/config.json && node -e "console.log(JSON.parse(require('node:fs').readFileSync('.fbeast/config.json','utf8')).network?.secureBackend)"
 frankenbeast network credentials || node packages/franken-orchestrator/dist/cli/run.js network credentials
