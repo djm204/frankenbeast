@@ -754,7 +754,7 @@ describe('stuck-run watchdog', () => {
         pid: 7416,
         status: 'failed',
         alive: false,
-        exitReason: 'supervisor stderr AWS_SECRET_ACCESS_KEY=abc123 DB_PASSWORD: secret-value',
+        exitReason: 'supervisor stderr AWS_SECRET_ACCESS_KEY=abc123 DB_PASSWORD: "secret value with spaces"',
         lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
       },
     ], { nowMs });
@@ -762,7 +762,7 @@ describe('stuck-run watchdog', () => {
     expect(finding.exitReason).toBe('supervisor stderr AWS_SECRET_ACCESS_KEY=<redacted> DB_PASSWORD=<redacted>');
     expect(finding.evidence).toContain('exitReason=supervisor stderr AWS_SECRET_ACCESS_KEY=<redacted> DB_PASSWORD=<redacted>');
     expect(finding.evidence.join('\n')).not.toContain('abc123');
-    expect(finding.evidence.join('\n')).not.toContain('secret-value');
+    expect(finding.evidence.join('\n')).not.toContain('secret value');
   });
 
   it('respects explicit blocker categories before stale waiting text', () => {
@@ -892,6 +892,36 @@ describe('stuck-run watchdog', () => {
       pid: 7412,
       restartDisposition: 'retryable',
       nextAction: 'restart-once',
+    });
+  });
+
+  it('does not emit restart advice after HITL evidence for the same dead card', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_hitl_then_dead',
+        pid: 7412,
+        runId: 'run-spawn-failed',
+        status: 'failed',
+        alive: false,
+        exitReason: 'spawn_failed',
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+      {
+        cardId: 't_hitl_then_dead',
+        pid: 7413,
+        runId: 'run-dead-later',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:31:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      cardId: 't_hitl_then_dead',
+      pid: 7412,
+      restartDisposition: 'hitl',
+      nextAction: 'replace-with-doctor',
     });
   });
 
@@ -1026,6 +1056,25 @@ describe('stuck-run watchdog', () => {
       disposition: 'retryable',
       nextAction: 'restart-once',
       kanbanState: 'failed',
+    });
+  });
+
+  it('defers dispatcher-bug crashes before considering dead-process restart', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_dispatcher_bug_dead',
+      pid: 7425,
+      status: 'running',
+      alive: false,
+    }, {
+      category: 'dispatcher-bug',
+      processStatus: 'dead',
+      kanbanState: 'running',
+    });
+
+    expect(contract).toMatchObject({
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      processStatus: 'dead',
     });
   });
 

@@ -757,7 +757,8 @@ function explicitProcessCrash(snapshot: IssueWorkerCardProcessSnapshot): boolean
 
 function redactStuckRunEvidenceText(value: string): string {
   return redactSensitiveText(value)
-    .replace(/\b([A-Za-z0-9_]*(?:SECRET|PASSWORD|CREDENTIAL)[A-Za-z0-9_]*|[A-Za-z0-9_]*API[_-]?KEY[A-Za-z0-9_]*)\s*[:=]\s*\S+/gi, '$1=<redacted>')
+    .replace(/\b([A-Za-z0-9_]*(?:SECRET|PASSWORD|CREDENTIAL)[A-Za-z0-9_]*|[A-Za-z0-9_]*API[_-]?KEY[A-Za-z0-9_]*)\s*:\s*(?:"[^"]*"|'[^']*'|[^\r\n]*)/gi, '$1=<redacted>')
+    .replace(/\b([A-Za-z0-9_]*(?:SECRET|PASSWORD|CREDENTIAL)[A-Za-z0-9_]*|[A-Za-z0-9_]*API[_-]?KEY[A-Za-z0-9_]*)\s*=\s*\S+/gi, '$1=<redacted>')
     .replace(/\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[opusr]_[A-Za-z0-9_.-]{12,})\b/g, '[REDACTED_TOKEN]')
     .replace(/\b(sk|xox[baprs]?|hf|glpat)-[A-Za-z0-9._/-]+\b/g, '$1-[REDACTED]')
     .replace(/\b([A-Za-z0-9_-]{20,})\.([A-Za-z0-9_-]{20,})\.([A-Za-z0-9_-]{20,})\b/g, '[REDACTED_JWT]')
@@ -940,7 +941,7 @@ export function buildWorkerCrashOnlyRestartContract(
     };
   }
 
-  if (kanbanState === 'blocked' || kanbanState === 'pending-approval' || input.category === 'approval-gate' || knownLongRunningWait(input.category)) {
+  if (kanbanState === 'blocked' || kanbanState === 'pending-approval' || input.category === 'approval-gate' || input.category === 'dispatcher-bug' || knownLongRunningWait(input.category)) {
     return {
       disposition: 'hitl',
       nextAction: 'defer-with-evidence',
@@ -1020,7 +1021,7 @@ export function detectStuckRunWatchdogFindings(
   const longRunningWaitGraceMs = options.longRunningWaitGraceMs ?? DEFAULT_STUCK_RUN_WAIT_GRACE_MS;
   const findings: IssueStuckRunWatchdogFinding[] = [];
   const liveSiblings = liveSiblingPidsByCardId(snapshots);
-  const emittedDeadRestartCards = new Set<string>();
+  const handledDeadRestartCards = new Set<string>();
 
   for (const snapshot of snapshots) {
     if (!snapshot.cardId.trim()) continue;
@@ -1086,9 +1087,9 @@ export function detectStuckRunWatchdogFindings(
       kanbanState: status ?? 'unknown',
     });
     const normalizedCardId = snapshot.cardId.trim();
-    if (processStatus === 'dead' && restartContract.nextAction === 'restart-once') {
-      if (emittedDeadRestartCards.has(normalizedCardId)) continue;
-      emittedDeadRestartCards.add(normalizedCardId);
+    if (processStatus === 'dead') {
+      if (handledDeadRestartCards.has(normalizedCardId)) continue;
+      handledDeadRestartCards.add(normalizedCardId);
     }
     evidence.push(...restartContract.evidence);
 
