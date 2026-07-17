@@ -163,6 +163,15 @@ function buildCatalog(manifest) {
       ['docs/onboarding/coding-agent-pr-etiquette.md'],
       ['coding-agent'],
     ),
+    item(
+      'first-pr-runbook',
+      'Contribution workflow',
+      'Use the first-PR agent runbook for small one-issue PRs',
+      'Walks a fresh coding agent through duplicate checks, isolated worktree setup, issue-scoped verification, PR creation, Codex review, and merge handoff.',
+      undefined,
+      ['docs/onboarding/first-pr-agent-runbook.md', 'docs/onboarding/repository-ownership.manifest.json'],
+      ['coding-agent'],
+    ),
   ];
 }
 
