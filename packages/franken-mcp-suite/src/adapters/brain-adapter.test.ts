@@ -1,15 +1,40 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { databaseInstances, brainInstances } = vi.hoisted(() => {
+const { databaseInstances, brainInstances, workingMemoryRowsByPath } = vi.hoisted(() => {
+  const workingMemoryRowsByPath = new Map<string, Array<{ key: string; value: string }>>();
   const databaseInstances: Array<{
     pragma: ReturnType<typeof vi.fn>;
     prepare: ReturnType<typeof vi.fn>;
     close: ReturnType<typeof vi.fn>;
+    dbPath: string;
     options: unknown;
   }> = [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- vi.hoisted mock shape intentionally mirrors a broad SqliteBrain instance across tests.
-  const brainInstances: any[] = [];
-  return { databaseInstances, brainInstances };
+  const brainInstances: Array<{
+    working: {
+      restore: ReturnType<typeof vi.fn>;
+      snapshot: ReturnType<typeof vi.fn>;
+      set: ReturnType<typeof vi.fn>;
+      has: ReturnType<typeof vi.fn>;
+      delete: ReturnType<typeof vi.fn>;
+    };
+    episodic: {
+      recall: ReturnType<typeof vi.fn>;
+      recent: ReturnType<typeof vi.fn>;
+      record: ReturnType<typeof vi.fn>;
+    };
+    rightToForget: ReturnType<typeof vi.fn>;
+    memoryReview: {
+      propose: ReturnType<typeof vi.fn>;
+      approve: ReturnType<typeof vi.fn>;
+      reject: ReturnType<typeof vi.fn>;
+      neverStore: ReturnType<typeof vi.fn>;
+      listProvenance: ReturnType<typeof vi.fn>;
+      conflictsFor: ReturnType<typeof vi.fn>;
+      resolveConflict: ReturnType<typeof vi.fn>;
+    };
+    flush: ReturnType<typeof vi.fn>;
+  }> = [];
+  return { databaseInstances, brainInstances, workingMemoryRowsByPath };
 });
 
 vi.mock("better-sqlite3", () => ({
@@ -20,8 +45,9 @@ vi.mock("better-sqlite3", () => ({
   ) {
     const db = {
       pragma: vi.fn(),
-      prepare: vi.fn(() => ({ all: vi.fn(() => []) })),
+      prepare: vi.fn(() => ({ all: vi.fn(() => workingMemoryRowsByPath.get(_dbPath) ?? []) })),
       close: vi.fn(),
+      dbPath: _dbPath,
       options,
     };
     databaseInstances.push(db);
@@ -31,58 +57,61 @@ vi.mock("better-sqlite3", () => ({
 
 vi.mock("@franken/brain", () => ({
   SqliteBrain: vi.fn(function MockSqliteBrain(this: unknown) {
+    let workingSnapshot: Record<string, unknown> = {
+      "task-1": "working entry",
+      "agents/oncall/runbook": "shared runbook",
+      "temporary-operational": {
+        value: "rotate release key",
+        category: "temporary-operational",
+        sourceScope: "mcp-memory-store",
+        expiresAt: "2026-07-16T06:00:00.000Z",
+      },
+      "github-token": "ghp_" + "supersecretvalue123456",
+      "public-key": "sk-" + "secretvalue123456",
+      "deployment-notes":
+        "-----BEGIN " +
+        "OPENSSH PRIVATE KEY-----\nsecret\n-----END " +
+        "OPENSSH PRIVATE KEY-----",
+      "status-page": "password=hunter2 session_cookie=abc123value",
+      "legacy-db-passwd": "legacy-password-alias",
+      "ops-note": "slack_webhook_url=https://hooks.slack.com/services/T000/B000/SECRET discord webhook https://discord.com/api/webhooks/1234567890/abcdef_SECRET",
+      "env-snippet": "AWS_SECRET_ACCESS_KEY=AKIA" + "supersecretvalue123456 REGION=us-east-1",
+      "legacy-token-snippet": "xoxb-" + "legacytokenvalue123 glpat-legacytokenvalue123",
+      "basic-auth": "Authorization: *** " + "dXNlcjpwYXNz",
+      "token-auth": "Authorization: Token " + "secret-token-value-that-must-not-leak",
+      "db_pwd": "super-pwd-value",
+      "db_passwd": "super-passwd-value",
+      "slack_webhook_url": "https://hooks.slack.com/services/T000/B000/secretwebhookvalue",
+      "ops-notes": "Mirror alerts to https://discord.com/api/webhooks/123456/secretwebhookvalue",
+
+      "json-literal-secrets": '{"password":123456,"token":true,"authToken":{"raw":"«redacted:ghs_…»"},"accessKey":["secretvalue123456"],"safe":"ok"}',
+      profile: {
+        password: "hunter2",
+        "alice@example.com": "oncall",
+        "bob@example.com": "backup",
+      },
+      "object-secret": {
+        password: "hunter2",
+        nested: { token: 987654 },
+        "alice@example.com": "oncall",
+      },
+      "__fbeast_agent_memory__/alpha/private-task": {
+        __fbeastMemoryScope: "fbeast:agent-memory",
+        agentId: "alpha",
+        value: "private entry",
+      },
+      "__fbeast_agent_memory__/beta/private-task": {
+        __fbeastMemoryScope: "fbeast:agent-memory",
+        agentId: "beta",
+        value: "beta entry",
+      },
+    };
     const brain = {
       working: {
-        restore: vi.fn(),
-        snapshot: vi.fn(() => ({
-          "task-1": "working entry",
-          "agents/oncall/runbook": "shared runbook",
-          "temporary-operational": {
-            value: "rotate release key",
-            category: "temporary-operational",
-            sourceScope: "mcp-memory-store",
-            expiresAt: "2026-07-16T06:00:00.000Z",
-          },
-          "github-token": "ghp_" + "supersecretvalue123456",
-          "public-key": "sk-" + "secretvalue123456",
-          "deployment-notes":
-            "-----BEGIN " +
-            "OPENSSH PRIVATE KEY-----\nsecret\n-----END " +
-            "OPENSSH PRIVATE KEY-----",
-          "status-page": "password=hunter2 session_cookie=abc123value",
-          "legacy-db-passwd": "legacy-password-alias",
-          "ops-note": "slack_webhook_url=https://hooks.slack.com/services/T000/B000/SECRET discord webhook https://discord.com/api/webhooks/1234567890/abcdef_SECRET",
-          "env-snippet": "AWS_SECRET_ACCESS_KEY=AKIA" + "supersecretvalue123456 REGION=us-east-1",
-          "legacy-token-snippet": "xoxb-" + "legacytokenvalue123 glpat-legacytokenvalue123",
-          "basic-auth": "Authorization: Basic " + "dXNlcjpwYXNz",
-          "token-auth": "Authorization: Token secret-token-value-that-must-not-leak",
-          "db_pwd": "super-pwd-value",
-          "db_passwd": "super-passwd-value",
-          "slack_webhook_url": "https://hooks.slack.com/services/T000/B000/secretwebhookvalue",
-          "ops-notes": "Mirror alerts to https://discord.com/api/webhooks/123456/secretwebhookvalue",
-
-          "json-literal-secrets": '{"password":123456,"token":true,"authToken":{"raw":"«redacted:ghs_…»"},"accessKey":["secretvalue123456"],"safe":"ok"}',
-          profile: {
-            password: "hunter2",
-            "alice@example.com": "oncall",
-            "bob@example.com": "backup",
-          },
-          "object-secret": {
-            password: "hunter2",
-            nested: { token: 987654 },
-            "alice@example.com": "oncall",
-          },
-          "__fbeast_agent_memory__/alpha/private-task": {
-            __fbeastMemoryScope: "fbeast:agent-memory",
-            agentId: "alpha",
-            value: "private entry",
-          },
-          "__fbeast_agent_memory__/beta/private-task": {
-            __fbeastMemoryScope: "fbeast:agent-memory",
-            agentId: "beta",
-            value: "beta entry",
-          },
-        })),
+        restore: vi.fn((snapshot: Record<string, unknown>) => {
+          workingSnapshot = snapshot;
+        }),
+        snapshot: vi.fn(() => workingSnapshot),
         set: vi.fn(),
         has: vi.fn(() => false),
         delete: vi.fn(),
@@ -192,7 +221,7 @@ vi.mock("@franken/brain", () => ({
         compactionCandidates: [],
       })),
       memoryReview: {
-        propose: vi.fn((input) => ({
+        propose: vi.fn((input: Record<string, unknown>) => ({
           ...input,
           id: "memcand_1",
           status: "pending",
@@ -288,6 +317,7 @@ describe("createBrainAdapter", () => {
   beforeEach(() => {
     databaseInstances.length = 0;
     brainInstances.length = 0;
+    workingMemoryRowsByPath.clear();
     vi.clearAllMocks();
   });
 
@@ -303,6 +333,50 @@ describe("createBrainAdapter", () => {
       "SELECT key, value FROM working_memory",
     );
     expect(readDb.close).toHaveBeenCalledOnce();
+  });
+
+  it("keeps direct API memory reads isolated by profile database path", async () => {
+    workingMemoryRowsByPath.set("/tmp/profiles/default/beast.db", [
+      { key: "profile-note", value: JSON.stringify("default profile memory") },
+    ]);
+    workingMemoryRowsByPath.set("/tmp/profiles/doctor/beast.db", [
+      { key: "profile-note", value: JSON.stringify("doctor profile memory") },
+    ]);
+
+    const defaultProfile = createBrainAdapter("/tmp/profiles/default/beast.db");
+    const doctorProfile = createBrainAdapter("/tmp/profiles/doctor/beast.db");
+
+    const defaultRows = await defaultProfile.query({
+      query: "profile memory",
+      type: "working",
+      readScope: "shared",
+      limit: 10,
+    });
+    const doctorRows = await doctorProfile.query({
+      query: "profile memory",
+      type: "working",
+      readScope: "shared",
+      limit: 10,
+    });
+
+    expect(defaultRows).toEqual([
+      { key: "profile-note", value: "default profile memory", type: "working" },
+    ]);
+    expect(doctorRows).toEqual([
+      { key: "profile-note", value: "doctor profile memory", type: "working" },
+    ]);
+    expect(databaseInstances.map((db) => db.dbPath)).toEqual([
+      "/tmp/profiles/default/beast.db",
+      "/tmp/profiles/doctor/beast.db",
+    ]);
+    expect(brainInstances[0]!.working.restore).toHaveBeenCalledWith({
+      "profile-note": "default profile memory",
+    });
+    expect(brainInstances[1]!.working.restore).toHaveBeenCalledWith({
+      "profile-note": "doctor profile memory",
+    });
+    expect(JSON.stringify(defaultRows)).not.toContain("doctor profile memory");
+    expect(JSON.stringify(doctorRows)).not.toContain("default profile memory");
   });
 
   it("stores and queries only supported memory types", async () => {

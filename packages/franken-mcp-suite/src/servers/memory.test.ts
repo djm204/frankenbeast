@@ -114,6 +114,53 @@ describe("Memory Server", () => {
       enum: ["working", "episodic"],
       description: "Filter by type: working or episodic",
     });
+    expect(queryTool.inputSchema.properties?.limit).toMatchObject({
+      type: "string",
+      description: "Max results as a positive integer from 1 to 1000 (default 20)",
+    });
+  });
+
+  it("keeps tool-level memory queries isolated by injected profile brain", async () => {
+    const defaultBrain = createBrainStub({
+      query: vi.fn().mockResolvedValue([
+        { key: "profile-note", value: "default profile memory", type: "working" },
+      ]),
+    });
+    const doctorBrain = createBrainStub({
+      query: vi.fn().mockResolvedValue([
+        { key: "profile-note", value: "doctor profile memory", type: "working" },
+      ]),
+    });
+    const defaultServer = createMemoryServer({ brain: defaultBrain });
+    const doctorServer = createMemoryServer({ brain: doctorBrain });
+
+    const defaultResult = await defaultServer.callTool("fbeast_memory_query", {
+      query: "profile memory",
+      type: "working",
+      readScope: "shared",
+    });
+    const doctorResult = await doctorServer.callTool("fbeast_memory_query", {
+      query: "profile memory",
+      type: "working",
+      readScope: "shared",
+    });
+
+    expect(defaultBrain.query).toHaveBeenCalledWith({
+      query: "profile memory",
+      type: "working",
+      readScope: "shared",
+      limit: 20,
+    });
+    expect(doctorBrain.query).toHaveBeenCalledWith({
+      query: "profile memory",
+      type: "working",
+      readScope: "shared",
+      limit: 20,
+    });
+    expect(defaultResult.content[0]!.text).toContain("default profile memory");
+    expect(defaultResult.content[0]!.text).not.toContain("doctor profile memory");
+    expect(doctorResult.content[0]!.text).toContain("doctor profile memory");
+    expect(doctorResult.content[0]!.text).not.toContain("default profile memory");
   });
 
   it("delegates memory store/query/frontload/forget to the brain adapter", async () => {
@@ -300,7 +347,7 @@ describe("Memory Server", () => {
     expect(brain.store).not.toHaveBeenCalled();
     expect(brain.proposeMemory).toHaveBeenCalledWith({
       key: "OPENAI_API_KEY",
-      value: sensitiveValue,
+      value: "<redacted>",
       source: "fbeast_memory_store:quarantine",
       evidenceId: "quarantine:OPENAI_API_KEY",
       confidence: 1,

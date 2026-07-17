@@ -3675,7 +3675,7 @@ describe('SqliteBrain', () => {
         .digest('hex');
       expect(suppression.signature).not.toBe(legacySignature);
       expect(
-        db.prepare(`SELECT COUNT(*) AS count FROM memory_deletion_hash_keys`).get(),
+        db.prepare(`SELECT COUNT(*) AS count FROM memory_deletion_hash_keys WHERE id = 'right-to-forget-hmac-v1'`).get(),
       ).toEqual({ count: 1 });
     });
 
@@ -3686,7 +3686,7 @@ describe('SqliteBrain', () => {
       expect(indexes.some(index => index.name === 'idx_memory_review_suppressions_target_key')).toBe(true);
     });
 
-    it('does not create deletion hash keys while only checking suppressions', () => {
+    it('does not create deletion guard hash keys while only checking suppressions', () => {
       const db = (brain as unknown as { db: Database.Database }).db;
 
       brain.memoryReview.propose({
@@ -3699,8 +3699,8 @@ describe('SqliteBrain', () => {
       });
 
       expect(
-        db.prepare(`SELECT COUNT(*) AS count FROM memory_deletion_hash_keys`).get(),
-      ).toEqual({ count: 0 });
+        db.prepare(`SELECT id FROM memory_deletion_hash_keys ORDER BY id`).all(),
+      ).toEqual([{ id: 'memory-access-audit-hmac-v1' }]);
       expect(brain.serialize()).not.toHaveProperty('deletionGuardHashKey');
     });
 
@@ -4037,7 +4037,12 @@ describe('SqliteBrain', () => {
         {
           store: 'memory_deletion_hash_keys',
           version: CURRENT_MEMORY_SCHEMA_VERSION,
-          recordCount: 0,
+          recordCount: 1,
+        },
+        {
+          store: 'memory_access_audit_events',
+          version: CURRENT_MEMORY_SCHEMA_VERSION,
+          recordCount: 5,
         },
       ]);
 
@@ -4176,7 +4181,12 @@ describe('SqliteBrain', () => {
           {
             store: 'memory_deletion_hash_keys',
             version: CURRENT_MEMORY_SCHEMA_VERSION,
-            recordCount: 0,
+            recordCount: 1,
+          },
+          {
+            store: 'memory_access_audit_events',
+            version: CURRENT_MEMORY_SCHEMA_VERSION,
+            recordCount: 1,
           },
         ]);
         reopened.close();
@@ -4313,10 +4323,16 @@ describe('SqliteBrain', () => {
           context: { secret: 'checkpoint payload' },
           timestamp: '2026-07-13T00:01:00.000Z',
         });
+        expect(encrypted.getMemoryEncryptionMetadata().stores).toEqual(
+          expect.arrayContaining([
+            { store: 'memory_access_audit_events', encrypted: false },
+          ]),
+        );
         expect(
           encrypted
             .getMemoryEncryptionMetadata()
-            .stores.every((store) => store.encrypted),
+            .stores.filter((store) => store.store !== 'memory_access_audit_events')
+            .every((store) => store.encrypted),
         ).toBe(true);
         encrypted.close();
 
@@ -4504,10 +4520,16 @@ describe('SqliteBrain', () => {
 
         const reopened = new SqliteBrain(dbPath, undefined, { encryption });
         expect(reopened.working.get('legacy')).toBe('plaintext memory');
+        expect(reopened.getMemoryEncryptionMetadata().stores).toEqual(
+          expect.arrayContaining([
+            { store: 'memory_access_audit_events', encrypted: false },
+          ]),
+        );
         expect(
           reopened
             .getMemoryEncryptionMetadata()
-            .stores.every((store) => store.encrypted),
+            .stores.filter((store) => store.store !== 'memory_access_audit_events')
+            .every((store) => store.encrypted),
         ).toBe(true);
         reopened.close();
       } finally {
@@ -5743,6 +5765,120 @@ describe('SqliteBrain', () => {
 
       const snapshot = brain.serialize();
       expect(() => BrainSnapshotSchema.parse(snapshot)).not.toThrow();
+    });
+  });
+
+  describe('memory access audit', () => {
+    it('hashes selectors with the deletion hash key and preserves details objects', () => {
+      brain.rightToForget({ query: 'audit seed selector' });
+      brain.working.set('api-token', 'secret-value');
+
+      const [event] = brain.accessAudit.list({ operation: 'working.set', limit: 1 });
+      expect(event).toMatchObject({
+        operation: 'working.set',
+        store: 'working',
+        outcome: 'success',
+        details: { valueBytes: '"secret-value"'.length },
+      });
+      expect(event.keyHash).toBeDefined();
+      expect(event.keyHash).not.toBe(
+        createHash('sha256').update('api-token', 'utf8').digest('hex'),
+      );
+    });
+
+    it('keeps audit-only hash keys out of exported deletion guard snapshots', () => {
+      brain.working.set('api-token', 'secret-value');
+
+      const [event] = brain.accessAudit.list({ operation: 'working.set', limit: 1 });
+      expect(event.keyHash).toBeDefined();
+      expect(brain.serialize().deletionGuardHashKey).toBeUndefined();
+      expect(brain.serialize().deletionGuards).toEqual([]);
+
+      const db = (brain as unknown as { db: Database.Database }).db;
+      expect(
+        db.prepare(`SELECT id FROM memory_deletion_hash_keys ORDER BY id`).all(),
+      ).toEqual([{ id: 'memory-access-audit-hmac-v1' }]);
+    });
+
+    it('hashes learning keys and audits denied review proposals', () => {
+      brain.episodic.recordLearning(
+        {
+          type: 'observation',
+          summary: 'Learned sensitive operator detail',
+          createdAt: '2026-07-15T00:00:00.000Z',
+        },
+        { key: 'operator@example.test', cooldownMs: 0 },
+      );
+      const [learningEvent] = brain.accessAudit.list({
+        operation: 'episodic.recordLearning',
+        limit: 1,
+      });
+      expect(learningEvent.keyHash).toBeDefined();
+      expect(JSON.stringify(learningEvent)).not.toContain('operator@example.test');
+
+      brain.rightToForget({ key: 'blocked-review-key' });
+      expect(() =>
+        brain.memoryReview.propose({
+          targetStore: 'working',
+          key: 'blocked-review-key',
+          value: 'blocked value',
+          source: 'test',
+          confidence: 0.9,
+          reason: 'would reintroduce forgotten key',
+        }),
+      ).toThrow(/right-to-forget/);
+      const [proposalEvent] = brain.accessAudit.list({
+        operation: 'review.propose',
+        limit: 1,
+      });
+      expect(proposalEvent).toMatchObject({
+        operation: 'review.propose',
+        store: 'review',
+        outcome: 'denied',
+        details: { errorName: 'MemoryDeletionGuardError' },
+      });
+      expect(proposalEvent.keyHash).toBeDefined();
+      expect(JSON.stringify(proposalEvent)).not.toContain('blocked-review-key');
+    });
+
+    it('records accesses across persisted memory surfaces and right-to-forget', () => {
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'Audit trail event',
+        createdAt: '2026-07-15T00:00:00.000Z',
+      });
+      brain.episodic.recall('Audit trail event', 1);
+      brain.recovery.checkpoint({
+        runId: 'audit-run',
+        phase: 'verify',
+        step: 1,
+        context: {},
+        timestamp: '2026-07-15T00:00:01.000Z',
+      });
+      brain.recovery.listCheckpoints();
+      brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'audit-review',
+        value: 'candidate',
+        source: 'test',
+        confidence: 0.9,
+        reason: 'exercise audit trail',
+      });
+      brain.memoryReview.list();
+      brain.rightToForget({ query: 'Audit trail event' });
+
+      const operations = brain.accessAudit.list({ limit: 50 }).map((event) => event.operation);
+      expect(operations).toEqual(
+        expect.arrayContaining([
+          'episodic.record',
+          'episodic.recall',
+          'recovery.checkpoint',
+          'recovery.listCheckpoints',
+          'review.propose',
+          'review.list',
+          'privacy.rightToForget',
+        ]),
+      );
     });
   });
 

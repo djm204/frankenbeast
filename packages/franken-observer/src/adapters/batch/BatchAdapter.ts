@@ -30,6 +30,15 @@ function validatePositiveSafeInteger(value: number, optionName: string): number 
   return value
 }
 
+function setTimerRefState(
+  timer: ReturnType<typeof globalThis.setInterval>,
+  shouldRef: boolean,
+): void {
+  const refableTimer = timer as { ref?: () => void, unref?: () => void }
+  if (shouldRef) refableTimer.ref?.()
+  else refableTimer.unref?.()
+}
+
 /**
  * Buffers `flush()` calls and forwards them to the underlying adapter in bulk,
  * reducing HTTP round-trips on high-throughput deployments.
@@ -70,13 +79,16 @@ export class BatchAdapter implements ExportAdapter {
       const flushIntervalMs = validatePositiveSafeInteger(options.flushIntervalMs, 'flushIntervalMs')
       const si = options.setInterval ?? globalThis.setInterval
       this.timer = si(() => { void this.drain().catch(() => undefined) }, flushIntervalMs)
+      setTimerRefState(this.timer, false)
     }
   }
 
   /** Add a trace to the buffer. Drains immediately if `maxBatchSize` is reached. */
   async flush(trace: Trace): Promise<void> {
     warnIfTraceHasActiveSpans(trace, 'BatchAdapter')
+    const wasEmpty = this.buffer.length === 0
     this.buffer.push(trace)
+    if (wasEmpty && this.timer !== null) setTimerRefState(this.timer, true)
     if (this.buffer.length >= this.maxBatchSize) {
       await this.drainForSizeTriggeredFlush(trace)
     }
@@ -168,6 +180,8 @@ export class BatchAdapter implements ExportAdapter {
         failures.push(result.reason)
       }
     }
+
+    if (this.buffer.length === 0 && this.timer !== null) setTimerRefState(this.timer, false)
 
     if (failures.length > 0) {
       const firstFailure = failures[0]

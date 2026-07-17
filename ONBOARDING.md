@@ -87,6 +87,15 @@ Use this checklist for a first local checkout or when rebuilding a development e
 
   The dry run checks auth, install, and git-state prerequisites, then walks through checkout, branch/worktree creation, a no-op change, test selection, PR body generation, Codex review, and cleanup. Every remote mutation is skipped: `git push`, `gh pr create`, `gh pr comment`, and merge actions are printed as planned side effects rather than executed. Local write steps are simulated, and failures include remediation such as `gh auth login`, Corepack/npm activation, `npm ci`, or starting from a clean isolated worktree.
 
+- [ ] Practice safe edit/test mechanics in the [agent practice fixture](fixtures/agent-practice-fixture/README.md) before touching production packages:
+
+  ```bash
+  cd fixtures/agent-practice-fixture
+  npm test
+  ```
+
+  The fixture is intentionally tiny and initially failing. Fix only `fixtures/agent-practice-fixture/src/scoreboard.js`, re-run the fixture test, then reset it with `npm run reset` for the next trainee. Trainers can copy the [sample practice issue body](docs/onboarding/sample-agent-practice-issue.md) when assigning the exercise.
+
 - [ ] Take the interactive workspace tour when you need a deterministic package map before choosing files:
 
   ```bash
@@ -166,7 +175,13 @@ Read the [agent role responsibility map](docs/onboarding/agent-role-responsibili
 
 ## Coding-agent PR etiquette
 
+Read the [first-PR agent runbook](docs/onboarding/first-pr-agent-runbook.md) when a fresh agent is taking a small issue from assignment through branch/worktree setup, implementation, verification, PR creation, Codex review, and merge handoff. It includes the exact command sequence and HITL stop conditions expected for first PRs.
+
 Read the [coding-agent PR etiquette guide](docs/onboarding/coding-agent-pr-etiquette.md) before opening, updating, or merging agent-authored pull requests. It defines one-issue/one-PR scope, required PR body evidence, current-head CI/Codex expectations, negative cases that prevent duplicate work, and handoff fields for blocked PRs.
+
+## Release and deployment mental model
+
+Read the [release and deployment mental model](docs/onboarding/release-deployment-mental-model.md) before you need to explain or own the issue->PR->CI->Codex->merge->Release Please->deployment flow. It defines release labels and signals, PR-to-release handoff expectations, post-merge monitoring ownership, and high-level rollback/incident responsibilities.
 
 ## Issue complexity rubric
 
@@ -321,12 +336,16 @@ It maps ChromaDB, Grafana, Tempo, provider credentials, and secret backends to t
 
 ## Troubleshooting
 
-If a PM, liveness monitor, or operator reports a stalled worker, use the dedicated [troubleshooting guide for stalled workers](docs/guides/troubleshooting-stalled-workers.md) before respawning or deleting worktrees. It walks through live task/PR evidence, active versus blocked versus stale classifications, safe recovery actions, and the handoff fields future workers need.
+Start with the [setup troubleshooting matrix](docs/onboarding/setup-troubleshooting-matrix.md) when bootstrap, package-manager, Corepack, GitHub auth, port, generated-file, lock-file, Docker service, secret-backend, or preflight checks fail. It maps each symptom to the likely cause, diagnostic command, remediation, verification command, and evidence to include in handoffs.
+
+If a PM, liveness monitor, or operator reports a stalled worker after setup succeeds, use the dedicated [troubleshooting guide for stalled workers](docs/guides/troubleshooting-stalled-workers.md) before respawning or deleting worktrees. It walks through live task/PR evidence, active versus blocked versus stale classifications, safe recovery actions, and the handoff fields future workers need.
 
 - [ ] `npm install` fails with an engine error:
+  - Follow the matrix row for Node engine failures.
   - Check `node --version` against the root `engines.node` range.
   - Re-run the Corepack commands in the prerequisites section and `npm run check:package-manager`.
 - [ ] `npm run check:package-manager` fails:
+  - Follow the matrix row for package-manager mismatches.
   - Run `corepack enable npm`.
   - Run `corepack prepare "$(node -p "require('./package.json').packageManager")" --activate`.
   - Confirm plain `npm --version` matches the root `packageManager` pin.
@@ -341,6 +360,7 @@ If a PM, liveness monitor, or operator reports a stalled worker, use the dedicat
   - Prefer `--base-dir /absolute/path/to/project` for `frankenbeast chat-server`, `frankenbeast network`, and `frankenbeast beasts-daemon`.
   - Use `FBEAST_ROOT` only for callers that construct Beast services or dispatch built-in Beast runs without an explicit root.
 - [ ] Docker services fail to start:
+  - Follow the matrix row for optional Docker service failures.
   - Check that Docker is running.
   - Confirm `GRAFANA_PASSWORD` is set to a unique non-default value before starting the full compose stack.
   - Use `docker compose ps` and service logs to inspect failures.
