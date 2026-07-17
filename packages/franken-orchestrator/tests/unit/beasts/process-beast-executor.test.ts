@@ -9,6 +9,11 @@ import { martinLoopDefinition } from '../../../src/beasts/definitions/martin-loo
 import { ProcessBeastExecutor } from '../../../src/beasts/execution/process-beast-executor.js';
 import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
 import { ProcessSupervisor, type ProcessCallbacks } from '../../../src/beasts/execution/process-supervisor.js';
+import {
+  RUN_CONFIG_INTEGRITY_ENV,
+  RUN_CONFIG_INTEGRITY_SECRET_ENV,
+  verifyRunConfigIntegrity,
+} from '../../../src/cli/run-config-integrity.js';
 import type { BeastDefinition } from '../../../src/beasts/types.js';
 
 function createTestRun(repo: SQLiteBeastRepository) {
@@ -1088,16 +1093,24 @@ describe('ProcessBeastExecutor', () => {
 
       const [spawnedSpec] = supervisor.spawn.mock.calls[0];
       const configPath = join(runConfigDir, `${run.id}.json`);
-      expect((spawnedSpec as { env: Record<string, string> }).env.FRANKENBEAST_RUN_CONFIG).toBe(configPath);
+      const manifestPath = `${configPath}.integrity`;
+      const spawnedEnv = (spawnedSpec as { env: Record<string, string> }).env;
+      expect(spawnedEnv.FRANKENBEAST_RUN_CONFIG).toBe(configPath);
+      expect(spawnedEnv[RUN_CONFIG_INTEGRITY_ENV]).toBe(manifestPath);
+      expect(spawnedEnv[RUN_CONFIG_INTEGRITY_SECRET_ENV]).toMatch(/^[0-9a-f]{64}$/);
       expect(existsSync(configPath)).toBe(true);
+      expect(existsSync(manifestPath)).toBe(true);
       expect(readFileSync(configPath, 'utf8')).toContain('Test objective');
       expect(readFileSync(configPath, 'utf8')).not.toContain('stale snapshot');
       expect(statSync(runConfigDir).mode & 0o777).toBe(0o700);
       expect(statSync(configPath).mode & 0o777).toBe(0o600);
+      expect(statSync(manifestPath).mode & 0o777).toBe(0o600);
+      expect(() => verifyRunConfigIntegrity(configPath, manifestPath, spawnedEnv[RUN_CONFIG_INTEGRITY_SECRET_ENV]!)).not.toThrow();
 
       capturedCallbacks!.onExit(0, null);
 
       expect(existsSync(configPath)).toBe(false);
+      expect(existsSync(manifestPath)).toBe(false);
     });
 
     it('redacts sensitive keys and secret-shaped values before writing run config files', async () => {
@@ -2035,9 +2048,10 @@ describe('ProcessBeastExecutor', () => {
 
       await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow();
 
-      // Config file should have been cleaned up
+      // Config file and integrity manifest should have been cleaned up
       const configPath = join(runConfigDir, `${run.id}.json`);
       expect(existsSync(configPath)).toBe(false);
+      expect(existsSync(`${configPath}.integrity`)).toBe(false);
     });
   });
 
