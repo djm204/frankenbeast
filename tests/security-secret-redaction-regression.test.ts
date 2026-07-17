@@ -31,6 +31,15 @@ const fixtures = [
   { name: 'bearer-token', value: bearerToken },
 ] as const;
 
+const camelCaseSecretMetadata = {
+  accessToken: 'opaque-access-token-value',
+  authToken: 'opaque-auth-token-value',
+  passwordValue: 'opaque-password-value',
+  cookieHeader: 'opaque-cookie-header-value',
+  privateKey: 'opaque-private-key-value',
+  APIKey: 'opaque-api-key-value',
+};
+
 function assertNoFixtureLeak(surface: string, value: unknown): void {
   const rendered = typeof value === 'string' ? value : JSON.stringify(value);
   for (const fixture of fixtures) {
@@ -111,6 +120,8 @@ describe('secret redaction regression harness', () => {
 
       expect(brain.store, fixture.name).not.toHaveBeenCalled();
       expect(brain.proposeMemory, fixture.name).toHaveBeenCalled();
+      expect(brain.proposeMemory, fixture.name).not.toHaveBeenCalledWith(expect.objectContaining({ value: fixture.value }));
+      expect(brain.proposeMemory, fixture.name).toHaveBeenCalledWith(expect.objectContaining({ value: '<redacted>' }));
       assertNoFixtureLeak(`memory ${fixture.name}`, result.content[0]?.text ?? '');
     }
   });
@@ -126,6 +137,7 @@ describe('secret redaction regression harness', () => {
       databaseUrl,
       cookieHeader,
       bearerToken,
+      ...camelCaseSecretMetadata,
     });
     SpanLifecycle.addThoughtBlock(span, `thought ${discordWebhook} ${bearerToken}`);
     TraceContext.endSpan(span, { status: 'error', errorMessage: `failed with ${databaseUrl}` });
@@ -136,6 +148,9 @@ describe('secret redaction regression harness', () => {
 
     expect(JSON.stringify(persisted)).toContain('<redacted>');
     assertNoFixtureLeak('trace persistence', persisted);
+    for (const value of Object.values(camelCaseSecretMetadata)) {
+      expect(JSON.stringify(persisted)).not.toContain(value);
+    }
   });
 
   it('redacts representative secret fixtures from HTTP error responses and logs', () => {

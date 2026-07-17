@@ -135,8 +135,18 @@ const SENSITIVE_MEMORY_VALUE_PATTERNS = [
   /\b(?:Cookie|Set-Cookie):\s*[^\r\n]+/i,
 ];
 
+const SENSITIVE_MEMORY_REDACTION = '<redacted>';
+
+function normalizeSensitiveMemoryKey(key: string): string {
+  return key
+    .trim()
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[^a-z0-9]+/giu, '_');
+}
+
 function sensitiveMemoryQuarantineReason(key: string, value: string): string | undefined {
-  const normalizedKey = key.trim();
+  const normalizedKey = normalizeSensitiveMemoryKey(key);
   if (SENSITIVE_MEMORY_KEY_PATTERNS.some((pattern) => pattern.test(normalizedKey))) {
     return 'key-name-indicates-secret';
   }
@@ -235,7 +245,7 @@ const TOOLS: ToolFull[] = [
         }
         const candidate = await brain.proposeMemory({
           key,
-          value,
+          value: SENSITIVE_MEMORY_REDACTION,
           source: 'fbeast_memory_store:quarantine',
           evidenceId: `quarantine:${key}`,
           confidence: 1,

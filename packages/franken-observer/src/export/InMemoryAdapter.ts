@@ -114,6 +114,17 @@ function cloneMetadata(metadata: Record<string, unknown>): Record<string, unknow
   return cloneMetadataValue(metadata) as Record<string, unknown>
 }
 
+function normalizeSensitiveKey(key: string): string {
+  return key
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[^a-z0-9]+/giu, '_')
+}
+
+function isSensitiveMetadataKey(key: string): boolean {
+  return SENSITIVE_METADATA_KEY_RE.test(normalizeSensitiveKey(key))
+}
+
 function cloneMetadataValue(value: unknown, seen = new WeakMap<object, unknown>()): unknown {
   if (typeof value === 'function' || typeof value === 'symbol') {
     return String(value)
@@ -200,7 +211,7 @@ function cloneMetadataValue(value: unknown, seen = new WeakMap<object, unknown>(
 }
 
 function redactMetadataEntry(key: string, value: unknown, seen: WeakMap<object, unknown>): unknown {
-  if (!SENSITIVE_METADATA_KEY_RE.test(key)) {
+  if (!isSensitiveMetadataKey(key)) {
     return cloneMetadataValue(value, seen)
   }
   if (typeof value === 'string' && REDACTION_MARKERS.has(value)) {

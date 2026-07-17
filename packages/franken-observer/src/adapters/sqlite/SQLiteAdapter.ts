@@ -200,6 +200,17 @@ function redactSensitiveText(text: string): string {
   return redacted
 }
 
+function normalizeSensitiveKey(key: string): string {
+  return key
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[^a-z0-9]+/giu, '_')
+}
+
+function isSensitiveMetadataKey(key: string): boolean {
+  return SENSITIVE_METADATA_KEY_RE.test(normalizeSensitiveKey(key))
+}
+
 function redactMetadata(value: unknown): unknown {
   if (typeof value === 'string') return redactSensitiveText(value)
   if (value === null || typeof value !== 'object') return value
@@ -212,7 +223,7 @@ function redactMetadata(value: unknown): unknown {
 }
 
 function redactMetadataEntry(key: string, value: unknown): unknown {
-  if (!SENSITIVE_METADATA_KEY_RE.test(key)) return redactMetadata(value)
+  if (!isSensitiveMetadataKey(key)) return redactMetadata(value)
   if (typeof value === 'string' && REDACTION_MARKERS.has(value)) return value
   return REDACTED
 }
