@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  defaultAgentToolPolicyConfig,
   roleToolManifests,
   validateAgentRoleTools,
 } from '../../../src/beasts/services/role-tool-manifest.js';
@@ -194,5 +195,47 @@ describe('role tool manifest policy', () => {
         reason: expect.stringContaining("not allowed for role 'triage'"),
       })],
     });
+  });
+
+  it('rejects malformed skills allowlists instead of treating them as an explicit empty allowlist', () => {
+    expect(validateAgentRoleTools({
+      agentRole: 'triage',
+      requestedTools: ['read_file'],
+      skills: true,
+    })).toMatchObject({
+      allowed: false,
+      role: 'triage',
+      denials: [expect.objectContaining({
+        requestedTool: '<malformed-skills-allowlist>',
+        reason: expect.stringContaining('must be an explicit array'),
+      })],
+    });
+  });
+
+  it('accepts trusted prompt-only skill manifests with no runtime tools', () => {
+    expect(validateAgentRoleTools({
+      agentRole: 'triage',
+      requestedTools: ['read_file'],
+      skills: ['prompt-context-only'],
+    }, {
+      trustedSkillToolManifests: { 'prompt-context-only': [] },
+    })).toMatchObject({
+      allowed: true,
+      role: 'triage',
+      denials: [],
+    });
+  });
+
+  it('derives explicit policy fields for tracked chat init shells', () => {
+    expect(defaultAgentToolPolicyConfig('martin-loop', 'martin-loop')).toEqual({
+      agentRole: 'coding',
+      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+      skills: [],
+    });
+
+    expect(validateAgentRoleTools(defaultAgentToolPolicyConfig('martin-loop', 'martin-loop'), {
+      definitionId: 'martin-loop',
+      initActionKind: 'martin-loop',
+    })).toMatchObject({ allowed: true, role: 'coding', denials: [] });
   });
 });

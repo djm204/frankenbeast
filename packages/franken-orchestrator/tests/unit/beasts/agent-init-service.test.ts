@@ -35,11 +35,40 @@ describe('AgentInitService', () => {
 
     expect(agent.chatSessionId).toBe('sess-1');
     expect(agent.initAction.command).toBe('/interview');
+    expect(agent.initConfig).toMatchObject({
+      agentRole: 'docs',
+      requestedTools: ['read_file', 'write_file'],
+      skills: [],
+    });
     expect(detail.events.map((event) => event.type)).toEqual([
       'agent.created',
       'agent.chat.bound',
       'agent.command.sent',
     ]);
+  });
+
+  it('derives explicit policy fields for empty chat init shells while interviews collect config', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-agent-init-'));
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
+    const init = new AgentInitService(agents, {
+      createRun: vi.fn(),
+    } as never, () => '2026-03-11T00:00:00.000Z');
+
+    const agent = init.createChatInitAgent({
+      definitionId: 'martin-loop',
+      chatSessionId: 'sess-empty',
+      command: 'martin-loop',
+      initActionKind: 'martin-loop',
+      config: {},
+    });
+
+    expect(agent.initConfig).toMatchObject({
+      agentRole: 'coding',
+      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+      skills: [],
+    });
+    expect(agents.getAgent(agent.id).status).toBe('initializing');
   });
 
   it('dispatches tracked agents after init completes and links the resulting run', async () => {

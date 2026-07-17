@@ -1,6 +1,7 @@
 import type { TrackedAgent, TrackedAgentInitActionKind, BeastExecutionMode, BeastRun } from '../types.js';
 import type { BeastDispatchService } from './beast-dispatch-service.js';
 import { AgentService } from './agent-service.js';
+import { defaultAgentToolPolicyConfig } from './role-tool-manifest.js';
 import { MaintenanceModeError } from './maintenance-mode-service.js';
 import { isoNow } from '@franken/types';
 
@@ -27,6 +28,10 @@ export class AgentInitService {
   ) {}
 
   createChatInitAgent(request: CreateChatInitAgentRequest): TrackedAgent {
+    const initConfig = {
+      ...defaultAgentToolPolicyConfig(request.definitionId, request.initActionKind),
+      ...request.config,
+    };
     const agent = this.agents.createAgent({
       definitionId: request.definitionId,
       source: 'chat',
@@ -34,10 +39,10 @@ export class AgentInitService {
       initAction: {
         kind: request.initActionKind,
         command: request.command,
-        config: request.config,
+        config: initConfig,
         chatSessionId: request.chatSessionId,
       },
-      initConfig: request.config,
+      initConfig,
       chatSessionId: request.chatSessionId,
     });
 

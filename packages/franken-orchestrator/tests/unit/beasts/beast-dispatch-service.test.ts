@@ -576,4 +576,79 @@ describe('BeastDispatchService', () => {
     expect(executors.process.start).not.toHaveBeenCalled();
     expect(repo.getRun(run.id)?.attemptCount).toBe(0);
   });
+
+  it('does not apply tracked-agent tool policy to direct non-agent dispatches', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+
+    const run = await dispatch.createRun({
+      definitionId: 'martin-loop',
+      config: {
+        provider: 'claude',
+        objective: 'Legacy direct dispatch without tracked agent policy metadata',
+        chunkDirectory: '.',
+      },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+    });
+
+    expect(run.trackedAgentId).toBeUndefined();
+    expect(run.configSnapshot).toMatchObject({ objective: 'Legacy direct dispatch without tracked agent policy metadata' });
+  });
+
+  it('preserves persisted tracked-agent role policy when dispatch config requests broader tools', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const agents = new AgentService(repo, () => '2026-03-17T00:00:00.000Z');
+    const executors = {
+      process: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const agent = agents.createAgent({
+      definitionId: 'design-interview',
+      source: 'dashboard',
+      createdByUser: 'operator',
+      initAction: { kind: 'design-interview', command: 'docs interview', config: {} },
+      initConfig: {
+        goal: 'Draft onboarding docs',
+        outputPath: 'docs/onboarding.md',
+        agentRole: 'docs',
+        requestedTools: ['read_file', 'write_file'],
+        skills: [],
+      },
+    });
+
+    const run = await dispatch.createRun({
+      definitionId: 'design-interview',
+      trackedAgentId: agent.id,
+      config: {
+        goal: 'Draft onboarding docs',
+        outputPath: 'docs/onboarding.md',
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+        skills: [],
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+    });
+
+    expect(run.trackedAgentId).toBe(agent.id);
+    expect(run.configSnapshot).toMatchObject({
+      agentRole: 'docs',
+      requestedTools: ['read_file', 'write_file'],
+      skills: [],
+    });
+  });
 });

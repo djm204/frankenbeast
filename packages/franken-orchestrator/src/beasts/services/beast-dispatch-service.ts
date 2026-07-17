@@ -1,4 +1,4 @@
-import type { BeastDefinition, BeastDispatchSource, BeastExecutionMode, BeastRun, ModuleConfig } from '../types.js';
+import type { BeastDefinition, BeastDispatchSource, BeastExecutionMode, BeastRun, ModuleConfig, TrackedAgent } from '../types.js';
 import { BeastLogStore } from '../events/beast-log-store.js';
 import type { BeastEventBus } from '../events/beast-event-bus.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
@@ -45,6 +45,17 @@ const SHARED_RUNTIME_CONFIG_KEYS = [
   'category',
   'categories',
   'issue',
+] as const;
+
+const TOOL_POLICY_CONFIG_KEYS = [
+  'agentRole',
+  'role',
+  'laneRole',
+  'requestedTools',
+  'enabledTools',
+  'toolManifest',
+  'tools',
+  'skills',
 ] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -129,6 +140,26 @@ function pickSharedRuntimeConfig(config: Readonly<Record<string, unknown>>): Rea
   );
 }
 
+function pickToolPolicyConfig(config: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  return Object.fromEntries(
+    TOOL_POLICY_CONFIG_KEYS
+      .filter((key) => Object.hasOwn(config, key))
+      .map((key) => [key, config[key]]),
+  );
+}
+
+function preserveTrackedAgentPolicyConfig(
+  config: Readonly<Record<string, unknown>>,
+  trackedAgent?: TrackedAgent | undefined,
+): Readonly<Record<string, unknown>> {
+  if (!trackedAgent) return config;
+  return {
+    ...config,
+    ...pickToolPolicyConfig(trackedAgent.initAction.config),
+    ...pickToolPolicyConfig(trackedAgent.initConfig),
+  };
+}
+
 export interface CreateBeastRunRequest {
   readonly definitionId: string;
   readonly config: Readonly<Record<string, unknown>>;
@@ -181,10 +212,14 @@ export class BeastDispatchService {
         ...pickSharedRuntimeConfig(request.config),
       };
     }
-    const moduleConfig = request.moduleConfig ?? this.resolveAgentModuleConfig(request.trackedAgentId);
-    const configSnapshot: Readonly<Record<string, unknown>> = moduleConfig
+    const trackedAgent = request.trackedAgentId
+      ? this.repository.requireTrackedAgent(request.trackedAgentId)
+      : undefined;
+    const moduleConfig = request.moduleConfig ?? trackedAgent?.moduleConfig;
+    const parsedConfigSnapshot: Readonly<Record<string, unknown>> = moduleConfig
       ? { ...config, modules: moduleConfig }
       : config;
+    const configSnapshot = preserveTrackedAgentPolicyConfig(parsedConfigSnapshot, trackedAgent);
     this.assertRoleToolManifestAllows(request, configSnapshot);
     const executionMode = request.executionMode ?? definition.executionModeDefault;
     const createdAt = new Date(wallClockNow()).toISOString();
@@ -369,21 +404,18 @@ export class BeastDispatchService {
       .map(run => capacityItemFromConfig(run.trackedAgentId!, run.configSnapshot));
   }
 
-  private resolveAgentModuleConfig(trackedAgentId?: string): ModuleConfig | undefined {
-    if (!trackedAgentId) return undefined;
-    const agent = this.repository.getTrackedAgent(trackedAgentId);
-    return agent?.moduleConfig;
-  }
-
   private assertRoleToolManifestAllows(
     request: CreateBeastRunRequest,
     configSnapshot: Readonly<Record<string, unknown>>,
   ): void {
+    if (!request.trackedAgentId) {
+      return;
+    }
     const trackedAgent = request.trackedAgentId
       ? this.repository.requireTrackedAgent(request.trackedAgentId)
       : undefined;
     const policyConfig = trackedAgent
-      ? { ...trackedAgent.initConfig, ...request.config, ...configSnapshot }
+      ? { ...request.config, ...configSnapshot, ...trackedAgent.initAction.config, ...trackedAgent.initConfig }
       : { ...request.config, ...configSnapshot };
     const validation = validateAgentRoleTools(policyConfig, {
       definitionId: request.definitionId,

@@ -117,12 +117,15 @@ function requestedToolsFromConfig(config: Readonly<Record<string, unknown>>): st
 
 interface SelectedSkillsConfig {
   readonly explicit: boolean;
+  readonly malformed: boolean;
   readonly skills: readonly string[];
 }
 
 function selectedSkillsFromConfig(config: Readonly<Record<string, unknown>>): SelectedSkillsConfig {
+  const explicit = Object.hasOwn(config, 'skills');
   return {
-    explicit: Object.hasOwn(config, 'skills'),
+    explicit,
+    malformed: explicit && !Array.isArray(config.skills),
     skills: [...new Set(arrayOfTools(config.skills))],
   };
 }
@@ -158,8 +161,18 @@ function trustedSkillToolManifestFor(context: ToolPolicyValidationContext, skill
     return undefined;
   }
   const raw = context.trustedSkillToolManifests?.[skill];
-  const tools = arrayOfTools(raw);
-  return tools.length > 0 ? tools : undefined;
+  return arrayOfTools(raw);
+}
+
+export function defaultAgentToolPolicyConfig(
+  definitionId: string,
+  initActionKind?: string | undefined,
+): Readonly<Record<string, unknown>> {
+  return {
+    agentRole: 'coding',
+    requestedTools: workflowRequiredTools({ definitionId, initActionKind }),
+    skills: [],
+  };
 }
 
 function skillToolDenials(
@@ -196,6 +209,13 @@ export function validateAgentRoleTools(
   const workflowTools = workflowRequiredTools(context);
   const selectedSkills = selectedSkillsFromConfig(policyConfig);
   const skillDenials = skillToolDenials(role ?? rawRole ?? '<missing-role>', selectedSkills.skills, context);
+  const malformedSkillsDenial = selectedSkills.malformed
+    ? [{
+      role: role ?? rawRole ?? '<missing-role>',
+      requestedTool: '<malformed-skills-allowlist>',
+      reason: 'agent creation skills allowlist must be an explicit array; use an empty skills array to disable installed skill tools',
+    }]
+    : [];
   const implicitSkillsDenial = selectedSkills.explicit
     ? []
     : [{
@@ -220,6 +240,7 @@ export function validateAgentRoleTools(
       : [];
     const denials = [
       ...missingManifestDenial,
+      ...malformedSkillsDenial,
       ...implicitSkillsDenial,
       ...explicitTools.map((requestedTool) => ({
         role: denialRole,
@@ -242,7 +263,7 @@ export function validateAgentRoleTools(
       role,
       rawRole,
       requestedTools,
-      denials: [{
+      denials: [...malformedSkillsDenial, {
         role,
         requestedTool: '<missing-tool-manifest>',
         reason: `role '${role}' requests must include an explicit least-privilege tool manifest`,
@@ -252,6 +273,7 @@ export function validateAgentRoleTools(
 
   const allowedTools = ROLE_TOOL_MANIFESTS[role];
   const denials = [
+    ...malformedSkillsDenial,
     ...implicitSkillsDenial,
     ...skillDenials.filter((denial) => denial.requestedTool.startsWith('skill:')),
     ...effectiveTools

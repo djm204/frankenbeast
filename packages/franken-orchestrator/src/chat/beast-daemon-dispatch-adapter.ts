@@ -1,4 +1,5 @@
 import type { BeastExecutionMode } from '../beasts/types.js';
+import { defaultAgentToolPolicyConfig } from '../beasts/services/role-tool-manifest.js';
 import type { ChatBeastContext, TranscriptMessage } from './types.js';
 import type { ChatBeastDispatchResult, ChatBeastDispatchState } from './beast-dispatch-adapter.js';
 
@@ -185,6 +186,7 @@ export class BeastDaemonDispatchAdapter {
   }
 
   private async createTrackedAgent(definitionId: string, sessionId: string): Promise<string> {
+    const initConfig = defaultAgentToolPolicyConfig(definitionId, definitionId);
     const body = await this.request<{ data: TrackedAgentResponse }>('/v1/beasts/agents', {
       method: 'POST',
       body: JSON.stringify({
@@ -192,10 +194,10 @@ export class BeastDaemonDispatchAdapter {
         initAction: {
           kind: definitionId,
           command: commandFor(definitionId),
-          config: {},
+          config: initConfig,
           chatSessionId: sessionId,
         },
-        initConfig: {},
+        initConfig,
         chatSessionId: sessionId,
         autoDispatch: false,
       }),
