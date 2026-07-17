@@ -196,6 +196,10 @@ export const AGENT_HANDOFF_TEMPLATE_REQUIREMENTS: readonly AgentHandoffTemplateR
         /\bbranch\b/i,
         /\bpr\b/i,
         /\bpull requests?\b/i,
+        /\bworktrees?\b/i,
+        /\bdiffs?\b/i,
+        /\bdocs?\b/i,
+        /\btelemetry\b/i,
       ],
       guidance:
         'Add a section for concrete artifacts such as branch, PR, worktree, docs, or telemetry links.',
@@ -530,7 +534,12 @@ function extractMarkdownSections(template: string): MarkdownSection[] {
         openSectionIndexes[openSectionIndexes.length - 1] ?? -1;
       for (const sectionIndex of openSectionIndexes) {
         const section = sections[sectionIndex];
-        if (section && (section.level > 1 || sectionIndex === activeSectionIndex)) {
+        if (
+          section &&
+          (section.level > 1 ||
+            sectionIndex === activeSectionIndex ||
+            isRequiredHandoffSectionHeading(section.heading))
+        ) {
           section.content.push(line);
         }
       }
@@ -767,20 +776,23 @@ function normalizeTemplateLabelKey(value: string): string {
 }
 
 function isKnownTemplateLabel(label: string): boolean {
-  return /^(?:issue(?: details)?|issue task|task|business goal|business objective|goal|objective|out of scope boundaries|boundary notes|boundaries|completed work|current phase|key decisions|status|current status|decisions|remaining work|blocker|blockers|risk|risks|command|commands|test command|test commands|outcome|result|owner|next action|artifact|artifacts|link|links|lesson|lessons)$/.test(
+  return /^(?:issue(?: details)?|issue task|task|business goal|business objective|goal|objective|out of scope boundaries|boundary notes|boundaries|completed work|current phase|key decisions|status|current status|decisions|remaining work|blocker|blockers|risk|risks|command|commands|test command|test commands|outcome|result|owner|next action|artifact|artifacts|link|links|worktree|worktrees|diff|diffs|doc|docs|telemetry|lesson|lessons)$/.test(
     normalizeTemplateLabelKey(label),
   );
 }
 
 function isKnownTemplateLabelCombination(label: string): boolean {
   const parts = normalizeEvidence(label)
-    .split(/\s*(?:,|\/|\band\b)\s*/i)
+    .split(/\s*(?:,|;|\/|\band\b)\s*/i)
     .map((part) => normalizeTemplateLabelKey(part))
     .filter((part) => part.length > 0);
   return parts.length > 1 && parts.every(isKnownTemplateLabel);
 }
 
 function isEmptyTemplateLabel(line: string): boolean {
+  if (hasParenthesizedFieldValue(line)) {
+    return false;
+  }
   const normalizedLabel = line
     .replace(/\[[ x-]\]/gi, ' ')
     .replace(/\([^)]*\)/g, ' ')
@@ -802,6 +814,9 @@ function isPlaceholderOnlyFieldLine(line: string): boolean {
 }
 
 function isRequiredHandoffSectionHeading(heading: string): boolean {
+  if (/\bagent\s+handoff\b/i.test(heading)) {
+    return false;
+  }
   return AGENT_HANDOFF_TEMPLATE_REQUIREMENTS.some((requirement) =>
     requirement.headingPatterns.some((pattern) => pattern.test(heading)),
   );
@@ -810,10 +825,27 @@ function isRequiredHandoffSectionHeading(heading: string): boolean {
 function isCombinedSkeletonLabelLine(line: string): boolean {
   const parts = line
     .replace(/^\s*[-*]\s*/, '')
-    .split(/[,/]/)
+    .split(/[,;/]/)
     .map((part) => part.trim())
     .filter(Boolean);
   return parts.length > 1 && parts.every((part) => isEmptyTemplateLabel(part));
+}
+
+function hasParenthesizedFieldValue(line: string): boolean {
+  const match = /^\s*(?:[-*]\s*)?[A-Za-z0-9 /_-]+\s+\(([^)]*[A-Za-z0-9][^)]*)\)\s*$/.exec(
+    line,
+  );
+  if (!match) {
+    return false;
+  }
+  const value = normalizeEvidence(match[1] ?? '');
+  return (
+    value.length > 0 &&
+    !/^(?:required|optional|tbd|todo|n\/?a|unknown|placeholder|please fill in|fill in|to be decided)$/i.test(
+      value,
+    ) &&
+    !isKnownTemplateLabel(value)
+  );
 }
 
 function isMarkdownTableHeader(line: string, nextLine: string): boolean {

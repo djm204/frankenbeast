@@ -1149,6 +1149,108 @@ Lesson: preserve child section bodies for H1 templates.
       validation.findings.find((finding) => finding.id === 'blockers'),
     ).toMatchObject({ status: 'placeholder' });
   });
+
+  it('ignores fenced examples under required H1 child sections', () => {
+    const validation = validateAgentHandoffTemplate(`# Scope and objective
+## Example
+\`\`\`md
+Issue #1775, business goal, and out-of-scope boundaries.
+\`\`\`
+
+${completeTemplate.replace(
+  '## Scope and objective\nName the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.\n\n',
+  '',
+)}`);
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('does not let generic wrapper H1 titles satisfy missing required sections', () => {
+    const validation = validateAgentHandoffTemplate(`# Agent handoff objective
+
+## Current state and decisions
+Issue #1775, business goal, and out-of-scope boundaries are known. Completed work and decisions are pending.
+
+## Verification evidence
+npm test passed.
+
+## Blockers and next action
+No blockers. Owner: PM. Next action: continue.
+
+## Artifacts and links
+PR #2331 and worktree artifact.
+
+## Learning and reuse
+Lesson: wrapper titles are not scope sections.
+`);
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('accepts documented artifact headings for worktree and diff evidence', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate
+        .replace('## Artifacts and links', '## Worktree and diff')
+        .replace(
+          'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
+          'Worktree /tmp/frankenbeast and diff docs telemetry are linked artifacts.',
+        ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'artifacts')
+        ?.matchedHeading,
+    ).toBe('Worktree and diff');
+  });
+
+  it('rejects semicolon-separated label-only skeletons', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        'Issue; Business goal; Boundaries',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('preserves parenthesized field values as verification evidence', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.',
+        '- Command (npm test)\n- Outcome (passed)',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'verification'),
+    ).toMatchObject({ status: 'pass' });
+  });
+
+  it('rejects documented artifact label-only skeletons', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
+        '- Worktree\n- Diff\n- Docs\n- Telemetry',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'artifacts'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
 });
 
 describe('truncateSnapshot', () => {
