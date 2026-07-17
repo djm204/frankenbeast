@@ -170,15 +170,25 @@ function readRunRecords(db: Database.Database, hasRuns: boolean, hasEvents: bool
     if (!hasComments) return rows;
     const comments = db.prepare(`
       SELECT task_id AS taskId,
-             MIN(created_at) AS firstOutputAt
+             created_at AS createdAt
       FROM comments
-      GROUP BY task_id
-    `).all() as Array<{ taskId: string; firstOutputAt: number }>;
-    const firstCommentByTask = new Map(comments.map((row) => [row.taskId, row.firstOutputAt]));
-    return rows.map((row) => ({
-      ...row,
-      firstOutputAt: row.firstOutputAt ?? firstCommentByTask.get(row.taskId) ?? null,
-    }));
+      WHERE created_at >= @cutoff
+      ORDER BY task_id, created_at
+    `).all({ cutoff }) as Array<{ taskId: string; createdAt: number }>;
+    const commentsByTask = new Map<string, number[]>();
+    for (const comment of comments) {
+      const bucket = commentsByTask.get(comment.taskId) ?? [];
+      bucket.push(comment.createdAt);
+      commentsByTask.set(comment.taskId, bucket);
+    }
+    return rows.map((row) => {
+      const start = row.runStartedAt ?? row.taskStartedAt ?? row.taskCreatedAt;
+      const firstComment = commentsByTask.get(row.taskId)?.find((createdAt) => createdAt >= start);
+      return {
+        ...row,
+        firstOutputAt: row.firstOutputAt ?? firstComment ?? null,
+      };
+    });
   };
   if (!hasRuns) {
     return attachCommentOutput(db.prepare(`
@@ -225,17 +235,19 @@ function readRunRecords(db: Database.Database, hasRuns: boolean, hasEvents: bool
            MIN(created_at) AS firstOutputAt
     FROM task_events
     WHERE run_id IS NOT NULL
+      AND created_at >= @cutoff
       AND kind IN ('commented', 'heartbeat', 'blocked', 'completed', 'protocol_violation', 'crashed', 'gave_up')
     GROUP BY run_id
-  `).all() as Array<{ runId: number; firstOutputAt: number }>;
+  `).all({ cutoff }) as Array<{ runId: number; firstOutputAt: number }>;
   const spawnedEvents = db.prepare(`
     SELECT run_id AS runId,
            MIN(created_at) AS spawnedAt
     FROM task_events
     WHERE run_id IS NOT NULL
+      AND created_at >= @cutoff
       AND kind = 'spawned'
     GROUP BY run_id
-  `).all() as Array<{ runId: number; spawnedAt: number }>;
+  `).all({ cutoff }) as Array<{ runId: number; spawnedAt: number }>;
   const firstOutputByRun = new Map(outputEvents.map((row) => [row.runId, row.firstOutputAt]));
   const spawnedByRun = new Map(spawnedEvents.map((row) => [row.runId, row.spawnedAt]));
 
@@ -247,6 +259,7 @@ function readRunRecords(db: Database.Database, hasRuns: boolean, hasEvents: bool
 }
 
 function readApprovalRecords(db: Database.Database, now: number): SloApprovalRecord[] {
+  const cutoff = now - Math.max(...WINDOWS.map((window) => window.seconds));
   const rows = db.prepare(`
     SELECT task_id AS taskId,
            kind,
@@ -254,8 +267,9 @@ function readApprovalRecords(db: Database.Database, now: number): SloApprovalRec
            created_at AS createdAt
     FROM task_events
     WHERE kind IN ('blocked', 'unblocked')
+      AND created_at >= @cutoff
     ORDER BY task_id, created_at
-  `).all() as Array<{ taskId: string; kind: string; payload: string | null; createdAt: number }>;
+  `).all({ cutoff }) as Array<{ taskId: string; kind: string; payload: string | null; createdAt: number }>;
   const pending = new Map<string, number>();
   const approvals: SloApprovalRecord[] = [];
   for (const row of rows) {
@@ -294,7 +308,7 @@ function columnExpr(db: Database.Database, table: string, column: string, tableA
 }
 
 function isApprovalBlock(payload: string | null): boolean {
-  if (!payload) return true;
+  if (!payload) return false;
   try {
     const parsed = JSON.parse(payload) as unknown;
     return JSON.stringify(parsed).toLowerCase().includes('approval') || JSON.stringify(parsed).toLowerCase().includes('hitl');

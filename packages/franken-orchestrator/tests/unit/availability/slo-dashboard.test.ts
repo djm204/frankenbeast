@@ -64,6 +64,8 @@ describe('SLO dashboard', () => {
         ('t_success_fast', 1, 'commented', '{}', 1120),
         ('t_success_slow', 2, 'spawned', '{}', 1280),
         ('t_success_slow', 2, 'heartbeat', '{}', 1400),
+        ('t_success_slow', 2, 'blocked', '{}', 1410),
+        ('t_success_slow', 2, 'unblocked', '{}', 1420),
         ('t_failed_provider', 3, 'spawned', '{}', 1550),
         ('t_failed_provider', 3, 'crashed', '{}', 1900),
         ('t_running_worker', NULL, 'blocked', '{"kind":"approval"}', 1500),
@@ -151,9 +153,10 @@ describe('SLO dashboard', () => {
         created_at INTEGER NOT NULL
       );
       INSERT INTO tasks (id, title, status, created_at, started_at) VALUES
-        ('t_comment_output', 'comment output', 'running', 1000, 1100);
-      INSERT INTO comments (task_id, body, created_at) VALUES
-        ('t_comment_output', 'worker started producing output', 1200);
+        ('t_comment_only', 'comment output', 'running', 1000, 1100);
+      INSERT INTO comments (id, task_id, body, created_at) VALUES
+        (1, 't_comment_only', 'planning note before worker start', 1090),
+        (2, 't_comment_only', 'worker produced output', 1200);
     `);
 
     const dashboard = await buildSloDashboardFromKanban(
