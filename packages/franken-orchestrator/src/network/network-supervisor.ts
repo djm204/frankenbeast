@@ -26,7 +26,7 @@ export interface NetworkSupervisorDeps {
     options: StartServiceOptions,
   ) => Promise<{ pid: number }>;
   stopService: (service: ManagedNetworkServiceState) => Promise<void>;
-  healthcheck: (service: ManagedNetworkServiceState) => Promise<boolean>;
+  healthcheck: (service: ManagedNetworkServiceState) => Promise<boolean | 'degraded'>;
   preflightService?: (service: ResolvedNetworkService) => Promise<PreflightServiceResult>;
   now?: () => string;
   startupAttempts?: number;

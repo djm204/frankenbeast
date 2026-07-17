@@ -1405,7 +1405,8 @@ async function runChatCommandIfRequested(
               getProviders: () => buildDashboardProviderSnapshot(mutableConfig, providerRegistry, [resolveSelectedProvider(args, mutableConfig), ...(args.providers ?? [])]),
               getAvailability: async () => {
                 const supervisor = createDefaultNetworkDeps(root).createSupervisor(paths);
-                return buildCliServiceHealthSnapshot(args, mutableConfig, paths, supervisor);
+                const providers = buildDashboardProviderSnapshot(mutableConfig, providerRegistry, [resolveSelectedProvider(args, mutableConfig), ...(args.providers ?? [])]);
+                return buildCliServiceHealthSnapshot(args, mutableConfig, paths, supervisor, providers);
               },
               getMaintenanceMode: () => {
                 if (localBeastServices) return localBeastServices.maintenance.getState();
@@ -1908,13 +1909,32 @@ async function buildCliServiceHealthSnapshot(
   config: OrchestratorConfig,
   paths: Pick<NetworkPaths, 'frankenbeastDir'>,
   supervisor: NetworkCommandSupervisorLike,
+  providers = buildDashboardProviderSnapshot(config, undefined, [resolveSelectedProvider(args, config), ...(args.providers ?? [])]),
 ): Promise<DashboardAvailabilitySnapshot> {
-  const networkStatus = await supervisor.status();
+  const stateStore = buildStateStoreHealthDependency(paths);
+  let networkServices: NetworkServiceHealthStatus[] | undefined;
+  try {
+    networkServices = (await supervisor.status()).services;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return buildServiceHealthSnapshot({
+      providers,
+      github: buildGithubHealthDependency(),
+      stateStore: {
+        name: 'state-store',
+        type: 'state-store',
+        status: 'unavailable',
+        summary: `Managed network status could not be loaded from ${paths.frankenbeastDir}: ${message}`,
+        remediationHint: 'Fix the .fbeast network state path and permissions, then rerun `frankenbeast network health`.',
+        safeWork: ['Continue read-only inspection; avoid operations that need persisted managed-network state.'],
+      },
+    });
+  }
   return buildServiceHealthSnapshot({
-    providers: buildDashboardProviderSnapshot(config, undefined, [resolveSelectedProvider(args, config), ...(args.providers ?? [])]),
-    networkServices: networkStatus.services,
+    providers,
+    networkServices,
     github: buildGithubHealthDependency(),
-    stateStore: buildStateStoreHealthDependency(paths),
+    stateStore,
   });
 }
 

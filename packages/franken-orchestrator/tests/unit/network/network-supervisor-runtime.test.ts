@@ -265,7 +265,7 @@ describe('network degraded health handling', () => {
     vi.unstubAllGlobals();
   });
 
-  it('treats read-only degraded health as reachable for stored-service healthchecks', async () => {
+  it('preserves read-only degraded health for stored-service healthchecks', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({
       ok: false,
       status: 'degraded',
@@ -279,7 +279,7 @@ describe('network degraded health handling', () => {
       pid: 4242,
       healthUrl: 'http://127.0.0.1:4050/health',
       startedAt: '2026-07-16T00:00:00.000Z',
-    })).resolves.toBe(true);
+    })).resolves.toBe('degraded');
   });
 
   it('reuses a port whose health identity is read-only degraded', async () => {

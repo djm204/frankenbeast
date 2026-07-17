@@ -48,6 +48,40 @@ describe('buildServiceHealthSnapshot', () => {
     expect(snapshot.dependencies.map((dependency) => [dependency.name, dependency.status])).toContainEqual(['background-loops', 'healthy']);
   });
 
+  it('treats absent optional loop channels as healthy/not applicable', () => {
+    const snapshot = buildServiceHealthSnapshot({
+      providers: [healthyProvider],
+      networkServices: [
+        { id: 'dashboard-web', status: 'running' },
+        { id: 'chat-server', status: 'running' },
+      ],
+      github: healthyGithub,
+      stateStore: healthyStateStore,
+    });
+
+    const loops = snapshot.dependencies.find((dependency) => dependency.name === 'background-loops');
+    expect(snapshot.status).toBe('healthy');
+    expect(loops).toMatchObject({ status: 'healthy' });
+    expect(loops?.summary).toContain('No optional background loop channels are enabled');
+  });
+
+  it('preserves degraded managed service health in the aggregate snapshot', () => {
+    const snapshot = buildServiceHealthSnapshot({
+      providers: [healthyProvider],
+      networkServices: [
+        { id: 'dashboard-web', status: 'degraded' },
+        { id: 'chat-server', status: 'running' },
+      ],
+      github: healthyGithub,
+      stateStore: healthyStateStore,
+    });
+
+    const web = snapshot.dependencies.find((dependency) => dependency.name === 'web-ui');
+    expect(snapshot.status).toBe('degraded');
+    expect(web).toMatchObject({ status: 'degraded' });
+    expect(web?.summary).toContain('reported degraded health');
+  });
+
   it('reports degraded with remediation hints when an enabled background loop channel is stale', () => {
     const snapshot = buildServiceHealthSnapshot({
       providers: [healthyProvider],

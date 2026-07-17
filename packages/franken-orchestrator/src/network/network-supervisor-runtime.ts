@@ -344,14 +344,16 @@ export async function stopNetworkService(service: { pid: number; detached?: bool
   }
 }
 
-export async function healthcheckNetworkService(service: ManagedNetworkServiceState): Promise<boolean> {
+export async function healthcheckNetworkService(service: ManagedNetworkServiceState): Promise<boolean | 'degraded'> {
   const probeUrl = service.healthUrl ?? service.url;
   if (probeUrl) {
     try {
       const response = await fetch(probeUrl, {
         signal: AbortSignal.timeout(HTTP_CHECK_TIMEOUT_MS),
       });
-      return response.ok || await isDegradedHealthResponse(response);
+      if (response.ok) return true;
+      if (await isDegradedHealthResponse(response)) return 'degraded';
+      return false;
     } catch {
       // Fall back to PID checks for services that have not opened HTTP yet.
     }

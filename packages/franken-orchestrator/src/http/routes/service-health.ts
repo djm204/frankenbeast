@@ -18,7 +18,9 @@ export interface ServiceHealthAggregatorInput {
 
 function normalizeServiceStatus(service?: NetworkServiceHealthStatus | undefined): DashboardDependencyStatus {
   if (!service) return 'unknown';
-  return service.status === 'running' ? 'healthy' : 'unavailable';
+  if (service.status === 'running') return 'healthy';
+  if (service.status === 'degraded') return 'degraded';
+  return 'unavailable';
 }
 
 function dependency(
@@ -54,6 +56,16 @@ function serviceDependency(
       `${name} is reachable through the managed service supervisor.`,
       'No remediation needed.',
       ['Traffic that depends on this service can continue.'],
+    );
+  }
+  if (status === 'degraded') {
+    return dependency(
+      name,
+      type,
+      status,
+      `${name} is reachable but reported degraded health.`,
+      docsHint,
+      ['Existing traffic may continue; avoid scaling up dependent work until degradation clears.'],
     );
   }
   if (status === 'unavailable') {
@@ -95,10 +107,10 @@ function backgroundLoopDependencies(services: readonly NetworkServiceHealthStatu
     return [dependency(
       'background-loops',
       'background-loop',
-      'unknown',
-      'No background loop channels are reported by the managed service state.',
-      'Start the managed network or check service channel instrumentation.',
-      ['Manual CLI workflows can continue; do not assume asynchronous delivery loops are healthy.'],
+      'healthy',
+      'No optional background loop channels are enabled in the managed service state.',
+      'No remediation needed.',
+      ['Synchronous CLI workflows can continue; enable a comms channel before relying on asynchronous delivery loops.'],
     )];
   }
 
