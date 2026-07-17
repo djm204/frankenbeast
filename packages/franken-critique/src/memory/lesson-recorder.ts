@@ -1159,8 +1159,8 @@ function choosePostTaskLessonDestination(
   if (category === 'task-state' || category === 'discard') return 'discard';
   if (kind === 'tool-failure') return 'skill';
   if (kind === 'user-correction' && category === 'preference') return 'memory';
-  if (category === 'environment-fact') return 'memory';
   if (isDocumentationUpdateLesson(text)) return 'docs';
+  if (category === 'environment-fact') return 'memory';
   if (category === 'procedure') return 'skill';
   return 'memory';
 }
@@ -1207,6 +1207,16 @@ function isRawUserPreferenceCorrection(text: string): boolean {
     return true;
   }
   if (
+    /^(?:please\s+)?(?:use|avoid|do\s+not\s+use|don't\s+use|never\s+use)\b/i.test(
+      text,
+    ) &&
+    !/\b(?:command|cli|tool|script|test|run|workflow|procedure|steps?|fallback|workaround|retry|gh|npm|pnpm|yarn|node)\b/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  if (
     /^(?:please\s+)?(?:keep|avoid|do\s+not|don't|never|prefer|use)\b/i.test(
       text,
     ) &&
@@ -1226,6 +1236,7 @@ function isRawUserPreferenceCorrection(text: string): boolean {
 
 function hasExplicitPostTaskLessonSignal(text: string): boolean {
   if (isOneOffPostTaskProgress(text)) return false;
+  if (isOneOffShouldCorrection(text)) return false;
   if (PREFERENCE_PATTERNS.some((pattern) => pattern.test(text))) return true;
   if (ENVIRONMENT_FACT_PATTERNS.some((pattern) => pattern.test(text))) {
     return true;
@@ -1244,8 +1255,20 @@ function hasExplicitPostTaskLessonSignal(text: string): boolean {
 }
 
 function hasReusableToolFailureSignal(text: string): boolean {
-  return /\b(?:when|if)\b.{0,160}\b(?:run|check|use|retry|fallback|workaround)\b|\b(?:run|check|use|retry|fallback|workaround)\b.{0,160}\b(?:when|if|before|instead|giving\s+up)\b/i.test(
+  return /\b(?:when|if)\b.{0,160}\b(?:run|check|use|retry|fallback|workaround)\b|\b(?:run|check|use|retry|fallback|workaround)\b.{0,160}\b(?:when|if|after|before|instead|giving\s+up)\b/i.test(
     text,
+  );
+}
+
+function isOneOffShouldCorrection(text: string): boolean {
+  return (
+    /\bshould\b/i.test(text) &&
+    /\b(?:failing\s+test|test|file|path|pr|pull\s+request|issue|ticket|task|commit)\b/i.test(
+      text,
+    ) &&
+    !/\b(?:always|never|avoid|prefer|require|validate|verify|retry|redact|fallback|workaround|when|if|docs?|readme|runbook|guide)\b/i.test(
+      text,
+    )
   );
 }
 

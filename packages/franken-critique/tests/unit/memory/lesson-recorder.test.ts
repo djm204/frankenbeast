@@ -307,6 +307,24 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('recognizes explicit workaround phrasing after command guidance as reusable', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-workaround-after-command',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      toolFailures: [
+        'Workaround: run gh run view after gh pr checks returns 502',
+      ],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'procedure',
+        suggestedDestination: 'skill',
+        review: expect.objectContaining({ status: 'pending-review' }),
+      }),
+    );
+  });
+
   it('discards one-off user corrections without reusable signals', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-one-off-correction',
@@ -316,6 +334,25 @@ describe('extractPostTaskLessonCandidates', () => {
 
     expect(report.candidates[0]).toEqual(
       expect.objectContaining({
+        suggestedDestination: 'discard',
+        privacyFilter: expect.objectContaining({ action: 'reject' }),
+        review: expect.objectContaining({ status: 'discarded' }),
+      }),
+    );
+  });
+
+  it('discards one-off should corrections with task-specific targets', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-one-off-should-correction',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: [
+        'The failing test should be tests/foo.test.ts, not tests/bar.test.ts',
+      ],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'task-state',
         suggestedDestination: 'discard',
         privacyFilter: expect.objectContaining({ action: 'reject' }),
         review: expect.objectContaining({ status: 'discarded' }),
@@ -470,6 +507,44 @@ describe('extractPostTaskLessonCandidates', () => {
       expect.objectContaining({
         category: 'preference',
         suggestedDestination: 'memory',
+      }),
+    );
+  });
+
+  it('routes generic please-use and please-do-not-use corrections to memory', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-generic-preferences',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['Please use British English', 'Please do not use emojis'],
+    });
+
+    expect(report.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          text: 'Please use British English',
+          category: 'preference',
+          suggestedDestination: 'memory',
+        }),
+        expect.objectContaining({
+          text: 'Please do not use emojis',
+          category: 'preference',
+          suggestedDestination: 'memory',
+        }),
+      ]),
+    );
+  });
+
+  it('routes explicit runbook update notes to docs before environment memory', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-runbook-environment-update',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Document in the runbook that the repo uses pnpm'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'environment-fact',
+        suggestedDestination: 'docs',
       }),
     );
   });
