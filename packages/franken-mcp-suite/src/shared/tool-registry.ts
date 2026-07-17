@@ -58,7 +58,9 @@ function hasDuplicateJsonKey(value: string, key: string): boolean {
 
 function usesReservedObserverProvenance(metadata: string): boolean {
   const parsed = parseJsonObject(metadata);
-  return parsed?.['source'] === RESERVED_AUDIT_SOURCE
+  return hasDuplicateJsonKey(metadata, 'source')
+    || hasDuplicateJsonKey(metadata, RESERVED_HOOK_SOURCE_KEY)
+    || parsed?.['source'] === RESERVED_AUDIT_SOURCE
     || parsed?.[RESERVED_HOOK_SOURCE_KEY] === RESERVED_HOOK_SOURCE;
 }
 
@@ -104,7 +106,11 @@ function parseMemoryAccessAuditStringFilter(name: string, value: unknown): { ok:
   if (typeof value !== 'string' || value.trim().length === 0) {
     return { ok: false, message: `${name} must be a non-empty string when provided` };
   }
-  return { ok: true, value: value.trim() };
+  const trimmed = value.trim();
+  if ((name === 'since' || name === 'until') && Number.isNaN(Date.parse(trimmed.includes('T') ? trimmed : `${trimmed.replace(' ', 'T')}Z`))) {
+    return { ok: false, message: `${name} must be a valid timestamp when provided` };
+  }
+  return { ok: true, value: trimmed };
 }
 
 function parseMemoryAccessAuditDecision(value: unknown): { ok: true; value?: string } | { ok: false; message: string } {

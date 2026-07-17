@@ -526,6 +526,7 @@ const MEMORY_ACCESS_TOOL_OPERATIONS: Record<string, { operation: string; targetS
   fbeast_memory_review_conflicts: { operation: "read", targetStore: "working", targetClass: "memory-review-conflict" },
   fbeast_memory_review_decide: { operation: "review", targetStore: "working", targetClass: "memory-review-candidate" },
   fbeast_memory_access_audit_report: { operation: "read", targetStore: "audit", targetClass: "memory-access-audit" },
+  fbeast_memory_retention_report: { operation: "read", targetStore: "working|episodic", targetClass: "memory-retention-report" },
 };
 
 const MEMORY_REVIEW_DECISIONS = new Set(["approve", "reject", "never_store", "resolve_conflict"]);
