@@ -15,10 +15,27 @@ interface CounterState {
 
 const DEFAULT_CLEANUP_BATCH_SIZE = 128;
 
+function assertPositiveSafeInteger(optionName: string, value: number): void {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new RangeError(`Beast rate limiter option ${optionName} must be a positive safe integer`);
+  }
+}
+
+function normalizeOptions(options: BeastRateLimitOptions): Required<BeastRateLimitOptions> {
+  assertPositiveSafeInteger('max', options.max);
+  assertPositiveSafeInteger('windowMs', options.windowMs);
+  const cleanupBatchSize = options.cleanupBatchSize ?? DEFAULT_CLEANUP_BATCH_SIZE;
+  assertPositiveSafeInteger('cleanupBatchSize', cleanupBatchSize);
+  return { ...options, cleanupBatchSize };
+}
+
 export class InMemoryRateLimiter {
   private readonly counters = new Map<string, CounterState>();
+  private readonly options: Required<BeastRateLimitOptions>;
 
-  constructor(private readonly options: BeastRateLimitOptions) {}
+  constructor(options: BeastRateLimitOptions) {
+    this.options = normalizeOptions(options);
+  }
 
   take(key: string): { allowed: boolean; remaining: number } {
     if (this.options.max <= 0) {
