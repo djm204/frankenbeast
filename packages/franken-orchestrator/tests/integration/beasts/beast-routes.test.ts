@@ -651,6 +651,46 @@ describe('beast routes', () => {
     expect(runsBody.data.runs).toEqual([]);
   });
 
+  it('returns 422 and does not persist a direct run when config provider is invalid', async () => {
+    const { app, operatorToken } = createBeastApp();
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    const createResponse = await app.request('/v1/beasts/runs', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        config: {
+          provider: 'not-a-provider',
+          objective: 'Reject invalid direct providers',
+          chunkDirectory: 'docs/chunks',
+        },
+        startNow: true,
+      }),
+    });
+
+    expect(createResponse.status).toBe(422);
+    const body = await createResponse.json() as {
+      error: { code: string; message: string; details: Array<{ path: string[]; message: string }> };
+    };
+    expect(body.error.code).toBe('BEAST_CONFIG_VALIDATION_ERROR');
+    expect(body.error.message).toBe('Beast run config validation failed');
+    expect(body.error.details).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: ['provider'] }),
+    ]));
+
+    const runsResponse = await app.request('/v1/beasts/runs', {
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+    const runsBody = await runsResponse.json() as { data: { runs: Array<unknown> } };
+    expect(runsBody.data.runs).toEqual([]);
+  });
+
   it('persists a failed run instead of returning 500 when startNow startup fails', async () => {
     const { app, operatorToken } = createBeastApp({ failStart: true });
     const headers = {

@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { z } from 'zod';
+import { z, ZodError } from 'zod';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { requireBeastOperatorAuth } from '../../beasts/http/beast-auth.js';
@@ -262,6 +262,14 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
           404,
           'TRACKED_AGENT_NOT_FOUND',
           `Tracked agent '${body.trackedAgentId}' was not found`,
+        );
+      }
+      if (error instanceof ZodError) {
+        throw new HttpError(
+          422,
+          'BEAST_CONFIG_VALIDATION_ERROR',
+          'Beast run config validation failed',
+          error.issues,
         );
       }
       throwCapacityReservationError(error);
