@@ -765,6 +765,24 @@ describe('stuck-run watchdog', () => {
     expect(finding.evidence.join('\n')).not.toContain('secret value');
   });
 
+  it('redacts quoted and space-containing colon-form secret values before exposing restart evidence', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_key_secret_phrase_exit',
+        pid: 7416,
+        status: 'failed',
+        alive: false,
+        exitReason: 'supervisor stderr DB_PASSWORD: "correct horse battery staple" AWS_SECRET_ACCESS_KEY: alpha beta gamma',
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding.exitReason).toBe('supervisor stderr DB_PASSWORD=<redacted> AWS_SECRET_ACCESS_KEY=<redacted>');
+    expect(finding.evidence).toContain('exitReason=supervisor stderr DB_PASSWORD=<redacted> AWS_SECRET_ACCESS_KEY=<redacted>');
+    expect(finding.evidence.join('\n')).not.toContain('correct horse');
+    expect(finding.evidence.join('\n')).not.toContain('alpha beta gamma');
+  });
+
   it('respects explicit blocker categories before stale waiting text', () => {
     const [finding] = detectStuckRunWatchdogFindings([
       {
@@ -788,6 +806,30 @@ describe('stuck-run watchdog', () => {
       nextAction: 'defer-with-evidence',
     });
     expect(finding.recommendedAction).toContain('dispatcher metadata');
+  });
+
+  it('defers dead dispatcher-bug snapshots instead of restarting over repair evidence', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_dead_dispatcher_blocker',
+        pid: 7416,
+        status: 'running',
+        alive: false,
+        blockerCategory: 'dispatcher-bug',
+        exitReason: 'current_run mismatch after dispatcher crash',
+        lastHeartbeatAt: '2026-07-16T10:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_dead_dispatcher_blocker',
+      blockerCategory: 'dispatcher-bug',
+      processStatus: 'dead',
+      restartDisposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+    });
+    expect(finding.recommendedAction).toContain('dispatcher metadata');
+    expect(finding.recommendedAction).not.toContain('respawn one focused worker');
   });
 
   it('keeps alive stale nonterminal workers in HITL instead of terminal no-op', () => {

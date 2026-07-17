@@ -941,7 +941,13 @@ export function buildWorkerCrashOnlyRestartContract(
     };
   }
 
-  if (kanbanState === 'blocked' || kanbanState === 'pending-approval' || input.category === 'approval-gate' || input.category === 'dispatcher-bug' || knownLongRunningWait(input.category)) {
+  if (
+    kanbanState === 'blocked'
+    || kanbanState === 'pending-approval'
+    || input.category === 'approval-gate'
+    || input.category === 'dispatcher-bug'
+    || knownLongRunningWait(input.category)
+  ) {
     return {
       disposition: 'hitl',
       nextAction: 'defer-with-evidence',
