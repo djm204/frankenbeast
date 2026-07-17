@@ -1,0 +1,14 @@
+{
+  "name": "frankenbeast-agent-practice-fixture",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tiny intentionally broken project for safe agent edit/test/PR practice.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "reset": "node scripts/reset.js"
+  },
+  "engines": {
+    "node": ">=22.13.0 <23 || >=24.0.0 <26"
+  }
+}
