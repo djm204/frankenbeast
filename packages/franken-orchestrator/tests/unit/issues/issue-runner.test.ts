@@ -641,6 +641,8 @@ describe('stuck-run watchdog', () => {
       'pid=7410',
       'heartbeatAgeMs=60000',
     ]));
+    expect(finding.recommendedAction).toContain('Doctor card');
+    expect(finding.recommendedAction).not.toContain('respawn one focused worker');
   });
 
   it('keeps blocked crash cards in HITL instead of auto-respawning them', () => {
@@ -659,6 +661,85 @@ describe('stuck-run watchdog', () => {
     expect(finding).toMatchObject({
       cardId: 't_blocked_crash',
       exitReason: 'exit_code_1',
+      restartDisposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      recommendedAction: expect.stringContaining('do not auto-respawn over the blocker'),
+    });
+  });
+
+  it('defers dead workers when waiting evidence names CI or provider gates', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_ci_dead',
+        pid: 7414,
+        runId: 'run-ci',
+        status: 'running',
+        alive: false,
+        waitingOn: 'CI checks are still queued',
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+      {
+        cardId: 't_provider_dead',
+        pid: 7415,
+        runId: 'run-provider',
+        status: 'running',
+        alive: false,
+        waitingOn: 'Codex rate limit reset',
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([
+      expect.objectContaining({
+        cardId: 't_ci_dead',
+        blockerCategory: 'ci-wait',
+        restartDisposition: 'hitl',
+        nextAction: 'defer-with-evidence',
+      }),
+      expect.objectContaining({
+        cardId: 't_provider_dead',
+        blockerCategory: 'provider-wait',
+        restartDisposition: 'hitl',
+        nextAction: 'defer-with-evidence',
+      }),
+    ]);
+  });
+
+  it('redacts sensitive exit reasons before exposing restart evidence', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_secret_exit',
+        pid: 7416,
+        status: 'failed',
+        alive: false,
+        exitReason: `spawn failed with token=${'github_pat_' + '12345678901234567890abcdef'}`,
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding.exitReason).toBe('spawn failed with token=[REDACTED]');
+    expect(finding.evidence).toContain('exitReason=spawn failed with token=[REDACTED]');
+    expect(finding.evidence.join('\n')).not.toContain('github_pat_');
+  });
+
+  it('keeps alive stale nonterminal workers in HITL instead of terminal no-op', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_alive_unknown',
+        pid: 7417,
+        status: 'running',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T10:00:00.000Z',
+        lastOutputAt: '2026-07-16T10:00:00.000Z',
+        lastToolActivityAt: '2026-07-16T10:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T10:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_alive_unknown',
+      processStatus: 'alive',
+      kanbanState: 'running',
       restartDisposition: 'hitl',
       nextAction: 'defer-with-evidence',
     });
@@ -682,6 +763,7 @@ describe('stuck-run watchdog', () => {
       cardId: 't_duplicate_respawn',
       restartDisposition: 'hitl',
       nextAction: 'suppress-duplicate-respawn',
+      recommendedAction: expect.stringContaining('Suppress duplicate respawn'),
     });
     expect(finding.evidence).toContain('siblingPids=7413');
   });
@@ -822,7 +904,7 @@ describe('stuck-run watchdog', () => {
     });
   });
 
-  it('classifies dead workers as crashes even when stale wait hints remain', () => {
+  it('defers dead workers when explicit wait hints remain', () => {
     const findings = detectStuckRunWatchdogFindings([
       {
         cardId: 't_dead_ci_wait',
@@ -838,9 +920,11 @@ describe('stuck-run watchdog', () => {
 
     expect(findings[0]).toMatchObject({
       cardId: 't_dead_ci_wait',
-      blockerCategory: 'process-crash',
+      blockerCategory: 'ci-wait',
       confidence: 'high',
       processStatus: 'dead',
+      restartDisposition: 'hitl',
+      nextAction: 'defer-with-evidence',
     });
   });
 
@@ -906,7 +990,7 @@ describe('stuck-run watchdog', () => {
         cardId: 't_failed_stale_ci_wait',
         pid: 7407,
         status: 'failed',
-        blockerCategory: 'ci-wait',
+        waitingOn: 'CI checks were queued before the process exited',
         lastStateTransitionAt: '2026-07-16T11:58:00.000Z',
       },
     ], { nowMs });

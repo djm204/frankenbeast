@@ -763,13 +763,13 @@ function normalizeStuckRunBlockerCategory(
   snapshot: IssueWorkerCardProcessSnapshot,
 ): IssueStuckRunBlockerCategory {
   const status = snapshot.status?.trim().toLowerCase() ?? '';
-  if (snapshot.alive === false) return 'process-crash';
-  if (CRASH_WORKER_CARD_STATUSES.has(status)) return 'process-crash';
   if (snapshot.blockerCategory && snapshot.blockerCategory !== 'unknown') return snapshot.blockerCategory;
+  if (snapshot.alive !== false && CRASH_WORKER_CARD_STATUSES.has(status)) return 'process-crash';
   const text = `${snapshot.status ?? ''} ${snapshot.waitingOn ?? ''}`.toLowerCase();
   if (/\bapproval\b|\bhitl\b|\bhuman\b|approval[- ]?token|pending approval|operator approval|approval-cop|approve/.test(text)) return 'approval-gate';
   if (/provider|codex|rate limit|quota|llm|model/.test(text)) return 'provider-wait';
   if (/\bci\b|ci[- ]?check|status check|check run|workflow|merge queue|github actions?/.test(text)) return 'ci-wait';
+  if (snapshot.alive === false) return 'process-crash';
   if (/\b(crash(?:ed|ing)?|exit(?:ed|ing)?|dead|pid|fail(?:ed|ure|ing)?)\b/.test(text)) return 'process-crash';
   if (/dispatcher|kanban|current_run|current run|respawn|heartbeat/.test(text)) return 'dispatcher-bug';
   return 'unknown';
@@ -823,6 +823,10 @@ function hasDuplicateRespawn(snapshot: IssueWorkerCardProcessSnapshot): boolean 
   return siblingPids.length > 0;
 }
 
+function terminalKanbanState(status: string): boolean {
+  return TERMINAL_WORKER_CARD_STATUSES.has(status.trim().toLowerCase());
+}
+
 export function buildWorkerCrashOnlyRestartContract(
   snapshot: IssueWorkerCardProcessSnapshot,
   input: {
@@ -832,7 +836,8 @@ export function buildWorkerCrashOnlyRestartContract(
     readonly kanbanState: string;
   },
 ): IssueWorkerCrashOnlyRestartContract {
-  const exitReason = normalizedExitReason(snapshot, input.category);
+  const rawExitReason = normalizedExitReason(snapshot, input.category);
+  const exitReason = redactStuckRunEvidenceText(rawExitReason);
   const evidence = [
     `exitReason=${exitReason}`,
     `pid=${snapshot.pid}`,
@@ -855,7 +860,7 @@ export function buildWorkerCrashOnlyRestartContract(
     };
   }
 
-  if (exitReason === 'spawn_failed' || /spawn|setup|enoent|eacces|protocol[_ -]?violation/i.test(exitReason)) {
+  if (rawExitReason === 'spawn_failed' || /spawn|setup|enoent|eacces|protocol[_ -]?violation/i.test(rawExitReason)) {
     return {
       disposition: 'hitl',
       nextAction: 'replace-with-doctor',
@@ -864,7 +869,7 @@ export function buildWorkerCrashOnlyRestartContract(
     };
   }
 
-  if (input.kanbanState === 'blocked' || input.category === 'approval-gate') {
+  if (input.kanbanState === 'blocked' || input.category === 'approval-gate' || knownLongRunningWait(input.category)) {
     return {
       disposition: 'hitl',
       nextAction: 'defer-with-evidence',
@@ -882,12 +887,40 @@ export function buildWorkerCrashOnlyRestartContract(
     };
   }
 
+  if (terminalKanbanState(input.kanbanState)) {
+    return {
+      disposition: 'terminal',
+      nextAction: 'no-op',
+      ...base,
+      evidence,
+    };
+  }
+
   return {
-    disposition: 'terminal',
-    nextAction: 'no-op',
+    disposition: 'hitl',
+    nextAction: 'defer-with-evidence',
     ...base,
     evidence,
   };
+}
+
+function remediationForCrashOnlyRestartContract(
+  contract: IssueWorkerCrashOnlyRestartContract,
+  category: IssueStuckRunBlockerCategory,
+  processStatus: IssueStuckRunWatchdogFinding['processStatus'],
+): string {
+  switch (contract.nextAction) {
+    case 'replace-with-doctor':
+      return 'Open or route to a Doctor card with the preserved setup/protocol failure evidence; do not blind-respawn this worker.';
+    case 'defer-with-evidence':
+      return `${remediationForStuckRun(category, processStatus)} Preserve the wait/crash evidence and defer to the active HITL, CI, provider, or dispatcher investigation gate; do not auto-respawn over the blocker.`;
+    case 'suppress-duplicate-respawn':
+      return 'Suppress duplicate respawn, keep the surviving worker PID/run id as owner, and repair stale duplicate metadata before any restart.';
+    case 'restart-once':
+      return remediationForStuckRun(category, processStatus);
+    case 'no-op':
+      return 'No restart action is required for this terminal worker state; keep the evidence for audit only.';
+  }
 }
 
 export function detectStuckRunWatchdogFindings(
@@ -963,7 +996,7 @@ export function detectStuckRunWatchdogFindings(
     });
     evidence.push(...restartContract.evidence);
 
-    const recommendedAction = remediationForStuckRun(category, processStatus);
+    const recommendedAction = remediationForCrashOnlyRestartContract(restartContract, category, processStatus);
     const confidence = confidenceForStuckRun(category, staleCount, processStatus);
     findings.push({
       cardId: snapshot.cardId.trim(),
