@@ -891,6 +891,25 @@ describe('stuck-run watchdog', () => {
     });
   });
 
+  it('treats crash-like terminal statuses as retryable process crashes', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_direct_failed',
+      pid: 7422,
+      status: 'failed',
+      alive: false,
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'failed',
+    });
+
+    expect(contract).toMatchObject({
+      disposition: 'retryable',
+      nextAction: 'restart-once',
+      kanbanState: 'failed',
+    });
+  });
+
   it('keeps intentional operator exits non-retryable in direct restart contracts', () => {
     const contract = buildWorkerCrashOnlyRestartContract({
       cardId: 't_operator_stop',
@@ -911,6 +930,26 @@ describe('stuck-run watchdog', () => {
     });
   });
 
+  it('keeps intentional signal exits non-retryable in direct restart contracts', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_signal_stop',
+      pid: 7423,
+      status: 'running',
+      alive: false,
+      exitReason: 'signal_SIGTERM',
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'running',
+    });
+
+    expect(contract).toMatchObject({
+      exitReason: 'signal_SIGTERM',
+      disposition: 'terminal',
+      nextAction: 'no-op',
+    });
+  });
+
   it('routes start_failed exit reasons to doctor replacement', () => {
     const contract = buildWorkerCrashOnlyRestartContract({
       cardId: 't_start_failed',
@@ -926,6 +965,26 @@ describe('stuck-run watchdog', () => {
 
     expect(contract).toMatchObject({
       exitReason: 'start_failed',
+      disposition: 'hitl',
+      nextAction: 'replace-with-doctor',
+    });
+  });
+
+  it('routes spawn_failure exit reasons to doctor replacement', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_spawn_failure',
+      pid: 7424,
+      status: 'running',
+      alive: false,
+      exitReason: 'spawn_failure',
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'running',
+    });
+
+    expect(contract).toMatchObject({
+      exitReason: 'spawn_failure',
       disposition: 'hitl',
       nextAction: 'replace-with-doctor',
     });

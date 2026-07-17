@@ -854,8 +854,12 @@ function terminalKanbanState(status: string): boolean {
   return TERMINAL_WORKER_CARD_STATUSES.has(normalizeKanbanState(status));
 }
 
+function crashKanbanState(status: string): boolean {
+  return CRASH_WORKER_CARD_STATUSES.has(normalizeKanbanState(status));
+}
+
 function intentionalNonRetryExitReason(exitReason: string): boolean {
-  return /^(clean_exit|operator_stop|operator_kill|exit_code_0|completed|cancelled|canceled|stopped|manual_stop|manual_kill)$/i.test(exitReason.trim());
+  return /^(clean_exit|operator_stop|operator_kill|exit_code_0|completed|cancelled|canceled|stopped|manual_stop|manual_kill|signal_sigterm|signal_sigint|signal_sighup|signal_sigquit)$/i.test(exitReason.trim());
 }
 
 export function buildWorkerCrashOnlyRestartContract(
@@ -893,7 +897,7 @@ export function buildWorkerCrashOnlyRestartContract(
     };
   }
 
-  if (rawExitReason === 'spawn_failed' || /spawn|start[_ -]?failed|setup|enoent|eacces|protocol[_ -]?violation/i.test(rawExitReason)) {
+  if (rawExitReason === 'spawn_failed' || /spawn[_ -]?(?:fail(?:ed|ure)?|error)?|start[_ -]?failed|setup|enoent|eacces|protocol[_ -]?violation/i.test(rawExitReason)) {
     return {
       disposition: 'hitl',
       nextAction: 'replace-with-doctor',
@@ -902,7 +906,7 @@ export function buildWorkerCrashOnlyRestartContract(
     };
   }
 
-  if (intentionalNonRetryExitReason(rawExitReason) || terminalKanbanState(kanbanState)) {
+  if (intentionalNonRetryExitReason(rawExitReason) || (terminalKanbanState(kanbanState) && !crashKanbanState(kanbanState))) {
     return {
       disposition: 'terminal',
       nextAction: 'no-op',
