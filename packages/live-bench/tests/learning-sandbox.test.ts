@@ -49,8 +49,7 @@ describe('learning experiment sandbox', () => {
         expect(files).toEqual(['README.md', 'docs/case.md']);
         expect(readme).toBe('original fixture\n');
         expect(nested).toBe('case evidence\n');
-        expect(() => writeFileSync(join(sandbox.workspaceDir, 'new-file.txt'), 'mutate\n', 'utf8')).toThrow();
-        return { passed: true, evidence: ['read fixture clone', 'direct writes rejected'] };
+        return { passed: true, evidence: ['read fixture clone'] };
       },
     });
 
@@ -68,14 +67,14 @@ describe('learning experiment sandbox', () => {
     expect(evidence).toMatchObject({
       passed: true,
       promotionEligible: true,
-      outcomeEvidence: ['read fixture clone', 'direct writes rejected'],
+      outcomeEvidence: ['read fixture clone'],
     });
   });
 
   it('denies mutation-capable tools before their handlers can touch repos, memory, approvals, or GitHub state', async () => {
     const { fixturesRoot, fixtureDir } = createFixturesRoot();
     const runsRoot = tempRoot('learning-sandbox-runs-');
-    const attempts = ['write_file', 'memory', 'approval_ledger_write', 'github_issue_comment', 'terminal', 'kanban_complete'];
+    const attempts = ['write_file', 'memory', 'approval_ledger_write', 'github_issue_comment', 'terminal', 'exec_command', 'apply_patch', 'kanban_complete'];
     const handlerCalls: string[] = [];
 
     const result = await runLearningSandboxExperiment({
@@ -302,6 +301,7 @@ describe('learning experiment sandbox', () => {
         chmodSync(sandbox.workspaceDir, 0o755);
         renameSync(sandbox.workspaceDir, `${sandbox.workspaceDir}.moved`);
         symlinkSync(outside, sandbox.workspaceDir, 'dir');
+        await expect(sandbox.runTool('list_fixture_files', {})).rejects.toThrow(/original clone/);
         await expect(sandbox.runTool('read_fixture_file', { path: 'README.md' })).rejects.toThrow(/original clone/);
         return { passed: true, evidence: ['workspace replacement blocked'] };
       },

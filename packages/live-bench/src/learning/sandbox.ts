@@ -22,7 +22,9 @@ export const DEFAULT_LEARNING_SANDBOX_TOOLS = [
 ] as const;
 
 const MUTATION_CAPABLE_SANDBOX_TOOLS = new Set([
+  'apply_patch',
   'approval_ledger_write',
+  'exec_command',
   'github_issue_comment',
   'kanban_complete',
   'kanban_block',
@@ -253,7 +255,7 @@ async function runSandboxTool(options: RunSandboxToolOptions): Promise<unknown> 
 
 async function runAllowedTool(options: RunSandboxToolOptions): Promise<unknown> {
   if (options.tool === 'list_fixture_files') {
-    return listFixtureFiles(options.workspaceDir);
+    return listFixtureFiles(options.workspaceDir, options.originalWorkspaceDir);
   }
   if (options.tool === 'read_fixture_file') {
     return readFixtureFile(options.workspaceDir, options.originalWorkspaceDir, options.input);
@@ -287,9 +289,13 @@ function readFixtureFile(workspaceDir: string, originalWorkspaceDir: string, inp
   return readFileSync(realTarget, 'utf8');
 }
 
-function listFixtureFiles(root: string): string[] {
+function listFixtureFiles(root: string, originalWorkspaceDir: string): string[] {
+  const currentWorkspaceDir = realpathSync(root);
+  if (currentWorkspaceDir !== originalWorkspaceDir || !lstatSync(root).isDirectory()) {
+    throw new Error('Sandbox fixture workspace is no longer anchored to the original clone');
+  }
   const files: string[] = [];
-  collectFixtureFiles(root, root, files);
+  collectFixtureFiles(originalWorkspaceDir, originalWorkspaceDir, files);
   return files.sort();
 }
 
@@ -394,6 +400,8 @@ function makeTreeWritableForCleanup(root: string): void {
 
 function snapshotTree(root: string): string {
   const entries: string[] = [];
+  const rootStat = lstatSync(root);
+  entries.push(`root:${rootStat.mode & 0o777}`);
   collectSnapshotEntries(root, root, entries);
   return createHash('sha256').update(entries.sort().join('\n')).digest('hex');
 }
