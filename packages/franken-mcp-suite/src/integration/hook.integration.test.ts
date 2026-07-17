@@ -191,6 +191,7 @@ describe('fbeast-hook runtime', () => {
       toolName: 'mcp__fbeast-memory__fbeast_memory_review_list',
       payload: '[memory-review-result-redacted]',
       phase: 'post-tool',
+      ok: true,
     });
     expect(result.observerLogs[0]!.metadata).not.toContain('token abc123');
   });
