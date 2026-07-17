@@ -159,7 +159,7 @@ function isSqliteLockError(error: unknown): boolean {
 function snapshotTrace(trace: Trace): Trace {
   return {
     id: trace.id,
-    goal: trace.goal,
+    goal: redactSensitiveText(trace.goal),
     status: trace.status,
     startedAt: trace.startedAt,
     endedAt: trace.endedAt,
@@ -172,11 +172,42 @@ function snapshotTrace(trace: Trace): Trace {
       startedAt: span.startedAt,
       endedAt: span.endedAt,
       durationMs: span.durationMs,
-      errorMessage: span.errorMessage,
-      metadata: JSON.parse(JSON.stringify(span.metadata)) as Record<string, unknown>,
-      thoughtBlocks: [...span.thoughtBlocks],
+      errorMessage: span.errorMessage === undefined ? undefined : redactSensitiveText(span.errorMessage),
+      metadata: redactMetadata(JSON.parse(JSON.stringify(span.metadata)) as Record<string, unknown>) as Record<string, unknown>,
+      thoughtBlocks: span.thoughtBlocks.map(redactSensitiveText),
     })),
   }
+}
+
+const REDACTED = '<redacted>'
+const SENSITIVE_METADATA_KEY_RE = /(?:^|[_-])(?:SECRET|TOKEN|PASSWORD|PASSWD|PWD|CREDENTIAL|COOKIE|BEARER|AUTH|AUTHORIZATION|API[_-]?KEY|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|CLAUDE[_-]?SESSION)(?:$|[_-])/iu
+const SENSITIVE_TEXT_PATTERNS = [
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gu,
+  /\b(?:sk|gho|ghp|glpat|xox[baprs])-?[A-Za-z0-9_\-]{12,}\b/gu,
+  /\bnpm_[A-Za-z0-9_\-]{12,}\b/gu,
+  /https:\/\/(?:discord(?:app)?\.com|canary\.discord\.com)\/api\/webhooks\/\d+\/[A-Za-z0-9_\-]+/giu,
+  /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/[^\s:@/]+:[^\s@/]+@[^\s]+/giu,
+  /\b(?:Bearer|token)\s+[A-Za-z0-9._~+/=-]{20,}\b/giu,
+  /\b(?:Cookie|Set-Cookie):\s*[^\r\n]+/giu,
+]
+
+function redactSensitiveText(text: string): string {
+  let redacted = text
+  for (const pattern of SENSITIVE_TEXT_PATTERNS) {
+    redacted = redacted.replace(pattern, REDACTED)
+  }
+  return redacted
+}
+
+function redactMetadata(value: unknown): unknown {
+  if (typeof value === 'string') return redactSensitiveText(value)
+  if (value === null || typeof value !== 'object') return value
+  if (Array.isArray(value)) return value.map(redactMetadata)
+  const redacted: Record<string, unknown> = {}
+  for (const [key, nestedValue] of Object.entries(value as Record<string, unknown>)) {
+    redacted[key] = SENSITIVE_METADATA_KEY_RE.test(key) ? REDACTED : redactMetadata(nestedValue)
+  }
+  return redacted
 }
 
 /**

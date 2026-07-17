@@ -3,6 +3,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { createMiddleware } from 'hono/factory';
 import type { ZodSchema } from 'zod';
 import { deterministicUuid } from '@franken/types';
+import { redactLogData, redactSensitiveText } from '../logging/redaction.js';
 
 export interface ApiError {
   error: {
@@ -188,17 +189,19 @@ export function requestSizeLimit(maxSize: number) {
 
 export const errorHandler: ErrorHandler = (err, c) => {
   if (err instanceof HttpError) {
+    const safeMessage = redactSensitiveText(err.message);
+    const safeDetails = err.details === undefined ? undefined : redactLogData(err.details);
     if (err.statusCode >= 500) {
-      console.error(`[HTTP ${err.statusCode}] ${err.code}: ${err.message}`, err.details ?? '');
+      console.error(`[HTTP ${err.statusCode}] ${err.code}: ${safeMessage}`, safeDetails ?? '');
     } else {
-      console.warn(`[HTTP ${err.statusCode}] ${err.code}: ${err.message}`, err.details ?? '');
+      console.warn(`[HTTP ${err.statusCode}] ${err.code}: ${safeMessage}`, safeDetails ?? '');
     }
     return c.json(
       {
         error: {
           code: err.code,
-          message: err.message,
-          ...(err.details !== undefined ? { details: err.details } : {}),
+          message: safeMessage,
+          ...(safeDetails !== undefined ? { details: safeDetails } : {}),
         },
       } satisfies ApiError,
       err.statusCode as 400,

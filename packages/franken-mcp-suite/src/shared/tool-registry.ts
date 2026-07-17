@@ -127,8 +127,12 @@ const SENSITIVE_MEMORY_KEY_PATTERNS = [
 
 const SENSITIVE_MEMORY_VALUE_PATTERNS = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
-  /\b(?:sk|gho|ghp|glpat|xox[baprs])-[A-Za-z0-9_\-]{12,}\b/,
+  /\b(?:sk|gho|ghp|glpat|xox[baprs])-?[A-Za-z0-9_\-]{12,}\b/,
+  /\bnpm_[A-Za-z0-9_\-]{12,}\b/,
+  /https:\/\/(?:discord(?:app)?\.com|canary\.discord\.com)\/api\/webhooks\/\d+\/[A-Za-z0-9_\-]+/i,
+  /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/[^\s:@/]+:[^\s@/]+@[^\s]+/i,
   /\b(?:Bearer|token)\s+[A-Za-z0-9._~+/=-]{20,}\b/i,
+  /\b(?:Cookie|Set-Cookie):\s*[^\r\n]+/i,
 ];
 
 function sensitiveMemoryQuarantineReason(key: string, value: string): string | undefined {
