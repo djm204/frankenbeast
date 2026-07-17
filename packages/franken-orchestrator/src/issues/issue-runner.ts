@@ -22,6 +22,7 @@ import type { BeastResult } from '../types.js';
 import type { CliSkillExecutor } from '../skills/cli-skill-executor.js';
 import type { CliSkillConfig } from '../skills/cli-types.js';
 import type { PrCreator } from '../closure/pr-creator.js';
+import { redactSensitiveText } from '../logging/redaction.js';
 
 export interface IssueRuntimeArtifacts {
   readonly planName: string;
@@ -751,7 +752,7 @@ function explicitProcessCrash(snapshot: IssueWorkerCardProcessSnapshot): boolean
 }
 
 function redactStuckRunEvidenceText(value: string): string {
-  return value
+  return redactSensitiveText(value)
     .replace(/\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[opusr]_[A-Za-z0-9_.-]{12,})\b/g, '[REDACTED_TOKEN]')
     .replace(/\b(sk|xox[baprs]?|hf|glpat)-[A-Za-z0-9._/-]+\b/g, '$1-[REDACTED]')
     .replace(/\b([A-Za-z0-9_-]{20,})\.([A-Za-z0-9_-]{20,})\.([A-Za-z0-9_-]{20,})\b/g, '[REDACTED_JWT]')
@@ -764,11 +765,11 @@ function normalizeStuckRunBlockerCategory(
 ): IssueStuckRunBlockerCategory {
   const status = snapshot.status?.trim().toLowerCase() ?? '';
   if (CRASH_WORKER_CARD_STATUSES.has(status)) return 'process-crash';
+  if (snapshot.blockerCategory && snapshot.blockerCategory !== 'unknown') return snapshot.blockerCategory;
   const text = `${snapshot.status ?? ''} ${snapshot.waitingOn ?? ''}`.toLowerCase();
   if (/\bapproval\b|\bhitl\b|\bhuman\b|approval[- ]?token|pending approval|operator approval|approval-cop|approve/.test(text)) return 'approval-gate';
   if (/provider|codex|rate limit|quota|llm|model/.test(text)) return 'provider-wait';
   if (/\bci\b|ci[- ]?check|status check|check run|workflow|merge queue|github actions?/.test(text)) return 'ci-wait';
-  if (snapshot.blockerCategory && snapshot.blockerCategory !== 'unknown') return snapshot.blockerCategory;
   if (snapshot.alive === false) return 'process-crash';
   if (/\b(crash(?:ed|ing)?|exit(?:ed|ing)?|dead|pid|fail(?:ed|ure|ing)?)\b/.test(text)) return 'process-crash';
   if (/dispatcher|kanban|current_run|current run|respawn|heartbeat/.test(text)) return 'dispatcher-bug';
@@ -859,7 +860,7 @@ function crashKanbanState(status: string): boolean {
 }
 
 function intentionalNonRetryExitReason(exitReason: string): boolean {
-  return /^(clean_exit|operator_stop|operator_kill|exit_code_0|completed|cancelled|canceled|stopped|manual_stop|manual_kill|signal_sigterm|signal_sigint|signal_sighup|signal_sigquit)$/i.test(exitReason.trim());
+  return /^(clean_exit|operator_stop|operator_kill|exit_code_0|completed|cancelled|canceled|stopped|manual_stop|manual_kill)$/i.test(exitReason.trim());
 }
 
 export function buildWorkerCrashOnlyRestartContract(

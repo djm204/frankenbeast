@@ -747,6 +747,49 @@ describe('stuck-run watchdog', () => {
     expect(finding.evidence.join('\n')).not.toContain('github_pat_');
   });
 
+  it('redacts key-value secrets in exit reasons before exposing restart evidence', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_key_secret_exit',
+        pid: 7416,
+        status: 'failed',
+        alive: false,
+        exitReason: 'supervisor stderr AWS_SECRET_ACCESS_KEY=abc123 DB_PASSWORD=secret-value',
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding.exitReason).toBe('supervisor stderr AWS_SECRET_ACCESS_KEY=<redacted> DB_PASSWORD=<redacted>');
+    expect(finding.evidence).toContain('exitReason=supervisor stderr AWS_SECRET_ACCESS_KEY=<redacted> DB_PASSWORD=<redacted>');
+    expect(finding.evidence.join('\n')).not.toContain('abc123');
+    expect(finding.evidence.join('\n')).not.toContain('secret-value');
+  });
+
+  it('respects explicit blocker categories before stale waiting text', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_explicit_dispatcher_blocker',
+        pid: 7416,
+        status: 'running',
+        alive: true,
+        blockerCategory: 'dispatcher-bug',
+        waitingOn: 'old note: CI checks are still running',
+        lastHeartbeatAt: '2026-07-16T10:00:00.000Z',
+        lastOutputAt: '2026-07-16T10:00:00.000Z',
+        lastToolActivityAt: '2026-07-16T10:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T10:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_explicit_dispatcher_blocker',
+      blockerCategory: 'dispatcher-bug',
+      restartDisposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+    });
+    expect(finding.recommendedAction).toContain('dispatcher metadata');
+  });
+
   it('keeps alive stale nonterminal workers in HITL instead of terminal no-op', () => {
     const [finding] = detectStuckRunWatchdogFindings([
       {
@@ -930,7 +973,7 @@ describe('stuck-run watchdog', () => {
     });
   });
 
-  it('keeps intentional signal exits non-retryable in direct restart contracts', () => {
+  it('treats external signal exits as retryable crashes in direct restart contracts', () => {
     const contract = buildWorkerCrashOnlyRestartContract({
       cardId: 't_signal_stop',
       pid: 7423,
@@ -945,8 +988,8 @@ describe('stuck-run watchdog', () => {
 
     expect(contract).toMatchObject({
       exitReason: 'signal_SIGTERM',
-      disposition: 'terminal',
-      nextAction: 'no-op',
+      disposition: 'retryable',
+      nextAction: 'restart-once',
     });
   });
 
