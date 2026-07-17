@@ -153,6 +153,22 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('routes bare prefer-to-use corrections to memory review', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-prefer-to-use-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['Prefer to use British English'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'preference',
+        suggestedDestination: 'memory',
+        privacyFilter: expect.objectContaining({ category: 'preference' }),
+      }),
+    );
+  });
+
   it('discards raw tool failures without reusable workaround guidance', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-raw-tool-failure',
@@ -164,6 +180,22 @@ describe('extractPostTaskLessonCandidates', () => {
       expect.objectContaining({
         suggestedDestination: 'discard',
         privacyFilter: expect.objectContaining({ action: 'reject' }),
+      }),
+    );
+  });
+
+  it('keeps tool failures with explicit workaround guidance for skill review', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-tool-failure-workaround',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      toolFailures: ['When gh pr checks returned 502, retry with gh run view'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'procedure',
+        suggestedDestination: 'skill',
+        privacyFilter: expect.objectContaining({ action: 'admit' }),
       }),
     );
   });
@@ -203,6 +235,39 @@ describe('extractPostTaskLessonCandidates', () => {
           approvalRequired: false,
           persistentWriteAllowed: false,
         }),
+      }),
+    );
+  });
+
+  it('discards imperative numbered issue actions as task state', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-imperative-issue-action',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Always close issue #123'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        privacyFilter: expect.objectContaining({
+          action: 'reject',
+          category: 'task-state',
+        }),
+      }),
+    );
+  });
+
+  it('discards green test status as transient environment state', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-green-test-status',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      summary: 'Frankenbeast tests passed',
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        privacyFilter: expect.objectContaining({ action: 'reject' }),
       }),
     );
   });

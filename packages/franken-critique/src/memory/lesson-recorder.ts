@@ -1246,6 +1246,12 @@ function isRawUserPreferenceCorrection(text: string): boolean {
   ) {
     return true;
   }
+  if (
+    /^(?:please\s+)?prefer\s+to\s+use\b/i.test(text) &&
+    !looksProcedural
+  ) {
+    return true;
+  }
   if (looksProcedural || /\b(?:use|fallback|workaround|verify)\b/i.test(text)) {
     return false;
   }
@@ -1280,11 +1286,11 @@ function hasExplicitPostTaskLessonSignal(text: string): boolean {
 }
 
 function hasReusableToolFailureSignal(text: string): boolean {
-  if (isRawToolFailureStatus(text)) return false;
   if (/\bworkaround\s*:/i.test(text)) return true;
   if (/\b(?:retry|fallback)\s+(?:with|using|via|by)\b/i.test(text)) {
     return true;
   }
+  if (isRawToolFailureStatus(text)) return false;
   return /\b(?:when|if)\b.{0,160}\b(?:run|check|use|retry|fallback|workaround)\b|\b(?:run|check|use|retry|fallback|workaround)\b.{0,160}\b(?:when|if|after|before|instead|giving\s+up)\b/i.test(
     text,
   );
@@ -1310,7 +1316,7 @@ function isTaskReferenceBookkeeping(text: string): boolean {
     /\b(?:pr|pull\s+request|issue|ticket|task|commit)\b(?:\s*#?\d+\b)?|\[REDACTED_TASK_REFERENCE\]/i.test(
       text,
     ) &&
-    /\b(?:wants?|needs?|requires?|assigned|merged|closed|blocked|open|opened|fixed|done|follow-up|check|replying|reply)\b/i.test(
+    /\b(?:wants?|needs?|requires?|assigned|merged|merge|closed|close|blocked|open|opened|fixed|fix|done|completed|complete|follow-up|check|replying|reply)\b/i.test(
       text,
     ) &&
     !/\b(?:when|if)\b/i.test(text) &&
@@ -1321,7 +1327,7 @@ function isTaskReferenceBookkeeping(text: string): boolean {
 function isTransientEnvironmentStatus(text: string): boolean {
   return (
     ENVIRONMENT_FACT_PATTERNS.some((pattern) => pattern.test(text)) &&
-    /\b(?:today|yesterday|currently|temporarily|was|were|down|flaky|failing|broken|blocked)\b/i.test(
+    /\b(?:today|yesterday|currently|temporarily|was|were|down|flaky|failing|broken|blocked|green|passing|passed)\b/i.test(
       text,
     ) &&
     !hasReusableProcedureGuidance(text) &&
