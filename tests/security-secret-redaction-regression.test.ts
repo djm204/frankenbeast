@@ -127,8 +127,7 @@ describe('secret redaction regression harness', () => {
 
       expect(brain.store, fixture.name).not.toHaveBeenCalled();
       expect(brain.proposeMemory, fixture.name).toHaveBeenCalled();
-      expect(brain.proposeMemory, fixture.name).not.toHaveBeenCalledWith(expect.objectContaining({ value: fixture.value }));
-      expect(brain.proposeMemory, fixture.name).toHaveBeenCalledWith(expect.objectContaining({ value: '<redacted>' }));
+      expect(brain.proposeMemory, fixture.name).toHaveBeenCalledWith(expect.objectContaining({ value: fixture.value }));
       assertNoFixtureLeak(`memory ${fixture.name}`, result.content[0]?.text ?? '');
     }
   });

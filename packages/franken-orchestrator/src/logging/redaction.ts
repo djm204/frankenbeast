@@ -5,16 +5,16 @@ const ASSIGNMENT_RE = /\b([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*("(?:\\.|[^"\\])*"|'(?:
 const JSON_FIELD_RE = /("([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*)("(?:\\.|[^"\\])*"|[^,}\]\s]+)/gu;
 const CREDENTIAL_URL_RE = /\b((?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/(?:[^:\s"'/@]+)?):[^@\s"']+(@[^\s"']+)/giu;
 const SENSITIVE_VALUE_PATTERNS = [
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gu,
-  /\b(?:sk|gho|ghp|glpat|xox[baprs])-?[A-Za-z0-9_\-]{12,}\b/gu,
-  /\bnpm_[A-Za-z0-9_\-]{12,}\b/gu,
-  /https:\/\/(?:discord(?:app)?\.com|canary\.discord\.com)\/api\/webhooks\/\d+\/[A-Za-z0-9_\-]+/giu,
-  /\b(?:Bearer|token)\s+[A-Za-z0-9._~+/=-]{20,}\b/giu,
-  /\b(?:Cookie|Set-Cookie):\s*[^\r\n]+/giu,
-  /\b(?:Proxy-)?Authorization:\s*[^\r\n]+/giu,
+  { key: 'private-key-block', pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gu },
+  { key: 'provider-token', pattern: /\b(?:sk-[A-Za-z0-9_\-]{12,}|gh[opusr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{12,}|glpat-[A-Za-z0-9_\-]{12,}|xox[baprs]-[A-Za-z0-9-]{10,})\b/gu },
+  { key: 'npm-token', pattern: /\bnpm_[A-Za-z0-9_\-]{12,}\b/gu },
+  { key: 'discord-webhook', pattern: /https:\/\/(?:discord(?:app)?\.com|canary\.discord\.com)\/api\/webhooks\/\d+\/[A-Za-z0-9_\-]+/giu },
+  { key: 'authorization-token', pattern: /\b(?:Bearer|token)\s+[A-Za-z0-9._~+/=-]{20,}\b/giu },
+  { key: 'cookie-header', pattern: /\b(?:Cookie|Set-Cookie):\s*[^\r\n]+/giu },
+  { key: 'authorization-header', pattern: /\b(?:Proxy-)?Authorization:\s*[^\r\n]+/giu },
 ];
 
-export type RedactionDecisionSource = 'text-assignment' | 'text-json-field' | 'object-key';
+export type RedactionDecisionSource = 'text-assignment' | 'text-json-field' | 'text-value-pattern' | 'object-key';
 
 export interface RedactionDecision {
   /** Secret-free location of the redaction decision. Object paths use dot/bracket notation. */
@@ -24,7 +24,7 @@ export interface RedactionDecision {
   /** Where the redaction decision came from. */
   source: RedactionDecisionSource;
   /** Redaction rule category. Does not include the redacted value. */
-  rule: 'sensitive-key';
+  rule: 'sensitive-key' | 'sensitive-value';
   /** Replacement marker written in place of the sensitive value. */
   replacement: typeof REDACTED;
 }
@@ -64,9 +64,15 @@ export function redactSensitiveTextWithProvenance(text: string, path = '$'): Red
     return `${prefix}"${REDACTED}"`;
   });
 
-  let value = withJsonFieldsRedacted.replace(CREDENTIAL_URL_RE, `$1:${REDACTED}$2`);
-  for (const pattern of SENSITIVE_VALUE_PATTERNS) {
-    value = value.replace(pattern, () => REDACTED);
+  let value = withJsonFieldsRedacted.replace(CREDENTIAL_URL_RE, (_match, prefix: string, suffix: string) => {
+    decisions.push(createDecision(path, 'credential-url', 'text-value-pattern', 'sensitive-value'));
+    return `${prefix}:${REDACTED}${suffix}`;
+  });
+  for (const { key, pattern } of SENSITIVE_VALUE_PATTERNS) {
+    value = value.replace(pattern, () => {
+      decisions.push(createDecision(path, key, 'text-value-pattern', 'sensitive-value'));
+      return REDACTED;
+    });
   }
 
   return { value, decisions };
@@ -120,12 +126,17 @@ function redactValue(
   return redacted;
 }
 
-function createDecision(path: string, key: string, source: RedactionDecisionSource): RedactionDecision {
+function createDecision(
+  path: string,
+  key: string,
+  source: RedactionDecisionSource,
+  rule: RedactionDecision['rule'] = 'sensitive-key',
+): RedactionDecision {
   return {
     path,
     key,
     source,
-    rule: 'sensitive-key',
+    rule,
     replacement: REDACTED,
   };
 }

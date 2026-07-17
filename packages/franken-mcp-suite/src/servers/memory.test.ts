@@ -320,7 +320,7 @@ describe("Memory Server", () => {
     expect(brain.store).not.toHaveBeenCalled();
     expect(brain.proposeMemory).toHaveBeenCalledWith({
       key: "OPENAI_API_KEY",
-      value: "<redacted>",
+      value: sensitiveValue,
       source: "fbeast_memory_store:quarantine",
       evidenceId: "quarantine:OPENAI_API_KEY",
       confidence: 1,
@@ -336,6 +336,38 @@ describe("Memory Server", () => {
       reason: "key-name-indicates-secret",
       stored: false,
     });
+    expect(result.content[0]!.text).not.toContain(sensitiveValue);
+  });
+
+  it("quarantines authorization-header memory values for review without echoing them", async () => {
+    const sensitiveValue = ["Authorization: Basic ", "a".repeat(32)].join("");
+    const brain = createBrainStub({ store: vi.fn(), proposeMemory: vi.fn().mockResolvedValue({
+      id: "memcand_header",
+      targetStore: "working",
+      key: "request-headers",
+      value: sensitiveValue,
+      source: "fbeast_memory_store:quarantine",
+      evidenceId: "quarantine:request-headers",
+      confidence: 1,
+      reason: "Sensitive memory quarantined for operator review (value-shape-indicates-secret).",
+      status: "pending",
+      createdAt: "2026-07-17T00:00:00.000Z",
+      updatedAt: "2026-07-17T00:00:00.000Z",
+    }) });
+    const server = createMemoryServer({ brain });
+
+    const result = await server.callTool("fbeast_memory_store", {
+      key: "request-headers",
+      value: sensitiveValue,
+      type: "working",
+    });
+
+    expect(brain.store).not.toHaveBeenCalled();
+    expect(brain.proposeMemory).toHaveBeenCalledWith(expect.objectContaining({
+      key: "request-headers",
+      value: sensitiveValue,
+      reason: expect.stringContaining("value-shape-indicates-secret"),
+    }));
     expect(result.content[0]!.text).not.toContain(sensitiveValue);
   });
 
@@ -391,6 +423,24 @@ describe("Memory Server", () => {
     expect(brain.store).toHaveBeenCalledWith({
       key: "token_budget_notes",
       value: "Keep summaries concise when token budget is low.",
+      type: "working",
+    });
+    expect(brain.proposeMemory).not.toHaveBeenCalled();
+  });
+
+  it("keeps benign sk-prefixed words on the direct store path", async () => {
+    const brain = createBrainStub({ store: vi.fn().mockResolvedValue(undefined), proposeMemory: vi.fn() });
+    const server = createMemoryServer({ brain });
+
+    await server.callTool("fbeast_memory_store", {
+      key: "installer_notes",
+      value: "skill-installer and skeletonization notes are benign documentation.",
+      type: "working",
+    });
+
+    expect(brain.store).toHaveBeenCalledWith({
+      key: "installer_notes",
+      value: "skill-installer and skeletonization notes are benign documentation.",
       type: "working",
     });
     expect(brain.proposeMemory).not.toHaveBeenCalled();

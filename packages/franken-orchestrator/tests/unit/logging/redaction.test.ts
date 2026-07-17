@@ -79,6 +79,28 @@ describe('logging redaction', () => {
     expect(JSON.stringify(result.decisions)).not.toContain(value);
   });
 
+  it('returns provenance for value-shape text redactions without leaking the value', () => {
+    const webhook = `https://discord.com/api/webhooks/${'1'.repeat(18)}/${'a'.repeat(68)}`;
+    const result = redactSensitiveTextWithProvenance(`webhook=${webhook}`, '$.message');
+
+    expect(result.value).toBe('webhook=<redacted>');
+    expect(result.decisions).toContainEqual({
+      path: '$.message',
+      key: 'discord-webhook',
+      source: 'text-value-pattern',
+      rule: 'sensitive-value',
+      replacement: '<redacted>',
+    });
+    expect(JSON.stringify(result.decisions)).not.toContain(webhook);
+  });
+
+  it('does not redact benign sk-prefixed words as provider tokens', () => {
+    const result = redactSensitiveTextWithProvenance('skill-installer skeletonization sketched notes', '$.message');
+
+    expect(result.value).toBe('skill-installer skeletonization sketched notes');
+    expect(result.decisions).toEqual([]);
+  });
+
   it('returns path-aware provenance for object and nested string redaction decisions', () => {
     const objectValue = secretMarker('object', 'value');
     const textValue = secretMarker('inline', 'value');
