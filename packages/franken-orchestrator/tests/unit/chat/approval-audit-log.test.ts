@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -86,14 +86,22 @@ describe('FileApprovalAuditLog', () => {
     }
   });
 
-  it('loads existing audit entries after restart and detects consumed approval replay attempts', async () => {
+  it('loads existing audit entries after restart and treats approved-or-executed approvals as consumed', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'franken-approval-audit-'));
     try {
       const logPath = join(dir, 'approval-audit.jsonl');
       const command = 'git push origin HEAD';
       const first = new FileApprovalAuditLog(logPath);
-      await first.recordExecution({
+      await first.recordDecision({
         sessionId: 'chat-1',
+        projectId: 'proj-1',
+        token: 'approval-token-1',
+        command,
+        decision: 'approved',
+        decisionSource: 'human',
+      });
+      await first.recordExecution({
+        sessionId: 'chat-2',
         projectId: 'proj-1',
         token: 'approval-token-1',
         command,
@@ -104,6 +112,12 @@ describe('FileApprovalAuditLog', () => {
       const restarted = new FileApprovalAuditLog(logPath);
       expect(await restarted.hasConsumedApproval({
         sessionId: 'chat-1',
+        projectId: 'proj-1',
+        token: 'approval-token-1',
+        commandHash: commandSha256(command),
+      })).toBe(true);
+      expect(await restarted.hasConsumedApproval({
+        sessionId: 'chat-2',
         projectId: 'proj-1',
         token: 'approval-token-1',
         commandHash: commandSha256(command),
@@ -123,7 +137,8 @@ describe('FileApprovalAuditLog', () => {
     const dir = await mkdtemp(join(tmpdir(), 'franken-approval-audit-'));
     try {
       const logPath = join(dir, 'approval-audit.jsonl');
-      await writeFile(logPath, '{"partial":', 'utf8');
+      await writeFile(logPath, '{"partial":', { encoding: 'utf8', mode: 0o644 });
+      await chmod(logPath, 0o644);
 
       const command = 'git push origin HEAD';
       const log = new FileApprovalAuditLog(logPath);
@@ -138,6 +153,7 @@ describe('FileApprovalAuditLog', () => {
 
       const raw = await readFile(logPath, 'utf8');
       expect(raw).toContain('{"partial":\n');
+      expect((await stat(logPath)).mode & 0o777).toBe(0o600);
       expect(await log.hasConsumedApproval({
         sessionId: 'chat-1',
         projectId: 'proj-1',

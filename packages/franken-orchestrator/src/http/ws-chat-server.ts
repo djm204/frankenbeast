@@ -15,7 +15,7 @@ import {
   ChatSocketSessionTicketStore,
   verifyChatSocketRequest,
 } from './ws-chat-auth.js';
-import { ClientSocketEventSchema, type ClientSocketEvent, type ServerSocketEvent, deterministicUuid, isoNow } from '@franken/types';
+import { ClientSocketEventSchema, type ChatSessionResponse, type ClientSocketEvent, type ServerSocketEvent, deterministicUuid, isoNow } from '@franken/types';
 import { InMemoryRateLimiter } from '../beasts/http/beast-rate-limit.js';
 import { ChatMutationAdmission, chatClientKey, createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, type ChatRateLimitOptions } from './chat-rate-limit.js';
 
@@ -80,6 +80,20 @@ const DEFAULT_CHAT_MESSAGE_RATE_LIMIT: ChatSocketMessageRateLimitOptions = {
   max: 20,
   windowMs: 10_000,
 };
+
+function redactPendingApproval(
+  pendingApproval: ChatSession['pendingApproval'],
+): ChatSessionResponse['pendingApproval'] {
+  if (!pendingApproval) return pendingApproval ?? null;
+  const {
+    approvalToken: _approvalToken,
+    requester: _requester,
+    workerId: _workerId,
+    workdir: _workdir,
+    ...redacted
+  } = pendingApproval;
+  return redacted;
+}
 
 class ChatSocketMessageRateLimiter {
   private readonly counters = new Map<string, CounterState>();
@@ -248,7 +262,7 @@ export class ChatSocketController {
       projectId: session.projectId,
       transcript: session.transcript,
       state: session.state,
-      pendingApproval: session.pendingApproval ?? null,
+      pendingApproval: redactPendingApproval(session.pendingApproval),
     });
     return { ok: true };
   }
@@ -616,11 +630,17 @@ export class ChatSocketController {
       session.state = 'rejected';
       session.updatedAt = nowIso();
       this.sessionStore.save(session);
+      const timestamp = nowIso();
       this.emit(peer, {
         type: 'turn.error',
         code: 'APPROVAL_REPLAYED',
         message: 'This approval was already consumed; recreate the approval request before retrying.',
-        timestamp: nowIso(),
+        timestamp,
+      });
+      this.emit(peer, {
+        type: 'turn.approval.resolved',
+        approved: false,
+        timestamp,
       });
       return;
     }
@@ -734,7 +754,7 @@ export class ChatSocketController {
         token: approvalAuditToken(session, command),
         ...(pendingApproval.workerId ? { workerId: pendingApproval.workerId } : {}),
         ...(pendingApproval.workdir ? { workdir: pendingApproval.workdir } : {}),
-        ...((pendingApproval.requester ?? options.requester) ? { requester: pendingApproval.requester ?? options.requester } : {}),
+        ...((options.requester ?? pendingApproval.requester) ? { requester: options.requester ?? pendingApproval.requester } : {}),
         command,
         decision,
         decisionSource,
@@ -762,7 +782,7 @@ export class ChatSocketController {
         token: approvalAuditTokenForPending(session, pendingApproval, command),
         ...(pendingApproval.workerId ? { workerId: pendingApproval.workerId } : {}),
         ...(pendingApproval.workdir ? { workdir: pendingApproval.workdir } : {}),
-        ...((pendingApproval.requester ?? requester) ? { requester: pendingApproval.requester ?? requester } : {}),
+        ...((requester ?? pendingApproval.requester) ? { requester: requester ?? pendingApproval.requester } : {}),
         command,
         exitCode,
         output,
@@ -788,7 +808,7 @@ export class ChatSocketController {
         token: approvalAuditToken(session, command),
         ...(pendingApproval.workerId ? { workerId: pendingApproval.workerId } : {}),
         ...(pendingApproval.workdir ? { workdir: pendingApproval.workdir } : {}),
-        ...((pendingApproval.requester ?? requester) ? { requester: pendingApproval.requester ?? requester } : {}),
+        ...((requester ?? pendingApproval.requester) ? { requester: requester ?? pendingApproval.requester } : {}),
         command,
         reason,
       });

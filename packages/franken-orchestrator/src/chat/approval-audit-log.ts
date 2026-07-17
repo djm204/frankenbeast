@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { mkdir, readFile, open } from 'node:fs/promises';
+import { mkdir, readFile, open, chmod } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { isoNow } from '@franken/types';
 
@@ -134,7 +134,7 @@ export class FileApprovalAuditLog implements ApprovalAuditLog {
       && entry.projectId === input.projectId
       && entry.commandHash === input.commandHash
       && (input.token === undefined || entry.token === input.token)
-      && (entry.decision === 'executed' || entry.decision === 'failed'));
+      && (entry.decision === 'approved' || entry.decision === 'executed' || entry.decision === 'failed'));
   }
 
   private baseEntry(input: {
@@ -161,13 +161,20 @@ export class FileApprovalAuditLog implements ApprovalAuditLog {
   }
 
   private async append(entry: ApprovalAuditEntry): Promise<void> {
-    await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
+    const dir = dirname(this.path);
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    try {
+      await chmod(dir, 0o700);
+    } catch {
+      // Best-effort hardening for already-created audit directories.
+    }
     const file = await open(
       this.path,
       constants.O_CREAT | constants.O_APPEND | constants.O_RDWR | constants.O_NOFOLLOW,
       0o600,
     );
     try {
+      await file.chmod(0o600);
       try {
         const existing = await file.readFile({ encoding: 'utf8' });
         if (existing.length > 0 && !existing.endsWith('\n')) {

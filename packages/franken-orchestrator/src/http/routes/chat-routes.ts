@@ -67,10 +67,27 @@ function validateChatSessionId(id: string): string {
   return id;
 }
 
+function redactPendingApproval(
+  pendingApproval: NonNullable<ReturnType<ISessionStore['get']>>['pendingApproval'],
+): ChatSessionResponse['pendingApproval'] {
+  if (!pendingApproval) return pendingApproval ?? null;
+  const {
+    approvalToken: _approvalToken,
+    requester: _requester,
+    workerId: _workerId,
+    workdir: _workdir,
+    ...redacted
+  } = pendingApproval;
+  return redacted;
+}
+
 function sessionResponse(
   session: NonNullable<ReturnType<ISessionStore['get']>>,
 ): ChatSessionResponse {
-  return { ...session };
+  return {
+    ...session,
+    pendingApproval: redactPendingApproval(session.pendingApproval),
+  };
 }
 
 function approvalReadinessResponse(
