@@ -223,6 +223,35 @@ describe('learning experiment sandbox', () => {
       execute: () => ({ passed: true, evidence: ['second'] }),
     });
     expect(second.passed).toBe(true);
+    expect(second.runDir).not.toBe(first.runDir);
+    expect(existsSync(first.evidencePath)).toBe(true);
+    expect(existsSync(second.evidencePath)).toBe(true);
+  });
+
+  it('keeps enforcement policy private even if experiment mutates the exposed policy object', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+
+    const result = await runLearningSandboxExperiment({
+      declaration,
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      execute: async (sandbox) => {
+        expect(() => {
+          (sandbox.policy as { readOnlyFixtureClone: boolean }).readOnlyFixtureClone = false;
+        }).toThrow();
+        expect(() => {
+          (sandbox.policy.allowedTools as string[]).push('score_candidate');
+        }).toThrow();
+        chmodSync(sandbox.workspaceDir, 0o755);
+        chmodSync(join(sandbox.workspaceDir, 'README.md'), 0o644);
+        await expect(sandbox.runTool('score_candidate', { score: 1 }, () => 1)).rejects.toThrow(/not allowed/);
+        return { passed: true, evidence: ['policy mutation blocked'] };
+      },
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.error).toMatch(/fixture clone was mutated/);
   });
 
   it('fails promotion when experiment code mutates the read-only fixture clone', async () => {
@@ -308,6 +337,28 @@ describe('learning experiment sandbox', () => {
     });
 
     expect(result.passed).toBe(false);
+  });
+
+  it('denies namespaced and observer mutation tool aliases even when allowlisted', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+    const attempts = ['functions.exec_command', 'functions.apply_patch', 'fbeast_observer_log', 'fbeast_observer_trail'];
+
+    const result = await runLearningSandboxExperiment({
+      declaration: { ...declaration, requestedTools: attempts },
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      policy: { allowedTools: ['list_fixture_files', 'read_fixture_file', ...attempts] },
+      execute: async (sandbox) => {
+        for (const tool of attempts) {
+          await expect(sandbox.runTool(tool, {}, () => 'mutated')).rejects.toThrow(/mutation-capable/);
+        }
+        return { passed: true, evidence: [] };
+      },
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.blockedToolCalls.map((call) => call.tool)).toEqual(attempts);
   });
 
   it('denies concrete fbeast memory mutation tool names even when allowlisted', async () => {

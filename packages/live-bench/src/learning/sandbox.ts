@@ -5,6 +5,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   readdirSync,
   realpathSync,
@@ -111,10 +112,11 @@ export async function runLearningSandboxExperiment(
   options: LearningSandboxExperimentOptions,
 ): Promise<LearningSandboxExperimentResult> {
   const declaration = LearningSandboxExperimentDeclarationSchema.parse(options.declaration) as LearningSandboxExperimentDeclaration;
-  const policy = LearningSandboxPolicySchema.parse({
+  const enforcedPolicy = LearningSandboxPolicySchema.parse({
     ...options.policy,
     allowedTools: options.policy?.allowedTools ?? [...DEFAULT_LEARNING_SANDBOX_TOOLS],
   }) as LearningSandboxPolicy;
+  const policy = freezeSandboxPolicy(enforcedPolicy);
   const now = options.now ?? (() => new Date().toISOString());
   const startedAt = now();
   const runsRoot = resolve(options.runsRoot);
@@ -122,8 +124,12 @@ export async function runLearningSandboxExperiment(
   const realRunsRoot = realpathSync(runsRoot);
 
   const fixtureDir = options.fixtures.resolveFixture(declaration.fixture);
-  const runDir = resolve(realRunsRoot, 'learning-sandbox', safeRunSegment(declaration.experimentId, declaration.hypothesis));
-  ensureContained(runDir, realRunsRoot, 'sandbox run directory');
+  const sandboxRoot = resolve(realRunsRoot, 'learning-sandbox');
+  ensureContained(sandboxRoot, realRunsRoot, 'sandbox run root');
+  assertNoSymlinkPathComponents(sandboxRoot, realRunsRoot);
+  mkdirSync(sandboxRoot, { recursive: true });
+  const runDir = mkdtempSync(join(sandboxRoot, `${safeRunSegment(declaration.experimentId, declaration.hypothesis)}-`));
+  ensureContained(runDir, sandboxRoot, 'sandbox run directory');
   const workspaceDir = join(runDir, 'workspace');
   const evidencePath = join(runDir, 'evidence.json');
 
@@ -134,7 +140,7 @@ export async function runLearningSandboxExperiment(
   cpSync(fixtureDir, workspaceDir, { recursive: true });
   assertNoSymlinksInTree(workspaceDir);
   const originalWorkspaceDir = realpathSync(workspaceDir);
-  if (policy.readOnlyFixtureClone) {
+  if (enforcedPolicy.readOnlyFixtureClone) {
     makeTreeReadOnly(workspaceDir);
   }
   const workspaceSnapshot = snapshotTree(workspaceDir);
@@ -149,7 +155,7 @@ export async function runLearningSandboxExperiment(
       tool,
       input,
       handler,
-      policy,
+      policy: enforcedPolicy,
       workspaceDir,
       originalWorkspaceDir,
       now,
@@ -167,7 +173,7 @@ export async function runLearningSandboxExperiment(
 
   const completedAt = now();
   const postRunSnapshot = safeSnapshotTree(workspaceDir);
-  const workspaceMutated = policy.readOnlyFixtureClone && postRunSnapshot.hash !== workspaceSnapshot;
+  const workspaceMutated = enforcedPolicy.readOnlyFixtureClone && postRunSnapshot.hash !== workspaceSnapshot;
   if (postRunSnapshot.error && error === undefined) {
     error = `Unable to verify read-only sandbox fixture clone: ${postRunSnapshot.error}`;
   } else if (workspaceMutated && error === undefined) {
@@ -372,12 +378,26 @@ function makeTreeReadOnly(root: string): void {
 }
 
 function isMutationCapableSandboxTool(tool: string): boolean {
-  return MUTATION_CAPABLE_SANDBOX_TOOLS.has(tool)
-    || tool.startsWith('fbeast_memory_')
-    || tool.startsWith('fbeast_governor_')
-    || tool.startsWith('fbeast_approval_')
-    || tool.startsWith('github_')
-    || tool.startsWith('kanban_');
+  const aliases = toolAliases(tool);
+  return aliases.some((alias) => MUTATION_CAPABLE_SANDBOX_TOOLS.has(alias)
+    || alias.startsWith('fbeast_memory_')
+    || alias.startsWith('fbeast_observer_')
+    || alias.startsWith('fbeast_governor_')
+    || alias.startsWith('fbeast_approval_')
+    || alias.startsWith('github_')
+    || alias.startsWith('kanban_'));
+}
+
+function toolAliases(tool: string): string[] {
+  const lastSegment = tool.split('.').pop();
+  return lastSegment && lastSegment !== tool ? [tool, lastSegment] : [tool];
+}
+
+function freezeSandboxPolicy(policy: LearningSandboxPolicy): LearningSandboxPolicy {
+  return Object.freeze({
+    ...policy,
+    allowedTools: Object.freeze([...policy.allowedTools]) as unknown as string[],
+  });
 }
 
 function makeTreeWritableForCleanup(root: string): void {
