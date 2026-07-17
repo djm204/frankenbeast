@@ -12,6 +12,7 @@ const ReviewRequestSchema = z.object({
 
 export interface CritiqueAppOptions {
   bearerToken?: string;
+  /** Positive finite integer request quota per minute. Use 0 or undefined to disable. */
   rateLimitPerMinute?: number;
   pipeline?: CritiquePipeline;
 }
@@ -54,10 +55,29 @@ export function evictOldestRateLimitBucket(
   }
 }
 
+function resolveRateLimitPerMinute(
+  rateLimitPerMinute: number | undefined,
+): number | undefined {
+  if (rateLimitPerMinute === undefined || rateLimitPerMinute === 0) {
+    return undefined;
+  }
+
+  if (!Number.isSafeInteger(rateLimitPerMinute) || rateLimitPerMinute < 1) {
+    throw new Error(
+      'rateLimitPerMinute must be a positive finite integer, or 0/undefined to disable rate limiting',
+    );
+  }
+
+  return rateLimitPerMinute;
+}
+
 export function createCritiqueApp(options: CritiqueAppOptions = {}): Hono {
   const app = new Hono();
   const requestCounts = new Map<string, RateLimitBucket>();
   let nextRateLimitCleanupAt = 0;
+  const rateLimitPerMinute = resolveRateLimitPerMinute(
+    options.rateLimitPerMinute,
+  );
 
   // Bearer auth middleware
   const bearerToken = options.bearerToken;
@@ -77,8 +97,8 @@ export function createCritiqueApp(options: CritiqueAppOptions = {}): Hono {
   // Rate limiting middleware. Expired buckets are swept at a fixed cadence and
   // the active bucket map has a hard cap so high-cardinality forwarded-address
   // traffic cannot force an O(bucket count) scan on every request.
-  if (options.rateLimitPerMinute) {
-    const limit = options.rateLimitPerMinute;
+  if (rateLimitPerMinute !== undefined) {
+    const limit = rateLimitPerMinute;
     app.use('/v1/*', async (c, next) => {
       const ip = c.req.header('x-forwarded-for') ?? 'unknown';
       const now = wallClockNow();
