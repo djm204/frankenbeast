@@ -607,9 +607,83 @@ describe('stuck-run watchdog', () => {
         kanbanState: 'running',
         heartbeatAgeMs: 5 * 60 * 1000,
         outputAgeMs: 270_000,
+        exitReason: 'process_not_alive',
+        restartDisposition: 'retryable',
+        nextAction: 'restart-once',
         recommendedAction: expect.stringContaining('clear the stale PID/current-run pointer'),
       }),
     ]);
+  });
+
+  it('records crash-only setup failures as HITL doctor replacement instead of blind respawn', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_setup_crash',
+        pid: 7410,
+        runId: 'run-setup',
+        status: 'failed',
+        alive: false,
+        exitReason: 'spawn_failed',
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_setup_crash',
+      exitReason: 'spawn_failed',
+      pid: 7410,
+      heartbeatAgeMs: 60_000,
+      restartDisposition: 'hitl',
+      nextAction: 'replace-with-doctor',
+    });
+    expect(finding.evidence).toEqual(expect.arrayContaining([
+      'exitReason=spawn_failed',
+      'pid=7410',
+      'heartbeatAgeMs=60000',
+    ]));
+  });
+
+  it('keeps blocked crash cards in HITL instead of auto-respawning them', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_blocked_crash',
+        pid: 7411,
+        runId: 'run-blocked',
+        status: 'blocked',
+        alive: false,
+        exitReason: 'exit_code_1',
+        lastHeartbeatAt: '2026-07-16T11:40:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_blocked_crash',
+      exitReason: 'exit_code_1',
+      restartDisposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+    });
+  });
+
+  it('suppresses duplicate respawns when another PID already owns the worker card', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_duplicate_respawn',
+        pid: 7412,
+        runId: 'run-older',
+        status: 'running',
+        alive: false,
+        exitReason: 'unknown_exit',
+        siblingPids: [7413],
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_duplicate_respawn',
+      restartDisposition: 'hitl',
+      nextAction: 'suppress-duplicate-respawn',
+    });
+    expect(finding.evidence).toContain('siblingPids=7413');
   });
 
   it('uses known blocker hints to report approval gates with concrete remediation', () => {

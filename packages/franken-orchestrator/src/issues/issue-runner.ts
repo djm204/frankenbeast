@@ -182,6 +182,10 @@ export interface IssueWorkerCardProcessSnapshot {
   readonly blockerCategory?: IssueStuckRunBlockerCategory | undefined;
   /** Human-readable wait reason, e.g. provider queue, CI checks, or approval token. */
   readonly waitingOn?: string | undefined;
+  /** Supervisor/dispatcher exit reason preserved from the last run/attempt. */
+  readonly exitReason?: string | undefined;
+  /** Other currently live PIDs observed for the same worker card. */
+  readonly siblingPids?: readonly number[] | undefined;
   /** Monotonic heartbeat sequence recorded by the heartbeat writer. */
   readonly heartbeatSequence?: number | undefined;
   /** Writer/reader source for diagnostics when heartbeat state is stale or regressive. */
@@ -220,9 +224,32 @@ export interface IssueStuckRunWatchdogFinding {
   readonly stateTransitionAgeMs?: number | undefined;
   readonly processStatus: 'alive' | 'dead' | 'unknown';
   readonly kanbanState: string;
+  readonly exitReason: string;
+  readonly restartDisposition: IssueWorkerRestartDisposition;
+  readonly nextAction: IssueWorkerRestartNextAction;
   readonly evidence: readonly string[];
   readonly recommendedAction: string;
   readonly message: string;
+}
+
+export type IssueWorkerRestartDisposition = 'terminal' | 'retryable' | 'hitl';
+
+export type IssueWorkerRestartNextAction =
+  | 'no-op'
+  | 'restart-once'
+  | 'defer-with-evidence'
+  | 'replace-with-doctor'
+  | 'suppress-duplicate-respawn';
+
+export interface IssueWorkerCrashOnlyRestartContract {
+  readonly disposition: IssueWorkerRestartDisposition;
+  readonly nextAction: IssueWorkerRestartNextAction;
+  readonly exitReason: string;
+  readonly pid: number;
+  readonly heartbeatAgeMs?: number | undefined;
+  readonly processStatus: IssueStuckRunWatchdogFinding['processStatus'];
+  readonly kanbanState: string;
+  readonly evidence: readonly string[];
 }
 
 export interface WorkerHeartbeatMonotonicityFinding {
@@ -781,6 +808,88 @@ function knownLongRunningWait(category: IssueStuckRunBlockerCategory): boolean {
   return category === 'ci-wait' || category === 'provider-wait';
 }
 
+function normalizedExitReason(snapshot: IssueWorkerCardProcessSnapshot, category: IssueStuckRunBlockerCategory): string {
+  const explicit = snapshot.exitReason?.trim();
+  if (explicit) return explicit;
+  if (snapshot.alive === false) return 'process_not_alive';
+  const status = snapshot.status?.trim().toLowerCase();
+  if (status && CRASH_WORKER_CARD_STATUSES.has(status)) return status;
+  if (category === 'process-crash') return 'process_crash';
+  return 'unknown';
+}
+
+function hasDuplicateRespawn(snapshot: IssueWorkerCardProcessSnapshot): boolean {
+  const siblingPids = snapshot.siblingPids?.filter((pid) => Number.isSafeInteger(pid) && pid > 0 && pid !== snapshot.pid) ?? [];
+  return siblingPids.length > 0;
+}
+
+export function buildWorkerCrashOnlyRestartContract(
+  snapshot: IssueWorkerCardProcessSnapshot,
+  input: {
+    readonly category: IssueStuckRunBlockerCategory;
+    readonly processStatus: IssueStuckRunWatchdogFinding['processStatus'];
+    readonly heartbeatAgeMs?: number | undefined;
+    readonly kanbanState: string;
+  },
+): IssueWorkerCrashOnlyRestartContract {
+  const exitReason = normalizedExitReason(snapshot, input.category);
+  const evidence = [
+    `exitReason=${exitReason}`,
+    `pid=${snapshot.pid}`,
+    `heartbeatAgeMs=${input.heartbeatAgeMs ?? 'unknown'}`,
+  ];
+  const base = {
+    exitReason,
+    pid: snapshot.pid,
+    ...(input.heartbeatAgeMs !== undefined ? { heartbeatAgeMs: input.heartbeatAgeMs } : {}),
+    processStatus: input.processStatus,
+    kanbanState: input.kanbanState,
+  };
+
+  if (hasDuplicateRespawn(snapshot)) {
+    return {
+      disposition: 'hitl',
+      nextAction: 'suppress-duplicate-respawn',
+      ...base,
+      evidence: [...evidence, `siblingPids=${snapshot.siblingPids?.join(',') ?? 'unknown'}`],
+    };
+  }
+
+  if (exitReason === 'spawn_failed' || /spawn|setup|enoent|eacces|protocol[_ -]?violation/i.test(exitReason)) {
+    return {
+      disposition: 'hitl',
+      nextAction: 'replace-with-doctor',
+      ...base,
+      evidence,
+    };
+  }
+
+  if (input.kanbanState === 'blocked' || input.category === 'approval-gate') {
+    return {
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      ...base,
+      evidence,
+    };
+  }
+
+  if (input.processStatus === 'dead' || input.category === 'process-crash') {
+    return {
+      disposition: 'retryable',
+      nextAction: 'restart-once',
+      ...base,
+      evidence,
+    };
+  }
+
+  return {
+    disposition: 'terminal',
+    nextAction: 'no-op',
+    ...base,
+    evidence,
+  };
+}
+
 export function detectStuckRunWatchdogFindings(
   snapshots: readonly IssueWorkerCardProcessSnapshot[],
   options: IssueStuckRunWatchdogOptions = {},
@@ -846,6 +955,13 @@ export function detectStuckRunWatchdogFindings(
       `blockerCategory=${category}`,
     ];
     if (snapshot.waitingOn) evidence.push(`waitingOn=${redactStuckRunEvidenceText(snapshot.waitingOn)}`);
+    const restartContract = buildWorkerCrashOnlyRestartContract(snapshot, {
+      category,
+      processStatus,
+      ...(heartbeatAgeMs !== undefined ? { heartbeatAgeMs } : {}),
+      kanbanState: status ?? 'unknown',
+    });
+    evidence.push(...restartContract.evidence);
 
     const recommendedAction = remediationForStuckRun(category, processStatus);
     const confidence = confidenceForStuckRun(category, staleCount, processStatus);
@@ -864,6 +980,9 @@ export function detectStuckRunWatchdogFindings(
       ...(stateTransitionAgeMs !== undefined ? { stateTransitionAgeMs } : {}),
       processStatus,
       kanbanState: status ?? 'unknown',
+      exitReason: restartContract.exitReason,
+      restartDisposition: restartContract.disposition,
+      nextAction: restartContract.nextAction,
       evidence,
       recommendedAction,
       message: `Worker card ${snapshot.cardId.trim()} appears stuck (${category}, ${confidence} confidence): ${recommendedAction}`,
