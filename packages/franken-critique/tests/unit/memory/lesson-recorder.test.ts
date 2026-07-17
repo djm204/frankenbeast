@@ -533,6 +533,51 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('keeps explicit tool-use corrections reviewable', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-tool-use-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['Please use the gh CLI'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'preference',
+        suggestedDestination: 'memory',
+      }),
+    );
+  });
+
+  it('admits package-scoped environment facts', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-package-env-fact',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['The package @franken/foo uses pnpm'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'environment-fact',
+        suggestedDestination: 'memory',
+      }),
+    );
+  });
+
+  it('accepts conditional use-workaround notes', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-conditional-use-workaround',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['When GitHub checks are stale use gh run view'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'procedure',
+        suggestedDestination: 'skill',
+      }),
+    );
+  });
+
   it('discards temporal progress summaries without explicit reusable signals', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-temporal-summary',

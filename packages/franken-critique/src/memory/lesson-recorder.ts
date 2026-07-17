@@ -215,6 +215,7 @@ const PREFERENCE_PATTERNS: readonly RegExp[] = [
 
 const ENVIRONMENT_FACT_PATTERNS: readonly RegExp[] = [
   /\b(?:repo|repository|project|package|workspace)\s+(?:uses|requires|runs|is)\b/i,
+  /\b(?:package\s+)?@franken\/[a-z0-9-]+\s+(?:uses|requires|runs|is)\b/i,
   /\b@franken\/[a-z0-9-]+\b/i,
   /\bfrankenbeast\b/i,
 ];
@@ -1235,6 +1236,13 @@ function isRawUserPreferenceCorrection(text: string): boolean {
     text,
   );
   if (
+    /^(?:please\s+)?use\s+(?:the\s+)?(?:gh\s+cli|pnpm|npm|yarn)\b/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  if (
     /^i\s+(?:do\s+not|don'?t)\s+want\b/i.test(text) &&
     /\b(?:logs?|final|summar(?:y|ies|ize)|include|mention|show|share|save|record|persist)\b/i.test(
       text,
@@ -1311,7 +1319,10 @@ function hasExplicitPostTaskLessonSignal(text: string): boolean {
     return true;
   }
   if (
-    /\b(?:when|if)\b.{0,160}\b(?:run|check)\b.{0,160}\b(?:before|instead|fallback|workaround|retry|use|giving\s+up)\b/i.test(
+    /\b(?:when|if)\b.{0,160}\b(?:run|check|use)\b.{0,160}\b(?:before|instead|fallback|workaround|retry|use|giving\s+up)\b/i.test(
+      text,
+    ) ||
+    /\b(?:when|if)\b.{0,160}\buse\b.{0,80}\b(?:gh|npm|pnpm|yarn|run\s+view)\b/i.test(
       text,
     ) ||
     /\b(?:run|check)\b.{0,160}\b(?:when|if)\b/i.test(text)
