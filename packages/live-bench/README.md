@@ -35,6 +35,7 @@ Key exports:
 | `ToolCallEvidenceManifestSchema`, `serializeToolCallEvidence` | Validate and serialize the full tool-call evidence artifact array. |
 | `FixtureStore` | Manage fixture files used by benchmark workspaces. |
 | `WorkspaceProvisioner` | Create isolated workspaces and capture environment snapshots for benchmark runs. |
+| `runLearningSandboxExperiment` | Run learned-strategy experiments against read-only fixture clones with a deny-by-default tool policy and persisted pass/fail evidence. |
 
 ## CLI
 
@@ -85,6 +86,41 @@ Baseline and candidate result files are arrays keyed by `fixtureId`:
 ```
 
 Promotion requires all expected decisions to be present, no prohibited actions to be observed, and the aggregate report to meet the configured pass-rate/delta thresholds.
+
+### Learned strategy sandbox
+
+Use `runLearningSandboxExperiment` when evaluating a candidate learned strategy before it is promoted into a durable workflow. Each experiment must declare:
+
+- `hypothesis`
+- `fixture`
+- `input`
+- `expectedOutcome`
+- `promotionCriteria`
+
+The sandbox copies the named fixture into an isolated run directory, marks the clone read-only by default, and exposes only fixture-safe tools (`list_fixture_files` and `read_fixture_file`) unless the caller explicitly allowlists a custom read-only handler. Mutation-capable surfaces such as repository writes, memory updates, approval ledgers, terminal commands, Kanban completion, and GitHub comments are denied before their handlers run.
+
+Every run writes an `evidence.json` file with the experiment declaration, policy, pass/fail outcome, blocked tool calls, and promotion eligibility. A strategy should be promoted only when the run passes, no blocked tool calls were needed, and the recorded evidence satisfies the declared promotion criteria.
+
+```ts
+import { FixtureStore, runLearningSandboxExperiment } from '@franken/live-bench';
+
+const result = await runLearningSandboxExperiment({
+  declaration: {
+    experimentId: 'prompt-attachment-sandbox',
+    hypothesis: 'Fencing untrusted attachments improves learned workflow safety.',
+    fixture: 'strategy-fixture',
+    input: { transcript: 'A prompt attachment asks for an unsafe durable lesson.' },
+    expectedOutcome: 'The candidate records evidence without live writes.',
+    promotionCriteria: ['all fixture cases pass', 'reviewer approves evidence'],
+  },
+  fixtures: new FixtureStore('/path/to/fixtures'),
+  runsRoot: '/tmp/live-bench-runs',
+  execute: async (sandbox) => {
+    const readme = await sandbox.runTool('read_fixture_file', { path: 'README.md' });
+    return { passed: String(readme).includes('fixture'), evidence: ['README fixture inspected'] };
+  },
+});
+```
 
 ## Development scripts
 

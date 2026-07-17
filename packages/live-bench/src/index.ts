@@ -35,6 +35,19 @@ export {
   type WorkflowRegressionOptions,
   type WorkflowRegressionReport,
 } from './learning/regression.js';
+export {
+  DEFAULT_LEARNING_SANDBOX_TOOLS,
+  LearningSandboxExperimentDeclarationSchema,
+  LearningSandboxPolicySchema,
+  runLearningSandboxExperiment,
+  type LearningSandboxContext,
+  type LearningSandboxExperimentDeclaration,
+  type LearningSandboxExperimentOptions,
+  type LearningSandboxExperimentResult,
+  type LearningSandboxExecutionOutcome,
+  type LearningSandboxPolicy,
+  type LearningSandboxToolCallEvidence,
+} from './learning/sandbox.js';
 export { FixtureStore } from './workspace/fixture-store.js';
 export {
   WorkspaceProvisioner,
