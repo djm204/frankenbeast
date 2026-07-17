@@ -1268,6 +1268,17 @@ function isRawUserPreferenceCorrection(text: string): boolean {
     return true;
   }
   if (
+    /^(?:please\s+)?use\b/i.test(text) &&
+    /\b(?:pnpm|yarn|npm|gh\s+cli|github\s+cli|cli|package\s+manager)\b/i.test(
+      text,
+    ) &&
+    !/\b(?:when|if|before|after|instead|retry|fallback|workaround|run|running|script|steps?)\b/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  if (
     /^(?:please\s+)?(?:keep|avoid|do\s+not|don't|never|prefer|use)\b/i.test(
       text,
     ) &&
@@ -1325,7 +1336,7 @@ function hasExplicitPostTaskLessonSignal(text: string): boolean {
     /\b(?:when|if)\b.{0,160}\buse\b.{0,80}\b(?:gh|npm|pnpm|yarn|run\s+view)\b/i.test(
       text,
     ) ||
-    /\b(?:run|check)\b.{0,160}\b(?:when|if)\b/i.test(text)
+    /\b(?:run|check|checks?|use)\b.{0,160}\b(?:when|if)\b/i.test(text)
   ) {
     return true;
   }
@@ -1353,7 +1364,7 @@ function hasReusableToolFailureSignal(text: string): boolean {
 }
 
 function hasReusableProcedureGuidance(text: string): boolean {
-  return /\b(?:always|when|if)\b.{0,160}\b(?:run|running|use|using|check|verify|retry|fallback|workaround)\b.{0,160}\b(?:before|after|instead|when|if|tests?|giving\s+up)\b|\b(?:run|running|use|using|check|verify|retry|fallback|workaround)\b.{0,160}\b(?:always|when|if|before|after|instead|giving\s+up)\b/i.test(
+  return /\b(?:when|if)\b.{0,160}\b(?:run|running|use|using|check|checks?|verify|retry|fallback|workaround)\b|\b(?:always|when|if)\b.{0,160}\b(?:run|running|use|using|check|checks?|verify|retry|fallback|workaround)\b.{0,160}\b(?:before|after|instead|when|if|tests?|giving\s+up)\b|\b(?:run|running|use|using|check|checks?|verify|retry|fallback|workaround)\b.{0,160}\b(?:always|when|if|before|after|instead|giving\s+up)\b/i.test(
     text,
   );
 }
