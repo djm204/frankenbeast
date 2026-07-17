@@ -193,7 +193,10 @@ function contextLooksLikeStrippedMemorySourceAttributionArgs(context: string): b
     const record = parsed as Record<string, unknown>;
     const keys = Object.keys(record);
     return keys.length > 0
-      && keys.every(key => ['key', 'source', 'limit', 'readScope', 'agentId'].includes(key));
+      && keys.every(key => ['key', 'source', 'limit', 'readScope', 'agentId', 'targetStore'].includes(key))
+      && (Object.prototype.hasOwnProperty.call(record, 'source')
+        || Object.prototype.hasOwnProperty.call(record, 'readScope')
+        || Object.prototype.hasOwnProperty.call(record, 'targetStore'));
   } catch {
     return false;
   }
