@@ -166,8 +166,8 @@ export const AGENT_HANDOFF_TEMPLATE_REQUIREMENTS: readonly AgentHandoffTemplateR
       guidance:
         'Add a section for deterministic test, lint, build, or verifier commands and outcomes.',
       requiredContentPatterns: [
-        /\b(test|lint|typecheck|build|verify|verification|npm|pnpm|yarn|vitest|tsc|eslint|pytest)\b/i,
-        /\b(pass(?:ed)?|fail(?:ed)?|exit|outcome|green|succeed(?:ed)?|success(?:ful)?|ok|0 errors)\b/i,
+        /\b(test|lint|typecheck|build|verify|npm|pnpm|yarn|vitest|tsc|eslint|pytest)\b/i,
+        /\b(pass(?:ed)?|fail(?:ed)?|exit|green|succeed(?:ed)?|success(?:ful)?|ok|0 errors)\b/i,
       ],
     },
     {
@@ -798,7 +798,7 @@ function normalizeTemplateLabelKey(value: string): string {
 }
 
 function isKnownTemplateLabel(label: string): boolean {
-  return /^(?:issue(?: details)?|issue task|task|business goal|business objective|goal|objective|out of scope boundaries|boundary notes|boundaries|completed work|current phase|key decisions|status|current status|decisions|remaining work|blocker|blockers|blocked|risk|risks|command|commands|test command|test commands|outcome|result|owner|responsible|assignee|next action|next step|next steps|follow up|continue|artifact|artifacts|link|links|worktree|worktrees|diff|diffs|doc|docs|telemetry|lesson|lessons)$/.test(
+  return /^(?:issue(?: details)?|issue task|task|business goal|business objective|goal|objective|out of scope boundaries|boundary notes|boundaries|completed work|current phase|key decisions|status|current status|decisions|remaining work|blocker|blockers|blocked|risk|risks|command|commands|test command|test commands|outcome|result|owner|responsible|assignee|next action|next step|next steps|follow up|continue|artifact|artifacts|link|links|branch|branches|pr|pull request|pull requests|worktree|worktrees|diff|diffs|doc|docs|telemetry|learning|learnings|reuse|lesson|lessons)$/.test(
     normalizeTemplateLabelKey(label),
   );
 }
@@ -888,6 +888,10 @@ function isPlaceholderValue(value: string): boolean {
   );
 }
 
+function isNoPlaceholderValue(value: string): boolean {
+  return /^(?:no|none|no blockers|no blocker|no risks|no risk)$/.test(value);
+}
+
 function isRequiredHandoffSectionHeading(heading: string): boolean {
   if (/^\s*agent\s+handoff(?:\s+template)?\s*$/i.test(heading)) {
     return false;
@@ -898,7 +902,7 @@ function isRequiredHandoffSectionHeading(heading: string): boolean {
 }
 
 function isExplicitRequiredHandoffSectionHeading(heading: string): boolean {
-  const isBroadWrapper = /^\s*project\s+(?:objective|goal)\s*$/i.test(heading);
+  const isBroadWrapper = /^(?:\s*project\s+(?:objective|goal)|\s*agent\s+handoff(?:\s+template)?\s+(?:objective|goal))\s*$/i.test(heading);
   return (
     /\bscope\b/i.test(heading) ||
     /\bcurrent\s+state\b/i.test(heading) ||
@@ -1051,7 +1055,8 @@ function populatedTableHeaderLabels(
       const header = headers[cellIndex] ?? '';
       if (
         cellHasPopulatedTemplateValue(cell) ||
-        (isBlockerOrRiskHeader(header) && isPlaceholderValue(normalizeTemplateLabelKey(cell)))
+        (isBlockerOrRiskHeader(header) &&
+          isNoPlaceholderValue(normalizeTemplateLabelKey(cell)))
       ) {
         populatedColumns.add(cellIndex);
       }

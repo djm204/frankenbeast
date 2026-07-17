@@ -1511,6 +1511,91 @@ Lesson: wrappers should not satisfy scope.
       validation.findings.find((finding) => finding.id === 'verification'),
     ).toMatchObject({ status: 'pass' });
   });
+
+  it('rejects documented artifact and learning label-only skeletons', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate
+        .replace(
+          'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
+          '- Branch\n- Pull request',
+        )
+        .replace(
+          'Capture durable lessons, Codex or CI feedback, and reusable notes for future handoffs.',
+          '- Learning\n- Reuse',
+        ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'artifacts'),
+    ).toMatchObject({ status: 'placeholder' });
+    expect(
+      validation.findings.find((finding) => finding.id === 'learning'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('does not count non-none blocker table placeholders as populated blockers', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'State blockers, owner, exact next action, and when the receiving worker should stop.',
+        '| Blocker | Owner | Next action |\n| --- | --- | --- |\n| TBD | PM | Continue |',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'blockers'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('requires concrete verification outcomes instead of labels or promises', () => {
+    const genericOutcome = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.',
+        'Verification outcome will be added later.',
+      ),
+    );
+    const seeLater = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.',
+        'Command: npm test; Outcome: see later.',
+      ),
+    );
+
+    expect(genericOutcome.valid).toBe(false);
+    expect(
+      genericOutcome.findings.find((finding) => finding.id === 'verification'),
+    ).toMatchObject({ status: 'placeholder' });
+    expect(seeLater.valid).toBe(false);
+    expect(
+      seeLater.findings.find((finding) => finding.id === 'verification'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('does not let agent handoff objective wrapper titles satisfy scope', () => {
+    const validation = validateAgentHandoffTemplate(`# Agent handoff objective
+
+## Current state and decisions
+Issue #1775, business goal, and out-of-scope boundaries are known. Completed work and decisions are pending.
+
+## Verification evidence
+npm test passed.
+
+## Blockers and next action
+No blockers. Owner: PM. Next action: continue.
+
+## Artifacts and links
+PR #2331 and worktree artifact.
+
+## Learning and reuse
+Lesson: wrapper titles are not scope sections.
+`);
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
 });
 
 describe('truncateSnapshot', () => {
