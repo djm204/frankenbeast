@@ -647,7 +647,8 @@ function isRedactedAuditValue(value: string | undefined): boolean {
 }
 
 function auditValuesCorrelate(left: string | undefined, right: string | undefined): boolean {
-  if (!left || !right) return true;
+  if (!left && !right) return true;
+  if (!left || !right) return false;
   if (isRedactedAuditValue(left) || isRedactedAuditValue(right)) return true;
   return left === right;
 }
@@ -1168,9 +1169,18 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
       try {
         const events: MemoryAccessAuditEventInternal[] = [];
         const governorTimeFilter = auditSqlTimeClause("created_at", input);
-        const governorWhere = governorTimeFilter.clause
-          ? `${governorTimeFilter.clause} AND (action LIKE '%fbeast_memory%' OR action LIKE '%execute_tool%' OR context LIKE '%fbeast_memory%')`
-          : "WHERE action LIKE '%fbeast_memory%' OR action LIKE '%execute_tool%' OR context LIKE '%fbeast_memory%'";
+        const safeGovernorJson = "CASE WHEN json_valid(context) THEN context ELSE '{}' END";
+        const governorProvenanceCondition = `(
+            json_extract(${safeGovernorJson}, '$.${GOVERNANCE_SOURCE_KEY}') = ?
+            OR json_extract(${safeGovernorJson}, '$.${HOOK_GOVERNANCE_SOURCE_KEY}') = ?
+          )`;
+        const governorMemoryCondition = "(action LIKE '%fbeast_memory%' OR action LIKE '%execute_tool%' OR context LIKE '%fbeast_memory%')";
+        const governorTimeCondition = governorTimeFilter.clause ? governorTimeFilter.clause.slice("WHERE ".length) : "";
+        const governorWhere = `WHERE ${[
+          governorProvenanceCondition,
+          governorMemoryCondition,
+          governorTimeCondition,
+        ].filter(Boolean).join(" AND ")}`;
         const governorRows = sqliteTableExists(reportDb, "governor_log")
           ? reportDb.prepare(`
           SELECT action, context, decision, reason, created_at AS createdAt
@@ -1178,7 +1188,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           ${governorWhere}
           ORDER BY id DESC
           ${sqlLimitClause(scanLimit)}
-        `).all(...governorTimeFilter.params, ...sqlLimitParams(scanLimit)) as Array<{ action: string; context: string; decision: string; reason: string | null; createdAt: string }>
+        `).all(CENTRAL_AUDIT_SOURCE, HOOK_GOVERNANCE_SOURCE, ...governorTimeFilter.params, ...sqlLimitParams(scanLimit)) as Array<{ action: string; context: string; decision: string; reason: string | null; createdAt: string }>
           : [];
         for (const row of governorRows) {
           const context = parseAuditContext(row.context);

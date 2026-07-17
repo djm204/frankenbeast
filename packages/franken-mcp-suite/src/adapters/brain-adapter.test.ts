@@ -984,18 +984,25 @@ describe("createBrainAdapter", () => {
     });
   });
 
-  it("preserves richer observer metadata when deduping sparse governed rows", async () => {
+  it("does not dedupe sparse governed rows with unrelated richer observer metadata", async () => {
     const brain = createBrainAdapter("/tmp/beast.db");
 
     const report = await brain.memoryAccessAuditReport({ profile: "sparse-duplicate-test", limit: 20 });
 
-    expect(report.count).toBe(1);
-    expect(report.events[0]).toMatchObject({
-      tool: "fbeast_memory_store",
-      operation: "write",
-      agentId: "agent-sparse",
-      profile: "sparse-duplicate-test",
-    });
+    expect(report.count).toBe(2);
+    expect(report.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        tool: "fbeast_memory_store",
+        operation: "write",
+        agentId: "agent-sparse",
+        profile: "sparse-duplicate-test",
+      }),
+      expect.objectContaining({
+        tool: "fbeast_memory_store",
+        operation: "write",
+        profile: "sparse-duplicate-test",
+      }),
+    ]));
     expect(report.summary.byAgent).toEqual({ "agent-sparse": 1 });
   });
 
@@ -1027,7 +1034,11 @@ describe("createBrainAdapter", () => {
     await brain.memoryAccessAuditReport({ limit: 5 });
 
     const prepareSql = databaseInstances.flatMap((db) => db.prepare.mock.calls.map(([sql]) => String(sql)));
-    expect(prepareSql.find((sql) => sql.includes("FROM governor_log"))).toContain("LIMIT ?");
+    const governorSql = prepareSql.find((sql) => sql.includes("FROM governor_log"));
+    expect(governorSql).toContain("json_extract");
+    expect(governorSql).toContain("__fbeastGovernanceSource");
+    expect(governorSql).toContain("__fbeastHookSource");
+    expect(governorSql).toContain("LIMIT ?");
     expect(prepareSql.find((sql) => sql.includes("FROM audit_trail"))).toContain("LIMIT ?");
   });
 

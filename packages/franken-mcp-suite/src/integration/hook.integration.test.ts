@@ -141,6 +141,23 @@ describe('fbeast-hook runtime', () => {
     expect(result.observerLogs[0]!.metadata).not.toContain('raw secret');
   });
 
+  it('redacts memory access audit report payloads before post-tool audit logging', async () => {
+    const streamedPayload = JSON.stringify({ events: [{ agentId: 'agent-a', profile: 'default', repo: 'secret/repo' }] });
+    const result = await runHookForTest(['post-tool', '--stdin-payload', '--', 'fbeast_memory_access_audit_report'], {
+      streamedPayload,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.observerLogs).toHaveLength(1);
+    expect(JSON.parse(result.observerLogs[0]!.metadata)).toEqual({
+      __fbeastHookSource: 'fbeast-hook',
+      toolName: 'fbeast_memory_access_audit_report',
+      payload: '[memory-review-result-redacted]',
+      phase: 'post-tool',
+    });
+    expect(result.observerLogs[0]!.metadata).not.toContain('agent-a');
+  });
+
   it('redacts proxied execute_tool result payloads before post-tool audit logging', async () => {
     const streamedPayload = JSON.stringify({ content: [{ type: 'text', text: '{"value":"token abc123"}' }] });
     const result = await runHookForTest(['post-tool', '--stdin-payload', '--', 'execute_tool'], {
