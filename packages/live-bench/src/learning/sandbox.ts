@@ -33,6 +33,7 @@ const MUTATION_CAPABLE_SANDBOX_TOOLS = new Set([
   'patch',
   'terminal',
   'write_file',
+  'write_stdin',
 ]);
 
 export const LearningSandboxExperimentDeclarationSchema = z.object({
@@ -48,6 +49,12 @@ export const LearningSandboxExperimentDeclarationSchema = z.object({
 export const LearningSandboxPolicySchema = z.object({
   allowedTools: z.array(z.string().min(1)).default([...DEFAULT_LEARNING_SANDBOX_TOOLS]),
   readOnlyFixtureClone: z.boolean().default(true),
+}).strict();
+
+const LearningSandboxExecutionOutcomeSchema = z.object({
+  passed: z.boolean(),
+  evidence: z.array(z.string()),
+  notes: z.string().optional(),
 }).strict();
 
 export type LearningSandboxExperimentDeclaration = z.infer<typeof LearningSandboxExperimentDeclarationSchema>;
@@ -111,7 +118,7 @@ export interface LearningSandboxExperimentResult {
 export async function runLearningSandboxExperiment(
   options: LearningSandboxExperimentOptions,
 ): Promise<LearningSandboxExperimentResult> {
-  const declaration = LearningSandboxExperimentDeclarationSchema.parse(options.declaration) as LearningSandboxExperimentDeclaration;
+  const declaration = deepFreeze(LearningSandboxExperimentDeclarationSchema.parse(options.declaration) as LearningSandboxExperimentDeclaration);
   const enforcedPolicy = LearningSandboxPolicySchema.parse({
     ...options.policy,
     allowedTools: options.policy?.allowedTools ?? [...DEFAULT_LEARNING_SANDBOX_TOOLS],
@@ -166,13 +173,13 @@ export async function runLearningSandboxExperiment(
   let outcome: LearningSandboxExecutionOutcome = { passed: false, evidence: [] };
   let error: string | undefined;
   try {
-    outcome = await options.execute(context);
+    outcome = LearningSandboxExecutionOutcomeSchema.parse(await options.execute(context)) as LearningSandboxExecutionOutcome;
   } catch (caught) {
     error = caught instanceof Error ? caught.message : String(caught);
   }
 
   const completedAt = now();
-  const postRunSnapshot = safeSnapshotTree(workspaceDir);
+  const postRunSnapshot = safeSnapshotTree(workspaceDir, originalWorkspaceDir);
   const workspaceMutated = enforcedPolicy.readOnlyFixtureClone && postRunSnapshot.hash !== workspaceSnapshot;
   if (postRunSnapshot.error && error === undefined) {
     error = `Unable to verify read-only sandbox fixture clone: ${postRunSnapshot.error}`;
@@ -317,8 +324,10 @@ function collectFixtureFiles(root: string, current: string, files: string[]): vo
 }
 
 function safeRunSegment(experimentId: string, hypothesis: string): string {
+  const idDigest = createHash('sha256').update(experimentId).digest('hex').slice(0, 12);
+  const safeIdPrefix = experimentId.slice(0, 48);
   const digest = createHash('sha256').update(hypothesis).digest('hex').slice(0, 12);
-  return `${experimentId}-${digest}`;
+  return `${safeIdPrefix}-${idDigest}-${digest}`;
 }
 
 function ensureContained(child: string, root: string, label: string): void {
@@ -400,6 +409,22 @@ function freezeSandboxPolicy(policy: LearningSandboxPolicy): LearningSandboxPoli
   });
 }
 
+function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
+  if (value === null || typeof value !== 'object') {
+    return value;
+  }
+  if (seen.has(value)) {
+    return value;
+  }
+  seen.add(value);
+  for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))) {
+    if ('value' in descriptor) {
+      deepFreeze(descriptor.value, seen);
+    }
+  }
+  return Object.freeze(value);
+}
+
 function makeTreeWritableForCleanup(root: string): void {
   if (!existsSync(root)) {
     return;
@@ -418,17 +443,24 @@ function makeTreeWritableForCleanup(root: string): void {
   }
 }
 
-function snapshotTree(root: string): string {
+function snapshotTree(root: string, expectedRealRoot = realpathSync(root)): string {
   const entries: string[] = [];
   const rootStat = lstatSync(root);
+  if (rootStat.isSymbolicLink()) {
+    throw new Error(`Sandbox fixture clone root is a symlink: ${root}`);
+  }
+  const realRoot = realpathSync(root);
+  if (realRoot !== expectedRealRoot) {
+    throw new Error(`Sandbox fixture clone moved outside original root: ${root}`);
+  }
   entries.push(`root:${rootStat.mode & 0o777}`);
   collectSnapshotEntries(root, root, entries);
   return createHash('sha256').update(entries.sort().join('\n')).digest('hex');
 }
 
-function safeSnapshotTree(root: string): { hash?: string; error?: string } {
+function safeSnapshotTree(root: string, expectedRealRoot?: string): { hash?: string; error?: string } {
   try {
-    return { hash: snapshotTree(root) };
+    return { hash: snapshotTree(root, expectedRealRoot) };
   } catch (caught) {
     return { error: caught instanceof Error ? caught.message : String(caught) };
   }
@@ -452,6 +484,17 @@ function collectSnapshotEntries(root: string, current: string, entries: string[]
 
 function stringifyEvidence(value: unknown): string {
   return JSON.stringify(toJsonSafeEvidence(value), null, 2) ?? 'null';
+}
+
+function safeEnumerableEntries(value: object): Array<[string, unknown]> {
+  return Object.entries(Object.getOwnPropertyDescriptors(value))
+    .filter(([, descriptor]) => descriptor.enumerable)
+    .map(([key, descriptor]) => {
+      if (!('value' in descriptor)) {
+        return [key, '[non-json accessor]'];
+      }
+      return [key, descriptor.value];
+    });
 }
 
 function toJsonSafeEvidence(value: unknown, seen = new WeakSet<object>()): unknown {
@@ -481,7 +524,7 @@ function toJsonSafeEvidence(value: unknown, seen = new WeakSet<object>()): unkno
       return '[non-json circular]';
     }
     seen.add(value);
-    const entries = Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, toJsonSafeEvidence(entry, seen)]));
+    const entries = Object.fromEntries(safeEnumerableEntries(value).map(([key, entry]) => [key, toJsonSafeEvidence(entry, seen)]));
     seen.delete(value);
     return entries;
   }

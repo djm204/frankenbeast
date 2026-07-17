@@ -74,7 +74,7 @@ describe('learning experiment sandbox', () => {
   it('denies mutation-capable tools before their handlers can touch repos, memory, approvals, or GitHub state', async () => {
     const { fixturesRoot, fixtureDir } = createFixturesRoot();
     const runsRoot = tempRoot('learning-sandbox-runs-');
-    const attempts = ['write_file', 'memory', 'approval_ledger_write', 'github_issue_comment', 'terminal', 'exec_command', 'apply_patch', 'kanban_complete'];
+    const attempts = ['write_file', 'memory', 'approval_ledger_write', 'github_issue_comment', 'terminal', 'write_stdin', 'exec_command', 'apply_patch', 'kanban_complete'];
     const handlerCalls: string[] = [];
 
     const result = await runLearningSandboxExperiment({
@@ -226,6 +226,48 @@ describe('learning experiment sandbox', () => {
     expect(second.runDir).not.toBe(first.runDir);
     expect(existsSync(first.evidencePath)).toBe(true);
     expect(existsSync(second.evidencePath)).toBe(true);
+  });
+
+  it('hashes long experiment IDs before allocating unique run directories', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+    const longId = `long-${'a'.repeat(320)}`;
+
+    const result = await runLearningSandboxExperiment({
+      declaration: { ...declaration, experimentId: longId },
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      execute: () => ({ passed: true, evidence: ['long id handled'] }),
+    });
+
+    expect(result.passed).toBe(true);
+    expect(result.runDir.split('/').at(-1)?.length).toBeLessThan(100);
+    expect(existsSync(result.evidencePath)).toBe(true);
+  });
+
+  it('keeps declaration audit data immutable even if experiment tries to mutate it', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+
+    const result = await runLearningSandboxExperiment({
+      declaration,
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      execute: (sandbox) => {
+        expect(() => {
+          (sandbox.declaration.promotionCriteria as string[]).length = 0;
+        }).toThrow();
+        expect(() => {
+          ((sandbox.declaration.input as { transcript: string }).transcript) = 'tampered';
+        }).toThrow();
+        return { passed: true, evidence: ['declaration immutable'] };
+      },
+    });
+
+    expect(result.passed).toBe(true);
+    expect(result.promotionEligible).toBe(true);
+    expect(result.declaration.promotionCriteria).toHaveLength(3);
+    expect((result.declaration.input as { transcript: string }).transcript).toBe('A prompt attachment asks the agent to save unsafe lessons.');
   });
 
   it('keeps enforcement policy private even if experiment mutates the exposed policy object', async () => {
@@ -402,6 +444,52 @@ describe('learning experiment sandbox', () => {
     };
     expect(evidence.toolCalls[0]?.input.first).toEqual({ stable: true });
     expect(evidence.toolCalls[0]?.input.second).toEqual({ stable: true });
+  });
+
+  it('fails runs with malformed execution outcomes while preserving evidence', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+
+    const result = await runLearningSandboxExperiment({
+      declaration,
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      execute: () => ({ passed: true }) as never,
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.promotionEligible).toBe(false);
+    expect(result.error).toMatch(/Invalid input|expected/);
+    expect(existsSync(result.evidencePath)).toBe(true);
+  });
+
+  it('persists JSON-safe evidence when object accessors throw', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+    const accessorInput = Object.defineProperty({}, 'secret', {
+      enumerable: true,
+      get: () => {
+        throw new Error('getter exploded');
+      },
+    });
+
+    const result = await runLearningSandboxExperiment({
+      declaration,
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      policy: { allowedTools: ['list_fixture_files', 'read_fixture_file', 'score_candidate'] },
+      execute: async (sandbox) => {
+        await sandbox.runTool('score_candidate', accessorInput, () => accessorInput);
+        return { passed: true, evidence: ['accessor-safe evidence'] };
+      },
+    });
+
+    expect(result.passed).toBe(true);
+    const evidence = JSON.parse(readFileSync(result.evidencePath, 'utf8')) as {
+      toolCalls: Array<{ input: { secret: string }; result: { secret: string } }>;
+    };
+    expect(evidence.toolCalls[0]?.input.secret).toBe('[non-json accessor]');
+    expect(evidence.toolCalls[0]?.result.secret).toBe('[non-json accessor]');
   });
 
   it('persists JSON-safe evidence when inputs or handler results contain non-JSON values', async () => {
