@@ -16,7 +16,7 @@ import type {
 } from './capacity-reservation-policy.js';
 import { capacityItemFromConfig } from './capacity-reservation-policy.js';
 import { AgentToolPolicyError, validateAgentRoleTools } from './role-tool-manifest.js';
-import type { ToolPolicyDenial } from './role-tool-manifest.js';
+import type { ToolPolicyDenial, ToolPolicyValidationContext } from './role-tool-manifest.js';
 
 export interface CreateTrackedAgentRequest {
   readonly definitionId: string;
@@ -53,6 +53,7 @@ export interface TrackedAgentDetail {
 export interface AgentServiceOptions {
   readonly capacityPolicy?: CapacityReservationPolicy | undefined;
   readonly toolPolicyLogger?: ((entry: ToolPolicyDenial) => void) | undefined;
+  readonly trustedSkillToolManifests?: ToolPolicyValidationContext['trustedSkillToolManifests'];
 }
 
 function defaultToolPolicyLogger(entry: ToolPolicyDenial): void {
@@ -67,7 +68,7 @@ export class AgentService {
   ) {}
 
   createAgent(request: CreateTrackedAgentRequest): TrackedAgent {
-    this.assertRoleToolManifestAllows(request.initConfig);
+    this.assertRoleToolManifestAllows(request);
     const timestamp = this.now();
     return this.repository.createTrackedAgent({
       definitionId: request.definitionId,
@@ -163,8 +164,13 @@ export class AgentService {
     });
   }
 
-  private assertRoleToolManifestAllows(initConfig: Readonly<Record<string, unknown>>): void {
-    const validation = validateAgentRoleTools(initConfig);
+  private assertRoleToolManifestAllows(request: CreateTrackedAgentRequest): void {
+    const validation = validateAgentRoleTools(request.initConfig, {
+      definitionId: request.definitionId,
+      initActionKind: request.initAction.kind,
+      initActionConfig: request.initAction.config,
+      trustedSkillToolManifests: this.options.trustedSkillToolManifests,
+    });
     if (validation.allowed) return;
 
     for (const denial of validation.denials) {

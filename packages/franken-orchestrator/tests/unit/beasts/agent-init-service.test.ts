@@ -66,7 +66,7 @@ describe('AgentInitService', () => {
         config: { designDocPath: 'docs/plans/design.md' },
         chatSessionId: 'sess-1',
       },
-      initConfig: { designDocPath: 'docs/plans/design.md', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
+      initConfig: { designDocPath: 'docs/plans/design.md', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
       chatSessionId: 'sess-1',
     });
 
@@ -115,7 +115,7 @@ describe('AgentInitService', () => {
       source: 'chat',
       createdByUser: 'chat-session:sess-1',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {}, chatSessionId: 'sess-1' },
-      initConfig: { provider: 'claude', objective: 'ship', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
+      initConfig: { provider: 'claude', objective: 'ship', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
       chatSessionId: 'sess-1',
     });
 

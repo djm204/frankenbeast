@@ -82,7 +82,7 @@ describe('beast types', () => {
       initConfig: {
         goal: 'Design the tracked agent flow',
         agentRole: 'coding',
-        requestedTools: ['read_file', 'search_files', 'terminal'],},
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],},
       chatSessionId: 'sess-1',
       createdAt: '2026-03-11T00:00:00.000Z',
       updatedAt: '2026-03-11T00:00:01.000Z',

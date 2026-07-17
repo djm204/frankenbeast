@@ -334,7 +334,7 @@ describe('ProcessBeastExecutor', () => {
       status: 'dispatching',
       createdByUser: 'pfk',
       initAction: { kind: 'martin-loop', command: 'test', config: {} },
-      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
+      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
       createdAt: '2026-03-10T00:00:00.000Z',
       updatedAt: '2026-03-10T00:00:00.000Z',
     });
@@ -392,7 +392,7 @@ describe('ProcessBeastExecutor', () => {
       status: 'dispatching',
       createdByUser: 'pfk',
       initAction: { kind: 'martin-loop', command: 'test', config: {} },
-      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
+      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
       createdAt: '2026-03-10T00:00:00.000Z',
       updatedAt: '2026-03-10T00:00:00.000Z',
     });
@@ -462,7 +462,7 @@ describe('ProcessBeastExecutor', () => {
       status: 'dispatching',
       createdByUser: 'pfk',
       initAction: { kind: 'martin-loop', command: 'test', config: {} },
-      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
+      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
       createdAt: '2026-03-10T00:00:00.000Z',
       updatedAt: '2026-03-10T00:00:00.000Z',
     });
@@ -557,7 +557,7 @@ describe('ProcessBeastExecutor', () => {
       status: 'dispatching',
       createdByUser: 'pfk',
       initAction: { kind: 'martin-loop', command: 'test', config: {} },
-      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
+      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
       createdAt: '2026-03-10T00:00:00.000Z',
       updatedAt: '2026-03-10T00:00:00.000Z',
     });
@@ -614,7 +614,7 @@ describe('ProcessBeastExecutor', () => {
       status: 'dispatching',
       createdByUser: 'pfk',
       initAction: { kind: 'martin-loop', command: 'test', config: {} },
-      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
+      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
       createdAt: '2026-03-10T00:00:00.000Z',
       updatedAt: '2026-03-10T00:00:00.000Z',
     });
@@ -663,7 +663,7 @@ describe('ProcessBeastExecutor', () => {
       status: 'dispatching',
       createdByUser: 'pfk',
       initAction: { kind: 'martin-loop', command: 'test', config: {} },
-      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
+      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
       createdAt: '2026-03-10T00:00:00.000Z',
       updatedAt: '2026-03-10T00:00:00.000Z',
     });
@@ -715,7 +715,7 @@ describe('ProcessBeastExecutor', () => {
       status: 'dispatching',
       createdByUser: 'pfk',
       initAction: { kind: 'martin-loop', command: 'test', config: {} },
-      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
+      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
       createdAt: '2026-03-10T00:00:00.000Z',
       updatedAt: '2026-03-10T00:00:00.000Z',
     });
@@ -767,7 +767,7 @@ describe('ProcessBeastExecutor', () => {
       status: 'dispatching',
       createdByUser: 'pfk',
       initAction: { kind: 'martin-loop', command: 'test', config: {} },
-      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
+      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
       createdAt: '2026-03-10T00:00:00.000Z',
       updatedAt: '2026-03-10T00:00:00.000Z',
     });
@@ -815,7 +815,7 @@ describe('ProcessBeastExecutor', () => {
       status: 'dispatching',
       createdByUser: 'pfk',
       initAction: { kind: 'martin-loop', command: 'test', config: {} },
-      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
+      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
       createdAt: '2026-03-10T00:00:00.000Z',
       updatedAt: '2026-03-10T00:00:00.000Z',
     });

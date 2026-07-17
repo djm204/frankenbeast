@@ -6,6 +6,13 @@ export interface ToolPolicyDenial {
   readonly reason: string;
 }
 
+export interface ToolPolicyValidationContext {
+  readonly definitionId?: string | undefined;
+  readonly initActionKind?: string | undefined;
+  readonly initActionConfig?: Readonly<Record<string, unknown>> | undefined;
+  readonly trustedSkillToolManifests?: Readonly<Record<string, readonly string[]>> | undefined;
+}
+
 export interface ToolPolicyValidationResult {
   readonly allowed: boolean;
   readonly role?: AgentRole | undefined;
@@ -81,8 +88,24 @@ export function roleToolManifests(): Readonly<Record<AgentRole, readonly string[
   };
 }
 
-function rawRoleFromConfig(config: Readonly<Record<string, unknown>>): string | undefined {
-  const raw = config.agentRole ?? config.role ?? config.laneRole;
+function defaultRoleForWorkflow(context: ToolPolicyValidationContext): AgentRole | undefined {
+  const workflow = context.definitionId ?? context.initActionKind;
+  switch (workflow) {
+    case 'martin-loop':
+      return 'coding';
+    case 'chunk-plan':
+    case 'design-interview':
+      return 'docs';
+    default:
+      return undefined;
+  }
+}
+
+function rawRoleFromConfig(
+  config: Readonly<Record<string, unknown>>,
+  context: ToolPolicyValidationContext,
+): string | undefined {
+  const raw = config.agentRole ?? config.role ?? config.laneRole ?? defaultRoleForWorkflow(context);
   return typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : undefined;
 }
 
@@ -109,10 +132,22 @@ function selectedSkillsFromConfig(config: Readonly<Record<string, unknown>>): st
   return [...new Set(arrayOfTools(config.skills))];
 }
 
-function skillToolManifestFor(config: Readonly<Record<string, unknown>>, skill: string): string[] | undefined {
-  const manifests = config.skillToolManifests ?? config.skillTools;
-  if (typeof manifests !== 'object' || manifests === null || Array.isArray(manifests)) return undefined;
-  const raw = (manifests as Readonly<Record<string, unknown>>)[skill];
+function workflowRequiredTools(context: ToolPolicyValidationContext): string[] {
+  const workflow = context.definitionId ?? context.initActionKind;
+  switch (workflow) {
+    case 'martin-loop':
+      return ['read_file', 'search_files', 'write_file', 'patch', 'terminal'];
+    case 'chunk-plan':
+      return ['read_file', 'search_files', 'write_file'];
+    case 'design-interview':
+      return ['read_file', 'write_file'];
+    default:
+      return [];
+  }
+}
+
+function trustedSkillToolManifestFor(context: ToolPolicyValidationContext, skill: string): string[] | undefined {
+  const raw = context.trustedSkillToolManifests?.[skill];
   const tools = arrayOfTools(raw);
   return tools.length > 0 ? tools : undefined;
 }
@@ -120,33 +155,40 @@ function skillToolManifestFor(config: Readonly<Record<string, unknown>>, skill: 
 function skillToolDenials(
   role: AgentRole | string,
   skills: readonly string[],
-  config: Readonly<Record<string, unknown>>,
+  context: ToolPolicyValidationContext,
 ): ToolPolicyDenial[] {
   return skills.flatMap((skill) => {
-    const tools = skillToolManifestFor(config, skill);
+    const tools = trustedSkillToolManifestFor(context, skill);
     if (!tools) {
       return [{
         role,
         requestedTool: `skill:${skill}`,
-        reason: `selected skill '${skill}' must declare its runtime tool manifest`,
+        reason: `selected skill '${skill}' must have a trusted installed runtime tool manifest`,
       }];
     }
     return tools.map((requestedTool) => ({
       role,
       requestedTool,
-      reason: `selected skill '${skill}' exposes runtime tool '${requestedTool}'`,
+      reason: `selected skill '${skill}' exposes installed runtime tool '${requestedTool}'`,
     }));
   });
 }
 
-export function validateAgentRoleTools(initConfig: Readonly<Record<string, unknown>>): ToolPolicyValidationResult {
-  const rawRole = rawRoleFromConfig(initConfig);
+export function validateAgentRoleTools(
+  initConfig: Readonly<Record<string, unknown>>,
+  context: ToolPolicyValidationContext = {},
+): ToolPolicyValidationResult {
+  const policyConfig = { ...context.initActionConfig, ...initConfig };
+  const rawRole = rawRoleFromConfig(policyConfig, context);
   const role = normalizeRole(rawRole);
-  const explicitTools = requestedToolsFromConfig(initConfig);
-  const selectedSkills = selectedSkillsFromConfig(initConfig);
+  const explicitTools = requestedToolsFromConfig(policyConfig);
+  const workflowTools = workflowRequiredTools(context);
+  const selectedSkills = selectedSkillsFromConfig(policyConfig);
+  const skillDenials = skillToolDenials(role ?? rawRole ?? '<missing-role>', selectedSkills, context);
   const requestedTools = [...new Set([
     ...explicitTools,
-    ...skillToolDenials(role ?? rawRole ?? '<missing-role>', selectedSkills, initConfig).map((denial) => denial.requestedTool),
+    ...workflowTools,
+    ...skillDenials.map((denial) => denial.requestedTool),
   ])];
   if (!role) {
     const denialRole = rawRole ?? '<missing-role>';
@@ -166,13 +208,12 @@ export function validateAgentRoleTools(initConfig: Readonly<Record<string, unkno
           ? `role '${rawRole}' is not recognized by the least-privilege manifest`
           : 'tool requests must include a role recognized by the least-privilege manifest',
       })),
-      ...skillToolDenials(denialRole, selectedSkills, initConfig),
+      ...skillDenials,
     ];
     return { allowed: false, rawRole, requestedTools, denials };
   }
 
-  const skillDenials = skillToolDenials(role, selectedSkills, initConfig);
-  const effectiveTools = [...new Set([...explicitTools, ...skillDenials
+  const effectiveTools = [...new Set([...explicitTools, ...workflowTools, ...skillDenials
     .filter((denial) => !denial.requestedTool.startsWith('skill:'))
     .map((denial) => denial.requestedTool)])];
   if (effectiveTools.length === 0) {

@@ -47,7 +47,7 @@ describe('ModuleConfig plumbing', () => {
         status: 'initializing',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
+        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
         moduleConfig,
         createdAt: '2026-03-13T00:00:00.000Z',
         updatedAt: '2026-03-13T00:00:00.000Z',
@@ -69,7 +69,7 @@ describe('ModuleConfig plumbing', () => {
         status: 'initializing',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
+        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
         createdAt: '2026-03-13T00:00:00.000Z',
         updatedAt: '2026-03-13T00:00:00.000Z',
       });
@@ -89,7 +89,7 @@ describe('ModuleConfig plumbing', () => {
         status: 'initializing',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
+        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
         createdAt: '2026-03-13T00:00:00.000Z',
         updatedAt: '2026-03-13T00:00:00.000Z',
       });
@@ -114,7 +114,7 @@ describe('ModuleConfig plumbing', () => {
         status: 'initializing',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
+        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
         moduleConfig: { firewall: false },
         createdAt: '2026-03-13T00:00:00.000Z',
         updatedAt: '2026-03-13T00:00:00.000Z',
@@ -140,7 +140,7 @@ describe('ModuleConfig plumbing', () => {
         source: 'dashboard',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
+        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
         moduleConfig: { skills: false, planner: false },
       });
 
@@ -157,7 +157,7 @@ describe('ModuleConfig plumbing', () => {
         source: 'dashboard',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
+        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
       });
 
       const updated = service.updateAgent(agent.id, {
@@ -213,7 +213,7 @@ describe('ModuleConfig plumbing', () => {
           objective: 'test agent fallback',
           chunkDirectory: 'docs/chunks',
         agentRole: 'coding',
-        requestedTools: ['read_file', 'search_files', 'terminal'],},
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],},
         moduleConfig: { governor: false, heartbeat: false },
       });
 
@@ -279,14 +279,14 @@ describe('ModuleConfig plumbing', () => {
         source: 'dashboard',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
+        initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
       });
       const urgentAgent = agents.createAgent({
         definitionId: 'martin-loop',
         source: 'dashboard',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
+        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
       });
 
       const run = await dispatch.createRun({
@@ -348,7 +348,7 @@ describe('ModuleConfig plumbing', () => {
           objective: 'override test',
           chunkDirectory: 'docs/chunks',
         agentRole: 'coding',
-        requestedTools: ['read_file', 'search_files', 'terminal'],},
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],},
         moduleConfig: { governor: false },
       });
 
