@@ -14,7 +14,8 @@ describe('issue #1701 setup troubleshooting matrix docs', () => {
   it('defines a diagnostic matrix with the required columns and at least eight common failures', () => {
     const matrix = readDoc(matrixPath);
 
-    expect(matrix).toContain('| Symptom | Likely cause | Diagnostic command | Remediation | Verification command |');
+    expect(matrix).toContain('| Symptom | Likely cause | Diagnostic | Remediation | Verification |');
+    expect(matrix).toContain('Copyable commands live below the table');
 
     const dataRows = matrix
       .split('\n')
@@ -37,14 +38,14 @@ describe('issue #1701 setup troubleshooting matrix docs', () => {
     }
 
     expect(matrix).toContain('5173 3737');
-    expect(matrix).toContain('failed=0; for port in');
+    expect(matrix).toContain('failed=0');
     expect(matrix).toContain('docker compose logs --tail=80 chromadb grafana tempo');
     expect(matrix).toContain('targeted probes');
     expect(matrix).toContain('${CHROMA_URL:-http://localhost:8000}/api/v2/heartbeat');
     expect(matrix).toContain('detectCheckpointLock(checkpointPath)');
     expect(matrix).toContain('safeToRemove');
     expect(matrix).toContain('frankenbeast network credentials');
-    expect(matrix).toContain('run `init --repair` only when you intentionally want an interactive repair');
+    expect(matrix).toContain('Run `init --repair` only when you intentionally want an interactive repair');
   });
 
   it('documents safe remediation and handoff evidence instead of destructive cleanup', () => {
