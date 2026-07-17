@@ -71,13 +71,11 @@ function redactPendingApproval(
   pendingApproval: NonNullable<ReturnType<ISessionStore['get']>>['pendingApproval'],
 ): ChatSessionResponse['pendingApproval'] {
   if (!pendingApproval) return pendingApproval ?? null;
-  const {
-    approvalToken: _approvalToken,
-    requester: _requester,
-    workerId: _workerId,
-    workdir: _workdir,
-    ...redacted
-  } = pendingApproval;
+  const redacted = { ...pendingApproval };
+  delete redacted.approvalToken;
+  delete redacted.requester;
+  delete redacted.workerId;
+  delete redacted.workdir;
   return redacted;
 }
 

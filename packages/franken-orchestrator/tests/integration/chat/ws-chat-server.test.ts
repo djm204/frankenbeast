@@ -1306,6 +1306,10 @@ describe('ws chat server', () => {
       type: 'turn.error',
       code: 'APPROVAL_REPLAYED',
     }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.approval.resolved',
+      approved: false,
+    }));
 
     rmSync(TMP, { recursive: true, force: true });
   });
