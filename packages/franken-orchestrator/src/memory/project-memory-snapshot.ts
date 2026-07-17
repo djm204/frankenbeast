@@ -124,8 +124,9 @@ function matchesOptionalScope(values: readonly string[] | undefined, selectorVal
 
 function matchesIsolationScope(values: readonly string[] | undefined, selectorValue: string | undefined): boolean {
   const hasValues = values !== undefined && values.length > 0;
-  if (selectorValue === undefined) return !hasValues;
-  return hasValues && values.includes(selectorValue);
+  if (!hasValues) return true;
+  if (selectorValue === undefined) return false;
+  return values.includes(selectorValue);
 }
 
 function matchesRequiredScope(values: readonly string[] | undefined, selectorValue: string): boolean {

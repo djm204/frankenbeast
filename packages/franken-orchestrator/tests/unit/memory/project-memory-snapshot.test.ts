@@ -43,6 +43,17 @@ describe('buildProjectMemorySnapshot', () => {
           provenance: { source: 'other.md', observedAt: '2026-07-15T00:00:00.000Z' },
         },
         {
+          id: 'project-wide-rule',
+          text: 'Project-wide lessons without profile or tenant metadata remain available to scoped workers.',
+          projects: ['frankenbeast'],
+          repos: ['djm204/frankenbeast'],
+          taskTypes: ['memory'],
+          roles: ['worker'],
+          confidence: 0.9,
+          sensitivity: 'internal',
+          provenance: { source: 'project-lessons', observedAt: '2026-07-15T00:00:00.000Z' },
+        },
+        {
           id: 'other-profile',
           text: 'Another Hermes profile memory should not leak into the default profile snapshot.',
           profiles: ['doctor'],
@@ -140,7 +151,7 @@ describe('buildProjectMemorySnapshot', () => {
       ],
     });
 
-    expect(snapshot.entries.map((entry) => entry.id)).toEqual(['project-rule']);
+    expect(snapshot.entries.map((entry) => entry.id)).toEqual(['project-rule', 'project-wide-rule']);
     expect(snapshot.excludedCount).toBe(9);
     expect(snapshot.entries[0]).toMatchObject({
       text: 'Project convention: memory work must keep MCP schemas and adapter behavior aligned.',

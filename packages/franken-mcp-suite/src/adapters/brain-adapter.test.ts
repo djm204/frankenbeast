@@ -78,7 +78,7 @@ vi.mock("@franken/brain", () => ({
       "env-snippet": "AWS_SECRET_ACCESS_KEY=AKIA" + "supersecretvalue123456 REGION=us-east-1",
       "legacy-token-snippet": "xoxb-" + "legacytokenvalue123 glpat-legacytokenvalue123",
       "basic-auth": "Authorization: *** " + "dXNlcjpwYXNz",
-      "token-auth": "Authorization: Token secret...leak",
+      "token-auth": "Authorization: Token " + "secret-token-value-that-must-not-leak",
       "db_pwd": "super-pwd-value",
       "db_passwd": "super-passwd-value",
       "slack_webhook_url": "https://hooks.slack.com/services/T000/B000/secretwebhookvalue",
