@@ -38,10 +38,20 @@ async function loadExistingConfig(
   });
 }
 
+async function quarantineMalformedConfigIfPresent(configFile: string): Promise<void> {
+  await readJsonFileOrDefault<unknown | undefined>(configFile, () => undefined, {
+    description: 'orchestrator config',
+    onCorrupt: warnJsonQuarantined,
+  });
+}
+
 async function resolveBaseConfig(options: RunInteractiveInitOptions): Promise<OrchestratorConfig> {
   const baseConfig = options.baseConfig ?? await loadExistingConfig(options.configFile, {
     allowTrustedProviderCommandOverrides: options.allowTrustedProviderCommandOverrides,
   });
+  if (options.baseConfig) {
+    await quarantineMalformedConfigIfPresent(options.configFile);
+  }
   if (!options.initBackend) {
     return baseConfig;
   }

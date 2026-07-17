@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { DashboardSkill, DashboardSecurity, DashboardProvider, DashboardAvailability, DashboardMaintenanceMode } from '../lib/dashboard-api';
+import type { DashboardSkill, DashboardSecurity, DashboardProvider, DashboardAvailability, DashboardMaintenanceMode, DashboardSlo } from '../lib/dashboard-api';
 
 interface DashboardStore {
   skills: DashboardSkill[];
@@ -7,10 +7,11 @@ interface DashboardStore {
   providers: DashboardProvider[];
   availability: DashboardAvailability | null;
   maintenance: DashboardMaintenanceMode | null;
+  slo: DashboardSlo | null;
   loading: boolean;
   error: string | null;
 
-  setSnapshot: (snapshot: { skills: DashboardSkill[]; security: DashboardSecurity; providers: DashboardProvider[]; availability?: DashboardAvailability | undefined; maintenance?: DashboardMaintenanceMode | undefined }) => void;
+  setSnapshot: (snapshot: { skills: DashboardSkill[]; security: DashboardSecurity; providers: DashboardProvider[]; availability?: DashboardAvailability | undefined; maintenance?: DashboardMaintenanceMode | undefined; slo?: DashboardSlo | undefined }) => void;
   toggleSkill: (name: string) => void;
   setSkillEnabled: (name: string, enabled: boolean) => void;
   setSecurityProfile: (profile: string) => void;
@@ -25,6 +26,7 @@ const initialState = {
   providers: [] as DashboardProvider[],
   availability: null as DashboardAvailability | null,
   maintenance: null as DashboardMaintenanceMode | null,
+  slo: null as DashboardSlo | null,
   loading: true,
   error: null as string | null,
 };
@@ -39,6 +41,7 @@ export const useDashboardStore = create<DashboardStore>()((set) => ({
       providers: snapshot.providers,
       availability: snapshot.availability ?? null,
       maintenance: snapshot.maintenance ?? current.maintenance,
+      slo: snapshot.slo ?? null,
       loading: false,
       error: null,
     })),

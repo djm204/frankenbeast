@@ -15,6 +15,8 @@ describe('Config loader', () => {
     tmpFiles.length = 0;
     // Clean env vars
     delete process.env['FRANKEN_MAX_TOTAL_TOKENS'];
+    delete process.env['FRANKEN_MAX_DURATION_MS'];
+    delete process.env['FRANKEN_MAX_CRITIQUE_ITERATIONS'];
     delete process.env['FRANKEN_ENABLE_HEARTBEAT'];
     delete process.env['FRANKEN_ENABLE_TRACING'];
     delete process.env['FRANKEN_ENABLE_REFLECTION'];
@@ -222,8 +224,44 @@ describe('Config loader', () => {
   );
 
   it('reads numeric env vars', async () => {
+    process.env['FRANKEN_MAX_TOTAL_TOKENS'] = '125000';
+    process.env['FRANKEN_MAX_DURATION_MS'] = '450000';
+    process.env['FRANKEN_MAX_CRITIQUE_ITERATIONS'] = '4';
     process.env['FRANKEN_MIN_CRITIQUE_SCORE'] = '0.9';
+
     const config = await loadConfig(makeArgs());
+
+    expect(config.maxTotalTokens).toBe(125_000);
+    expect(config.maxDurationMs).toBe(450_000);
+    expect(config.maxCritiqueIterations).toBe(4);
     expect(config.minCritiqueScore).toBe(0.9);
+  });
+
+  it.each([
+    ['FRANKEN_MAX_TOTAL_TOKENS', ''],
+    ['FRANKEN_MAX_TOTAL_TOKENS', 'abc'],
+    ['FRANKEN_MAX_TOTAL_TOKENS', 'NaN'],
+    ['FRANKEN_MAX_TOTAL_TOKENS', 'Infinity'],
+    ['FRANKEN_MIN_CRITIQUE_SCORE', ''],
+    ['FRANKEN_MIN_CRITIQUE_SCORE', 'abc'],
+    ['FRANKEN_MIN_CRITIQUE_SCORE', 'NaN'],
+    ['FRANKEN_MIN_CRITIQUE_SCORE', 'Infinity'],
+  ])('rejects invalid numeric env var %s=%j with a clear error', async (name, value) => {
+    process.env[name] = value;
+
+    await expect(loadConfig(makeArgs())).rejects.toThrow(
+      `Invalid numeric value for ${name}`,
+    );
+  });
+
+  it('does not silently ignore blank numeric env vars over file config', async () => {
+    const filePath = join(tmpdir(), `beast-config-${Date.now()}.json`);
+    tmpFiles.push(filePath);
+    await writeFile(filePath, JSON.stringify({ maxTotalTokens: 50_000 }));
+    process.env['FRANKEN_MAX_TOTAL_TOKENS'] = '';
+
+    await expect(loadConfig(makeArgs({ config: filePath }))).rejects.toThrow(
+      'Invalid numeric value for FRANKEN_MAX_TOTAL_TOKENS',
+    );
   });
 });

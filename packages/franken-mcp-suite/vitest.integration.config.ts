@@ -7,19 +7,9 @@ export default defineConfig({
     alias: createFrankenSourceAliases(import.meta.url),
   },
   test: {
-    pool: 'threads',
     setupFiles: [fileURLToPath(new URL('../../scripts/vitest-deterministic-setup.ts', import.meta.url))],
-    globals: false,
-    include: ['tests/unit/**/*.test.ts'],
-    exclude: ['tests/integration/**/*.test.ts', 'tests/**/*.integration.test.ts'],
-    coverage: {
-      provider: 'v8',
-      include: ['src/**/*.ts'],
-      exclude: ['src/index.ts'],
-      thresholds: {
-        lines: 80,
-        branches: 80,
-      },
-    },
+    include: ['src/**/*.integration.test.ts'],
+    environment: 'node',
+    testTimeout: 15_000,
   },
 });

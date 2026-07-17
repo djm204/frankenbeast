@@ -22,18 +22,34 @@ function parseBooleanEnv(name: string): boolean | undefined {
   );
 }
 
+function parseNumericEnv(name: string, options: { integer?: boolean } = {}): number | undefined {
+  const raw = process.env[name];
+  if (raw === undefined) return undefined;
+
+  const normalized = raw.trim();
+  const value = Number(normalized);
+  if (normalized.length === 0 || !Number.isFinite(value) || (options.integer === true && !Number.isInteger(value))) {
+    const expected = options.integer === true ? 'a finite integer' : 'a finite number';
+    throw new Error(
+      `Invalid numeric value for ${name}: ${JSON.stringify(raw)}. Expected ${expected}.`,
+    );
+  }
+
+  return value;
+}
+
 /** Extract config values from environment variables. */
 function fromEnv(shadowedFields: ReadonlySet<keyof OrchestratorConfig> = new Set()): Partial<OrchestratorConfig> {
   const env: Partial<OrchestratorConfig> = {};
 
-  const maxTokens = process.env[`${ENV_PREFIX}MAX_TOTAL_TOKENS`];
-  if (maxTokens) env.maxTotalTokens = Number(maxTokens);
+  const maxTokens = parseNumericEnv(`${ENV_PREFIX}MAX_TOTAL_TOKENS`, { integer: true });
+  if (maxTokens !== undefined) env.maxTotalTokens = maxTokens;
 
-  const maxDuration = process.env[`${ENV_PREFIX}MAX_DURATION_MS`];
-  if (maxDuration) env.maxDurationMs = Number(maxDuration);
+  const maxDuration = parseNumericEnv(`${ENV_PREFIX}MAX_DURATION_MS`, { integer: true });
+  if (maxDuration !== undefined) env.maxDurationMs = maxDuration;
 
-  const maxCritique = process.env[`${ENV_PREFIX}MAX_CRITIQUE_ITERATIONS`];
-  if (maxCritique) env.maxCritiqueIterations = Number(maxCritique);
+  const maxCritique = parseNumericEnv(`${ENV_PREFIX}MAX_CRITIQUE_ITERATIONS`, { integer: true });
+  if (maxCritique !== undefined) env.maxCritiqueIterations = maxCritique;
 
   if (!shadowedFields.has('enableHeartbeat')) {
     const heartbeat = parseBooleanEnv(`${ENV_PREFIX}ENABLE_HEARTBEAT`);
@@ -50,8 +66,8 @@ function fromEnv(shadowedFields: ReadonlySet<keyof OrchestratorConfig> = new Set
     if (reflection !== undefined) env.enableReflection = reflection;
   }
 
-  const minScore = process.env[`${ENV_PREFIX}MIN_CRITIQUE_SCORE`];
-  if (minScore) env.minCritiqueScore = Number(minScore);
+  const minScore = parseNumericEnv(`${ENV_PREFIX}MIN_CRITIQUE_SCORE`);
+  if (minScore !== undefined) env.minCritiqueScore = minScore;
 
   return env;
 }

@@ -90,7 +90,7 @@ For Beast controls, run the orchestrator/backend setup flow with `frankenbeast i
 
 | Server | Tools | Description |
 |--------|-------|-------------|
-| `fbeast-memory` | `fbeast_memory_store`, `fbeast_memory_query`, `fbeast_memory_frontload`, `fbeast_memory_export`, `fbeast_memory_forget`, `fbeast_memory_right_to_forget`, `fbeast_memory_review_propose`, `fbeast_memory_review_list`, `fbeast_memory_source_attribution`, `fbeast_memory_review_decide` | Key-value, episodic, redacted project export, review-queued promotion, source attribution, and auditable deletion memory via SqliteBrain |
+| `fbeast-memory` | `fbeast_memory_store`, `fbeast_memory_query`, `fbeast_memory_frontload`, `fbeast_memory_export`, `fbeast_memory_retention_report`, `fbeast_memory_forget`, `fbeast_memory_right_to_forget`, `fbeast_memory_review_propose`, `fbeast_memory_review_list`, `fbeast_memory_source_attribution`, `fbeast_memory_review_conflicts`, `fbeast_memory_review_decide` | Key-value, episodic, redacted project export, retention/compaction reports, review-queued promotion, source attribution, and auditable deletion memory via SqliteBrain |
 | `fbeast-observer` | `fbeast_observer_log`, `fbeast_observer_log_cost`, `fbeast_observer_cost`, `fbeast_observer_trail`, `fbeast_observer_verify` | Audit trail with chained hashes, token/cost logging and summaries |
 | `fbeast-governor` | `fbeast_governor_check`, `fbeast_governor_budget` | Action safety assessment and budget status |
 | `fbeast-planner` | `fbeast_plan_decompose`, `fbeast_plan_status`, `fbeast_plan_validate` | Task DAG planning, status visualization, and validation |
@@ -111,6 +111,8 @@ To create agent-scoped entries through `fbeast_memory_store`, pass `agentId`; wo
 `fbeast_memory_store` quarantines likely sensitive working-memory writes instead of storing them directly when the key or value looks like a secret (for example API keys, private keys, passwords, passphrases, credentials, or explicit access/refresh/auth/bearer tokens). The tool returns structured non-sensitive quarantine metadata (`status`, candidate `id`, logical `key`, optional `agentId`, reason, and `stored: false`) without echoing the value. Operators can inspect the pending candidate with `fbeast_memory_review_list` and then approve, reject, or `never_store` it with `fbeast_memory_review_decide`; approval is the only path that persists the quarantined value into working memory, preserving the original agent scope when `agentId` was supplied. Repeated writes that match a prior rejection or `never_store` suppression report the suppressed status instead of returning a decider action. Benign operational notes such as token-budget guidance continue down the direct store path.
 
 `fbeast_memory_export` returns a structured JSON export of the same database-scoped project memory with `redaction: "safe"` by default. Safe redaction masks sensitive keys and values such as passwords, API keys, bearer tokens, session cookies, private keys, and email addresses before returning working and episodic memory entries. Use `redaction: "none"` only for trusted operator-only exports; `readScope` and `agentId` use the same scope rules as query/frontload.
+
+`fbeast_memory_retention_report` returns the configured retention taxonomy and a structured report of entries that are protected, expired, nearing expiry, or eligible for compaction. User preferences are protected from automatic compaction; learned procedures and project conventions out-rank environment facts; transient observations and temporary operational facts are first-choice compaction candidates. Pass `maxEntries` to preview budget-pressure compaction ordering and `expiryHorizonMs` to tune the nearing-expiry window.
 
 `fbeast_memory_right_to_forget` performs user-directed memory deletion by exact key, category metadata, source scope, or sensitive query text. The report returns only a selector hash, deleted counts, remaining-reference count, and optional audit event id; it does not echo the deleted content. Non-dry-run deletions also install hashed reinference guards so future working-memory writes matching forgotten keys, categories, source scopes, or query tokens are rejected.
 
@@ -191,7 +193,7 @@ sensitive payloads into logs or issue comments.
 
 ## Combined server
 
-`fbeast-mcp` runs all 28 tools in a single MCP server process.
+`fbeast-mcp` runs all 29 tools in a single MCP server process.
 
 ## Tool argument shape hardening
 
