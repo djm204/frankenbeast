@@ -155,6 +155,7 @@ describe('fbeast-hook runtime', () => {
     expect(JSON.parse(result.observerLogs[0]!.metadata)).toEqual({
       __fbeastHookSource: 'fbeast-hook',
       toolName: 'fbeast_memory_access_audit_report',
+      ok: true,
       payload: '[memory-review-result-redacted]',
       phase: 'post-tool',
     });
