@@ -1391,6 +1391,120 @@ describe('extractPostTaskLessonCandidates', () => {
       );
     }
   });
+
+  it('keeps failed retry statuses when they include recovery guidance', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-failed-retry-with-recovery',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      toolFailures: ['Retry with gh pr checks failed; use gh run view instead'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'procedure',
+        suggestedDestination: 'skill',
+        review: expect.objectContaining({ status: 'pending-review' }),
+      }),
+    );
+  });
+
+  it('discards task-scoped preference wording about PR state', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-specific-pr-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['I prefer PR #123 be merged'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        review: expect.objectContaining({ status: 'discarded' }),
+      }),
+    );
+  });
+
+  it('routes terse prefer-not-to-use corrections to memory', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-prefer-not-to-use',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['Prefer not to use emojis', 'Prefer not to use npm'],
+    });
+
+    expect(report.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          text: 'Prefer not to use emojis',
+          category: 'preference',
+          suggestedDestination: 'memory',
+        }),
+        expect.objectContaining({
+          text: 'Prefer not to use npm',
+          category: 'preference',
+          suggestedDestination: 'memory',
+        }),
+      ]),
+    );
+  });
+
+  it('discards failed retry status notes without recovery guidance', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-note-failed-retry',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Retry with gh run view failed'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        review: expect.objectContaining({ status: 'discarded' }),
+      }),
+    );
+  });
+
+  it('discards task-specific tool failures before skill routing', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-specific-tool-failure',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      toolFailures: ['When PR #123 checks failed, use gh run view'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        review: expect.objectContaining({ status: 'discarded' }),
+      }),
+    );
+  });
+
+  it('keeps do-not-forget documentation reminders on the docs path', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-doc-reminder',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ["Don't forget to update the README with the npm ci requirement"],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'docs',
+        review: expect.objectContaining({ status: 'pending-review' }),
+      }),
+    );
+  });
+
+  it('discards conditional failure observations without guidance', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-conditional-failure-observation',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['When running npm test, it failed'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        review: expect.objectContaining({ status: 'discarded' }),
+      }),
+    );
+  });
 });
 
 describe('LessonRecorder', () => {

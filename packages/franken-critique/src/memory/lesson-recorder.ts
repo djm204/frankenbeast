@@ -1125,7 +1125,9 @@ export function extractPostTaskLessonCandidates(
   for (const failure of input.toolFailures ?? []) {
     const normalizedFailure = normalizeCandidateText(failure);
     addCandidate('tool-failure', normalizedFailure, undefined, {
-      forceDiscard: !hasReusableToolFailureSignal(normalizedFailure),
+      forceDiscard:
+        isTaskReferenceBookkeeping(normalizedFailure) ||
+        !hasReusableToolFailureSignal(normalizedFailure),
     });
   }
   if (input.summary) {
@@ -1179,6 +1181,9 @@ function choosePostTaskLessonDestination(
 }
 
 function isDocumentationUpdateLesson(text: string): boolean {
+  if (/^\s*(?:please\s+)?don'?t\s+forget\b.{0,80}\b(?:add|document|record|publish|update|write)\b.{0,80}\b(?:docs?|readme|runbook|guide)\b/i.test(text)) {
+    return true;
+  }
   if (
     /^(?:please\s+)?(?:do\s+not|don't|never|avoid)\b.{0,80}\b(?:add|document|record|publish|update|write)\b.{0,80}\b(?:docs?|readme|runbook|guide)\b|\b(?:avoid|never|don'?t|do\s+not)\b.{0,80}\b(?:docs?|documentation|document|write)\b|\b(?:docs?|documentation)\b.{0,80}\b(?:avoid|never|don'?t|do\s+not|unless)\b/i.test(
       text,
@@ -1214,7 +1219,7 @@ function inferPostTaskLessonCategory(
 function isDirectUserPreferenceWording(text: string): boolean {
   return (
     isRawUserPreferenceCorrection(text) &&
-    /^(?:i\s+prefer|i'd\s+prefer|my\s+preference\s+is|i\s+like|i\s+(?:do\s+not|don'?t)\s+want|(?:please\s+)?(?:do\s+not\s+use|don't\s+use|never\s+use|avoid\s+using))\b/i.test(
+    /^(?:i\s+prefer|i'd\s+prefer|my\s+preference\s+is|i\s+like|i\s+(?:do\s+not|don'?t)\s+want|prefer\s+not\s+to\s+use|(?:please\s+)?(?:do\s+not\s+use|don't\s+use|never\s+use|avoid\s+using))\b/i.test(
       text,
     )
   );
@@ -1327,6 +1332,11 @@ function isRawUserPreferenceCorrection(text: string): boolean {
   ) {
     return true;
   }
+  if (
+    /^\s*(?:please\s+)?prefer\s+not\s+to\s+use\b/i.test(text)
+  ) {
+    return true;
+  }
   if (looksProcedural || /\b(?:use|fallback|workaround|verify)\b/i.test(text)) {
     return false;
   }
@@ -1337,7 +1347,14 @@ function isRawUserPreferenceCorrection(text: string): boolean {
 
 function hasExplicitPostTaskLessonSignal(text: string): boolean {
   if (isTaskReferenceBookkeeping(text)) return false;
+  if (
+    (isFailedRetryOrFallbackStatus(text) || isRawToolFailureStatus(text)) &&
+    !hasStatusRecoveryGuidance(text)
+  ) {
+    return false;
+  }
   if (isTransientEnvironmentStatus(text)) return false;
+  if (isConditionalFailureStatus(text)) return false;
   if (isDocumentationUpdateLesson(text)) return true;
   if (hasReusableProcedureGuidance(text)) return true;
   if (isOneOffModalTaskReminder(text)) return false;
@@ -1365,7 +1382,10 @@ function hasExplicitPostTaskLessonSignal(text: string): boolean {
 }
 
 function hasReusableToolFailureSignal(text: string): boolean {
-  if (isFailedRetryOrFallbackStatus(text)) return false;
+  if (isTaskScopedToolFailureReference(text)) return false;
+  if (isFailedRetryOrFallbackStatus(text) && !hasStatusRecoveryGuidance(text)) {
+    return false;
+  }
   if (/\bworkaround\s*:/i.test(text)) return true;
   if (/\b(?:retry|fallback)\s+(?:with|using|via|by)\b/i.test(text)) {
     return true;
@@ -1389,14 +1409,37 @@ function isFailedRetryOrFallbackStatus(text: string): boolean {
   );
 }
 
+function hasStatusRecoveryGuidance(text: string): boolean {
+  return /(?:;|,)\s*(?:use|run|check|retry|fallback)\b|\b(?:instead|workaround)\b/i.test(
+    text,
+  );
+}
+
 function isRawToolFailureStatus(text: string): boolean {
   return /\b(?:failed|error|returned|timed\s+out|crashed)\b.{0,80}\b(?:after\s+\d+\s+retry\s+attempts?|retry\s+attempts?|returned\s+\d{3}|\d{3})\b|\b(?:fallback|retry)\b.{0,80}\b(?:failed|error|returned\s+\d{3}|timed\s+out|crashed)\b/i.test(
     text,
   );
 }
 
+function isConditionalFailureStatus(text: string): boolean {
+  return (
+    /\b(?:when|if)\b.{0,120}\b(?:run|running|check|checking|use|using)\b.{0,120}\b(?:failed|fails|error|timed\s*out|timeout|crashed)\b/i.test(
+      text,
+    ) && !hasStatusRecoveryGuidance(text)
+  );
+}
+
+function isTaskScopedToolFailureReference(text: string): boolean {
+  return (
+    TASK_STATE_PATTERNS.some((pattern) => pattern.test(text)) &&
+    /\b(?:failed|fails|error|timed\s*out|timeout|crashed|checks?)\b/i.test(
+      text,
+    )
+  );
+}
+
 function hasReusableProcedureGuidance(text: string): boolean {
-  return /\b(?:when|if)\b.{0,160}\b(?:run|running|use|using|check|checks?|verify|retry|fallback|workaround)\b|\b(?:always|when|if)\b.{0,160}\b(?:run|running|use|using|check|checks?|verify|retry|fallback|workaround)\b.{0,160}\b(?:before|after|instead|when|if|tests?|giving\s+up)\b|\b(?:run|running|use|using|check|checks?|verify|retry|fallback|workaround)\b.{0,160}\b(?:always|when|if|before|after|instead|giving\s+up)\b/i.test(
+  return /\b(?:always|when|if)\b.{0,160}\b(?:run|running|use|using|check|checks?|verify|retry|fallback|workaround)\b.{0,160}\b(?:before|after|instead|when|if|tests?|giving\s+up)\b|\b(?:run|running|use|using|check|checks?|verify|retry|fallback|workaround)\b.{0,160}\b(?:always|when|if|before|after|instead|giving\s+up)\b/i.test(
     text,
   );
 }
@@ -1410,6 +1453,19 @@ function isTaskReferenceBookkeeping(text: string): boolean {
     hasRedactedTaskReference &&
     /\b(?:check|replying|reply|review|merge|close)\b/i.test(text) &&
     !/\b(?:when|if)\b/i.test(text) &&
+    !isDocumentationUpdateLesson(text)
+  ) {
+    return true;
+  }
+  if (
+    hasSpecificTaskReference &&
+    /^(?:i\s+prefer|i'd\s+prefer|my\s+preference\s+is|i\s+like|i\s+(?:do\s+not|don'?t)\s+want|(?:please\s+)?(?:keep|avoid|do\s+not|don't|never|prefer|use))\b/i.test(
+      text,
+    ) &&
+    /\b(?:wants?|needs?|requires?|assigned|merged|merge|closed|close|blocked|open|opened|fixed|fix|done|completed|complete|follow-up)\b/i.test(
+      text,
+    ) &&
+    !/^\s*(?:when|if)\b/i.test(text) &&
     !isDocumentationUpdateLesson(text)
   ) {
     return true;
