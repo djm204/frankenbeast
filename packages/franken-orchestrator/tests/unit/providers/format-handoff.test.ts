@@ -1070,6 +1070,85 @@ Lesson: codex review feedback is reusable.
       validation.findings.find((finding) => finding.id === 'verification'),
     ).toMatchObject({ status: 'placeholder' });
   });
+
+  it('uses populated child headings as required field labels without requiring duplicated labels in values', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '### Issue/task\n#1775\n### Business goal\nImprove onboarding handoffs.\n### Out-of-scope boundaries\nNo unrelated refactors.',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'pass' });
+  });
+
+  it('preserves child content for required sections written as H1 headings', () => {
+    const validation = validateAgentHandoffTemplate(`# Scope and objective
+## Issue/task
+#1775
+## Business goal
+Improve onboarding handoffs.
+## Out-of-scope boundaries
+No unrelated refactors.
+
+# Current state and decisions
+Completed work is implemented.
+## Current phase
+Review.
+## Key decisions
+Keep validation strict.
+## Remaining work
+Merge after checks.
+
+# Verification evidence
+## Command
+npm test
+## Outcome
+passed
+
+# Blockers and next action
+No blockers. Owner: PM. Next action: merge.
+
+# Artifacts and links
+PR #2331 and branch resolve/issue-1775.
+
+# Learning and reuse
+Lesson: preserve child section bodies for H1 templates.
+`);
+
+    expect(validation.valid).toBe(true);
+  });
+
+  it('preserves labeled markdown autolinks as artifact values', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
+        'PR: <https://github.com/org/repo/pull/123>',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'artifacts'),
+    ).toMatchObject({ status: 'pass' });
+  });
+
+  it('rejects blocker label skeletons with comma-separated required fields', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'State blockers, owner, exact next action, and when the receiving worker should stop.',
+        'Blockers, owner, next action',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'blockers'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
 });
 
 describe('truncateSnapshot', () => {

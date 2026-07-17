@@ -502,12 +502,13 @@ function sectionSatisfiesRequirement(
   section: MarkdownSection,
   requirement: AgentHandoffTemplateRequirement,
 ): boolean {
-  const contentWithoutChildHeadingLabels = stripChildHeadingLabels(section.content);
+  const contentWithPopulatedChildHeadingLabels =
+    stripUnpopulatedChildHeadingLabels(section.content);
   const searchableContent = normalizeEvidence(
-    stripPlaceholderOnlyTemplateFields(contentWithoutChildHeadingLabels),
+    stripPlaceholderOnlyTemplateFields(contentWithPopulatedChildHeadingLabels),
   );
   return (
-    hasSubstantiveTemplateGuidance(contentWithoutChildHeadingLabels) &&
+    hasSubstantiveTemplateGuidance(contentWithPopulatedChildHeadingLabels) &&
     requirement.requiredContentPatterns.every((pattern) =>
       pattern.test(searchableContent),
     )
@@ -611,7 +612,12 @@ function extractMarkdownSections(template: string): MarkdownSection[] {
       openSectionIndexes[openSectionIndexes.length - 1] ?? -1;
     for (const sectionIndex of openSectionIndexes) {
       const section = sections[sectionIndex];
-      if (section && (section.level > 1 || sectionIndex === activeSectionIndex)) {
+      if (
+        section &&
+        (section.level > 1 ||
+          sectionIndex === activeSectionIndex ||
+          isRequiredHandoffSectionHeading(section.heading))
+      ) {
         section.content.push(line);
       }
     }
@@ -640,6 +646,33 @@ function stripChildHeadingLabels(content: string): string {
     new RegExp(`^${escapeRegExp(CHILD_HEADING_LABEL_PREFIX)}.*$`, 'gim'),
     ' ',
   );
+}
+
+function stripUnpopulatedChildHeadingLabels(content: string): string {
+  const lines = content.split(/\r?\n/);
+  const kept: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+    if (!line.startsWith(CHILD_HEADING_LABEL_PREFIX)) {
+      kept.push(line);
+      continue;
+    }
+
+    const childBody: string[] = [];
+    for (let lookahead = index + 1; lookahead < lines.length; lookahead += 1) {
+      const bodyLine = lines[lookahead] ?? '';
+      if (bodyLine.startsWith(CHILD_HEADING_LABEL_PREFIX)) {
+        break;
+      }
+      childBody.push(bodyLine);
+    }
+
+    const childBodyText = childBody.join('\n');
+    if (hasSubstantiveTemplateGuidance(childBodyText)) {
+      kept.push(`${line.replace(CHILD_HEADING_LABEL_PREFIX, ' ')} ${childBodyText}`);
+    }
+  }
+  return kept.join('\n');
 }
 
 function stripPlaceholderOnlyTemplateFields(content: string): string {
@@ -692,7 +725,7 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
       : line;
     const withoutPlaceholders = effectiveLine
       .replace(
-        /\b[A-Za-z0-9 /_-]+(?:\s+-\s+|:)\s*(?:<[^>]*>|\{\{[^}]*\}\}|\{[^}]*\}|\[[^\]]*\](?!\(|\[)|[-–—]+|\b(?:tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)\b)\s*(?:[;,.]|$)/gi,
+        /\b[A-Za-z0-9 /_-]+(?:\s+-\s+|:)\s*(?:<(?!(?:https?:\/\/|\.\.?\/|#))[^>]*>|\{\{[^}]*\}\}|\{[^}]*\}|\[[^\]]*\](?!\(|\[)|[-–—]+|\b(?:tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)\b)\s*(?:[;,.]|$)/gi,
         ' ',
       )
       .replace(/^```.*$/g, ' ')
@@ -734,7 +767,7 @@ function normalizeTemplateLabelKey(value: string): string {
 }
 
 function isKnownTemplateLabel(label: string): boolean {
-  return /^(?:issue(?: details)?|issue task|task|business goal|business objective|goal|objective|out of scope boundaries|boundary notes|boundaries|completed work|current phase|key decisions|status|current status|decisions|remaining work|command|commands|test command|test commands|outcome|result|owner|next action|artifact|artifacts|link|links|lesson|lessons)$/.test(
+  return /^(?:issue(?: details)?|issue task|task|business goal|business objective|goal|objective|out of scope boundaries|boundary notes|boundaries|completed work|current phase|key decisions|status|current status|decisions|remaining work|blocker|blockers|risk|risks|command|commands|test command|test commands|outcome|result|owner|next action|artifact|artifacts|link|links|lesson|lessons)$/.test(
     normalizeTemplateLabelKey(label),
   );
 }
@@ -763,8 +796,14 @@ function isEmptyTemplateLabel(line: string): boolean {
 
 function isPlaceholderOnlyFieldLine(line: string): boolean {
   const normalized = normalizeEvidence(line.replace(/^\s*[-*]\s*/, ''));
-  return /^[A-Za-z0-9 /_-]+(?::|\s+-\s+)(?:<[^>]*>|\{\{[^}]*\}\}|\{[^}]*\}|\[[^\]]*\](?!\(|\[)|[-–—]+|\b(?:tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)\b)\s*$/i.test(
+  return /^[A-Za-z0-9 /_-]+(?::|\s+-\s+)(?:<(?!(?:https?:\/\/|\.\.?\/|#))[^>]*>|\{\{[^}]*\}\}|\{[^}]*\}|\[[^\]]*\](?!\(|\[)|[-–—]+|\b(?:tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)\b)\s*$/i.test(
     normalized,
+  );
+}
+
+function isRequiredHandoffSectionHeading(heading: string): boolean {
+  return AGENT_HANDOFF_TEMPLATE_REQUIREMENTS.some((requirement) =>
+    requirement.headingPatterns.some((pattern) => pattern.test(heading)),
   );
 }
 
