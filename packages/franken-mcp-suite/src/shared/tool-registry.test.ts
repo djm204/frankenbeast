@@ -138,6 +138,26 @@ describe('TOOL_REGISTRY', () => {
     expect(forgedHookResult.content[0]!.text).toContain('reserved audit provenance');
     expect(observer.log).not.toHaveBeenCalled();
 
+    const duplicateSourceResult = await handler({
+      event: 'tool_call',
+      metadata: '{"source":"central-dispatch","source":"user","toolName":"fbeast_memory_store"}',
+      sessionId: 'sess-1',
+    });
+
+    expect(duplicateSourceResult.isError).toBe(true);
+    expect(duplicateSourceResult.content[0]!.text).toContain('reserved audit provenance');
+    expect(observer.log).not.toHaveBeenCalled();
+
+    const duplicateHookSourceResult = await handler({
+      event: 'tool_call',
+      metadata: '{"__fbeastHookSource":"fbeast-hook","__fbeastHookSource":"user","toolName":"fbeast_memory_store"}',
+      sessionId: 'sess-1',
+    });
+
+    expect(duplicateHookSourceResult.isError).toBe(true);
+    expect(duplicateHookSourceResult.content[0]!.text).toContain('reserved audit provenance');
+    expect(observer.log).not.toHaveBeenCalled();
+
     const malformedJsonResult = await handler({
       event: 'file_edit',
       metadata: '{not-json',
@@ -150,6 +170,30 @@ describe('TOOL_REGISTRY', () => {
       metadata: '{not-json',
       sessionId: 'sess-1',
     });
+  });
+
+  it('rejects invalid memory access audit timestamp filters before invoking the adapter', async () => {
+    const brain = {
+      memoryAccessAuditReport: vi.fn().mockReturnValue({ generatedAt: '2026-01-01T00:00:00.000Z', events: [], count: 0 }),
+    };
+    const handler = TOOL_REGISTRY.get('fbeast_memory_access_audit_report')!.makeHandler({ brain } as unknown as AdapterSet);
+
+    for (const args of [
+      { since: '2026-02-31T00:00:00Z' },
+      { until: 'not-a-date' },
+      { since: '2026-01-01T25:00:00Z' },
+    ]) {
+      const result = await handler(args);
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain('must be a valid timestamp');
+    }
+
+    const validResult = await handler({ since: '2026-01-31 23:59:59', until: '2026-02-01T00:00:00Z' });
+    expect(validResult.isError).not.toBe(true);
+    expect(brain.memoryAccessAuditReport).toHaveBeenCalledWith(expect.objectContaining({
+      since: '2026-01-31 23:59:59',
+      until: '2026-02-01T00:00:00Z',
+    }));
   });
 
   it('rejects invalid observer log cost arguments before invoking the registry adapter handler', async () => {

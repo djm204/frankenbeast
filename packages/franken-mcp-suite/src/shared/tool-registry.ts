@@ -107,10 +107,27 @@ function parseMemoryAccessAuditStringFilter(name: string, value: unknown): { ok:
     return { ok: false, message: `${name} must be a non-empty string when provided` };
   }
   const trimmed = value.trim();
-  if ((name === 'since' || name === 'until') && Number.isNaN(Date.parse(trimmed.includes('T') ? trimmed : `${trimmed.replace(' ', 'T')}Z`))) {
+  if ((name === 'since' || name === 'until') && !isValidMemoryAccessAuditTimestamp(trimmed)) {
     return { ok: false, message: `${name} must be a valid timestamp when provided` };
   }
   return { ok: true, value: trimmed };
+}
+
+function isValidMemoryAccessAuditTimestamp(value: string): boolean {
+  const normalized = value.includes('T') ? value : value.replace(' ', 'T');
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})?$/);
+  if (!match) return false;
+  const [, yearRaw, monthRaw, dayRaw, hourRaw, minuteRaw, secondRaw = '00'] = match;
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  const second = Number(secondRaw);
+  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) return false;
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  if (day < 1 || day > daysInMonth) return false;
+  return Number.isFinite(Date.parse(normalized.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(normalized) ? normalized : `${normalized}Z`));
 }
 
 function parseMemoryAccessAuditDecision(value: unknown): { ok: true; value?: string } | { ok: false; message: string } {

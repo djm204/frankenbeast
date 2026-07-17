@@ -292,6 +292,11 @@ vi.mock("better-sqlite3", () => ({
                 payload: JSON.stringify({ source: "central-dispatch", toolName: "fbeast_memory_source_attribution", ok: true, args: { profile: "source-attribution-test", readScope: "shared" } }),
                 createdAt: "2026-07-16T14:20:00.000Z",
               },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastHookSource: "fbeast-hook", toolName: "fbeast_memory_retention_report", phase: "post-tool", ok: true, args: { agentId: "agent-retention", profile: "retention-audit-test", readScope: "agent" } }),
+                createdAt: "2026-07-16T14:25:00.000Z",
+              },
             ];
           }
           return workingMemoryRowsByPath.get(_dbPath) ?? [];
@@ -1370,6 +1375,22 @@ describe("createBrainAdapter", () => {
       operation: "read",
       targetStore: "working",
       targetClass: "memory-source-attribution",
+      decision: "approved",
+    });
+  });
+
+  it("includes retention reports in memory access audit reports", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "retention-audit-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      agentId: "agent-retention",
+      tool: "fbeast_memory_retention_report",
+      operation: "read",
+      targetStore: "working|episodic",
+      targetClass: "memory-retention-report",
       decision: "approved",
     });
   });

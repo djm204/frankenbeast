@@ -46,7 +46,6 @@ describe('runHook', () => {
       toolName: 'fbeast_memory_retention_report',
       payload: '[memory-review-result-redacted]',
       phase: 'post-tool',
-      ok: true,
     });
   });
 
@@ -104,5 +103,53 @@ describe('runHook', () => {
     });
     expect(log.mock.calls.map((call) => JSON.stringify(call)).join('\n')).not.toContain('«redacted:ghp_…»');
     expect(log.mock.calls.map((call) => JSON.stringify(call)).join('\n')).not.toContain('private memory payload');
+  });
+
+  it('uses the hook tool name to redact direct memory args without type hints', async () => {
+    const { deps, log } = hookDeps();
+    deps.readContext = () => JSON.stringify({
+      args: {
+        key: 'private-key',
+        value: 'ordinary sensitive memory text',
+      },
+    });
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    await runHook([
+      'post-tool',
+      'fbeast_memory_store',
+      'Stored memory: private-key',
+    ], deps);
+
+    const metadata = JSON.parse(log.mock.calls[0]![0].metadata);
+    expect(metadata).toMatchObject({
+      toolName: 'fbeast_memory_store',
+      args: { key: '[memory-selector-redacted]' },
+    });
+    const serialized = JSON.stringify(metadata);
+    expect(serialized).not.toContain('ordinary sensitive memory text');
+    expect(serialized).not.toContain('private-key');
+  });
+
+  it('redacts direct memory-store args even when the context has only key and value', async () => {
+    const { deps, log } = hookDeps();
+    deps.readContext = () => JSON.stringify({
+      args: {
+        key: 'sensitive:memory:key',
+        value: 'private memory payload',
+      },
+    });
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    await runHook([
+      'post-tool',
+      'fbeast_memory_store',
+      '{"ok":true}',
+    ], deps);
+
+    const metadata = JSON.parse(log.mock.calls[0]![0].metadata);
+    expect(metadata.args).toEqual({ key: '[memory-selector-redacted]' });
+    expect(JSON.stringify(metadata)).not.toContain('private memory payload');
+    expect(JSON.stringify(metadata)).not.toContain('sensitive:memory:key');
   });
 });

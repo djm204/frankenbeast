@@ -71,6 +71,7 @@ async function readStdinPayload(): Promise<string> {
 }
 
 const MEMORY_RESULT_PAYLOAD_REDACTION_TOOLS = new Set([
+  'fbeast_memory_store',
   'fbeast_memory_export',
   'fbeast_memory_access_audit_report',
   'fbeast_memory_retention_report',
@@ -88,6 +89,7 @@ const MEMORY_RESULT_PAYLOAD_REDACTION_TOOLS = new Set([
 const MEMORY_RESULT_IMPLICIT_SUCCESS_TOOLS = new Set([
   'fbeast_memory_export',
   'fbeast_memory_review_propose',
+  'fbeast_memory_retention_report',
 ]);
 
 function unqualifyMcpToolName(toolName: string): string {
@@ -126,13 +128,13 @@ function parseJsonRecord(text: string): Record<string, unknown> | undefined {
   }
 }
 
-function hookArgsFromContext(context: string): Record<string, unknown> | undefined {
+function hookArgsFromContext(context: string, toolName: string): Record<string, unknown> | undefined {
   const parsed = parseJsonRecord(redactSecrets(context));
   if (!parsed) return undefined;
   const toolInput = parsed['tool_input'];
   if (toolInput !== null && typeof toolInput === 'object' && !Array.isArray(toolInput)) {
     const input = toolInput as Record<string, unknown>;
-    const nestedTool = typeof input['tool'] === 'string' ? input['tool'] : undefined;
+    const nestedTool = typeof input['tool'] === 'string' ? input['tool'] : toolName;
     const args = input['args'];
     return args !== null && typeof args === 'object' && !Array.isArray(args)
       ? sanitizeHookAuditArgs(nestedTool, args as Record<string, unknown>)
@@ -140,8 +142,8 @@ function hookArgsFromContext(context: string): Record<string, unknown> | undefin
   }
   const args = parsed['args'];
   return args !== null && typeof args === 'object' && !Array.isArray(args)
-    ? sanitizeHookAuditArgs(undefined, args as Record<string, unknown>)
-    : sanitizeHookAuditArgs(undefined, parsed);
+    ? sanitizeHookAuditArgs(toolName, args as Record<string, unknown>)
+    : sanitizeHookAuditArgs(toolName, parsed);
 }
 
 function sanitizeHookAuditArgs(toolName: string | undefined, args: Record<string, unknown>): Record<string, unknown> {
@@ -247,7 +249,7 @@ export async function runHook(
       ? await (resolvedDeps.readPostToolPayload?.() ?? readStdinPayload())
       : '';
     const rawPostPayload = payload || streamedPayload;
-    const hookArgs = hookArgsFromContext(resolvedDeps.readContext());
+    const hookArgs = hookArgsFromContext(resolvedDeps.readContext(), toolName);
     const outcome = hookAuditOutcomeFromPayload(toolName, rawPostPayload);
     await resolvedDeps.observer.log({
       event: 'tool_call',
