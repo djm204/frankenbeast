@@ -854,6 +854,10 @@ function terminalKanbanState(status: string): boolean {
   return TERMINAL_WORKER_CARD_STATUSES.has(normalizeKanbanState(status));
 }
 
+function intentionalNonRetryExitReason(exitReason: string): boolean {
+  return /^(clean_exit|operator_stop|operator_kill|exit_code_0|completed|cancelled|canceled|stopped|manual_stop|manual_kill)$/i.test(exitReason.trim());
+}
+
 export function buildWorkerCrashOnlyRestartContract(
   snapshot: IssueWorkerCardProcessSnapshot,
   input: {
@@ -889,10 +893,19 @@ export function buildWorkerCrashOnlyRestartContract(
     };
   }
 
-  if (rawExitReason === 'spawn_failed' || /spawn|setup|enoent|eacces|protocol[_ -]?violation/i.test(rawExitReason)) {
+  if (rawExitReason === 'spawn_failed' || /spawn|start[_ -]?failed|setup|enoent|eacces|protocol[_ -]?violation/i.test(rawExitReason)) {
     return {
       disposition: 'hitl',
       nextAction: 'replace-with-doctor',
+      ...base,
+      evidence,
+    };
+  }
+
+  if (intentionalNonRetryExitReason(rawExitReason) || terminalKanbanState(kanbanState)) {
+    return {
+      disposition: 'terminal',
+      nextAction: 'no-op',
       ...base,
       evidence,
     };
@@ -911,15 +924,6 @@ export function buildWorkerCrashOnlyRestartContract(
     return {
       disposition: 'retryable',
       nextAction: 'restart-once',
-      ...base,
-      evidence,
-    };
-  }
-
-  if (terminalKanbanState(input.kanbanState)) {
-    return {
-      disposition: 'terminal',
-      nextAction: 'no-op',
       ...base,
       evidence,
     };

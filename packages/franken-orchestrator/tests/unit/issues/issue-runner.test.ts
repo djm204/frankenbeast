@@ -847,6 +847,65 @@ describe('stuck-run watchdog', () => {
     });
   });
 
+  it('keeps direct terminal restart contracts as no-op before dead-process retry', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_direct_completed',
+      pid: 7419,
+      status: 'completed',
+      alive: false,
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'completed',
+    });
+
+    expect(contract).toMatchObject({
+      disposition: 'terminal',
+      nextAction: 'no-op',
+      kanbanState: 'completed',
+    });
+  });
+
+  it('keeps intentional operator exits non-retryable in direct restart contracts', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_operator_stop',
+      pid: 7420,
+      status: 'running',
+      alive: false,
+      exitReason: 'operator_stop',
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'running',
+    });
+
+    expect(contract).toMatchObject({
+      exitReason: 'operator_stop',
+      disposition: 'terminal',
+      nextAction: 'no-op',
+    });
+  });
+
+  it('routes start_failed exit reasons to doctor replacement', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_start_failed',
+      pid: 7421,
+      status: 'running',
+      alive: false,
+      exitReason: 'start_failed',
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'running',
+    });
+
+    expect(contract).toMatchObject({
+      exitReason: 'start_failed',
+      disposition: 'hitl',
+      nextAction: 'replace-with-doctor',
+    });
+  });
+
   it('uses known blocker hints to report approval gates with concrete remediation', () => {
     const findings = detectStuckRunWatchdogFindings([
       {
