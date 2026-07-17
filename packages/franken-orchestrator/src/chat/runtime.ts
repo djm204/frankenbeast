@@ -7,7 +7,13 @@ import type { BeastExecutionMode } from '../beasts/types.js';
 import type { PendingApproval } from '@franken/types';
 import { isoNow } from '@franken/types';
 
-type PendingApprovalContext = Omit<PendingApproval, 'description' | 'requestedAt'>;
+type PendingApprovalContext = Omit<PendingApproval, 'description' | 'requestedAt'> & {
+  approvalToken?: string | undefined;
+  requester?: string | undefined;
+  workerId?: string | undefined;
+  workdir?: string | undefined;
+};
+type RuntimePendingApproval = PendingApproval & PendingApprovalContext;
 
 const SLASH_COMMANDS = new Set([
   '/plan',
@@ -82,7 +88,7 @@ export interface ChatRuntimeRunOptions {
 }
 
 export function pendingApprovalRuntimeState(
-  pendingApproval: PendingApproval | null | undefined,
+  pendingApproval: RuntimePendingApproval | null | undefined,
   pendingApprovalState = false,
 ): Pick<ChatRuntimeState, 'pendingApproval' | 'pendingApprovalContext' | 'pendingApprovalDescription' | 'pendingApprovalRequestedAt'> {
   if (!pendingApproval) {

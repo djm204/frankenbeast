@@ -61,6 +61,15 @@ Use this checklist for a first local checkout or when rebuilding a development e
 
   The command prints stable `[new-worker-preflight:<check>] ok|warn|fail - ...` badges by default, or a JSON object with `ok` and `checks` when `--json` is supplied. Use `npm --silent` or `node scripts/new-worker-preflight.mjs --json` for machine-parsed JSON so npm lifecycle banners do not prefix stdout. It verifies the supported Node.js/npm pin, required `git`/`gh`/`jq` commands, GitHub CLI authentication for `github.com`, the project git identity (`David Mendez <me@davidmendez.dev>`), Frankenbeast repository root, and whether the current worktree already has uncommitted files. Use `--skip-github-auth` only for offline docs/tests; run without it before opening PRs.
 
+- [ ] Run the setup healthcheck when onboarding fails or before starting expensive local services:
+
+  ```bash
+  npm run setup:healthcheck
+  npm --silent run setup:healthcheck -- --json
+  ```
+
+  The healthcheck reports human-readable fixes and JSON `checks` with `id`, `status`, `required`, `detail`, and `action` fields. It verifies Node/npm, dependency install state, env files, git status, common local ports, optional GitHub auth, and ChromaDB/Grafana/Tempo service endpoints. Warnings such as missing optional auth/services or occupied optional ports do not make the command fail; missing required prerequisites do.
+
 - [ ] PMs or workers that need profile-specific evidence: run the capability self-test with the expected profile schema or explicit flags before dispatching PR-producing work:
 
   ```bash

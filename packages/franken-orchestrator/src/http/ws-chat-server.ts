@@ -821,7 +821,7 @@ export class ChatSocketController {
 
   private emit(peer: ChatSocketPeer, event: ServerSocketEvent): void {
     const connection = this.connections.get(peer);
-    if (!connection || event.eventId) {
+    if (!connection || (event as { eventId?: string }).eventId) {
       peer.send(JSON.stringify(event));
       return;
     }
