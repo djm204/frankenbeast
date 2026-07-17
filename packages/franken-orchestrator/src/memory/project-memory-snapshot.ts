@@ -100,8 +100,8 @@ function matchesSelector(
   minConfidence: number,
   allowedSensitivity: ReadonlySet<ProjectMemorySensitivity>,
 ): boolean {
-  if (!matchesOptionalScope(memory.profiles, selector.profile)) return false;
-  if (!matchesOptionalScope(memory.tenants, selector.tenant)) return false;
+  if (!matchesIsolationScope(memory.profiles, selector.profile)) return false;
+  if (!matchesIsolationScope(memory.tenants, selector.tenant)) return false;
   if (!matchesRequiredScope(memory.projects, selector.projectId)) return false;
   if (!matchesOptionalScope(memory.repos, selector.repo)) return false;
   if (!matchesOptionalScope(memory.taskTypes, selector.taskType)) return false;
@@ -120,6 +120,12 @@ function matchesSelector(
 function matchesOptionalScope(values: readonly string[] | undefined, selectorValue: string | undefined): boolean {
   if (values === undefined || values.length === 0 || selectorValue === undefined) return true;
   return values.includes(selectorValue);
+}
+
+function matchesIsolationScope(values: readonly string[] | undefined, selectorValue: string | undefined): boolean {
+  const hasValues = values !== undefined && values.length > 0;
+  if (selectorValue === undefined) return !hasValues;
+  return hasValues && values.includes(selectorValue);
 }
 
 function matchesRequiredScope(values: readonly string[] | undefined, selectorValue: string): boolean {
@@ -149,11 +155,11 @@ function compareSnapshotEntries(left: ProjectMemorySnapshotEntry, right: Project
 function renderProjectMemorySnapshotText(snapshot: Omit<ProjectMemorySnapshot, 'text'>): string {
   const selector = snapshot.selector;
   const scope = [
-    selector.profile === undefined ? undefined : `profile=${selector.profile}`,
-    selector.tenant === undefined ? undefined : `tenant=${selector.tenant}`,
-    selector.repo === undefined ? undefined : `repo=${selector.repo}`,
-    selector.taskType === undefined ? undefined : `taskType=${selector.taskType}`,
-    selector.role === undefined ? undefined : `role=${selector.role}`,
+    selector.profile === undefined ? undefined : `profile=${quoteSnapshotMetadata(selector.profile)}`,
+    selector.tenant === undefined ? undefined : `tenant=${quoteSnapshotMetadata(selector.tenant)}`,
+    selector.repo === undefined ? undefined : `repo=${quoteSnapshotMetadata(selector.repo)}`,
+    selector.taskType === undefined ? undefined : `taskType=${quoteSnapshotMetadata(selector.taskType)}`,
+    selector.role === undefined ? undefined : `role=${quoteSnapshotMetadata(selector.role)}`,
   ].filter((part): part is string => part !== undefined).join(' ');
 
   const lines = [

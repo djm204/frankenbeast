@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { databaseInstances, brainInstances } = vi.hoisted(() => {
+const { databaseInstances, brainInstances, workingMemoryRowsByPath } = vi.hoisted(() => {
+  const workingMemoryRowsByPath = new Map<string, Array<{ key: string; value: string }>>();
   const databaseInstances: Array<{
     pragma: ReturnType<typeof vi.fn>;
     prepare: ReturnType<typeof vi.fn>;
     close: ReturnType<typeof vi.fn>;
+    dbPath: string;
     options: unknown;
   }> = [];
   const brainInstances: Array<{
@@ -32,7 +34,7 @@ const { databaseInstances, brainInstances } = vi.hoisted(() => {
     };
     flush: ReturnType<typeof vi.fn>;
   }> = [];
-  return { databaseInstances, brainInstances };
+  return { databaseInstances, brainInstances, workingMemoryRowsByPath };
 });
 
 vi.mock("better-sqlite3", () => ({
@@ -43,8 +45,9 @@ vi.mock("better-sqlite3", () => ({
   ) {
     const db = {
       pragma: vi.fn(),
-      prepare: vi.fn(() => ({ all: vi.fn(() => []) })),
+      prepare: vi.fn(() => ({ all: vi.fn(() => workingMemoryRowsByPath.get(_dbPath) ?? []) })),
       close: vi.fn(),
+      dbPath: _dbPath,
       options,
     };
     databaseInstances.push(db);
@@ -54,58 +57,61 @@ vi.mock("better-sqlite3", () => ({
 
 vi.mock("@franken/brain", () => ({
   SqliteBrain: vi.fn(function MockSqliteBrain(this: unknown) {
+    let workingSnapshot: Record<string, unknown> = {
+      "task-1": "working entry",
+      "agents/oncall/runbook": "shared runbook",
+      "temporary-operational": {
+        value: "rotate release key",
+        category: "temporary-operational",
+        sourceScope: "mcp-memory-store",
+        expiresAt: "2026-07-16T06:00:00.000Z",
+      },
+      "github-token": "ghp_" + "supersecretvalue123456",
+      "public-key": "sk-" + "secretvalue123456",
+      "deployment-notes":
+        "-----BEGIN " +
+        "OPENSSH PRIVATE KEY-----\nsecret\n-----END " +
+        "OPENSSH PRIVATE KEY-----",
+      "status-page": "password=hunter2 session_cookie=abc123value",
+      "legacy-db-passwd": "legacy-password-alias",
+      "ops-note": "slack_webhook_url=https://hooks.slack.com/services/T000/B000/SECRET discord webhook https://discord.com/api/webhooks/1234567890/abcdef_SECRET",
+      "env-snippet": "AWS_SECRET_ACCESS_KEY=AKIA" + "supersecretvalue123456 REGION=us-east-1",
+      "legacy-token-snippet": "xoxb-" + "legacytokenvalue123 glpat-legacytokenvalue123",
+      "basic-auth": "Authorization: *** " + "dXNlcjpwYXNz",
+      "token-auth": "Authorization: Token secret...leak",
+      "db_pwd": "super-pwd-value",
+      "db_passwd": "super-passwd-value",
+      "slack_webhook_url": "https://hooks.slack.com/services/T000/B000/secretwebhookvalue",
+      "ops-notes": "Mirror alerts to https://discord.com/api/webhooks/123456/secretwebhookvalue",
+
+      "json-literal-secrets": '{"password":123456,"token":true,"authToken":{"raw":"«redacted:ghs_…»"},"accessKey":["secretvalue123456"],"safe":"ok"}',
+      profile: {
+        password: "hunter2",
+        "alice@example.com": "oncall",
+        "bob@example.com": "backup",
+      },
+      "object-secret": {
+        password: "hunter2",
+        nested: { token: 987654 },
+        "alice@example.com": "oncall",
+      },
+      "__fbeast_agent_memory__/alpha/private-task": {
+        __fbeastMemoryScope: "fbeast:agent-memory",
+        agentId: "alpha",
+        value: "private entry",
+      },
+      "__fbeast_agent_memory__/beta/private-task": {
+        __fbeastMemoryScope: "fbeast:agent-memory",
+        agentId: "beta",
+        value: "beta entry",
+      },
+    };
     const brain = {
       working: {
-        restore: vi.fn(),
-        snapshot: vi.fn(() => ({
-          "task-1": "working entry",
-          "agents/oncall/runbook": "shared runbook",
-          "temporary-operational": {
-            value: "rotate release key",
-            category: "temporary-operational",
-            sourceScope: "mcp-memory-store",
-            expiresAt: "2026-07-16T06:00:00.000Z",
-          },
-          "github-token": "ghp_" + "supersecretvalue123456",
-          "public-key": "sk-" + "secretvalue123456",
-          "deployment-notes":
-            "-----BEGIN " +
-            "OPENSSH PRIVATE KEY-----\nsecret\n-----END " +
-            "OPENSSH PRIVATE KEY-----",
-          "status-page": "password=hunter2 session_cookie=abc123value",
-          "legacy-db-passwd": "legacy-password-alias",
-          "ops-note": "slack_webhook_url=https://hooks.slack.com/services/T000/B000/SECRET discord webhook https://discord.com/api/webhooks/1234567890/abcdef_SECRET",
-          "env-snippet": "AWS_SECRET_ACCESS_KEY=AKIA" + "supersecretvalue123456 REGION=us-east-1",
-          "legacy-token-snippet": "xoxb-" + "legacytokenvalue123 glpat-legacytokenvalue123",
-          "basic-auth": "Authorization: Basic " + "dXNlcjpwYXNz",
-          "token-auth": "Authorization: Token secret-token-value-that-must-not-leak",
-          "db_pwd": "super-pwd-value",
-          "db_passwd": "super-passwd-value",
-          "slack_webhook_url": "https://hooks.slack.com/services/T000/B000/secretwebhookvalue",
-          "ops-notes": "Mirror alerts to https://discord.com/api/webhooks/123456/secretwebhookvalue",
-
-          "json-literal-secrets": '{"password":123456,"token":true,"authToken":{"raw":"«redacted:ghs_…»"},"accessKey":["secretvalue123456"],"safe":"ok"}',
-          profile: {
-            password: "hunter2",
-            "alice@example.com": "oncall",
-            "bob@example.com": "backup",
-          },
-          "object-secret": {
-            password: "hunter2",
-            nested: { token: 987654 },
-            "alice@example.com": "oncall",
-          },
-          "__fbeast_agent_memory__/alpha/private-task": {
-            __fbeastMemoryScope: "fbeast:agent-memory",
-            agentId: "alpha",
-            value: "private entry",
-          },
-          "__fbeast_agent_memory__/beta/private-task": {
-            __fbeastMemoryScope: "fbeast:agent-memory",
-            agentId: "beta",
-            value: "beta entry",
-          },
-        })),
+        restore: vi.fn((snapshot: Record<string, unknown>) => {
+          workingSnapshot = snapshot;
+        }),
+        snapshot: vi.fn(() => workingSnapshot),
         set: vi.fn(),
         has: vi.fn(() => false),
         delete: vi.fn(),
@@ -169,7 +175,7 @@ vi.mock("@franken/brain", () => ({
         remainingReferences: 0,
       })),
       memoryReview: {
-        propose: vi.fn((input) => ({
+        propose: vi.fn((input: Record<string, unknown>) => ({
           ...input,
           id: "memcand_1",
           status: "pending",
@@ -265,6 +271,7 @@ describe("createBrainAdapter", () => {
   beforeEach(() => {
     databaseInstances.length = 0;
     brainInstances.length = 0;
+    workingMemoryRowsByPath.clear();
     vi.clearAllMocks();
   });
 
@@ -283,15 +290,15 @@ describe("createBrainAdapter", () => {
   });
 
   it("keeps direct API memory reads isolated by profile database path", async () => {
+    workingMemoryRowsByPath.set("/tmp/profiles/default/beast.db", [
+      { key: "profile-note", value: JSON.stringify("default profile memory") },
+    ]);
+    workingMemoryRowsByPath.set("/tmp/profiles/doctor/beast.db", [
+      { key: "profile-note", value: JSON.stringify("doctor profile memory") },
+    ]);
+
     const defaultProfile = createBrainAdapter("/tmp/profiles/default/beast.db");
     const doctorProfile = createBrainAdapter("/tmp/profiles/doctor/beast.db");
-
-    brainInstances[0]!.working.snapshot.mockReturnValue({
-      "profile-note": "default profile memory",
-    });
-    brainInstances[1]!.working.snapshot.mockReturnValue({
-      "profile-note": "doctor profile memory",
-    });
 
     const defaultRows = await defaultProfile.query({
       query: "profile memory",
@@ -312,6 +319,16 @@ describe("createBrainAdapter", () => {
     expect(doctorRows).toEqual([
       { key: "profile-note", value: "doctor profile memory", type: "working" },
     ]);
+    expect(databaseInstances.map((db) => db.dbPath)).toEqual([
+      "/tmp/profiles/default/beast.db",
+      "/tmp/profiles/doctor/beast.db",
+    ]);
+    expect(brainInstances[0]!.working.restore).toHaveBeenCalledWith({
+      "profile-note": "default profile memory",
+    });
+    expect(brainInstances[1]!.working.restore).toHaveBeenCalledWith({
+      "profile-note": "doctor profile memory",
+    });
     expect(JSON.stringify(defaultRows)).not.toContain("doctor profile memory");
     expect(JSON.stringify(doctorRows)).not.toContain("default profile memory");
   });
