@@ -71,6 +71,8 @@ describe('learning experiment sandbox', () => {
       promotionEligible: true,
       outcomeEvidence: ['read fixture clone'],
     });
+    expect(evidence.error).toBeUndefined();
+    expect(evidence.notes).toBeUndefined();
   });
 
   it('denies mutation-capable tools before their handlers can touch repos, memory, approvals, or GitHub state', async () => {
@@ -529,6 +531,35 @@ describe('learning experiment sandbox', () => {
     expect(existsSync(result.evidencePath)).toBe(true);
   });
 
+  it('recreates the sandbox root when the evidence ancestor is replaced by a symlink', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+    const outside = tempRoot('learning-sandbox-evidence-ancestor-outside-');
+
+    const result = await runLearningSandboxExperiment({
+      declaration,
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      execute: (sandbox) => {
+        const runDir = dirname(sandbox.evidencePath);
+        const sandboxRoot = dirname(runDir);
+        chmodSync(runDir, 0o755);
+        chmodSync(sandbox.workspaceDir, 0o755);
+        chmodSync(join(sandbox.workspaceDir, 'docs'), 0o755);
+        chmodSync(join(sandbox.workspaceDir, 'README.md'), 0o644);
+        chmodSync(join(sandbox.workspaceDir, 'docs', 'case.md'), 0o644);
+        rmSync(sandboxRoot, { recursive: true, force: true });
+        symlinkSync(outside, sandboxRoot, 'dir');
+        return { passed: true, evidence: ['ancestor symlink attempted'] };
+      },
+    });
+
+    expect(result.passed).toBe(false);
+    expect(existsSync(join(outside, 'evidence.json'))).toBe(false);
+    expect(lstatSync(dirname(result.runDir)).isSymbolicLink()).toBe(false);
+    expect(existsSync(result.evidencePath)).toBe(true);
+  });
+
   it('keeps fixture reads anchored to the original workspace directory', async () => {
     const { fixturesRoot } = createFixturesRoot();
     const runsRoot = tempRoot('learning-sandbox-runs-');
@@ -555,7 +586,7 @@ describe('learning experiment sandbox', () => {
   it('denies namespaced and observer mutation tool aliases even when allowlisted', async () => {
     const { fixturesRoot } = createFixturesRoot();
     const runsRoot = tempRoot('learning-sandbox-runs-');
-    const attempts = ['functions.exec_command', 'functions.apply_patch', 'fbeast_observer_log', 'fbeast_observer_trail', 'mcp__github__create_issue_comment', 'github.create_issue_comment'];
+    const attempts = ['functions.exec_command', 'functions.apply_patch', 'fbeast_observer_log', 'fbeast_observer_trail', 'mcp__github__create_issue_comment', 'github.create_issue_comment', 'create_issue_comment'];
 
     const result = await runLearningSandboxExperiment({
       declaration: { ...declaration, requestedTools: attempts },
@@ -584,7 +615,7 @@ describe('learning experiment sandbox', () => {
       runsRoot,
       policy: { allowedTools: ['list_fixture_files', 'read_fixture_file', 'execute_tool'] },
       execute: async (sandbox) => {
-        await expect(sandbox.runTool('execute_tool', { tool_name: 'exec_command', tool_input: { command: 'touch live-state' } }, () => 'stored')).rejects.toThrow(/mutation-capable/);
+        await expect(sandbox.runTool('execute_tool', { tool_name: 'create_issue_comment', tool_input: { body: 'mutate live PR' } }, () => 'stored')).rejects.toThrow(/mutation-capable/);
         return { passed: true, evidence: [] };
       },
     });
@@ -734,6 +765,32 @@ describe('learning experiment sandbox', () => {
     };
     expect(evidence.toolCalls[0]?.input['[non-json object]']).toBe('[non-json descriptor-trap]');
     expect(evidence.toolCalls[0]?.result['[non-json object]']).toBe('[non-json descriptor-trap]');
+  });
+
+  it('records denied tool calls with accessor arrays without invoking element getters', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+    const accessorArray = Object.defineProperty([], '0', {
+      enumerable: true,
+      get: () => {
+        throw new Error('array getter exploded');
+      },
+    });
+    accessorArray.length = 1;
+
+    const result = await runLearningSandboxExperiment({
+      declaration,
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      execute: async (sandbox) => {
+        await expect(sandbox.runTool('write_file', accessorArray, () => 'mutated')).rejects.toThrow(/mutation-capable/);
+        return { passed: true, evidence: ['blocked array accessor'] };
+      },
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.blockedToolCalls).toHaveLength(1);
+    expect((result.blockedToolCalls[0]?.input as string[])[0]).toBe('[non-json accessor]');
   });
 
   it('persists JSON-safe evidence when inputs or handler results contain non-JSON values', async () => {

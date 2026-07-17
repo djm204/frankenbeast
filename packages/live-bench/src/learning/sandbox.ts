@@ -29,6 +29,7 @@ const MUTATION_CAPABLE_SANDBOX_TOOLS = new Set([
   'apply_patch',
   'approval_ledger_write',
   'exec_command',
+  'create_issue_comment',
   'github_issue_comment',
   'kanban_complete',
   'kanban_block',
@@ -147,6 +148,7 @@ export async function runLearningSandboxExperiment(
   ensureContained(sandboxRoot, realRunsRoot, 'sandbox run root');
   assertNoSymlinkPathComponents(sandboxRoot, realRunsRoot);
   mkdirSync(sandboxRoot, { recursive: true });
+  const originalSandboxRoot = realpathSync(sandboxRoot);
   const runDir = mkdtempSync(join(sandboxRoot, `${safeRunSegment(declaration.experimentId, declaration.hypothesis)}-`));
   ensureContained(runDir, sandboxRoot, 'sandbox run directory');
   const workspaceDir = join(runDir, 'workspace');
@@ -211,12 +213,12 @@ export async function runLearningSandboxExperiment(
     startedAt,
     completedAt,
     outcomeEvidence: outcome.evidence,
-    notes: outcome.notes,
-    error,
+    ...(outcome.notes !== undefined ? { notes: outcome.notes } : {}),
+    ...(error !== undefined ? { error } : {}),
     toolCalls,
     blockedToolCalls,
   };
-  writeEvidenceFileSecurely(evidencePath, `${stringifyEvidence(result)}\n`, runDir, originalRunDir);
+  writeEvidenceFileSecurely(evidencePath, `${stringifyEvidence(result)}\n`, runDir, originalRunDir, sandboxRoot, originalSandboxRoot);
   return result;
 }
 
@@ -566,11 +568,27 @@ function pathExistsNoFollow(path: string): boolean {
   }
 }
 
-function writeEvidenceFileSecurely(evidencePath: string, contents: string, runDir: string, originalRunDir: string): void {
+function ensureRunParentAnchored(sandboxRoot: string, originalSandboxRoot: string): void {
+  if (!existsSync(sandboxRoot) || lstatSync(sandboxRoot).isSymbolicLink() || !lstatSync(sandboxRoot).isDirectory() || realpathSync(sandboxRoot) !== originalSandboxRoot) {
+    rmSync(sandboxRoot, { recursive: true, force: true });
+    mkdirSync(sandboxRoot, { recursive: true, mode: 0o700 });
+  }
+  chmodSync(sandboxRoot, 0o700);
+}
+
+function writeEvidenceFileSecurely(
+  evidencePath: string,
+  contents: string,
+  runDir: string,
+  originalRunDir: string,
+  sandboxRoot: string,
+  originalSandboxRoot: string,
+): void {
   const evidenceDir = dirname(evidencePath);
   if (evidenceDir !== runDir) {
     throw new Error(`Evidence path escapes sandbox run directory: ${evidencePath}`);
   }
+  ensureRunParentAnchored(sandboxRoot, originalSandboxRoot);
   if (!existsSync(runDir) || lstatSync(runDir).isSymbolicLink() || !lstatSync(runDir).isDirectory() || realpathSync(runDir) !== originalRunDir) {
     rmSync(runDir, { recursive: true, force: true });
     mkdirSync(runDir, { recursive: true, mode: 0o700 });
@@ -608,7 +626,17 @@ function toJsonSafeEvidence(value: unknown, seen = new WeakSet<object>()): unkno
       return '[non-json circular]';
     }
     seen.add(value);
-    const items = value.map((item) => toJsonSafeEvidence(item, seen));
+    const descriptors = safeOwnPropertyDescriptors(value);
+    const items = Array.from({ length: value.length }, (_unused, index) => {
+      const descriptor = descriptors[String(index)];
+      if (!descriptor) {
+        return '[non-json sparse-array-hole]';
+      }
+      if ('value' in descriptor) {
+        return toJsonSafeEvidence(descriptor.value, seen);
+      }
+      return '[non-json accessor]';
+    });
     seen.delete(value);
     return items;
   }
