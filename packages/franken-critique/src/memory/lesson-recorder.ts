@@ -1179,7 +1179,7 @@ function choosePostTaskLessonDestination(
 
 function isDocumentationUpdateLesson(text: string): boolean {
   if (
-    /^(?:please\s+)?(?:do\s+not|don't|never|avoid)\b.{0,80}\b(?:add|document|record|publish|update|write)\b.{0,80}\b(?:docs?|readme|runbook|guide)\b/i.test(
+    /^(?:please\s+)?(?:do\s+not|don't|never|avoid)\b.{0,80}\b(?:add|document|record|publish|update|write)\b.{0,80}\b(?:docs?|readme|runbook|guide)\b|\b(?:avoid|never|don'?t|do\s+not)\b.{0,80}\b(?:docs?|documentation|document|write)\b|\b(?:docs?|documentation)\b.{0,80}\b(?:avoid|never|don'?t|do\s+not|unless)\b/i.test(
       text,
     )
   ) {
@@ -1246,7 +1246,8 @@ function isRawUserPreferenceCorrection(text: string): boolean {
     /^(?:i\s+prefer|i'd\s+prefer|my\s+preference\s+is|i\s+like|i\s+(?:do\s+not|don'?t)\s+want)\b/i.test(
       text,
     ) &&
-    !looksProcedural
+    (/\b(?:summar(?:y|ies)|final|logs?|include|mention|show)\b/i.test(text) ||
+      !looksProcedural)
   ) {
     return true;
   }
@@ -1262,7 +1263,7 @@ function isRawUserPreferenceCorrection(text: string): boolean {
     /^(?:please\s+)?(?:keep|avoid|do\s+not|don't|never|prefer|use)\b/i.test(
       text,
     ) &&
-    /\b(?:include|mention|expose|save|record|persist|show|share|summar(?:y|ies|ize)|final)\b/i.test(
+    /\b(?:include|mention|expose|save|record|persist|show|share|summar(?:y|ies|ize)|final|write|document|docs?|documentation)\b/i.test(
       text,
     )
   ) {
@@ -1317,7 +1318,7 @@ function hasExplicitPostTaskLessonSignal(text: string): boolean {
   ) {
     return true;
   }
-  return /\b(?:always|avoid|ensure|prefer|require|validate|verify|retry|redact|use|fallback|workaround)\b/i.test(
+  return /\b(?:always|avoid|ensure|prefer|require|validate|verify|retry|redact|fallback|workaround)\b/i.test(
     text,
   );
 }

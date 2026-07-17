@@ -200,6 +200,36 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('routes negative documentation preferences to memory review', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-negative-doc-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ["Please don't write docs unless asked"],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'preference',
+        suggestedDestination: 'memory',
+      }),
+    );
+  });
+
+  it('preserves first-person preferences mentioning test logs', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-test-log-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ["I don't want test logs in final summaries"],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'preference',
+        suggestedDestination: 'memory',
+      }),
+    );
+  });
+
   it('discards raw tool failures without reusable workaround guidance', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-raw-tool-failure',
@@ -302,11 +332,47 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('discards modal task reminders without reusable context', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-modal-reminder',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Must resolve the failing test before merging'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        privacyFilter: expect.objectContaining({
+          action: 'reject',
+          category: 'task-state',
+        }),
+      }),
+    );
+  });
+
   it('discards imperative numbered issue actions as task state', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-imperative-issue-action',
       completedAt: '2026-07-16T00:00:00.000Z',
       notes: ['Always close issue #123'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        privacyFilter: expect.objectContaining({
+          action: 'reject',
+          category: 'task-state',
+        }),
+      }),
+    );
+  });
+
+  it('discards conditional guidance scoped to a numbered PR', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-conditional-numbered-pr',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['When working on PR #123, always run npm test'],
     });
 
     expect(report.candidates[0]).toEqual(
@@ -530,6 +596,21 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('does not attach unrelated verification to the only pending lesson candidate', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-unrelated-verification-evidence',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['Please keep summaries concise'],
+      verificationSteps: ['Ran npm test'],
+    });
+
+    expect(report.candidates).toHaveLength(1);
+    expect(report.candidates[0]?.evidence).toHaveLength(1);
+    expect(report.candidates[0]?.evidence).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'verification' })]),
+    );
+  });
+
   it('admits redacted raw preferences after recategorizing task-state corrections', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-preference-with-state',
@@ -667,14 +748,14 @@ describe('extractPostTaskLessonCandidates', () => {
       taskId: 'post-task-task-state-verification',
       completedAt: '2026-07-16T00:00:00.000Z',
       toolFailures: ['Use gh run view when gh pr checks returns 502'],
-      verificationSteps: ['Verified against PR #123'],
+      verificationSteps: ['Verified gh run view fallback after gh pr checks returned 502'],
     });
 
     expect(report.candidates[0]).toEqual(
       expect.objectContaining({
         suggestedDestination: 'skill',
         privacyFilter: expect.objectContaining({ action: 'admit' }),
-        evidence: expect.not.arrayContaining([
+        evidence: expect.arrayContaining([
           expect.objectContaining({ kind: 'verification' }),
         ]),
       }),
