@@ -85,6 +85,11 @@ const MEMORY_RESULT_PAYLOAD_REDACTION_TOOLS = new Set([
   'execute_tool',
 ]);
 
+const MEMORY_RESULT_IMPLICIT_SUCCESS_TOOLS = new Set([
+  'fbeast_memory_export',
+  'fbeast_memory_review_propose',
+]);
+
 function unqualifyMcpToolName(toolName: string): string {
   const marker = '__';
   const index = toolName.lastIndexOf(marker);
@@ -165,13 +170,16 @@ function sanitizeHookAuditArgs(toolName: string | undefined, args: Record<string
   return safe;
 }
 
-function hookAuditOutcomeFromPayload(payload: string): { ok?: boolean; decision?: string } {
+function hookAuditOutcomeFromPayload(toolName: string, payload: string): { ok?: boolean; decision?: string } {
   const parsed = parseJsonRecord(payload);
   if (!parsed) return {};
   if (typeof parsed['ok'] === 'boolean') return { ok: parsed['ok'] };
   if (typeof parsed['isError'] === 'boolean') return { ok: !parsed['isError'] };
   if (typeof parsed['decision'] === 'string' && parsed['decision'].trim().length > 0) {
     return { decision: parsed['decision'].trim() };
+  }
+  if (MEMORY_RESULT_IMPLICIT_SUCCESS_TOOLS.has(unqualifyMcpToolName(toolName))) {
+    return { ok: true };
   }
   return {};
 }
@@ -240,7 +248,7 @@ export async function runHook(
       : '';
     const rawPostPayload = payload || streamedPayload;
     const hookArgs = hookArgsFromContext(resolvedDeps.readContext());
-    const outcome = hookAuditOutcomeFromPayload(rawPostPayload);
+    const outcome = hookAuditOutcomeFromPayload(toolName, rawPostPayload);
     await resolvedDeps.observer.log({
       event: 'tool_call',
       metadata: JSON.stringify({

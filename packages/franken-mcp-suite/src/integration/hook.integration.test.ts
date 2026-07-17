@@ -102,6 +102,7 @@ describe('fbeast-hook runtime', () => {
     expect(JSON.parse(result.observerLogs[0]!.metadata)).toEqual({
       __fbeastHookSource: 'fbeast-hook',
       toolName: 'read_file',
+      ok: true,
       payload: streamedPayload,
       phase: 'post-tool',
     });
@@ -118,6 +119,7 @@ describe('fbeast-hook runtime', () => {
     expect(JSON.parse(result.observerLogs[0]!.metadata)).toEqual({
       __fbeastHookSource: 'fbeast-hook',
       toolName: 'fbeast_memory_review_propose',
+      ok: true,
       payload: '[memory-review-result-redacted]',
       phase: 'post-tool',
     });
@@ -135,6 +137,7 @@ describe('fbeast-hook runtime', () => {
     expect(JSON.parse(result.observerLogs[0]!.metadata)).toEqual({
       __fbeastHookSource: 'fbeast-hook',
       toolName: 'fbeast_memory_export',
+      ok: true,
       payload: '[memory-review-result-redacted]',
       phase: 'post-tool',
     });
