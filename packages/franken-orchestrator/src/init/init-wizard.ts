@@ -53,6 +53,25 @@ function enabledTransportsFromConfig(config: OrchestratorConfig): SupportedComms
     .map((transport) => transport.id);
 }
 
+function answersFromConfig(config: OrchestratorConfig): Record<string, unknown> {
+  return {
+    'providers.default': config.providers.default,
+    'network.operatorTokenRef': config.network.operatorTokenRef,
+    'comms.slack.appId': config.comms.slack.appId,
+    'comms.slack.botTokenRef': config.comms.slack.botTokenRef,
+    'comms.slack.signingSecretRef': config.comms.slack.signingSecretRef,
+    'comms.discord.applicationId': config.comms.discord.applicationId,
+    'comms.discord.botTokenRef': config.comms.discord.botTokenRef,
+    'comms.discord.publicKeyRef': config.comms.discord.publicKeyRef,
+    'comms.telegram.botTokenRef': config.comms.telegram.botTokenRef,
+    'comms.telegram.webhookSecretTokenRef': config.comms.telegram.webhookSecretTokenRef,
+    'comms.whatsapp.accessTokenRef': config.comms.whatsapp.accessTokenRef,
+    'comms.whatsapp.phoneNumberIdRef': config.comms.whatsapp.phoneNumberIdRef,
+    'comms.whatsapp.appSecretRef': config.comms.whatsapp.appSecretRef,
+    'comms.whatsapp.verifyTokenRef': config.comms.whatsapp.verifyTokenRef,
+  };
+}
+
 function hasTransportOnlyScope(scope: readonly InitWizardScope[] | undefined): boolean {
   return scope !== undefined
     && scope.some((item) => item === 'slack' || item === 'discord' || item === 'telegram' || item === 'whatsapp')
@@ -230,7 +249,7 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
       selectedCommsTransports: preservedTransports,
       completedSteps: Array.from(completedSteps),
       securityMode,
-      answers: { ...options.initialState.answers },
+      answers: { ...answersFromConfig(config), ...options.initialState.answers },
     };
     return { config: buildConfig(config, nextState, {
       allowTrustedProviderCommandOverrides: options.allowTrustedProviderCommandOverrides,

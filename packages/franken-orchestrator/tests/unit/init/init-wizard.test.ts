@@ -340,5 +340,13 @@ describe('runInitWizard – scope: secret-backend only', () => {
     expect(result.config.comms.discord.enabled).toBe(true);
     expect(result.config.comms.telegram.enabled).toBe(false);
     expect(result.config.comms.whatsapp.enabled).toBe(false);
+    expect(result.state.answers).toMatchObject({
+      'comms.slack.appId': 'existing-slack-app',
+      'comms.slack.botTokenRef': 'secret://existing/slack-token',
+      'comms.slack.signingSecretRef': 'secret://existing/slack-signing-secret',
+      'comms.discord.applicationId': 'existing-discord-app',
+      'comms.discord.botTokenRef': 'secret://existing/discord-token',
+      'comms.discord.publicKeyRef': 'existing-discord-public-key',
+    });
   });
 });
