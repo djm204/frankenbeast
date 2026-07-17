@@ -137,6 +137,14 @@ describe('logging redaction', () => {
     expect(output).not.toContain(cachePassword);
   });
 
+  it('redacts email addresses in angle-bracket display-name forms', () => {
+    const email = ['alice', 'example.com'].join('@');
+    const output = redactSensitiveText(`Operator Alice <${email}> approved the run`);
+
+    expect(output).toBe('Operator Alice <<redacted-email>> approved the run');
+    expect(output).not.toContain(email);
+  });
+
   it('returns path-aware provenance for object and nested string redaction decisions', () => {
     const objectValue = secretMarker('object', 'value');
     const textValue = secretMarker('inline', 'value');

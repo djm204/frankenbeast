@@ -76,6 +76,10 @@ function sha256(data: Buffer | string): string {
   return `sha256:${createHash('sha256').update(data).digest('hex')}`;
 }
 
+function sha256Hex(data: Buffer | string): string {
+  return createHash('sha256').update(data).digest('hex');
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -132,9 +136,27 @@ function classifySqliteTable(table: string): SqliteEvidenceSection | undefined {
   return undefined;
 }
 
+function isSqliteMemoryTable(table: string): boolean {
+  const normalized = table.toLowerCase();
+  return normalized.includes('memory') || normalized.includes('episodic');
+}
+
 function isMemoryStorePath(path: string): boolean {
   const normalized = path.toLowerCase();
   return normalized.includes('/memory') || basename(normalized) === 'memory.db';
+}
+
+function redactApprovalPath(path: string): string {
+  const parts = path.split('/');
+  return parts.map((part, index) => {
+    const previous = index > 0 ? parts[index - 1]?.toLowerCase() : undefined;
+    if (previous === 'approval' || previous === 'approvals') return `approval-path-${sha256Hex(part)}`;
+    return part;
+  }).join('/');
+}
+
+function redactApprovalChecksum(checksum: FileChecksum): FileChecksum {
+  return { ...checksum, path: redactApprovalPath(checksum.path) };
 }
 
 function isWithinDirectory(root: string, candidate: string): boolean {
@@ -242,12 +264,15 @@ function summarizeSqliteMemoryStore(absolutePath: string, checksum: FileChecksum
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as Array<{ name: string }>;
     const metadata: Record<string, unknown>[] = [];
     let recordCount = 0;
+    const summarizeAllTables = isMemoryStorePath(checksum.path);
     for (const { name } of tables) {
+      if (!summarizeAllTables && !isSqliteMemoryTable(name)) continue;
       const quoted = quoteSqliteIdentifier(name);
       const countRow = db.prepare(`SELECT COUNT(*) AS count FROM ${quoted}`).get() as { count: number };
       recordCount += countRow.count;
       metadata.push({ table: name, rowCount: countRow.count });
     }
+    if (metadata.length === 0) return undefined;
     return { ...checksum, recordCount, keys: [], metadata };
   } catch {
     return undefined;
@@ -332,6 +357,7 @@ function summarizeSqliteTables(absolutePath: string, checksum: FileChecksum): Re
     db = new Database(absolutePath, { readonly: true, fileMustExist: true });
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as Array<{ name: string }>;
     for (const { name } of tables) {
+      if (isSqliteMemoryTable(name)) continue;
       const section = classifySqliteTable(name);
       if (section === undefined) continue;
       const quoted = quoteSqliteIdentifier(name);
@@ -362,7 +388,7 @@ function splitChatPendingApprovals(checksum: FileChecksum, text: string): Redact
   try {
     const parsed = JSON.parse(text) as unknown;
     if (!isRecord(parsed) || parsed.pendingApproval == null) return undefined;
-    return { ...checksum, records: [sanitizeRecord(parsed.pendingApproval)] };
+    return { ...checksum, records: [sanitizeApprovalRecord(parsed.pendingApproval)] };
   } catch {
     return undefined;
   }
@@ -424,38 +450,39 @@ export async function createPointInTimeExport(options: PointInTimeExportOptions)
       if (isRecord(error) && error.code === 'ENOENT') continue;
       throw error;
     }
-    files.push(checksum);
+    const evidenceChecksum = section === 'approvals' ? redactApprovalChecksum(checksum) : checksum;
+    files.push(evidenceChecksum);
 
     if (basename(checksum.path).endsWith('.db')) {
-      const sqlite = summarizeSqliteTables(resolved, checksum);
+      const sqlite = summarizeSqliteTables(resolved, evidenceChecksum);
       approvals.push(...sqlite.approvals);
       tasks.push(...sqlite.tasks);
       runs.push(...sqlite.runs);
-      const memorySummary = isMemoryStorePath(checksum.path) ? summarizeSqliteMemoryStore(resolved, { ...checksum }) : undefined;
+      const memorySummary = summarizeSqliteMemoryStore(resolved, { ...evidenceChecksum });
       if (memorySummary !== undefined) memory.push(memorySummary);
     }
 
     if (section === 'config') {
-      configChecksums.push({ ...checksum });
+      configChecksums.push({ ...evidenceChecksum });
       continue;
     }
 
     if (text === undefined) continue;
 
-    const pendingApprovalSummary = splitChatPendingApprovals(checksum, text);
+    const pendingApprovalSummary = splitChatPendingApprovals(evidenceChecksum, text);
     if (pendingApprovalSummary !== undefined) approvals.push(pendingApprovalSummary);
 
     if (section === 'approvals') {
       const records = sanitizeApprovalRecords(text);
-      if (records.length > 0) approvals.push({ ...checksum, records });
+      if (records.length > 0) approvals.push({ ...evidenceChecksum, records });
     } else if (section === 'memory') {
-      memory.push({ ...checksum, ...sanitizeMemory(text) });
+      memory.push({ ...evidenceChecksum, ...sanitizeMemory(text) });
     } else if (section === 'tasks') {
       const records = sanitizeRecords(text);
-      if (records.length > 0) tasks.push({ ...checksum, records });
+      if (records.length > 0) tasks.push({ ...evidenceChecksum, records });
     } else if (section === 'runs') {
       const records = sanitizeRecords(text);
-      if (records.length > 0) runs.push({ ...checksum, records });
+      if (records.length > 0) runs.push({ ...evidenceChecksum, records });
     }
   }
 

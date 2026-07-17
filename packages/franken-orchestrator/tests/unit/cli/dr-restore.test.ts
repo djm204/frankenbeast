@@ -99,7 +99,11 @@ describe('dr restore-dry-run CLI', () => {
       await mkdir(join(stateDir, 'chat'), { recursive: true });
       await writeFile(join(stateDir, 'config.json'), JSON.stringify({ provider: 'openai', apiToken: 'config-value-for-mask' }), 'utf8');
       await writeFile(join(stateDir, 'config.yaml'), 'provider: openai\napiToken: config-yaml-value-for-mask\n', 'utf8');
+      const approvalFileToken = 'fileApprovalTokenForPath123';
+      const redactedApprovalLedgerPath = `approvals/approval-path-${createHash('sha256').update('ledger.json').digest('hex')}`;
+      const redactedApprovalFilePath = `approvals/approval-path-${createHash('sha256').update(`${approvalFileToken}.json`).digest('hex')}`;
       await writeFile(join(stateDir, 'approvals', 'ledger.json'), JSON.stringify({ approvals: [{ id: 'approval-1', token: 'approval-value-for-mask', state: 'pending' }] }), 'utf8');
+      await writeFile(join(stateDir, 'approvals', `${approvalFileToken}.json`), JSON.stringify({ id: 'approval-file-1', state: 'pending' }), 'utf8');
       await writeFile(join(stateDir, 'memory', 'store.json'), JSON.stringify({ memories: [{ key: 'user.pref', value: 'private memory body', metadata: { source: 'chat' } }] }), 'utf8');
       await writeFile(join(stateDir, 'memory', 'snapshot.json'), JSON.stringify({ working: { sessionA: { value: 'private working body' }, sessionB: { value: 'second private working body' } } }), 'utf8');
       await writeFile(join(stateDir, 'kanban-tasks.json'), JSON.stringify({ tasks: [{ id: 'task-1', title: 'private task title', status: 'running' }] }), 'utf8');
@@ -141,10 +145,13 @@ describe('dr restore-dry-run CLI', () => {
       try {
         beastDb.exec(`CREATE TABLE beast_runs (id TEXT PRIMARY KEY, status TEXT, definition_id TEXT, created_at TEXT);`);
         beastDb.exec(`CREATE TABLE tracked_agents (id TEXT PRIMARY KEY, status TEXT, definition_id TEXT, created_at TEXT);`);
+        beastDb.exec(`CREATE TABLE working_memory (id TEXT PRIMARY KEY, status TEXT, created_at TEXT);`);
         beastDb.prepare('INSERT INTO beast_runs (id, status, definition_id, created_at) VALUES (?, ?, ?, ?)')
           .run('run-db-1', 'running', 'nightly', '2026-07-16T08:00:00.000Z');
         beastDb.prepare('INSERT INTO tracked_agents (id, status, definition_id, created_at) VALUES (?, ?, ?, ?)')
           .run('agent-db-1', 'running', 'nightly', '2026-07-16T08:01:00.000Z');
+        beastDb.prepare('INSERT INTO working_memory (id, status, created_at) VALUES (?, ?, ?)')
+          .run('beast-memory-1', 'stored', '2026-07-16T08:03:00.000Z');
         kanbanDb.exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, status TEXT, created_at TEXT);`);
         kanbanDb.prepare('INSERT INTO tasks (id, status, created_at) VALUES (?, ?, ?)')
           .run('task-db-1', 'ready', '2026-07-16T08:00:00.000Z');
@@ -195,9 +202,10 @@ describe('dr restore-dry-run CLI', () => {
         expect.objectContaining({ path: 'config.json', sha256: expect.stringMatching(/^sha256:/u) }),
         expect.objectContaining({ path: 'config.yaml', sha256: expect.stringMatching(/^sha256:/u) }),
       ]));
-      expect(report.manifest.sections).toEqual(expect.objectContaining({ approvals: 3, memory: 4, tasks: 2, runs: 3, logs: 3 }));
+      expect(report.manifest.sections).toEqual(expect.objectContaining({ approvals: 4, memory: 5, tasks: 2, runs: 3, logs: 3 }));
       expect(report.evidence.approvals).toEqual(expect.arrayContaining([
-        expect.objectContaining({ path: 'approvals/ledger.json' }),
+        expect.objectContaining({ path: redactedApprovalLedgerPath }),
+        expect.objectContaining({ path: redactedApprovalFilePath }),
         expect.objectContaining({
           path: 'approval-ledger.db',
           table: 'approvals',
@@ -205,12 +213,13 @@ describe('dr restore-dry-run CLI', () => {
         }),
         expect.objectContaining({
           path: 'chat/session-1.json',
-          records: [expect.objectContaining({ id: 'approval-chat-1', command: 'deploy --token <redacted>', tool: 'shell', sessionId: 'session-1' })],
+          records: [expect.objectContaining({ id: `sha256:${createHash('sha256').update('approval-chat-1').digest('hex')}`, command: 'deploy --token <redacted>', tool: 'shell', sessionId: 'session-1' })],
         }),
       ]));
       expect(report.evidence.memory).toEqual(expect.arrayContaining([
         expect.objectContaining({ path: 'memory/store.json', recordCount: 1 }),
         expect.objectContaining({ path: 'memory/snapshot.json', keys: expect.arrayContaining(['working.sessionA', 'working.sessionB']) }),
+        expect.objectContaining({ path: 'beast.db', metadata: expect.arrayContaining([expect.objectContaining({ table: 'working_memory', rowCount: 1 })]) }),
       ]));
       expect(report.evidence.tasks).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'kanban-tasks.json', records: [expect.objectContaining({ id: 'task-1', status: 'running' })] })]));
       expect(report.evidence.runs).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'runs/run-1/metadata.json', records: [expect.objectContaining({ id: 'run-1', status: 'running' })] })]));
@@ -230,6 +239,7 @@ describe('dr restore-dry-run CLI', () => {
       expect(report.evidence.logs.flatMap((log) => log.tail).every((line) => line.length <= 8192)).toBe(true);
       expect(reportText).not.toContain('config-value-for-mask');
       expect(reportText).not.toContain('approval-value-for-mask');
+      expect(reportText).not.toContain(approvalFileToken);
       expect(reportText).not.toContain('config-yaml-value-for-mask');
       expect(reportText).not.toContain('private memory body');
       expect(reportText).not.toContain('private working body');
@@ -245,6 +255,7 @@ describe('dr restore-dry-run CLI', () => {
       expect(reportText).not.toContain('redissValueForMasking');
       expect(reportText).not.toContain('rotated-log-secret');
       expect(reportText).not.toContain(approvalRowId);
+      expect(reportText).not.toContain('approval-chat-1');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
