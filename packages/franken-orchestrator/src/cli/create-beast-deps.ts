@@ -1,32 +1,42 @@
-import { SqliteBrain } from '@franken/brain';
+import { SqliteBrain } from "@franken/brain";
 import {
   createModelProviderFailoverAuditPayload,
   ProviderRegistry,
-} from '../providers/provider-registry.js';
-import { createLlmProvider, type ProviderConfig } from '../providers/provider-config.js';
-import type { EgressAuditSink, EgressPolicyConfig } from '../network/egress-policy.js';
-import { now as deterministicNow } from '@franken/types';
+} from "../providers/provider-registry.js";
+import {
+  createLlmProvider,
+  type ProviderConfig,
+} from "../providers/provider-config.js";
+import type {
+  EgressAuditSink,
+  EgressPolicyConfig,
+} from "../network/egress-policy.js";
+import { now as deterministicNow } from "@franken/types";
 import {
   buildMiddlewareChain,
   resolveSecurityConfig,
   type SecurityProfile,
   type SecurityRule,
   type WebhookSignaturePolicy,
-} from '../middleware/security-profiles.js';
-import { SkillManager } from '../skills/skill-manager.js';
-import { SkillConfigStore } from '../skills/skill-config-store.js';
-import { AuditTrail, AuditTrailStore, createAuditEvent } from '@franken/observer';
-import { ReplayContentStore } from '../replay/replay-content-store.js';
-import { join, basename, dirname } from 'node:path';
+} from "../middleware/security-profiles.js";
+import { SkillManager } from "../skills/skill-manager.js";
+import { SkillConfigStore } from "../skills/skill-config-store.js";
+import {
+  AuditTrail,
+  AuditTrailStore,
+  createAuditEvent,
+} from "@franken/observer";
+import { ReplayContentStore } from "../replay/replay-content-store.js";
+import { join, basename, dirname } from "node:path";
 
-import { MiddlewareChainFirewallAdapter } from '../adapters/middleware-firewall-adapter.js';
-import { SqliteBrainMemoryAdapter } from '../adapters/brain-memory-adapter.js';
-import { ReflectionHeartbeatAdapter } from '../adapters/reflection-heartbeat-adapter.js';
-import { SkillManagerAdapter } from '../adapters/skill-manager-adapter.js';
-import { AuditTrailObserverAdapter } from '../adapters/audit-observer-adapter.js';
-import { McpSdkAdapter } from '../adapters/mcp-sdk-adapter.js';
-import { ProviderRegistryIAdapter } from '../adapters/provider-registry-adapter.js';
-import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
+import { MiddlewareChainFirewallAdapter } from "../adapters/middleware-firewall-adapter.js";
+import { SqliteBrainMemoryAdapter } from "../adapters/brain-memory-adapter.js";
+import { ReflectionHeartbeatAdapter } from "../adapters/reflection-heartbeat-adapter.js";
+import { SkillManagerAdapter } from "../adapters/skill-manager-adapter.js";
+import { AuditTrailObserverAdapter } from "../adapters/audit-observer-adapter.js";
+import { McpSdkAdapter } from "../adapters/mcp-sdk-adapter.js";
+import { ProviderRegistryIAdapter } from "../adapters/provider-registry-adapter.js";
+import { AdapterLlmClient } from "../adapters/adapter-llm-client.js";
 // NOTE: `@franken/critique` is imported lazily inside `reflectionFn` (see below).
 // A top-level static import would make this module — and everything that
 // statically imports it (e.g. dep-factory) — fail to evaluate when the
@@ -34,11 +44,11 @@ import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 // fail-closed / config-disable / FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES
 // opt-out handling in dep-factory before it can run (issue #364, ADR-036).
 
-import type { BeastLoopDeps, IObserverModule, McpToolInfo } from '../deps.js';
-import type { ILlmProvider } from '@franken/types';
-import type { AggregatedTokenUsage } from '../providers/token-aggregator.js';
+import type { BeastLoopDeps, IObserverModule, McpToolInfo } from "../deps.js";
+import type { ILlmProvider } from "@franken/types";
+import type { AggregatedTokenUsage } from "../providers/token-aggregator.js";
 
-export type { ProviderConfig } from '../providers/provider-config.js';
+export type { ProviderConfig } from "../providers/provider-config.js";
 
 // --- Config types ---
 
@@ -55,7 +65,7 @@ export interface BeastDepsConfig {
     webhookSignaturePolicy?: WebhookSignaturePolicy;
     allowedDomains?: string[];
     maxTokenBudget?: number;
-    requireApproval?: 'all' | 'destructive' | 'none';
+    requireApproval?: "all" | "destructive" | "none";
     customRules?: SecurityRule[];
   };
   brain?: {
@@ -67,19 +77,19 @@ export interface BeastDepsConfig {
 }
 
 export interface ExistingDeps {
-  planner: BeastLoopDeps['planner'];
-  critique: BeastLoopDeps['critique'];
-  governor: BeastLoopDeps['governor'];
+  planner: BeastLoopDeps["planner"];
+  critique: BeastLoopDeps["critique"];
+  governor: BeastLoopDeps["governor"];
   observer: IObserverModule;
-  logger: BeastLoopDeps['logger'];
-  graphBuilder?: BeastLoopDeps['graphBuilder'];
-  prCreator?: BeastLoopDeps['prCreator'];
-  cliExecutor?: BeastLoopDeps['cliExecutor'];
-  mcp?: BeastLoopDeps['mcp'];
-  checkpoint?: BeastLoopDeps['checkpoint'];
-  refreshPlanTasks?: BeastLoopDeps['refreshPlanTasks'];
-  runConfigOverrides?: BeastLoopDeps['runConfigOverrides'];
-  clock?: BeastLoopDeps['clock'];
+  logger: BeastLoopDeps["logger"];
+  graphBuilder?: BeastLoopDeps["graphBuilder"];
+  prCreator?: BeastLoopDeps["prCreator"];
+  cliExecutor?: BeastLoopDeps["cliExecutor"];
+  mcp?: BeastLoopDeps["mcp"];
+  checkpoint?: BeastLoopDeps["checkpoint"];
+  refreshPlanTasks?: BeastLoopDeps["refreshPlanTasks"];
+  runConfigOverrides?: BeastLoopDeps["runConfigOverrides"];
+  clock?: BeastLoopDeps["clock"];
 }
 
 export type ConsolidatedDeps = BeastLoopDeps & {
@@ -105,40 +115,48 @@ export function createBeastDeps(
   existingDeps: ExistingDeps,
 ): ConsolidatedDeps {
   // 1. Brain
-  const brain = new SqliteBrain(config.brain?.dbPath ?? ':memory:');
+  const brain = new SqliteBrain(config.brain?.dbPath ?? ":memory:");
 
   // 2. Audit trail
   const auditTrail = new AuditTrail();
-  const metadataDir = config.configDir ?? '.fbeast';
-  const auditRoot = basename(metadataDir) === '.fbeast'
-    ? join(metadataDir, 'audit')
-    : join(metadataDir, '.fbeast', 'audit');
-  const auditTrailProjectRoot = basename(metadataDir) === '.fbeast'
-    ? dirname(metadataDir)
-    : metadataDir;
+  const metadataDir = config.configDir ?? ".fbeast";
+  const auditRoot =
+    basename(metadataDir) === ".fbeast"
+      ? join(metadataDir, "audit")
+      : join(metadataDir, ".fbeast", "audit");
+  const auditTrailProjectRoot =
+    basename(metadataDir) === ".fbeast" ? dirname(metadataDir) : metadataDir;
   const replayStore = new ReplayContentStore(auditRoot);
 
   // 3. Provider registry
   const recordProviderEgressDecision: EgressAuditSink = (decision) => {
     auditTrail.append(
-      createAuditEvent('network.egress.provider', decision, {
-        phase: 'execution',
-        provider: 'egress-policy',
+      createAuditEvent("network.egress.provider", decision, {
+        phase: "execution",
+        provider: "egress-policy",
       }),
     );
   };
-  const providers = buildProviderList(config.providers, config.network?.egressPolicy, recordProviderEgressDecision);
+  const providers = buildProviderList(
+    config.providers,
+    config.network?.egressPolicy,
+    recordProviderEgressDecision,
+  );
   const registry = new ProviderRegistry(providers, brain, {
     onProviderSwitch: (event) => {
       auditTrail.append(
-        createAuditEvent('model-provider.failover', createModelProviderFailoverAuditPayload(event), {
-          phase: 'execution',
-          provider: event.to,
-        }),
+        createAuditEvent(
+          "model-provider.failover",
+          createModelProviderFailoverAuditPayload(event),
+          {
+            phase: "execution",
+            provider: event.to,
+          },
+        ),
       );
       auditTrail.append(
-        createAuditEvent('provider.switch', event, {
-          phase: 'execution',
+        createAuditEvent("provider.switch", event, {
+          phase: "execution",
           provider: event.to,
         }),
       );
@@ -146,14 +164,17 @@ export function createBeastDeps(
   });
 
   // 4. Security middleware
-  const securityProfile = config.security?.profile ?? 'standard';
-  const securityConfig = resolveSecurityConfig(securityProfile, config.security);
+  const securityProfile = config.security?.profile ?? "standard";
+  const securityConfig = resolveSecurityConfig(
+    securityProfile,
+    config.security,
+  );
   const middlewareChain = buildMiddlewareChain(securityConfig);
 
   // 5. Skill manager
-  const configStore = new SkillConfigStore(config.configDir ?? '.fbeast');
+  const configStore = new SkillConfigStore(config.configDir ?? ".fbeast");
   const skillManager = new SkillManager(
-    config.skillsDir ?? './skills',
+    config.skillsDir ?? "./skills",
     new Set(),
     configStore,
   );
@@ -163,35 +184,48 @@ export function createBeastDeps(
   const memory = new SqliteBrainMemoryAdapter(brain);
 
   // Wire ProviderRegistry + MiddlewareChain into heartbeat reflection via IAdapter
-  const registryAdapter = new ProviderRegistryIAdapter(registry, middlewareChain);
+  const registryAdapter = new ProviderRegistryIAdapter(
+    registry,
+    middlewareChain,
+  );
   const registryLlmClient = new AdapterLlmClient(registryAdapter);
-  const reflectionFn = config.reflection !== false
-    ? async () => {
-        const { ReflectionEvaluator } = await import('@franken/critique');
-        const evaluator = new ReflectionEvaluator({ llmClient: registryLlmClient });
-        const result = await evaluator.evaluate({
-          content: 'Current execution state',
-          metadata: { phase: 'execution', stepsCompleted: 0, objective: 'Reflect on progress' },
-        });
-        const finding = result.findings[0];
-        return {
-          summary: finding?.message ?? 'No reflection available.',
-          improvements: finding?.suggestion ? [finding.suggestion] : [],
-          techDebt: [],
-        };
-      }
-    : undefined;
+  const reflectionFn =
+    config.reflection !== false
+      ? async () => {
+          const { ReflectionEvaluator } = await import("@franken/critique");
+          const evaluator = new ReflectionEvaluator({
+            llmClient: {
+              complete: (prompt: string) => registryLlmClient.complete(prompt),
+            },
+          });
+          const result = await evaluator.evaluate({
+            content: "Current execution state",
+            metadata: {
+              phase: "execution",
+              stepsCompleted: 0,
+              objective: "Reflect on progress",
+            },
+          });
+          const finding = result.findings[0];
+          return {
+            summary: finding?.message ?? "No reflection available.",
+            improvements: finding?.suggestion ? [finding.suggestion] : [],
+            techDebt: [],
+          };
+        }
+      : undefined;
 
   const heartbeat = new ReflectionHeartbeatAdapter(reflectionFn);
   const skills = new SkillManagerAdapter(skillManager);
   const observer = new AuditTrailObserverAdapter(
     existingDeps.observer,
     auditTrail,
-    'unknown',
-    'unknown',
+    "unknown",
+    "unknown",
     replayStore,
   );
-  const mcp = existingDeps.mcp ?? new McpSdkAdapter(collectEnabledMcpTools(skillManager));
+  const mcp =
+    existingDeps.mcp ?? new McpSdkAdapter(collectEnabledMcpTools(skillManager));
 
   return {
     firewall,
@@ -216,17 +250,29 @@ export function createBeastDeps(
     persistAuditTrail: (runId: string) => {
       const store = new AuditTrailStore(auditTrailProjectRoot);
       const replayManifest = observer.getReplayManifest();
-      const eventPath = store.save(runId, auditTrail, replayManifest.length > 0 ? replayManifest : undefined);
+      const eventPath = store.save(
+        runId,
+        auditTrail,
+        replayManifest.length > 0 ? replayManifest : undefined,
+      );
       return eventPath;
     },
 
     // Optional pass-through deps (spread conditionally)
-    ...(existingDeps.graphBuilder ? { graphBuilder: existingDeps.graphBuilder } : {}),
+    ...(existingDeps.graphBuilder
+      ? { graphBuilder: existingDeps.graphBuilder }
+      : {}),
     ...(existingDeps.prCreator ? { prCreator: existingDeps.prCreator } : {}),
-    ...(existingDeps.cliExecutor ? { cliExecutor: existingDeps.cliExecutor } : {}),
+    ...(existingDeps.cliExecutor
+      ? { cliExecutor: existingDeps.cliExecutor }
+      : {}),
     ...(existingDeps.checkpoint ? { checkpoint: existingDeps.checkpoint } : {}),
-    ...(existingDeps.refreshPlanTasks ? { refreshPlanTasks: existingDeps.refreshPlanTasks } : {}),
-    ...(existingDeps.runConfigOverrides ? { runConfigOverrides: existingDeps.runConfigOverrides } : {}),
+    ...(existingDeps.refreshPlanTasks
+      ? { refreshPlanTasks: existingDeps.refreshPlanTasks }
+      : {}),
+    ...(existingDeps.runConfigOverrides
+      ? { runConfigOverrides: existingDeps.runConfigOverrides }
+      : {}),
   } as ConsolidatedDeps;
 }
 
@@ -249,9 +295,11 @@ export function buildProviderList(
 ): ILlmProvider[] {
   if (!configs || configs.length === 0) {
     throw new Error(
-      'No providers configured. Add a consolidatedProviders entry to your frankenbeast config, for example: '
-        + '{"consolidatedProviders":[{"name":"claude","type":"claude-cli"}]}',
+      "No providers configured. Add a consolidatedProviders entry to your frankenbeast config, for example: " +
+        '{"consolidatedProviders":[{"name":"claude","type":"claude-cli"}]}',
     );
   }
-  return configs.map((pc) => createLlmProvider(pc, { egressPolicy, egressAudit }));
+  return configs.map((pc) =>
+    createLlmProvider(pc, { egressPolicy, egressAudit }),
+  );
 }
