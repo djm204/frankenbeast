@@ -342,7 +342,8 @@ describe('dashboard routes', () => {
       }
       reader.cancel();
 
-      // SSE format: event: snapshot\ndata: ...\n\n
+      // SSE format: id: ...\nevent: snapshot\ndata: ...\n\n
+      expect(text).toMatch(/id: dashboard:[0-9a-f-]{36}:1/);
       expect(text).toContain('event: snapshot');
 
       // Extract the data line for the snapshot event
@@ -355,6 +356,43 @@ describe('dashboard routes', () => {
       expect(data.skills).toHaveLength(2);
       expect(data.security.profile).toBe('standard');
       expect(data.providers).toHaveLength(1);
+    });
+
+    it('keeps snapshot ids monotonic across dashboard SSE reconnects', async () => {
+      const deps = createMockDeps();
+      const app = createDashboardRoutes(deps);
+      const readInitialStreamText = async (
+        ticket: string,
+        targetApp: ReturnType<typeof createDashboardRoutes> = app,
+      ) => {
+        const res = await targetApp.request(`/events?ticket=${ticket}`);
+        const reader = res.body!.getReader();
+        const decoder = new TextDecoder();
+        let text = '';
+        for (let i = 0; i < 10; i++) {
+          const { value, done } = await reader.read();
+          if (value) text += decoder.decode(value, { stream: true });
+          if (done || text.includes('event: snapshot')) break;
+        }
+        await reader.cancel();
+        return text;
+      };
+
+      const firstText = await readInitialStreamText(await issueDashboardTicket(app));
+      const secondText = await readInitialStreamText(await issueDashboardTicket(app));
+
+      const firstId = firstText.match(/^id: (dashboard:[0-9a-f-]{36}:1)$/m)?.[1];
+      const secondId = secondText.match(/^id: (dashboard:[0-9a-f-]{36}:2)$/m)?.[1];
+      expect(firstId).toBeDefined();
+      expect(secondId).toBeDefined();
+      const firstEpoch = firstId!.split(':')[1];
+      expect(secondId).toBe(`dashboard:${firstEpoch}:2`);
+
+      const restartedApp = createDashboardRoutes(createMockDeps());
+      const restartedText = await readInitialStreamText(await issueDashboardTicket(restartedApp), restartedApp);
+      const restartedId = restartedText.match(/^id: (dashboard:[0-9a-f-]{36}:1)$/m)?.[1];
+      expect(restartedId).toBeDefined();
+      expect(restartedId!.split(':')[1]).not.toBe(firstEpoch);
     });
 
     it('streams a fresh snapshot when dashboard state changes after connect', async () => {

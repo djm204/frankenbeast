@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
@@ -82,6 +82,11 @@ export function createDashboardRoutes(deps: DashboardRouteDeps): Hono {
   const ticketStore = deps.ticketStore;
   const operatorToken = deps.operatorToken;
 
+  // Event ids are scoped to this route instance instead of each connection and
+  // include an epoch so a restarted dashboard route never reuses old ids.
+  const dashboardSnapshotEpoch = randomUUID();
+  let dashboardSnapshotSequence = 0;
+
   // GET /api/dashboard — aggregated snapshot of all dashboard state
   app.get('/', async (c) => {
     return c.json(await buildSnapshot(deps));
@@ -123,7 +128,9 @@ export function createDashboardRoutes(deps: DashboardRouteDeps): Hono {
       let lastSnapshot = JSON.stringify(await buildSnapshot(deps));
 
       // Send initial snapshot
+      dashboardSnapshotSequence += 1;
       await stream.writeSSE({
+        id: `dashboard:${dashboardSnapshotEpoch}:${dashboardSnapshotSequence}`,
         event: 'snapshot',
         data: lastSnapshot,
       });
@@ -147,8 +154,9 @@ export function createDashboardRoutes(deps: DashboardRouteDeps): Hono {
           return;
         }
         lastSnapshot = nextSnapshot;
+        dashboardSnapshotSequence += 1;
         try {
-          await stream.writeSSE({ event: 'snapshot', data: nextSnapshot });
+          await stream.writeSSE({ id: `dashboard:${dashboardSnapshotEpoch}:${dashboardSnapshotSequence}`, event: 'snapshot', data: nextSnapshot });
         } catch {
           clearAll();
         }

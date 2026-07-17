@@ -85,7 +85,7 @@ Use this checklist for a first local checkout or when rebuilding a development e
   npm --silent run first-run:checklist -- --persona coding-agent --json
   ```
 
-  The generator prints deterministic Markdown by default, or JSON with `persona`, `root`, `items`, `docs`, and `nextAction` for PM/liveness tooling. It never mutates files or runs setup commands; it points each checklist item at the command and docs to run next. Valid personas are `operator`, `coding-agent`, and `contributor`; unknown personas fail closed with an explicit error instead of falling back to a misleading generic checklist.
+  Start with the [persona quickstart tracks](docs/onboarding/persona-quickstart-tracks.md) when you want the human-readable chooser first. It defines operator, contributor, and agent-developer outcomes with prerequisites, setup commands, validation commands, and expected success output. The generator prints deterministic Markdown by default, or JSON with `persona`, `root`, `items`, `docs`, and `nextAction` for PM/liveness tooling. It never mutates files or runs setup commands; it points each checklist item at the command and docs to run next. Valid personas are `operator`, `coding-agent`, and `contributor`; unknown personas fail closed with an explicit error instead of falling back to a misleading generic checklist.
 
 - [ ] Rehearse the full local-to-PR path before publishing anything:
 
