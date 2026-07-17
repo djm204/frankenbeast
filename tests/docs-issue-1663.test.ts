@@ -55,6 +55,8 @@ describe('issue #1663 persona quickstart tracks', () => {
       '### Expected success output',
       '[onboarding:6/6:done] complete - onboarding bootstrap reached 6/6 steps',
       'new-worker:preflight -- --json',
+      'ISSUE_NUMBER="${ISSUE_NUMBER:?set the assigned issue number}"',
+      'ISSUE_TITLE="${ISSUE_TITLE:?set the assigned issue title}"',
       'issue:worktree -- --dry-run',
       'tests/docs-issue-1663.test.ts',
     ]) {
@@ -74,6 +76,7 @@ describe('issue #1663 persona quickstart tracks', () => {
 
     expect(referencedScripts).toEqual(expect.arrayContaining([
       'bootstrap',
+      'bootstrap:dry-run',
       'local:verify-setup',
       'first-run:checklist',
       'workspace:tour',

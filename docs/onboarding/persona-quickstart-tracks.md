@@ -36,14 +36,21 @@ npm run bootstrap -- --services
 ### Validation commands
 
 ```bash
-npm run local:verify-setup
+npm run bootstrap:dry-run
 npm run first-run:checklist -- --persona operator
+```
+
+If you intentionally started optional Docker services with `npm run bootstrap -- --services`, also run the live setup probe:
+
+```bash
+npm run local:verify-setup
 ```
 
 ### Expected success output
 
 - Bootstrap prints `[onboarding:6/6:done] complete - onboarding bootstrap reached 6/6 steps`.
-- `local:verify-setup` exits `0` after validating the local `.env` and setup state.
+- `bootstrap:dry-run` exits `0` after validating the no-Docker prerequisite path without requiring ChromaDB, Grafana, or Tempo to be running.
+- `local:verify-setup` exits `0` on the services path after validating the local `.env` and live optional-service setup state.
 - The generated operator checklist includes runtime configuration and optional-service items without agent-only PR steps.
 
 ## Contributor track
@@ -90,8 +97,10 @@ For a narrower change, choose the smallest safe command from [the test command d
 ### Setup commands
 
 ```bash
+ISSUE_NUMBER="${ISSUE_NUMBER:?set the assigned issue number}"
+ISSUE_TITLE="${ISSUE_TITLE:?set the assigned issue title}"
 npm --silent run new-worker:preflight -- --json
-npm run issue:worktree -- --dry-run --issue 1663 --title "feat(onboarding): add persona-based quickstart tracks"
+npm run issue:worktree -- --dry-run --issue "$ISSUE_NUMBER" --title "$ISSUE_TITLE"
 npm run first-run:checklist -- --persona coding-agent
 ```
 
