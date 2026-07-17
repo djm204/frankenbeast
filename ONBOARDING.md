@@ -166,6 +166,8 @@ Read the [agent role responsibility map](docs/onboarding/agent-role-responsibili
 
 ## Coding-agent PR etiquette
 
+Read the [first-PR agent runbook](docs/onboarding/first-pr-agent-runbook.md) when a fresh agent is taking a small issue from assignment through branch/worktree setup, implementation, verification, PR creation, Codex review, and merge handoff. It includes the exact command sequence and HITL stop conditions expected for first PRs.
+
 Read the [coding-agent PR etiquette guide](docs/onboarding/coding-agent-pr-etiquette.md) before opening, updating, or merging agent-authored pull requests. It defines one-issue/one-PR scope, required PR body evidence, current-head CI/Codex expectations, negative cases that prevent duplicate work, and handoff fields for blocked PRs.
 
 ## Release and deployment mental model
