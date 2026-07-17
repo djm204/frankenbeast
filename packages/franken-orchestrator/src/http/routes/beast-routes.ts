@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { requireBeastOperatorAuth } from '../../beasts/http/beast-auth.js';
 import { InMemoryRateLimiter, requireBeastRateLimit, type BeastRateLimitOptions } from '../../beasts/http/beast-rate-limit.js';
 import { UnknownBeastDefinitionError, UnknownTrackedAgentError } from '../../beasts/errors.js';
+import { InvalidBeastInterviewAnswerError } from '../../beasts/interview-answers.js';
 import { BeastCatalogService } from '../../beasts/services/beast-catalog-service.js';
 import { BeastDispatchService } from '../../beasts/services/beast-dispatch-service.js';
 import {
@@ -357,6 +358,12 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
     } catch (error) {
       if (error instanceof UnknownBeastInterviewSessionError) {
         throw new InterviewSessionNotFoundHttpError(sessionId);
+      }
+      if (error instanceof InvalidBeastInterviewAnswerError) {
+        throw new HttpError(400, 'INVALID_INTERVIEW_ANSWER', error.message, {
+          promptKey: error.prompt.key,
+          options: error.prompt.options,
+        });
       }
       throw error;
     }

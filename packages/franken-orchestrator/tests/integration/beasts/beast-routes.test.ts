@@ -527,6 +527,37 @@ describe('beast routes', () => {
     expect(answered.data.session.currentPrompt.key).toBe('objective');
   });
 
+  it('returns a structured 400 for invalid option-backed interview answers', async () => {
+    const { app, operatorToken } = createBeastApp();
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+    const startResponse = await app.request('/v1/beasts/interviews/martin-loop/start', {
+      method: 'POST',
+      headers,
+    });
+    const started = await startResponse.json() as { data: { id: string } };
+
+    const response = await app.request(`/v1/beasts/interviews/${started.data.id}/answer`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ answer: 'not-a-provider' }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: {
+        code: 'INVALID_INTERVIEW_ANSWER',
+        message: "Invalid answer for 'provider': expected one of claude, codex, gemini, aider",
+        details: {
+          promptKey: 'provider',
+          options: ['claude', 'codex', 'gemini', 'aider'],
+        },
+      },
+    });
+  });
+
   it('returns a structured 404 when answering an unknown interview session', async () => {
     const { app, operatorToken } = createBeastApp();
 
