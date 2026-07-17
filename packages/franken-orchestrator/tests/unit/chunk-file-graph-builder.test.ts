@@ -19,7 +19,12 @@ describe('ChunkFileGraphBuilder', () => {
   const intent = { goal: 'build the project' };
 
   function writeMdFile(name: string, content: string): void {
-    writeFileSync(join(tmpDir, name), content, 'utf-8');
+    const chunkNumber = /^(\d{2,})_/.exec(name)?.[1];
+    const fileContent =
+      chunkNumber && !content.startsWith('# Chunk ')
+        ? `# Chunk ${chunkNumber}: ${name.replace(/\.md$/, '')}\n\n${content}`
+        : content;
+    writeFileSync(join(tmpDir, name), fileContent, 'utf-8');
   }
 
   function taskById(tasks: readonly PlanTask[], id: string): PlanTask | undefined {
@@ -62,6 +67,20 @@ describe('ChunkFileGraphBuilder', () => {
       const graph = await builder.build(intent);
 
       expect(graph.tasks).toHaveLength(2);
+    });
+
+    it('ignores preserved numbered markdown files that were not writer-generated chunks', async () => {
+      writeMdFile('01_setup.md', 'Setup chunk');
+      writeFileSync(join(tmpDir, '02_context.md'), '# Operator context\n\nDo not execute me.\n', 'utf-8');
+
+      const builder = new ChunkFileGraphBuilder(tmpDir);
+      const graph = await builder.build(intent);
+
+      expect(graph.tasks).toHaveLength(2);
+      const ids = graph.tasks.map((t) => t.id);
+      expect(ids).toContain('impl:01_setup');
+      expect(ids).not.toContain('impl:02_context');
+      expect(ids).not.toContain('harden:02_context');
     });
 
     it('sorts files alphabetically for natural chunk ordering', async () => {

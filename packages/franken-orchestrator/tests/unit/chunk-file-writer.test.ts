@@ -275,6 +275,30 @@ describe('ChunkFileWriter', () => {
     expect(readFileSync(unrelatedPath, 'utf-8')).toContain('Keep this file.');
   });
 
+  it('removes stale generated chunks with three-digit numbers', () => {
+    const writer = new ChunkFileWriter(fixtureDir);
+
+    writeFileSync(
+      join(fixtureDir, '100_old-generated.md'),
+      '# Chunk 100: old-generated\n\n## Objective\n\nOld generated chunk.\n',
+      'utf-8',
+    );
+
+    writer.write([
+      {
+        id: 'new-chunk-x',
+        objective: 'New X',
+        files: ['x.ts'],
+        successCriteria: 'X passes',
+        verificationCommand: 'npm test',
+        dependencies: [],
+      },
+    ]);
+
+    const remaining = readdirSync(fixtureDir).sort();
+    expect(remaining).toEqual(['01_new-chunk-x.md']);
+  });
+
   it('keeps the previous chunk set intact when replacement preparation fails', () => {
     const writer = new ChunkFileWriter(fixtureDir);
 

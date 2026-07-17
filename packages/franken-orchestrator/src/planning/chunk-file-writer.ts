@@ -74,11 +74,6 @@ export class ChunkFileWriter {
         installedPaths.push(file.filePath);
       }
 
-      for (const backup of backups) {
-        rmSync(backup.backupPath, { force: true });
-      }
-
-      return preparedFiles.map((file) => file.filePath);
     } catch (error) {
       for (const installedPath of installedPaths) {
         rmSync(installedPath, { force: true });
@@ -93,6 +88,18 @@ export class ChunkFileWriter {
       }
       throw error;
     }
+
+    for (const backup of backups) {
+      try {
+        rmSync(backup.backupPath, { force: true });
+      } catch {
+        // The replacement set is already installed. A backup cleanup failure
+        // should leave a recoverable backup file behind rather than rolling
+        // back and risking loss of the newly generated or previous plan.
+      }
+    }
+
+    return preparedFiles.map((file) => file.filePath);
   }
 
   private findWriterOwnedChunkFiles(): string[] {
@@ -101,7 +108,7 @@ export class ChunkFileWriter {
   }
 
   private isWriterOwnedChunkFile(file: string): boolean {
-    const match = /^(\d{2})_[a-zA-Z0-9_-]+\.md$/.exec(file);
+    const match = /^(\d{2,})_[a-zA-Z0-9_-]+\.md$/.exec(file);
     if (!match) {
       return false;
     }
