@@ -21,7 +21,7 @@ Starting from a fresh checkout? Use the [Frankenbeast onboarding checklist](ONBO
 npm run bootstrap -- --no-docker
 ```
 
-The bootstrap command delegates to [`scripts/bootstrap.sh`](scripts/bootstrap.sh), which validates Node.js, npm/Corepack, `.env` defaults, dependencies, and optional Docker services. The [persona quickstart tracks](docs/onboarding/persona-quickstart-tracks.md) name the prerequisites, setup commands, validation commands, and first-success output for each supported role. If you want persona-specific generated guidance before running setup commands, use `npm run first-run:checklist -- --persona operator` or `npm --silent run first-run:checklist -- --persona coding-agent --json`. To orient a human or agent inside the repository, run `npm run workspace:tour` or `npm --silent run workspace:tour -- --json` for a package map, key docs, generated files, test commands, runtime state paths, safe first commands, and docs-drift checks. New issue workers can run `npm --silent run new-worker:preflight -- --json` before coding to verify the local Node/npm/git/gh/jq toolchain, GitHub authentication, project git identity, repository root, and worktree cleanliness with parseable structured output for PM handoffs. Pass `--services` when you want bootstrap to start the optional Docker compose stack after dependency installation. To preview the checks without changing files or installing packages, run:
+The bootstrap command delegates to [`scripts/bootstrap.sh`](scripts/bootstrap.sh), which validates Node.js, npm/Corepack, `.env` defaults, dependencies, and optional Docker services. The [persona quickstart tracks](docs/onboarding/persona-quickstart-tracks.md) name the prerequisites, setup commands, validation commands, and first-success output for each supported role. If you want persona-specific generated guidance before running setup commands, use `npm run first-run:checklist -- --persona operator` or `npm --silent run first-run:checklist -- --persona coding-agent --json`. To orient a human or agent inside the repository, run `npm run workspace:tour` or `npm --silent run workspace:tour -- --json` for a package map, key docs, generated files, test commands, runtime state paths, safe first commands, and docs-drift checks. New issue workers can run `npm --silent run new-worker:preflight -- --json` before coding to verify the local Node/npm/git/gh/jq toolchain, GitHub authentication, project git identity, repository root, and worktree cleanliness with parseable structured output for PM handoffs. For a broader setup healthcheck with actionable remediation and machine-readable output, run `npm --silent run setup:healthcheck -- --json`; it verifies Node/npm, dependency install state, env files, git status, common local ports, optional GitHub auth, and optional service endpoints without failing on warnings. Pass `--services` when you want bootstrap to start the optional Docker compose stack after dependency installation. To preview the checks without changing files or installing packages, run:
 
 ```bash
 ./scripts/bootstrap.sh --dry-run
@@ -642,7 +642,7 @@ npm run local:verify-setup
 
 `CHROMA_URL` points Frankenbeast's local setup scripts at the ChromaDB HTTP API.
 Both `npm run local:seed` (`scripts/seed.ts`) and `npm run local:verify-setup`
-(`scripts/verify-setup.ts`) read it from the environment or the copied `.env`
+(`scripts/verify-setup.mjs`) read it from the environment or the copied `.env`
 file, falling back to `http://localhost:8000` when it is unset. The default
 matches the root `docker-compose.yml`, which publishes ChromaDB on port 8000
 for local development.
@@ -784,7 +784,7 @@ Required HITL approvals fail closed when a run has no interactive TTY. In truste
 | `GOOGLE_API_KEY` | MOD-01 | Runtime only | Gemini adapter API key (Google AI Studio name) |
 | `GEMINI_API_KEY` | MOD-01 | Runtime only | Gemini adapter API key (alternative name) |
 | `OLLAMA_BASE_URL` | Provider registry | Not consumed by the current provider schema; legacy/future Ollama-compatible builds only | Ollama daemon base URL, usually `http://localhost:11434`; set a different HTTP(S) endpoint for remote or non-default daemons only in builds that actually support an Ollama provider. It is intentionally absent from `.env.example` because the default local setup, current provider schema, and current `fbeast mcp beast` presets do not consume it. |
-| `CHROMA_URL` | MOD-03 | If using semantic memory | ChromaDB base URL used by `scripts/seed.ts` and `scripts/verify-setup.ts` (default: `http://localhost:8000`) |
+| `CHROMA_URL` | MOD-03 | If using semantic memory | ChromaDB base URL used by `scripts/seed.ts` and `scripts/verify-setup.mjs` (default: `http://localhost:8000`) |
 | `SLACK_WEBHOOK_URL` | MOD-07 | If using Slack approvals | Slack webhook for HITL notifications |
 | `FRANKENBEAST_MODULE_MEMORY` | MOD-03 | Optional | Memory module config fallback and Beast child-env toggle. Only the literal value `false` records it as disabled when the `memory` config key is unset; current local CLI wiring still constructs the real memory adapter. |
 | `FRANKENBEAST_MODULE_PLANNER` | MOD-04 | Optional | Planner module config fallback and Beast child-env toggle. Only literal `false` records it as disabled when the `planner` config key is unset; current local CLI wiring still uses the graph-builder path. |
@@ -1003,7 +1003,7 @@ frankenbeast/
 │   ├── guides/                  # Quickstart, run/deploy, provider, agent, verification, and issue-workflow guides
 │   └── plans/                   # Design docs and implementation plans
 ├── tests/                       # Root-level integration tests
-├── scripts/                     # seed.ts, verify-setup.ts
+├── scripts/                     # seed.ts, verify-setup.mjs
 ├── packages/
 │   ├── franken-brain/           # MOD-03: Memory Systems
 │   ├── franken-planner/         # MOD-04: Planning & Decomposition
