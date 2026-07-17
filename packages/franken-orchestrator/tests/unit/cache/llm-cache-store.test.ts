@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { LlmCacheStore } from '../../../src/cache/llm-cache-store.js';
@@ -141,5 +141,60 @@ describe('LlmCacheStore', () => {
     await expect(store.loadWorkEntry('frankenbeast', 'issue:99', 'shared-key')).resolves.toMatchObject({
       content: 'work shared',
     });
+  });
+
+  it('uses atomic writes that replace valid cache JSON only after the replacement is complete', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-llm-cache-'));
+    const rootDir = join(workDir, '.fbeast', '.cache', 'llm');
+    const store = new LlmCacheStore(rootDir, { schemaVersion: 1 });
+    const path = join(
+      rootDir,
+      'project',
+      encodeCachePathSegment('frankenbeast'),
+      'stable',
+      `${encodeCachePathSegment('atomic:key')}.json`,
+    );
+
+    await store.saveProjectEntry('frankenbeast', 'atomic:key', {
+      content: 'initial valid cache entry',
+      fingerprint: 'fp-initial',
+      createdAt: '2026-03-13T00:00:00.000Z',
+      metadata: { kind: 'project' },
+    });
+
+    await store.saveProjectEntry('frankenbeast', 'atomic:key', {
+      content: 'replacement cache entry',
+      fingerprint: 'fp-replacement',
+      createdAt: '2026-03-13T00:00:01.000Z',
+      metadata: { kind: 'project' },
+    });
+
+    await expect(readFile(path, 'utf8')).resolves.toContain('replacement cache entry');
+    await expect(store.loadProjectEntry('frankenbeast', 'atomic:key')).resolves.toMatchObject({
+      content: 'replacement cache entry',
+      fingerprint: 'fp-replacement',
+      schemaVersion: 1,
+    });
+  });
+
+  it('quarantines malformed cache JSON and treats corruption as an explicit miss', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-llm-cache-'));
+    const rootDir = join(workDir, '.fbeast', '.cache', 'llm');
+    const path = join(
+      rootDir,
+      'project',
+      encodeCachePathSegment('frankenbeast'),
+      'stable',
+      `${encodeCachePathSegment('corrupt:key')}.json`,
+    );
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, '{"content": "truncated"', 'utf8');
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const store = new LlmCacheStore(rootDir, { schemaVersion: 1 });
+    await expect(store.loadProjectEntry('frankenbeast', 'corrupt:key')).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Malformed LLM cache entry JSON'));
+    await expect(readFile(path, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    warn.mockRestore();
   });
 });
