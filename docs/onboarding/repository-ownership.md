@@ -1,6 +1,6 @@
 # Repository ownership manifest
 
-Frankenbeast keeps a structured repository ownership manifest at `docs/onboarding/repository-ownership.manifest.json`. Use it before assigning repository-wide or cross-package work so PMs, workers, and reviewers can route changes to the right maintainer surface without rediscovering package boundaries.
+Frankenbeast keeps a structured repository ownership manifest at `docs/onboarding/repository-ownership.manifest.json`. Use it before assigning repository-wide or cross-package work so coordinators, workers, and reviewers can route changes to the right maintainer surface without rediscovering package boundaries.
 
 ## How to use the manifest
 
@@ -9,7 +9,7 @@ Frankenbeast keeps a structured repository ownership manifest at `docs/onboardin
 3. Run the listed `verification` commands when the touched area is in scope, or explain why a narrower command is safer.
 4. Include the `handoffNotes` when creating worker prompts so agents know the local pitfalls for that ownership area.
 
-## PM/worker handoff
+## Coordinator/worker handoff
 
 Use this compact shape in issue and PR handoffs:
 
@@ -32,7 +32,7 @@ Negative/edge cases:
 - Do not assign browser work to `orchestrator-runtime` just because the browser calls an orchestrator route; include both `web-dashboard` and `orchestrator-runtime` when both sides change.
 - Do not assign shared DTO or export changes only to the consuming package; include `types-contracts` when `packages/franken-types/**` changes.
 - Do not treat historical `docs/plans/**` ownership as live runtime ownership without verifying current package boundaries.
-- Do not broaden a one-issue worker into adjacent owners just because the manifest names them; open a follow-up or PM routing decision instead.
+- Do not broaden a one-issue worker into adjacent owners just because the manifest names them; open a follow-up or coordinator routing decision instead.
 
 ## Maintaining the manifest
 

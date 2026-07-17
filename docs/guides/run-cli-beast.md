@@ -168,7 +168,7 @@ frankenbeast beasts delete <agent-id>
 
 ### Worker crash classification
 
-Every Beast worker lifecycle event now carries a structured `crashClassification` object so operators and PM/liveness tooling do not need to infer failure type from prose. The taxonomy includes:
+Every Beast worker lifecycle event now carries a structured `crashClassification` object so operators and coordination/liveness tooling do not need to infer failure type from prose. The taxonomy includes:
 
 | Kind | Meaning | Operator action |
 |------|---------|-----------------|

@@ -67,7 +67,7 @@ Use this checklist for a first local checkout or when rebuilding a development e
   npm --silent run profile:capability-self-test -- --json --repo djm204/frankenbeast --require-repo-write --toolset terminal,file --delivery-target discord:1523806555047333968
   ```
 
-  The command is read-only: even a failing self-test checks GitHub repository permission with `gh repo view --json viewerPermission` and never creates, edits, pushes, comments, or merges. It verifies expected model/provider labels, required toolsets, `gh` auth, git identity, optional repo write permission, approval-cop availability, and delivery target wiring. Human output uses stable `[profile-capability-self-test:<check>] ok|warn|fail - ...` badges; `--json` returns `{ ok, profile, checks }` for Kanban/Discord reports.
+  The command is read-only: even a failing self-test checks GitHub repository permission with `gh repo view --json viewerPermission` and never creates, edits, pushes, comments, or merges. It verifies expected model/provider labels, required toolsets, `gh` auth, git identity, optional repo write permission, approval runner availability, and delivery target wiring. Human output uses stable `[profile-capability-self-test:<check>] ok|warn|fail - ...` badges; `--json` returns `{ ok, profile, checks }` for Kanban/Discord reports.
 
 - [ ] Generate a guided checklist when you need a smaller first-run path than the full document. Pick the persona that matches the work:
 
@@ -76,7 +76,7 @@ Use this checklist for a first local checkout or when rebuilding a development e
   npm --silent run first-run:checklist -- --persona coding-agent --json
   ```
 
-  The generator prints deterministic Markdown by default, or JSON with `persona`, `root`, `items`, `docs`, and `nextAction` for PM/liveness tooling. It never mutates files or runs setup commands; it points each checklist item at the command and docs to run next. Valid personas are `operator`, `coding-agent`, and `contributor`; unknown personas fail closed with an explicit error instead of falling back to a misleading generic checklist.
+  The generator prints deterministic Markdown by default, or JSON with `persona`, `root`, `items`, `docs`, and `nextAction` for coordination/liveness tooling. It never mutates files or runs setup commands; it points each checklist item at the command and docs to run next. Valid personas are `operator`, `coding-agent`, and `contributor`; unknown personas fail closed with an explicit error instead of falling back to a misleading generic checklist.
 
 - [ ] Rehearse the full local-to-PR path before publishing anything:
 
@@ -94,7 +94,7 @@ Use this checklist for a first local checkout or when rebuilding a development e
   npm --silent run workspace:tour -- --json
   ```
 
-  The tour prints package responsibilities, common ticket routing hints, key docs, generated-file locations, focused test commands, runtime state paths, and safe first commands. JSON mode exposes the same data for agent prompts and PM handoffs, while the docs-drift section reports missing expected package, doc, script, or test paths.
+  The tour prints package responsibilities, common ticket routing hints, key docs, generated-file locations, focused test commands, runtime state paths, and safe first commands. JSON mode exposes the same data for agent prompts and coordination handoffs, while the docs-drift section reports missing expected package, doc, script, or test paths.
 
 ### Progress badges and status output
 
@@ -106,7 +106,7 @@ The bootstrap script prints deterministic status badges as it advances through o
 [onboarding:6/6:done] complete - onboarding bootstrap reached 6/6 steps
 ```
 
-Read each badge as `[onboarding:<current>/<total>:<stage>] <state> - <detail>`. Automation can key on the stable `onboarding` prefix, fraction, stage, and state values (`start`, `ok`, `error`, `complete`) while humans can follow the detail text. If option parsing fails before the first stage, the stage is `args`; otherwise `error` badges keep the active stage name so PM/liveness tooling can identify the failed stage without parsing prose.
+Read each badge as `[onboarding:<current>/<total>:<stage>] <state> - <detail>`. Automation can key on the stable `onboarding` prefix, fraction, stage, and state values (`start`, `ok`, `error`, `complete`) while humans can follow the detail text. If option parsing fails before the first stage, the stage is `args`; otherwise `error` badges keep the active stage name so coordination/liveness tooling can identify the failed stage without parsing prose.
 
 - [ ] Review `.env` and fill in only the values you need:
 
@@ -162,7 +162,7 @@ Read each badge as `[onboarding:<current>/<total>:<stage>] <state> - <detail>`. 
 
 Read the [repository ownership manifest](docs/onboarding/repository-ownership.md) before assigning repository-wide or cross-package work. It maps current package and documentation surfaces to primary owners, escalation owners, verification commands, and PM/worker handoff notes so agents do not guess ownership from path names alone.
 
-Read the [agent role responsibility map](docs/onboarding/agent-role-responsibility-map.md) when assigning, resuming, reviewing, or recovering agent work. It maps PM shards, issue workers, doctors, reviewers, and docs workers to repository responsibilities, required handoff fields, verification commands, and explicit `mustNotOwn` boundaries.
+Read the [agent role responsibility map](docs/onboarding/agent-role-responsibility-map.md) when assigning, resuming, reviewing, or recovering agent work. It maps coordination shards, issue workers, repair owners, reviewers, and docs workers to repository responsibilities, required handoff fields, verification commands, and explicit `mustNotOwn` boundaries.
 
 ## Coding-agent PR etiquette
 
@@ -172,13 +172,13 @@ Read the [coding-agent PR etiquette guide](docs/onboarding/coding-agent-pr-etiqu
 
 Read the [issue complexity rubric](docs/onboarding/issue-complexity-rubric.md) before assigning, refilling, or taking an issue-worker card. It maps issue labels and acceptance criteria to six complexity/risk levels, allowed toolsets, model lanes, verification depth, and escalation triggers so low-risk fallback agents do not take high-risk implementation work.
 
-## PM-swarm runtime glossary
+## Agent coordination runtime glossary
 
-Read the [PM-swarm runtime glossary](docs/onboarding/pm-swarm-runtime-glossary.md) before interpreting PM-swarm Kanban comments, liveness reports, doctor treatment notes, or issue-worker handoffs. It defines the runtime vocabulary used to decode liveness, refill, Codex, approval-cop, and worker handoff terms without creating duplicate branches, worktrees, or PRs.
+Read the [agent coordination runtime glossary](docs/onboarding/agent-coordination-runtime-glossary.md) before interpreting agent-coordination Kanban comments, liveness reports, repair notes, or issue-worker handoffs. It defines the runtime vocabulary used to decode liveness, refill, Codex, approval runner, and worker handoff terms without creating duplicate branches, worktrees, or PRs.
 
 ## Issue worktree bootstrap
 
-When a PM or issue handoff gives you one GitHub issue to fix, start from a dedicated branch/worktree instead of the main checkout:
+When a coordinator or issue handoff gives you one GitHub issue to fix, start from a dedicated branch/worktree instead of the main checkout:
 
 ```bash
 npm run issue:worktree -- --dry-run --issue 1769 --title "feat(onboarding): add issue-to-worktree bootstrap helper"

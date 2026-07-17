@@ -1,12 +1,12 @@
 # Coding-agent PR etiquette guide
 
-Use this guide when an autonomous or semi-autonomous coding agent opens, updates, reviews, or merges a Frankenbeast pull request. The goal is to make each PR independently reviewable, easy to close out, and safe for PM/liveness tooling to reason about.
+Use this guide when an autonomous or semi-autonomous coding agent opens, updates, reviews, or merges a Frankenbeast pull request. The goal is to make each PR independently reviewable, easy to close out, and safe for coordination/liveness tooling to reason about.
 
 ## Fast checklist
 
 Before opening or updating a PR:
 
-1. Confirm the issue scope in GitHub and work only that issue unless a PM explicitly changes the assignment.
+1. Confirm the issue scope in GitHub and work only that issue unless a coordinator explicitly changes the assignment.
 2. Use one issue, one branch, and one PR. Put the issue number in the branch name and the PR body.
 3. Read `tasks/resolve-issues-shared-lessons.md` and `tasks/lessons.md` when they exist before making changes.
 4. Keep commits atomic and Conventional Commit formatted, for example `docs(onboarding): add coding-agent PR etiquette guide`.
@@ -55,7 +55,7 @@ These cases must be explicit in PR handoffs so agents do not create duplicate or
 - Do not broaden a documentation-only onboarding issue into runtime behavior unless the issue explicitly requires runtime changes.
 - Do not delete or overwrite another worker's dirty worktree while closing out your own PR.
 
-## PM and worker handoff notes
+## Coordinator and worker handoff notes
 
 When a PR cannot be merged immediately, leave a handoff that names the exact blocker and the next safe command. A useful handoff looks like this:
 

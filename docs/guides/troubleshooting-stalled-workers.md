@@ -1,6 +1,6 @@
 # Troubleshooting stalled workers
 
-Use this guide when a PM, liveness monitor, or operator sees a worker that has stopped making visible progress. The goal is to classify the worker before taking action so recovery does not duplicate PRs, overwrite active work, or hide a real blocker.
+Use this guide when a coordinator, liveness monitor, or operator sees a worker that has stopped making visible progress. The goal is to classify the worker before taking action so recovery does not duplicate PRs, overwrite active work, or hide a real blocker.
 
 ## Fast triage checklist
 
@@ -68,7 +68,7 @@ gh pr checks <pr-number> --repo djm204/frankenbeast
 ## Edge cases that must stay explicit
 
 - Do not merge on Codex silence, usage-limit text, or an all-clear from an older head.
-- Do not respawn a worker just because a PM liveness file is stale; verify the live Kanban task and PR state first.
+- Do not respawn a worker just because a coordination liveness file is stale; verify the live Kanban task and PR state first.
 - Do not delete dirty worktrees until their commits are pushed, abandoned by an explicit owner decision, or safely copied into the recovery handoff.
 - Do not broaden a one-issue worker into adjacent issues while recovering it.
 
