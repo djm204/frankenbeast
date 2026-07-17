@@ -76,7 +76,7 @@ Use this checklist for a first local checkout or when rebuilding a development e
   npm --silent run first-run:checklist -- --persona coding-agent --json
   ```
 
-  The generator prints deterministic Markdown by default, or JSON with `persona`, `root`, `items`, `docs`, and `nextAction` for PM/liveness tooling. It never mutates files or runs setup commands; it points each checklist item at the command and docs to run next. Valid personas are `operator`, `coding-agent`, and `contributor`; unknown personas fail closed with an explicit error instead of falling back to a misleading generic checklist.
+  Start with the [persona quickstart tracks](docs/onboarding/persona-quickstart-tracks.md) when you want the human-readable chooser first. It defines operator, contributor, and agent-developer outcomes with prerequisites, setup commands, validation commands, and expected success output. The generator prints deterministic Markdown by default, or JSON with `persona`, `root`, `items`, `docs`, and `nextAction` for PM/liveness tooling. It never mutates files or runs setup commands; it points each checklist item at the command and docs to run next. Valid personas are `operator`, `coding-agent`, and `contributor`; unknown personas fail closed with an explicit error instead of falling back to a misleading generic checklist.
 
 - [ ] Rehearse the full local-to-PR path before publishing anything:
 
@@ -336,12 +336,16 @@ It maps ChromaDB, Grafana, Tempo, provider credentials, and secret backends to t
 
 ## Troubleshooting
 
-If a PM, liveness monitor, or operator reports a stalled worker, use the dedicated [troubleshooting guide for stalled workers](docs/guides/troubleshooting-stalled-workers.md) before respawning or deleting worktrees. It walks through live task/PR evidence, active versus blocked versus stale classifications, safe recovery actions, and the handoff fields future workers need.
+Start with the [setup troubleshooting matrix](docs/onboarding/setup-troubleshooting-matrix.md) when bootstrap, package-manager, Corepack, GitHub auth, port, generated-file, lock-file, Docker service, secret-backend, or preflight checks fail. It maps each symptom to the likely cause, diagnostic command, remediation, verification command, and evidence to include in handoffs.
+
+If a PM, liveness monitor, or operator reports a stalled worker after setup succeeds, use the dedicated [troubleshooting guide for stalled workers](docs/guides/troubleshooting-stalled-workers.md) before respawning or deleting worktrees. It walks through live task/PR evidence, active versus blocked versus stale classifications, safe recovery actions, and the handoff fields future workers need.
 
 - [ ] `npm install` fails with an engine error:
+  - Follow the matrix row for Node engine failures.
   - Check `node --version` against the root `engines.node` range.
   - Re-run the Corepack commands in the prerequisites section and `npm run check:package-manager`.
 - [ ] `npm run check:package-manager` fails:
+  - Follow the matrix row for package-manager mismatches.
   - Run `corepack enable npm`.
   - Run `corepack prepare "$(node -p "require('./package.json').packageManager")" --activate`.
   - Confirm plain `npm --version` matches the root `packageManager` pin.
@@ -356,6 +360,7 @@ If a PM, liveness monitor, or operator reports a stalled worker, use the dedicat
   - Prefer `--base-dir /absolute/path/to/project` for `frankenbeast chat-server`, `frankenbeast network`, and `frankenbeast beasts-daemon`.
   - Use `FBEAST_ROOT` only for callers that construct Beast services or dispatch built-in Beast runs without an explicit root.
 - [ ] Docker services fail to start:
+  - Follow the matrix row for optional Docker service failures.
   - Check that Docker is running.
   - Confirm `GRAFANA_PASSWORD` is set to a unique non-default value before starting the full compose stack.
   - Use `docker compose ps` and service logs to inspect failures.

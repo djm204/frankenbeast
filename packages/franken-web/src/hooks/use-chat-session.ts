@@ -25,6 +25,7 @@ import {
   preserveLocalRecoveryMessages,
   sessionHasCostTelemetry,
   sessionHasTokenTelemetry,
+  shouldApplySocketEvent,
   updateReceipt,
   type PendingSend,
 } from './chat-session-state';
@@ -134,6 +135,8 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   const lastMessageRef = useRef<{ clientMessageId: string; content: string } | null>(null);
   const errorActionRef = useRef(new Map<string, ChatErrorAction>());
   const approvalResolvingRef = useRef(false);
+  const processedSocketEventIdsRef = useRef<Set<string>>(new Set());
+  const replayCursorsRef = useRef<Map<string, number>>(new Map());
 
   function addErrorBanner(banner: ChatErrorBanner) {
     errorActionRef.current.set(banner.id, banner.action);
@@ -267,6 +270,8 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     setTokenTelemetryStatus('unavailable');
     setErrorBanners([]);
     errorActionRef.current.clear();
+    processedSocketEventIdsRef.current.clear();
+    replayCursorsRef.current.clear();
     setStatus('connecting');
     setConnectionStatus(typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'connecting');
 
@@ -415,6 +420,13 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       }
 
       const payload = parsed.data;
+      if (!shouldApplySocketEvent(
+        payload,
+        processedSocketEventIdsRef.current,
+        replayCursorsRef.current,
+      )) {
+        return;
+      }
 
       switch (payload.type) {
         case 'session.ready':

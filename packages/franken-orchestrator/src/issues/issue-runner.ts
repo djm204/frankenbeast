@@ -22,6 +22,7 @@ import type { BeastResult } from '../types.js';
 import type { CliSkillExecutor } from '../skills/cli-skill-executor.js';
 import type { CliSkillConfig } from '../skills/cli-types.js';
 import type { PrCreator } from '../closure/pr-creator.js';
+import { redactSensitiveText } from '../logging/redaction.js';
 
 export interface IssueRuntimeArtifacts {
   readonly planName: string;
@@ -182,6 +183,14 @@ export interface IssueWorkerCardProcessSnapshot {
   readonly blockerCategory?: IssueStuckRunBlockerCategory | undefined;
   /** Human-readable wait reason, e.g. provider queue, CI checks, or approval token. */
   readonly waitingOn?: string | undefined;
+  /** Supervisor/dispatcher exit reason preserved from the last run/attempt. */
+  readonly exitReason?: string | undefined;
+  /** Other currently live PIDs observed for the same worker card. */
+  readonly siblingPids?: readonly number[] | undefined;
+  /** Existing PR URL that already owns this worker's issue/branch, if observed. */
+  readonly activePrUrl?: string | undefined;
+  /** Existing worktree path that already owns this worker's issue/branch, if observed. */
+  readonly activeWorktreePath?: string | undefined;
   /** Monotonic heartbeat sequence recorded by the heartbeat writer. */
   readonly heartbeatSequence?: number | undefined;
   /** Writer/reader source for diagnostics when heartbeat state is stale or regressive. */
@@ -220,9 +229,32 @@ export interface IssueStuckRunWatchdogFinding {
   readonly stateTransitionAgeMs?: number | undefined;
   readonly processStatus: 'alive' | 'dead' | 'unknown';
   readonly kanbanState: string;
+  readonly exitReason: string;
+  readonly restartDisposition: IssueWorkerRestartDisposition;
+  readonly nextAction: IssueWorkerRestartNextAction;
   readonly evidence: readonly string[];
   readonly recommendedAction: string;
   readonly message: string;
+}
+
+export type IssueWorkerRestartDisposition = 'terminal' | 'retryable' | 'hitl';
+
+export type IssueWorkerRestartNextAction =
+  | 'no-op'
+  | 'restart-once'
+  | 'defer-with-evidence'
+  | 'replace-with-doctor'
+  | 'suppress-duplicate-respawn';
+
+export interface IssueWorkerCrashOnlyRestartContract {
+  readonly disposition: IssueWorkerRestartDisposition;
+  readonly nextAction: IssueWorkerRestartNextAction;
+  readonly exitReason: string;
+  readonly pid: number;
+  readonly heartbeatAgeMs?: number | undefined;
+  readonly processStatus: IssueStuckRunWatchdogFinding['processStatus'];
+  readonly kanbanState: string;
+  readonly evidence: readonly string[];
 }
 
 export interface WorkerHeartbeatMonotonicityFinding {
@@ -724,7 +756,9 @@ function explicitProcessCrash(snapshot: IssueWorkerCardProcessSnapshot): boolean
 }
 
 function redactStuckRunEvidenceText(value: string): string {
-  return value
+  return redactSensitiveText(value)
+    .replace(/\b([A-Za-z0-9_]*(?:SECRET|PASSWORD|CREDENTIAL)[A-Za-z0-9_]*|[A-Za-z0-9_]*API[_-]?KEY[A-Za-z0-9_]*)\s*:\s*(?:"[^"]*"|'[^']*'|[^\r\n]*)/gi, '$1=<redacted>')
+    .replace(/\b([A-Za-z0-9_]*(?:SECRET|PASSWORD|CREDENTIAL)[A-Za-z0-9_]*|[A-Za-z0-9_]*API[_-]?KEY[A-Za-z0-9_]*)\s*=\s*\S+/gi, '$1=<redacted>')
     .replace(/\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[opusr]_[A-Za-z0-9_.-]{12,})\b/g, '[REDACTED_TOKEN]')
     .replace(/\b(sk|xox[baprs]?|hf|glpat)-[A-Za-z0-9._/-]+\b/g, '$1-[REDACTED]')
     .replace(/\b([A-Za-z0-9_-]{20,})\.([A-Za-z0-9_-]{20,})\.([A-Za-z0-9_-]{20,})\b/g, '[REDACTED_JWT]')
@@ -736,13 +770,14 @@ function normalizeStuckRunBlockerCategory(
   snapshot: IssueWorkerCardProcessSnapshot,
 ): IssueStuckRunBlockerCategory {
   const status = snapshot.status?.trim().toLowerCase() ?? '';
-  if (snapshot.alive === false) return 'process-crash';
   if (CRASH_WORKER_CARD_STATUSES.has(status)) return 'process-crash';
   if (snapshot.blockerCategory && snapshot.blockerCategory !== 'unknown') return snapshot.blockerCategory;
   const text = `${snapshot.status ?? ''} ${snapshot.waitingOn ?? ''}`.toLowerCase();
-  if (/\bapproval\b|\bhitl\b|\bhuman\b|approval[- ]?token|pending approval|operator approval|approval-cop|approve/.test(text)) return 'approval-gate';
+  if (/\bapproval\b|\bhitl\b|\bhuman\b|approval[- ]?token|pending[_ -]approval|operator approval|approval-cop|approve/.test(text)) return 'approval-gate';
+  if (snapshot.alive === false && /\b(crash(?:ed|ing)?|exit(?:ed|ing)?|dead|pid|fail(?:ed|ure|ing)?)\b/.test(text)) return 'process-crash';
   if (/provider|codex|rate limit|quota|llm|model/.test(text)) return 'provider-wait';
   if (/\bci\b|ci[- ]?check|status check|check run|workflow|merge queue|github actions?/.test(text)) return 'ci-wait';
+  if (snapshot.alive === false) return 'process-crash';
   if (/\b(crash(?:ed|ing)?|exit(?:ed|ing)?|dead|pid|fail(?:ed|ure|ing)?)\b/.test(text)) return 'process-crash';
   if (/dispatcher|kanban|current_run|current run|respawn|heartbeat/.test(text)) return 'dispatcher-bug';
   return 'unknown';
@@ -781,6 +816,239 @@ function knownLongRunningWait(category: IssueStuckRunBlockerCategory): boolean {
   return category === 'ci-wait' || category === 'provider-wait';
 }
 
+function normalizedExitReason(snapshot: IssueWorkerCardProcessSnapshot, category: IssueStuckRunBlockerCategory): string {
+  const explicit = snapshot.exitReason?.trim();
+  if (explicit) return explicit;
+  if (snapshot.alive === false) return 'process_not_alive';
+  const status = snapshot.status?.trim().toLowerCase();
+  if (status && CRASH_WORKER_CARD_STATUSES.has(status)) return status;
+  if (category === 'process-crash') return 'process_crash';
+  return 'unknown';
+}
+
+function liveSiblingPidsByCardId(snapshots: readonly IssueWorkerCardProcessSnapshot[]): Map<string, number[]> {
+  const byCard = new Map<string, Set<number>>();
+  for (const snapshot of snapshots) {
+    const cardId = snapshot.cardId.trim();
+    const status = snapshot.status?.trim().toLowerCase();
+    if (!cardId
+      || snapshot.alive === false
+      || (status && TERMINAL_WORKER_CARD_STATUSES.has(status))
+      || !Number.isSafeInteger(snapshot.pid)
+      || snapshot.pid <= 0) continue;
+    const pids = byCard.get(cardId) ?? new Set<number>();
+    pids.add(snapshot.pid);
+    byCard.set(cardId, pids);
+  }
+  return new Map([...byCard].map(([cardId, pids]) => [cardId, [...pids].sort((a, b) => a - b)]));
+}
+
+function siblingPidsForSnapshot(
+  snapshot: IssueWorkerCardProcessSnapshot,
+  livePidsByCardId: ReadonlyMap<string, readonly number[]>,
+): number[] {
+  const explicit = snapshot.siblingPids ?? [];
+  const derived = livePidsByCardId.get(snapshot.cardId.trim()) ?? [];
+  return [...new Set([...explicit, ...derived]
+    .filter((pid) => Number.isSafeInteger(pid) && pid > 0 && pid !== snapshot.pid))]
+    .sort((a, b) => a - b);
+}
+
+function normalizeKanbanState(status: string): string {
+  return status.trim().toLowerCase().replace(/[\s_]+/g, '-');
+}
+
+function terminalKanbanState(status: string): boolean {
+  return TERMINAL_WORKER_CARD_STATUSES.has(normalizeKanbanState(status));
+}
+
+function crashKanbanState(status: string): boolean {
+  return CRASH_WORKER_CARD_STATUSES.has(normalizeKanbanState(status));
+}
+
+function intentionalNonRetryExitReason(exitReason: string): boolean {
+  return /^(clean_exit|operator_stop|operator_kill|exit_code_0|completed|cancelled|canceled|stopped|manual_stop|manual_kill)$/i.test(exitReason.trim());
+}
+
+function operatorControlledSignalExitReason(exitReason: string): boolean {
+  return /^signal_(?:sigterm|sigint|sighup)$/i.test(exitReason.trim());
+}
+
+function dispatcherRestartExitReason(exitReason: string): boolean {
+  return /^dispatcher_restart_/i.test(exitReason.trim());
+}
+
+export function buildWorkerCrashOnlyRestartContract(
+  snapshot: IssueWorkerCardProcessSnapshot,
+  input: {
+    readonly category: IssueStuckRunBlockerCategory;
+    readonly processStatus: IssueStuckRunWatchdogFinding['processStatus'];
+    readonly heartbeatAgeMs?: number | undefined;
+    readonly kanbanState: string;
+  },
+): IssueWorkerCrashOnlyRestartContract {
+  const rawExitReason = normalizedExitReason(snapshot, input.category);
+  const exitReason = redactStuckRunEvidenceText(rawExitReason);
+  const kanbanState = normalizeKanbanState(input.kanbanState) || 'unknown';
+  const siblingPids = siblingPidsForSnapshot(snapshot, new Map());
+  const activePrUrl = snapshot.activePrUrl?.trim();
+  const activeWorktreePath = snapshot.activeWorktreePath?.trim();
+  const redactedActivePrUrl = activePrUrl ? redactStuckRunEvidenceText(activePrUrl) : undefined;
+  const redactedActiveWorktreePath = activeWorktreePath ? redactStuckRunEvidenceText(activeWorktreePath) : undefined;
+  const evidence = [
+    `exitReason=${exitReason}`,
+    `pid=${snapshot.pid}`,
+    `heartbeatAgeMs=${input.heartbeatAgeMs ?? 'unknown'}`,
+    ...(redactedActivePrUrl ? [`activePr=${redactedActivePrUrl}`] : []),
+    ...(redactedActiveWorktreePath ? [`activeWorktree=${redactedActiveWorktreePath}`] : []),
+  ];
+  const base = {
+    exitReason,
+    pid: snapshot.pid,
+    ...(input.heartbeatAgeMs !== undefined ? { heartbeatAgeMs: input.heartbeatAgeMs } : {}),
+    processStatus: input.processStatus,
+    kanbanState,
+  };
+
+  if (siblingPids.length > 0) {
+    return {
+      disposition: 'hitl',
+      nextAction: 'suppress-duplicate-respawn',
+      ...base,
+      evidence: [...evidence, `siblingPids=${siblingPids.join(',')}`],
+    };
+  }
+
+  if (rawExitReason === 'spawn_failed' || /^(?:spawn(?:[_ -]?(?:fail(?:ed|ure)?|error))?\b|start[_ -]?failed\b|setup\b|enoent\b|eacces\b|protocol[_ -]?violation\b)/i.test(rawExitReason.trim())) {
+    return {
+      disposition: 'hitl',
+      nextAction: 'replace-with-doctor',
+      ...base,
+      evidence,
+    };
+  }
+
+  if (operatorControlledSignalExitReason(rawExitReason)) {
+    return {
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      ...base,
+      evidence,
+    };
+  }
+
+  if (intentionalNonRetryExitReason(rawExitReason) || (terminalKanbanState(kanbanState) && !crashKanbanState(kanbanState))) {
+    return {
+      disposition: 'terminal',
+      nextAction: 'no-op',
+      ...base,
+      evidence,
+    };
+  }
+
+  if (
+    kanbanState === 'blocked'
+    || kanbanState === 'pending-approval'
+    || input.category === 'approval-gate'
+    || input.category === 'dispatcher-bug'
+    || dispatcherRestartExitReason(rawExitReason)
+    || knownLongRunningWait(input.category)
+  ) {
+    return {
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      ...base,
+      evidence,
+    };
+  }
+
+  if (activePrUrl || activeWorktreePath) {
+    return {
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      ...base,
+      evidence,
+    };
+  }
+
+  if (input.processStatus === 'dead') {
+    return {
+      disposition: 'retryable',
+      nextAction: 'restart-once',
+      ...base,
+      evidence,
+    };
+  }
+  return {
+    disposition: 'hitl',
+    nextAction: 'defer-with-evidence',
+    ...base,
+    evidence,
+  };
+}
+
+function deferRemediationForStuckRun(category: IssueStuckRunBlockerCategory): string {
+  switch (category) {
+    case 'approval-gate':
+      return 'Route the exact pending approval command/token to approval-cop or a human.';
+    case 'ci-wait':
+      return 'Check live CI/run status and merge queue state, rerun failed checks or unblock shared CI.';
+    case 'provider-wait':
+      return 'Check provider quota/rate-limit status and the latest model/bot response; retry later or switch provider only after preserving current work evidence.';
+    case 'dispatcher-bug':
+      return 'Audit Kanban current_run/status/heartbeat consistency and repair dispatcher metadata before unblocking the card.';
+    default:
+      return 'Open a Doctor card with heartbeat/output/tool/state evidence and verify process liveness.';
+  }
+}
+
+function restartContractSafetyRank(contract: IssueWorkerCrashOnlyRestartContract): number {
+  switch (contract.disposition) {
+    case 'hitl':
+      return 2;
+    case 'terminal':
+    case 'retryable':
+      return 1;
+  }
+}
+
+function snapshotRecencyMs(snapshot: IssueWorkerCardProcessSnapshot): number {
+  return Math.max(
+    0,
+    ...[
+      snapshot.lastHeartbeatAt,
+      snapshot.lastOutputAt,
+      snapshot.lastToolActivityAt,
+      snapshot.lastStateTransitionAt,
+      snapshot.startedAt,
+    ].map((value) => {
+      if (value === undefined) return 0;
+      const date = value instanceof Date ? value : new Date(value);
+      const parsed = date.getTime();
+      return Number.isFinite(parsed) ? parsed : 0;
+    }),
+  );
+}
+
+function remediationForCrashOnlyRestartContract(
+  contract: IssueWorkerCrashOnlyRestartContract,
+  category: IssueStuckRunBlockerCategory,
+  processStatus: IssueStuckRunWatchdogFinding['processStatus'],
+): string {
+  switch (contract.nextAction) {
+    case 'replace-with-doctor':
+      return 'Open or route to a Doctor card with the preserved setup/protocol failure evidence; do not blind-respawn this worker.';
+    case 'defer-with-evidence':
+      return `${deferRemediationForStuckRun(category)} Preserve the wait/crash evidence and defer to the active HITL, CI, provider, or dispatcher investigation gate; do not auto-respawn over the blocker.`;
+    case 'suppress-duplicate-respawn':
+      return 'Suppress duplicate respawn, keep the surviving worker PID/run id as owner, and repair stale duplicate metadata before any restart.';
+    case 'restart-once':
+      return remediationForStuckRun(category, processStatus);
+    case 'no-op':
+      return 'No restart action is required for this terminal worker state; keep the evidence for audit only.';
+  }
+}
+
 export function detectStuckRunWatchdogFindings(
   snapshots: readonly IssueWorkerCardProcessSnapshot[],
   options: IssueStuckRunWatchdogOptions = {},
@@ -792,6 +1060,10 @@ export function detectStuckRunWatchdogFindings(
   const staleStateTransitionMs = options.staleStateTransitionMs ?? DEFAULT_STUCK_RUN_STALE_STATE_TRANSITION_MS;
   const longRunningWaitGraceMs = options.longRunningWaitGraceMs ?? DEFAULT_STUCK_RUN_WAIT_GRACE_MS;
   const findings: IssueStuckRunWatchdogFinding[] = [];
+  const liveSiblings = liveSiblingPidsByCardId(snapshots);
+  const deadFindingsByCardId = new Map<string, IssueStuckRunWatchdogFinding>();
+  const deadFindingKeysByCardId = new Map<string, { readonly safetyRank: number; readonly recencyMs: number; readonly index: number }>();
+  let findingIndex = 0;
 
   for (const snapshot of snapshots) {
     if (!snapshot.cardId.trim()) continue;
@@ -846,11 +1118,23 @@ export function detectStuckRunWatchdogFindings(
       `blockerCategory=${category}`,
     ];
     if (snapshot.waitingOn) evidence.push(`waitingOn=${redactStuckRunEvidenceText(snapshot.waitingOn)}`);
+    const siblingPids = siblingPidsForSnapshot(snapshot, liveSiblings);
+    const restartSnapshot = siblingPids.length > 0
+      ? { ...snapshot, siblingPids }
+      : snapshot;
+    const restartContract = buildWorkerCrashOnlyRestartContract(restartSnapshot, {
+      category,
+      processStatus,
+      ...(heartbeatAgeMs !== undefined ? { heartbeatAgeMs } : {}),
+      kanbanState: status ?? 'unknown',
+    });
+    const normalizedCardId = snapshot.cardId.trim();
+    evidence.push(...restartContract.evidence);
 
-    const recommendedAction = remediationForStuckRun(category, processStatus);
+    const recommendedAction = remediationForCrashOnlyRestartContract(restartContract, category, processStatus);
     const confidence = confidenceForStuckRun(category, staleCount, processStatus);
-    findings.push({
-      cardId: snapshot.cardId.trim(),
+    const finding: IssueStuckRunWatchdogFinding = {
+      cardId: normalizedCardId,
       pid: snapshot.pid,
       ...(snapshot.runId ? { runId: snapshot.runId } : {}),
       ...(snapshot.issueNumber !== undefined ? { issueNumber: snapshot.issueNumber } : {}),
@@ -864,13 +1148,40 @@ export function detectStuckRunWatchdogFindings(
       ...(stateTransitionAgeMs !== undefined ? { stateTransitionAgeMs } : {}),
       processStatus,
       kanbanState: status ?? 'unknown',
+      exitReason: restartContract.exitReason,
+      restartDisposition: restartContract.disposition,
+      nextAction: restartContract.nextAction,
       evidence,
       recommendedAction,
       message: `Worker card ${snapshot.cardId.trim()} appears stuck (${category}, ${confidence} confidence): ${recommendedAction}`,
-    });
+    };
+
+    if (processStatus === 'dead') {
+      const candidateKey = {
+        safetyRank: restartContractSafetyRank(restartContract),
+        recencyMs: snapshotRecencyMs(snapshot),
+        index: findingIndex,
+      };
+      const existingKey = deadFindingKeysByCardId.get(normalizedCardId);
+      const candidateIsSafer = existingKey === undefined
+        || candidateKey.safetyRank > existingKey.safetyRank
+        || (candidateKey.safetyRank === existingKey.safetyRank && candidateKey.recencyMs > existingKey.recencyMs)
+        || (
+          candidateKey.safetyRank === existingKey.safetyRank
+          && candidateKey.recencyMs === existingKey.recencyMs
+          && candidateKey.index > existingKey.index
+        );
+      if (candidateIsSafer) {
+        deadFindingKeysByCardId.set(normalizedCardId, candidateKey);
+        deadFindingsByCardId.set(normalizedCardId, finding);
+      }
+    } else {
+      findings.push(finding);
+    }
+    findingIndex += 1;
   }
 
-  return findings.sort((a, b) => a.cardId.localeCompare(b.cardId));
+  return [...findings, ...deadFindingsByCardId.values()].sort((a, b) => a.cardId.localeCompare(b.cardId));
 }
 
 function isoTimestamp(value: string | number | Date | undefined): string | undefined {

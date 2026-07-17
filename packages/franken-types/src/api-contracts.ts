@@ -17,7 +17,12 @@ export const PendingApprovalSchema = z.object({
   affectedFiles: z.array(z.string()).optional(),
   sessionId: z.string().optional(),
 });
-export type PendingApproval = z.infer<typeof PendingApprovalSchema>;
+export type PendingApproval = z.infer<typeof PendingApprovalSchema> & {
+  approvalToken?: string | undefined;
+  requester?: string | undefined;
+  workerId?: string | undefined;
+  workdir?: string | undefined;
+};
 
 export const TranscriptMessageSchema = z.object({
   id: z.string().optional(),

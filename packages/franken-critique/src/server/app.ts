@@ -121,7 +121,21 @@ export function createCritiqueApp(options: CritiqueAppOptions = {}): Hono {
 
   // POST /v1/review — submit code for critique
   app.post('/v1/review', async (c) => {
-    const body = await c.req.json();
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json(
+        {
+          error: {
+            message: 'Invalid JSON request body',
+            type: 'invalid_json',
+          },
+        },
+        400,
+      );
+    }
+
     const parsed = ReviewRequestSchema.safeParse(body);
 
     if (!parsed.success) {
