@@ -44,11 +44,13 @@ describe('issue #1664 first-PR agent runbook', () => {
     }
 
     for (const command of [
-      'gh issue view 1664 --repo djm204/frankenbeast',
+      'ISSUE_NUMBER="${ISSUE_NUMBER:?set the assigned issue number}"',
+      'gh issue view "$ISSUE_NUMBER" --repo djm204/frankenbeast',
       'gh pr list --repo djm204/frankenbeast --state open',
-      'npm run issue:worktree -- --dry-run --issue 1664',
-      'git worktree add ../resolve-wt/issue-1664 -b resolve/issue-1664-feat-onboarding-add-first-pr-agent-runbook origin/main',
-      '[ -f AGENTS.md ] && sed -n \'1,220p\' AGENTS.md',
+      'python3 - <<\'PY\'',
+      'for relative in [\'tasks/resolve-issues-shared-lessons.md\', \'tasks/lessons.md\', \'AGENTS.md\']:',
+      'npm run issue:worktree -- --dry-run --issue "$ISSUE_NUMBER"',
+      'git worktree add "../resolve-wt/issue-$ISSUE_NUMBER" -b "$BRANCH_NAME" origin/main',
       'git config extensions.worktreeConfig true',
       'git config --worktree user.name "David Mendez"',
       'git diff --cached --check',
@@ -59,10 +61,11 @@ describe('issue #1664 first-PR agent runbook', () => {
       'npm run build',
       'git push -u origin HEAD',
       'gh pr create',
-      'PR_NUMBER=2558',
+      'PR_NUMBER="${PR_NUMBER:?set the pull request number}"',
       'gh pr comment "$PR_NUMBER" --repo djm204/frankenbeast --body "@codex review"',
+      'VERIFIED_HEAD="$(gh pr view "$PR_NUMBER" --repo djm204/frankenbeast --json headRefOid --jq .headRefOid)"',
       'gh pr checks "$PR_NUMBER" --repo djm204/frankenbeast',
-      'gh pr merge "$PR_NUMBER" --repo djm204/frankenbeast --squash --delete-branch',
+      'gh pr merge "$PR_NUMBER" --repo djm204/frankenbeast --squash --delete-branch --match-head-commit "$VERIFIED_HEAD"',
     ]) {
       expect(runbook).toContain(command);
     }
@@ -79,6 +82,8 @@ describe('issue #1664 first-PR agent runbook', () => {
       'usage-limit text',
       'a clean comment that predates your latest push',
       'Stop at the configured review-invocation cap and ask for HITL approval before exceeding it.',
+      'Run it only after the PM/HITL reviewer has authorized push and PR creation for the assigned issue.',
+      'authorized Codex review for this PR',
       'push, merge, delete a branch, close an issue, edit labels, or rerun over the Codex cap',
       'local worktree state includes unrelated staged/dirty files you cannot safely separate',
       'the next action would require secrets or access to production systems',

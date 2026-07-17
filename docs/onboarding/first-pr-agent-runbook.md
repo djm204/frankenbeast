@@ -20,8 +20,9 @@ Stop and hand back to the PM/HITL reviewer when any checklist item fails.
 ### 1. Confirm assignment and duplicate state
 
 ```bash
-gh issue view 1664 --repo djm204/frankenbeast --json number,title,state,labels,body,url
-gh pr list --repo djm204/frankenbeast --state open --search "1664 OR issue-1664" --json number,title,headRefName,url,state
+ISSUE_NUMBER="${ISSUE_NUMBER:?set the assigned issue number}"
+gh issue view "$ISSUE_NUMBER" --repo djm204/frankenbeast --json number,title,state,labels,body,url
+gh pr list --repo djm204/frankenbeast --state open --search "$ISSUE_NUMBER OR issue-$ISSUE_NUMBER" --json number,title,headRefName,url,state
 ```
 
 Continue only if the issue is open and no open PR already owns it. If an open PR exists, resume that PR only when the PM explicitly assigns it to you; otherwise stop and report the duplicate.
@@ -29,9 +30,15 @@ Continue only if the issue is open and no open PR already owns it. If an open PR
 ### 2. Read local policy before editing
 
 ```bash
-[ -f tasks/resolve-issues-shared-lessons.md ] && sed -n '1,220p' tasks/resolve-issues-shared-lessons.md
-[ -f tasks/lessons.md ] && sed -n '1,220p' tasks/lessons.md
-[ -f AGENTS.md ] && sed -n '1,220p' AGENTS.md
+python3 - <<'PY'
+from pathlib import Path
+
+for relative in ['tasks/resolve-issues-shared-lessons.md', 'tasks/lessons.md', 'AGENTS.md']:
+    path = Path(relative)
+    if path.exists():
+        print(f'\n--- {relative} ---')
+        print(path.read_text())
+PY
 sed -n '1,220p' ONBOARDING.md
 sed -n '1,180p' docs/onboarding/coding-agent-pr-etiquette.md
 ```
@@ -43,17 +50,21 @@ Apply the most specific current repository guidance. If you enter a nested packa
 Prefer the repository helper when it is available:
 
 ```bash
-npm run issue:worktree -- --dry-run --issue 1664 --title "feat(onboarding): add first-PR agent runbook"
-npm run issue:worktree -- --issue 1664 --title "feat(onboarding): add first-PR agent runbook"
-cd ../resolve-wt/issue-1664
+ISSUE_NUMBER="${ISSUE_NUMBER:?set the assigned issue number}"
+ISSUE_TITLE="${ISSUE_TITLE:?set a short issue title}"
+npm run issue:worktree -- --dry-run --issue "$ISSUE_NUMBER" --title "$ISSUE_TITLE"
+npm run issue:worktree -- --issue "$ISSUE_NUMBER" --title "$ISSUE_TITLE"
+cd "../resolve-wt/issue-$ISSUE_NUMBER"
 ```
 
 Manual equivalent:
 
 ```bash
+ISSUE_NUMBER="${ISSUE_NUMBER:?set the assigned issue number}"
+BRANCH_NAME="${BRANCH_NAME:?set the issue branch name}"
 git fetch origin main --prune
-git worktree add ../resolve-wt/issue-1664 -b resolve/issue-1664-feat-onboarding-add-first-pr-agent-runbook origin/main
-cd ../resolve-wt/issue-1664
+git worktree add "../resolve-wt/issue-$ISSUE_NUMBER" -b "$BRANCH_NAME" origin/main
+cd "../resolve-wt/issue-$ISSUE_NUMBER"
 git config extensions.worktreeConfig true
 git config --worktree user.name "David Mendez"
 git config --worktree user.email "me@davidmendez.dev"
@@ -102,6 +113,8 @@ Use the [test command decision tree](test-command-decision-tree.md) when the tou
 
 ### 7. Push and open the PR
 
+This step mutates remote GitHub state. Run it only after the PM/HITL reviewer has authorized push and PR creation for the assigned issue.
+
 ```bash
 git push -u origin HEAD
 gh pr create \
@@ -129,10 +142,10 @@ The PR title and every commit subject must be Conventional Commit formatted. The
 
 ### 8. Trigger the real GitHub Codex gate
 
-Trigger after the PR is open and the current head contains the intended fix:
+Trigger after the PR is open, the current head contains the intended fix, and the PM/HITL reviewer has authorized Codex review for this PR:
 
 ```bash
-PR_NUMBER=2558
+PR_NUMBER="${PR_NUMBER:?set the pull request number}"
 gh pr comment "$PR_NUMBER" --repo djm204/frankenbeast --body "@codex review"
 ```
 
@@ -150,9 +163,10 @@ When Codex reports findings, fix only the issue-scoped problem, push, reply to t
 Merge only when all required checks are green and Codex is clean for the current head:
 
 ```bash
-PR_NUMBER=2558
+PR_NUMBER="${PR_NUMBER:?set the pull request number}"
+VERIFIED_HEAD="$(gh pr view "$PR_NUMBER" --repo djm204/frankenbeast --json headRefOid --jq .headRefOid)"
 gh pr checks "$PR_NUMBER" --repo djm204/frankenbeast
-gh pr merge "$PR_NUMBER" --repo djm204/frankenbeast --squash --delete-branch
+gh pr merge "$PR_NUMBER" --repo djm204/frankenbeast --squash --delete-branch --match-head-commit "$VERIFIED_HEAD"
 ```
 
 If you are not authorized to merge, leave a handoff comment with current head SHA, CI status, Codex status, verification already run, and the exact next safe command.
