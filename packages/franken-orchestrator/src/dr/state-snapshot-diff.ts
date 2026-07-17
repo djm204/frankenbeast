@@ -1,0 +1,612 @@
+import { createHash } from 'node:crypto';
+import { readdir, readFile, stat } from 'node:fs/promises';
+import { basename, join, relative, sep } from 'node:path';
+
+import { redactLogData } from '../logging/redaction.js';
+
+export type StateSnapshotDiffSubsystem = 'tasks' | 'approvals' | 'workerIds' | 'memory' | 'cron';
+export type StateSnapshotDiffChangeType = 'added' | 'removed' | 'changed';
+
+export interface StateSnapshotDiffRecord {
+  readonly id: string;
+  readonly value: unknown;
+  readonly compareValue: unknown;
+  readonly source: string;
+  readonly workerReferenceOnly?: boolean;
+}
+
+export interface StateSnapshotRecordChange {
+  readonly type: StateSnapshotDiffChangeType;
+  readonly id: string;
+  readonly before?: unknown;
+  readonly after?: unknown;
+  readonly changedFields?: readonly string[];
+  readonly beforeSource?: string;
+  readonly afterSource?: string;
+}
+
+export interface StateSnapshotSubsystemDiff {
+  readonly subsystem: StateSnapshotDiffSubsystem;
+  readonly added: readonly StateSnapshotRecordChange[];
+  readonly removed: readonly StateSnapshotRecordChange[];
+  readonly changed: readonly StateSnapshotRecordChange[];
+}
+
+export interface StateSnapshotDiffSummary {
+  readonly added: number;
+  readonly removed: number;
+  readonly changed: number;
+  readonly bySubsystem: Readonly<Record<StateSnapshotDiffSubsystem, {
+    readonly added: number;
+    readonly removed: number;
+    readonly changed: number;
+  }>>;
+}
+
+export interface StateSnapshotDirectoryDiffReport {
+  readonly command: 'dr snapshot-diff';
+  readonly beforePath: string;
+  readonly afterPath: string;
+  readonly summary: StateSnapshotDiffSummary;
+  readonly textSummary: string;
+  readonly diffs: readonly StateSnapshotSubsystemDiff[];
+}
+
+type MutableSubsystemRecords = Record<StateSnapshotDiffSubsystem, Map<string, StateSnapshotDiffRecord>>;
+
+const SUBSYSTEMS: readonly StateSnapshotDiffSubsystem[] = ['tasks', 'approvals', 'workerIds', 'memory', 'cron'];
+const MAX_JSON_FILE_BYTES = 4 * 1024 * 1024;
+const MAX_DIRECTORY_FILES = 1_000;
+
+function emptyRecords(): MutableSubsystemRecords {
+  return {
+    tasks: new Map(),
+    approvals: new Map(),
+    workerIds: new Map(),
+    memory: new Map(),
+    cron: new Map(),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+  }
+  if (isRecord(value)) {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function redactObjectKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => redactObjectKeys(item));
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, nested]) => [
+    maskOpaqueSecretLiterals(redactLogData(key) as string),
+    redactObjectKeys(nested),
+  ]));
+}
+
+function redactForOutput(value: unknown): unknown {
+  const redacted = redactObjectKeys(redactLogData(value));
+  return JSON.parse(maskOpaqueSecretLiterals(JSON.stringify(redacted))) as unknown;
+}
+
+function normalizeSnapshotSourcePath(source: string): string {
+  return source.replaceAll(sep, '/').replaceAll('\\', '/');
+}
+
+export function maskOpaqueSecretLiterals(text: string): string {
+  return text
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/gu, '<redacted>')
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{12,}\b/gu, '<redacted>')
+    .replace(/\bsk-[A-Za-z0-9_-]{12,}\b/gu, '<redacted>')
+    .replace(/\bxox[baprs]-[A-Za-z0-9-]{10,}\b/gu, '<redacted>')
+    .replace(/\b([A-Za-z][A-Za-z0-9+.-]*:\/\/(?:[^:\s"'/@]+)?):[^@\s"']+@/gu, '$1:<redacted>@')
+    .replace(/\b((?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/(?:[^:\s"'/@]+)?):[^@\s"']+@/giu, '$1:<redacted>@')
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu, '<redacted-email>')
+    .replace(/\b(?:Bearer|Basic|Bot)\s+[A-Za-z0-9._~+/=-]{8,}\b/giu, (match) => `${match.split(/\s+/u)[0]} <redacted>`)
+    .replace(/((?:^|[\s"'])--(?:api-?key|auth|authorization|bearer|password|secret|token)\s+)[^\s"']+/giu, '$1<redacted>')
+    .replace(/((?:^|[\s"'])--(?:api-?key|auth|authorization|bearer|password|secret|token)=)[^\s"']+/giu, '$1<redacted>')
+    .replace(/("--(?:api-?key|auth|authorization|bearer|password|secret|token)"\s*,\s*")[^"]+/giu, '$1<redacted>');
+}
+
+function shortDigest(value: unknown): string {
+  return createHash('sha256').update(stableStringify(value)).digest('hex').slice(0, 16);
+}
+
+function safeApprovalId(value: unknown): string {
+  return `approval:${shortDigest(value)}`;
+}
+
+function recordId(
+  record: unknown,
+  fallback: string,
+  subsystem?: StateSnapshotDiffSubsystem,
+  options: { readonly preferFallbackOverMutableDisplayName?: boolean; readonly preferFallbackOverMutableWorkerOwner?: boolean } = {},
+): string {
+  if (subsystem === 'approvals' && !isRecord(record)) return safeApprovalId(record);
+  if (subsystem === 'workerIds' && (typeof record === 'string' || typeof record === 'number')) return String(record);
+  if (!isRecord(record)) return fallback;
+  const idKeys = subsystem === 'approvals'
+    ? ['id', 'tokenId', 'token_id', 'approvalId', 'approval_id', 'token', 'value']
+    : subsystem === 'tasks'
+      ? options.preferFallbackOverMutableDisplayName
+        ? ['id', 'taskId', 'task_id', 'cardId', 'card_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key']
+        : ['id', 'taskId', 'task_id', 'cardId', 'card_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key', 'name']
+      : (options.preferFallbackOverMutableDisplayName || options.preferFallbackOverMutableWorkerOwner) && subsystem !== 'workerIds'
+        ? ['id', 'taskId', 'task_id', 'cardId', 'card_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key']
+        : ['id', 'taskId', 'task_id', 'cardId', 'card_id', 'jobId', 'job_id', 'memoryKey', 'memory_key', 'key', 'workerId', 'worker_id', 'currentWorkerId', 'current_worker_id', 'name'];
+  for (const key of idKeys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim() !== '') {
+      const trimmed = value.trim();
+      if (subsystem === 'approvals') return safeApprovalId(trimmed);
+      return trimmed;
+    }
+    if (typeof value === 'number' && Number.isSafeInteger(value)) {
+      if (subsystem === 'approvals') return safeApprovalId(value);
+      return String(value);
+    }
+  }
+  if (subsystem === 'approvals') return safeApprovalId(fallback);
+  return fallback;
+}
+
+function hasRecordIdentityKey(value: Record<string, unknown>): boolean {
+  return [
+    'id',
+    'taskId',
+    'task_id',
+    'jobId',
+    'job_id',
+    'workerId',
+    'worker_id',
+    'currentWorkerId',
+    'current_worker_id',
+    'cardId',
+    'card_id',
+    'memoryKey',
+    'memory_key',
+    'tokenId',
+    'token_id',
+    'approvalId',
+    'approval_id',
+    'key',
+    'name',
+  ].some((key) => key in value);
+}
+
+function sensitiveApprovalValueForComparison(key: string, value: unknown): unknown {
+  if (/^(?:id|approval[-_]?id|token|tokens|value|secret|password|credential|bearer|refresh|access|digest|api[-_]?key)$/iu.test(key)) {
+    return `<sha256:${shortDigest(value)}>`;
+  }
+  return value;
+}
+
+function scopedRecordValue(subsystem: StateSnapshotDiffSubsystem, value: unknown): unknown {
+  if (subsystem !== 'approvals') return value;
+  if (!isRecord(value)) {
+    return { token: '<redacted>' };
+  }
+  return Object.fromEntries(Object.entries(value).map(([key, nested]) => [
+    key,
+    /^(?:id|approval[-_]?id|token|tokens|value|secret|password|credential|bearer|refresh|access|digest|api[-_]?key)$/iu.test(key)
+      ? '<redacted>'
+      : nested,
+  ]));
+}
+
+function scopedRecordCompareValue(subsystem: StateSnapshotDiffSubsystem, value: unknown): unknown {
+  if (subsystem !== 'approvals') return value;
+  if (!isRecord(value)) {
+    return { token: sensitiveApprovalValueForComparison('token', value) };
+  }
+  return Object.fromEntries(Object.entries(value).map(([key, nested]) => [
+    key,
+    sensitiveApprovalValueForComparison(key, nested),
+  ]));
+}
+
+function redactSourceForOutput(subsystem: StateSnapshotDiffSubsystem, source: string): string {
+  const normalized = normalizeSnapshotSourcePath(source);
+  if (subsystem !== 'approvals') return maskOpaqueSecretLiterals(redactLogData(normalized) as string);
+  return normalized.split('/').map((segment) => {
+    if (/^(?:approvals?|approval[-_]?tokens?|tokens?|ledger|state|snapshots?)(?:\.jsonl?)?(?::\d+)?(?::approvals?)?$/iu.test(segment)) {
+      return segment;
+    }
+    return `<sha256:${shortDigest(segment)}>`;
+  }).join('/');
+}
+
+function redactIdForOutput(subsystem: StateSnapshotDiffSubsystem, id: string): string {
+  if (subsystem === 'approvals') return id;
+  return maskOpaqueSecretLiterals(redactLogData(id) as string);
+}
+
+function isGenericCollectionSource(source: string): boolean {
+  return /(?:^|\/)(?:state|index|tasks|cards|kanban|approvals?|approval[-_]?tokens?|tokens?|ledger|workers?|memory|memories|cron|jobs)\.jsonl?(?::\d+)?$/iu.test(normalizeSnapshotSourcePath(source));
+}
+
+function addRecord(
+  records: MutableSubsystemRecords,
+  subsystem: StateSnapshotDiffSubsystem,
+  id: string,
+  value: unknown,
+  source: string,
+): void {
+  const map = records[subsystem];
+  const existing = map.get(id);
+  if (existing === undefined) {
+    map.set(id, { id, value: scopedRecordValue(subsystem, value), compareValue: scopedRecordCompareValue(subsystem, value), source });
+    return;
+  }
+  const valueForOutput = scopedRecordValue(subsystem, value);
+  const compareValue = scopedRecordCompareValue(subsystem, value);
+  if (subsystem === 'workerIds' && existing.workerReferenceOnly) {
+    map.set(id, { id, value: valueForOutput, compareValue, source });
+    return;
+  }
+  if (stableStringify(existing.compareValue) === stableStringify(compareValue)) {
+    return;
+  }
+  let suffix = 2;
+  while (map.has(`${id}#${suffix}`)) suffix += 1;
+  map.set(`${id}#${suffix}`, { id: `${id}#${suffix}`, value: valueForOutput, compareValue, source });
+}
+
+function addWorkerReference(records: MutableSubsystemRecords, workerId: string, source: string): void {
+  if (records.workerIds.has(workerId)) return;
+  records.workerIds.set(workerId, {
+    id: workerId,
+    value: { id: workerId },
+    compareValue: { id: workerId },
+    source,
+    workerReferenceOnly: true,
+  });
+}
+
+function addArrayRecords(
+  records: MutableSubsystemRecords,
+  subsystem: StateSnapshotDiffSubsystem,
+  values: readonly unknown[],
+  source: string,
+): void {
+  values.forEach((value, index) => addRecord(records, subsystem, recordId(value, `${source}[${index}]`, subsystem), value, source));
+}
+
+function addObjectMapRecords(
+  records: MutableSubsystemRecords,
+  subsystem: StateSnapshotDiffSubsystem,
+  values: Record<string, unknown>,
+  source: string,
+): void {
+  Object.entries(values)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .forEach(([key, value]) => {
+      const fallback = subsystem === 'approvals' ? safeApprovalId(key) : key;
+      const recordValue = subsystem === 'approvals' && !isRecord(value)
+        ? { value }
+        : !isRecord(value)
+        ? { [key]: value }
+        : value;
+      const id = subsystem === 'approvals'
+        ? fallback
+        : recordId(recordValue, fallback, subsystem, {
+          preferFallbackOverMutableDisplayName: true,
+          preferFallbackOverMutableWorkerOwner: subsystem !== 'workerIds',
+        });
+      addRecord(records, subsystem, id, recordValue, source);
+    });
+}
+
+function subsystemFromSegment(segment: string): StateSnapshotDiffSubsystem | undefined {
+  const normalized = segment.toLowerCase().replace(/\.jsonl?(?::\d+)?$/iu, '').replace(/(?::\d+)$/u, '');
+  if (/^(?:approvals?|approval[-_]?tokens?|tokens?|ledger)$/iu.test(normalized)) return 'approvals';
+  if (/^(?:tasks?|cards?|kanban)$/iu.test(normalized)) return 'tasks';
+  if (/^(?:workers?|worker[-_]?ids?)$/iu.test(normalized)) return 'workerIds';
+  if (/^(?:memory|memories)$/iu.test(normalized)) return 'memory';
+  if (/^(?:cron|schedule|jobs?)$/iu.test(normalized)) return 'cron';
+  return undefined;
+}
+
+function likelySubsystemFromPath(relativePath: string): StateSnapshotDiffSubsystem | undefined {
+  const normalized = normalizeSnapshotSourcePath(relativePath).toLowerCase();
+  const segments = normalized.split('/').filter((segment) => segment !== '');
+  const basename = segments.at(-1);
+  if (basename !== undefined) {
+    const basenameSubsystem = subsystemFromSegment(basename);
+    if (basenameSubsystem === 'approvals') return basenameSubsystem;
+  }
+  for (const segment of segments.slice(0, -1)) {
+    const subsystem = subsystemFromSegment(segment);
+    if (subsystem !== undefined) return subsystem;
+  }
+  if (basename !== undefined) {
+    const subsystem = subsystemFromSegment(basename);
+    if (subsystem !== undefined) return subsystem;
+    if (/approvals?|tokens?|ledger/.test(basename)) return 'approvals';
+    if (/tasks?|cards?|kanban/.test(basename)) return 'tasks';
+    if (/workers?/.test(basename)) return 'workerIds';
+    if (/memory|memories/.test(basename)) return 'memory';
+    if (/cron|schedule|jobs?/.test(basename)) return 'cron';
+  }
+  return undefined;
+}
+
+function extractWorkerIds(value: unknown, output: Set<string>): void {
+  if (Array.isArray(value)) {
+    for (const item of value) extractWorkerIds(item, output);
+    return;
+  }
+  if (!isRecord(value)) return;
+  for (const [key, nested] of Object.entries(value)) {
+    if (/^(workerIds?|worker_ids?|workerId|worker_id|currentWorkerId|current_worker_id)$/iu.test(key)) {
+      if (typeof nested === 'string' && nested.trim() !== '') output.add(nested);
+      if (Array.isArray(nested)) {
+        for (const item of nested) if (typeof item === 'string' && item.trim() !== '') output.add(item);
+      }
+    }
+    extractWorkerIds(nested, output);
+  }
+}
+
+function extractRecordsFromJson(records: MutableSubsystemRecords, parsed: unknown, source: string): void {
+  const pathSubsystem = likelySubsystemFromPath(source);
+  if (Array.isArray(parsed) && pathSubsystem !== undefined) {
+    addArrayRecords(records, pathSubsystem, parsed, source);
+  } else if (pathSubsystem !== undefined && !isRecord(parsed)) {
+    addRecord(records, pathSubsystem, recordId(parsed, source, pathSubsystem, { preferFallbackOverMutableDisplayName: true }), parsed, source);
+  }
+
+  if (isRecord(parsed)) {
+    const rootArrays: ReadonlyArray<[StateSnapshotDiffSubsystem, readonly string[]]> = [
+      ['tasks', ['tasks', 'cards', 'kanbanCards', 'kanban_cards']],
+      ['approvals', ['approvals', 'approvalTokens', 'approval_tokens', 'tokens', 'ledger']],
+      ['workerIds', ['workerIds', 'worker_ids', 'workers']],
+      ['memory', ['memory', 'memories', 'memoryRecords', 'memory_records']],
+      ['cron', ['cron', 'cronJobs', 'cron_jobs', 'jobs']],
+    ];
+    let foundRootCollection = false;
+    for (const [subsystem, keys] of rootArrays) {
+      if (pathSubsystem !== undefined && (!isGenericCollectionSource(source) || hasExplicitParentSubsystem(source)) && subsystem !== pathSubsystem) continue;
+      for (const key of keys) {
+        const value = parsed[key];
+        if (Array.isArray(value)) {
+          foundRootCollection = true;
+          addArrayRecords(records, subsystem, value, `${source}:${key}`);
+        } else if (isRecord(value)) {
+          foundRootCollection = true;
+          addObjectMapRecords(records, subsystem, value, `${source}:${key}`);
+        }
+      }
+    }
+
+    if (pathSubsystem !== undefined && !foundRootCollection) {
+      const values = Object.values(parsed);
+      if (values.length > 0 && values.every(isRecord) && ((isGenericCollectionSource(source) && !hasExplicitParentSubsystem(source)) || pathSubsystem === 'approvals')) {
+        addObjectMapRecords(records, pathSubsystem, parsed, source);
+      } else if (pathSubsystem !== 'tasks' && !hasRecordIdentityKey(parsed) && values.length > 0 && values.every((value) => !isRecord(value) && !Array.isArray(value)) && (pathSubsystem !== 'approvals' || !looksLikeApprovalRecord(parsed))) {
+        addObjectMapRecords(records, pathSubsystem, parsed, source);
+      } else {
+        addRecord(records, pathSubsystem, recordId(parsed, source, pathSubsystem, { preferFallbackOverMutableDisplayName: true }), parsed, source);
+      }
+    }
+  }
+
+  const workerIds = new Set<string>();
+  extractWorkerIds(parsed, workerIds);
+  for (const workerId of workerIds) {
+    addWorkerReference(records, workerId, source);
+  }
+}
+
+async function collectSnapshotFiles(directory: string, current = directory, collected: string[] = []): Promise<string[]> {
+  if (collected.length > MAX_DIRECTORY_FILES) {
+    throw new Error(`State snapshot directory has too many files; maximum supported JSON/JSONL files is ${MAX_DIRECTORY_FILES}`);
+  }
+  let entries;
+  try {
+    entries = await readdir(current, { withFileTypes: true });
+  } catch (error) {
+    const source = relative(directory, current) || current;
+    throw new Error(`Unable to read state snapshot directory ${sourceForError(source)}: ${errorMessageForOutput(error)}`);
+  }
+  for (const entry of entries) {
+    const path = join(current, entry.name);
+    if (entry.isDirectory()) {
+      await collectSnapshotFiles(directory, path, collected);
+    } else if (entry.isFile() && /\.jsonl?$/iu.test(entry.name)) {
+      collected.push(path);
+      if (collected.length > MAX_DIRECTORY_FILES) {
+        throw new Error(`State snapshot directory has too many files; maximum supported JSON/JSONL files is ${MAX_DIRECTORY_FILES}`);
+      }
+    }
+  }
+  return collected;
+}
+
+function sourceForError(source: string): string {
+  const subsystem = likelySubsystemFromPath(source);
+  const normalized = normalizeSnapshotSourcePath(source);
+  return subsystem === undefined
+    ? maskOpaqueSecretLiterals(redactLogData(normalized) as string)
+    : redactSourceForOutput(subsystem, source);
+}
+
+function errorMessageForOutput(error: unknown): string {
+  if (isRecord(error) && typeof error.code === 'string' && error.code.trim() !== '') {
+    return error.code;
+  }
+  if (error instanceof Error && error.name.trim() !== '') {
+    return error.name;
+  }
+  return 'unknown error';
+}
+
+function hasExplicitParentSubsystem(source: string): boolean {
+  const segments = normalizeSnapshotSourcePath(source).toLowerCase().split('/').filter((segment) => segment !== '');
+  return segments.slice(0, -1).some((segment) => subsystemFromSegment(segment) !== undefined);
+}
+
+function looksLikeApprovalRecord(value: Record<string, unknown>): boolean {
+  return Object.keys(value).some((key) => /^(?:decision|status|state|approved|denied|reason|createdAt|created_at|updatedAt|updated_at|expiresAt|expires_at)$/iu.test(key));
+}
+
+function parseSnapshotFile(raw: string, source: string): ReadonlyArray<{ parsed: unknown; sourceSuffix: string }> {
+  const redactedSource = sourceForError(source);
+  if (source.toLowerCase().endsWith('.jsonl')) {
+    const records: Array<{ parsed: unknown; sourceSuffix: string }> = [];
+    raw.split(/\r?\n/u).forEach((line, index) => {
+      if (line.trim() === '') return;
+      try {
+        records.push({ parsed: JSON.parse(line) as unknown, sourceSuffix: `:${index + 1}` });
+      } catch {
+        throw new Error(`Unable to read state snapshot JSONL ${redactedSource} line ${index + 1}: invalid JSON`);
+      }
+    });
+    return records;
+  }
+
+  try {
+    return [{ parsed: JSON.parse(raw) as unknown, sourceSuffix: '' }];
+  } catch {
+    throw new Error(`Unable to read state snapshot JSON ${redactedSource}: invalid JSON`);
+  }
+}
+
+async function loadSnapshotDirectory(directory: string): Promise<MutableSubsystemRecords> {
+  let rootStat;
+  try {
+    rootStat = await stat(directory);
+  } catch (error) {
+    throw new Error(`Unable to read state snapshot directory ${sourceForError(directory)}: ${errorMessageForOutput(error)}`);
+  }
+  if (!rootStat.isDirectory()) throw new Error(`State snapshot path must be a directory: ${sourceForError(directory)}`);
+  const records = emptyRecords();
+  const files = await collectSnapshotFiles(directory);
+  for (const file of files.sort()) {
+    const source = relative(directory, file) || basename(file);
+    let fileStat;
+    try {
+      fileStat = await stat(file);
+    } catch (error) {
+      throw new Error(`Unable to read state snapshot file ${sourceForError(source)}: ${errorMessageForOutput(error)}`);
+    }
+    if (fileStat.size > MAX_JSON_FILE_BYTES) {
+      throw new Error(`State snapshot file is too large: ${sourceForError(source)}`);
+    }
+    let raw;
+    try {
+      raw = await readFile(file, 'utf8');
+    } catch (error) {
+      throw new Error(`Unable to read state snapshot file ${sourceForError(source)}: ${errorMessageForOutput(error)}`);
+    }
+    if (Buffer.byteLength(raw, 'utf8') > MAX_JSON_FILE_BYTES) {
+      throw new Error(`State snapshot file is too large: ${sourceForError(source)}`);
+    }
+    const parsedRecords = parseSnapshotFile(raw, source);
+    for (const { parsed, sourceSuffix } of parsedRecords) {
+      extractRecordsFromJson(records, parsed, `${source}${sourceSuffix}`);
+    }
+  }
+  return records;
+}
+
+function changedFields(before: unknown, after: unknown): readonly string[] {
+  if (!isRecord(before) || !isRecord(after)) return [];
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  return [...keys].sort().filter((key) => stableStringify(before[key]) !== stableStringify(after[key]));
+}
+
+function redactFieldNameForOutput(subsystem: StateSnapshotDiffSubsystem, field: string): string {
+  if (subsystem === 'approvals' && /^(?:id|approval[-_]?id|token|tokens|secret|password|credential|bearer|refresh|access|api[-_]?key)$/iu.test(field)) {
+    return '<redacted>';
+  }
+  return maskOpaqueSecretLiterals(redactLogData(field) as string);
+}
+
+function diffSubsystem(
+  subsystem: StateSnapshotDiffSubsystem,
+  before: Map<string, StateSnapshotDiffRecord>,
+  after: Map<string, StateSnapshotDiffRecord>,
+): StateSnapshotSubsystemDiff {
+  const added: StateSnapshotRecordChange[] = [];
+  const removed: StateSnapshotRecordChange[] = [];
+  const changed: StateSnapshotRecordChange[] = [];
+
+  for (const [id, afterRecord] of after) {
+    const beforeRecord = before.get(id);
+    if (beforeRecord === undefined) {
+      added.push({ type: 'added', id: redactIdForOutput(subsystem, id), after: redactForOutput(afterRecord.value), afterSource: redactSourceForOutput(subsystem, afterRecord.source) });
+    } else if (stableStringify(beforeRecord.compareValue) !== stableStringify(afterRecord.compareValue)) {
+      changed.push({
+        type: 'changed',
+        id: redactIdForOutput(subsystem, id),
+        before: redactForOutput(beforeRecord.value),
+        after: redactForOutput(afterRecord.value),
+        changedFields: changedFields(beforeRecord.compareValue, afterRecord.compareValue).map((field) => redactFieldNameForOutput(subsystem, field)),
+        beforeSource: redactSourceForOutput(subsystem, beforeRecord.source),
+        afterSource: redactSourceForOutput(subsystem, afterRecord.source),
+      });
+    }
+  }
+  for (const [id, beforeRecord] of before) {
+    if (!after.has(id)) {
+      removed.push({ type: 'removed', id: redactIdForOutput(subsystem, id), before: redactForOutput(beforeRecord.value), beforeSource: redactSourceForOutput(subsystem, beforeRecord.source) });
+    }
+  }
+
+  const byId = (a: StateSnapshotRecordChange, b: StateSnapshotRecordChange) => a.id.localeCompare(b.id);
+  return {
+    subsystem,
+    added: added.sort(byId),
+    removed: removed.sort(byId),
+    changed: changed.sort(byId),
+  };
+}
+
+function summarize(diffs: readonly StateSnapshotSubsystemDiff[]): StateSnapshotDiffSummary {
+  const bySubsystem = Object.fromEntries(SUBSYSTEMS.map((subsystem) => [subsystem, { added: 0, removed: 0, changed: 0 }])) as StateSnapshotDiffSummary['bySubsystem'];
+  let added = 0;
+  let removed = 0;
+  let changed = 0;
+  for (const diff of diffs) {
+    const counts = { added: diff.added.length, removed: diff.removed.length, changed: diff.changed.length };
+    (bySubsystem as Record<StateSnapshotDiffSubsystem, typeof counts>)[diff.subsystem] = counts;
+    added += counts.added;
+    removed += counts.removed;
+    changed += counts.changed;
+  }
+  return { added, removed, changed, bySubsystem };
+}
+
+function renderTextSummary(summary: StateSnapshotDiffSummary): string {
+  const lines = [`State snapshot diff: ${summary.added} added, ${summary.removed} removed, ${summary.changed} changed.`];
+  for (const subsystem of SUBSYSTEMS) {
+    const counts = summary.bySubsystem[subsystem];
+    lines.push(`- ${subsystem}: ${counts.added} added, ${counts.removed} removed, ${counts.changed} changed`);
+  }
+  return lines.join('\n');
+}
+
+export async function diffStateSnapshotDirectories(beforePath: string, afterPath: string): Promise<StateSnapshotDirectoryDiffReport> {
+  const [beforeRecords, afterRecords] = await Promise.all([
+    loadSnapshotDirectory(beforePath),
+    loadSnapshotDirectory(afterPath),
+  ]);
+  const diffs = SUBSYSTEMS.map((subsystem) => diffSubsystem(subsystem, beforeRecords[subsystem], afterRecords[subsystem]));
+  const summary = summarize(diffs);
+  return {
+    command: 'dr snapshot-diff',
+    beforePath: sourceForError(beforePath),
+    afterPath: sourceForError(afterPath),
+    summary,
+    textSummary: renderTextSummary(summary),
+    diffs,
+  };
+}

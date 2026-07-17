@@ -34,6 +34,7 @@ frankenbeast interview
 frankenbeast plan --design-doc <file>
 frankenbeast run --plan-dir <dir>
 frankenbeast issues
+frankenbeast dr snapshot-diff ./healthy-export ./incident-export
 frankenbeast dr dead-letter-list .fbeast/dead-letter-actions.json
 frankenbeast dr dead-letter-replay-dry-run .fbeast/dead-letter-actions.json <entry-id>
 frankenbeast chat-server
@@ -86,6 +87,16 @@ frankenbeast dr dead-letter-retire <queue-file> <entry-id> "handled manually"
 The replay command is dry-run only. Entries classified as side-effecting report that explicit operator approval is required before any future replay executor may run them, while retired or unsafe entries are not replayable.
 
 When dead-letter entries appear alongside corrupted Git worktrees, stuck approval-cop queues, broken Kanban cards, crashed dispatchers, or inconsistent liveness state, follow `docs/dr/corrupted-worktrees-and-queues.md` from the repository root. That runbook separates read-only diagnosis from repair, requires backups before mutation, and marks every destructive queue/worktree/card command as approval-cop/HITL required.
+
+## Disaster recovery state snapshot diff
+
+Incident responders can compare two state snapshot/export directories without manually reading every JSON dump:
+
+```bash
+frankenbeast dr snapshot-diff <before-dir> <after-dir>
+```
+
+The command scans JSON and JSONL files in each directory and emits a redacted JSON report containing both `summary` counts and a human-readable `textSummary`. It groups added, removed, and changed records by tasks/cards, approval tokens, worker IDs, memory records, and cron jobs where those records are present. Approval-token IDs and primitive token arrays are represented by stable short digests, not raw token strings.
 
 ## Flaky liveness fixture replay
 
