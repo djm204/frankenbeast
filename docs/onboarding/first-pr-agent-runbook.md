@@ -24,9 +24,11 @@ ISSUE_NUMBER="${ISSUE_NUMBER:?set the assigned issue number}"
 ISSUE_NUMBER="${ISSUE_NUMBER#\#}"
 gh issue view "$ISSUE_NUMBER" --repo djm204/frankenbeast --json number,title,state,labels,body,url
 gh pr list --repo djm204/frankenbeast --state open --search "$ISSUE_NUMBER OR issue-$ISSUE_NUMBER" --json number,title,headRefName,url,state
+gh pr list --repo djm204/frankenbeast --state open --json number,title,headRefName,url,state \
+  --jq ".[] | select(.headRefName | startswith(\"resolve/issue-$ISSUE_NUMBER-\"))"
 ```
 
-Continue only if the issue is open and no open PR already owns it. If an open PR exists, resume that PR only when the PM explicitly assigns it to you; otherwise stop and report the duplicate.
+Continue only if the issue is open and no open PR already owns it by body/title search or by a `resolve/issue-$ISSUE_NUMBER-*` head branch. If an open PR exists, resume that PR only when the PM explicitly assigns it to you; otherwise stop and report the duplicate.
 
 ### 2. Read local policy before editing
 
@@ -91,13 +93,13 @@ git status --short
 git diff -- docs/onboarding/ ONBOARDING.md README.md tests/
 ```
 
-Keep the diff scoped to the issue. Stage only the files you intentionally changed:
+Keep the diff scoped to the issue. Stage only the files you intentionally changed, replacing the placeholders with your actual issue-scoped paths and commit subject:
 
 ```bash
-git add docs/onboarding/first-pr-agent-runbook.md docs/onboarding/coding-agent-pr-etiquette.md ONBOARDING.md README.md tests/docs-issue-1664.test.ts
+git add <files-you-intentionally-changed>
 git diff --cached --stat
 git diff --cached --check
-git commit -m "docs(onboarding): add first-pr agent runbook"
+git commit -m "<type(scope): concise issue-specific summary>"
 ```
 
 ### 6. Select and run verification commands
@@ -122,20 +124,20 @@ This step mutates remote GitHub state. Run it only after the PM/HITL reviewer ha
 git push -u origin HEAD
 gh pr create \
   --repo djm204/frankenbeast \
-  --title "docs(onboarding): add first-pr agent runbook" \
+  --title "<type(scope): concise issue-specific summary>" \
   --body "$(cat <<'PR_BODY'
 ## Summary
-- Add a first-PR agent runbook covering issue confirmation, isolated branch/worktree setup, implementation, verification, PR creation, Codex review, and merge handoff.
-- Link the runbook from onboarding entrypoints and agent PR etiquette guidance.
+- <bullet describing the user-visible or maintainer-visible change>
+- <bullet describing the verification or documentation surface updated>
 
 ## Verification
-- npm run test:root -- tests/docs-issue-1664.test.ts — passed
-- npm run test:root -- tests/docs-issue-1094.test.ts — passed
+- <command> — <passed/failed with reason>
+- <command> — <passed/failed with reason>
 
 ## Scope and handoff
 - Issue: Closes #<issue-number>
 - Branch: <branch-name>
-- Ownership entries: onboarding-docs, repo-automation
+- Ownership entries: <files/packages/docs areas touched>
 - Codex: pending @codex review
 PR_BODY
 )"
