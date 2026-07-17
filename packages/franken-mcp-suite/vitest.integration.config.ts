@@ -8,8 +8,7 @@ export default defineConfig({
   },
   test: {
     setupFiles: [fileURLToPath(new URL('../../scripts/vitest-deterministic-setup.ts', import.meta.url))],
-    include: ['src/**/*.test.ts'],
-    exclude: ['src/**/*.integration.test.ts'],
+    include: ['src/**/*.integration.test.ts'],
     environment: 'node',
     testTimeout: 15_000,
   },
