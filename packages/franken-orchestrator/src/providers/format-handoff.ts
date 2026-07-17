@@ -508,8 +508,9 @@ function sectionSatisfiesRequirement(
 ): boolean {
   const contentWithPopulatedChildHeadingLabels =
     stripUnpopulatedChildHeadingLabels(section.content);
+  const headingContentPrefix = requirement.id === 'artifacts' ? section.heading : '';
   const searchableContent = normalizeEvidence(
-    stripPlaceholderOnlyTemplateFields(contentWithPopulatedChildHeadingLabels),
+    `${headingContentPrefix} ${stripPlaceholderOnlyTemplateFields(contentWithPopulatedChildHeadingLabels)}`,
   );
   return (
     hasSubstantiveTemplateGuidance(contentWithPopulatedChildHeadingLabels) &&
@@ -538,7 +539,7 @@ function extractMarkdownSections(template: string): MarkdownSection[] {
           section &&
           (section.level > 1 ||
             sectionIndex === activeSectionIndex ||
-            isRequiredHandoffSectionHeading(section.heading))
+            isExplicitRequiredHandoffSectionHeading(section.heading))
         ) {
           section.content.push(line);
         }
@@ -625,7 +626,7 @@ function extractMarkdownSections(template: string): MarkdownSection[] {
         section &&
         (section.level > 1 ||
           sectionIndex === activeSectionIndex ||
-          isRequiredHandoffSectionHeading(section.heading))
+          isExplicitRequiredHandoffSectionHeading(section.heading))
       ) {
         section.content.push(line);
       }
@@ -688,6 +689,7 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
   const lines = content.split(/\r?\n/);
   const stripped: string[] = [];
   let activeFence: string | null = null;
+  let activeFencePreservesCommands = false;
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? '';
@@ -696,15 +698,20 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
       const marker = fence[1] ?? '';
       if (activeFence === null) {
         activeFence = marker;
+        activeFencePreservesCommands = /\b(?:bash|sh|shell|zsh|fish|console)\b/i.test(line);
       } else if (
         marker[0] === activeFence[0] &&
         marker.length >= activeFence.length
       ) {
         activeFence = null;
+        activeFencePreservesCommands = false;
       }
       continue;
     }
     if (activeFence !== null) {
+      if (activeFencePreservesCommands && looksLikeVerificationCommand(line)) {
+        stripped.push(line);
+      }
       continue;
     }
     if (
@@ -808,8 +815,25 @@ function isEmptyTemplateLabel(line: string): boolean {
 
 function isPlaceholderOnlyFieldLine(line: string): boolean {
   const normalized = normalizeEvidence(line.replace(/^\s*[-*]\s*/, ''));
+  const field = /^([A-Za-z0-9 /_-]+)(?::|\s+-\s+)(.+)$/i.exec(normalized);
+  if (field) {
+    const label = normalizeTemplateLabelKey(field[1] ?? '');
+    const value = normalizeTemplateLabelKey(field[2] ?? '');
+    const isNoBlockerValue =
+      /^(?:blocker|blockers|risk|risks)$/.test(label) &&
+      /^(?:no|none|no blockers|no blocker|no risks|no risk)$/.test(value);
+    if (!isNoBlockerValue && (value === label || isPlaceholderValue(value))) {
+      return true;
+    }
+  }
   return /^[A-Za-z0-9 /_-]+(?::|\s+-\s+)(?:<(?!(?:https?:\/\/|\.\.?\/|#))[^>]*>|\{\{[^}]*\}\}|\{[^}]*\}|\[[^\]]*\](?!\(|\[)|[-–—]+|\b(?:tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)\b)\s*$/i.test(
     normalized,
+  );
+}
+
+function isPlaceholderValue(value: string): boolean {
+  return /^(?:no|none|tbd|todo|n a|na|unknown|placeholder|please fill in|fill in|to be decided)$/.test(
+    value,
   );
 }
 
@@ -819,6 +843,26 @@ function isRequiredHandoffSectionHeading(heading: string): boolean {
   }
   return AGENT_HANDOFF_TEMPLATE_REQUIREMENTS.some((requirement) =>
     requirement.headingPatterns.some((pattern) => pattern.test(heading)),
+  );
+}
+
+function isExplicitRequiredHandoffSectionHeading(heading: string): boolean {
+  return (
+    /\bscope\b/i.test(heading) ||
+    /\bcurrent\s+state\b/i.test(heading) ||
+    /\bverification\b/i.test(heading) ||
+    /\bblockers?\b/i.test(heading) ||
+    /\bnext action\b/i.test(heading) ||
+    /\bartifacts?\b/i.test(heading) ||
+    /\blearning\b/i.test(heading)
+  )
+    ? isRequiredHandoffSectionHeading(heading)
+    : false;
+}
+
+function looksLikeVerificationCommand(line: string): boolean {
+  return /\b(?:npm|pnpm|yarn|vitest|tsc|eslint|pytest|test|lint|typecheck|build)\b/i.test(
+    line,
   );
 }
 

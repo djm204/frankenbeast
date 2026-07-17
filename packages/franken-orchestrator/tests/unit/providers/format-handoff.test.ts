@@ -1251,6 +1251,83 @@ Lesson: wrapper titles are not scope sections.
       validation.findings.find((finding) => finding.id === 'artifacts'),
     ).toMatchObject({ status: 'placeholder' });
   });
+
+  it('does not let broad wrapper objective headings inherit child sections', () => {
+    const validation = validateAgentHandoffTemplate(`# Project objective
+
+## Current state and decisions
+Issue #1775, business goal, and out-of-scope boundaries are known. Completed work and decisions are pending.
+
+## Verification evidence
+npm test passed.
+
+## Blockers and next action
+No blockers. Owner: PM. Next action: continue.
+
+## Artifacts and links
+PR #2331 and worktree artifact.
+
+## Learning and reuse
+Lesson: wrapper titles are not scope sections.
+`);
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('rejects placeholder values that repeat labels or use none outside blocker context', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate
+        .replace(
+          'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+          '- Issue/task: Issue/task\n- Business goal: none\n- Boundaries: Boundaries',
+        )
+        .replace(
+          'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
+          'PR: none',
+        ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+    expect(
+      validation.findings.find((finding) => finding.id === 'artifacts'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('uses matched artifact heading labels with body values', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate
+        .replace('## Artifacts and links', '## PR')
+        .replace(
+          'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
+          '#2331',
+        ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'artifacts'),
+    ).toMatchObject({ status: 'pass', matchedHeading: 'PR' });
+  });
+
+  it('preserves fenced verification commands', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.',
+        'Command:\n```bash\nnpm --workspace @franken/orchestrator test\n```\nOutcome: passed',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'verification'),
+    ).toMatchObject({ status: 'pass' });
+  });
 });
 
 describe('truncateSnapshot', () => {
