@@ -93,6 +93,7 @@ export type MemoryRetentionClass =
   | 'environment_fact'
   | 'project_convention'
   | 'learned_procedure'
+  | 'audit_record'
   | 'transient_observation'
   | 'temporary_operational'
   | 'uncategorized';
@@ -227,6 +228,13 @@ const MEMORY_RETENTION_POLICIES: Record<MemoryRetentionClass, MemoryRetentionPol
     compactPriority: 10,
     protected: false,
     description: 'Learned procedures are preserved longer than environment facts.',
+  },
+  audit_record: {
+    class: 'audit_record',
+    retentionDays: null,
+    compactPriority: 0,
+    protected: true,
+    description: 'Audit records preserve deletion and governance trails.',
   },
   project_convention: {
     class: 'project_convention',
@@ -789,11 +797,10 @@ function isTemporaryOperationalWorkingMemoryValue(value: unknown): value is { ex
 }
 
 function extractTemporaryOperationalExpiresAt(value: unknown, className: MemoryRetentionClass): string | undefined {
-  if (className !== 'temporary_operational' || value === null || typeof value !== 'object' || Array.isArray(value)) {
+  if (className !== 'temporary_operational' || !isTemporaryOperationalWorkingMemoryValue(value)) {
     return undefined;
   }
-  const expiresAt = (value as { expiresAt?: unknown }).expiresAt;
-  return typeof expiresAt === 'string' ? expiresAt : undefined;
+  return value.expiresAt;
 }
 
 function parseAgentScopedEpisodicDetails(details: Record<string, unknown> | undefined): string | undefined {
@@ -1443,6 +1450,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
   }
 
   retentionEntries(nowIso = isoNow()): Array<{ key: string; value: unknown; updatedAt: string }> {
+    this.expireRuntimeKeysMatchingCurrentGuards();
     const rows = this.db
       .prepare(`SELECT key, value, updated_at as updatedAt FROM working_memory ORDER BY key ASC`)
       .all() as Array<{ key: string; value: string; updatedAt: string }>;
@@ -3975,13 +3983,15 @@ export class SqliteBrain implements IBrain {
 
     for (const event of this.episodic.recent(-1)) {
       const key = String(event.id ?? event.summary);
-      const className = classifyMemoryEntry({
-        store: 'episodic',
-        key,
-        value: event.summary,
-        summary: event.summary,
-        ...(event.details === undefined ? {} : { details: event.details }),
-      });
+      const className = isRightToForgetAuditEvent(event)
+        ? 'audit_record'
+        : classifyMemoryEntry({
+          store: 'episodic',
+          key,
+          value: event.summary,
+          summary: event.summary,
+          ...(event.details === undefined ? {} : { details: event.details }),
+        });
       const policy = MEMORY_RETENTION_POLICIES[className];
       const observedAgeDays = ageDays(event.createdAt, nowMs);
       const decision = retentionActionForEntry({

@@ -204,6 +204,75 @@ describe('SqliteBrain', () => {
       expect(brain.working.snapshot()).toHaveProperty('expired.one');
     });
 
+    it('uses the same temporary TTL marker semantics as working memory cleanup', () => {
+      brain.working.set('class-only-expiry', {
+        value: 'reported temp but not a TTL-managed temporary operational value',
+        memoryClass: 'temporary_operational',
+        expiresAt: '2027-01-01T00:00:00.000Z',
+      });
+
+      const report = brain.memoryRetentionReport({ now: '2027-01-01T00:00:01.000Z' });
+
+      expect(report.entries.find((entry) => entry.key === 'class-only-expiry')).toMatchObject({
+        class: 'temporary_operational',
+        action: 'retain',
+      });
+      expect(report.entries.find((entry) => entry.key === 'class-only-expiry')).not.toHaveProperty('expiresAt');
+      expect(brain.working.has('class-only-expiry')).toBe(true);
+    });
+
+    it('suppresses runtime entries covered by cross-process deletion guards before retention reporting', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-retention-rtf-guard-'));
+      const dbPath = join(dir, 'brain.db');
+      let stale: SqliteBrain | undefined;
+      let db: Database.Database | undefined;
+
+      try {
+        stale = new SqliteBrain(dbPath);
+        stale.working.set('contact', 'alice@example.test');
+        stale.flush();
+
+        db = new Database(dbPath);
+        db.prepare(`INSERT INTO memory_deletion_guards (selector_hash, guard_kind, value_hash, created_at) VALUES (?, ?, ?, ?)`).run(
+          'selector-hash',
+          'working:query',
+          queryGuardHash('alice@example.test'),
+          '2026-07-14T00:00:00.000Z',
+        );
+        db.prepare(`DELETE FROM working_memory WHERE key = ?`).run('contact');
+        db.close();
+        db = undefined;
+
+        expect(stale!.memoryRetentionReport().entries.map((entry) => entry.key)).not.toContain('contact');
+        expect(stale!.working.has('contact')).toBe(false);
+      } finally {
+        db?.close();
+        stale?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('protects right-to-forget audit events from retention compaction reports', () => {
+      brain.episodic.record({
+        type: 'observation',
+        step: 'right-to-forget',
+        summary: 'Right-to-forget deletion completed',
+        details: {
+          selectorHash: 'a'.repeat(64),
+          deleted: { working: 1, episodic: 0, derived: 1 },
+        },
+        createdAt: '2020-01-01T00:00:00.000Z',
+      });
+
+      const report = brain.memoryRetentionReport({ now: '2027-01-01T00:00:00.000Z' });
+
+      expect(report.entries.find((entry) => entry.class === 'audit_record')).toMatchObject({
+        action: 'protect',
+        protected: true,
+      });
+      expect(report.compactionCandidates.map((entry) => entry.class)).not.toContain('audit_record');
+    });
+
     it('counts existing compaction candidates before applying entry budgets', () => {
       brain.episodic.record({
         type: 'observation',
@@ -291,7 +360,7 @@ describe('SqliteBrain', () => {
     it('honors explicit temporary and uncategorized classes', () => {
       brain.working.set('explicit.tmp', {
         value: 'scratch state',
-        memoryClass: 'temporary_operational',
+        category: 'temporary-operational',
         expiresAt: '2027-01-01T00:00:00.000Z',
       });
       brain.episodic.record({

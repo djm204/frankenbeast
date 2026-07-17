@@ -359,15 +359,15 @@ function contextLooksLikeMemoryRetentionReportArgs(context: string): boolean {
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
     const record = parsed as Record<string, unknown>;
     const keys = Object.keys(record);
-    const hasRetentionReportSignal = Object.prototype.hasOwnProperty.call(record, 'now')
-      || Object.prototype.hasOwnProperty.call(record, 'expiryHorizonMs')
-      || Object.prototype.hasOwnProperty.call(record, 'maxEntries')
-      || (Object.prototype.hasOwnProperty.call(record, 'readScope')
-        && Object.prototype.hasOwnProperty.call(record, 'agentId')
-        && !Object.prototype.hasOwnProperty.call(record, 'key')
-        && !Object.prototype.hasOwnProperty.call(record, 'source')
-        && !Object.prototype.hasOwnProperty.call(record, 'redaction')
-        && !Object.prototype.hasOwnProperty.call(record, 'limit'));
+    const hasRetentionReportSignal = Object.prototype.hasOwnProperty.call(record, 'readScope')
+      && Object.prototype.hasOwnProperty.call(record, 'agentId')
+      && !Object.prototype.hasOwnProperty.call(record, 'key')
+      && !Object.prototype.hasOwnProperty.call(record, 'source')
+      && !Object.prototype.hasOwnProperty.call(record, 'redaction')
+      && !Object.prototype.hasOwnProperty.call(record, 'limit')
+      && !Object.prototype.hasOwnProperty.call(record, 'command')
+      && !Object.prototype.hasOwnProperty.call(record, 'script')
+      && !Object.prototype.hasOwnProperty.call(record, 'args');
     return keys.length > 0
       && hasRetentionReportSignal;
   } catch {

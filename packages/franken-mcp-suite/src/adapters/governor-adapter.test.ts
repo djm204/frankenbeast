@@ -201,6 +201,15 @@ describe('GovernorAdapter', () => {
     expect(rows.map((row) => row.context).join('\n')).not.toContain('secret');
   });
 
+  it('does not redact generic proxied payloads just because they have retention-shaped keys', async () => {
+    const governor = createGovernorAdapter(tracked(tmpDbPath()));
+
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"maxEntries":1,"command":"rm -rf /var/data"}',
+    })).resolves.toMatchObject({ decision: 'denied' });
+  });
+
   it('denies raw destructive patterns (rm -rf)', async () => {
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
     const result = await governor.check({ action: 'rm -rf /data', context: '{}' });
