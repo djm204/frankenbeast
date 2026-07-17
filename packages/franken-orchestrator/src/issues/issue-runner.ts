@@ -767,7 +767,7 @@ function normalizeStuckRunBlockerCategory(
   if (CRASH_WORKER_CARD_STATUSES.has(status)) return 'process-crash';
   if (snapshot.blockerCategory && snapshot.blockerCategory !== 'unknown') return snapshot.blockerCategory;
   const text = `${snapshot.status ?? ''} ${snapshot.waitingOn ?? ''}`.toLowerCase();
-  if (/\bapproval\b|\bhitl\b|\bhuman\b|approval[- ]?token|pending approval|operator approval|approval-cop|approve/.test(text)) return 'approval-gate';
+  if (/\bapproval\b|\bhitl\b|\bhuman\b|approval[- ]?token|pending[_ -]approval|operator approval|approval-cop|approve/.test(text)) return 'approval-gate';
   if (/provider|codex|rate limit|quota|llm|model/.test(text)) return 'provider-wait';
   if (/\bci\b|ci[- ]?check|status check|check run|workflow|merge queue|github actions?/.test(text)) return 'ci-wait';
   if (snapshot.alive === false) return 'process-crash';
@@ -863,6 +863,10 @@ function intentionalNonRetryExitReason(exitReason: string): boolean {
   return /^(clean_exit|operator_stop|operator_kill|exit_code_0|completed|cancelled|canceled|stopped|manual_stop|manual_kill)$/i.test(exitReason.trim());
 }
 
+function externalSignalExitReason(exitReason: string): boolean {
+  return /^signal_[a-z0-9]+$/i.test(exitReason.trim());
+}
+
 export function buildWorkerCrashOnlyRestartContract(
   snapshot: IssueWorkerCardProcessSnapshot,
   input: {
@@ -907,6 +911,15 @@ export function buildWorkerCrashOnlyRestartContract(
     };
   }
 
+  if (externalSignalExitReason(rawExitReason)) {
+    return {
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      ...base,
+      evidence,
+    };
+  }
+
   if (intentionalNonRetryExitReason(rawExitReason) || (terminalKanbanState(kanbanState) && !crashKanbanState(kanbanState))) {
     return {
       disposition: 'terminal',
@@ -916,7 +929,7 @@ export function buildWorkerCrashOnlyRestartContract(
     };
   }
 
-  if (kanbanState === 'blocked' || input.category === 'approval-gate' || knownLongRunningWait(input.category)) {
+  if (kanbanState === 'blocked' || kanbanState === 'pending-approval' || input.category === 'approval-gate' || knownLongRunningWait(input.category)) {
     return {
       disposition: 'hitl',
       nextAction: 'defer-with-evidence',

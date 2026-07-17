@@ -915,6 +915,25 @@ describe('stuck-run watchdog', () => {
     });
   });
 
+  it('defers pending approval Kanban states before dead-process retry', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_pending_approval',
+      pid: 7418,
+      status: 'pending_approval',
+      alive: false,
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'pending_approval',
+    });
+
+    expect(contract).toMatchObject({
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      kanbanState: 'pending-approval',
+    });
+  });
+
   it('keeps direct terminal restart contracts as no-op before dead-process retry', () => {
     const contract = buildWorkerCrashOnlyRestartContract({
       cardId: 't_direct_completed',
@@ -973,7 +992,7 @@ describe('stuck-run watchdog', () => {
     });
   });
 
-  it('treats external signal exits as retryable crashes in direct restart contracts', () => {
+  it('defers external signal exits for operator investigation in direct restart contracts', () => {
     const contract = buildWorkerCrashOnlyRestartContract({
       cardId: 't_signal_stop',
       pid: 7423,
@@ -988,8 +1007,8 @@ describe('stuck-run watchdog', () => {
 
     expect(contract).toMatchObject({
       exitReason: 'signal_SIGTERM',
-      disposition: 'retryable',
-      nextAction: 'restart-once',
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
     });
   });
 
