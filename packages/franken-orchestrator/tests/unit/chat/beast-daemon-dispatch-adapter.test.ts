@@ -221,6 +221,7 @@ describe('BeastDaemonDispatchAdapter', () => {
         status: 'interviewing',
       }),
     });
+    expect(result?.assistantMessage).toContain("Invalid answer for 'provider'");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 

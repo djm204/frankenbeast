@@ -54,8 +54,9 @@ export class BeastDaemonRequestError extends Error {
     public readonly statusText: string,
     public readonly code?: string | undefined,
     public readonly details?: unknown,
+    public readonly daemonMessage?: string | undefined,
   ) {
-    super(code ? `Beast daemon request failed: ${status} ${statusText} (${code})` : `Beast daemon request failed: ${status} ${statusText}`);
+    super(daemonMessage ?? (code ? `Beast daemon request failed: ${status} ${statusText} (${code})` : `Beast daemon request failed: ${status} ${statusText}`));
     this.name = 'BeastDaemonRequestError';
   }
 }
@@ -253,6 +254,7 @@ export class BeastDaemonDispatchAdapter {
         response.statusText,
         envelope?.error?.code,
         envelope?.error?.details,
+        envelope?.error?.message,
       );
     }
     return response.json() as Promise<T>;
@@ -313,7 +315,7 @@ export class BeastDaemonDispatchAdapter {
     return {
       kind: 'interview',
       definitionId,
-      assistantMessage: this.formatPrompt(definition.label, prompt, options),
+      assistantMessage: `${error.message}. ${this.formatPrompt(definition.label, prompt, options)}`,
       beastContext: {
         ...(context.agentId ? { agentId: context.agentId } : {}),
         definitionId,
