@@ -1990,7 +1990,7 @@ function hasValidScopeAuditTrail(
       if (latest === undefined) {
         return entry;
       }
-      return parseScopeTimestamp(entry.changedAt)! >
+      return parseScopeTimestamp(entry.changedAt)! >=
         parseScopeTimestamp(latest.changedAt)!
         ? entry
         : latest;

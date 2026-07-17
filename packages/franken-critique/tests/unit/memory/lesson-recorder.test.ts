@@ -1778,6 +1778,36 @@ describe('LessonRecorder', () => {
       }),
     ).toBe(false);
 
+    const importedRepoWithSameTimestampDemotion = {
+      ...baseLesson,
+      lessonScope: {
+        schemaVersion: 'lesson-scope-v1',
+        scope: 'repo',
+        allowedRepos: ['djm204/frankenbeast'],
+        provenance: { source: 'recorded', taskId: 'scope-task' },
+        auditTrail: [
+          {
+            changedAt: reviewedAt,
+            actor: 'pm-reviewer',
+            toScope: 'repo',
+            reason: 'Initial review attested repo scope.',
+          },
+          {
+            changedAt: reviewedAt,
+            actor: 'pm-reviewer',
+            fromScope: 'repo',
+            toScope: 'task',
+            reason: 'Same-timestamp demotion was appended later.',
+          },
+        ],
+      },
+    } satisfies CritiqueLesson;
+    expect(
+      isLessonApplicable(importedRepoWithSameTimestampDemotion, {
+        repo: 'djm204/frankenbeast',
+      }),
+    ).toBe(false);
+
     const importedRepoWithMalformedAllowlist = {
       ...repoScoped,
       lessonScope: {
@@ -1802,6 +1832,7 @@ describe('LessonRecorder', () => {
     expect(
       isLessonApplicable(importedRepoWithNormalizedExpiry, {
         repo: 'djm204/frankenbeast',
+        now: '2026-02-01T00:00:00.000Z',
       }),
     ).toBe(false);
 
