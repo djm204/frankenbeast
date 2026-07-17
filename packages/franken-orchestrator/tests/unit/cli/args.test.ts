@@ -194,6 +194,13 @@ describe('parseArgs', () => {
     expect(args.networkAction).toBe('status');
   });
 
+  it('parses network health with JSON output', () => {
+    const args = parseArgs(['network', 'health', '--json']);
+    expect(args.subcommand).toBe('network');
+    expect(args.networkAction).toBe('health');
+    expect(args.json).toBe(true);
+  });
+
   it('parses network start with target service', () => {
     const args = parseArgs(['network', 'start', 'chat-server']);
     expect(args.subcommand).toBe('network');

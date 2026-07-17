@@ -52,6 +52,20 @@ frankenbeast network up -d
 frankenbeast network status
 ```
 
+For a focused availability summary across the web UI, orchestrator API, providers, GitHub automation, state store, and background-loop channels, run:
+
+```bash
+frankenbeast network health
+```
+
+Machine-readable output is available for monitors and incident tooling:
+
+```bash
+frankenbeast network health --json
+```
+
+The same aggregate snapshot is exposed by the chat server at `GET /api/dashboard/health` for dashboard and external service-status consumers. Every dependency includes a status, summary, remediation hint, and safe-work guidance so operators can distinguish healthy, degraded, and unavailable states before starting new work.
+
 ## Stop or Restart Services
 
 ```bash

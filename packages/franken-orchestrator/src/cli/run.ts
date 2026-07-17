@@ -69,10 +69,13 @@ import { loadRunConfigFromEnv, type RunConfig } from './run-config-loader.js';
 import { resolveProviderCatalogEntry, resolveProviderType, type ProviderConfig } from '../providers/provider-config.js';
 import type { ProviderRegistry as LlmProviderRegistry } from '../providers/provider-registry.js';
 import { redactLogData } from '../logging/redaction.js';
+import type { NetworkServiceHealthStatus } from '../network/network-health.js';
 import {
   type DashboardAvailabilitySnapshot,
+  type DashboardDependencySnapshot,
   type DashboardProviderSnapshot,
 } from '../http/routes/dashboard-status.js';
+import { buildServiceHealthSnapshot } from '../http/routes/service-health.js';
 
 const DEFAULT_SLO_KANBAN_DB = () => join(process.env.HERMES_HOME ?? join(homedir(), '.hermes'), 'kanban.db');
 
@@ -1730,7 +1733,7 @@ export interface NetworkCommandSupervisorLike {
   }): Promise<{ services: Array<{ id: string; status?: string | undefined; url?: string | undefined }> }>;
   down(): Promise<void>;
   stopAll(state: Awaited<ReturnType<NetworkCommandSupervisorLike['up']>>): Promise<void>;
-  status(): Promise<{ mode?: string; secureBackend?: string; services: Array<{ id: string; status: string }>; availability?: DashboardAvailabilitySnapshot }>;
+  status(): Promise<{ mode?: string; secureBackend?: string; services: NetworkServiceHealthStatus[]; availability?: DashboardAvailabilitySnapshot }>;
   stop(target: string | 'all'): Promise<void>;
   logs(target: string | 'all'): Promise<string[]>;
 }
@@ -1802,7 +1805,7 @@ async function waitForTerminationSignal(root: string): Promise<void> {
   });
 }
 
-function formatStatus(status: { mode?: string; secureBackend?: string; services: Array<{ id: string; status: string }>; availability?: DashboardAvailabilitySnapshot }): string[] {
+function formatStatus(status: { mode?: string; secureBackend?: string; services: NetworkServiceHealthStatus[]; availability?: DashboardAvailabilitySnapshot }): string[] {
   const lines = [
     `Mode: ${status.mode ?? 'unknown'}`,
   ];
@@ -1816,19 +1819,88 @@ function formatStatus(status: { mode?: string; secureBackend?: string; services:
   }
 
   if (status.availability) {
-    lines.push(`Dependency availability: ${status.availability.status}`);
-    for (const dependency of status.availability.dependencies) {
-      lines.push(`dependency ${dependency.name} (${dependency.type}): ${dependency.status} — ${dependency.summary}`);
-      if (dependency.remediationHint) {
-        lines.push(`  remediation: ${dependency.remediationHint}`);
-      }
-      if (dependency.safeWork.length > 0) {
-        lines.push(`  safe work: ${dependency.safeWork.join(' ')}`);
-      }
-    }
+    lines.push(...formatAvailability(status.availability, 'Dependency availability'));
   }
 
   return lines;
+}
+
+function formatAvailability(availability: DashboardAvailabilitySnapshot, label = 'Service health'): string[] {
+  const lines = [`${label}: ${availability.status}`];
+  for (const dependency of availability.dependencies) {
+    lines.push(`dependency ${dependency.name} (${dependency.type}): ${dependency.status} — ${dependency.summary}`);
+    if (dependency.remediationHint) {
+      lines.push(`  remediation: ${dependency.remediationHint}`);
+    }
+    if (dependency.safeWork.length > 0) {
+      lines.push(`  safe work: ${dependency.safeWork.join(' ')}`);
+    }
+  }
+  return lines;
+}
+
+function buildGithubHealthDependency(): DashboardDependencySnapshot {
+  const hasToken = Boolean(firstNonEmptyEnv('GITHUB_TOKEN', 'GH_TOKEN'));
+  const hasGh = isCommandAvailable('gh');
+  if (hasToken || hasGh) {
+    return {
+      name: 'github-api',
+      type: 'github',
+      status: hasToken ? 'healthy' : 'degraded',
+      summary: hasToken
+        ? 'A GitHub token is available for issue and PR automation.'
+        : 'The gh CLI is installed, but no GitHub token environment variable is set for this process.',
+      remediationHint: hasToken ? 'No remediation needed.' : 'Run `gh auth status` or export GITHUB_TOKEN before unattended GitHub automation.',
+      safeWork: hasToken ? ['Issue and PR automation can continue.'] : ['Interactive gh-authenticated workflows may work; verify before unattended automation.'],
+    };
+  }
+  return {
+    name: 'github-api',
+    type: 'github',
+    status: 'unavailable',
+    summary: 'No GitHub token or gh executable was found for issue and PR automation.',
+    remediationHint: 'Install gh and authenticate, or export GITHUB_TOKEN/GH_TOKEN.',
+    safeWork: ['Continue local-only implementation and tests.'],
+  };
+}
+
+function buildStateStoreHealthDependency(paths: Pick<NetworkPaths, 'frankenbeastDir'>): DashboardDependencySnapshot {
+  const candidate = existsSync(paths.frankenbeastDir) ? paths.frankenbeastDir : dirname(paths.frankenbeastDir);
+  try {
+    accessSync(candidate, constants.W_OK);
+    return {
+      name: 'state-store',
+      type: 'state-store',
+      status: 'healthy',
+      summary: `State directory ${paths.frankenbeastDir} is writable or can be created.`,
+      remediationHint: 'No remediation needed.',
+      safeWork: ['Stateful orchestrator, web, and network operations can persist status.'],
+    };
+  } catch {
+    return {
+      name: 'state-store',
+      type: 'state-store',
+      status: 'unavailable',
+      summary: `State directory ${paths.frankenbeastDir} is not writable by this process.`,
+      remediationHint: 'Fix filesystem ownership/permissions or choose a writable --base-dir before running managed services.',
+      safeWork: ['Continue read-only inspection; avoid operations that need persisted state.'],
+    };
+  }
+}
+
+async function buildCliServiceHealthSnapshot(
+  args: CliArgs,
+  config: OrchestratorConfig,
+  paths: Pick<NetworkPaths, 'frankenbeastDir'>,
+  supervisor: NetworkCommandSupervisorLike,
+): Promise<DashboardAvailabilitySnapshot> {
+  const networkStatus = await supervisor.status();
+  return buildServiceHealthSnapshot({
+    providers: buildDashboardProviderSnapshot(config, undefined, [resolveSelectedProvider(args, config), ...(args.providers ?? [])]),
+    networkServices: networkStatus.services,
+    github: buildGithubHealthDependency(),
+    stateStore: buildStateStoreHealthDependency(paths),
+  });
 }
 
 export async function runNetworkCommand(
@@ -1875,6 +1947,18 @@ export async function runNetworkCommand(
   if (action === 'status') {
     const status = await supervisor.status();
     for (const line of formatStatus(status)) {
+      deps.print(line);
+    }
+    return;
+  }
+
+  if (action === 'health') {
+    const health = await buildCliServiceHealthSnapshot(args, config, paths, supervisor);
+    if (args.json) {
+      deps.print(JSON.stringify(health, null, 2));
+      return;
+    }
+    for (const line of formatAvailability(health)) {
       deps.print(line);
     }
     return;
