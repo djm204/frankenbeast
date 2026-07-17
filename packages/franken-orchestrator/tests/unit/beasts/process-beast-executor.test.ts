@@ -85,6 +85,32 @@ async function cleanupTempDirs(): Promise<void> {
   }
 }
 
+async function waitForPersistedLogLines(
+  logs: BeastLogStore,
+  runId: string,
+  attemptId: string,
+  predicate: (lines: string[]) => boolean,
+  timeoutMs = 1_000,
+): Promise<string[]> {
+  const deadline = Date.now() + timeoutMs;
+  let lines: string[] = [];
+  do {
+    lines = (await logs.read(runId, attemptId)).map((line) => {
+      try {
+        const parsed = JSON.parse(line) as { message?: string; line?: string };
+        return parsed.message ?? parsed.line ?? line;
+      } catch {
+        return line;
+      }
+    });
+    if (predicate(lines)) {
+      return lines;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  } while (Date.now() < deadline);
+  return lines;
+}
+
 describe('ProcessBeastExecutor', () => {
   let workDir: string | undefined;
 
@@ -1353,14 +1379,13 @@ describe('ProcessBeastExecutor', () => {
       expect(publishedLogLines).toContain(`stdout [REDACTED] [REDACTED] [REDACTED] ${visibleValue}`);
       expect(publishedLogLines).toContain(`stderr [REDACTED] [REDACTED] ${visibleValue}`);
 
-      const persistedLogLines = (await logs.read(run.id, attempt.id)).map((line) => {
-        try {
-          const parsed = JSON.parse(line);
-          return parsed.message ?? parsed.line ?? line;
-        } catch {
-          return line;
-        }
-      });
+      const persistedLogLines = await waitForPersistedLogLines(
+        logs,
+        run.id,
+        attempt.id,
+        (lines) => lines.some((line) => line.includes(`stdout [REDACTED] [REDACTED] [REDACTED] ${visibleValue}`))
+          && lines.some((line) => line.includes(`stderr [REDACTED] [REDACTED] ${visibleValue}`)),
+      );
       const persistedLogDump = persistedLogLines.join('\\n');
 
       expect(persistedLogDump).toContain(`stdout [REDACTED] [REDACTED] [REDACTED] ${visibleValue}`);
