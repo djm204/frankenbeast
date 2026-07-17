@@ -120,10 +120,10 @@ function classifyExportPath(path: string): EvidenceSection {
   const normalized = path.toLowerCase();
   const base = basename(normalized);
   if (/\.log(?:\.\d+)?$/iu.test(base) || normalized.startsWith('logs/') || normalized.includes('/logs/')) return 'logs';
-  if (normalized.includes('pendingapproval') || normalized.includes('pending_approval') || normalized.includes('approval') || normalized.includes('ledger')) return 'approvals';
+  if (normalized.includes('pendingapproval') || normalized.includes('pending_approval') || normalized.includes('approval') || normalized.includes('ledger') || normalized.startsWith('tokens/') || normalized.includes('/tokens/')) return 'approvals';
   if (normalized.includes('memory')) return 'memory';
   if (base === 'kanban.db' || normalized.includes('kanban') || normalized.includes('/tasks/') || normalized.includes('task')) return 'tasks';
-  if (base === 'beast.db' || normalized.startsWith('runs/') || normalized.includes('/runs/') || normalized.includes('run-metadata') || normalized.includes('attempt')) return 'runs';
+  if (base === 'beast.db' || normalized.startsWith('runs/') || normalized.includes('/runs/') || normalized.includes('run-metadata') || normalized.includes('attempt') || (normalized.startsWith('state/') && base.endsWith('.jsonl'))) return 'runs';
   if (/config\.(?:json|ya?ml|toml|ini)$/iu.test(base) || base === '.env' || base.startsWith('.env.')) return 'config';
   return 'other';
 }
@@ -152,7 +152,7 @@ function redactApprovalPath(path: string): string {
   return parts.map((part) => {
     if (insideApprovalPath) return `approval-path-${sha256Hex(part)}`;
     const normalized = part.toLowerCase();
-    if (normalized === 'approval' || normalized === 'approvals') {
+    if (normalized === 'approval' || normalized === 'approvals' || normalized === 'approval-tokens' || normalized === 'tokens') {
       insideApprovalPath = true;
     }
     return part;
@@ -191,7 +191,18 @@ function parseJsonObjectOrArray(text: string): unknown[] {
     }
     return [parsed];
   } catch {
-    return [];
+    const records: unknown[] = [];
+    for (const line of text.split(/\r?\n/u)) {
+      const trimmed = line.trim();
+      if (trimmed === '') continue;
+      try {
+        const parsedLine = JSON.parse(trimmed) as unknown;
+        if (isRecord(parsedLine)) records.push(parsedLine);
+      } catch {
+        // Ignore malformed JSONL lines; DR exports should preserve checksum evidence rather than fail.
+      }
+    }
+    return records;
   }
 }
 
@@ -442,7 +453,7 @@ export async function createPointInTimeExport(options: PointInTimeExportOptions)
     try {
       const fileStats = await stat(resolved);
       const couldReadText = fileStats.size <= MAX_TEXT_EVIDENCE_BYTES
-        && (relativePath.endsWith('.json') || section === 'approvals' || section === 'memory' || section === 'tasks' || section === 'runs');
+        && (relativePath.endsWith('.json') || relativePath.endsWith('.jsonl') || section === 'approvals' || section === 'memory' || section === 'tasks' || section === 'runs');
       if (couldReadText) {
         const textEvidence = await checksumAndTextFor(sourceDir, resolved);
         checksum = textEvidence.checksum;

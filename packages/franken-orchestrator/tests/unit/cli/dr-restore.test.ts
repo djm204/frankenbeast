@@ -92,8 +92,10 @@ describe('dr restore-dry-run CLI', () => {
 
     try {
       await mkdir(join(stateDir, 'approvals', 'nested'), { recursive: true });
+      await mkdir(join(stateDir, 'tokens'), { recursive: true });
       await mkdir(join(stateDir, 'memory'), { recursive: true });
       await mkdir(join(stateDir, 'runs', 'run-1'), { recursive: true });
+      await mkdir(join(stateDir, 'state'), { recursive: true });
       await mkdir(join(stateDir, 'logs'), { recursive: true });
       await mkdir(join(stateDir, 'logs', 'run-2'), { recursive: true });
       await mkdir(join(stateDir, 'chat'), { recursive: true });
@@ -101,12 +103,15 @@ describe('dr restore-dry-run CLI', () => {
       await writeFile(join(stateDir, 'config.yaml'), 'provider: openai\napiToken: config-yaml-value-for-mask\n', 'utf8');
       const approvalFileToken = 'fileApprovalTokenForPath123';
       const nestedApprovalFileToken = 'nestedApprovalTokenForPath456';
+      const alternateApprovalFileToken = 'alternateApprovalTokenForPath789';
       const redactedApprovalLedgerPath = `approvals/approval-path-${createHash('sha256').update('ledger.json').digest('hex')}`;
       const redactedApprovalFilePath = `approvals/approval-path-${createHash('sha256').update(`${approvalFileToken}.json`).digest('hex')}`;
       const redactedNestedApprovalFilePath = `approvals/approval-path-${createHash('sha256').update('nested').digest('hex')}/approval-path-${createHash('sha256').update(`${nestedApprovalFileToken}.json`).digest('hex')}`;
+      const redactedAlternateApprovalFilePath = `tokens/approval-path-${createHash('sha256').update(`${alternateApprovalFileToken}.json`).digest('hex')}`;
       await writeFile(join(stateDir, 'approvals', 'ledger.json'), JSON.stringify({ approvals: [{ id: 'approval-1', token: 'approval-value-for-mask', state: 'pending' }] }), 'utf8');
       await writeFile(join(stateDir, 'approvals', `${approvalFileToken}.json`), JSON.stringify({ id: 'approval-file-1', state: 'pending' }), 'utf8');
       await writeFile(join(stateDir, 'approvals', 'nested', `${nestedApprovalFileToken}.json`), JSON.stringify({ id: 'approval-file-2', state: 'pending' }), 'utf8');
+      await writeFile(join(stateDir, 'tokens', `${alternateApprovalFileToken}.json`), JSON.stringify({ id: 'approval-file-3', state: 'pending' }), 'utf8');
       await writeFile(join(stateDir, 'memory', 'store.json'), JSON.stringify({ memories: [{ key: 'user.pref', value: 'private memory body', metadata: { source: 'chat' } }] }), 'utf8');
       await writeFile(join(stateDir, 'memory', 'snapshot.json'), JSON.stringify({ working: { sessionA: { value: 'private working body' }, sessionB: { value: 'second private working body' } } }), 'utf8');
       await writeFile(join(stateDir, 'kanban-tasks.json'), JSON.stringify({ tasks: [{ id: 'task-1', title: 'private task title', status: 'running' }] }), 'utf8');
@@ -117,13 +122,17 @@ describe('dr restore-dry-run CLI', () => {
           id: 'approval-chat-1',
           description: 'deploy pending',
           target: 'https://operator:targetValueForMask@example.com',
-          command: 'deploy --token commandValueForMask',
+          command: 'deploy --token "command value for mask"',
           tool: 'shell',
           risk: 'requires-approval',
           affectedFiles: ['deploy-plan.md'],
           sessionId: 'session-1',
         },
       }), 'utf8');
+      await writeFile(join(stateDir, 'state', 'run-jsonl-1.jsonl'), [
+        JSON.stringify({ id: 'phase-1', runId: 'run-jsonl-1', status: 'started' }),
+        JSON.stringify({ id: 'phase-2', runId: 'run-jsonl-1', status: 'completed' }),
+      ].join('\n'), 'utf8');
       const longSingleLinePrefix = 'x'.repeat(9000);
       const boundaryBearer = ['boundary', 'credential', 'for', 'tail'].join('-');
       await writeFile(join(stateDir, 'logs', 'run-1.log'), [
@@ -205,11 +214,12 @@ describe('dr restore-dry-run CLI', () => {
         expect.objectContaining({ path: 'config.json', sha256: expect.stringMatching(/^sha256:/u) }),
         expect.objectContaining({ path: 'config.yaml', sha256: expect.stringMatching(/^sha256:/u) }),
       ]));
-      expect(report.manifest.sections).toEqual(expect.objectContaining({ approvals: 5, memory: 5, tasks: 2, runs: 3, logs: 3 }));
+      expect(report.manifest.sections).toEqual(expect.objectContaining({ approvals: 6, memory: 5, tasks: 2, runs: 4, logs: 3 }));
       expect(report.evidence.approvals).toEqual(expect.arrayContaining([
         expect.objectContaining({ path: redactedApprovalLedgerPath }),
         expect.objectContaining({ path: redactedApprovalFilePath }),
         expect.objectContaining({ path: redactedNestedApprovalFilePath }),
+        expect.objectContaining({ path: redactedAlternateApprovalFilePath }),
         expect.objectContaining({
           path: 'approval-ledger.db',
           table: 'approvals',
@@ -227,6 +237,7 @@ describe('dr restore-dry-run CLI', () => {
       ]));
       expect(report.evidence.tasks).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'kanban-tasks.json', records: [expect.objectContaining({ id: 'task-1', status: 'running' })] })]));
       expect(report.evidence.runs).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'runs/run-1/metadata.json', records: [expect.objectContaining({ id: 'run-1', status: 'running' })] })]));
+      expect(report.evidence.runs).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'state/run-jsonl-1.jsonl', records: expect.arrayContaining([expect.objectContaining({ id: 'phase-1', runId: 'run-jsonl-1', status: 'started' })]) })]));
       expect(report.evidence.tasks).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'kanban.db', table: 'tasks', rowCount: 1 })]));
       expect(report.evidence.runs).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'beast.db', table: 'beast_runs', rowCount: 1 })]));
       expect(report.evidence.runs).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'beast.db', table: 'tracked_agents', rowCount: 1 })]));
@@ -245,6 +256,7 @@ describe('dr restore-dry-run CLI', () => {
       expect(reportText).not.toContain('approval-value-for-mask');
       expect(reportText).not.toContain(approvalFileToken);
       expect(reportText).not.toContain(nestedApprovalFileToken);
+      expect(reportText).not.toContain(alternateApprovalFileToken);
       expect(reportText).not.toContain('config-yaml-value-for-mask');
       expect(reportText).not.toContain('private memory body');
       expect(reportText).not.toContain('private working body');

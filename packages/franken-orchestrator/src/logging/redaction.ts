@@ -58,7 +58,7 @@ export function maskOpaqueSecretLiterals(text: string): string {
     .replace(/\b([A-Za-z][A-Za-z0-9+.-]*:\/\/):[^@\s"']+(@[^/\s"']*)/gu, `$1:${REDACTED}$2`)
     .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/gu, REDACTED_EMAIL)
     .replace(/\b(?:Bearer|Basic|Bot)\s+[A-Za-z0-9._~+/=-]{8,}\b/giu, (match) => `${match.split(/\s+/u)[0]} ${REDACTED}`)
-    .replace(/((?:^|[\s"'])--(?:api-?key|auth|authorization|bearer|password|secret|token)\s+)[^\s"']+/giu, `$1${REDACTED}`)
+    .replace(/((?:^|[\s"'])--(?:api-?key|auth|authorization|bearer|password|secret|token)\s+)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s"']+)/giu, `$1${REDACTED}`)
     .replace(/((?:^|[\s"'])--(?:api-?key|auth|authorization|bearer|password|secret|token)=)[^\s"']+/giu, `$1${REDACTED}`)
     .replace(/("--(?:api-?key|auth|authorization|bearer|password|secret|token)"\s*,\s*")[^"]+/giu, `$1${REDACTED}`);
 }
