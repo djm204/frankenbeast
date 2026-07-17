@@ -31,14 +31,14 @@ describe('AgentService capacity reservations', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { labels: ['feature'] },
+      initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
     });
     const securityAgent = service.createAgent({
       definitionId: 'martin-loop',
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { labels: ['security'] },
+      initConfig: { labels: ['security'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
     });
     service.updateAgent(normalAgent.id, { status: 'running' });
     service.updateAgent(securityAgent.id, { status: 'running' });

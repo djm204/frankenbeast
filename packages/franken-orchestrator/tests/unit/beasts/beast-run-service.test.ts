@@ -150,7 +150,8 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Keep lifecycle in sync',
         chunkDirectory: 'docs/chunks',
-      },
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'terminal'],},
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -213,7 +214,8 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Stop queued work',
         chunkDirectory: 'docs/chunks',
-      },
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'terminal'],},
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -346,7 +348,8 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Resume the stopped run',
         chunkDirectory: 'docs/chunks',
-      },
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'terminal'],},
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -411,7 +414,7 @@ describe('BeastRunService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { labels: ['feature'] },
+      initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -513,14 +516,14 @@ describe('BeastRunService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { labels: ['feature'] },
+      initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
     });
     const urgentAgent = agents.createAgent({
       definitionId: 'martin-loop',
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: {},
+      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -570,7 +573,7 @@ describe('BeastRunService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { labels: ['feature'] },
+      initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
     });
     const run = repo.createRun({
       trackedAgentId: agent.id,
@@ -647,7 +650,8 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Start queued work',
         chunkDirectory: 'docs/chunks',
-      },
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'terminal'],},
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -826,7 +830,8 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Spawn work',
         chunkDirectory: 'docs/chunks',
-      },
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'terminal'],},
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -925,7 +930,8 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Spawn work',
         chunkDirectory: 'docs/chunks',
-      },
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'terminal'],},
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -1290,7 +1296,8 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Start deleted linked work',
         chunkDirectory: 'docs/chunks',
-      },
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'terminal'],},
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -1369,7 +1376,8 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Finish atomically',
         chunkDirectory: 'docs/chunks',
-      },
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'terminal'],},
       createdAt: '2026-03-11T00:00:00.000Z',
       updatedAt: '2026-03-11T00:00:00.000Z',
     });

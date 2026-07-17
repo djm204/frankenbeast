@@ -17,7 +17,9 @@ function createAgent(repo: SQLiteBeastRepository, name: string): TrackedAgent {
     status: 'initializing',
     createdByUser: 'operator',
     initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-    initConfig: { identity: { name }, labels: ['reconciliation'] },
+    initConfig: { identity: { name }, labels: ['reconciliation'],
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'terminal'],},
     createdAt: '2026-03-20T00:00:00.000Z',
     updatedAt: '2026-03-20T00:00:00.000Z',
   });

@@ -47,7 +47,7 @@ describe('ModuleConfig plumbing', () => {
         status: 'initializing',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: {},
+        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
         moduleConfig,
         createdAt: '2026-03-13T00:00:00.000Z',
         updatedAt: '2026-03-13T00:00:00.000Z',
@@ -69,7 +69,7 @@ describe('ModuleConfig plumbing', () => {
         status: 'initializing',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: {},
+        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
         createdAt: '2026-03-13T00:00:00.000Z',
         updatedAt: '2026-03-13T00:00:00.000Z',
       });
@@ -89,7 +89,7 @@ describe('ModuleConfig plumbing', () => {
         status: 'initializing',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: {},
+        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
         createdAt: '2026-03-13T00:00:00.000Z',
         updatedAt: '2026-03-13T00:00:00.000Z',
       });
@@ -114,7 +114,7 @@ describe('ModuleConfig plumbing', () => {
         status: 'initializing',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: {},
+        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
         moduleConfig: { firewall: false },
         createdAt: '2026-03-13T00:00:00.000Z',
         updatedAt: '2026-03-13T00:00:00.000Z',
@@ -140,7 +140,7 @@ describe('ModuleConfig plumbing', () => {
         source: 'dashboard',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: {},
+        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
         moduleConfig: { skills: false, planner: false },
       });
 
@@ -157,7 +157,7 @@ describe('ModuleConfig plumbing', () => {
         source: 'dashboard',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: {},
+        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
       });
 
       const updated = service.updateAgent(agent.id, {
@@ -212,7 +212,8 @@ describe('ModuleConfig plumbing', () => {
           provider: 'claude',
           objective: 'test agent fallback',
           chunkDirectory: 'docs/chunks',
-        },
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'terminal'],},
         moduleConfig: { governor: false, heartbeat: false },
       });
 
@@ -278,14 +279,14 @@ describe('ModuleConfig plumbing', () => {
         source: 'dashboard',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: { labels: ['feature'] },
+        initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
       });
       const urgentAgent = agents.createAgent({
         definitionId: 'martin-loop',
         source: 'dashboard',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: {},
+        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
       });
 
       const run = await dispatch.createRun({
@@ -346,7 +347,8 @@ describe('ModuleConfig plumbing', () => {
           provider: 'claude',
           objective: 'override test',
           chunkDirectory: 'docs/chunks',
-        },
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'terminal'],},
         moduleConfig: { governor: false },
       });
 

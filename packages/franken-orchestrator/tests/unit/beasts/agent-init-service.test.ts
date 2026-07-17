@@ -29,7 +29,7 @@ describe('AgentInitService', () => {
       chatSessionId: 'sess-1',
       command: '/interview',
       initActionKind: 'design-interview',
-      config: { goal: 'Map the lifecycle' },
+      config: { goal: 'Map the lifecycle', agentRole: 'docs', requestedTools: ['read_file', 'write_file'] },
     });
     const detail = agents.getAgentDetail(agent.id);
 
@@ -66,7 +66,7 @@ describe('AgentInitService', () => {
         config: { designDocPath: 'docs/plans/design.md' },
         chatSessionId: 'sess-1',
       },
-      initConfig: { designDocPath: 'docs/plans/design.md' },
+      initConfig: { designDocPath: 'docs/plans/design.md', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
       chatSessionId: 'sess-1',
     });
 
@@ -115,7 +115,7 @@ describe('AgentInitService', () => {
       source: 'chat',
       createdByUser: 'chat-session:sess-1',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {}, chatSessionId: 'sess-1' },
-      initConfig: { provider: 'claude', objective: 'ship' },
+      initConfig: { provider: 'claude', objective: 'ship', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
       chatSessionId: 'sess-1',
     });
 

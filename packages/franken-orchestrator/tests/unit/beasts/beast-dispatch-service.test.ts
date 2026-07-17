@@ -266,7 +266,8 @@ describe('BeastDispatchService', () => {
         provider: 'claude',
         objective: 'Implement linkage',
         chunkDirectory: 'docs/chunks',
-      },
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'terminal'],},
     });
 
     const run = await dispatch.createRun({
@@ -315,7 +316,7 @@ describe('BeastDispatchService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { labels: ['availability'] },
+      initConfig: { labels: ['availability'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
     });
     const firstRun = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -409,7 +410,7 @@ describe('BeastDispatchService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: { provider: 'claude', objective: 'SSE test', chunkDirectory: '.' } },
-      initConfig: { provider: 'claude', objective: 'SSE test', chunkDirectory: '.' },
+      initConfig: { provider: 'claude', objective: 'SSE test', chunkDirectory: '.', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
     });
 
     await dispatch.createRun({
@@ -454,7 +455,7 @@ describe('BeastDispatchService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: { provider: 'claude', objective: 'Approval test', chunkDirectory: '.' } },
-      initConfig: { provider: 'claude', objective: 'Approval test', chunkDirectory: '.' },
+      initConfig: { provider: 'claude', objective: 'Approval test', chunkDirectory: '.', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
     });
 
     const run = await dispatch.createRun({
@@ -498,7 +499,7 @@ describe('BeastDispatchService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: { provider: 'claude', objective: 'SSE fail test', chunkDirectory: '.' } },
-      initConfig: { provider: 'claude', objective: 'SSE fail test', chunkDirectory: '.' },
+      initConfig: { provider: 'claude', objective: 'SSE fail test', chunkDirectory: '.', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
     });
 
     const run = await dispatch.createRun({
