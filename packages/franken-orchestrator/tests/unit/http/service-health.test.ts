@@ -75,9 +75,27 @@ describe('buildServiceHealthSnapshot', () => {
       stateStore: healthyStateStore,
     });
 
+    expect(snapshot.dependencies.map((dependency) => dependency.name)).not.toContain('web-ui');
+    expect(snapshot.dependencies).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'orchestrator-api', status: 'healthy' })]));
     expect(snapshot.status).toBe('healthy');
-    expect(snapshot.dependencies.find((dependency) => dependency.name === 'web-ui')).toBeUndefined();
-    expect(snapshot.dependencies.find((dependency) => dependency.name === 'orchestrator-api')).toMatchObject({ status: 'healthy' });
+  });
+
+  it('includes each required orchestrator service in the aggregate snapshot', () => {
+    const snapshot = buildServiceHealthSnapshot({
+      providers: [healthyProvider],
+      networkServices: [
+        { id: 'chat-server', status: 'running' },
+        { id: 'beasts-daemon', status: 'stale' },
+      ],
+      github: healthyGithub,
+      stateStore: healthyStateStore,
+    });
+
+    expect(snapshot.dependencies).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'orchestrator-api', status: 'healthy' }),
+      expect.objectContaining({ name: 'beasts-daemon', status: 'unavailable' }),
+    ]));
+    expect(snapshot.status).toBe('unavailable');
   });
 
   it('preserves degraded managed service health in the aggregate snapshot', () => {

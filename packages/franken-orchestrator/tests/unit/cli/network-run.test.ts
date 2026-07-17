@@ -432,6 +432,80 @@ describe('runNetworkCommand', () => {
     expect(stateStore?.summary).toContain('/network');
   });
 
+  it('health rejects a non-directory network state path', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'frankenbeast-network-file-health-'));
+    const paths = makePaths(root);
+    await mkdir(paths.frankenbeastDir, { recursive: true });
+    await writeFile(join(paths.frankenbeastDir, 'network'), 'not a directory', 'utf-8');
+    const print = vi.fn();
+    try {
+      await runNetworkCommand(
+        makeArgs({ networkAction: 'health', json: true }),
+        defaultConfig(),
+        root,
+        paths,
+        {
+          resolveServices: vi.fn(() => []),
+          createSupervisor: vi.fn(() => ({
+            up: vi.fn(),
+            stopAll: vi.fn(),
+            down: vi.fn(),
+            status: vi.fn(async () => ({ services: [] })),
+            stop: vi.fn(),
+            logs: vi.fn(),
+          })),
+          print,
+          printError: vi.fn(),
+          renderHelp: () => 'network help',
+          waitForShutdown: vi.fn(async () => undefined),
+        },
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+
+    const report = JSON.parse(print.mock.calls.at(-1)?.[0] as string) as {
+      dependencies: Array<{ name: string; status: string; summary: string }>;
+    };
+    expect(report.dependencies.find((dependency) => dependency.name === 'state-store')).toMatchObject({
+      status: 'unavailable',
+      summary: expect.stringContaining('not a directory'),
+    });
+  });
+
+  it('health marks configured services unhealthy when persisted state is empty', async () => {
+    const print = vi.fn();
+
+    await runNetworkCommand(
+      makeArgs({ networkAction: 'health', json: true }),
+      defaultConfig(),
+      '/repo/frankenbeast',
+      makePaths(),
+      {
+        resolveServices: vi.fn(() => []),
+        createSupervisor: vi.fn(() => ({
+          up: vi.fn(),
+          stopAll: vi.fn(),
+          down: vi.fn(),
+          status: vi.fn(async () => ({ services: [] })),
+          stop: vi.fn(),
+          logs: vi.fn(),
+        })),
+        print,
+        printError: vi.fn(),
+        renderHelp: () => 'network help',
+        waitForShutdown: vi.fn(async () => undefined),
+      },
+    );
+
+    const report = JSON.parse(print.mock.calls.at(-1)?.[0] as string) as {
+      status: string;
+      dependencies: Array<{ name: string; status: string }>;
+    };
+    expect(report.status).not.toBe('healthy');
+    expect(report.dependencies.some((dependency) => ['web-ui', 'orchestrator-api', 'beasts-daemon'].includes(dependency.name))).toBe(true);
+  });
+
   it('health downgrades GitHub automation when a token exists without gh', async () => {
     const originalPath = process.env.PATH;
     const originalGithubToken = process.env.GITHUB_TOKEN;

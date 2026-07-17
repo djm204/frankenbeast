@@ -5,7 +5,7 @@ function printLine(...args: unknown[]): void {
 }
 
 
-import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { accessSync, constants, existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
@@ -1902,13 +1902,23 @@ function buildGithubHealthDependency(): DashboardDependencySnapshot {
   };
 }
 
+let ghAuthCache: { checkedAt: number; cacheKey: string; authenticated: boolean } | undefined;
+
 function isGhAuthenticated(): boolean {
-  try {
-    execFileSync('gh', ['auth', 'status', '--hostname', 'github.com'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
+  const now = Date.now();
+  const cacheKey = `${process.env.PATH ?? ''}\u0000${process.env.GH_TOKEN ?? ''}\u0000${process.env.GITHUB_TOKEN ?? ''}`;
+  if (ghAuthCache && ghAuthCache.cacheKey === cacheKey && now - ghAuthCache.checkedAt < 30_000) {
+    return ghAuthCache.authenticated;
   }
+  let authenticated = false;
+  try {
+    execFileSync('gh', ['auth', 'status', '--hostname', 'github.com'], { stdio: 'ignore', timeout: 2_000 });
+    authenticated = true;
+  } catch {
+    authenticated = false;
+  }
+  ghAuthCache = { checkedAt: now, cacheKey, authenticated };
+  return authenticated;
 }
 
 function buildStateStoreHealthDependency(
@@ -1927,7 +1937,7 @@ function buildStateStoreHealthDependency(
     };
   }
   const networkStateDir = join(paths.frankenbeastDir, 'network');
-  const candidate = existsSync(networkStateDir) ? networkStateDir : dirname(networkStateDir);
+  const candidate = existsSync(networkStateDir) ? networkStateDir : nearestExistingParent(networkStateDir);
   try {
     if (existsSync(paths.frankenbeastDir) && !statSync(paths.frankenbeastDir).isDirectory()) {
       return {
@@ -1936,6 +1946,16 @@ function buildStateStoreHealthDependency(
         status: 'unavailable',
         summary: `State path ${paths.frankenbeastDir} exists but is not a directory.`,
         remediationHint: 'Move or remove the file at the state path, then create a writable .fbeast directory before running managed services.',
+        safeWork: ['Continue read-only inspection; avoid operations that need persisted state.'],
+      };
+    }
+    if (existsSync(networkStateDir) && !statSync(networkStateDir).isDirectory()) {
+      return {
+        name: 'state-store',
+        type: 'state-store',
+        status: 'unavailable',
+        summary: `Network state path ${networkStateDir} exists but is not a directory.`,
+        remediationHint: 'Move or remove the file at the network state path, then create a writable .fbeast/network directory before running managed services.',
         safeWork: ['Continue read-only inspection; avoid operations that need persisted state.'],
       };
     }
@@ -1958,6 +1978,18 @@ function buildStateStoreHealthDependency(
       safeWork: ['Continue read-only inspection; avoid operations that need persisted state.'],
     };
   }
+}
+
+function nearestExistingParent(path: string): string {
+  let candidate = dirname(path);
+  while (!existsSync(candidate)) {
+    const parent = dirname(candidate);
+    if (parent === candidate) {
+      return candidate;
+    }
+    candidate = parent;
+  }
+  return candidate;
 }
 
 async function resolveManagedProcessHealthFromConfig(
@@ -2010,7 +2042,7 @@ async function buildCliServiceHealthSnapshot(
     const supervisorStatus = await supervisor.status();
     stateStore = buildStateStoreHealthDependency(paths, supervisorStatus.stateCorruptions);
     networkServices = supervisorStatus.services;
-    if (networkServices.length === 0 && process.env.FRANKENBEAST_NETWORK_MANAGED === '1') {
+    if (networkServices.length === 0) {
       networkServices = await resolveManagedProcessHealthFromConfig(args, config, root);
     }
   } catch (error) {

@@ -96,6 +96,13 @@ function findService(services: readonly NetworkServiceHealthStatus[] | undefined
   return undefined;
 }
 
+function findServices(services: readonly NetworkServiceHealthStatus[] | undefined, candidates: readonly string[]): NetworkServiceHealthStatus[] {
+  return candidates.flatMap((candidate) => {
+    const service = services?.find((entry) => entry.id === candidate);
+    return service ? [service] : [];
+  });
+}
+
 function backgroundLoopDependencies(services: readonly NetworkServiceHealthStatus[] | undefined): DashboardDependencySnapshot[] {
   const channelEntries = services?.flatMap((service) => (
     Object.entries(service.channels ?? {})
@@ -134,7 +141,7 @@ function backgroundLoopDependencies(services: readonly NetworkServiceHealthStatu
 export function buildServiceHealthSnapshot(input: ServiceHealthAggregatorInput): DashboardAvailabilitySnapshot {
   const services = input.networkServices;
   const webService = findService(services, ['dashboard-web', 'web-ui', 'franken-web']);
-  const orchestratorService = findService(services, ['chat-server', 'orchestrator-api', 'beasts-daemon']);
+  const orchestratorServices = findServices(services, ['chat-server', 'orchestrator-api', 'beasts-daemon']);
   const serviceDependencies: DashboardDependencySnapshot[] = [];
   if (webService || services === undefined) {
     serviceDependencies.push(serviceDependency(
@@ -144,11 +151,19 @@ export function buildServiceHealthSnapshot(input: ServiceHealthAggregatorInput):
       'Run `frankenbeast network status` and restart the dashboard service if needed.',
     ));
   }
-  if (orchestratorService || services === undefined) {
+  if (services === undefined) {
     serviceDependencies.push(serviceDependency(
       'orchestrator-api',
       'orchestrator',
-      orchestratorService,
+      undefined,
+      'Run `frankenbeast network status` and restart chat-server or beasts-daemon if needed.',
+    ));
+  }
+  for (const service of orchestratorServices) {
+    serviceDependencies.push(serviceDependency(
+      service.id === 'chat-server' || service.id === 'orchestrator-api' ? 'orchestrator-api' : service.id,
+      'orchestrator',
+      service,
       'Run `frankenbeast network status` and restart chat-server or beasts-daemon if needed.',
     ));
   }
