@@ -236,6 +236,9 @@ async function checkCommonLocalPorts(requireServices = false) {
                 warn(portCheck.id, portCheck.name, detail, `If this is not the expected ${portCheck.service} process, stop the conflicting service before starting Frankenbeast local infrastructure.`);
             }
         }
+        else if (requireServices) {
+            check(portCheck.id, portCheck.name, false, detail, `Start ${portCheck.service} with docker compose up -d, verify port ${portCheck.port} is reachable, then re-run npm run local:verify-setup.`, true);
+        }
         else {
             warn(portCheck.id, portCheck.name, detail, `If ${portCheck.service} is required for your task, start it with docker compose up -d and re-run the healthcheck.`);
         }
@@ -287,8 +290,8 @@ async function main() {
     else {
         // ChromaDB
         const chromaUrl = process.env['CHROMA_URL'] ?? envFile.get('CHROMA_URL') ?? 'http://localhost:8000';
-        const grafanaUrl = process.env['GRAFANA_URL'] ?? envFile.get('GRAFANA_URL') ?? 'http://localhost:3000';
-        const tempoUrl = process.env['TEMPO_URL'] ?? envFile.get('TEMPO_URL') ?? 'http://localhost:3200';
+        const grafanaUrl = 'http://localhost:3000';
+        const tempoUrl = 'http://localhost:3200';
         await checkHttp('ChromaDB', `${chromaUrl}/api/v2/heartbeat`, options.requireServices);
         // Grafana
         await checkHttp('Grafana', `${grafanaUrl}/api/health`, options.requireServices);

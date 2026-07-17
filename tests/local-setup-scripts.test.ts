@@ -127,8 +127,8 @@ describe('local setup scripts', () => {
     expect(read('README.md')).toContain('Tempo readiness (http://localhost:3200/ready)');
     expect(read('README.md')).toContain('.env.example intentionally does not define a TEMPO_ENDPOINT override');
     expect(source).toContain("const chromaUrl = process.env['CHROMA_URL'] ?? envFile.get('CHROMA_URL') ?? 'http://localhost:8000'");
-    expect(source).toContain("const grafanaUrl = process.env['GRAFANA_URL'] ?? envFile.get('GRAFANA_URL') ?? 'http://localhost:3000'");
-    expect(source).toContain("const tempoUrl = process.env['TEMPO_URL'] ?? envFile.get('TEMPO_URL') ?? 'http://localhost:3200'");
+    expect(source).toContain("const grafanaUrl = 'http://localhost:3000'");
+    expect(source).toContain("const tempoUrl = 'http://localhost:3200'");
     expect(source).toContain("await checkHttp('ChromaDB', `${chromaUrl}/api/v2/heartbeat`, options.requireServices)");
     expect(source).toContain("await checkHttp('Grafana', `${grafanaUrl}/api/health`, options.requireServices)");
     expect(source).toContain("await checkHttp('Tempo', `${tempoUrl}/ready`, options.requireServices)");
@@ -261,6 +261,45 @@ describe('local setup scripts', () => {
         expect.objectContaining({ id: 'http-grafana', status: 'warn', required: false }),
         expect.objectContaining({ id: 'http-tempo', status: 'warn', required: false }),
       ]));
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
+  it('local setup verification fails closed when required service ports are down', () => {
+    const fixture = mkdtempSync(join(tmpdir(), 'frankenbeast-local-healthcheck-'));
+    const root = join(fixture, 'repo');
+    const bin = join(fixture, 'bin');
+    mkdirSync(root, { recursive: true });
+    mkdirSync(join(root, 'node_modules'), { recursive: true });
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(root, 'package-lock.json'), '{}');
+    writeFileSync(join(root, 'frankenbeast.config.example.json'), '{}');
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'frankenbeast', packageManager: 'npm@11.5.1' }));
+    writeFileSync(join(root, '.env.example'), [
+      'CHROMA_URL=http://127.0.0.1:9',
+      'GRAFANA_URL=http://127.0.0.1:9',
+      'TEMPO_URL=http://127.0.0.1:9',
+      '',
+    ].join('\n'));
+    writeExecutable(join(bin, 'npm'), "printf '11.5.1\\n'\n");
+    writeExecutable(join(bin, 'gh'), "exit 1\n");
+    writeExecutable(join(bin, 'git'), `case \"$1\" in\n  rev-parse) printf '%s\\n' '${root}' ;;\n  status) exit 0 ;;\n  *) exit 0 ;;\nesac\n`);
+
+    try {
+      const result = spawnSync(process.execPath, [join(ROOT, 'scripts/verify-setup.mjs'), '--env-file', '.env.example', '--json', '--require-services'], {
+        cwd: root,
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` },
+      });
+      expect(result.status).not.toBe(0);
+      const report = JSON.parse(result.stdout) as { ok: boolean; checks: Array<{ id: string; status: string; required: boolean; action: string | null }> };
+      expect(report.ok).toBe(false);
+      expect(report.checks).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: 'port-4317', status: 'fail', required: true }),
+        expect.objectContaining({ id: 'port-4318', status: 'fail', required: true }),
+      ]));
+      expect(report.checks.every((check) => Object.hasOwn(check, 'action'))).toBe(true);
     } finally {
       rmSync(fixture, { recursive: true, force: true });
     }
