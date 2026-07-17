@@ -1252,7 +1252,7 @@ function hasExplicitPostTaskLessonSignal(text: string): boolean {
   ) {
     return true;
   }
-  return /\b(?:always|avoid|ensure|prefer|require|validate|verify|retry|redact|must|should|use|fallback|workaround)\b/i.test(
+  return /\b(?:always|avoid|ensure|prefer|require|validate|verify|retry|redact|must|use|fallback|workaround)\b/i.test(
     text,
   );
 }

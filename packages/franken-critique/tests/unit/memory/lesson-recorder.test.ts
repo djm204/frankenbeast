@@ -595,6 +595,21 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('discards non-instructional should status notes', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-ordinary-should-status',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['This should fix the bug'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        review: expect.objectContaining({ status: 'discarded' }),
+      }),
+    );
+  });
+
   it('discards raw tool failures without workaround verbs', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-raw-tool-failure',
