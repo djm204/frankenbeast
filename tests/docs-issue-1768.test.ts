@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const ROOT = resolve(import.meta.dirname, '..');
-const glossaryPath = 'docs/onboarding/pm-swarm-runtime-glossary.md';
+const glossaryPath = 'docs/onboarding/agent-coordination-runtime-glossary.md';
 
 function readText(relativePath: string): string {
   return readFileSync(resolve(ROOT, relativePath), 'utf8');
@@ -19,12 +19,12 @@ function sectionBetween(source: string, start: string, end: string): string {
   return source.slice(startIndex, endIndex);
 }
 
-describe('issue #1768 PM-swarm runtime glossary', () => {
+describe('issue #1768 agent coordination runtime glossary', () => {
   it('adds a dedicated glossary with stable runtime terms and operator actions', () => {
     const glossary = readText(glossaryPath);
 
     for (const heading of [
-      '# PM-swarm runtime glossary',
+      '# Agent coordination runtime glossary',
       '## Quick use',
       '## Runtime term table',
       '## Negative and edge-case guidance',
@@ -34,16 +34,16 @@ describe('issue #1768 PM-swarm runtime glossary', () => {
     }
 
     for (const term of [
-      '| PM shard |',
+      '| Coordination shard |',
       '| Worker card |',
       '| Root blackboard |',
       '| Liveness check |',
       '| Refill |',
       '| `worker_ids` |',
       '| Active PR guard |',
-      '| Codex gate |',
-      '| Approval-cop |',
-      '| Doctor card |',
+      '| Review gate |',
+      '| Approval runner |',
+      '| Repair card |',
       '| Shared lessons file |',
     ]) {
       expect(glossary).toContain(term);
@@ -59,9 +59,9 @@ describe('issue #1768 PM-swarm runtime glossary', () => {
 
     for (const guardrail of [
       'Do not start a second branch, worktree, or PR for the same issue',
-      'Do not merge on Codex silence, an eyes reaction, or a clean response from an older head',
+      'Do not merge on review silence, an eyes reaction, or a clean response from an older head',
       'Do not treat `worker_ids` as a historical audit log',
-      'Do not use approval-cop to invent a missing command',
+      'Do not use an approval runner to invent a missing command',
       'Do not roll a completed worker into the next issue',
     ]) {
       expect(negativeGuidance).toContain(guardrail);
@@ -72,8 +72,8 @@ describe('issue #1768 PM-swarm runtime glossary', () => {
     const onboarding = readText('ONBOARDING.md');
     const readme = readText('README.md');
 
-    expect(onboarding).toContain('[PM-swarm runtime glossary](docs/onboarding/pm-swarm-runtime-glossary.md)');
-    expect(onboarding).toContain('decode liveness, refill, Codex, approval-cop, and worker handoff terms');
-    expect(readme).toContain('[PM-swarm runtime glossary](ONBOARDING.md#pm-swarm-runtime-glossary)');
+    expect(onboarding).toContain('[agent coordination runtime glossary](docs/onboarding/agent-coordination-runtime-glossary.md)');
+    expect(onboarding).toContain('decode liveness, refill, Codex, approval runner, and worker handoff terms');
+    expect(readme).toContain('[agent coordination runtime glossary](ONBOARDING.md#agent-coordination-runtime-glossary)');
   });
 });

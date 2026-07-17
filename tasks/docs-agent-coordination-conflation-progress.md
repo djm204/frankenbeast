@@ -4,6 +4,6 @@
 - [x] Identify tracked Frankenbeast docs that mention external agent-coordination concepts as though they were Frankenbeast product/runtime concepts.
 - [x] Patch docs to describe Frankenbeast surfaces without agent-coordination conflation.
 - [x] Verify with searches and relevant docs checks.
-- [ ] Commit and push branch.
-- [ ] Open PR.
+- [x] Commit and push branch.
+- [x] Open PR: https://github.com/djm204/frankenbeast/pull/2567
 - [ ] Hand PR closeout to worker.

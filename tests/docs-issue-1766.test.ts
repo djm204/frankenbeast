@@ -46,9 +46,9 @@ describe('issue #1766 agent role responsibility map', () => {
     expect(roleMap.schemaVersion).toBe(1);
     expect(roleMap.ownershipManifest).toBe(ownershipManifestPath);
     expect(roleMap.roleMappings.map((role) => role.roleId)).toEqual([
-      'pm-shard',
+      'coordinator-shard',
       'issue-worker',
-      'doctor-recovery',
+      'repair-recovery',
       'reviewer',
       'docs-onboarding-worker',
     ]);

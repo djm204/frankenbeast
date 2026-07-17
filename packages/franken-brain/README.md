@@ -52,7 +52,7 @@ brain.episodic.record({
 });
 const related = brain.episodic.recall('package inventory', 5);
 
-// Agent learning capture can opt into a cooldown so retrospectives or PM
+// Agent learning capture can opt into a cooldown so retrospectives or coordinator
 // handoffs do not churn the same lesson repeatedly. The key is stored in
 // details.learningKey; duplicate attempts return a structured cooldown result
 // instead of silently inserting another episodic row.
@@ -141,7 +141,7 @@ if (conflicts.length > 0 && prompt) {
 
 // Confidence decay gives injection/retrieval code a deterministic way to lower
 // old memory certainty without mutating the stored record. The result is
-// structured so PM/liveness tools can log the age, half-life, and applied floor.
+// structured so coordination/liveness tools can log the age, half-life, and applied floor.
 const confidence = calculateMemoryConfidenceDecay({
   confidence: provenance?.confidence ?? 0.5,
   observedAt: provenance?.approvedAt ?? new Date().toISOString(),

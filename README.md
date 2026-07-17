@@ -838,7 +838,7 @@ Critique lessons recorded after a recovered failure include a `rollbackWorkflow`
 3. Either record a replacement lesson with fresh traceability evidence or retire the original lesson with no replacement.
 4. Run the verifier command and include the result in the coordination handoff before removing the rollback block.
 
-Rollback requests must provide a stable lesson id, a concrete rollback reason, evidence such as a review comment/regression/operator report, and a verification command. If any of that evidence is missing, PM tooling should keep the lesson blocked instead of silently retiring or replacing it.
+Rollback requests must provide a stable lesson id, a concrete rollback reason, evidence such as a review comment/regression/operator report, and a verification command. If any of that evidence is missing, coordination tooling should keep the lesson blocked instead of silently retiring or replacing it.
 
 ### Phase 3: Validated Execution
 

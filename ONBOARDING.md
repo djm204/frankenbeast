@@ -61,7 +61,7 @@ Use this checklist for a first local checkout or when rebuilding a development e
 
   The command prints stable `[new-worker-preflight:<check>] ok|warn|fail - ...` badges by default, or a JSON object with `ok` and `checks` when `--json` is supplied. Use `npm --silent` or `node scripts/new-worker-preflight.mjs --json` for machine-parsed JSON so npm lifecycle banners do not prefix stdout. It verifies the supported Node.js/npm pin, required `git`/`gh`/`jq` commands, GitHub CLI authentication for `github.com`, the project git identity (`David Mendez <me@davidmendez.dev>`), Frankenbeast repository root, and whether the current worktree already has uncommitted files. Use `--skip-github-auth` only for offline docs/tests; run without it before opening PRs.
 
-- [ ] PMs or workers that need profile-specific evidence: run the capability self-test with the expected profile schema or explicit flags before dispatching PR-producing work:
+- [ ] Coordinators or workers that need profile-specific evidence: run the capability self-test with the expected profile schema or explicit flags before dispatching PR-producing work:
 
   ```bash
   npm --silent run profile:capability-self-test -- --json --repo djm204/frankenbeast --require-repo-write --toolset terminal,file --delivery-target discord:1523806555047333968
@@ -160,7 +160,7 @@ Read each badge as `[onboarding:<current>/<total>:<stage>] <state> - <detail>`. 
 
 ## Repository ownership
 
-Read the [repository ownership manifest](docs/onboarding/repository-ownership.md) before assigning repository-wide or cross-package work. It maps current package and documentation surfaces to primary owners, escalation owners, verification commands, and PM/worker handoff notes so agents do not guess ownership from path names alone.
+Read the [repository ownership manifest](docs/onboarding/repository-ownership.md) before assigning repository-wide or cross-package work. It maps current package and documentation surfaces to primary owners, escalation owners, verification commands, and coordinator/worker handoff notes so agents do not guess ownership from path names alone.
 
 Read the [agent role responsibility map](docs/onboarding/agent-role-responsibility-map.md) when assigning, resuming, reviewing, or recovering agent work. It maps coordination shards, issue workers, repair owners, reviewers, and docs workers to repository responsibilities, required handoff fields, verification commands, and explicit `mustNotOwn` boundaries.
 
@@ -266,7 +266,7 @@ Edge case: many older diagrams and `docs/plans/` files describe target or histor
 ## Optional services
 
 Before starting Docker or blocking on optional infrastructure, read the [local service dependency explainer](docs/onboarding/local-service-dependencies.md).
-It maps ChromaDB, Grafana, Tempo, provider credentials, and secret backends to the capabilities that actually require them, with health checks and PM/worker handoff fields.
+It maps ChromaDB, Grafana, Tempo, provider credentials, and secret backends to the capabilities that actually require them, with health checks and coordinator/worker handoff fields.
 
 - [ ] Configure `.env` before starting the full compose stack.
   - Keep `CHROMA_URL=http://localhost:8000` unless ChromaDB runs elsewhere.
@@ -321,7 +321,7 @@ It maps ChromaDB, Grafana, Tempo, provider credentials, and secret backends to t
 
 ## Troubleshooting
 
-If a PM, liveness monitor, or operator reports a stalled worker, use the dedicated [troubleshooting guide for stalled workers](docs/guides/troubleshooting-stalled-workers.md) before respawning or deleting worktrees. It walks through live task/PR evidence, active versus blocked versus stale classifications, safe recovery actions, and the handoff fields future workers need.
+If a coordinator, liveness monitor, or operator reports a stalled worker, use the dedicated [troubleshooting guide for stalled workers](docs/guides/troubleshooting-stalled-workers.md) before respawning or deleting worktrees. It walks through live task/PR evidence, active versus blocked versus stale classifications, safe recovery actions, and the handoff fields future workers need.
 
 - [ ] `npm install` fails with an engine error:
   - Check `node --version` against the root `engines.node` range.
