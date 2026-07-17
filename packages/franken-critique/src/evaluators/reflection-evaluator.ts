@@ -5,8 +5,19 @@ import type {
   EvaluationFinding,
 } from './evaluator.js';
 
+export interface ReflectionCompletionOptions {
+  maxTokens?: number;
+}
+
+export interface ReflectionLlmClient {
+  complete(
+    prompt: string,
+    options?: ReflectionCompletionOptions,
+  ): Promise<string>;
+}
+
 export interface ReflectionEvaluatorOptions {
-  llmClient: { complete(prompt: string): Promise<string> };
+  llmClient: ReflectionLlmClient;
   maxTokens?: number;
 }
 
@@ -23,7 +34,14 @@ export class ReflectionEvaluator implements Evaluator {
 
   async evaluate(input: EvaluationInput): Promise<EvaluationResult> {
     const prompt = this.buildReflectionPrompt(input);
-    const reflection = await this.options.llmClient.complete(prompt);
+    const completionOptions =
+      this.options.maxTokens === undefined
+        ? undefined
+        : { maxTokens: this.options.maxTokens };
+    const reflection = await this.options.llmClient.complete(
+      prompt,
+      completionOptions,
+    );
 
     const severity = this.parseSeverity(reflection);
     const score = Math.max(0, 1 - (severity - 1) / 9); // 1→1.0, 10→0.0
@@ -60,7 +78,10 @@ export class ReflectionEvaluator implements Evaluator {
       `Steps completed: ${this.quoteUntrusted(stepsCompleted)}`,
       '',
       'Work done so far:',
-      this.formatUntrustedBlock('UNTRUSTED_WORK_SUMMARY', input.content || 'No summary available'),
+      this.formatUntrustedBlock(
+        'UNTRUSTED_WORK_SUMMARY',
+        input.content || 'No summary available',
+      ),
       '',
       'Original objective:',
       this.formatUntrustedBlock('UNTRUSTED_OBJECTIVE', objective),
@@ -117,7 +138,10 @@ export class ReflectionEvaluator implements Evaluator {
       // Fall through to the defensive string representation below.
     }
 
-    return JSON.stringify(this.describeUntrustedValue(value)).replaceAll('</', '<\\/');
+    return JSON.stringify(this.describeUntrustedValue(value)).replaceAll(
+      '</',
+      '<\\/',
+    );
   }
 
   private describeUntrustedValue(value: unknown): string {
