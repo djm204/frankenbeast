@@ -10,12 +10,18 @@ const REQUIRED_BACKUP_TABLES = [
 ] as const;
 const CURRENT_SCHEMA_REQUIRED_TABLES = [
   ...REQUIRED_BACKUP_TABLES,
+  'memory_review_candidates',
+  'memory_review_provenance',
+  'memory_review_suppressions',
   'memory_deletion_guards',
   'memory_deletion_hash_keys',
 ] as const;
 const MEMORY_BACKUP_TABLES = [
   'memory_schema_versions',
   ...REQUIRED_BACKUP_TABLES,
+  'memory_review_candidates',
+  'memory_review_provenance',
+  'memory_review_suppressions',
   'memory_deletion_guards',
   'memory_deletion_hash_keys',
   'memory_access_audit_events',
@@ -29,6 +35,9 @@ const ENCRYPTED_PAYLOAD_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
   working_memory: ['value'],
   episodic_events: ['summary', 'details'],
   checkpoints: ['state'],
+  memory_review_candidates: ['value', 'source', 'source_id', 'evidence_id', 'reason', 'reviewer', 'note'],
+  memory_review_provenance: ['value', 'source', 'source_id', 'evidence_id', 'reason', 'reviewer', 'note'],
+  memory_review_suppressions: ['value', 'source', 'source_id', 'evidence_id', 'reason', 'reviewer', 'note'],
   memory_deletion_hash_keys: ['key_material'],
 };
 const REQUIRED_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
@@ -36,6 +45,9 @@ const REQUIRED_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
   episodic_events: ['id', 'type', 'step', 'summary', 'details', 'created_at'],
   checkpoints: ['id', 'state', 'created_at'],
   memory_schema_versions: ['store', 'version', 'migrated_at'],
+  memory_review_candidates: ['id', 'target_store', 'memory_key', 'value', 'source', 'source_type', 'source_id', 'evidence_id', 'confidence', 'reason', 'expires_at', 'revalidate_at', 'status', 'suppression_reason', 'reviewer', 'note', 'created_at', 'updated_at', 'decided_at', 'schema_version'],
+  memory_review_provenance: ['target_store', 'memory_key', 'value', 'candidate_id', 'source', 'source_type', 'source_id', 'evidence_id', 'confidence', 'reason', 'reviewer', 'note', 'created_at', 'approved_at', 'expires_at', 'revalidate_at', 'schema_version'],
+  memory_review_suppressions: ['signature', 'suppression_reason', 'target_store', 'memory_key', 'value', 'source', 'source_id', 'evidence_id', 'reason', 'reviewer', 'note', 'created_at', 'schema_version'],
   memory_deletion_guards: ['selector_hash', 'guard_kind', 'value_hash', 'created_at'],
   memory_deletion_hash_keys: ['id', 'key_material', 'created_at'],
   memory_access_audit_events: ['id', 'operation', 'store', 'key_hash', 'query_hash', 'outcome', 'details', 'created_at', 'schema_version'],
@@ -572,18 +584,22 @@ export function verifyMemoryBackup(path: string): MemoryBackupVerificationReport
       throw new Error(`Memory backup is missing required table(s): ${missingTables.join(', ')}`);
     }
     if (tables.has('memory_schema_versions')) {
-      const missingCurrentTables = CURRENT_SCHEMA_REQUIRED_TABLES.filter((table) => !tables.has(table));
+      const schemaRowsForMissingTables = db
+        .prepare(`SELECT store, version FROM memory_schema_versions ORDER BY store ASC`)
+        .all() as Array<{ store: string; version: number }>;
+      const registeredStores = schemaRowsForMissingTables.map((row) => row.store);
+      const requiredStores = [
+        'memory_deletion_guards',
+        'memory_deletion_hash_keys',
+        ...(registeredStores.includes('memory_access_audit_events') ? ['memory_access_audit_events'] : []),
+        ...(schemaRowsForMissingTables.some((row) => row.version >= CURRENT_MEMORY_SCHEMA_VERSION)
+          || registeredStores.some((store) => store.startsWith('memory_review_'))
+          ? ['memory_review_candidates', 'memory_review_provenance', 'memory_review_suppressions']
+          : []),
+      ] as const;
+      const missingCurrentTables = requiredStores.filter((table) => !tables.has(table));
       if (missingCurrentTables.length > 0) {
         throw new Error(`Current memory backup is missing required table(s): ${missingCurrentTables.join(', ')}`);
-      }
-      const schemaRowsForMissingTables = db
-        .prepare(`SELECT store FROM memory_schema_versions ORDER BY store ASC`)
-        .all() as Array<{ store: string }>;
-      const registeredMissingStores = schemaRowsForMissingTables
-        .map((row) => row.store)
-        .filter((store) => MEMORY_BACKUP_TABLES.includes(store as typeof MEMORY_BACKUP_TABLES[number]) && !tables.has(store));
-      if (registeredMissingStores.length > 0) {
-        throw new Error(`Current memory backup is missing required table(s): ${registeredMissingStores.join(', ')}`);
       }
     }
 

@@ -481,6 +481,31 @@ describe('SqliteBrain', () => {
       expect(() => brain.working.set('project:import-1:new-item', 'secret')).toThrow(/right-to-forget/);
     });
 
+    it('guards memory review proposals whose sourceId matches a forgotten source scope', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.timezone',
+        value: 'UTC',
+        source: 'chat',
+        sourceId: 'msg-42',
+        confidence: 0.8,
+        reason: 'User stated timezone preference.',
+      });
+      brain.memoryReview.approve(candidate.id, { reviewer: 'operator' });
+
+      brain.rightToForget({ sourceScope: 'msg-42' });
+
+      expect(() => brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.locale',
+        value: 'en-US',
+        source: 'chat',
+        sourceId: 'msg-42',
+        confidence: 0.8,
+        reason: 'Same forgotten message id with different content.',
+      })).toThrow(/right-to-forget/);
+    });
+
     it('deletes episodic events whose step matches the query selector', () => {
       brain.episodic.record({
         type: 'observation',
@@ -1604,6 +1629,12 @@ describe('SqliteBrain', () => {
           }),
         }),
       ]);
+      expect(brain.memoryReview.listProvenance({ key: 'user.location.city' })).toEqual([
+        expect.objectContaining({
+          key: 'user.location.city',
+          expiresAt: '2026-07-15T00:00:00.000Z',
+        }),
+      ]);
     });
 
     it('filters memory provenance by source and validates invalid viewer filters', () => {
@@ -1613,7 +1644,7 @@ describe('SqliteBrain', () => {
         value: 'main',
         source: 'repo-config',
         confidence: 0.8,
-        reason: 'Observed from GitHub repository metadata.',
+        reason: 'Observed from GitHub repository metadata; not from a chat transcript.',
       });
       const chatCandidate = brain.memoryReview.propose({
         targetStore: 'working',

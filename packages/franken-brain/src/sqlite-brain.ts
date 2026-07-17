@@ -3301,21 +3301,16 @@ export class SqliteMemoryReviewQueue {
         )
         .all(...params) as MemoryProvenanceRow[];
       const sourceFilter = options.source?.trim().toLowerCase();
-      const nowMs = options.now === undefined ? Date.now() : parseDecayTimestamp(options.now, 'now');
       const attributions: MemoryProvenanceRecord[] = [];
       for (const row of rows) {
         if (!this.provenanceMatchesCurrentWorkingMemory(row)) {
           continue;
         }
         const provenance = this.rowToProvenance(row);
-        if (!options.includeExpired && provenance.expiresAt && Date.parse(provenance.expiresAt) <= nowMs) {
-          continue;
-        }
         if (sourceFilter && ![
           provenance.source,
           provenance.sourceId,
           provenance.evidenceId,
-          provenance.reason,
         ].filter((value): value is string => value !== undefined).some(value => value.toLowerCase().includes(sourceFilter))) {
           continue;
         }
@@ -3378,7 +3373,16 @@ export class SqliteMemoryReviewQueue {
     options: MemoryAttributionListOptions = {},
   ): MemoryCompactedEntry[] {
     const now = options.now ?? new Date();
-    return this.listProvenance(options)
+    const nowMs = parseDecayTimestamp(now, 'now');
+    const limit = this.resolveAttributionLimit(options.limit);
+    const provenance = this.listProvenance({
+      ...options,
+      includeExpired: true,
+      limit: 1000,
+    });
+    return provenance
+      .filter((record) => options.includeExpired || !record.expiresAt || Date.parse(record.expiresAt) > nowMs)
+      .slice(0, limit)
       .map((record) => this.provenanceToCompactedEntry(record, options, now));
   }
 
@@ -6837,6 +6841,7 @@ function assertMemoryCandidateNotDeletionGuarded(
     stringifyWorkingMemoryValue(proposal.key, {
       value: proposal.value,
       source: proposal.source,
+      sourceId: proposal.sourceId,
       evidenceId: proposal.evidenceId,
       reason: proposal.reason,
     }),
