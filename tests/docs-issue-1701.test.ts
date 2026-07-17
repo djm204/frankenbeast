@@ -35,6 +35,11 @@ describe('issue #1701 setup troubleshooting matrix docs', () => {
     ]) {
       expect(matrix).toContain(requiredText);
     }
+
+    expect(matrix).toContain('5173 3737');
+    expect(matrix).toContain('docker compose logs --tail=80 chromadb grafana tempo');
+    expect(matrix).toContain('targeted probes');
+    expect(matrix).toContain('run `init --repair` only when you intentionally want an interactive repair');
   });
 
   it('documents safe remediation and handoff evidence instead of destructive cleanup', () => {
