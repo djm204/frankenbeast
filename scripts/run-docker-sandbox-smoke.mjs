@@ -6,7 +6,9 @@ const dockerVersion = spawnSync('docker', ['version', '--format', '{{.Server.Ver
   stdio: 'pipe',
 });
 
-const ciRequiresDocker = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
+const trueLikeCiValues = new Set(['1', 'true', 'yes', 'on']);
+const ciRequiresDocker = trueLikeCiValues.has((process.env.CI ?? '').trim().toLowerCase())
+  || trueLikeCiValues.has((process.env.GITHUB_ACTIONS ?? '').trim().toLowerCase());
 
 if (dockerVersion.error || dockerVersion.status !== 0) {
   const reason = dockerVersion.error?.message

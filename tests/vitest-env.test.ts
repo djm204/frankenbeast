@@ -74,8 +74,9 @@ describe('Vitest environment flag helper', () => {
     expect(ci).toContain('npm run test:docker:sandbox');
     expect(smokeScript).toContain('DOCKER_BUILD');
     expect(smokeScript).toContain("${ciRequiresDocker ? 'failed' : 'skipped'}: Docker daemon unavailable");
-    expect(smokeScript).toContain("process.env.CI === 'true'");
-    expect(smokeScript).toContain("process.env.GITHUB_ACTIONS === 'true'");
+    expect(smokeScript).toContain("const trueLikeCiValues = new Set(['1', 'true', 'yes', 'on'])");
+    expect(smokeScript).toContain("process.env.CI ?? ''");
+    expect(smokeScript).toContain("process.env.GITHUB_ACTIONS ?? ''");
     expect(smokeScript).toContain('Docker sandbox build smoke test passed');
   });
 
@@ -98,16 +99,23 @@ describe('Vitest environment flag helper', () => {
         encoding: 'utf-8',
         env: { ...baseEnv, CI: undefined },
       });
-      const ciResult = spawnSync(process.execPath, [script], {
+      const ciTrueResult = spawnSync(process.execPath, [script], {
         cwd: ROOT,
         encoding: 'utf-8',
         env: { ...baseEnv, CI: 'true' },
       });
+      const ciOneResult = spawnSync(process.execPath, [script], {
+        cwd: ROOT,
+        encoding: 'utf-8',
+        env: { ...baseEnv, CI: '1' },
+      });
 
       expect(localResult.status).toBe(0);
       expect(localResult.stderr).toContain('Docker sandbox build smoke test skipped');
-      expect(ciResult.status).toBe(1);
-      expect(ciResult.stderr).toContain('Docker sandbox build smoke test failed');
+      expect(ciTrueResult.status).toBe(1);
+      expect(ciTrueResult.stderr).toContain('Docker sandbox build smoke test failed');
+      expect(ciOneResult.status).toBe(1);
+      expect(ciOneResult.stderr).toContain('Docker sandbox build smoke test failed');
     } finally {
       rmSync(binDir, { force: true, recursive: true });
     }
