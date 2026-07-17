@@ -433,6 +433,90 @@ describe('agent routes integration', () => {
     expect(agents.listAgents()).toEqual([]);
   });
 
+  it('derives policy defaults for dashboard wizard agent launches', async () => {
+    const { app, operatorToken, agents } = createIntegratedBeastApp();
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        autoDispatch: false,
+        initAction: {
+          kind: 'martin-loop',
+          command: 'martin-loop',
+          config: {},
+        },
+        initConfig: {
+          provider: 'claude',
+          objective: 'Launch from the dashboard without explicit policy fields',
+          chunkDirectory: 'docs/chunks',
+        },
+      }),
+    });
+
+    expect(response.status).toBe(201);
+    const [agent] = agents.listAgents();
+    expect(agent.initConfig).toMatchObject({
+      agentRole: 'coding',
+      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+      skills: [],
+    });
+  });
+
+  it('returns a policy-denied 403 for tracked-agent run dispatch policy failures', async () => {
+    const { app, operatorToken, agents } = createIntegratedBeastApp();
+
+    const createResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        autoDispatch: false,
+        initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+        initConfig: { provider: 'claude', objective: 'Create tracked shell', chunkDirectory: 'docs/chunks' },
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+    const [agent] = agents.listAgents();
+
+    const runResponse = await app.request('/v1/beasts/runs', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        trackedAgentId: agent.id,
+        config: {
+          provider: 'claude',
+          objective: 'Dispatch with an untrusted selected skill',
+          chunkDirectory: 'docs/chunks',
+          skills: ['unknown-installed-skill'],
+        },
+      }),
+    });
+
+    expect(runResponse.status).toBe(403);
+    expect(await runResponse.json()).toMatchObject({
+      error: {
+        code: 'AGENT_TOOL_POLICY_DENIED',
+        details: {
+          validation: {
+            denials: expect.arrayContaining([expect.objectContaining({ requestedTool: 'skill:unknown-installed-skill' })]),
+          },
+        },
+      },
+    });
+  });
+
   it('returns malformed json errors for invalid tracked agent request bodies', async () => {
     const { app, operatorToken } = createIntegratedBeastApp();
 

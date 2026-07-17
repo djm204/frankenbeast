@@ -16,12 +16,13 @@ import {
 } from './capacity-reservation-policy.js';
 import type { MaintenanceModeService } from './maintenance-mode-service.js';
 import { AgentToolPolicyError, validateAgentRoleTools } from './role-tool-manifest.js';
-import type { ToolPolicyDenial } from './role-tool-manifest.js';
+import type { ToolPolicyDenial, ToolPolicyValidationContext } from './role-tool-manifest.js';
 
 export interface BeastDispatchServiceOptions {
   eventBus?: BeastEventBus;
   capacityPolicy?: CapacityReservationPolicy | undefined;
   maintenance?: MaintenanceModeService | undefined;
+  trustedSkillToolManifests?: ToolPolicyValidationContext['trustedSkillToolManifests'];
 }
 
 export interface BeastExecutors {
@@ -55,7 +56,6 @@ const TOOL_POLICY_CONFIG_KEYS = [
   'enabledTools',
   'toolManifest',
   'tools',
-  'skills',
 ] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -146,6 +146,10 @@ function pickToolPolicyConfig(config: Readonly<Record<string, unknown>>): Readon
       .filter((key) => Object.hasOwn(config, key))
       .map((key) => [key, config[key]]),
   );
+}
+
+function pickSkillsPolicyConfig(config: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  return Object.hasOwn(config, 'skills') ? { skills: config.skills } : {};
 }
 
 function preserveTrackedAgentPolicyConfig(
@@ -415,12 +419,20 @@ export class BeastDispatchService {
       ? this.repository.requireTrackedAgent(request.trackedAgentId)
       : undefined;
     const policyConfig = trackedAgent
-      ? { ...request.config, ...configSnapshot, ...trackedAgent.initAction.config, ...trackedAgent.initConfig }
+      ? {
+        ...request.config,
+        ...pickSkillsPolicyConfig(trackedAgent.initAction.config),
+        ...pickSkillsPolicyConfig(trackedAgent.initConfig),
+        ...configSnapshot,
+        ...pickToolPolicyConfig(trackedAgent.initAction.config),
+        ...pickToolPolicyConfig(trackedAgent.initConfig),
+      }
       : { ...request.config, ...configSnapshot };
     const validation = validateAgentRoleTools(policyConfig, {
       definitionId: request.definitionId,
       initActionKind: trackedAgent?.initAction.kind,
       initActionConfig: trackedAgent?.initAction.config,
+      trustedSkillToolManifests: this.options.trustedSkillToolManifests,
     });
     if (validation.allowed) return;
 

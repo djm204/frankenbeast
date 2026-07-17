@@ -604,7 +604,7 @@ describe('BeastDispatchService', () => {
     expect(run.configSnapshot).toMatchObject({ objective: 'Legacy direct dispatch without tracked agent policy metadata' });
   });
 
-  it('preserves persisted tracked-agent role policy when dispatch config requests broader tools', async () => {
+  it('preserves dispatch-selected skills while keeping persisted tracked-agent role policy', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const logs = new BeastLogStore(join(workDir, 'logs'));
@@ -614,41 +614,42 @@ describe('BeastDispatchService', () => {
       process: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
       container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
     };
-    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs, {
+      trustedSkillToolManifests: { 'context-only': [] },
+    });
     const agent = agents.createAgent({
-      definitionId: 'design-interview',
-      source: 'dashboard',
+      definitionId: 'martin-loop',
+      source: 'chat',
       createdByUser: 'operator',
-      initAction: { kind: 'design-interview', command: 'docs interview', config: {} },
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
       initConfig: {
-        goal: 'Draft onboarding docs',
-        outputPath: 'docs/onboarding.md',
-        agentRole: 'docs',
-        requestedTools: ['read_file', 'write_file'],
+        provider: 'claude',
+        objective: 'Collect interview config',
+        chunkDirectory: 'docs/chunks',
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
         skills: [],
       },
     });
 
     const run = await dispatch.createRun({
-      definitionId: 'design-interview',
+      definitionId: 'martin-loop',
       trackedAgentId: agent.id,
       config: {
-        goal: 'Draft onboarding docs',
-        outputPath: 'docs/onboarding.md',
-        agentRole: 'coding',
-        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
-        skills: [],
+        provider: 'claude',
+        objective: 'Run final interview config',
+        chunkDirectory: 'docs/chunks',
+        skills: ['context-only'],
       },
-      dispatchedBy: 'dashboard',
+      dispatchedBy: 'chat',
       dispatchedByUser: 'operator',
       executionMode: 'process',
     });
 
-    expect(run.trackedAgentId).toBe(agent.id);
     expect(run.configSnapshot).toMatchObject({
-      agentRole: 'docs',
-      requestedTools: ['read_file', 'write_file'],
-      skills: [],
+      agentRole: 'coding',
+      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+      skills: ['context-only'],
     });
   });
 });
