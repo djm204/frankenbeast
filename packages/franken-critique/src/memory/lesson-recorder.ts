@@ -1160,6 +1160,7 @@ function choosePostTaskLessonDestination(
   if (kind === 'tool-failure') return 'skill';
   if (kind === 'user-correction' && category === 'preference') return 'memory';
   if (isDocumentationUpdateLesson(text)) return 'docs';
+  if (hasReusableProcedureGuidance(text)) return 'skill';
   if (category === 'environment-fact') return 'memory';
   if (category === 'procedure') return 'skill';
   return 'memory';
@@ -1203,7 +1204,7 @@ function recategorizePostTaskPrivacyDecision(
 }
 
 function isRawUserPreferenceCorrection(text: string): boolean {
-  if (/^(?:i\s+prefer|i'd\s+prefer|my\s+preference\s+is|i\s+like|i\s+don'?t\s+want)\b/i.test(text)) {
+  if (/^(?:i\s+prefer|i'd\s+prefer|my\s+preference\s+is|i\s+like|i\s+(?:do\s+not|don'?t)\s+want)\b/i.test(text)) {
     return true;
   }
   if (
@@ -1235,10 +1236,10 @@ function isRawUserPreferenceCorrection(text: string): boolean {
 }
 
 function hasExplicitPostTaskLessonSignal(text: string): boolean {
+  if (isTaskReferenceBookkeeping(text)) return false;
   if (hasReusableProcedureGuidance(text)) return true;
   if (isOneOffPostTaskProgress(text)) return false;
   if (isOneOffShouldCorrection(text)) return false;
-  if (isTaskReferenceBookkeeping(text)) return false;
   if (isDocumentationUpdateLesson(text)) return true;
   if (PREFERENCE_PATTERNS.some((pattern) => pattern.test(text))) return true;
   if (ENVIRONMENT_FACT_PATTERNS.some((pattern) => pattern.test(text))) {
@@ -1258,6 +1259,7 @@ function hasExplicitPostTaskLessonSignal(text: string): boolean {
 }
 
 function hasReusableToolFailureSignal(text: string): boolean {
+  if (/\b(?:workaround|fallback|retry)\b/i.test(text)) return true;
   return /\b(?:when|if)\b.{0,160}\b(?:run|check|use|retry|fallback|workaround)\b|\b(?:run|check|use|retry|fallback|workaround)\b.{0,160}\b(?:when|if|after|before|instead|giving\s+up)\b/i.test(
     text,
   );
@@ -1271,13 +1273,12 @@ function hasReusableProcedureGuidance(text: string): boolean {
 
 function isTaskReferenceBookkeeping(text: string): boolean {
   return (
-    /\b(?:pr|pull\s+request|issue|ticket|task|commit)\s*#?\d+\b/i.test(
+    /\b(?:pr|pull\s+request|issue|ticket|task|commit)\b(?:\s*#?\d+\b)?|\[REDACTED_TASK_REFERENCE\]/i.test(
       text,
     ) &&
-    /\b(?:wants?|needs?|requires?|assigned|merged|closed|blocked|open|opened|fixed|done)\b/i.test(
+    /\b(?:wants?|needs?|requires?|assigned|merged|closed|blocked|open|opened|fixed|done|follow-up|check|replying)\b/i.test(
       text,
     ) &&
-    !hasReusableProcedureGuidance(text) &&
     !isDocumentationUpdateLesson(text)
   );
 }

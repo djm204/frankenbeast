@@ -595,6 +595,70 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('routes repo-named procedures to skill review', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-repo-procedure',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Always run npm test in Frankenbeast before committing'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'skill',
+        review: expect.objectContaining({ status: 'pending-review' }),
+      }),
+    );
+  });
+
+  it('discards task-scoped procedure-looking PR checks', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-specific-pr-check',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Always check PR #123 before replying'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        review: expect.objectContaining({ status: 'discarded' }),
+      }),
+    );
+  });
+
+  it('preserves first-person do-not-want preferences', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-do-not-want-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['I do not want emojis in summaries'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'preference',
+        suggestedDestination: 'memory',
+        review: expect.objectContaining({ status: 'pending-review' }),
+      }),
+    );
+  });
+
+  it('discards unnumbered PR and issue bookkeeping', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-unnumbered-bookkeeping',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['User wants the PR merged', 'Frankenbeast issue requires follow-up'],
+    });
+
+    expect(report.candidates).toHaveLength(2);
+    for (const candidate of report.candidates) {
+      expect(candidate).toEqual(
+        expect.objectContaining({
+          suggestedDestination: 'discard',
+          review: expect.objectContaining({ status: 'discarded' }),
+        }),
+      );
+    }
+  });
+
   it('discards non-instructional should status notes', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-ordinary-should-status',
@@ -606,6 +670,21 @@ describe('extractPostTaskLessonCandidates', () => {
       expect.objectContaining({
         suggestedDestination: 'discard',
         review: expect.objectContaining({ status: 'discarded' }),
+      }),
+    );
+  });
+
+  it('keeps explicit tool-failure workarounds without connector words', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-tool-workaround-short',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      toolFailures: ['Workaround: retry gh run view'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'skill',
+        review: expect.objectContaining({ status: 'pending-review' }),
       }),
     );
   });
