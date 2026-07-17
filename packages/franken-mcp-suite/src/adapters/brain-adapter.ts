@@ -7,6 +7,9 @@ import {
   type MemoryConflict,
   type MemoryConflictResolution,
   type MemoryProvenanceRecord,
+  type MemoryRetentionEntryReport,
+  type MemoryRetentionReport,
+  type MemoryRetentionReportOptions,
   type MemoryReviewDecisionOptions,
   type RightToForgetReport,
   type RightToForgetSelector,
@@ -139,6 +142,8 @@ export interface ProjectMemoryExport {
   episodic: MemoryExportEpisodicEntry[];
 }
 
+export interface MemoryRetentionReportInput extends MemoryRetentionReportOptions, MemoryScopeInput {}
+
 export interface BrainAdapter {
   query(input: BrainQueryInput): Promise<BrainMemoryEntry[]>;
   store(input: {
@@ -151,7 +156,7 @@ export interface BrainAdapter {
   frontload(input?: MemoryScopeInput): Promise<BrainFrontloadSection[]>;
   exportProjectMemory(input?: MemoryExportInput): Promise<ProjectMemoryExport>;
   memoryAccessAuditReport(input?: MemoryAccessAuditReportInput): Promise<MemoryAccessAuditReport>;
-  forget(key: string, input?: AgentScopedInput): Promise<boolean>;
+  memoryRetentionReport(input?: MemoryRetentionReportInput): Promise<MemoryRetentionReport>;  forget(key: string, input?: AgentScopedInput): Promise<boolean>;
   rightToForget(
     input: RightToForgetSelector & AgentScopedInput,
   ): Promise<RightToForgetReport>;
@@ -408,6 +413,66 @@ function takeVisibleEntries<T>(
   canRead: (entry: T) => boolean,
 ): T[] {
   return entries.filter(canRead).slice(0, limit);
+}
+
+function scopedReportEntry(entry: MemoryRetentionEntryReport): MemoryRetentionEntryReport {
+  if (entry.store !== "working") return entry;
+  const scoped = parseScopedWorkingExportEntry(entry.key, undefined);
+  return {
+    ...entry,
+    key: scoped.key,
+    ...(entry.agentId !== undefined || scoped.agentId === undefined
+      ? {}
+      : { agentId: scoped.agentId }),
+  };
+}
+
+function applyRetentionBudget(
+  entries: MemoryRetentionEntryReport[],
+  maxEntries: number | undefined,
+): MemoryRetentionEntryReport[] {
+  const scopedEntries = entries.map((entry) => ({ ...entry }));
+  if (maxEntries === undefined) return scopedEntries;
+  const activeEntries = scopedEntries.filter((entry) => entry.action !== "expired");
+  const existingCompactionCount = activeEntries.filter((entry) => entry.action === "compact").length;
+  const extraBudgetCompactions = Math.max(0, activeEntries.length - maxEntries - existingCompactionCount);
+  if (extraBudgetCompactions === 0) return scopedEntries;
+  const retainedCandidates = scopedEntries
+    .filter((entry) => !entry.protected && (entry.action === "retain" || entry.action === "nearing_expiry"))
+    .sort((a, b) => b.policy.compactPriority - a.policy.compactPriority || a.key.localeCompare(b.key));
+  for (const entry of retainedCandidates.slice(0, extraBudgetCompactions)) {
+    entry.action = "compact";
+    entry.reason = `Scoped memory report has ${activeEntries.length} active entries, over report budget ${maxEntries}; ${entry.class} has compaction priority ${entry.policy.compactPriority}`;
+  }
+  return scopedEntries;
+}
+
+function filterRetentionReportByScope(
+  report: MemoryRetentionReport,
+  scope: { readScope: MemoryReadScope; agentId?: string },
+  maxEntries?: number,
+): MemoryRetentionReport {
+  const entries = applyRetentionBudget(
+    report.entries
+      .filter((entry) => canReadMemoryEntry(entry.agentId, scope))
+      .map(scopedReportEntry),
+    maxEntries,
+  );
+  const compactionCandidates = entries
+    .filter((entry) => entry.action === "compact")
+    .sort((a, b) => b.policy.compactPriority - a.policy.compactPriority || a.key.localeCompare(b.key));
+  return {
+    ...report,
+    counts: {
+      total: entries.length,
+      protected: entries.filter((entry) => entry.protected).length,
+      expired: entries.filter((entry) => entry.action === "expired").length,
+      nearingExpiry: entries.filter((entry) => entry.action === "nearing_expiry").length,
+      compactionCandidates: compactionCandidates.length,
+    },
+    entries,
+    compactionCandidates,
+  };
 }
 
 function resolveQueryLimit(limit: number | undefined, defaultLimit = DEFAULT_QUERY_LIMIT): number {
@@ -1282,6 +1347,24 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
         reportDb.close();
       }
     },
+
+    async memoryRetentionReport(input = {}) {
+      const readScope = resolveMemoryReadScope(input);
+      const reportOptions: MemoryRetentionReportOptions = {
+        ...(input.now === undefined ? {} : { now: input.now }),
+        ...(input.expiryHorizonMs === undefined ? {} : { expiryHorizonMs: input.expiryHorizonMs }),
+        ...(readScope.readScope === "all" && input.maxEntries !== undefined
+          ? { maxEntries: input.maxEntries }
+          : {}),
+        ...(readScope.readScope !== "all" && input.maxEntries !== undefined
+          ? { maxEntries: Number.MAX_SAFE_INTEGER }
+          : {}),
+      };
+      return filterRetentionReportByScope(
+        brain.memoryRetentionReport(reportOptions),
+        readScope,
+        readScope.readScope === "all" ? undefined : input.maxEntries,
+      );    },
 
     async forget(key, input = {}) {
       const resolvedKey = scopedWorkingKey(key, input.agentId);

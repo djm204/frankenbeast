@@ -2,6 +2,8 @@
 
 Use this checklist when automation that normally coordinates workers, PR gates, approvals, backups, restores, or liveness monitoring fails or starts producing ambiguous handoffs. The goal is to put one person in incident command, freeze unsafe automation paths, preserve evidence, and route every recovery action through an explicit decision trail.
 
+If any incident update uses PM-swarm terms such as refill, parked worker, provider route, fallback lane, HITL gate, Codex review cap, current-head clean, or approval-cop, link responders to the [PM-swarm runtime glossary](../onboarding/pm-swarm-runtime-glossary.md) before assigning recovery work.
+
 This checklist is operator guidance, not a restore script. Do not run destructive commands from this document; copy the decision fields into the incident room, Kanban card, or ticket that is acting as the command log. It requires explicit decision-log rows before merges, force-pushes, restore commands, approval replays, or broad worker respawns.
 
 ## Incident metadata
@@ -70,7 +72,7 @@ Every mutation or route change must have a row before it happens.
 
 ## 6. Recovery action checklist
 
-Use the matching lane only after stabilization is complete. For a non-mutating rehearsal of primary provider failure, fallback-only routing, in-flight backlog freeze, recovery probe, and resume order, run the [provider outage recovery drill](provider-outage-recovery-drill.md) before practicing live incident response.
+Use the matching lane only after stabilization is complete. For corrupted Git worktrees, stuck approval/dead-letter queues, broken Kanban cards, crashed dispatcher workers, or inconsistent liveness state, use the [corrupted worktrees and queues runbook](corrupted-worktrees-and-queues.md) to keep diagnosis read-only, back up state before repair, and route destructive commands through approval-cop/HITL. For a non-mutating rehearsal of primary provider failure, fallback-only routing, in-flight backlog freeze, recovery probe, and resume order, run the [provider outage recovery drill](provider-outage-recovery-drill.md) before practicing live incident response.
 
 ### Worker or Kanban failure
 

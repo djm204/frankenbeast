@@ -73,7 +73,7 @@ async function readStdinPayload(): Promise<string> {
 const MEMORY_RESULT_PAYLOAD_REDACTION_TOOLS = new Set([
   'fbeast_memory_export',
   'fbeast_memory_access_audit_report',
-  'fbeast_memory_review_propose',
+  'fbeast_memory_retention_report',  'fbeast_memory_review_propose',
   'fbeast_memory_review_list',
   'fbeast_memory_review_decide',
   'fbeast_memory_source_attribution',

@@ -32,6 +32,7 @@ The fixture script is safe to run from any checkout because it only prints deter
 
 ```bash
 node scripts/provider-outage-drill-fixture.mjs --scenario provider-outage
+node scripts/provider-outage-drill-fixture.mjs --scenario fallback-paths
 node scripts/provider-outage-drill-fixture.mjs --scenario recovery
 ```
 
@@ -138,6 +139,14 @@ Failure interpretations:
 - `fallback_only_mode` with lane width and allowed lanes;
 - backlog routes that include `resume-checkpointed`, `complete-checkpointed`, and `defer-fresh-start`;
 - `failureInterpretations` for fresh-start starvation, duplicate owners, unsafe gate bypass, and missing retry clock.
+
+`node scripts/provider-outage-drill-fixture.mjs --scenario fallback-paths` should print JSON containing:
+
+- `scenario: "fallback-paths"` and `safety.liveProviderCalls: false`;
+- fixtures named `primary-unavailable`, `spark-budget-exhausted`, `ollama-only-continuity`, and `primary-restored`;
+- transitions that park fresh backlog during primary outage, refuse Spark refill after budget exhaustion, keep Ollama Cloud fallback at five low-risk lanes, and resume primary blocked owners before new tickets;
+- `workerCounts` and `summaryLines` that expose primary, Spark, Ollama, and parked worker counts for every route transition;
+- `toolRestrictions` for Ollama-only continuity so fallback lanes cannot perform fresh implementation, production mutation, or live gate substitution.
 
 `node scripts/provider-outage-drill-fixture.mjs --scenario recovery` should print JSON containing:
 

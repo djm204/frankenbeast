@@ -467,6 +467,34 @@ describe('CliSkillExecutor', () => {
       );
     });
 
+    it('surfaces tool exceptions, records a terminal error span, and leaves no budget polling timer behind', async () => {
+      vi.useFakeTimers();
+      try {
+        martin.run.mockRejectedValue(new Error('tool adapter exploded'));
+
+        await expect(createAndExecute('cli:01_types')).rejects.toThrow(
+          'MartinLoop failed for chunk "01_types": tool adapter exploded',
+        );
+
+        expect(observer.endSpan).toHaveBeenCalledWith(
+          expect.any(Object),
+          expect.objectContaining({
+            status: 'error',
+            errorMessage: 'Error: tool adapter exploded',
+          }),
+        );
+        expect(observer.recordReplay).toHaveBeenCalledWith(expect.objectContaining({
+          kind: 'tool.call',
+          runId: 'session-1',
+          toolName: 'cli:01_types',
+        }));
+        expect(observer.recordReplay.mock.calls.some(([record]) => record.kind === 'tool.result')).toBe(false);
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('mentions emitted mismatched promise tags in the failure message', async () => {
       martin.run.mockResolvedValue({
         completed: false,

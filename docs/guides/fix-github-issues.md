@@ -108,6 +108,8 @@ Resolves the GitHub `upstream` remote from the current fork checkout and uses th
 
 Before assigning or executing an issue, classify it with the [issue complexity rubric](../onboarding/issue-complexity-rubric.md). The rubric maps labels such as `docs`, `security`, `availability`, and priority tags to complexity/risk levels, allowed toolsets, recommended model lanes, verification depth, and escalation triggers.
 
+When the work may affect a release, deployment, or post-merge ownership handoff, also read the [release and deployment mental model](../onboarding/release-deployment-mental-model.md). It explains the issue-to-PR-to-release path, release labels, CI/Codex merge gates, and rollback/monitoring responsibilities so PR handoffs do not stop at "merged" when rollout ownership still matters.
+
 Use the rubric result as separate PM handoff metadata or an issue comment alongside the CLI's existing review table. The current `frankenbeast issues` table still reports implementation complexity such as `one-shot` or `chunked`; the C0-C5 rubric is the assignment-risk overlay PMs use to keep C0/C1 work in low-risk lanes while routing C3-C5 cross-package, security, disaster-recovery, or PM-swarm policy work to senior or PM-supervised lanes.
 
 ## Review Flow
@@ -167,6 +169,12 @@ await evaluateIssueBackpressure({
 ## Duplicate worker-card process detector
 
 PM and liveness callers that inventory worker-card processes can call `detectDuplicateWorkerCardProcesses(snapshots)` before starting or refilling issue work. Provide one snapshot per observed worker process with `cardId`, `pid`, optional string `runId`, `issueNumber`, `owner`, `status`, `alive`, `startedAt`, and `lastHeartbeatAt`. The detector ignores terminal/dead/invalid snapshots while preserving live blocked workers and reports only cards with two or more distinct live PIDs. Each finding is structured for automation: `cardId`, `processCount`, sorted `pids`, `runIds`, `owners`, `statuses`, timestamps, a `message`, and operator `guidance` telling the PM to keep one live owner, stop or park the duplicate, and record the survivor in liveness output.
+
+## Idempotent Kanban state mutation planning
+
+Retrying PM, doctor, or watchdog updates should first call `planKanbanStateMutation(snapshot, request)` with a deterministic `idempotencyKey` and, when available, an `expectedRevision`. The planner returns `apply`, `skip`, or `conflict` with machine-readable evidence so repeated comment/block/unblock/complete attempts converge without duplicate noise while stale concurrent writes surface an explicit compare-and-set conflict.
+
+Use stable keys derived from the business intent, not random attempts, for example `comment:<card-id>:liveness:<head-sha>`, `block:<card-id>:codex-usage-limit`, `unblock:<card-id>:doctor-treatment`, or `complete:<card-id>:merged:<pr-number>`. Treat `skip` as success, `conflict` as a re-read-and-decide signal, and only execute the underlying Kanban mutation on `apply`.
 
 ## Scheduler fairness report
 

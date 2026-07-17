@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.10.0...franken-observer-v0.10.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **observer:** unref BatchAdapter flush interval timers ([7f5354c](https://github.com/djm204/frankenbeast/commit/7f5354cec9f5ff5392dfe6703d538a4207c0f229)), closes [#2030](https://github.com/djm204/frankenbeast/issues/2030)
+
 ## [0.10.0](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.9.0...franken-observer-v0.10.0) (2026-07-16)
 
 

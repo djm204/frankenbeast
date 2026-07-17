@@ -9,6 +9,8 @@ export interface ProjectMemorySnapshotProvenance {
 export interface ProjectMemoryRecord {
   readonly id: string;
   readonly text: string;
+  readonly profiles?: readonly string[] | undefined;
+  readonly tenants?: readonly string[] | undefined;
   readonly projects?: readonly string[] | undefined;
   readonly repos?: readonly string[] | undefined;
   readonly taskTypes?: readonly string[] | undefined;
@@ -19,6 +21,8 @@ export interface ProjectMemoryRecord {
 }
 
 export interface ProjectMemorySnapshotSelector {
+  readonly profile?: string | undefined;
+  readonly tenant?: string | undefined;
   readonly projectId: string;
   readonly repo?: string | undefined;
   readonly taskType?: string | undefined;
@@ -96,6 +100,8 @@ function matchesSelector(
   minConfidence: number,
   allowedSensitivity: ReadonlySet<ProjectMemorySensitivity>,
 ): boolean {
+  if (!matchesIsolationScope(memory.profiles, selector.profile)) return false;
+  if (!matchesIsolationScope(memory.tenants, selector.tenant)) return false;
   if (!matchesRequiredScope(memory.projects, selector.projectId)) return false;
   if (!matchesOptionalScope(memory.repos, selector.repo)) return false;
   if (!matchesOptionalScope(memory.taskTypes, selector.taskType)) return false;
@@ -113,6 +119,13 @@ function matchesSelector(
 
 function matchesOptionalScope(values: readonly string[] | undefined, selectorValue: string | undefined): boolean {
   if (values === undefined || values.length === 0 || selectorValue === undefined) return true;
+  return values.includes(selectorValue);
+}
+
+function matchesIsolationScope(values: readonly string[] | undefined, selectorValue: string | undefined): boolean {
+  const hasValues = values !== undefined && values.length > 0;
+  if (!hasValues) return true;
+  if (selectorValue === undefined) return false;
   return values.includes(selectorValue);
 }
 
@@ -143,9 +156,11 @@ function compareSnapshotEntries(left: ProjectMemorySnapshotEntry, right: Project
 function renderProjectMemorySnapshotText(snapshot: Omit<ProjectMemorySnapshot, 'text'>): string {
   const selector = snapshot.selector;
   const scope = [
-    selector.repo === undefined ? undefined : `repo=${selector.repo}`,
-    selector.taskType === undefined ? undefined : `taskType=${selector.taskType}`,
-    selector.role === undefined ? undefined : `role=${selector.role}`,
+    selector.profile === undefined ? undefined : `profile=${quoteSnapshotMetadata(selector.profile)}`,
+    selector.tenant === undefined ? undefined : `tenant=${quoteSnapshotMetadata(selector.tenant)}`,
+    selector.repo === undefined ? undefined : `repo=${quoteSnapshotMetadata(selector.repo)}`,
+    selector.taskType === undefined ? undefined : `taskType=${quoteSnapshotMetadata(selector.taskType)}`,
+    selector.role === undefined ? undefined : `role=${quoteSnapshotMetadata(selector.role)}`,
   ].filter((part): part is string => part !== undefined).join(' ');
 
   const lines = [

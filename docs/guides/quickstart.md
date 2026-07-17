@@ -20,7 +20,7 @@ For CI-style validation without mutating files or installing dependencies, run:
 ./scripts/bootstrap.sh --dry-run
 ```
 
-If you are not sure which first-run steps apply to your role, generate a guided checklist before mutating the checkout:
+If you are not sure which first-run steps apply to your role, choose the [persona quickstart track](../onboarding/persona-quickstart-tracks.md) for operators, contributors, or agent-developers, then generate a guided checklist before mutating the checkout:
 
 ```bash
 npm run first-run:checklist -- --persona contributor

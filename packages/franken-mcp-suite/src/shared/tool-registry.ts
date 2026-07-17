@@ -150,6 +150,40 @@ function parseMemoryExportRedaction(value: unknown): { ok: true; value?: 'safe' 
   return { ok: false, message: 'redaction must be one of: safe, none' };
 }
 
+function parseOptionalPositiveIntegerArg(name: string, value: unknown): { ok: true; value?: number } | { ok: false; message: string } {
+  if (value === undefined) return { ok: true };
+  const raw = typeof value === 'string' ? value.trim() : String(value);
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || !Number.isSafeInteger(parsed) || parsed < 1) {
+    return { ok: false, message: `${name} must be a positive integer` };
+  }
+  return { ok: true, value: parsed };
+}
+
+function parseOptionalNonNegativeNumberArg(name: string, value: unknown): { ok: true; value?: number } | { ok: false; message: string } {
+  if (value === undefined) return { ok: true };
+  if (typeof value !== 'number' && typeof value !== 'string') {
+    return { ok: false, message: `${name} must be a non-negative number` };
+  }
+  const raw = typeof value === 'string' ? value.trim() : value;
+  if (raw === '') {
+    return { ok: false, message: `${name} must be a non-negative number` };
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return { ok: false, message: `${name} must be a non-negative number` };
+  }
+  return { ok: true, value: parsed };
+}
+
+function parseOptionalDateArg(name: string, value: unknown): { ok: true; value?: string } | { ok: false; message: string } {
+  if (value === undefined) return { ok: true };
+  if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) {
+    return { ok: false, message: `${name} must be a valid date string` };
+  }
+  return { ok: true, value };
+}
+
 function parseOptionalAgentIdArg(args: Record<string, unknown>): { ok: true; value?: string } | { ok: false; message: string } {
   if (args['agentId'] === undefined) return { ok: true };
   const agentId = String(args['agentId']).trim();
@@ -168,19 +202,33 @@ function parseStringArg(name: string, value: unknown): { ok: true; value: string
 
 const SENSITIVE_MEMORY_KEY_PATTERNS = [
   /(^|[._:-])(api[-_]?key|apikey)([._:-]|$)/i,
-  /(^|[._:-])(access[-_]?token|refresh[-_]?token|auth[-_]?token|bearer[-_]?token)([._:-]|$)/i,
-  /(^|[._:-])(password|passphrase|secret|credential|credentials)([._:-]|$)/i,
+  /(^|[._:-])(access[-_]?token|refresh[-_]?token|auth[-_]?token|bearer[-_]?token|authorization|proxy[-_]?authorization)([._:-]|$)/i,
+  /(^|[._:-])(password|passphrase|secret|credential|credentials|cookie|session)([._:-]|$)/i,
   /(^|[._:-])private[-_]?key([._:-]|$)/i,
 ];
 
 const SENSITIVE_MEMORY_VALUE_PATTERNS = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
-  /\b(?:sk|gho|ghp|glpat|xox[baprs])-[A-Za-z0-9_\-]{12,}\b/,
+  /\b(?:sk|gho|ghp|glpat|xox[baprs])-?[A-Za-z0-9_\-]{12,}\b/,
+  /\bnpm_[A-Za-z0-9_\-]{12,}\b/,
+  /https:\/\/(?:discord(?:app)?\.com|canary\.discord\.com)\/api\/webhooks\/\d+\/[A-Za-z0-9_\-]+/i,
+  /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/[^\s:@/]*:[^\s@/]+@[^\s]+/i,
   /\b(?:Bearer|token)\s+[A-Za-z0-9._~+/=-]{20,}\b/i,
+  /\b(?:Cookie|Set-Cookie):\s*[^\r\n]+/i,
 ];
 
+const SENSITIVE_MEMORY_REDACTION = '<redacted>';
+
+function normalizeSensitiveMemoryKey(key: string): string {
+  return key
+    .trim()
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[^a-z0-9]+/giu, '_');
+}
+
 function sensitiveMemoryQuarantineReason(key: string, value: string): string | undefined {
-  const normalizedKey = key.trim();
+  const normalizedKey = normalizeSensitiveMemoryKey(key);
   if (SENSITIVE_MEMORY_KEY_PATTERNS.some((pattern) => pattern.test(normalizedKey))) {
     return 'key-name-indicates-secret';
   }
@@ -279,7 +327,7 @@ const TOOLS: ToolFull[] = [
         }
         const candidate = await brain.proposeMemory({
           key,
-          value,
+          value: SENSITIVE_MEMORY_REDACTION,
           source: 'fbeast_memory_store:quarantine',
           evidenceId: `quarantine:${key}`,
           confidence: 1,
@@ -323,7 +371,7 @@ const TOOLS: ToolFull[] = [
       properties: {
         query: { type: 'string', description: 'Search query (substring match on key and value)' },
         type: { type: 'string', description: 'Filter by type: working or episodic', enum: ['working', 'episodic'] },
-        limit: { type: 'string', description: 'Max results (default 20)' },
+        limit: { type: 'string', description: 'Max results as a positive integer from 1 to 1000 (default 20)' },
         readScope: { type: 'string', description: 'Read scope: all (legacy), shared (hide agent-scoped entries), or agent (shared plus entries for agentId)', enum: ['all', 'shared', 'agent'] },
         agentId: { type: 'string', description: 'Agent id required when readScope is agent' },
       },
@@ -411,6 +459,46 @@ const TOOLS: ToolFull[] = [
         limit: parsedLimit.value,
       });
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    },
+  },
+  {
+    name: 'fbeast_memory_retention_report',
+    server: 'memory',
+    description: 'Inspect memory retention and compaction policy status by memory class',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        now: { type: 'string', description: 'Optional report timestamp for deterministic evaluation' },
+        expiryHorizonMs: { type: 'string', description: 'Report TTL entries expiring within this many milliseconds (default seven days)' },
+        maxEntries: { type: 'string', description: 'Optional entry budget used to mark overflow compaction candidates' },
+        readScope: { type: 'string', description: 'Memory visibility scope: all, shared, or agent', enum: ['all', 'shared', 'agent'] },
+        agentId: { type: 'string', description: 'Required when readScope is agent; filters report to shared plus that agent-scoped memory' },
+      },
+    },
+    makeHandler: ({ brain }) => async (args) => {
+      const now = parseOptionalDateArg('now', args['now']);
+      if (!now.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_retention_report ${now.message}` }], isError: true };
+      }
+      const expiryHorizonMs = parseOptionalNonNegativeNumberArg('expiryHorizonMs', args['expiryHorizonMs']);
+      if (!expiryHorizonMs.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_retention_report ${expiryHorizonMs.message}` }], isError: true };
+      }
+      const maxEntries = parseOptionalPositiveIntegerArg('maxEntries', args['maxEntries']);
+      if (!maxEntries.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_retention_report ${maxEntries.message}` }], isError: true };
+      }
+      const scopeArgs = parseMemoryReadScopeArgs(args);
+      if (!scopeArgs.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_retention_report ${scopeArgs.message}` }], isError: true };
+      }
+      const report = await brain.memoryRetentionReport({
+        ...scopeArgs.value,
+        ...(now.value ? { now: now.value } : {}),
+        ...(expiryHorizonMs.value === undefined ? {} : { expiryHorizonMs: expiryHorizonMs.value }),
+        ...(maxEntries.value === undefined ? {} : { maxEntries: maxEntries.value }),
+      });
+      return { content: [{ type: 'text', text: JSON.stringify(report, null, 2) }] };
     },
   },
   {
