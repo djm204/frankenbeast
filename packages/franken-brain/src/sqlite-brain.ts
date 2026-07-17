@@ -1037,12 +1037,21 @@ function normalizeMemoryClassName(value: unknown): MemoryRetentionClass | undefi
   return MEMORY_RETENTION_CLASS_ALIASES[normalized];
 }
 
-function objectStringField(value: unknown, keys: readonly string[]): string | undefined {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
+function objectStringFields(value: unknown, keys: readonly string[]): string[] {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return [];
   const record = value as Record<string, unknown>;
+  const values: string[] = [];
   for (const key of keys) {
     const field = record[key];
-    if (typeof field === 'string' && field.trim().length > 0) return field;
+    if (typeof field === 'string' && field.trim().length > 0) values.push(field);
+  }
+  return values;
+}
+
+function normalizeFirstMemoryClass(values: readonly string[]): MemoryRetentionClass | undefined {
+  for (const value of values) {
+    const className = normalizeMemoryClassName(value);
+    if (className) return className;
   }
   return undefined;
 }
@@ -1055,10 +1064,11 @@ function classifyMemoryEntry(input: {
   details?: Record<string, unknown>;
 }): MemoryRetentionClass {
   if (input.store === 'working' && isTemporaryOperationalWorkingMemoryValue(input.value)) return 'temporary_operational';
-  const explicitClass = normalizeMemoryClassName(
-    objectStringField(input.value, ['memoryClass', 'memory_class', 'class', 'category', 'kind', 'type', 'scope'])
-      ?? objectStringField(input.details, ['memoryClass', 'memory_class', 'class', 'category', 'kind', 'type', 'scope']),
-  );
+  const classFields = ['memoryClass', 'memory_class', 'class', 'category', 'kind', 'type', 'scope'] as const;
+  const explicitClass = normalizeFirstMemoryClass([
+    ...objectStringFields(input.value, classFields),
+    ...objectStringFields(input.details, classFields),
+  ]);
   if (explicitClass) return explicitClass;
   const text = `${input.key} ${input.summary ?? ''} ${valueToSearchText(input.value)} ${input.details ? valueToSearchText(input.details) : ''}`.toLowerCase();
   if (/\b(user[._:-]?preference|preference|preferences)\b/.test(text)) return 'user_preference';

@@ -301,6 +301,11 @@ describe('SqliteBrain', () => {
         value: 'operator approved deletion hash abc123',
         category: 'governance-audit',
       });
+      brain.working.set('manual.audit.later-field', {
+        value: 'operator approved deletion hash def456',
+        category: 'custom-retention-category',
+        type: 'audit_record',
+      });
 
       const report = brain.memoryRetentionReport({ now: '2027-01-01T00:00:00.000Z' });
 
@@ -308,6 +313,7 @@ describe('SqliteBrain', () => {
       expect(auditEntries).toEqual(expect.arrayContaining([
         expect.objectContaining({ store: 'episodic', action: 'protect', protected: true }),
         expect.objectContaining({ store: 'working', key: 'manual.audit', action: 'protect', protected: true }),
+        expect.objectContaining({ store: 'working', key: 'manual.audit.later-field', action: 'protect', protected: true }),
       ]));
       expect(report.compactionCandidates).not.toContainEqual(expect.objectContaining({ class: 'audit_record' }));
     });

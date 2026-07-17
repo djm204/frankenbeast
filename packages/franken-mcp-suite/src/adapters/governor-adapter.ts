@@ -372,8 +372,8 @@ function contextLooksLikeMemoryRetentionReportArgs(context: string): boolean {
       'maxEntries',
       'agentId',
     ]);
-    const hasRetentionReportSignal = Object.prototype.hasOwnProperty.call(record, 'readScope')
-      && keys.every((key) => allowedRetentionReportArgKeys.has(key));
+
+    const hasRetentionReportSignal = keys.every((key) => allowedRetentionReportArgKeys.has(key));
     return keys.length > 0
       && hasRetentionReportSignal;
   } catch {

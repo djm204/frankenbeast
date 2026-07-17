@@ -421,8 +421,8 @@ const TOOLS: ToolFull[] = [
       type: 'object',
       properties: {
         now: { type: 'string', description: 'Optional report timestamp for deterministic evaluation' },
-        expiryHorizonMs: { type: 'number', description: 'Report TTL entries expiring within this many milliseconds (default seven days)' },
-        maxEntries: { type: 'integer', description: 'Optional entry budget used to mark overflow compaction candidates' },
+        expiryHorizonMs: { type: 'string', description: 'Report TTL entries expiring within this many milliseconds (default seven days)' },
+        maxEntries: { type: 'string', description: 'Optional entry budget used to mark overflow compaction candidates' },
         readScope: { type: 'string', description: 'Memory visibility scope: all, shared, or agent', enum: ['all', 'shared', 'agent'] },
         agentId: { type: 'string', description: 'Required when readScope is agent; filters report to shared plus that agent-scoped memory' },
       },

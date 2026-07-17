@@ -78,6 +78,18 @@ describe('TOOL_REGISTRY', () => {
     expect(brain.memoryRetentionReport).not.toHaveBeenCalled();
   });
 
+  it('accepts string numeric retention budgets from MCP clients', async () => {
+    const brain = {
+      memoryRetentionReport: vi.fn().mockReturnValue({ generatedAt: '2026-01-01T00:00:00.000Z', entries: [] }),
+    };
+    const handler = TOOL_REGISTRY.get('fbeast_memory_retention_report')!.makeHandler({ brain } as unknown as AdapterSet);
+
+    const result = await handler({ expiryHorizonMs: '1000', maxEntries: '5' });
+
+    expect(result.isError).not.toBe(true);
+    expect(brain.memoryRetentionReport).toHaveBeenCalledWith(expect.objectContaining({ expiryHorizonMs: 1000, maxEntries: 5 }));
+  });
+
   it('rejects invalid observer log arguments before invoking the registry adapter handler', async () => {
     const observer = {
       log: vi.fn().mockResolvedValue({ id: 42, hash: 'abc123' }),
