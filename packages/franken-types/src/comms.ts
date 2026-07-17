@@ -48,6 +48,10 @@ export const ServerSocketEventSchema = z.discriminatedUnion('type', [
       risk: z.string().optional(),
       affectedFiles: z.array(z.string()).optional(),
       sessionId: z.string().optional(),
+      approvalToken: z.string().optional(),
+      requester: z.string().optional(),
+      workerId: z.string().optional(),
+      workdir: z.string().optional(),
     }).nullable().optional(),
   }),
   serverEventShape({

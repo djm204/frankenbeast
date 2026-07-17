@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createServer } from 'node:http';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocket, type RawData } from 'ws';
@@ -8,6 +8,7 @@ import { ConversationEngine } from '../../../src/chat/conversation-engine.js';
 import { FileSessionStore } from '../../../src/chat/session-store.js';
 import { TurnRunner } from '../../../src/chat/turn-runner.js';
 import { ChatRuntime } from '../../../src/chat/runtime.js';
+import { FileApprovalAuditLog, commandSha256 } from '../../../src/chat/approval-audit-log.js';
 import {
   CHAT_SOCKET_PROTOCOL,
   CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX,
@@ -946,6 +947,10 @@ describe('ws chat server', () => {
       runtime,
       sessionStore: store,
       tokenSecret: secret,
+      approvalAuditLog: new FileApprovalAuditLog(join(TMP, 'hitl-approval-audit.jsonl'), {
+        workerId: 'worker-1',
+        workdir: '/repo/worktree',
+      }),
     });
     const { peer, sent } = createPeer();
 
@@ -979,6 +984,24 @@ describe('ws chat server', () => {
     }));
     expect(store.get(session.id)?.state).toBe('approved');
     expect(store.get(session.id)?.pendingApproval).toBeNull();
+    const auditEntries = readFileSync(join(TMP, 'hitl-approval-audit.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(auditEntries.map((entry) => entry.decision)).toEqual(['approved', 'executed']);
+    expect(auditEntries[0]).toEqual(expect.objectContaining({
+      sessionId: session.id,
+      projectId: 'proj',
+      workerId: 'worker-1',
+      workdir: '/repo/worktree',
+      decisionSource: 'human',
+      commandBody: '/run deploy staging',
+    }));
+    expect(auditEntries[1]).toEqual(expect.objectContaining({
+      decisionSource: 'runtime',
+      exitCode: 0,
+      commandBody: '/run deploy staging',
+    }));
 
     rmSync(TMP, { recursive: true, force: true });
   });
@@ -1159,7 +1182,7 @@ describe('ws chat server', () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
-  it('restores pending approval and notifies clients when approved execution throws', async () => {
+  it('records a failed execution and consumes approval when approved execution throws', async () => {
     mkdirSync(TMP, { recursive: true });
     const store = new FileSessionStore(TMP);
     const session = store.create('proj');
@@ -1185,6 +1208,10 @@ describe('ws chat server', () => {
       runtime,
       sessionStore: store,
       tokenSecret: secret,
+      approvalAuditLog: new FileApprovalAuditLog(join(TMP, 'hitl-approval-audit.jsonl'), {
+        workerId: 'worker-1',
+        workdir: '/repo/worktree',
+      }),
     });
     const { peer, sent } = createPeer();
 
@@ -1199,17 +1226,27 @@ describe('ws chat server', () => {
       approved: true,
     }))).resolves.toBeUndefined();
 
-    expect(store.get(session.id)?.state).toBe('pending_approval');
-    expect(store.get(session.id)?.pendingApproval?.command).toBe('deploy staging');
+    expect(store.get(session.id)?.state).toBe('failed');
+    expect(store.get(session.id)?.pendingApproval).toBeNull();
     const events = sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
     expect(events).toContainEqual(expect.objectContaining({
       type: 'turn.error',
       code: 'APPROVAL_EXECUTION_FAILED',
       message: 'executor offline',
     }));
-    expect(events).toContainEqual(expect.objectContaining({
+    expect(events).not.toContainEqual(expect.objectContaining({
       type: 'turn.approval.requested',
-      command: 'deploy staging',
+    }));
+    const auditEntries = readFileSync(join(TMP, 'hitl-approval-audit.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(auditEntries.map((entry) => entry.decision)).toEqual(['approved', 'failed']);
+    expect(auditEntries[1]).toEqual(expect.objectContaining({
+      decisionSource: 'runtime',
+      exitCode: 1,
+      commandBody: '/run deploy staging',
+      outputTail: 'executor offline',
     }));
 
     rmSync(TMP, { recursive: true, force: true });
@@ -1269,6 +1306,70 @@ describe('ws chat server', () => {
     expect(events).not.toContainEqual(expect.objectContaining({
       type: 'turn.approval.resolved',
       approved: true,
+    }));
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('clears stale WebSocket approvals after consumed replay detection', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    session.state = 'pending_approval';
+    session.pendingApproval = {
+      description: 'deploy staging',
+      requestedAt: '2026-03-09T00:00:00Z',
+      tool: 'execution',
+      command: 'deploy staging',
+      sessionId: session.id,
+    };
+    store.save(session);
+    const auditLog = new FileApprovalAuditLog(join(TMP, 'hitl-approval-audit.jsonl'));
+    await auditLog.recordExecution({
+      sessionId: session.id,
+      projectId: session.projectId,
+      token: `${session.id}:2026-03-09T00:00:00Z:${commandSha256('/run deploy staging')}`,
+      command: '/run deploy staging',
+      exitCode: 0,
+      output: 'done',
+    });
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const execute = vi.fn();
+    const runtime = new ChatRuntime({
+      engine: { processTurn: vi.fn() } as unknown as ConversationEngine,
+      turnRunner: new TurnRunner({ execute }),
+    });
+    const controller = new ChatSocketController({
+      runtime,
+      sessionStore: store,
+      tokenSecret: secret,
+      approvalAuditLog: auditLog,
+    });
+    const { peer, sent } = createPeer();
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    await expect(controller.receive(peer, JSON.stringify({
+      type: 'approval.respond',
+      approved: true,
+    }))).resolves.toBeUndefined();
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(store.get(session.id)?.state).toBe('rejected');
+    expect(store.get(session.id)?.pendingApproval).toBeNull();
+    const events = sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.error',
+      code: 'APPROVAL_REPLAYED',
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.approval.resolved',
+      approved: false,
     }));
 
     rmSync(TMP, { recursive: true, force: true });

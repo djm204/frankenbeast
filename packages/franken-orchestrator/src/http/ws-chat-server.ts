@@ -3,6 +3,11 @@ import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import { approvalRuntimeInput, UnsafeApprovalCommandError } from '../chat/approval-input.js';
+import {
+  FileApprovalAuditLog,
+  commandSha256,
+  type ApprovalAuditLog,
+} from '../chat/approval-audit-log.js';
 import { ChatRuntime, pendingApprovalRuntimeState } from '../chat/runtime.js';
 import type { ISessionStore } from '../chat/session-store.js';
 import type { ChatSession } from '../chat/types.js';
@@ -11,7 +16,7 @@ import {
   ChatSocketSessionTicketStore,
   verifyChatSocketRequest,
 } from './ws-chat-auth.js';
-import { ClientSocketEventSchema, type ClientSocketEvent, type ServerSocketEvent, deterministicUuid, isoNow } from '@franken/types';
+import { ClientSocketEventSchema, type ChatSessionResponse, type ClientSocketEvent, type ServerSocketEvent, deterministicUuid, isoNow } from '@franken/types';
 import { InMemoryRateLimiter } from '../beasts/http/beast-rate-limit.js';
 import { ChatMutationAdmission, chatClientKey, createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, type ChatRateLimitOptions } from './chat-rate-limit.js';
 
@@ -43,6 +48,7 @@ export interface ChatSocketControllerOptions {
   chatRateLimiter?: InMemoryRateLimiter;
   chatMutationAdmission?: ChatMutationAdmission;
   maxMessageBytes?: number;
+  approvalAuditLog?: ApprovalAuditLog;
 }
 
 export interface ChatSocketConnectRequest {
@@ -75,6 +81,18 @@ const DEFAULT_CHAT_MESSAGE_RATE_LIMIT: ChatSocketMessageRateLimitOptions = {
   max: 20,
   windowMs: 10_000,
 };
+
+function redactPendingApproval(
+  pendingApproval: ChatSession['pendingApproval'],
+): ChatSessionResponse['pendingApproval'] {
+  if (!pendingApproval) return pendingApproval ?? null;
+  const redacted = { ...pendingApproval };
+  delete redacted.approvalToken;
+  delete redacted.requester;
+  delete redacted.workerId;
+  delete redacted.workdir;
+  return redacted;
+}
 
 class ChatSocketMessageRateLimiter {
   private readonly counters = new Map<string, CounterState>();
@@ -179,6 +197,7 @@ export class ChatSocketController {
   private readonly chatRateLimiter: InMemoryRateLimiter;
   private readonly chatMutationAdmission: ChatMutationAdmission;
   private readonly maxMessageBytes: number;
+  private readonly approvalAuditLog: ApprovalAuditLog;
 
   constructor(options: ChatSocketControllerOptions) {
     this.allowedOrigins = options.allowedOrigins ?? [];
@@ -193,6 +212,7 @@ export class ChatSocketController {
     this.chatRateLimiter = options.chatRateLimiter ?? createChatRateLimiter(options.chatRateLimit ?? DEFAULT_CHAT_RATE_LIMIT);
     this.chatMutationAdmission = options.chatMutationAdmission ?? new ChatMutationAdmission(this.chatRateLimiter);
     this.maxMessageBytes = options.maxMessageBytes ?? DEFAULT_CHAT_SOCKET_MAX_MESSAGE_BYTES;
+    this.approvalAuditLog = options.approvalAuditLog ?? new FileApprovalAuditLog();
   }
 
   authorize(request: ChatSocketConnectRequest): { ok: true } | { ok: false; status: number } {
@@ -243,7 +263,7 @@ export class ChatSocketController {
       projectId: session.projectId,
       transcript: session.transcript,
       state: session.state,
-      pendingApproval: session.pendingApproval ?? null,
+      pendingApproval: redactPendingApproval(session.pendingApproval),
     });
     return { ok: true };
   }
@@ -551,6 +571,9 @@ export class ChatSocketController {
     }
 
     if (!approved) {
+      await this.recordApprovalDecision(session, 'denied', 'human', {
+        requester: connectionRequester(peer, this.connections),
+      });
       session.pendingApproval = null;
       session.state = 'rejected';
       session.updatedAt = nowIso();
@@ -570,12 +593,15 @@ export class ChatSocketController {
     }
 
     const pendingApproval = session.pendingApproval;
-    const originalState = session.state;
     let runtimeInput: string;
     try {
       runtimeInput = approvalRuntimeInput(pendingApproval);
     } catch (error) {
       if (error instanceof UnsafeApprovalCommandError) {
+        await this.recordApprovalDecision(session, 'skipped', 'parser', {
+          reason: error.message,
+          requester: connectionRequester(peer, this.connections),
+        });
         const timestamp = nowIso();
         this.emit(peer, {
           type: 'turn.error',
@@ -599,6 +625,30 @@ export class ChatSocketController {
       }
       throw error;
     }
+    if (await this.hasConsumedApproval(session, runtimeInput)) {
+      await this.recordApprovalReplay(session, runtimeInput, 'approval was already consumed', connectionRequester(peer, this.connections));
+      session.pendingApproval = null;
+      session.state = 'rejected';
+      session.updatedAt = nowIso();
+      this.sessionStore.save(session);
+      const timestamp = nowIso();
+      this.emit(peer, {
+        type: 'turn.error',
+        code: 'APPROVAL_REPLAYED',
+        message: 'This approval was already consumed; recreate the approval request before retrying.',
+        timestamp,
+      });
+      this.emit(peer, {
+        type: 'turn.approval.resolved',
+        approved: false,
+        timestamp,
+      });
+      return;
+    }
+    await this.recordApprovalDecision(session, 'approved', 'human', {
+      requester: connectionRequester(peer, this.connections),
+      command: runtimeInput,
+    });
     session.pendingApproval = null;
     session.state = 'approved';
     session.updatedAt = nowIso();
@@ -630,8 +680,16 @@ export class ChatSocketController {
         },
       });
     } catch (error) {
-      session.pendingApproval = pendingApproval;
-      session.state = originalState;
+      await this.recordApprovalExecution(
+        session,
+        pendingApproval,
+        runtimeInput,
+        1,
+        error instanceof Error ? error.message : String(error),
+        connectionRequester(peer, this.connections),
+      );
+      session.pendingApproval = null;
+      session.state = 'failed';
       session.updatedAt = nowIso();
       this.sessionStore.save(session);
       this.emit(peer, {
@@ -640,20 +698,16 @@ export class ChatSocketController {
         message: error instanceof Error ? error.message : 'Approved action failed to run.',
         timestamp: session.updatedAt,
       });
-      if (pendingApproval) {
-        this.emit(peer, {
-          type: 'turn.approval.requested',
-          description: pendingApproval.description,
-          timestamp: pendingApproval.requestedAt,
-          ...(pendingApproval.tool ? { tool: pendingApproval.tool } : {}),
-          ...(pendingApproval.command ? { command: pendingApproval.command } : {}),
-          ...(pendingApproval.risk ? { risk: pendingApproval.risk } : {}),
-          ...(pendingApproval.affectedFiles ? { affectedFiles: pendingApproval.affectedFiles } : {}),
-          ...(pendingApproval.sessionId ? { sessionId: pendingApproval.sessionId } : {}),
-        });
-      }
       return;
     }
+    await this.recordApprovalExecution(
+      session,
+      pendingApproval,
+      runtimeInput,
+      result.state === 'failed' ? 1 : 0,
+      result.displayMessages.map((display) => display.content).join('\n'),
+      connectionRequester(peer, this.connections),
+    );
     session.pendingApproval = null;
     session.state = result.state === 'active' ? 'approved' : result.state;
     session.beastContext = result.beastContext ?? null;
@@ -667,6 +721,101 @@ export class ChatSocketController {
         content: display.content,
         timestamp: nowIso(),
       });
+    }
+  }
+
+  private async hasConsumedApproval(session: ChatSession, command: string): Promise<boolean> {
+    const pendingApproval = session.pendingApproval;
+    if (!pendingApproval) return false;
+    try {
+      return await this.approvalAuditLog.hasConsumedApproval({
+        sessionId: session.id,
+        projectId: session.projectId,
+        token: approvalAuditToken(session, command),
+        commandHash: commandSha256(command),
+      });
+    } catch {
+      return false;
+    }
+  }
+
+  private async recordApprovalDecision(
+    session: ChatSession,
+    decision: 'approved' | 'denied' | 'skipped',
+    decisionSource: string,
+    options: { readonly command?: string; readonly requester?: string; readonly reason?: string } = {},
+  ): Promise<void> {
+    const pendingApproval = session.pendingApproval;
+    if (!pendingApproval) return;
+    const command = options.command ?? pendingApproval.command ?? pendingApproval.description;
+    try {
+      await this.approvalAuditLog.recordDecision({
+        sessionId: session.id,
+        projectId: session.projectId,
+        token: approvalAuditToken(session, command),
+        ...(pendingApproval.workerId ? { workerId: pendingApproval.workerId } : {}),
+        ...(pendingApproval.workdir ? { workdir: pendingApproval.workdir } : {}),
+        ...((options.requester ?? pendingApproval.requester) ? { requester: options.requester ?? pendingApproval.requester } : {}),
+        command,
+        decision,
+        decisionSource,
+        ...(options.reason ? { reason: options.reason } : {}),
+      });
+    } catch {
+      // Audit logging is best-effort and must not convert a human decision into
+      // a second approval prompt. Replay protection still works when the log is
+      // available, and failures are surfaced by package health checks.
+    }
+  }
+
+  private async recordApprovalExecution(
+    session: ChatSession,
+    pendingApproval: NonNullable<ChatSession['pendingApproval']>,
+    command: string,
+    exitCode: number,
+    output: string,
+    requester?: string,
+  ): Promise<void> {
+    try {
+      await this.approvalAuditLog.recordExecution({
+        sessionId: session.id,
+        projectId: session.projectId,
+        token: approvalAuditTokenForPending(session, pendingApproval, command),
+        ...(pendingApproval.workerId ? { workerId: pendingApproval.workerId } : {}),
+        ...(pendingApproval.workdir ? { workdir: pendingApproval.workdir } : {}),
+        ...((requester ?? pendingApproval.requester) ? { requester: requester ?? pendingApproval.requester } : {}),
+        command,
+        exitCode,
+        output,
+      });
+    } catch {
+      // Preserve already-completed approval execution semantics if the optional
+      // audit backend is temporarily unavailable.
+    }
+  }
+
+  private async recordApprovalReplay(
+    session: ChatSession,
+    command: string,
+    reason: string,
+    requester?: string,
+  ): Promise<void> {
+    const pendingApproval = session.pendingApproval;
+    if (!pendingApproval) return;
+    try {
+      await this.approvalAuditLog.recordReplay({
+        sessionId: session.id,
+        projectId: session.projectId,
+        token: approvalAuditToken(session, command),
+        ...(pendingApproval.workerId ? { workerId: pendingApproval.workerId } : {}),
+        ...(pendingApproval.workdir ? { workdir: pendingApproval.workdir } : {}),
+        ...((requester ?? pendingApproval.requester) ? { requester: requester ?? pendingApproval.requester } : {}),
+        command,
+        reason,
+      });
+    } catch {
+      // Replay handling must fail closed at the controller layer even if the
+      // attempt cannot be appended to disk.
     }
   }
 
@@ -684,6 +833,27 @@ export class ChatSocketController {
       ...event,
     }));
   }
+}
+
+function connectionRequester(
+  peer: ChatSocketPeer,
+  connections: ReadonlyMap<ChatSocketPeer, ConnectionState>,
+): string {
+  const remoteAddress = connections.get(peer)?.remoteAddress;
+  return remoteAddress ? `websocket:${remoteAddress}` : 'websocket';
+}
+
+function approvalAuditToken(session: ChatSession, command: string): string {
+  if (session.pendingApproval?.approvalToken) return session.pendingApproval.approvalToken;
+  return `${session.id}:${session.pendingApproval?.requestedAt ?? 'unknown'}:${commandSha256(command)}`;
+}
+
+function approvalAuditTokenForPending(
+  session: ChatSession,
+  pendingApproval: NonNullable<ChatSession['pendingApproval']>,
+  command: string,
+): string {
+  return pendingApproval.approvalToken ?? `${session.id}:${pendingApproval.requestedAt}:${commandSha256(command)}`;
 }
 
 function requestToPeer(ws: WebSocket): ChatSocketPeer {
