@@ -656,7 +656,6 @@ export class ChatSocketController {
         },
       });
     } catch (error) {
-      await this.recordApprovalExecution(session, pendingApproval, runtimeInput, 1, error instanceof Error ? error.message : String(error), connectionRequester(peer, this.connections));
       session.pendingApproval = pendingApproval;
       session.state = originalState;
       session.updatedAt = nowIso();

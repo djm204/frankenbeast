@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -114,6 +114,36 @@ describe('FileApprovalAuditLog', () => {
         token: 'approval-token-1',
         commandHash: commandSha256('different command'),
       })).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('separates a corrupt partial tail before appending replay-protecting entries', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-approval-audit-'));
+    try {
+      const logPath = join(dir, 'approval-audit.jsonl');
+      await writeFile(logPath, '{"partial":', 'utf8');
+
+      const command = 'git push origin HEAD';
+      const log = new FileApprovalAuditLog(logPath);
+      await log.recordExecution({
+        sessionId: 'chat-1',
+        projectId: 'proj-1',
+        token: 'approval-token-1',
+        command,
+        exitCode: 0,
+        output: 'ok',
+      });
+
+      const raw = await readFile(logPath, 'utf8');
+      expect(raw).toContain('{"partial":\n');
+      expect(await log.hasConsumedApproval({
+        sessionId: 'chat-1',
+        projectId: 'proj-1',
+        token: 'approval-token-1',
+        commandHash: commandSha256(command),
+      })).toBe(true);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

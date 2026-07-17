@@ -161,6 +161,16 @@ export class FileApprovalAuditLog implements ApprovalAuditLog {
 
   private async append(entry: ApprovalAuditEntry): Promise<void> {
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
+    try {
+      const existing = await readFile(this.path, 'utf8');
+      if (existing.length > 0 && !existing.endsWith('\n')) {
+        await appendFile(this.path, '\n', { encoding: 'utf8', mode: 0o600 });
+      }
+    } catch {
+      // Missing/unreadable files are handled by the append below. If an older
+      // tail is corrupt, separating it with a newline prevents the next valid
+      // audit entry from being merged into that corrupt line.
+    }
     await appendFile(this.path, `${JSON.stringify(entry)}\n`, { encoding: 'utf8', mode: 0o600 });
   }
 
