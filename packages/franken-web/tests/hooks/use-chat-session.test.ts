@@ -1489,11 +1489,19 @@ describe('useChatSession', () => {
         content: 'Second delivered answer',
         timestamp: '2026-03-09T00:00:04Z',
       });
+      socket.message({
+        eventId: 'chat-1:server-restart-epoch:1',
+        type: 'assistant.message.complete',
+        messageId: 'assistant-after-restart',
+        content: 'Restarted server answer',
+        timestamp: '2026-03-09T00:00:05Z',
+      });
     });
 
     expect(result.current.messages.map((message) => message.content)).toEqual([
       'First delivered answer',
       'Second delivered answer',
+      'Restarted server answer',
     ]);
     expect(result.current.errorBanners).toHaveLength(0);
   });

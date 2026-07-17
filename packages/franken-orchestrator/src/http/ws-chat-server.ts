@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
@@ -165,6 +166,7 @@ function createPeerState(
 
 export class ChatSocketController {
   readonly connections = new Map<ChatSocketPeer, ConnectionState>();
+  private readonly eventEpoch = randomUUID();
   private readonly eventSequences = new Map<string, number>();
   private readonly activeSessionTurns = new Set<string>();
   private readonly allowedOrigins: string[];
@@ -678,7 +680,7 @@ export class ChatSocketController {
     const nextSequence = (this.eventSequences.get(connection.sessionId) ?? 0) + 1;
     this.eventSequences.set(connection.sessionId, nextSequence);
     peer.send(JSON.stringify({
-      eventId: `${connection.sessionId}:${nextSequence}`,
+      eventId: `${connection.sessionId}:${this.eventEpoch}:${nextSequence}`,
       ...event,
     }));
   }

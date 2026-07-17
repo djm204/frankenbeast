@@ -335,7 +335,7 @@ describe('ws chat server', () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
-  it('stamps outgoing websocket events with monotonic per-connection event ids', async () => {
+  it('stamps outgoing websocket events with a controller epoch and monotonic ids', async () => {
     mkdirSync(TMP, { recursive: true });
     const store = new FileSessionStore(TMP);
     const session = store.create('proj');
@@ -357,8 +357,12 @@ describe('ws chat server', () => {
     await controller.receive(peer, JSON.stringify({ type: 'ping' }));
 
     const events = sent.map((raw) => JSON.parse(raw) as { eventId?: string; type: string });
-    expect(events[0]).toMatchObject({ eventId: `${session.id}:1`, type: 'session.ready' });
-    expect(events[1]).toMatchObject({ eventId: `${session.id}:2`, type: 'pong' });
+    const [sessionId, controllerEpoch, firstSequence] = events[0]!.eventId!.split(':');
+    expect(sessionId).toBe(session.id);
+    expect(controllerEpoch).toMatch(/^[0-9a-f-]{36}$/);
+    expect(firstSequence).toBe('1');
+    expect(events[0]).toMatchObject({ type: 'session.ready' });
+    expect(events[1]).toMatchObject({ eventId: `${session.id}:${controllerEpoch}:2`, type: 'pong' });
 
     const reconnectToken = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
     const { peer: reconnectPeer, sent: reconnectSent } = createPeer();
@@ -368,7 +372,26 @@ describe('ws chat server', () => {
       token: reconnectToken,
     }).ok).toBe(true);
     const reconnectEvents = reconnectSent.map((raw) => JSON.parse(raw) as { eventId?: string; type: string });
-    expect(reconnectEvents[0]).toMatchObject({ eventId: `${session.id}:3`, type: 'session.ready' });
+    expect(reconnectEvents[0]).toMatchObject({ eventId: `${session.id}:${controllerEpoch}:3`, type: 'session.ready' });
+
+    const restartedController = new ChatSocketController({
+      runtime: createTestRuntime(),
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const restartToken = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const { peer: restartPeer, sent: restartSent } = createPeer();
+    expect(restartedController.connect(restartPeer, {
+      origin: null,
+      sessionId: session.id,
+      token: restartToken,
+    }).ok).toBe(true);
+    const restartedReady = JSON.parse(restartSent[0]!) as { eventId?: string; type: string };
+    const [, restartedEpoch, restartedSequence] = restartedReady.eventId!.split(':');
+    expect(restartedReady.type).toBe('session.ready');
+    expect(restartedEpoch).toMatch(/^[0-9a-f-]{36}$/);
+    expect(restartedEpoch).not.toBe(controllerEpoch);
+    expect(restartedSequence).toBe('1');
 
     rmSync(TMP, { recursive: true, force: true });
   });
