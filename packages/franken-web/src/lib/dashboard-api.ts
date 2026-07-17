@@ -92,6 +92,21 @@ export class DashboardApiClient {
     let eventSource: EventSource | undefined;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let closed = false;
+    let lastEventId: string | undefined;
+    const seenEventIds = new Set<string>();
+
+    const rememberEventId = (eventId: string): boolean => {
+      if (seenEventIds.has(eventId)) {
+        return false;
+      }
+      seenEventIds.add(eventId);
+      lastEventId = eventId;
+      if (seenEventIds.size > 1_000) {
+        const oldest = seenEventIds.values().next().value;
+        if (oldest) seenEventIds.delete(oldest);
+      }
+      return true;
+    };
 
     const closeActiveSource = () => {
       eventSource?.close();
@@ -122,8 +137,12 @@ export class DashboardApiClient {
       // EventSource may be mocked as a plain function in tests; prefer browser
       // constructor semantics, then fall back to callable test doubles.
       const EventSourceCtor: any = (globalThis as any).EventSource;
-      const url = ticket
-        ? `${this.baseUrl}/api/dashboard/events?${new URLSearchParams({ ticket }).toString()}`
+      const params = new URLSearchParams();
+      if (ticket) params.set('ticket', ticket);
+      if (lastEventId) params.set('lastEventId', lastEventId);
+      const query = params.toString();
+      const url = query
+        ? `${this.baseUrl}/api/dashboard/events?${query}`
         : `${this.baseUrl}/api/dashboard/events`;
       let nextEventSource: EventSource;
       try {
@@ -133,6 +152,13 @@ export class DashboardApiClient {
       }
       eventSource = nextEventSource;
       nextEventSource.addEventListener('snapshot', (event: any) => {
+        const eventId = typeof event.lastEventId === 'string' && event.lastEventId.length > 0
+          ? event.lastEventId
+          : undefined;
+        if (eventId && !rememberEventId(eventId)) {
+          return;
+        }
+
         let snapshot: DashboardSnapshot;
         try {
           snapshot = JSON.parse(event.data) as DashboardSnapshot;
