@@ -1254,7 +1254,13 @@ function isRawUserPreferenceCorrection(text: string): boolean {
     return true;
   }
   if (
-    /^(?:please\s+)?prefer\s+to\s+use\b/i.test(text) &&
+    /^(?:please\s+)?(?:always\s+)?prefer\s+to\s+use\b/i.test(text) &&
+    !looksProcedural
+  ) {
+    return true;
+  }
+  if (
+    /^(?:please\s+)?always\s+use\b/i.test(text) &&
     !looksProcedural
   ) {
     return true;
@@ -1308,7 +1314,11 @@ function hasReusableToolFailureSignal(text: string): boolean {
   const hasInstructionalWorkaround =
     /\b(?:when|if)\b.{0,160}\b(?:run|check|use|retry|fallback|workaround)\b|\b(?:run|check|use|retry|fallback|workaround)\b.{0,160}\b(?:when|if|after|before|instead|giving\s+up)\b/i.test(
       text,
-    ) || /(?:;|,)\s*(?:use|run|check|retry|fallback)\b/i.test(text);
+    ) ||
+    /(?:;|,)\s*(?:use|run|check|retry|fallback)\b/i.test(text) ||
+    /\b(?:returned|failed|error|timed\s*out|timeout|exit(?:ed)?\s+\d+)\b.{0,160}\b(?:use|fallback|workaround)\b|\b(?:use|fallback|workaround)\b.{0,160}\b(?:returned|failed|error|timed\s*out|timeout|exit(?:ed)?\s+\d+)\b/i.test(
+      text,
+    );
   if (hasInstructionalWorkaround) return true;
   if (isRawToolFailureStatus(text)) return false;
   return false;
@@ -1322,10 +1332,6 @@ function hasReusableProcedureGuidance(text: string): boolean {
 
 function isTaskReferenceBookkeeping(text: string): boolean {
   const hasRedactedTaskReference = /\[REDACTED_TASK_REFERENCE\]/i.test(text);
-  const hasConcreteTaskReference =
-    /\b(?:pr|pull\s+request|issue|ticket|task|commit)\s*#?\d+\b|\[REDACTED_TASK_REFERENCE\]/i.test(
-      text,
-    );
   if (
     hasRedactedTaskReference &&
     /\b(?:check|replying|reply|review|merge|close)\b/i.test(text) &&
@@ -1334,13 +1340,17 @@ function isTaskReferenceBookkeeping(text: string): boolean {
   ) {
     return true;
   }
-  if (!hasConcreteTaskReference && hasReusableProcedureGuidance(text)) {
-    return false;
-  }
-  return (
-    /\b(?:pr|pull\s+request|issue|ticket|task|commit)\b(?:\s*#?\d+\b)?|\[REDACTED_TASK_REFERENCE\]/i.test(
+  const hasSpecificTaskReference = TASK_STATE_PATTERNS.some((pattern) =>
+    pattern.test(text),
+  );
+  const hasBareBookkeepingReference =
+    /\b(?:pr|pull\s+request|issue|ticket|task)\b/i.test(text) &&
+    /\b(?:wants?|needs?|requires?|assigned|merged|merge|closed|close|blocked|open|opened|fixed|fix|done|completed|complete|follow-up)\b/i.test(
       text,
     ) &&
+    !hasReusableProcedureGuidance(text);
+  return (
+    (hasSpecificTaskReference || hasBareBookkeepingReference) &&
     /\b(?:wants?|needs?|requires?|assigned|merged|merge|closed|close|blocked|open|opened|fixed|fix|done|completed|complete|follow-up|check|replying|reply)\b/i.test(
       text,
     ) &&

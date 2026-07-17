@@ -169,6 +169,37 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('normalizes and routes indented raw user preference corrections to memory review', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-indented-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['\n  Please keep summaries concise'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'preference',
+        suggestedDestination: 'memory',
+        text: 'Please keep summaries concise',
+      }),
+    );
+  });
+
+  it('routes always-use corrections to memory review', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-always-use-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['Always use British English'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'preference',
+        suggestedDestination: 'memory',
+      }),
+    );
+  });
+
   it('discards raw tool failures without reusable workaround guidance', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-raw-tool-failure',
@@ -189,6 +220,38 @@ describe('extractPostTaskLessonCandidates', () => {
       taskId: 'post-task-tool-failure-workaround',
       completedAt: '2026-07-16T00:00:00.000Z',
       toolFailures: ['When gh pr checks returned 502, retry with gh run view'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'procedure',
+        suggestedDestination: 'skill',
+        privacyFilter: expect.objectContaining({ action: 'admit' }),
+      }),
+    );
+  });
+
+  it('keeps status-plus-workaround tool failures for skill review', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-tool-failure-use-after-status',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      toolFailures: ['gh pr checks returned 502; use gh run view'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'procedure',
+        suggestedDestination: 'skill',
+        privacyFilter: expect.objectContaining({ action: 'admit' }),
+      }),
+    );
+  });
+
+  it('keeps generic PR check procedures for skill review', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-generic-pr-check-procedure',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Always check PR checks before replying'],
     });
 
     expect(report.candidates[0]).toEqual(
