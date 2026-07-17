@@ -6,11 +6,18 @@ const dockerVersion = spawnSync('docker', ['version', '--format', '{{.Server.Ver
   stdio: 'pipe',
 });
 
+const ciRequiresDocker = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
+
 if (dockerVersion.error || dockerVersion.status !== 0) {
   const reason = dockerVersion.error?.message
     ?? dockerVersion.stderr?.trim()
     ?? `docker version exited with status ${dockerVersion.status}`;
-  console.warn(`Docker sandbox build smoke test skipped: Docker daemon unavailable (${reason}).`);
+  const message = `Docker sandbox build smoke test ${ciRequiresDocker ? 'failed' : 'skipped'}: Docker daemon unavailable (${reason}).`;
+  if (ciRequiresDocker) {
+    console.error(message);
+    process.exit(1);
+  }
+  console.warn(message);
   process.exit(0);
 }
 
