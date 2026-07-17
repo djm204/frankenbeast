@@ -757,6 +757,7 @@ function explicitProcessCrash(snapshot: IssueWorkerCardProcessSnapshot): boolean
 
 function redactStuckRunEvidenceText(value: string): string {
   return redactSensitiveText(value)
+    .replace(/\b([A-Za-z0-9_]*(?:SECRET|PASSWORD|CREDENTIAL)[A-Za-z0-9_]*|[A-Za-z0-9_]*API[_-]?KEY[A-Za-z0-9_]*)\s*[:=]\s*\S+/gi, '$1=<redacted>')
     .replace(/\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[opusr]_[A-Za-z0-9_.-]{12,})\b/g, '[REDACTED_TOKEN]')
     .replace(/\b(sk|xox[baprs]?|hf|glpat)-[A-Za-z0-9._/-]+\b/g, '$1-[REDACTED]')
     .replace(/\b([A-Za-z0-9_-]{20,})\.([A-Za-z0-9_-]{20,})\.([A-Za-z0-9_-]{20,})\b/g, '[REDACTED_JWT]')
@@ -886,12 +887,14 @@ export function buildWorkerCrashOnlyRestartContract(
   const siblingPids = siblingPidsForSnapshot(snapshot, new Map());
   const activePrUrl = snapshot.activePrUrl?.trim();
   const activeWorktreePath = snapshot.activeWorktreePath?.trim();
+  const redactedActivePrUrl = activePrUrl ? redactStuckRunEvidenceText(activePrUrl) : undefined;
+  const redactedActiveWorktreePath = activeWorktreePath ? redactStuckRunEvidenceText(activeWorktreePath) : undefined;
   const evidence = [
     `exitReason=${exitReason}`,
     `pid=${snapshot.pid}`,
     `heartbeatAgeMs=${input.heartbeatAgeMs ?? 'unknown'}`,
-    ...(activePrUrl ? [`activePr=${activePrUrl}`] : []),
-    ...(activeWorktreePath ? [`activeWorktree=${activeWorktreePath}`] : []),
+    ...(redactedActivePrUrl ? [`activePr=${redactedActivePrUrl}`] : []),
+    ...(redactedActiveWorktreePath ? [`activeWorktree=${redactedActiveWorktreePath}`] : []),
   ];
   const base = {
     exitReason,
@@ -955,7 +958,7 @@ export function buildWorkerCrashOnlyRestartContract(
     };
   }
 
-  if (input.processStatus === 'dead' || input.category === 'process-crash') {
+  if (input.processStatus === 'dead') {
     return {
       disposition: 'retryable',
       nextAction: 'restart-once',

@@ -747,14 +747,14 @@ describe('stuck-run watchdog', () => {
     expect(finding.evidence.join('\n')).not.toContain('github_pat_');
   });
 
-  it('redacts key-value secrets in exit reasons before exposing restart evidence', () => {
+  it('redacts key-value and colon-form secrets in exit reasons before exposing restart evidence', () => {
     const [finding] = detectStuckRunWatchdogFindings([
       {
         cardId: 't_key_secret_exit',
         pid: 7416,
         status: 'failed',
         alive: false,
-        exitReason: 'supervisor stderr AWS_SECRET_ACCESS_KEY=abc123 DB_PASSWORD=secret-value',
+        exitReason: 'supervisor stderr AWS_SECRET_ACCESS_KEY=abc123 DB_PASSWORD: secret-value',
         lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
       },
     ], { nowMs });
@@ -970,8 +970,8 @@ describe('stuck-run watchdog', () => {
       status: 'running',
       alive: false,
       exitReason: 'respawn_guarded(active_pr)',
-      activePrUrl: 'https://github.com/djm204/frankenbeast/pull/2560',
-      activeWorktreePath: '/tmp/frankenbeast/.worktrees/t_active_owner',
+      activePrUrl: `https://github.com/djm204/frankenbeast/pull/2560?token=${'github_pat_' + '12345678901234567890abcdef'}`,
+      activeWorktreePath: '/tmp/frankenbeast/.worktrees/t_active_owner/DB_PASSWORD:secret-value',
     }, {
       category: 'process-crash',
       processStatus: 'dead',
@@ -984,9 +984,11 @@ describe('stuck-run watchdog', () => {
       kanbanState: 'running',
     });
     expect(contract.evidence).toEqual(expect.arrayContaining([
-      'activePr=https://github.com/djm204/frankenbeast/pull/2560',
-      'activeWorktree=/tmp/frankenbeast/.worktrees/t_active_owner',
+      'activePr=https://github.com/djm204/frankenbeast/pull/2560?token=[REDACTED]',
+      'activeWorktree=/tmp/frankenbeast/.worktrees/t_active_owner/DB_PASSWORD=<redacted>',
     ]));
+    expect(contract.evidence.join('\n')).not.toContain('github_pat_');
+    expect(contract.evidence.join('\n')).not.toContain('secret-value');
   });
 
   it('keeps direct terminal restart contracts as no-op before dead-process retry', () => {
@@ -1023,6 +1025,26 @@ describe('stuck-run watchdog', () => {
     expect(contract).toMatchObject({
       disposition: 'retryable',
       nextAction: 'restart-once',
+      kanbanState: 'failed',
+    });
+  });
+
+  it('defers crash-like statuses while liveness still reports the process alive', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_failed_but_alive',
+      pid: 7426,
+      status: 'failed',
+      alive: true,
+    }, {
+      category: 'process-crash',
+      processStatus: 'alive',
+      kanbanState: 'failed',
+    });
+
+    expect(contract).toMatchObject({
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      processStatus: 'alive',
       kanbanState: 'failed',
     });
   });
