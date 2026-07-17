@@ -71,8 +71,15 @@ export class BeastDaemonDispatchAdapter {
       ? { ...state.beastContext, executionMode: state.executionMode }
       : state.beastContext;
     if (activeContext?.status === 'interviewing' && activeContext.interviewSessionId) {
-      const progress = await this.answerInterview(activeContext.interviewSessionId, input);
-      return this.resultFromProgress(progress, activeContext, state.sessionId);
+      try {
+        const progress = await this.answerInterview(activeContext.interviewSessionId, input);
+        return this.resultFromProgress(progress, activeContext, state.sessionId);
+      } catch (error) {
+        if (error instanceof BeastDaemonRequestError && error.status === 400 && error.code === 'INVALID_INTERVIEW_ANSWER') {
+          return this.invalidAnswerResult(error, activeContext);
+        }
+        throw error;
+      }
     }
 
     if (!this.isLaunchRequest(input)) {
@@ -283,6 +290,38 @@ export class BeastDaemonDispatchAdapter {
     }
 
     return [...aliases];
+  }
+
+  private async invalidAnswerResult(
+    error: BeastDaemonRequestError,
+    context: ChatBeastContext,
+  ): Promise<ChatBeastDispatchResult> {
+    const definitionId = context.definitionId;
+    const definition = (await this.listDefinitions()).find((entry) => entry.id === definitionId);
+    if (!definition) {
+      throw new Error(`Unknown Beast definition: ${definitionId}`);
+    }
+
+    const details = error.details && typeof error.details === 'object'
+      ? error.details as Record<string, unknown>
+      : {};
+    const prompt = typeof details.prompt === 'string' ? details.prompt : String(details.promptKey ?? 'Please choose a valid option.');
+    const options = Array.isArray(details.options)
+      ? details.options.filter((option): option is string => typeof option === 'string')
+      : undefined;
+
+    return {
+      kind: 'interview',
+      definitionId,
+      assistantMessage: this.formatPrompt(definition.label, prompt, options),
+      beastContext: {
+        ...(context.agentId ? { agentId: context.agentId } : {}),
+        definitionId,
+        interviewSessionId: context.interviewSessionId,
+        ...(context.executionMode ? { executionMode: context.executionMode } : {}),
+        status: 'interviewing',
+      },
+    };
   }
 
   private formatPrompt(label: string, prompt: string, options?: readonly string[] | undefined): string {

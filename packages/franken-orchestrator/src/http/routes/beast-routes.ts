@@ -370,6 +370,7 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
       if (error instanceof InvalidBeastInterviewAnswerError) {
         throw new HttpError(400, 'INVALID_INTERVIEW_ANSWER', error.message, {
           promptKey: error.prompt.key,
+          prompt: error.prompt.prompt,
           options: error.prompt.options,
         });
       }

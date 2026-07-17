@@ -552,6 +552,7 @@ describe('beast routes', () => {
         message: "Invalid answer for 'provider': expected one of claude, codex, gemini, aider",
         details: {
           promptKey: 'provider',
+          prompt: 'Which provider should run the martin loop?',
           options: ['claude', 'codex', 'gemini', 'aider'],
         },
       },
@@ -651,7 +652,7 @@ describe('beast routes', () => {
     expect(runsBody.data.runs).toEqual([]);
   });
 
-  it('returns 422 and does not persist a direct run when config provider is invalid', async () => {
+  it('returns 422 and does not persist a direct run when required config is invalid', async () => {
     const { app, operatorToken } = createBeastApp();
     const headers = {
       authorization: `Bearer ${operatorToken}`,
@@ -664,8 +665,8 @@ describe('beast routes', () => {
       body: JSON.stringify({
         definitionId: 'martin-loop',
         config: {
-          provider: 'not-a-provider',
-          objective: 'Reject invalid direct providers',
+          provider: 'prod-claude',
+          objective: '',
           chunkDirectory: 'docs/chunks',
         },
         startNow: true,
@@ -679,7 +680,7 @@ describe('beast routes', () => {
     expect(body.error.code).toBe('BEAST_CONFIG_VALIDATION_ERROR');
     expect(body.error.message).toBe('Beast run config validation failed');
     expect(body.error.details).toEqual(expect.arrayContaining([
-      expect.objectContaining({ path: ['provider'] }),
+      expect.objectContaining({ path: ['objective'] }),
     ]));
 
     const runsResponse = await app.request('/v1/beasts/runs', {

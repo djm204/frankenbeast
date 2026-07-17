@@ -7,7 +7,7 @@ const promptConfigSchema = z.object({
   files: z.array(z.string()).optional(),
 }).strict();
 
-const martinLoopProviderSchema = z.enum(['claude', 'codex', 'gemini', 'aider']);
+const martinLoopProviderSchema = z.string().min(1);
 
 export const martinLoopDefinition: BeastDefinition = {
   id: 'martin-loop',

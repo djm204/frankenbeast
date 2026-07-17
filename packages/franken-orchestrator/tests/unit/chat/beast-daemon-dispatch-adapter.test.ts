@@ -171,6 +171,59 @@ describe('BeastDaemonDispatchAdapter', () => {
     expect(result?.assistantMessage).toContain('beasts maintenance off');
   });
 
+  it('keeps daemon-backed interviews active after invalid option answers', async () => {
+    const context = {
+      agentId: 'agent-1',
+      definitionId: 'martin-loop',
+      interviewSessionId: 'interview-1',
+      status: 'interviewing' as const,
+    };
+    const fetchMock = vi.fn(async (url: URL | RequestInfo) => {
+      const target = url.toString();
+      if (target.endsWith('/v1/beasts/interviews/interview-1/answer')) {
+        return Response.json({
+          error: {
+            code: 'INVALID_INTERVIEW_ANSWER',
+            message: "Invalid answer for 'provider': expected one of claude, codex, gemini, aider",
+            details: {
+              promptKey: 'provider',
+              prompt: 'Which provider should run the martin loop?',
+              options: ['claude', 'codex', 'gemini', 'aider'],
+            },
+          },
+        }, { status: 400, statusText: 'Bad Request' });
+      }
+      if (target.endsWith('/v1/beasts/catalog')) {
+        return Response.json({ data: definitions });
+      }
+      return Response.json({ error: 'unexpected' }, { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const adapter = new BeastDaemonDispatchAdapter({
+      baseUrl: 'http://127.0.0.1:4050',
+      operatorToken: TEST_DAEMON_TOKEN,
+    });
+
+    const result = await adapter.handle('not-a-provider', {
+      projectId: 'project',
+      sessionId: 'session-1',
+      transcript: [],
+      beastContext: context,
+    });
+
+    expect(result).toMatchObject({
+      kind: 'interview',
+      definitionId: 'martin-loop',
+      assistantMessage: expect.stringContaining('Options: claude, codex, gemini, aider'),
+      beastContext: expect.objectContaining({
+        agentId: 'agent-1',
+        interviewSessionId: 'interview-1',
+        status: 'interviewing',
+      }),
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('propagates daemon catalog failures for launch requests', async () => {
     const fetchMock = vi.fn(async () => Response.json({ error: 'unauthorized' }, { status: 401, statusText: 'Unauthorized' }));
     vi.stubGlobal('fetch', fetchMock);

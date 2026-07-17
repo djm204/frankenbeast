@@ -58,7 +58,7 @@ describe('BeastDispatchService', () => {
     expect(repo.listRuns()).toHaveLength(0);
   });
 
-  it('rejects direct Martin Loop runs with providers outside the advertised prompt options', async () => {
+  it('preserves configured Martin Loop provider aliases for direct runs', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const logs = new BeastLogStore(join(workDir, 'logs'));
@@ -77,19 +77,20 @@ describe('BeastDispatchService', () => {
     };
     const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
 
-    await expect(dispatch.createRun({
+    const run = await dispatch.createRun({
       definitionId: 'martin-loop',
       config: {
-        provider: 'not-a-provider',
+        provider: 'prod-claude',
         objective: 'Implement the dispatch panel',
         chunkDirectory: 'docs/chunks',
       },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'pfk',
       executionMode: 'process',
-    })).rejects.toThrow();
+    });
+    expect(run.configSnapshot.provider).toBe('prod-claude');
     expect(executors.process.start).not.toHaveBeenCalled();
-    expect(repo.listRuns()).toHaveLength(0);
+    expect(repo.listRuns()).toHaveLength(1);
   });
 
   it('fails closed when a persisted maintenance state file is not an object', async () => {
