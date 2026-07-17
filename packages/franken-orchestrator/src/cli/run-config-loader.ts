@@ -84,25 +84,46 @@ export class RunConfigParseError extends Error {
  * Load and validate a RunConfig from a JSON file path.
  * Throws if the file does not exist or the content fails Zod validation.
  */
-function verifyRunConfigIntegrityFromEnv(filePath: string): void {
+const verifiedRunConfigCache = new Map<string, Buffer>();
+
+function runConfigCacheKey(filePath: string, manifestPath: string): string {
+  return `${filePath}\u0000${manifestPath}`;
+}
+
+function verifyRunConfigIntegrityFromEnv(filePath: string): Buffer | undefined {
   if (process.env[RUN_CONFIG_INTEGRITY_BYPASS_ENV] === '1') {
     printWarning(`runtime config integrity bypass enabled for ${filePath}`);
-    return;
+    return undefined;
   }
 
   const manifestPath = process.env[RUN_CONFIG_INTEGRITY_ENV];
   const secret = process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV];
-  if (!manifestPath && !secret) return;
-  verifyRunConfigIntegrity(filePath, manifestPath ?? '', secret ?? '');
+  if (!manifestPath && !secret) return undefined;
+  const cacheKey = manifestPath ? runConfigCacheKey(filePath, manifestPath) : undefined;
+  if (!secret && cacheKey) {
+    const cachedBytes = verifiedRunConfigCache.get(cacheKey);
+    if (cachedBytes) return cachedBytes;
+  }
+  const verifiedBytes = verifyRunConfigIntegrity(filePath, manifestPath ?? '', secret ?? '');
+  if (cacheKey) {
+    verifiedRunConfigCache.set(cacheKey, verifiedBytes);
+  }
+  delete process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV];
+  return verifiedBytes;
 }
 
 export function loadRunConfig(filePath: string): RunConfig {
-  verifyRunConfigIntegrityFromEnv(filePath);
-  const info = statSync(filePath);
-  if (info.size > 1_048_576) {
-    throw new RunConfigParseError(filePath, `Run config ${filePath} exceeds maxBytes: ${info.size} > 1048576`);
+  const verifiedBytes = verifyRunConfigIntegrityFromEnv(filePath);
+  let raw: string;
+  if (verifiedBytes) {
+    raw = verifiedBytes.toString('utf-8');
+  } else {
+    const info = statSync(filePath);
+    if (info.size > 1_048_576) {
+      throw new RunConfigParseError(filePath, `Run config ${filePath} exceeds maxBytes: ${info.size} > 1048576`);
+    }
+    raw = readFileSync(filePath, 'utf-8');
   }
-  const raw = readFileSync(filePath, 'utf-8');
   let parsed: unknown;
   try {
     parsed = parseSafeJson(raw, {

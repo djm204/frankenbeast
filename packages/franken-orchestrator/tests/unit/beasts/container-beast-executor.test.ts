@@ -41,7 +41,12 @@ describe('ContainerBeastExecutor', () => {
       logStore,
       eventBus,
       supervisorFactory: () => fakeSupervisor,
-      policy: { ...DEFAULT_SANDBOX_POLICY, image: 'fbeast/sandbox:test', workspaceHostPath: workDir },
+      policy: {
+        ...DEFAULT_SANDBOX_POLICY,
+        image: 'fbeast/sandbox:test',
+        workspaceHostPath: workDir,
+        envAllowlist: ['FRANKENBEAST_RUN_CONFIG'],
+      },
     });
     const run = repository.createRun({
       definitionId: 'test-beast',

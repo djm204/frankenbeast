@@ -2,7 +2,9 @@ import type { BeastProcessSpec } from '../types.js';
 import type { SandboxPolicy } from './sandbox-policy.js';
 import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
 import { realpathSync, statSync } from 'node:fs';
-import { RUN_CONFIG_INTEGRITY_SECRET_ENV } from '../../cli/run-config-integrity.js';
+import { RUN_CONFIG_INTEGRITY_ENV, RUN_CONFIG_INTEGRITY_SECRET_ENV } from '../../cli/run-config-integrity.js';
+
+const INTERNAL_CONTAINER_ENV_ALLOWLIST = [RUN_CONFIG_INTEGRITY_ENV, RUN_CONFIG_INTEGRITY_SECRET_ENV] as const;
 
 function canonicalExistingPath(path: string): string {
   try {
@@ -48,7 +50,8 @@ function dockerEnv(spec: BeastProcessSpec, policy: SandboxPolicy): { args: strin
     `GIT_CONFIG_VALUE_0=${policy.workspaceContainerPath}`,
   ];
   const env: Record<string, string> = {};
-  for (const key of policy.envAllowlist) {
+  const envAllowlist = new Set([...policy.envAllowlist, ...INTERNAL_CONTAINER_ENV_ALLOWLIST]);
+  for (const key of envAllowlist) {
     const value = spec.env?.[key];
     if (value !== undefined) {
       if (key === RUN_CONFIG_INTEGRITY_SECRET_ENV) {

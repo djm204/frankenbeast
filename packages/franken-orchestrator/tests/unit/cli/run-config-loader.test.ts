@@ -177,6 +177,9 @@ describe('RunConfigLoader', () => {
       process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV] = secret;
 
       expect(loadRunConfig(filePath)).toMatchObject(config);
+      expect(process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV]).toBeUndefined();
+      await writeFile(filePath, JSON.stringify({ provider: 'attacker', objective: 'tampered-after-verify' }));
+      expect(loadRunConfig(filePath)).toMatchObject(config);
     });
 
     it('fails closed before JSON parsing when a signed config is tampered', async () => {
