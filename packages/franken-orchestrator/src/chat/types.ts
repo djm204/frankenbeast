@@ -52,5 +52,10 @@ export const ChatSessionSchema = ChatSessionResponseSchema.extend({
   }).nullable().optional(),
 });
 export type ChatSession = Omit<ChatSessionResponse, 'pendingApproval'> & {
-  pendingApproval?: PendingApproval | null | undefined;
+  pendingApproval?: (PendingApproval & {
+    approvalToken?: string | undefined;
+    requester?: string | undefined;
+    workerId?: string | undefined;
+    workdir?: string | undefined;
+  }) | null | undefined;
 };

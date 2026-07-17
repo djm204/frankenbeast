@@ -319,5 +319,11 @@
 ## 2026-07-16 — DR process cleanup closeout
 - DR process cleanup planners should ignore terminal attempts before PID counting and orphan scans, treat missing-PID live attempts as possible owners of matching processes, and include process-start tokens on executable orphan actions so signal-time consumers can revalidate PID identity before termination.
 
+## 2026-07-16 — Orchestrator focused test command
+- In the root workspace, `npm test -- --run ...` passes `--run` to Turbo and fails. For one orchestrator test file, run `npm run test --workspace @franken/orchestrator -- tests/unit/path.test.ts`; run `npm run build` first if package-local typecheck cannot resolve internal `@franken/*` workspace declarations.
+
+## 2026-07-16 — DR point-in-time export review fixes
+- Incident exports must summarize the real `.fbeast/beast.db` and `kanban.db` SQLite tables, include chat `pendingApproval` session state as approval evidence, stream/hash large logs instead of buffering them, and apply the same redaction to the serialized artifact that the terminal preview uses.
+
 ## 2026-07-17 — Orchestrator chaos-test closeout
 - For orchestrator chaos/stability regressions, keep dropped-provider and thrown-tool cases deterministic: use fake timers around never-settling promises, assert cleanup with zero leaked timers, and build dependent workspaces before package typecheck when source-only workspace packages make bare orchestrator `tsc --noEmit` report missing `@franken/*` declarations.
