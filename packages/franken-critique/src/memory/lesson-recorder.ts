@@ -1915,7 +1915,7 @@ function isLessonScopeAllowed(
   if (isEmptyLessonInjectionContext(context)) {
     return false;
   }
-  const nowMs = parseScopeTimestamp(context.now ?? new Date().toISOString());
+  const nowMs = parseContextTimestamp(context.now ?? new Date().toISOString());
   if (nowMs === undefined) {
     return false;
   }
@@ -1982,26 +1982,67 @@ function hasValidScopeAuditTrail(
   if (!Array.isArray(scope.auditTrail)) {
     return false;
   }
-  return scope.auditTrail.some((entry) => {
-    if (entry === null || typeof entry !== 'object') {
-      return false;
-    }
-    const candidate = entry as Partial<LessonScopeAuditEntry>;
-    return (
-      typeof candidate.changedAt === 'string' &&
-      parseScopeTimestamp(candidate.changedAt) !== undefined &&
-      candidate.toScope === currentScope &&
-      typeof candidate.actor === 'string' &&
-      candidate.actor.trim().length > 0 &&
-      typeof candidate.reason === 'string' &&
-      candidate.reason.trim().length > 0
-    );
-  });
+  const validEntries = scope.auditTrail.filter(
+    (entry): entry is LessonScopeAuditEntry => isValidScopeAuditEntry(entry),
+  );
+  const latestEntry = validEntries.reduce<LessonScopeAuditEntry | undefined>(
+    (latest, entry) => {
+      if (latest === undefined) {
+        return entry;
+      }
+      return parseScopeTimestamp(entry.changedAt)! >=
+        parseScopeTimestamp(latest.changedAt)!
+        ? entry
+        : latest;
+    },
+    undefined,
+  );
+  return latestEntry?.toScope === currentScope;
+}
+
+function isValidScopeAuditEntry(
+  entry: unknown,
+): entry is LessonScopeAuditEntry {
+  if (entry === null || typeof entry !== 'object') {
+    return false;
+  }
+  const candidate = entry as Partial<LessonScopeAuditEntry>;
+  return (
+    typeof candidate.changedAt === 'string' &&
+    parseScopeTimestamp(candidate.changedAt) !== undefined &&
+    isKnownLessonScopeKind(candidate.toScope) &&
+    (candidate.fromScope === undefined ||
+      isKnownLessonScopeKind(candidate.fromScope)) &&
+    typeof candidate.actor === 'string' &&
+    candidate.actor.trim().length > 0 &&
+    typeof candidate.reason === 'string' &&
+    candidate.reason.trim().length > 0
+  );
 }
 
 function parseScopeTimestamp(timestamp: string): number | undefined {
   const parsed = Date.parse(timestamp);
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+  return new Date(parsed).toISOString() === timestamp ? parsed : undefined;
+}
+
+function parseContextTimestamp(timestamp: string): number | undefined {
+  const parsed = Date.parse(timestamp);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function isKnownLessonScopeKind(
+  scope: unknown,
+): scope is LessonScopeKind {
+  return (
+    scope === 'global' ||
+    scope === 'repo' ||
+    scope === 'role' ||
+    scope === 'profile' ||
+    scope === 'task'
+  );
 }
 
 function isEmptyLessonInjectionContext(
@@ -2027,7 +2068,12 @@ function matchesRequiredAllowlist(
   allowed: readonly string[] | undefined,
   actual: string | undefined,
 ): boolean {
-  return actual !== undefined && allowed?.includes(actual) === true;
+  return (
+    actual !== undefined &&
+    Array.isArray(allowed) &&
+    allowed.every((value) => typeof value === 'string') &&
+    allowed.includes(actual)
+  );
 }
 
 export function detectLessonContradictions(
