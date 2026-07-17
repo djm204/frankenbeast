@@ -1169,7 +1169,7 @@ ${completeTemplate.replace(
   });
 
   it('does not let generic wrapper H1 titles satisfy missing required sections', () => {
-    const validation = validateAgentHandoffTemplate(`# Agent handoff objective
+    const validation = validateAgentHandoffTemplate(`# Agent handoff
 
 ## Current state and decisions
 Issue #1775, business goal, and out-of-scope boundaries are known. Completed work and decisions are pending.
@@ -1190,7 +1190,7 @@ Lesson: wrapper titles are not scope sections.
     expect(validation.valid).toBe(false);
     expect(
       validation.findings.find((finding) => finding.id === 'scope'),
-    ).toMatchObject({ status: 'placeholder' });
+    ).toMatchObject({ status: 'missing' });
   });
 
   it('accepts documented artifact headings for worktree and diff evidence', () => {

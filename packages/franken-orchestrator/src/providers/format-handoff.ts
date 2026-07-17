@@ -167,7 +167,7 @@ export const AGENT_HANDOFF_TEMPLATE_REQUIREMENTS: readonly AgentHandoffTemplateR
         'Add a section for deterministic test, lint, build, or verifier commands and outcomes.',
       requiredContentPatterns: [
         /\b(test|lint|typecheck|build|verify|verification|npm|pnpm|yarn|vitest|tsc|eslint|pytest)\b/i,
-        /\b(pass(?:ed)?|fail(?:ed)?|exit|outcome|green|succeed(?:ed)?|0 errors)\b/i,
+        /\b(pass(?:ed)?|fail(?:ed)?|exit|outcome|green|succeed(?:ed)?|success(?:ful)?|ok|0 errors)\b/i,
       ],
     },
     {
@@ -626,8 +626,7 @@ function extractMarkdownSections(template: string): MarkdownSection[] {
       const section = sections[sectionIndex];
       if (
         section &&
-        (section.level > 1 ||
-          sectionIndex === activeSectionIndex ||
+        (sectionIndex === activeSectionIndex ||
           isExplicitRequiredHandoffSectionHeading(section.heading))
       ) {
         section.content.push(line);
@@ -899,10 +898,12 @@ function isRequiredHandoffSectionHeading(heading: string): boolean {
 }
 
 function isExplicitRequiredHandoffSectionHeading(heading: string): boolean {
+  const isBroadWrapper = /^\s*project\s+(?:objective|goal)\s*$/i.test(heading);
   return (
     /\bscope\b/i.test(heading) ||
     /\bcurrent\s+state\b/i.test(heading) ||
     /\bstatus\b/i.test(heading) ||
+    (!isBroadWrapper && /\b(?:objective|goal)\b/i.test(heading)) ||
     /\bdecisions?\b/i.test(heading) ||
     /\bverification\b/i.test(heading) ||
     /\btests?\b/i.test(heading) ||
@@ -936,7 +937,7 @@ function artifactHeadingContentPrefix(heading: string, content: string): string 
   ) {
     return '';
   }
-  return /\b(branch|pr|pull request|worktree|diff|doc|docs|telemetry)\b|https?:\/\//i.test(
+  return /\b(branch|branches|pr|pull request|worktree|worktrees|diff|diffs|doc|docs|telemetry)\b|https?:\/\//i.test(
     heading,
   )
     ? heading
