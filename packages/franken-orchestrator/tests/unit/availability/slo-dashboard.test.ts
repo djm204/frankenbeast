@@ -51,7 +51,8 @@ describe('SLO dashboard', () => {
         ('t_success_slow', 'success slow', 'done', 1100, 1200, 1700, NULL),
         ('t_failed_provider', 'provider failed', 'done', 1200, 1400, 1900, NULL),
         ('t_blocked_approval', 'approval wait', 'blocked', 1300, 1500, NULL, 'approval'),
-        ('t_running_worker', 'running worker', 'running', 1500, 1600, NULL, NULL);
+        ('t_running_worker', 'running worker', 'running', 1500, 1600, NULL, NULL),
+        ('t_pending_old', 'pending old', 'ready', 1000, NULL, NULL, NULL);
       INSERT INTO task_runs (id, task_id, status, started_at, ended_at, outcome, error) VALUES
         (1, 't_success_fast', 'done', 1060, 1300, 'completed', NULL),
         (2, 't_success_slow', 'done', 1200, 1700, 'completed', NULL),
@@ -84,16 +85,50 @@ describe('SLO dashboard', () => {
       'approval_latency_p50_ms',
     ]);
     expect(oneHour.metrics.find((metric) => metric.id === 'run_success_rate')).toMatchObject({ value: 50, unit: 'percent', status: 'breach' });
-    expect(oneHour.metrics.find((metric) => metric.id === 'time_to_first_output_p50_ms')?.value).toBe(130_000);
+    expect(oneHour.metrics.find((metric) => metric.id === 'time_to_first_output_p50_ms')?.value).toBe(200_000);
     expect(oneHour.metrics.find((metric) => metric.id === 'time_to_closeout_p50_ms')?.value).toBe(600_000);
     expect(oneHour.metrics.find((metric) => metric.id === 'provider_wait_p50_ms')?.value).toBe(80_000);
-    expect(oneHour.metrics.find((metric) => metric.id === 'queue_age_p50_ms')?.value).toBe(100_000);
+    expect(oneHour.metrics.find((metric) => metric.id === 'queue_age_p50_ms')?.value).toBe(150_000);
     expect(oneHour.metrics.find((metric) => metric.id === 'approval_latency_p50_ms')?.value).toBe(60_000);
     expect(oneHour.failureCategories).toEqual([
       { category: 'approval', count: 1 },
       { category: 'provider', count: 1 },
     ]);
     expect(dashboard.source).toEqual({ kanban: true, approvals: true, runs: true });
+    expect(dashboard.generatedAt).toBe('1970-01-01T00:31:40.000Z');
+    db.close();
+  });
+
+  it('falls back safely for legacy task-only Kanban schemas', async () => {
+    const dbPath = join(mkdtempSync(join(tmpdir(), 'fbeast-slo-legacy-')), 'kanban.db');
+    const db = new Database(dbPath);
+    db.exec(`
+      CREATE TABLE tasks (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE comments (
+        id INTEGER PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        body TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      INSERT INTO tasks (id, title, status, created_at) VALUES
+        ('t_legacy_pending', 'legacy pending', 'ready', 1000),
+        ('t_legacy_archived', 'legacy archived', 'archived', 1100);
+    `);
+
+    const dashboard = await buildSloDashboardFromKanban(
+      createSqliteSloDashboardSource({ kanbanDbPath: dbPath, now: 2_000 }),
+    );
+
+    const oneHour = dashboard.windows[0];
+    expect(dashboard.source).toEqual({ kanban: true, approvals: false, runs: false });
+    expect(dashboard.generatedAt).toBe('1970-01-01T00:18:20.000Z');
+    expect(oneHour.metrics.find((metric) => metric.id === 'queue_age_p50_ms')?.value).toBe(950_000);
+    expect(oneHour.failureCategories).toEqual([{ category: 'other', count: 1 }]);
     db.close();
   });
 });

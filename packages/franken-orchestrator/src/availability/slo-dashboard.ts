@@ -86,7 +86,7 @@ const TARGETS = {
 
 export async function buildSloDashboardFromKanban(source: SloDashboardSource): Promise<SloDashboard> {
   return {
-    generatedAt: new Date(source.now * 1000).toISOString(),
+    generatedAt: new Date(sourceTimestamp(source) * 1000).toISOString(),
     source: {
       kanban: source.hasKanbanData,
       approvals: source.hasApprovalData,
@@ -133,17 +133,13 @@ function buildWindow(source: SloDashboardSource, label: '1h' | '24h' | '7d', sec
   const totalTerminalRuns = runs.filter(isTerminalRun).length;
   const successRate = totalTerminalRuns === 0 ? null : round((successfulRuns / totalTerminalRuns) * 100, 2);
   const firstOutputSamples = runs
-    .map((run) => durationMs(run.runStartedAt, run.firstOutputAt))
+    .map((run) => firstOutputDurationMs(run, source.now))
     .filter(isNumber);
-  const closeoutSamples = runs
-    .map((run) => durationMs(run.taskCreatedAt, run.taskCompletedAt))
-    .filter(isNumber);
+  const closeoutSamples = taskDurationSamples(runs, (run) => durationMs(run.taskCreatedAt, run.taskCompletedAt));
   const providerWaitSamples = runs
     .map((run) => durationMs(run.runStartedAt, run.spawnedAt))
     .filter(isNumber);
-  const queueAgeSamples = runs
-    .map((run) => durationMs(run.taskCreatedAt, run.taskStartedAt ?? run.runStartedAt))
-    .filter(isNumber);
+  const queueAgeSamples = taskDurationSamples(runs, (run) => durationMs(run.taskCreatedAt, run.taskStartedAt ?? run.runStartedAt ?? source.now));
   const approvalSamples = approvals
     .map((approval) => durationMs(approval.requestedAt, approval.decidedAt))
     .filter(isNumber);
@@ -165,13 +161,15 @@ function buildWindow(source: SloDashboardSource, label: '1h' | '24h' | '7d', sec
 }
 
 function readRunRecords(db: Database.Database, hasRuns: boolean, hasEvents: boolean): SloRunRecord[] {
+  const taskStartedExpr = columnExpr(db, 'tasks', 'started_at', 't', 'NULL');
+  const taskCompletedExpr = columnExpr(db, 'tasks', 'completed_at', 't', 'NULL');
   if (!hasRuns) {
     return db.prepare(`
       SELECT id AS taskId,
              status AS taskStatus,
              created_at AS taskCreatedAt,
-             started_at AS taskStartedAt,
-             completed_at AS taskCompletedAt
+             ${columnExpr(db, 'tasks', 'started_at', undefined, 'NULL')} AS taskStartedAt,
+             ${columnExpr(db, 'tasks', 'completed_at', undefined, 'NULL')} AS taskCompletedAt
       FROM tasks
     `).all() as SloRunRecord[];
   }
@@ -180,16 +178,16 @@ function readRunRecords(db: Database.Database, hasRuns: boolean, hasEvents: bool
     SELECT t.id AS taskId,
            t.status AS taskStatus,
            t.created_at AS taskCreatedAt,
-           t.started_at AS taskStartedAt,
-           t.completed_at AS taskCompletedAt,
+           ${taskStartedExpr} AS taskStartedAt,
+           ${taskCompletedExpr} AS taskCompletedAt,
            r.id AS runId,
            r.status AS runStatus,
            r.started_at AS runStartedAt,
            r.ended_at AS runEndedAt,
            r.outcome AS outcome,
            r.error AS error
-    FROM task_runs r
-    JOIN tasks t ON t.id = r.task_id
+    FROM tasks t
+    LEFT JOIN task_runs r ON r.task_id = t.id
   `).all() as SloRunRecord[];
 
   if (!hasEvents) {
@@ -253,6 +251,15 @@ function hasTable(db: Database.Database, table: string): boolean {
   return Boolean(row);
 }
 
+function hasColumn(db: Database.Database, table: string, column: string): boolean {
+  return (db.prepare(`PRAGMA table_info(${JSON.stringify(table)})`).all() as Array<{ name: string }>).some((row) => row.name === column);
+}
+
+function columnExpr(db: Database.Database, table: string, column: string, tableAlias?: string | undefined, fallback = 'NULL'): string {
+  if (!hasColumn(db, table, column)) return fallback;
+  return tableAlias ? `${tableAlias}.${column}` : column;
+}
+
 function isApprovalBlock(payload: string | null): boolean {
   if (!payload) return true;
   try {
@@ -313,6 +320,23 @@ function durationMs(start: number | null | undefined, end: number | null | undef
   return (end - start) * 1000;
 }
 
+function taskDurationSamples(runs: SloRunRecord[], readDuration: (run: SloRunRecord) => number | null): number[] {
+  const samples = new Map<string, number>();
+  for (const run of runs) {
+    const duration = readDuration(run);
+    if (duration !== null && !samples.has(run.taskId)) {
+      samples.set(run.taskId, duration);
+    }
+  }
+  return [...samples.values()];
+}
+
+function firstOutputDurationMs(run: SloRunRecord, now: number): number | null {
+  if (!isNumber(run.runStartedAt)) return null;
+  const end = run.firstOutputAt ?? (isTerminalRun(run) ? run.runEndedAt : now);
+  return durationMs(run.runStartedAt, end);
+}
+
 function recordTimestamp(run: SloRunRecord): number {
   return run.runEndedAt ?? run.taskCompletedAt ?? run.runStartedAt ?? run.taskStartedAt ?? run.taskCreatedAt;
 }
@@ -323,7 +347,15 @@ function isSuccessfulRun(run: SloRunRecord): boolean {
 
 function isTerminalRun(run: SloRunRecord): boolean {
   const value = String(run.outcome ?? run.runStatus ?? run.taskStatus).toLowerCase();
-  return ['completed', 'complete', 'done', 'success', 'failed', 'error', 'crashed', 'timed_out', 'blocked'].includes(value);
+  return ['completed', 'complete', 'done', 'success', 'failed', 'error', 'crashed', 'timed_out', 'timeout', 'blocked', 'archived', 'cancelled', 'canceled', 'deleted', 'stopped'].includes(value);
+}
+
+function sourceTimestamp(source: SloDashboardSource): number {
+  const timestamps = [
+    ...source.runs.flatMap((run) => [recordTimestamp(run), run.firstOutputAt, run.spawnedAt]),
+    ...source.approvals.map((approval) => approval.decidedAt),
+  ].filter(isNumber);
+  return timestamps.length > 0 ? Math.max(...timestamps) : 0;
 }
 
 function failureCategories(runs: SloRunRecord[]): SloFailureCategory[] {
