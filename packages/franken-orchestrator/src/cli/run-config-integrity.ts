@@ -1,10 +1,12 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { z } from 'zod';
 
 export const RUN_CONFIG_INTEGRITY_ALGORITHM = 'hmac-sha256';
 export const RUN_CONFIG_INTEGRITY_VERSION = 1;
 export const DEFAULT_RUN_CONFIG_INTEGRITY_TTL_MS = 24 * 60 * 60 * 1000;
+export const RUN_CONFIG_INTEGRITY_MAX_CONFIG_BYTES = 1_048_576;
+export const RUN_CONFIG_INTEGRITY_MAX_MANIFEST_BYTES = 16_384;
 
 export const RUN_CONFIG_INTEGRITY_ENV = 'FRANKENBEAST_RUN_CONFIG_INTEGRITY';
 export const RUN_CONFIG_INTEGRITY_SECRET_ENV = 'FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET';
@@ -49,6 +51,14 @@ export class RunConfigIntegrityError extends Error {
 
 function sha256Hex(bytes: string | Buffer): string {
   return createHash('sha256').update(bytes).digest('hex');
+}
+
+function readBoundedFileSync(path: string, maxBytes: number, description: string): Buffer {
+  const info = statSync(path);
+  if (info.size > maxBytes) {
+    throw new Error(`${description} exceeds maxBytes: ${info.size} > ${maxBytes}`);
+  }
+  return readFileSync(path);
 }
 
 function canonicalIntegrityPayload(fields: Omit<RunConfigIntegrityManifest, 'signature'>): string {
@@ -115,7 +125,12 @@ export function verifyRunConfigIntegrity(
 
   let manifest: RunConfigIntegrityManifest;
   try {
-    manifest = RunConfigIntegrityManifestSchema.parse(JSON.parse(readFileSync(manifestPath, 'utf-8')));
+    const manifestBytes = readBoundedFileSync(
+      manifestPath,
+      RUN_CONFIG_INTEGRITY_MAX_MANIFEST_BYTES,
+      'runtime config integrity manifest',
+    );
+    manifest = RunConfigIntegrityManifestSchema.parse(JSON.parse(manifestBytes.toString('utf-8')));
   } catch (error) {
     throw new RunConfigIntegrityError(
       configPath,
@@ -145,7 +160,12 @@ export function verifyRunConfigIntegrity(
     throw new RunConfigIntegrityError(configPath, 'signature mismatch');
   }
 
-  const actualSha256 = sha256Hex(readFileSync(configPath));
+  const configBytes = readBoundedFileSync(
+    configPath,
+    RUN_CONFIG_INTEGRITY_MAX_CONFIG_BYTES,
+    'runtime config',
+  );
+  const actualSha256 = sha256Hex(configBytes);
   if (actualSha256 !== manifest.configSha256.toLowerCase()) {
     throw new RunConfigIntegrityError(configPath, 'checksum mismatch');
   }

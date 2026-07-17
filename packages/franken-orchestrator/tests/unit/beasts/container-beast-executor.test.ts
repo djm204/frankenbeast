@@ -10,6 +10,7 @@ import { BeastLogStore } from '../../../src/beasts/events/beast-log-store.js';
 import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
 import type { BeastDefinition, BeastProcessSpec } from '../../../src/beasts/types.js';
 import type { ProcessCallbacks, ProcessSupervisorLike } from '../../../src/beasts/execution/process-supervisor.js';
+import { RUN_CONFIG_INTEGRITY_SECRET_ENV } from '../../../src/cli/run-config-integrity.js';
 
 describe('ContainerBeastExecutor', () => {
   let workDir: string | undefined;
@@ -83,6 +84,11 @@ describe('ContainerBeastExecutor', () => {
     expect(spawned[0].command).toBe('docker');
     expect(spawned[0].args).toEqual(expect.arrayContaining(['--name', `fbeast-${run.id}-attempt-1`]));
     expect(spawned[0].args).toEqual(expect.arrayContaining(['--network', 'none']));
+    const integritySecret = spawned[0].env?.[RUN_CONFIG_INTEGRITY_SECRET_ENV];
+    expect(integritySecret).toEqual(expect.any(String));
+    expect(spawned[0].args).toEqual(expect.arrayContaining(['-e', RUN_CONFIG_INTEGRITY_SECRET_ENV]));
+    expect(spawned[0].args).not.toContain(`${RUN_CONFIG_INTEGRITY_SECRET_ENV}=${integritySecret}`);
+    expect((attempt.executorMetadata?.dockerArgs as string[]).join('\n')).not.toContain(String(integritySecret));
 
     const userFlag = spawned[0].args.indexOf('--user');
     const containerUser = spawned[0].args[userFlag + 1]!;
