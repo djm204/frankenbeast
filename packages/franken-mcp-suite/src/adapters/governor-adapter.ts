@@ -360,7 +360,6 @@ function contextLooksLikeMemoryRetentionReportArgs(context: string): boolean {
     const record = parsed as Record<string, unknown>;
     const keys = Object.keys(record);
     const hasRetentionReportSignal = Object.prototype.hasOwnProperty.call(record, 'readScope')
-      && Object.prototype.hasOwnProperty.call(record, 'agentId')
       && !Object.prototype.hasOwnProperty.call(record, 'key')
       && !Object.prototype.hasOwnProperty.call(record, 'source')
       && !Object.prototype.hasOwnProperty.call(record, 'redaction')

@@ -292,6 +292,11 @@ const MEMORY_RETENTION_CLASS_ALIASES: Record<string, MemoryRetentionClass> = {
   procedures: 'learned_procedure',
   workflow: 'learned_procedure',
   skill: 'learned_procedure',
+  'audit-record': 'audit_record',
+  audit_record: 'audit_record',
+  audit: 'audit_record',
+  'deletion-audit': 'audit_record',
+  'governance-audit': 'audit_record',
   'transient-observation': 'transient_observation',
   transient_observation: 'transient_observation',
   transient: 'transient_observation',
@@ -1334,6 +1339,12 @@ class SqliteWorkingMemory implements IWorkingMemory {
     }
   }
 
+  private expireRuntimeKeysMatchingCurrentDeletionGuards(): void {
+    for (const key of Array.from(this.store.keys())) {
+      this.expireRuntimeKeyIfGuarded(key);
+    }
+  }
+
   private deleteExpiredPersistedRows(
     rows: ReadonlyArray<{ key: string; serialized: string | undefined }>,
   ): Array<{ key: string; serialized: string }> {
@@ -1450,7 +1461,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
   }
 
   retentionEntries(nowIso = isoNow()): Array<{ key: string; value: unknown; updatedAt: string }> {
-    this.expireRuntimeKeysMatchingCurrentGuards();
+    this.expireRuntimeKeysMatchingCurrentDeletionGuards();
     const rows = this.db
       .prepare(`SELECT key, value, updated_at as updatedAt FROM working_memory ORDER BY key ASC`)
       .all() as Array<{ key: string; value: string; updatedAt: string }>;

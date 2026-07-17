@@ -187,6 +187,11 @@ describe('GovernorAdapter', () => {
       context: '{"readScope":"agent","agentId":"dave@example.test","extra":"secret"}',
     })).resolves.toMatchObject({ decision: 'approved' });
 
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"readScope":"shared","now":"operator@example.test invalid date"}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+
     const db = new Database(dbPath);
     const rows = db.prepare(`SELECT context FROM governor_log ORDER BY id ASC`).all() as Array<{ context: string }>;
     db.close();
@@ -194,10 +199,12 @@ describe('GovernorAdapter', () => {
     expect(rows[1]!.context).toBe('{"tool":"fbeast_memory_retention_report","args":{"readScope":"agent","expiryHorizonMs":1000,"agentId":"[memory-retention-report-args-redacted]"}}');
     expect(rows[2]!.context).toBe('{"readScope":"agent","maxEntries":5,"agentId":"[memory-retention-report-args-redacted]"}');
     expect(rows[3]!.context).toBe('{"readScope":"agent","agentId":"[memory-retention-report-args-redacted]"}');
+    expect(rows[4]!.context).toBe('{"readScope":"shared","now":"[memory-retention-report-args-redacted]"}');
     expect(rows.map((row) => row.context).join('\n')).not.toContain('alice@example.test');
     expect(rows.map((row) => row.context).join('\n')).not.toContain('bob@example.test');
     expect(rows.map((row) => row.context).join('\n')).not.toContain('carol@example.test');
     expect(rows.map((row) => row.context).join('\n')).not.toContain('dave@example.test');
+    expect(rows.map((row) => row.context).join('\n')).not.toContain('operator@example.test');
     expect(rows.map((row) => row.context).join('\n')).not.toContain('secret');
   });
 

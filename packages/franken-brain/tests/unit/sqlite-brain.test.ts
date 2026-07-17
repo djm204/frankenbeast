@@ -273,6 +273,46 @@ describe('SqliteBrain', () => {
       expect(report.compactionCandidates.map((entry) => entry.class)).not.toContain('audit_record');
     });
 
+    it('treats explicit audit class aliases as protected audit records', () => {
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'Manual deletion audit trail entry',
+        details: { memoryClass: 'audit-record' },
+        createdAt: '2020-01-01T00:00:00.000Z',
+      });
+      brain.working.set('manual.audit', {
+        value: 'operator approved deletion hash abc123',
+        category: 'governance-audit',
+      });
+
+      const report = brain.memoryRetentionReport({ now: '2027-01-01T00:00:00.000Z' });
+
+      const auditEntries = report.entries.filter((entry) => entry.class === 'audit_record');
+      expect(auditEntries).toEqual(expect.arrayContaining([
+        expect.objectContaining({ store: 'episodic', action: 'protect', protected: true }),
+        expect.objectContaining({ store: 'working', key: 'manual.audit', action: 'protect', protected: true }),
+      ]));
+      expect(report.compactionCandidates).not.toContainEqual(expect.objectContaining({ class: 'audit_record' }));
+    });
+
+    it('reports expired TTL working entries without deleting them during the report', () => {
+      brain.working.set('expired.operational', {
+        value: 'short-lived cache',
+        category: 'temporary-operational',
+        sourceScope: 'test',
+        expiresAt: '2027-01-01T00:00:00.000Z',
+      });
+
+      const report = brain.memoryRetentionReport({ now: '2027-01-02T00:00:00.000Z' });
+
+      expect(report.entries.find((entry) => entry.key === 'expired.operational')).toMatchObject({
+        class: 'temporary_operational',
+        action: 'expired',
+      });
+      expect(brain.memoryRetentionReport({ now: '2027-01-02T00:00:00.000Z' }).entries)
+        .toContainEqual(expect.objectContaining({ key: 'expired.operational', action: 'expired' }));
+    });
+
     it('counts existing compaction candidates before applying entry budgets', () => {
       brain.episodic.record({
         type: 'observation',
