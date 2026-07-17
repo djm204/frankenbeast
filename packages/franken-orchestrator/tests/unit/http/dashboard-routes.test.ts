@@ -342,7 +342,8 @@ describe('dashboard routes', () => {
       }
       reader.cancel();
 
-      // SSE format: event: snapshot\ndata: ...\n\n
+      // SSE format: id: ...\nevent: snapshot\ndata: ...\n\n
+      expect(text).toContain('id: dashboard:1');
       expect(text).toContain('event: snapshot');
 
       // Extract the data line for the snapshot event

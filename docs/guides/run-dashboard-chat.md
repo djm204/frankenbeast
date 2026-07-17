@@ -129,6 +129,8 @@ Expected behavior:
 - opening the chat page creates or resumes a session over HTTP
 - the UI then opens a WebSocket connection to `/v1/chat/ws`
 - sending a message streams assistant output back into the transcript
+- WebSocket stream events include monotonic `eventId` values so reconnect/replay paths can ignore duplicate or stale events without duplicating transcript entries
+- dashboard SSE snapshots include monotonic `id: dashboard:<n>` fields; reconnecting clients pass their last processed id as `lastEventId` when minting the next short-lived stream, and client reducers must ignore duplicate event ids
 - approvals show up in the side rail when a turn requires them
 
 ## Security defaults

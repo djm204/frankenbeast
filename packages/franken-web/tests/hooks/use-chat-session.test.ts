@@ -1451,6 +1451,53 @@ describe('useChatSession', () => {
     expect(result.current.connectionStatus).toBe('connecting');
   });
 
+  it('deduplicates replayed websocket events by event id and monotonic cursor', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+      socket.message({
+        eventId: 'chat-1:1',
+        type: 'assistant.message.complete',
+        messageId: 'assistant-1',
+        content: 'First delivered answer',
+        timestamp: '2026-03-09T00:00:01Z',
+      });
+      socket.message({
+        eventId: 'chat-1:1',
+        type: 'assistant.message.complete',
+        messageId: 'assistant-duplicate',
+        content: 'Duplicate replay should not render',
+        timestamp: '2026-03-09T00:00:02Z',
+      });
+      socket.message({
+        eventId: 'chat-1:0',
+        type: 'assistant.message.complete',
+        messageId: 'assistant-stale',
+        content: 'Stale replay should not render',
+        timestamp: '2026-03-09T00:00:03Z',
+      });
+      socket.message({
+        eventId: 'chat-1:2',
+        type: 'assistant.message.complete',
+        messageId: 'assistant-2',
+        content: 'Second delivered answer',
+        timestamp: '2026-03-09T00:00:04Z',
+      });
+    });
+
+    expect(result.current.messages.map((message) => message.content)).toEqual([
+      'First delivered answer',
+      'Second delivered answer',
+    ]);
+    expect(result.current.errorBanners).toHaveLength(0);
+  });
+
   it('reconnects after the socket closes and falls back to HTTP send while reconnecting', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 

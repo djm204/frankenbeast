@@ -335,6 +335,34 @@ describe('ws chat server', () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
+  it('stamps outgoing websocket events with monotonic per-connection event ids', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const controller = new ChatSocketController({
+      runtime: createTestRuntime(),
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const { peer, sent } = createPeer();
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    await controller.receive(peer, JSON.stringify({ type: 'ping' }));
+
+    const events = sent.map((raw) => JSON.parse(raw) as { eventId?: string; type: string });
+    expect(events[0]).toMatchObject({ eventId: `${session.id}:1`, type: 'session.ready' });
+    expect(events[1]).toMatchObject({ eventId: `${session.id}:2`, type: 'pong' });
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
   it('emits typing, delta, and complete events for a reply turn', async () => {
     mkdirSync(TMP, { recursive: true });
     const store = new FileSessionStore(TMP);

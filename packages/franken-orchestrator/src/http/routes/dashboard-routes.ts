@@ -121,9 +121,11 @@ export function createDashboardRoutes(deps: DashboardRouteDeps): Hono {
 
     return streamSSE(c, async (stream) => {
       let lastSnapshot = JSON.stringify(await buildSnapshot(deps));
+      let snapshotSequence = 1;
 
       // Send initial snapshot
       await stream.writeSSE({
+        id: `dashboard:${snapshotSequence}`,
         event: 'snapshot',
         data: lastSnapshot,
       });
@@ -147,8 +149,9 @@ export function createDashboardRoutes(deps: DashboardRouteDeps): Hono {
           return;
         }
         lastSnapshot = nextSnapshot;
+        snapshotSequence += 1;
         try {
-          await stream.writeSSE({ event: 'snapshot', data: nextSnapshot });
+          await stream.writeSSE({ id: `dashboard:${snapshotSequence}`, event: 'snapshot', data: nextSnapshot });
         } catch {
           clearAll();
         }
