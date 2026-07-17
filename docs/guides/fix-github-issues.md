@@ -108,6 +108,8 @@ Resolves the GitHub `upstream` remote from the current fork checkout and uses th
 
 Before assigning or executing an issue, classify it with the [issue complexity rubric](../onboarding/issue-complexity-rubric.md). The rubric maps labels such as `docs`, `security`, `availability`, and priority tags to complexity/risk levels, allowed toolsets, recommended model lanes, verification depth, and escalation triggers.
 
+When the work may affect a release, deployment, or post-merge ownership handoff, also read the [release and deployment mental model](../onboarding/release-deployment-mental-model.md). It explains the issue-to-PR-to-release path, release labels, CI/Codex merge gates, and rollback/monitoring responsibilities so PR handoffs do not stop at "merged" when rollout ownership still matters.
+
 Use the rubric result as separate PM handoff metadata or an issue comment alongside the CLI's existing review table. The current `frankenbeast issues` table still reports implementation complexity such as `one-shot` or `chunked`; the C0-C5 rubric is the assignment-risk overlay PMs use to keep C0/C1 work in low-risk lanes while routing C3-C5 cross-package, security, disaster-recovery, or PM-swarm policy work to senior or PM-supervised lanes.
 
 ## Review Flow
