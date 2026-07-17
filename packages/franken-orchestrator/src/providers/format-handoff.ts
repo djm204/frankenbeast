@@ -813,7 +813,7 @@ function isKnownTemplateLabelCombination(label: string): boolean {
 
 function isWhitespaceSeparatedTemplateLabelCombination(label: string): boolean {
   const stripped = label
-    .replace(/\b(?:issue|task|business goal|business objective|goal|objective|out of scope boundaries|boundary notes|boundaries|blocker|blockers|blocked|owner|responsible|assignee|next action|next step|next steps)\b/g, ' ')
+    .replace(/\b(?:issue|task|business goal|business objective|goal|objective|out of scope boundaries|boundary notes|boundaries|completed work|current phase|key decisions|remaining work|status|current status|decisions|blocker|blockers|blocked|no blockers|no blocker|risk|risks|command|commands|test command|test commands|outcome|result|owner|responsible|assignee|next action|next step|next steps|follow up|continue|artifact|artifacts|link|links|branch|branches|pr|pull request|worktree|worktrees|diff|diffs|doc|docs|telemetry|lesson|lessons|learning|retrospective|reuse|reusable)\b/g, ' ')
     .trim();
   return stripped.length === 0 && /\s/.test(label);
 }
@@ -973,7 +973,7 @@ function looksLikeVerificationCommand(line: string): boolean {
 }
 
 function looksLikeVerificationOutcome(line: string): boolean {
-  return /\b(?:pass(?:ed|es)?|fail(?:ed|ure|ures)?|success(?:ful)?|ok|green|red|\d+\s+passed|\d+\s+failed)\b/i.test(
+  return /\b(?:pass(?:ed|es)?|fail(?:ed|ure|ures)?|success(?:ful)?|ok|green|red|succeed(?:ed)?|exit\s+0|0\s+errors?|\d+\s+passed|\d+\s+failed)\b/i.test(
     line,
   );
 }
