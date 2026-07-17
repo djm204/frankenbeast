@@ -16,6 +16,7 @@ const VITEST_CONFIGS = [
   'packages/franken-governor/vitest.integration.config.ts',
   'packages/live-bench/vitest.config.ts',
   'packages/franken-mcp-suite/vitest.config.ts',
+  'packages/franken-mcp-suite/vitest.integration.config.ts',
   'packages/franken-observer/vitest.config.ts',
   'packages/franken-orchestrator/vitest.config.ts',
   'packages/franken-planner/vitest.config.ts',
