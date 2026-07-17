@@ -54,7 +54,7 @@ const REQUIRED_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
 };
 const SCHEMA_V1_MEMORY_REVIEW_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
   memory_review_candidates: ['id', 'target_store', 'memory_key', 'value', 'source', 'evidence_id', 'confidence', 'reason', 'status', 'suppression_reason', 'reviewer', 'note', 'created_at', 'updated_at', 'decided_at', 'schema_version'],
-  memory_review_provenance: ['target_store', 'memory_key', 'value', 'candidate_id', 'source', 'evidence_id', 'confidence', 'reason', 'reviewer', 'note', 'created_at', 'approved_at', 'schema_version'],
+  memory_review_provenance: ['target_store', 'memory_key', 'value', 'candidate_id', 'source', 'evidence_id', 'confidence', 'reason', 'reviewer', 'note', 'approved_at', 'schema_version'],
   memory_review_suppressions: ['signature', 'suppression_reason', 'target_store', 'memory_key', 'value', 'source', 'evidence_id', 'reason', 'reviewer', 'note', 'created_at', 'schema_version'],
 };
 const ENCRYPTED_MEMORY_PREFIX = 'enc:v1:';

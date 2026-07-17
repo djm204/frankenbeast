@@ -3294,11 +3294,9 @@ export class SqliteMemoryReviewQueue {
         conditions.push("memory_key NOT LIKE ? ESCAPE '\\'");
         params.push(`${prefix.replace(/[\\%_]/g, char => `\\${char}`)}%`);
       }
-      if (options.includeExpired === false) {
-        const nowMs = parseDecayTimestamp(options.now ?? new Date(), 'now');
-        conditions.push('(expires_at IS NULL OR expires_at > ?)');
-        params.push(new Date(nowMs).toISOString());
-      }
+      const nowMs = options.includeExpired === false
+        ? parseDecayTimestamp(options.now ?? new Date(), 'now')
+        : undefined;
       const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
       const rows = this.db
         .prepare(
@@ -3312,6 +3310,9 @@ export class SqliteMemoryReviewQueue {
           continue;
         }
         const provenance = this.rowToProvenance(row);
+        if (nowMs !== undefined && provenance.expiresAt && Date.parse(provenance.expiresAt) <= nowMs) {
+          continue;
+        }
         if (sourceFilter && !provenance.source.toLowerCase().includes(sourceFilter)) {
           continue;
         }
@@ -6153,20 +6154,11 @@ function readStorePayloads(
         }>
       ).map((row) => row.state);
     case 'memory_review_candidates':
-      return readReviewPayloads(
-        db,
-        `SELECT value, source, source_id, evidence_id, reason, reviewer, note FROM memory_review_candidates`,
-      );
+      return readReviewPayloads(db, 'memory_review_candidates');
     case 'memory_review_provenance':
-      return readReviewPayloads(
-        db,
-        `SELECT value, source, source_id, evidence_id, reason, reviewer, note FROM memory_review_provenance`,
-      );
+      return readReviewPayloads(db, 'memory_review_provenance');
     case 'memory_review_suppressions':
-      return readReviewPayloads(
-        db,
-        `SELECT value, source, source_id, evidence_id, reason, reviewer, note FROM memory_review_suppressions`,
-      );
+      return readReviewPayloads(db, 'memory_review_suppressions');
     case 'memory_deletion_hash_keys':
       return (
         db.prepare(`SELECT key_material FROM memory_deletion_hash_keys`).all() as Array<{
@@ -6177,21 +6169,27 @@ function readStorePayloads(
   return [];
 }
 
-function readReviewPayloads(db: Database.Database, sql: string): string[] {
-  return (
-    db.prepare(sql).all() as Array<{
-      value: string;
-      source: string;
-      source_id: string | null;
-      evidence_id: string | null;
-      reason: string;
-      reviewer: string | null;
-      note: string | null;
-    }>
-  ).flatMap((row) =>
-    [row.value, row.source, row.source_id, row.evidence_id, row.reason, row.reviewer, row.note].filter(
-      (value): value is string => value !== null,
+function readReviewPayloads(db: Database.Database, table: string): string[] {
+  const desiredColumns = [
+    'value',
+    'source',
+    'source_id',
+    'evidence_id',
+    'reason',
+    'reviewer',
+    'note',
+  ];
+  const existing = new Set(
+    (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(
+      row => row.name,
     ),
+  );
+  const columns = desiredColumns.filter(column => existing.has(column));
+  if (columns.length === 0) return [];
+  const selected = columns.join(', ');
+  const rows = db.prepare(`SELECT ${selected} FROM ${table}`).all() as Array<Record<string, string | null>>;
+  return rows.flatMap((row) =>
+    columns.map(column => row[column]).filter((value): value is string => value !== null),
   );
 }
 
