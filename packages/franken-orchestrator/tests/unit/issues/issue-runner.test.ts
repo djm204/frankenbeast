@@ -967,6 +967,29 @@ describe('stuck-run watchdog', () => {
     });
   });
 
+  it('lets newer terminal snapshots clear stale dead restart candidates', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_dead_then_terminal',
+        pid: 7412,
+        runId: 'run-old-dead',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+      {
+        cardId: 't_dead_then_terminal',
+        pid: 7413,
+        runId: 'run-new-complete',
+        status: 'completed',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:31:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([]);
+  });
+
   it('treats dispatcher restart stop reasons as HITL repair evidence before retrying', () => {
     const [finding] = detectStuckRunWatchdogFindings([
       {
@@ -1196,6 +1219,28 @@ describe('stuck-run watchdog', () => {
     expect(contract.evidence.join('\n')).not.toContain('secret-value');
   });
 
+  it('defers spawn failures with active ownership before routing to doctor replacement', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_spawn_failed_owned',
+      pid: 7418,
+      status: 'running',
+      alive: false,
+      exitReason: 'spawn_failed',
+      activePrUrl: 'https://github.com/djm204/frankenbeast/pull/2560',
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'running',
+    });
+
+    expect(contract).toMatchObject({
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      kanbanState: 'running',
+    });
+    expect(contract.evidence).toContain('activePr=https://github.com/djm204/frankenbeast/pull/2560');
+  });
+
   it('keeps direct terminal restart contracts as no-op before dead-process retry', () => {
     const contract = buildWorkerCrashOnlyRestartContract({
       cardId: 't_direct_completed',
@@ -1270,6 +1315,24 @@ describe('stuck-run watchdog', () => {
       nextAction: 'defer-with-evidence',
       processStatus: 'alive',
       kanbanState: 'failed',
+    });
+  });
+
+  it('treats status-only crash snapshots as dead when no live probe contradicts them', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_status_only_failed',
+        pid: 7426,
+        status: 'failed',
+        lastHeartbeatAt: '2026-07-16T11:55:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_status_only_failed',
+      processStatus: 'dead',
+      restartDisposition: 'retryable',
+      nextAction: 'restart-once',
     });
   });
 
@@ -1565,8 +1628,8 @@ describe('stuck-run watchdog', () => {
     expect(findings[0]).toMatchObject({
       cardId: 't_crashed_without_probe',
       blockerCategory: 'process-crash',
-      confidence: 'medium',
-      processStatus: 'alive',
+      confidence: 'high',
+      processStatus: 'dead',
       kanbanState: 'failed',
     });
   });
@@ -1583,8 +1646,8 @@ describe('stuck-run watchdog', () => {
     expect(findings[0]).toMatchObject({
       cardId: 't_crashed_without_activity',
       blockerCategory: 'process-crash',
-      confidence: 'medium',
-      processStatus: 'alive',
+      confidence: 'high',
+      processStatus: 'dead',
       kanbanState: 'failed',
     });
   });
@@ -1603,8 +1666,8 @@ describe('stuck-run watchdog', () => {
     expect(findings[0]).toMatchObject({
       cardId: 't_failed_stale_ci_wait',
       blockerCategory: 'process-crash',
-      confidence: 'medium',
-      processStatus: 'alive',
+      confidence: 'high',
+      processStatus: 'dead',
       kanbanState: 'failed',
     });
   });

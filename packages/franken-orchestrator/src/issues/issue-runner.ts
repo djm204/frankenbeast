@@ -919,6 +919,15 @@ export function buildWorkerCrashOnlyRestartContract(
     };
   }
 
+  if (activePrUrl || activeWorktreePath) {
+    return {
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      ...base,
+      evidence,
+    };
+  }
+
   if (rawExitReason === 'spawn_failed' || /^(?:spawn(?:[_ -]?(?:fail(?:ed|ure)?|error))?\b|start[_ -]?failed\b|setup\b|enoent\b|eacces\b|protocol[_ -]?violation\b)/i.test(rawExitReason.trim())) {
     return {
       disposition: 'hitl',
@@ -954,15 +963,6 @@ export function buildWorkerCrashOnlyRestartContract(
     || dispatcherRestartExitReason(rawExitReason)
     || knownLongRunningWait(input.category)
   ) {
-    return {
-      disposition: 'hitl',
-      nextAction: 'defer-with-evidence',
-      ...base,
-      evidence,
-    };
-  }
-
-  if (activePrUrl || activeWorktreePath) {
     return {
       disposition: 'hitl',
       nextAction: 'defer-with-evidence',
@@ -1069,7 +1069,16 @@ export function detectStuckRunWatchdogFindings(
     if (!snapshot.cardId.trim()) continue;
     const hasPositivePid = Number.isSafeInteger(snapshot.pid) && snapshot.pid > 0;
     const status = snapshot.status?.trim().toLowerCase();
-    if (status && TERMINAL_WORKER_CARD_STATUSES.has(status) && !explicitProcessCrash(snapshot)) continue;
+    if (status && TERMINAL_WORKER_CARD_STATUSES.has(status) && !explicitProcessCrash(snapshot)) {
+      const normalizedCardId = snapshot.cardId.trim();
+      const terminalRecencyMs = snapshotRecencyMs(snapshot);
+      const existingKey = deadFindingKeysByCardId.get(normalizedCardId);
+      if (existingKey && snapshot.alive !== true && terminalRecencyMs >= existingKey.recencyMs) {
+        deadFindingKeysByCardId.delete(normalizedCardId);
+        deadFindingsByCardId.delete(normalizedCardId);
+      }
+      continue;
+    }
 
     const category = normalizeStuckRunBlockerCategory(snapshot);
     const heartbeatAgeMs = ageMs(snapshot.lastHeartbeatAt, nowMs);
@@ -1090,7 +1099,7 @@ export function detectStuckRunWatchdogFindings(
     const minimumStaleSignals = providedActivitySignalCount;
     const freshLongRunningWaitActivity = [heartbeatAgeMs, outputAgeMs, toolActivityAgeMs, stateTransitionAgeMs]
       .some((age) => age !== undefined && age < longRunningWaitGraceMs);
-    const processStatus: IssueStuckRunWatchdogFinding['processStatus'] = snapshot.alive === false
+    const processStatus: IssueStuckRunWatchdogFinding['processStatus'] = snapshot.alive === false || (snapshot.alive !== true && status !== undefined && crashKanbanState(status))
       ? 'dead'
       : hasPositivePid
         ? 'alive'
