@@ -774,6 +774,7 @@ function normalizeStuckRunBlockerCategory(
   if (snapshot.blockerCategory && snapshot.blockerCategory !== 'unknown') return snapshot.blockerCategory;
   const text = `${snapshot.status ?? ''} ${snapshot.waitingOn ?? ''}`.toLowerCase();
   if (/\bapproval\b|\bhitl\b|\bhuman\b|approval[- ]?token|pending[_ -]approval|operator approval|approval-cop|approve/.test(text)) return 'approval-gate';
+  if (snapshot.alive === false && /\b(crash(?:ed|ing)?|exit(?:ed|ing)?|dead|pid|fail(?:ed|ure|ing)?)\b/.test(text)) return 'process-crash';
   if (/provider|codex|rate limit|quota|llm|model/.test(text)) return 'provider-wait';
   if (/\bci\b|ci[- ]?check|status check|check run|workflow|merge queue|github actions?/.test(text)) return 'ci-wait';
   if (snapshot.alive === false) return 'process-crash';
@@ -1004,9 +1005,8 @@ function deferRemediationForStuckRun(category: IssueStuckRunBlockerCategory): st
 function restartContractSafetyRank(contract: IssueWorkerCrashOnlyRestartContract): number {
   switch (contract.disposition) {
     case 'hitl':
-      return 3;
-    case 'terminal':
       return 2;
+    case 'terminal':
     case 'retryable':
       return 1;
   }
@@ -1023,7 +1023,8 @@ function snapshotRecencyMs(snapshot: IssueWorkerCardProcessSnapshot): number {
       snapshot.startedAt,
     ].map((value) => {
       if (value === undefined) return 0;
-      const parsed = Date.parse(String(value));
+      const date = value instanceof Date ? value : new Date(value);
+      const parsed = date.getTime();
       return Number.isFinite(parsed) ? parsed : 0;
     }),
   );

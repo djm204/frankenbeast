@@ -989,6 +989,87 @@ describe('stuck-run watchdog', () => {
     expect(finding.recommendedAction).toContain('do not auto-respawn over the blocker');
   });
 
+  it('uses numeric timestamp recency when coalescing dead attempts', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_numeric_recency',
+        pid: 7415,
+        runId: 'run-older',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: Date.parse('2026-07-16T11:30:00.000Z'),
+      },
+      {
+        cardId: 't_numeric_recency',
+        pid: 7416,
+        runId: 'run-newer',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: Date.parse('2026-07-16T11:31:00.000Z'),
+      },
+    ], { nowMs });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      cardId: 't_numeric_recency',
+      pid: 7416,
+      runId: 'run-newer',
+      restartDisposition: 'retryable',
+      nextAction: 'restart-once',
+    });
+  });
+
+  it('prefers a newer retryable dead attempt over an older terminal stop', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_terminal_then_retryable',
+        pid: 7417,
+        runId: 'run-old-stop',
+        status: 'running',
+        alive: false,
+        exitReason: 'operator_stop',
+        lastHeartbeatAt: '2026-07-16T11:20:00.000Z',
+      },
+      {
+        cardId: 't_terminal_then_retryable',
+        pid: 7418,
+        runId: 'run-new-crash',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:31:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      cardId: 't_terminal_then_retryable',
+      pid: 7418,
+      runId: 'run-new-crash',
+      restartDisposition: 'retryable',
+      nextAction: 'restart-once',
+    });
+  });
+
+  it('classifies dead workers as crashes before broad provider wait text', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_dead_with_stale_provider_text',
+        pid: 7419,
+        status: 'running',
+        alive: false,
+        waitingOn: 'Codex process failed before the last heartbeat',
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_dead_with_stale_provider_text',
+      blockerCategory: 'process-crash',
+      restartDisposition: 'retryable',
+      nextAction: 'restart-once',
+    });
+  });
+
   it('does not emit restart advice after HITL evidence for the same dead card', () => {
     const findings = detectStuckRunWatchdogFindings([
       {
