@@ -5,7 +5,7 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 
 import Database from 'better-sqlite3';
 
-import { redactLogData, redactSensitiveText } from '../logging/redaction.js';
+import { maskOpaqueSecretLiterals, redactLogData, redactSensitiveText } from '../logging/redaction.js';
 
 export const POINT_IN_TIME_EXPORT_SCHEMA_VERSION = 1;
 const MAX_LOG_TAIL_LINE_CHARS = 8192;
@@ -186,6 +186,20 @@ function sanitizeRecord(value: unknown): Record<string, unknown> {
 function sanitizeRecords(text: string): Record<string, unknown>[] {
   return parseJsonObjectOrArray(text)
     .map(sanitizeRecord)
+    .filter((record) => Object.keys(record).length > 0);
+}
+
+function sanitizeApprovalRecord(value: unknown): Record<string, unknown> {
+  const record = sanitizeRecord(value);
+  if (typeof record.id === 'string') {
+    record.id = sha256(Buffer.from(record.id, 'utf8'));
+  }
+  return record;
+}
+
+function sanitizeApprovalRecords(text: string): Record<string, unknown>[] {
+  return parseJsonObjectOrArray(text)
+    .map(sanitizeApprovalRecord)
     .filter((record) => Object.keys(record).length > 0);
 }
 
@@ -380,7 +394,13 @@ export async function createPointInTimeExport(options: PointInTimeExportOptions)
       continue;
     }
 
-    const checksum = await checksumForPath(sourceDir, resolved);
+    let checksum: FileChecksum;
+    try {
+      checksum = await checksumForPath(sourceDir, resolved);
+    } catch (error) {
+      if (isRecord(error) && error.code === 'ENOENT') continue;
+      throw error;
+    }
     files.push(checksum);
 
     if (basename(checksum.path).endsWith('.db')) {
@@ -407,7 +427,7 @@ export async function createPointInTimeExport(options: PointInTimeExportOptions)
     if (pendingApprovalSummary !== undefined) approvals.push(pendingApprovalSummary);
 
     if (section === 'approvals') {
-      const records = sanitizeRecords(text);
+      const records = sanitizeApprovalRecords(text);
       if (records.length > 0) approvals.push({ ...checksum, records });
     } else if (section === 'memory') {
       memory.push({ ...checksum, ...sanitizeMemory(text) });
@@ -443,7 +463,7 @@ export async function createPointInTimeExport(options: PointInTimeExportOptions)
     evidence: { approvals, memory, tasks, runs, logs },
   };
 
-  const serialized = `${JSON.stringify(redactLogData(report), null, 2)}\n`;
+  const serialized = `${maskOpaqueSecretLiterals(JSON.stringify(redactLogData(report), null, 2))}\n`;
   if (!dryRun) {
     await mkdir(dirname(outputPath), { recursive: true });
     const tmpPath = join(dirname(outputPath), `.${basename(outputPath)}.tmp-${process.pid}-${Date.now()}`);

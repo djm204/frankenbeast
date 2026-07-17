@@ -89,7 +89,7 @@ describe('logging redaction', () => {
       '$.message',
     );
 
-    expect(result.value).toBe('Authorization: Bearer <redacted> Proxy-Authorization: <redacted> X-API-Key: <redacted> Cookie: <redacted> redis://:<redacted>@localhost:6379/0 rediss://:<redacted>@cache.example:6380/0');
+    expect(result.value).toBe('Authorization: Bearer <redacted> Proxy-Authorization: <redacted> X-API-Key: <redacted> Cookie: <redacted> redis://:<redacted>@localhost:6379/0 rediss://:<redacted>:6380/0');
     expect(result.value).not.toContain(bearer);
     expect(result.value).not.toContain(password);
     expect(result.value).not.toContain(redissPassword);

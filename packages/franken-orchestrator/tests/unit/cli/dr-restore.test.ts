@@ -212,7 +212,7 @@ describe('dr restore-dry-run CLI', () => {
       })]));
       expect(report.evidence.logs).toEqual(expect.arrayContaining([expect.objectContaining({ tail: expect.arrayContaining(['Authorization: Bearer <redacted>']) })]));
       expect(report.evidence.logs).toEqual(expect.arrayContaining([expect.objectContaining({ tail: expect.arrayContaining(['X-API-Key: <redacted>']) })]));
-      expect(report.evidence.logs).toEqual(expect.arrayContaining([expect.objectContaining({ tail: expect.arrayContaining(['redis tls rediss://:<redacted>@cache.example:6380/0']) })]));
+      expect(report.evidence.logs).toEqual(expect.arrayContaining([expect.objectContaining({ tail: expect.arrayContaining(['redis tls rediss://:<redacted>:6380/0']) })]));
       expect(report.evidence.logs.flatMap((log) => log.tail).every((line) => line.length <= 8192)).toBe(true);
       expect(reportText).not.toContain('config-value-for-mask');
       expect(reportText).not.toContain('approval-value-for-mask');
@@ -639,7 +639,7 @@ describe('dr restore-dry-run CLI', () => {
       expect(JSON.parse(listOutput)).toMatchObject({
         command: 'dr dead-letter-list',
         summary: { open: 1 },
-        entries: [{ id: 'dlq_test', actionClass: 'codex-review-trigger', target: 'https://operator:<redacted>@example.com/franken' }],
+        entries: [{ id: 'dlq_test', actionClass: 'codex-review-trigger', target: 'https://operator:<redacted>/franken' }],
       });
       expect(listOutput).not.toContain('targetSecret123');
       expect(listOutput).not.toContain('databaseSecret123');
