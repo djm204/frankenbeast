@@ -1,10 +1,19 @@
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { parseSafeJson } from '../utils/safe-json.js';
-
+import {
+  RUN_CONFIG_INTEGRITY_BYPASS_ENV,
+  RUN_CONFIG_INTEGRITY_ENV,
+  RUN_CONFIG_INTEGRITY_SECRET_ENV,
+  verifyRunConfigIntegrity,
+} from './run-config-integrity.js';
 
 function printLine(...args: unknown[]): void {
   console.info(...args);
+}
+
+function printWarning(...args: unknown[]): void {
+  console.warn(...args);
 }
 export const LlmOverrideSchema = z.object({
   provider: z.string().optional(),
@@ -75,11 +84,20 @@ export class RunConfigParseError extends Error {
  * Load and validate a RunConfig from a JSON file path.
  * Throws if the file does not exist or the content fails Zod validation.
  */
-export function loadRunConfig(filePath: string): RunConfig {
-  const info = statSync(filePath);
-  if (info.size > 1_048_576) {
-    throw new RunConfigParseError(filePath, `Run config ${filePath} exceeds maxBytes: ${info.size} > 1048576`);
+function verifyRunConfigIntegrityFromEnv(filePath: string): void {
+  if (process.env[RUN_CONFIG_INTEGRITY_BYPASS_ENV] === '1') {
+    printWarning(`runtime config integrity bypass enabled for ${filePath}`);
+    return;
   }
+
+  const manifestPath = process.env[RUN_CONFIG_INTEGRITY_ENV];
+  const secret = process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV];
+  if (!manifestPath && !secret) return;
+  verifyRunConfigIntegrity(filePath, manifestPath ?? '', secret ?? '');
+}
+
+export function loadRunConfig(filePath: string): RunConfig {
+  verifyRunConfigIntegrityFromEnv(filePath);
   const raw = readFileSync(filePath, 'utf-8');
   let parsed: unknown;
   try {

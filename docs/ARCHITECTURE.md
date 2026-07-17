@@ -914,7 +914,7 @@ The beast control surface is now agent-centric rather than run-centric.
 
 When the daemon dispatches a Beast run, it spawns a subprocess managed by `ProcessBeastExecutor`:
 
-1. **Config passthrough**: `ProcessBeastExecutor.start()` serializes `configSnapshot` to `.fbeast/.build/run-configs/<runId>.json` and passes `FRANKENBEAST_RUN_CONFIG=<path>` to the subprocess. The spawned process loads and validates via `loadRunConfigFromEnv()`. Config file is cleaned up on run completion, stop, or spawn failure.
+1. **Signed config passthrough**: `ProcessBeastExecutor.start()` serializes `configSnapshot` to `.fbeast/.build/run-configs/<runId>.json`, creates a sibling HMAC integrity manifest, and passes `FRANKENBEAST_RUN_CONFIG=<path>`, `FRANKENBEAST_RUN_CONFIG_INTEGRITY=<manifest>`, and an ephemeral `FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET` to the subprocess. The spawned process verifies the manifest before parsing or using the config via `loadRunConfigFromEnv()`, so missing, malformed, stale, tampered, replayed, or untrusted signatures fail closed before launch-side effects. Runtime config and integrity sidecar files are cleaned up on run completion, stop, or spawn failure; operators should relaunch/re-dispatch rather than editing `.fbeast/.build/run-configs/*.json` in place.
 
 2. **Process lifecycle**: `ProcessSupervisor` manages the child process with a three-way exit gate (`stdout closed + stderr closed + exit event`) to ensure all buffered output is captured before `onExit` fires. Early stdout/stderr arriving before attempt creation are buffered and flushed (to both logs and SSE) once the attempt ID is set.
 

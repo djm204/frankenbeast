@@ -18,7 +18,7 @@ import type { ProjectPaths } from './project-root.js';
 import type { ReviewIO } from '../issues/issue-review.js';
 import type { IssueFetchOptions, IssueOutcome } from '../issues/types.js';
 import { createCliDeps, type CliDepOptions } from './dep-factory.js';
-import { PromptConfigSchema, RunConfigSchema, type RunConfig } from './run-config-loader.js';
+import { PromptConfigSchema, RunConfigSchema, loadRunConfigFromEnv, type RunConfig } from './run-config-loader.js';
 import { extractDesignSummary, formatDesignCard } from './design-summary.js';
 import { reviewLoop } from './review-loop.js';
 import { isNoOpDesign } from './noop-detector.js';
@@ -41,20 +41,14 @@ function appendPromptContext(value: string, promptText: string | undefined): str
 }
 
 function loadPromptConfigFromEnv(): RunConfig['promptConfig'] | undefined {
-  const filePath = process.env['FRANKENBEAST_RUN_CONFIG'];
-  if (!filePath) return undefined;
-  const raw = readFileSync(filePath, 'utf-8');
-  const parsed = JSON.parse(raw) as { promptConfig?: unknown };
-  if (!parsed.promptConfig) return undefined;
-  return PromptConfigSchema.parse(parsed.promptConfig);
+  const runConfig = loadRunConfigFromEnv();
+  if (!runConfig?.promptConfig) return undefined;
+  return PromptConfigSchema.parse(runConfig.promptConfig);
 }
 
 function loadCompatibleRunConfigFromEnv(): RunConfig | undefined {
-  const filePath = process.env['FRANKENBEAST_RUN_CONFIG'];
-  if (!filePath) return undefined;
-  const raw = readFileSync(filePath, 'utf-8');
-  const parsed = JSON.parse(raw) as unknown;
-  const result = RunConfigSchema.safeParse(parsed);
+  const runConfig = loadRunConfigFromEnv();
+  const result = RunConfigSchema.safeParse(runConfig);
   return result.success ? result.data : undefined;
 }
 
