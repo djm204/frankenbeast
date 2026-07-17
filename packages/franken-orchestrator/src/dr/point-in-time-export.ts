@@ -115,7 +115,7 @@ function normalizeRelative(root: string, absolutePath: string): string {
 function classifyExportPath(path: string): EvidenceSection {
   const normalized = path.toLowerCase();
   const base = basename(normalized);
-  if (base.endsWith('.log') || normalized.includes('/logs/')) return 'logs';
+  if (/\.log(?:\.\d+)?$/iu.test(base) || normalized.startsWith('logs/') || normalized.includes('/logs/')) return 'logs';
   if (normalized.includes('pendingapproval') || normalized.includes('pending_approval') || normalized.includes('approval') || normalized.includes('ledger')) return 'approvals';
   if (normalized.includes('memory')) return 'memory';
   if (base === 'kanban.db' || normalized.includes('kanban') || normalized.includes('/tasks/') || normalized.includes('task')) return 'tasks';
@@ -275,6 +275,18 @@ async function checksumForPath(root: string, absolutePath: string): Promise<File
   };
 }
 
+async function checksumAndTextFor(root: string, absolutePath: string): Promise<{ checksum: FileChecksum; text: string }> {
+  const data = await readFile(absolutePath);
+  return {
+    checksum: {
+      path: normalizeRelative(root, absolutePath),
+      bytes: data.byteLength,
+      sha256: sha256(data),
+    },
+    text: data.toString('utf8'),
+  };
+}
+
 async function checksumAndTailFor(root: string, absolutePath: string, limit: number): Promise<LogTailSummary> {
   const hasher = createHash('sha256');
   const lines: string[] = [];
@@ -334,7 +346,7 @@ function summarizeSqliteTables(absolutePath: string, checksum: FileChecksum): Re
       const records = selected.length === 0
         ? []
         : (db.prepare(`SELECT ${selected.map(quoteSqliteIdentifier).join(', ')} FROM ${quoted} ORDER BY rowid DESC LIMIT 25`).all() as Array<Record<string, unknown>>)
-          .map(sanitizeRecord)
+          .map((record) => section === 'approvals' ? sanitizeApprovalRecord(record) : sanitizeRecord(record))
           .filter((record) => Object.keys(record).length > 0);
       result[section].push({ ...checksum, table: name, rowCount: countRow.count, records });
     }
@@ -396,8 +408,18 @@ export async function createPointInTimeExport(options: PointInTimeExportOptions)
     }
 
     let checksum: FileChecksum;
+    let text: string | undefined;
     try {
-      checksum = await checksumForPath(sourceDir, resolved);
+      const fileStats = await stat(resolved);
+      const couldReadText = fileStats.size <= MAX_TEXT_EVIDENCE_BYTES
+        && (relativePath.endsWith('.json') || section === 'approvals' || section === 'memory' || section === 'tasks' || section === 'runs');
+      if (couldReadText) {
+        const textEvidence = await checksumAndTextFor(sourceDir, resolved);
+        checksum = textEvidence.checksum;
+        text = textEvidence.text;
+      } else {
+        checksum = await checksumForPath(sourceDir, resolved);
+      }
     } catch (error) {
       if (isRecord(error) && error.code === 'ENOENT') continue;
       throw error;
@@ -418,17 +440,7 @@ export async function createPointInTimeExport(options: PointInTimeExportOptions)
       continue;
     }
 
-    const shouldReadText = checksum.bytes <= MAX_TEXT_EVIDENCE_BYTES
-      && (checksum.path.endsWith('.json') || section === 'approvals' || section === 'memory' || section === 'tasks' || section === 'runs');
-    if (!shouldReadText) continue;
-
-    let text: string;
-    try {
-      text = await readFile(resolved, 'utf8');
-    } catch (error) {
-      if (isRecord(error) && error.code === 'ENOENT') continue;
-      throw error;
-    }
+    if (text === undefined) continue;
 
     const pendingApprovalSummary = splitChatPendingApprovals(checksum, text);
     if (pendingApprovalSummary !== undefined) approvals.push(pendingApprovalSummary);

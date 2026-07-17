@@ -95,6 +95,7 @@ describe('dr restore-dry-run CLI', () => {
       await mkdir(join(stateDir, 'memory'), { recursive: true });
       await mkdir(join(stateDir, 'runs', 'run-1'), { recursive: true });
       await mkdir(join(stateDir, 'logs'), { recursive: true });
+      await mkdir(join(stateDir, 'logs', 'run-2'), { recursive: true });
       await mkdir(join(stateDir, 'chat'), { recursive: true });
       await writeFile(join(stateDir, 'config.json'), JSON.stringify({ provider: 'openai', apiToken: 'config-value-for-mask' }), 'utf8');
       await writeFile(join(stateDir, 'config.yaml'), 'provider: openai\napiToken: config-yaml-value-for-mask\n', 'utf8');
@@ -129,11 +130,14 @@ describe('dr restore-dry-run CLI', () => {
         `${longSingleLinePrefix}tail-marker`,
         'finished run',
       ].join('\n'), 'utf8');
+      await writeFile(join(stateDir, 'logs', 'run-2', 'attempt.log.1'), 'rotated OPENAI_API_KEY=rotated-log-secret\n', 'utf8');
       const binaryLog = Buffer.from([0xff, 0xfe, 0x41, 0x0a]);
       await writeFile(join(stateDir, 'logs', 'binary.log'), binaryLog);
       const beastDb = new Database(join(stateDir, 'beast.db'));
       const kanbanDb = new Database(join(stateDir, 'kanban.db'));
       const memoryDb = new Database(join(stateDir, 'memory.db'));
+      const approvalDb = new Database(join(stateDir, 'approval-ledger.db'));
+      const approvalRowId = 'approval' + 'SqliteIdentifier123';
       try {
         beastDb.exec(`CREATE TABLE beast_runs (id TEXT PRIMARY KEY, status TEXT, definition_id TEXT, created_at TEXT);`);
         beastDb.exec(`CREATE TABLE tracked_agents (id TEXT PRIMARY KEY, status TEXT, definition_id TEXT, created_at TEXT);`);
@@ -147,10 +151,14 @@ describe('dr restore-dry-run CLI', () => {
         memoryDb.exec(`CREATE TABLE episodic_events (id TEXT PRIMARY KEY, status TEXT, created_at TEXT);`);
         memoryDb.prepare('INSERT INTO episodic_events (id, status, created_at) VALUES (?, ?, ?)')
           .run('memory-event-1', 'stored', '2026-07-16T08:00:00.000Z');
+        approvalDb.exec(`CREATE TABLE approvals (id TEXT PRIMARY KEY, state TEXT, requestedAt TEXT);`);
+        approvalDb.prepare('INSERT INTO approvals (id, state, requestedAt) VALUES (?, ?, ?)')
+          .run(approvalRowId, 'pending', '2026-07-16T08:02:00.000Z');
       } finally {
         beastDb.close();
         kanbanDb.close();
         memoryDb.close();
+        approvalDb.close();
       }
 
       await handleDrCommand({
@@ -187,9 +195,14 @@ describe('dr restore-dry-run CLI', () => {
         expect.objectContaining({ path: 'config.json', sha256: expect.stringMatching(/^sha256:/u) }),
         expect.objectContaining({ path: 'config.yaml', sha256: expect.stringMatching(/^sha256:/u) }),
       ]));
-      expect(report.manifest.sections).toEqual(expect.objectContaining({ approvals: 2, memory: 4, tasks: 2, runs: 3, logs: 2 }));
+      expect(report.manifest.sections).toEqual(expect.objectContaining({ approvals: 3, memory: 4, tasks: 2, runs: 3, logs: 3 }));
       expect(report.evidence.approvals).toEqual(expect.arrayContaining([
         expect.objectContaining({ path: 'approvals/ledger.json' }),
+        expect.objectContaining({
+          path: 'approval-ledger.db',
+          table: 'approvals',
+          records: [expect.objectContaining({ id: `sha256:${createHash('sha256').update(approvalRowId).digest('hex')}` })],
+        }),
         expect.objectContaining({
           path: 'chat/session-1.json',
           records: [expect.objectContaining({ id: 'approval-chat-1', command: 'deploy --token <redacted>', tool: 'shell', sessionId: 'session-1' })],
@@ -213,6 +226,7 @@ describe('dr restore-dry-run CLI', () => {
       expect(report.evidence.logs).toEqual(expect.arrayContaining([expect.objectContaining({ tail: expect.arrayContaining(['Authorization: Bearer <redacted>']) })]));
       expect(report.evidence.logs).toEqual(expect.arrayContaining([expect.objectContaining({ tail: expect.arrayContaining(['X-API-Key: <redacted>']) })]));
       expect(report.evidence.logs).toEqual(expect.arrayContaining([expect.objectContaining({ tail: expect.arrayContaining(['redis tls rediss://:<redacted>@cache.example:6380/0']) })]));
+      expect(report.evidence.logs).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'logs/run-2/attempt.log.1', tail: expect.arrayContaining(['rotated OPENAI_API_KEY=<redacted>']) })]));
       expect(report.evidence.logs.flatMap((log) => log.tail).every((line) => line.length <= 8192)).toBe(true);
       expect(reportText).not.toContain('config-value-for-mask');
       expect(reportText).not.toContain('approval-value-for-mask');
@@ -229,6 +243,8 @@ describe('dr restore-dry-run CLI', () => {
       expect(reportText).not.toContain(boundaryBearer);
       expect(reportText).not.toContain('bearerValueForMasking123');
       expect(reportText).not.toContain('redissValueForMasking');
+      expect(reportText).not.toContain('rotated-log-secret');
+      expect(reportText).not.toContain(approvalRowId);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

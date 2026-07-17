@@ -124,6 +124,19 @@ describe('logging redaction', () => {
     ]));
   });
 
+  it('preserves URL hosts when masking embedded credentials', () => {
+    const userPassword = ['user', 'pass', 'value'].join('');
+    const cachePassword = ['cache', 'pass', 'value'].join('');
+    const output = redactSensitiveText(
+      `https://operator:${userPassword}@example.com/path rediss://:${cachePassword}@cache.example:6380/0`,
+    );
+
+    expect(output).toContain('https://operator:<redacted>@example.com/path');
+    expect(output).toContain('rediss://:<redacted>@cache.example:6380/0');
+    expect(output).not.toContain(userPassword);
+    expect(output).not.toContain(cachePassword);
+  });
+
   it('returns path-aware provenance for object and nested string redaction decisions', () => {
     const objectValue = secretMarker('object', 'value');
     const textValue = secretMarker('inline', 'value');
