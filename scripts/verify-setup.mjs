@@ -146,13 +146,13 @@ function checkGitHubAuth(required = true) {
             check('github-auth', 'GitHub CLI authenticated', false, 'gh command not found or not executable', 'Install GitHub CLI, then run gh auth login --hostname github.com.');
         }
         else {
-            warn('github-auth', 'GitHub CLI authenticated', 'Skipped required GitHub auth gate in dry-run because gh is unavailable', 'Install GitHub CLI and run gh auth login --hostname github.com before opening PRs.');
+            warn('github-auth', 'GitHub CLI authenticated', 'Optional GitHub auth check skipped because gh is unavailable', 'Install GitHub CLI and run gh auth login --hostname github.com before opening PRs.');
         }
         return;
     }
     const auth = runCommand('gh auth status --hostname github.com');
     if (auth.ok === false && !required) {
-        warn('github-auth', 'GitHub CLI authenticated', 'Skipped required GitHub auth gate in dry-run because gh is not authenticated', 'Run gh auth login --hostname github.com before opening PRs.');
+        warn('github-auth', 'GitHub CLI authenticated', 'Optional GitHub auth check skipped because gh is not authenticated', 'Run gh auth login --hostname github.com before opening PRs.');
         return;
     }
     if (auth.ok === true) {
@@ -228,9 +228,12 @@ async function checkCommonLocalPorts() {
         const detail = open
             ? `${portCheck.service} port ${portCheck.port} is accepting TCP connections`
             : `${portCheck.service} port ${portCheck.port} is not accepting TCP connections`;
-        warn(portCheck.id, portCheck.name, detail, open
-            ? `If this is not the expected ${portCheck.service} process, stop the conflicting service before starting Frankenbeast local infrastructure.`
-            : `If ${portCheck.service} is required for your task, start it with docker compose up -d and re-run the healthcheck.`);
+        if (open) {
+            check(portCheck.id, portCheck.name, true, detail, `If this is not the expected ${portCheck.service} process, stop the conflicting service before starting Frankenbeast local infrastructure.`, false);
+        }
+        else {
+            warn(portCheck.id, portCheck.name, detail, `If ${portCheck.service} is required for your task, start it with docker compose up -d and re-run the healthcheck.`);
+        }
     }
 }
 function printHumanSummary(options) {
@@ -267,7 +270,9 @@ async function main() {
     checkGitStatus();
     // Environment file
     check('environment-file', 'Environment file exists', envFileExists, envFileExists ? options.envFile : `Missing — copy .env.example to ${options.envFile}`, `Copy .env.example to ${options.envFile} and customize local-only secrets.`);
-    checkRequiredBootstrapEnv(options.envFile, envFile);
+    if (!options.requireServices) {
+        checkRequiredBootstrapEnv(options.envFile, envFile);
+    }
     // Config example
     check('config-example', 'Config example', existsSync('frankenbeast.config.example.json'), 'frankenbeast.config.example.json', 'Restore frankenbeast.config.example.json from the repository or rebase onto origin/main.');
     await checkCommonLocalPorts();

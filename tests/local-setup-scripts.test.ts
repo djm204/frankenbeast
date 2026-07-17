@@ -144,6 +144,7 @@ describe('local setup scripts', () => {
     expect(source).toContain('--json');
     expect(source).toContain('--require-services');
     expect(source).toContain('Required bootstrap env vars');
+    expect(source).toContain('if (!options.requireServices)');
     expect(source).toContain('checkRequiredBootstrapEnv(options.envFile, envFile)');
     expect(source).toContain("envFile.get('CHROMA_URL')");
     expect(source).toContain('checks: results');
