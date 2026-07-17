@@ -764,11 +764,11 @@ function normalizeStuckRunBlockerCategory(
 ): IssueStuckRunBlockerCategory {
   const status = snapshot.status?.trim().toLowerCase() ?? '';
   if (CRASH_WORKER_CARD_STATUSES.has(status)) return 'process-crash';
-  if (snapshot.blockerCategory && snapshot.blockerCategory !== 'unknown') return snapshot.blockerCategory;
   const text = `${snapshot.status ?? ''} ${snapshot.waitingOn ?? ''}`.toLowerCase();
   if (/\bapproval\b|\bhitl\b|\bhuman\b|approval[- ]?token|pending approval|operator approval|approval-cop|approve/.test(text)) return 'approval-gate';
   if (/provider|codex|rate limit|quota|llm|model/.test(text)) return 'provider-wait';
   if (/\bci\b|ci[- ]?check|status check|check run|workflow|merge queue|github actions?/.test(text)) return 'ci-wait';
+  if (snapshot.blockerCategory && snapshot.blockerCategory !== 'unknown') return snapshot.blockerCategory;
   if (snapshot.alive === false) return 'process-crash';
   if (/\b(crash(?:ed|ing)?|exit(?:ed|ing)?|dead|pid|fail(?:ed|ure|ing)?)\b/.test(text)) return 'process-crash';
   if (/dispatcher|kanban|current_run|current run|respawn|heartbeat/.test(text)) return 'dispatcher-bug';
@@ -847,7 +847,7 @@ function siblingPidsForSnapshot(
 }
 
 function normalizeKanbanState(status: string): string {
-  return status.trim().toLowerCase();
+  return status.trim().toLowerCase().replace(/_/g, '-');
 }
 
 function terminalKanbanState(status: string): boolean {
@@ -928,7 +928,6 @@ export function buildWorkerCrashOnlyRestartContract(
       evidence,
     };
   }
-
   return {
     disposition: 'hitl',
     nextAction: 'defer-with-evidence',

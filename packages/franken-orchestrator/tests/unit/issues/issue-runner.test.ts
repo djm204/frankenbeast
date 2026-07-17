@@ -665,6 +665,7 @@ describe('stuck-run watchdog', () => {
       nextAction: 'defer-with-evidence',
       recommendedAction: expect.stringContaining('do not auto-respawn over the blocker'),
     });
+    expect(finding.recommendedAction).not.toContain('respawn one focused worker');
   });
 
   it('defers dead workers when waiting evidence names CI or provider gates', () => {
@@ -695,14 +696,38 @@ describe('stuck-run watchdog', () => {
         blockerCategory: 'ci-wait',
         restartDisposition: 'hitl',
         nextAction: 'defer-with-evidence',
+        recommendedAction: expect.not.stringContaining('respawn one focused worker'),
       }),
       expect.objectContaining({
         cardId: 't_provider_dead',
         blockerCategory: 'provider-wait',
         restartDisposition: 'hitl',
         nextAction: 'defer-with-evidence',
+        recommendedAction: expect.not.stringContaining('respawn one focused worker'),
       }),
     ]);
+  });
+
+  it('normalizes direct restart-contract Kanban state before choosing HITL defer', () => {
+    const contract = buildWorkerCrashOnlyRestartContract(
+      {
+        cardId: 't_direct_blocked',
+        pid: 7418,
+        status: 'running',
+        alive: false,
+      },
+      {
+        category: 'process-crash',
+        processStatus: 'dead',
+        kanbanState: 'Blocked',
+      },
+    );
+
+    expect(contract).toMatchObject({
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      kanbanState: 'blocked',
+    });
   });
 
   it('redacts sensitive exit reasons before exposing restart evidence', () => {
