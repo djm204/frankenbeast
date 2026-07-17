@@ -275,7 +275,7 @@ const TOOLS: ToolFull[] = [
       properties: {
         query: { type: 'string', description: 'Search query (substring match on key and value)' },
         type: { type: 'string', description: 'Filter by type: working or episodic', enum: ['working', 'episodic'] },
-        limit: { type: 'string', description: 'Max results (default 20)' },
+        limit: { type: 'string', description: 'Max results as a positive integer from 1 to 1000 (default 20)' },
         readScope: { type: 'string', description: 'Read scope: all (legacy), shared (hide agent-scoped entries), or agent (shared plus entries for agentId)', enum: ['all', 'shared', 'agent'] },
         agentId: { type: 'string', description: 'Agent id required when readScope is agent' },
       },

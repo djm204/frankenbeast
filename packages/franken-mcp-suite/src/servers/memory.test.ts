@@ -106,6 +106,10 @@ describe("Memory Server", () => {
       enum: ["working", "episodic"],
       description: "Filter by type: working or episodic",
     });
+    expect(queryTool.inputSchema.properties?.limit).toMatchObject({
+      type: "string",
+      description: "Max results as a positive integer from 1 to 1000 (default 20)",
+    });
   });
 
   it("delegates memory store/query/frontload/forget to the brain adapter", async () => {
