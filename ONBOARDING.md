@@ -87,6 +87,15 @@ Use this checklist for a first local checkout or when rebuilding a development e
 
   The dry run checks auth, install, and git-state prerequisites, then walks through checkout, branch/worktree creation, a no-op change, test selection, PR body generation, Codex review, and cleanup. Every remote mutation is skipped: `git push`, `gh pr create`, `gh pr comment`, and merge actions are printed as planned side effects rather than executed. Local write steps are simulated, and failures include remediation such as `gh auth login`, Corepack/npm activation, `npm ci`, or starting from a clean isolated worktree.
 
+- [ ] Practice safe edit/test mechanics in the [agent practice fixture](examples/agent-practice-fixture/README.md) before touching production packages:
+
+  ```bash
+  cd examples/agent-practice-fixture
+  npm test
+  ```
+
+  The fixture is intentionally tiny and initially failing. Fix only `examples/agent-practice-fixture/src/scoreboard.js`, re-run the fixture test, then reset it with `npm run reset` for the next trainee. Trainers can copy the [sample practice issue body](docs/onboarding/sample-agent-practice-issue.md) when assigning the exercise.
+
 - [ ] Take the interactive workspace tour when you need a deterministic package map before choosing files:
 
   ```bash
