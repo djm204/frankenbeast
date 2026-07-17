@@ -1316,6 +1316,81 @@ describe('extractPostTaskLessonCandidates', () => {
       }),
     );
   });
+
+  it('keeps negative tool-use preferences as memory candidates', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-negative-tool-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ["Please don't use npm", 'Never use yarn'],
+    });
+
+    expect(report.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          text: "Please don't use npm",
+          category: 'preference',
+          suggestedDestination: 'memory',
+        }),
+        expect.objectContaining({
+          text: 'Never use yarn',
+          category: 'preference',
+          suggestedDestination: 'memory',
+        }),
+      ]),
+    );
+  });
+
+  it('routes conditional tool preferences to memory instead of skills', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-conditional-tool-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['I prefer concise summaries when you use tools'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'preference',
+        suggestedDestination: 'memory',
+        review: expect.objectContaining({ status: 'pending-review' }),
+      }),
+    );
+  });
+
+  it('discards verification-only progress notes as task state', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-validate-progress',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Ran npm test to validate the fix'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        privacyFilter: expect.objectContaining({ action: 'reject' }),
+      }),
+    );
+  });
+
+  it('rejects failed retry and fallback statuses before workaround routing', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-failed-fallback-statuses',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      toolFailures: [
+        'Retry with gh run view failed',
+        'fallback using gh run view timed out',
+      ],
+    });
+
+    expect(report.candidates).toHaveLength(2);
+    for (const candidate of report.candidates) {
+      expect(candidate).toEqual(
+        expect.objectContaining({
+          suggestedDestination: 'discard',
+          review: expect.objectContaining({ status: 'discarded' }),
+        }),
+      );
+    }
+  });
 });
 
 describe('LessonRecorder', () => {

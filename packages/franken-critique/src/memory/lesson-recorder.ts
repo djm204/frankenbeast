@@ -1196,11 +1196,7 @@ function inferPostTaskLessonCategory(
   text: string,
   fallback: LessonCandidateCategory,
 ): LessonCandidateCategory {
-  if (
-    /^(?:i\s+prefer|i'd\s+prefer|my\s+preference\s+is|i\s+like|i\s+(?:do\s+not|don'?t)\s+want)\b/i.test(
-      text,
-    )
-  ) {
+  if (isDirectUserPreferenceWording(text)) {
     return 'preference';
   }
   if (hasReusableProcedureGuidance(text)) {
@@ -1213,6 +1209,15 @@ function inferPostTaskLessonCategory(
     return 'procedure';
   }
   return fallback;
+}
+
+function isDirectUserPreferenceWording(text: string): boolean {
+  return (
+    isRawUserPreferenceCorrection(text) &&
+    /^(?:i\s+prefer|i'd\s+prefer|my\s+preference\s+is|i\s+like|i\s+(?:do\s+not|don'?t)\s+want|(?:please\s+)?(?:do\s+not\s+use|don't\s+use|never\s+use|avoid\s+using))\b/i.test(
+      text,
+    )
+  );
 }
 
 function recategorizePostTaskPrivacyDecision(
@@ -1250,7 +1255,7 @@ function isRawUserPreferenceCorrection(text: string): boolean {
     return true;
   }
   if (
-    /^(?:please\s+)?(?:do\s+not|don't|never|avoid)\s+use\s+(?:the\s+)?(?:gh\s+cli|github\s+cli|cli|pnpm|npm|yarn|package\s+manager)\b/i.test(
+    /^(?:please\s+)?(?:do\s+not\s+use|don't\s+use|never\s+use|avoid\s+using|avoid\s+use)\s+(?:the\s+)?(?:gh\s+cli|github\s+cli|cli|pnpm|npm|yarn|node|bun|deno|uv|pip|poetry|package\s+manager)\b/i.test(
       text,
     )
   ) {
@@ -1360,8 +1365,8 @@ function hasExplicitPostTaskLessonSignal(text: string): boolean {
 }
 
 function hasReusableToolFailureSignal(text: string): boolean {
-  if (/\bworkaround\s*:/i.test(text)) return true;
   if (isFailedRetryOrFallbackStatus(text)) return false;
+  if (/\bworkaround\s*:/i.test(text)) return true;
   if (/\b(?:retry|fallback)\s+(?:with|using|via|by)\b/i.test(text)) {
     return true;
   }
@@ -1374,11 +1379,18 @@ function hasReusableToolFailureSignal(text: string): boolean {
       text,
     );
   if (hasInstructionalWorkaround) return true;
+  if (isRawToolFailureStatus(text)) return false;
   return false;
 }
 
 function isFailedRetryOrFallbackStatus(text: string): boolean {
-  return /\b(?:retry|fallback)\b.{0,80}\b(?:failed|error|returned\s+\d{3}|timed\s+out|crashed)\b/i.test(
+  return /\b(?:retry|fallback)\s+(?:with|using|via|by)\b.{0,100}\b(?:failed|error|returned\s+\d{3}|timed\s+out|timeout|crashed)\b/i.test(
+    text,
+  );
+}
+
+function isRawToolFailureStatus(text: string): boolean {
+  return /\b(?:failed|error|returned|timed\s+out|crashed)\b.{0,80}\b(?:after\s+\d+\s+retry\s+attempts?|retry\s+attempts?|returned\s+\d{3}|\d{3})\b|\b(?:fallback|retry)\b.{0,80}\b(?:failed|error|returned\s+\d{3}|timed\s+out|crashed)\b/i.test(
     text,
   );
 }
