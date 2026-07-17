@@ -21,6 +21,7 @@ Stop and hand back to the PM/HITL reviewer when any checklist item fails.
 
 ```bash
 ISSUE_NUMBER="${ISSUE_NUMBER:?set the assigned issue number}"
+ISSUE_NUMBER="${ISSUE_NUMBER#\#}"
 gh issue view "$ISSUE_NUMBER" --repo djm204/frankenbeast --json number,title,state,labels,body,url
 gh pr list --repo djm204/frankenbeast --state open --search "$ISSUE_NUMBER OR issue-$ISSUE_NUMBER" --json number,title,headRefName,url,state
 ```
@@ -51,6 +52,7 @@ Prefer the repository helper when it is available:
 
 ```bash
 ISSUE_NUMBER="${ISSUE_NUMBER:?set the assigned issue number}"
+ISSUE_NUMBER="${ISSUE_NUMBER#\#}"
 ISSUE_TITLE="${ISSUE_TITLE:?set a short issue title}"
 npm run issue:worktree -- --dry-run --issue "$ISSUE_NUMBER" --title "$ISSUE_TITLE"
 npm run issue:worktree -- --issue "$ISSUE_NUMBER" --title "$ISSUE_TITLE"
@@ -61,6 +63,7 @@ Manual equivalent:
 
 ```bash
 ISSUE_NUMBER="${ISSUE_NUMBER:?set the assigned issue number}"
+ISSUE_NUMBER="${ISSUE_NUMBER#\#}"
 BRANCH_NAME="${BRANCH_NAME:?set the issue branch name}"
 git fetch origin main --prune
 git worktree add "../resolve-wt/issue-$ISSUE_NUMBER" -b "$BRANCH_NAME" origin/main
@@ -91,7 +94,7 @@ git diff -- docs/onboarding/ ONBOARDING.md README.md tests/
 Keep the diff scoped to the issue. Stage only the files you intentionally changed:
 
 ```bash
-git add docs/onboarding/first-pr-agent-runbook.md ONBOARDING.md README.md tests/docs-issue-1664.test.ts
+git add docs/onboarding/first-pr-agent-runbook.md docs/onboarding/coding-agent-pr-etiquette.md ONBOARDING.md README.md tests/docs-issue-1664.test.ts
 git diff --cached --stat
 git diff --cached --check
 git commit -m "docs(onboarding): add first-pr agent runbook"
@@ -132,7 +135,7 @@ gh pr create \
 ## Scope and handoff
 - Issue: Closes #<issue-number>
 - Branch: <branch-name>
-- Ownership entries: onboarding-docs
+- Ownership entries: onboarding-docs, repo-automation
 - Codex: pending @codex review
 PR_BODY
 )"
@@ -165,7 +168,7 @@ Merge only when all required checks are green and Codex is clean for the current
 ```bash
 PR_NUMBER="${PR_NUMBER:?set the pull request number}"
 VERIFIED_HEAD="$(gh pr view "$PR_NUMBER" --repo djm204/frankenbeast --json headRefOid --jq .headRefOid)"
-gh pr checks "$PR_NUMBER" --repo djm204/frankenbeast
+gh pr checks "$PR_NUMBER" --repo djm204/frankenbeast --watch && \
 gh pr merge "$PR_NUMBER" --repo djm204/frankenbeast --squash --delete-branch --match-head-commit "$VERIFIED_HEAD"
 ```
 

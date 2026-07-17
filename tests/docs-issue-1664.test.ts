@@ -45,6 +45,7 @@ describe('issue #1664 first-PR agent runbook', () => {
 
     for (const command of [
       'ISSUE_NUMBER="${ISSUE_NUMBER:?set the assigned issue number}"',
+      'ISSUE_NUMBER="${ISSUE_NUMBER#\\#}"',
       'gh issue view "$ISSUE_NUMBER" --repo djm204/frankenbeast',
       'gh pr list --repo djm204/frankenbeast --state open',
       'python3 - <<\'PY\'',
@@ -53,6 +54,7 @@ describe('issue #1664 first-PR agent runbook', () => {
       'git worktree add "../resolve-wt/issue-$ISSUE_NUMBER" -b "$BRANCH_NAME" origin/main',
       'git config extensions.worktreeConfig true',
       'git config --worktree user.name "David Mendez"',
+      'git add docs/onboarding/first-pr-agent-runbook.md docs/onboarding/coding-agent-pr-etiquette.md ONBOARDING.md README.md tests/docs-issue-1664.test.ts',
       'git diff --cached --check',
       'git commit -m "docs(onboarding): add first-pr agent runbook"',
       'npm run test:root -- tests/docs-issue-1664.test.ts',
@@ -64,7 +66,7 @@ describe('issue #1664 first-PR agent runbook', () => {
       'PR_NUMBER="${PR_NUMBER:?set the pull request number}"',
       'gh pr comment "$PR_NUMBER" --repo djm204/frankenbeast --body "@codex review"',
       'VERIFIED_HEAD="$(gh pr view "$PR_NUMBER" --repo djm204/frankenbeast --json headRefOid --jq .headRefOid)"',
-      'gh pr checks "$PR_NUMBER" --repo djm204/frankenbeast',
+      'gh pr checks "$PR_NUMBER" --repo djm204/frankenbeast --watch && \\',
       'gh pr merge "$PR_NUMBER" --repo djm204/frankenbeast --squash --delete-branch --match-head-commit "$VERIFIED_HEAD"',
     ]) {
       expect(runbook).toContain(command);
@@ -78,6 +80,7 @@ describe('issue #1664 first-PR agent runbook', () => {
       'one issue, one isolated branch/worktree, one PR',
       'No secrets, production data, destructive migrations, release credentials, or customer-impacting side effects are required.',
       'The PR body must include `Closes #<issue-number>`',
+      'Ownership entries: onboarding-docs, repo-automation',
       'silence or only an `eyes` reaction',
       'usage-limit text',
       'a clean comment that predates your latest push',
