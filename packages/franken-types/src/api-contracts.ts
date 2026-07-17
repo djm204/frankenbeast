@@ -18,10 +18,10 @@ export const PendingApprovalSchema = z.object({
   sessionId: z.string().optional(),
 });
 export type PendingApproval = z.infer<typeof PendingApprovalSchema> & {
-  approvalToken?: string;
-  requester?: string;
-  workerId?: string;
-  workdir?: string;
+  approvalToken?: string | undefined;
+  requester?: string | undefined;
+  workerId?: string | undefined;
+  workdir?: string | undefined;
 };
 
 export const TranscriptMessageSchema = z.object({
