@@ -6,6 +6,7 @@ import { DeletedTrackedAgentError, UnknownTrackedAgentError } from '../../beasts
 import { CapacityReservationError } from '../../beasts/services/capacity-reservation-policy.js';
 import { MaintenanceModeError, type MaintenanceModeService } from '../../beasts/services/maintenance-mode-service.js';
 import type { AgentService } from '../../beasts/services/agent-service.js';
+import { AgentToolPolicyError } from '../../beasts/services/role-tool-manifest.js';
 import type { BeastDispatchService } from '../../beasts/services/beast-dispatch-service.js';
 import type { BeastRunService } from '../../beasts/services/beast-run-service.js';
 import {
@@ -111,16 +112,30 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
         }, 409);
       }
     }
-    const agent = deps.agents.createAgent({
-      definitionId: body.definitionId,
-      source: body.chatSessionId ? 'chat' : 'dashboard',
-      createdByUser: body.chatSessionId ? `chat-session:${body.chatSessionId}` : 'operator',
-      initAction: body.initAction,
-      initConfig: body.initConfig,
-      ...(body.chatSessionId ? { chatSessionId: body.chatSessionId } : {}),
-      ...(body.executionMode ? { executionMode: body.executionMode } : {}),
-      ...(body.moduleConfig ? { moduleConfig: body.moduleConfig } : {}),
-    });
+    let agent: TrackedAgent;
+    try {
+      agent = deps.agents.createAgent({
+        definitionId: body.definitionId,
+        source: body.chatSessionId ? 'chat' : 'dashboard',
+        createdByUser: body.chatSessionId ? `chat-session:${body.chatSessionId}` : 'operator',
+        initAction: body.initAction,
+        initConfig: body.initConfig,
+        ...(body.chatSessionId ? { chatSessionId: body.chatSessionId } : {}),
+        ...(body.executionMode ? { executionMode: body.executionMode } : {}),
+        ...(body.moduleConfig ? { moduleConfig: body.moduleConfig } : {}),
+      });
+    } catch (error) {
+      if (error instanceof AgentToolPolicyError) {
+        return c.json({
+          error: {
+            code: 'AGENT_TOOL_POLICY_DENIED',
+            message: error.message,
+            details: { validation: error.validation },
+          },
+        }, 403);
+      }
+      throw error;
+    }
     deps.agents.appendEvent(agent.id, {
       level: 'info',
       type: 'agent.created',

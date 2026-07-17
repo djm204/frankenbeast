@@ -9,6 +9,7 @@ export interface ToolPolicyDenial {
 export interface ToolPolicyValidationResult {
   readonly allowed: boolean;
   readonly role?: AgentRole | undefined;
+  readonly rawRole?: string | undefined;
   readonly requestedTools: readonly string[];
   readonly denials: readonly ToolPolicyDenial[];
 }
@@ -80,6 +81,11 @@ export function roleToolManifests(): Readonly<Record<AgentRole, readonly string[
   };
 }
 
+function rawRoleFromConfig(config: Readonly<Record<string, unknown>>): string | undefined {
+  const raw = config.agentRole ?? config.role ?? config.laneRole;
+  return typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : undefined;
+}
+
 function normalizeRole(value: unknown): AgentRole | undefined {
   return typeof value === 'string' && value in ROLE_TOOL_MANIFESTS ? value as AgentRole : undefined;
 }
@@ -89,16 +95,29 @@ function normalizeTool(value: unknown): string | undefined {
 }
 
 function requestedToolsFromConfig(config: Readonly<Record<string, unknown>>): string[] {
-  const raw = config.requestedTools ?? config.enabledTools ?? config.toolManifest ?? config.tools;
-  if (!Array.isArray(raw)) return [];
-  return [...new Set(raw.map(normalizeTool).filter((value): value is string => Boolean(value)))];
+  const rawExplicitTools = config.requestedTools ?? config.enabledTools ?? config.toolManifest ?? config.tools;
+  const tools = Array.isArray(rawExplicitTools) ? rawExplicitTools : [];
+  const skills = Array.isArray(config.skills) ? config.skills : [];
+  const enabledSkills = Array.isArray(config.enabledSkills) ? config.enabledSkills : [];
+  return [...new Set([...tools, ...skills, ...enabledSkills].map(normalizeTool).filter((value): value is string => Boolean(value)))];
 }
 
 export function validateAgentRoleTools(initConfig: Readonly<Record<string, unknown>>): ToolPolicyValidationResult {
-  const role = normalizeRole(initConfig.agentRole ?? initConfig.role ?? initConfig.laneRole);
+  const rawRole = rawRoleFromConfig(initConfig);
+  const role = normalizeRole(rawRole);
   const requestedTools = requestedToolsFromConfig(initConfig);
-  if (!role || requestedTools.length === 0) {
-    return { allowed: true, role, requestedTools, denials: [] };
+  if (!role) {
+    const denials = rawRole && requestedTools.length > 0
+      ? requestedTools.map((requestedTool) => ({
+        role: rawRole,
+        requestedTool,
+        reason: `role '${rawRole}' is not recognized by the least-privilege manifest`,
+      }))
+      : [];
+    return { allowed: denials.length === 0, rawRole, requestedTools, denials };
+  }
+  if (requestedTools.length === 0) {
+    return { allowed: true, role, rawRole, requestedTools, denials: [] };
   }
 
   const allowedTools = ROLE_TOOL_MANIFESTS[role];
@@ -113,6 +132,7 @@ export function validateAgentRoleTools(initConfig: Readonly<Record<string, unkno
   return {
     allowed: denials.length === 0,
     role,
+    rawRole,
     requestedTools,
     denials,
   };

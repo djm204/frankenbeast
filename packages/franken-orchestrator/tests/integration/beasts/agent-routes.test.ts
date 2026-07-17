@@ -381,6 +381,44 @@ describe('agent routes integration', () => {
     });
   });
 
+  it('returns a policy-denied 403 for forbidden role tool manifests', async () => {
+    const { app, operatorToken, agents } = createIntegratedBeastApp();
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        autoDispatch: false,
+        initAction: {
+          kind: 'martin-loop',
+          command: 'ticket-manager',
+          config: {},
+        },
+        initConfig: {
+          agentRole: 'ticket-manager',
+          requestedTools: ['read_file', 'patch'],
+        },
+      }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'AGENT_TOOL_POLICY_DENIED',
+        details: {
+          validation: {
+            denials: [expect.objectContaining({ requestedTool: 'patch' })],
+          },
+        },
+      },
+    });
+    expect(agents.listAgents()).toEqual([]);
+  });
+
   it('returns malformed json errors for invalid tracked agent request bodies', async () => {
     const { app, operatorToken } = createIntegratedBeastApp();
 

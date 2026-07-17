@@ -55,6 +55,10 @@ export interface AgentServiceOptions {
   readonly toolPolicyLogger?: ((entry: ToolPolicyDenial) => void) | undefined;
 }
 
+function defaultToolPolicyLogger(entry: ToolPolicyDenial): void {
+  console.warn('[agent-tool-policy-denial]', JSON.stringify(entry));
+}
+
 export class AgentService {
   constructor(
     private readonly repository: SQLiteBeastRepository,
@@ -164,7 +168,7 @@ export class AgentService {
     if (validation.allowed) return;
 
     for (const denial of validation.denials) {
-      this.options.toolPolicyLogger?.(denial);
+      (this.options.toolPolicyLogger ?? defaultToolPolicyLogger)(denial);
     }
     throw new AgentToolPolicyError(validation);
   }

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -51,6 +51,78 @@ describe('AgentService', () => {
         reason: expect.stringContaining('not allowed'),
       }),
     ]));
+  });
+
+  it('fails closed for unknown roles and skill-derived tool requests', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-agent-service-'));
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const securityLog: unknown[] = [];
+    const service = new AgentService(repository, () => '2026-03-11T00:00:00.000Z', {
+      toolPolicyLogger: (entry) => securityLog.push(entry),
+    });
+
+    expect(() => service.createAgent({
+      definitionId: 'fallback-issue-worker',
+      source: 'cli',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'issue-worker', config: {} },
+      initConfig: {
+        agentRole: 'issue-worker',
+        requestedTools: ['patch'],
+      },
+    })).toThrow(/least-privilege tool manifest denied/i);
+
+    expect(() => service.createAgent({
+      definitionId: 'fallback-ticket-manager',
+      source: 'cli',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'ticket-manager', config: {} },
+      initConfig: {
+        agentRole: 'ticket-manager',
+        skills: ['patch', 'terminal.background'],
+      },
+    })).toThrow(/least-privilege tool manifest denied/i);
+
+    expect(service.listAgents()).toEqual([]);
+    expect(securityLog).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: 'issue-worker',
+        requestedTool: 'patch',
+        reason: expect.stringContaining('not recognized'),
+      }),
+      expect.objectContaining({
+        role: 'ticket-manager',
+        requestedTool: 'patch',
+        reason: expect.stringContaining('not allowed'),
+      }),
+    ]));
+  });
+
+  it('emits structured default denial logs when no policy logger is injected', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-agent-service-'));
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const service = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
+
+    try {
+      expect(() => service.createAgent({
+        definitionId: 'fallback-ticket-manager',
+        source: 'cli',
+        createdByUser: 'operator',
+        initAction: { kind: 'martin-loop', command: 'ticket-manager', config: {} },
+        initConfig: {
+          agentRole: 'ticket-manager',
+          requestedTools: ['patch'],
+        },
+      })).toThrow(/least-privilege tool manifest denied/i);
+
+      expect(warn).toHaveBeenCalledWith(
+        '[agent-tool-policy-denial]',
+        expect.stringContaining('"requestedTool":"patch"'),
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('allows coding, review, docs, triage, doctor, and ticket-manager requests that match role manifests', async () => {
