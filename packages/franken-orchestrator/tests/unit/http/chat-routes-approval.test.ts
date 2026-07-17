@@ -141,7 +141,6 @@ describe('chat approval route persistence', () => {
     const session = pendingApprovalSession(sessionStore.create('project-1'));
     session.pendingApproval = {
       ...session.pendingApproval!,
-      approvalToken: 'approval-token-1',
       workerId: 'worker-1',
       workdir: '/repo/worktree',
       requester: 'operator-ui',
@@ -171,7 +170,7 @@ describe('chat approval route persistence', () => {
       .map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(entries.map((entry) => entry.decision)).toEqual(['approved', 'executed']);
     expect(entries[0]).toEqual(expect.objectContaining({
-      token: 'approval-token-1',
+      token: expect.stringContaining(`${session.id}:2026-07-07T15:23:06.000Z:`),
       workerId: 'worker-1',
       workdir: '/repo/worktree',
       requester: 'unknown',

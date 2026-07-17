@@ -168,6 +168,19 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     return requestAddress(c);
   }
 
+  function approvalAuditToken(session: NonNullable<ReturnType<ISessionStore['get']>>, command: string): string {
+    if (session.pendingApproval?.approvalToken) return session.pendingApproval.approvalToken;
+    return `${session.id}:${session.pendingApproval?.requestedAt ?? 'unknown'}:${commandSha256(command)}`;
+  }
+
+  function approvalAuditTokenForPending(
+    session: NonNullable<ReturnType<ISessionStore['get']>>,
+    pendingApproval: NonNullable<NonNullable<ReturnType<ISessionStore['get']>>['pendingApproval']>,
+    command: string,
+  ): string {
+    return pendingApproval.approvalToken ?? `${session.id}:${pendingApproval.requestedAt}:${commandSha256(command)}`;
+  }
+
   async function hasConsumedApproval(session: NonNullable<ReturnType<ISessionStore['get']>>, command: string): Promise<boolean> {
     const pendingApproval = session.pendingApproval;
     if (!pendingApproval) return false;
@@ -175,7 +188,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
       return await approvalAuditLog.hasConsumedApproval({
         sessionId: session.id,
         projectId: session.projectId,
-        ...(pendingApproval.approvalToken ? { token: pendingApproval.approvalToken } : {}),
+        token: approvalAuditToken(session, command),
         commandHash: commandSha256(command),
       });
     } catch {
@@ -195,7 +208,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
       await approvalAuditLog.recordDecision({
         sessionId: session.id,
         projectId: session.projectId,
-        ...(pendingApproval?.approvalToken ? { token: pendingApproval.approvalToken } : {}),
+        token: approvalAuditToken(session, command),
         ...(pendingApproval?.workerId ? { workerId: pendingApproval.workerId } : {}),
         ...(pendingApproval?.workdir ? { workdir: pendingApproval.workdir } : {}),
         ...(pendingApproval?.requester ? { requester: pendingApproval.requester } : {}),
@@ -222,7 +235,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
       await approvalAuditLog.recordExecution({
         sessionId: session.id,
         projectId: session.projectId,
-        ...(pendingApproval.approvalToken ? { token: pendingApproval.approvalToken } : {}),
+        token: approvalAuditTokenForPending(session, pendingApproval, command),
         ...(pendingApproval.workerId ? { workerId: pendingApproval.workerId } : {}),
         ...(pendingApproval.workdir ? { workdir: pendingApproval.workdir } : {}),
         ...(pendingApproval.requester ? { requester: pendingApproval.requester } : {}),
@@ -248,7 +261,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
       await approvalAuditLog.recordReplay({
         sessionId: session.id,
         projectId: session.projectId,
-        ...(pendingApproval.approvalToken ? { token: pendingApproval.approvalToken } : {}),
+        token: approvalAuditTokenForPending(session, pendingApproval, command),
         ...(pendingApproval.workerId ? { workerId: pendingApproval.workerId } : {}),
         ...(pendingApproval.workdir ? { workdir: pendingApproval.workdir } : {}),
         ...(pendingApproval.requester ? { requester: pendingApproval.requester } : {}),

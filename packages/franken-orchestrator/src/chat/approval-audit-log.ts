@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { mkdir, readFile, appendFile, open } from 'node:fs/promises';
+import { mkdir, readFile, open } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { isoNow } from '@franken/types';
 
@@ -162,22 +162,22 @@ export class FileApprovalAuditLog implements ApprovalAuditLog {
 
   private async append(entry: ApprovalAuditEntry): Promise<void> {
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
-    try {
-      const existing = await readFile(this.path, 'utf8');
-      if (existing.length > 0 && !existing.endsWith('\n')) {
-        await appendFile(this.path, '\n', { encoding: 'utf8', mode: 0o600 });
-      }
-    } catch {
-      // Missing/unreadable files are handled by the append below. If an older
-      // tail is corrupt, separating it with a newline prevents the next valid
-      // audit entry from being merged into that corrupt line.
-    }
     const file = await open(
       this.path,
-      constants.O_CREAT | constants.O_APPEND | constants.O_WRONLY | constants.O_NOFOLLOW,
+      constants.O_CREAT | constants.O_APPEND | constants.O_RDWR | constants.O_NOFOLLOW,
       0o600,
     );
     try {
+      try {
+        const existing = await file.readFile({ encoding: 'utf8' });
+        if (existing.length > 0 && !existing.endsWith('\n')) {
+          await file.appendFile('\n', { encoding: 'utf8' });
+        }
+      } catch {
+        // Missing/unreadable files are handled by the append below. If an older
+        // tail is corrupt, separating it with a newline prevents the next valid
+        // audit entry from being merged into that corrupt line.
+      }
       await file.appendFile(`${JSON.stringify(entry)}\n`, { encoding: 'utf8' });
     } finally {
       await file.close();

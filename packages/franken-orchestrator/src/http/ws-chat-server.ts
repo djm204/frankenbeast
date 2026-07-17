@@ -612,6 +612,10 @@ export class ChatSocketController {
     }
     if (await this.hasConsumedApproval(session, runtimeInput)) {
       await this.recordApprovalReplay(session, runtimeInput, 'approval was already consumed', connectionRequester(peer, this.connections));
+      session.pendingApproval = null;
+      session.state = 'rejected';
+      session.updatedAt = nowIso();
+      this.sessionStore.save(session);
       this.emit(peer, {
         type: 'turn.error',
         code: 'APPROVAL_REPLAYED',

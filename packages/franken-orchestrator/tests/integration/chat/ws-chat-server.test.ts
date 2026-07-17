@@ -8,7 +8,7 @@ import { ConversationEngine } from '../../../src/chat/conversation-engine.js';
 import { FileSessionStore } from '../../../src/chat/session-store.js';
 import { TurnRunner } from '../../../src/chat/turn-runner.js';
 import { ChatRuntime } from '../../../src/chat/runtime.js';
-import { FileApprovalAuditLog } from '../../../src/chat/approval-audit-log.js';
+import { FileApprovalAuditLog, commandSha256 } from '../../../src/chat/approval-audit-log.js';
 import {
   CHAT_SOCKET_PROTOCOL,
   CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX,
@@ -1245,6 +1245,66 @@ describe('ws chat server', () => {
     expect(events).not.toContainEqual(expect.objectContaining({
       type: 'turn.approval.resolved',
       approved: true,
+    }));
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('clears stale WebSocket approvals after consumed replay detection', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    session.state = 'pending_approval';
+    session.pendingApproval = {
+      description: 'deploy staging',
+      requestedAt: '2026-03-09T00:00:00Z',
+      tool: 'execution',
+      command: 'deploy staging',
+      sessionId: session.id,
+    };
+    store.save(session);
+    const auditLog = new FileApprovalAuditLog(join(TMP, 'hitl-approval-audit.jsonl'));
+    await auditLog.recordExecution({
+      sessionId: session.id,
+      projectId: session.projectId,
+      token: `${session.id}:2026-03-09T00:00:00Z:${commandSha256('/run deploy staging')}`,
+      command: '/run deploy staging',
+      exitCode: 0,
+      output: 'done',
+    });
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const execute = vi.fn();
+    const runtime = new ChatRuntime({
+      engine: { processTurn: vi.fn() } as unknown as ConversationEngine,
+      turnRunner: new TurnRunner({ execute }),
+    });
+    const controller = new ChatSocketController({
+      runtime,
+      sessionStore: store,
+      tokenSecret: secret,
+      approvalAuditLog: auditLog,
+    });
+    const { peer, sent } = createPeer();
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    await expect(controller.receive(peer, JSON.stringify({
+      type: 'approval.respond',
+      approved: true,
+    }))).resolves.toBeUndefined();
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(store.get(session.id)?.state).toBe('rejected');
+    expect(store.get(session.id)?.pendingApproval).toBeNull();
+    const events = sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.error',
+      code: 'APPROVAL_REPLAYED',
     }));
 
     rmSync(TMP, { recursive: true, force: true });

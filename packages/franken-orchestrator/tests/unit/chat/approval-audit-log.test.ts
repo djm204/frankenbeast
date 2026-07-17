@@ -154,7 +154,7 @@ describe('FileApprovalAuditLog', () => {
     try {
       const outsidePath = join(dir, 'outside-target.jsonl');
       const logPath = join(dir, 'approval-audit.jsonl');
-      await writeFile(outsidePath, 'original\n', 'utf8');
+      await writeFile(outsidePath, 'original', 'utf8');
       await symlink(outsidePath, logPath);
 
       const log = new FileApprovalAuditLog(logPath);
@@ -166,7 +166,7 @@ describe('FileApprovalAuditLog', () => {
         exitCode: 0,
         output: 'ok',
       })).rejects.toThrow();
-      expect(await readFile(outsidePath, 'utf8')).toBe('original\n');
+      expect(await readFile(outsidePath, 'utf8')).toBe('original');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
