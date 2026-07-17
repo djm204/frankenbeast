@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createServer } from 'node:http';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocket, type RawData } from 'ws';
@@ -8,6 +8,7 @@ import { ConversationEngine } from '../../../src/chat/conversation-engine.js';
 import { FileSessionStore } from '../../../src/chat/session-store.js';
 import { TurnRunner } from '../../../src/chat/turn-runner.js';
 import { ChatRuntime } from '../../../src/chat/runtime.js';
+import { FileApprovalAuditLog } from '../../../src/chat/approval-audit-log.js';
 import {
   CHAT_SOCKET_PROTOCOL,
   CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX,
@@ -885,6 +886,10 @@ describe('ws chat server', () => {
       runtime,
       sessionStore: store,
       tokenSecret: secret,
+      approvalAuditLog: new FileApprovalAuditLog(join(TMP, 'hitl-approval-audit.jsonl'), {
+        workerId: 'worker-1',
+        workdir: '/repo/worktree',
+      }),
     });
     const { peer, sent } = createPeer();
 
@@ -918,6 +923,24 @@ describe('ws chat server', () => {
     }));
     expect(store.get(session.id)?.state).toBe('approved');
     expect(store.get(session.id)?.pendingApproval).toBeNull();
+    const auditEntries = readFileSync(join(TMP, 'hitl-approval-audit.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(auditEntries.map((entry) => entry.decision)).toEqual(['approved', 'executed']);
+    expect(auditEntries[0]).toEqual(expect.objectContaining({
+      sessionId: session.id,
+      projectId: 'proj',
+      workerId: 'worker-1',
+      workdir: '/repo/worktree',
+      decisionSource: 'human',
+      commandBody: '/run deploy staging',
+    }));
+    expect(auditEntries[1]).toEqual(expect.objectContaining({
+      decisionSource: 'runtime',
+      exitCode: 0,
+      commandBody: '/run deploy staging',
+    }));
 
     rmSync(TMP, { recursive: true, force: true });
   });
