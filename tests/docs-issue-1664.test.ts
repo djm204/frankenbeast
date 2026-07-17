@@ -48,7 +48,9 @@ describe('issue #1664 first-PR agent runbook', () => {
       'gh pr list --repo djm204/frankenbeast --state open',
       'npm run issue:worktree -- --dry-run --issue 1664',
       'git worktree add ../resolve-wt/issue-1664 -b resolve/issue-1664-feat-onboarding-add-first-pr-agent-runbook origin/main',
-      'git config user.name "David Mendez"',
+      '[ -f AGENTS.md ] && sed -n \'1,220p\' AGENTS.md',
+      'git config extensions.worktreeConfig true',
+      'git config --worktree user.name "David Mendez"',
       'git diff --cached --check',
       'git commit -m "docs(onboarding): add first-pr agent runbook"',
       'npm run test:root -- tests/docs-issue-1664.test.ts',
@@ -57,9 +59,10 @@ describe('issue #1664 first-PR agent runbook', () => {
       'npm run build',
       'git push -u origin HEAD',
       'gh pr create',
-      'gh pr comment <PR_NUMBER> --repo djm204/frankenbeast --body "@codex review"',
-      'gh pr checks <PR_NUMBER> --repo djm204/frankenbeast',
-      'gh pr merge <PR_NUMBER> --repo djm204/frankenbeast --squash --delete-branch',
+      'PR_NUMBER=2558',
+      'gh pr comment "$PR_NUMBER" --repo djm204/frankenbeast --body "@codex review"',
+      'gh pr checks "$PR_NUMBER" --repo djm204/frankenbeast',
+      'gh pr merge "$PR_NUMBER" --repo djm204/frankenbeast --squash --delete-branch',
     ]) {
       expect(runbook).toContain(command);
     }
@@ -71,7 +74,7 @@ describe('issue #1664 first-PR agent runbook', () => {
     for (const guardrail of [
       'one issue, one isolated branch/worktree, one PR',
       'No secrets, production data, destructive migrations, release credentials, or customer-impacting side effects are required.',
-      'The PR body must include `Closes #1664`',
+      'The PR body must include `Closes #<issue-number>`',
       'silence or only an `eyes` reaction',
       'usage-limit text',
       'a clean comment that predates your latest push',

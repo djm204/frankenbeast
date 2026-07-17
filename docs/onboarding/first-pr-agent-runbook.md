@@ -31,11 +31,12 @@ Continue only if the issue is open and no open PR already owns it. If an open PR
 ```bash
 [ -f tasks/resolve-issues-shared-lessons.md ] && sed -n '1,220p' tasks/resolve-issues-shared-lessons.md
 [ -f tasks/lessons.md ] && sed -n '1,220p' tasks/lessons.md
+[ -f AGENTS.md ] && sed -n '1,220p' AGENTS.md
 sed -n '1,220p' ONBOARDING.md
 sed -n '1,180p' docs/onboarding/coding-agent-pr-etiquette.md
 ```
 
-Apply the most specific current repository guidance. If a local instruction conflicts with the issue, stop and ask the PM/HITL reviewer instead of silently broadening scope.
+Apply the most specific current repository guidance. If you enter a nested package or docs directory that has its own `AGENTS.md`, read that scoped file before editing there. If a local instruction conflicts with the issue, stop and ask the PM/HITL reviewer instead of silently broadening scope.
 
 ### 3. Create an isolated issue branch/worktree
 
@@ -53,8 +54,9 @@ Manual equivalent:
 git fetch origin main --prune
 git worktree add ../resolve-wt/issue-1664 -b resolve/issue-1664-feat-onboarding-add-first-pr-agent-runbook origin/main
 cd ../resolve-wt/issue-1664
-git config user.name "David Mendez"
-git config user.email "me@davidmendez.dev"
+git config extensions.worktreeConfig true
+git config --worktree user.name "David Mendez"
+git config --worktree user.email "me@davidmendez.dev"
 git status --short --branch
 ```
 
@@ -115,22 +117,23 @@ gh pr create \
 - npm run test:root -- tests/docs-issue-1094.test.ts — passed
 
 ## Scope and handoff
-- Issue: Closes #1664
-- Branch: resolve/issue-1664-feat-onboarding-add-first-pr-agent-runbook
+- Issue: Closes #<issue-number>
+- Branch: <branch-name>
 - Ownership entries: onboarding-docs
 - Codex: pending @codex review
 PR_BODY
 )"
 ```
 
-The PR title and every commit subject must be Conventional Commit formatted. The PR body must include `Closes #1664` and must not mention unrelated issues as closing keywords.
+The PR title and every commit subject must be Conventional Commit formatted. The PR body must include `Closes #<issue-number>` for the assigned issue and must not mention unrelated issues as closing keywords.
 
 ### 8. Trigger the real GitHub Codex gate
 
 Trigger after the PR is open and the current head contains the intended fix:
 
 ```bash
-gh pr comment <PR_NUMBER> --repo djm204/frankenbeast --body "@codex review"
+PR_NUMBER=2558
+gh pr comment "$PR_NUMBER" --repo djm204/frankenbeast --body "@codex review"
 ```
 
 Then poll issue comments, PR reviews, inline comments, and review threads from `chatgpt-codex-connector`. Treat these states as blockers, not clean results:
@@ -147,8 +150,9 @@ When Codex reports findings, fix only the issue-scoped problem, push, reply to t
 Merge only when all required checks are green and Codex is clean for the current head:
 
 ```bash
-gh pr checks <PR_NUMBER> --repo djm204/frankenbeast
-gh pr merge <PR_NUMBER> --repo djm204/frankenbeast --squash --delete-branch
+PR_NUMBER=2558
+gh pr checks "$PR_NUMBER" --repo djm204/frankenbeast
+gh pr merge "$PR_NUMBER" --repo djm204/frankenbeast --squash --delete-branch
 ```
 
 If you are not authorized to merge, leave a handoff comment with current head SHA, CI status, Codex status, verification already run, and the exact next safe command.
