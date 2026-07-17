@@ -49,6 +49,7 @@ Use read-only verification before any restore or deletion decision:
 - `docs/dr/restore-preview.md` describes restore-preview output, backup encryption verification reports, approval-ledger recovery reports, point-in-time manifests, consistency checks, partial-write recovery, and backup-only task/card guardrails.
 - `docs/dr/tabletop-exercise-template.md` provides the monthly non-destructive tabletop format.
 - `docs/dr/incident-command-checklist.md` defines incident command, evidence capture, and escalation during DR events.
+- `docs/dr/corrupted-worktrees-and-queues.md` defines diagnosis, backup-before-repair, worktree reset, queue repair, worker defer/replace, and verification steps for corrupted worktrees and automation queues; every destructive command in that runbook is routed through approval-cop/HITL.
 - `npm run dr:runtime-config-rollback:dry-run -- --before <before.json> --after <after.json> --target <target.json>` previews runtime-config rollback decisions without writing live state.
 - `npm run dr:worker-push-rollback:dry-run -- --branch <branch> --remote <remote> --last-good <sha>` previews worker branch rollback decisions without pushing.
 

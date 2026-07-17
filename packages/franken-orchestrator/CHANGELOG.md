@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.52.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.51.0...@franken/orchestrator-v0.52.0) (2026-07-16)
+
+
+### Features
+
+* **memory:** add memory access audit trail ([#2317](https://github.com/djm204/frankenbeast/issues/2317)) ([ef889da](https://github.com/djm204/frankenbeast/commit/ef889dae092d996a6ca463e5abcaf5ed4d296158))
+
+
+### Bug Fixes
+
+* **orchestrator:** make kanban updates idempotent ([#2549](https://github.com/djm204/frankenbeast/issues/2549)) ([9523167](https://github.com/djm204/frankenbeast/commit/95231673319fca0ebbd9a94dd3d1b42d3ce715ce))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/brain bumped from 0.12.0 to 0.13.0
+
 ## [0.51.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.50.0...@franken/orchestrator-v0.51.0) (2026-07-16)
 
 

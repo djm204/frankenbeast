@@ -4,6 +4,7 @@ import {
   buildRestoreDryRunReport,
   type RestorePreviewManifest,
 } from '../dr/restore-preview.js';
+import { diffStateSnapshotDirectories } from '../dr/state-snapshot-diff.js';
 import {
   createEncryptedStateBackup,
   readStateBackupEnvelope,
@@ -28,6 +29,7 @@ export interface DrCommandDeps {
     | 'verify'
     | 'restore'
     | 'restore-dry-run'
+    | 'snapshot-diff'
     | 'dead-letter-list'
     | 'dead-letter-inspect'
     | 'dead-letter-replay-dry-run'
@@ -114,6 +116,14 @@ function summarizeDeadLetterEntry(entry: DeadLetterEntry): Omit<DeadLetterEntry,
 
 export async function handleDrCommand(deps: DrCommandDeps): Promise<void> {
   const { action, backupManifestPath, liveManifestPath, keyFilePath, print } = deps;
+  if (action === 'snapshot-diff') {
+    if (!backupManifestPath || !liveManifestPath) {
+      throw new Error('dr snapshot-diff requires two snapshot/export directories: <before-dir> <after-dir>');
+    }
+    printRedactedJson(print, await diffStateSnapshotDirectories(backupManifestPath, liveManifestPath));
+    return;
+  }
+
   if (action === 'dead-letter-list') {
     if (!backupManifestPath) {
       throw new Error('dr dead-letter-list requires <queue-file>');
@@ -253,7 +263,7 @@ export async function handleDrCommand(deps: DrCommandDeps): Promise<void> {
   }
 
   if (action !== 'restore-dry-run') {
-    throw new Error('Usage: frankenbeast dr <backup|export|list|verify|restore|restore-dry-run|dead-letter-list|dead-letter-inspect|dead-letter-replay-dry-run|dead-letter-retire> ...');
+    throw new Error('Usage: frankenbeast dr <backup|export|list|verify|restore|restore-dry-run|snapshot-diff|dead-letter-list|dead-letter-inspect|dead-letter-replay-dry-run|dead-letter-retire> ...');
   }
   if (!backupManifestPath || !liveManifestPath) {
     throw new Error('dr restore-dry-run requires two manifest JSON files: <backup-manifest.json> <live-manifest.json>');

@@ -52,6 +52,92 @@ const scenarios = new Map([
     },
   ],
   [
+    'fallback-paths',
+    {
+      scenario: 'fallback-paths',
+      safety: {
+        mode: 'fixture-only',
+        mutatesState: false,
+        liveProviderCalls: false,
+        note: 'Deterministic fallback-path drill; uses synthetic provider and budget statuses only.',
+      },
+      fixtures: [
+        {
+          name: 'primary-unavailable',
+          providerStatus: { primary: 'unavailable', spark: 'available', ollama: 'available' },
+          budgetStatus: { sparkRemainingUsd: 12, ollamaFallbackLaneWidth: 5 },
+        },
+        {
+          name: 'spark-budget-exhausted',
+          providerStatus: { primary: 'unavailable', spark: 'budget-exhausted', ollama: 'available' },
+          budgetStatus: { sparkRemainingUsd: 0, ollamaFallbackLaneWidth: 5 },
+        },
+        {
+          name: 'ollama-only-continuity',
+          providerStatus: { primary: 'unavailable', spark: 'budget-exhausted', ollama: 'available' },
+          budgetStatus: { sparkRemainingUsd: 0, ollamaFallbackLaneWidth: 5 },
+          lowRiskScope: ['read-only-inventory', 'docs-only-updates', 'status-summary', 'checkpointed-closeout-only'],
+        },
+        {
+          name: 'primary-restored',
+          providerStatus: { primary: 'available', spark: 'budget-exhausted', ollama: 'draining' },
+          budgetStatus: { sparkRemainingUsd: 0, ollamaFallbackLaneWidth: 0 },
+        },
+      ],
+      transitions: [
+        {
+          from: 'normal-primary-refill',
+          to: 'provider-outage-freeze',
+          trigger: 'primary unavailable',
+          route: 'park-fresh-work',
+          parkedBacklog: ['fresh-issue-starts', 'unsafe-merge-gates'],
+          workerCounts: { primary: 0, spark: 5, ollama: 0, parked: 7 },
+        },
+        {
+          from: 'spark-fallback-refill',
+          to: 'spark-budget-freeze',
+          trigger: 'Spark budget exhausted',
+          route: 'keep-high-risk-parked',
+          refillDecision: 'do-not-refill-spark; keep backlog parked',
+          workerCounts: { primary: 0, spark: 0, ollama: 0, parked: 12 },
+        },
+        {
+          from: 'fallback-budget-freeze',
+          to: 'ollama-only-continuity',
+          trigger: 'Ollama fallback continuity',
+          route: 'refill-low-risk-only',
+          toolRestrictions: ['read-only-inventory', 'docs-only-updates', 'status-summary', 'checkpointed-closeout-only'],
+          workerCounts: { primary: 0, spark: 0, ollama: 5, parked: 12 },
+        },
+        {
+          from: 'ollama-only-continuity',
+          to: 'primary-recovery-drain',
+          trigger: 'primary restored',
+          route: 'resume-primary-before-new-tickets',
+          resumeOrdering: [
+            'unpark-provider-blocked-active-owners',
+            'finish-in-flight-before-fresh-issues',
+            'rerun-current-head-gates',
+            'restore-primary-refill-after-stability-tick',
+          ],
+          workerCounts: { primary: 5, spark: 0, ollama: 0, parked: 7 },
+        },
+      ],
+      summaryLines: [
+        '[fallback-drill] fixture primary-unavailable => route=park-fresh-work primary=0 spark=5 ollama=0 parked=7',
+        '[fallback-drill] fixture spark-budget-exhausted => route=keep-high-risk-parked primary=0 spark=0 ollama=0 parked=12',
+        '[fallback-drill] fixture ollama-only-continuity => route=refill-low-risk-only primary=0 spark=0 ollama=5 parked=12 restrictions=read-only-inventory,docs-only-updates,status-summary,checkpointed-closeout-only',
+        '[fallback-drill] fixture primary-restored => route=resume-primary-before-new-tickets primary=5 spark=0 ollama=0 parked=7',
+      ],
+      assertions: [
+        'Primary outage parks fresh issue starts and unsafe merge gates.',
+        'Spark budget exhaustion does not refill Spark lanes or unpark high-risk backlog.',
+        'Ollama-only continuity remains exactly five low-risk lanes with restricted tooling.',
+        'Primary recovery resumes provider-blocked active owners before fresh tickets.',
+      ],
+    },
+  ],
+  [
     'recovery',
     {
       scenario: 'recovery',
@@ -105,7 +191,7 @@ const scenarios = new Map([
 ]);
 
 function usage() {
-  return `Usage: node scripts/provider-outage-drill-fixture.mjs --scenario <provider-outage|recovery>`;
+  return `Usage: node scripts/provider-outage-drill-fixture.mjs --scenario <provider-outage|fallback-paths|recovery>`;
 }
 
 const args = process.argv.slice(2);

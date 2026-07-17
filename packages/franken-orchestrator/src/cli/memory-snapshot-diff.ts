@@ -19,10 +19,12 @@ const MEMORY_BACKUP_TABLES = [
   ...REQUIRED_BACKUP_TABLES,
   'memory_deletion_guards',
   'memory_deletion_hash_keys',
+  'memory_access_audit_events',
 ] as const;
 const JSON_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
   episodic_events: ['details'],
   checkpoints: ['state'],
+  memory_access_audit_events: ['details'],
 };
 const ENCRYPTED_PAYLOAD_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
   working_memory: ['value'],
@@ -37,9 +39,11 @@ const REQUIRED_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
   memory_schema_versions: ['store', 'version', 'migrated_at'],
   memory_deletion_guards: ['selector_hash', 'guard_kind', 'value_hash', 'created_at'],
   memory_deletion_hash_keys: ['id', 'key_material', 'created_at'],
+  memory_access_audit_events: ['id', 'operation', 'store', 'key_hash', 'query_hash', 'outcome', 'details', 'created_at', 'schema_version'],
 };
 const ENCRYPTED_MEMORY_PREFIX = 'enc:v1:';
 const DELETION_HASH_KEY_ID = 'right-to-forget-hmac-v1';
+const ACCESS_AUDIT_HASH_KEY_ID = 'memory-access-audit-hmac-v1';
 
 export interface SnapshotDiff<T = unknown> {
   readonly added: Record<string, T>;
@@ -329,6 +333,42 @@ function verifyDeletionGuardKeyLink(db: Database.Database, tables: Set<string>):
   }
 }
 
+function verifyAccessAuditKeyLink(db: Database.Database, tables: Set<string>): void {
+  if (!tables.has('memory_access_audit_events')) return;
+  const auditColumns = readTableColumns(db, 'memory_access_audit_events');
+  const hashColumns = ['key_hash', 'query_hash'].filter((column) => auditColumns.has(column));
+  if (hashColumns.length === 0) return;
+  for (const column of hashColumns) {
+    const rows = db
+      .prepare(
+        `SELECT ${sqliteIdentifier(column)} AS hashValue
+         FROM memory_access_audit_events
+         WHERE ${sqliteIdentifier(column)} IS NOT NULL`,
+      )
+      .all() as Array<{ hashValue: string }>;
+    const invalid = rows.find((row) => !/^[0-9a-f]{64}$/iu.test(row.hashValue));
+    if (invalid) {
+      throw new Error(
+        `Memory backup has non-HMAC access audit hash value in memory_access_audit_events.${column}`,
+      );
+    }
+  }
+  const hashedPredicate = hashColumns.map((column) => `${sqliteIdentifier(column)} IS NOT NULL`).join(' OR ');
+  const hashedAuditRows = db
+    .prepare(`SELECT COUNT(*) AS count FROM memory_access_audit_events WHERE ${hashedPredicate}`)
+    .get() as { count: number };
+  if (hashedAuditRows.count === 0) return;
+  if (!tables.has('memory_deletion_hash_keys')) {
+    throw new Error(`Memory backup has access audit hashes but is missing memory_deletion_hash_keys table with canonical access audit hash key ${ACCESS_AUDIT_HASH_KEY_ID}`);
+  }
+  const row = db
+    .prepare(`SELECT id FROM memory_deletion_hash_keys WHERE id = ? LIMIT 1`)
+    .get(ACCESS_AUDIT_HASH_KEY_ID) as { id: string } | undefined;
+  if (!row) {
+    throw new Error(`Memory backup has access audit hashes but is missing canonical access audit hash key ${ACCESS_AUDIT_HASH_KEY_ID}`);
+  }
+}
+
 function readSchemaStores(db: Database.Database, tables: Set<string>): MemoryBackupVerificationReport['schema']['stores'] {
   if (!tables.has('memory_schema_versions')) {
     return REQUIRED_BACKUP_TABLES.map((store) => ({
@@ -537,6 +577,15 @@ export function verifyMemoryBackup(path: string): MemoryBackupVerificationReport
       if (missingCurrentTables.length > 0) {
         throw new Error(`Current memory backup is missing required table(s): ${missingCurrentTables.join(', ')}`);
       }
+      const schemaRowsForMissingTables = db
+        .prepare(`SELECT store FROM memory_schema_versions ORDER BY store ASC`)
+        .all() as Array<{ store: string }>;
+      const registeredMissingStores = schemaRowsForMissingTables
+        .map((row) => row.store)
+        .filter((store) => MEMORY_BACKUP_TABLES.includes(store as typeof MEMORY_BACKUP_TABLES[number]) && !tables.has(store));
+      if (registeredMissingStores.length > 0) {
+        throw new Error(`Current memory backup is missing required table(s): ${registeredMissingStores.join(', ')}`);
+      }
     }
 
     const encryptedStores = readEncryptedStores(db, tables);
@@ -557,6 +606,7 @@ export function verifyMemoryBackup(path: string): MemoryBackupVerificationReport
       verifyPayloadColumns(db, table, columns, encryptedStores);
     }
     verifyDeletionGuardKeyLink(db, tables);
+    verifyAccessAuditKeyLink(db, tables);
 
     const stores = readSchemaStores(db, tables);
     return {
