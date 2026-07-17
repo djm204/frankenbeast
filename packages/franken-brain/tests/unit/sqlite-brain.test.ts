@@ -178,21 +178,22 @@ describe('SqliteBrain', () => {
     });
 
     it('reports expired TTL rows without mutating memory or compacting active entries unnecessarily', () => {
+      const futureExpiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
       brain.working.set('fresh.env', { value: 'node 20', memoryClass: 'environment_fact' });
       brain.working.set('fresh.procedure', { value: 'run npm test', memoryClass: 'learned_procedure' });
       brain.working.set('expired.one', {
         value: 'old scratch',
         category: 'temporary-operational',
-        expiresAt: '2027-01-01T00:00:00.000Z',
+        expiresAt: futureExpiry,
       });
       brain.working.set('expired.two', {
         value: 'old scratch 2',
         category: 'temporary-operational',
-        expiresAt: '2027-01-01T00:00:00.000Z',
+        expiresAt: futureExpiry,
       });
 
       const report = brain.memoryRetentionReport({
-        now: '2027-01-02T00:00:00.000Z',
+        now: new Date(Date.parse(futureExpiry) + 24 * 60 * 60 * 1000).toISOString(),
         maxEntries: 2,
       });
 
@@ -202,6 +203,22 @@ describe('SqliteBrain', () => {
       ]);
       expect(report.compactionCandidates).toEqual([]);
       expect(brain.working.snapshot()).toHaveProperty('expired.one');
+    });
+
+    it('treats TTL-managed working memory as temporary even when explicit classes are present', () => {
+      brain.working.set('ttl.user-pref', {
+        value: 'temporary rollout note',
+        memoryClass: 'user_preference',
+        category: 'temporary-operational',
+        expiresAt: '2027-01-01T00:00:00.000Z',
+      });
+
+      const report = brain.memoryRetentionReport({ now: '2027-01-02T00:00:00.000Z' });
+
+      expect(report.entries.find((entry) => entry.key === 'ttl.user-pref')).toMatchObject({
+        class: 'temporary_operational',
+        action: 'expired',
+      });
     });
 
     it('uses the same temporary TTL marker semantics as working memory cleanup', () => {

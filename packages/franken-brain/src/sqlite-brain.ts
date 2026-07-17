@@ -1054,12 +1054,12 @@ function classifyMemoryEntry(input: {
   summary?: string;
   details?: Record<string, unknown>;
 }): MemoryRetentionClass {
+  if (input.store === 'working' && isTemporaryOperationalWorkingMemoryValue(input.value)) return 'temporary_operational';
   const explicitClass = normalizeMemoryClassName(
     objectStringField(input.value, ['memoryClass', 'memory_class', 'class', 'category', 'kind', 'type', 'scope'])
       ?? objectStringField(input.details, ['memoryClass', 'memory_class', 'class', 'category', 'kind', 'type', 'scope']),
   );
   if (explicitClass) return explicitClass;
-  if (isTemporaryOperationalWorkingMemoryValue(input.value)) return 'temporary_operational';
   const text = `${input.key} ${input.summary ?? ''} ${valueToSearchText(input.value)} ${input.details ? valueToSearchText(input.details) : ''}`.toLowerCase();
   if (/\b(user[._:-]?preference|preference|preferences)\b/.test(text)) return 'user_preference';
   if (/\b(project[._:-]?(convention|rule)|convention|repo[._:-]?convention)\b/.test(text)) return 'project_convention';

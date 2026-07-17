@@ -364,9 +364,7 @@ function contextLooksLikeMemoryRetentionReportArgs(context: string): boolean {
       && !Object.prototype.hasOwnProperty.call(record, 'source')
       && !Object.prototype.hasOwnProperty.call(record, 'redaction')
       && !Object.prototype.hasOwnProperty.call(record, 'limit')
-      && !Object.prototype.hasOwnProperty.call(record, 'command')
-      && !Object.prototype.hasOwnProperty.call(record, 'script')
-      && !Object.prototype.hasOwnProperty.call(record, 'args');
+      && !['command', 'cmd', 'commands', 'script', 'scripts', 'args', 'argv', 'shell', 'sh'].some((key) => Object.prototype.hasOwnProperty.call(record, key));
     return keys.length > 0
       && hasRetentionReportSignal;
   } catch {

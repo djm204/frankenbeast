@@ -248,8 +248,10 @@ const MEMORY_REVIEW_DECIDE_SAFE_RESOLUTIONS = new Set(['keep_existing', 'replace
 const MEMORY_STORE_TOOL = 'fbeast_memory_store';
 const MEMORY_STORE_SAFE_AUDIT_KEYS = new Set(['key', 'type', 'agentId', 'ttlMs']);
 
-function isValidAuditDateString(value: unknown): value is string {
-  return typeof value === 'string' && Number.isFinite(Date.parse(value));
+function normalizeAuditDateString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const parsedMs = Date.parse(value);
+  return Number.isFinite(parsedMs) ? new Date(parsedMs).toISOString() : undefined;
 }
 
 function unqualifyMcpToolName(toolName: string): string {
@@ -417,8 +419,8 @@ function redactMemoryRetentionReportArgs(sanitized: Record<string, unknown>, red
       sanitized[key] = redaction;
     } else if ((key === 'expiryHorizonMs' || key === 'maxEntries') && typeof sanitized[key] !== 'number') {
       sanitized[key] = redaction;
-    } else if (key === 'now' && !isValidAuditDateString(sanitized[key])) {
-      sanitized[key] = redaction;
+    } else if (key === 'now') {
+      sanitized[key] = normalizeAuditDateString(sanitized[key]) ?? redaction;
     } else if (!MEMORY_RETENTION_REPORT_SAFE_AUDIT_KEYS.has(key)) {
       sanitized[key] = redaction;
     }

@@ -215,6 +215,10 @@ describe('GovernorAdapter', () => {
       action: 'mcp__fbeast-proxy__execute_tool',
       context: '{"maxEntries":1,"command":"rm -rf /var/data"}',
     })).resolves.toMatchObject({ decision: 'denied' });
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"readScope":"agent","cmd":"rm -rf /var/data"}',
+    })).resolves.toMatchObject({ decision: 'denied' });
   });
 
   it('denies raw destructive patterns (rm -rf)', async () => {

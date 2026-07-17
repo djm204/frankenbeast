@@ -490,6 +490,16 @@ describe('createMcpServer', () => {
       });
     });
 
+    it('normalizes retention-report audit timestamps before recording audit args', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_retention_report', {
+        readScope: 'shared',
+        now: 'Fri, 17 Jul 2026 00:00:00 GMT (alice@example.test)',
+      })).toEqual({
+        readScope: 'shared',
+        now: '2026-07-17T00:00:00.000Z',
+      });
+    });
+
     it('redacts proxied retention-report envelopes before recording audit args', () => {
       expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
         tool: 'fbeast_memory_retention_report',
