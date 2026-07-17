@@ -258,14 +258,35 @@ describe('BeastEventBus', () => {
     expect(observed).toHaveLength(1);
     expect(observed[0].data).not.toBe(cyclicPayload);
     expect(observed[0].data.unsupported).toBe(unsupported);
-    expect(observed[0].data.self).toBe(observed[0].data);
-    expect((observed[0].data.history as unknown[])[0]).toBe(observed[0].data);
+    expect(observed[0].data.self).toBe('[Circular]');
+    expect((observed[0].data.history as unknown[])[0]).toBe('[Circular]');
+    expect(() => JSON.stringify(observed[0].data)).not.toThrow();
 
     const replayed = bus.replaySince(0)[0];
     expect(replayed.data).not.toBe(observed[0].data);
     expect(replayed.data.unsupported).toBe(unsupported);
-    expect(replayed.data.self).toBe(replayed.data);
-    expect((replayed.data.history as unknown[])[0]).toBe(replayed.data);
+    expect(replayed.data.self).toBe('[Circular]');
+    expect((replayed.data.history as unknown[])[0]).toBe('[Circular]');
+    expect(() => JSON.stringify(replayed.data)).not.toThrow();
+  });
+
+  it('preserves own __proto__ fields in fallback-cloned payloads', () => {
+    const bus = new BeastEventBus();
+    const observed: BeastSseEvent[] = [];
+    const payload: Record<string, unknown> = { unsupported: () => 'fallback' };
+    Object.defineProperty(payload, '__proto__', {
+      value: { role: 'payload-data' },
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+
+    bus.subscribe((event) => observed.push(event));
+    bus.publish({ type: 'agent.status', data: payload });
+
+    expect(Object.prototype.hasOwnProperty.call(observed[0].data, '__proto__')).toBe(true);
+    expect(observed[0].data.__proto__).toEqual({ role: 'payload-data' });
+    expect(Object.getPrototypeOf(observed[0].data)).toBe(Object.prototype);
   });
 
   it('evicts oldest events when buffer exceeds maxBufferSize', () => {

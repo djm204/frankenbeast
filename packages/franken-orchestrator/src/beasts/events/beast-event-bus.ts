@@ -27,32 +27,34 @@ function reportDefaultListenerError({ event, error }: BeastEventBusListenerError
   });
 }
 
-function cloneJsonCompatibleValue(value: unknown, seen = new WeakMap<object, unknown>()): unknown {
+function cloneJsonCompatibleValue(value: unknown, active = new WeakSet<object>()): unknown {
   if (Array.isArray(value)) {
-    const cached = seen.get(value);
-    if (cached) {
-      return cached;
+    if (active.has(value)) {
+      return '[Circular]';
     }
 
-    const cloned: unknown[] = [];
-    seen.set(value, cloned);
-    for (const item of value) {
-      cloned.push(cloneJsonCompatibleValue(item, seen));
-    }
+    active.add(value);
+    const cloned = value.map((item) => cloneJsonCompatibleValue(item, active));
+    active.delete(value);
     return cloned;
   }
 
   if (value && typeof value === 'object') {
-    const cached = seen.get(value);
-    if (cached) {
-      return cached;
+    if (active.has(value)) {
+      return '[Circular]';
     }
 
+    active.add(value);
     const cloned: Record<string, unknown> = {};
-    seen.set(value, cloned);
     for (const [key, nestedValue] of Object.entries(value as Record<string, unknown>)) {
-      cloned[key] = cloneJsonCompatibleValue(nestedValue, seen);
+      Object.defineProperty(cloned, key, {
+        value: cloneJsonCompatibleValue(nestedValue, active),
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
     }
+    active.delete(value);
     return cloned;
   }
 
