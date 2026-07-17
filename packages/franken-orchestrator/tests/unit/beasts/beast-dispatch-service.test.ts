@@ -49,6 +49,9 @@ describe('BeastDispatchService', () => {
         provider: 'claude',
         objective: 'Implement the dispatch panel',
         chunkDirectory: 'docs/chunks',
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+        skills: [],
       },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'pfk',
@@ -124,6 +127,9 @@ describe('BeastDispatchService', () => {
         provider: 'claude',
         objective: 'Implement the dispatch panel',
         chunkDirectory: 'docs/chunks',
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+        skills: [],
       },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'pfk',
@@ -135,6 +141,7 @@ describe('BeastDispatchService', () => {
       provider: 'claude',
       objective: 'Implement the dispatch panel',
       chunkDirectory: 'docs/chunks',
+      skills: [],
     });
     expect(metrics.render()).toContain('beast_runs_created_total{definition_id="martin-loop",source="dashboard"} 1');
   });
@@ -165,7 +172,9 @@ describe('BeastDispatchService', () => {
         provider: 'claude',
         objective: 'Implement the dispatch panel',
         chunkDirectory: 'docs/chunks',
-        skills: ['code-review', 'testing'],
+        skills: [],
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
         promptConfig: { text: 'Launch with this context.' },
         gitConfig: { preset: 'feature-branch', baseBranch: 'develop', branchPattern: '', prCreation: true, mergeStrategy: 'squash', commitConvention: 'conventional' },
         llmConfig: { default: { provider: 'openai', model: 'gpt-5.3-codex-spark' } },
@@ -180,7 +189,7 @@ describe('BeastDispatchService', () => {
       provider: 'claude',
       objective: 'Implement the dispatch panel',
       chunkDirectory: 'docs/chunks',
-      skills: ['code-review', 'testing'],
+      skills: [],
       promptConfig: { text: 'Launch with this context.' },
       gitConfig: { preset: 'feature-branch', baseBranch: 'develop', branchPattern: '', prCreation: 'auto', mergeStrategy: 'squash', commitConvention: 'conventional' },
       llmConfig: { default: { provider: 'openai', model: 'gpt-5.3-codex-spark' } },
@@ -214,6 +223,9 @@ describe('BeastDispatchService', () => {
         provider: 'claude',
         objective: 'Implement the dispatch panel',
         chunkDirectory: 'docs/chunks',
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+        skills: [],
         llmConfig: { default: { provider: 1 } },
         promptConfig: { text: 'Launch with this context.' },
       },
@@ -227,6 +239,7 @@ describe('BeastDispatchService', () => {
       objective: 'Implement the dispatch panel',
       chunkDirectory: 'docs/chunks',
       promptConfig: { text: 'Launch with this context.' },
+      skills: [],
     });
   });
 
@@ -267,7 +280,7 @@ describe('BeastDispatchService', () => {
         objective: 'Implement linkage',
         chunkDirectory: 'docs/chunks',
         agentRole: 'coding',
-        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],},
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
     });
 
     const run = await dispatch.createRun({
@@ -316,7 +329,7 @@ describe('BeastDispatchService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { labels: ['availability'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
+      initConfig: { labels: ['availability'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
     });
     const firstRun = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -410,7 +423,7 @@ describe('BeastDispatchService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: { provider: 'claude', objective: 'SSE test', chunkDirectory: '.' } },
-      initConfig: { provider: 'claude', objective: 'SSE test', chunkDirectory: '.', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
+      initConfig: { provider: 'claude', objective: 'SSE test', chunkDirectory: '.', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
     });
 
     await dispatch.createRun({
@@ -455,7 +468,7 @@ describe('BeastDispatchService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: { provider: 'claude', objective: 'Approval test', chunkDirectory: '.' } },
-      initConfig: { provider: 'claude', objective: 'Approval test', chunkDirectory: '.', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
+      initConfig: { provider: 'claude', objective: 'Approval test', chunkDirectory: '.', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
     });
 
     const run = await dispatch.createRun({
@@ -499,7 +512,7 @@ describe('BeastDispatchService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: { provider: 'claude', objective: 'SSE fail test', chunkDirectory: '.' } },
-      initConfig: { provider: 'claude', objective: 'SSE fail test', chunkDirectory: '.', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
+      initConfig: { provider: 'claude', objective: 'SSE fail test', chunkDirectory: '.', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
     });
 
     const run = await dispatch.createRun({
@@ -538,7 +551,14 @@ describe('BeastDispatchService', () => {
 
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
-      config: { provider: 'claude', objective: 'Stop before start', chunkDirectory: '.' },
+      config: {
+        provider: 'claude',
+        objective: 'Stop before start',
+        chunkDirectory: '.',
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+        skills: [],
+      },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'operator',
       executionMode: 'process',

@@ -94,7 +94,7 @@ describe('createBeastServices', () => {
         source: 'dashboard',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
+        initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
       });
       services.agents.updateAgent(agent.id, { status: 'running' });
 

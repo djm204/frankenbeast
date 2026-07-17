@@ -15,6 +15,8 @@ import {
   capacityItemFromConfig,
 } from './capacity-reservation-policy.js';
 import type { MaintenanceModeService } from './maintenance-mode-service.js';
+import { AgentToolPolicyError, validateAgentRoleTools } from './role-tool-manifest.js';
+import type { ToolPolicyDenial } from './role-tool-manifest.js';
 
 export interface BeastDispatchServiceOptions {
   eventBus?: BeastEventBus;
@@ -183,6 +185,7 @@ export class BeastDispatchService {
     const configSnapshot: Readonly<Record<string, unknown>> = moduleConfig
       ? { ...config, modules: moduleConfig }
       : config;
+    this.assertRoleToolManifestAllows(request, configSnapshot);
     const executionMode = request.executionMode ?? definition.executionModeDefault;
     const createdAt = new Date(wallClockNow()).toISOString();
     const linkedAt = new Date(wallClockNow()).toISOString();
@@ -372,6 +375,29 @@ export class BeastDispatchService {
     return agent?.moduleConfig;
   }
 
+  private assertRoleToolManifestAllows(
+    request: CreateBeastRunRequest,
+    configSnapshot: Readonly<Record<string, unknown>>,
+  ): void {
+    const trackedAgent = request.trackedAgentId
+      ? this.repository.requireTrackedAgent(request.trackedAgentId)
+      : undefined;
+    const policyConfig = trackedAgent
+      ? { ...trackedAgent.initConfig, ...request.config, ...configSnapshot }
+      : { ...request.config, ...configSnapshot };
+    const validation = validateAgentRoleTools(policyConfig, {
+      definitionId: request.definitionId,
+      initActionKind: trackedAgent?.initAction.kind,
+      initActionConfig: trackedAgent?.initAction.config,
+    });
+    if (validation.allowed) return;
+
+    for (const denial of validation.denials) {
+      defaultToolPolicyLogger(denial);
+    }
+    throw new AgentToolPolicyError(validation);
+  }
+
   private getDefinitionOrThrow(definitionId: string): BeastDefinition {
     const definition = this.catalog.getDefinition(definitionId);
     if (!definition) {
@@ -379,4 +405,8 @@ export class BeastDispatchService {
     }
     return definition;
   }
+}
+
+function defaultToolPolicyLogger(entry: ToolPolicyDenial): void {
+  console.warn('[agent-tool-policy-denial]', JSON.stringify(entry));
 }

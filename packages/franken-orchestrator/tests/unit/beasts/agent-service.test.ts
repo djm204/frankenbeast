@@ -273,7 +273,7 @@ describe('AgentService', () => {
         config: { goal: 'First' },
         chatSessionId: 'sess-1',
       },
-      initConfig: { goal: 'First', agentRole: 'docs', requestedTools: ['read_file', 'write_file'] },
+      initConfig: { goal: 'First', agentRole: 'docs', requestedTools: ['read_file', 'write_file'], skills: [] },
       chatSessionId: 'sess-1',
     });
     const second = service.createAgent({
@@ -285,7 +285,7 @@ describe('AgentService', () => {
         command: 'martin-loop',
         config: { chunkDirectory: 'docs/chunks' },
       },
-      initConfig: { chunkDirectory: 'docs/chunks', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
+      initConfig: { chunkDirectory: 'docs/chunks', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
     });
 
     expect(first.status).toBe('initializing');
@@ -307,7 +307,7 @@ describe('AgentService', () => {
         config: { designDocPath: 'docs/plans/design.md' },
         chatSessionId: 'sess-1',
       },
-      initConfig: { designDocPath: 'docs/plans/design.md', agentRole: 'docs', requestedTools: ['read_file', 'write_file'] },
+      initConfig: { designDocPath: 'docs/plans/design.md', agentRole: 'docs', requestedTools: ['read_file', 'write_file'], skills: [] },
       chatSessionId: 'sess-1',
     });
 
@@ -354,7 +354,7 @@ describe('AgentService', () => {
         command: 'martin-loop',
         config: { chunkDirectory: 'docs/chunks' },
       },
-      initConfig: { chunkDirectory: 'docs/chunks', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
+      initConfig: { chunkDirectory: 'docs/chunks', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
     });
     const run = repository.createRun({
       trackedAgentId: agent.id,
@@ -398,7 +398,7 @@ describe('AgentService', () => {
         command: 'martin-loop',
         config: { chunkDirectory: 'docs/chunks' },
       },
-      initConfig: { chunkDirectory: 'docs/chunks', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'] },
+      initConfig: { chunkDirectory: 'docs/chunks', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
     });
 
     service.updateAgent(agent.id, { status: 'stopped' });

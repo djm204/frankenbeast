@@ -26,6 +26,18 @@ const TEST_SUPER_SECRET_OPERATOR_TOKEN = testCredential('TEST_SUPER_SECRET_OPERA
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/agent-routes');
 
+const CODING_POLICY = {
+  agentRole: 'coding',
+  requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+  skills: [],
+} as const;
+
+const DOCS_POLICY = {
+  agentRole: 'docs',
+  requestedTools: ['read_file', 'search_files', 'write_file'],
+  skills: [],
+} as const;
+
 type AgentEvent = { type: string };
 
 function expectEventsToIncludeTypes(events: AgentEvent[], requiredTypes: string[]) {
@@ -204,12 +216,14 @@ describe('agent routes integration', () => {
           provider: 'claude',
           objective: 'Resume with capacity guard',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
         },
       },
       initConfig: {
         provider: 'claude',
         objective: 'Resume with capacity guard',
         chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
       },
     });
     const linkedRun = repository.createRun({
@@ -288,9 +302,9 @@ describe('agent routes integration', () => {
         initAction: {
           kind: 'martin-loop',
           command: 'martin-loop',
-          config: { provider: 'claude', objective: 'Race auto-dispatch', chunkDirectory: 'docs/chunks' },
+          config: { provider: 'claude', objective: 'Race auto-dispatch', chunkDirectory: 'docs/chunks', ...CODING_POLICY },
         },
-        initConfig: { provider: 'claude', objective: 'Race auto-dispatch', chunkDirectory: 'docs/chunks' },
+        initConfig: { provider: 'claude', objective: 'Race auto-dispatch', chunkDirectory: 'docs/chunks', ...CODING_POLICY },
       }),
     });
 
@@ -342,9 +356,9 @@ describe('agent routes integration', () => {
         initAction: {
           kind: 'martin-loop',
           command: 'martin-loop',
-          config: { provider: 'claude', objective: 'Race maintenance', chunkDirectory: 'docs/chunks' },
+          config: { provider: 'claude', objective: 'Race maintenance', chunkDirectory: 'docs/chunks', ...CODING_POLICY },
         },
-        initConfig: { provider: 'claude', objective: 'Race maintenance', chunkDirectory: 'docs/chunks' },
+        initConfig: { provider: 'claude', objective: 'Race maintenance', chunkDirectory: 'docs/chunks', ...CODING_POLICY },
       }),
     });
 
@@ -457,6 +471,7 @@ describe('agent routes integration', () => {
             provider: 'claude',
             objective: 'Start later',
             chunkDirectory: 'docs/chunks',
+            ...CODING_POLICY,
             promptConfig: { text: 'x'.repeat(20 * 1024) },
           },
         },
@@ -464,6 +479,7 @@ describe('agent routes integration', () => {
           provider: 'claude',
           objective: 'Start later',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
           promptConfig: { text: 'x'.repeat(20 * 1024) },
         },
         autoDispatch: false,
@@ -491,6 +507,7 @@ describe('agent routes integration', () => {
             provider: 'claude',
             objective: 'Start later',
             chunkDirectory: 'docs/chunks',
+            ...CODING_POLICY,
             promptConfig: { text: 'x'.repeat(20 * 1024) },
           },
         },
@@ -498,6 +515,7 @@ describe('agent routes integration', () => {
           provider: 'claude',
           objective: 'Start later',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
           promptConfig: { text: 'x'.repeat(20 * 1024) },
         },
         autoDispatch: false,
@@ -518,9 +536,9 @@ describe('agent routes integration', () => {
         initAction: {
           kind: 'martin-loop',
           command: 'martin-loop',
-          config: { promptConfig: { text: 'x'.repeat(2 * 1024 * 1024) } },
+          config: { promptConfig: { text: 'x'.repeat(2 * 1024 * 1024) }, ...CODING_POLICY },
         },
-        initConfig: { promptConfig: { text: 'x'.repeat(2 * 1024 * 1024) } },
+        initConfig: { promptConfig: { text: 'x'.repeat(2 * 1024 * 1024) }, ...CODING_POLICY },
         autoDispatch: false,
       }),
     });
@@ -546,12 +564,14 @@ describe('agent routes integration', () => {
           config: {
             goal: 'Design the init workflow',
             outputPath: 'docs/design.md',
+            ...DOCS_POLICY,
           },
           chatSessionId: 'sess-1',
         },
         initConfig: {
           goal: 'Design the init workflow',
           outputPath: 'docs/design.md',
+          ...DOCS_POLICY,
         },
         chatSessionId: 'sess-1',
       }),
@@ -602,12 +622,14 @@ describe('agent routes integration', () => {
           config: {
             designDocPath: 'docs/plans/design.md',
             outputDir: 'docs/chunks',
+            ...DOCS_POLICY,
           },
           chatSessionId: createdSession.data.id,
         },
         initConfig: {
           designDocPath: 'docs/plans/design.md',
           outputDir: 'docs/chunks',
+          ...DOCS_POLICY,
         },
         chatSessionId: createdSession.data.id,
       }),
@@ -671,12 +693,14 @@ describe('agent routes integration', () => {
             provider: 'claude',
             objective: 'Start later',
             chunkDirectory: 'docs/chunks',
+            ...CODING_POLICY,
           },
         },
         initConfig: {
           provider: 'claude',
           objective: 'Start later',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
         },
         executionMode: 'container',
         autoDispatch: false,
@@ -719,12 +743,14 @@ describe('agent routes integration', () => {
             provider: 'claude',
             objective: 'Ship route integration',
             chunkDirectory: 'docs/chunks',
+            ...CODING_POLICY,
           },
         },
         initConfig: {
           provider: 'claude',
           objective: 'Ship route integration',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
         },
       }),
     });
@@ -740,6 +766,7 @@ describe('agent routes integration', () => {
           provider: 'claude',
           objective: 'Ship route integration',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
         },
         executionMode: 'process',
         startNow: true,
@@ -787,12 +814,14 @@ describe('agent routes integration', () => {
             provider: 'claude',
             objective: 'Resume from dashboard',
             chunkDirectory: 'docs/chunks',
+            ...CODING_POLICY,
           },
         },
         initConfig: {
           provider: 'claude',
           objective: 'Resume from dashboard',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
         },
       }),
     });
@@ -808,6 +837,7 @@ describe('agent routes integration', () => {
           provider: 'claude',
           objective: 'Resume from dashboard',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
         },
         executionMode: 'process',
         startNow: true,
@@ -853,10 +883,10 @@ describe('agent routes integration', () => {
         initAction: {
           kind: 'design-interview',
           command: '/interview',
-          config: { goal: 'Stop from dashboard' },
+          config: { goal: 'Stop from dashboard', ...DOCS_POLICY },
           chatSessionId: 'sess-1',
         },
-        initConfig: { goal: 'Stop from dashboard' },
+        initConfig: { goal: 'Stop from dashboard', ...DOCS_POLICY },
         chatSessionId: 'sess-1',
       }),
     });
@@ -910,12 +940,14 @@ describe('agent routes integration', () => {
             provider: 'claude',
             objective: 'Restart from dashboard',
             chunkDirectory: 'docs/chunks',
+            ...CODING_POLICY,
           },
         },
         initConfig: {
           provider: 'claude',
           objective: 'Restart from dashboard',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
         },
       }),
     });
@@ -931,6 +963,7 @@ describe('agent routes integration', () => {
           provider: 'claude',
           objective: 'Restart from dashboard',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
         },
         executionMode: 'process',
         startNow: true,
@@ -992,11 +1025,13 @@ describe('agent routes integration', () => {
           config: {
             designDocPath: 'docs/plans/design.md',
             outputDir: 'docs/chunks',
+            ...DOCS_POLICY,
           },
         },
         initConfig: {
           designDocPath: 'docs/plans/design.md',
           outputDir: 'docs/chunks',
+          ...DOCS_POLICY,
         },
       }),
     });
@@ -1050,11 +1085,13 @@ describe('agent routes integration', () => {
           config: {
             designDocPath: 'docs/plans/design.md',
             outputDir: 'docs/chunks',
+            ...DOCS_POLICY,
           },
         },
         initConfig: {
           designDocPath: 'docs/plans/design.md',
           outputDir: 'docs/chunks',
+          ...DOCS_POLICY,
         },
       }),
     });
@@ -1116,9 +1153,9 @@ describe('agent routes integration', () => {
         initAction: {
           kind: 'design-interview',
           command: '/interview',
-          config: { goal: 'Kill without a linked run' },
+          config: { goal: 'Kill without a linked run', ...DOCS_POLICY },
         },
-        initConfig: { goal: 'Kill without a linked run' },
+        initConfig: { goal: 'Kill without a linked run', ...DOCS_POLICY },
       }),
     });
     expect(createResponse.status).toBe(201);
@@ -1174,9 +1211,9 @@ describe('agent routes integration', () => {
         initAction: {
           kind: 'design-interview',
           command: '/interview',
-          config: { goal: 'Delete from dashboard', outputPath: 'docs/delete-design.md' },
+          config: { goal: 'Delete from dashboard', outputPath: 'docs/delete-design.md', ...DOCS_POLICY },
         },
-        initConfig: { goal: 'Delete from dashboard', outputPath: 'docs/delete-design.md' },
+        initConfig: { goal: 'Delete from dashboard', outputPath: 'docs/delete-design.md', ...DOCS_POLICY },
       }),
     });
     expect(createResponse.status).toBe(201);
@@ -1249,9 +1286,9 @@ describe('agent routes integration', () => {
           initAction: {
             kind: 'design-interview',
             command: '/interview',
-            config: { goal: `Delete ${status} from dashboard` },
+            config: { goal: `Delete ${status} from dashboard`, ...DOCS_POLICY },
           },
-          initConfig: { goal: `Delete ${status} from dashboard` },
+          initConfig: { goal: `Delete ${status} from dashboard`, ...DOCS_POLICY },
           autoDispatch: false,
         }),
       });
@@ -1293,9 +1330,9 @@ describe('agent routes integration', () => {
         initAction: {
           kind: 'design-interview',
           command: '/interview',
-          config: { goal: 'Do not delete running agents', outputPath: 'docs/running-delete.md' },
+          config: { goal: 'Do not delete running agents', outputPath: 'docs/running-delete.md', ...DOCS_POLICY },
         },
-        initConfig: { goal: 'Do not delete running agents', outputPath: 'docs/running-delete.md' },
+        initConfig: { goal: 'Do not delete running agents', outputPath: 'docs/running-delete.md', ...DOCS_POLICY },
       }),
     });
     expect(createResponse.status).toBe(201);
@@ -1345,6 +1382,7 @@ describe('agent routes integration', () => {
         initConfig: {
           identity: { name: 'Old name', description: 'Old description' },
           workflow: { workflowType: 'design-interview' },
+          ...DOCS_POLICY,
         },
         autoDispatch: false,
       }),
@@ -1396,12 +1434,14 @@ describe('agent routes integration', () => {
           config: {
             designDocPath: 'docs/plans/design.md',
             outputDir: 'docs/chunks',
+            ...DOCS_POLICY,
           },
         },
         initConfig: {
           identity: { name: 'Linked run agent' },
           designDocPath: 'docs/plans/design.md',
           outputDir: 'docs/chunks',
+          ...DOCS_POLICY,
           modules: { firewall: true, memory: false },
         },
         moduleConfig: { firewall: true, memory: false },
@@ -1466,9 +1506,9 @@ describe('agent routes integration', () => {
       initAction: {
         kind: 'design-interview',
         command: '/interview',
-        config: {},
+        config: { ...DOCS_POLICY },
       },
-      initConfig: {},
+      initConfig: { ...DOCS_POLICY },
       autoDispatch: false,
     });
 
@@ -1499,11 +1539,13 @@ describe('agent routes integration', () => {
           config: {
             designDocPath: 'docs/plans/design.md',
             outputDir: 'docs/chunks',
+            ...DOCS_POLICY,
             invalidField: 'this-will-fail-schema',
           },
         },
         initConfig: {
           invalidField: 'this-will-fail-schema',
+          ...DOCS_POLICY,
         },
       }),
     });
@@ -1554,11 +1596,13 @@ describe('agent routes integration', () => {
           config: {
             designDocPath: 'docs/plans/design.md',
             outputDir: 'docs/chunks',
+            ...DOCS_POLICY,
           },
         },
         initConfig: {
           designDocPath: 'docs/plans/design.md',
           outputDir: 'docs/chunks',
+          ...DOCS_POLICY,
         },
       }),
     });
@@ -1583,10 +1627,11 @@ describe('agent routes integration', () => {
         initAction: {
           kind: 'chunk-plan',
           command: '/plan',
-          config: {},
+          config: { ...DOCS_POLICY },
         },
         initConfig: {
           invalidField: 'will-fail',
+          ...DOCS_POLICY,
         },
       }),
     });
