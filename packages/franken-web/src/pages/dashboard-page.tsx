@@ -4,6 +4,7 @@ import { SkillCatalogBrowser } from '../components/skills/skill-catalog-browser'
 import { SecurityPanel } from '../components/security/security-panel';
 import { ProviderPanel } from '../components/providers/provider-panel';
 import { AvailabilityPanel } from '../components/availability/availability-panel';
+import { SloPanel } from '../components/availability/slo-panel';
 import type { DashboardApiClient, DashboardSecurity, DashboardSnapshot } from '../lib/dashboard-api';
 
 interface DashboardPageProps {
@@ -32,6 +33,7 @@ export function DashboardPage({ client }: DashboardPageProps) {
     providers,
     availability,
     maintenance,
+    slo,
     loading,
     setSnapshot,
     setSkillEnabled,
@@ -103,6 +105,7 @@ export function DashboardPage({ client }: DashboardPageProps) {
         providers: currentSnapshot.providers,
         availability: currentSnapshot.availability ?? undefined,
         maintenance: currentSnapshot.maintenance ?? undefined,
+        slo: currentSnapshot.slo ?? undefined,
       });
     }
   }, [setSnapshot]);
@@ -118,6 +121,7 @@ export function DashboardPage({ client }: DashboardPageProps) {
       providers: currentSnapshot.providers,
       availability: currentSnapshot.availability ?? undefined,
       maintenance: currentSnapshot.maintenance ?? undefined,
+      slo: currentSnapshot.slo ?? undefined,
     });
   }, [setSnapshot]);
 
@@ -131,6 +135,7 @@ export function DashboardPage({ client }: DashboardPageProps) {
       providers: currentSnapshot.providers,
       availability: currentSnapshot.availability ?? undefined,
       maintenance: currentSnapshot.maintenance ?? undefined,
+      slo: currentSnapshot.slo ?? undefined,
     });
   }, [setSnapshot]);
 
@@ -177,7 +182,7 @@ export function DashboardPage({ client }: DashboardPageProps) {
     }
     const subscriptionGeneration = clientGenerationRef.current;
     if (!confirmedSnapshotRef.current && security) {
-      setConfirmedSnapshot({ skills, security, providers });
+      setConfirmedSnapshot({ skills, security, providers, availability: availability ?? undefined, maintenance: maintenance ?? undefined, slo: slo ?? undefined });
     }
     loadSnapshot();
     let unsub: (() => void) | undefined;
@@ -384,6 +389,7 @@ export function DashboardPage({ client }: DashboardPageProps) {
         )}
         <ProviderPanel providers={providers} />
         <AvailabilityPanel availability={availability ?? undefined} />
+        <SloPanel slo={slo} />
       </div>
     </div>
   );
