@@ -212,6 +212,22 @@ describe('learning experiment sandbox', () => {
     expect(result.blockedToolCalls[0]?.error).toMatch(/mutation-capable/);
   });
 
+  it('rejects symlinked runs roots before resolving evidence paths', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const rootParent = tempRoot('learning-sandbox-runs-parent-');
+    const outside = tempRoot('learning-sandbox-outside-');
+    const runsRoot = join(rootParent, 'runs-link');
+    symlinkSync(outside, runsRoot, 'dir');
+
+    await expect(runLearningSandboxExperiment({
+      declaration,
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      execute: () => ({ passed: true, evidence: [] }),
+    })).rejects.toThrow(/runs root is a symlink/);
+    expect(lstatSync(runsRoot).isSymbolicLink()).toBe(true);
+  });
+
   it('rejects symlinked sandbox run path components before cleanup', async () => {
     const { fixturesRoot } = createFixturesRoot();
     const runsRoot = tempRoot('learning-sandbox-runs-');
@@ -586,7 +602,18 @@ describe('learning experiment sandbox', () => {
   it('denies namespaced and observer mutation tool aliases even when allowlisted', async () => {
     const { fixturesRoot } = createFixturesRoot();
     const runsRoot = tempRoot('learning-sandbox-runs-');
-    const attempts = ['functions.exec_command', 'functions.apply_patch', 'fbeast_observer_log', 'fbeast_observer_trail', 'mcp__github__create_issue_comment', 'github.create_issue_comment', 'create_issue_comment'];
+    const attempts = [
+      'functions.exec_command',
+      'functions.apply_patch',
+      'fbeast_observer_log',
+      'fbeast_observer_trail',
+      'mcp__github__create_issue_comment',
+      'github.create_issue_comment',
+      'create_issue_comment',
+      'create_file',
+      'mcp__github__create_file',
+      'memory.store',
+    ];
 
     const result = await runLearningSandboxExperiment({
       declaration: { ...declaration, requestedTools: attempts },
@@ -791,6 +818,33 @@ describe('learning experiment sandbox', () => {
     expect(result.passed).toBe(false);
     expect(result.blockedToolCalls).toHaveLength(1);
     expect((result.blockedToolCalls[0]?.input as string[])[0]).toBe('[non-json accessor]');
+  });
+
+  it('records denied tool calls when proxy array length access throws', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+    const proxyArray = new Proxy(['secret'], {
+      get: (target, prop, receiver) => {
+        if (prop === 'length') {
+          throw new Error('length exploded');
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    });
+
+    const result = await runLearningSandboxExperiment({
+      declaration,
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      execute: async (sandbox) => {
+        await expect(sandbox.runTool('write_file', proxyArray, () => 'mutated')).rejects.toThrow(/mutation-capable/);
+        return { passed: true, evidence: ['blocked proxy array'] };
+      },
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.blockedToolCalls).toHaveLength(1);
+    expect(result.blockedToolCalls[0]?.input).toEqual(['secret']);
   });
 
   it('persists JSON-safe evidence when inputs or handler results contain non-JSON values', async () => {

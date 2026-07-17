@@ -6,6 +6,7 @@
 ## 2026-07-17 — Learning sandbox Codex closeout
 - For learning sandbox hardening, treat the public execution context as adversarial: freeze exposed policy/declaration objects, keep enforcement copies private, deny namespaced aliases and observer/terminal surfaces (`exec_command`, `write_stdin`, `apply_patch`), and validate callback outcomes before marking a run promotion-eligible.
 - Snapshot and fixture-tool containment must reject replaced/symlinked workspace roots before descending, include root/file mode metadata, and persist evidence even when verification fails, getters throw, or workspaces disappear. Use unique short hashed run directories so parallel retries cannot overwrite each other.
+- Denylist coverage needs last-segment and dot-namespaced mutation aliases such as `create_file` and `memory.store`, and denied-tool evidence serialization must avoid invoking hostile `length` getters so blocked calls are recorded before errors can be caught by experiments.
 
 ## 2026-07-16 — Synthetic availability probe review fixes
 - Availability probes should fail closed for real dependencies: do not default provider checks to `node --version` or dashboard checks to a static UI health URL, require explicit provider/backend health targets, and cover missing-target behavior in tests so cron copies cannot produce false-green uptime.

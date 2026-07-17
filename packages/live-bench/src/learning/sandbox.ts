@@ -28,6 +28,7 @@ export const DEFAULT_LEARNING_SANDBOX_TOOLS = [
 const MUTATION_CAPABLE_SANDBOX_TOOLS = new Set([
   'apply_patch',
   'approval_ledger_write',
+  'create_file',
   'exec_command',
   'create_issue_comment',
   'delete_file',
@@ -146,6 +147,9 @@ export async function runLearningSandboxExperiment(
   const now = options.now ?? (() => new Date().toISOString());
   const startedAt = now();
   const runsRoot = resolve(options.runsRoot);
+  if (existsSync(runsRoot) && lstatSync(runsRoot).isSymbolicLink()) {
+    throw new Error(`Sandbox runs root is a symlink: ${runsRoot}`);
+  }
   mkdirSync(runsRoot, { recursive: true });
   const realRunsRoot = realpathSync(runsRoot);
 
@@ -246,7 +250,7 @@ async function runSandboxTool(options: RunSandboxToolOptions): Promise<unknown> 
   if (!allowed) {
     const call = {
       tool: options.tool,
-      input: toJsonSafeEvidence(options.input),
+      input: safeToJsonSafeEvidence(options.input),
       allowed: false,
       startedAt,
       completedAt: options.now(),
@@ -263,19 +267,19 @@ async function runSandboxTool(options: RunSandboxToolOptions): Promise<unknown> 
     const result = await runAllowedTool(options);
     options.evidence.push({
       tool: options.tool,
-      input: toJsonSafeEvidence(options.input),
+      input: safeToJsonSafeEvidence(options.input),
       allowed: true,
       startedAt,
       completedAt: options.now(),
       ok: true,
-      result: toJsonSafeEvidence(result),
+      result: safeToJsonSafeEvidence(result),
     });
     return result;
   } catch (caught) {
     const error = caught instanceof Error ? caught.message : String(caught);
     options.evidence.push({
       tool: options.tool,
-      input: toJsonSafeEvidence(options.input),
+      input: safeToJsonSafeEvidence(options.input),
       allowed: true,
       startedAt,
       completedAt: options.now(),
@@ -416,7 +420,8 @@ function isMutationCapableSandboxTool(tool: string, input?: unknown): boolean {
     || alias.startsWith('github_')
     || alias.startsWith('github.')
     || alias.startsWith('kanban_')
-    || alias.startsWith('kanban.'));
+    || alias.startsWith('kanban.')
+    || alias.startsWith('memory.'));
 }
 
 function toolAliases(tool: string, input?: unknown): string[] {
@@ -541,7 +546,7 @@ function collectSnapshotEntries(root: string, current: string, entries: string[]
 }
 
 function stringifyEvidence(value: unknown): string {
-  return JSON.stringify(toJsonSafeEvidence(value), null, 2) ?? 'null';
+  return JSON.stringify(safeToJsonSafeEvidence(value), null, 2) ?? 'null';
 }
 
 function safeEnumerableEntries(value: object): Array<[string, unknown]> {
@@ -650,7 +655,15 @@ function toJsonSafeEvidence(value: unknown, seen = new WeakSet<object>()): unkno
     }
     seen.add(value);
     const descriptors = safeOwnPropertyDescriptors(value);
-    const items = Array.from({ length: value.length }, (_unused, index) => {
+    const lengthDescriptor = descriptors.length;
+    const length = lengthDescriptor
+      && 'value' in lengthDescriptor
+      && typeof lengthDescriptor.value === 'number'
+      && Number.isSafeInteger(lengthDescriptor.value)
+      && lengthDescriptor.value >= 0
+      ? lengthDescriptor.value
+      : 0;
+    const items = Array.from({ length }, (_unused, index) => {
       const descriptor = descriptors[String(index)];
       if (!descriptor) {
         return '[non-json sparse-array-hole]';
@@ -673,4 +686,13 @@ function toJsonSafeEvidence(value: unknown, seen = new WeakSet<object>()): unkno
     return entries;
   }
   return String(value);
+}
+
+function safeToJsonSafeEvidence(value: unknown): unknown {
+  try {
+    return toJsonSafeEvidence(value);
+  } catch (caught) {
+    const message = caught instanceof Error ? caught.message : String(caught);
+    return `[non-json evidence-serialization-error:${message}]`;
+  }
 }
