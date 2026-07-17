@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses, detectWorkerHeartbeatMonotonicityAnomalies, detectStuckRunWatchdogFindings, evaluateIssueSchedulingScore, planKanbanStateMutation } from '../../../src/issues/issue-runner.js';
+import { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses, detectWorkerHeartbeatMonotonicityAnomalies, detectStuckRunWatchdogFindings, buildWorkerCrashOnlyRestartContract, evaluateIssueSchedulingScore, planKanbanStateMutation } from '../../../src/issues/issue-runner.js';
 import type { IssueBackpressureSignals, IssueBackpressureThresholds, IssueRunnerConfig } from '../../../src/issues/issue-runner.js';
 import type { GithubIssue, TriageResult } from '../../../src/issues/types.js';
 import type { PlanGraph, ICheckpointStore, ILogger, BeastLoopDeps } from '../../../src/deps.js';
@@ -766,6 +766,55 @@ describe('stuck-run watchdog', () => {
       recommendedAction: expect.stringContaining('Suppress duplicate respawn'),
     });
     expect(finding.evidence).toContain('siblingPids=7413');
+  });
+
+  it('derives duplicate respawn siblings from the watchdog snapshot set', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_derived_duplicate',
+        pid: 7412,
+        runId: 'run-dead',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+      {
+        cardId: 't_derived_duplicate',
+        pid: 7413,
+        runId: 'run-live',
+        status: 'running',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      cardId: 't_derived_duplicate',
+      pid: 7412,
+      restartDisposition: 'hitl',
+      nextAction: 'suppress-duplicate-respawn',
+    });
+    expect(findings[0].evidence).toContain('siblingPids=7413');
+  });
+
+  it('normalizes exported restart-contract Kanban state before suppressing blocked respawns', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_direct_blocked',
+      pid: 7418,
+      status: 'Blocked',
+      alive: false,
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'Blocked',
+    });
+
+    expect(contract).toMatchObject({
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      kanbanState: 'blocked',
+    });
   });
 
   it('uses known blocker hints to report approval gates with concrete remediation', () => {

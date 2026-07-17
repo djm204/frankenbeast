@@ -763,8 +763,8 @@ function normalizeStuckRunBlockerCategory(
   snapshot: IssueWorkerCardProcessSnapshot,
 ): IssueStuckRunBlockerCategory {
   const status = snapshot.status?.trim().toLowerCase() ?? '';
+  if (CRASH_WORKER_CARD_STATUSES.has(status)) return 'process-crash';
   if (snapshot.blockerCategory && snapshot.blockerCategory !== 'unknown') return snapshot.blockerCategory;
-  if (snapshot.alive !== false && CRASH_WORKER_CARD_STATUSES.has(status)) return 'process-crash';
   const text = `${snapshot.status ?? ''} ${snapshot.waitingOn ?? ''}`.toLowerCase();
   if (/\bapproval\b|\bhitl\b|\bhuman\b|approval[- ]?token|pending approval|operator approval|approval-cop|approve/.test(text)) return 'approval-gate';
   if (/provider|codex|rate limit|quota|llm|model/.test(text)) return 'provider-wait';
@@ -818,13 +818,35 @@ function normalizedExitReason(snapshot: IssueWorkerCardProcessSnapshot, category
   return 'unknown';
 }
 
-function hasDuplicateRespawn(snapshot: IssueWorkerCardProcessSnapshot): boolean {
-  const siblingPids = snapshot.siblingPids?.filter((pid) => Number.isSafeInteger(pid) && pid > 0 && pid !== snapshot.pid) ?? [];
-  return siblingPids.length > 0;
+function liveSiblingPidsByCardId(snapshots: readonly IssueWorkerCardProcessSnapshot[]): Map<string, number[]> {
+  const byCard = new Map<string, Set<number>>();
+  for (const snapshot of snapshots) {
+    const cardId = snapshot.cardId.trim();
+    if (!cardId || snapshot.alive === false || !Number.isSafeInteger(snapshot.pid) || snapshot.pid <= 0) continue;
+    const pids = byCard.get(cardId) ?? new Set<number>();
+    pids.add(snapshot.pid);
+    byCard.set(cardId, pids);
+  }
+  return new Map([...byCard].map(([cardId, pids]) => [cardId, [...pids].sort((a, b) => a - b)]));
+}
+
+function siblingPidsForSnapshot(
+  snapshot: IssueWorkerCardProcessSnapshot,
+  livePidsByCardId: ReadonlyMap<string, readonly number[]>,
+): number[] {
+  const explicit = snapshot.siblingPids ?? [];
+  const derived = livePidsByCardId.get(snapshot.cardId.trim()) ?? [];
+  return [...new Set([...explicit, ...derived]
+    .filter((pid) => Number.isSafeInteger(pid) && pid > 0 && pid !== snapshot.pid))]
+    .sort((a, b) => a - b);
+}
+
+function normalizeKanbanState(status: string): string {
+  return status.trim().toLowerCase();
 }
 
 function terminalKanbanState(status: string): boolean {
-  return TERMINAL_WORKER_CARD_STATUSES.has(status.trim().toLowerCase());
+  return TERMINAL_WORKER_CARD_STATUSES.has(normalizeKanbanState(status));
 }
 
 export function buildWorkerCrashOnlyRestartContract(
@@ -838,6 +860,8 @@ export function buildWorkerCrashOnlyRestartContract(
 ): IssueWorkerCrashOnlyRestartContract {
   const rawExitReason = normalizedExitReason(snapshot, input.category);
   const exitReason = redactStuckRunEvidenceText(rawExitReason);
+  const kanbanState = normalizeKanbanState(input.kanbanState) || 'unknown';
+  const siblingPids = siblingPidsForSnapshot(snapshot, new Map());
   const evidence = [
     `exitReason=${exitReason}`,
     `pid=${snapshot.pid}`,
@@ -848,15 +872,15 @@ export function buildWorkerCrashOnlyRestartContract(
     pid: snapshot.pid,
     ...(input.heartbeatAgeMs !== undefined ? { heartbeatAgeMs: input.heartbeatAgeMs } : {}),
     processStatus: input.processStatus,
-    kanbanState: input.kanbanState,
+    kanbanState,
   };
 
-  if (hasDuplicateRespawn(snapshot)) {
+  if (siblingPids.length > 0) {
     return {
       disposition: 'hitl',
       nextAction: 'suppress-duplicate-respawn',
       ...base,
-      evidence: [...evidence, `siblingPids=${snapshot.siblingPids?.join(',') ?? 'unknown'}`],
+      evidence: [...evidence, `siblingPids=${siblingPids.join(',')}`],
     };
   }
 
@@ -869,7 +893,7 @@ export function buildWorkerCrashOnlyRestartContract(
     };
   }
 
-  if (input.kanbanState === 'blocked' || input.category === 'approval-gate' || knownLongRunningWait(input.category)) {
+  if (kanbanState === 'blocked' || input.category === 'approval-gate' || knownLongRunningWait(input.category)) {
     return {
       disposition: 'hitl',
       nextAction: 'defer-with-evidence',
@@ -904,6 +928,21 @@ export function buildWorkerCrashOnlyRestartContract(
   };
 }
 
+function deferRemediationForStuckRun(category: IssueStuckRunBlockerCategory): string {
+  switch (category) {
+    case 'approval-gate':
+      return 'Route the exact pending approval command/token to approval-cop or a human.';
+    case 'ci-wait':
+      return 'Check live CI/run status and merge queue state, rerun failed checks or unblock shared CI.';
+    case 'provider-wait':
+      return 'Check provider quota/rate-limit status and the latest model/bot response; retry later or switch provider only after preserving current work evidence.';
+    case 'dispatcher-bug':
+      return 'Audit Kanban current_run/status/heartbeat consistency and repair dispatcher metadata before unblocking the card.';
+    default:
+      return 'Open a Doctor card with heartbeat/output/tool/state evidence and verify process liveness.';
+  }
+}
+
 function remediationForCrashOnlyRestartContract(
   contract: IssueWorkerCrashOnlyRestartContract,
   category: IssueStuckRunBlockerCategory,
@@ -913,7 +952,7 @@ function remediationForCrashOnlyRestartContract(
     case 'replace-with-doctor':
       return 'Open or route to a Doctor card with the preserved setup/protocol failure evidence; do not blind-respawn this worker.';
     case 'defer-with-evidence':
-      return `${remediationForStuckRun(category, processStatus)} Preserve the wait/crash evidence and defer to the active HITL, CI, provider, or dispatcher investigation gate; do not auto-respawn over the blocker.`;
+      return `${deferRemediationForStuckRun(category)} Preserve the wait/crash evidence and defer to the active HITL, CI, provider, or dispatcher investigation gate; do not auto-respawn over the blocker.`;
     case 'suppress-duplicate-respawn':
       return 'Suppress duplicate respawn, keep the surviving worker PID/run id as owner, and repair stale duplicate metadata before any restart.';
     case 'restart-once':
@@ -934,6 +973,7 @@ export function detectStuckRunWatchdogFindings(
   const staleStateTransitionMs = options.staleStateTransitionMs ?? DEFAULT_STUCK_RUN_STALE_STATE_TRANSITION_MS;
   const longRunningWaitGraceMs = options.longRunningWaitGraceMs ?? DEFAULT_STUCK_RUN_WAIT_GRACE_MS;
   const findings: IssueStuckRunWatchdogFinding[] = [];
+  const liveSiblings = liveSiblingPidsByCardId(snapshots);
 
   for (const snapshot of snapshots) {
     if (!snapshot.cardId.trim()) continue;
@@ -988,7 +1028,11 @@ export function detectStuckRunWatchdogFindings(
       `blockerCategory=${category}`,
     ];
     if (snapshot.waitingOn) evidence.push(`waitingOn=${redactStuckRunEvidenceText(snapshot.waitingOn)}`);
-    const restartContract = buildWorkerCrashOnlyRestartContract(snapshot, {
+    const siblingPids = siblingPidsForSnapshot(snapshot, liveSiblings);
+    const restartSnapshot = siblingPids.length > 0
+      ? { ...snapshot, siblingPids }
+      : snapshot;
+    const restartContract = buildWorkerCrashOnlyRestartContract(restartSnapshot, {
       category,
       processStatus,
       ...(heartbeatAgeMs !== undefined ? { heartbeatAgeMs } : {}),
