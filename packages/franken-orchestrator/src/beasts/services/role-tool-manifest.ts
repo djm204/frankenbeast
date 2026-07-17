@@ -94,32 +94,88 @@ function normalizeTool(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
 }
 
+function arrayOfTools(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map(normalizeTool).filter((tool): tool is string => Boolean(tool))
+    : [];
+}
+
 function requestedToolsFromConfig(config: Readonly<Record<string, unknown>>): string[] {
   const toolAliases = [config.requestedTools, config.enabledTools, config.toolManifest, config.tools];
-  return [...new Set(toolAliases
-    .flatMap((alias) => Array.isArray(alias) ? alias : [])
-    .map(normalizeTool)
-    .filter((value): value is string => Boolean(value)))];
+  return [...new Set(toolAliases.flatMap(arrayOfTools))];
+}
+
+function selectedSkillsFromConfig(config: Readonly<Record<string, unknown>>): string[] {
+  return [...new Set(arrayOfTools(config.skills))];
+}
+
+function skillToolManifestFor(config: Readonly<Record<string, unknown>>, skill: string): string[] | undefined {
+  const manifests = config.skillToolManifests ?? config.skillTools;
+  if (typeof manifests !== 'object' || manifests === null || Array.isArray(manifests)) return undefined;
+  const raw = (manifests as Readonly<Record<string, unknown>>)[skill];
+  const tools = arrayOfTools(raw);
+  return tools.length > 0 ? tools : undefined;
+}
+
+function skillToolDenials(
+  role: AgentRole | string,
+  skills: readonly string[],
+  config: Readonly<Record<string, unknown>>,
+): ToolPolicyDenial[] {
+  return skills.flatMap((skill) => {
+    const tools = skillToolManifestFor(config, skill);
+    if (!tools) {
+      return [{
+        role,
+        requestedTool: `skill:${skill}`,
+        reason: `selected skill '${skill}' must declare its runtime tool manifest`,
+      }];
+    }
+    return tools.map((requestedTool) => ({
+      role,
+      requestedTool,
+      reason: `selected skill '${skill}' exposes runtime tool '${requestedTool}'`,
+    }));
+  });
 }
 
 export function validateAgentRoleTools(initConfig: Readonly<Record<string, unknown>>): ToolPolicyValidationResult {
   const rawRole = rawRoleFromConfig(initConfig);
   const role = normalizeRole(rawRole);
-  const requestedTools = requestedToolsFromConfig(initConfig);
+  const explicitTools = requestedToolsFromConfig(initConfig);
+  const selectedSkills = selectedSkillsFromConfig(initConfig);
+  const requestedTools = [...new Set([
+    ...explicitTools,
+    ...skillToolDenials(role ?? rawRole ?? '<missing-role>', selectedSkills, initConfig).map((denial) => denial.requestedTool),
+  ])];
   if (!role) {
     const denialRole = rawRole ?? '<missing-role>';
-    const denials = requestedTools.length > 0
-      ? requestedTools.map((requestedTool) => ({
+    const missingManifestDenial = explicitTools.length === 0 && selectedSkills.length === 0
+      ? [{
+        role: denialRole,
+        requestedTool: '<missing-tool-manifest>',
+        reason: 'agent creation must include a role and an explicit least-privilege tool manifest',
+      }]
+      : [];
+    const denials = [
+      ...missingManifestDenial,
+      ...explicitTools.map((requestedTool) => ({
         role: denialRole,
         requestedTool,
         reason: rawRole
           ? `role '${rawRole}' is not recognized by the least-privilege manifest`
           : 'tool requests must include a role recognized by the least-privilege manifest',
-      }))
-      : [];
-    return { allowed: denials.length === 0, rawRole, requestedTools, denials };
+      })),
+      ...skillToolDenials(denialRole, selectedSkills, initConfig),
+    ];
+    return { allowed: false, rawRole, requestedTools, denials };
   }
-  if (requestedTools.length === 0) {
+
+  const skillDenials = skillToolDenials(role, selectedSkills, initConfig);
+  const effectiveTools = [...new Set([...explicitTools, ...skillDenials
+    .filter((denial) => !denial.requestedTool.startsWith('skill:'))
+    .map((denial) => denial.requestedTool)])];
+  if (effectiveTools.length === 0) {
     return {
       allowed: false,
       role,
@@ -134,13 +190,16 @@ export function validateAgentRoleTools(initConfig: Readonly<Record<string, unkno
   }
 
   const allowedTools = ROLE_TOOL_MANIFESTS[role];
-  const denials = requestedTools
-    .filter((tool) => !allowedTools.has(tool))
-    .map((requestedTool) => ({
-      role,
-      requestedTool,
-      reason: `tool '${requestedTool}' is not allowed for role '${role}' by the least-privilege manifest`,
-    }));
+  const denials = [
+    ...skillDenials.filter((denial) => denial.requestedTool.startsWith('skill:')),
+    ...effectiveTools
+      .filter((tool) => !allowedTools.has(tool))
+      .map((requestedTool) => ({
+        role,
+        requestedTool,
+        reason: `tool '${requestedTool}' is not allowed for role '${role}' by the least-privilege manifest`,
+      })),
+  ];
 
   return {
     allowed: denials.length === 0,

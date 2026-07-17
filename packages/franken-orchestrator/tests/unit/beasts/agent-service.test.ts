@@ -115,6 +115,39 @@ describe('AgentService', () => {
       },
     })).toThrow(/least-privilege tool manifest denied/i);
 
+    expect(() => service.createAgent({
+      definitionId: 'fallback-no-manifest',
+      source: 'cli',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'no-manifest', config: {} },
+      initConfig: {},
+    })).toThrow(/least-privilege tool manifest denied/i);
+
+    expect(() => service.createAgent({
+      definitionId: 'fallback-ticket-manager',
+      source: 'cli',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'ticket-manager', config: {} },
+      initConfig: {
+        agentRole: 'ticket-manager',
+        requestedTools: ['read_file'],
+        skills: ['repo-writer'],
+      },
+    })).toThrow(/least-privilege tool manifest denied/i);
+
+    expect(() => service.createAgent({
+      definitionId: 'fallback-ticket-manager',
+      source: 'cli',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'ticket-manager', config: {} },
+      initConfig: {
+        agentRole: 'ticket-manager',
+        requestedTools: ['read_file'],
+        skills: ['repo-writer'],
+        skillToolManifests: { 'repo-writer': ['patch'] },
+      },
+    })).toThrow(/least-privilege tool manifest denied/i);
+
     expect(service.listAgents()).toEqual([]);
     expect(securityLog).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -141,6 +174,21 @@ describe('AgentService', () => {
         role: 'constructor',
         requestedTool: 'read_file',
         reason: expect.stringContaining('not recognized'),
+      }),
+      expect.objectContaining({
+        role: '<missing-role>',
+        requestedTool: '<missing-tool-manifest>',
+        reason: expect.stringContaining('explicit least-privilege tool manifest'),
+      }),
+      expect.objectContaining({
+        role: 'ticket-manager',
+        requestedTool: 'skill:repo-writer',
+        reason: expect.stringContaining('must declare its runtime tool manifest'),
+      }),
+      expect.objectContaining({
+        role: 'ticket-manager',
+        requestedTool: 'patch',
+        reason: expect.stringContaining('not allowed'),
       }),
     ]));
   });
@@ -196,7 +244,12 @@ describe('AgentService', () => {
           command: `${agentRole} lane`,
           config: {},
         },
-        initConfig: { agentRole, requestedTools, skills: ['code-review', 'testing'] },
+        initConfig: {
+          agentRole,
+          requestedTools,
+          skills: ['read-only-context'],
+          skillToolManifests: { 'read-only-context': ['read_file'] },
+        },
       });
     }
 
@@ -222,7 +275,7 @@ describe('AgentService', () => {
         config: { goal: 'First' },
         chatSessionId: 'sess-1',
       },
-      initConfig: { goal: 'First' },
+      initConfig: { goal: 'First', agentRole: 'triage', requestedTools: ['read_file'] },
       chatSessionId: 'sess-1',
     });
     const second = service.createAgent({
@@ -234,7 +287,7 @@ describe('AgentService', () => {
         command: 'martin-loop',
         config: { chunkDirectory: 'docs/chunks' },
       },
-      initConfig: { chunkDirectory: 'docs/chunks' },
+      initConfig: { chunkDirectory: 'docs/chunks', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
     });
 
     expect(first.status).toBe('initializing');
@@ -256,7 +309,7 @@ describe('AgentService', () => {
         config: { designDocPath: 'docs/plans/design.md' },
         chatSessionId: 'sess-1',
       },
-      initConfig: { designDocPath: 'docs/plans/design.md' },
+      initConfig: { designDocPath: 'docs/plans/design.md', agentRole: 'docs', requestedTools: ['read_file', 'write_file'] },
       chatSessionId: 'sess-1',
     });
 
@@ -303,7 +356,7 @@ describe('AgentService', () => {
         command: 'martin-loop',
         config: { chunkDirectory: 'docs/chunks' },
       },
-      initConfig: { chunkDirectory: 'docs/chunks' },
+      initConfig: { chunkDirectory: 'docs/chunks', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
     });
     const run = repository.createRun({
       trackedAgentId: agent.id,
@@ -347,7 +400,7 @@ describe('AgentService', () => {
         command: 'martin-loop',
         config: { chunkDirectory: 'docs/chunks' },
       },
-      initConfig: { chunkDirectory: 'docs/chunks' },
+      initConfig: { chunkDirectory: 'docs/chunks', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'terminal'] },
     });
 
     service.updateAgent(agent.id, { status: 'stopped' });
