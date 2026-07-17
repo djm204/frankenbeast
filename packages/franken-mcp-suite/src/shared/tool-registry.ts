@@ -120,19 +120,33 @@ function parseStringArg(name: string, value: unknown): { ok: true; value: string
 
 const SENSITIVE_MEMORY_KEY_PATTERNS = [
   /(^|[._:-])(api[-_]?key|apikey)([._:-]|$)/i,
-  /(^|[._:-])(access[-_]?token|refresh[-_]?token|auth[-_]?token|bearer[-_]?token)([._:-]|$)/i,
-  /(^|[._:-])(password|passphrase|secret|credential|credentials)([._:-]|$)/i,
+  /(^|[._:-])(access[-_]?token|refresh[-_]?token|auth[-_]?token|bearer[-_]?token|authorization|proxy[-_]?authorization)([._:-]|$)/i,
+  /(^|[._:-])(password|passphrase|secret|credential|credentials|cookie|session)([._:-]|$)/i,
   /(^|[._:-])private[-_]?key([._:-]|$)/i,
 ];
 
 const SENSITIVE_MEMORY_VALUE_PATTERNS = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
-  /\b(?:sk|gho|ghp|glpat|xox[baprs])-[A-Za-z0-9_\-]{12,}\b/,
+  /\b(?:sk|gho|ghp|glpat|xox[baprs])-?[A-Za-z0-9_\-]{12,}\b/,
+  /\bnpm_[A-Za-z0-9_\-]{12,}\b/,
+  /https:\/\/(?:discord(?:app)?\.com|canary\.discord\.com)\/api\/webhooks\/\d+\/[A-Za-z0-9_\-]+/i,
+  /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/[^\s:@/]*:[^\s@/]+@[^\s]+/i,
   /\b(?:Bearer|token)\s+[A-Za-z0-9._~+/=-]{20,}\b/i,
+  /\b(?:Cookie|Set-Cookie):\s*[^\r\n]+/i,
 ];
 
+const SENSITIVE_MEMORY_REDACTION = '<redacted>';
+
+function normalizeSensitiveMemoryKey(key: string): string {
+  return key
+    .trim()
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[^a-z0-9]+/giu, '_');
+}
+
 function sensitiveMemoryQuarantineReason(key: string, value: string): string | undefined {
-  const normalizedKey = key.trim();
+  const normalizedKey = normalizeSensitiveMemoryKey(key);
   if (SENSITIVE_MEMORY_KEY_PATTERNS.some((pattern) => pattern.test(normalizedKey))) {
     return 'key-name-indicates-secret';
   }
@@ -231,7 +245,7 @@ const TOOLS: ToolFull[] = [
         }
         const candidate = await brain.proposeMemory({
           key,
-          value,
+          value: SENSITIVE_MEMORY_REDACTION,
           source: 'fbeast_memory_store:quarantine',
           evidenceId: `quarantine:${key}`,
           confidence: 1,
