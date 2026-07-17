@@ -15,6 +15,75 @@ describe('AgentService', () => {
     }
   });
 
+  it('blocks low-risk role manifests from requesting mutation tools before tracking a run', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-agent-service-'));
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const securityLog: unknown[] = [];
+    const service = new AgentService(repository, () => '2026-03-11T00:00:00.000Z', {
+      toolPolicyLogger: (entry) => securityLog.push(entry),
+    });
+
+    expect(() => service.createAgent({
+      definitionId: 'fallback-ticket-manager',
+      source: 'cli',
+      createdByUser: 'operator',
+      initAction: {
+        kind: 'martin-loop',
+        command: 'ticket-manager',
+        config: {},
+      },
+      initConfig: {
+        agentRole: 'ticket-manager',
+        requestedTools: ['read_file', 'patch', 'terminal.background'],
+      },
+    })).toThrow(/least-privilege tool manifest denied/i);
+
+    expect(service.listAgents()).toEqual([]);
+    expect(securityLog).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: 'ticket-manager',
+        requestedTool: 'patch',
+        reason: expect.stringContaining('not allowed'),
+      }),
+      expect.objectContaining({
+        role: 'ticket-manager',
+        requestedTool: 'terminal.background',
+        reason: expect.stringContaining('not allowed'),
+      }),
+    ]));
+  });
+
+  it('allows coding, review, docs, triage, doctor, and ticket-manager requests that match role manifests', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-agent-service-'));
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const service = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
+
+    const roleRequests = [
+      ['coding', ['read_file', 'write_file', 'patch', 'terminal', 'terminal.background']],
+      ['review', ['read_file', 'search_files', 'terminal', 'github.read', 'github.comment']],
+      ['docs', ['read_file', 'search_files', 'write_file', 'github.pr']],
+      ['triage', ['read_file', 'search_files', 'github.read', 'kanban.comment']],
+      ['doctor', ['read_file', 'search_files', 'terminal', 'github.read', 'kanban.comment']],
+      ['ticket-manager', ['read_file', 'search_files', 'github.read', 'github.comment']],
+    ] as const;
+
+    for (const [agentRole, requestedTools] of roleRequests) {
+      service.createAgent({
+        definitionId: `${agentRole}-lane`,
+        source: 'api',
+        createdByUser: 'operator',
+        initAction: {
+          kind: 'martin-loop',
+          command: `${agentRole} lane`,
+          config: {},
+        },
+        initConfig: { agentRole, requestedTools },
+      });
+    }
+
+    expect(service.listAgents()).toHaveLength(roleRequests.length);
+  });
+
   it('creates tracked agents and lists them newest first', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-agent-service-'));
     const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

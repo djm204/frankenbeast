@@ -15,6 +15,8 @@ import type {
   CapacityReservationWorkItem,
 } from './capacity-reservation-policy.js';
 import { capacityItemFromConfig } from './capacity-reservation-policy.js';
+import { AgentToolPolicyError, validateAgentRoleTools } from './role-tool-manifest.js';
+import type { ToolPolicyDenial } from './role-tool-manifest.js';
 
 export interface CreateTrackedAgentRequest {
   readonly definitionId: string;
@@ -50,6 +52,7 @@ export interface TrackedAgentDetail {
 
 export interface AgentServiceOptions {
   readonly capacityPolicy?: CapacityReservationPolicy | undefined;
+  readonly toolPolicyLogger?: ((entry: ToolPolicyDenial) => void) | undefined;
 }
 
 export class AgentService {
@@ -60,6 +63,7 @@ export class AgentService {
   ) {}
 
   createAgent(request: CreateTrackedAgentRequest): TrackedAgent {
+    this.assertRoleToolManifestAllows(request.initConfig);
     const timestamp = this.now();
     return this.repository.createTrackedAgent({
       definitionId: request.definitionId,
@@ -153,6 +157,16 @@ export class AgentService {
       ...(request.moduleConfig !== undefined ? { moduleConfig: request.moduleConfig } : {}),
       updatedAt: this.now(),
     });
+  }
+
+  private assertRoleToolManifestAllows(initConfig: Readonly<Record<string, unknown>>): void {
+    const validation = validateAgentRoleTools(initConfig);
+    if (validation.allowed) return;
+
+    for (const denial of validation.denials) {
+      this.options.toolPolicyLogger?.(denial);
+    }
+    throw new AgentToolPolicyError(validation);
   }
 
   private activeCapacityItems(): CapacityReservationWorkItem[] {

@@ -26,6 +26,7 @@ type AgentRoleMap = {
   schemaVersion: number;
   ownershipManifest: string;
   handoffRequiredFields: string[];
+  toolManifests: Record<string, string[]>;
   roleMappings: RoleMapping[];
 };
 
@@ -86,6 +87,23 @@ describe('issue #1766 agent role responsibility map', () => {
     expect(issueWorker).toBeDefined();
     expect(issueWorker?.verification).toContain('npm run test:root -- tests/docs-issue-1766.test.ts');
     expect(issueWorker?.mustNotOwn.join(' ')).toContain('Adjacent open issues');
+  });
+
+  it('defines least-privilege tool manifests for runtime roles', () => {
+    const roleMap = readJson<AgentRoleMap>(roleMapPath);
+
+    expect(Object.keys(roleMap.toolManifests).sort()).toEqual([
+      'coding',
+      'docs',
+      'doctor',
+      'review',
+      'ticket-manager',
+      'triage',
+    ]);
+    expect(roleMap.toolManifests.coding).toEqual(expect.arrayContaining(['patch', 'terminal.background']));
+    expect(roleMap.toolManifests['ticket-manager']).toEqual(expect.arrayContaining(['read_file', 'search_files', 'github.read', 'github.comment']));
+    expect(roleMap.toolManifests['ticket-manager']).not.toContain('patch');
+    expect(roleMap.toolManifests['ticket-manager']).not.toContain('terminal.background');
   });
 
   it('documents use, onboarding entrypoint, and negative edge cases for ambiguous ownership', () => {
