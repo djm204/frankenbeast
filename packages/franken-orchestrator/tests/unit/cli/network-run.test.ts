@@ -346,6 +346,98 @@ describe('runNetworkCommand', () => {
     expect(print).toHaveBeenCalledWith(expect.stringContaining('chat-server: running'));
   });
 
+  it('health reports quarantined network state as degraded instead of healthy', async () => {
+    const print = vi.fn();
+
+    await runNetworkCommand(
+      makeArgs({ networkAction: 'health', json: true }),
+      defaultConfig(),
+      '/repo/frankenbeast',
+      makePaths(),
+      {
+        resolveServices: vi.fn(() => []),
+        createSupervisor: vi.fn(() => ({
+          up: vi.fn(),
+          stopAll: vi.fn(),
+          down: vi.fn(),
+          status: vi.fn(async () => ({
+            services: [],
+            stateCorruptions: [{
+              path: '/repo/frankenbeast/.fbeast/network/state.json',
+              quarantinePath: '/repo/frankenbeast/.fbeast/network/state.json.corrupt',
+              reason: 'Unexpected token',
+              repairHint: 'Recover the quarantined state.',
+            }],
+          })),
+          stop: vi.fn(),
+          logs: vi.fn(),
+        })),
+        print,
+        printError: vi.fn(),
+        renderHelp: () => 'network help',
+        waitForShutdown: vi.fn(async () => undefined),
+      },
+    );
+
+    const report = JSON.parse(print.mock.calls.at(-1)?.[0] as string) as {
+      dependencies: Array<{ name: string; status: string; summary: string; remediationHint: string }>;
+    };
+    const stateStore = report.dependencies.find((dependency) => dependency.name === 'state-store');
+    expect(stateStore).toMatchObject({
+      status: 'degraded',
+      remediationHint: 'Recover the quarantined state.',
+    });
+    expect(stateStore?.summary).toContain('quarantined');
+    expect(stateStore?.summary).toContain('Unexpected token');
+  });
+
+  it('health downgrades GitHub automation when a token exists without gh', async () => {
+    const originalPath = process.env.PATH;
+    const originalGithubToken = process.env.GITHUB_TOKEN;
+    const originalGhToken = process.env.GH_TOKEN;
+    process.env.PATH = '';
+    process.env.GITHUB_TOKEN = 'test-token';
+    delete process.env.GH_TOKEN;
+    const print = vi.fn();
+    try {
+      await runNetworkCommand(
+        makeArgs({ networkAction: 'health', json: true }),
+        defaultConfig(),
+        '/repo/frankenbeast',
+        makePaths(),
+        {
+          resolveServices: vi.fn(() => []),
+          createSupervisor: vi.fn(() => ({
+            up: vi.fn(),
+            stopAll: vi.fn(),
+            down: vi.fn(),
+            status: vi.fn(async () => ({ services: [] })),
+            stop: vi.fn(),
+            logs: vi.fn(),
+          })),
+          print,
+          printError: vi.fn(),
+          renderHelp: () => 'network help',
+          waitForShutdown: vi.fn(async () => undefined),
+        },
+      );
+    } finally {
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+      if (originalGithubToken === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = originalGithubToken;
+      if (originalGhToken === undefined) delete process.env.GH_TOKEN;
+      else process.env.GH_TOKEN = originalGhToken;
+    }
+
+    const report = JSON.parse(print.mock.calls.at(-1)?.[0] as string) as {
+      dependencies: Array<{ name: string; status: string; summary: string; remediationHint: string }>;
+    };
+    const github = report.dependencies.find((dependency) => dependency.name === 'github-api');
+    expect(github).toMatchObject({ status: 'degraded' });
+    expect(github?.summary).toContain('gh CLI is missing');
+  });
+
   it('prints a scoped credential inventory without secret values', async () => {
     const config = defaultConfig();
     config.network.operatorTokenRef = ' prod/operator-token ';

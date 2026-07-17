@@ -43,7 +43,11 @@ import { buildSloDashboardFromKanban, createSqliteSloDashboardSource } from '../
 import { parse as parseDotenv } from 'dotenv';
 import { createSecretStore } from '../network/secret-store.js';
 import { filterNetworkServices, resolveNetworkServices, type ResolvedNetworkService } from '../network/network-registry.js';
-import { NetworkStateStore } from '../network/network-state-store.js';
+import {
+  NetworkStateStore,
+  type ManagedNetworkServiceState,
+  type NetworkStateCorruptionDiagnostic,
+} from '../network/network-state-store.js';
 import { NetworkLogStore } from '../network/network-logs.js';
 import { NetworkSupervisor } from '../network/network-supervisor.js';
 import { renderNetworkHelp } from '../network/network-help.js';
@@ -70,6 +74,7 @@ import { resolveProviderCatalogEntry, resolveProviderType, type ProviderConfig }
 import type { ProviderRegistry as LlmProviderRegistry } from '../providers/provider-registry.js';
 import { redactLogData } from '../logging/redaction.js';
 import type { NetworkServiceHealthStatus } from '../network/network-health.js';
+import { resolveServiceHealth } from '../network/network-health.js';
 import {
   type DashboardAvailabilitySnapshot,
   type DashboardDependencySnapshot,
@@ -1406,7 +1411,7 @@ async function runChatCommandIfRequested(
               getAvailability: async () => {
                 const supervisor = createDefaultNetworkDeps(root).createSupervisor(paths);
                 const providers = buildDashboardProviderSnapshot(mutableConfig, providerRegistry, [resolveSelectedProvider(args, mutableConfig), ...(args.providers ?? [])]);
-                return buildCliServiceHealthSnapshot(args, mutableConfig, paths, supervisor, providers);
+                return buildCliServiceHealthSnapshot(args, mutableConfig, root, paths, supervisor, providers);
               },
               getMaintenanceMode: () => {
                 if (localBeastServices) return localBeastServices.maintenance.getState();
@@ -1739,7 +1744,13 @@ export interface NetworkCommandSupervisorLike {
   }): Promise<{ services: Array<{ id: string; status?: string | undefined; url?: string | undefined }> }>;
   down(): Promise<void>;
   stopAll(state: Awaited<ReturnType<NetworkCommandSupervisorLike['up']>>): Promise<void>;
-  status(): Promise<{ mode?: string; secureBackend?: string; services: NetworkServiceHealthStatus[]; availability?: DashboardAvailabilitySnapshot }>;
+  status(): Promise<{
+    mode?: string;
+    secureBackend?: string;
+    services: NetworkServiceHealthStatus[];
+    availability?: DashboardAvailabilitySnapshot;
+    stateCorruptions?: NetworkStateCorruptionDiagnostic[] | undefined;
+  }>;
   stop(target: string | 'all'): Promise<void>;
   logs(target: string | 'all'): Promise<string[]>;
 }
@@ -1848,16 +1859,34 @@ function formatAvailability(availability: DashboardAvailabilitySnapshot, label =
 function buildGithubHealthDependency(): DashboardDependencySnapshot {
   const hasToken = Boolean(firstNonEmptyEnv('GITHUB_TOKEN', 'GH_TOKEN'));
   const hasGh = isCommandAvailable('gh');
-  if (hasToken || hasGh) {
+  if (hasToken && hasGh) {
     return {
       name: 'github-api',
       type: 'github',
-      status: hasToken ? 'healthy' : 'degraded',
-      summary: hasToken
-        ? 'A GitHub token is available for issue and PR automation.'
-        : 'The gh CLI is installed, but no GitHub token environment variable is set for this process.',
-      remediationHint: hasToken ? 'No remediation needed.' : 'Run `gh auth status` or export GITHUB_TOKEN before unattended GitHub automation.',
-      safeWork: hasToken ? ['Issue and PR automation can continue.'] : ['Interactive gh-authenticated workflows may work; verify before unattended automation.'],
+      status: 'healthy',
+      summary: 'A GitHub token and the gh CLI are available for issue and PR automation.',
+      remediationHint: 'No remediation needed.',
+      safeWork: ['Issue and PR automation can continue.'],
+    };
+  }
+  if (hasToken) {
+    return {
+      name: 'github-api',
+      type: 'github',
+      status: 'degraded',
+      summary: 'A GitHub token is available, but the gh CLI is missing; repo issue and PR automation uses gh commands.',
+      remediationHint: 'Install gh and verify `gh auth status`, or avoid unattended issue/PR automation on this host.',
+      safeWork: ['Continue local implementation and tests; use GitHub automation only after gh is installed.'],
+    };
+  }
+  if (hasGh) {
+    return {
+      name: 'github-api',
+      type: 'github',
+      status: 'degraded',
+      summary: 'The gh CLI is installed, but no GitHub token environment variable is set for this process.',
+      remediationHint: 'Run `gh auth status` or export GITHUB_TOKEN before unattended GitHub automation.',
+      safeWork: ['Interactive gh-authenticated workflows may work; verify before unattended automation.'],
     };
   }
   return {
@@ -1870,7 +1899,21 @@ function buildGithubHealthDependency(): DashboardDependencySnapshot {
   };
 }
 
-function buildStateStoreHealthDependency(paths: Pick<NetworkPaths, 'frankenbeastDir'>): DashboardDependencySnapshot {
+function buildStateStoreHealthDependency(
+  paths: Pick<NetworkPaths, 'frankenbeastDir'>,
+  corruptions: readonly NetworkStateCorruptionDiagnostic[] = [],
+): DashboardDependencySnapshot {
+  const corruption = corruptions[0];
+  if (corruption) {
+    return {
+      name: 'state-store',
+      type: 'state-store',
+      status: 'degraded',
+      summary: `Managed network state at ${corruption.path} is malformed and was quarantined${corruption.quarantinePath ? ` at ${corruption.quarantinePath}` : ''}: ${corruption.reason}.`,
+      remediationHint: corruption.repairHint,
+      safeWork: ['Continue read-only inspection; recover or restart affected managed services before trusting persisted network state.'],
+    };
+  }
   const candidate = existsSync(paths.frankenbeastDir) ? paths.frankenbeastDir : dirname(paths.frankenbeastDir);
   try {
     if (existsSync(paths.frankenbeastDir) && !statSync(paths.frankenbeastDir).isDirectory()) {
@@ -1904,17 +1947,59 @@ function buildStateStoreHealthDependency(paths: Pick<NetworkPaths, 'frankenbeast
   }
 }
 
+async function resolveManagedProcessHealthFromConfig(
+  args: CliArgs,
+  config: OrchestratorConfig,
+  root: string,
+): Promise<NetworkServiceHealthStatus[]> {
+  const configFile = args.config ? resolvePath(args.config) : undefined;
+  const resolvedServices = filterNetworkServices(
+    resolveNetworkServices(config, {
+      repoRoot: root,
+      ...(configFile ? { configFile } : {}),
+      ...(args.networkSet ? { configOverrides: args.networkSet } : {}),
+      allowTrustedProviderCommandOverrides: args.trustProviderCommandOverrides,
+    }),
+    undefined,
+  );
+  const startedAt = new Date().toISOString();
+  const serviceStates: ManagedNetworkServiceState[] = resolvedServices.map((service) => ({
+    id: service.id,
+    pid: 0,
+    detached: false,
+    dependsOn: [...service.dependsOn],
+    startedAt,
+    status: 'already-running',
+    ...(service.runtimeConfig.inProcess ? { inProcess: service.runtimeConfig.inProcess } : {}),
+    ...(service.runtimeConfig.url ? { url: service.runtimeConfig.url } : {}),
+    ...(service.runtimeConfig.healthUrl ? { healthUrl: service.runtimeConfig.healthUrl } : {}),
+    ...(service.runtimeConfig.serviceIdentity ? { serviceIdentity: service.runtimeConfig.serviceIdentity } : {}),
+    ...(service.runtimeConfig.hostServiceId ? { hostServiceId: service.runtimeConfig.hostServiceId } : {}),
+    ...(service.runtimeConfig.channels ? { channels: service.runtimeConfig.channels } : {}),
+  }));
+
+  return Promise.all(
+    serviceStates.map((service) => resolveServiceHealth(service, healthcheckNetworkService, serviceStates)),
+  );
+}
+
 async function buildCliServiceHealthSnapshot(
   args: CliArgs,
   config: OrchestratorConfig,
+  root: string,
   paths: Pick<NetworkPaths, 'frankenbeastDir'>,
   supervisor: NetworkCommandSupervisorLike,
   providers = buildDashboardProviderSnapshot(config, undefined, [resolveSelectedProvider(args, config), ...(args.providers ?? [])]),
 ): Promise<DashboardAvailabilitySnapshot> {
-  const stateStore = buildStateStoreHealthDependency(paths);
   let networkServices: NetworkServiceHealthStatus[] | undefined;
+  let stateStore = buildStateStoreHealthDependency(paths);
   try {
-    networkServices = (await supervisor.status()).services;
+    const supervisorStatus = await supervisor.status();
+    stateStore = buildStateStoreHealthDependency(paths, supervisorStatus.stateCorruptions);
+    networkServices = supervisorStatus.services;
+    if (networkServices.length === 0 && process.env.FRANKENBEAST_NETWORK_MANAGED === '1') {
+      networkServices = await resolveManagedProcessHealthFromConfig(args, config, root);
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return buildServiceHealthSnapshot({
@@ -1988,7 +2073,7 @@ export async function runNetworkCommand(
   }
 
   if (action === 'health') {
-    const health = await buildCliServiceHealthSnapshot(args, config, paths, supervisor);
+    const health = await buildCliServiceHealthSnapshot(args, config, root, paths, supervisor);
     if (args.json) {
       deps.print(JSON.stringify(health, null, 2));
       return;
