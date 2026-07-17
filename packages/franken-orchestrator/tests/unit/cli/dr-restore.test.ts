@@ -91,7 +91,7 @@ describe('dr restore-dry-run CLI', () => {
     const output: string[] = [];
 
     try {
-      await mkdir(join(stateDir, 'approvals'), { recursive: true });
+      await mkdir(join(stateDir, 'approvals', 'nested'), { recursive: true });
       await mkdir(join(stateDir, 'memory'), { recursive: true });
       await mkdir(join(stateDir, 'runs', 'run-1'), { recursive: true });
       await mkdir(join(stateDir, 'logs'), { recursive: true });
@@ -100,10 +100,13 @@ describe('dr restore-dry-run CLI', () => {
       await writeFile(join(stateDir, 'config.json'), JSON.stringify({ provider: 'openai', apiToken: 'config-value-for-mask' }), 'utf8');
       await writeFile(join(stateDir, 'config.yaml'), 'provider: openai\napiToken: config-yaml-value-for-mask\n', 'utf8');
       const approvalFileToken = 'fileApprovalTokenForPath123';
+      const nestedApprovalFileToken = 'nestedApprovalTokenForPath456';
       const redactedApprovalLedgerPath = `approvals/approval-path-${createHash('sha256').update('ledger.json').digest('hex')}`;
       const redactedApprovalFilePath = `approvals/approval-path-${createHash('sha256').update(`${approvalFileToken}.json`).digest('hex')}`;
+      const redactedNestedApprovalFilePath = `approvals/approval-path-${createHash('sha256').update('nested').digest('hex')}/approval-path-${createHash('sha256').update(`${nestedApprovalFileToken}.json`).digest('hex')}`;
       await writeFile(join(stateDir, 'approvals', 'ledger.json'), JSON.stringify({ approvals: [{ id: 'approval-1', token: 'approval-value-for-mask', state: 'pending' }] }), 'utf8');
       await writeFile(join(stateDir, 'approvals', `${approvalFileToken}.json`), JSON.stringify({ id: 'approval-file-1', state: 'pending' }), 'utf8');
+      await writeFile(join(stateDir, 'approvals', 'nested', `${nestedApprovalFileToken}.json`), JSON.stringify({ id: 'approval-file-2', state: 'pending' }), 'utf8');
       await writeFile(join(stateDir, 'memory', 'store.json'), JSON.stringify({ memories: [{ key: 'user.pref', value: 'private memory body', metadata: { source: 'chat' } }] }), 'utf8');
       await writeFile(join(stateDir, 'memory', 'snapshot.json'), JSON.stringify({ working: { sessionA: { value: 'private working body' }, sessionB: { value: 'second private working body' } } }), 'utf8');
       await writeFile(join(stateDir, 'kanban-tasks.json'), JSON.stringify({ tasks: [{ id: 'task-1', title: 'private task title', status: 'running' }] }), 'utf8');
@@ -202,10 +205,11 @@ describe('dr restore-dry-run CLI', () => {
         expect.objectContaining({ path: 'config.json', sha256: expect.stringMatching(/^sha256:/u) }),
         expect.objectContaining({ path: 'config.yaml', sha256: expect.stringMatching(/^sha256:/u) }),
       ]));
-      expect(report.manifest.sections).toEqual(expect.objectContaining({ approvals: 4, memory: 5, tasks: 2, runs: 3, logs: 3 }));
+      expect(report.manifest.sections).toEqual(expect.objectContaining({ approvals: 5, memory: 5, tasks: 2, runs: 3, logs: 3 }));
       expect(report.evidence.approvals).toEqual(expect.arrayContaining([
         expect.objectContaining({ path: redactedApprovalLedgerPath }),
         expect.objectContaining({ path: redactedApprovalFilePath }),
+        expect.objectContaining({ path: redactedNestedApprovalFilePath }),
         expect.objectContaining({
           path: 'approval-ledger.db',
           table: 'approvals',
@@ -240,6 +244,7 @@ describe('dr restore-dry-run CLI', () => {
       expect(reportText).not.toContain('config-value-for-mask');
       expect(reportText).not.toContain('approval-value-for-mask');
       expect(reportText).not.toContain(approvalFileToken);
+      expect(reportText).not.toContain(nestedApprovalFileToken);
       expect(reportText).not.toContain('config-yaml-value-for-mask');
       expect(reportText).not.toContain('private memory body');
       expect(reportText).not.toContain('private working body');

@@ -148,9 +148,13 @@ function isMemoryStorePath(path: string): boolean {
 
 function redactApprovalPath(path: string): string {
   const parts = path.split('/');
-  return parts.map((part, index) => {
-    const previous = index > 0 ? parts[index - 1]?.toLowerCase() : undefined;
-    if (previous === 'approval' || previous === 'approvals') return `approval-path-${sha256Hex(part)}`;
+  let insideApprovalPath = false;
+  return parts.map((part) => {
+    if (insideApprovalPath) return `approval-path-${sha256Hex(part)}`;
+    const normalized = part.toLowerCase();
+    if (normalized === 'approval' || normalized === 'approvals') {
+      insideApprovalPath = true;
+    }
     return part;
   }).join('/');
 }
