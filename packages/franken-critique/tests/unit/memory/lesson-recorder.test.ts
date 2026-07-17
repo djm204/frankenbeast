@@ -462,6 +462,21 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('keeps retry/fallback status entries when they include workaround advice', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-retry-status-with-workaround',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      toolFailures: ['Retry with gh pr checks failed; use gh run view instead'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'procedure',
+        suggestedDestination: 'skill',
+      }),
+    );
+  });
+
   it('discards numbered task references even in conditional notes', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-numbered-pr-conditional',
@@ -563,6 +578,21 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('routes prefer-not-to-use corrections to memory review', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-prefer-not-use-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['Prefer not to use emojis'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'preference',
+        suggestedDestination: 'memory',
+      }),
+    );
+  });
+
   it('keeps conditional tool-context preferences on the memory path', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-conditional-tool-context-preference',
@@ -619,6 +649,50 @@ describe('extractPostTaskLessonCandidates', () => {
       expect.objectContaining({
         suggestedDestination: 'discard',
         privacyFilter: expect.objectContaining({ action: 'reject' }),
+      }),
+    );
+  });
+
+  it('discards failed retry/fallback status notes without workaround guidance', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-failed-retry-status-note',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Retry with gh run view failed'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'task-state',
+        suggestedDestination: 'discard',
+      }),
+    );
+  });
+
+  it('keeps positive docs reminders on the docs path', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-dont-forget-docs',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ["Don't forget to update the README with the npm ci requirement"],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'docs',
+      }),
+    );
+  });
+
+  it('discards conditional failure status notes without guidance', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-conditional-failure-status',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['When running npm test, it failed'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'task-state',
+        suggestedDestination: 'discard',
       }),
     );
   });
@@ -731,6 +805,36 @@ describe('extractPostTaskLessonCandidates', () => {
           action: 'admit',
           category: 'preference',
         }),
+      }),
+    );
+  });
+
+  it('discards task-scoped preference wording about a specific PR action', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-task-scoped-pr-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['I prefer PR #123 be merged'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'task-state',
+        suggestedDestination: 'discard',
+      }),
+    );
+  });
+
+  it('discards tool-failure workarounds scoped to a specific task reference', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-tool-failure-specific-pr',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      toolFailures: ['When PR #123 checks failed, use gh run view'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'task-state',
+        suggestedDestination: 'discard',
       }),
     );
   });

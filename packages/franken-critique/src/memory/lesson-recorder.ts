@@ -1185,7 +1185,7 @@ function isDocumentationUpdateLesson(text: string): boolean {
     return true;
   }
   if (
-    /^(?:please\s+)?(?:do\s+not|don't|never|avoid)\b.{0,80}\b(?:add|document|record|publish|update|write)\b.{0,80}\b(?:docs?|readme|runbook|guide)\b|\b(?:avoid|never|don'?t|do\s+not)\b.{0,80}\b(?:docs?|documentation|document|write)\b|\b(?:docs?|documentation)\b.{0,80}\b(?:avoid|never|don'?t|do\s+not|unless)\b/i.test(
+    /^(?:please\s+)?(?:do\s+not|don't(?!\s+forget\s+to\b)|never|avoid)\b.{0,80}\b(?:add|document|record|publish|update|write)\b.{0,80}\b(?:docs?|readme|runbook|guide)\b|\b(?:avoid|never|don'?t(?!\s+forget\s+to\b)|do\s+not)\b.{0,80}\b(?:docs?|documentation|document|write)\b|\b(?:docs?|documentation)\b.{0,80}\b(?:avoid|never|don'?t(?!\s+forget\s+to\b)|do\s+not|unless)\b/i.test(
       text,
     )
   ) {
@@ -1263,6 +1263,12 @@ function isRawUserPreferenceCorrection(text: string): boolean {
     /^(?:please\s+)?(?:do\s+not\s+use|don't\s+use|never\s+use|avoid\s+using|avoid\s+use)\s+(?:the\s+)?(?:gh\s+cli|github\s+cli|cli|pnpm|npm|yarn|node|bun|deno|uv|pip|poetry|package\s+manager)\b/i.test(
       text,
     )
+  ) {
+    return true;
+  }
+  if (
+    /^(?:please\s+)?prefer\s+not\s+to\s+use\b/i.test(text) &&
+    !isTaskReferenceBookkeeping(text)
   ) {
     return true;
   }
@@ -1387,18 +1393,19 @@ function hasReusableToolFailureSignal(text: string): boolean {
     return false;
   }
   if (/\bworkaround\s*:/i.test(text)) return true;
-  if (/\b(?:retry|fallback)\s+(?:with|using|via|by)\b/i.test(text)) {
-    return true;
-  }
   const hasInstructionalWorkaround =
     /\b(?:when|if)\b.{0,160}\b(?:run|check|use|retry|fallback|workaround)\b|\b(?:run|check|use|retry|fallback|workaround)\b.{0,160}\b(?:when|if|after|before|instead|giving\s+up)\b/i.test(
       text,
     ) ||
     /(?:;|,)\s*(?:use|run|check|retry|fallback)\b/i.test(text) ||
-    /\b(?:returned|failed|error|timed\s*out|timeout|exit(?:ed)?\s+\d+)\b.{0,160}\b(?:use|fallback|workaround)\b|\b(?:use|fallback|workaround)\b.{0,160}\b(?:returned|failed|error|timed\s*out|timeout|exit(?:ed)?\s+\d+)\b/i.test(
+    /\b(?:returned|failed|error|timed\s*out|timeout|exit(?:ed)?\s+\d+)\b.{0,160}\b(?:use|fallback|workaround)\b|\b(?:use|workaround)\b.{0,160}\b(?:returned|failed|error|timed\s*out|timeout|exit(?:ed)?\s+\d+)\b/i.test(
       text,
     );
   if (hasInstructionalWorkaround) return true;
+  if (isFailedRetryOrFallbackStatus(text)) return false;
+  if (/\b(?:retry|fallback)\s+(?:with|using|via|by)\b/i.test(text)) {
+    return true;
+  }
   if (isRawToolFailureStatus(text)) return false;
   return false;
 }
@@ -1423,7 +1430,7 @@ function isRawToolFailureStatus(text: string): boolean {
 
 function isConditionalFailureStatus(text: string): boolean {
   return (
-    /\b(?:when|if)\b.{0,120}\b(?:run|running|check|checking|use|using)\b.{0,120}\b(?:failed|fails|error|timed\s*out|timeout|crashed)\b/i.test(
+    /\b(?:when|if)\b.{0,120}\b(?:run|running|ran|check|checking|checked|use|using)\b.{0,120}\b(?:failed|fails|failure|error|errored|timed\s*out|timeout|crashed)\b/i.test(
       text,
     ) && !hasStatusRecoveryGuidance(text)
   );
@@ -1432,13 +1439,14 @@ function isConditionalFailureStatus(text: string): boolean {
 function isTaskScopedToolFailureReference(text: string): boolean {
   return (
     TASK_STATE_PATTERNS.some((pattern) => pattern.test(text)) &&
-    /\b(?:failed|fails|error|timed\s*out|timeout|crashed|checks?)\b/i.test(
+    /\b(?:failed|fails|failure|error|errored|timed\s*out|timeout|crashed|checks?)\b/i.test(
       text,
     )
   );
 }
 
 function hasReusableProcedureGuidance(text: string): boolean {
+  if (isConditionalFailureStatus(text)) return false;
   return /\b(?:always|when|if)\b.{0,160}\b(?:run|running|use|using|check|checks?|verify|retry|fallback|workaround)\b.{0,160}\b(?:before|after|instead|when|if|tests?|giving\s+up)\b|\b(?:run|running|use|using|check|checks?|verify|retry|fallback|workaround)\b.{0,160}\b(?:always|when|if|before|after|instead|giving\s+up)\b/i.test(
     text,
   );
@@ -1478,7 +1486,10 @@ function isTaskReferenceBookkeeping(text: string): boolean {
     !/^\s*(?:when|if)\b/i.test(text) &&
     !isDocumentationUpdateLesson(text)
   ) {
-    return false;
+    return /\b(?:pr|pull\s+request|issue|ticket|task)\b/i.test(text) &&
+      /\b(?:merge|merged|close|closed|open|opened|fix|fixed|complete|completed|done|approve|approved|review|reviewed)\b/i.test(
+        text,
+      );
   }
   if (hasSpecificTaskReference && !isDocumentationUpdateLesson(text)) {
     return true;
