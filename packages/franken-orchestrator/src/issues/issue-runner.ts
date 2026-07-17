@@ -757,7 +757,7 @@ function explicitProcessCrash(snapshot: IssueWorkerCardProcessSnapshot): boolean
 
 function redactStuckRunEvidenceText(value: string): string {
   return redactSensitiveText(value)
-    .replace(/\b([A-Za-z0-9_]*(?:SECRET|PASSWORD|CREDENTIAL)[A-Za-z0-9_]*|[A-Za-z0-9_]*API[_-]?KEY[A-Za-z0-9_]*)\s*:\s*(?:"[^"]*"|'[^']*'|[^\r\n]*)/gi, '$1=<redacted>')
+    .replace(/\b([A-Za-z0-9_]*(?:SECRET|PASSWORD|CREDENTIAL)[A-Za-z0-9_]*|[A-Za-z0-9_]*API[_-]?KEY[A-Za-z0-9_]*)\s*:\s*(?:"[^"]*"|'[^']*'|.*?)(?=\s+[A-Za-z0-9_]*(?:SECRET|PASSWORD|CREDENTIAL|API[_-]?KEY)[A-Za-z0-9_]*\s*[:=]|$)/gi, '$1=<redacted>')
     .replace(/\b([A-Za-z0-9_]*(?:SECRET|PASSWORD|CREDENTIAL)[A-Za-z0-9_]*|[A-Za-z0-9_]*API[_-]?KEY[A-Za-z0-9_]*)\s*=\s*\S+/gi, '$1=<redacted>')
     .replace(/\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[opusr]_[A-Za-z0-9_.-]{12,})\b/g, '[REDACTED_TOKEN]')
     .replace(/\b(sk|xox[baprs]?|hf|glpat)-[A-Za-z0-9._/-]+\b/g, '$1-[REDACTED]')
