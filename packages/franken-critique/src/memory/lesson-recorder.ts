@@ -1915,7 +1915,7 @@ function isLessonScopeAllowed(
   if (isEmptyLessonInjectionContext(context)) {
     return false;
   }
-  const nowMs = parseScopeTimestamp(context.now ?? new Date().toISOString());
+  const nowMs = parseContextTimestamp(context.now ?? new Date().toISOString());
   if (nowMs === undefined) {
     return false;
   }
@@ -1985,7 +1985,18 @@ function hasValidScopeAuditTrail(
   const validEntries = scope.auditTrail.filter(
     (entry): entry is LessonScopeAuditEntry => isValidScopeAuditEntry(entry),
   );
-  const latestEntry = validEntries.at(-1);
+  const latestEntry = validEntries.reduce<LessonScopeAuditEntry | undefined>(
+    (latest, entry) => {
+      if (latest === undefined) {
+        return entry;
+      }
+      return parseScopeTimestamp(entry.changedAt)! >
+        parseScopeTimestamp(latest.changedAt)!
+        ? entry
+        : latest;
+    },
+    undefined,
+  );
   return latestEntry?.toScope === currentScope;
 }
 
@@ -2015,6 +2026,11 @@ function parseScopeTimestamp(timestamp: string): number | undefined {
     return undefined;
   }
   return new Date(parsed).toISOString() === timestamp ? parsed : undefined;
+}
+
+function parseContextTimestamp(timestamp: string): number | undefined {
+  const parsed = Date.parse(timestamp);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function isKnownLessonScopeKind(

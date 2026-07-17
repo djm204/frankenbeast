@@ -1762,6 +1762,22 @@ describe('LessonRecorder', () => {
       }),
     ).toBe(false);
 
+    const importedRepoWithUnorderedStaleAuditScope = {
+      ...importedRepoWithStaleAuditScope,
+      lessonScope: {
+        ...importedRepoWithStaleAuditScope.lessonScope,
+        auditTrail: [
+          importedRepoWithStaleAuditScope.lessonScope.auditTrail[1]!,
+          importedRepoWithStaleAuditScope.lessonScope.auditTrail[0]!,
+        ],
+      },
+    } satisfies CritiqueLesson;
+    expect(
+      isLessonApplicable(importedRepoWithUnorderedStaleAuditScope, {
+        repo: 'djm204/frankenbeast',
+      }),
+    ).toBe(false);
+
     const importedRepoWithMalformedAllowlist = {
       ...repoScoped,
       lessonScope: {
@@ -1846,6 +1862,12 @@ describe('LessonRecorder', () => {
       isLessonApplicable(expired, {
         role: 'worker',
         now: '2026-07-13T01:30:00.000Z',
+      }),
+    ).toBe(true);
+    expect(
+      isLessonApplicable(expired, {
+        role: 'worker',
+        now: '2026-07-13T01:30:00Z',
       }),
     ).toBe(true);
     expect(
