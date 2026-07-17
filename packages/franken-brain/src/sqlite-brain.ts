@@ -3380,10 +3380,11 @@ export class SqliteMemoryReviewQueue {
       ...options,
       includeExpired: options.includeExpired ? true : false,
       now,
-      limit,
+      limit: 1000,
     });
     return provenance
       .filter(record => this.provenanceMatchesCurrentWorkingState(record))
+      .slice(0, limit)
       .map((record) => this.provenanceToCompactedEntry(record, options, now));
   }
 
