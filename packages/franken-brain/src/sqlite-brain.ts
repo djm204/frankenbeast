@@ -3382,7 +3382,17 @@ export class SqliteMemoryReviewQueue {
       now,
       limit,
     });
-    return provenance.map((record) => this.provenanceToCompactedEntry(record, options, now));
+    return provenance
+      .filter(record => this.provenanceMatchesCurrentWorkingState(record))
+      .map((record) => this.provenanceToCompactedEntry(record, options, now));
+  }
+
+  private provenanceMatchesCurrentWorkingState(record: MemoryProvenanceRecord): boolean {
+    if (record.targetStore !== 'working') return true;
+    const state = this.working.reviewValueState(record.key);
+    if (state.state !== 'present') return false;
+    return stableStringify(canonicalMemoryValue(state.value)) ===
+      stableStringify(canonicalMemoryValue(record.value));
   }
 
   private provenanceToCompactedEntry(
@@ -4374,9 +4384,10 @@ export class SqliteMemoryReviewQueue {
       if (stableStringify(canonicalMemoryValue(this.decodeValue(row.value))) !== candidateValue) {
         continue;
       }
+      const storedSourceId = row.source_id ? this.decodeText(row.source_id) : undefined;
       if (
         this.decodeText(row.source) === candidate.source &&
-        optionalTextMatches(row.source_id ? this.decodeText(row.source_id) : undefined, candidate.sourceId) &&
+        (storedSourceId === undefined || storedSourceId === candidate.sourceId) &&
         (row.evidence_id ? this.decodeText(row.evidence_id) : undefined) ===
           candidate.evidenceId
       ) {
@@ -4916,14 +4927,21 @@ export class SqliteBrain implements IBrain {
     }
   }
 
-  private static expireLiveWorkingMatches(dbPath: string, selector: NormalizedRightToForgetSelector): void {
+  private static expireLiveWorkingMatches(
+    dbPath: string,
+    selector: NormalizedRightToForgetSelector,
+    keysToExpire: readonly string[] = [],
+  ): void {
     const normalizedDbPath = normalizeSqliteDbPath(dbPath);
     if (normalizedDbPath === ':memory:' || selector.type === 'episodic') return;
     const liveBrains = liveSqliteBrainsByPath.get(normalizedDbPath);
     if (!liveBrains) return;
     for (const brain of liveBrains) {
-      const keys = brain.working.matchingRuntimeKeys(selector);
-      brain.working.expireRuntimeKeys(keys, selector);
+      const keys = new Set([
+        ...brain.working.matchingRuntimeKeys(selector),
+        ...keysToExpire,
+      ]);
+      brain.working.expireRuntimeKeys(Array.from(keys), selector);
     }
   }
 
@@ -5296,7 +5314,11 @@ export class SqliteBrain implements IBrain {
         this.working.deleteRuntimeKeys(Array.from(runtimeWorkingKeysToDelete));
         purgeDeletedSqliteContent(this.db, this.dbPath);
       }
-      SqliteBrain.expireLiveWorkingMatches(this.dbPath, normalizedSelector);
+      SqliteBrain.expireLiveWorkingMatches(
+        this.dbPath,
+        normalizedSelector,
+        Array.from(runtimeWorkingKeysToDelete),
+      );
       return {
         selectorHash,
         dryRun,
