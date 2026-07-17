@@ -1859,6 +1859,7 @@ function formatAvailability(availability: DashboardAvailabilitySnapshot, label =
 function buildGithubHealthDependency(): DashboardDependencySnapshot {
   const hasToken = Boolean(firstNonEmptyEnv('GITHUB_TOKEN', 'GH_TOKEN'));
   const hasGh = isCommandAvailable('gh');
+  const ghAuthenticated = hasGh && isGhAuthenticated();
   if (hasToken && hasGh) {
     return {
       name: 'github-api',
@@ -1883,10 +1884,12 @@ function buildGithubHealthDependency(): DashboardDependencySnapshot {
     return {
       name: 'github-api',
       type: 'github',
-      status: 'degraded',
-      summary: 'The gh CLI is installed, but no GitHub token environment variable is set for this process.',
-      remediationHint: 'Run `gh auth status` or export GITHUB_TOKEN before unattended GitHub automation.',
-      safeWork: ['Interactive gh-authenticated workflows may work; verify before unattended automation.'],
+      status: ghAuthenticated ? 'healthy' : 'degraded',
+      summary: ghAuthenticated
+        ? 'The gh CLI is installed and authenticated for issue and PR automation.'
+        : 'The gh CLI is installed, but this process could not verify GitHub authentication.',
+      remediationHint: ghAuthenticated ? 'No remediation needed.' : 'Run `gh auth status` or export GITHUB_TOKEN before unattended GitHub automation.',
+      safeWork: ghAuthenticated ? ['Issue and PR automation can continue.'] : ['Interactive gh-authenticated workflows may work; verify before unattended automation.'],
     };
   }
   return {
@@ -1897,6 +1900,15 @@ function buildGithubHealthDependency(): DashboardDependencySnapshot {
     remediationHint: 'Install gh and authenticate, or export GITHUB_TOKEN/GH_TOKEN.',
     safeWork: ['Continue local-only implementation and tests.'],
   };
+}
+
+function isGhAuthenticated(): boolean {
+  try {
+    execFileSync('gh', ['auth', 'status', '--hostname', 'github.com'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function buildStateStoreHealthDependency(
@@ -1914,7 +1926,8 @@ function buildStateStoreHealthDependency(
       safeWork: ['Continue read-only inspection; recover or restart affected managed services before trusting persisted network state.'],
     };
   }
-  const candidate = existsSync(paths.frankenbeastDir) ? paths.frankenbeastDir : dirname(paths.frankenbeastDir);
+  const networkStateDir = join(paths.frankenbeastDir, 'network');
+  const candidate = existsSync(networkStateDir) ? networkStateDir : dirname(networkStateDir);
   try {
     if (existsSync(paths.frankenbeastDir) && !statSync(paths.frankenbeastDir).isDirectory()) {
       return {
@@ -1931,7 +1944,7 @@ function buildStateStoreHealthDependency(
       name: 'state-store',
       type: 'state-store',
       status: 'healthy',
-      summary: `State directory ${paths.frankenbeastDir} is writable or can be created.`,
+      summary: `Network state directory ${networkStateDir} is writable or can be created.`,
       remediationHint: 'No remediation needed.',
       safeWork: ['Stateful orchestrator, web, and network operations can persist status.'],
     };
@@ -1940,7 +1953,7 @@ function buildStateStoreHealthDependency(
       name: 'state-store',
       type: 'state-store',
       status: 'unavailable',
-      summary: `State directory ${paths.frankenbeastDir} is not writable by this process.`,
+      summary: `Network state directory ${networkStateDir} is not writable by this process.`,
       remediationHint: 'Fix filesystem ownership/permissions or choose a writable --base-dir before running managed services.',
       safeWork: ['Continue read-only inspection; avoid operations that need persisted state.'],
     };

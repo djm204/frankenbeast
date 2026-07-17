@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve as resolvePath } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -391,6 +391,47 @@ describe('runNetworkCommand', () => {
     expect(stateStore?.summary).toContain('Unexpected token');
   });
 
+  it('health checks the actual network state directory permissions', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'frankenbeast-network-state-health-'));
+    const paths = makePaths(root);
+    await mkdir(join(paths.frankenbeastDir, 'network'), { recursive: true });
+    await chmod(join(paths.frankenbeastDir, 'network'), 0o500);
+    const print = vi.fn();
+    try {
+      await runNetworkCommand(
+        makeArgs({ networkAction: 'health', json: true }),
+        defaultConfig(),
+        root,
+        paths,
+        {
+          resolveServices: vi.fn(() => []),
+          createSupervisor: vi.fn(() => ({
+            up: vi.fn(),
+            stopAll: vi.fn(),
+            down: vi.fn(),
+            status: vi.fn(async () => ({ services: [] })),
+            stop: vi.fn(),
+            logs: vi.fn(),
+          })),
+          print,
+          printError: vi.fn(),
+          renderHelp: () => 'network help',
+          waitForShutdown: vi.fn(async () => undefined),
+        },
+      );
+    } finally {
+      await chmod(join(paths.frankenbeastDir, 'network'), 0o700).catch(() => undefined);
+      await rm(root, { recursive: true, force: true });
+    }
+
+    const report = JSON.parse(print.mock.calls.at(-1)?.[0] as string) as {
+      dependencies: Array<{ name: string; status: string; summary: string }>;
+    };
+    const stateStore = report.dependencies.find((dependency) => dependency.name === 'state-store');
+    expect(stateStore).toMatchObject({ status: 'unavailable' });
+    expect(stateStore?.summary).toContain('/network');
+  });
+
   it('health downgrades GitHub automation when a token exists without gh', async () => {
     const originalPath = process.env.PATH;
     const originalGithubToken = process.env.GITHUB_TOKEN;
@@ -436,6 +477,58 @@ describe('runNetworkCommand', () => {
     const github = report.dependencies.find((dependency) => dependency.name === 'github-api');
     expect(github).toMatchObject({ status: 'degraded' });
     expect(github?.summary).toContain('gh CLI is missing');
+  });
+
+  it('health accepts gh authentication without requiring a token environment variable', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'frankenbeast-gh-auth-'));
+    const gh = join(root, 'gh');
+    await writeFile(gh, '#!/bin/sh\nexit 0\n', 'utf-8');
+    await chmod(gh, 0o700);
+    const originalPath = process.env.PATH;
+    const originalGithubToken = process.env.GITHUB_TOKEN;
+    const originalGhToken = process.env.GH_TOKEN;
+    process.env.PATH = root;
+    delete process.env.GITHUB_TOKEN;
+    delete process.env.GH_TOKEN;
+    const print = vi.fn();
+    try {
+      await runNetworkCommand(
+        makeArgs({ networkAction: 'health', json: true }),
+        defaultConfig(),
+        '/repo/frankenbeast',
+        makePaths(),
+        {
+          resolveServices: vi.fn(() => []),
+          createSupervisor: vi.fn(() => ({
+            up: vi.fn(),
+            stopAll: vi.fn(),
+            down: vi.fn(),
+            status: vi.fn(async () => ({ services: [] })),
+            stop: vi.fn(),
+            logs: vi.fn(),
+          })),
+          print,
+          printError: vi.fn(),
+          renderHelp: () => 'network help',
+          waitForShutdown: vi.fn(async () => undefined),
+        },
+      );
+    } finally {
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+      if (originalGithubToken === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = originalGithubToken;
+      if (originalGhToken === undefined) delete process.env.GH_TOKEN;
+      else process.env.GH_TOKEN = originalGhToken;
+      await rm(root, { recursive: true, force: true });
+    }
+
+    const report = JSON.parse(print.mock.calls.at(-1)?.[0] as string) as {
+      dependencies: Array<{ name: string; status: string; summary: string }>;
+    };
+    const github = report.dependencies.find((dependency) => dependency.name === 'github-api');
+    expect(github).toMatchObject({ status: 'healthy' });
+    expect(github?.summary).toContain('authenticated');
   });
 
   it('prints a scoped credential inventory without secret values', async () => {

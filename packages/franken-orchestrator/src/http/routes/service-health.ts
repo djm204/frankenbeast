@@ -133,19 +133,27 @@ function backgroundLoopDependencies(services: readonly NetworkServiceHealthStatu
 
 export function buildServiceHealthSnapshot(input: ServiceHealthAggregatorInput): DashboardAvailabilitySnapshot {
   const services = input.networkServices;
-  const dependencies: DashboardDependencySnapshot[] = [
-    serviceDependency(
+  const webService = findService(services, ['dashboard-web', 'web-ui', 'franken-web']);
+  const orchestratorService = findService(services, ['chat-server', 'orchestrator-api', 'beasts-daemon']);
+  const serviceDependencies: DashboardDependencySnapshot[] = [];
+  if (webService || services === undefined) {
+    serviceDependencies.push(serviceDependency(
       'web-ui',
       'web',
-      findService(services, ['dashboard-web', 'web-ui', 'franken-web']),
+      webService,
       'Run `frankenbeast network status` and restart the dashboard service if needed.',
-    ),
-    serviceDependency(
+    ));
+  }
+  if (orchestratorService || services === undefined) {
+    serviceDependencies.push(serviceDependency(
       'orchestrator-api',
       'orchestrator',
-      findService(services, ['chat-server', 'orchestrator-api', 'beasts-daemon']),
+      orchestratorService,
       'Run `frankenbeast network status` and restart chat-server or beasts-daemon if needed.',
-    ),
+    ));
+  }
+  const dependencies: DashboardDependencySnapshot[] = [
+    ...serviceDependencies,
     input.github ?? dependency(
       'github-api',
       'github',

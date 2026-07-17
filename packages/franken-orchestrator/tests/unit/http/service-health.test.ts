@@ -65,6 +65,21 @@ describe('buildServiceHealthSnapshot', () => {
     expect(loops?.summary).toContain('No optional background loop channels are enabled');
   });
 
+  it('does not require intentionally disabled web services in the aggregate snapshot', () => {
+    const snapshot = buildServiceHealthSnapshot({
+      providers: [healthyProvider],
+      networkServices: [
+        { id: 'chat-server', status: 'running' },
+      ],
+      github: healthyGithub,
+      stateStore: healthyStateStore,
+    });
+
+    expect(snapshot.status).toBe('healthy');
+    expect(snapshot.dependencies.find((dependency) => dependency.name === 'web-ui')).toBeUndefined();
+    expect(snapshot.dependencies.find((dependency) => dependency.name === 'orchestrator-api')).toMatchObject({ status: 'healthy' });
+  });
+
   it('preserves degraded managed service health in the aggregate snapshot', () => {
     const snapshot = buildServiceHealthSnapshot({
       providers: [healthyProvider],
