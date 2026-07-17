@@ -73,7 +73,8 @@ async function readStdinPayload(): Promise<string> {
 const MEMORY_RESULT_PAYLOAD_REDACTION_TOOLS = new Set([
   'fbeast_memory_export',
   'fbeast_memory_access_audit_report',
-  'fbeast_memory_retention_report',  'fbeast_memory_review_propose',
+  'fbeast_memory_retention_report',
+  'fbeast_memory_review_propose',
   'fbeast_memory_review_list',
   'fbeast_memory_review_decide',
   'fbeast_memory_source_attribution',
@@ -107,6 +108,44 @@ function markHookGovernanceContext(context: string): string {
     [HOOK_GOVERNANCE_SOURCE_KEY]: HOOK_GOVERNANCE_SOURCE,
     contextText: context,
   });
+}
+
+function parseJsonRecord(text: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function hookAuditArgsFromContext(context: string): Record<string, unknown> | undefined {
+  const parsed = parseJsonRecord(redactSecrets(context));
+  if (!parsed) return undefined;
+  const toolInput = parsed['tool_input'];
+  if (toolInput !== null && typeof toolInput === 'object' && !Array.isArray(toolInput)) {
+    const args = (toolInput as Record<string, unknown>)['args'];
+    return args !== null && typeof args === 'object' && !Array.isArray(args)
+      ? args as Record<string, unknown>
+      : toolInput as Record<string, unknown>;
+  }
+  const args = parsed['args'];
+  return args !== null && typeof args === 'object' && !Array.isArray(args)
+    ? args as Record<string, unknown>
+    : parsed;
+}
+
+function hookAuditOutcomeFromPayload(payload: string): { ok?: boolean; decision?: string } {
+  const parsed = parseJsonRecord(payload);
+  if (!parsed) return { ok: true };
+  if (typeof parsed['ok'] === 'boolean') return { ok: parsed['ok'] };
+  if (typeof parsed['isError'] === 'boolean') return { ok: !parsed['isError'] };
+  if (typeof parsed['decision'] === 'string' && parsed['decision'].trim().length > 0) {
+    return { decision: parsed['decision'].trim() };
+  }
+  return { ok: true };
 }
 
 function redactPostToolPayload(toolName: string, payload: string): string {
@@ -172,9 +211,18 @@ export async function runHook(
       ? await (resolvedDeps.readPostToolPayload?.() ?? readStdinPayload())
       : '';
     const rawPostPayload = payload || streamedPayload;
+    const hookArgs = hookAuditArgsFromContext(resolvedDeps.readContext());
+    const outcome = hookAuditOutcomeFromPayload(rawPostPayload);
     await resolvedDeps.observer.log({
       event: 'tool_call',
-      metadata: JSON.stringify({ [HOOK_GOVERNANCE_SOURCE_KEY]: HOOK_GOVERNANCE_SOURCE, toolName, payload: redactPostToolPayload(toolName, rawPostPayload), phase }),
+      metadata: JSON.stringify({
+        [HOOK_GOVERNANCE_SOURCE_KEY]: HOOK_GOVERNANCE_SOURCE,
+        toolName,
+        ...(hookArgs ? { args: hookArgs } : {}),
+        ...outcome,
+        payload: redactPostToolPayload(toolName, rawPostPayload),
+        phase,
+      }),
       sessionId: resolvedDeps.sessionId(),
     });
     process.stdout.write(JSON.stringify({ logged: true }) + '\n');

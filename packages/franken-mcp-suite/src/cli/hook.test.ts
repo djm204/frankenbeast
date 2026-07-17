@@ -42,6 +42,7 @@ describe('runHook', () => {
       metadata: JSON.stringify({
         __fbeastHookSource: 'fbeast-hook',
         toolName: 'fbeast_memory_retention_report',
+        ok: true,
         payload: '[memory-review-result-redacted]',
         phase: 'post-tool',
       }),
@@ -62,5 +63,41 @@ describe('runHook', () => {
 
     const metadata = JSON.parse(log.mock.calls[0]![0].metadata) as { payload: string };
     expect(metadata.payload).toBe('[memory-review-result-redacted]');
+  });
+
+  it('records sanitized hook args and post-tool outcomes for audit reports', async () => {
+    const { deps, log } = hookDeps();
+    deps.readContext = () => JSON.stringify({
+      args: {
+        agentId: 'agent-hook-post',
+        profile: 'hook-test',
+        repo: 'djm204/frankenbeast',
+        type: 'working',
+      },
+      token: '«redacted:ghp_…»',
+    });
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    await runHook([
+      'post-tool',
+      'fbeast_memory_query',
+      '{"ok":true,"content":[{"type":"text","text":"safe"}]}',
+    ], deps);
+
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({ event: 'tool_call', sessionId: 'session-1' }));
+    expect(JSON.parse(log.mock.calls[0]![0].metadata)).toEqual({
+      __fbeastHookSource: 'fbeast-hook',
+      toolName: 'fbeast_memory_query',
+      args: {
+        agentId: 'agent-hook-post',
+        profile: 'hook-test',
+        repo: 'djm204/frankenbeast',
+        type: 'working',
+      },
+      ok: true,
+      payload: '{"ok":true,"content":[{"type":"text","text":"safe"}]}',
+      phase: 'post-tool',
+    });
+    expect(log.mock.calls.map((call) => JSON.stringify(call)).join('\n')).not.toContain('«redacted:ghp_…»');
   });
 });

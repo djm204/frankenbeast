@@ -203,6 +203,17 @@ function mergeTrustedGovernanceProvenance(context: string, payload: Record<strin
   return { ...trustedGovernanceProvenance(context), ...payload };
 }
 
+function hasDuplicateReservedProvenanceKeys(context: string): boolean {
+  const counts = new Map<string, number>();
+  for (const match of context.matchAll(/"(__fbeast(?:Governance|Hook)Source)"\s*:/g)) {
+    const key = match[1] ?? '';
+    if (key.length === 0) continue;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    if ((counts.get(key) ?? 0) > 1) return true;
+  }
+  return false;
+}
+
 function contextTargetsTool(context: string, toolName: string): boolean {
   try {
     const parsed = JSON.parse(context) as unknown;
@@ -823,6 +834,14 @@ export function createGovernorAdapter(dbPath: string): GovernorAdapter {
   return {
     async check(input) {
       const isDryRunForget = isRightToForgetDryRun(input.action, input.context);
+      if (hasDuplicateReservedProvenanceKeys(input.context)) {
+        const reason = 'Duplicate reserved fbeast provenance keys are not allowed.';
+        store.db.prepare(`
+          INSERT INTO governor_log (action, context, decision, reason)
+          VALUES (?, ?, ?, ?)
+        `).run(input.action, '[duplicate-reserved-provenance-rejected]', 'denied', reason);
+        return { decision: 'denied', reason };
+      }
       const context = redactGovernanceContext(input.action, input.context);
       const result = isDryRunForget
         ? {
