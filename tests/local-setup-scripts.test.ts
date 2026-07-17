@@ -126,9 +126,9 @@ describe('local setup scripts', () => {
     expect(read('README.md')).toContain('fixed compose defaults for Grafana (http://localhost:3000/api/health)');
     expect(read('README.md')).toContain('Tempo readiness (http://localhost:3200/ready)');
     expect(read('README.md')).toContain('.env.example intentionally does not define a TEMPO_ENDPOINT override');
-    expect(source).toContain("const chromaUrl = process.env['CHROMA_URL'] ?? envFile.get('CHROMA_URL') ?? 'http://localhost:8000'");
-    expect(source).toContain("const grafanaUrl = 'http://localhost:3000'");
-    expect(source).toContain("const tempoUrl = 'http://localhost:3200'");
+    expect(source).toContain("chroma: process.env['CHROMA_URL'] ?? parsed.get('CHROMA_URL') ?? 'http://localhost:8000'");
+    expect(source).toContain("grafana: process.env['FRANKEN_LOCAL_GRAFANA_URL'] ?? parsed.get('FRANKEN_LOCAL_GRAFANA_URL') ?? 'http://localhost:3000'");
+    expect(source).toContain("tempo: process.env['FRANKEN_LOCAL_TEMPO_URL'] ?? parsed.get('FRANKEN_LOCAL_TEMPO_URL') ?? 'http://localhost:3200'");
     expect(source).toContain("await checkHttp('ChromaDB', `${chromaUrl}/api/v2/heartbeat`, options.requireServices)");
     expect(source).toContain("await checkHttp('Grafana', `${grafanaUrl}/api/health`, options.requireServices)");
     expect(source).toContain("await checkHttp('Tempo', `${tempoUrl}/ready`, options.requireServices)");
@@ -149,7 +149,7 @@ describe('local setup scripts', () => {
     expect(source).toContain('Required bootstrap env vars');
     expect(source).toContain('if (!options.requireServices)');
     expect(source).toContain('checkRequiredBootstrapEnv(options.envFile, envFile)');
-    expect(source).toContain("envFile.get('CHROMA_URL')");
+    expect(source).toContain("parsed.get('CHROMA_URL')");
     expect(source).toContain('checks: results');
     expect(source).toContain('action');
     expect(source).toContain("shell: process.platform === 'win32'");
@@ -222,6 +222,7 @@ describe('local setup scripts', () => {
     const bin = join(fixture, 'bin');
     mkdirSync(root, { recursive: true });
     mkdirSync(join(root, 'node_modules'), { recursive: true });
+    writeFileSync(join(root, 'node_modules/.package-lock.json'), '{}');
     mkdirSync(bin, { recursive: true });
     writeFileSync(join(root, 'package-lock.json'), '{}');
     writeFileSync(join(root, 'frankenbeast.config.example.json'), '{}');
@@ -230,6 +231,8 @@ describe('local setup scripts', () => {
       'CHROMA_URL=http://127.0.0.1:9',
       'GRAFANA_URL=http://127.0.0.1:9',
       'TEMPO_URL=http://127.0.0.1:9',
+      'FRANKEN_LOCAL_GRAFANA_URL=http://127.0.0.1:9',
+      'FRANKEN_LOCAL_TEMPO_URL=http://127.0.0.1:9',
       'FRANKEN_MAX_TOTAL_TOKENS=1',
       'FRANKEN_MAX_DURATION_MS=1',
       'FRANKEN_MAX_CRITIQUE_ITERATIONS=1',
@@ -272,6 +275,7 @@ describe('local setup scripts', () => {
     const bin = join(fixture, 'bin');
     mkdirSync(root, { recursive: true });
     mkdirSync(join(root, 'node_modules'), { recursive: true });
+    writeFileSync(join(root, 'node_modules/.package-lock.json'), '{}');
     mkdirSync(bin, { recursive: true });
     writeFileSync(join(root, 'package-lock.json'), '{}');
     writeFileSync(join(root, 'frankenbeast.config.example.json'), '{}');

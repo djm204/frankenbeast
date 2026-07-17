@@ -18,11 +18,11 @@ const REQUIRED_BOOTSTRAP_ENV_VARS = [
     'FRANKEN_MIN_CRITIQUE_SCORE',
 ];
 const COMMON_LOCAL_PORTS = [
-    { id: 'port-3000', name: 'Port 3000', port: 3000, service: 'Grafana/dashboard dev server' },
-    { id: 'port-8000', name: 'Port 8000', port: 8000, service: 'ChromaDB' },
-    { id: 'port-3200', name: 'Port 3200', port: 3200, service: 'Tempo' },
-    { id: 'port-4317', name: 'Port 4317', port: 4317, service: 'Tempo OTLP gRPC' },
-    { id: 'port-4318', name: 'Port 4318', port: 4318, service: 'Tempo OTLP HTTP' },
+    { id: 'port-3000', name: 'Port 3000', port: 3000, service: 'Grafana/dashboard dev server', key: 'grafana' },
+    { id: 'port-8000', name: 'Port 8000', port: 8000, service: 'ChromaDB', key: 'chroma' },
+    { id: 'port-3200', name: 'Port 3200', port: 3200, service: 'Tempo', key: 'tempo' },
+    { id: 'port-4317', name: 'Port 4317', port: 4317, service: 'Tempo OTLP gRPC', key: 'tempo' },
+    { id: 'port-4318', name: 'Port 4318', port: 4318, service: 'Tempo OTLP HTTP', key: 'tempo' },
 ];
 const results = [];
 function parseOptions(argv) {
@@ -135,9 +135,10 @@ function checkDependencyInstallState(dryRun) {
     }
     const hasLockfile = existsSync('package-lock.json');
     const hasNodeModules = existsSync('node_modules');
-    check('dependencies-installed', 'Workspace dependencies installed', hasLockfile && hasNodeModules, hasLockfile && hasNodeModules
-        ? 'package-lock.json and node_modules are present'
-        : `package-lock.json ${hasLockfile ? 'present' : 'missing'}; node_modules ${hasNodeModules ? 'present' : 'missing'}`, 'Run npm ci from the repository root to install the locked workspace dependencies.');
+    const hasNpmInstallMarker = existsSync('node_modules/.package-lock.json');
+    check('dependencies-installed', 'Workspace dependencies installed', hasLockfile && hasNodeModules && hasNpmInstallMarker, hasLockfile && hasNodeModules && hasNpmInstallMarker
+        ? 'package-lock.json, node_modules, and npm install marker are present'
+        : `package-lock.json ${hasLockfile ? 'present' : 'missing'}; node_modules ${hasNodeModules ? 'present' : 'missing'}; npm install marker ${hasNpmInstallMarker ? 'present' : 'missing'}`, 'Run npm ci from the repository root to install the locked workspace dependencies.');
 }
 function checkGitHubAuth(required = true) {
     const ghVersion = runCommand('gh --version');
@@ -222,7 +223,28 @@ function probePort(port, timeoutMs = 500) {
         socket.once('error', () => done(false));
     });
 }
-async function checkCommonLocalPorts(requireServices = false) {
+function getServiceUrls(parsed) {
+    return {
+        chroma: process.env['CHROMA_URL'] ?? parsed.get('CHROMA_URL') ?? 'http://localhost:8000',
+        grafana: process.env['FRANKEN_LOCAL_GRAFANA_URL'] ?? parsed.get('FRANKEN_LOCAL_GRAFANA_URL') ?? 'http://localhost:3000',
+        tempo: process.env['FRANKEN_LOCAL_TEMPO_URL'] ?? parsed.get('FRANKEN_LOCAL_TEMPO_URL') ?? 'http://localhost:3200',
+    };
+}
+function requiresLocalPort(serviceUrls, portCheck) {
+    const url = serviceUrls[portCheck.key];
+    try {
+        const parsed = new URL(url);
+        const host = parsed.hostname.toLowerCase();
+        const isLocalHost = host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1';
+        const actualPort = parsed.port === '' ? (parsed.protocol === 'https:' ? 443 : 80) : Number(parsed.port);
+        const expectedPort = portCheck.key === 'tempo' ? 3200 : portCheck.port;
+        return isLocalHost && actualPort === expectedPort;
+    }
+    catch (_error) {
+        return true;
+    }
+}
+async function checkCommonLocalPorts(requireServices = false, serviceUrls = getServiceUrls(new Map())) {
     for (const portCheck of COMMON_LOCAL_PORTS) {
         const open = await probePort(portCheck.port);
         const detail = open
@@ -236,8 +258,11 @@ async function checkCommonLocalPorts(requireServices = false) {
                 warn(portCheck.id, portCheck.name, detail, `If this is not the expected ${portCheck.service} process, stop the conflicting service before starting Frankenbeast local infrastructure.`);
             }
         }
-        else if (requireServices) {
+        else if (requireServices && requiresLocalPort(serviceUrls, portCheck)) {
             check(portCheck.id, portCheck.name, false, detail, `Start ${portCheck.service} with docker compose up -d, verify port ${portCheck.port} is reachable, then re-run npm run local:verify-setup.`, true);
+        }
+        else if (requireServices) {
+            warn(portCheck.id, portCheck.name, `${detail}; skipped as required because ${portCheck.service} uses a configured non-local endpoint`, `Verify the configured ${portCheck.service} endpoint is reachable and re-run npm run local:verify-setup.`);
         }
         else {
             warn(portCheck.id, portCheck.name, detail, `If ${portCheck.service} is required for your task, start it with docker compose up -d and re-run the healthcheck.`);
@@ -283,15 +308,14 @@ async function main() {
     }
     // Config example
     check('config-example', 'Config example', existsSync('frankenbeast.config.example.json'), 'frankenbeast.config.example.json', 'Restore frankenbeast.config.example.json from the repository or rebase onto origin/main.');
-    await checkCommonLocalPorts(options.requireServices);
+    const serviceUrls = getServiceUrls(envFile);
+    await checkCommonLocalPorts(options.requireServices, serviceUrls);
     if (options.dryRun) {
         check('live-service-probes', 'Live service probes', true, 'Skipping live service probes in dry-run mode');
     }
     else {
         // ChromaDB
-        const chromaUrl = process.env['CHROMA_URL'] ?? envFile.get('CHROMA_URL') ?? 'http://localhost:8000';
-        const grafanaUrl = 'http://localhost:3000';
-        const tempoUrl = 'http://localhost:3200';
+        const { chroma: chromaUrl, grafana: grafanaUrl, tempo: tempoUrl } = serviceUrls;
         await checkHttp('ChromaDB', `${chromaUrl}/api/v2/heartbeat`, options.requireServices);
         // Grafana
         await checkHttp('Grafana', `${grafanaUrl}/api/health`, options.requireServices);
