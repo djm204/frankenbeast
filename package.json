@@ -10,7 +10,7 @@
   "scripts": {
     "build": "turbo run build",
     "bootstrap": "bash scripts/bootstrap.sh",
-    "bootstrap:dry-run": "tsx scripts/verify-setup.ts --dry-run --env-file .env.example",
+    "bootstrap:dry-run": "node scripts/verify-setup.mjs --dry-run --env-file .env.example",
     "issue:worktree": "node scripts/issue-worktree-bootstrap.mjs",
     "local-to-pr:dry-run": "node scripts/local-to-pr-dry-run.mjs",
     "typecheck": "turbo run typecheck",
@@ -30,7 +30,8 @@
     "local:link": "npm run build && npm link --workspace=@franken/mcp-suite --workspace=@franken/orchestrator",
     "local:seed": "tsx scripts/seed.ts",
     "local:verify-cli": "fbeast --help && fbeast mcp --help && frankenbeast --help",
-    "local:verify-setup": "tsx scripts/verify-setup.ts",
+    "local:verify-setup": "node scripts/verify-setup.mjs",
+    "setup:healthcheck": "node scripts/verify-setup.mjs",
     "new-worker:preflight": "node scripts/new-worker-preflight.mjs",
     "profile:capability-self-test": "node scripts/profile-capability-self-test.mjs",
     "first-run:checklist": "node scripts/first-run-checklist.mjs",
