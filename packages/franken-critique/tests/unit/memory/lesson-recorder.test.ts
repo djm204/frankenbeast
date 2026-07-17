@@ -272,6 +272,67 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('normalizes raw correction text before classification', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-indented-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['\n  Please keep summaries concise'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        text: 'Please keep summaries concise',
+        category: 'preference',
+        suggestedDestination: 'memory',
+      }),
+    );
+  });
+
+  it('routes always-use preferences to memory review', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-always-use-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['Always use British English'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'preference',
+        suggestedDestination: 'memory',
+      }),
+    );
+  });
+
+  it('keeps generic PR check procedures reviewable', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-generic-pr-check-procedure',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Always check PR checks before replying'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'procedure',
+        suggestedDestination: 'skill',
+      }),
+    );
+  });
+
+  it('keeps status-plus-workaround tool failures reviewable', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-status-plus-workaround',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      toolFailures: ['gh pr checks returned 502; use gh run view'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'procedure',
+        suggestedDestination: 'skill',
+      }),
+    );
+  });
+
   it('discards temporal progress summaries without explicit reusable signals', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-temporal-summary',

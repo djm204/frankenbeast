@@ -1037,13 +1037,16 @@ export function extractPostTaskLessonCandidates(
   );
   const candidates: PostTaskLessonCandidate[] = [];
 
+  const normalizeCandidateText = (text: string): string =>
+    text.trim().replace(/\s+/g, ' ');
+
   const addCandidate = (
     kind: PostTaskLessonEvidenceKind,
     text: string,
     reference?: string,
     options: { readonly forceDiscard?: boolean } = {},
   ): void => {
-    const normalizedText = text.trim().replace(/\s+/g, ' ');
+    const normalizedText = normalizeCandidateText(text);
     if (!normalizedText) return;
     const privacyDecision = createPrivacyDecision(normalizedText, {
       flagCustomerData: true,
@@ -1111,29 +1114,33 @@ export function extractPostTaskLessonCandidates(
   };
 
   for (const correction of input.userCorrections ?? []) {
-    addCandidate('user-correction', correction, undefined, {
+    const normalizedCorrection = normalizeCandidateText(correction);
+    addCandidate('user-correction', normalizedCorrection, undefined, {
       forceDiscard:
-        !isRawUserPreferenceCorrection(correction) &&
-        !hasExplicitPostTaskLessonSignal(correction),
+        !isRawUserPreferenceCorrection(normalizedCorrection) &&
+        !hasExplicitPostTaskLessonSignal(normalizedCorrection),
     });
   }
   for (const failure of input.toolFailures ?? []) {
-    addCandidate('tool-failure', failure, undefined, {
-      forceDiscard: !hasReusableToolFailureSignal(failure),
+    const normalizedFailure = normalizeCandidateText(failure);
+    addCandidate('tool-failure', normalizedFailure, undefined, {
+      forceDiscard: !hasReusableToolFailureSignal(normalizedFailure),
     });
   }
   if (input.summary) {
-    addCandidate('completion-summary', input.summary, undefined, {
+    const normalizedSummary = normalizeCandidateText(input.summary);
+    addCandidate('completion-summary', normalizedSummary, undefined, {
       forceDiscard:
-        !isRawUserPreferenceCorrection(input.summary) &&
-        !hasExplicitPostTaskLessonSignal(input.summary),
+        !isRawUserPreferenceCorrection(normalizedSummary) &&
+        !hasExplicitPostTaskLessonSignal(normalizedSummary),
     });
   }
   for (const note of input.notes ?? []) {
-    addCandidate('task-note', note, undefined, {
+    const normalizedNote = normalizeCandidateText(note);
+    addCandidate('task-note', normalizedNote, undefined, {
       forceDiscard:
-        !isRawUserPreferenceCorrection(note) &&
-        !hasExplicitPostTaskLessonSignal(note),
+        !isRawUserPreferenceCorrection(normalizedNote) &&
+        !hasExplicitPostTaskLessonSignal(normalizedNote),
     });
   }
 
@@ -1252,6 +1259,14 @@ function isRawUserPreferenceCorrection(text: string): boolean {
   ) {
     return true;
   }
+  if (
+    /^(?:please\s+)?always\s+(?:use|avoid|do\s+not\s+use|don't\s+use|never\s+use)\b/i.test(
+      text,
+    ) &&
+    !looksProcedural
+  ) {
+    return true;
+  }
   if (looksProcedural || /\b(?:use|fallback|workaround|verify)\b/i.test(text)) {
     return false;
   }
@@ -1290,10 +1305,13 @@ function hasReusableToolFailureSignal(text: string): boolean {
   if (/\b(?:retry|fallback)\s+(?:with|using|via|by)\b/i.test(text)) {
     return true;
   }
+  const hasInstructionalWorkaround =
+    /\b(?:when|if)\b.{0,160}\b(?:run|check|use|retry|fallback|workaround)\b|\b(?:run|check|use|retry|fallback|workaround)\b.{0,160}\b(?:when|if|after|before|instead|giving\s+up)\b/i.test(
+      text,
+    ) || /(?:;|,)\s*(?:use|run|check|retry|fallback)\b/i.test(text);
+  if (hasInstructionalWorkaround) return true;
   if (isRawToolFailureStatus(text)) return false;
-  return /\b(?:when|if)\b.{0,160}\b(?:run|check|use|retry|fallback|workaround)\b|\b(?:run|check|use|retry|fallback|workaround)\b.{0,160}\b(?:when|if|after|before|instead|giving\s+up)\b/i.test(
-    text,
-  );
+  return false;
 }
 
 function hasReusableProcedureGuidance(text: string): boolean {
@@ -1304,6 +1322,10 @@ function hasReusableProcedureGuidance(text: string): boolean {
 
 function isTaskReferenceBookkeeping(text: string): boolean {
   const hasRedactedTaskReference = /\[REDACTED_TASK_REFERENCE\]/i.test(text);
+  const hasConcreteTaskReference =
+    /\b(?:pr|pull\s+request|issue|ticket|task|commit)\s*#?\d+\b|\[REDACTED_TASK_REFERENCE\]/i.test(
+      text,
+    );
   if (
     hasRedactedTaskReference &&
     /\b(?:check|replying|reply|review|merge|close)\b/i.test(text) &&
@@ -1311,6 +1333,9 @@ function isTaskReferenceBookkeeping(text: string): boolean {
     !isDocumentationUpdateLesson(text)
   ) {
     return true;
+  }
+  if (!hasConcreteTaskReference && hasReusableProcedureGuidance(text)) {
+    return false;
   }
   return (
     /\b(?:pr|pull\s+request|issue|ticket|task|commit)\b(?:\s*#?\d+\b)?|\[REDACTED_TASK_REFERENCE\]/i.test(
