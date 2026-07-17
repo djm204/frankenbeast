@@ -406,7 +406,9 @@ function isMutationCapableSandboxTool(tool: string, input?: unknown): boolean {
     || alias.startsWith('fbeast_governor_')
     || alias.startsWith('fbeast_approval_')
     || alias.startsWith('github_')
-    || alias.startsWith('kanban_'));
+    || alias.startsWith('github.')
+    || alias.startsWith('kanban_')
+    || alias.startsWith('kanban.'));
 }
 
 function toolAliases(tool: string, input?: unknown): string[] {
@@ -442,7 +444,7 @@ function wrappedToolNames(input: unknown, seen = new WeakSet<object>()): string[
   seen.add(input);
   const names: string[] = [];
   const descriptors = safeOwnPropertyDescriptors(input);
-  for (const field of ['tool', 'name', 'toolName', 'recipient_name']) {
+  for (const field of ['tool', 'name', 'toolName', 'tool_name', 'recipient_name']) {
     const descriptor = descriptors[field];
     if (descriptor && 'value' in descriptor && typeof descriptor.value === 'string') {
       names.push(descriptor.value);
@@ -552,6 +554,18 @@ function safeOwnPropertyDescriptors(value: object): PropertyDescriptorMap {
   }
 }
 
+function pathExistsNoFollow(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch (caught) {
+    if (caught && typeof caught === 'object' && 'code' in caught && caught.code === 'ENOENT') {
+      return false;
+    }
+    throw caught;
+  }
+}
+
 function writeEvidenceFileSecurely(evidencePath: string, contents: string, runDir: string, originalRunDir: string): void {
   const evidenceDir = dirname(evidencePath);
   if (evidenceDir !== runDir) {
@@ -561,7 +575,8 @@ function writeEvidenceFileSecurely(evidencePath: string, contents: string, runDi
     rmSync(runDir, { recursive: true, force: true });
     mkdirSync(runDir, { recursive: true, mode: 0o700 });
   }
-  if (existsSync(evidencePath)) {
+  chmodSync(runDir, 0o700);
+  if (pathExistsNoFollow(evidencePath)) {
     rmSync(evidencePath, { recursive: true, force: true });
   }
   const fd = openSync(evidencePath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
@@ -573,7 +588,10 @@ function writeEvidenceFileSecurely(evidencePath: string, contents: string, runDi
 }
 
 function toJsonSafeEvidence(value: unknown, seen = new WeakSet<object>()): unknown {
-  if (value === null || value === undefined || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+  if (value === undefined) {
+    return '[non-json undefined]';
+  }
+  if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     return value;
   }
   if (typeof value === 'bigint') {

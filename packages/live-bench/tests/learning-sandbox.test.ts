@@ -463,6 +463,44 @@ describe('learning experiment sandbox', () => {
     expect(statSync(result.evidencePath).isFile()).toBe(true);
   });
 
+  it('removes dangling evidence symlinks before writing evidence', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+
+    const result = await runLearningSandboxExperiment({
+      declaration,
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      execute: (sandbox) => {
+        symlinkSync(join(tempRoot('learning-sandbox-missing-target-'), 'missing.json'), sandbox.evidencePath);
+        return { passed: true, evidence: ['dangling symlink evidence path attempted'] };
+      },
+    });
+
+    expect(result.passed).toBe(true);
+    expect(lstatSync(result.evidencePath).isSymbolicLink()).toBe(false);
+    expect(statSync(result.evidencePath).isFile()).toBe(true);
+  });
+
+  it('restores run directory permissions before writing evidence', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+
+    const result = await runLearningSandboxExperiment({
+      declaration,
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      execute: (sandbox) => {
+        chmodSync(dirname(sandbox.evidencePath), 0o500);
+        return { passed: true, evidence: ['run directory mode changed'] };
+      },
+    });
+
+    expect(result.passed).toBe(true);
+    expect(existsSync(result.evidencePath)).toBe(true);
+    expect(statSync(result.runDir).mode & 0o777).toBe(0o700);
+  });
+
   it('recreates the run directory when evidence parent is replaced by a symlink', async () => {
     const { fixturesRoot } = createFixturesRoot();
     const runsRoot = tempRoot('learning-sandbox-runs-');
@@ -517,7 +555,7 @@ describe('learning experiment sandbox', () => {
   it('denies namespaced and observer mutation tool aliases even when allowlisted', async () => {
     const { fixturesRoot } = createFixturesRoot();
     const runsRoot = tempRoot('learning-sandbox-runs-');
-    const attempts = ['functions.exec_command', 'functions.apply_patch', 'fbeast_observer_log', 'fbeast_observer_trail', 'mcp__github__create_issue_comment'];
+    const attempts = ['functions.exec_command', 'functions.apply_patch', 'fbeast_observer_log', 'fbeast_observer_trail', 'mcp__github__create_issue_comment', 'github.create_issue_comment'];
 
     const result = await runLearningSandboxExperiment({
       declaration: { ...declaration, requestedTools: attempts },
@@ -546,7 +584,7 @@ describe('learning experiment sandbox', () => {
       runsRoot,
       policy: { allowedTools: ['list_fixture_files', 'read_fixture_file', 'execute_tool'] },
       execute: async (sandbox) => {
-        await expect(sandbox.runTool('execute_tool', { tool: 'fbeast_memory_store', key: 'lesson' }, () => 'stored')).rejects.toThrow(/mutation-capable/);
+        await expect(sandbox.runTool('execute_tool', { tool_name: 'exec_command', tool_input: { command: 'touch live-state' } }, () => 'stored')).rejects.toThrow(/mutation-capable/);
         return { passed: true, evidence: [] };
       },
     });
@@ -705,7 +743,7 @@ describe('learning experiment sandbox', () => {
     circular.self = circular;
 
     const result = await runLearningSandboxExperiment({
-      declaration: { ...declaration, input: { count: BigInt(7), invalidDate: new Date('not-a-date') } },
+      declaration: { ...declaration, input: { count: BigInt(7), invalidDate: new Date('not-a-date'), explicitUndefined: undefined } },
       fixtures: new FixtureStore(fixturesRoot),
       runsRoot,
       policy: { allowedTools: ['list_fixture_files', 'read_fixture_file', 'score_candidate'] },
@@ -717,11 +755,12 @@ describe('learning experiment sandbox', () => {
 
     expect(result.passed).toBe(true);
     const evidence = JSON.parse(readFileSync(result.evidencePath, 'utf8')) as {
-      declaration: { input: { count: string; invalidDate: string } };
+      declaration: { input: { count: string; invalidDate: string; explicitUndefined: string } };
       toolCalls: Array<{ input: { self: string }; result: { count: string; invalidDate: string; circular: { self: string } } }>;
     };
     expect(evidence.declaration.input.count).toBe('[non-json bigint:7]');
     expect(evidence.declaration.input.invalidDate).toBe('[non-json invalid-date]');
+    expect(evidence.declaration.input.explicitUndefined).toBe('[non-json undefined]');
     expect(evidence.toolCalls[0]?.input.self).toBe('[non-json circular]');
     expect(evidence.toolCalls[0]?.result.count).toBe('[non-json bigint:9]');
     expect(evidence.toolCalls[0]?.result.invalidDate).toBe('[non-json invalid-date]');
