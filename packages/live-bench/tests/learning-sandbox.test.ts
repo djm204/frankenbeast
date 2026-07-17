@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -244,6 +244,113 @@ describe('learning experiment sandbox', () => {
 
     expect(result.passed).toBe(false);
     expect(result.error).toMatch(/fixture clone was mutated/);
+  });
+
+  it('fails promotion when experiment code only changes fixture permissions', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+
+    const result = await runLearningSandboxExperiment({
+      declaration,
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      execute: (sandbox) => {
+        chmodSync(sandbox.workspaceDir, 0o755);
+        chmodSync(join(sandbox.workspaceDir, 'README.md'), 0o644);
+        return { passed: true, evidence: ['permission-only mutation'] };
+      },
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.error).toMatch(/fixture clone was mutated/);
+  });
+
+  it('persists failed evidence when experiment code removes the workspace clone', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+
+    const result = await runLearningSandboxExperiment({
+      declaration,
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      execute: (sandbox) => {
+        chmodSync(sandbox.workspaceDir, 0o755);
+        chmodSync(join(sandbox.workspaceDir, 'docs'), 0o755);
+        chmodSync(join(sandbox.workspaceDir, 'README.md'), 0o644);
+        chmodSync(join(sandbox.workspaceDir, 'docs', 'case.md'), 0o644);
+        rmSync(sandbox.workspaceDir, { recursive: true, force: true });
+        return { passed: true, evidence: ['removed workspace'] };
+      },
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.error).toMatch(/Unable to verify read-only sandbox fixture clone/);
+    expect(existsSync(result.evidencePath)).toBe(true);
+  });
+
+  it('keeps fixture reads anchored to the original workspace directory', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+    const outside = tempRoot('learning-sandbox-read-outside-');
+    writeFileSync(join(outside, 'README.md'), 'outside\n', 'utf8');
+
+    const result = await runLearningSandboxExperiment({
+      declaration,
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      execute: async (sandbox) => {
+        chmodSync(sandbox.workspaceDir, 0o755);
+        renameSync(sandbox.workspaceDir, `${sandbox.workspaceDir}.moved`);
+        symlinkSync(outside, sandbox.workspaceDir, 'dir');
+        await expect(sandbox.runTool('read_fixture_file', { path: 'README.md' })).rejects.toThrow(/original clone/);
+        return { passed: true, evidence: ['workspace replacement blocked'] };
+      },
+    });
+
+    expect(result.passed).toBe(false);
+  });
+
+  it('denies concrete fbeast memory mutation tool names even when allowlisted', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+
+    const result = await runLearningSandboxExperiment({
+      declaration: { ...declaration, requestedTools: ['fbeast_memory_store'] },
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      policy: { allowedTools: ['list_fixture_files', 'read_fixture_file', 'fbeast_memory_store'] },
+      execute: async (sandbox) => {
+        await sandbox.runTool('fbeast_memory_store', { key: 'lesson' }, () => 'stored');
+        return { passed: true, evidence: [] };
+      },
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.blockedToolCalls[0]?.tool).toBe('fbeast_memory_store');
+  });
+
+  it('preserves repeated non-cyclic object evidence without marking it circular', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+    const shared = { stable: true };
+
+    const result = await runLearningSandboxExperiment({
+      declaration,
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      policy: { allowedTools: ['list_fixture_files', 'read_fixture_file', 'score_candidate'] },
+      execute: async (sandbox) => {
+        await sandbox.runTool('score_candidate', { first: shared, second: shared }, () => ({ first: shared, second: shared }));
+        return { passed: true, evidence: ['shared evidence'] };
+      },
+    });
+
+    expect(result.passed).toBe(true);
+    const evidence = JSON.parse(readFileSync(result.evidencePath, 'utf8')) as {
+      toolCalls: Array<{ input: { first: { stable: boolean }; second: { stable: boolean } } }>;
+    };
+    expect(evidence.toolCalls[0]?.input.first).toEqual({ stable: true });
+    expect(evidence.toolCalls[0]?.input.second).toEqual({ stable: true });
   });
 
   it('persists JSON-safe evidence when inputs or handler results contain non-JSON values', async () => {

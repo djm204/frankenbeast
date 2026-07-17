@@ -131,10 +131,11 @@ export async function runLearningSandboxExperiment(
   mkdirSync(workspaceDir, { recursive: true });
   cpSync(fixtureDir, workspaceDir, { recursive: true });
   assertNoSymlinksInTree(workspaceDir);
-  const workspaceSnapshot = snapshotTree(workspaceDir);
+  const originalWorkspaceDir = realpathSync(workspaceDir);
   if (policy.readOnlyFixtureClone) {
     makeTreeReadOnly(workspaceDir);
   }
+  const workspaceSnapshot = snapshotTree(workspaceDir);
 
   const toolCalls: LearningSandboxToolCallEvidence[] = [];
   const context: LearningSandboxContext = {
@@ -148,6 +149,7 @@ export async function runLearningSandboxExperiment(
       handler,
       policy,
       workspaceDir,
+      originalWorkspaceDir,
       now,
       evidence: toolCalls,
     }),
@@ -162,8 +164,11 @@ export async function runLearningSandboxExperiment(
   }
 
   const completedAt = now();
-  const workspaceMutated = policy.readOnlyFixtureClone && snapshotTree(workspaceDir) !== workspaceSnapshot;
-  if (workspaceMutated && error === undefined) {
+  const postRunSnapshot = safeSnapshotTree(workspaceDir);
+  const workspaceMutated = policy.readOnlyFixtureClone && postRunSnapshot.hash !== workspaceSnapshot;
+  if (postRunSnapshot.error && error === undefined) {
+    error = `Unable to verify read-only sandbox fixture clone: ${postRunSnapshot.error}`;
+  } else if (workspaceMutated && error === undefined) {
     error = 'Read-only sandbox fixture clone was mutated during experiment';
   }
   const blockedToolCalls = toolCalls.filter((call) => !call.allowed);
@@ -195,13 +200,14 @@ interface RunSandboxToolOptions {
   readonly handler?: () => unknown | Promise<unknown>;
   readonly policy: LearningSandboxPolicy;
   readonly workspaceDir: string;
+  readonly originalWorkspaceDir: string;
   readonly now: () => string;
   readonly evidence: LearningSandboxToolCallEvidence[];
 }
 
 async function runSandboxTool(options: RunSandboxToolOptions): Promise<unknown> {
   const startedAt = options.now();
-  const allowed = options.policy.allowedTools.includes(options.tool) && !MUTATION_CAPABLE_SANDBOX_TOOLS.has(options.tool);
+  const allowed = options.policy.allowedTools.includes(options.tool) && !isMutationCapableSandboxTool(options.tool);
   if (!allowed) {
     const call = {
       tool: options.tool,
@@ -210,7 +216,7 @@ async function runSandboxTool(options: RunSandboxToolOptions): Promise<unknown> 
       startedAt,
       completedAt: options.now(),
       ok: false,
-      error: MUTATION_CAPABLE_SANDBOX_TOOLS.has(options.tool)
+      error: isMutationCapableSandboxTool(options.tool)
         ? `Tool ${options.tool} is mutation-capable and cannot be allowed in learning sandbox policy`
         : `Tool ${options.tool} is not allowed in learning sandbox policy`,
     } satisfies LearningSandboxToolCallEvidence;
@@ -250,7 +256,7 @@ async function runAllowedTool(options: RunSandboxToolOptions): Promise<unknown> 
     return listFixtureFiles(options.workspaceDir);
   }
   if (options.tool === 'read_fixture_file') {
-    return readFixtureFile(options.workspaceDir, options.input);
+    return readFixtureFile(options.workspaceDir, options.originalWorkspaceDir, options.input);
   }
   if (options.handler) {
     return options.handler();
@@ -258,7 +264,7 @@ async function runAllowedTool(options: RunSandboxToolOptions): Promise<unknown> 
   throw new Error(`Allowed sandbox tool ${options.tool} has no fixture-safe handler`);
 }
 
-function readFixtureFile(workspaceDir: string, input: unknown): string {
+function readFixtureFile(workspaceDir: string, originalWorkspaceDir: string, input: unknown): string {
   const parsed = z.object({ path: z.string().min(1) }).strict().parse(input) as { path: string };
   const path = parsed.path;
   if (path !== basename(path) && (path.startsWith('/') || path.includes('..') || path.includes('\\'))) {
@@ -267,13 +273,17 @@ function readFixtureFile(workspaceDir: string, input: unknown): string {
   if (path.startsWith('/') || path.includes('..') || path.includes('\\')) {
     throw new Error(`Invalid fixture file path: ${path}`);
   }
-  const target = resolve(workspaceDir, path);
-  ensureContained(target, workspaceDir, 'fixture file');
+  const currentWorkspaceDir = realpathSync(workspaceDir);
+  if (currentWorkspaceDir !== originalWorkspaceDir || !lstatSync(workspaceDir).isDirectory()) {
+    throw new Error('Sandbox fixture workspace is no longer anchored to the original clone');
+  }
+  const target = resolve(originalWorkspaceDir, path);
+  ensureContained(target, originalWorkspaceDir, 'fixture file');
   if (!existsSync(target) || !statSync(target).isFile()) {
     throw new Error(`Fixture file not found: ${path}`);
   }
   const realTarget = realpathSync(target);
-  ensureContained(realTarget, realpathSync(workspaceDir), 'fixture file real path');
+  ensureContained(realTarget, originalWorkspaceDir, 'fixture file real path');
   return readFileSync(realTarget, 'utf8');
 }
 
@@ -289,7 +299,7 @@ function collectFixtureFiles(root: string, current: string, files: string[]): vo
     if (entry.isDirectory()) {
       collectFixtureFiles(root, path, files);
     } else if (entry.isFile()) {
-      files.push(relative(root, path));
+      files.push(relative(root, path).replace(/\\/g, '/'));
     }
   }
 }
@@ -355,6 +365,15 @@ function makeTreeReadOnly(root: string): void {
   chmodSync(root, 0o555);
 }
 
+function isMutationCapableSandboxTool(tool: string): boolean {
+  return MUTATION_CAPABLE_SANDBOX_TOOLS.has(tool)
+    || tool.startsWith('fbeast_memory_')
+    || tool.startsWith('fbeast_governor_')
+    || tool.startsWith('fbeast_approval_')
+    || tool.startsWith('github_')
+    || tool.startsWith('kanban_');
+}
+
 function makeTreeWritableForCleanup(root: string): void {
   if (!existsSync(root)) {
     return;
@@ -379,17 +398,26 @@ function snapshotTree(root: string): string {
   return createHash('sha256').update(entries.sort().join('\n')).digest('hex');
 }
 
+function safeSnapshotTree(root: string): { hash?: string; error?: string } {
+  try {
+    return { hash: snapshotTree(root) };
+  } catch (caught) {
+    return { error: caught instanceof Error ? caught.message : String(caught) };
+  }
+}
+
 function collectSnapshotEntries(root: string, current: string, entries: string[]): void {
   for (const entry of readdirSync(current, { withFileTypes: true })) {
     const path = join(current, entry.name);
-    const rel = relative(root, path);
+    const rel = relative(root, path).replace(/\\/g, '/');
+    const stat = lstatSync(path);
     if (entry.isDirectory()) {
-      entries.push(`dir:${rel}`);
+      entries.push(`dir:${rel}:${stat.mode & 0o777}`);
       collectSnapshotEntries(root, path, entries);
     } else if (entry.isFile()) {
-      entries.push(`file:${rel}:${createHash('sha256').update(readFileSync(path)).digest('hex')}`);
+      entries.push(`file:${rel}:${stat.mode & 0o777}:${createHash('sha256').update(readFileSync(path)).digest('hex')}`);
     } else {
-      entries.push(`other:${rel}`);
+      entries.push(`other:${rel}:${stat.mode & 0o777}`);
     }
   }
 }
@@ -416,14 +444,18 @@ function toJsonSafeEvidence(value: unknown, seen = new WeakSet<object>()): unkno
       return '[non-json circular]';
     }
     seen.add(value);
-    return value.map((item) => toJsonSafeEvidence(item, seen));
+    const items = value.map((item) => toJsonSafeEvidence(item, seen));
+    seen.delete(value);
+    return items;
   }
   if (typeof value === 'object') {
     if (seen.has(value)) {
       return '[non-json circular]';
     }
     seen.add(value);
-    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, toJsonSafeEvidence(entry, seen)]));
+    const entries = Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, toJsonSafeEvidence(entry, seen)]));
+    seen.delete(value);
+    return entries;
   }
   return String(value);
 }
