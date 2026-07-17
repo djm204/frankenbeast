@@ -87,9 +87,33 @@ const MEMORY_RESULT_PAYLOAD_REDACTION_TOOLS = new Set([
 ]);
 
 const MEMORY_RESULT_IMPLICIT_SUCCESS_TOOLS = new Set([
+  'fbeast_memory_store',
+  'fbeast_memory_query',
+  'fbeast_memory_frontload',
   'fbeast_memory_export',
+  'fbeast_memory_forget',
+  'fbeast_memory_right_to_forget',
+  'fbeast_memory_source_attribution',
   'fbeast_memory_review_propose',
   'fbeast_memory_retention_report',
+  'fbeast_memory_review_list',
+  'fbeast_memory_review_decide',
+  'fbeast_memory_review_conflicts',
+]);
+
+const MEMORY_AUDIT_ARG_TOOLS = new Set([
+  'fbeast_memory_store',
+  'fbeast_memory_query',
+  'fbeast_memory_frontload',
+  'fbeast_memory_export',
+  'fbeast_memory_right_to_forget',
+  'fbeast_memory_forget',
+  'fbeast_memory_source_attribution',
+  'fbeast_memory_retention_report',
+  'fbeast_memory_review_propose',
+  'fbeast_memory_review_list',
+  'fbeast_memory_review_decide',
+  'fbeast_memory_review_conflicts',
 ]);
 
 function unqualifyMcpToolName(toolName: string): string {
@@ -136,9 +160,13 @@ function hookArgsFromContext(context: string, toolName: string): Record<string, 
     const input = toolInput as Record<string, unknown>;
     const nestedTool = typeof input['tool'] === 'string' ? input['tool'] : toolName;
     const args = input['args'];
-    return args !== null && typeof args === 'object' && !Array.isArray(args)
+    const sanitized = args !== null && typeof args === 'object' && !Array.isArray(args)
       ? sanitizeHookAuditArgs(nestedTool, args as Record<string, unknown>)
       : sanitizeHookAuditArgs(nestedTool, input);
+    if (!sanitized) return undefined;
+    return unqualifyMcpToolName(toolName) === 'execute_tool'
+      ? { tool: nestedTool, args: sanitized }
+      : sanitized;
   }
   const args = parsed['args'];
   return args !== null && typeof args === 'object' && !Array.isArray(args)
@@ -146,22 +174,10 @@ function hookArgsFromContext(context: string, toolName: string): Record<string, 
     : sanitizeHookAuditArgs(toolName, parsed);
 }
 
-function sanitizeHookAuditArgs(toolName: string | undefined, args: Record<string, unknown>): Record<string, unknown> {
+function sanitizeHookAuditArgs(toolName: string | undefined, args: Record<string, unknown>): Record<string, unknown> | undefined {
   const normalized = unqualifyMcpToolName(toolName ?? '');
-  const memoryTools = new Set([
-    'fbeast_memory_store',
-    'fbeast_memory_query',
-    'fbeast_memory_export',
-    'fbeast_memory_right_to_forget',
-    'fbeast_memory_forget',
-    'fbeast_memory_source_attribution',
-    'fbeast_memory_retention_report',
-    'fbeast_memory_review_propose',
-    'fbeast_memory_review_resolve',
-    'fbeast_memory_review_conflicts',
-  ]);
-  const mayBeMemory = memoryTools.has(normalized) || 'agentId' in args || 'profile' in args || 'readScope' in args || 'type' in args;
-  if (!mayBeMemory) return args;
+  const mayBeMemory = MEMORY_AUDIT_ARG_TOOLS.has(normalized) || 'agentId' in args || 'profile' in args || 'readScope' in args || 'type' in args;
+  if (!mayBeMemory) return undefined;
   const safe: Record<string, unknown> = {};
   for (const key of ['agentId', 'profile', 'repo', 'type', 'operation', 'decision', 'readScope', 'limit', 'dryRun', 'redaction', 'activeProfile', 'crossProfile']) {
     if (Object.prototype.hasOwnProperty.call(args, key)) safe[key] = args[key];

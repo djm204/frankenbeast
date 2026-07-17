@@ -152,4 +152,38 @@ describe('runHook', () => {
     expect(JSON.stringify(metadata)).not.toContain('private memory payload');
     expect(JSON.stringify(metadata)).not.toContain('sensitive:memory:key');
   });
+
+  it('preserves sanitized proxied memory tool names while dropping non-memory hook inputs', async () => {
+    const { deps, log } = hookDeps();
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    deps.readContext = () => JSON.stringify({
+      tool_input: {
+        tool: 'fbeast_memory_store',
+        args: { key: 'secret-key', value: 'sensitive value', type: 'working' },
+      },
+    });
+    await runHook(['post-tool', 'execute_tool', '{"content":[]}'], deps);
+
+    deps.readContext = () => JSON.stringify({
+      tool_input: {
+        tool: 'shell_command',
+        args: { command: 'cat /tmp/private-file', input: 'private payload' },
+      },
+    });
+    await runHook(['post-tool', 'execute_tool', '{"content":[]}'], deps);
+
+    const proxiedMetadata = JSON.parse(log.mock.calls[0]![0].metadata);
+    expect(proxiedMetadata.args).toEqual({
+      tool: 'fbeast_memory_store',
+      args: { key: '[memory-selector-redacted]', type: 'working' },
+    });
+    expect(JSON.stringify(proxiedMetadata)).not.toContain('sensitive value');
+    expect(JSON.stringify(proxiedMetadata)).not.toContain('secret-key');
+
+    const nonMemoryMetadata = JSON.parse(log.mock.calls[1]![0].metadata);
+    expect(nonMemoryMetadata.args).toBeUndefined();
+    expect(JSON.stringify(nonMemoryMetadata)).not.toContain('private payload');
+    expect(JSON.stringify(nonMemoryMetadata)).not.toContain('cat /tmp/private-file');
+  });
 });

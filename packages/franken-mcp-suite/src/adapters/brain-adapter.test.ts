@@ -188,6 +188,20 @@ vi.mock("better-sqlite3", () => ({
                 reason: "hook approval",
                 createdAt: "2026-07-16T14:15:05.000Z",
               },
+              {
+                action: "fbeast_memory_store",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "agent-target-dedupe", profile: "target-dedupe-test", type: "working", cardId: "card-a" }),
+                decision: "approved",
+                reason: "working write",
+                createdAt: "2026-07-16T14:30:00.000Z",
+              },
+              {
+                action: "fbeast_memory_store",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "agent-card-dedupe", profile: "card-dedupe-test", type: "working", cardId: "card-a" }),
+                decision: "approved",
+                reason: "card a write",
+                createdAt: "2026-07-16T14:35:00.000Z",
+              },
             ];
           }
           if (sql.includes("FROM audit_trail")) {
@@ -296,6 +310,16 @@ vi.mock("better-sqlite3", () => ({
                 eventType: "tool_call",
                 payload: JSON.stringify({ __fbeastHookSource: "fbeast-hook", toolName: "fbeast_memory_retention_report", phase: "post-tool", ok: true, args: { agentId: "agent-retention", profile: "retention-audit-test", readScope: "agent" } }),
                 createdAt: "2026-07-16T14:25:00.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ source: "central-dispatch", toolName: "fbeast_memory_store", ok: true, args: { agentId: "agent-target-dedupe", profile: "target-dedupe-test", type: "episodic", cardId: "card-a" } }),
+                createdAt: "2026-07-16T14:30:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ source: "central-dispatch", toolName: "fbeast_memory_store", ok: true, args: { agentId: "agent-card-dedupe", profile: "card-dedupe-test", type: "working", cardId: "card-b" } }),
+                createdAt: "2026-07-16T14:35:05.000Z",
               },
             ];
           }
@@ -1393,6 +1417,18 @@ describe("createBrainAdapter", () => {
       targetClass: "memory-retention-report",
       decision: "approved",
     });
+  });
+
+  it("keeps distinct target stores and card ids as separate audit events", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const targetReport = await brain.memoryAccessAuditReport({ profile: "target-dedupe-test", limit: 20 });
+    expect(targetReport.count).toBe(2);
+    expect(targetReport.events.map((event) => event.targetStore).sort()).toEqual(["episodic", "working"]);
+
+    const cardReport = await brain.memoryAccessAuditReport({ profile: "card-dedupe-test", limit: 20 });
+    expect(cardReport.count).toBe(2);
+    expect(cardReport.events.map((event) => event.cardId).sort()).toEqual(["card-a", "card-b"]);
   });
 
   it("includes trusted hook-based memory access records", async () => {

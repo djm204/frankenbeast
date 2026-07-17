@@ -723,10 +723,18 @@ function auditOperationsCorrelate(left: string, right: string): boolean {
   return left === right;
 }
 
+function auditTargetStoresCorrelate(left: string, right: string): boolean {
+  if (left === right) return true;
+  if (left.includes('|') || right.includes('|')) return true;
+  return false;
+}
+
 function auditEventsCorrelate(left: MemoryAccessAuditEventInternal, right: MemoryAccessAuditEventInternal): boolean {
   return left.tool === right.tool
     && auditOperationsCorrelate(left.operation, right.operation)
+    && auditTargetStoresCorrelate(left.targetStore, right.targetStore)
     && auditValuesCorrelate(left.agentId, right.agentId)
+    && auditValuesCorrelate(left.cardId, right.cardId)
     && auditValuesCorrelate(left.profile, right.profile)
     && auditValuesCorrelate(left.repo, right.repo);
 }
