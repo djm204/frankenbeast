@@ -168,6 +168,10 @@ Read the [agent role responsibility map](docs/onboarding/agent-role-responsibili
 
 Read the [coding-agent PR etiquette guide](docs/onboarding/coding-agent-pr-etiquette.md) before opening, updating, or merging agent-authored pull requests. It defines one-issue/one-PR scope, required PR body evidence, current-head CI/Codex expectations, negative cases that prevent duplicate work, and handoff fields for blocked PRs.
 
+## Release and deployment mental model
+
+Read the [release and deployment mental model](docs/onboarding/release-deployment-mental-model.md) before you need to explain or own the issue->PR->CI->Codex->merge->Release Please->deployment flow. It defines release labels and signals, PR-to-release handoff expectations, post-merge monitoring ownership, and high-level rollback/incident responsibilities.
+
 ## Issue complexity rubric
 
 Read the [issue complexity rubric](docs/onboarding/issue-complexity-rubric.md) before assigning, refilling, or taking an issue-worker card. It maps issue labels and acceptance criteria to six complexity/risk levels, allowed toolsets, model lanes, verification depth, and escalation triggers so low-risk fallback agents do not take high-risk implementation work.
