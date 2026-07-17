@@ -610,6 +610,21 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('routes generic PR check procedures to skill review', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-generic-pr-check-procedure',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['When PR checks fail, run gh run view before replying'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'skill',
+        review: expect.objectContaining({ status: 'pending-review' }),
+      }),
+    );
+  });
+
   it('discards task-scoped procedure-looking PR checks', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-specific-pr-check',
@@ -630,6 +645,22 @@ describe('extractPostTaskLessonCandidates', () => {
       taskId: 'post-task-do-not-want-preference',
       completedAt: '2026-07-16T00:00:00.000Z',
       userCorrections: ['I do not want emojis in summaries'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'preference',
+        suggestedDestination: 'memory',
+        review: expect.objectContaining({ status: 'pending-review' }),
+      }),
+    );
+  });
+
+  it('classifies raw preferences from notes as memory candidates', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-note-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Please keep summaries concise'],
     });
 
     expect(report.candidates[0]).toEqual(
@@ -770,6 +801,51 @@ describe('extractPostTaskLessonCandidates', () => {
       taskId: 'post-task-raw-tool-failure',
       completedAt: '2026-07-16T00:00:00.000Z',
       toolFailures: ['gh pr checks should not have returned 502'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        privacyFilter: expect.objectContaining({ action: 'reject' }),
+      }),
+    );
+  });
+
+  it('discards raw tool-failure retry status', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-tool-retry-status',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      toolFailures: ['npm install failed after 3 retry attempts'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        privacyFilter: expect.objectContaining({ action: 'reject' }),
+      }),
+    );
+  });
+
+  it('preserves completed documentation updates', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-completed-doc-update',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Added a runbook entry for npm ci'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'docs',
+        review: expect.objectContaining({ status: 'pending-review' }),
+      }),
+    );
+  });
+
+  it('discards transient repo status notes', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-transient-repo-status',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Frankenbeast CI was down today'],
     });
 
     expect(report.candidates[0]).toEqual(

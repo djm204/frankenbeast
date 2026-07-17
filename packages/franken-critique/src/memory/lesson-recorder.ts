@@ -1261,6 +1261,7 @@ function hasExplicitPostTaskLessonSignal(text: string): boolean {
   if (hasReusableProcedureGuidance(text)) return true;
   if (isOneOffPostTaskProgress(text)) return false;
   if (isOneOffShouldCorrection(text)) return false;
+  if (isRawUserPreferenceCorrection(text)) return true;
   if (PREFERENCE_PATTERNS.some((pattern) => pattern.test(text))) return true;
   if (ENVIRONMENT_FACT_PATTERNS.some((pattern) => pattern.test(text))) {
     return true;
@@ -1279,6 +1280,7 @@ function hasExplicitPostTaskLessonSignal(text: string): boolean {
 }
 
 function hasReusableToolFailureSignal(text: string): boolean {
+  if (isRawToolFailureStatus(text)) return false;
   if (/\bworkaround\s*:/i.test(text)) return true;
   if (/\b(?:retry|fallback)\s+(?:with|using|via|by)\b/i.test(text)) {
     return true;
@@ -1340,6 +1342,9 @@ function isOneOffShouldCorrection(text: string): boolean {
 }
 
 function isOneOffPostTaskProgress(text: string): boolean {
+  if (isDocumentationUpdateLesson(text)) {
+    return false;
+  }
   if (/^(?:updated|implemented|fixed|added|changed|refactored|wrote|created|removed|completed)\b/i.test(text)) {
     return true;
   }
@@ -1356,6 +1361,12 @@ function isOneOffPostTaskProgress(text: string): boolean {
     (/\b(?:pr|pull\s+request|issue|ticket|task|commit|review)\b/i.test(
       text,
     ) || ENVIRONMENT_FACT_PATTERNS.some((pattern) => pattern.test(text)))
+  );
+}
+
+function isRawToolFailureStatus(text: string): boolean {
+  return /\b(?:failed|error|returned|timed\s+out|crashed)\b.{0,80}\b(?:after\s+\d+\s+retry\s+attempts?|retry\s+attempts?|returned\s+\d{3}|\d{3})\b|\b(?:fallback|retry)\b.{0,80}\b(?:failed|error|returned\s+\d{3}|timed\s+out|crashed)\b/i.test(
+    text,
   );
 }
 
