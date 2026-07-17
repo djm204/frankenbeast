@@ -47,6 +47,12 @@ function transportDefault(state: InitState, config: OrchestratorConfig, id: Supp
   return config.comms[id].enabled;
 }
 
+function enabledTransportsFromConfig(config: OrchestratorConfig): SupportedCommsTransportId[] {
+  return listSupportedCommsTransports()
+    .filter((transport) => config.comms[transport.id].enabled)
+    .map((transport) => transport.id);
+}
+
 function hasTransportOnlyScope(scope: readonly InitWizardScope[] | undefined): boolean {
   return scope !== undefined
     && scope.some((item) => item === 'slack' || item === 'discord' || item === 'telegram' || item === 'whatsapp')
@@ -217,7 +223,7 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
       : selectedModules;
     const preservedTransports = options.initialState.selectedCommsTransports.length > 0
       ? options.initialState.selectedCommsTransports
-      : options.initialState.selectedCommsTransports;
+      : enabledTransportsFromConfig(config);
     const nextState: InitState = {
       ...options.initialState,
       selectedModules: preservedModules,
