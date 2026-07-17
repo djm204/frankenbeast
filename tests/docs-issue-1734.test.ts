@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const ROOT = resolve(import.meta.dirname, '..');
-const fixturePath = 'examples/agent-practice-fixture';
+const fixturePath = 'fixtures/agent-practice-fixture';
 
 function readText(relativePath: string): string {
   return readFileSync(resolve(ROOT, relativePath), 'utf8');
@@ -30,10 +30,11 @@ describe('issue #1734 agent practice fixture', () => {
     }
 
     expect(readText(`${fixturePath}/test/scoreboard.test.js`)).toContain('Grace: 5\\nKatherine: 3\\nAda: 2');
-    expect(readText(`${fixturePath}/src/scoreboard.js`)).toBe(readText(`${fixturePath}/fixtures/buggy/scoreboard.js`));
+    expect(readText(`${fixturePath}/src/scoreboard.js`)).toContain('formatScoreboard');
+    expect(readText(`${fixturePath}/fixtures/buggy/scoreboard.js`)).toContain('.map((player) => `${player.name}: ${player.score}`)');
     expect(readText(`${fixturePath}/fixtures/solution/scoreboard.js`)).toContain('.sort((left, right) => right.score - left.score');
     expect(readText(`${fixturePath}/README.md`)).toContain('npm run reset');
-    expect(readText('docs/onboarding/sample-agent-practice-issue.md')).toContain('Only edit files under `examples/agent-practice-fixture`');
+    expect(readText('docs/onboarding/sample-agent-practice-issue.md')).toContain('Only edit files under `fixtures/agent-practice-fixture`');
   });
 
   it('keeps the practice fixture outside production workspaces and root test discovery', () => {
@@ -46,11 +47,11 @@ describe('issue #1734 agent practice fixture', () => {
     expect(fixturePackage.private).toBe(true);
     expect(fixturePackage.scripts?.test).toBe('node --test test/*.test.js');
     expect(vitestConfig).toContain("? ['tests/**/*.test.ts']");
-    expect(vitestConfig).not.toMatch(/examples\/[*][*]\/[*.]test/u);
+    expect(vitestConfig).not.toMatch(/examples\/[*][*]\/[*][.]test[.][cm]?[jt]sx?/u);
   });
 
   it('links the fixture from onboarding entrypoints', () => {
-    expect(readText('ONBOARDING.md')).toContain('examples/agent-practice-fixture');
-    expect(readText('README.md')).toContain('examples/agent-practice-fixture');
+    expect(readText('ONBOARDING.md')).toContain('fixtures/agent-practice-fixture');
+    expect(readText('README.md')).toContain('fixtures/agent-practice-fixture');
   });
 });

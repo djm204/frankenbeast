@@ -8,14 +8,14 @@ The agent practice fixture formats scoreboard rows in the same order it receives
 
 ## Scope
 
-- Only edit files under `examples/agent-practice-fixture`.
+- Only edit files under `fixtures/agent-practice-fixture`.
 - Do not modify production packages under `packages/*`.
 - Keep the fixture dependency-free and use the built-in Node.js test runner.
 
 ## Acceptance criteria
 
-- [ ] `examples/agent-practice-fixture/src/scoreboard.js` sorts scores descending.
-- [ ] `cd examples/agent-practice-fixture && npm test` passes.
+- [ ] `fixtures/agent-practice-fixture/src/scoreboard.js` sorts scores descending.
+- [ ] `cd fixtures/agent-practice-fixture && npm test` passes.
 - [ ] The PR body states that this is a practice fixture change and does not close production issues.
 
 ## Reset instructions
@@ -23,6 +23,6 @@ The agent practice fixture formats scoreboard rows in the same order it receives
 After review, reset the fixture back to the intentionally buggy starting point if you want to reuse the exercise:
 
 ```bash
-cd examples/agent-practice-fixture
+cd fixtures/agent-practice-fixture
 npm run reset
 ```

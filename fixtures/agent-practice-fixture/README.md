@@ -2,7 +2,7 @@
 
 This tiny project is a safe sandbox for new agents to practice the mechanics of editing code, running a targeted test, preparing a PR, and resetting a task without touching production Frankenbeast packages.
 
-It is intentionally excluded from production builds: the root `package.json` workspace list only includes `packages/*`, and this fixture lives under `examples/agent-practice-fixture` with its own private `package.json` and Node.js built-in test command.
+It is intentionally excluded from production builds: the root `package.json` workspace list only includes `packages/*`, and this fixture lives under `fixtures/agent-practice-fixture` with its own private `package.json` and Node.js built-in test command.
 
 ## Practice task
 
@@ -13,7 +13,7 @@ Expected fix path:
 1. Run the failing fixture test:
 
    ```bash
-   cd examples/agent-practice-fixture
+   cd fixtures/agent-practice-fixture
    npm test
    ```
 
@@ -26,7 +26,7 @@ Expected fix path:
 After a practice run, reset the fixture to the known buggy state:
 
 ```bash
-cd examples/agent-practice-fixture
+cd fixtures/agent-practice-fixture
 npm run reset
 ```
 
