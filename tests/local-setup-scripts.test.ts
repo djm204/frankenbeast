@@ -126,9 +126,12 @@ describe('local setup scripts', () => {
     expect(read('README.md')).toContain('fixed compose defaults for Grafana (http://localhost:3000/api/health)');
     expect(read('README.md')).toContain('Tempo readiness (http://localhost:3200/ready)');
     expect(read('README.md')).toContain('.env.example intentionally does not define a TEMPO_ENDPOINT override');
+    expect(source).toContain("const chromaUrl = process.env['CHROMA_URL'] ?? envFile.get('CHROMA_URL') ?? 'http://localhost:8000'");
+    expect(source).toContain("const grafanaUrl = process.env['GRAFANA_URL'] ?? envFile.get('GRAFANA_URL') ?? 'http://localhost:3000'");
+    expect(source).toContain("const tempoUrl = process.env['TEMPO_URL'] ?? envFile.get('TEMPO_URL') ?? 'http://localhost:3200'");
     expect(source).toContain("await checkHttp('ChromaDB', `${chromaUrl}/api/v2/heartbeat`, options.requireServices)");
-    expect(source).toContain("await checkHttp('Grafana', 'http://localhost:3000/api/health', options.requireServices)");
-    expect(source).toContain("await checkHttp('Tempo', 'http://localhost:3200/ready', options.requireServices)");
+    expect(source).toContain("await checkHttp('Grafana', `${grafanaUrl}/api/health`, options.requireServices)");
+    expect(source).toContain("await checkHttp('Tempo', `${tempoUrl}/ready`, options.requireServices)");
     expect(source).toContain('Some checks failed: ${failedChecks}');
     expect(source).toContain('for ChromaDB, Grafana, and Tempo');
     expect(source).not.toMatch(/localhost:9090|Firewall server/u);
@@ -225,6 +228,8 @@ describe('local setup scripts', () => {
     writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'frankenbeast', packageManager: 'npm@11.5.1' }));
     writeFileSync(join(root, '.env.example'), [
       'CHROMA_URL=http://127.0.0.1:9',
+      'GRAFANA_URL=http://127.0.0.1:9',
+      'TEMPO_URL=http://127.0.0.1:9',
       'FRANKEN_MAX_TOTAL_TOKENS=1',
       'FRANKEN_MAX_DURATION_MS=1',
       'FRANKEN_MAX_CRITIQUE_ITERATIONS=1',
@@ -245,10 +250,11 @@ describe('local setup scripts', () => {
         env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` },
       });
       expect(result.status, result.stderr).toBe(0);
-      const report = JSON.parse(result.stdout) as { ok: boolean; summary: { warn: number; fail: number }; checks: Array<{ id: string; status: string; required: boolean }> };
+      const report = JSON.parse(result.stdout) as { ok: boolean; summary: { warn: number; fail: number }; checks: Array<{ id: string; status: string; required: boolean; action: string | null }> };
       expect(report.ok).toBe(true);
       expect(report.summary.fail).toBe(0);
       expect(report.summary.warn).toBeGreaterThan(0);
+      expect(report.checks.every((check) => Object.hasOwn(check, 'action'))).toBe(true);
       expect(report.checks).toEqual(expect.arrayContaining([
         expect.objectContaining({ id: 'github-auth', status: 'warn', required: false }),
         expect.objectContaining({ id: 'http-chromadb', status: 'warn', required: false }),

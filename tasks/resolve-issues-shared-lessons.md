@@ -1,5 +1,8 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-17 — Setup healthcheck Codex closeout
+- For onboarding setup healthchecks, distinguish pre-service bootstrap from strict local service verification: occupied optional ports should warn with conflict guidance before Docker starts, while `--require-services` can treat expected open ports as healthy. Keep JSON check schemas stable by serializing nullable fields like `action`, and let tests override service URLs so host-running Grafana/Tempo cannot flip optional-service assertions.
+
 ## 2026-07-16 — Synthetic availability probe review fixes
 - Availability probes should fail closed for real dependencies: do not default provider checks to `node --version` or dashboard checks to a static UI health URL, require explicit provider/backend health targets, and cover missing-target behavior in tests so cron copies cannot produce false-green uptime.
 - For cron/CI probe JSON logs, redact both `key=value` and whitespace-separated secret forms, including split `Authorization: Bearer *** argv sequences, before serializing command details or error messages.

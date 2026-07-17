@@ -66,10 +66,10 @@ function parseOptions(argv) {
     }
     return options;
 }
-function check(id, name, ok, detail, action, required = true) {
+function check(id, name, ok, detail, action = null, required = true) {
     results.push({ id, name, status: ok ? 'ok' : 'fail', ok, required, detail, action });
 }
-function warn(id, name, detail, action) {
+function warn(id, name, detail, action = null) {
     results.push({ id, name, status: 'warn', ok: true, required: false, detail, action });
 }
 function parseEnvFile(path) {
@@ -222,14 +222,19 @@ function probePort(port, timeoutMs = 500) {
         socket.once('error', () => done(false));
     });
 }
-async function checkCommonLocalPorts() {
+async function checkCommonLocalPorts(requireServices = false) {
     for (const portCheck of COMMON_LOCAL_PORTS) {
         const open = await probePort(portCheck.port);
         const detail = open
             ? `${portCheck.service} port ${portCheck.port} is accepting TCP connections`
             : `${portCheck.service} port ${portCheck.port} is not accepting TCP connections`;
         if (open) {
-            check(portCheck.id, portCheck.name, true, detail, `If this is not the expected ${portCheck.service} process, stop the conflicting service before starting Frankenbeast local infrastructure.`, false);
+            if (requireServices) {
+                check(portCheck.id, portCheck.name, true, detail, `If this is not the expected ${portCheck.service} process, stop the conflicting service before starting Frankenbeast local infrastructure.`, false);
+            }
+            else {
+                warn(portCheck.id, portCheck.name, detail, `If this is not the expected ${portCheck.service} process, stop the conflicting service before starting Frankenbeast local infrastructure.`);
+            }
         }
         else {
             warn(portCheck.id, portCheck.name, detail, `If ${portCheck.service} is required for your task, start it with docker compose up -d and re-run the healthcheck.`);
@@ -275,18 +280,20 @@ async function main() {
     }
     // Config example
     check('config-example', 'Config example', existsSync('frankenbeast.config.example.json'), 'frankenbeast.config.example.json', 'Restore frankenbeast.config.example.json from the repository or rebase onto origin/main.');
-    await checkCommonLocalPorts();
+    await checkCommonLocalPorts(options.requireServices);
     if (options.dryRun) {
         check('live-service-probes', 'Live service probes', true, 'Skipping live service probes in dry-run mode');
     }
     else {
         // ChromaDB
         const chromaUrl = process.env['CHROMA_URL'] ?? envFile.get('CHROMA_URL') ?? 'http://localhost:8000';
+        const grafanaUrl = process.env['GRAFANA_URL'] ?? envFile.get('GRAFANA_URL') ?? 'http://localhost:3000';
+        const tempoUrl = process.env['TEMPO_URL'] ?? envFile.get('TEMPO_URL') ?? 'http://localhost:3200';
         await checkHttp('ChromaDB', `${chromaUrl}/api/v2/heartbeat`, options.requireServices);
         // Grafana
-        await checkHttp('Grafana', 'http://localhost:3000/api/health', options.requireServices);
+        await checkHttp('Grafana', `${grafanaUrl}/api/health`, options.requireServices);
         // Tempo
-        await checkHttp('Tempo', 'http://localhost:3200/ready', options.requireServices);
+        await checkHttp('Tempo', `${tempoUrl}/ready`, options.requireServices);
     }
     const failedRequired = results.filter((result) => result.status === 'fail' && result.required);
     const report = {
