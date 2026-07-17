@@ -187,6 +187,10 @@ export interface IssueWorkerCardProcessSnapshot {
   readonly exitReason?: string | undefined;
   /** Other currently live PIDs observed for the same worker card. */
   readonly siblingPids?: readonly number[] | undefined;
+  /** Existing PR URL that already owns this worker's issue/branch, if observed. */
+  readonly activePrUrl?: string | undefined;
+  /** Existing worktree path that already owns this worker's issue/branch, if observed. */
+  readonly activeWorktreePath?: string | undefined;
   /** Monotonic heartbeat sequence recorded by the heartbeat writer. */
   readonly heartbeatSequence?: number | undefined;
   /** Writer/reader source for diagnostics when heartbeat state is stale or regressive. */
@@ -848,7 +852,7 @@ function siblingPidsForSnapshot(
 }
 
 function normalizeKanbanState(status: string): string {
-  return status.trim().toLowerCase().replace(/_/g, '-');
+  return status.trim().toLowerCase().replace(/[\s_]+/g, '-');
 }
 
 function terminalKanbanState(status: string): boolean {
@@ -880,10 +884,14 @@ export function buildWorkerCrashOnlyRestartContract(
   const exitReason = redactStuckRunEvidenceText(rawExitReason);
   const kanbanState = normalizeKanbanState(input.kanbanState) || 'unknown';
   const siblingPids = siblingPidsForSnapshot(snapshot, new Map());
+  const activePrUrl = snapshot.activePrUrl?.trim();
+  const activeWorktreePath = snapshot.activeWorktreePath?.trim();
   const evidence = [
     `exitReason=${exitReason}`,
     `pid=${snapshot.pid}`,
     `heartbeatAgeMs=${input.heartbeatAgeMs ?? 'unknown'}`,
+    ...(activePrUrl ? [`activePr=${activePrUrl}`] : []),
+    ...(activeWorktreePath ? [`activeWorktree=${activeWorktreePath}`] : []),
   ];
   const base = {
     exitReason,
@@ -930,6 +938,15 @@ export function buildWorkerCrashOnlyRestartContract(
   }
 
   if (kanbanState === 'blocked' || kanbanState === 'pending-approval' || input.category === 'approval-gate' || knownLongRunningWait(input.category)) {
+    return {
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      ...base,
+      evidence,
+    };
+  }
+
+  if (activePrUrl || activeWorktreePath) {
     return {
       disposition: 'hitl',
       nextAction: 'defer-with-evidence',

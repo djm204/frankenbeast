@@ -41,7 +41,7 @@ gh pr checks <pr-number> --repo djm204/frankenbeast
 
 ## Crash-only restart contract
 
-Every abnormal worker exit must produce one auditable restart contract row before a PM, doctor, or dispatcher starts another worker. The row records `exitReason`, `pid`, `heartbeatAgeMs`, and `nextAction`, then classifies the liveness state as terminal, retryable, or HITL:
+PM/liveness watchdog recovery of an abnormal worker exit must produce one auditable restart contract row before a PM, doctor, or dispatcher starts another worker from the stalled-card path. Manual/API restarts must still follow the fast triage checklist above, but this watchdog contract row specifically records `exitReason`, `pid`, `heartbeatAgeMs`, and `nextAction`, then classifies the liveness state as terminal, retryable, or HITL:
 
 | Exit/state | Disposition | Next action |
 | --- | --- | --- |

@@ -919,12 +919,12 @@ describe('stuck-run watchdog', () => {
     const contract = buildWorkerCrashOnlyRestartContract({
       cardId: 't_pending_approval',
       pid: 7418,
-      status: 'pending_approval',
+      status: 'pending approval',
       alive: false,
     }, {
       category: 'process-crash',
       processStatus: 'dead',
-      kanbanState: 'pending_approval',
+      kanbanState: 'pending approval',
     });
 
     expect(contract).toMatchObject({
@@ -932,6 +932,31 @@ describe('stuck-run watchdog', () => {
       nextAction: 'defer-with-evidence',
       kanbanState: 'pending-approval',
     });
+  });
+
+  it('defers dead workers with active PR/worktree ownership before restart-once', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_active_owner',
+      pid: 7418,
+      status: 'running',
+      alive: false,
+      activePrUrl: 'https://github.com/djm204/frankenbeast/pull/2560',
+      activeWorktreePath: '/tmp/frankenbeast/.worktrees/t_active_owner',
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'running',
+    });
+
+    expect(contract).toMatchObject({
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      kanbanState: 'running',
+    });
+    expect(contract.evidence).toEqual(expect.arrayContaining([
+      'activePr=https://github.com/djm204/frankenbeast/pull/2560',
+      'activeWorktree=/tmp/frankenbeast/.worktrees/t_active_owner',
+    ]));
   });
 
   it('keeps direct terminal restart contracts as no-op before dead-process retry', () => {
