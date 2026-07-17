@@ -333,6 +333,14 @@ Capture durable lessons, Codex or CI feedback, and reusable notes for future han
     expect(validation.valid).toBe(true);
   });
 
+  it('accepts level-one headings as required sections when they contain body guidance', () => {
+    const h1Template = completeTemplate.replace(/^## /gm, '# ');
+
+    const validation = validateAgentHandoffTemplate(h1Template);
+
+    expect(validation.valid).toBe(true);
+  });
+
   it('returns structured missing-section findings for incomplete templates', () => {
     const validation = validateAgentHandoffTemplate(`## Scope
 Name issue #1775, business goal, and out-of-scope boundaries.
@@ -486,6 +494,20 @@ Record npm test passed or failed.
     ).toBe('placeholder');
   });
 
+  it('rejects combined label-only skeleton lines', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Summarize completed work, current phase, key decisions, and remaining work.',
+        'Completed work, decisions, remaining work',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'state')?.status,
+    ).toBe('placeholder');
+  });
+
   it('preserves linked field values as actionable content', () => {
     const validation = validateAgentHandoffTemplate(
       completeTemplate.replace(
@@ -516,7 +538,7 @@ Record npm test passed or failed.
     const validation = validateAgentHandoffTemplate(
       completeTemplate.replace(
         'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
-        '### Issue/task\nIssue #1775\n### Business goal\nBusiness goal: improve handoff onboarding.\n### Out-of-scope boundaries\nOut-of-scope boundaries: no unrelated refactors.',
+        '### Issue/task\nIssue #1775\n### Business goal\nBusiness goal: improve handoff onboarding.\n### Out-of-scope boundaries\nOut-of-scope boundaries: no unrelated refactors.'
       ),
     );
 
@@ -585,6 +607,34 @@ Issue #1775 goal is onboarding; out-of-scope boundaries are unrelated refactors.
     expect(validation.valid).toBe(false);
     expect(
       validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('does not use empty child headings to satisfy required content patterns', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        'Please complete this\n### Issue/task\n### Business goal\n### Out-of-scope boundaries',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('requires none to be attached to blocker or risk state', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'State blockers, owner, exact next action, and when the receiving worker should stop.',
+        'Owner: none. Next action: continue.',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'blockers')?.status,
     ).toBe('placeholder');
   });
 
@@ -800,6 +850,20 @@ ${completeTemplate}`);
       completeTemplate.replace(
         'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
         '| Issue/task | Business goal | Boundaries |\n| --- | --- | --- |\n| #1775 | - | - |',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('rejects table rows that repeat labels as values', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '| Issue/task | Business goal | Out-of-scope boundaries |\n| --- | --- | --- |\n| Issue/task | Business goal | Out-of-scope boundaries |',
       ),
     );
 

@@ -669,7 +669,8 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
       /^\s*(?:[-*]\s*)?(?:todo|tbd|placeholder|please\s+fill\s+in)\s*:/i.test(
         line,
       ) ||
-      isPlaceholderOnlyFieldLine(line)
+      isPlaceholderOnlyFieldLine(line) ||
+      isCombinedSkeletonLabelLine(line)
     ) {
       continue;
     }
@@ -733,7 +734,7 @@ function normalizeTemplateLabelKey(value: string): string {
 }
 
 function isKnownTemplateLabel(label: string): boolean {
-  return /^(?:issue(?: details)?|issue task|task|business goal|business objective|goal|objective|out of scope boundaries|boundary notes|boundaries|completed work|status|current status|decisions|remaining work|command|commands|test command|test commands|outcome|result|owner|next action|artifact|artifacts|link|links|lesson|lessons)$/.test(
+  return /^(?:issue(?: details)?|issue task|task|business goal|business objective|goal|objective|out of scope boundaries|boundary notes|boundaries|completed work|current phase|key decisions|status|current status|decisions|remaining work|command|commands|test command|test commands|outcome|result|owner|next action|artifact|artifacts|link|links|lesson|lessons)$/.test(
     normalizeTemplateLabelKey(label),
   );
 }
@@ -765,6 +766,15 @@ function isPlaceholderOnlyFieldLine(line: string): boolean {
   return /^[A-Za-z0-9 /_-]+(?::|\s+-\s+)(?:<[^>]*>|\{\{[^}]*\}\}|\{[^}]*\}|\[[^\]]*\](?!\(|\[)|[-–—]+|\b(?:tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)\b)\s*$/i.test(
     normalized,
   );
+}
+
+function isCombinedSkeletonLabelLine(line: string): boolean {
+  const parts = line
+    .replace(/^\s*[-*]\s*/, '')
+    .split(/[,/]/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return parts.length > 1 && parts.every((part) => isEmptyTemplateLabel(part));
 }
 
 function isMarkdownTableHeader(line: string, nextLine: string): boolean {
@@ -831,6 +841,7 @@ function cellHasPopulatedTemplateValue(cell: string): boolean {
   const stripped = normalizeEvidence(stripPlaceholderOnlyTemplateFields(cell));
   return (
     stripped.length > 0 &&
+    !isEmptyTemplateLabel(stripped) &&
     !/^(?:[-–—]+|tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)$/i.test(
       stripped,
     )
