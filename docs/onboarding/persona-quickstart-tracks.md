@@ -6,7 +6,7 @@ Choose the track that matches your first job in the repository. Each track keeps
 
 | Persona | Use this track when | First-success outcome |
 | --- | --- | --- |
-| Operator | You want to run Frankenbeast locally, start optional services, or validate the dashboard/control-plane setup. | Bootstrap reaches the final onboarding badge and `local:verify-setup` reports the local configuration is usable. |
+| Operator | You want to run Frankenbeast locally, start optional services, or validate the dashboard/control-plane setup. | Bootstrap reaches the final onboarding badge, and the bootstrap dry run passes for no-Docker setup. |
 | Contributor | You want to install dependencies, inspect the workspace, make docs or code changes, and run a safe verification gate. | The repository builds or passes the targeted test path selected from the decision tree. |
 | Agent-developer | You are a PM/worker/coding agent preparing one issue-scoped PR with GitHub and Codex review evidence. | Worker preflight emits JSON with `ok: true`, the issue worktree helper produces a branch/worktree plan, and the PR flow has a stable runbook target. |
 
@@ -36,7 +36,7 @@ npm run bootstrap -- --services
 ### Validation commands
 
 ```bash
-npm run bootstrap:dry-run
+./scripts/bootstrap.sh --dry-run
 npm run first-run:checklist -- --persona operator
 ```
 
@@ -49,7 +49,7 @@ npm run local:verify-setup
 ### Expected success output
 
 - Bootstrap prints `[onboarding:6/6:done] complete - onboarding bootstrap reached 6/6 steps`.
-- `bootstrap:dry-run` exits `0` after validating the no-Docker prerequisite path without requiring ChromaDB, Grafana, or Tempo to be running.
+- `./scripts/bootstrap.sh --dry-run` exits `0` after exercising the bootstrap script's no-Docker validation path without mutating files or requiring ChromaDB, Grafana, or Tempo to be running.
 - `local:verify-setup` exits `0` on the services path after validating the local `.env` and live optional-service setup state.
 - The generated operator checklist includes runtime configuration and optional-service items without agent-only PR steps.
 
@@ -109,18 +109,18 @@ When the dry run is correct, run the issue worktree helper without `--dry-run` o
 ### Validation commands
 
 ```bash
-npm run test:root -- tests/docs-issue-1663.test.ts
+npm run test:root -- <targeted-test-file>
 npm run typecheck
 npm run build
 ```
 
-After the PR is opened, trigger and complete the real GitHub Codex gate described in [the coding-agent PR etiquette guide](coding-agent-pr-etiquette.md) and [the first-PR agent runbook](first-pr-agent-runbook.md).
+Choose `<targeted-test-file>` from the files you changed and [the test command decision tree](test-command-decision-tree.md); for example, this persona-track guide is guarded by `tests/docs-issue-1663.test.ts`. After the PR is opened, trigger and complete the real GitHub Codex gate described in [the coding-agent PR etiquette guide](coding-agent-pr-etiquette.md) and [the first-PR agent runbook](first-pr-agent-runbook.md).
 
 ### Expected success output
 
 - `new-worker:preflight -- --json` returns JSON with `ok: true` and check entries for GitHub auth, git identity, repository root, and worktree cleanliness.
 - `issue:worktree -- --dry-run` prints the planned issue number, branch, worktree path, duplicate-PR check, and verification commands without mutating the checkout.
-- The docs regression test for this guide exits `0`, proving the entrypoint links and command references still match root package scripts and repository files.
+- The targeted regression exits `0`, proving the touched docs, commands, or package surface still matches repository files.
 
 ## Drift guard
 

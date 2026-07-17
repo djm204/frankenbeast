@@ -76,7 +76,6 @@ describe('issue #1663 persona quickstart tracks', () => {
 
     expect(referencedScripts).toEqual(expect.arrayContaining([
       'bootstrap',
-      'bootstrap:dry-run',
       'local:verify-setup',
       'first-run:checklist',
       'workspace:tour',
