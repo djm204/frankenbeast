@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 
 const DEFAULT_TIMEOUT_MS = 5_000;
 const OUTPUT_LIMIT_BYTES = 1024 * 1024;
-const SECRET_LABEL_SOURCE = String.raw`(?:token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential|private[-_]?key|signing[-_]?key)`;
+const SECRET_LABEL_SOURCE = String.raw`(?:token|secret|password|passwd|authorization|bearer|oauth2[-_]?bearer|api[-_]?key|access[-_]?key|credential|private[-_]?key|signing[-_]?key)`;
 const SECRET_ARG_PATTERN = new RegExp(SECRET_LABEL_SOURCE, 'iu');
 const SECRET_ASSIGNMENT_PATTERN = new RegExp(String.raw`((?:["']?${SECRET_LABEL_SOURCE}[\w.-]*["']?\s*[=:]\s*))(["'])([^"']+)\2`, 'giu');
 const SECRET_UNQUOTED_ASSIGNMENT_PATTERN = new RegExp(String.raw`((?:${SECRET_LABEL_SOURCE})[\w.-]*\s*[=:]\s*)\S+`, 'giu');
@@ -200,12 +200,12 @@ async function defaultExecFile(file, args, timeoutMs) {
 function redactText(value) {
   return String(value)
     .replace(/(Authorization:\s*)Basic\s+\S+(?:\s+\S+)?/giu, '$1Basic [REDACTED]')
-    .replace(/Bearer\s+\S+/giu, 'Bearer [REDACTED]')
-    .replace(/Basic\s+\S+/giu, 'Basic [REDACTED]')
-    .replace(/[a-z][a-z0-9+.-]*:\/\/[^\s'"<>]+/giu, (match) => redactUrl(match))
     .replace(SECRET_ASSIGNMENT_PATTERN, '$1$2[REDACTED]$2')
     .replace(SECRET_UNQUOTED_ASSIGNMENT_PATTERN, '$1[REDACTED]')
     .replace(SECRET_FLAG_VALUE_PATTERN, '$1[REDACTED]')
+    .replace(/(?<![\w-])Bearer\s+\S+/giu, 'Bearer [REDACTED]')
+    .replace(/Basic\s+\S+/giu, 'Basic [REDACTED]')
+    .replace(/[a-z][a-z0-9+.-]*:\/\/[^\s'"<>]+/giu, (match) => redactUrl(match))
     .replace(TOKEN_LITERAL_PATTERN, '[REDACTED]');
 }
 
@@ -264,6 +264,9 @@ function redactCommand(command) {
 
 function dashboardHealthRequest(value) {
   const url = new URL(String(value));
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(`dashboard health URL must use http or https, got ${url.protocol || 'unknown'}`);
+  }
   const headers = {};
   if (url.username || url.password) {
     const username = decodeURIComponent(url.username);
@@ -294,10 +297,12 @@ async function probeKanbanRead(config, deps) {
   if (!config.kanbanDbPath) throw new Error('missing kanban db path; pass --kanban-db or HERMES_KANBAN_DB');
   const db = await deps.openSqliteReadOnly(config.kanbanDbPath);
   try {
-    const tableRow = db.prepare("SELECT count(*) AS count FROM sqlite_master WHERE type = 'table'").get();
-    const tables = Number(tableRow?.count ?? 0);
-    if (tables <= 0) throw new Error('kanban db contains no tables');
-    return { path: config.kanbanDbPath, tables };
+    const requiredTables = ['tasks', 'comments'];
+    const tableRows = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('tasks', 'comments')").all();
+    const tables = new Set(tableRows.map((row) => String(row?.name ?? '')));
+    const missingTables = requiredTables.filter((name) => !tables.has(name));
+    if (missingTables.length > 0) throw new Error(`kanban db missing required tables: ${missingTables.join(', ')}`);
+    return { path: config.kanbanDbPath, tables: requiredTables };
   } finally {
     db.close?.();
   }

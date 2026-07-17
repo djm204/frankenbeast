@@ -33,7 +33,9 @@ describe('synthetic availability probes', () => {
     });
     const fetch = vi.fn(async (url: string) => ({ ok: true, status: 200, url }));
     const openSqliteReadOnly = vi.fn((path: string) => ({
-      prepare: (sql: string) => ({ get: () => ({ count: path === kanbanPath && sql.includes('sqlite_master') ? 1 : 0 }) }),
+      prepare: (sql: string) => ({
+        all: () => (path === kanbanPath && sql.includes('sqlite_master') ? [{ name: 'tasks' }, { name: 'comments' }] : []),
+      }),
       close: vi.fn(),
     }));
 
@@ -129,7 +131,7 @@ describe('synthetic availability probes', () => {
       },
       execFile,
       fetch: vi.fn(async () => ({ ok: true, status: 200 })),
-      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ all: () => [{ name: 'tasks' }, { name: 'comments' }] }), close: vi.fn() })),
       readFile: vi.fn(async () => '{}'),
     });
 
@@ -151,7 +153,7 @@ describe('synthetic availability probes', () => {
       },
       execFile,
       fetch: vi.fn(async () => ({ ok: true, status: 200 })),
-      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ all: () => [{ name: 'tasks' }, { name: 'comments' }] }), close: vi.fn() })),
       readFile: vi.fn(async () => '{}'),
     });
 
@@ -173,7 +175,7 @@ describe('synthetic availability probes', () => {
       },
       execFile,
       fetch: vi.fn(async () => ({ ok: true, status: 200 })),
-      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ all: () => [{ name: 'tasks' }, { name: 'comments' }] }), close: vi.fn() })),
       readFile: vi.fn(async () => '{}'),
     });
 
@@ -195,7 +197,7 @@ describe('synthetic availability probes', () => {
       },
       execFile,
       fetch: vi.fn(async () => ({ ok: true, status: 200 })),
-      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ all: () => [{ name: 'tasks' }, { name: 'comments' }] }), close: vi.fn() })),
       readFile: vi.fn(async () => '{}'),
     });
 
@@ -217,7 +219,7 @@ describe('synthetic availability probes', () => {
       },
       execFile,
       fetch: vi.fn(async () => ({ ok: true, status: 200 })),
-      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ all: () => [{ name: 'tasks' }, { name: 'comments' }] }), close: vi.fn() })),
       readFile: vi.fn(async () => '{}'),
     });
 
@@ -237,7 +239,7 @@ describe('synthetic availability probes', () => {
       },
       execFile: vi.fn(async (file: string) => (file === 'gh' ? '[]' : 'provider ok')),
       fetch,
-      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ all: () => [{ name: 'tasks' }, { name: 'comments' }] }), close: vi.fn() })),
       readFile: vi.fn(async () => '{}'),
     });
 
@@ -260,7 +262,7 @@ describe('synthetic availability probes', () => {
       },
       execFile: vi.fn(async (file: string) => (file === 'gh' ? '[]' : 'provider ok')),
       fetch,
-      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ all: () => [{ name: 'tasks' }, { name: 'comments' }] }), close: vi.fn() })),
       readFile: vi.fn(async () => '{}'),
     });
 
@@ -286,7 +288,7 @@ describe('synthetic availability probes', () => {
       },
       execFile: vi.fn(async (file: string) => (file === 'gh' ? '[]' : 'provider ok')),
       fetch: vi.fn(async () => ({ ok: true, status: 200 })),
-      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ all: () => [{ name: 'tasks' }, { name: 'comments' }] }), close: vi.fn() })),
       readFile: vi.fn(async () => 'opaque-approval-token-value'),
     });
 
@@ -309,7 +311,7 @@ describe('synthetic availability probes', () => {
         throw new Error('provider failed: GITHUB_TOKEN_VALUE ghp_secret AWS_ACCESS_KEY_ID AKIASECRET');
       }),
       fetch: vi.fn(async () => ({ ok: true, status: 200 })),
-      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ all: () => [{ name: 'tasks' }, { name: 'comments' }] }), close: vi.fn() })),
       readFile: vi.fn(async () => '{}'),
     });
 
@@ -329,7 +331,7 @@ describe('synthetic availability probes', () => {
       },
       execFile: vi.fn(async (file: string) => (file === 'gh' ? '[]' : 'provider ok')),
       fetch: vi.fn(async () => ({ ok: true, status: 200 })),
-      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ all: () => [{ name: 'tasks' }, { name: 'comments' }] }), close: vi.fn() })),
       readFile: vi.fn(async () => '{}'),
     });
 
@@ -349,7 +351,7 @@ describe('synthetic availability probes', () => {
       },
       execFile: vi.fn(async (file: string) => (file === 'gh' ? '[]' : 'provider ok')),
       fetch: vi.fn(async () => ({ ok: true, status: 200 })),
-      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ all: () => [{ name: 'tasks' }, { name: 'comments' }] }), close: vi.fn() })),
       readFile: vi.fn(async () => '{}'),
     });
 
@@ -394,7 +396,7 @@ describe('synthetic availability probes', () => {
       },
       execFile: vi.fn(async (file: string) => (file === 'gh' ? '[]' : 'provider ok')),
       fetch: vi.fn(async () => ({ ok: true, status: 200 })),
-      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ all: () => [{ name: 'tasks' }, { name: 'comments' }] }), close: vi.fn() })),
       readFile: vi.fn(async () => '{}'),
     });
 
@@ -414,13 +416,36 @@ describe('synthetic availability probes', () => {
       },
       execFile: vi.fn(async (file: string) => (file === 'gh' ? '[]' : 'provider ok')),
       fetch: vi.fn(async () => ({ ok: true, status: 200 })),
-      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ all: () => [{ name: 'tasks' }, { name: 'comments' }] }), close: vi.fn() })),
       readFile: vi.fn(async () => '{}'),
     });
 
     const providerProbe = (report.probes as Array<any>).find((probe) => probe.name === 'provider_status');
     expect(providerProbe?.detail.command).toContain('[REDACTED]');
     expect(providerProbe?.detail.command).not.toContain('bearer-token-value');
+  });
+
+  it('redacts oauth2 bearer provider command flags and echoed bearer output', async () => {
+    const { runSyntheticAvailabilityProbes } = await loadScript();
+    const report = await runSyntheticAvailabilityProbes({
+      config: {
+        repo: 'djm204/frankenbeast',
+        providerCommand: ['curl', '--oauth2-bearer', 'opaque-provider-credential', 'http://127.0.0.1/health'],
+        timeoutMs: 100,
+      },
+      execFile: vi.fn(async (file: string) => {
+        if (file === 'gh') return '[]';
+        throw new Error('curl failed: --oauth2-bearer opaque-provider-credential');
+      }),
+      fetch: vi.fn(async () => ({ ok: true, status: 200 })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ all: () => [{ name: 'tasks' }, { name: 'comments' }] }), close: vi.fn() })),
+      readFile: vi.fn(async () => '{}'),
+    });
+
+    const providerProbe = (report.probes as Array<any>).find((probe) => probe.name === 'provider_status');
+    expect(providerProbe?.status).toBe('unavailable');
+    expect(providerProbe?.error).toContain('--oauth2-bearer [REDACTED]');
+    expect(providerProbe?.error).not.toContain('opaque-provider-credential');
   });
 
   it('redacts space-separated secrets from provider failure output', async () => {
@@ -436,7 +461,7 @@ describe('synthetic availability probes', () => {
         throw new Error('provider exited with code 1: --api-key super-secret token another-secret Bearer bearer-secret');
       }),
       fetch: vi.fn(async () => ({ ok: true, status: 200 })),
-      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ all: () => [{ name: 'tasks' }, { name: 'comments' }] }), close: vi.fn() })),
       readFile: vi.fn(async () => '{}'),
     });
 
@@ -460,7 +485,7 @@ describe('synthetic availability probes', () => {
         throw new Error('provider failed: Authorization: Basic *** dXNlcjpwYXNz http://user:p4ssw0rd@example.test/health?token=secret-token');
       }),
       fetch: vi.fn(async () => ({ ok: true, status: 200 })),
-      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ all: () => [{ name: 'tasks' }, { name: 'comments' }] }), close: vi.fn() })),
       readFile: vi.fn(async () => '{}'),
     });
 
@@ -484,7 +509,7 @@ describe('synthetic availability probes', () => {
         throw new Error('provider failed: postgres://user:p4ssw0rd@db.example/app?sslmode=require');
       }),
       fetch: vi.fn(async () => ({ ok: true, status: 200 })),
-      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ all: () => [{ name: 'tasks' }, { name: 'comments' }] }), close: vi.fn() })),
       readFile: vi.fn(async () => '{}'),
     });
 
@@ -507,7 +532,7 @@ describe('synthetic availability probes', () => {
         throw new Error('provider failed: http://%');
       }),
       fetch: vi.fn(async () => ({ ok: true, status: 200 })),
-      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ all: () => [{ name: 'tasks' }, { name: 'comments' }] }), close: vi.fn() })),
       readFile: vi.fn(async () => '{}'),
     });
 
@@ -527,13 +552,36 @@ describe('synthetic availability probes', () => {
       },
       execFile: vi.fn(async (file: string) => (file === 'gh' ? '[]' : 'provider ok')),
       fetch: vi.fn(async () => ({ ok: true, status: 200 })),
-      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ all: () => [{ name: 'tasks' }, { name: 'comments' }] }), close: vi.fn() })),
       readFile: vi.fn(async () => '{}'),
     });
 
     const dashboardProbe = (report.probes as Array<any>).find((probe) => probe.name === 'dashboard_health');
     expect(dashboardProbe?.detail.url).toBe('https://hooks.slack.com/services/[REDACTED]');
     expect(JSON.stringify(report)).not.toContain('secret-webhook-token');
+  });
+
+  it('rejects non-http dashboard health URLs', async () => {
+    const { runSyntheticAvailabilityProbes } = await loadScript();
+    const fetch = vi.fn(async () => ({ ok: true, status: 200 }));
+
+    const report = await runSyntheticAvailabilityProbes({
+      config: {
+        repo: 'djm204/frankenbeast',
+        providerCommand: ['node', '--version'],
+        dashboardHealthUrl: 'data:text/plain,ok',
+        timeoutMs: 100,
+      },
+      execFile: vi.fn(async (file: string) => (file === 'gh' ? '[]' : 'provider ok')),
+      fetch,
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ all: () => [{ name: 'tasks' }, { name: 'comments' }] }), close: vi.fn() })),
+      readFile: vi.fn(async () => '{}'),
+    });
+
+    const dashboardProbe = (report.probes as Array<any>).find((probe) => probe.name === 'dashboard_health');
+    expect(fetch).not.toHaveBeenCalled();
+    expect(dashboardProbe?.status).toBe('unavailable');
+    expect(dashboardProbe?.error).toContain('must use http or https');
   });
 
   it('redacts bare token literals and quoted structured secret values from provider errors', async () => {
@@ -549,7 +597,7 @@ describe('synthetic availability probes', () => {
         throw new Error('provider failed: {"access_token":"sk-abcdefghijklmnop"} TOKEN="quoted value with spaces" xoxb-123456789-secret');
       }),
       fetch: vi.fn(async () => ({ ok: true, status: 200 })),
-      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ all: () => [{ name: 'tasks' }, { name: 'comments' }] }), close: vi.fn() })),
       readFile: vi.fn(async () => '{}'),
     });
 
@@ -570,7 +618,7 @@ describe('synthetic availability probes', () => {
       },
       execFile: vi.fn(async (file: string) => (file === 'gh' ? '[]' : 'provider ok')),
       fetch: vi.fn(async () => ({ ok: true, status: 200 })),
-      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ all: () => [{ name: 'tasks' }, { name: 'comments' }] }), close: vi.fn() })),
       readFile: vi.fn(async () => '{}'),
     });
 
@@ -592,13 +640,33 @@ describe('synthetic availability probes', () => {
       },
       execFile: vi.fn(async (file: string) => (file === 'gh' ? '[]' : 'provider ok')),
       fetch: vi.fn(async () => ({ ok: true, status: 200 })),
-      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 0 }) }), close: vi.fn() })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ all: () => [] }), close: vi.fn() })),
       readFile: vi.fn(async () => '{}'),
     });
 
     const kanbanProbe = (report.probes as Array<any>).find((probe) => probe.name === 'kanban_read');
     expect(kanbanProbe?.status).toBe('unavailable');
-    expect(kanbanProbe?.error).toContain('no tables');
+    expect(kanbanProbe?.error).toContain('missing required tables: tasks, comments');
+  });
+
+  it('marks a non-Kanban SQLite database unavailable', async () => {
+    const { runSyntheticAvailabilityProbes } = await loadScript();
+    const report = await runSyntheticAvailabilityProbes({
+      config: {
+        repo: 'djm204/frankenbeast',
+        kanbanDbPath: '/tmp/not-kanban.db',
+        providerCommand: ['node', '--version'],
+        timeoutMs: 100,
+      },
+      execFile: vi.fn(async (file: string) => (file === 'gh' ? '[]' : 'provider ok')),
+      fetch: vi.fn(async () => ({ ok: true, status: 200 })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ all: () => [{ name: 'users' }] }), close: vi.fn() })),
+      readFile: vi.fn(async () => '{}'),
+    });
+
+    const kanbanProbe = (report.probes as Array<any>).find((probe) => probe.name === 'kanban_read');
+    expect(kanbanProbe?.status).toBe('unavailable');
+    expect(kanbanProbe?.error).toContain('missing required tables: tasks, comments');
   });
 
   it('terminates timed-out provider commands before returning a report', () => {
