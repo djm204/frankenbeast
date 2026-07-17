@@ -112,6 +112,49 @@ describe("Memory Server", () => {
     });
   });
 
+  it("keeps tool-level memory queries isolated by injected profile brain", async () => {
+    const defaultBrain = createBrainStub({
+      query: vi.fn().mockResolvedValue([
+        { key: "profile-note", value: "default profile memory", type: "working" },
+      ]),
+    });
+    const doctorBrain = createBrainStub({
+      query: vi.fn().mockResolvedValue([
+        { key: "profile-note", value: "doctor profile memory", type: "working" },
+      ]),
+    });
+    const defaultServer = createMemoryServer({ brain: defaultBrain });
+    const doctorServer = createMemoryServer({ brain: doctorBrain });
+
+    const defaultResult = await defaultServer.callTool("fbeast_memory_query", {
+      query: "profile memory",
+      type: "working",
+      readScope: "shared",
+    });
+    const doctorResult = await doctorServer.callTool("fbeast_memory_query", {
+      query: "profile memory",
+      type: "working",
+      readScope: "shared",
+    });
+
+    expect(defaultBrain.query).toHaveBeenCalledWith({
+      query: "profile memory",
+      type: "working",
+      readScope: "shared",
+      limit: 20,
+    });
+    expect(doctorBrain.query).toHaveBeenCalledWith({
+      query: "profile memory",
+      type: "working",
+      readScope: "shared",
+      limit: 20,
+    });
+    expect(defaultResult.content[0]!.text).toContain("default profile memory");
+    expect(defaultResult.content[0]!.text).not.toContain("doctor profile memory");
+    expect(doctorResult.content[0]!.text).toContain("doctor profile memory");
+    expect(doctorResult.content[0]!.text).not.toContain("default profile memory");
+  });
+
   it("delegates memory store/query/frontload/forget to the brain adapter", async () => {
     const brain = createBrainStub({
       query: vi.fn().mockResolvedValue([
