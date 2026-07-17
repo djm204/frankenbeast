@@ -2,6 +2,8 @@
 
 Use this checklist when automation that normally coordinates workers, PR gates, approvals, backups, restores, or liveness monitoring fails or starts producing ambiguous handoffs. The goal is to put one person in incident command, freeze unsafe automation paths, preserve evidence, and route every recovery action through an explicit decision trail.
 
+If any incident update uses agent-coordination runtime terms such as refill, parked worker, provider route, fallback lane, HITL gate, review cap, current-head clean, or approval runner, link responders to the [agent coordination runtime glossary](../onboarding/agent-coordination-runtime-glossary.md) before assigning recovery work.
+
 This checklist is operator guidance, not a restore script. Do not run destructive commands from this document; copy the decision fields into the incident room, Kanban card, or ticket that is acting as the command log. It requires explicit decision-log rows before merges, force-pushes, restore commands, approval replays, or broad worker respawns.
 
 ## Incident metadata

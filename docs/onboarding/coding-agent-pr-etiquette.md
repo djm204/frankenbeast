@@ -2,6 +2,8 @@
 
 Use this guide when an autonomous or semi-autonomous coding agent opens, updates, reviews, or merges a Frankenbeast pull request. The goal is to make each PR independently reviewable, easy to close out, and safe for coordination/liveness tooling to reason about.
 
+If this is the agent's first small issue-to-PR task in the repository, start with the [first-PR agent runbook](first-pr-agent-runbook.md). It gives the numbered command flow from GitHub issue confirmation through branch/worktree creation, local verification, PR creation, Codex review, merge handoff, and HITL stop conditions.
+
 ## Fast checklist
 
 Before opening or updating a PR:
