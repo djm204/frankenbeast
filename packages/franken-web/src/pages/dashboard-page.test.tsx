@@ -46,6 +46,40 @@ const snapshot: DashboardSnapshot = {
       },
     ],
   },
+  slo: {
+    generatedAt: '2026-07-17T00:00:00.000Z',
+    source: { kanban: true, approvals: true, runs: true },
+    windows: [
+      {
+        label: '1h',
+        seconds: 3600,
+        sampleSize: 9,
+        metrics: [
+          {
+            id: 'run_success_rate',
+            label: 'Run success rate',
+            value: 94.5,
+            unit: 'percent',
+            target: 95,
+            comparator: '>=',
+            status: 'warning',
+            description: 'Completed terminal runs divided by all terminal Kanban runs.',
+          },
+          {
+            id: 'approval_latency_p50_ms',
+            label: 'Approval latency p50',
+            value: 420_000,
+            unit: 'milliseconds',
+            target: 3_600_000,
+            comparator: '<=',
+            status: 'ok',
+            description: 'Median time from approval/HITL block to unblock decision.',
+          },
+        ],
+        failureCategories: [{ category: 'provider', count: 2 }],
+      },
+    ],
+  },
 };
 
 function mockClient(overrides: Partial<DashboardApiClient> = {}): DashboardApiClient {
@@ -89,6 +123,12 @@ describe('DashboardPage', () => {
     expect(screen.getByText(/Continue local implementation and tests/)).toBeTruthy();
     expect(screen.getByText('github-api')).toBeTruthy();
     expect(screen.getByText('[degraded]')).toBeTruthy();
+    expect(await screen.findByLabelText('SLO dashboard')).toBeTruthy();
+    expect(screen.getByText('Run success rate')).toBeTruthy();
+    expect(screen.getByText('94.5%')).toBeTruthy();
+    expect(screen.getByText('Approval latency p50')).toBeTruthy();
+    expect(screen.getByText('7m')).toBeTruthy();
+    expect(screen.getByText(/provider \(2\)/)).toBeTruthy();
   });
 
   it('renders a maintenance mode banner with dispatch guardrail guidance', async () => {

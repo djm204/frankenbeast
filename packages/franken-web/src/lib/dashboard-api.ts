@@ -46,12 +46,46 @@ export interface DashboardMaintenanceMode {
   allowedCommands: string[];
 }
 
+export type DashboardSloMetricStatus = 'ok' | 'warning' | 'breach' | 'unknown';
+export type DashboardSloMetricUnit = 'percent' | 'milliseconds' | 'count';
+
+export interface DashboardSloMetric {
+  id: string;
+  label: string;
+  value: number | null;
+  unit: DashboardSloMetricUnit;
+  target: number;
+  comparator: '>=' | '<=';
+  status: DashboardSloMetricStatus;
+  description: string;
+}
+
+export interface DashboardSloFailureCategory {
+  category: string;
+  count: number;
+}
+
+export interface DashboardSloWindow {
+  label: '1h' | '24h' | '7d';
+  seconds: number;
+  sampleSize: number;
+  metrics: DashboardSloMetric[];
+  failureCategories: DashboardSloFailureCategory[];
+}
+
+export interface DashboardSlo {
+  generatedAt: string;
+  source: { kanban: boolean; approvals: boolean; runs: boolean };
+  windows: DashboardSloWindow[];
+}
+
 export interface DashboardSnapshot {
   skills: DashboardSkill[];
   security: DashboardSecurity;
   providers: DashboardProvider[];
   availability?: DashboardAvailability;
   maintenance?: DashboardMaintenanceMode;
+  slo?: DashboardSlo;
 }
 
 export class DashboardApiClient {

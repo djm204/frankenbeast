@@ -1,0 +1,359 @@
+import Database from 'better-sqlite3';
+import { existsSync } from 'node:fs';
+
+export type SloMetricStatus = 'ok' | 'warning' | 'breach' | 'unknown';
+export type SloMetricUnit = 'percent' | 'milliseconds' | 'count';
+
+export interface SloMetric {
+  id: string;
+  label: string;
+  value: number | null;
+  unit: SloMetricUnit;
+  target: number;
+  comparator: '>=' | '<=';
+  status: SloMetricStatus;
+  description: string;
+}
+
+export interface SloFailureCategory {
+  category: string;
+  count: number;
+}
+
+export interface SloWindowDashboard {
+  label: '1h' | '24h' | '7d';
+  seconds: number;
+  metrics: SloMetric[];
+  failureCategories: SloFailureCategory[];
+  sampleSize: number;
+}
+
+export interface SloDashboard {
+  generatedAt: string;
+  source: {
+    kanban: boolean;
+    approvals: boolean;
+    runs: boolean;
+  };
+  windows: SloWindowDashboard[];
+}
+
+export interface SloRunRecord {
+  taskId: string;
+  taskStatus: string;
+  taskCreatedAt: number;
+  taskStartedAt?: number | null;
+  taskCompletedAt?: number | null;
+  runId?: number | null;
+  runStatus?: string | null;
+  runStartedAt?: number | null;
+  runEndedAt?: number | null;
+  outcome?: string | null;
+  error?: string | null;
+  firstOutputAt?: number | null;
+  spawnedAt?: number | null;
+}
+
+export interface SloApprovalRecord {
+  taskId: string;
+  requestedAt: number;
+  decidedAt: number;
+}
+
+export interface SloDashboardSource {
+  now: number;
+  runs: SloRunRecord[];
+  approvals: SloApprovalRecord[];
+  hasKanbanData: boolean;
+  hasRunData: boolean;
+  hasApprovalData: boolean;
+}
+
+const WINDOWS: ReadonlyArray<{ label: '1h' | '24h' | '7d'; seconds: number }> = [
+  { label: '1h', seconds: 60 * 60 },
+  { label: '24h', seconds: 24 * 60 * 60 },
+  { label: '7d', seconds: 7 * 24 * 60 * 60 },
+];
+
+const TARGETS = {
+  runSuccessRate: 95,
+  firstOutputMs: 5 * 60 * 1000,
+  closeoutMs: 24 * 60 * 60 * 1000,
+  providerWaitMs: 2 * 60 * 1000,
+  queueAgeMs: 15 * 60 * 1000,
+  approvalLatencyMs: 60 * 60 * 1000,
+} as const;
+
+export async function buildSloDashboardFromKanban(source: SloDashboardSource): Promise<SloDashboard> {
+  return {
+    generatedAt: new Date(source.now * 1000).toISOString(),
+    source: {
+      kanban: source.hasKanbanData,
+      approvals: source.hasApprovalData,
+      runs: source.hasRunData,
+    },
+    windows: WINDOWS.map((window) => buildWindow(source, window.label, window.seconds)),
+  };
+}
+
+export interface SqliteSloDashboardSourceOptions {
+  kanbanDbPath: string;
+  now?: number | undefined;
+}
+
+export function createSqliteSloDashboardSource(options: SqliteSloDashboardSourceOptions): SloDashboardSource {
+  const now = options.now ?? Math.floor(Date.now() / 1000);
+  if (!existsSync(options.kanbanDbPath)) {
+    return { now, runs: [], approvals: [], hasKanbanData: false, hasRunData: false, hasApprovalData: false };
+  }
+
+  const db = new Database(options.kanbanDbPath, { readonly: true, fileMustExist: true });
+  try {
+    const hasTasks = hasTable(db, 'tasks');
+    const hasRuns = hasTable(db, 'task_runs');
+    const hasEvents = hasTable(db, 'task_events');
+    return {
+      now,
+      runs: hasTasks ? readRunRecords(db, hasRuns, hasEvents) : [],
+      approvals: hasEvents ? readApprovalRecords(db) : [],
+      hasKanbanData: hasTasks,
+      hasRunData: hasRuns,
+      hasApprovalData: hasEvents,
+    };
+  } finally {
+    db.close();
+  }
+}
+
+function buildWindow(source: SloDashboardSource, label: '1h' | '24h' | '7d', seconds: number): SloWindowDashboard {
+  const since = source.now - seconds;
+  const runs = source.runs.filter((run) => recordTimestamp(run) >= since);
+  const approvals = source.approvals.filter((approval) => approval.decidedAt >= since);
+  const successfulRuns = runs.filter(isSuccessfulRun).length;
+  const totalTerminalRuns = runs.filter(isTerminalRun).length;
+  const successRate = totalTerminalRuns === 0 ? null : round((successfulRuns / totalTerminalRuns) * 100, 2);
+  const firstOutputSamples = runs
+    .map((run) => durationMs(run.runStartedAt, run.firstOutputAt))
+    .filter(isNumber);
+  const closeoutSamples = runs
+    .map((run) => durationMs(run.taskCreatedAt, run.taskCompletedAt))
+    .filter(isNumber);
+  const providerWaitSamples = runs
+    .map((run) => durationMs(run.runStartedAt, run.spawnedAt))
+    .filter(isNumber);
+  const queueAgeSamples = runs
+    .map((run) => durationMs(run.taskCreatedAt, run.taskStartedAt ?? run.runStartedAt))
+    .filter(isNumber);
+  const approvalSamples = approvals
+    .map((approval) => durationMs(approval.requestedAt, approval.decidedAt))
+    .filter(isNumber);
+
+  return {
+    label,
+    seconds,
+    metrics: [
+      metric('run_success_rate', 'Run success rate', successRate, 'percent', TARGETS.runSuccessRate, '>=', 'Completed terminal runs divided by all terminal Kanban runs.'),
+      metric('time_to_first_output_p50_ms', 'Time to first output p50', percentile(firstOutputSamples, 50), 'milliseconds', TARGETS.firstOutputMs, '<=', 'Median time from run start to first heartbeat, comment, block, or completion signal.'),
+      metric('time_to_closeout_p50_ms', 'Time to merge/closeout p50', percentile(closeoutSamples, 50), 'milliseconds', TARGETS.closeoutMs, '<=', 'Median time from task creation to done/completed closeout.'),
+      metric('provider_wait_p50_ms', 'Provider wait p50', percentile(providerWaitSamples, 50), 'milliseconds', TARGETS.providerWaitMs, '<=', 'Median time from run claim/start to worker spawn signal.'),
+      metric('queue_age_p50_ms', 'Queue age p50', percentile(queueAgeSamples, 50), 'milliseconds', TARGETS.queueAgeMs, '<=', 'Median time from task creation to first start/claim.'),
+      metric('approval_latency_p50_ms', 'Approval latency p50', percentile(approvalSamples, 50), 'milliseconds', TARGETS.approvalLatencyMs, '<=', 'Median time from approval/HITL block to unblock decision.'),
+    ],
+    failureCategories: failureCategories(runs),
+    sampleSize: runs.length,
+  };
+}
+
+function readRunRecords(db: Database.Database, hasRuns: boolean, hasEvents: boolean): SloRunRecord[] {
+  if (!hasRuns) {
+    return db.prepare(`
+      SELECT id AS taskId,
+             status AS taskStatus,
+             created_at AS taskCreatedAt,
+             started_at AS taskStartedAt,
+             completed_at AS taskCompletedAt
+      FROM tasks
+    `).all() as SloRunRecord[];
+  }
+
+  const rows = db.prepare(`
+    SELECT t.id AS taskId,
+           t.status AS taskStatus,
+           t.created_at AS taskCreatedAt,
+           t.started_at AS taskStartedAt,
+           t.completed_at AS taskCompletedAt,
+           r.id AS runId,
+           r.status AS runStatus,
+           r.started_at AS runStartedAt,
+           r.ended_at AS runEndedAt,
+           r.outcome AS outcome,
+           r.error AS error
+    FROM task_runs r
+    JOIN tasks t ON t.id = r.task_id
+  `).all() as SloRunRecord[];
+
+  if (!hasEvents) {
+    return rows;
+  }
+
+  const outputEvents = db.prepare(`
+    SELECT run_id AS runId,
+           MIN(created_at) AS firstOutputAt
+    FROM task_events
+    WHERE run_id IS NOT NULL
+      AND kind IN ('commented', 'heartbeat', 'blocked', 'completed', 'protocol_violation', 'crashed', 'gave_up')
+    GROUP BY run_id
+  `).all() as Array<{ runId: number; firstOutputAt: number }>;
+  const spawnedEvents = db.prepare(`
+    SELECT run_id AS runId,
+           MIN(created_at) AS spawnedAt
+    FROM task_events
+    WHERE run_id IS NOT NULL
+      AND kind = 'spawned'
+    GROUP BY run_id
+  `).all() as Array<{ runId: number; spawnedAt: number }>;
+  const firstOutputByRun = new Map(outputEvents.map((row) => [row.runId, row.firstOutputAt]));
+  const spawnedByRun = new Map(spawnedEvents.map((row) => [row.runId, row.spawnedAt]));
+
+  return rows.map((row) => ({
+    ...row,
+    firstOutputAt: row.runId ? firstOutputByRun.get(row.runId) ?? null : null,
+    spawnedAt: row.runId ? spawnedByRun.get(row.runId) ?? null : null,
+  }));
+}
+
+function readApprovalRecords(db: Database.Database): SloApprovalRecord[] {
+  const rows = db.prepare(`
+    SELECT task_id AS taskId,
+           kind,
+           payload,
+           created_at AS createdAt
+    FROM task_events
+    WHERE kind IN ('blocked', 'unblocked')
+    ORDER BY task_id, created_at
+  `).all() as Array<{ taskId: string; kind: string; payload: string | null; createdAt: number }>;
+  const pending = new Map<string, number>();
+  const approvals: SloApprovalRecord[] = [];
+  for (const row of rows) {
+    if (row.kind === 'blocked' && isApprovalBlock(row.payload)) {
+      pending.set(row.taskId, row.createdAt);
+    } else if (row.kind === 'unblocked') {
+      const requestedAt = pending.get(row.taskId);
+      if (requestedAt !== undefined && row.createdAt >= requestedAt) {
+        approvals.push({ taskId: row.taskId, requestedAt, decidedAt: row.createdAt });
+        pending.delete(row.taskId);
+      }
+    }
+  }
+  return approvals;
+}
+
+function hasTable(db: Database.Database, table: string): boolean {
+  const row = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) as { name: string } | undefined;
+  return Boolean(row);
+}
+
+function isApprovalBlock(payload: string | null): boolean {
+  if (!payload) return true;
+  try {
+    const parsed = JSON.parse(payload) as unknown;
+    return JSON.stringify(parsed).toLowerCase().includes('approval') || JSON.stringify(parsed).toLowerCase().includes('hitl');
+  } catch {
+    return /approval|hitl/iu.test(payload);
+  }
+}
+
+function metric(
+  id: string,
+  label: string,
+  value: number | null,
+  unit: SloMetricUnit,
+  target: number,
+  comparator: '>=' | '<=',
+  description: string,
+): SloMetric {
+  return {
+    id,
+    label,
+    value,
+    unit,
+    target,
+    comparator,
+    status: metricStatus(value, target, comparator),
+    description,
+  };
+}
+
+function metricStatus(value: number | null, target: number, comparator: '>=' | '<='): SloMetricStatus {
+  if (value === null) return 'unknown';
+  if (comparator === '>=') {
+    if (value >= target) return 'ok';
+    if (value >= target * 0.9) return 'warning';
+    return 'breach';
+  }
+  if (value <= target) return 'ok';
+  if (value <= target * 1.25) return 'warning';
+  return 'breach';
+}
+
+function percentile(values: number[], p: number): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = (p / 100) * (sorted.length - 1);
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  if (lower === upper) return sorted[lower] ?? null;
+  const lowerValue = sorted[lower] ?? 0;
+  const upperValue = sorted[upper] ?? lowerValue;
+  return Math.round(lowerValue + (upperValue - lowerValue) * (index - lower));
+}
+
+function durationMs(start: number | null | undefined, end: number | null | undefined): number | null {
+  if (!isNumber(start) || !isNumber(end) || end < start) return null;
+  return (end - start) * 1000;
+}
+
+function recordTimestamp(run: SloRunRecord): number {
+  return run.runEndedAt ?? run.taskCompletedAt ?? run.runStartedAt ?? run.taskStartedAt ?? run.taskCreatedAt;
+}
+
+function isSuccessfulRun(run: SloRunRecord): boolean {
+  return ['completed', 'complete', 'done', 'success'].includes(String(run.outcome ?? run.runStatus ?? run.taskStatus).toLowerCase());
+}
+
+function isTerminalRun(run: SloRunRecord): boolean {
+  const value = String(run.outcome ?? run.runStatus ?? run.taskStatus).toLowerCase();
+  return ['completed', 'complete', 'done', 'success', 'failed', 'error', 'crashed', 'timed_out', 'blocked'].includes(value);
+}
+
+function failureCategories(runs: SloRunRecord[]): SloFailureCategory[] {
+  const counts = new Map<string, number>();
+  for (const run of runs) {
+    if (!isTerminalRun(run) || isSuccessfulRun(run)) continue;
+    const category = normalizeFailureCategory(run.error ?? run.outcome ?? run.runStatus ?? run.taskStatus);
+    counts.set(category, (counts.get(category) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([category, count]) => ({ category, count }))
+    .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category));
+}
+
+function normalizeFailureCategory(value: string | null | undefined): string {
+  const text = String(value ?? 'unknown').toLowerCase();
+  if (/approval|hitl|human|blocked/.test(text)) return 'approval';
+  if (/provider|rate limit|quota|model|llm|openai|anthropic|codex|ollama/.test(text)) return 'provider';
+  if (/ci|test|typecheck|lint|build/.test(text)) return 'ci';
+  if (/github|git|merge|pull request|pr /.test(text)) return 'github';
+  if (/timeout|timed out|stale/.test(text)) return 'timeout';
+  if (/crash|exception|traceback|error/.test(text)) return 'runtime';
+  return 'other';
+}
+
+function round(value: number, digits: number): number {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+function isNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}

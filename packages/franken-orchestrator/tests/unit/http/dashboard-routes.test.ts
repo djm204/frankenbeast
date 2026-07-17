@@ -44,6 +44,30 @@ function createMockDeps(): DashboardRouteDeps {
       startedAt: '2026-07-16T10:00:00.000Z',
       allowedCommands: ['beasts list', 'beasts status <run-id>'],
     }),
+    getSloDashboard: vi.fn().mockReturnValue({
+      generatedAt: '2026-07-17T00:00:00.000Z',
+      source: { kanban: true, approvals: true, runs: true },
+      windows: [
+        {
+          label: '1h',
+          seconds: 3600,
+          sampleSize: 4,
+          metrics: [
+            {
+              id: 'run_success_rate',
+              label: 'Run success rate',
+              value: 97,
+              unit: 'percent',
+              target: 95,
+              comparator: '>=',
+              status: 'ok',
+              description: 'Completed terminal runs divided by all terminal Kanban runs.',
+            },
+          ],
+          failureCategories: [{ category: 'provider', count: 1 }],
+        },
+      ],
+    }),
     operatorToken: TEST_DASHBOARD_TOKEN,
     ticketStore: ticketStore = new SseConnectionTicketStore(),
   };
@@ -90,6 +114,18 @@ describe('dashboard routes', () => {
         reason: 'database migration',
         startedAt: '2026-07-16T10:00:00.000Z',
         allowedCommands: ['beasts list', 'beasts status <run-id>'],
+      });
+      expect(body.slo).toMatchObject({
+        source: { kanban: true, approvals: true, runs: true },
+        windows: [
+          {
+            label: '1h',
+            metrics: [
+              { id: 'run_success_rate', value: 97, status: 'ok' },
+            ],
+            failureCategories: [{ category: 'provider', count: 1 }],
+          },
+        ],
       });
       expect(body.availability).toEqual({
         status: 'healthy',
