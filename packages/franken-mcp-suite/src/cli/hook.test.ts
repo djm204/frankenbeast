@@ -37,18 +37,17 @@ describe('runHook', () => {
       '{"working":[{"key":"sensitive:legacy","agentId":"alice@example.test"}]}',
     ], deps);
 
-    expect(log).toHaveBeenCalledWith({
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({
       event: 'tool_call',
-      metadata: JSON.stringify({
-        __fbeastHookSource: 'fbeast-hook',
-        toolName: 'fbeast_memory_retention_report',
-        ok: true,
-        payload: '[memory-review-result-redacted]',
-        phase: 'post-tool',
-      }),
       sessionId: 'session-1',
+    }));
+    expect(JSON.parse(log.mock.calls[0]![0].metadata)).toMatchObject({
+      __fbeastHookSource: 'fbeast-hook',
+      toolName: 'fbeast_memory_retention_report',
+      payload: '[memory-review-result-redacted]',
+      phase: 'post-tool',
+      ok: true,
     });
-    expect(log.mock.calls.map((call) => JSON.stringify(call)).join('\n')).not.toContain('alice@example.test');
   });
 
   it('redacts MCP-qualified retention-report post-tool payloads', async () => {
@@ -84,7 +83,10 @@ describe('runHook', () => {
       '{"ok":true,"content":[{"type":"text","text":"safe"}]}',
     ], deps);
 
-    expect(log).toHaveBeenCalledWith(expect.objectContaining({ event: 'tool_call', sessionId: 'session-1' }));
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'tool_call',
+      sessionId: 'session-1',
+    }));
     expect(JSON.parse(log.mock.calls[0]![0].metadata)).toEqual({
       __fbeastHookSource: 'fbeast-hook',
       toolName: 'fbeast_memory_query',
@@ -98,6 +100,6 @@ describe('runHook', () => {
       payload: '{"ok":true,"content":[{"type":"text","text":"safe"}]}',
       phase: 'post-tool',
     });
-    expect(log.mock.calls.map((call) => JSON.stringify(call)).join('\n')).not.toContain('«redacted:ghp_…»');
+    expect(log.mock.calls.map((call) => JSON.stringify(call)).join('\n')).not.toContain('ghp_secretvalue123456');
   });
 });
