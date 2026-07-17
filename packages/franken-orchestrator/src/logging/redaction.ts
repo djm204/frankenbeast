@@ -1,4 +1,5 @@
 const REDACTED = '<redacted>';
+const REDACTED_EMAIL = '<redacted-email>';
 
 const SENSITIVE_KEY_RE = /(?:^|[_-])(?:SECRET|TOKEN|PASSWORD|PASSWD|PWD|CREDENTIAL|COOKIE|BEARER|AUTH|AUTHORIZATION|PROXY[_-]?AUTHORIZATION|API[_-]?KEY|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|CLAUDE[_-]?SESSION)(?:$|[_-])/iu;
 const ASSIGNMENT_RE = /\b([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)/gu;
@@ -44,10 +45,13 @@ export function maskOpaqueSecretLiterals(text: string): string {
     .replace(/\bgithub_pat_[A-Za-z0-9_]{12,}\b/gu, REDACTED)
     .replace(/\bsk-[A-Za-z0-9_-]{12,}\b/gu, REDACTED)
     .replace(/\bxox[baprs]-[A-Za-z0-9-]{10,}\b/gu, REDACTED)
-    .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/gu, REDACTED)
     .replace(/\b((?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|rediss?):\/\/[^:@/\s"']*):[^@\s"']+(@[^/\s"']*)/giu, `$1:${REDACTED}$2`)
     .replace(/\b([A-Za-z][A-Za-z0-9+.-]*:\/\/[^:@/\s"']+):[^@\s"']+(@[^/\s"']*)/gu, `$1:${REDACTED}$2`)
     .replace(/\b([A-Za-z][A-Za-z0-9+.-]*:\/\/):[^@\s"']+(@[^/\s"']*)/gu, `$1:${REDACTED}$2`)
+    .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/gu, (match, offset: number, input: string) => {
+      const previous = offset > 0 ? input[offset - 1] : '';
+      return previous === '<' ? match : REDACTED_EMAIL;
+    })
     .replace(/\b(?:Bearer|Basic|Bot)\s+[A-Za-z0-9._~+/=-]{8,}\b/giu, (match) => `${match.split(/\s+/u)[0]} ${REDACTED}`)
     .replace(/((?:^|[\s"'])--(?:api-?key|auth|authorization|bearer|password|secret|token)\s+)[^\s"']+/giu, `$1${REDACTED}`)
     .replace(/((?:^|[\s"'])--(?:api-?key|auth|authorization|bearer|password|secret|token)=)[^\s"']+/giu, `$1${REDACTED}`)

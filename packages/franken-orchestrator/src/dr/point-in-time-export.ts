@@ -230,14 +230,9 @@ function sanitizeMemory(text: string): { recordCount: number; keys: string[]; me
 }
 
 function boundPendingLogLine(pending: string): string {
-  if (pending.length <= MAX_PENDING_LOG_CHARS) return pending;
   const redacted = redactSensitiveText(pending);
-  if (redacted.includes('<redacted>')) {
-    return redacted.length <= MAX_PENDING_LOG_CHARS
-      ? redacted
-      : `${redacted.slice(0, MAX_LOG_TAIL_LINE_CHARS)}${redacted.slice(-MAX_LOG_TAIL_LINE_CHARS)}`;
-  }
-  return pending.slice(-MAX_PENDING_LOG_CHARS);
+  if (redacted.length <= MAX_PENDING_LOG_CHARS) return redacted;
+  return `${redacted.slice(0, MAX_LOG_TAIL_LINE_CHARS)}${redacted.slice(-MAX_LOG_TAIL_LINE_CHARS)}`;
 }
 
 function summarizeSqliteMemoryStore(absolutePath: string, checksum: FileChecksum): MemoryMetadataSummary | undefined {
@@ -388,7 +383,13 @@ export async function createPointInTimeExport(options: PointInTimeExportOptions)
     const relativePath = normalizeRelative(sourceDir, resolved);
     const section = classifyExportPath(relativePath);
     if (section === 'logs') {
-      const logSummary = await checksumAndTailFor(sourceDir, resolved, logTailLimit);
+      let logSummary: LogTailSummary;
+      try {
+        logSummary = await checksumAndTailFor(sourceDir, resolved, logTailLimit);
+      } catch (error) {
+        if (isRecord(error) && error.code === 'ENOENT') continue;
+        throw error;
+      }
       files.push({ path: logSummary.path, bytes: logSummary.bytes, sha256: logSummary.sha256 });
       logs.push(logSummary);
       continue;
@@ -421,7 +422,13 @@ export async function createPointInTimeExport(options: PointInTimeExportOptions)
       && (checksum.path.endsWith('.json') || section === 'approvals' || section === 'memory' || section === 'tasks' || section === 'runs');
     if (!shouldReadText) continue;
 
-    const text = await readFile(resolved, 'utf8');
+    let text: string;
+    try {
+      text = await readFile(resolved, 'utf8');
+    } catch (error) {
+      if (isRecord(error) && error.code === 'ENOENT') continue;
+      throw error;
+    }
 
     const pendingApprovalSummary = splitChatPendingApprovals(checksum, text);
     if (pendingApprovalSummary !== undefined) approvals.push(pendingApprovalSummary);
