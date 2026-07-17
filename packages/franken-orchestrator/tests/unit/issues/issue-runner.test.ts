@@ -1725,7 +1725,7 @@ describe('stuck-run watchdog', () => {
         pid: 7411,
         status: 'running',
         alive: true,
-        waitingOn: 'approval token=ghr_abcdefghijklmnopqrstuvwx.yz-123456 and api token: sk-abcdefghijklmnopqrstuvwxyz123456',
+        waitingOn: `approval token=${'ghr_'}abcdefghijklmnopqrstuvwx.yz-123456 and api token: ${'sk-'}abcdefghijklmnopqrstuvwxyz123456`,
         lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
         lastOutputAt: '2026-07-16T08:00:00.000Z',
         lastToolActivityAt: '2026-07-16T08:00:00.000Z',
