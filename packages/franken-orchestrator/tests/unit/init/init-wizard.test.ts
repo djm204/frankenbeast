@@ -302,4 +302,51 @@ describe('runInitWizard – scope: secret-backend only', () => {
     // io.ask should never have been called (no interactive prompts)
     expect(io.ask).not.toHaveBeenCalled();
   });
+
+  it('preserves base config comms transports when init state has none', async () => {
+    const io = makeIO([]);
+    const secretStore = makeSecretStore({ available: true });
+    const state = createEmptyInitState('/tmp/test-config.json');
+    const baseConfig = defaultConfig();
+    baseConfig.comms.enabled = true;
+    baseConfig.comms.slack = {
+      ...baseConfig.comms.slack,
+      enabled: true,
+      appId: 'existing-slack-app',
+      botTokenRef: 'secret://existing/slack-token',
+      signingSecretRef: 'secret://existing/slack-signing-secret',
+    };
+    baseConfig.comms.discord = {
+      ...baseConfig.comms.discord,
+      enabled: true,
+      applicationId: 'existing-discord-app',
+      botTokenRef: 'secret://existing/discord-token',
+      publicKeyRef: 'existing-discord-public-key',
+    };
+
+    const result = await runInitWizard({
+      io,
+      initialState: state,
+      baseConfig,
+      secretStore,
+      scope: ['secret-backend'],
+    });
+
+    expect(io.ask).not.toHaveBeenCalled();
+    expect(result.state.selectedModules).toEqual(['chat', 'dashboard', 'comms']);
+    expect(result.state.selectedCommsTransports).toEqual(['slack', 'discord']);
+    expect(result.config.comms.enabled).toBe(true);
+    expect(result.config.comms.slack.enabled).toBe(true);
+    expect(result.config.comms.discord.enabled).toBe(true);
+    expect(result.config.comms.telegram.enabled).toBe(false);
+    expect(result.config.comms.whatsapp.enabled).toBe(false);
+    expect(result.state.answers).toMatchObject({
+      'comms.slack.appId': 'existing-slack-app',
+      'comms.slack.botTokenRef': 'secret://existing/slack-token',
+      'comms.slack.signingSecretRef': 'secret://existing/slack-signing-secret',
+      'comms.discord.applicationId': 'existing-discord-app',
+      'comms.discord.botTokenRef': 'secret://existing/discord-token',
+      'comms.discord.publicKeyRef': 'existing-discord-public-key',
+    });
+  });
 });
