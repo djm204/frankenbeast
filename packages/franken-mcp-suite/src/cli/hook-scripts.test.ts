@@ -47,6 +47,9 @@ function installFakeHook(root: string): string {
     'if [ "$PHASE" = "pre-tool" ]; then',
     '  # Context arrives via env; the tool name is the positional after "--".',
     '  CONTEXT="${FBEAST_TOOL_CONTEXT:-}"',
+    '  if [ -n "${FBEAST_TOOL_CONTEXT_FILE:-}" ] && [ -f "${FBEAST_TOOL_CONTEXT_FILE:-}" ]; then',
+    '    CONTEXT=$(cat "$FBEAST_TOOL_CONTEXT_FILE")',
+    '  fi',
     '  if [ -n "${FBEAST_CAPTURE_CONTEXT_FILE:-}" ]; then',
     '    printf "%s" "$CONTEXT" > "$FBEAST_CAPTURE_CONTEXT_FILE"',
     '  fi',
@@ -72,6 +75,9 @@ function installFakeHook(root: string): string {
     '',
     'if [ "$PHASE" = "post-tool" ]; then',
     '  CONTEXT="${FBEAST_TOOL_CONTEXT:-}"',
+    '  if [ -n "${FBEAST_TOOL_CONTEXT_FILE:-}" ]; then',
+    '    CONTEXT=$(cat "$FBEAST_TOOL_CONTEXT_FILE")',
+    '  fi',
     '  if [ -n "${FBEAST_CAPTURE_CONTEXT_FILE:-}" ]; then',
     '    printf "%s" "$CONTEXT" > "$FBEAST_CAPTURE_CONTEXT_FILE"',
     '  fi',
@@ -668,7 +674,7 @@ describe('Codex hook scripts', () => {
         args: {
           agentId: 'agent-post',
           profile: 'default',
-          query: 'sensitive selector',
+          query: '[memory-selector-redacted]',
         },
       },
     });
@@ -910,6 +916,42 @@ describe('Codex hook scripts', () => {
     expect(Date.now() - startedAt).toBeLessThan(3_000);
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe('');
+  });
+
+  it('passes only sanitized post-tool memory context to fbeast-hook', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const contextFile = join(root, 'post-context.txt');
+    const { postTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(postTool, {
+      tool_name: 'fbeast_memory_access_audit_report',
+      tool_input: {
+        profile: 'default',
+        repo: 'djm204/frankenbeast',
+        query: 'private search text',
+        value: 'sensitive memory payload',
+        large: 'x'.repeat(300_000),
+      },
+      tool_response: { rows: [{ decision: 'approved' }] },
+      session_id: 'sess-1',
+    }, binDir, {
+      FBEAST_CAPTURE_CONTEXT_FILE: contextFile,
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    const context = readFileSync(contextFile, 'utf8');
+    expect(JSON.parse(context)).toEqual({
+      tool_input: {
+        profile: 'default',
+        repo: 'djm204/frankenbeast',
+        query: '[memory-selector-redacted]',
+      },
+    });
+    expect(context).not.toContain('sensitive memory payload');
+    expect(context).not.toContain('private search text');
+    expect(context).not.toContain('xxx');
   });
 
   it('runs post-tool fbeast-hook directly when timeout is unavailable', () => {

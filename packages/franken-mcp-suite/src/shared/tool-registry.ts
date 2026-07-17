@@ -50,24 +50,72 @@ function parseJsonObject(value: string): Record<string, unknown> | undefined {
   }
 }
 
-function hasDuplicateJsonKey(value: string, key: string): boolean {
-  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const matches = value.match(new RegExp(`"${escaped}"\\s*:`, 'g'));
-  return (matches?.length ?? 0) > 1;
+function countRootJsonKey(value: string, key: string): number {
+  let count = 0;
+  let depth = 0;
+  let index = 0;
+
+  const skipWhitespace = (from: number): number => {
+    let next = from;
+    while (next < value.length && /\s/.test(value[next]!)) next++;
+    return next;
+  };
+
+  while (index < value.length) {
+    const char = value[index]!;
+    if (char === '"') {
+      const start = index;
+      index++;
+      let escaped = false;
+      while (index < value.length) {
+        const inner = value[index]!;
+        if (escaped) {
+          escaped = false;
+        } else if (inner === '\\') {
+          escaped = true;
+        } else if (inner === '"') {
+          break;
+        }
+        index++;
+      }
+      if (index >= value.length) return count;
+      const end = index;
+      const after = skipWhitespace(end + 1);
+      if (depth === 1 && value[after] === ':') {
+        try {
+          if (JSON.parse(value.slice(start, end + 1)) === key) count++;
+        } catch {
+          // Malformed JSON is allowed through existing adapter behavior; duplicate
+          // detection is best-effort and should not reject arbitrary log text.
+        }
+      }
+      index++;
+      continue;
+    }
+    if (char === '{' || char === '[') depth++;
+    if (char === '}' || char === ']') depth = Math.max(0, depth - 1);
+    index++;
+  }
+
+  return count;
+}
+
+function hasDuplicateRootJsonKey(value: string, key: string): boolean {
+  return countRootJsonKey(value, key) > 1;
 }
 
 function usesReservedObserverProvenance(metadata: string): boolean {
   const parsed = parseJsonObject(metadata);
-  return hasDuplicateJsonKey(metadata, 'source')
-    || hasDuplicateJsonKey(metadata, RESERVED_HOOK_SOURCE_KEY)
+  return hasDuplicateRootJsonKey(metadata, 'source')
+    || hasDuplicateRootJsonKey(metadata, RESERVED_HOOK_SOURCE_KEY)
     || parsed?.['source'] === RESERVED_AUDIT_SOURCE
     || parsed?.[RESERVED_HOOK_SOURCE_KEY] === RESERVED_HOOK_SOURCE;
 }
 
 function usesReservedGovernorProvenance(context: string): boolean {
   const parsed = parseJsonObject(context);
-  return hasDuplicateJsonKey(context, RESERVED_GOVERNANCE_SOURCE_KEY)
-    || hasDuplicateJsonKey(context, RESERVED_HOOK_SOURCE_KEY)
+  return hasDuplicateRootJsonKey(context, RESERVED_GOVERNANCE_SOURCE_KEY)
+    || hasDuplicateRootJsonKey(context, RESERVED_HOOK_SOURCE_KEY)
     || parsed?.[RESERVED_GOVERNANCE_SOURCE_KEY] === RESERVED_AUDIT_SOURCE
     || parsed?.[RESERVED_HOOK_SOURCE_KEY] === RESERVED_HOOK_SOURCE;
 }

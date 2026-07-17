@@ -63,6 +63,24 @@ describe('runHook', () => {
     expect(metadata.payload).toBe('[memory-review-result-redacted]');
   });
 
+  it('marks redacted memory access audit report hook results as successful', async () => {
+    const { deps, log } = hookDeps();
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    await runHook([
+      'post-tool',
+      'fbeast_memory_access_audit_report',
+      '{"rows":[{"agentId":"agent-hook-post","decision":"approved"}]}',
+    ], deps);
+
+    const metadata = JSON.parse(log.mock.calls[0]![0].metadata);
+    expect(metadata).toMatchObject({
+      toolName: 'fbeast_memory_access_audit_report',
+      ok: true,
+      payload: '[memory-review-result-redacted]',
+    });
+  });
+
   it('records sanitized hook args and post-tool outcomes for audit reports', async () => {
     const { deps, log } = hookDeps();
     deps.readContext = () => JSON.stringify({

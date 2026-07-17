@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createGovernorAdapter, type GovernorAdapter } from '../adapters/governor-adapter.js';
@@ -6,6 +7,7 @@ import { createObserverAdapter, type ObserverAdapter } from '../adapters/observe
 
 /** Env var carrying the governor context (policy-relevant command text). */
 export const TOOL_CONTEXT_ENV = 'FBEAST_TOOL_CONTEXT';
+export const TOOL_CONTEXT_FILE_ENV = 'FBEAST_TOOL_CONTEXT_FILE';
 export const HOOK_GOVERNANCE_SOURCE_KEY = '__fbeastHookSource';
 export const HOOK_GOVERNANCE_SOURCE = 'fbeast-hook';
 
@@ -37,7 +39,17 @@ export function defaultHookDeps(dbPath?: string): HookDeps {
       process.env['FBEAST_SESSION_ID']
       ?? process.env['CLAUDE_SESSION_ID']
       ?? randomUUID(),
-    readContext: () => process.env[TOOL_CONTEXT_ENV] ?? '',
+    readContext: () => {
+      const contextFile = process.env[TOOL_CONTEXT_FILE_ENV];
+      if (contextFile) {
+        try {
+          return readFileSync(contextFile, 'utf8');
+        } catch {
+          return '';
+        }
+      }
+      return process.env[TOOL_CONTEXT_ENV] ?? '';
+    },
   };
 }
 
@@ -91,6 +103,7 @@ const MEMORY_RESULT_IMPLICIT_SUCCESS_TOOLS = new Set([
   'fbeast_memory_query',
   'fbeast_memory_frontload',
   'fbeast_memory_export',
+  'fbeast_memory_access_audit_report',
   'fbeast_memory_forget',
   'fbeast_memory_right_to_forget',
   'fbeast_memory_source_attribution',
@@ -106,6 +119,7 @@ const MEMORY_AUDIT_ARG_TOOLS = new Set([
   'fbeast_memory_query',
   'fbeast_memory_frontload',
   'fbeast_memory_export',
+  'fbeast_memory_access_audit_report',
   'fbeast_memory_right_to_forget',
   'fbeast_memory_forget',
   'fbeast_memory_source_attribution',
