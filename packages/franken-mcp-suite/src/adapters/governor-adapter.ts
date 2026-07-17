@@ -24,6 +24,11 @@ function isValidAuditDateString(value: unknown): value is string {
   return typeof value === 'string' && Number.isFinite(Date.parse(value));
 }
 
+function normalizeAuditDateString(value: unknown): string | undefined {
+  if (!isValidAuditDateString(value)) return undefined;
+  return new Date(Date.parse(value)).toISOString();
+}
+
 const HIGH_RISK_ACTIONS: Readonly<Record<string, HighRiskActionClass>> = {
   fbeast_memory_store: 'memory',
   fbeast_memory_forget: 'memory',
@@ -332,8 +337,9 @@ function sanitizeMemoryRetentionReportGovernanceArgs(args: Record<string, unknow
   } else if (Object.prototype.hasOwnProperty.call(args, 'readScope')) {
     safe['readScope'] = MEMORY_RETENTION_REPORT_CONTEXT_REDACTION;
   }
-  if (isValidAuditDateString(args['now'])) {
-    safe['now'] = args['now'];
+  const normalizedNow = normalizeAuditDateString(args['now']);
+  if (normalizedNow !== undefined) {
+    safe['now'] = normalizedNow;
   } else if (Object.prototype.hasOwnProperty.call(args, 'now')) {
     safe['now'] = MEMORY_RETENTION_REPORT_CONTEXT_REDACTION;
   }
@@ -359,12 +365,15 @@ function contextLooksLikeMemoryRetentionReportArgs(context: string): boolean {
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
     const record = parsed as Record<string, unknown>;
     const keys = Object.keys(record);
+    const allowedRetentionReportArgKeys = new Set([
+      'readScope',
+      'now',
+      'expiryHorizonMs',
+      'maxEntries',
+      'agentId',
+    ]);
     const hasRetentionReportSignal = Object.prototype.hasOwnProperty.call(record, 'readScope')
-      && !Object.prototype.hasOwnProperty.call(record, 'key')
-      && !Object.prototype.hasOwnProperty.call(record, 'source')
-      && !Object.prototype.hasOwnProperty.call(record, 'redaction')
-      && !Object.prototype.hasOwnProperty.call(record, 'limit')
-      && !['command', 'cmd', 'commands', 'script', 'scripts', 'args', 'argv', 'shell', 'sh'].some((key) => Object.prototype.hasOwnProperty.call(record, key));
+      && keys.every((key) => allowedRetentionReportArgKeys.has(key));
     return keys.length > 0
       && hasRetentionReportSignal;
   } catch {

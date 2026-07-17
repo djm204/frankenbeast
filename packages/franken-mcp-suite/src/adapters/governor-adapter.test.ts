@@ -184,12 +184,17 @@ describe('GovernorAdapter', () => {
 
     await expect(governor.check({
       action: 'mcp__fbeast-proxy__execute_tool',
-      context: '{"readScope":"agent","agentId":"dave@example.test","extra":"secret"}',
+      context: '{"tool":"fbeast_memory_retention_report","args":{"readScope":"agent","agentId":"dave@example.test","extra":"secret"}}',
     })).resolves.toMatchObject({ decision: 'approved' });
 
     await expect(governor.check({
       action: 'mcp__fbeast-proxy__execute_tool',
       context: '{"readScope":"shared","now":"operator@example.test invalid date"}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+
+    await expect(governor.check({
+      action: 'fbeast_memory_retention_report',
+      context: '{"readScope":"shared","now":"Fri, 17 Jul 2026 00:00:00 GMT (operator@example.test)"}',
     })).resolves.toMatchObject({ decision: 'approved' });
 
     const db = new Database(dbPath);
@@ -198,8 +203,9 @@ describe('GovernorAdapter', () => {
     expect(rows[0]!.context).toBe('{"readScope":"agent","now":"[memory-retention-report-args-redacted]","maxEntries":10,"agentId":"[memory-retention-report-args-redacted]"}');
     expect(rows[1]!.context).toBe('{"tool":"fbeast_memory_retention_report","args":{"readScope":"agent","expiryHorizonMs":1000,"agentId":"[memory-retention-report-args-redacted]"}}');
     expect(rows[2]!.context).toBe('{"readScope":"agent","maxEntries":5,"agentId":"[memory-retention-report-args-redacted]"}');
-    expect(rows[3]!.context).toBe('{"readScope":"agent","agentId":"[memory-retention-report-args-redacted]"}');
+    expect(rows[3]!.context).toBe('{"tool":"fbeast_memory_retention_report","args":{"readScope":"agent","agentId":"[memory-retention-report-args-redacted]"}}');
     expect(rows[4]!.context).toBe('{"readScope":"shared","now":"[memory-retention-report-args-redacted]"}');
+    expect(rows[5]!.context).toBe('{"readScope":"shared","now":"2026-07-17T00:00:00.000Z"}');
     expect(rows.map((row) => row.context).join('\n')).not.toContain('alice@example.test');
     expect(rows.map((row) => row.context).join('\n')).not.toContain('bob@example.test');
     expect(rows.map((row) => row.context).join('\n')).not.toContain('carol@example.test');
@@ -218,6 +224,10 @@ describe('GovernorAdapter', () => {
     await expect(governor.check({
       action: 'mcp__fbeast-proxy__execute_tool',
       context: '{"readScope":"agent","cmd":"rm -rf /var/data"}',
+    })).resolves.toMatchObject({ decision: 'denied' });
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"readScope":"agent","payload":"rm -rf /var/data"}',
     })).resolves.toMatchObject({ decision: 'denied' });
   });
 
