@@ -1037,6 +1037,26 @@ describe('stuck-run watchdog', () => {
     });
   });
 
+  it('restarts retryable signal-killed workers without active ownership', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_signal_kill',
+      pid: 7425,
+      status: 'running',
+      alive: false,
+      exitReason: 'signal_SIGKILL',
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'running',
+    });
+
+    expect(contract).toMatchObject({
+      exitReason: 'signal_SIGKILL',
+      disposition: 'retryable',
+      nextAction: 'restart-once',
+    });
+  });
+
   it('routes start_failed exit reasons to doctor replacement', () => {
     const contract = buildWorkerCrashOnlyRestartContract({
       cardId: 't_start_failed',

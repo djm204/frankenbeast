@@ -867,8 +867,8 @@ function intentionalNonRetryExitReason(exitReason: string): boolean {
   return /^(clean_exit|operator_stop|operator_kill|exit_code_0|completed|cancelled|canceled|stopped|manual_stop|manual_kill)$/i.test(exitReason.trim());
 }
 
-function externalSignalExitReason(exitReason: string): boolean {
-  return /^signal_[a-z0-9]+$/i.test(exitReason.trim());
+function operatorControlledSignalExitReason(exitReason: string): boolean {
+  return /^signal_(?:sigterm|sigint|sighup)$/i.test(exitReason.trim());
 }
 
 export function buildWorkerCrashOnlyRestartContract(
@@ -919,7 +919,7 @@ export function buildWorkerCrashOnlyRestartContract(
     };
   }
 
-  if (externalSignalExitReason(rawExitReason)) {
+  if (operatorControlledSignalExitReason(rawExitReason)) {
     return {
       disposition: 'hitl',
       nextAction: 'defer-with-evidence',
