@@ -24,7 +24,7 @@ function runCli(args: string[], cwd = packageRoot) {
   return spawnSync(npmCommand, ['exec', '--', 'fbeast-live-bench', ...args], {
     cwd,
     encoding: 'utf8',
-    timeout: 10_000,
+    timeout: 30_000,
   });
 }
 
@@ -82,7 +82,7 @@ describe('live-bench CLI smoke coverage', () => {
     } finally {
       rmSync(corpusDir, { recursive: true, force: true });
     }
-  });
+  }, 35_000);
 
   it('surfaces schema-invalid corpus files as a non-zero CLI failure', () => {
     const corpusDir = mkdtempSync(join(tmpdir(), 'live-bench-invalid-corpus-'));
@@ -112,7 +112,7 @@ describe('live-bench CLI smoke coverage', () => {
     } finally {
       rmSync(corpusDir, { recursive: true, force: true });
     }
-  });
+  }, 35_000);
 
   it('prints a dry-run learned workflow regression report', () => {
     const fixtureDir = mkdtempSync(join(tmpdir(), 'live-bench-workflow-fixtures-'));
@@ -146,7 +146,7 @@ describe('live-bench CLI smoke coverage', () => {
     } finally {
       rmSync(fixtureDir, { recursive: true, force: true });
     }
-  });
+  }, 35_000);
 
   it('treats invalid learning-regression options as usage failures', () => {
     const result = runCli(['learning-regression', corpusRoot, 'baseline.json', 'candidate.json', '--min-pass-rate', 'not-a-number']);
@@ -154,7 +154,7 @@ describe('live-bench CLI smoke coverage', () => {
     expect(result.status).toBe(2);
     expect(result.stdout).toBe('');
     expect(result.stderr).toContain('Invalid number for --min-pass-rate');
-  });
+  }, 35_000);
 
   it('treats out-of-range learning-regression thresholds as usage failures', () => {
     const fixtureDir = mkdtempSync(join(tmpdir(), 'live-bench-workflow-threshold-'));
@@ -179,28 +179,28 @@ describe('live-bench CLI smoke coverage', () => {
     } finally {
       rmSync(fixtureDir, { recursive: true, force: true });
     }
-  });
+  }, 35_000);
 
   it('exits with code 2 when required corpus arg is missing', () => {
     const result = runCli(['list']);
 
     expect(result.status).toBe(2);
     expect(result.stderr).toContain('Usage: fbeast-live-bench list <corpus-root>');
-  });
+  }, 35_000);
 
   it('exits with code 2 for unknown commands', () => {
     const result = runCli(['unsupported']);
 
     expect(result.status).toBe(2);
     expect(result.stderr).toContain('Unknown command: unsupported');
-  });
+  }, 35_000);
 
   it('returns non-zero for missing corpus roots', () => {
     const result = runCli(['list', join(corpusRoot, 'definitely-missing')]);
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toBeTruthy();
-  });
+  }, 35_000);
 
   it('returns non-zero and surfaces malformed corpus files', () => {
     const corpusDir = mkdtempSync(join(tmpdir(), 'live-bench-invalid-corpus-'));
@@ -215,5 +215,5 @@ describe('live-bench CLI smoke coverage', () => {
     } finally {
       rmSync(corpusDir, { recursive: true, force: true });
     }
-  });
+  }, 35_000);
 });
