@@ -1,11 +1,14 @@
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
+  closeSync,
+  constants,
   cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   readdirSync,
   realpathSync,
@@ -44,7 +47,15 @@ export const LearningSandboxExperimentDeclarationSchema = z.object({
   expectedOutcome: z.string().min(1),
   promotionCriteria: z.array(z.string().min(1)).min(1),
   requestedTools: z.array(z.string().min(1)).default([]),
-}).strict();
+}).strict().superRefine((declaration, context) => {
+  if (!Object.prototype.hasOwnProperty.call(declaration, 'input')) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['input'],
+      message: 'Experiment declaration must include an explicit input field',
+    });
+  }
+});
 
 export const LearningSandboxPolicySchema = z.object({
   allowedTools: z.array(z.string().min(1)).default([...DEFAULT_LEARNING_SANDBOX_TOOLS]),
@@ -141,9 +152,8 @@ export async function runLearningSandboxExperiment(
   const evidencePath = join(runDir, 'evidence.json');
 
   assertNoSymlinkPathComponents(runDir, realRunsRoot);
-  makeTreeWritableForCleanup(runDir);
-  rmSync(runDir, { recursive: true, force: true });
-  mkdirSync(workspaceDir, { recursive: true });
+  chmodSync(runDir, 0o700);
+  mkdirSync(workspaceDir, { recursive: true, mode: 0o700 });
   cpSync(fixtureDir, workspaceDir, { recursive: true });
   assertNoSymlinksInTree(workspaceDir);
   const originalWorkspaceDir = realpathSync(workspaceDir);
@@ -204,8 +214,7 @@ export async function runLearningSandboxExperiment(
     toolCalls,
     blockedToolCalls,
   };
-  mkdirSync(dirname(evidencePath), { recursive: true });
-  writeFileSync(evidencePath, `${stringifyEvidence(result)}\n`, 'utf8');
+  writeEvidenceFileSecurely(evidencePath, `${stringifyEvidence(result)}\n`, runDir);
   return result;
 }
 
@@ -222,7 +231,8 @@ interface RunSandboxToolOptions {
 
 async function runSandboxTool(options: RunSandboxToolOptions): Promise<unknown> {
   const startedAt = options.now();
-  const allowed = options.policy.allowedTools.includes(options.tool) && !isMutationCapableSandboxTool(options.tool);
+  const mutationCapable = isMutationCapableSandboxTool(options.tool, options.input);
+  const allowed = options.policy.allowedTools.includes(options.tool) && !mutationCapable;
   if (!allowed) {
     const call = {
       tool: options.tool,
@@ -231,7 +241,7 @@ async function runSandboxTool(options: RunSandboxToolOptions): Promise<unknown> 
       startedAt,
       completedAt: options.now(),
       ok: false,
-      error: isMutationCapableSandboxTool(options.tool)
+      error: mutationCapable
         ? `Tool ${options.tool} is mutation-capable and cannot be allowed in learning sandbox policy`
         : `Tool ${options.tool} is not allowed in learning sandbox policy`,
     } satisfies LearningSandboxToolCallEvidence;
@@ -386,8 +396,8 @@ function makeTreeReadOnly(root: string): void {
   chmodSync(root, 0o555);
 }
 
-function isMutationCapableSandboxTool(tool: string): boolean {
-  const aliases = toolAliases(tool);
+function isMutationCapableSandboxTool(tool: string, input?: unknown): boolean {
+  const aliases = toolAliases(tool, input);
   return aliases.some((alias) => MUTATION_CAPABLE_SANDBOX_TOOLS.has(alias)
     || alias.startsWith('fbeast_memory_')
     || alias.startsWith('fbeast_observer_')
@@ -397,9 +407,41 @@ function isMutationCapableSandboxTool(tool: string): boolean {
     || alias.startsWith('kanban_'));
 }
 
-function toolAliases(tool: string): string[] {
+function toolAliases(tool: string, input?: unknown): string[] {
+  const aliases = new Set<string>([tool]);
   const lastSegment = tool.split('.').pop();
-  return lastSegment && lastSegment !== tool ? [tool, lastSegment] : [tool];
+  if (lastSegment) {
+    aliases.add(lastSegment);
+  }
+  for (const segment of tool.split('__')) {
+    if (segment) {
+      aliases.add(segment);
+    }
+  }
+  const prefixedSegments = tool.split('__');
+  for (let index = 1; index < prefixedSegments.length; index += 1) {
+    aliases.add(prefixedSegments.slice(index).join('_'));
+  }
+  const wrappedTool = wrappedToolName(input);
+  if (wrappedTool) {
+    for (const alias of toolAliases(wrappedTool)) {
+      aliases.add(alias);
+    }
+  }
+  return [...aliases];
+}
+
+function wrappedToolName(input: unknown): string | undefined {
+  if (!input || typeof input !== 'object') {
+    return undefined;
+  }
+  const descriptor = Object.getOwnPropertyDescriptor(input, 'tool')
+    ?? Object.getOwnPropertyDescriptor(input, 'name')
+    ?? Object.getOwnPropertyDescriptor(input, 'toolName');
+  if (!descriptor || !('value' in descriptor) || typeof descriptor.value !== 'string') {
+    return undefined;
+  }
+  return descriptor.value;
 }
 
 function freezeSandboxPolicy(policy: LearningSandboxPolicy): LearningSandboxPolicy {
@@ -423,24 +465,6 @@ function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
     }
   }
   return Object.freeze(value);
-}
-
-function makeTreeWritableForCleanup(root: string): void {
-  if (!existsSync(root)) {
-    return;
-  }
-  const stat = lstatSync(root);
-  if (stat.isSymbolicLink()) {
-    return;
-  }
-  if (stat.isDirectory()) {
-    chmodSync(root, 0o755);
-    for (const entry of readdirSync(root, { withFileTypes: true })) {
-      makeTreeWritableForCleanup(join(root, entry.name));
-    }
-  } else if (stat.isFile()) {
-    chmodSync(root, 0o644);
-  }
 }
 
 function snapshotTree(root: string, expectedRealRoot = realpathSync(root)): string {
@@ -497,6 +521,22 @@ function safeEnumerableEntries(value: object): Array<[string, unknown]> {
     });
 }
 
+function writeEvidenceFileSecurely(evidencePath: string, contents: string, runDir: string): void {
+  const evidenceDir = dirname(evidencePath);
+  if (realpathSync(evidenceDir) !== realpathSync(runDir)) {
+    throw new Error(`Evidence path escapes sandbox run directory: ${evidencePath}`);
+  }
+  if (existsSync(evidencePath) && lstatSync(evidencePath).isSymbolicLink()) {
+    rmSync(evidencePath, { force: true });
+  }
+  const fd = openSync(evidencePath, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, 0o600);
+  try {
+    writeFileSync(fd, contents, 'utf8');
+  } finally {
+    closeSync(fd);
+  }
+}
+
 function toJsonSafeEvidence(value: unknown, seen = new WeakSet<object>()): unknown {
   if (value === null || value === undefined || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     return value;
@@ -508,7 +548,7 @@ function toJsonSafeEvidence(value: unknown, seen = new WeakSet<object>()): unkno
     return `[non-json ${typeof value}]`;
   }
   if (value instanceof Date) {
-    return value.toISOString();
+    return Number.isNaN(value.getTime()) ? '[non-json invalid-date]' : value.toISOString();
   }
   if (Array.isArray(value)) {
     if (seen.has(value)) {
