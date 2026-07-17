@@ -3,12 +3,12 @@ const REDACTED = '<redacted>';
 const SENSITIVE_KEY_RE = /(?:^|[_-])(?:SECRET|TOKEN|PASSWORD|PASSWD|PWD|CREDENTIAL|COOKIE|BEARER|AUTH|AUTHORIZATION|PROXY[_-]?AUTHORIZATION|API[_-]?KEY|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|CLAUDE[_-]?SESSION)(?:$|[_-])/iu;
 const ASSIGNMENT_RE = /\b([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)/gu;
 const JSON_FIELD_RE = /("([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*)("(?:\\.|[^"\\])*"|[^,}\]\s]+)/gu;
+const CREDENTIAL_URL_RE = /\b((?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/(?:[^:\s"'/@]+)?):[^@\s"']+(@[^\s"']+)/giu;
 const SENSITIVE_VALUE_PATTERNS = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gu,
   /\b(?:sk|gho|ghp|glpat|xox[baprs])-?[A-Za-z0-9_\-]{12,}\b/gu,
   /\bnpm_[A-Za-z0-9_\-]{12,}\b/gu,
   /https:\/\/(?:discord(?:app)?\.com|canary\.discord\.com)\/api\/webhooks\/\d+\/[A-Za-z0-9_\-]+/giu,
-  /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/[^\s:@/]*:[^\s@/]+@[^\s]+/giu,
   /\b(?:Bearer|token)\s+[A-Za-z0-9._~+/=-]{20,}\b/giu,
   /\b(?:Cookie|Set-Cookie):\s*[^\r\n]+/giu,
   /\b(?:Proxy-)?Authorization:\s*[^\r\n]+/giu,
@@ -64,7 +64,7 @@ export function redactSensitiveTextWithProvenance(text: string, path = '$'): Red
     return `${prefix}"${REDACTED}"`;
   });
 
-  let value = withJsonFieldsRedacted;
+  let value = withJsonFieldsRedacted.replace(CREDENTIAL_URL_RE, `$1:${REDACTED}$2`);
   for (const pattern of SENSITIVE_VALUE_PATTERNS) {
     value = value.replace(pattern, () => REDACTED);
   }
