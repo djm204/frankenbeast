@@ -548,6 +548,36 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('keeps negative tool-use corrections reviewable', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-negative-tool-use-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ["Please don't use npm"],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'preference',
+        suggestedDestination: 'memory',
+      }),
+    );
+  });
+
+  it('keeps conditional tool-context preferences on the memory path', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-conditional-tool-context-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['I prefer concise summaries when you use tools'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'preference',
+        suggestedDestination: 'memory',
+      }),
+    );
+  });
+
   it('admits package-scoped environment facts', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-package-env-fact',
@@ -578,11 +608,41 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('discards failed retry/fallback status updates', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-failed-retry-status',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      toolFailures: ['Retry with gh run view failed'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        privacyFilter: expect.objectContaining({ action: 'reject' }),
+      }),
+    );
+  });
+
   it('discards temporal progress summaries without explicit reusable signals', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-temporal-summary',
       completedAt: '2026-07-16T00:00:00.000Z',
       summary: 'After updating the tests, all checks passed',
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        privacyFilter: expect.objectContaining({ action: 'reject' }),
+      }),
+    );
+  });
+
+  it('discards ordinary validation progress notes', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-validation-progress',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Ran npm test to validate the fix'],
     });
 
     expect(report.candidates[0]).toEqual(
