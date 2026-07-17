@@ -411,7 +411,7 @@ describe('agent routes integration', () => {
         code: 'AGENT_TOOL_POLICY_DENIED',
         details: {
           validation: {
-            denials: [expect.objectContaining({ requestedTool: 'patch' })],
+            denials: expect.arrayContaining([expect.objectContaining({ requestedTool: 'patch' })]),
           },
         },
       },

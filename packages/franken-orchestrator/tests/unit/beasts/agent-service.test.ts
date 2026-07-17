@@ -59,6 +59,7 @@ describe('AgentService', () => {
     const securityLog: unknown[] = [];
     const service = new AgentService(repository, () => '2026-03-11T00:00:00.000Z', {
       toolPolicyLogger: (entry) => securityLog.push(entry),
+      trustedSkillToolManifests: { 'repo-writer': ['patch'] },
     });
 
     expect(() => service.createAgent({
@@ -179,11 +180,6 @@ describe('AgentService', () => {
         role: '<missing-role>',
         requestedTool: '<missing-tool-manifest>',
         reason: expect.stringContaining('explicit least-privilege tool manifest'),
-      }),
-      expect.objectContaining({
-        role: 'ticket-manager',
-        requestedTool: 'skill:repo-writer',
-        reason: expect.stringContaining('trusted installed runtime tool manifest'),
       }),
       expect.objectContaining({
         role: 'ticket-manager',

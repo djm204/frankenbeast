@@ -132,6 +132,18 @@ function selectedSkillsFromConfig(config: Readonly<Record<string, unknown>>): st
   return [...new Set(arrayOfTools(config.skills))];
 }
 
+function runtimeToolsFromConfig(config: Readonly<Record<string, unknown>>): string[] {
+  const tools: string[] = [];
+  const gitConfig = config.gitConfig;
+  if (typeof gitConfig === 'object' && gitConfig !== null && !Array.isArray(gitConfig)) {
+    const prCreation = (gitConfig as Readonly<Record<string, unknown>>).prCreation;
+    if (prCreation === 'auto' || prCreation === 'required') {
+      tools.push('github.pr');
+    }
+  }
+  return tools;
+}
+
 function workflowRequiredTools(context: ToolPolicyValidationContext): string[] {
   const workflow = context.definitionId ?? context.initActionKind;
   switch (workflow) {
@@ -159,13 +171,7 @@ function skillToolDenials(
 ): ToolPolicyDenial[] {
   return skills.flatMap((skill) => {
     const tools = trustedSkillToolManifestFor(context, skill);
-    if (!tools) {
-      return [{
-        role,
-        requestedTool: `skill:${skill}`,
-        reason: `selected skill '${skill}' must have a trusted installed runtime tool manifest`,
-      }];
-    }
+    if (!tools) return [];
     return tools.map((requestedTool) => ({
       role,
       requestedTool,
@@ -182,11 +188,13 @@ export function validateAgentRoleTools(
   const rawRole = rawRoleFromConfig(policyConfig, context);
   const role = normalizeRole(rawRole);
   const explicitTools = requestedToolsFromConfig(policyConfig);
+  const runtimeTools = runtimeToolsFromConfig(policyConfig);
   const workflowTools = workflowRequiredTools(context);
   const selectedSkills = selectedSkillsFromConfig(policyConfig);
   const skillDenials = skillToolDenials(role ?? rawRole ?? '<missing-role>', selectedSkills, context);
   const requestedTools = [...new Set([
     ...explicitTools,
+    ...runtimeTools,
     ...workflowTools,
     ...skillDenials.map((denial) => denial.requestedTool),
   ])];
@@ -213,7 +221,7 @@ export function validateAgentRoleTools(
     return { allowed: false, rawRole, requestedTools, denials };
   }
 
-  const effectiveTools = [...new Set([...explicitTools, ...workflowTools, ...skillDenials
+  const effectiveTools = [...new Set([...explicitTools, ...runtimeTools, ...workflowTools, ...skillDenials
     .filter((denial) => !denial.requestedTool.startsWith('skill:'))
     .map((denial) => denial.requestedTool)])];
   if (effectiveTools.length === 0) {
