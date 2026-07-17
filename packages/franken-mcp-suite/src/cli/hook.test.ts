@@ -40,6 +40,7 @@ describe('runHook', () => {
     expect(log).toHaveBeenCalledWith({
       event: 'tool_call',
       metadata: JSON.stringify({
+        __fbeastHookSource: 'fbeast-hook',
         toolName: 'fbeast_memory_retention_report',
         payload: '[memory-review-result-redacted]',
         phase: 'post-tool',

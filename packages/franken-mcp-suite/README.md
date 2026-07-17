@@ -90,8 +90,8 @@ For Beast controls, run the orchestrator/backend setup flow with `frankenbeast i
 
 | Server | Tools | Description |
 |--------|-------|-------------|
-| `fbeast-memory` | `fbeast_memory_store`, `fbeast_memory_query`, `fbeast_memory_frontload`, `fbeast_memory_export`, `fbeast_memory_forget`, `fbeast_memory_right_to_forget`, `fbeast_memory_review_propose`, `fbeast_memory_review_list`, `fbeast_memory_source_attribution`, `fbeast_memory_review_decide`, `fbeast_memory_access_audit_report` | Key-value, episodic, redacted project export, review-queued promotion, source attribution, auditable deletion, and redacted access reporting memory via SqliteBrain |
-| `fbeast-memory` | `fbeast_memory_store`, `fbeast_memory_query`, `fbeast_memory_frontload`, `fbeast_memory_export`, `fbeast_memory_retention_report`, `fbeast_memory_forget`, `fbeast_memory_right_to_forget`, `fbeast_memory_review_propose`, `fbeast_memory_review_list`, `fbeast_memory_source_attribution`, `fbeast_memory_review_conflicts`, `fbeast_memory_review_decide` | Key-value, episodic, redacted project export, retention/compaction reports, review-queued promotion, source attribution, and auditable deletion memory via SqliteBrain || `fbeast-observer` | `fbeast_observer_log`, `fbeast_observer_log_cost`, `fbeast_observer_cost`, `fbeast_observer_trail`, `fbeast_observer_verify` | Audit trail with chained hashes, token/cost logging and summaries |
+| `fbeast-memory` | `fbeast_memory_store`, `fbeast_memory_query`, `fbeast_memory_frontload`, `fbeast_memory_export`, `fbeast_memory_retention_report`, `fbeast_memory_forget`, `fbeast_memory_right_to_forget`, `fbeast_memory_review_propose`, `fbeast_memory_review_list`, `fbeast_memory_source_attribution`, `fbeast_memory_review_conflicts`, `fbeast_memory_review_decide`, `fbeast_memory_access_audit_report` | Key-value, episodic, redacted project export, retention/compaction reports, review-queued promotion, source attribution, auditable deletion, and redacted access reporting memory via SqliteBrain |
+| `fbeast-observer` | `fbeast_observer_log`, `fbeast_observer_log_cost`, `fbeast_observer_cost`, `fbeast_observer_trail`, `fbeast_observer_verify` | Audit trail with chained hashes, token/cost logging and summaries |
 | `fbeast-governor` | `fbeast_governor_check`, `fbeast_governor_budget` | Action safety assessment and budget status |
 | `fbeast-planner` | `fbeast_plan_decompose`, `fbeast_plan_status`, `fbeast_plan_validate` | Task DAG planning, status visualization, and validation |
 | `fbeast-critique` | `fbeast_critique_evaluate`, `fbeast_critique_compare` | Content evaluation and revision comparison |
@@ -195,7 +195,7 @@ sensitive payloads into logs or issue comments.
 
 ## Combined server
 
-`fbeast-mcp` runs all 29 tools in a single MCP server process.
+`fbeast-mcp` runs all 30 tools in a single MCP server process.
 
 ## Tool argument shape hardening
 
