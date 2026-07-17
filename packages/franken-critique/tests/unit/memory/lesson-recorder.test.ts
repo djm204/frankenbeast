@@ -396,6 +396,77 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('discards numbered task references even in conditional notes', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-numbered-pr-conditional',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['When working on PR #123, always run npm test'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        category: 'task-state',
+      }),
+    );
+  });
+
+  it('does not attach unrelated verification to a single candidate', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-unmatched-verification',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['Please keep summaries concise'],
+      verificationSteps: ['Ran npm test'],
+    });
+
+    expect(report.candidates[0]?.evidence).toHaveLength(1);
+  });
+
+  it('discards one-off modal task reminders', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-modal-reminder',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Must resolve the failing test before merging'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        category: 'task-state',
+      }),
+    );
+  });
+
+  it('routes negative documentation preferences away from docs review', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-negative-doc-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ["Please don't write docs unless asked"],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'preference',
+        suggestedDestination: 'memory',
+      }),
+    );
+  });
+
+  it('preserves first-person preferences mentioning test logs', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-first-person-test-log-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ["I don't want test logs in final summaries"],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'preference',
+        suggestedDestination: 'memory',
+      }),
+    );
+  });
+
   it('discards temporal progress summaries without explicit reusable signals', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-temporal-summary',
@@ -439,12 +510,12 @@ describe('extractPostTaskLessonCandidates', () => {
     expect(JSON.stringify(report)).not.toContain('ACME-123');
   });
 
-  it('attaches verification steps to a single pending lesson candidate', () => {
+  it('attaches matching verification steps to a single pending lesson candidate', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-verification-evidence',
       completedAt: '2026-07-16T00:00:00.000Z',
       toolFailures: ['When docs build fails after dependency install, retry with npm ci before changing docs'],
-      verificationSteps: ['Ran npm test'],
+      verificationSteps: ['Verified npm ci retry before changing docs'],
     });
 
     expect(report.candidates).toHaveLength(1);
@@ -603,7 +674,7 @@ describe('extractPostTaskLessonCandidates', () => {
       expect.objectContaining({
         suggestedDestination: 'skill',
         privacyFilter: expect.objectContaining({ action: 'admit' }),
-        evidence: expect.arrayContaining([
+        evidence: expect.not.arrayContaining([
           expect.objectContaining({ kind: 'verification' }),
         ]),
       }),

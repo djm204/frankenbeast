@@ -1178,6 +1178,13 @@ function choosePostTaskLessonDestination(
 }
 
 function isDocumentationUpdateLesson(text: string): boolean {
+  if (
+    /^(?:please\s+)?(?:do\s+not|don't|never|avoid)\b.{0,80}\b(?:add|document|record|publish|update|write)\b.{0,80}\b(?:docs?|readme|runbook|guide)\b/i.test(
+      text,
+    )
+  ) {
+    return false;
+  }
   return /\b(?:add|added|document|documented|record|recorded|publish|published|update|updated|write|wrote|written)\b.{0,80}\b(?:docs?|readme|runbook|guide)\b|\b(?:docs?|readme|runbook|guide)\b.{0,80}\b(?:add|added|document|documented|record|recorded|publish|published|update|updated|write|wrote|written)\b/i.test(
     text,
   );
@@ -1227,6 +1234,14 @@ function isRawUserPreferenceCorrection(text: string): boolean {
   const looksProcedural = /\b(?:command|cli|tool|script|test|run|running|workflow|procedure|steps?|fallback|workaround|retry|retrying|gh|npm|pnpm|yarn|node)\b/i.test(
     text,
   );
+  if (
+    /^i\s+(?:do\s+not|don'?t)\s+want\b/i.test(text) &&
+    /\b(?:logs?|final|summar(?:y|ies|ize)|include|mention|show|share|save|record|persist)\b/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
   if (
     /^(?:i\s+prefer|i'd\s+prefer|my\s+preference\s+is|i\s+like|i\s+(?:do\s+not|don'?t)\s+want)\b/i.test(
       text,
@@ -1286,6 +1301,7 @@ function hasExplicitPostTaskLessonSignal(text: string): boolean {
   if (isTransientEnvironmentStatus(text)) return false;
   if (isDocumentationUpdateLesson(text)) return true;
   if (hasReusableProcedureGuidance(text)) return true;
+  if (isOneOffModalTaskReminder(text)) return false;
   if (isOneOffPostTaskProgress(text)) return false;
   if (isOneOffShouldCorrection(text)) return false;
   if (isRawUserPreferenceCorrection(text)) return true;
@@ -1301,7 +1317,7 @@ function hasExplicitPostTaskLessonSignal(text: string): boolean {
   ) {
     return true;
   }
-  return /\b(?:always|avoid|ensure|prefer|require|validate|verify|retry|redact|must|use|fallback|workaround)\b/i.test(
+  return /\b(?:always|avoid|ensure|prefer|require|validate|verify|retry|redact|use|fallback|workaround)\b/i.test(
     text,
   );
 }
@@ -1332,6 +1348,9 @@ function hasReusableProcedureGuidance(text: string): boolean {
 
 function isTaskReferenceBookkeeping(text: string): boolean {
   const hasRedactedTaskReference = /\[REDACTED_TASK_REFERENCE\]/i.test(text);
+  const hasSpecificTaskReference = TASK_STATE_PATTERNS.some((pattern) =>
+    pattern.test(text),
+  );
   if (
     hasRedactedTaskReference &&
     /\b(?:check|replying|reply|review|merge|close)\b/i.test(text) &&
@@ -1340,9 +1359,22 @@ function isTaskReferenceBookkeeping(text: string): boolean {
   ) {
     return true;
   }
-  const hasSpecificTaskReference = TASK_STATE_PATTERNS.some((pattern) =>
-    pattern.test(text),
-  );
+  if (
+    hasSpecificTaskReference &&
+    /^(?:i\s+prefer|i'd\s+prefer|my\s+preference\s+is|i\s+like|i\s+(?:do\s+not|don'?t)\s+want|(?:please\s+)?(?:keep|avoid|do\s+not|don't|never|prefer|use))\b/i.test(
+      text,
+    ) &&
+    !/^\s*(?:when|if)\b/i.test(text) &&
+    !isDocumentationUpdateLesson(text)
+  ) {
+    return false;
+  }
+  if (hasSpecificTaskReference && !isDocumentationUpdateLesson(text)) {
+    return true;
+  }
+  if (!hasRedactedTaskReference && !hasSpecificTaskReference && hasReusableProcedureGuidance(text)) {
+    return false;
+  }
   const hasBareBookkeepingReference =
     /\b(?:pr|pull\s+request|issue|ticket|task)\b/i.test(text) &&
     /\b(?:wants?|needs?|requires?|assigned|merged|merge|closed|close|blocked|open|opened|fixed|fix|done|completed|complete|follow-up)\b/i.test(
@@ -1350,7 +1382,7 @@ function isTaskReferenceBookkeeping(text: string): boolean {
     ) &&
     !hasReusableProcedureGuidance(text);
   return (
-    (hasSpecificTaskReference || hasBareBookkeepingReference) &&
+    (hasRedactedTaskReference || hasBareBookkeepingReference) &&
     /\b(?:wants?|needs?|requires?|assigned|merged|merge|closed|close|blocked|open|opened|fixed|fix|done|completed|complete|follow-up|check|replying|reply)\b/i.test(
       text,
     ) &&
@@ -1379,6 +1411,18 @@ function isOneOffShouldCorrection(text: string): boolean {
     !/\b(?:always|never|avoid|prefer|require|validate|verify|retry|redact|fallback|workaround|when|if|docs?|readme|runbook|guide)\b/i.test(
       text,
     )
+  );
+}
+
+function isOneOffModalTaskReminder(text: string): boolean {
+  return (
+    /\b(?:must|should)\b/i.test(text) &&
+    /\b(?:resolve|fix|merge|merging|before\s+merging|failing\s+test|test|file|path|pr|pull\s+request|issue|ticket|task|commit)\b/i.test(
+      text,
+    ) &&
+    !hasReusableProcedureGuidance(text) &&
+    !isRawUserPreferenceCorrection(text) &&
+    !isDocumentationUpdateLesson(text)
   );
 }
 
@@ -1450,14 +1494,6 @@ function attachPostTaskVerificationEvidence(
     (candidate) => candidate.suggestedDestination !== 'discard',
   );
   if (reviewableCandidates.length === 0) return candidates;
-  if (reviewableCandidates.length === 1) {
-    const candidate = reviewableCandidates[0]!;
-    return candidates.map((item) =>
-      item.id === candidate.id
-        ? attachVerificationEvidenceToCandidate(item, verificationEvidence)
-        : item,
-    );
-  }
 
   const attachments = new Map<string, PostTaskVerificationEvidenceItem[]>();
   for (const evidence of verificationEvidence) {
