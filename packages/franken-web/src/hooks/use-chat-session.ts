@@ -25,6 +25,7 @@ import {
   preserveLocalRecoveryMessages,
   sessionHasCostTelemetry,
   sessionHasTokenTelemetry,
+  shouldApplySocketEvent,
   updateReceipt,
   type PendingSend,
 } from './chat-session-state';
@@ -136,41 +137,6 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   const approvalResolvingRef = useRef(false);
   const processedSocketEventIdsRef = useRef<Set<string>>(new Set());
   const replayCursorsRef = useRef<Map<string, number>>(new Map());
-
-  function parseReplayCursor(eventId: string): { stream: string; sequence: number } | null {
-    const match = /^(.*?)(?:[#:/-])(\d+)$/.exec(eventId);
-    if (!match) return null;
-    const sequence = Number(match[2]);
-    if (!Number.isSafeInteger(sequence)) return null;
-    return { stream: match[1] || 'default', sequence };
-  }
-
-  function rememberSocketEventId(eventId: string): boolean {
-    if (processedSocketEventIdsRef.current.has(eventId)) {
-      return false;
-    }
-
-    const cursor = parseReplayCursor(eventId);
-    if (cursor) {
-      const previous = replayCursorsRef.current.get(cursor.stream);
-      if (previous !== undefined && cursor.sequence <= previous) {
-        processedSocketEventIdsRef.current.add(eventId);
-        return false;
-      }
-      replayCursorsRef.current.set(cursor.stream, cursor.sequence);
-    }
-
-    processedSocketEventIdsRef.current.add(eventId);
-    if (processedSocketEventIdsRef.current.size > 1_000) {
-      const oldest = processedSocketEventIdsRef.current.values().next().value;
-      if (oldest) processedSocketEventIdsRef.current.delete(oldest);
-    }
-    return true;
-  }
-
-  function shouldApplySocketEvent(payload: { eventId?: string }): boolean {
-    return !payload.eventId || rememberSocketEventId(payload.eventId);
-  }
 
   function addErrorBanner(banner: ChatErrorBanner) {
     errorActionRef.current.set(banner.id, banner.action);
@@ -454,7 +420,11 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       }
 
       const payload = parsed.data;
-      if (!shouldApplySocketEvent(payload)) {
+      if (!shouldApplySocketEvent(
+        payload,
+        processedSocketEventIdsRef.current,
+        replayCursorsRef.current,
+      )) {
         return;
       }
 
