@@ -16,7 +16,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, join, parse, relative, resolve } from 'node:path';
 import { z } from 'zod';
 import type { FixtureStore } from '../workspace/fixture-store.js';
 
@@ -28,15 +28,23 @@ export const DEFAULT_LEARNING_SANDBOX_TOOLS = [
 const MUTATION_CAPABLE_SANDBOX_TOOLS = new Set([
   'apply_patch',
   'approval_ledger_write',
+  'bash',
   'create_file',
   'exec_command',
   'create_issue_comment',
   'delete_file',
+  'edit',
   'edit_file',
+  'multi_edit',
   'move_file',
+  'notebook_edit',
   'rename_file',
   'remove_file',
+  'replace',
+  'run_shell_command',
+  'shell',
   'uninspectable_wrapper_target',
+  'write',
   'github_issue_comment',
   'kanban_complete',
   'kanban_block',
@@ -147,10 +155,9 @@ export async function runLearningSandboxExperiment(
   const now = options.now ?? (() => new Date().toISOString());
   const startedAt = now();
   const runsRoot = resolve(options.runsRoot);
-  if (existsSync(runsRoot) && lstatSync(runsRoot).isSymbolicLink()) {
-    throw new Error(`Sandbox runs root is a symlink: ${runsRoot}`);
-  }
+  assertNoExistingSymlinkPathComponents(runsRoot, 'Sandbox runs root');
   mkdirSync(runsRoot, { recursive: true });
+  assertNoExistingSymlinkPathComponents(runsRoot, 'Sandbox runs root');
   const realRunsRoot = realpathSync(runsRoot);
 
   const fixtureDir = options.fixtures.resolveFixture(declaration.fixture);
@@ -177,21 +184,30 @@ export async function runLearningSandboxExperiment(
   const workspaceSnapshot = snapshotTree(workspaceDir);
 
   const toolCalls: LearningSandboxToolCallEvidence[] = [];
+  const pendingToolCalls = new Set<Promise<unknown>>();
   const context: LearningSandboxContext = {
     declaration,
     policy,
     workspaceDir,
     evidencePath,
-    runTool: async (tool, input, handler) => runSandboxTool({
-      tool,
-      input,
-      handler,
-      policy: enforcedPolicy,
-      workspaceDir,
-      originalWorkspaceDir,
-      now,
-      evidence: toolCalls,
-    }),
+    runTool: (tool, input, handler) => {
+      const promise = runSandboxTool({
+        tool,
+        input,
+        handler,
+        policy: enforcedPolicy,
+        workspaceDir,
+        originalWorkspaceDir,
+        now,
+        evidence: toolCalls,
+      });
+      pendingToolCalls.add(promise);
+      promise.then(
+        () => pendingToolCalls.delete(promise),
+        () => pendingToolCalls.delete(promise),
+      );
+      return promise;
+    },
   };
 
   let outcome: LearningSandboxExecutionOutcome = { passed: false, evidence: [] };
@@ -200,6 +216,10 @@ export async function runLearningSandboxExperiment(
     outcome = LearningSandboxExecutionOutcomeSchema.parse(await options.execute(context)) as LearningSandboxExecutionOutcome;
   } catch (caught) {
     error = caught instanceof Error ? caught.message : String(caught);
+  }
+  const pendingToolError = await settlePendingSandboxToolCalls(pendingToolCalls);
+  if (pendingToolError && error === undefined) {
+    error = pendingToolError;
   }
 
   const completedAt = now();
@@ -298,6 +318,7 @@ async function runAllowedTool(options: RunSandboxToolOptions): Promise<unknown> 
     return readFixtureFile(options.workspaceDir, options.originalWorkspaceDir, options.input);
   }
   if (options.handler) {
+    assertWorkspaceAnchored(options.workspaceDir, options.originalWorkspaceDir);
     return options.handler();
   }
   throw new Error(`Allowed sandbox tool ${options.tool} has no fixture-safe handler`);
@@ -379,6 +400,31 @@ function assertNoSymlinkPathComponents(target: string, root: string): void {
   }
 }
 
+function assertNoExistingSymlinkPathComponents(target: string, label: string): void {
+  const absolute = resolve(target);
+  const root = parse(absolute).root;
+  let current = root;
+  for (const segment of relative(root, absolute).split(/[\\/]+/)) {
+    if (!segment) {
+      continue;
+    }
+    current = join(current, segment);
+    if (!existsSync(current)) {
+      return;
+    }
+    if (lstatSync(current).isSymbolicLink()) {
+      throw new Error(`${label} contains symlink component: ${current}`);
+    }
+  }
+}
+
+function assertWorkspaceAnchored(workspaceDir: string, originalWorkspaceDir: string): void {
+  const currentWorkspaceDir = realpathSync(workspaceDir);
+  if (currentWorkspaceDir !== originalWorkspaceDir || !lstatSync(workspaceDir).isDirectory()) {
+    throw new Error('Sandbox fixture workspace is no longer anchored to the original clone');
+  }
+}
+
 function assertNoSymlinksInTree(root: string): void {
   const stat = lstatSync(root);
   if (stat.isSymbolicLink()) {
@@ -412,16 +458,19 @@ function makeTreeReadOnly(root: string): void {
 
 function isMutationCapableSandboxTool(tool: string, input?: unknown): boolean {
   const aliases = toolAliases(tool, input);
-  return aliases.some((alias) => MUTATION_CAPABLE_SANDBOX_TOOLS.has(alias)
-    || alias.startsWith('fbeast_memory_')
-    || alias.startsWith('fbeast_observer_')
-    || alias.startsWith('fbeast_governor_')
-    || alias.startsWith('fbeast_approval_')
-    || alias.startsWith('github_')
-    || alias.startsWith('github.')
-    || alias.startsWith('kanban_')
-    || alias.startsWith('kanban.')
-    || alias.startsWith('memory.'));
+  return aliases.some((alias) => {
+    const normalizedAlias = alias.toLowerCase();
+    return MUTATION_CAPABLE_SANDBOX_TOOLS.has(normalizedAlias)
+      || normalizedAlias.startsWith('fbeast_memory_')
+      || normalizedAlias.startsWith('fbeast_observer_')
+      || normalizedAlias.startsWith('fbeast_governor_')
+      || normalizedAlias.startsWith('fbeast_approval_')
+      || normalizedAlias.startsWith('github_')
+      || normalizedAlias.startsWith('github.')
+      || normalizedAlias.startsWith('kanban_')
+      || normalizedAlias.startsWith('kanban.')
+      || normalizedAlias.startsWith('memory.');
+  });
 }
 
 function toolAliases(tool: string, input?: unknown): string[] {
@@ -446,7 +495,12 @@ function toolAliases(tool: string, input?: unknown): string[] {
       }
     }
   }
-  return [...aliases];
+  const normalizedAliases = new Set<string>();
+  for (const alias of aliases) {
+    normalizedAliases.add(alias);
+    normalizedAliases.add(alias.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase());
+  }
+  return [...normalizedAliases];
 }
 
 function wrappedToolNames(input: unknown, seen = new WeakSet<object>()): string[] {
@@ -472,6 +526,7 @@ function wrappedToolNames(input: unknown, seen = new WeakSet<object>()): string[
   }
   for (const descriptor of Object.values(descriptors)) {
     if (!('value' in descriptor)) {
+      names.push('uninspectable_wrapper_target');
       continue;
     }
     const value = descriptor.value;
@@ -481,6 +536,19 @@ function wrappedToolNames(input: unknown, seen = new WeakSet<object>()): string[
   }
   seen.delete(input);
   return names;
+}
+
+async function settlePendingSandboxToolCalls(pendingToolCalls: Set<Promise<unknown>>): Promise<string | undefined> {
+  let firstError: string | undefined;
+  while (pendingToolCalls.size > 0) {
+    const results = await Promise.allSettled([...pendingToolCalls]);
+    for (const result of results) {
+      if (result.status === 'rejected' && firstError === undefined) {
+        firstError = result.reason instanceof Error ? result.reason.message : String(result.reason);
+      }
+    }
+  }
+  return firstError;
 }
 
 function freezeSandboxPolicy(policy: LearningSandboxPolicy): LearningSandboxPolicy {

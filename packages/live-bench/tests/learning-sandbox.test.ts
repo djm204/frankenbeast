@@ -224,8 +224,24 @@ describe('learning experiment sandbox', () => {
       fixtures: new FixtureStore(fixturesRoot),
       runsRoot,
       execute: () => ({ passed: true, evidence: [] }),
-    })).rejects.toThrow(/runs root is a symlink/);
+    })).rejects.toThrow(/runs root.*symlink/i);
     expect(lstatSync(runsRoot).isSymbolicLink()).toBe(true);
+  });
+
+  it('rejects symlinked ancestors in runs roots before creating workspaces', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const rootParent = tempRoot('learning-sandbox-runs-parent-');
+    const outside = tempRoot('learning-sandbox-outside-');
+    const symlinkedParent = join(rootParent, 'link-parent');
+    symlinkSync(outside, symlinkedParent, 'dir');
+
+    await expect(runLearningSandboxExperiment({
+      declaration,
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot: join(symlinkedParent, 'runs'),
+      execute: () => ({ passed: true, evidence: [] }),
+    })).rejects.toThrow(/runs root.*symlink component/i);
+    expect(existsSync(join(outside, 'runs'))).toBe(false);
   });
 
   it('rejects symlinked sandbox run path components before cleanup', async () => {
@@ -599,6 +615,34 @@ describe('learning experiment sandbox', () => {
     expect(result.passed).toBe(false);
   });
 
+  it('keeps custom handlers anchored to the original workspace directory', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+    const outside = tempRoot('learning-sandbox-custom-outside-');
+    const handlerCalls: string[] = [];
+    writeFileSync(join(outside, 'README.md'), 'outside\n', 'utf8');
+
+    const result = await runLearningSandboxExperiment({
+      declaration: { ...declaration, requestedTools: ['score_candidate'] },
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      policy: { allowedTools: ['list_fixture_files', 'read_fixture_file', 'score_candidate'] },
+      execute: async (sandbox) => {
+        chmodSync(sandbox.workspaceDir, 0o755);
+        renameSync(sandbox.workspaceDir, `${sandbox.workspaceDir}.moved`);
+        symlinkSync(outside, sandbox.workspaceDir, 'dir');
+        await expect(sandbox.runTool('score_candidate', {}, () => {
+          handlerCalls.push('called');
+          return readFileSync(join(sandbox.workspaceDir, 'README.md'), 'utf8');
+        })).rejects.toThrow(/original clone/);
+        return { passed: true, evidence: ['custom handler replacement blocked'] };
+      },
+    });
+
+    expect(result.passed).toBe(false);
+    expect(handlerCalls).toEqual([]);
+  });
+
   it('denies namespaced and observer mutation tool aliases even when allowlisted', async () => {
     const { fixturesRoot } = createFixturesRoot();
     const runsRoot = tempRoot('learning-sandbox-runs-');
@@ -629,6 +673,33 @@ describe('learning experiment sandbox', () => {
     });
 
     expect(result.passed).toBe(false);
+    expect(result.blockedToolCalls.map((call) => call.tool)).toEqual(attempts);
+  });
+
+  it('denies real terminal and file-write client aliases even when allowlisted', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+    const attempts = ['Bash', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'run_shell_command'];
+    const handlerCalls: string[] = [];
+
+    const result = await runLearningSandboxExperiment({
+      declaration: { ...declaration, requestedTools: attempts },
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      policy: { allowedTools: ['list_fixture_files', 'read_fixture_file', ...attempts] },
+      execute: async (sandbox) => {
+        for (const tool of attempts) {
+          await expect(sandbox.runTool(tool, {}, () => {
+            handlerCalls.push(tool);
+            return 'mutated';
+          })).rejects.toThrow(/mutation-capable/);
+        }
+        return { passed: true, evidence: [] };
+      },
+    });
+
+    expect(result.passed).toBe(false);
+    expect(handlerCalls).toEqual([]);
     expect(result.blockedToolCalls.map((call) => call.tool)).toEqual(attempts);
   });
 
@@ -665,6 +736,35 @@ describe('learning experiment sandbox', () => {
         await expect(sandbox.runTool('multi_tool_use.parallel', {
           tool_uses: [{ recipient_name: 'functions.exec_command', parameters: { command: 'touch live-state' } }],
         }, () => {
+          handlerCalls.push('called');
+          return 'mutated';
+        })).rejects.toThrow(/mutation-capable/);
+        return { passed: true, evidence: [] };
+      },
+    });
+
+    expect(result.passed).toBe(false);
+    expect(handlerCalls).toEqual([]);
+    expect(result.blockedToolCalls[0]?.tool).toBe('multi_tool_use.parallel');
+  });
+
+  it('treats opaque wrapper entries as mutation-capable before handlers run', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+    const handlerCalls: string[] = [];
+    const toolUses = Object.defineProperty([], '0', {
+      enumerable: true,
+      get: () => ({ recipient_name: 'functions.exec_command', parameters: { command: 'touch live-state' } }),
+    });
+    toolUses.length = 1;
+
+    const result = await runLearningSandboxExperiment({
+      declaration: { ...declaration, requestedTools: ['multi_tool_use.parallel'] },
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      policy: { allowedTools: ['list_fixture_files', 'read_fixture_file', 'multi_tool_use.parallel'] },
+      execute: async (sandbox) => {
+        await expect(sandbox.runTool('multi_tool_use.parallel', { tool_uses: toolUses }, () => {
           handlerCalls.push('called');
           return 'mutated';
         })).rejects.toThrow(/mutation-capable/);
@@ -735,6 +835,35 @@ describe('learning experiment sandbox', () => {
     expect(result.promotionEligible).toBe(false);
     expect(result.error).toMatch(/Invalid input|expected/);
     expect(existsSync(result.evidencePath)).toBe(true);
+  });
+
+  it('awaits outstanding sandbox tool calls before computing promotion eligibility', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+
+    const result = await runLearningSandboxExperiment({
+      declaration: { ...declaration, requestedTools: ['score_candidate'] },
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      policy: { allowedTools: ['list_fixture_files', 'read_fixture_file', 'score_candidate'] },
+      execute: (sandbox) => {
+        void sandbox.runTool('score_candidate', {}, async () => {
+          await new Promise((resolvePromise) => { setTimeout(resolvePromise, 5); });
+          throw new Error('delayed scorer failed');
+        });
+        return { passed: true, evidence: ['returned before tool settled'] };
+      },
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.promotionEligible).toBe(false);
+    expect(result.error).toMatch(/delayed scorer failed/);
+    expect(result.toolCalls[0]).toMatchObject({
+      tool: 'score_candidate',
+      allowed: true,
+      ok: false,
+      error: 'delayed scorer failed',
+    });
   });
 
   it('persists JSON-safe evidence when object accessors throw', async () => {
