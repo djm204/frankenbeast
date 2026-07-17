@@ -1096,7 +1096,7 @@ export function extractPostTaskLessonCandidates(
       },
     ];
     candidates.push({
-      id: `post-task-lesson:${stableHash(`${taskId}\n${kind}\n${sanitizedText}`)}`,
+      id: `post-task-lesson:${stableHash(`${taskId}\n${sanitizedText}`)}`,
       taskId,
       text: sanitizedText,
       category: discarded ? 'task-state' : category,
@@ -1181,11 +1181,11 @@ function choosePostTaskLessonDestination(
 }
 
 function isDocumentationUpdateLesson(text: string): boolean {
-  if (/^\s*(?:please\s+)?don'?t\s+forget\b.{0,80}\b(?:add|document|record|publish|update|write)\b.{0,80}\b(?:docs?|documentation|readme|runbook|guide)\b/i.test(text)) {
+  if (/^\s*(?:please\s+)?(?:don'?t|do\s+not)\s+forget(?:\s+to)?\b.{0,80}\b(?:add|document|record|publish|update|write)\b.{0,80}\b(?:docs?|documentation|readme|runbook|guide)\b/i.test(text)) {
     return true;
   }
   if (
-    /^(?:please\s+)?(?:do\s+not|don't(?!\s+forget\s+to\b)|never|avoid)\b.{0,80}\b(?:add|document|record|publish|update|write)\b.{0,80}\b(?:docs?|readme|runbook|guide)\b|\b(?:avoid|never|don'?t(?!\s+forget\s+to\b)|do\s+not)\b.{0,80}\b(?:docs?|documentation|document|write)\b|\b(?:docs?|documentation)\b.{0,80}\b(?:avoid|never|don'?t(?!\s+forget\s+to\b)|do\s+not|unless)\b/i.test(
+    /^(?:please\s+)?(?:do\s+not(?!\s+forget\s+to\b)|don't(?!\s+forget\s+to\b)|never|avoid)\b.{0,80}\b(?:add|document|record|publish|update|write)\b.{0,80}\b(?:docs?|readme|runbook|guide)\b|\b(?:avoid|never|don'?t(?!\s+forget\s+to\b)|do\s+not(?!\s+forget\s+to\b))\b.{0,80}\b(?:docs?|documentation|document|write)\b|\b(?:docs?|documentation)\b.{0,80}\b(?:avoid|never|don'?t(?!\s+forget\s+to\b)|do\s+not(?!\s+forget\s+to\b)|unless)\b/i.test(
       text,
     )
   ) {
@@ -1260,7 +1260,7 @@ function isRawUserPreferenceCorrection(text: string): boolean {
     return true;
   }
   if (
-    /^(?:please\s+)?(?:do\s+not\s+use|don't\s+use|never\s+use|avoid\s+using|avoid\s+use)\s+(?:the\s+)?(?:gh\s+cli|github\s+cli|cli|pnpm|npm|yarn|node|bun|deno|uv|pip|poetry|package\s+manager)\b/i.test(
+    /^(?:please\s+)?(?:do\s+not\s+use|don't\s+use|never\s+use|avoid(?:\s+using|\s+use)?)\s+(?:the\s+)?(?:gh\s+cli|github\s+cli|cli|pnpm|npm|yarn|node|bun|deno|uv|pip|poetry|package\s+manager)\b/i.test(
       text,
     )
   ) {
@@ -1382,8 +1382,13 @@ function hasExplicitPostTaskLessonSignal(text: string): boolean {
   ) {
     return true;
   }
-  return /\b(?:always|avoid|ensure|prefer|require|retry|redact|fallback|workaround)\b/i.test(
-    text,
+  return (
+    /\b(?:always|avoid|ensure|prefer|require|retry|redact|fallback|workaround)\b/i.test(
+      text,
+    ) &&
+    /\b(?:when|if|before|after|use|run|check|verify|record|save|persist|redact|fallback|workaround|require|ensure|prefer|avoid)\b/i.test(
+      text,
+    )
   );
 }
 
@@ -1492,6 +1497,16 @@ function isTaskReferenceBookkeeping(text: string): boolean {
       );
   }
   if (hasSpecificTaskReference && !isDocumentationUpdateLesson(text)) {
+    if (
+      /^(?:i\s+prefer|i'd\s+prefer|my\s+preference\s+is|i\s+like|i\s+(?:do\s+not|don'?t)\s+want|(?:please\s+)?(?:keep|avoid|do\s+not|don't|never|prefer|use))\b/i.test(
+        text,
+      ) &&
+      !/\b(?:wants?|needs?|requires?|assigned|merged|merge|closed|close|blocked|open|opened|fixed|fix|done|completed|complete|follow-up|approve|approved|review|reviewed)\b/i.test(
+        text,
+      )
+    ) {
+      return false;
+    }
     return true;
   }
   if (!hasRedactedTaskReference && !hasSpecificTaskReference && hasReusableProcedureGuidance(text)) {
@@ -1768,14 +1783,25 @@ function summarizePostTaskEvidence(
 function dedupePostTaskLessonCandidates(
   candidates: readonly PostTaskLessonCandidate[],
 ): PostTaskLessonCandidate[] {
-  const seen = new Set<string>();
-  const deduped: PostTaskLessonCandidate[] = [];
+  const dedupedById = new Map<string, PostTaskLessonCandidate>();
   for (const candidate of candidates) {
-    if (seen.has(candidate.id)) continue;
-    seen.add(candidate.id);
-    deduped.push(candidate);
+    const existing = dedupedById.get(candidate.id);
+    if (!existing) {
+      dedupedById.set(candidate.id, candidate);
+      continue;
+    }
+    const primary =
+      existing.suggestedDestination === 'discard' &&
+      candidate.suggestedDestination !== 'discard'
+        ? candidate
+        : existing;
+    const secondary = primary === existing ? candidate : existing;
+    dedupedById.set(candidate.id, {
+      ...primary,
+      evidence: [...primary.evidence, ...secondary.evidence],
+    });
   }
-  return deduped;
+  return [...dedupedById.values()];
 }
 
 export class LessonRecorder {

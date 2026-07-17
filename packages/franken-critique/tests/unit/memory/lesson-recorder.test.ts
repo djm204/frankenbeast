@@ -1643,6 +1643,94 @@ describe('extractPostTaskLessonCandidates', () => {
       }),
     );
   });
+
+  it('keeps incidental task references in otherwise reusable preference corrections', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-incidental-reference-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['Please keep summaries concise for PR #123'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        text: 'Please keep summaries concise for [REDACTED_TASK_REFERENCE]',
+        category: 'preference',
+        suggestedDestination: 'memory',
+        privacyFilter: expect.objectContaining({ action: 'admit' }),
+      }),
+    );
+  });
+
+  it('routes bare avoid-tool corrections as preferences', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-avoid-tool-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['Avoid npm'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'preference',
+        suggestedDestination: 'memory',
+      }),
+    );
+  });
+
+  it('recognizes do-not-forget documentation reminders as documentation updates', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-do-not-forget-docs',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Do not forget to update the README with the npm ci requirement'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'docs',
+        review: expect.objectContaining({ status: 'pending-review' }),
+      }),
+    );
+  });
+
+  it('discards keyword-only progress summaries without durable guidance', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-keyword-only-progress',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Always happy to help', 'No retry was needed'],
+    });
+
+    expect(report.candidates).toHaveLength(2);
+    for (const candidate of report.candidates) {
+      expect(candidate).toEqual(
+        expect.objectContaining({
+          suggestedDestination: 'discard',
+          review: expect.objectContaining({ status: 'discarded' }),
+        }),
+      );
+    }
+  });
+
+  it('deduplicates the same lesson text across evidence kinds', () => {
+    const lessonText = 'When GitHub checks are stale use gh run view';
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-duplicate-lesson-text',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      toolFailures: [lessonText],
+      notes: [lessonText],
+    });
+
+    expect(report.candidates).toHaveLength(1);
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        text: lessonText,
+        category: 'procedure',
+        suggestedDestination: 'skill',
+        evidence: expect.arrayContaining([
+          expect.objectContaining({ kind: 'tool-failure' }),
+          expect.objectContaining({ kind: 'task-note' }),
+        ]),
+      }),
+    );
+  });
 });
 
 describe('LessonRecorder', () => {
