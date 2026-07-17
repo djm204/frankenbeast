@@ -90,6 +90,7 @@ function cloneTrace(trace: Trace): Trace {
 }
 
 const REDACTED = '<redacted>'
+const REDACTION_MARKERS = new Set(['[REDACTED]', '<redacted>', '***'])
 const SENSITIVE_METADATA_KEY_RE = /(?:^|[_-])(?:SECRET|TOKEN|PASSWORD|PASSWD|PWD|CREDENTIAL|COOKIE|BEARER|AUTH|AUTHORIZATION|API[_-]?KEY|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|CLAUDE[_-]?SESSION)(?:$|[_-])/iu
 const SENSITIVE_TEXT_PATTERNS = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gu,
@@ -185,7 +186,7 @@ function cloneMetadataValue(value: unknown, seen = new WeakMap<object, unknown>(
       cloned['errors'] = cloneMetadataValue(value.errors, seen)
     }
     for (const [key, nestedValue] of Object.entries(value)) {
-      defineMetadataProperty(cloned, key, SENSITIVE_METADATA_KEY_RE.test(key) ? REDACTED : cloneMetadataValue(nestedValue, seen))
+      defineMetadataProperty(cloned, key, redactMetadataEntry(key, nestedValue, seen))
     }
     return cloned
   }
@@ -193,9 +194,19 @@ function cloneMetadataValue(value: unknown, seen = new WeakMap<object, unknown>(
   const cloned: Record<string, unknown> = {}
   seen.set(value, cloned)
   for (const [key, nestedValue] of Object.entries(value)) {
-    defineMetadataProperty(cloned, key, SENSITIVE_METADATA_KEY_RE.test(key) ? REDACTED : cloneMetadataValue(nestedValue, seen))
+    defineMetadataProperty(cloned, key, redactMetadataEntry(key, nestedValue, seen))
   }
   return cloned
+}
+
+function redactMetadataEntry(key: string, value: unknown, seen: WeakMap<object, unknown>): unknown {
+  if (!SENSITIVE_METADATA_KEY_RE.test(key)) {
+    return cloneMetadataValue(value, seen)
+  }
+  if (typeof value === 'string' && REDACTION_MARKERS.has(value)) {
+    return value
+  }
+  return REDACTED
 }
 
 function cloneArrayBufferView(value: ArrayBufferView): ArrayBufferView {

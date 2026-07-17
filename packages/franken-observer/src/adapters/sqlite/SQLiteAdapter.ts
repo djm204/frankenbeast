@@ -180,6 +180,7 @@ function snapshotTrace(trace: Trace): Trace {
 }
 
 const REDACTED = '<redacted>'
+const REDACTION_MARKERS = new Set(['[REDACTED]', '<redacted>', '***'])
 const SENSITIVE_METADATA_KEY_RE = /(?:^|[_-])(?:SECRET|TOKEN|PASSWORD|PASSWD|PWD|CREDENTIAL|COOKIE|BEARER|AUTH|AUTHORIZATION|API[_-]?KEY|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|CLAUDE[_-]?SESSION)(?:$|[_-])/iu
 const SENSITIVE_TEXT_PATTERNS = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gu,
@@ -205,9 +206,15 @@ function redactMetadata(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redactMetadata)
   const redacted: Record<string, unknown> = {}
   for (const [key, nestedValue] of Object.entries(value as Record<string, unknown>)) {
-    redacted[key] = SENSITIVE_METADATA_KEY_RE.test(key) ? REDACTED : redactMetadata(nestedValue)
+    redacted[key] = redactMetadataEntry(key, nestedValue)
   }
   return redacted
+}
+
+function redactMetadataEntry(key: string, value: unknown): unknown {
+  if (!SENSITIVE_METADATA_KEY_RE.test(key)) return redactMetadata(value)
+  if (typeof value === 'string' && REDACTION_MARKERS.has(value)) return value
+  return REDACTED
 }
 
 /**
