@@ -510,7 +510,7 @@ function sectionSatisfiesRequirement(
     stripUnpopulatedChildHeadingLabels(section.content);
   const headingContentPrefix =
     requirement.id === 'artifacts'
-      ? artifactHeadingContentPrefix(section.heading)
+      ? artifactHeadingContentPrefix(section.heading, contentWithPopulatedChildHeadingLabels)
       : '';
   const searchableContent = normalizeEvidence(
     `${headingContentPrefix} ${stripPlaceholderOnlyTemplateFields(contentWithPopulatedChildHeadingLabels)}`,
@@ -721,26 +721,24 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
       }
       continue;
     }
-    if (isNoBlockerOrRiskStateLine(line)) {
-      stripped.push(line);
-      continue;
-    }
-    if (
-      /^\s*(?:[-*]\s*)?(?:todo|tbd|placeholder|please\s+fill\s+in)(?:\s*:|\b)/i.test(
-        line,
-      ) ||
-      (!isNoBlockerOrRiskFieldLine(line) && isPlaceholderOnlyFieldLine(line)) ||
-      isOrderedListTemplateLabelLine(line) ||
-      isEmptyTemplateLabel(line) ||
-      isCombinedSkeletonLabelLine(line)
-    ) {
-      continue;
-    }
-
     const nextLine = lines[index + 1] ?? '';
     const isPopulatedTableHeader =
       isMarkdownTableHeader(line, nextLine) &&
       hasPopulatedTableRows(lines, index + 2);
+    if (
+      /^\s*(?:[-*]\s*)?(?:todo|tbd|placeholder|please\s+fill\s+in)(?:\s*:|\b)/i.test(
+        line,
+      ) ||
+      (!isPopulatedTableHeader &&
+        !isNoBlockerOrRiskFieldLine(line) &&
+        isPlaceholderOnlyFieldLine(line)) ||
+      (!isPopulatedTableHeader && isOrderedListTemplateLabelLine(line)) ||
+      (!isPopulatedTableHeader && isEmptyTemplateLabel(line)) ||
+      (!isPopulatedTableHeader && isCombinedSkeletonLabelLine(line))
+    ) {
+      continue;
+    }
+
     if (isMarkdownTableHeader(line, nextLine) && !isPopulatedTableHeader) {
       index += 1;
       continue;
@@ -756,7 +754,8 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
       stripped.push(effectiveLine);
       continue;
     }
-    const withoutPlaceholderFragments = effectiveLine
+    const protectedNoBlockerState = preserveNoBlockerOrRiskState(effectiveLine);
+    const withoutPlaceholderFragments = protectedNoBlockerState
       .replace(
         /\b[A-Za-z0-9 /_-]+(?:\s+-\s+|:)\s*(?:<(?!(?:https?:\/\/|\.\.?\/|#))[^>]*>|\{\{[^}]*\}\}|\{[^}]*\}|\[[^\]]*\](?!\(|\[)|[-–—]+|\b(?:none|tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)\b)\s*(?:[;,.]|$)/gi,
         ' ',
@@ -776,7 +775,7 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
       )
       .replace(/[_.-]{2,}/g, ' ');
     if (
-      isEmptyTemplateLabel(withoutPlaceholderFragments) ||
+      (!isPopulatedTableHeader && isEmptyTemplateLabel(withoutPlaceholderFragments)) ||
       (!isPopulatedTableHeader && isEmptyTableRow(withoutPlaceholderFragments))
     ) {
       continue;
@@ -813,6 +812,13 @@ function isKnownTemplateLabelCombination(label: string): boolean {
   return parts.length > 1 && parts.every(isKnownTemplateLabel);
 }
 
+function isWhitespaceSeparatedTemplateLabelCombination(label: string): boolean {
+  const stripped = label
+    .replace(/\b(?:issue|task|business goal|business objective|goal|objective|out of scope boundaries|boundary notes|boundaries|blocker|blockers|blocked|owner|responsible|assignee|next action|next step|next steps)\b/g, ' ')
+    .trim();
+  return stripped.length === 0 && /\s/.test(label);
+}
+
 function isEmptyTemplateLabel(line: string): boolean {
   if (hasParenthesizedFieldValue(line)) {
     return false;
@@ -826,7 +832,8 @@ function isEmptyTemplateLabel(line: string): boolean {
   return (
     /^\s*(?:[-*]\s*)?[A-Za-z0-9 /_-]+:\s*$/.test(normalizedLabel) ||
     isKnownTemplateLabel(normalizedLabelKey) ||
-    isKnownTemplateLabelCombination(normalizedLabel)
+    isKnownTemplateLabelCombination(normalizedLabel) ||
+    isWhitespaceSeparatedTemplateLabelCombination(normalizedLabelKey)
   );
 }
 
@@ -862,10 +869,13 @@ function isNoBlockerOrRiskFieldLine(line: string): boolean {
   );
 }
 
-function isNoBlockerOrRiskStateLine(line: string): boolean {
-  return /(?:\b(?:blocker|blockers|blocked|risk|risks)\b\s*[:=-]?\s*(?:none|no)\b|\b(?:no|none)\s+(?:blocker|blockers|risk|risks)\b)/i.test(
-    line,
-  );
+function preserveNoBlockerOrRiskState(line: string): string {
+  return line
+    .replace(
+      /\b(?:blocker|blockers|blocked|risk|risks)\b\s*[:=-]?\s*(?:none|no)\b/gi,
+      'No blockers',
+    )
+    .replace(/\bnone\s+(?:blocker|blockers|risk|risks)\b/gi, 'No blockers');
 }
 
 function isNoBlockerOrRiskLabelValue(label: string, value: string): boolean {
@@ -880,7 +890,7 @@ function isPlaceholderValue(value: string): boolean {
 }
 
 function isRequiredHandoffSectionHeading(heading: string): boolean {
-  if (/\bagent\s+handoff\b/i.test(heading)) {
+  if (/^\s*agent\s+handoff(?:\s+template)?\s*$/i.test(heading)) {
     return false;
   }
   return AGENT_HANDOFF_TEMPLATE_REQUIREMENTS.some((requirement) =>
@@ -918,8 +928,19 @@ function isExplicitRequiredHandoffSectionHeading(heading: string): boolean {
     : false;
 }
 
-function artifactHeadingContentPrefix(_heading: string): string {
-  return '';
+function artifactHeadingContentPrefix(heading: string, content: string): string {
+  const strippedContent = normalizeEvidence(stripPlaceholderOnlyTemplateFields(content));
+  if (
+    strippedContent.length === 0 ||
+    /^(?:please\s+complete\s+this|see\s+above|details?\s+to\s+come)$/i.test(strippedContent)
+  ) {
+    return '';
+  }
+  return /\b(branch|pr|pull request|worktree|diff|doc|docs|telemetry)\b|https?:\/\//i.test(
+    heading,
+  )
+    ? heading
+    : '';
 }
 
 function unlabeledFenceContainsVerificationCommand(
@@ -1026,12 +1047,20 @@ function populatedTableHeaderLabels(
       continue;
     }
     splitMarkdownTableCells(line).forEach((cell, cellIndex) => {
-      if (cellHasPopulatedTemplateValue(cell)) {
+      const header = headers[cellIndex] ?? '';
+      if (
+        cellHasPopulatedTemplateValue(cell) ||
+        (isBlockerOrRiskHeader(header) && isPlaceholderValue(normalizeTemplateLabelKey(cell)))
+      ) {
         populatedColumns.add(cellIndex);
       }
     });
   }
   return headers.filter((_, index) => populatedColumns.has(index)).join(' ');
+}
+
+function isBlockerOrRiskHeader(header: string): boolean {
+  return /^(?:blocker|blockers|blocked|risk|risks)$/.test(normalizeTemplateLabelKey(header));
 }
 
 function splitMarkdownTableCells(line: string): string[] {
