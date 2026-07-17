@@ -1235,8 +1235,11 @@ function isRawUserPreferenceCorrection(text: string): boolean {
 }
 
 function hasExplicitPostTaskLessonSignal(text: string): boolean {
+  if (hasReusableProcedureGuidance(text)) return true;
   if (isOneOffPostTaskProgress(text)) return false;
   if (isOneOffShouldCorrection(text)) return false;
+  if (isTaskReferenceBookkeeping(text)) return false;
+  if (isDocumentationUpdateLesson(text)) return true;
   if (PREFERENCE_PATTERNS.some((pattern) => pattern.test(text))) return true;
   if (ENVIRONMENT_FACT_PATTERNS.some((pattern) => pattern.test(text))) {
     return true;
@@ -1257,6 +1260,25 @@ function hasExplicitPostTaskLessonSignal(text: string): boolean {
 function hasReusableToolFailureSignal(text: string): boolean {
   return /\b(?:when|if)\b.{0,160}\b(?:run|check|use|retry|fallback|workaround)\b|\b(?:run|check|use|retry|fallback|workaround)\b.{0,160}\b(?:when|if|after|before|instead|giving\s+up)\b/i.test(
     text,
+  );
+}
+
+function hasReusableProcedureGuidance(text: string): boolean {
+  return /\b(?:always|when|if)\b.{0,160}\b(?:run|running|use|using|check|verify|retry|fallback|workaround)\b.{0,160}\b(?:before|after|instead|when|if|tests?|giving\s+up)\b|\b(?:run|running|use|using|check|verify|retry|fallback|workaround)\b.{0,160}\b(?:always|when|if|before|after|instead|giving\s+up)\b/i.test(
+    text,
+  );
+}
+
+function isTaskReferenceBookkeeping(text: string): boolean {
+  return (
+    /\b(?:pr|pull\s+request|issue|ticket|task|commit)\s*#?\d+\b/i.test(
+      text,
+    ) &&
+    /\b(?:wants?|needs?|requires?|assigned|merged|closed|blocked|open|opened|fixed|done)\b/i.test(
+      text,
+    ) &&
+    !hasReusableProcedureGuidance(text) &&
+    !isDocumentationUpdateLesson(text)
   );
 }
 

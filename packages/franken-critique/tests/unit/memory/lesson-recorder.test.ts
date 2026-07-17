@@ -549,6 +549,21 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('admits documentation update notes before discard gating', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-readme-update',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Update the README with the npm ci requirement'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'docs',
+        review: expect.objectContaining({ status: 'pending-review' }),
+      }),
+    );
+  });
+
   it('discards task-state before preference wording', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-user-wants-pr-state',
@@ -560,6 +575,22 @@ describe('extractPostTaskLessonCandidates', () => {
       expect.objectContaining({
         suggestedDestination: 'discard',
         privacyFilter: expect.objectContaining({ action: 'reject' }),
+      }),
+    );
+  });
+
+  it('keeps reusable procedure guidance embedded in progress summaries', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-progress-with-guidance',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      summary: 'Fixed the flaky setup by always running npm ci before tests',
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'procedure',
+        suggestedDestination: 'skill',
+        review: expect.objectContaining({ status: 'pending-review' }),
       }),
     );
   });
