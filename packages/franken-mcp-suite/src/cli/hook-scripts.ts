@@ -153,14 +153,15 @@ trap 'rm -f "$INPUT_FILE" "$PAYLOAD_FILE"' EXIT
 PAYLOAD_FILE=$(mktemp -t fbeast-hook-response.XXXXXX) || exit 0
 cat > "$INPUT_FILE" || exit 0
 TOOL_NAME=$("$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(String(d?.tool_name || '')); } catch { process.stdout.write(''); }" "$INPUT_FILE" 2>/dev/null || echo "")
+TOOL_CONTEXT=$("$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); const ti = d?.tool_input; if (typeof ti === 'string') process.stdout.write(ti); else if (ti && typeof ti === 'object' && !Array.isArray(ti)) process.stdout.write(JSON.stringify({ tool_input: ti })); else process.stdout.write(''); } catch { process.stdout.write(''); }" "$INPUT_FILE" 2>/dev/null || echo "")
 if ! "$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(JSON.stringify(d?.tool_response || {})); } catch { process.exit(1); }" "$INPUT_FILE" > "$PAYLOAD_FILE" 2>/dev/null; then
   printf '{}' > "$PAYLOAD_FILE" 2>/dev/null || exit 0
 fi
 
 if command -v timeout >/dev/null 2>&1; then
-  timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
+  FBEAST_TOOL_CONTEXT="$TOOL_CONTEXT" timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
 else
-  fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
+  FBEAST_TOOL_CONTEXT="$TOOL_CONTEXT" fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
 fi
 exit 0
 `);
@@ -278,14 +279,15 @@ trap 'rm -f "$INPUT_FILE" "$PAYLOAD_FILE"' EXIT
 PAYLOAD_FILE=$(mktemp -t fbeast-hook-response.XXXXXX) || exit 0
 cat > "$INPUT_FILE" || exit 0
 TOOL_NAME=$("$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(String(d?.tool_name || '')); } catch { process.stdout.write(''); }" "$INPUT_FILE" 2>/dev/null || echo "")
+TOOL_CONTEXT=$("$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); const ti = d?.tool_input; if (typeof ti === 'string') process.stdout.write(ti); else if (ti && typeof ti === 'object' && !Array.isArray(ti)) process.stdout.write(JSON.stringify({ tool_input: ti })); else process.stdout.write(''); } catch { process.stdout.write(''); }" "$INPUT_FILE" 2>/dev/null || echo "")
 if ! "$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(JSON.stringify(d?.tool_response || {})); } catch { process.exit(1); }" "$INPUT_FILE" > "$PAYLOAD_FILE" 2>/dev/null; then
   printf '{}' > "$PAYLOAD_FILE" 2>/dev/null || exit 0
 fi
 
 if command -v timeout >/dev/null 2>&1; then
-  timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
+  FBEAST_TOOL_CONTEXT="$TOOL_CONTEXT" timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
 else
-  fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
+  FBEAST_TOOL_CONTEXT="$TOOL_CONTEXT" fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
 fi
 exit 0
 `);
@@ -404,14 +406,15 @@ trap 'rm -f "$INPUT_FILE" "$PAYLOAD_FILE"' EXIT
 PAYLOAD_FILE=$(mktemp -t fbeast-hook-response.XXXXXX) || exit 0
 cat > "$INPUT_FILE" || exit 0
 TOOL_NAME=$("$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(String(d?.tool_name || '')); } catch { process.stdout.write(''); }" "$INPUT_FILE" 2>/dev/null || echo "")
+TOOL_CONTEXT=$("$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); const ti = d?.tool_input; if (typeof ti === 'string') process.stdout.write(ti); else if (ti && typeof ti === 'object' && !Array.isArray(ti)) process.stdout.write(JSON.stringify({ tool_input: ti })); else process.stdout.write(''); } catch { process.stdout.write(''); }" "$INPUT_FILE" 2>/dev/null || echo "")
 if ! "$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(JSON.stringify(d?.tool_response || {})); } catch { process.exit(1); }" "$INPUT_FILE" > "$PAYLOAD_FILE" 2>/dev/null; then
   printf '{}' > "$PAYLOAD_FILE" 2>/dev/null || exit 0
 fi
 
 if command -v timeout >/dev/null 2>&1; then
-  timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
+  FBEAST_TOOL_CONTEXT="$TOOL_CONTEXT" timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
 else
-  fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
+  FBEAST_TOOL_CONTEXT="$TOOL_CONTEXT" fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
 fi
 exit 0
 `);

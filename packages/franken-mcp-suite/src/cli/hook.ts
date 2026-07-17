@@ -121,31 +121,59 @@ function parseJsonRecord(text: string): Record<string, unknown> | undefined {
   }
 }
 
-function hookAuditArgsFromContext(context: string): Record<string, unknown> | undefined {
+function hookArgsFromContext(context: string): Record<string, unknown> | undefined {
   const parsed = parseJsonRecord(redactSecrets(context));
   if (!parsed) return undefined;
   const toolInput = parsed['tool_input'];
   if (toolInput !== null && typeof toolInput === 'object' && !Array.isArray(toolInput)) {
-    const args = (toolInput as Record<string, unknown>)['args'];
+    const input = toolInput as Record<string, unknown>;
+    const nestedTool = typeof input['tool'] === 'string' ? input['tool'] : undefined;
+    const args = input['args'];
     return args !== null && typeof args === 'object' && !Array.isArray(args)
-      ? args as Record<string, unknown>
-      : toolInput as Record<string, unknown>;
+      ? sanitizeHookAuditArgs(nestedTool, args as Record<string, unknown>)
+      : sanitizeHookAuditArgs(nestedTool, input);
   }
   const args = parsed['args'];
   return args !== null && typeof args === 'object' && !Array.isArray(args)
-    ? args as Record<string, unknown>
-    : parsed;
+    ? sanitizeHookAuditArgs(undefined, args as Record<string, unknown>)
+    : sanitizeHookAuditArgs(undefined, parsed);
+}
+
+function sanitizeHookAuditArgs(toolName: string | undefined, args: Record<string, unknown>): Record<string, unknown> {
+  const normalized = unqualifyMcpToolName(toolName ?? '');
+  const memoryTools = new Set([
+    'fbeast_memory_store',
+    'fbeast_memory_query',
+    'fbeast_memory_export',
+    'fbeast_memory_right_to_forget',
+    'fbeast_memory_forget',
+    'fbeast_memory_source_attribution',
+    'fbeast_memory_retention_report',
+    'fbeast_memory_review_propose',
+    'fbeast_memory_review_resolve',
+    'fbeast_memory_review_conflicts',
+  ]);
+  const mayBeMemory = memoryTools.has(normalized) || 'agentId' in args || 'profile' in args || 'readScope' in args || 'type' in args;
+  if (!mayBeMemory) return args;
+  const safe: Record<string, unknown> = {};
+  for (const key of ['agentId', 'profile', 'repo', 'type', 'operation', 'decision', 'readScope', 'limit', 'dryRun', 'redaction', 'activeProfile', 'crossProfile']) {
+    if (Object.prototype.hasOwnProperty.call(args, key)) safe[key] = args[key];
+  }
+  for (const key of ['key', 'query', 'category', 'sourceScope', 'memoryKey']) {
+    if (Object.prototype.hasOwnProperty.call(args, key)) safe[key] = '[memory-selector-redacted]';
+  }
+  return safe;
 }
 
 function hookAuditOutcomeFromPayload(payload: string): { ok?: boolean; decision?: string } {
   const parsed = parseJsonRecord(payload);
-  if (!parsed) return { ok: true };
+  if (!parsed) return {};
   if (typeof parsed['ok'] === 'boolean') return { ok: parsed['ok'] };
   if (typeof parsed['isError'] === 'boolean') return { ok: !parsed['isError'] };
   if (typeof parsed['decision'] === 'string' && parsed['decision'].trim().length > 0) {
     return { decision: parsed['decision'].trim() };
   }
-  return { ok: true };
+  return {};
 }
 
 function redactPostToolPayload(toolName: string, payload: string): string {
@@ -211,7 +239,7 @@ export async function runHook(
       ? await (resolvedDeps.readPostToolPayload?.() ?? readStdinPayload())
       : '';
     const rawPostPayload = payload || streamedPayload;
-    const hookArgs = hookAuditArgsFromContext(resolvedDeps.readContext());
+    const hookArgs = hookArgsFromContext(resolvedDeps.readContext());
     const outcome = hookAuditOutcomeFromPayload(rawPostPayload);
     await resolvedDeps.observer.log({
       event: 'tool_call',

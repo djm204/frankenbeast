@@ -72,6 +72,8 @@ describe('runHook', () => {
         profile: 'hook-test',
         repo: 'djm204/frankenbeast',
         type: 'working',
+        query: 'private search text',
+        value: 'private memory payload',
       },
       token: '«redacted:ghp_…»',
     });
@@ -94,11 +96,13 @@ describe('runHook', () => {
         profile: 'hook-test',
         repo: 'djm204/frankenbeast',
         type: 'working',
+        query: '[memory-selector-redacted]',
       },
       ok: true,
       payload: '{"ok":true,"content":[{"type":"text","text":"safe"}]}',
       phase: 'post-tool',
     });
-    expect(log.mock.calls.map((call) => JSON.stringify(call)).join('\n')).not.toContain('ghp_secretvalue123456');
+    expect(log.mock.calls.map((call) => JSON.stringify(call)).join('\n')).not.toContain('«redacted:ghp_…»');
+    expect(log.mock.calls.map((call) => JSON.stringify(call)).join('\n')).not.toContain('private memory payload');
   });
 });

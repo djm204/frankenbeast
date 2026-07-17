@@ -71,6 +71,10 @@ function installFakeHook(root: string): string {
     'fi',
     '',
     'if [ "$PHASE" = "post-tool" ]; then',
+    '  CONTEXT="${FBEAST_TOOL_CONTEXT:-}"',
+    '  if [ -n "${FBEAST_CAPTURE_CONTEXT_FILE:-}" ]; then',
+    '    printf "%s" "$CONTEXT" > "$FBEAST_CAPTURE_CONTEXT_FILE"',
+    '  fi',
     '  TOOL_NAME="${5:-}"',
     '  PAYLOAD=$(cat)',
     '  if [ "${FBEAST_EXPECT_STDIN_PAYLOAD:-}" = "1" ]; then',
@@ -634,6 +638,40 @@ describe('Codex hook scripts', () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe('');
+  });
+
+  it('passes post-tool input context through the hook environment', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const contextFile = join(root, 'post-context.txt');
+    const { postTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(postTool, {
+      tool_name: 'fbeast_memory_query',
+      tool_input: {
+        args: {
+          agentId: 'agent-post',
+          profile: 'default',
+          query: 'sensitive selector',
+        },
+      },
+      tool_response: { ok: true },
+      session_id: 'sess-1',
+    }, binDir, {
+      FBEAST_CAPTURE_CONTEXT_FILE: contextFile,
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(contextFile, 'utf8'))).toEqual({
+      tool_input: {
+        args: {
+          agentId: 'agent-post',
+          profile: 'default',
+          query: 'sensitive selector',
+        },
+      },
+    });
   });
 
   it('keeps leading-dash post-tool responses from being parsed as fbeast-hook options', () => {
