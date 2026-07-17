@@ -397,10 +397,11 @@ describe('Codex hook scripts', () => {
     expect(result.status, result.stderr).toBe(0);
     const context = readFileSync(contextFile, 'utf8');
     expect(JSON.parse(context)).toEqual({
+      agentId: 'alice@example.test',
+      readScope: 'agent',
       redaction: 'none',
       operatorApproval: 'trusted-operator-approved',
     });
-    expect(context).not.toContain('alice@example.test');
     expect(context).not.toContain('SECRET_TOKEN_SHOULD_NOT_LEAK');
   });
 
@@ -456,11 +457,11 @@ describe('Codex hook scripts', () => {
     expect(JSON.parse(context)).toEqual({
       tool: 'fbeast_memory_export',
       args: {
+        agentId: 'alice@example.test',
         redaction: 'none',
         operatorApproval: 'trusted-operator-approved',
       },
     });
-    expect(context).not.toContain('alice@example.test');
     expect(context).not.toContain('SECRET_TOKEN_SHOULD_NOT_LEAK');
   });
 

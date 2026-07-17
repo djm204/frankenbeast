@@ -202,13 +202,21 @@ function sanitizeHookAuditArgs(toolName: string | undefined, args: Record<string
   return safe;
 }
 
+const HOOK_AUDIT_DECISIONS = new Set(['approved', 'denied', 'review_recommended', 'unknown_tool', 'validation_error', 'protected_mode', 'error']);
+
+function effectiveHookAuditTool(toolName: string, hookArgs: Record<string, unknown> | undefined): string {
+  const nestedTool = hookArgs && typeof hookArgs['tool'] === 'string' ? hookArgs['tool'] : undefined;
+  return nestedTool ?? toolName;
+}
+
 function hookAuditOutcomeFromPayload(toolName: string, payload: string): { ok?: boolean; decision?: string } {
   const parsed = parseJsonRecord(payload);
   if (!parsed) return {};
   if (typeof parsed['ok'] === 'boolean') return { ok: parsed['ok'] };
   if (typeof parsed['isError'] === 'boolean') return { ok: !parsed['isError'] };
   if (typeof parsed['decision'] === 'string' && parsed['decision'].trim().length > 0) {
-    return { decision: parsed['decision'].trim() };
+    const decision = parsed['decision'].trim();
+    return { decision: HOOK_AUDIT_DECISIONS.has(decision) ? decision : 'unknown' };
   }
   if (MEMORY_RESULT_IMPLICIT_SUCCESS_TOOLS.has(unqualifyMcpToolName(toolName))) {
     return { ok: true };
@@ -280,7 +288,8 @@ export async function runHook(
       : '';
     const rawPostPayload = payload || streamedPayload;
     const hookArgs = hookArgsFromContext(resolvedDeps.readContext(), toolName);
-    const outcome = hookAuditOutcomeFromPayload(toolName, rawPostPayload);
+    const auditToolName = effectiveHookAuditTool(toolName, hookArgs);
+    const outcome = hookAuditOutcomeFromPayload(auditToolName, rawPostPayload);
     await resolvedDeps.observer.log({
       event: 'tool_call',
       metadata: JSON.stringify({

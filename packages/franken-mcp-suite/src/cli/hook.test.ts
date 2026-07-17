@@ -196,6 +196,7 @@ describe('runHook', () => {
       tool: 'fbeast_memory_store',
       args: { key: '[memory-selector-redacted]', type: 'working' },
     });
+    expect(proxiedMetadata.ok).toBe(true);
     expect(JSON.stringify(proxiedMetadata)).not.toContain('sensitive value');
     expect(JSON.stringify(proxiedMetadata)).not.toContain('secret-key');
 
@@ -203,5 +204,20 @@ describe('runHook', () => {
     expect(nonMemoryMetadata.args).toBeUndefined();
     expect(JSON.stringify(nonMemoryMetadata)).not.toContain('private payload');
     expect(JSON.stringify(nonMemoryMetadata)).not.toContain('cat /tmp/private-file');
+  });
+
+  it('maps unrecognized decision strings to unknown before observer logging', async () => {
+    const { deps, log } = hookDeps();
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    await runHook([
+      'post-tool',
+      'execute_tool',
+      '{"decision":"token=secret-value"}',
+    ], deps);
+
+    const metadata = JSON.parse(log.mock.calls[0]![0].metadata);
+    expect(metadata.decision).toBe('unknown');
+    expect(JSON.stringify(metadata)).not.toContain('token=secret-value');
   });
 });
