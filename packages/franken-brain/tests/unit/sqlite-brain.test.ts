@@ -836,6 +836,31 @@ describe('SqliteBrain', () => {
       expect(() => brain.working.set('project:import-1:new-item', 'secret')).toThrow(/right-to-forget/);
     });
 
+    it('guards memory review proposals whose sourceId matches a forgotten source scope', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.timezone',
+        value: 'UTC',
+        source: 'chat',
+        sourceId: 'msg-42',
+        confidence: 0.8,
+        reason: 'User stated timezone preference.',
+      });
+      brain.memoryReview.approve(candidate.id, { reviewer: 'operator' });
+
+      brain.rightToForget({ sourceScope: 'msg-42' });
+
+      expect(() => brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.locale',
+        value: 'en-US',
+        source: 'chat',
+        sourceId: 'msg-42',
+        confidence: 0.8,
+        reason: 'Same forgotten message id with different content.',
+      })).toThrow(/right-to-forget/);
+    });
+
     it('deletes episodic events whose step matches the query selector', () => {
       brain.episodic.record({
         type: 'observation',
@@ -1884,6 +1909,89 @@ describe('SqliteBrain', () => {
       ]);
     });
 
+    it('exposes compact provenance and confidence metadata on the agent read path', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.response-style',
+        value: 'concise',
+        source: 'chat:turn-42',
+        sourceType: 'user',
+        sourceId: 'msg-42',
+        evidenceId: 'transcript-42',
+        confidence: 0.92,
+        reason: 'User explicitly requested concise responses.',
+        revalidateAt: '2026-08-01T00:00:00.000Z',
+      });
+      brain.memoryReview.approve(candidate.id, { reviewer: 'operator' });
+
+      const [entry] = brain.memoryReview.listForAgent({
+        key: 'user.preference.response-style',
+        now: '2026-07-16T00:00:00.000Z',
+      });
+
+      expect(entry).toMatchObject({
+        targetStore: 'working',
+        key: 'user.preference.response-style',
+        value: 'concise',
+        metadata: expect.objectContaining({
+          sourceType: 'user',
+          source: 'chat:turn-42',
+          sourceId: 'msg-42',
+          evidenceId: 'transcript-42',
+          confidence: 0.92,
+          expired: false,
+          needsRevalidation: false,
+        }),
+      });
+      expect(entry?.compact).toContain('user.preference.response-style="concise"');
+      expect(entry?.compact).toContain('source=user:"msg-42"');
+      expect(entry?.compact).toContain('confidence=');
+      expect(entry?.compact).toContain('revalidate=2026-08-01T00:00:00.000Z');
+    });
+
+    it('hides expired inferred memories from compact agent reads by default', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.location.city',
+        value: 'Paris',
+        source: 'inferred:session-7',
+        sourceId: 'session-7',
+        confidence: 0.6,
+        reason: 'User mentioned a Paris train connection; this is inferred.',
+        expiresAt: '2026-07-15T00:00:00.000Z',
+      });
+      brain.memoryReview.approve(candidate.id, { reviewer: 'operator' });
+
+      expect(
+        brain.memoryReview.listForAgent({
+          key: 'user.location.city',
+          now: '2026-07-16T00:00:00.000Z',
+        }),
+      ).toEqual([]);
+
+      expect(
+        brain.memoryReview.listForAgent({
+          key: 'user.location.city',
+          now: '2026-07-16T00:00:00.000Z',
+          includeExpired: true,
+        }),
+      ).toEqual([
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            sourceType: 'inferred',
+            sourceId: 'session-7',
+            expired: true,
+          }),
+        }),
+      ]);
+      expect(brain.memoryReview.listProvenance({ key: 'user.location.city' })).toEqual([
+        expect.objectContaining({
+          key: 'user.location.city',
+          expiresAt: '2026-07-15T00:00:00.000Z',
+        }),
+      ]);
+    });
+
     it('filters memory provenance by source and validates invalid viewer filters', () => {
       const repoCandidate = brain.memoryReview.propose({
         targetStore: 'working',
@@ -1891,7 +1999,7 @@ describe('SqliteBrain', () => {
         value: 'main',
         source: 'repo-config',
         confidence: 0.8,
-        reason: 'Observed from GitHub repository metadata.',
+        reason: 'Observed from GitHub repository metadata; not from a chat transcript.',
       });
       const chatCandidate = brain.memoryReview.propose({
         targetStore: 'working',
