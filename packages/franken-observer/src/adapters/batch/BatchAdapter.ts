@@ -30,6 +30,10 @@ function validatePositiveSafeInteger(value: number, optionName: string): number 
   return value
 }
 
+function unrefTimerIfSupported(timer: ReturnType<typeof globalThis.setInterval>): void {
+  ;(timer as { unref?: () => void }).unref?.()
+}
+
 /**
  * Buffers `flush()` calls and forwards them to the underlying adapter in bulk,
  * reducing HTTP round-trips on high-throughput deployments.
@@ -70,6 +74,7 @@ export class BatchAdapter implements ExportAdapter {
       const flushIntervalMs = validatePositiveSafeInteger(options.flushIntervalMs, 'flushIntervalMs')
       const si = options.setInterval ?? globalThis.setInterval
       this.timer = si(() => { void this.drain().catch(() => undefined) }, flushIntervalMs)
+      unrefTimerIfSupported(this.timer)
     }
   }
 

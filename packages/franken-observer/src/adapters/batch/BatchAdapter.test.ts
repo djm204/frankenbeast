@@ -90,6 +90,21 @@ describe('BatchAdapter — options', () => {
     await batch.stop()
     expect(clearIntervalFn).toHaveBeenCalledWith(42)
   })
+
+  it('unrefs Node-compatible flush interval timers', () => {
+    const timer = { unref: vi.fn() } as unknown as ReturnType<typeof globalThis.setInterval> & {
+      unref: () => void
+    }
+    const setIntervalFn = vi.fn().mockReturnValue(timer)
+
+    new BatchAdapter({
+      adapter: new InMemoryAdapter(),
+      flushIntervalMs: 1000,
+      setInterval: setIntervalFn,
+    })
+
+    expect(timer.unref).toHaveBeenCalledOnce()
+  })
 })
 
 // ── buffering ─────────────────────────────────────────────────────────────────
