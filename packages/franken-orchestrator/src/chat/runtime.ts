@@ -1,19 +1,12 @@
 import type { ConversationEngine } from './conversation-engine.js';
 import type { TurnRunner, TurnEvent, TurnRunResult } from './turn-runner.js';
-import type { ChatBeastContext, ExecuteOutcome, TranscriptMessage, TurnOutcome } from './types.js';
+import type { ChatBeastContext, ExecuteOutcome, ExtendedPendingApproval, TranscriptMessage, TurnOutcome } from './types.js';
 import { sanitizeChatOutput } from './output-sanitizer.js';
 import type { BeastDispatchPort } from './beast-daemon-dispatch-adapter.js';
 import type { BeastExecutionMode } from '../beasts/types.js';
-import type { PendingApproval } from '@franken/types';
 import { isoNow } from '@franken/types';
 
-type PendingApprovalContext = Omit<PendingApproval, 'description' | 'requestedAt'> & {
-  approvalToken?: string | undefined;
-  requester?: string | undefined;
-  workerId?: string | undefined;
-  workdir?: string | undefined;
-};
-type RuntimePendingApproval = PendingApproval & PendingApprovalContext;
+type PendingApprovalContext = Omit<ExtendedPendingApproval, 'description' | 'requestedAt'>;
 
 const SLASH_COMMANDS = new Set([
   '/plan',
@@ -88,7 +81,7 @@ export interface ChatRuntimeRunOptions {
 }
 
 export function pendingApprovalRuntimeState(
-  pendingApproval: RuntimePendingApproval | null | undefined,
+  pendingApproval: ExtendedPendingApproval | null | undefined,
   pendingApprovalState = false,
 ): Pick<ChatRuntimeState, 'pendingApproval' | 'pendingApprovalContext' | 'pendingApprovalDescription' | 'pendingApprovalRequestedAt'> {
   if (!pendingApproval) {
