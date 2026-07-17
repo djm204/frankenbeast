@@ -13,7 +13,7 @@ const STATUS_BADGES: Record<DashboardSloMetricStatus, string> = {
 
 function formatValue(metric: DashboardSloMetric): string {
   if (metric.value === null) return 'No data';
-  if (metric.unit === 'percent') return `${metric.value.toFixed(metric.value % 1 === 0 ? 0 : 1)}%`;
+  if (metric.unit === 'percent') return `${metric.value.toFixed(metric.value % 1 === 0 ? 0 : 2)}%`;
   if (metric.unit === 'milliseconds') return formatDuration(metric.value);
   return String(metric.value);
 }

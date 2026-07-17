@@ -66,6 +66,7 @@ describe('SLO dashboard', () => {
         ('t_success_slow', 2, 'heartbeat', '{}', 1400),
         ('t_failed_provider', 3, 'spawned', '{}', 1550),
         ('t_failed_provider', 3, 'crashed', '{}', 1900),
+        ('t_running_worker', NULL, 'blocked', '{"kind":"approval"}', 1500),
         ('t_blocked_approval', 4, 'blocked', '{"kind":"approval"}', 1510),
         ('t_blocked_approval', 4, 'unblocked', '{}', 1570);
     `);
@@ -84,17 +85,18 @@ describe('SLO dashboard', () => {
       'queue_age_p50_ms',
       'approval_latency_p50_ms',
     ]);
-    expect(oneHour.metrics.find((metric) => metric.id === 'run_success_rate')).toMatchObject({ value: 66.67, unit: 'percent', status: 'breach' });
+    expect(oneHour.metrics.find((metric) => metric.id === 'run_success_rate')).toMatchObject({ value: 50, unit: 'percent', status: 'breach' });
     expect(oneHour.metrics.find((metric) => metric.id === 'time_to_first_output_p50_ms')?.value).toBe(200_000);
     expect(oneHour.metrics.find((metric) => metric.id === 'time_to_closeout_p50_ms')?.value).toBe(600_000);
-    expect(oneHour.metrics.find((metric) => metric.id === 'provider_wait_p50_ms')?.value).toBe(80_000);
+    expect(oneHour.metrics.find((metric) => metric.id === 'provider_wait_p50_ms')?.value).toBe(100_000);
     expect(oneHour.metrics.find((metric) => metric.id === 'queue_age_p50_ms')?.value).toBe(150_000);
-    expect(oneHour.metrics.find((metric) => metric.id === 'approval_latency_p50_ms')?.value).toBe(60_000);
+    expect(oneHour.metrics.find((metric) => metric.id === 'approval_latency_p50_ms')?.value).toBe(270_000);
     expect(oneHour.failureCategories).toEqual([
+      { category: 'approval', count: 1 },
       { category: 'provider', count: 1 },
     ]);
     expect(dashboard.source).toEqual({ kanban: true, approvals: true, runs: true });
-    expect(dashboard.generatedAt).toBe('1970-01-01T00:31:40.000Z');
+    expect(dashboard.generatedAt).toBe('1970-01-01T00:33:00.000Z');
     db.close();
   });
 
@@ -126,7 +128,7 @@ describe('SLO dashboard', () => {
     const oneHour = dashboard.windows[0];
     expect(dashboard.source).toEqual({ kanban: true, approvals: false, runs: false });
     expect(dashboard.generatedAt).toBe('1970-01-01T00:18:20.000Z');
-    expect(oneHour.metrics.find((metric) => metric.id === 'queue_age_p50_ms')?.value).toBe(950_000);
+    expect(oneHour.metrics.find((metric) => metric.id === 'queue_age_p50_ms')?.value).toBe(930_000);
     expect(oneHour.failureCategories).toEqual([{ category: 'other', count: 1 }]);
     db.close();
   });

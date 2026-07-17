@@ -115,8 +115,8 @@ export function createSqliteSloDashboardSource(options: SqliteSloDashboardSource
     const hasComments = hasTable(db, 'comments');
     return {
       now,
-      runs: hasTasks ? readRunRecords(db, hasRuns, hasEvents, hasComments) : [],
-      approvals: hasEvents ? readApprovalRecords(db) : [],
+      runs: hasTasks ? readRunRecords(db, hasRuns, hasEvents, hasComments, now) : [],
+      approvals: hasEvents ? readApprovalRecords(db, sampleTimestamp(now)) : [],
       hasKanbanData: hasTasks,
       hasRunData: hasRuns,
       hasApprovalData: hasEvents,
@@ -127,20 +127,21 @@ export function createSqliteSloDashboardSource(options: SqliteSloDashboardSource
 }
 
 function buildWindow(source: SloDashboardSource, label: '1h' | '24h' | '7d', seconds: number): SloWindowDashboard {
+  const sampleNow = sampleTimestamp(source.now);
   const since = source.now - seconds;
-  const runs = source.runs.filter((run) => windowTimestamp(run, source.now) >= since);
+  const runs = source.runs.filter((run) => windowTimestamp(run, sampleNow) >= since);
   const approvals = source.approvals.filter((approval) => approval.decidedAt >= since);
   const successfulRuns = runs.filter(isSuccessfulRun).length;
   const totalTerminalRuns = runs.filter(isTerminalRun).length;
   const successRate = totalTerminalRuns === 0 ? null : round((successfulRuns / totalTerminalRuns) * 100, 2);
   const firstOutputSamples = runs
-    .map((run) => firstOutputDurationMs(run, source.now))
+    .map((run) => firstOutputDurationMs(run, sampleNow))
     .filter(isNumber);
   const closeoutSamples = taskDurationSamples(runs, (run) => durationMs(run.taskCreatedAt, run.taskCompletedAt));
   const providerWaitSamples = runs
-    .map((run) => durationMs(run.runStartedAt, run.spawnedAt))
+    .map((run) => providerWaitDurationMs(run, sampleNow))
     .filter(isNumber);
-  const queueAgeSamples = taskDurationSamples(runs, (run) => durationMs(run.taskCreatedAt, run.taskStartedAt ?? run.runStartedAt ?? source.now));
+  const queueAgeSamples = taskDurationSamples(runs, (run) => durationMs(run.taskCreatedAt, run.taskStartedAt ?? run.runStartedAt ?? sampleNow));
   const approvalSamples = approvals
     .map((approval) => durationMs(approval.requestedAt, approval.decidedAt))
     .filter(isNumber);
@@ -161,7 +162,8 @@ function buildWindow(source: SloDashboardSource, label: '1h' | '24h' | '7d', sec
   };
 }
 
-function readRunRecords(db: Database.Database, hasRuns: boolean, hasEvents: boolean, hasComments: boolean): SloRunRecord[] {
+function readRunRecords(db: Database.Database, hasRuns: boolean, hasEvents: boolean, hasComments: boolean, now: number): SloRunRecord[] {
+  const cutoff = now - Math.max(...WINDOWS.map((window) => window.seconds));
   const taskStartedExpr = columnExpr(db, 'tasks', 'started_at', 't', 'NULL');
   const taskCompletedExpr = columnExpr(db, 'tasks', 'completed_at', 't', 'NULL');
   const attachCommentOutput = (rows: SloRunRecord[]): SloRunRecord[] => {
@@ -186,7 +188,9 @@ function readRunRecords(db: Database.Database, hasRuns: boolean, hasEvents: bool
              ${columnExpr(db, 'tasks', 'started_at', undefined, 'NULL')} AS taskStartedAt,
              ${columnExpr(db, 'tasks', 'completed_at', undefined, 'NULL')} AS taskCompletedAt
       FROM tasks
-    `).all() as SloRunRecord[]);
+      WHERE created_at >= @cutoff
+         OR lower(status) NOT IN ('done', 'completed', 'complete', 'success', 'failed', 'error', 'crashed', 'timed_out', 'timeout', 'archived', 'cancelled', 'canceled', 'deleted', 'stopped')
+    `).all({ cutoff }) as SloRunRecord[]);
   }
 
   const rows = db.prepare(`
@@ -203,7 +207,14 @@ function readRunRecords(db: Database.Database, hasRuns: boolean, hasEvents: bool
            r.error AS error
     FROM tasks t
     LEFT JOIN task_runs r ON r.task_id = t.id
-  `).all() as SloRunRecord[];
+    WHERE t.created_at >= @cutoff
+       OR ${taskStartedExpr} >= @cutoff
+       OR ${taskCompletedExpr} >= @cutoff
+       OR r.started_at >= @cutoff
+       OR r.ended_at >= @cutoff
+       OR lower(t.status) NOT IN ('done', 'completed', 'complete', 'success', 'failed', 'error', 'crashed', 'timed_out', 'timeout', 'archived', 'cancelled', 'canceled', 'deleted', 'stopped')
+    ORDER BY t.id, r.started_at
+  `).all({ cutoff }) as SloRunRecord[];
 
   if (!hasEvents) {
     return attachCommentOutput(rows);
@@ -235,7 +246,7 @@ function readRunRecords(db: Database.Database, hasRuns: boolean, hasEvents: bool
   })));
 }
 
-function readApprovalRecords(db: Database.Database): SloApprovalRecord[] {
+function readApprovalRecords(db: Database.Database, now: number): SloApprovalRecord[] {
   const rows = db.prepare(`
     SELECT task_id AS taskId,
            kind,
@@ -258,6 +269,11 @@ function readApprovalRecords(db: Database.Database): SloApprovalRecord[] {
         approvals.push({ taskId: row.taskId, requestedAt, decidedAt: row.createdAt });
         pending.delete(row.taskId);
       }
+    }
+  }
+  for (const [taskId, requestedAt] of pending.entries()) {
+    if (now >= requestedAt) {
+      approvals.push({ taskId, requestedAt, decidedAt: now });
     }
   }
   return approvals;
@@ -355,6 +371,12 @@ function firstOutputDurationMs(run: SloRunRecord, now: number): number | null {
   return durationMs(start, end);
 }
 
+function providerWaitDurationMs(run: SloRunRecord, now: number): number | null {
+  if (!isNumber(run.runStartedAt)) return null;
+  const end = run.spawnedAt ?? (isTerminalRun(run) ? run.runEndedAt : now);
+  return durationMs(run.runStartedAt, end);
+}
+
 function recordTimestamp(run: SloRunRecord): number {
   return run.runEndedAt ?? run.taskCompletedAt ?? run.runStartedAt ?? run.taskStartedAt ?? run.taskCreatedAt;
 }
@@ -369,6 +391,9 @@ function isSuccessfulRun(run: SloRunRecord): boolean {
 
 function isTerminalRun(run: SloRunRecord): boolean {
   const value = String(run.outcome ?? run.runStatus ?? run.taskStatus).toLowerCase();
+  if (value === 'blocked') {
+    return isNumber(run.runEndedAt) || isNumber(run.taskCompletedAt);
+  }
   return ['completed', 'complete', 'done', 'success', 'failed', 'error', 'crashed', 'timed_out', 'timeout', 'archived', 'cancelled', 'canceled', 'deleted', 'stopped'].includes(value);
 }
 
@@ -378,6 +403,10 @@ function sourceTimestamp(source: SloDashboardSource): number {
     ...source.approvals.map((approval) => approval.decidedAt),
   ].filter(isNumber);
   return timestamps.length > 0 ? Math.max(...timestamps) : 0;
+}
+
+function sampleTimestamp(now: number): number {
+  return Math.floor(now / 60) * 60;
 }
 
 function failureCategories(runs: SloRunRecord[]): SloFailureCategory[] {

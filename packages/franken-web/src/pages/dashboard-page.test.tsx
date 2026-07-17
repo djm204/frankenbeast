@@ -58,7 +58,7 @@ const snapshot: DashboardSnapshot = {
           {
             id: 'run_success_rate',
             label: 'Run success rate',
-            value: 94.5,
+            value: 94.96,
             unit: 'percent',
             target: 95,
             comparator: '>=',
@@ -125,7 +125,7 @@ describe('DashboardPage', () => {
     expect(screen.getByText('[degraded]')).toBeTruthy();
     expect(await screen.findByLabelText('SLO dashboard')).toBeTruthy();
     expect(screen.getByText('Run success rate')).toBeTruthy();
-    expect(screen.getByText('94.5%')).toBeTruthy();
+    expect(screen.getByText('94.96%')).toBeTruthy();
     expect(screen.getByText('Approval latency p50')).toBeTruthy();
     expect(screen.getByText('7m')).toBeTruthy();
     expect(screen.getByText(/provider \(2\)/)).toBeTruthy();
