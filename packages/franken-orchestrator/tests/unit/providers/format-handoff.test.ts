@@ -1328,6 +1328,98 @@ Lesson: wrapper titles are not scope sections.
       validation.findings.find((finding) => finding.id === 'verification'),
     ).toMatchObject({ status: 'pass' });
   });
+
+  it('preserves verification commands in unlabeled fenced blocks', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.',
+        'Command:\n```\nnpm --workspace @franken/orchestrator test\n```\nOutcome: passed',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'verification'),
+    ).toMatchObject({ status: 'pass' });
+  });
+
+  it('preserves child content for required H1 section aliases', () => {
+    const validation = validateAgentHandoffTemplate(`# Scope and objective
+## Issue/task
+#1775
+## Business goal
+Improve onboarding handoffs.
+## Out-of-scope boundaries
+No unrelated refactors.
+
+# Status and decisions
+## Completed work
+Validator is implemented.
+## Decisions
+Keep skeleton rejection strict.
+## Remaining work
+Merge after review.
+
+# Tests
+## Command
+npm test
+## Outcome
+passed
+
+# Next steps
+Blocked: none. Responsible: PM. Continue after review.
+
+# Artifacts and links
+PR #2331 and branch resolve/issue-1775.
+
+# Learnings
+Lesson: accepted aliases must preserve child section bodies.
+`);
+
+    expect(validation.valid).toBe(true);
+  });
+
+  it('requires artifact evidence beyond the generic artifacts heading', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
+        'See above.',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'artifacts'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('rejects fill-in instructions that list required labels', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        'Please fill in issue, business goal, and out-of-scope boundaries',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('rejects blocker alias label-only skeletons', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'State blockers, owner, exact next action, and when the receiving worker should stop.',
+        '- Blocked\n- Responsible\n- Continue',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'blockers'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
 });
 
 describe('truncateSnapshot', () => {

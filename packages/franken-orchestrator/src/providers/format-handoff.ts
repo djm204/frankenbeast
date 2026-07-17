@@ -508,7 +508,10 @@ function sectionSatisfiesRequirement(
 ): boolean {
   const contentWithPopulatedChildHeadingLabels =
     stripUnpopulatedChildHeadingLabels(section.content);
-  const headingContentPrefix = requirement.id === 'artifacts' ? section.heading : '';
+  const headingContentPrefix =
+    requirement.id === 'artifacts'
+      ? artifactHeadingContentPrefix(section.heading)
+      : '';
   const searchableContent = normalizeEvidence(
     `${headingContentPrefix} ${stripPlaceholderOnlyTemplateFields(contentWithPopulatedChildHeadingLabels)}`,
   );
@@ -698,7 +701,10 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
       const marker = fence[1] ?? '';
       if (activeFence === null) {
         activeFence = marker;
-        activeFencePreservesCommands = /\b(?:bash|sh|shell|zsh|fish|console)\b/i.test(line);
+        activeFencePreservesCommands =
+          /\b(?:bash|sh|shell|zsh|fish|console)\b/i.test(line) ||
+          (/^\s*(`{3,}|~{3,})\s*$/.test(line) &&
+            unlabeledFenceContainsVerificationCommand(lines, index + 1, marker));
       } else if (
         marker[0] === activeFence[0] &&
         marker.length >= activeFence.length
@@ -715,7 +721,7 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
       continue;
     }
     if (
-      /^\s*(?:[-*]\s*)?(?:todo|tbd|placeholder|please\s+fill\s+in)\s*:/i.test(
+      /^\s*(?:[-*]\s*)?(?:todo|tbd|placeholder|please\s+fill\s+in)(?:\s*:|\b)/i.test(
         line,
       ) ||
       isPlaceholderOnlyFieldLine(line) ||
@@ -783,7 +789,7 @@ function normalizeTemplateLabelKey(value: string): string {
 }
 
 function isKnownTemplateLabel(label: string): boolean {
-  return /^(?:issue(?: details)?|issue task|task|business goal|business objective|goal|objective|out of scope boundaries|boundary notes|boundaries|completed work|current phase|key decisions|status|current status|decisions|remaining work|blocker|blockers|risk|risks|command|commands|test command|test commands|outcome|result|owner|next action|artifact|artifacts|link|links|worktree|worktrees|diff|diffs|doc|docs|telemetry|lesson|lessons)$/.test(
+  return /^(?:issue(?: details)?|issue task|task|business goal|business objective|goal|objective|out of scope boundaries|boundary notes|boundaries|completed work|current phase|key decisions|status|current status|decisions|remaining work|blocker|blockers|blocked|risk|risks|command|commands|test command|test commands|outcome|result|owner|responsible|assignee|next action|next step|next steps|follow up|continue|artifact|artifacts|link|links|worktree|worktrees|diff|diffs|doc|docs|telemetry|lesson|lessons)$/.test(
     normalizeTemplateLabelKey(label),
   );
 }
@@ -850,14 +856,60 @@ function isExplicitRequiredHandoffSectionHeading(heading: string): boolean {
   return (
     /\bscope\b/i.test(heading) ||
     /\bcurrent\s+state\b/i.test(heading) ||
+    /\bstatus\b/i.test(heading) ||
+    /\bdecisions?\b/i.test(heading) ||
     /\bverification\b/i.test(heading) ||
+    /\btests?\b/i.test(heading) ||
+    /\bvalidation\b/i.test(heading) ||
     /\bblockers?\b/i.test(heading) ||
     /\bnext action\b/i.test(heading) ||
+    /\bnext steps?\b/i.test(heading) ||
     /\bartifacts?\b/i.test(heading) ||
-    /\blearning\b/i.test(heading)
+    /\blinks?\b/i.test(heading) ||
+    /\bbranches?\b/i.test(heading) ||
+    /\bpr\b/i.test(heading) ||
+    /\bpull requests?\b/i.test(heading) ||
+    /\bworktrees?\b/i.test(heading) ||
+    /\bdiffs?\b/i.test(heading) ||
+    /\bdocs?\b/i.test(heading) ||
+    /\btelemetry\b/i.test(heading) ||
+    /\blearnings?\b/i.test(heading) ||
+    /\blessons?\b/i.test(heading) ||
+    /\bretrospective\b/i.test(heading) ||
+    /\breuse\b/i.test(heading)
   )
     ? isRequiredHandoffSectionHeading(heading)
     : false;
+}
+
+function artifactHeadingContentPrefix(heading: string): string {
+  return /\b(branch|pr|pull request|worktree|diff|doc|docs|telemetry)\b|https?:\/\//i.test(
+    heading,
+  )
+    ? heading
+    : '';
+}
+
+function unlabeledFenceContainsVerificationCommand(
+  lines: readonly string[],
+  startIndex: number,
+  marker: string,
+): boolean {
+  for (let index = startIndex; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+    const fence = /^\s*(`{3,}|~{3,})/.exec(line);
+    if (
+      fence &&
+      (fence[1]?.[0] ?? '') === marker[0] &&
+      (fence[1]?.length ?? 0) >= marker.length
+    ) {
+      return false;
+    }
+    if (looksLikeVerificationCommand(line)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function looksLikeVerificationCommand(line: string): boolean {
