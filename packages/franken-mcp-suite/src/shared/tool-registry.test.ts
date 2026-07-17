@@ -39,7 +39,7 @@ describe('TOOL_REGISTRY', () => {
     }
   });
 
-  it('TOOL_STUBS and TOOL_REGISTRY contain the same 29 tool names', () => {
+  it('TOOL_STUBS and TOOL_REGISTRY contain the same 30 tool names', () => {
     const stubNames = new Set(TOOL_STUBS.map((s) => s.name));
     const registryNames = new Set(TOOL_REGISTRY.keys());
     expect(stubNames).toEqual(registryNames);
@@ -224,12 +224,12 @@ describe('TOOL_REGISTRY', () => {
 });
 
 describe('searchTools', () => {
-  it('returns all 29 tools when called with no query', () => {
+  it('returns all 30 tools when called with no query', () => {
     expect(searchTools()).toHaveLength(EXPECTED_COUNT);
     expect(searchTools(undefined)).toHaveLength(EXPECTED_COUNT);
   });
 
-  it('returns exactly 12 tools for query "memory"', () => {
+  it('returns exactly 13 tools for query "memory"', () => {
     const results = searchTools('memory');
     expect(results).toHaveLength(EXPECTED_MEMORY_COUNT);
     for (const r of results) {
