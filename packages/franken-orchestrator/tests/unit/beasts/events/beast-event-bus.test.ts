@@ -243,6 +243,31 @@ describe('BeastEventBus', () => {
     expect(bus.replaySince(0)[0].data.startedAt).toEqual(startedAt);
   });
 
+  it('bounds fallback cloning for cyclic payloads with unsupported values', () => {
+    const bus = new BeastEventBus();
+    const observed: BeastSseEvent[] = [];
+    const unsupported = () => 'listener-local helper';
+    const cyclicPayload: Record<string, unknown> = { agentId: 'a1', unsupported };
+    cyclicPayload.self = cyclicPayload;
+    cyclicPayload.history = [cyclicPayload];
+
+    bus.subscribe((event) => observed.push(event));
+
+    expect(() => bus.publish({ type: 'agent.status', data: cyclicPayload })).not.toThrow();
+
+    expect(observed).toHaveLength(1);
+    expect(observed[0].data).not.toBe(cyclicPayload);
+    expect(observed[0].data.unsupported).toBe(unsupported);
+    expect(observed[0].data.self).toBe(observed[0].data);
+    expect((observed[0].data.history as unknown[])[0]).toBe(observed[0].data);
+
+    const replayed = bus.replaySince(0)[0];
+    expect(replayed.data).not.toBe(observed[0].data);
+    expect(replayed.data.unsupported).toBe(unsupported);
+    expect(replayed.data.self).toBe(replayed.data);
+    expect((replayed.data.history as unknown[])[0]).toBe(replayed.data);
+  });
+
   it('evicts oldest events when buffer exceeds maxBufferSize', () => {
     const bus = new BeastEventBus(3); // buffer limited to 3
     bus.publish({ type: 'e', data: { n: 1 } });
