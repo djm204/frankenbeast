@@ -23,7 +23,6 @@ interface ConnectionState {
   sessionId: string;
   remoteAddress?: string | undefined;
   rateLimitKey: string;
-  eventSequence: number;
 }
 
 export interface ChatSocketMessageRateLimitOptions {
@@ -159,13 +158,14 @@ function createPeerState(
   rateLimitKey: string,
   controller: ChatSocketController,
 ): ConnectionState {
-  const state = { sessionId, remoteAddress, rateLimitKey, eventSequence: 0 };
+  const state = { sessionId, remoteAddress, rateLimitKey };
   controller.connections.set(peer, state);
   return state;
 }
 
 export class ChatSocketController {
   readonly connections = new Map<ChatSocketPeer, ConnectionState>();
+  private readonly eventSequences = new Map<string, number>();
   private readonly activeSessionTurns = new Set<string>();
   private readonly allowedOrigins: string[];
   private readonly messageRateLimiter: ChatSocketMessageRateLimiter;
@@ -675,9 +675,10 @@ export class ChatSocketController {
       return;
     }
 
-    connection.eventSequence += 1;
+    const nextSequence = (this.eventSequences.get(connection.sessionId) ?? 0) + 1;
+    this.eventSequences.set(connection.sessionId, nextSequence);
     peer.send(JSON.stringify({
-      eventId: `${connection.sessionId}:${connection.eventSequence}`,
+      eventId: `${connection.sessionId}:${nextSequence}`,
       ...event,
     }));
   }

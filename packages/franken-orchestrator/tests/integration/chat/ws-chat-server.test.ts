@@ -360,6 +360,16 @@ describe('ws chat server', () => {
     expect(events[0]).toMatchObject({ eventId: `${session.id}:1`, type: 'session.ready' });
     expect(events[1]).toMatchObject({ eventId: `${session.id}:2`, type: 'pong' });
 
+    const reconnectToken = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const { peer: reconnectPeer, sent: reconnectSent } = createPeer();
+    expect(controller.connect(reconnectPeer, {
+      origin: null,
+      sessionId: session.id,
+      token: reconnectToken,
+    }).ok).toBe(true);
+    const reconnectEvents = reconnectSent.map((raw) => JSON.parse(raw) as { eventId?: string; type: string });
+    expect(reconnectEvents[0]).toMatchObject({ eventId: `${session.id}:3`, type: 'session.ready' });
+
     rmSync(TMP, { recursive: true, force: true });
   });
 

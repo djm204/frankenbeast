@@ -358,6 +358,30 @@ describe('dashboard routes', () => {
       expect(data.providers).toHaveLength(1);
     });
 
+    it('keeps snapshot ids monotonic across dashboard SSE reconnects', async () => {
+      const deps = createMockDeps();
+      const app = createDashboardRoutes(deps);
+      const readInitialStreamText = async (ticket: string) => {
+        const res = await app.request(`/events?ticket=${ticket}`);
+        const reader = res.body!.getReader();
+        const decoder = new TextDecoder();
+        let text = '';
+        for (let i = 0; i < 10; i++) {
+          const { value, done } = await reader.read();
+          if (value) text += decoder.decode(value, { stream: true });
+          if (done || text.includes('event: snapshot')) break;
+        }
+        await reader.cancel();
+        return text;
+      };
+
+      const firstText = await readInitialStreamText(await issueDashboardTicket(app));
+      const secondText = await readInitialStreamText(await issueDashboardTicket(app));
+
+      expect(firstText).toContain('id: dashboard:1');
+      expect(secondText).toContain('id: dashboard:2');
+    });
+
     it('streams a fresh snapshot when dashboard state changes after connect', async () => {
       vi.useFakeTimers();
       try {
