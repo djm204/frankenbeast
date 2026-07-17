@@ -23,8 +23,9 @@ Stop and hand back to the PM/HITL reviewer when any checklist item fails.
 ISSUE_NUMBER="${ISSUE_NUMBER:?set the assigned issue number}"
 ISSUE_NUMBER="${ISSUE_NUMBER#\#}"
 gh issue view "$ISSUE_NUMBER" --repo djm204/frankenbeast --json number,title,state,labels,body,url
-gh pr list --repo djm204/frankenbeast --state open --search "$ISSUE_NUMBER OR issue-$ISSUE_NUMBER" --json number,title,headRefName,url,state
-gh pr list --repo djm204/frankenbeast --state open --json number,title,headRefName,url,state \
+gh pr list --repo djm204/frankenbeast --state open --limit 100 \
+  --search "$ISSUE_NUMBER OR issue-$ISSUE_NUMBER" --json number,title,headRefName,url,state
+gh pr list --repo djm204/frankenbeast --state open --limit 100 --json number,title,headRefName,url,state \
   --jq ".[] | select(.headRefName | startswith(\"resolve/issue-$ISSUE_NUMBER-\"))"
 ```
 
@@ -107,14 +108,14 @@ git commit -m "<type(scope): concise issue-specific summary>"
 Choose the narrowest deterministic check that covers the change, then broaden when practical:
 
 ```bash
-npm run test:root -- tests/docs-issue-1664.test.ts
-npm run test:root -- tests/docs-issue-1094.test.ts
+npm run test:root -- <targeted-test-file-for-your-change>
+npm test --workspace <touched-workspace-if-applicable>
 npm run lint
 npm run typecheck
 npm run build
 ```
 
-Use the [test command decision tree](test-command-decision-tree.md) when the touched package is not obvious. If a broad command fails for an unrelated pre-existing reason, capture the exact failure and keep the passing targeted command in the PR body.
+Replace the placeholder commands with the narrowest regression for the files you touched; for example, docs-only onboarding changes often use a `tests/docs-issue-<issue-number>.test.ts` root test. Use the [test command decision tree](test-command-decision-tree.md) when the touched package is not obvious. If a broad command fails for an unrelated pre-existing reason, capture the exact failure and keep the passing targeted command in the PR body.
 
 ### 7. Push and open the PR
 
@@ -137,7 +138,7 @@ gh pr create \
 ## Scope and handoff
 - Issue: Closes #<issue-number>
 - Branch: <branch-name>
-- Ownership entries: <files/packages/docs areas touched>
+- Ownership entry IDs: <manifest entry ids from docs/onboarding/repository-ownership.manifest.json, for example onboarding-docs or repo-automation>
 - Codex: pending @codex review
 PR_BODY
 )"

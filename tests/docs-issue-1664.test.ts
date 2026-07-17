@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -48,6 +49,7 @@ describe('issue #1664 first-PR agent runbook', () => {
       'ISSUE_NUMBER="${ISSUE_NUMBER#\\#}"',
       'gh issue view "$ISSUE_NUMBER" --repo djm204/frankenbeast',
       'gh pr list --repo djm204/frankenbeast --state open',
+      '--limit 100',
       'resolve/issue-$ISSUE_NUMBER-',
       'python3 - <<\'PY\'',
       'for relative in [\'tasks/resolve-issues-shared-lessons.md\', \'tasks/lessons.md\', \'AGENTS.md\']:',
@@ -58,7 +60,8 @@ describe('issue #1664 first-PR agent runbook', () => {
       'git add <files-you-intentionally-changed>',
       'git diff --cached --check',
       'git commit -m "<type(scope): concise issue-specific summary>"',
-      'npm run test:root -- tests/docs-issue-1664.test.ts',
+      'npm run test:root -- <targeted-test-file-for-your-change>',
+      'npm test --workspace <touched-workspace-if-applicable>',
       'npm run lint',
       'npm run typecheck',
       'npm run build',
@@ -82,13 +85,14 @@ describe('issue #1664 first-PR agent runbook', () => {
       'one issue, one isolated branch/worktree, one PR',
       'No secrets, production data, destructive migrations, release credentials, or customer-impacting side effects are required.',
       'The PR body must include `Closes #<issue-number>`',
-      'Ownership entries: <files/packages/docs areas touched>',
+      'Ownership entry IDs: <manifest entry ids from docs/onboarding/repository-ownership.manifest.json',
       'silence or only an `eyes` reaction',
       'usage-limit text',
       'a clean comment that predates your latest push',
       'Stop at the configured review-invocation cap and ask for HITL approval before exceeding it.',
       'by body/title search or by a `resolve/issue-$ISSUE_NUMBER-*` head branch',
       'replacing the placeholders with your actual issue-scoped paths and commit subject',
+      'Replace the placeholder commands with the narrowest regression for the files you touched',
       'Run it only after the PM/HITL reviewer has authorized push and PR creation for the assigned issue.',
       'authorized Codex review for this PR',
       'push, merge, delete a branch, close an issue, edit labels, or rerun over the Codex cap',
@@ -97,5 +101,24 @@ describe('issue #1664 first-PR agent runbook', () => {
     ]) {
       expect(runbook).toContain(guardrail);
     }
+  });
+
+  it('includes the runbook in the generated coding-agent first-run checklist', () => {
+    const result = spawnSync(process.execPath, ['scripts/first-run-checklist.mjs', '--json', '--persona', 'coding-agent'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    const checklist = JSON.parse(result.stdout) as { items: Array<{ id: string; docs: string[] }> };
+    expect(checklist.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'first-pr-runbook',
+        docs: expect.arrayContaining([
+          'docs/onboarding/first-pr-agent-runbook.md',
+          'docs/onboarding/repository-ownership.manifest.json',
+        ]),
+      }),
+    ]));
   });
 });
