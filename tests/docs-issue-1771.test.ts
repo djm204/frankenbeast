@@ -58,11 +58,17 @@ describe('issue #1771 local service dependency explainer', () => {
     expect(secretBackend?.healthCheck).toContain('FRANKENBEAST_PASSPHRASE');
     expect(secretBackend?.healthCheck).toContain('store.detect()');
     expect(secretBackend?.healthCheck).toContain('store.resolve(ref)');
+    expect(secretBackend?.healthCheck).toContain('cfg.comms?.telegram?.webhookSecretTokenRef');
     expect(secretBackend?.healthCheck).toContain('SecretResolver');
     expect(secretBackend?.healthCheck).toContain('.keys()');
     expect(secretBackend?.handoffNote).toContain('detect() succeeded');
     expect(secretBackend?.handoffNote).toContain('configured secret refs resolved through store.resolve()');
     expect(secretBackend?.healthCheck).not.toContain('|| true');
+
+    const tempo = manifest.services.find((service) => service.id === 'tempo');
+    expect(tempo?.healthCheck).toContain('http://localhost:3200/ready');
+    expect(tempo?.healthCheck).toContain('net.connect(4318');
+    expect(tempo?.handoffNote).toContain('OTLP/HTTP target 4318');
 
     const grafana = manifest.services.find((service) => service.id === 'grafana');
     expect(grafana?.startCommand).toContain('openssl rand -base64 24');
@@ -71,6 +77,8 @@ describe('issue #1771 local service dependency explainer', () => {
 
     const provider = manifest.services.find((service) => service.id === 'provider-cli');
     expect(provider?.healthCheck).toContain('selected configured CLI-backed provider');
+    expect(provider?.startCommand).toContain('aider');
+    expect(provider?.healthCheck).toContain('aider');
     expect(provider?.healthCheck).toContain('chat surfaces and normal frankenbeast run/agent execution require a CLI-backed provider');
     expect(provider?.startCommand).toContain('explicitly bypass the CLI registry');
     expect(provider?.startCommand).toContain('normal frankenbeast run/agent execution');
@@ -118,8 +126,11 @@ describe('issue #1771 local service dependency explainer', () => {
       'Do not assume Docker is required for onboarding.',
       'Do not overwrite a remote service URL by starting a local container on the same port.',
       'Full-stack probe: `npm run local:verify-setup` checks ChromaDB, Grafana, and Tempo together',
-      'selected CLI-backed provider smoke call; do not rely on `command -v` alone',
+      'selected CLI-backed provider (`claude`, `codex`, `gemini`, or legacy `aider`) smoke call; do not rely on `command -v` alone',
+      'legacy `aider`',
       'chat surfaces currently resolve providers through the CLI provider registry',
+      'Tempo can be ready for queries while the OTLP/HTTP listener used by `TempoAdapter` is missing or blocked.',
+      "Telegram's `comms.telegram.webhookSecretTokenRef`",
       'do not treat normal `frankenbeast run` or chat as API-key-only',
       'docker compose up -d --no-deps grafana',
       'resolve configured refs through the same store used at runtime',
