@@ -6,7 +6,7 @@ const JSON_FIELD_RE = /("([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*)("(?:\\.|[^"\\])*"|[^,
 const CREDENTIAL_URL_RE = /\b((?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/(?:[^:\s"'/@]+)?):[^@\s"']+(@[^\s"']+)/giu;
 const SENSITIVE_VALUE_PATTERNS = [
   { key: 'private-key-block', pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gu },
-  { key: 'provider-token', pattern: /\b(?:sk-[A-Za-z0-9_\-]{12,}|gh[opusr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{12,}|glpat-[A-Za-z0-9_\-]{12,}|xox[baprs]-[A-Za-z0-9-]{10,})\b/gu },
+  { key: 'provider-token', pattern: /\b(?:sk[-_][A-Za-z0-9_\-]{12,}|gh[opusr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{12,}|glpat-[A-Za-z0-9_\-]{12,}|xox[baprs]-[A-Za-z0-9-]{10,})\b/gu },
   { key: 'npm-token', pattern: /\bnpm_[A-Za-z0-9_\-]{12,}\b/gu },
   { key: 'discord-webhook', pattern: /https:\/\/(?:discord(?:app)?\.com|canary\.discord\.com)\/api\/webhooks\/\d+\/[A-Za-z0-9_\-]+/giu },
   { key: 'authorization-token', pattern: /\b(?:Bearer|token)\s+[A-Za-z0-9._~+/=-]{20,}\b/giu },

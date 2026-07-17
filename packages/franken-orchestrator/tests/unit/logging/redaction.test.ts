@@ -101,6 +101,19 @@ describe('logging redaction', () => {
     expect(result.decisions).toEqual([]);
   });
 
+  it('redacts underscore-separated sk provider tokens as value-shape secrets', () => {
+    const token = `sk_live_${'a'.repeat(24)}`;
+    const result = redactSensitiveTextWithProvenance(`provider=${token}`, '$.message');
+
+    expect(result.value).toBe('provider=<redacted>');
+    expect(result.decisions).toContainEqual(expect.objectContaining({
+      key: 'provider-token',
+      source: 'text-value-pattern',
+      rule: 'sensitive-value',
+    }));
+    expect(JSON.stringify(result.decisions)).not.toContain(token);
+  });
+
   it('returns path-aware provenance for object and nested string redaction decisions', () => {
     const objectValue = secretMarker('object', 'value');
     const textValue = secretMarker('inline', 'value');

@@ -446,6 +446,38 @@ describe("Memory Server", () => {
     expect(brain.proposeMemory).not.toHaveBeenCalled();
   });
 
+  it("quarantines underscore-separated sk provider tokens", async () => {
+    const sensitiveValue = `sk_live_${"a".repeat(24)}`;
+    const brain = createBrainStub({ store: vi.fn(), proposeMemory: vi.fn().mockResolvedValue({
+      id: "memcand_sk_live",
+      targetStore: "working",
+      key: "provider_note",
+      value: sensitiveValue,
+      source: "fbeast_memory_store:quarantine",
+      evidenceId: "quarantine:provider_note",
+      confidence: 1,
+      reason: "Sensitive memory quarantined for operator review (value-shape-indicates-secret).",
+      status: "pending",
+      createdAt: "2026-07-17T00:00:00.000Z",
+      updatedAt: "2026-07-17T00:00:00.000Z",
+    }) });
+    const server = createMemoryServer({ brain });
+
+    const result = await server.callTool("fbeast_memory_store", {
+      key: "provider_note",
+      value: sensitiveValue,
+      type: "working",
+    });
+
+    expect(brain.store).not.toHaveBeenCalled();
+    expect(brain.proposeMemory).toHaveBeenCalledWith(expect.objectContaining({
+      key: "provider_note",
+      value: sensitiveValue,
+      reason: expect.stringContaining("value-shape-indicates-secret"),
+    }));
+    expect(result.content[0]!.text).not.toContain(sensitiveValue);
+  });
+
   it("rejects blank agent ids before storing private memory as shared", async () => {
     const brain = createBrainStub({
       query: vi.fn().mockResolvedValue([]),

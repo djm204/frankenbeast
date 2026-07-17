@@ -127,7 +127,7 @@ const SENSITIVE_MEMORY_KEY_PATTERNS = [
 
 const SENSITIVE_MEMORY_VALUE_PATTERNS = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
-  /\b(?:sk-[A-Za-z0-9_\-]{12,}|gh[opusr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{12,}|glpat-[A-Za-z0-9_\-]{12,}|xox[baprs]-[A-Za-z0-9-]{10,})\b/,
+  /\b(?:sk[-_][A-Za-z0-9_\-]{12,}|gh[opusr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{12,}|glpat-[A-Za-z0-9_\-]{12,}|xox[baprs]-[A-Za-z0-9-]{10,})\b/,
   /\bnpm_[A-Za-z0-9_\-]{12,}\b/,
   /https:\/\/(?:discord(?:app)?\.com|canary\.discord\.com)\/api\/webhooks\/\d+\/[A-Za-z0-9_\-]+/i,
   /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/[^\s:@/]*:[^\s@/]+@[^\s]+/i,
