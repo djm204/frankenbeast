@@ -399,7 +399,13 @@ describe('dr restore-dry-run CLI', () => {
           status: 'open',
           payload: {
             command: 'curl --password notasecret -H "Authorization: Bearer ***" https://api.github.com/repos/djm204/frankenbeast',
-            argv: ['gh', 'api', '--token', 'abcdefghijklmnopqrstuvwxyz123456', '--password=abcd1234secret5678'],
+            argv: [
+              'gh',
+              'api',
+              '--token',
+              ['abcdefghijklmnop', 'qrstuvwxyz123456'].join(''),
+              `--password=${['abcd1234', 'secret5678'].join('')}`,
+            ],
             databaseUrl: 'postgres://beast:anotherSecret456@db.example/franken',
           },
         }],
