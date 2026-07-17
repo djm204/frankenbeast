@@ -8,9 +8,10 @@ const SENSITIVE_VALUE_PATTERNS = [
   /\b(?:sk|gho|ghp|glpat|xox[baprs])-?[A-Za-z0-9_\-]{12,}\b/gu,
   /\bnpm_[A-Za-z0-9_\-]{12,}\b/gu,
   /https:\/\/(?:discord(?:app)?\.com|canary\.discord\.com)\/api\/webhooks\/\d+\/[A-Za-z0-9_\-]+/giu,
-  /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/[^\s:@/]+:[^\s@/]+@[^\s]+/giu,
+  /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/[^\s:@/]*:[^\s@/]+@[^\s]+/giu,
   /\b(?:Bearer|token)\s+[A-Za-z0-9._~+/=-]{20,}\b/giu,
   /\b(?:Cookie|Set-Cookie):\s*[^\r\n]+/giu,
+  /\b(?:Proxy-)?Authorization:\s*[^\r\n]+/giu,
 ];
 
 export type RedactionDecisionSource = 'text-assignment' | 'text-json-field' | 'object-key';

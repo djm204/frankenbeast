@@ -277,7 +277,7 @@ describe("Memory Server", () => {
     expect(brain.store).not.toHaveBeenCalled();
     expect(brain.proposeMemory).toHaveBeenCalledWith({
       key: "OPENAI_API_KEY",
-      value: sensitiveValue,
+      value: "<redacted>",
       source: "fbeast_memory_store:quarantine",
       evidenceId: "quarantine:OPENAI_API_KEY",
       confidence: 1,

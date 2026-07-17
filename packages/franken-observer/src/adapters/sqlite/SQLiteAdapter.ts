@@ -187,13 +187,21 @@ const SENSITIVE_TEXT_PATTERNS = [
   /\b(?:sk|gho|ghp|glpat|xox[baprs])-?[A-Za-z0-9_\-]{12,}\b/gu,
   /\bnpm_[A-Za-z0-9_\-]{12,}\b/gu,
   /https:\/\/(?:discord(?:app)?\.com|canary\.discord\.com)\/api\/webhooks\/\d+\/[A-Za-z0-9_\-]+/giu,
-  /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/[^\s:@/]+:[^\s@/]+@[^\s]+/giu,
+  /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/[^\s:@/]*:[^\s@/]+@[^\s]+/giu,
   /\b(?:Bearer|token)\s+[A-Za-z0-9._~+/=-]{20,}\b/giu,
   /\b(?:Cookie|Set-Cookie):\s*[^\r\n]+/giu,
+  /\b(?:Proxy-)?Authorization:\s*[^\r\n]+/giu,
 ]
+const SENSITIVE_ASSIGNMENT_RE = /\b([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)/gu
+const SENSITIVE_JSON_FIELD_RE = /("([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*)("(?:\\.|[^"\\])*"|[^,}\]\s]+)/gu
 
 function redactSensitiveText(text: string): string {
-  let redacted = text
+  let redacted = text.replace(SENSITIVE_ASSIGNMENT_RE, (match, key: string) => {
+    return isSensitiveMetadataKey(key) ? `${key}=${REDACTED}` : match
+  })
+  redacted = redacted.replace(SENSITIVE_JSON_FIELD_RE, (match, prefix: string, key: string) => {
+    return isSensitiveMetadataKey(key) ? `${prefix}"${REDACTED}"` : match
+  })
   for (const pattern of SENSITIVE_TEXT_PATTERNS) {
     redacted = redacted.replace(pattern, REDACTED)
   }

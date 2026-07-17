@@ -21,21 +21,27 @@ const npmToken = ['npm', '_', 'b'.repeat(36)].join('');
 const databaseUrl = ['postgres://agent:', 'c'.repeat(24), '@db.internal:5432/app'].join('');
 const cookieHeader = ['Cookie: session=', 'd'.repeat(32), '; csrf=', 'e'.repeat(32)].join('');
 const bearerToken = ['Bearer ', 'f'.repeat(48)].join('');
+const passwordOnlyRedisUrl = ['redis://:', 'g'.repeat(24), '@cache.internal:6379/0'].join('');
+const bareCookieValue = ['session=', 'h'.repeat(32), '; csrf=', 'i'.repeat(32)].join('');
+const authorizationHeader = ['Authorization: Basic ', 'j'.repeat(32)].join('');
 
 const fixtures = [
   { name: 'github-token', value: githubToken },
   { name: 'discord-webhook', value: discordWebhook },
   { name: 'npm-token', value: npmToken },
   { name: 'database-url', value: databaseUrl },
+  { name: 'password-only-redis-url', value: passwordOnlyRedisUrl },
   { name: 'cookie-header', value: cookieHeader },
+  { name: 'bare-cookie-value', value: bareCookieValue },
   { name: 'bearer-token', value: bearerToken },
+  { name: 'authorization-header', value: authorizationHeader },
 ] as const;
 
 const camelCaseSecretMetadata = {
   accessToken: 'opaque-access-token-value',
   authToken: 'opaque-auth-token-value',
   passwordValue: 'opaque-password-value',
-  cookieHeader: 'opaque-cookie-header-value',
+  sessionCookie: 'opaque-cookie-header-value',
   privateKey: 'opaque-private-key-value',
   APIKey: 'opaque-api-key-value',
 };
@@ -95,11 +101,12 @@ describe('secret redaction regression harness', () => {
     const logSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
     const logger = new ConsoleLogger({ verbose: true });
 
-    logger.debug(`runtime credentials ${cookieHeader} ${bearerToken}`, {
+    logger.debug(`runtime credentials ${cookieHeader} ${bearerToken} ${authorizationHeader}`, {
       githubToken,
       discordWebhook,
       npmToken,
       databaseUrl,
+      passwordOnlyRedisUrl,
     });
 
     const output = logSpy.mock.calls.map(call => call.join(' ')).join('\n');
@@ -135,12 +142,17 @@ describe('secret redaction regression harness', () => {
       discordWebhook,
       npmToken,
       databaseUrl,
+      passwordOnlyRedisUrl,
       cookieHeader,
+      authorizationHeader,
       bearerToken,
+      keyAssignment: `OPENAI_API_KEY=${githubToken}`,
+      jsonAssignment: `{"password":"${bearerToken}"}`,
+      sensitiveMap: new Map([['apiKey', 'short-secret-value']]),
       ...camelCaseSecretMetadata,
     });
-    SpanLifecycle.addThoughtBlock(span, `thought ${discordWebhook} ${bearerToken}`);
-    TraceContext.endSpan(span, { status: 'error', errorMessage: `failed with ${databaseUrl}` });
+    SpanLifecycle.addThoughtBlock(span, `thought ${discordWebhook} ${bearerToken} password=short-value`);
+    TraceContext.endSpan(span, { status: 'error', errorMessage: `failed with ${databaseUrl} ${authorizationHeader}` });
     TraceContext.endTrace(trace);
 
     await adapter.flush(trace);
