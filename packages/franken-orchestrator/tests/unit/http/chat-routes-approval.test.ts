@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createChatApp } from '../../../src/http/chat-app.js';
 import { FileSessionStore } from '../../../src/chat/session-store.js';
 import { BeastDaemonRequestError } from '../../../src/chat/beast-daemon-dispatch-adapter.js';
 import { CapacityReservationError } from '../../../src/beasts/services/capacity-reservation-policy.js';
+import { FileApprovalAuditLog } from '../../../src/chat/approval-audit-log.js';
 import type { ChatSession } from '../../../src/chat/types.js';
 
 function pendingApprovalSession(session: ChatSession): ChatSession {
@@ -113,6 +114,86 @@ describe('chat approval route persistence', () => {
     expect(staleResponse.status).toBe(200);
     const staleBody = await staleResponse.json() as { data: { approved: boolean; state: string; pendingApproval?: unknown } };
     expect(staleBody.data).toMatchObject({ approved: true, state: 'approved', pendingApproval: null });
+  });
+
+  it('records HTTP fallback approval execution and rejects replayed consumed approvals', async () => {
+    const auditPath = join(sessionStoreDir, 'hitl-approval-audit.jsonl');
+    const runtime = {
+      run: vi.fn().mockResolvedValue({
+        displayMessages: [{ kind: 'reply' as const, content: 'deployed' }],
+        events: [],
+        pendingApproval: false,
+        state: 'active' as const,
+        transcript: [],
+        beastContext: null,
+      }),
+    };
+    const app = createChatApp({
+      sessionStore,
+      engine: {} as never,
+      runtime: runtime as never,
+      turnRunner: {} as never,
+      approvalAuditLog: new FileApprovalAuditLog(auditPath, {
+        workerId: 'worker-1',
+        workdir: '/repo/worktree',
+      }),
+    });
+    const session = pendingApprovalSession(sessionStore.create('project-1'));
+    session.pendingApproval = {
+      ...session.pendingApproval!,
+      approvalToken: 'approval-token-1',
+      workerId: 'worker-1',
+      workdir: '/repo/worktree',
+      requester: 'operator-ui',
+      tool: 'execution',
+      command: 'deploy staging',
+      risk: 'Requires approval.',
+      sessionId: session.id,
+    };
+    sessionStore.save(session);
+
+    const response = await app.request(`/v1/chat/sessions/${session.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved: true }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(runtime.run).toHaveBeenCalledWith('/run deploy staging', expect.objectContaining({
+      sessionId: session.id,
+      pendingApproval: true,
+      approvalResolved: true,
+    }));
+    expect(sessionStore.get(session.id)?.pendingApproval).toBeNull();
+    const entries = readFileSync(auditPath, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(entries.map((entry) => entry.decision)).toEqual(['approved', 'executed']);
+    expect(entries[0]).toEqual(expect.objectContaining({
+      token: 'approval-token-1',
+      workerId: 'worker-1',
+      workdir: '/repo/worktree',
+      requester: 'unknown',
+      commandBody: '/run deploy staging',
+    }));
+
+    const replay = sessionStore.get(session.id)!;
+    replay.state = 'pending_approval';
+    replay.pendingApproval = session.pendingApproval;
+    sessionStore.save(replay);
+    const replayResponse = await app.request(`/v1/chat/sessions/${session.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved: true }),
+    });
+
+    expect(replayResponse.status).toBe(409);
+    const body = await replayResponse.json() as { error: { code: string } };
+    expect(body.error.code).toBe('APPROVAL_REPLAYED');
+    expect(runtime.run).toHaveBeenCalledTimes(1);
+    expect(sessionStore.get(session.id)?.state).toBe('rejected');
+    expect(readFileSync(auditPath, 'utf8')).toContain('"decision":"replayed"');
   });
 
   it('clears pending approval metadata when a session is rejected over HTTP', async () => {
@@ -469,8 +550,8 @@ describe('chat approval route persistence', () => {
     expect(body.error.code).toBe('AGENT_CAPACITY_RESERVED');
     expect(body.error.details.decision.reason).toBe('reserved_capacity_only');
     const stored = sessionStore.get(session.id);
-    expect(stored?.state).toBe('pending_approval');
-    expect(stored?.pendingApproval).not.toBeNull();
+    expect(stored?.state).toBe('failed');
+    expect(stored?.pendingApproval).toBeNull();
   });
 
   it('reports unsafe approval-cop health without leaking unsafe command details in the reason', async () => {

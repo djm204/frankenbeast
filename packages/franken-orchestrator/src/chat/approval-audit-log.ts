@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, appendFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { mkdir, readFile, appendFile, open } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { isoNow } from '@franken/types';
 
@@ -171,7 +172,16 @@ export class FileApprovalAuditLog implements ApprovalAuditLog {
       // tail is corrupt, separating it with a newline prevents the next valid
       // audit entry from being merged into that corrupt line.
     }
-    await appendFile(this.path, `${JSON.stringify(entry)}\n`, { encoding: 'utf8', mode: 0o600 });
+    const file = await open(
+      this.path,
+      constants.O_CREAT | constants.O_APPEND | constants.O_WRONLY | constants.O_NOFOLLOW,
+      0o600,
+    );
+    try {
+      await file.appendFile(`${JSON.stringify(entry)}\n`, { encoding: 'utf8' });
+    } finally {
+      await file.close();
+    }
   }
 
   private async readEntries(): Promise<ApprovalAuditEntry[]> {

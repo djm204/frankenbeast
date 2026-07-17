@@ -1121,7 +1121,7 @@ describe('ws chat server', () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
-  it('restores pending approval and notifies clients when approved execution throws', async () => {
+  it('records a failed execution and consumes approval when approved execution throws', async () => {
     mkdirSync(TMP, { recursive: true });
     const store = new FileSessionStore(TMP);
     const session = store.create('proj');
@@ -1147,6 +1147,10 @@ describe('ws chat server', () => {
       runtime,
       sessionStore: store,
       tokenSecret: secret,
+      approvalAuditLog: new FileApprovalAuditLog(join(TMP, 'hitl-approval-audit.jsonl'), {
+        workerId: 'worker-1',
+        workdir: '/repo/worktree',
+      }),
     });
     const { peer, sent } = createPeer();
 
@@ -1161,17 +1165,27 @@ describe('ws chat server', () => {
       approved: true,
     }))).resolves.toBeUndefined();
 
-    expect(store.get(session.id)?.state).toBe('pending_approval');
-    expect(store.get(session.id)?.pendingApproval?.command).toBe('deploy staging');
+    expect(store.get(session.id)?.state).toBe('failed');
+    expect(store.get(session.id)?.pendingApproval).toBeNull();
     const events = sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
     expect(events).toContainEqual(expect.objectContaining({
       type: 'turn.error',
       code: 'APPROVAL_EXECUTION_FAILED',
       message: 'executor offline',
     }));
-    expect(events).toContainEqual(expect.objectContaining({
+    expect(events).not.toContainEqual(expect.objectContaining({
       type: 'turn.approval.requested',
-      command: 'deploy staging',
+    }));
+    const auditEntries = readFileSync(join(TMP, 'hitl-approval-audit.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(auditEntries.map((entry) => entry.decision)).toEqual(['approved', 'failed']);
+    expect(auditEntries[1]).toEqual(expect.objectContaining({
+      decisionSource: 'runtime',
+      exitCode: 1,
+      commandBody: '/run deploy staging',
+      outputTail: 'executor offline',
     }));
 
     rmSync(TMP, { recursive: true, force: true });

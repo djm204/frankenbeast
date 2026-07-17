@@ -578,7 +578,6 @@ export class ChatSocketController {
     }
 
     const pendingApproval = session.pendingApproval;
-    const originalState = session.state;
     let runtimeInput: string;
     try {
       runtimeInput = approvalRuntimeInput(pendingApproval);
@@ -656,8 +655,16 @@ export class ChatSocketController {
         },
       });
     } catch (error) {
-      session.pendingApproval = pendingApproval;
-      session.state = originalState;
+      await this.recordApprovalExecution(
+        session,
+        pendingApproval,
+        runtimeInput,
+        1,
+        error instanceof Error ? error.message : String(error),
+        connectionRequester(peer, this.connections),
+      );
+      session.pendingApproval = null;
+      session.state = 'failed';
       session.updatedAt = nowIso();
       this.sessionStore.save(session);
       this.emit(peer, {
@@ -666,18 +673,6 @@ export class ChatSocketController {
         message: error instanceof Error ? error.message : 'Approved action failed to run.',
         timestamp: session.updatedAt,
       });
-      if (pendingApproval) {
-        this.emit(peer, {
-          type: 'turn.approval.requested',
-          description: pendingApproval.description,
-          timestamp: pendingApproval.requestedAt,
-          ...(pendingApproval.tool ? { tool: pendingApproval.tool } : {}),
-          ...(pendingApproval.command ? { command: pendingApproval.command } : {}),
-          ...(pendingApproval.risk ? { risk: pendingApproval.risk } : {}),
-          ...(pendingApproval.affectedFiles ? { affectedFiles: pendingApproval.affectedFiles } : {}),
-          ...(pendingApproval.sessionId ? { sessionId: pendingApproval.sessionId } : {}),
-        });
-      }
       return;
     }
     await this.recordApprovalExecution(

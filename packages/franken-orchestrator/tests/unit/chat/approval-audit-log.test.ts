@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -144,6 +144,29 @@ describe('FileApprovalAuditLog', () => {
         token: 'approval-token-1',
         commandHash: commandSha256(command),
       })).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses to append through an existing audit-log symlink', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-approval-audit-'));
+    try {
+      const outsidePath = join(dir, 'outside-target.jsonl');
+      const logPath = join(dir, 'approval-audit.jsonl');
+      await writeFile(outsidePath, 'original\n', 'utf8');
+      await symlink(outsidePath, logPath);
+
+      const log = new FileApprovalAuditLog(logPath);
+      await expect(log.recordExecution({
+        sessionId: 'chat-1',
+        projectId: 'proj-1',
+        token: 'approval-token-1',
+        command: 'git push origin HEAD',
+        exitCode: 0,
+        output: 'ok',
+      })).rejects.toThrow();
+      expect(await readFile(outsidePath, 'utf8')).toBe('original\n');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
