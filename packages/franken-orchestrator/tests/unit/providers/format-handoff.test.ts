@@ -1420,6 +1420,97 @@ Lesson: accepted aliases must preserve child section bodies.
       validation.findings.find((finding) => finding.id === 'blockers'),
     ).toMatchObject({ status: 'placeholder' });
   });
+
+  it('requires artifact body evidence for artifact alias headings', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
+        'Please complete this.',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'artifacts'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('rejects ordered-list label-only skeletons', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '1) Issue/task\n2) Business goal\n3) Out-of-scope boundaries',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('rejects none-only child heading bodies outside blocker context', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '### Issue/task\nNone\n### Business goal\nNone\n### Out-of-scope boundaries\nNone',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('allows blocked none as a blocker state across separate fields', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'State blockers, owner, exact next action, and when the receiving worker should stop.',
+        'Blocked: none\nResponsible: PM\nContinue after review',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'blockers'),
+    ).toMatchObject({ status: 'pass' });
+  });
+
+  it('does not let generic H2 wrapper titles inherit child sections', () => {
+    const validation = validateAgentHandoffTemplate(`# Agent handoff
+## Project objective
+### Current state and decisions
+Completed work is documented. Decisions are final. Remaining work is review.
+### Tests
+Command: npm test. Outcome: passed.
+### Blockers
+None; continue after review.
+### Artifacts
+PR #2331.
+### Learnings
+Lesson: wrappers should not satisfy scope.
+`);
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('preserves verification outcomes in fenced shell transcripts', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.',
+        '```bash\nnpm test\n3 passed\n```',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'verification'),
+    ).toMatchObject({ status: 'pass' });
+  });
 });
 
 describe('truncateSnapshot', () => {

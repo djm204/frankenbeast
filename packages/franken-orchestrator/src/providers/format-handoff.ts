@@ -204,7 +204,7 @@ export const AGENT_HANDOFF_TEMPLATE_REQUIREMENTS: readonly AgentHandoffTemplateR
       guidance:
         'Add a section for concrete artifacts such as branch, PR, worktree, docs, or telemetry links.',
       requiredContentPatterns: [
-        /\b(branch|pr|pull request|worktree|diff|doc|docs|telemetry|artifact|artifacts|https?:\/\/)\b/i,
+        /(?:\b(branch|pr|pull request|worktree|diff|doc|docs|telemetry|artifact|artifacts)\b|https?:\/\/|#\d+)/i,
       ],
     },
     {
@@ -540,8 +540,7 @@ function extractMarkdownSections(template: string): MarkdownSection[] {
         const section = sections[sectionIndex];
         if (
           section &&
-          (section.level > 1 ||
-            sectionIndex === activeSectionIndex ||
+          (sectionIndex === activeSectionIndex ||
             isExplicitRequiredHandoffSectionHeading(section.heading))
         ) {
           section.content.push(line);
@@ -715,16 +714,24 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
       continue;
     }
     if (activeFence !== null) {
-      if (activeFencePreservesCommands && looksLikeVerificationCommand(line)) {
+      if (activeFencePreservesCommands &&
+        (looksLikeVerificationCommand(line) || looksLikeVerificationOutcome(line))
+      ) {
         stripped.push(line);
       }
+      continue;
+    }
+    if (isNoBlockerOrRiskStateLine(line)) {
+      stripped.push(line);
       continue;
     }
     if (
       /^\s*(?:[-*]\s*)?(?:todo|tbd|placeholder|please\s+fill\s+in)(?:\s*:|\b)/i.test(
         line,
       ) ||
-      isPlaceholderOnlyFieldLine(line) ||
+      (!isNoBlockerOrRiskFieldLine(line) && isPlaceholderOnlyFieldLine(line)) ||
+      isOrderedListTemplateLabelLine(line) ||
+      isEmptyTemplateLabel(line) ||
       isCombinedSkeletonLabelLine(line)
     ) {
       continue;
@@ -745,9 +752,13 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
     const effectiveLine = isPopulatedTableHeader
       ? populatedTableHeaderLabels(line, lines, index + 2)
       : line;
-    const withoutPlaceholders = effectiveLine
+    if (isNoBlockerOrRiskFieldLine(effectiveLine)) {
+      stripped.push(effectiveLine);
+      continue;
+    }
+    const withoutPlaceholderFragments = effectiveLine
       .replace(
-        /\b[A-Za-z0-9 /_-]+(?:\s+-\s+|:)\s*(?:<(?!(?:https?:\/\/|\.\.?\/|#))[^>]*>|\{\{[^}]*\}\}|\{[^}]*\}|\[[^\]]*\](?!\(|\[)|[-–—]+|\b(?:tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)\b)\s*(?:[;,.]|$)/gi,
+        /\b[A-Za-z0-9 /_-]+(?:\s+-\s+|:)\s*(?:<(?!(?:https?:\/\/|\.\.?\/|#))[^>]*>|\{\{[^}]*\}\}|\{[^}]*\}|\[[^\]]*\](?!\(|\[)|[-–—]+|\b(?:none|tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)\b)\s*(?:[;,.]|$)/gi,
         ' ',
       )
       .replace(/^```.*$/g, ' ')
@@ -760,17 +771,17 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
       .replace(/\{\{[^}]*\}\}/g, ' ')
       .replace(/\{[^}]*\}/g, ' ')
       .replace(
-        /\b(?:tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)\b/gi,
+        /\b(?:none|tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)\b/gi,
         ' ',
       )
       .replace(/[_.-]{2,}/g, ' ');
     if (
-      isEmptyTemplateLabel(withoutPlaceholders) ||
-      (!isPopulatedTableHeader && isEmptyTableRow(withoutPlaceholders))
+      isEmptyTemplateLabel(withoutPlaceholderFragments) ||
+      (!isPopulatedTableHeader && isEmptyTableRow(withoutPlaceholderFragments))
     ) {
       continue;
     }
-    stripped.push(withoutPlaceholders);
+    stripped.push(withoutPlaceholderFragments);
   }
 
   return stripped.join('\n');
@@ -779,7 +790,7 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
 function normalizeTemplateLabelKey(value: string): string {
   return normalizeEvidence(
     value
-      .replace(/^\s*[-*]\s*/, '')
+      .replace(/^\s*(?:[-*]|\d+[.)])\s*/, '')
       .replace(/\[[ x-]\]/gi, ' ')
       .replace(/\([^)]*\)/g, ' ')
       .replace(/\b(?:required|optional)\b/gi, ' ')
@@ -819,22 +830,47 @@ function isEmptyTemplateLabel(line: string): boolean {
   );
 }
 
+function isOrderedListTemplateLabelLine(line: string): boolean {
+  const match = /^\s*\d+[.)]\s*(.+?)\s*$/.exec(line);
+  return match ? isKnownTemplateLabel(match[1] ?? '') : false;
+}
+
 function isPlaceholderOnlyFieldLine(line: string): boolean {
-  const normalized = normalizeEvidence(line.replace(/^\s*[-*]\s*/, ''));
+  const normalized = normalizeEvidence(line.replace(/^\s*(?:[-*]|\d+[.)])\s*/, ''));
   const field = /^([A-Za-z0-9 /_-]+)(?::|\s+-\s+)(.+)$/i.exec(normalized);
   if (field) {
     const label = normalizeTemplateLabelKey(field[1] ?? '');
     const value = normalizeTemplateLabelKey(field[2] ?? '');
-    const isNoBlockerValue =
-      /^(?:blocker|blockers|risk|risks)$/.test(label) &&
-      /^(?:no|none|no blockers|no blocker|no risks|no risk)$/.test(value);
-    if (!isNoBlockerValue && (value === label || isPlaceholderValue(value))) {
+    if (!isNoBlockerOrRiskLabelValue(label, value) && (value === label || isPlaceholderValue(value))) {
       return true;
     }
   }
-  return /^[A-Za-z0-9 /_-]+(?::|\s+-\s+)(?:<(?!(?:https?:\/\/|\.\.?\/|#))[^>]*>|\{\{[^}]*\}\}|\{[^}]*\}|\[[^\]]*\](?!\(|\[)|[-–—]+|\b(?:tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)\b)\s*$/i.test(
+  return /^[A-Za-z0-9 /_-]+(?::|\s+-\s+)(?:<(?!(?:https?:\/\/|\.\.?\/|#))[^>]*>|\{\{[^}]*\}\}|\{[^}]*\}|\[[^\]]*\](?!\(|\[)|[-–—]+|\b(?:none|tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)\b)\s*$/i.test(
     normalized,
   );
+}
+
+function isNoBlockerOrRiskFieldLine(line: string): boolean {
+  const normalized = normalizeEvidence(line.replace(/^\s*(?:[-*]|\d+[.)])\s*/, ''));
+  const field = /^([A-Za-z0-9 /_-]+)(?::|\s+-\s+)(.+)$/i.exec(normalized);
+  if (!field) {
+    return false;
+  }
+  return isNoBlockerOrRiskLabelValue(
+    normalizeTemplateLabelKey(field[1] ?? ''),
+    normalizeTemplateLabelKey(field[2] ?? ''),
+  );
+}
+
+function isNoBlockerOrRiskStateLine(line: string): boolean {
+  return /(?:\b(?:blocker|blockers|blocked|risk|risks)\b\s*[:=-]?\s*(?:none|no)\b|\b(?:no|none)\s+(?:blocker|blockers|risk|risks)\b)/i.test(
+    line,
+  );
+}
+
+function isNoBlockerOrRiskLabelValue(label: string, value: string): boolean {
+  return /^(?:blocker|blockers|blocked|risk|risks)$/.test(label) &&
+    /^(?:no|none|no blockers|no blocker|no risks|no risk)$/.test(value);
 }
 
 function isPlaceholderValue(value: string): boolean {
@@ -882,12 +918,8 @@ function isExplicitRequiredHandoffSectionHeading(heading: string): boolean {
     : false;
 }
 
-function artifactHeadingContentPrefix(heading: string): string {
-  return /\b(branch|pr|pull request|worktree|diff|doc|docs|telemetry)\b|https?:\/\//i.test(
-    heading,
-  )
-    ? heading
-    : '';
+function artifactHeadingContentPrefix(_heading: string): string {
+  return '';
 }
 
 function unlabeledFenceContainsVerificationCommand(
@@ -914,6 +946,12 @@ function unlabeledFenceContainsVerificationCommand(
 
 function looksLikeVerificationCommand(line: string): boolean {
   return /\b(?:npm|pnpm|yarn|vitest|tsc|eslint|pytest|test|lint|typecheck|build)\b/i.test(
+    line,
+  );
+}
+
+function looksLikeVerificationOutcome(line: string): boolean {
+  return /\b(?:pass(?:ed|es)?|fail(?:ed|ure|ures)?|success(?:ful)?|ok|green|red|\d+\s+passed|\d+\s+failed)\b/i.test(
     line,
   );
 }
@@ -1009,7 +1047,7 @@ function cellHasPopulatedTemplateValue(cell: string): boolean {
   return (
     stripped.length > 0 &&
     !isEmptyTemplateLabel(stripped) &&
-    !/^(?:[-–—]+|tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)$/i.test(
+    !/^(?:[-–—]+|none|tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided)$/i.test(
       stripped,
     )
   );
@@ -1029,7 +1067,7 @@ function isEmptyTableRow(line: string): boolean {
       (cell) =>
         isKnownTemplateLabel(cell) ||
         isKnownTemplateLabelCombination(cell) ||
-        /^(?:tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided|[-–—]+)$/i.test(
+        /^(?:none|tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided|[-–—]+)$/i.test(
           cell,
         ),
     )
