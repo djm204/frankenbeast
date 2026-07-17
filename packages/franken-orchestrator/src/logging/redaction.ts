@@ -4,6 +4,7 @@ const SENSITIVE_KEY_RE = /(?:^|[_-])(?:SECRET|TOKEN|PASSWORD|PASSWD|PWD|CREDENTI
 const ASSIGNMENT_RE = /\b([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)/gu;
 const HEADER_STYLE_FIELD_RE = /\b([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)/gu;
 const JSON_FIELD_RE = /("([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*)("(?:\\.|[^"\\])*"|[^,}\]\s]+)/gu;
+const WHOLE_HEADER_STYLE_RE = /\b((?:Set-)?Cookie)\s*:\s*(.+?)(?=\s+[A-Za-z_][A-Za-z0-9_-]*\s*:|$)/giu;
 
 export type RedactionDecisionSource = 'text-assignment' | 'text-json-field' | 'text-opaque-literal' | 'object-key';
 
@@ -69,7 +70,12 @@ export function redactSensitiveTextWithProvenance(text: string, path = '$'): Red
     return `${prefix}"${REDACTED}"`;
   });
 
-  const withAuthorizationSchemesRedacted = jsonRedacted.replace(/\b((?:Proxy-)?Authorization)\s*:\s*(Bearer|Basic|Bot)\s+(.+?)(?=\s+[A-Za-z_][A-Za-z0-9_-]*\s*:|$)/giu, (_match, key: string, scheme: string) => {
+  const withWholeHeadersRedacted = jsonRedacted.replace(WHOLE_HEADER_STYLE_RE, (_match, key: string) => {
+    decisions.push(createDecision(path, key, 'text-assignment'));
+    return `${key}: ${REDACTED}`;
+  });
+
+  const withAuthorizationSchemesRedacted = withWholeHeadersRedacted.replace(/\b((?:Proxy-)?Authorization)\s*:\s*(Bearer|Basic|Bot)\s+(.+?)(?=\s+[A-Za-z_][A-Za-z0-9_-]*\s*:|$)/giu, (_match, key: string, scheme: string) => {
     decisions.push(createDecision(path, key, 'text-assignment'));
     return `${key}: ${scheme} ${REDACTED}`;
   });

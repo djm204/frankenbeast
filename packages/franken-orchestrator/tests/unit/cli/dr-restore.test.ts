@@ -92,8 +92,10 @@ describe('dr restore-dry-run CLI', () => {
       await mkdir(join(stateDir, 'logs'), { recursive: true });
       await mkdir(join(stateDir, 'chat'), { recursive: true });
       await writeFile(join(stateDir, 'config.json'), JSON.stringify({ provider: 'openai', apiToken: 'config-value-for-mask' }), 'utf8');
+      await writeFile(join(stateDir, 'config.yaml'), 'provider: openai\napiToken: config-yaml-value-for-mask\n', 'utf8');
       await writeFile(join(stateDir, 'approvals', 'ledger.json'), JSON.stringify({ approvals: [{ id: 'approval-1', token: 'approval-value-for-mask', state: 'pending' }] }), 'utf8');
       await writeFile(join(stateDir, 'memory', 'store.json'), JSON.stringify({ memories: [{ key: 'user.pref', value: 'private memory body', metadata: { source: 'chat' } }] }), 'utf8');
+      await writeFile(join(stateDir, 'memory', 'snapshot.json'), JSON.stringify({ working: { sessionA: { value: 'private working body' }, sessionB: { value: 'second private working body' } } }), 'utf8');
       await writeFile(join(stateDir, 'kanban-tasks.json'), JSON.stringify({ tasks: [{ id: 'task-1', title: 'private task title', status: 'running' }] }), 'utf8');
       await writeFile(join(stateDir, 'runs', 'run-1', 'metadata.json'), JSON.stringify({ id: 'run-1', taskId: 'task-1', status: 'running' }), 'utf8');
       await writeFile(join(stateDir, 'chat', 'session-1.json'), JSON.stringify({
@@ -115,6 +117,7 @@ describe('dr restore-dry-run CLI', () => {
         'starting run',
         'OPENAI_API_KEY=test-key-needs-redaction',
         'X-API-Key: reviewHeaderValueForMasking',
+        'Cookie: sid=reviewCookieForMasking; csrf=reviewCsrfForMasking',
         'Authorization: Bearer bearerValueForMasking123',
         'redis tls rediss://:redissValueForMasking@cache.example:6380/0',
         `Authorization: Bearer ${longSingleLinePrefix}${boundaryBearer}`,
@@ -175,8 +178,11 @@ describe('dr restore-dry-run CLI', () => {
 
       expect(report.command).toBe('dr export');
       expect(report.manifest.generatedAt).toBe('2026-07-16T09:00:00.000Z');
-      expect(report.manifest.configChecksums).toEqual([expect.objectContaining({ path: 'config.json', sha256: expect.stringMatching(/^sha256:/u) })]);
-      expect(report.manifest.sections).toEqual(expect.objectContaining({ approvals: 2, memory: 3, tasks: 2, runs: 3, logs: 2 }));
+      expect(report.manifest.configChecksums).toEqual(expect.arrayContaining([
+        expect.objectContaining({ path: 'config.json', sha256: expect.stringMatching(/^sha256:/u) }),
+        expect.objectContaining({ path: 'config.yaml', sha256: expect.stringMatching(/^sha256:/u) }),
+      ]));
+      expect(report.manifest.sections).toEqual(expect.objectContaining({ approvals: 2, memory: 4, tasks: 2, runs: 3, logs: 2 }));
       expect(report.evidence.approvals).toEqual(expect.arrayContaining([
         expect.objectContaining({ path: 'approvals/ledger.json' }),
         expect.objectContaining({
@@ -184,7 +190,10 @@ describe('dr restore-dry-run CLI', () => {
           records: [expect.objectContaining({ id: 'approval-chat-1', command: 'deploy --token <redacted>', tool: 'shell', sessionId: 'session-1' })],
         }),
       ]));
-      expect(report.evidence.memory).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'memory/store.json', recordCount: 1 })]));
+      expect(report.evidence.memory).toEqual(expect.arrayContaining([
+        expect.objectContaining({ path: 'memory/store.json', recordCount: 1 }),
+        expect.objectContaining({ path: 'memory/snapshot.json', keys: expect.arrayContaining(['working.sessionA', 'working.sessionB']) }),
+      ]));
       expect(report.evidence.tasks).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'kanban-tasks.json', records: [expect.objectContaining({ id: 'task-1', status: 'running' })] })]));
       expect(report.evidence.runs).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'runs/run-1/metadata.json', records: [expect.objectContaining({ id: 'run-1', status: 'running' })] })]));
       expect(report.evidence.tasks).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'kanban.db', table: 'tasks', rowCount: 1 })]));
@@ -202,10 +211,15 @@ describe('dr restore-dry-run CLI', () => {
       expect(report.evidence.logs.flatMap((log) => log.tail).every((line) => line.length <= 8192)).toBe(true);
       expect(reportText).not.toContain('config-value-for-mask');
       expect(reportText).not.toContain('approval-value-for-mask');
+      expect(reportText).not.toContain('config-yaml-value-for-mask');
       expect(reportText).not.toContain('private memory body');
+      expect(reportText).not.toContain('private working body');
+      expect(reportText).not.toContain('second private working body');
       expect(reportText).not.toContain('private task title');
       expect(reportText).not.toContain('test-key-needs-redaction');
       expect(reportText).not.toContain('reviewHeaderValueForMasking');
+      expect(reportText).not.toContain('reviewCookieForMasking');
+      expect(reportText).not.toContain('reviewCsrfForMasking');
       expect(reportText).not.toContain(longSingleLinePrefix);
       expect(reportText).not.toContain(boundaryBearer);
       expect(reportText).not.toContain('bearerValueForMasking123');

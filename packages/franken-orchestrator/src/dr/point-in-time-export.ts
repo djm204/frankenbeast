@@ -10,6 +10,7 @@ import { redactLogData, redactSensitiveText } from '../logging/redaction.js';
 export const POINT_IN_TIME_EXPORT_SCHEMA_VERSION = 1;
 const MAX_LOG_TAIL_LINE_CHARS = 8192;
 const MAX_TEXT_EVIDENCE_BYTES = 2 * 1024 * 1024;
+const MAX_PENDING_LOG_CHARS = MAX_LOG_TAIL_LINE_CHARS * 2;
 
 export interface PointInTimeExportOptions {
   readonly stateDir: string;
@@ -200,8 +201,29 @@ function sanitizeMemory(text: string): { recordCount: number; keys: string[]; me
       const redactedMetadata = redactLogData(rawMetadata);
       if (isRecord(redactedMetadata)) metadata.push(redactedMetadata);
     }
+    const working = record.working;
+    if (isRecord(working)) {
+      const workingKeys = Object.keys(working).map(redactSensitiveText).sort();
+      keys.push(...workingKeys.map((key) => `working.${key}`));
+      metadata.push({ section: 'working', recordCount: workingKeys.length });
+    } else if (typeof record.key !== 'string' && rawMetadata === undefined) {
+      const objectKeys = Object.keys(record).map(redactSensitiveText).sort();
+      keys.push(...objectKeys);
+      metadata.push({ section: 'object', recordCount: objectKeys.length });
+    }
   }
   return { recordCount: records.length, keys: keys.sort(), metadata };
+}
+
+function boundPendingLogLine(pending: string): string {
+  if (pending.length <= MAX_PENDING_LOG_CHARS) return pending;
+  const redacted = redactSensitiveText(pending);
+  if (redacted.includes('<redacted>')) {
+    return redacted.length <= MAX_PENDING_LOG_CHARS
+      ? redacted
+      : `${redacted.slice(0, MAX_LOG_TAIL_LINE_CHARS)}${redacted.slice(-MAX_LOG_TAIL_LINE_CHARS)}`;
+  }
+  return pending.slice(-MAX_PENDING_LOG_CHARS);
 }
 
 function summarizeSqliteMemoryStore(absolutePath: string, checksum: FileChecksum): MemoryMetadataSummary | undefined {
@@ -256,7 +278,7 @@ async function checksumAndTailFor(root: string, absolutePath: string, limit: num
       hasher.update(chunk);
       const text = chunk.toString('utf8');
       const parts = `${pending}${text}`.split(/\r?\n/u);
-      pending = parts.pop() ?? '';
+      pending = boundPendingLogLine(parts.pop() ?? '');
       for (const line of parts) {
         const redacted = redactSensitiveText(line);
         lines.push(redacted.slice(-MAX_LOG_TAIL_LINE_CHARS));
@@ -370,6 +392,11 @@ export async function createPointInTimeExport(options: PointInTimeExportOptions)
       if (memorySummary !== undefined) memory.push(memorySummary);
     }
 
+    if (section === 'config') {
+      configChecksums.push({ ...checksum });
+      continue;
+    }
+
     const shouldReadText = checksum.bytes <= MAX_TEXT_EVIDENCE_BYTES
       && (checksum.path.endsWith('.json') || section === 'approvals' || section === 'memory' || section === 'tasks' || section === 'runs');
     if (!shouldReadText) continue;
@@ -379,9 +406,7 @@ export async function createPointInTimeExport(options: PointInTimeExportOptions)
     const pendingApprovalSummary = splitChatPendingApprovals(checksum, text);
     if (pendingApprovalSummary !== undefined) approvals.push(pendingApprovalSummary);
 
-    if (section === 'config') {
-      configChecksums.push({ ...checksum });
-    } else if (section === 'approvals') {
+    if (section === 'approvals') {
       const records = sanitizeRecords(text);
       if (records.length > 0) approvals.push({ ...checksum, records });
     } else if (section === 'memory') {
