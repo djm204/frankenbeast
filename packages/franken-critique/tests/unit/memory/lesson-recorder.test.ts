@@ -659,6 +659,82 @@ describe('extractPostTaskLessonCandidates', () => {
     }
   });
 
+  it('keeps completed documentation updates on docs review path', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-completed-docs',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      summary: 'Added a runbook entry for npm ci',
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'docs',
+        review: expect.objectContaining({ status: 'pending-review' }),
+      }),
+    );
+  });
+
+  it('classifies raw preferences from notes as memory lessons', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-note-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Please keep summaries concise'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'preference',
+        suggestedDestination: 'memory',
+        review: expect.objectContaining({ status: 'pending-review' }),
+      }),
+    );
+  });
+
+  it('keeps generic PR-check procedures reviewable', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-generic-pr-checks',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['When PR checks fail, run gh run view before replying'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'skill',
+        review: expect.objectContaining({ status: 'pending-review' }),
+      }),
+    );
+  });
+
+  it('rejects transient repo status as task state', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-transient-repo-status',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Frankenbeast CI was down today'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        review: expect.objectContaining({ status: 'discarded' }),
+      }),
+    );
+  });
+
+  it('discards raw retry/fallback tool-failure status without a workaround', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-raw-retry-status',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      toolFailures: ['npm install failed after 3 retry attempts'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        review: expect.objectContaining({ status: 'discarded' }),
+      }),
+    );
+  });
+
   it('discards non-instructional should status notes', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-ordinary-should-status',
