@@ -21,6 +21,17 @@ export const DEFAULT_LEARNING_SANDBOX_TOOLS = [
   'read_fixture_file',
 ] as const;
 
+const MUTATION_CAPABLE_SANDBOX_TOOLS = new Set([
+  'approval_ledger_write',
+  'github_issue_comment',
+  'kanban_complete',
+  'kanban_block',
+  'memory',
+  'patch',
+  'terminal',
+  'write_file',
+]);
+
 export const LearningSandboxExperimentDeclarationSchema = z.object({
   experimentId: z.string().min(1).regex(/^[a-z0-9][a-z0-9._-]*$/),
   hypothesis: z.string().min(1),
@@ -106,17 +117,21 @@ export async function runLearningSandboxExperiment(
   const startedAt = now();
   const runsRoot = resolve(options.runsRoot);
   mkdirSync(runsRoot, { recursive: true });
+  const realRunsRoot = realpathSync(runsRoot);
 
   const fixtureDir = options.fixtures.resolveFixture(declaration.fixture);
-  const runDir = resolve(runsRoot, 'learning-sandbox', safeRunSegment(declaration.experimentId, declaration.hypothesis));
-  ensureContained(runDir, runsRoot, 'sandbox run directory');
+  const runDir = resolve(realRunsRoot, 'learning-sandbox', safeRunSegment(declaration.experimentId, declaration.hypothesis));
+  ensureContained(runDir, realRunsRoot, 'sandbox run directory');
   const workspaceDir = join(runDir, 'workspace');
   const evidencePath = join(runDir, 'evidence.json');
 
+  assertNoSymlinkPathComponents(runDir, realRunsRoot);
+  makeTreeWritableForCleanup(runDir);
   rmSync(runDir, { recursive: true, force: true });
   mkdirSync(workspaceDir, { recursive: true });
   cpSync(fixtureDir, workspaceDir, { recursive: true });
   assertNoSymlinksInTree(workspaceDir);
+  const workspaceSnapshot = snapshotTree(workspaceDir);
   if (policy.readOnlyFixtureClone) {
     makeTreeReadOnly(workspaceDir);
   }
@@ -147,6 +162,10 @@ export async function runLearningSandboxExperiment(
   }
 
   const completedAt = now();
+  const workspaceMutated = policy.readOnlyFixtureClone && snapshotTree(workspaceDir) !== workspaceSnapshot;
+  if (workspaceMutated && error === undefined) {
+    error = 'Read-only sandbox fixture clone was mutated during experiment';
+  }
   const blockedToolCalls = toolCalls.filter((call) => !call.allowed);
   const passed = error === undefined && outcome.passed && blockedToolCalls.length === 0;
   const result: LearningSandboxExperimentResult = {
@@ -166,7 +185,7 @@ export async function runLearningSandboxExperiment(
     blockedToolCalls,
   };
   mkdirSync(dirname(evidencePath), { recursive: true });
-  writeFileSync(evidencePath, `${JSON.stringify(result, null, 2)}\n`, 'utf8');
+  writeFileSync(evidencePath, `${stringifyEvidence(result)}\n`, 'utf8');
   return result;
 }
 
@@ -182,16 +201,18 @@ interface RunSandboxToolOptions {
 
 async function runSandboxTool(options: RunSandboxToolOptions): Promise<unknown> {
   const startedAt = options.now();
-  const allowed = options.policy.allowedTools.includes(options.tool);
+  const allowed = options.policy.allowedTools.includes(options.tool) && !MUTATION_CAPABLE_SANDBOX_TOOLS.has(options.tool);
   if (!allowed) {
     const call = {
       tool: options.tool,
-      input: options.input,
+      input: toJsonSafeEvidence(options.input),
       allowed: false,
       startedAt,
       completedAt: options.now(),
       ok: false,
-      error: `Tool ${options.tool} is not allowed in learning sandbox policy`,
+      error: MUTATION_CAPABLE_SANDBOX_TOOLS.has(options.tool)
+        ? `Tool ${options.tool} is mutation-capable and cannot be allowed in learning sandbox policy`
+        : `Tool ${options.tool} is not allowed in learning sandbox policy`,
     } satisfies LearningSandboxToolCallEvidence;
     options.evidence.push(call);
     throw new Error(call.error);
@@ -201,19 +222,19 @@ async function runSandboxTool(options: RunSandboxToolOptions): Promise<unknown> 
     const result = await runAllowedTool(options);
     options.evidence.push({
       tool: options.tool,
-      input: options.input,
+      input: toJsonSafeEvidence(options.input),
       allowed: true,
       startedAt,
       completedAt: options.now(),
       ok: true,
-      result,
+      result: toJsonSafeEvidence(result),
     });
     return result;
   } catch (caught) {
     const error = caught instanceof Error ? caught.message : String(caught);
     options.evidence.push({
       tool: options.tool,
-      input: options.input,
+      input: toJsonSafeEvidence(options.input),
       allowed: true,
       startedAt,
       completedAt: options.now(),
@@ -285,6 +306,24 @@ function ensureContained(child: string, root: string, label: string): void {
   }
 }
 
+function assertNoSymlinkPathComponents(target: string, root: string): void {
+  const rel = relative(root, target);
+  if (rel === '' || rel === '..' || rel.startsWith('../') || rel.startsWith('..\\') || rel.includes(':')) {
+    throw new Error(`sandbox run directory escapes sandbox root: ${target}`);
+  }
+  let current = root;
+  for (const segment of rel.split(/[\\/]+/)) {
+    current = join(current, segment);
+    if (!existsSync(current)) {
+      return;
+    }
+    if (lstatSync(current).isSymbolicLink()) {
+      throw new Error(`Sandbox run path contains symlink component: ${current}`);
+    }
+    ensureContained(realpathSync(current), root, 'sandbox run directory real path');
+  }
+}
+
 function assertNoSymlinksInTree(root: string): void {
   const stat = lstatSync(root);
   if (stat.isSymbolicLink()) {
@@ -314,4 +353,77 @@ function makeTreeReadOnly(root: string): void {
     }
   }
   chmodSync(root, 0o555);
+}
+
+function makeTreeWritableForCleanup(root: string): void {
+  if (!existsSync(root)) {
+    return;
+  }
+  const stat = lstatSync(root);
+  if (stat.isSymbolicLink()) {
+    return;
+  }
+  if (stat.isDirectory()) {
+    chmodSync(root, 0o755);
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      makeTreeWritableForCleanup(join(root, entry.name));
+    }
+  } else if (stat.isFile()) {
+    chmodSync(root, 0o644);
+  }
+}
+
+function snapshotTree(root: string): string {
+  const entries: string[] = [];
+  collectSnapshotEntries(root, root, entries);
+  return createHash('sha256').update(entries.sort().join('\n')).digest('hex');
+}
+
+function collectSnapshotEntries(root: string, current: string, entries: string[]): void {
+  for (const entry of readdirSync(current, { withFileTypes: true })) {
+    const path = join(current, entry.name);
+    const rel = relative(root, path);
+    if (entry.isDirectory()) {
+      entries.push(`dir:${rel}`);
+      collectSnapshotEntries(root, path, entries);
+    } else if (entry.isFile()) {
+      entries.push(`file:${rel}:${createHash('sha256').update(readFileSync(path)).digest('hex')}`);
+    } else {
+      entries.push(`other:${rel}`);
+    }
+  }
+}
+
+function stringifyEvidence(value: unknown): string {
+  return JSON.stringify(toJsonSafeEvidence(value), null, 2) ?? 'null';
+}
+
+function toJsonSafeEvidence(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (value === null || value === undefined || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'bigint') {
+    return `[non-json bigint:${value.toString()}]`;
+  }
+  if (typeof value === 'symbol' || typeof value === 'function') {
+    return `[non-json ${typeof value}]`;
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (Array.isArray(value)) {
+    if (seen.has(value)) {
+      return '[non-json circular]';
+    }
+    seen.add(value);
+    return value.map((item) => toJsonSafeEvidence(item, seen));
+  }
+  if (typeof value === 'object') {
+    if (seen.has(value)) {
+      return '[non-json circular]';
+    }
+    seen.add(value);
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, toJsonSafeEvidence(entry, seen)]));
+  }
+  return String(value);
 }
