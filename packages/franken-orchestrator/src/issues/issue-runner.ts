@@ -910,7 +910,7 @@ export function buildWorkerCrashOnlyRestartContract(
     };
   }
 
-  if (rawExitReason === 'spawn_failed' || /^(?:spawn(?:[_ -]?(?:fail(?:ed|ure)?|error))?|start[_ -]?failed|setup|enoent|eacces|protocol[_ -]?violation)$/i.test(rawExitReason.trim())) {
+  if (rawExitReason === 'spawn_failed' || /^(?:spawn(?:[_ -]?(?:fail(?:ed|ure)?|error))?\b|start[_ -]?failed\b|setup\b|enoent\b|eacces\b|protocol[_ -]?violation\b)/i.test(rawExitReason.trim())) {
     return {
       disposition: 'hitl',
       nextAction: 'replace-with-doctor',
@@ -1017,6 +1017,7 @@ export function detectStuckRunWatchdogFindings(
   const longRunningWaitGraceMs = options.longRunningWaitGraceMs ?? DEFAULT_STUCK_RUN_WAIT_GRACE_MS;
   const findings: IssueStuckRunWatchdogFinding[] = [];
   const liveSiblings = liveSiblingPidsByCardId(snapshots);
+  const emittedDeadRestartCards = new Set<string>();
 
   for (const snapshot of snapshots) {
     if (!snapshot.cardId.trim()) continue;
@@ -1081,12 +1082,17 @@ export function detectStuckRunWatchdogFindings(
       ...(heartbeatAgeMs !== undefined ? { heartbeatAgeMs } : {}),
       kanbanState: status ?? 'unknown',
     });
+    const normalizedCardId = snapshot.cardId.trim();
+    if (processStatus === 'dead' && restartContract.nextAction === 'restart-once') {
+      if (emittedDeadRestartCards.has(normalizedCardId)) continue;
+      emittedDeadRestartCards.add(normalizedCardId);
+    }
     evidence.push(...restartContract.evidence);
 
     const recommendedAction = remediationForCrashOnlyRestartContract(restartContract, category, processStatus);
     const confidence = confidenceForStuckRun(category, staleCount, processStatus);
     findings.push({
-      cardId: snapshot.cardId.trim(),
+      cardId: normalizedCardId,
       pid: snapshot.pid,
       ...(snapshot.runId ? { runId: snapshot.runId } : {}),
       ...(snapshot.issueNumber !== undefined ? { issueNumber: snapshot.issueNumber } : {}),

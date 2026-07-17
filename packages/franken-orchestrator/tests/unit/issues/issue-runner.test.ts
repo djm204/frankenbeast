@@ -866,6 +866,35 @@ describe('stuck-run watchdog', () => {
     expect(findings[0].evidence).toContain('siblingPids=7413');
   });
 
+  it('coalesces multiple dead attempts into one restart recommendation', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_repeated_dead_attempts',
+        pid: 7412,
+        runId: 'run-dead-1',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+      {
+        cardId: 't_repeated_dead_attempts',
+        pid: 7413,
+        runId: 'run-dead-2',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:31:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      cardId: 't_repeated_dead_attempts',
+      pid: 7412,
+      restartDisposition: 'retryable',
+      nextAction: 'restart-once',
+    });
+  });
+
   it('does not derive duplicate siblings from terminal stale snapshots', () => {
     const findings = detectStuckRunWatchdogFindings([
       {
