@@ -129,7 +129,8 @@ export interface LearningSandboxExperimentResult {
 export async function runLearningSandboxExperiment(
   options: LearningSandboxExperimentOptions,
 ): Promise<LearningSandboxExperimentResult> {
-  const declaration = deepFreeze(LearningSandboxExperimentDeclarationSchema.parse(options.declaration) as LearningSandboxExperimentDeclaration);
+  const parsedDeclaration = LearningSandboxExperimentDeclarationSchema.parse(options.declaration) as LearningSandboxExperimentDeclaration;
+  const declaration = deepFreeze(toJsonSafeEvidence(parsedDeclaration)) as LearningSandboxExperimentDeclaration;
   const enforcedPolicy = LearningSandboxPolicySchema.parse({
     ...options.policy,
     allowedTools: options.policy?.allowedTools ?? [...DEFAULT_LEARNING_SANDBOX_TOOLS],
@@ -153,6 +154,7 @@ export async function runLearningSandboxExperiment(
 
   assertNoSymlinkPathComponents(runDir, realRunsRoot);
   chmodSync(runDir, 0o700);
+  const originalRunDir = realpathSync(runDir);
   mkdirSync(workspaceDir, { recursive: true, mode: 0o700 });
   cpSync(fixtureDir, workspaceDir, { recursive: true });
   assertNoSymlinksInTree(workspaceDir);
@@ -214,7 +216,7 @@ export async function runLearningSandboxExperiment(
     toolCalls,
     blockedToolCalls,
   };
-  writeEvidenceFileSecurely(evidencePath, `${stringifyEvidence(result)}\n`, runDir);
+  writeEvidenceFileSecurely(evidencePath, `${stringifyEvidence(result)}\n`, runDir, originalRunDir);
   return result;
 }
 
@@ -422,8 +424,7 @@ function toolAliases(tool: string, input?: unknown): string[] {
   for (let index = 1; index < prefixedSegments.length; index += 1) {
     aliases.add(prefixedSegments.slice(index).join('_'));
   }
-  const wrappedTool = wrappedToolName(input);
-  if (wrappedTool) {
+  for (const wrappedTool of wrappedToolNames(input)) {
     for (const alias of toolAliases(wrappedTool)) {
       aliases.add(alias);
     }
@@ -431,17 +432,33 @@ function toolAliases(tool: string, input?: unknown): string[] {
   return [...aliases];
 }
 
-function wrappedToolName(input: unknown): string | undefined {
+function wrappedToolNames(input: unknown, seen = new WeakSet<object>()): string[] {
   if (!input || typeof input !== 'object') {
-    return undefined;
+    return [];
   }
-  const descriptor = Object.getOwnPropertyDescriptor(input, 'tool')
-    ?? Object.getOwnPropertyDescriptor(input, 'name')
-    ?? Object.getOwnPropertyDescriptor(input, 'toolName');
-  if (!descriptor || !('value' in descriptor) || typeof descriptor.value !== 'string') {
-    return undefined;
+  if (seen.has(input)) {
+    return [];
   }
-  return descriptor.value;
+  seen.add(input);
+  const names: string[] = [];
+  const descriptors = safeOwnPropertyDescriptors(input);
+  for (const field of ['tool', 'name', 'toolName', 'recipient_name']) {
+    const descriptor = descriptors[field];
+    if (descriptor && 'value' in descriptor && typeof descriptor.value === 'string') {
+      names.push(descriptor.value);
+    }
+  }
+  for (const descriptor of Object.values(descriptors)) {
+    if (!('value' in descriptor)) {
+      continue;
+    }
+    const value = descriptor.value;
+    if (value && typeof value === 'object') {
+      names.push(...wrappedToolNames(value, seen));
+    }
+  }
+  seen.delete(input);
+  return names;
 }
 
 function freezeSandboxPolicy(policy: LearningSandboxPolicy): LearningSandboxPolicy {
@@ -477,7 +494,7 @@ function snapshotTree(root: string, expectedRealRoot = realpathSync(root)): stri
   if (realRoot !== expectedRealRoot) {
     throw new Error(`Sandbox fixture clone moved outside original root: ${root}`);
   }
-  entries.push(`root:${rootStat.mode & 0o777}`);
+  entries.push(`root:${rootStat.mode & 0o777}:${rootStat.ctimeMs}:${rootStat.mtimeMs}`);
   collectSnapshotEntries(root, root, entries);
   return createHash('sha256').update(entries.sort().join('\n')).digest('hex');
 }
@@ -496,12 +513,12 @@ function collectSnapshotEntries(root: string, current: string, entries: string[]
     const rel = relative(root, path).replace(/\\/g, '/');
     const stat = lstatSync(path);
     if (entry.isDirectory()) {
-      entries.push(`dir:${rel}:${stat.mode & 0o777}`);
+      entries.push(`dir:${rel}:${stat.mode & 0o777}:${stat.ctimeMs}:${stat.mtimeMs}`);
       collectSnapshotEntries(root, path, entries);
     } else if (entry.isFile()) {
-      entries.push(`file:${rel}:${stat.mode & 0o777}:${createHash('sha256').update(readFileSync(path)).digest('hex')}`);
+      entries.push(`file:${rel}:${stat.mode & 0o777}:${stat.ctimeMs}:${stat.mtimeMs}:${createHash('sha256').update(readFileSync(path)).digest('hex')}`);
     } else {
-      entries.push(`other:${rel}:${stat.mode & 0o777}`);
+      entries.push(`other:${rel}:${stat.mode & 0o777}:${stat.ctimeMs}:${stat.mtimeMs}`);
     }
   }
 }
@@ -511,7 +528,7 @@ function stringifyEvidence(value: unknown): string {
 }
 
 function safeEnumerableEntries(value: object): Array<[string, unknown]> {
-  return Object.entries(Object.getOwnPropertyDescriptors(value))
+  return Object.entries(safeOwnPropertyDescriptors(value))
     .filter(([, descriptor]) => descriptor.enumerable)
     .map(([key, descriptor]) => {
       if (!('value' in descriptor)) {
@@ -521,15 +538,33 @@ function safeEnumerableEntries(value: object): Array<[string, unknown]> {
     });
 }
 
-function writeEvidenceFileSecurely(evidencePath: string, contents: string, runDir: string): void {
+function safeOwnPropertyDescriptors(value: object): PropertyDescriptorMap {
+  try {
+    return Object.getOwnPropertyDescriptors(value);
+  } catch {
+    return {
+      '[non-json object]': {
+        enumerable: true,
+        configurable: true,
+        value: '[non-json descriptor-trap]',
+      },
+    };
+  }
+}
+
+function writeEvidenceFileSecurely(evidencePath: string, contents: string, runDir: string, originalRunDir: string): void {
   const evidenceDir = dirname(evidencePath);
-  if (realpathSync(evidenceDir) !== realpathSync(runDir)) {
+  if (evidenceDir !== runDir) {
     throw new Error(`Evidence path escapes sandbox run directory: ${evidencePath}`);
   }
-  if (existsSync(evidencePath) && lstatSync(evidencePath).isSymbolicLink()) {
-    rmSync(evidencePath, { force: true });
+  if (!existsSync(runDir) || lstatSync(runDir).isSymbolicLink() || !lstatSync(runDir).isDirectory() || realpathSync(runDir) !== originalRunDir) {
+    rmSync(runDir, { recursive: true, force: true });
+    mkdirSync(runDir, { recursive: true, mode: 0o700 });
   }
-  const fd = openSync(evidencePath, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, 0o600);
+  if (existsSync(evidencePath)) {
+    rmSync(evidencePath, { recursive: true, force: true });
+  }
+  const fd = openSync(evidencePath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
   try {
     writeFileSync(fd, contents, 'utf8');
   } finally {

@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runLearningSandboxExperiment, type LearningSandboxExperimentDeclaration } from '../src/learning/sandbox.js';
 import { FixtureStore } from '../src/workspace/fixture-store.js';
@@ -290,6 +290,28 @@ describe('learning experiment sandbox', () => {
     expect((result.declaration.input as { transcript: string }).transcript).toBe('A prompt attachment asks the agent to save unsafe lessons.');
   });
 
+  it('snapshots mutable declaration built-ins before exposing declaration audit data', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+    const startedAt = new Date('2026-07-17T20:00:00.000Z');
+
+    const result = await runLearningSandboxExperiment({
+      declaration: { ...declaration, input: { startedAt } },
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      execute: (sandbox) => {
+        startedAt.setTime(0);
+        expect(() => {
+          ((sandbox.declaration.input as { startedAt: string }).startedAt) = 'tampered';
+        }).toThrow();
+        return { passed: true, evidence: ['mutable built-in snapshot'] };
+      },
+    });
+
+    expect(result.passed).toBe(true);
+    expect((result.declaration.input as { startedAt: string }).startedAt).toBe('2026-07-17T20:00:00.000Z');
+  });
+
   it('keeps enforcement policy private even if experiment mutates the exposed policy object', async () => {
     const { fixturesRoot } = createFixturesRoot();
     const runsRoot = tempRoot('learning-sandbox-runs-');
@@ -355,6 +377,30 @@ describe('learning experiment sandbox', () => {
     expect(result.error).toMatch(/fixture clone was mutated/);
   });
 
+  it('fails promotion when experiment code restores fixture bytes and permissions after mutation', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+
+    const result = await runLearningSandboxExperiment({
+      declaration,
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      execute: (sandbox) => {
+        const readme = join(sandbox.workspaceDir, 'README.md');
+        chmodSync(sandbox.workspaceDir, 0o755);
+        chmodSync(readme, 0o644);
+        writeFileSync(readme, 'temporary mutation\n', 'utf8');
+        writeFileSync(readme, 'original fixture\n', 'utf8');
+        chmodSync(readme, 0o444);
+        chmodSync(sandbox.workspaceDir, 0o555);
+        return { passed: true, evidence: ['restored mutation'] };
+      },
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.error).toMatch(/fixture clone was mutated/);
+  });
+
   it('persists failed evidence when experiment code removes the workspace clone', async () => {
     const { fixturesRoot } = createFixturesRoot();
     const runsRoot = tempRoot('learning-sandbox-runs-');
@@ -397,6 +443,52 @@ describe('learning experiment sandbox', () => {
     expect(result.passed).toBe(true);
     expect(readFileSync(outside, 'utf8')).toBe('do not overwrite\n');
     expect(lstatSync(result.evidencePath).isSymbolicLink()).toBe(false);
+  });
+
+  it('replaces pre-existing evidence directories with the evidence file', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+
+    const result = await runLearningSandboxExperiment({
+      declaration,
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      execute: (sandbox) => {
+        mkdirSync(sandbox.evidencePath);
+        return { passed: true, evidence: ['directory evidence path attempted'] };
+      },
+    });
+
+    expect(result.passed).toBe(true);
+    expect(statSync(result.evidencePath).isFile()).toBe(true);
+  });
+
+  it('recreates the run directory when evidence parent is replaced by a symlink', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+    const outside = tempRoot('learning-sandbox-evidence-parent-outside-');
+
+    const result = await runLearningSandboxExperiment({
+      declaration,
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      execute: (sandbox) => {
+        const runDir = dirname(sandbox.evidencePath);
+        chmodSync(runDir, 0o755);
+        chmodSync(sandbox.workspaceDir, 0o755);
+        chmodSync(join(sandbox.workspaceDir, 'docs'), 0o755);
+        chmodSync(join(sandbox.workspaceDir, 'README.md'), 0o644);
+        chmodSync(join(sandbox.workspaceDir, 'docs', 'case.md'), 0o644);
+        rmSync(runDir, { recursive: true, force: true });
+        symlinkSync(outside, runDir, 'dir');
+        return { passed: true, evidence: ['parent symlink attempted'] };
+      },
+    });
+
+    expect(result.passed).toBe(false);
+    expect(existsSync(join(outside, 'evidence.json'))).toBe(false);
+    expect(lstatSync(result.runDir).isSymbolicLink()).toBe(false);
+    expect(existsSync(result.evidencePath)).toBe(true);
   });
 
   it('keeps fixture reads anchored to the original workspace directory', async () => {
@@ -461,6 +553,32 @@ describe('learning experiment sandbox', () => {
 
     expect(result.passed).toBe(false);
     expect(result.blockedToolCalls[0]?.tool).toBe('execute_tool');
+  });
+
+  it('denies nested multi-tool wrapper mutation targets even when the wrapper tool is allowlisted', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+    const handlerCalls: string[] = [];
+
+    const result = await runLearningSandboxExperiment({
+      declaration: { ...declaration, requestedTools: ['multi_tool_use.parallel'] },
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      policy: { allowedTools: ['list_fixture_files', 'read_fixture_file', 'multi_tool_use.parallel'] },
+      execute: async (sandbox) => {
+        await expect(sandbox.runTool('multi_tool_use.parallel', {
+          tool_uses: [{ recipient_name: 'functions.exec_command', parameters: { command: 'touch live-state' } }],
+        }, () => {
+          handlerCalls.push('called');
+          return 'mutated';
+        })).rejects.toThrow(/mutation-capable/);
+        return { passed: true, evidence: [] };
+      },
+    });
+
+    expect(result.passed).toBe(false);
+    expect(handlerCalls).toEqual([]);
+    expect(result.blockedToolCalls[0]?.tool).toBe('multi_tool_use.parallel');
   });
 
   it('denies concrete fbeast memory mutation tool names even when allowlisted', async () => {
@@ -550,6 +668,34 @@ describe('learning experiment sandbox', () => {
     };
     expect(evidence.toolCalls[0]?.input.secret).toBe('[non-json accessor]');
     expect(evidence.toolCalls[0]?.result.secret).toBe('[non-json accessor]');
+  });
+
+  it('persists JSON-safe evidence when proxy descriptor traps throw', async () => {
+    const { fixturesRoot } = createFixturesRoot();
+    const runsRoot = tempRoot('learning-sandbox-runs-');
+    const proxyInput = new Proxy({}, {
+      ownKeys: () => {
+        throw new Error('ownKeys exploded');
+      },
+    });
+
+    const result = await runLearningSandboxExperiment({
+      declaration,
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+      policy: { allowedTools: ['list_fixture_files', 'read_fixture_file', 'score_candidate'] },
+      execute: async (sandbox) => {
+        await sandbox.runTool('score_candidate', proxyInput, () => proxyInput);
+        return { passed: true, evidence: ['proxy-safe evidence'] };
+      },
+    });
+
+    expect(result.passed).toBe(true);
+    const evidence = JSON.parse(readFileSync(result.evidencePath, 'utf8')) as {
+      toolCalls: Array<{ input: { '[non-json object]': string }; result: { '[non-json object]': string } }>;
+    };
+    expect(evidence.toolCalls[0]?.input['[non-json object]']).toBe('[non-json descriptor-trap]');
+    expect(evidence.toolCalls[0]?.result['[non-json object]']).toBe('[non-json descriptor-trap]');
   });
 
   it('persists JSON-safe evidence when inputs or handler results contain non-JSON values', async () => {
