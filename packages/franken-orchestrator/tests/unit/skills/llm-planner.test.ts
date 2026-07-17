@@ -45,8 +45,11 @@ describe('LlmPlanner', () => {
     expect(prompt).toContain('| {"repo":"frankenbeast"}');
   });
 
-  it('falls back to a single task plan on malformed LLM output', async () => {
-    const llmClient = { complete: vi.fn().mockResolvedValue('not-json') };
+  it.each([
+    ['malformed JSON', 'not-json'],
+    ['empty response', '   '],
+  ])('falls back to a single task plan on %s LLM output', async (_name, response) => {
+    const llmClient = { complete: vi.fn().mockResolvedValue(response) };
     const planner = new LlmPlanner(llmClient);
 
     const plan = await planner.createPlan(intent);
@@ -61,6 +64,32 @@ describe('LlmPlanner', () => {
         },
       ],
     });
+  });
+
+  it('falls back to a single task plan when a dropped LLM response times out without leaking timers', async () => {
+    vi.useFakeTimers();
+    try {
+      const llmClient = { complete: vi.fn(() => new Promise<string>(() => {})) };
+      const planner = new LlmPlanner(llmClient, { timeoutMs: 25 });
+
+      const pendingPlan = planner.createPlan(intent);
+      await vi.advanceTimersByTimeAsync(25);
+      const plan = await pendingPlan;
+
+      expect(plan).toEqual({
+        tasks: [
+          {
+            id: 't1',
+            objective: 'Ship the release',
+            requiredSkills: ['llm-generate'],
+            dependsOn: [],
+          },
+        ],
+      });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('fails plan creation when a task depends on an unknown task id', async () => {
@@ -78,6 +107,24 @@ describe('LlmPlanner', () => {
 
     await expect(planner.createPlan(intent)).rejects.toThrow(
       "Invalid plan structure: task 'ship' depends on unknown task 'missing'",
+    );
+  });
+
+  it('fails plan creation on duplicate LLM task ids before ambiguous dependency mapping can proceed', async () => {
+    const llmClient = {
+      complete: vi.fn().mockResolvedValue(
+        JSON.stringify({
+          tasks: [
+            { id: 'repeat', objective: 'First completion', dependsOn: [] },
+            { id: 'repeat', objective: 'Duplicate completion', dependsOn: [] },
+          ],
+        }),
+      ),
+    };
+    const planner = new LlmPlanner(llmClient);
+
+    await expect(planner.createPlan(intent)).rejects.toThrow(
+      "Invalid plan structure: duplicate task id 'repeat'",
     );
   });
 
