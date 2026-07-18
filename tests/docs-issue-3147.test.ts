@@ -10,6 +10,7 @@ describe('issue #3147 Telegram webhook migration docs', () => {
     expect(README).toContain('/webhooks/telegram');
     expect(README).toContain('X-Telegram-Bot-Api-Secret-Token');
     expect(README).toContain('webhookSecretTokenRef');
+    expect(README).toContain('A-Z, a-z, 0-9, `_`, and `-`');
     expect(README).not.toContain('| Telegram | Webhook | Token-based authentication |');
   });
 
@@ -18,5 +19,8 @@ describe('issue #3147 Telegram webhook migration docs', () => {
     expect(README).toContain('re-register the webhook');
     expect(README).toContain('rotate the bot token with BotFather');
     expect(README).toContain('secret_token');
+    expect(README).toContain('dashboard-web');
+    expect(README).toContain('rewrites legacy token-bearing paths');
+    expect(README).not.toContain('webhookSecretTokenRef` through `frankenbeast init --repair`');
   });
 });
