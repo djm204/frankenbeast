@@ -973,7 +973,70 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('scripts/install-equivalent-cron.mjs:7');
   });
 
-  it('allows quoted runtime env-file credentials in shell cron commands', () => {
+  it('rejects multiline sinks, aliased commands, backquotes, destructuring, and multiline assembly', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'install-multiline-cron.py'),
+      [
+        'import os',
+        'import subprocess',
+        'import sys',
+        "credential = os.environ['GITHUB_TOKEN']",
+        'schedule = sys.argv[1]',
+        "entry = f'{schedule} agy pr --token {credential}'",
+        'subprocess.run(',
+        "  ['crontab', '-'],",
+        '  input=entry,',
+        ')',
+        'second = (',
+        "  f'{schedule} agy pr '",
+        "  f'--token {credential}'",
+        ')',
+        "subprocess.run(['crontab', '-'], input=second)",
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'install-more-cron.sh'),
+      [
+        "printf '%s\\n' '0 3 * * * agy pr' >/tmp/jobs",
+        "printf '%s\\n' \"--token $GITHUB_TOKEN\" >>/tmp/jobs",
+        'crontab < /tmp/jobs',
+        'auth=`printenv GITHUB_TOKEN`',
+        'CRON_CMD="0 4 * * * agy pr --token $auth"',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'install-more-cron.mjs'),
+      [
+        "const ghArgs = ['auth', 'token'];",
+        "const credential = execFileSync('gh', ghArgs, { encoding: 'utf8' });",
+        'const schedule =',
+        "  '0 5 * * *';",
+        'const entry = `${schedule} agy pr --token ${credential}`;',
+        'const cfg = {};',
+        'cfg.credential = process.env.GITHUB_TOKEN;',
+        'const { credential: destructured } = cfg;',
+        'const second = `0 6 * * * agy pr --token ${destructured}`;',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/install-multiline-cron.py:9');
+    expect(result.stderr).toContain('scripts/install-multiline-cron.py:15');
+    expect(result.stderr).toContain('scripts/install-more-cron.sh:2');
+    expect(result.stderr).toContain('scripts/install-more-cron.sh:5');
+    expect(result.stderr).toContain('scripts/install-more-cron.mjs:5');
+    expect(result.stderr).toContain('scripts/install-more-cron.mjs:9');
+  });
+
+  it('allows quoted runtime env-file credentials in shell cron commands and heredocs', () => {
     const root = makeFixtureRoot();
     const scriptDir = join(root, 'scripts');
     mkdirSync(scriptDir, { recursive: true });
@@ -982,6 +1045,9 @@ describe('hard-coded example secret scanner', () => {
       [
         "CRON_CMD='0 3 * * * . /etc/franken.env; agy pr --token \"$GITHUB_TOKEN\"'",
         "CRON_COMMAND=\"0 4 * * * . /etc/franken.env; agy pr --token \\\$GITHUB_TOKEN\"",
+        "cat <<'EOF' | crontab -",
+        '0 5 * * * . /etc/franken.env; agy pr --token "$GITHUB_TOKEN"',
+        'EOF',
       ].join('\n'),
       'utf8',
     );
