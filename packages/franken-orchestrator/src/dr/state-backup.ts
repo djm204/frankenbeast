@@ -94,12 +94,12 @@ async function deriveKey(keyFilePath: string): Promise<Buffer> {
 }
 
 function classifyBackupPath(path: string): BackupCategory {
-  const normalized = path.toLowerCase();
+  const normalized = path.toLowerCase().replace(/\\/g, '/');
   const base = basename(normalized);
-  if (base === 'kanban.db' || base.startsWith('kanban.db-') || normalized.includes(`${sep}kanban${sep}`)) return 'kanban';
+  if (base === 'kanban.db' || base.startsWith('kanban.db-') || normalized.includes('/kanban/')) return 'kanban';
   if (normalized.includes('approval') || normalized.includes('ledger')) return 'approvals';
   if (normalized.includes('liveness') || normalized.includes('heartbeat')) return 'liveness';
-  if (normalized.startsWith('runs/') || normalized.includes(`${sep}runs${sep}`) || normalized.includes('run-metadata') || normalized.includes('attempt')) return 'runs';
+  if (normalized.startsWith('runs/') || normalized.includes('/runs/') || normalized.includes('run-metadata') || normalized.includes('attempt')) return 'runs';
   return 'other';
 }
 
@@ -108,7 +108,7 @@ function emptyCategoryCounts(): Record<BackupCategory, number> {
 }
 
 function assertSafeRelativePath(filePath: string): void {
-  if (!filePath || filePath.startsWith('/') || filePath.includes('..') || filePath.split(/[\\/]+/).some((part) => part === '..' || part === '')) {
+  if (!filePath || filePath.startsWith('/') || filePath.split(/[\\/]+/).some((part) => part === '..' || part === '')) {
     throw new Error(`Unsafe backup entry path: ${filePath}`);
   }
 }
@@ -392,6 +392,22 @@ async function ensureRealDirectory(path: string): Promise<void> {
   }
 }
 
+async function assertRealAncestorChain(path: string): Promise<void> {
+  const parent = dirname(path);
+  if (parent !== path) {
+    await assertRealAncestorChain(parent);
+  }
+  try {
+    const stats = await lstat(path);
+    if (stats.isSymbolicLink() || !stats.isDirectory()) {
+      throw new Error(`DR restore target parent must be a real directory: ${path}`);
+    }
+  } catch (error: unknown) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return;
+    throw error;
+  }
+}
+
 async function assertRestoreTargetReady(targetDir: string, createIfMissing: boolean): Promise<void> {
   try {
     const stats = await lstat(targetDir);
@@ -404,6 +420,7 @@ async function assertRestoreTargetReady(targetDir: string, createIfMissing: bool
     }
   } catch (error: unknown) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      await assertRealAncestorChain(dirname(targetDir));
       if (createIfMissing) await ensureRealDirectory(targetDir);
       return;
     }

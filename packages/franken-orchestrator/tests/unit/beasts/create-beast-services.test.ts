@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -36,7 +36,6 @@ describe('createBeastServices', () => {
     const parentCwd = join(tempDir, 'parent-cwd');
     const projectRoot = join(tempDir, 'target-project');
     const originalCwd = process.cwd();
-    const { mkdir } = await import('node:fs/promises');
     await mkdir(parentCwd, { recursive: true });
     await mkdir(projectRoot, { recursive: true });
 
@@ -103,6 +102,62 @@ describe('createBeastServices', () => {
         reason: 'capacity_full',
         reservationId: undefined,
       });
+    } finally {
+      services.dispose();
+    }
+  });
+
+  it('loads installed skill tool manifests for tracked-agent validation and dispatch', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-create-beast-services-'));
+    const skillDir = join(tempDir, '.fbeast', 'skills', 'context-only');
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(
+      join(skillDir, 'mcp.json'),
+      JSON.stringify({ mcpServers: { 'context-only': { command: 'context-only' } } }),
+    );
+    await writeFile(
+      join(skillDir, 'tools.json'),
+      JSON.stringify([{ name: 'read_file', description: 'Read context', inputSchema: {} }]),
+    );
+    const { createBeastServices } = await import('../../../src/beasts/create-beast-services.js');
+    const services = createBeastServices({
+      beastsDb: join(tempDir, 'beast.db'),
+      beastLogsDir: join(tempDir, 'logs'),
+      root: tempDir,
+    });
+
+    try {
+      const agent = services.agents.createAgent({
+        definitionId: 'martin-loop',
+        source: 'dashboard',
+        createdByUser: 'operator',
+        initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+        initConfig: {
+          provider: 'claude',
+          objective: 'Use the selected context skill',
+          chunkDirectory: 'docs/chunks',
+          agentRole: 'coding',
+          requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+          skills: ['context-only'],
+        },
+      });
+
+      const run = await services.dispatch.createRun({
+        definitionId: 'martin-loop',
+        trackedAgentId: agent.id,
+        config: {
+          provider: 'claude',
+          objective: 'Dispatch with selected context skill',
+          chunkDirectory: 'docs/chunks',
+          skills: ['context-only'],
+        },
+        dispatchedBy: 'dashboard',
+        dispatchedByUser: 'operator',
+        executionMode: 'process',
+      });
+
+      expect(run.configSnapshot).toMatchObject({ skills: ['context-only'] });
+      expect(processExecutorConstructor.mock.calls.length).toBeGreaterThanOrEqual(1);
     } finally {
       services.dispose();
     }

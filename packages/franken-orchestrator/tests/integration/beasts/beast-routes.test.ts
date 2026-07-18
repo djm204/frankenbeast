@@ -218,7 +218,14 @@ describe('beast routes', () => {
       createdByUser: 'chat-session:chat-1',
       chatSessionId: 'chat-1',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { provider: 'claude', objective: 'ship', chunkDirectory: 'docs/chunks' },
+      initConfig: {
+        provider: 'claude',
+        objective: 'ship',
+        chunkDirectory: 'docs/chunks',
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+        skills: [],
+      },
     });
 
     const response = await app.request('/v1/beasts/runs', {
@@ -282,7 +289,14 @@ describe('beast routes', () => {
       createdByUser: 'chat-session:chat-1',
       chatSessionId: 'chat-1',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { provider: 'claude', objective: 'ship', chunkDirectory: 'docs/chunks' },
+      initConfig: {
+        provider: 'claude',
+        objective: 'ship',
+        chunkDirectory: 'docs/chunks',
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+        skills: [],
+      },
     });
     agents.updateAgent(agent.id, { status: 'running' });
 
@@ -527,6 +541,38 @@ describe('beast routes', () => {
     expect(answered.data.session.currentPrompt.key).toBe('objective');
   });
 
+  it('returns a structured 400 for invalid option-backed interview answers', async () => {
+    const { app, operatorToken } = createBeastApp();
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+    const startResponse = await app.request('/v1/beasts/interviews/martin-loop/start', {
+      method: 'POST',
+      headers,
+    });
+    const started = await startResponse.json() as { data: { id: string } };
+
+    const response = await app.request(`/v1/beasts/interviews/${started.data.id}/answer`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ answer: 'not-a-provider' }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: {
+        code: 'INVALID_INTERVIEW_ANSWER',
+        message: "Invalid answer for 'provider': expected one of claude, codex, gemini, aider",
+        details: {
+          promptKey: 'provider',
+          prompt: 'Which provider should run the martin loop?',
+          options: ['claude', 'codex', 'gemini', 'aider'],
+        },
+      },
+    });
+  });
+
   it('returns a structured 404 when answering an unknown interview session', async () => {
     const { app, operatorToken } = createBeastApp();
 
@@ -610,6 +656,46 @@ describe('beast routes', () => {
         message: "Beast definition 'does-not-exist' was not found",
       },
     });
+
+    const runsResponse = await app.request('/v1/beasts/runs', {
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+    const runsBody = await runsResponse.json() as { data: { runs: Array<unknown> } };
+    expect(runsBody.data.runs).toEqual([]);
+  });
+
+  it('returns 422 and does not persist a direct run when required config is invalid', async () => {
+    const { app, operatorToken } = createBeastApp();
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    const createResponse = await app.request('/v1/beasts/runs', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        config: {
+          provider: 'prod-claude',
+          objective: '',
+          chunkDirectory: 'docs/chunks',
+        },
+        startNow: true,
+      }),
+    });
+
+    expect(createResponse.status).toBe(422);
+    const body = await createResponse.json() as {
+      error: { code: string; message: string; details: Array<{ path: string[]; message: string }> };
+    };
+    expect(body.error.code).toBe('BEAST_CONFIG_VALIDATION_ERROR');
+    expect(body.error.message).toBe('Beast run config validation failed');
+    expect(body.error.details).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: ['objective'] }),
+    ]));
 
     const runsResponse = await app.request('/v1/beasts/runs', {
       headers: {

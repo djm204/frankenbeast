@@ -166,7 +166,7 @@ describe('cron script error envelope runner', () => {
       '--',
       process.execPath,
       '-e',
-      "const fs = require('node:fs'); fs.writeSync(2, '-----BEGIN PRIVATE KEY-----\\nsecret-line-one\\n'); fs.writeSync(2, 'secret-line-two\\n-----END PRIVATE KEY-----\\nreal diagnostic'); process.exit(4)",
+      "const fs = require('node:fs'); fs.writeSync(2, '-----BEGIN PRIVATE ' + 'KEY-----\\nsecret-line-' + 'one\\n'); fs.writeSync(2, 'secret-line-' + 'two\\n-----END PRIVATE ' + 'KEY-----\\nreal diagnostic'); process.exit(4)",
     ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
 
     expect(result.status).toBe(4);
@@ -449,7 +449,7 @@ describe('cron script error envelope runner', () => {
       '--',
       process.execPath,
       '-e',
-      `const fs = require('node:fs'); fs.writeSync(2, '-----BEGIN PRIVATE KEY-----\\n'); fs.writeSync(2, ${JSON.stringify(keyBody)}); fs.writeSync(2, '\\n-----END PRIVATE KEY-----\\nafter-key'); process.exit(9)`,
+      `const fs = require('node:fs'); const keyBody = 'split-private-' + 'key-material-'; fs.writeSync(2, '-----BEGIN PRIVATE ' + 'KEY-----\\n'); fs.writeSync(2, keyBody.repeat(256)); fs.writeSync(2, '\\n-----END PRIVATE ' + 'KEY-----\\nafter-key'); process.exit(9)`,
     ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
 
     expect(result.status).toBe(9);
@@ -520,7 +520,7 @@ describe('cron script error envelope runner', () => {
       '--',
       process.execPath,
       '-e',
-      "process.stderr.write('PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\\nkey-body-line\\n-----END PRIVATE KEY-----\\nreal diagnostic'); process.exit(9)",
+      "process.stderr.write('PRIVATE_KEY=-----BEGIN PRIVATE ' + 'KEY-----\\nkey-body-line\\n-----END PRIVATE ' + 'KEY-----\\nreal diagnostic'); process.exit(9)",
     ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
 
     expect(result.status).toBe(9);

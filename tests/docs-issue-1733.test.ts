@@ -18,7 +18,7 @@ describe('issue #1733 issue complexity rubric docs', () => {
 
     expect(rubric).toContain('| Level | Use when | Examples | Allowed toolsets | Recommended model lane | Verification depth | Escalate when |');
     expect(rubric).toContain('C0 — Triage / no-code');
-    expect(rubric).toContain('C5 — System / PM-swarm / release-critical');
+    expect(rubric).toContain('C5 — System / agent coordination / release-critical');
     expect(rubric).toContain('Low-risk fallback agents must not implement C3–C5 work.');
   });
 

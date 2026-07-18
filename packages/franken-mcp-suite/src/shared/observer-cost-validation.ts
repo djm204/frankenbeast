@@ -59,15 +59,15 @@ export function validateObserverCostNumbers(input: ObserverCostNumbers): void {
 export function parseObserverCostArgs(args: Record<string, unknown>): ParseResult<ParsedObserverCostArgs> {
   const promptTokensArg = parseNonNegativeIntegerArg('promptTokens', args['promptTokens']);
   if (!promptTokensArg.ok) {
-    return promptTokensArg;
+    return { ok: false, message: 'promptTokens must be a finite safe non-negative integer' };
   }
   const completionTokensArg = parseNonNegativeIntegerArg('completionTokens', args['completionTokens']);
   if (!completionTokensArg.ok) {
-    return completionTokensArg;
+    return { ok: false, message: 'completionTokens must be a finite safe non-negative integer' };
   }
   const costUsdArg = parseOptionalNonNegativeNumberArg('costUsd', args['costUsd']);
   if (!costUsdArg.ok) {
-    return costUsdArg;
+    return { ok: false, message: 'costUsd must be a finite non-negative number' };
   }
 
   const parsed = {

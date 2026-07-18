@@ -52,7 +52,7 @@ brain.episodic.record({
 });
 const related = brain.episodic.recall('package inventory', 5);
 
-// Agent learning capture can opt into a cooldown so retrospectives or PM
+// Agent learning capture can opt into a cooldown so retrospectives or coordinator
 // handoffs do not churn the same lesson repeatedly. The key is stored in
 // details.learningKey; duplicate attempts return a structured cooldown result
 // instead of silently inserting another episodic row.
@@ -101,8 +101,11 @@ const candidate = brain.memoryReview.propose({
   key: 'user.preference.response-style',
   value: 'concise',
   source: 'chat:turn-42',
+  sourceType: 'user',
+  sourceId: 'msg-42',
   confidence: 0.92,
   reason: 'User explicitly requested concise responses.',
+  revalidateAt: '2026-08-01T00:00:00.000Z',
 });
 const visibleQueue = brain.memoryReview.list();
 brain.memoryReview.edit(candidate.id, {
@@ -117,6 +120,9 @@ const provenance = brain.memoryReview.provenanceFor(
   'working',
   'user.preference.response-style',
 );
+const compactForAgent = brain.memoryReview.listForAgent({
+  key: 'user.preference.response-style',
+});
 // Contradictory candidates for an existing key are surfaced before approval so
 // callers can explicitly keep the durable fact, replace it, keep both values
 // under explicit scope, reject the new candidate, or expire the old value with
@@ -141,7 +147,7 @@ if (conflicts.length > 0 && prompt) {
 
 // Confidence decay gives injection/retrieval code a deterministic way to lower
 // old memory certainty without mutating the stored record. The result is
-// structured so PM/liveness tools can log the age, half-life, and applied floor.
+// structured so coordination/liveness tools can log the age, half-life, and applied floor.
 const confidence = calculateMemoryConfidenceDecay({
   confidence: provenance?.confidence ?? 0.5,
   observedAt: provenance?.approvedAt ?? new Date().toISOString(),
@@ -158,6 +164,21 @@ const accessAudit = brain.accessAudit.list({
   store: 'working',
   limit: 20,
 });
+
+// Confidence/update rules:
+// - `sourceType: 'user'` means the user explicitly stated the fact/preference;
+//   prefer it over lower-confidence inferred observations during injection.
+// - `sourceType: 'inferred'` should use lower confidence, include a safe source id,
+//   and usually set `expiresAt` or `revalidateAt` so stale observations are not
+//   injected forever.
+// - `sourceType: 'system' | 'tool' | 'operator'` should describe reproducible
+//   evidence such as repository config, CLI output, or an operator decision.
+// - Direct overwrites/deletes hide stale provenance; conflicting candidates must
+//   be resolved explicitly with `resolveConflict()` so update history remains
+//   explainable.
+// `listForAgent()` returns compact strings plus metadata (created/updated time,
+// source type/id, confidence, decayed confidence, expiry, revalidation status)
+// and hides expired memories by default unless `includeExpired` is true.
 
 // Rejected candidates and never-store decisions are remembered so duplicate
 // weak evidence or sensitive values do not silently reappear in the queue.

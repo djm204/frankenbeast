@@ -61,13 +61,22 @@ Use this checklist for a first local checkout or when rebuilding a development e
 
   The command prints stable `[new-worker-preflight:<check>] ok|warn|fail - ...` badges by default, or a JSON object with `ok` and `checks` when `--json` is supplied. Use `npm --silent` or `node scripts/new-worker-preflight.mjs --json` for machine-parsed JSON so npm lifecycle banners do not prefix stdout. It verifies the supported Node.js/npm pin, required `git`/`gh`/`jq` commands, GitHub CLI authentication for `github.com`, the project git identity (`David Mendez <me@davidmendez.dev>`), Frankenbeast repository root, and whether the current worktree already has uncommitted files. Use `--skip-github-auth` only for offline docs/tests; run without it before opening PRs.
 
-- [ ] PMs or workers that need profile-specific evidence: run the capability self-test with the expected profile schema or explicit flags before dispatching PR-producing work:
+- [ ] Run the setup healthcheck when onboarding fails or before starting expensive local services:
+
+  ```bash
+  npm run setup:healthcheck
+  npm --silent run setup:healthcheck -- --json
+  ```
+
+  The healthcheck reports human-readable fixes and JSON `checks` with `id`, `status`, `required`, `detail`, and `action` fields. It verifies Node/npm, dependency install state, env files, git status, common local ports, optional GitHub auth, and ChromaDB/Grafana/Tempo service endpoints. Warnings such as missing optional auth/services or occupied optional ports do not make the command fail; missing required prerequisites do.
+
+- [ ] Coordinators or workers that need profile-specific evidence: run the capability self-test with the expected profile schema or explicit flags before dispatching PR-producing work:
 
   ```bash
   npm --silent run profile:capability-self-test -- --json --repo djm204/frankenbeast --require-repo-write --toolset terminal,file --delivery-target discord:1523806555047333968
   ```
 
-  The command is read-only: even a failing self-test checks GitHub repository permission with `gh repo view --json viewerPermission` and never creates, edits, pushes, comments, or merges. It verifies expected model/provider labels, required toolsets, `gh` auth, git identity, optional repo write permission, approval-cop availability, and delivery target wiring. Human output uses stable `[profile-capability-self-test:<check>] ok|warn|fail - ...` badges; `--json` returns `{ ok, profile, checks }` for Kanban/Discord reports.
+  The command is read-only: even a failing self-test checks GitHub repository permission with `gh repo view --json viewerPermission` and never creates, edits, pushes, comments, or merges. It verifies expected model/provider labels, required toolsets, `gh` auth, git identity, optional repo write permission, approval runner availability, and delivery target wiring. Human output uses stable `[profile-capability-self-test:<check>] ok|warn|fail - ...` badges; `--json` returns `{ ok, profile, checks }` for Kanban/Discord reports.
 
 - [ ] Generate a guided checklist when you need a smaller first-run path than the full document. Pick the persona that matches the work:
 
@@ -76,7 +85,7 @@ Use this checklist for a first local checkout or when rebuilding a development e
   npm --silent run first-run:checklist -- --persona coding-agent --json
   ```
 
-  The generator prints deterministic Markdown by default, or JSON with `persona`, `root`, `items`, `docs`, and `nextAction` for PM/liveness tooling. It never mutates files or runs setup commands; it points each checklist item at the command and docs to run next. Valid personas are `operator`, `coding-agent`, and `contributor`; unknown personas fail closed with an explicit error instead of falling back to a misleading generic checklist.
+  Start with the [persona quickstart tracks](docs/onboarding/persona-quickstart-tracks.md) when you want the human-readable chooser first. It defines operator, contributor, and agent-developer outcomes with prerequisites, setup commands, validation commands, and expected success output. The generator prints deterministic Markdown by default, or JSON with `persona`, `root`, `items`, `docs`, and `nextAction` for coordination/liveness tooling. It never mutates files or runs setup commands; it points each checklist item at the command and docs to run next. Valid personas are `operator`, `coding-agent`, and `contributor`; unknown personas fail closed with an explicit error instead of falling back to a misleading generic checklist.
 
 - [ ] Rehearse the full local-to-PR path before publishing anything:
 
@@ -87,6 +96,15 @@ Use this checklist for a first local checkout or when rebuilding a development e
 
   The dry run checks auth, install, and git-state prerequisites, then walks through checkout, branch/worktree creation, a no-op change, test selection, PR body generation, Codex review, and cleanup. Every remote mutation is skipped: `git push`, `gh pr create`, `gh pr comment`, and merge actions are printed as planned side effects rather than executed. Local write steps are simulated, and failures include remediation such as `gh auth login`, Corepack/npm activation, `npm ci`, or starting from a clean isolated worktree.
 
+- [ ] Practice safe edit/test mechanics in the [agent practice fixture](fixtures/agent-practice-fixture/README.md) before touching production packages:
+
+  ```bash
+  cd fixtures/agent-practice-fixture
+  npm test
+  ```
+
+  The fixture is intentionally tiny and initially failing. Fix only `fixtures/agent-practice-fixture/src/scoreboard.js`, re-run the fixture test, then reset it with `npm run reset` for the next trainee. Trainers can copy the [sample practice issue body](docs/onboarding/sample-agent-practice-issue.md) when assigning the exercise.
+
 - [ ] Take the interactive workspace tour when you need a deterministic package map before choosing files:
 
   ```bash
@@ -94,7 +112,7 @@ Use this checklist for a first local checkout or when rebuilding a development e
   npm --silent run workspace:tour -- --json
   ```
 
-  The tour prints package responsibilities, common ticket routing hints, key docs, generated-file locations, focused test commands, runtime state paths, and safe first commands. JSON mode exposes the same data for agent prompts and PM handoffs, while the docs-drift section reports missing expected package, doc, script, or test paths.
+  The tour prints package responsibilities, common ticket routing hints, key docs, generated-file locations, focused test commands, runtime state paths, and safe first commands. JSON mode exposes the same data for agent prompts and coordination handoffs, while the docs-drift section reports missing expected package, doc, script, or test paths.
 
 ### Progress badges and status output
 
@@ -106,7 +124,7 @@ The bootstrap script prints deterministic status badges as it advances through o
 [onboarding:6/6:done] complete - onboarding bootstrap reached 6/6 steps
 ```
 
-Read each badge as `[onboarding:<current>/<total>:<stage>] <state> - <detail>`. Automation can key on the stable `onboarding` prefix, fraction, stage, and state values (`start`, `ok`, `error`, `complete`) while humans can follow the detail text. If option parsing fails before the first stage, the stage is `args`; otherwise `error` badges keep the active stage name so PM/liveness tooling can identify the failed stage without parsing prose.
+Read each badge as `[onboarding:<current>/<total>:<stage>] <state> - <detail>`. Automation can key on the stable `onboarding` prefix, fraction, stage, and state values (`start`, `ok`, `error`, `complete`) while humans can follow the detail text. If option parsing fails before the first stage, the stage is `args`; otherwise `error` badges keep the active stage name so coordination/liveness tooling can identify the failed stage without parsing prose.
 
 - [ ] Review `.env` and fill in only the values you need:
 
@@ -160,25 +178,31 @@ Read each badge as `[onboarding:<current>/<total>:<stage>] <state> - <detail>`. 
 
 ## Repository ownership
 
-Read the [repository ownership manifest](docs/onboarding/repository-ownership.md) before assigning repository-wide or cross-package work. It maps current package and documentation surfaces to primary owners, escalation owners, verification commands, and PM/worker handoff notes so agents do not guess ownership from path names alone.
+Read the [repository ownership manifest](docs/onboarding/repository-ownership.md) before assigning repository-wide or cross-package work. It maps current package and documentation surfaces to primary owners, escalation owners, verification commands, and coordinator/worker handoff notes so agents do not guess ownership from path names alone.
 
-Read the [agent role responsibility map](docs/onboarding/agent-role-responsibility-map.md) when assigning, resuming, reviewing, or recovering agent work. It maps PM shards, issue workers, doctors, reviewers, and docs workers to repository responsibilities, required handoff fields, verification commands, and explicit `mustNotOwn` boundaries.
+Read the [agent role responsibility map](docs/onboarding/agent-role-responsibility-map.md) when assigning, resuming, reviewing, or recovering agent work. It maps coordination shards, issue workers, repair owners, reviewers, and docs workers to repository responsibilities, required handoff fields, verification commands, and explicit `mustNotOwn` boundaries.
 
 ## Coding-agent PR etiquette
 
+Read the [first-PR agent runbook](docs/onboarding/first-pr-agent-runbook.md) when a fresh agent is taking a small issue from assignment through branch/worktree setup, implementation, verification, PR creation, Codex review, and merge handoff. It includes the exact command sequence and HITL stop conditions expected for first PRs.
+
 Read the [coding-agent PR etiquette guide](docs/onboarding/coding-agent-pr-etiquette.md) before opening, updating, or merging agent-authored pull requests. It defines one-issue/one-PR scope, required PR body evidence, current-head CI/Codex expectations, negative cases that prevent duplicate work, and handoff fields for blocked PRs.
+
+## Release and deployment mental model
+
+Read the [release and deployment mental model](docs/onboarding/release-deployment-mental-model.md) before you need to explain or own the issue->PR->CI->Codex->merge->Release Please->deployment flow. It defines release labels and signals, PR-to-release handoff expectations, post-merge monitoring ownership, and high-level rollback/incident responsibilities.
 
 ## Issue complexity rubric
 
 Read the [issue complexity rubric](docs/onboarding/issue-complexity-rubric.md) before assigning, refilling, or taking an issue-worker card. It maps issue labels and acceptance criteria to six complexity/risk levels, allowed toolsets, model lanes, verification depth, and escalation triggers so low-risk fallback agents do not take high-risk implementation work.
 
-## PM-swarm runtime glossary
+## Agent coordination runtime glossary
 
-Read the [PM-swarm runtime glossary](docs/onboarding/pm-swarm-runtime-glossary.md) before interpreting PM-swarm Kanban comments, liveness reports, doctor treatment notes, or issue-worker handoffs. It defines the runtime vocabulary used to decode liveness, refill, Codex, approval-cop, and worker handoff terms without creating duplicate branches, worktrees, or PRs.
+Read the [agent coordination runtime glossary](docs/onboarding/agent-coordination-runtime-glossary.md) before interpreting agent-coordination Kanban comments, liveness reports, repair notes, or issue-worker handoffs. It defines the runtime vocabulary used to decode liveness, refill, Codex, approval runner, and worker handoff terms without creating duplicate branches, worktrees, or PRs.
 
 ## Issue worktree bootstrap
 
-When a PM or issue handoff gives you one GitHub issue to fix, start from a dedicated branch/worktree instead of the main checkout:
+When a coordinator or issue handoff gives you one GitHub issue to fix, start from a dedicated branch/worktree instead of the main checkout:
 
 ```bash
 npm run issue:worktree -- --dry-run --issue 1769 --title "feat(onboarding): add issue-to-worktree bootstrap helper"
@@ -192,14 +216,30 @@ The helper prints structured issue, branch, worktree path, duplicate-PR check, a
 Use this path when you are new to Frankenbeast or when an agent handoff says "read the architecture docs first." It is intentionally ordered from current implementation to deeper historical context.
 
 1. **Current implementation before history** — start with [`docs/RAMP_UP.md`](docs/RAMP_UP.md) for the shortest current package map, Beast Loop summary, CLI/runtime wiring notes, known limitations, and build/test commands.
-2. **Repository-level model** — read [`README.md#architecture`](README.md#architecture) for the public Beast Loop diagram and current 10-package workspace framing.
-3. **Detailed architecture** — read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), especially the System Overview, package table, Beast Loop, Current Local CLI Path, orchestrator internals, and dashboard/control-plane sections. Use the package inventory tables as authoritative when diagrams still use MOD labels.
-4. **Runtime handoff flow** — read [`docs/DATA_FLOW.md`](docs/DATA_FLOW.md) to connect user input, planning, execution, observer/cost records, and closure artifacts.
-5. **Port and package boundaries** — read [`docs/CONTRACT_MATRIX.md`](docs/CONTRACT_MATRIX.md) before changing cross-package interfaces or assuming a module owns a capability.
-6. **Consolidation rationale** — read [ADR-031](docs/adr/031-architecture-consolidation-provider-agnostic.md) to understand why formerly separate MOD packages were consolidated into the orchestrator or MCP suite.
-7. **Topic-specific ADRs/guides** — only after the current path above, branch into relevant ADRs under `docs/adr/` or operational guides under `docs/guides/`.
+2. **New-contributor routing map** — read the [architecture map for new agent contributors](docs/onboarding/architecture-map.md) to translate issue titles into likely packages, owners, common recipes, test commands, approval/HITL boundaries, and memory boundaries.
+3. **Repository-level model** — read [`README.md#architecture`](README.md#architecture) for the public Beast Loop diagram and current 10-package workspace framing.
+4. **Detailed architecture** — read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), especially the System Overview, package table, Beast Loop, Current Local CLI Path, orchestrator internals, and dashboard/control-plane sections. Use the package inventory tables as authoritative when diagrams still use MOD labels.
+5. **Runtime handoff flow** — read [`docs/DATA_FLOW.md`](docs/DATA_FLOW.md) to connect user input, planning, execution, observer/cost records, and closure artifacts.
+6. **Port and package boundaries** — read [`docs/CONTRACT_MATRIX.md`](docs/CONTRACT_MATRIX.md) before changing cross-package interfaces or assuming a module owns a capability.
+7. **Consolidation rationale** — read [ADR-031](docs/adr/031-architecture-consolidation-provider-agnostic.md) to understand why formerly separate MOD packages were consolidated into the orchestrator or MCP suite.
+8. **Topic-specific ADRs/guides** — only after the current path above, branch into relevant ADRs under `docs/adr/` or operational guides under `docs/guides/`.
 
 Edge case: many older diagrams and `docs/plans/` files describe target or historical architecture. Do not start with `docs/plans/` when onboarding, and do not treat a plan diagram as live behavior until you verify it against the current package inventory in `docs/RAMP_UP.md` and `docs/ARCHITECTURE.md`.
+
+## Agent handoff template validator
+
+Use `validateAgentHandoffTemplate(markdown)` from `@franken/orchestrator` before promoting a PM, worker, or liveness handoff template into onboarding material. The validator returns structured output with `valid`, `passed`, `total`, `missingSections`, `findings`, and `operatorGuidance` so automation can block ambiguous templates instead of relying on prose review.
+
+A valid template needs actionable markdown sections for:
+
+- Scope and objective, including the issue/task, business goal, and out-of-scope boundaries.
+- Current state and decisions, including completed work, phase, decisions, and remaining work.
+- Verification evidence, including deterministic test/lint/typecheck/build commands and outcomes.
+- Blockers and next action, including blocker state, owner, and the exact next step.
+- Artifacts and links, including branch, PR, worktree, diff, docs, telemetry, or other inspectable records.
+- Learning and reuse, including durable lessons, Codex/CI feedback, and reusable handoff notes.
+
+Placeholder-only sections such as `<TBD>`, `TODO`, `N/A`, or empty headings fail explicitly with a `placeholder` finding. Missing headings fail with `missing`, and `operatorGuidance` names the sections to repair before the template is used in an agent handoff.
 
 ## Run UI
 
@@ -266,7 +306,7 @@ Edge case: many older diagrams and `docs/plans/` files describe target or histor
 ## Optional services
 
 Before starting Docker or blocking on optional infrastructure, read the [local service dependency explainer](docs/onboarding/local-service-dependencies.md).
-It maps ChromaDB, Grafana, Tempo, provider credentials, and secret backends to the capabilities that actually require them, with health checks and PM/worker handoff fields.
+It maps ChromaDB, Grafana, Tempo, provider credentials, and secret backends to the capabilities that actually require them, with health checks and coordinator/worker handoff fields.
 
 - [ ] Configure `.env` before starting the full compose stack.
   - Keep `CHROMA_URL=http://localhost:8000` unless ChromaDB runs elsewhere.
@@ -321,12 +361,16 @@ It maps ChromaDB, Grafana, Tempo, provider credentials, and secret backends to t
 
 ## Troubleshooting
 
-If a PM, liveness monitor, or operator reports a stalled worker, use the dedicated [troubleshooting guide for stalled workers](docs/guides/troubleshooting-stalled-workers.md) before respawning or deleting worktrees. It walks through live task/PR evidence, active versus blocked versus stale classifications, safe recovery actions, and the handoff fields future workers need.
+Start with the [setup troubleshooting matrix](docs/onboarding/setup-troubleshooting-matrix.md) when bootstrap, package-manager, Corepack, GitHub auth, port, generated-file, lock-file, Docker service, secret-backend, or preflight checks fail. It maps each symptom to the likely cause, diagnostic command, remediation, verification command, and evidence to include in handoffs.
+
+If a coordinator, liveness monitor, or operator reports a stalled worker after setup succeeds, use the dedicated [troubleshooting guide for stalled workers](docs/guides/troubleshooting-stalled-workers.md) before respawning or deleting worktrees. It walks through live task/PR evidence, active versus blocked versus stale classifications, safe recovery actions, and the handoff fields future workers need.
 
 - [ ] `npm install` fails with an engine error:
+  - Follow the matrix row for Node engine failures.
   - Check `node --version` against the root `engines.node` range.
   - Re-run the Corepack commands in the prerequisites section and `npm run check:package-manager`.
 - [ ] `npm run check:package-manager` fails:
+  - Follow the matrix row for package-manager mismatches.
   - Run `corepack enable npm`.
   - Run `corepack prepare "$(node -p "require('./package.json').packageManager")" --activate`.
   - Confirm plain `npm --version` matches the root `packageManager` pin.
@@ -341,6 +385,7 @@ If a PM, liveness monitor, or operator reports a stalled worker, use the dedicat
   - Prefer `--base-dir /absolute/path/to/project` for `frankenbeast chat-server`, `frankenbeast network`, and `frankenbeast beasts-daemon`.
   - Use `FBEAST_ROOT` only for callers that construct Beast services or dispatch built-in Beast runs without an explicit root.
 - [ ] Docker services fail to start:
+  - Follow the matrix row for optional Docker service failures.
   - Check that Docker is running.
   - Confirm `GRAFANA_PASSWORD` is set to a unique non-default value before starting the full compose stack.
   - Use `docker compose ps` and service logs to inspect failures.

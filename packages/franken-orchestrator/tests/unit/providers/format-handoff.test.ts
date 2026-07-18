@@ -4,6 +4,7 @@ import {
   assessPmHandoffQuality,
   formatHandoff,
   truncateSnapshot,
+  validateAgentHandoffTemplate,
 } from '../../../src/providers/format-handoff.js';
 
 function makeSnapshot(overrides: Partial<BrainSnapshot> = {}): BrainSnapshot {
@@ -12,10 +13,18 @@ function makeSnapshot(overrides: Partial<BrainSnapshot> = {}): BrainSnapshot {
     timestamp: '2026-03-22T00:00:00.000Z',
     working: { task: 'fix auth' },
     episodic: [
-      { type: 'decision', summary: 'Refactor auth module', createdAt: '2026-03-22T00:00:00.000Z' },
+      {
+        type: 'decision',
+        summary: 'Refactor auth module',
+        createdAt: '2026-03-22T00:00:00.000Z',
+      },
     ],
     checkpoint: null,
-    metadata: { lastProvider: 'claude-cli', switchReason: 'rate-limit', totalTokensUsed: 5000 },
+    metadata: {
+      lastProvider: 'claude-cli',
+      switchReason: 'rate-limit',
+      totalTokensUsed: 5000,
+    },
     ...overrides,
   };
 }
@@ -80,11 +89,14 @@ describe('formatHandoff', () => {
     const text = formatHandoff(
       makeSnapshot({
         working: {
-          issue: '#1862 add PM handoff quality rubric with goal to improve PM handoffs; out-of-scope: unrelated learning changes',
+          issue:
+            '#1862 add PM handoff quality rubric with goal to improve PM handoffs; out-of-scope: unrelated learning changes',
           status: 'completed docs and implementation',
-          verification: 'npm test -- --run tests/unit/providers/format-handoff.test.ts passed',
+          verification:
+            'npm test -- --run tests/unit/providers/format-handoff.test.ts passed',
           blocker: 'needs review before merge PR',
-          artifact: 'branch resolve/issue-1862-feat-learning-add-pm-handoff-quality-rubric',
+          artifact:
+            'branch resolve/issue-1862-feat-learning-add-pm-handoff-quality-rubric',
           lesson: 'Future workers can use this rubric before promotion',
         },
       }),
@@ -104,7 +116,8 @@ describe('assessPmHandoffQuality', () => {
         working: {
           goal: 'Resolve issue #1862 without broadening scope; out-of-scope: unrelated learning changes',
           status: 'implementation completed with decisions recorded',
-          verificationCommand: 'npm test --workspace @franken/orchestrator -- --run tests/unit/providers/format-handoff.test.ts passed',
+          verificationCommand:
+            'npm test --workspace @franken/orchestrator -- --run tests/unit/providers/format-handoff.test.ts passed',
           blocker: 'needs review before merge',
           pr: 'https://github.com/djm204/frankenbeast/pull/9999',
           retrospective: 'lesson captured for PM handoffs',
@@ -114,7 +127,9 @@ describe('assessPmHandoffQuality', () => {
 
     expect(assessment.score).toBe(1);
     expect(assessment.passed).toBe(6);
-    expect(assessment.results.every((result) => result.status === 'pass')).toBe(true);
+    expect(assessment.results.every((result) => result.status === 'pass')).toBe(
+      true,
+    );
   });
 
   it('flags sparse handoffs instead of inventing missing evidence', () => {
@@ -135,7 +150,9 @@ describe('assessPmHandoffQuality', () => {
     expect(assessment.results.map((result) => result.status)).toEqual(
       Array.from({ length: 6 }, () => 'needs-attention'),
     );
-    expect(assessment.operatorGuidance).toContain('missing one or more rubric criteria');
+    expect(assessment.operatorGuidance).toContain(
+      'missing one or more rubric criteria',
+    );
   });
 
   it('ignores empty placeholder fields when scoring evidence', () => {
@@ -168,7 +185,9 @@ describe('assessPmHandoffQuality', () => {
     );
 
     expect(assessment.score).toBe(0.17);
-    expect(assessment.results.find((result) => result.id === 'state')?.status).toBe('pass');
+    expect(
+      assessment.results.find((result) => result.id === 'state')?.status,
+    ).toBe('pass');
     expect(
       assessment.results
         .filter((result) => result.id !== 'state')
@@ -207,7 +226,9 @@ describe('assessPmHandoffQuality', () => {
       }),
     );
 
-    expect(assessment.results.find((result) => result.id === 'blockers')?.status).toBe('pass');
+    expect(
+      assessment.results.find((result) => result.id === 'blockers')?.status,
+    ).toBe('pass');
   });
 
   it('requires command and outcome signals for verification evidence', () => {
@@ -217,9 +238,10 @@ describe('assessPmHandoffQuality', () => {
         episodic: [],
       }),
     );
-    expect(missingOutcome.results.find((result) => result.id === 'verification')?.status).toBe(
-      'needs-attention',
-    );
+    expect(
+      missingOutcome.results.find((result) => result.id === 'verification')
+        ?.status,
+    ).toBe('needs-attention');
 
     const verified = assessPmHandoffQuality(
       makeSnapshot({
@@ -227,7 +249,9 @@ describe('assessPmHandoffQuality', () => {
         episodic: [],
       }),
     );
-    expect(verified.results.find((result) => result.id === 'verification')?.status).toBe('pass');
+    expect(
+      verified.results.find((result) => result.id === 'verification')?.status,
+    ).toBe('pass');
   });
 
   it('bounds large checkpoint context evidence in the formatted rubric', () => {
@@ -254,6 +278,1326 @@ describe('assessPmHandoffQuality', () => {
   });
 });
 
+describe('validateAgentHandoffTemplate', () => {
+  const completeTemplate = `# Agent handoff
+
+## Scope and objective
+Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.
+
+## Current state and decisions
+Summarize completed work, current phase, key decisions, and remaining work.
+
+## Verification evidence
+List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.
+
+## Blockers and next action
+State blockers, owner, exact next action, and when the receiving worker should stop.
+
+## Artifacts and links
+Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.
+
+## Learning and reuse
+Capture durable lessons, Codex or CI feedback, and reusable notes for future handoffs.
+`;
+
+  it('accepts a complete markdown handoff template with actionable guidance', () => {
+    const validation = validateAgentHandoffTemplate(completeTemplate);
+
+    expect(validation.valid).toBe(true);
+    expect(validation.passed).toBe(6);
+    expect(validation.missingSections).toEqual([]);
+    expect(
+      validation.findings.every((finding) => finding.status === 'pass'),
+    ).toBe(true);
+    expect(validation.operatorGuidance).toContain('every required section');
+  });
+
+  it('accepts setext-style headings for required sections', () => {
+    const setextTemplate = completeTemplate
+      .replace('## Scope and objective', 'Scope and objective\n---')
+      .replace('## Current state and decisions', 'Current state and decisions\n---')
+      .replace('## Verification evidence', 'Verification evidence\n---')
+      .replace('## Blockers and next action', 'Blockers and next action\n---')
+      .replace('## Artifacts and links', 'Artifacts and links\n---');
+
+    const validation = validateAgentHandoffTemplate(setextTemplate);
+
+    expect(validation.valid).toBe(true);
+  });
+
+  it('accepts headings indented by up to three spaces', () => {
+    const indentedTemplate = completeTemplate.replace(/^## /gm, '   ## ');
+
+    const validation = validateAgentHandoffTemplate(indentedTemplate);
+
+    expect(validation.valid).toBe(true);
+  });
+
+  it('accepts level-one headings as required sections when they contain body guidance', () => {
+    const h1Template = completeTemplate.replace(/^## /gm, '# ');
+
+    const validation = validateAgentHandoffTemplate(h1Template);
+
+    expect(validation.valid).toBe(true);
+  });
+
+  it('returns structured missing-section findings for incomplete templates', () => {
+    const validation = validateAgentHandoffTemplate(`## Scope
+Name issue #1775, business goal, and out-of-scope boundaries.
+
+## Verification
+Record npm test passed or failed.
+`);
+
+    expect(validation.valid).toBe(false);
+    expect(validation.missingSections).toEqual([
+      'state',
+      'blockers',
+      'artifacts',
+      'learning',
+    ]);
+    expect(
+      validation.findings.find((finding) => finding.id === 'state')?.status,
+    ).toBe('missing');
+    expect(validation.operatorGuidance).toContain(
+      'state, blockers, artifacts, learning',
+    );
+  });
+
+  it('flags placeholder-only sections as explicit failures', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.',
+        '<TBD>',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(validation.missingSections).toContain('verification');
+    expect(
+      validation.findings.find((finding) => finding.id === 'verification'),
+    ).toMatchObject({
+      status: 'placeholder',
+      matchedHeading: 'Verification evidence',
+    });
+  });
+
+  it('rejects field labels that only point at placeholders', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '- Issue: <issue>\n- Goal: <goal>\n- Boundaries: <out-of-scope boundaries>',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('rejects field labels that only point at single-brace placeholders', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '- Issue: {issue}\n- Goal: {business goal}\n- Boundaries: {out-of-scope boundaries}',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('rejects field labels that only point at square-bracket placeholders', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '- Issue: [issue]\n- Business goal: [goal]\n- Out-of-scope boundaries: [boundaries]',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('rejects inline placeholder-only field fragments', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        'Issue: TODO; Goal: TODO; Boundaries: TODO',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('rejects label-only bullet skeletons without colons', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '- Issue/task\n- Business goal\n- Out-of-scope boundaries',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('rejects TODO skeleton lines that repeat required keywords', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        'TODO: issue, business goal, and out-of-scope boundaries',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('rejects dash-separated placeholder-only field fragments', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '- Issue/task - <issue>\n- Business goal - <goal>\n- Boundaries - <boundaries>',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('rejects variant label-only bullet skeletons', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '- Issue details\n- Business objective\n- Boundary notes',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('rejects combined label-only skeleton lines', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Summarize completed work, current phase, key decisions, and remaining work.',
+        'Completed work, decisions, remaining work',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'state')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('preserves linked field values as actionable content', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '- Issue/task: [issue #1775](../issues/1775)\n- Business goal: improve onboarding handoffs\n- Boundaries: no unrelated refactors',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+  });
+
+  it('preserves child-heading content inside a required parent section', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.',
+        '### Commands\n`npm test` passed with exit 0.\n### Outcome\nGreen verification evidence is recorded.',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'verification')
+        ?.status,
+    ).toBe('pass');
+  });
+
+  it('preserves populated child-heading labels as required content signals', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '### Issue/task\nIssue #1775\n### Business goal\nBusiness goal: improve handoff onboarding.\n### Out-of-scope boundaries\nOut-of-scope boundaries: no unrelated refactors.'
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('pass');
+  });
+
+  it('requires a distinct matched section for each handoff dimension', () => {
+    const validation = validateAgentHandoffTemplate(`# Agent handoff
+
+## Scope current state verification blockers artifacts learning
+Issue #1775 goal is onboarding; out-of-scope boundaries are unrelated refactors. Completed status and decisions remain pending. npm test passed. No blocker, owner PM, next action continue. PR branch docs artifact. Lesson is reusable.
+`);
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('pass');
+    expect(validation.missingSections).toEqual([
+      'state',
+      'verification',
+      'blockers',
+      'artifacts',
+      'learning',
+    ]);
+  });
+
+  it('rejects sections that omit required content signals', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        'Write a summary for the next worker.',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('does not count empty child headings as guidance', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '### Issue/task\n### Business goal\n### Out-of-scope boundaries',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('does not count placeholder child heading bodies as guidance', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '### Issue/task\nPlease fill in\n### Business goal\nTODO\n### Out-of-scope boundaries\n{boundaries}',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('does not use empty child headings to satisfy required content patterns', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        'Please complete this\n### Issue/task\n### Business goal\n### Out-of-scope boundaries',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('requires none to be attached to blocker or risk state', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'State blockers, owner, exact next action, and when the receiving worker should stop.',
+        'Owner: none. Next action: continue.',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'blockers')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('ignores fenced example headings when extracting real sections', () => {
+    const validation = validateAgentHandoffTemplate(`
+# Example handoff
+
+\`\`\`md
+## Scope and objective
+Name the issue, business goal, and out-of-scope boundaries.
+## Current state and decisions
+Summarize status.
+## Verification evidence
+List tests.
+## Blockers and next action
+State owner and next action.
+## Artifacts and links
+Link PR.
+## Learning and reuse
+Capture lesson.
+\`\`\`
+`);
+
+    expect(validation.valid).toBe(false);
+    expect(validation.missingSections).toEqual(
+      expect.arrayContaining(['scope', 'state', 'verification']),
+    );
+  });
+
+  it('does not let a top-level title inherit unrelated child sections', () => {
+    const validation = validateAgentHandoffTemplate(`
+# Agent handoff objective
+
+## Current state and decisions
+Status: implementation done. Decision: keep validator strict.
+
+## Verification evidence
+Command: npm test. Outcome: passed.
+
+## Blockers and next action
+Owner: next worker. Next action: review the PR.
+
+## Artifacts and links
+PR: https://github.com/djm204/frankenbeast/pull/2331. Branch: resolve/issue-1775.
+
+## Learning and reuse
+Lesson: placeholder skeletons must fail validation.
+`);
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('ignores fenced example content when checking required section guidance', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.',
+        '```md\nnpm test passed with exit 0.\n```',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'verification')
+        ?.status,
+    ).toBe('placeholder');
+  });
+
+  it('strips empty table skeletons before checking required content', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '| Issue | Business goal | Out-of-scope boundaries |\n| --- | --- | --- |',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('prefers later usable sections over earlier matching placeholders', () => {
+    const validation = validateAgentHandoffTemplate(`## Goal
+<TBD>
+
+${completeTemplate}`);
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')
+        ?.matchedHeading,
+    ).toBe('Scope and objective');
+  });
+
+  it('respects the opening fence delimiter when scanning sections', () => {
+    const validation = validateAgentHandoffTemplate(
+      [
+        'Example only:',
+        '````md',
+        '## Scope and objective',
+        'Issue #1775, business goal, and out-of-scope boundaries.',
+        '```ts',
+        "const heading = '## nested example';",
+        '```',
+        '````',
+        '',
+        completeTemplate,
+      ].join('\n'),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')
+        ?.matchedHeading,
+    ).toBe('Scope and objective');
+  });
+
+  it('rejects decorated label-only fields', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '- Issue/task (required):\n- Business goal (required):\n- Out-of-scope boundaries (required):',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+  });
+
+  it('preserves populated table rows as verification evidence', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.',
+        '| Command | Outcome |\n| --- | --- |\n| npm test | passed |',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+  });
+
+  it('preserves populated table headers as required content signals', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '| Issue/task | Business goal | Boundaries |\n| --- | --- | --- |\n| #1775 | Improve onboarding | No unrelated refactors |',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('pass');
+  });
+
+  it('rejects blank table rows with label-only cells regardless of case', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate
+        .replace(
+          'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+          '| Issue | |\n| Business Goal | |\n| Boundaries | |',
+        )
+        .replace(
+          'List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.',
+          '| Test Command | |\n| Outcome | |',
+        ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope')?.status,
+    ).toBe('placeholder');
+    expect(
+      validation.findings.find((finding) => finding.id === 'verification')
+        ?.status,
+    ).toBe('placeholder');
+  });
+
+  it('rejects populated-looking table rows whose cells are placeholders', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '| Issue/task | Business goal | Boundaries |\n| --- | --- | --- |\n| <issue> | {goal} | [boundaries] |',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('rejects dash-only table rows as placeholder values', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '| Issue/task | Business goal | Boundaries |\n| --- | --- | --- |\n| - | - | - |',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('requires populated values for every required table field', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '| Issue/task | Business goal | Boundaries |\n| --- | --- | --- |\n| #1775 | - | - |',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('rejects table rows that repeat labels as values', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '| Issue/task | Business goal | Out-of-scope boundaries |\n| --- | --- | --- |\n| Issue/task | Business goal | Out-of-scope boundaries |',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('accepts a singular Branch heading for artifact guidance', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate
+        .replace('## Artifacts and links', '## Branch')
+        .replace(
+          'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
+          'Record branch resolve/issue-1775, PR #2331, and worktree artifact links.',
+        ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'artifacts')
+        ?.matchedHeading,
+    ).toBe('Branch');
+  });
+
+  it('accepts a PR heading for artifact guidance', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate
+        .replace('## Artifacts and links', '## PR / diff')
+        .replace(
+          'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
+          'Record PR #2331, branch resolve/issue-1775, and diff artifact links.',
+        ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'artifacts')
+        ?.matchedHeading,
+    ).toBe('PR / diff');
+  });
+
+  it('does not consume an overlapping placeholder heading before a later matching requirement', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate
+        .replace(
+          '## Current state and decisions\nSummarize completed work, current phase, key decisions, and remaining work.\n\n',
+          '',
+        )
+        .replace(
+          '## Blockers and next action\nState blockers, owner, exact next action, and when the receiving worker should stop.',
+          '## Status and next steps\nNo blockers; owner PM; next action continue.',
+        ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'state')?.status,
+    ).toBe('missing');
+    expect(
+      validation.findings.find((finding) => finding.id === 'blockers')?.status,
+    ).toBe('pass');
+  });
+
+  it('reserves underspecified overlapping headings for their own requirement', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate
+        .replace(
+          '## Current state and decisions\nSummarize completed work, current phase, key decisions, and remaining work.\n\n',
+          '',
+        )
+        .replace(
+          '## Blockers and next action\nState blockers, owner, exact next action, and when the receiving worker should stop.',
+          '## Status and next steps\nNo blockers; next action continue.',
+        ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'state')?.status,
+    ).toBe('missing');
+    expect(
+      validation.findings.find((finding) => finding.id === 'blockers'),
+    ).toMatchObject({ status: 'placeholder', matchedHeading: 'Status and next steps' });
+  });
+
+  it('preserves markdown link text when checking artifact guidance', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
+        'Link the [PR](../pull/123) and [runbook](../runbook) for inspectable artifacts.',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+  });
+
+  it('preserves reference-style markdown link text when checking artifact guidance', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
+        'See [PR][pr] and [docs][docs] for inspectable artifact references.\n\n[pr]: ../pull/123\n[docs]: ../docs',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+  });
+
+  it('preserves markdown autolinks as artifact evidence', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
+        '<https://github.com/org/repo/pull/123>',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+  });
+
+  it('rejects generic filler plus empty child headings as scope guidance', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        'Please complete this.\n\n### Issue/task\n### Business goal\n### Out-of-scope boundaries',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('accepts required sections written as populated H1 headings', () => {
+    const validation = validateAgentHandoffTemplate(`# Scope and objective
+Name issue #1775, business goal, and out-of-scope boundaries.
+
+# Current state and decisions
+Completed validation change; decisions are documented; remaining work is review.
+
+# Verification evidence
+Run npm test and record passed outcome.
+
+# Blockers and next action
+Blockers: none. Owner: PM. Next action: continue.
+
+# Artifacts and links
+PR #2331 and branch resolve/issue-1775 are artifact links.
+
+# Learning and reuse
+Lesson: codex review feedback is reusable.
+`);
+
+    expect(validation.valid).toBe(true);
+  });
+
+  it('requires none to appear in a blocker or risk context', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'State blockers, owner, exact next action, and when the receiving worker should stop.',
+        'Owner: none. Next action: continue.',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'blockers'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('rejects table rows that repeat field labels as values', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '| Field | Value |\n| --- | --- |\n| Issue/task | Issue/task |\n| Business goal | Business goal |\n| Out-of-scope boundaries | Out-of-scope boundaries |',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('rejects combined label-only skeleton lines', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate
+        .replace(
+          'Summarize completed work, current phase, key decisions, and remaining work.',
+          'Completed work, decisions, remaining work',
+        )
+        .replace(
+          'List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.',
+          'Test command / outcome',
+        ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'state'),
+    ).toMatchObject({ status: 'placeholder' });
+    expect(
+      validation.findings.find((finding) => finding.id === 'verification'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('uses populated child headings as required field labels without requiring duplicated labels in values', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '### Issue/task\n#1775\n### Business goal\nImprove onboarding handoffs.\n### Out-of-scope boundaries\nNo unrelated refactors.',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'pass' });
+  });
+
+  it('preserves child content for required sections written as H1 headings', () => {
+    const validation = validateAgentHandoffTemplate(`# Scope and objective
+## Issue/task
+#1775
+## Business goal
+Improve onboarding handoffs.
+## Out-of-scope boundaries
+No unrelated refactors.
+
+# Current state and decisions
+Completed work is implemented.
+## Current phase
+Review.
+## Key decisions
+Keep validation strict.
+## Remaining work
+Merge after checks.
+
+# Verification evidence
+## Command
+npm test
+## Outcome
+passed
+
+# Blockers and next action
+No blockers. Owner: PM. Next action: merge.
+
+# Artifacts and links
+PR #2331 and branch resolve/issue-1775.
+
+# Learning and reuse
+Lesson: preserve child section bodies for H1 templates.
+`);
+
+    expect(validation.valid).toBe(true);
+  });
+
+  it('preserves labeled markdown autolinks as artifact values', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
+        'PR: <https://github.com/org/repo/pull/123>',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'artifacts'),
+    ).toMatchObject({ status: 'pass' });
+  });
+
+  it('rejects blocker label skeletons with comma-separated required fields', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'State blockers, owner, exact next action, and when the receiving worker should stop.',
+        'Blockers, owner, next action',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'blockers'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('ignores fenced examples under required H1 child sections', () => {
+    const validation = validateAgentHandoffTemplate(`# Scope and objective
+## Example
+\`\`\`md
+Issue #1775, business goal, and out-of-scope boundaries.
+\`\`\`
+
+${completeTemplate.replace(
+  '## Scope and objective\nName the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.\n\n',
+  '',
+)}`);
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('does not let generic wrapper H1 titles satisfy missing required sections', () => {
+    const validation = validateAgentHandoffTemplate(`# Agent handoff
+
+## Current state and decisions
+Issue #1775, business goal, and out-of-scope boundaries are known. Completed work and decisions are pending.
+
+## Verification evidence
+npm test passed.
+
+## Blockers and next action
+No blockers. Owner: PM. Next action: continue.
+
+## Artifacts and links
+PR #2331 and worktree artifact.
+
+## Learning and reuse
+Lesson: wrapper titles are not scope sections.
+`);
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'missing' });
+  });
+
+  it('accepts documented artifact headings for worktree and diff evidence', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate
+        .replace('## Artifacts and links', '## Worktree and diff')
+        .replace(
+          'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
+          'Worktree /tmp/frankenbeast and diff docs telemetry are linked artifacts.',
+        ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'artifacts')
+        ?.matchedHeading,
+    ).toBe('Worktree and diff');
+  });
+
+  it('rejects semicolon-separated label-only skeletons', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        'Issue; Business goal; Boundaries',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('preserves parenthesized field values as verification evidence', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.',
+        '- Command (npm test)\n- Outcome (passed)',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'verification'),
+    ).toMatchObject({ status: 'pass' });
+  });
+
+  it('rejects documented artifact label-only skeletons', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
+        '- Worktree\n- Diff\n- Docs\n- Telemetry',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'artifacts'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('does not let broad wrapper objective headings inherit child sections', () => {
+    const validation = validateAgentHandoffTemplate(`# Project objective
+
+## Current state and decisions
+Issue #1775, business goal, and out-of-scope boundaries are known. Completed work and decisions are pending.
+
+## Verification evidence
+npm test passed.
+
+## Blockers and next action
+No blockers. Owner: PM. Next action: continue.
+
+## Artifacts and links
+PR #2331 and worktree artifact.
+
+## Learning and reuse
+Lesson: wrapper titles are not scope sections.
+`);
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('rejects placeholder values that repeat labels or use none outside blocker context', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate
+        .replace(
+          'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+          '- Issue/task: Issue/task\n- Business goal: none\n- Boundaries: Boundaries',
+        )
+        .replace(
+          'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
+          'PR: none',
+        ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+    expect(
+      validation.findings.find((finding) => finding.id === 'artifacts'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('uses matched artifact heading labels with body values', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate
+        .replace('## Artifacts and links', '## PR')
+        .replace(
+          'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
+          '#2331',
+        ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'artifacts'),
+    ).toMatchObject({ status: 'pass', matchedHeading: 'PR' });
+  });
+
+  it('preserves fenced verification commands', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.',
+        'Command:\n```bash\nnpm --workspace @franken/orchestrator test\n```\nOutcome: passed',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'verification'),
+    ).toMatchObject({ status: 'pass' });
+  });
+
+  it('preserves verification commands in unlabeled fenced blocks', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.',
+        'Command:\n```\nnpm --workspace @franken/orchestrator test\n```\nOutcome: passed',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'verification'),
+    ).toMatchObject({ status: 'pass' });
+  });
+
+  it('preserves child content for required H1 section aliases', () => {
+    const validation = validateAgentHandoffTemplate(`# Scope and objective
+## Issue/task
+#1775
+## Business goal
+Improve onboarding handoffs.
+## Out-of-scope boundaries
+No unrelated refactors.
+
+# Status and decisions
+## Completed work
+Validator is implemented.
+## Decisions
+Keep skeleton rejection strict.
+## Remaining work
+Merge after review.
+
+# Tests
+## Command
+npm test
+## Outcome
+passed
+
+# Next steps
+Blocked: none. Responsible: PM. Continue after review.
+
+# Artifacts and links
+PR #2331 and branch resolve/issue-1775.
+
+# Learnings
+Lesson: accepted aliases must preserve child section bodies.
+`);
+
+    expect(validation.valid).toBe(true);
+  });
+
+  it('requires artifact evidence beyond the generic artifacts heading', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
+        'See above.',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'artifacts'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('rejects fill-in instructions that list required labels', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        'Please fill in issue, business goal, and out-of-scope boundaries',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('rejects blocker alias label-only skeletons', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'State blockers, owner, exact next action, and when the receiving worker should stop.',
+        '- Blocked\n- Responsible\n- Continue',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'blockers'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('requires artifact body evidence for artifact alias headings', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
+        'Please complete this.',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'artifacts'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('rejects ordered-list label-only skeletons', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '1) Issue/task\n2) Business goal\n3) Out-of-scope boundaries',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('rejects none-only child heading bodies outside blocker context', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '### Issue/task\nNone\n### Business goal\nNone\n### Out-of-scope boundaries\nNone',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('allows blocked none as a blocker state across separate fields', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'State blockers, owner, exact next action, and when the receiving worker should stop.',
+        'Blocked: none\nResponsible: PM\nContinue after review',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'blockers'),
+    ).toMatchObject({ status: 'pass' });
+  });
+
+  it('does not let generic H2 wrapper titles inherit child sections', () => {
+    const validation = validateAgentHandoffTemplate(`# Agent handoff
+## Project objective
+### Current state and decisions
+Completed work is documented. Decisions are final. Remaining work is review.
+### Tests
+Command: npm test. Outcome: passed.
+### Blockers
+None; continue after review.
+### Artifacts
+PR #2331.
+### Learnings
+Lesson: wrappers should not satisfy scope.
+`);
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('preserves verification outcomes in fenced shell transcripts', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.',
+        '```bash\nnpm test\n3 passed\n```',
+      ),
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(
+      validation.findings.find((finding) => finding.id === 'verification'),
+    ).toMatchObject({ status: 'pass' });
+  });
+
+  it('rejects documented artifact and learning label-only skeletons', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate
+        .replace(
+          'Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.',
+          '- Branch\n- Pull request',
+        )
+        .replace(
+          'Capture durable lessons, Codex or CI feedback, and reusable notes for future handoffs.',
+          '- Learning\n- Reuse',
+        ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'artifacts'),
+    ).toMatchObject({ status: 'placeholder' });
+    expect(
+      validation.findings.find((finding) => finding.id === 'learning'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('does not count non-none blocker table placeholders as populated blockers', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'State blockers, owner, exact next action, and when the receiving worker should stop.',
+        '| Blocker | Owner | Next action |\n| --- | --- | --- |\n| TBD | PM | Continue |',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'blockers'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('requires concrete verification outcomes instead of labels or promises', () => {
+    const genericOutcome = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.',
+        'Verification outcome will be added later.',
+      ),
+    );
+    const seeLater = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.',
+        'Command: npm test; Outcome: see later.',
+      ),
+    );
+
+    expect(genericOutcome.valid).toBe(false);
+    expect(
+      genericOutcome.findings.find((finding) => finding.id === 'verification'),
+    ).toMatchObject({ status: 'placeholder' });
+    expect(seeLater.valid).toBe(false);
+    expect(
+      seeLater.findings.find((finding) => finding.id === 'verification'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('does not let agent handoff objective wrapper titles satisfy scope', () => {
+    const validation = validateAgentHandoffTemplate(`# Agent handoff objective
+
+## Current state and decisions
+Issue #1775, business goal, and out-of-scope boundaries are known. Completed work and decisions are pending.
+
+## Verification evidence
+npm test passed.
+
+## Blockers and next action
+No blockers. Owner: PM. Next action: continue.
+
+## Artifacts and links
+PR #2331 and worktree artifact.
+
+## Learning and reuse
+Lesson: wrapper titles are not scope sections.
+`);
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+});
+
 describe('truncateSnapshot', () => {
   it('returns snapshot unchanged when within budget', () => {
     const snapshot = makeSnapshot();
@@ -273,7 +1617,9 @@ describe('truncateSnapshot', () => {
 
     expect(truncated.episodic.length).toBeLessThan(50);
     // Most recent events are kept
-    expect(truncated.episodic[truncated.episodic.length - 1]!.summary).toContain('Step 49');
+    expect(
+      truncated.episodic[truncated.episodic.length - 1]!.summary,
+    ).toContain('Step 49');
     // Oldest events are removed
     expect(truncated.episodic[0]!.summary).not.toContain('Step 0');
   });
@@ -288,7 +1634,9 @@ describe('truncateSnapshot', () => {
       },
     });
     const truncated = truncateSnapshot(snapshot, 500);
-    const workingKeys = Object.keys(truncated.working as Record<string, unknown>);
+    const workingKeys = Object.keys(
+      truncated.working as Record<string, unknown>,
+    );
 
     // Largest value should be removed first
     expect(workingKeys).not.toContain('large');

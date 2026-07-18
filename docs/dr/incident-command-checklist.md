@@ -2,6 +2,8 @@
 
 Use this checklist when automation that normally coordinates workers, PR gates, approvals, backups, restores, or liveness monitoring fails or starts producing ambiguous handoffs. The goal is to put one person in incident command, freeze unsafe automation paths, preserve evidence, and route every recovery action through an explicit decision trail.
 
+If any incident update uses agent-coordination runtime terms such as refill, parked worker, provider route, fallback lane, HITL gate, review cap, current-head clean, or approval runner, link responders to the [agent coordination runtime glossary](../onboarding/agent-coordination-runtime-glossary.md) before assigning recovery work.
+
 This checklist is operator guidance, not a restore script. Do not run destructive commands from this document; copy the decision fields into the incident room, Kanban card, or ticket that is acting as the command log. It requires explicit decision-log rows before merges, force-pushes, restore commands, approval replays, or broad worker respawns.
 
 ## Incident metadata
@@ -12,7 +14,7 @@ This checklist is operator guidance, not a restore script. Do not run destructiv
 | Start time (UTC) | `<YYYY-MM-DD HH:MM>` |
 | Incident commander | `<single accountable operator>` |
 | Scribe | `<person recording decisions>` |
-| Affected automation | `<dispatcher, PM swarm, Codex gate, approval-cop, cron monitor, restore-preview, backup job>` |
+| Affected automation | `<dispatcher, coordination shard, review gate, approval runner, cron monitor, restore-preview, backup job>` |
 | Communication channel | `<Discord thread, incident room, Kanban card, or issue>` |
 | Current severity | `SEV-1 \| SEV-2 \| SEV-3 \| SEV-4` |
 
@@ -44,7 +46,7 @@ Run only read-only commands during stabilization unless the incident commander r
 - [ ] Capture live Kanban status for affected task ids and their parent/root cards.
 - [ ] Capture live PR state: head SHA, merge state, status checks, review decision, and linked issue closure state.
 - [ ] Capture current worktree state: branch, local head, remote head, dirty files, and ahead/behind status.
-- [ ] Capture current automation owner: live worker PID, active cron job id, or PM/doctor card.
+- [ ] Capture current automation owner: live worker PID, active cron job id, or coordination/repair card.
 - [ ] Capture latest review/approval gate state: Codex trigger timestamp, unresolved thread count, usage-limit text, approval token status.
 - [ ] If backup/restore is in scope, capture both manifests and restore-preview output before making decisions.
 
@@ -58,7 +60,7 @@ Keep roles explicit so autonomous workers do not duplicate or overwrite each oth
 | Evidence scribe | `<name>` | Records commands, outputs, links, and timestamps. | Evidence bundle attached to ticket/card. |
 | Recovery implementer | `<worker/card>` | Makes the smallest approved fix in one branch/worktree. | PR merged, reverted, or blocked. |
 | Gate operator | `<name or monitor>` | Watches CI/Codex/approval state and reports terminal status. | Green/current-head clean, explicit bypass approval, or blocker recorded. |
-| Communications owner | `<name>` | Posts updates to users/PMs without adding unverified claims. | Stakeholders acknowledge status and next update time. |
+| Communications owner | `<name>` | Posts updates to users/coordinators without adding unverified claims. | Stakeholders acknowledge status and next update time. |
 
 ## 5. Decision log template
 
@@ -70,7 +72,7 @@ Every mutation or route change must have a row before it happens.
 
 ## 6. Recovery action checklist
 
-Use the matching lane only after stabilization is complete. For corrupted Git worktrees, stuck approval/dead-letter queues, broken Kanban cards, crashed dispatcher workers, or inconsistent liveness state, use the [corrupted worktrees and queues runbook](corrupted-worktrees-and-queues.md) to keep diagnosis read-only, back up state before repair, and route destructive commands through approval-cop/HITL. For a non-mutating rehearsal of primary provider failure, fallback-only routing, in-flight backlog freeze, recovery probe, and resume order, run the [provider outage recovery drill](provider-outage-recovery-drill.md) before practicing live incident response.
+Use the matching lane only after stabilization is complete. For corrupted Git worktrees, stuck approval/dead-letter queues, broken Kanban cards, crashed dispatcher workers, or inconsistent liveness state, use the [corrupted worktrees and queues runbook](corrupted-worktrees-and-queues.md) to keep diagnosis read-only, back up state before repair, and route destructive commands through approval runner/HITL. For a non-mutating rehearsal of primary provider failure, fallback-only routing, in-flight backlog freeze, recovery probes, and resume order, use the [provider outage recovery drill](provider-outage-recovery-drill.md).
 
 ### Worker or Kanban failure
 

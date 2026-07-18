@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
-import { z } from 'zod';
+import { z, ZodError } from 'zod';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { requireBeastOperatorAuth } from '../../beasts/http/beast-auth.js';
 import { InMemoryRateLimiter, requireBeastRateLimit, type BeastRateLimitOptions } from '../../beasts/http/beast-rate-limit.js';
 import { UnknownBeastDefinitionError, UnknownTrackedAgentError } from '../../beasts/errors.js';
+import { InvalidBeastInterviewAnswerError } from '../../beasts/interview-answers.js';
 import { BeastCatalogService } from '../../beasts/services/beast-catalog-service.js';
 import { BeastDispatchService } from '../../beasts/services/beast-dispatch-service.js';
 import {
@@ -277,6 +278,14 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
         );
       }
       throwAgentToolPolicyError(error);
+      if (error instanceof ZodError) {
+        throw new HttpError(
+          422,
+          'BEAST_CONFIG_VALIDATION_ERROR',
+          'Beast run config validation failed',
+          error.issues,
+        );
+      }
       throwCapacityReservationError(error);
       throw error;
     }
@@ -371,6 +380,13 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
     } catch (error) {
       if (error instanceof UnknownBeastInterviewSessionError) {
         throw new InterviewSessionNotFoundHttpError(sessionId);
+      }
+      if (error instanceof InvalidBeastInterviewAnswerError) {
+        throw new HttpError(400, 'INVALID_INTERVIEW_ANSWER', error.message, {
+          promptKey: error.prompt.key,
+          prompt: error.prompt.prompt,
+          options: error.prompt.options,
+        });
       }
       throw error;
     }

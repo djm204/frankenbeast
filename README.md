@@ -15,13 +15,13 @@ Frankenbeast is a safety framework that enforces guardrails *outside* the LLM's 
 
 ## 🚀 One-click onboarding
 
-Starting from a fresh checkout? Use the [Frankenbeast onboarding checklist](ONBOARDING.md) for prerequisites, environment setup, and first-run validation. Coding agents should also read the [coding-agent PR etiquette guide](docs/onboarding/coding-agent-pr-etiquette.md) before opening, updating, or merging PRs. If you are trying to understand the system before changing it, follow the [Architecture reading path](ONBOARDING.md#architecture-reading-path) so you read current implementation docs before historical plans. If a PM-swarm handoff uses runtime coordination terms, read the [PM-swarm runtime glossary](ONBOARDING.md#pm-swarm-runtime-glossary) before acting. Then run the repository bootstrap script:
+Starting from a fresh checkout? Use the [Frankenbeast onboarding checklist](ONBOARDING.md) for prerequisites, environment setup, and first-run validation. If you want a role-specific path first, choose the [persona quickstart track](docs/onboarding/persona-quickstart-tracks.md) for operators, contributors, or agent-developers. If setup fails, use the [setup troubleshooting matrix](docs/onboarding/setup-troubleshooting-matrix.md) to map symptoms to diagnostic commands, safe remediations, and verification checks. Coding agents should also read the [first-PR agent runbook](docs/onboarding/first-pr-agent-runbook.md) for the end-to-end issue-to-PR flow, the [coding-agent PR etiquette guide](docs/onboarding/coding-agent-pr-etiquette.md) before opening, updating, or merging PRs, and the [release and deployment mental model](docs/onboarding/release-deployment-mental-model.md) before owning post-merge or release handoffs. If you are trying to understand the system before changing it, follow the [Architecture reading path](ONBOARDING.md#architecture-reading-path) for current implementation docs before historical plans, then use the [architecture map for new agent contributors](docs/onboarding/architecture-map.md) to route issues to the right package, tests, approval/HITL boundary, and memory surface. If an agent coordination handoff uses runtime coordination terms, read the [agent coordination runtime glossary](ONBOARDING.md#agent-coordination-runtime-glossary) before acting. New agents that need a low-risk edit/test rehearsal can use the [agent practice fixture](fixtures/agent-practice-fixture/README.md), which includes an intentionally failing scoreboard test, reset script, and sample issue body. Then run the repository bootstrap script:
 
 ```bash
 npm run bootstrap -- --no-docker
 ```
 
-The bootstrap command delegates to [`scripts/bootstrap.sh`](scripts/bootstrap.sh), which validates Node.js, npm/Corepack, `.env` defaults, dependencies, and optional Docker services. If you want persona-specific guidance before running setup commands, generate a deterministic first-run checklist with `npm run first-run:checklist -- --persona operator` or `npm --silent run first-run:checklist -- --persona coding-agent --json`. To orient a human or agent inside the repository, run `npm run workspace:tour` or `npm --silent run workspace:tour -- --json` for a package map, key docs, generated files, test commands, runtime state paths, safe first commands, and docs-drift checks. New issue workers can run `npm --silent run new-worker:preflight -- --json` before coding to verify the local Node/npm/git/gh/jq toolchain, GitHub authentication, project git identity, repository root, and worktree cleanliness with parseable structured output for PM handoffs. Pass `--services` when you want bootstrap to start the optional Docker compose stack after dependency installation. To preview the checks without changing files or installing packages, run:
+The bootstrap command delegates to [`scripts/bootstrap.sh`](scripts/bootstrap.sh), which validates Node.js, npm/Corepack, `.env` defaults, dependencies, and optional Docker services. The [persona quickstart tracks](docs/onboarding/persona-quickstart-tracks.md) name the prerequisites, setup commands, validation commands, and first-success output for each supported role. If you want persona-specific generated guidance before running setup commands, use `npm run first-run:checklist -- --persona operator` or `npm --silent run first-run:checklist -- --persona coding-agent --json`. To orient a human or agent inside the repository, run `npm run workspace:tour` or `npm --silent run workspace:tour -- --json` for a package map, key docs, generated files, test commands, runtime state paths, safe first commands, and docs-drift checks. New issue workers can run `npm --silent run new-worker:preflight -- --json` before coding to verify the local Node/npm/git/gh/jq toolchain, GitHub authentication, project git identity, repository root, and worktree cleanliness with parseable structured output for coordination handoffs. For a broader setup healthcheck with actionable remediation and machine-readable output, run `npm --silent run setup:healthcheck -- --json`; it verifies Node/npm, dependency install state, env files, git status, common local ports, optional GitHub auth, and optional service endpoints without failing on warnings. Pass `--services` when you want bootstrap to start the optional Docker compose stack after dependency installation. To preview the checks without changing files or installing packages, run:
 
 ```bash
 ./scripts/bootstrap.sh --dry-run
@@ -54,7 +54,7 @@ LLM-based agents routinely lose safety constraints when context windows compress
 
 ## Security
 
-See [SECURITY.md](SECURITY.md) for vulnerability reporting, dependency update expectations, secret handling, HTTPS guidance, and runtime hardening recommendations. See [docs/agent-tool-execution-threat-model.md](docs/agent-tool-execution-threat-model.md) for the agent tool-execution trust boundaries that cover terminal, filesystem, GitHub, profile state, cron, and PM-swarm approval flows. See [docs/security-json-parsing-limits.md](docs/security-json-parsing-limits.md) for JSON input limits; Beast config, run config, GitHub issue payloads, and LLM issue decomposition payloads are size/depth/fan-out bounded, and YAML is not accepted on those surfaces.
+See [SECURITY.md](SECURITY.md) for vulnerability reporting, dependency update expectations, secret handling, HTTPS guidance, and runtime hardening recommendations. See [docs/agent-tool-execution-threat-model.md](docs/agent-tool-execution-threat-model.md) for the agent tool-execution trust boundaries that cover terminal, filesystem, GitHub, profile state, cron, and agent coordination approval flows. See [docs/security-json-parsing-limits.md](docs/security-json-parsing-limits.md) for JSON input limits; Beast config, run config, GitHub issue payloads, and LLM issue decomposition payloads are size/depth/fan-out bounded, and YAML is not accepted on those surfaces.
 
 ## Architecture
 
@@ -642,7 +642,7 @@ npm run local:verify-setup
 
 `CHROMA_URL` points Frankenbeast's local setup scripts at the ChromaDB HTTP API.
 Both `npm run local:seed` (`scripts/seed.ts`) and `npm run local:verify-setup`
-(`scripts/verify-setup.ts`) read it from the environment or the copied `.env`
+(`scripts/verify-setup.mjs`) read it from the environment or the copied `.env`
 file, falling back to `http://localhost:8000` when it is unset. The default
 matches the root `docker-compose.yml`, which publishes ChromaDB on port 8000
 for local development.
@@ -770,8 +770,8 @@ Required HITL approvals fail closed when a run has no interactive TTY. In truste
 
 - [ADR-018](docs/adr/018-secret-store-architecture.md) — secret store design and backend selection rationale
 - [ADR-017](docs/adr/017-network-operator-control-plane.md) — network operator control plane and token auth
-- [Worker push rollback runbook](docs/runbooks/worker-push-rollback.md) — dry-run planning and approval-cop routing for failed or bad worker branch publishes
-- [Corrupted worktrees and queues runbook](docs/dr/corrupted-worktrees-and-queues.md) — incident diagnosis, backup-before-repair, queue repair, worker defer/replace, and approval-cop routing for automation-state corruption
+- [Worker push rollback runbook](docs/runbooks/worker-push-rollback.md) — dry-run planning and approval runner routing for failed or bad worker branch publishes
+- [Corrupted worktrees and queues runbook](docs/dr/corrupted-worktrees-and-queues.md) — incident diagnosis, backup-before-repair, queue repair, worker defer/replace, and approval runner routing for automation-state corruption
 
 ## Configuration
 
@@ -784,7 +784,7 @@ Required HITL approvals fail closed when a run has no interactive TTY. In truste
 | `GOOGLE_API_KEY` | MOD-01 | Runtime only | Gemini adapter API key (Google AI Studio name) |
 | `GEMINI_API_KEY` | MOD-01 | Runtime only | Gemini adapter API key (alternative name) |
 | `OLLAMA_BASE_URL` | Provider registry | Not consumed by the current provider schema; legacy/future Ollama-compatible builds only | Ollama daemon base URL, usually `http://localhost:11434`; set a different HTTP(S) endpoint for remote or non-default daemons only in builds that actually support an Ollama provider. It is intentionally absent from `.env.example` because the default local setup, current provider schema, and current `fbeast mcp beast` presets do not consume it. |
-| `CHROMA_URL` | MOD-03 | If using semantic memory | ChromaDB base URL used by `scripts/seed.ts` and `scripts/verify-setup.ts` (default: `http://localhost:8000`) |
+| `CHROMA_URL` | MOD-03 | If using semantic memory | ChromaDB base URL used by `scripts/seed.ts` and `scripts/verify-setup.mjs` (default: `http://localhost:8000`) |
 | `SLACK_WEBHOOK_URL` | MOD-07 | If using Slack approvals | Slack webhook for HITL notifications |
 | `FRANKENBEAST_MODULE_MEMORY` | MOD-03 | Optional | Memory module config fallback and Beast child-env toggle. Only the literal value `false` records it as disabled when the `memory` config key is unset; current local CLI wiring still constructs the real memory adapter. |
 | `FRANKENBEAST_MODULE_PLANNER` | MOD-04 | Optional | Planner module config fallback and Beast child-env toggle. Only literal `false` records it as disabled when the `planner` config key is unset; current local CLI wiring still uses the graph-builder path. |
@@ -831,14 +831,14 @@ The Planner generates a Task DAG. The Critique module audits it with 8 evaluator
 
 #### Lesson rollback workflow
 
-Critique lessons recorded after a recovered failure include a `rollbackWorkflow` object for PM/liveness consumers. Use it when a lesson is later found to be incorrect, stale, over-broad, or harmful:
+Critique lessons recorded after a recovered failure include a `rollbackWorkflow` object for coordination/liveness consumers. Use it when a lesson is later found to be incorrect, stale, over-broad, or harmful:
 
 1. Quarantine the target lesson so it stops being promoted into new worker handoffs.
 2. Attach the rollback reason, evidence URLs, and verifier command to the lesson audit trail.
 3. Either record a replacement lesson with fresh traceability evidence or retire the original lesson with no replacement.
-4. Run the verifier command and include the result in the PM handoff before removing the rollback block.
+4. Run the verifier command and include the result in the coordination handoff before removing the rollback block.
 
-Rollback requests must provide a stable lesson id, a concrete rollback reason, evidence such as a review comment/regression/operator report, and a verification command. If any of that evidence is missing, PM tooling should keep the lesson blocked instead of silently retiring or replacing it.
+Rollback requests must provide a stable lesson id, a concrete rollback reason, evidence such as a review comment/regression/operator report, and a verification command. If any of that evidence is missing, coordination tooling should keep the lesson blocked instead of silently retiring or replacing it.
 
 ### Phase 3: Validated Execution
 
@@ -1003,7 +1003,7 @@ frankenbeast/
 │   ├── guides/                  # Quickstart, run/deploy, provider, agent, verification, and issue-workflow guides
 │   └── plans/                   # Design docs and implementation plans
 ├── tests/                       # Root-level integration tests
-├── scripts/                     # seed.ts, verify-setup.ts
+├── scripts/                     # seed.ts, verify-setup.mjs
 ├── packages/
 │   ├── franken-brain/           # MOD-03: Memory Systems
 │   ├── franken-planner/         # MOD-04: Planning & Decomposition
