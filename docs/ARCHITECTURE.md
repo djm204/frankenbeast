@@ -7,9 +7,9 @@ Frankenbeast is a deterministic guardrails framework for AI agents, organized as
 This document mixes two views:
 
 - **Current implementation**: what is actually wired in `@franken/orchestrator`, `@franken/mcp-suite`, and the current workspaces today
-- **Target / historical architecture**: broader MOD diagrams and pre-consolidation service boundaries that remain useful as design vocabulary, but are not necessarily current package names
+- **Target / historical architecture**: broader conceptual diagrams and pre-consolidation service boundaries that remain useful as design vocabulary, but are not necessarily current package names
 
-Unless a section explicitly says otherwise, diagrams should be read as target architecture and the prose should call out current local limitations where they matter.
+Unless a section explicitly says otherwise, diagrams should use current package or implementation-surface names, and the prose should call out current local limitations where they matter.
 
 | Package | Role |
 |---------|------|
@@ -471,13 +471,13 @@ Canonical type definitions shared across all modules:
 
 ## Module Interconnections
 
-This diagram shows the logical/target module topology. The `pre-consolidation MCP surface` subgraph depicts the pre-consolidation MCP design; the current implementation is `@franken/mcp-suite` (see the [@franken/mcp-suite](#fbeastmcp-suite) section for what does and does not exist today).
+This diagram shows the logical/target module topology using current package or implementation-surface names. The `pre-consolidation MCP surface` subgraph depicts the pre-consolidation MCP design; the current implementation is `@franken/mcp-suite` (see the [@franken/mcp-suite](#fbeastmcp-suite) section for what does and does not exist today).
 
 ```mermaid
     graph TB
         User([User Input])
 
-        subgraph "MOD-01: Frankenfirewall"
+        subgraph "@franken/orchestrator firewall"
             direction TB
             FW_IN["Inbound Interceptors<br/>• Injection Scanner<br/>• PII Masker<br/>• Project Alignment"]
             FW_ADAPT["Adapter Pipeline<br/>• ClaudeAdapter<br/>• OpenAIAdapter<br/>• OllamaAdapter<br/>• (Extensible)"]
@@ -485,7 +485,7 @@ This diagram shows the logical/target module topology. The `pre-consolidation MC
             FW_IN --> FW_ADAPT --> FW_OUT
         end
 
-        subgraph "MOD-02: Franken Skills"
+        subgraph "@franken/orchestrator skills"
             direction TB
             SK_REG["Skill Registry<br/>ISkillRegistry"]
             SK_DISC["Discovery Service<br/>Global + Local"]
@@ -494,7 +494,7 @@ This diagram shows the logical/target module topology. The `pre-consolidation MC
             SK_VAL --> SK_REG
         end
 
-        subgraph "MOD-03: Franken Brain"
+        subgraph "@franken/brain"
             direction TB
             MEM_ADAPT["Memory adapter ports<br/>Not package exports"]
             MEM_BRAIN["SqliteBrain<br/>Current public API"]
@@ -507,7 +507,7 @@ This diagram shows the logical/target module topology. The `pre-consolidation MC
             MEM_BRAIN --> MEM_RECOV
         end
 
-        subgraph "MOD-04: Franken Planner"
+        subgraph "@franken/planner"
             direction TB
             PL_INTENT["Intent Parser"]
             PL_DAG["DAG Builder<br/>Graph + Cycle Detection"]
@@ -522,7 +522,7 @@ This diagram shows the logical/target module topology. The `pre-consolidation MC
             PL_EXEC --> PL_RECOV
         end
 
-        subgraph "MOD-05: Franken Observer"
+        subgraph "@franken/observer"
             direction TB
             OB_TRACE["Trace Context<br/>Spans + Lifecycle"]
             OB_COST["Cost Tracking<br/>TokenCounter + CostCalc"]
@@ -534,7 +534,7 @@ This diagram shows the logical/target module topology. The `pre-consolidation MC
             OB_COST --> OB_CB
         end
 
-        subgraph "MOD-06: Franken Critique"
+        subgraph "@franken/critique"
             direction TB
             CR_PIPE["Critique Pipeline"]
             CR_DET["Deterministic Evaluators<br/>• Safety • GhostDep<br/>• LogicLoop • ADR"]
@@ -548,7 +548,7 @@ This diagram shows the logical/target module topology. The `pre-consolidation MC
             CR_BREAK --> CR_LOOP
         end
 
-        subgraph "MOD-07: Franken Governor"
+        subgraph "@franken/governor"
             direction TB
             GOV_TRIG["Trigger Evaluators<br/>• Budget • Skill<br/>• Confidence • Ambiguity"]
             GOV_GW["Approval Gateway"]
@@ -560,7 +560,7 @@ This diagram shows the logical/target module topology. The `pre-consolidation MC
             GOV_SEC --> GOV_GW
         end
 
-        subgraph "MOD-08: Franken Heartbeat"
+        subgraph "@franken/orchestrator heartbeat"
             direction TB
             HB_DET["Phase 1: Deterministic Check<br/>Watchlist, Git, Tokens"]
             HB_REFL["Phase 2: Reflection Engine<br/>LLM-powered analysis"]
@@ -614,60 +614,60 @@ This diagram shows the logical/target module topology. The `pre-consolidation MC
         FW_ADAPT --> LLM
         LLM --> FW_ADAPT
 
-        %% === MOD-01 → MOD-04: Sanitized Intent ===
+        %% === Orchestrator firewall → planner: Sanitized Intent ===
         FW_OUT -- "getSanitizedIntent()<br/>→ Intent" --> PL_INTENT
 
-        %% === MOD-01 ↔ MOD-02: Tool call grounding ===
+        %% === Orchestrator firewall ↔ orchestrator skills: Tool call grounding ===
         FW_OUT -- "validateToolCalls()<br/>against registry" --> SK_REG
 
-        %% === MOD-04 → MOD-02: Skill discovery ===
+        %% === Planner → orchestrator skills: Skill discovery ===
         PL_DAG -- "getAvailableSkills()<br/>hasSkill()" --> SK_REG
 
-        %% === MOD-04 → MOD-03: Context loading ===
+        %% === Planner → brain: Context loading ===
         PL_DAG -- "IMemoryModule.getContext()" --> MEM_ADAPT
         PL_EXEC -- "IMemoryModule.recordTrace()" --> MEM_ADAPT
 
-        %% === MOD-04 → MOD-07: CoT verification ===
+        %% === Planner → governor: CoT verification ===
         PL_COT -- "verifyRationale()<br/>RationaleBlock" --> GOV_TRIG
 
-        %% === MOD-06 → MOD-01: Safety rules ===
+        %% === Critique → orchestrator firewall: Safety rules ===
         CR_DET -- "getSafetyRules()<br/>executeSandbox()" --> FW_IN
 
-        %% === MOD-06 → MOD-03: ADRs + lessons ===
+        %% === Critique → brain: ADRs + lessons ===
         CR_DET -- "MemoryPort.searchADRs()" --> MEM_ADAPT
         CR_LESSON -- "MemoryPort.recordLesson()" --> MEM_ADAPT
 
-        %% === MOD-06 → MOD-05: Token spend ===
+        %% === Critique → observer: Token spend ===
         CR_BREAK -- "getTokenSpend()" --> OB_COST
 
-        %% === MOD-06 → MOD-07: Escalation ===
+        %% === Critique → governor: Escalation ===
         CR_LOOP -- "requestHumanReview()<br/>on escalation" --> GOV_GW
 
-        %% === MOD-07 → MOD-03: Audit trail ===
+        %% === Governor → brain: Audit trail ===
         GOV_AUDIT -- "record audit<br/>EpisodicTrace" --> MEM_EPIS
 
-        %% === MOD-07 → MOD-02: HITL skill check ===
+        %% === Governor → orchestrator skills: HITL skill check ===
         GOV_TRIG -- "requires_hitl?" --> SK_REG
 
-        %% === MOD-07 → MOD-05: Budget trigger ===
+        %% === Governor → observer: Budget trigger ===
         GOV_TRIG -- "budget check" --> OB_CB
 
-        %% === MOD-08: Reflection pulse ===
+        %% === Orchestrator heartbeat: Reflection pulse ===
         BL_CLOSE -- "optional pulse()" --> HB_REFL
 
-        %% === MOD-08 → MOD-05: Observability ===
+        %% === Orchestrator heartbeat → observer: Observability ===
         HB_DET -- "getTraces()<br/>getTokenSpend()" --> OB_TRACE
 
-        %% === MOD-08 → MOD-04: Task injection ===
+        %% === Orchestrator heartbeat → planner: Task injection ===
         HB_DISP -- "injectTask()<br/>self-improvement" --> PL_EXEC
 
-        %% === MOD-08 → MOD-06: Audit conclusions ===
+        %% === Orchestrator heartbeat → critique: Audit conclusions ===
         HB_REFL -- "auditConclusions()" --> CR_LOOP
 
-        %% === MOD-08 → MOD-07: Alerts + brief ===
+        %% === Orchestrator heartbeat → governor: Alerts + brief ===
         HB_BRIEF -- "sendMorningBrief()<br/>notifyAlert()" --> GOV_GW
 
-        %% === MOD-05 ← All: Span emission ===
+        %% === Observer ← All: Span emission ===
         PL_EXEC -. "emit spans" .-> OB_TRACE
         FW_ADAPT -. "emit spans" .-> OB_TRACE
         CR_LOOP -. "emit spans" .-> OB_TRACE
