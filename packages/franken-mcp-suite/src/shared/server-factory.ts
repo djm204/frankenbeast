@@ -143,27 +143,40 @@ export async function executeToolWithDeadline(
     timeoutMs,
   };
   const timeoutError = Symbol('tool-timeout');
+  const timeoutReason = () => new Error(`Tool execution timed out after ${timeoutMs}ms`);
+  const timeoutResult = (): ToolExecutionResult => ({
+    result: {
+      content: [{ type: 'text', text: `Error: Tool execution timed out after ${timeoutMs}ms [MCP_TOOL_TIMEOUT]` }],
+      isError: true,
+    },
+    timedOut: true,
+  });
+  const abortForTimeout = (): void => {
+    if (!controller.signal.aborted) controller.abort(timeoutReason());
+  };
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => {
+      abortForTimeout();
       reject(timeoutError);
-      controller.abort(new Error(`Tool execution timed out after ${timeoutMs}ms`));
     }, timeoutMs);
     timer.unref?.();
   });
 
   try {
     const result = await Promise.race([tool.handler(args, context), timeout]);
+    // Timers cannot preempt synchronous/blocking handler work. Re-check the
+    // wall clock so a handler that returns after its deadline cannot win the
+    // Promise.race merely because the event loop was blocked.
+    if (Date.now() >= context.deadlineAt) {
+      abortForTimeout();
+      return timeoutResult();
+    }
     return { result, timedOut: false };
   } catch (error) {
-    if (error === timeoutError) {
-      return {
-        result: {
-          content: [{ type: 'text', text: `Error: Tool execution timed out after ${timeoutMs}ms [MCP_TOOL_TIMEOUT]` }],
-          isError: true,
-        },
-        timedOut: true,
-      };
+    if (error === timeoutError || Date.now() >= context.deadlineAt) {
+      abortForTimeout();
+      return timeoutResult();
     }
     return {
       result: {

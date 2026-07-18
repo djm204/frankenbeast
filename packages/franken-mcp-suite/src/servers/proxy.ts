@@ -47,10 +47,11 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
   const audit = deps.audit ?? createAuditSink(dbPath);
   // The proxy wrapper must outlive the longest registered target deadline; the
   // resolved target is independently bounded below by executeToolWithDeadline.
-  const proxyExecutionTimeoutMs = [...TOOL_REGISTRY.values()].reduce(
+  const longestTargetTimeoutMs = [...TOOL_REGISTRY.values()].reduce(
     (longest, tool) => Math.max(longest, tool.timeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS),
     DEFAULT_TOOL_TIMEOUT_MS,
   );
+  const proxyExecutionTimeoutMs = longestTargetTimeoutMs + 1_000;
 
   function getAdapters(): AdapterSet {
     if (!cachedAdapters) {

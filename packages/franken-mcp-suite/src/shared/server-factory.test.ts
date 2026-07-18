@@ -121,6 +121,34 @@ describe('createMcpServer', () => {
     ]);
   });
 
+  it('reports synchronous work that finishes after its deadline as timed out', async () => {
+    let receivedSignal: AbortSignal | undefined;
+    const server = createMcpServer('test', '1.0.0', [
+      {
+        name: 'blocking',
+        description: 'Blocks before resolving',
+        timeoutMs: 5,
+        inputSchema: { type: 'object', properties: {} },
+        async handler(_args, context) {
+          receivedSignal = context!.signal;
+          const stopAt = Date.now() + 15;
+          while (Date.now() < stopAt) {
+            // Model an existing synchronous filesystem/CPU handler.
+          }
+          return { content: [{ type: 'text', text: 'late success' }] };
+        },
+      },
+    ]);
+
+    const result = await server.callTool('blocking', {});
+
+    expect(result).toEqual({
+      content: [{ type: 'text', text: 'Error: Tool execution timed out after 5ms [MCP_TOOL_TIMEOUT]' }],
+      isError: true,
+    });
+    expect(receivedSignal?.aborted).toBe(true);
+  });
+
   it('honors a per-tool timeout override while preserving nominal results', async () => {
     const tool: ToolDef = {
       name: 'slow_tool',

@@ -97,6 +97,10 @@ describe('proxy server', () => {
   });
 
   describe('execute_tool', () => {
+    it('keeps the proxy wrapper deadline longer than every target deadline', () => {
+      expect(executeToolDef.timeoutMs).toBe(31_000);
+    });
+
     it('calls through to handler and returns its result', async () => {
       const fakeResult = { content: [{ type: 'text', text: 'tool executed' }] };
       const fakeHandler = vi.fn().mockResolvedValue(fakeResult);
