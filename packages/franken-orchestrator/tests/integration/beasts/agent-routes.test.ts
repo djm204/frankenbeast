@@ -1603,6 +1603,21 @@ describe('agent routes integration', () => {
     const responseBody = await response.json() as {
       error: { message: string; details: { agentId: string; dispatchError: string } };
     };
+    agents.updateAgent(responseBody.error.details.agentId, {
+      status: 'stopped',
+    });
+    agents.appendEvent(responseBody.error.details.agentId, {
+      level: 'error',
+      type: 'agent.command.sent',
+      message: sensitiveCommand,
+      payload: { command: sensitiveCommand },
+    });
+    agents.appendEvent(responseBody.error.details.agentId, {
+      level: 'error',
+      type: 'agent.dispatch.failed',
+      message: `Provider spawn failed: token=${exceptionSecret}`,
+      payload: { error: exceptionSecret, runId: 'run_historical-secret-link' },
+    });
     const detailResponse = await app.request(`/v1/beasts/agents/${responseBody.error.details.agentId}`, { headers });
     expect(detailResponse.status).toBe(200);
     const detail = await detailResponse.json() as {
@@ -1615,6 +1630,11 @@ describe('agent routes integration', () => {
       logs: consoleError.mock.calls,
     });
     expect(responseBody.error.details.dispatchError).toBe(SAFE_DISPATCH_FAILURE_MESSAGE);
+    expect(detail.data.agent).toMatchObject({
+      initAction: { kind: 'martin-loop', command: '[REDACTED]', config: {} },
+      initConfig: {},
+    });
+    expect(detail.data.agent).not.toHaveProperty('dispatchRunId');
     expect(exposedSurfaces).not.toContain(exceptionSecret);
     expect(exposedSurfaces).not.toContain('Provider spawn failed');
     expect(exposedSurfaces).not.toContain(requestSecret);
@@ -1622,6 +1642,66 @@ describe('agent routes integration', () => {
     expect(exposedSurfaces).not.toContain('/opt/private/bin/provider');
     expect(exposedSurfaces).not.toContain('super-secret');
     consoleError.mockRestore();
+  });
+
+  it('redacts a failed tracked agent when auto-dispatch resolves instead of throwing', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const repository = new SQLiteBeastRepository(join(TMP, 'redacted-resolved-dispatch-failure.db'));
+    const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
+    const runs = { getRun: vi.fn(), start: vi.fn(), stop: vi.fn(), kill: vi.fn(), restart: vi.fn() };
+    const requestSecret = 'resolved-dispatch-secret-1234567890';
+    const sensitiveCommand = '/opt/private/bin/provider --token resolved-secret';
+    const dispatch = {
+      createRun: vi.fn(async () => {
+        const agent = agents.listAgents()[0];
+        if (!agent) throw new Error('Expected the route to create a tracked agent before dispatch');
+        agents.updateAgent(agent.id, { status: 'failed' });
+        agents.appendEvent(agent.id, {
+          level: 'error',
+          type: 'agent.dispatch.failed',
+          message: SAFE_DISPATCH_FAILURE_MESSAGE,
+          payload: { error: SAFE_DISPATCH_FAILURE_MESSAGE },
+        });
+        return { id: 'run_failed', status: 'failed' };
+      }),
+    };
+    const app = new Hono();
+    app.onError(errorHandler);
+    app.route('/', agentRoutes({
+      agents,
+      dispatch: dispatch as never,
+      runs: runs as never,
+      operatorToken: TEST_SUPER_SECRET_OPERATOR_TOKEN,
+      security: new TransportSecurityService(),
+    }));
+    const headers = new Headers({ 'content-type': 'application/json' });
+    headers.set('authorization', ['Bearer', TEST_SUPER_SECRET_OPERATOR_TOKEN].join(' '));
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        initAction: {
+          kind: 'martin-loop',
+          command: sensitiveCommand,
+          config: { provider: 'claude', token: requestSecret },
+        },
+        initConfig: { provider: 'claude', token: requestSecret },
+      }),
+    });
+
+    expect(response.status).toBe(201);
+    const responseBody = await response.json() as { data: Record<string, unknown> };
+    expect(responseBody.data).toMatchObject({
+      status: 'failed',
+      initAction: { kind: 'martin-loop', command: '[REDACTED]', config: {} },
+      initConfig: {},
+    });
+    expect(responseBody.data).not.toHaveProperty('dispatchRunId');
+    const exposedResponse = JSON.stringify(responseBody);
+    expect(exposedResponse).not.toContain(requestSecret);
+    expect(exposedResponse).not.toContain(sensitiveCommand);
   });
 
   it('allows starting failed tracked agents via the start endpoint', async () => {

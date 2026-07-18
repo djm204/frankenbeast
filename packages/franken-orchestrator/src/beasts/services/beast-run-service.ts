@@ -93,7 +93,7 @@ export class BeastRunService {
       }
       this.syncTrackedAgent(updated);
       return updated;
-    } catch (error) {
+    } catch {
       const errorMessage = SAFE_DISPATCH_FAILURE_MESSAGE;
       const currentRun = this.repository.getRun(run.id);
       if (

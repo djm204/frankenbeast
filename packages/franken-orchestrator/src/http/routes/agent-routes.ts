@@ -17,7 +17,7 @@ import {
   validateBody,
 } from '../middleware.js';
 import { TransportSecurityService } from '../security/transport-security.js';
-import type { BeastRun, TrackedAgent } from '../../beasts/types.js';
+import type { BeastRun, TrackedAgent, TrackedAgentEvent } from '../../beasts/types.js';
 
 const ModuleConfigSchema = z.object({
   firewall: z.boolean().optional(),
@@ -224,13 +224,21 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       }, 409);
     }
 
-    return c.json({ data: deps.agents.getAgent(agent.id) }, 201);
+    const createdDetail = deps.agents.getAgentDetail(agent.id);
+    return c.json({
+      data: hasDispatchFailure(createdDetail.events)
+        ? redactDispatchFailedAgentResponse(createdDetail.agent)
+        : createdDetail.agent,
+    }, 201);
   });
 
   app.get('/v1/beasts/agents', (c) => {
     return c.json({
       data: {
-        agents: deps.agents.listAgents().map(redactFailedAgentResponse),
+        agents: deps.agents.listAgents().map((agent) => {
+          const events = deps.agents.getAgentDetail(agent.id).events;
+          return hasDispatchFailure(events) ? redactDispatchFailedAgentResponse(agent) : agent;
+        }),
         capacityReservation: deps.agents.getCapacityReservationState(),
       },
     });
@@ -240,10 +248,12 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
     const agentId = c.req.param('agentId');
     try {
       const detail = deps.agents.getAgentDetail(agentId);
+      const redactDispatchFailure = hasDispatchFailure(detail.events);
       return c.json({
         data: {
           ...detail,
-          agent: redactFailedAgentResponse(detail.agent),
+          agent: redactDispatchFailure ? redactDispatchFailedAgentResponse(detail.agent) : detail.agent,
+          events: redactDispatchFailure ? redactDispatchFailedAgentEvents(detail.events) : detail.events,
         },
       });
     } catch (error) {
@@ -672,16 +682,41 @@ function assertAgentCapacityAvailable(deps: AgentRoutesDeps, agent: TrackedAgent
   }
 }
 
-function redactFailedAgentResponse(agent: TrackedAgent) {
-  if (agent.status !== 'failed') {
-    return agent;
-  }
-
+function redactDispatchFailedAgentResponse(agent: TrackedAgent) {
   return {
     ...agent,
-    initAction: { kind: agent.initAction.kind },
+    initAction: {
+      ...agent.initAction,
+      command: '[REDACTED]',
+      config: {},
+    },
     initConfig: {},
+    dispatchRunId: undefined,
   };
+}
+
+function hasDispatchFailure(events: readonly TrackedAgentEvent[]): boolean {
+  return events.some((event) => event.type === 'agent.dispatch.failed');
+}
+
+function redactDispatchFailedAgentEvents(events: readonly TrackedAgentEvent[]): TrackedAgentEvent[] {
+  return events.map((event) => {
+    if (event.type === 'agent.command.sent') {
+      return {
+        ...event,
+        message: 'Sent init command',
+        payload: {},
+      };
+    }
+    if (event.type === 'agent.dispatch.failed') {
+      return {
+        ...event,
+        message: SAFE_DISPATCH_FAILURE_MESSAGE,
+        payload: { error: SAFE_DISPATCH_FAILURE_MESSAGE },
+      };
+    }
+    return event;
+  });
 }
 
 async function dispatchDetachedAgent(
