@@ -156,6 +156,7 @@ describe('extractPostTaskLessonCandidates', () => {
   it.each([
     'Prefer to use British English',
     'Prefer to use pnpm',
+    'Prefer pnpm',
     'I prefer the gh CLI',
   ])('routes bare prefer-to-use correction %p to memory review', (correction) => {
     const report = extractPostTaskLessonCandidates({
@@ -189,20 +190,23 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
-  it('routes always-use corrections to memory review', () => {
-    const report = extractPostTaskLessonCandidates({
-      taskId: 'post-task-always-use-preference',
-      completedAt: '2026-07-16T00:00:00.000Z',
-      userCorrections: ['Always use British English'],
-    });
+  it.each(['Always use British English', 'Always use pnpm'])(
+    'routes always-use correction %p to memory review',
+    (correction) => {
+      const report = extractPostTaskLessonCandidates({
+        taskId: 'post-task-always-use-preference',
+        completedAt: '2026-07-16T00:00:00.000Z',
+        userCorrections: [correction],
+      });
 
-    expect(report.candidates[0]).toEqual(
-      expect.objectContaining({
-        category: 'preference',
-        suggestedDestination: 'memory',
-      }),
-    );
-  });
+      expect(report.candidates[0]).toEqual(
+        expect.objectContaining({
+          category: 'preference',
+          suggestedDestination: 'memory',
+        }),
+      );
+    },
+  );
 
   it('routes negative documentation preferences to memory review', () => {
     const report = extractPostTaskLessonCandidates({
@@ -277,6 +281,21 @@ describe('extractPostTaskLessonCandidates', () => {
         category: 'procedure',
         suggestedDestination: 'skill',
         privacyFilter: expect.objectContaining({ action: 'admit' }),
+      }),
+    );
+  });
+
+  it('discards failed retry narration without a recovery action', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-failed-retry-narration',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      toolFailures: ['Retry with gh run view failed instead of succeeding'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'task-state',
+        suggestedDestination: 'discard',
       }),
     );
   });
@@ -611,6 +630,24 @@ describe('extractPostTaskLessonCandidates', () => {
       }),
     );
   });
+
+  it.each(['Frankenbeast', '@franken/foo'])(
+    'discards bare repo/package mention %p without an environment fact',
+    (note) => {
+      const report = extractPostTaskLessonCandidates({
+        taskId: 'post-task-bare-repo-mention',
+        completedAt: '2026-07-16T00:00:00.000Z',
+        notes: [note],
+      });
+
+      expect(report.candidates[0]).toEqual(
+        expect.objectContaining({
+          category: 'task-state',
+          suggestedDestination: 'discard',
+        }),
+      );
+    },
+  );
 
   it('admits package-scoped environment facts', () => {
     const report = extractPostTaskLessonCandidates({

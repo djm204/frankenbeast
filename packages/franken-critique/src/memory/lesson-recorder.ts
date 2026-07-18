@@ -216,8 +216,6 @@ const PREFERENCE_PATTERNS: readonly RegExp[] = [
 const ENVIRONMENT_FACT_PATTERNS: readonly RegExp[] = [
   /\b(?:repo|repository|project|package|workspace)\s+(?:uses|requires|runs|is)\b/i,
   /\b(?:package\s+)?@franken\/[a-z0-9-]+\s+(?:uses|requires|runs|is)\b/i,
-  /\b@franken\/[a-z0-9-]+\b/i,
-  /\bfrankenbeast\b/i,
 ];
 
 const LESSON_FEEDBACK_WEIGHTING_GUIDANCE =
@@ -1263,6 +1261,9 @@ function isRawUserPreferenceCorrection(text: string): boolean {
     /^(?:please\s+)?prefer\s+to\s+use\s+(?:the\s+)?(?:gh\s+cli|github\s+cli|cli|pnpm|npm|yarn|node|bun|deno|uv|pip|poetry|package\s+manager)\b/i.test(
       text,
     ) ||
+    /^(?:please\s+)?prefer\s+(?:the\s+)?(?:gh\s+cli|github\s+cli|cli|pnpm|npm|yarn|node|bun|deno|uv|pip|poetry|package\s+manager)\b/i.test(
+      text,
+    ) ||
     /^i\s+prefer\s+(?:to\s+use\s+)?(?:the\s+)?(?:gh\s+cli|github\s+cli|cli|pnpm|npm|yarn|node|bun|deno|uv|pip|poetry|package\s+manager)\b/i.test(
       text,
     )
@@ -1336,7 +1337,10 @@ function isRawUserPreferenceCorrection(text: string): boolean {
   }
   if (
     /^(?:please\s+)?always\s+use\b/i.test(text) &&
-    !looksProcedural
+    (!looksProcedural ||
+      /\b(?:gh\s+cli|github\s+cli|cli|pnpm|npm|yarn|node|bun|deno|uv|pip|poetry|package\s+manager)\b/i.test(
+        text,
+      ))
   ) {
     return true;
   }
@@ -1432,8 +1436,9 @@ function isFailedRetryOrFallbackStatus(text: string): boolean {
 }
 
 function hasStatusRecoveryGuidance(text: string): boolean {
-  return /(?:;|,)\s*(?:use|run|check|retry|fallback)\b|\b(?:instead|workaround)\b/i.test(
-    text,
+  return (
+    /(?:;|,)\s*(?:use|run|check|retry|fallback)\b/i.test(text) ||
+    /\bworkaround\b/i.test(text)
   );
 }
 
