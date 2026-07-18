@@ -92,7 +92,7 @@ describe('GovernorAdapter', () => {
     await expect(governor.check({
       action: 'mcp__fbeast-proxy__execute_tool',
       context: '{"key":"profile.delete-policy","readScope":"agent","agentId":"agent-1"}',
-    })).resolves.toMatchObject({ decision: 'approved' });
+    })).resolves.toMatchObject({ decision: 'denied' });
     await expect(governor.check({
       action: 'mcp__fbeast-proxy__execute_tool',
       context: '{"key":"profile.delete-policy","source":"chat:turn-42 secret","targetStore":"working"}',
@@ -119,10 +119,10 @@ describe('GovernorAdapter', () => {
     db.close();
     expect(rows[0]?.context).toBe('{}');
     expect(rows[1]?.context).toBe('{}');
-    expect(rows[2]?.context).toBe('{}');
+    expect(rows[2]?.context).toContain('profile.delete-policy');
     expect(rows[3]?.context).toBe('{}');
     expect(rows[4]?.context).toContain('profile.delete-policy');
-    expect(rows[5]?.context).toBe('{}');
+    expect(rows[5]?.context).toContain('readScope');
     expect(rows[6]?.context).toContain('profile.delete-policy');
     expect(rows[7]?.context).toContain('profile.delete-policy');
   });
