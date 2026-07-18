@@ -189,6 +189,12 @@ const PRIVACY_REDACTION_RULES: readonly PrivacyRedactionRule[] = [
       /(?:https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/(?:pull|issues)\/\d+(?:[^\s'"`)\]]*)?|https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/actions\/runs\/\d+(?:[^\s'"`)\]]*)?|https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/commit\/[0-9a-f]{7,40}(?:[^\s'"`)\]]*)?|\b(?:(?:PR|pull request|issue|ticket)\s*#?\d+|(?:commit|sha)\s+[0-9a-f]{7,40}|task\s+t_[0-9a-f]{6,}|(?:impl|harden):issue-\d+|issue-\d+)\b)/gi,
     replacement: '[REDACTED_TASK_REFERENCE]',
   },
+  {
+    kind: 'task-state',
+    label: 'branch-reference',
+    pattern: /\bbranch\s+(?:refs\/heads\/)?[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+\b/gi,
+    replacement: 'branch [REDACTED_TASK_REFERENCE]',
+  },
 ];
 
 const CUSTOMER_DATA_PATTERNS: readonly RegExp[] = [
@@ -1143,9 +1149,7 @@ export function extractPostTaskLessonCandidates(
   for (const failure of input.toolFailures ?? []) {
     const normalizedFailure = normalizeCandidateText(failure);
     addCandidate('tool-failure', normalizedFailure, undefined, {
-      forceDiscard:
-        isTaskReferenceBookkeeping(normalizedFailure) ||
-        !hasReusableToolFailureSignal(normalizedFailure),
+      forceDiscard: !hasReusableToolFailureSignal(normalizedFailure),
     });
   }
   if (input.summary) {
@@ -1264,7 +1268,11 @@ function recategorizePostTaskPrivacyDecision(
 }
 
 function isRawUserPreferenceCorrection(text: string): boolean {
-  if (isTaskReferenceBookkeeping(text) || isDocumentationUpdateLesson(text)) {
+  if (
+    isTaskReferenceBookkeeping(text) ||
+    isDocumentationUpdateLesson(text) ||
+    isOneOffUserTaskRequest(text)
+  ) {
     return false;
   }
   const looksProcedural = /\b(?:command|cli|tool|script|test|run|running|workflow|procedure|steps?|fallback|workaround|retry|retrying|gh|npm|pnpm|yarn|node)\b/i.test(
@@ -1373,6 +1381,14 @@ function isRawUserPreferenceCorrection(text: string): boolean {
     return true;
   }
   if (
+    /^(?:please\s+)?always\s+(?:keep|prefer|avoid)\b/i.test(text) &&
+    /\b(?:concise|brief|verbose|emoji|emojis|tone|style|format|summar(?:y|ies|ize)|final|response|responses|reply|replies|write|writing)\b/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  if (
     /^\s*(?:please\s+)?prefer\s+not\s+to\s+use\b/i.test(text)
   ) {
     return true;
@@ -1386,7 +1402,12 @@ function isRawUserPreferenceCorrection(text: string): boolean {
 }
 
 function hasExplicitPostTaskLessonSignal(text: string): boolean {
-  if (isTaskReferenceBookkeeping(text)) return false;
+  if (
+    isTaskReferenceBookkeeping(text) &&
+    !hasReusableGuidanceAfterTaskStateClause(text)
+  ) {
+    return false;
+  }
   if (
     (isFailedRetryOrFallbackStatus(text) || isRawToolFailureStatus(text)) &&
     !hasStatusRecoveryGuidance(text)
@@ -1403,6 +1424,7 @@ function hasExplicitPostTaskLessonSignal(text: string): boolean {
     return false;
   }
   if (isOneOffShouldCorrection(text)) return false;
+  if (isOneOffUserTaskRequest(text)) return false;
   if (isNegatedKeywordOnlyStatus(text)) return false;
   if (isRawUserPreferenceCorrection(text)) return true;
   if (PREFERENCE_PATTERNS.some((pattern) => pattern.test(text))) return true;
@@ -1430,8 +1452,20 @@ function hasExplicitPostTaskLessonSignal(text: string): boolean {
   );
 }
 
+function hasReusableGuidanceAfterTaskStateClause(text: string): boolean {
+  return (
+    TASK_STATE_PATTERNS.some((pattern) => pattern.test(text)) &&
+    /(?:;|\n)\s*(?:always\s+)?(?:run|use|check|retry|fallback)\b/i.test(text)
+  );
+}
+
 function hasReusableToolFailureSignal(text: string): boolean {
-  if (isTaskScopedToolFailureReference(text)) return false;
+  if (
+    isTaskScopedToolFailureReference(text) &&
+    !hasReusableGuidanceAfterTaskStateClause(text)
+  ) {
+    return false;
+  }
   if (isFailedRetryOrFallbackStatus(text) && !hasStatusRecoveryGuidance(text)) {
     return false;
   }
@@ -1608,6 +1642,17 @@ function isOneOffShouldCorrection(text: string): boolean {
       text,
     ) &&
     !/\b(?:always|never|avoid|prefer|require|validate|verify|retry|redact|fallback|workaround|when|if|docs?|readme|runbook|guide)\b/i.test(
+      text,
+    )
+  );
+}
+
+function isOneOffUserTaskRequest(text: string): boolean {
+  return (
+    /\buser\s+wants?\b/i.test(text) &&
+    /\b(?:fix|fixed|resolve|resolved|repair|repaired|address|addressed)\b/i.test(text) &&
+    /\b(?:bug|issue|problem|failure|failing\s+test|test|error|regression)\b/i.test(text) &&
+    !/\b(?:always|never|avoid|prefer|when|if|before|after|procedure|workflow|docs?|readme|runbook|guide)\b/i.test(
       text,
     )
   );
@@ -4089,7 +4134,7 @@ function isGenericCustomerPolicyText(text: string): boolean {
 }
 
 function hasConcreteCustomerReference(text: string): boolean {
-  return /\b(?:[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*|[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*|[a-z][A-Za-z0-9_.:-]*\s+(?:data|records?|information|identifiers?))|[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*|[Cc]ustomer\s+(?:account\s+)?(?!(?:data|identifiers?|records?|information|privacy|pii)\b)(?:[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|[A-Za-z0-9][A-Za-z0-9_.:-]*)|[Cc]ustomer\s+(?:data|identifiers?|records?|information|privacy|pii)\s*(?:(?:for|[:=-])\s*|\s+)[A-Za-z0-9][A-Za-z0-9_.:-]*)\b/.test(
+  return /\b(?:[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*|[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*|[a-z][A-Za-z0-9_.:-]*\s+(?:data|records?|information|identifiers?))|[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*|[Cc]ustomer\s+(?:account\s+)?(?!(?:data|identifiers?|records?|information|privacy|pii)\b)(?:[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|[A-Za-z0-9][A-Za-z0-9_.:-]*)|[Cc]ustomer\s+(?:data|identifiers?|records?|information|privacy|pii)\s*(?:(?:for|[:=-])\s*|\s+)(?!(?:should|are|is|must|never|not|stay|stays|remain|remains|be|being|was|were)\b)[A-Za-z0-9][A-Za-z0-9_.:-]*)\b/.test(
     text,
   );
 }
@@ -4115,7 +4160,7 @@ function extractCustomerSegments(text: string): string[] {
       'g',
     ),
     new RegExp(
-      `\\b[Cc]ustomer\\s+(?:data|identifiers?|records?|information|privacy|pii)\\s*(?:(?:for|[:=-])\\s*|\\s+)[A-Za-z0-9][A-Za-z0-9_.:-]*${trailingCustomerToken}\\b`,
+      `\\b[Cc]ustomer\\s+(?:data|identifiers?|records?|information|privacy|pii)\\s*(?:(?:for|[:=-])\\s*|\\s+)(?!(?:should|are|is|must|never|not|stay|stays|remain|remains|be|being|was|were)\\b)[A-Za-z0-9][A-Za-z0-9_.:-]*${trailingCustomerToken}\\b`,
       'g',
     ),
   ];

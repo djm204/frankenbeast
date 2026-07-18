@@ -548,6 +548,98 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it.each(['Always keep summaries concise', 'Please always prefer concise summaries'])(
+    'routes always-prefixed preference %p to memory review',
+    (correction) => {
+      const report = extractPostTaskLessonCandidates({
+        taskId: 'post-task-always-prefixed-preference',
+        completedAt: '2026-07-16T00:00:00.000Z',
+        userCorrections: [correction],
+      });
+
+      expect(report.candidates[0]).toEqual(
+        expect.objectContaining({
+          category: 'preference',
+          suggestedDestination: 'memory',
+        }),
+      );
+    },
+  );
+
+  it.each(['User wants the failing test fixed', 'User wants the bug resolved'])(
+    'discards one-off user task request %p',
+    (note) => {
+      const report = extractPostTaskLessonCandidates({
+        taskId: 'post-task-user-wants-task-request',
+        completedAt: '2026-07-16T00:00:00.000Z',
+        notes: [note],
+      });
+
+      expect(report.candidates[0]).toEqual(
+        expect.objectContaining({
+          category: 'task-state',
+          suggestedDestination: 'discard',
+        }),
+      );
+    },
+  );
+
+  it('preserves reusable guidance mixed with task references', () => {
+    const reports = [
+      extractPostTaskLessonCandidates({
+        taskId: 'post-task-mixed-summary-guidance',
+        completedAt: '2026-07-16T00:00:00.000Z',
+        summary: 'Merged PR #123; always run npm test before replying',
+      }),
+      extractPostTaskLessonCandidates({
+        taskId: 'post-task-mixed-tool-guidance',
+        completedAt: '2026-07-16T00:00:00.000Z',
+        toolFailures: ['PR #123 checks failed; use gh run view'],
+      }),
+    ];
+
+    for (const report of reports) {
+      expect(JSON.stringify(report)).not.toContain('PR #123');
+      expect(report.candidates[0]).toEqual(
+        expect.objectContaining({
+          category: 'procedure',
+          suggestedDestination: 'skill',
+        }),
+      );
+    }
+  });
+
+  it('redacts branch references without discarding reusable candidates', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-branch-reference-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['Please keep summaries concise for branch feature/customer-fix'],
+    });
+
+    expect(JSON.stringify(report)).not.toContain('feature/customer-fix');
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'preference',
+        suggestedDestination: 'memory',
+      }),
+    );
+  });
+
+  it('keeps generic customer policy text readable and non-sensitive', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-generic-customer-policy',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['User prefers customer data should never be copied'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        text: 'User prefers customer data should never be copied',
+        privacyFilter: expect.objectContaining({ sensitive: false }),
+      }),
+    );
+  });
+
   it('discards numbered task references even in conditional notes', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-numbered-pr-conditional',
