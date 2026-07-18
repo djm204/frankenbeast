@@ -27,7 +27,7 @@ const sensitiveEnvNames = [
   ['SECRET', 'KEY'],
 ].map((parts) => parts.join('_'));
 
-const sensitiveIdentifierPattern = /\b(?:(?:GITHUB|GH)_PAT|[A-Z0-9_]+_PAT|[A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY|PASSPHRASE)|[A-Z0-9_]*(?:SECRET_KEY|ACCESS_KEY)|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)\b/i;
+const sensitiveIdentifierPattern = /\b(?:[A-Z0-9_]*(?:_PAT|PAT_)[A-Z0-9_]*|[A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY|PASSPHRASE)|[A-Z0-9_]*(?:SECRET_KEY|ACCESS_KEY)|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)\b/i;
 const fallbackOperatorPattern = /(?:=|:|\?\?|\|\|)\s*$/;
 const DEFAULT_MAX_SCANNED_FILE_BYTES = 1_000_000;
 const DEFAULT_MAX_SCANNED_LINE_CHARS = 20_000;
@@ -359,7 +359,7 @@ function expressionUsesSensitiveAlias(expression, aliases) {
   return false;
 }
 
-function collectSensitiveEnvAliases(line, aliases) {
+function collectSensitiveEnvAliases(line, aliases, envNameAliases) {
   const destructured = line.match(/^\s*(?:const|let|var)\s*\{([^}]+)\}\s*=\s*(?:\(?process\.env\)?|import\.meta\.env)\s*;?$/);
   if (destructured) {
     for (const part of destructured[1].split(',')) {
@@ -378,7 +378,15 @@ function collectSensitiveEnvAliases(line, aliases) {
     return;
   }
   const [, alias, expression] = assignment;
-  if (hasSensitiveEnvAccess(expression) || expressionUsesSensitiveAlias(expression, aliases)) {
+  const envNameLiteral = stringLiterals(expression).map((literal) => literal.value.trim()).find((literal) => sensitiveIdentifierPattern.test(literal));
+  if (envNameLiteral) {
+    envNameAliases.add(alias);
+  } else {
+    envNameAliases.delete(alias);
+  }
+  const envNameAliasAccess = new RegExp(String.raw`(?:os\.environ(?:\.(?:get|setdefault))?|os\.getenv|\bgetenv|\benviron(?:\.(?:get|setdefault))?)\s*\(\s*([A-Za-z_$][\w$]*)|(?:os\.)?environ\s*\[\s*([A-Za-z_$][\w$]*)\s*\]`, 'u').exec(expression);
+  const envAlias = envNameAliasAccess?.[1] ?? envNameAliasAccess?.[2] ?? '';
+  if (hasSensitiveEnvAccess(expression) || (envAlias && envNameAliases.has(envAlias)) || expressionUsesSensitiveAlias(expression, aliases)) {
     aliases.add(alias);
   } else {
     aliases.delete(alias);
@@ -389,7 +397,7 @@ function hasCronScheduleLiteral(line) {
   const cronComponent = String.raw`(?:\*|\d+(?:-\d+)?|[A-Z]{3}(?:-[A-Z]{3})?)(?:\/\d+)?`;
   const cronField = String.raw`${cronComponent}(?:,${cronComponent})*`;
   const cronSchedule = new RegExp(String.raw`(?:^|\s)${cronField}\s+${cronField}\s+${cronField}\s+${cronField}\s+${cronField}(?:\s+\S|\s*$)`);
-  return stringLiterals(line).some((literal) => cronSchedule.test(literal.value));
+  return stringLiterals(line).some((literal) => /^(?:@(?:reboot|yearly|annually|monthly|weekly|daily|hourly))\s+\S/i.test(literal.value.trim()) || cronSchedule.test(literal.value));
 }
 
 function hasCronCommandMarker(line) {
@@ -399,8 +407,11 @@ function hasCronCommandMarker(line) {
 
 function hasAliasInterpolation(line, alias) {
   const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const templateInterpolationPattern = new RegExp(`(?:\\$?\\{\\s*${escaped}\\s*\\})`, 'u');
+  const templateInterpolationPattern = new RegExp(`(?:\\$?\\{\\s*${escaped}(?:\\b[^}]*)?\\})`, 'u');
   if (stringLiterals(line).some((literal) => templateInterpolationPattern.test(literal.value))) {
+    return true;
+  }
+  if (templateInterpolationPattern.test(line)) {
     return true;
   }
   const outsideStrings = codeOutsideStringLiterals(line);
@@ -411,10 +422,10 @@ function hasAliasInterpolation(line, alias) {
 function hasCronCredentialLiteral(line) {
   return stringLiterals(line).some((literal) => {
     const value = literal.value;
-    if (!hasCronScheduleLiteral(`${literal.quote}${value}${literal.quote}`) && !/\bCRON(?:_CMD|_COMMAND)?\b|\bcrontab\b/i.test(line)) {
-      return false;
-    }
-    return new RegExp(`${sensitiveIdentifierPattern.source}\\s*=\\s*[^\\s'\"` + '`' + `]+`, 'i').test(value);
+    const cronLike = hasCronScheduleLiteral(`${literal.quote}${value}${literal.quote}`) || /\bCRON(?:_CMD|_COMMAND)?\b|\bcrontab\b/i.test(line);
+    const hasCredentialAssignment = new RegExp(`${sensitiveIdentifierPattern.source}\\s*=\\s*[^\\s'\"` + '`' + `]+`, 'i').test(value);
+    const hasInlineTokenMaterial = /\b(?:gh[pousr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{8,})\b/i.test(value);
+    return (cronLike || hasCredentialAssignment) && (hasCredentialAssignment || hasInlineTokenMaterial);
   });
 }
 
@@ -437,7 +448,7 @@ function isCronContinuationLine(line, inCronContext, pendingCronCommand) {
   if (!inCronContext) {
     return false;
   }
-  if (/\(\s*$|[+\\,]\s*$/.test(line)) {
+  if (/\(\s*$|[+\\,]\s*$|(?:[furbFURB]*)?(?:'''|\"\"\")\s*$/.test(line)) {
     return true;
   }
   if (/^[furbFURB]*['"`]/.test(line)) {
@@ -516,6 +527,7 @@ async function scanSourceFile(file, findings) {
   const commentState = { inBlockComment: false };
   let pendingSensitiveFallbackLine = null;
   const sensitiveEnvAliases = new Set();
+  const sensitiveEnvNameAliases = new Set();
   let pendingCronCommand = false;
   const language = lineLanguage(file);
 
@@ -529,12 +541,12 @@ async function scanSourceFile(file, findings) {
     if (hasCronSecretInterpolation(code, sensitiveEnvAliases, inCronContext)) {
       findings.push(`${toRepoPath(file)}:${index + 1}: ${redactSourceLine(code)}`);
       pendingSensitiveFallbackLine = null;
-      collectSensitiveEnvAliases(code, sensitiveEnvAliases);
+      collectSensitiveEnvAliases(code, sensitiveEnvAliases, sensitiveEnvNameAliases);
       pendingCronCommand = false;
       continue;
     }
 
-    collectSensitiveEnvAliases(code, sensitiveEnvAliases);
+    collectSensitiveEnvAliases(code, sensitiveEnvAliases, sensitiveEnvNameAliases);
     pendingCronCommand = isCronContinuationLine(code, inCronContext, pendingCronCommand);
 
     if (pendingSensitiveFallbackLine && hasHardcodedSourceLiteral(code)) {
