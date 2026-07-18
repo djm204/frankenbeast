@@ -143,6 +143,26 @@ function summarizeSpawnCommand(
   };
 }
 
+function redactSpawnArgs(
+  args: readonly string[],
+  configuredSecrets: readonly string[],
+): string[] {
+  let redactNext = false;
+  return args.map((arg) => {
+    if (redactNext) {
+      redactNext = false;
+      return REDACTED_SECRET;
+    }
+    const flagName = arg.startsWith('-')
+      ? arg.replace(/^-+/, '').split('=', 1)[0] ?? ''
+      : '';
+    if (flagName && !arg.includes('=') && isConfiguredSecretKey(flagName)) {
+      redactNext = true;
+    }
+    return redactBeastLogLine(arg, configuredSecrets);
+  });
+}
+
 export interface SpawnFailureDebugDetails {
   readonly error: string;
   readonly code: string;
@@ -504,7 +524,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
           error: redactBeastLogLine(errorMessage, configuredSecrets),
           code: errorCode,
           command: redactBeastLogLine(processSpec.command, configuredSecrets),
-          args: processSpec.args.map(arg => redactBeastLogLine(arg, configuredSecrets)),
+          args: redactSpawnArgs(processSpec.args, configuredSecrets),
         });
       } catch {
         // Debug diagnostics are best-effort and must not replace the spawn failure.

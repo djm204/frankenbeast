@@ -94,7 +94,11 @@ export class BeastRunService {
       return updated;
     } catch (error) {
       const currentRun = this.repository.getRun(run.id);
-      const errorMessage = currentRun?.stopReason === 'spawn_failed'
+      const executorRecordedSpawnFailure = currentRun?.status === 'failed'
+        && currentRun.stopReason === 'spawn_failed'
+        && currentRun.finishedAt !== undefined
+        && currentRun.finishedAt !== run.finishedAt;
+      const errorMessage = executorRecordedSpawnFailure
         ? 'Worker process could not be spawned.'
         : error instanceof Error ? error.message : String(error);
       if (

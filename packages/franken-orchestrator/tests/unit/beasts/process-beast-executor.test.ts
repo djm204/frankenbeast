@@ -1999,6 +1999,7 @@ describe('ProcessBeastExecutor', () => {
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const configuredSecret = ['opaque', 'private', 'material'].join('-');
       const tokenLikeArg = `${'ghp'}_${'abcdefghijklmnopqrstuvwxyz1234567890'}`;
+      const splitArgSecret = ['split', 'credential', 'value'].join('-');
       const supervisor = {
         spawn: vi.fn(async () => {
           throw Object.assign(new Error(`spawn failed for --token=${configuredSecret}`), { code: 'TOPSECRETVALUE123' });
@@ -2021,7 +2022,7 @@ describe('ProcessBeastExecutor', () => {
         ...martinLoopDefinition,
         buildProcessSpec: () => ({
           command: `/private/operator/bin/${tokenLikeArg}`,
-          args: [`--token=${configuredSecret}`, '/private/operator/worktree'],
+          args: [`--token=${configuredSecret}`, '--password', splitArgSecret, '/private/operator/worktree'],
           cwd: workDir,
           env: {},
         }),
@@ -2039,7 +2040,7 @@ describe('ProcessBeastExecutor', () => {
         error: 'Worker process could not be spawned.',
         code: 'SPAWN_FAILED',
         commandSummary: {
-          argumentCount: 2,
+          argumentCount: 4,
         },
       });
       expect(spawnEvent!.payload).not.toHaveProperty('command');
@@ -2049,10 +2050,11 @@ describe('ProcessBeastExecutor', () => {
         error: 'spawn failed for --token=[REDACTED]',
         code: 'SPAWN_FAILED',
         command: '/private/operator/bin/[REDACTED]',
-        args: ['--token=[REDACTED]', '/private/operator/worktree'],
+        args: ['--token=[REDACTED]', '--password', '[REDACTED]', '/private/operator/worktree'],
       });
       expect(JSON.stringify({ event: spawnEvent, debug: onSpawnFailureDebug.mock.calls })).not.toContain(configuredSecret);
       expect(JSON.stringify({ event: spawnEvent, debug: onSpawnFailureDebug.mock.calls })).not.toContain(tokenLikeArg);
+      expect(JSON.stringify({ event: spawnEvent, debug: onSpawnFailureDebug.mock.calls })).not.toContain(splitArgSecret);
     });
 
     it('calls onRunStatusChange on spawn failure', async () => {

@@ -1029,6 +1029,21 @@ describe('BeastRunService', () => {
       expect.stringContaining('start_failed: Worker process could not be spawned.'),
     );
 
+    executors.process.start.mockImplementationOnce(async () => {
+      throw new Error('config invalid on retry');
+    });
+
+    const preStartFailed = await runs.start(run.id, 'operator');
+
+    expect(preStartFailed).toMatchObject({ status: 'failed', stopReason: 'start_failed' });
+    await expect(runs.readLogs(run.id)).resolves.toContainEqual(
+      expect.stringContaining('start_failed: config invalid on retry'),
+    );
+    expect(repo.listEvents(run.id)).toContainEqual(expect.objectContaining({
+      type: 'run.start_failed',
+      payload: { error: 'config invalid on retry' },
+    }));
+
     executors.process.start.mockImplementationOnce(async (retryRun: { id: string }) => {
       repo.createAttempt(retryRun.id, {
         status: 'running',
