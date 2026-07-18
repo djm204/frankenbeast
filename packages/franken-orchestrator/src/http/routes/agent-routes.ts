@@ -76,7 +76,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       limiter,
       (authHeader, path) => `${authHeader ?? 'anonymous'}:${path}`,
     );
-    app.use('/v1/beasts/agents', rateLimit);
+    app.use('/v1/beasts/agents/*', rateLimit);
   }
 
   app.post('/v1/beasts/agents', async (c) => {
