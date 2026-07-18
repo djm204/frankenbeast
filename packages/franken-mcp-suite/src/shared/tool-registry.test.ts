@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createAdapterSet, TOOL_STUBS, TOOL_REGISTRY, searchTools, type AdapterSet } from './tool-registry.js';
+import { createAdapterSet, createToolDefsForServer, TOOL_STUBS, TOOL_REGISTRY, searchTools, type AdapterSet } from './tool-registry.js';
 
 const EXPECTED_COUNT = 30;
 
@@ -37,6 +37,13 @@ describe('TOOL_REGISTRY', () => {
     for (const [name, tool] of TOOL_REGISTRY) {
       expect(typeof tool.makeHandler, `${name} makeHandler is not a function`).toBe('function');
     }
+  });
+
+  it('propagates registry deadline overrides to standalone tool definitions', () => {
+    const tool = createToolDefsForServer('firewall', {} as AdapterSet)
+      .find(({ name }) => name === 'fbeast_firewall_scan_file');
+
+    expect(tool?.timeoutMs).toBe(60_000);
   });
 
   it('TOOL_STUBS and TOOL_REGISTRY contain the same 30 tool names', () => {

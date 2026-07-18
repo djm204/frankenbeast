@@ -11,6 +11,10 @@
 - Separate shell interpolation parsing from JavaScript template interpolation, carry quote/heredoc context across lines, recognize staged crontab files and programmatic crontab sinks, and propagate aliased Python `os.environ`; otherwise a line-oriented scanner both misses persisted credentials and rejects safe runtime `$(gh auth token)` strings.
 - Treat cron-install taint as a language-aware dataflow problem: cover post-processed/backquoted `printenv`, wrapped/incrementally assembled `gh auth token`, aliased env imports/containers/sinks, dot/bracket/destructuring/joined interpolation flows, multiline schedules/assembly/programmatic sinks, and redirect/tee/stdin staging while preserving shell URLs and excluding quoted heredoc/escaped runtime expansion.
 
+## 2026-07-18 — MCP execution deadline review fixes
+- A `Promise.race` timer cannot preempt synchronous handler work because the event loop is blocked; deadline wrappers must re-check wall-clock time after handler resolution/rejection and convert late completion into the same structured timeout while aborting the supplied signal. Keep that timer ref'ed so in-process callers with no other active handles still receive the timeout result.
+- Nested dispatch wrappers must have a deadline strictly longer than the longest inner target deadline, including validation/governance/audit slack, or the wrapper can win the timeout race and lose resolved-target timeout auditing.
+
 ## 2026-07-17 — PR #2358 stalled closeout and Codex gate handling
 - For stalled PR closeout, re-verify live PR head, mergeability, CI rollup, unresolved Codex threads, and the latest top-level Codex response before acting; a stale green/clean state can become `mergeable=CONFLICTING`/`mergeStateStatus=DIRTY` after main advances even when required CI is still green.
 - Treat Codex usage-limit responses as a hard review-gate blocker for the current round: do not repeatedly retrigger `@codex review`, do not treat historical inline finding lists as active blockers when GraphQL review threads are resolved, and wait for restored usage/approved over-cap review before merging.
