@@ -7,6 +7,8 @@ type StdinRunner = (command: string, args: string[], stdin: string) => Promise<C
 const VAULT = 'frankenbeast';
 const TITLE_PREFIX = 'frankenbeast/';
 
+const REQUIRED_OP_EDIT_STDIN_VERSION = [2, 23, 0] as const;
+
 interface OnePasswordItemTemplate {
   id?: string;
   title?: string;
@@ -71,6 +73,21 @@ function parseItemTemplate(stdout: string): OnePasswordItemTemplate | undefined 
   }
 }
 
+function parseVersion(stdout: string): [number, number, number] | undefined {
+  const match = stdout.match(/(\d+)\.(\d+)\.(\d+)/);
+  if (!match) return undefined;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function versionAtLeast(actual: [number, number, number] | undefined, required: readonly [number, number, number]): boolean {
+  if (!actual) return false;
+  for (let i = 0; i < required.length; i += 1) {
+    if (actual[i]! > required[i]!) return true;
+    if (actual[i]! < required[i]!) return false;
+  }
+  return true;
+}
+
 function hasPasskeys(item: OnePasswordItemTemplate | undefined): boolean {
   return Array.isArray(item?.passkeys) && item.passkeys.length > 0;
 }
@@ -86,6 +103,13 @@ export class OnePasswordStore implements ISecretStore {
   async detect(): Promise<SecretStoreDetection> {
     const result = await this.runner('op', ['--version']);
     if (result.exitCode === 0) {
+      if (!versionAtLeast(parseVersion(result.stdout), REQUIRED_OP_EDIT_STDIN_VERSION)) {
+        return {
+          available: false,
+          reason: `1Password CLI ${result.stdout.trim() || 'version unknown'} does not support JSON-template edits from stdin`,
+          setupInstructions: 'Install 1Password CLI 2.23.0 or newer so secret updates can use stdin without exposing values in process arguments.',
+        };
+      }
       return { available: true };
     }
     return {

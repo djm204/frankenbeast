@@ -1,3 +1,4 @@
+import process from 'node:process';
 import { z } from 'zod';
 
 const HostSchema = z.string().min(1).default('127.0.0.1');
@@ -77,7 +78,14 @@ const LEGACY_BACKEND_MAP: Record<string, string> = {
 
 export const SecureBackendSchema = z.preprocess(
   (val) => (typeof val === 'string' ? (LEGACY_BACKEND_MAP[val] ?? val) : val),
-  z.enum(['1password', 'bitwarden', 'os-keychain', 'local-encrypted']),
+  z.enum(['1password', 'bitwarden', 'os-keychain', 'local-encrypted']).superRefine((value, ctx) => {
+    if (value === 'os-keychain' && process.platform !== 'linux') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'os-keychain is only supported as a write-capable backend on Linux Secret Service; use local-encrypted, 1password, or bitwarden on macOS/Windows.',
+      });
+    }
+  }),
 );
 
 export const NetworkOperatorConfigSchema = z.object({

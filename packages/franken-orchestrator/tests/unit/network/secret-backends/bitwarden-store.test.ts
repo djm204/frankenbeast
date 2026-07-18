@@ -32,12 +32,12 @@ function createMockRunner() {
   return { runner, stdinRunner, calls, responses };
 }
 
-function expectNoArgContains(calls: Array<{ args: string[] }>, secret: string) {
-  const encodedSecret = Buffer.from(secret).toString('base64');
+function expectNoArgContains(calls: Array<{ args: string[] }>, ...unsafeValues: string[]) {
   for (const call of calls) {
     const argv = call.args.join('\0');
-    expect(argv).not.toContain(secret);
-    expect(argv).not.toContain(encodedSecret);
+    for (const unsafe of unsafeValues) {
+      expect(argv).not.toContain(unsafe);
+    }
   }
 }
 
@@ -78,7 +78,7 @@ describe('BitwardenStore', () => {
       expect(decoded.type).toBe(2);
       expect(decoded.name).toBe('frankenbeast/comms.slack.botTokenRef');
       expect(decoded.notes).toBe(TEST_SLACK_BOT_TOKEN);
-      expectNoArgContains(mock.calls, TEST_SLACK_BOT_TOKEN);
+      expectNoArgContains(mock.calls, TEST_SLACK_BOT_TOKEN, createCall!.stdin!);
     });
 
     it('edits existing item with the encoded payload supplied through stdin', async () => {
@@ -96,7 +96,7 @@ describe('BitwardenStore', () => {
       expect(editCall?.stdin).toBeDefined();
       const decoded = JSON.parse(Buffer.from(editCall!.stdin!, 'base64').toString('utf-8'));
       expect(decoded.notes).toBe(UPDATED_SLACK_BOT_TOKEN);
-      expectNoArgContains(mock.calls, UPDATED_SLACK_BOT_TOKEN);
+      expectNoArgContains(mock.calls, UPDATED_SLACK_BOT_TOKEN, editCall!.stdin!);
     });
 
     it('fails closed when storing without a stdin-capable runner', async () => {

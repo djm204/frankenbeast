@@ -59,6 +59,14 @@ describe('OnePasswordStore', () => {
       expect(detection.available).toBe(false);
       expect(detection.setupInstructions).toContain('1Password CLI');
     });
+
+    it('requires a 1Password CLI version with stdin JSON-template edits', async () => {
+      mock.responses.set('--version', { stdout: '2.22.0', stderr: '', exitCode: 0 });
+      const detection = await store.detect();
+      expect(detection.available).toBe(false);
+      expect(detection.reason).toContain('does not support JSON-template edits from stdin');
+      expect(detection.setupInstructions).toContain('2.23.0');
+    });
   });
 
   describe('store and resolve', () => {
