@@ -46,7 +46,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   const catalog = new BeastCatalogService();
   const metrics = new PrometheusBeastMetrics();
   const eventBus = new BeastEventBus();
-  const ticketStore = new SseConnectionTicketStore();
+  const ticketStore = new SseConnectionTicketStore({ databasePath: paths.beastsDb });
   const capacityPolicy = createCapacityReservationPolicyFromEnv();
   const maintenance = MaintenanceModeService.forProjectRoot(projectRoot);
 

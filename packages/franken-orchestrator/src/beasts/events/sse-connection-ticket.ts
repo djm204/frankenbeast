@@ -1,15 +1,28 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+import Database from 'better-sqlite3';
 import { constantTimeTokenEqual } from '../../http/security/constant-time.js';
+
 interface TicketEntry {
-  token: string;
+  tokenDigest: string;
   scope?: string | undefined;
   expiresAt: number;
 }
 
+interface PersistedTicketRow {
+  token_digest: string;
+  scope: string | null;
+  state: 'issued' | 'consumed';
+  expires_at: number;
+  consumed_until: number | null;
+}
 
 export interface SseConnectionTicketStoreOptions {
   ttlMs?: number;
   cleanupIntervalMs?: number;
+  /** SQLite database shared by daemon processes. Omit only for isolated/test stores. */
+  databasePath?: string;
   /**
    * How long a consumed ticket is remembered (for reused → 204 detection)
    * after it is burned. Defaults to well beyond the issue TTL so long-lived
@@ -41,22 +54,24 @@ function resolvePositiveDurationMs(
   return resolved;
 }
 
+function digestToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
+
 export class SseConnectionTicketStore {
   private readonly tickets = new Map<string, TicketEntry>();
   // Consumed tickets are remembered past the issue TTL so that an EventSource
   // reconnecting on a long-lived stream is recognized as `reused` (→ 204) and
-  // its native retry loop stops, instead of falling through to `invalid` (401)
-  // and looping. Retention is bounded (well beyond any realistic reconnect
-  // window) so the set does not grow without limit. Maps ticket → expiry ts.
+  // its native retry loop stops, instead of falling through to `invalid` (401).
   private readonly consumedTickets = new Map<string, number>();
   private readonly ttlMs: number;
   private readonly consumedRetentionMs: number;
   private readonly cleanupInterval: ReturnType<typeof setInterval>;
+  private readonly db: Database.Database | undefined;
+  private destroyed = false;
 
   constructor(options?: SseConnectionTicketStoreOptions) {
     this.ttlMs = resolvePositiveDurationMs('ttlMs', options?.ttlMs, DEFAULT_TICKET_TTL_MS);
-    // Cover EventSource's reconnect behaviour comfortably (>> ttl) while still
-    // bounding memory: at least 10 minutes, or 20× the issue TTL if larger.
     this.consumedRetentionMs = resolvePositiveDurationMs(
       'consumedRetentionMs',
       options?.consumedRetentionMs,
@@ -68,21 +83,52 @@ export class SseConnectionTicketStore {
       DEFAULT_CLEANUP_INTERVAL_MS,
       MAX_NODE_TIMER_DELAY_MS,
     );
+
+    if (options?.databasePath) {
+      mkdirSync(dirname(options.databasePath), { recursive: true });
+      this.db = new Database(options.databasePath);
+      this.db.pragma('journal_mode = WAL');
+      this.db.pragma('busy_timeout = 5000');
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS sse_connection_tickets (
+          ticket TEXT PRIMARY KEY,
+          token_digest TEXT NOT NULL,
+          scope TEXT,
+          state TEXT NOT NULL CHECK (state IN ('issued', 'consumed')),
+          expires_at INTEGER NOT NULL,
+          consumed_until INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_sse_connection_tickets_expiry
+          ON sse_connection_tickets(state, expires_at, consumed_until);
+      `);
+    }
+
     this.cleanupInterval = setInterval(() => this.cleanup(), cleanupMs);
     this.cleanupInterval.unref?.();
   }
 
   issue(token: string, scope?: string | undefined): string {
     const ticket = randomUUID();
-    this.tickets.set(ticket, {
-      token,
-      scope,
-      expiresAt: Date.now() + this.ttlMs,
-    });
+    const tokenDigest = digestToken(token);
+    const expiresAt = Date.now() + this.ttlMs;
+
+    if (this.db) {
+      this.db.prepare(`
+        INSERT INTO sse_connection_tickets
+          (ticket, token_digest, scope, state, expires_at, consumed_until)
+        VALUES (?, ?, ?, 'issued', ?, NULL)
+      `).run(ticket, tokenDigest, scope ?? null, expiresAt);
+    } else {
+      this.tickets.set(ticket, { tokenDigest, scope, expiresAt });
+    }
     return ticket;
   }
 
   consume(ticket: string, operatorToken: string, scope?: string | undefined): SseTicketStatus {
+    if (this.db) {
+      return this.consumePersisted(ticket, operatorToken, scope);
+    }
+
     const entry = this.tickets.get(ticket);
     if (!entry) {
       const consumedExpiry = this.consumedTickets.get(ticket);
@@ -90,7 +136,6 @@ export class SseConnectionTicketStore {
         if (Date.now() <= consumedExpiry) {
           return 'reused';
         }
-        // Retention window elapsed — forget it and treat as invalid.
         this.consumedTickets.delete(ticket);
       }
       return 'invalid';
@@ -104,8 +149,7 @@ export class SseConnectionTicketStore {
     if (entry.scope !== scope) {
       return 'invalid';
     }
-
-    if (!constantTimeTokenEqual(operatorToken, entry.token)) {
+    if (!constantTimeTokenEqual(digestToken(operatorToken), entry.tokenDigest)) {
       return 'invalid';
     }
 
@@ -117,21 +161,74 @@ export class SseConnectionTicketStore {
     return this.consume(ticket, operatorToken, scope) === 'valid';
   }
 
+  private consumePersisted(
+    ticket: string,
+    operatorToken: string,
+    scope?: string | undefined,
+  ): SseTicketStatus {
+    const db = this.db;
+    if (!db) return 'invalid';
+
+    const consume = db.transaction((): SseTicketStatus => {
+      const now = Date.now();
+      const entry = db.prepare(`
+        SELECT token_digest, scope, state, expires_at, consumed_until
+        FROM sse_connection_tickets
+        WHERE ticket = ?
+      `).get(ticket) as PersistedTicketRow | undefined;
+
+      if (!entry) return 'invalid';
+      if (entry.state === 'consumed') {
+        if (entry.consumed_until !== null && now <= entry.consumed_until) return 'reused';
+        db.prepare('DELETE FROM sse_connection_tickets WHERE ticket = ?').run(ticket);
+        return 'invalid';
+      }
+
+      // Burn the issued ticket before returning, including failed validation,
+      // while the IMMEDIATE transaction serializes consumers across processes.
+      if (
+        now > entry.expires_at
+        || entry.scope !== (scope ?? null)
+        || !constantTimeTokenEqual(digestToken(operatorToken), entry.token_digest)
+      ) {
+        db.prepare('DELETE FROM sse_connection_tickets WHERE ticket = ?').run(ticket);
+        return 'invalid';
+      }
+
+      db.prepare(`
+        UPDATE sse_connection_tickets
+        SET state = 'consumed', token_digest = '', scope = NULL, consumed_until = ?
+        WHERE ticket = ?
+      `).run(now + this.consumedRetentionMs, ticket);
+      return 'valid';
+    });
+
+    return consume.immediate();
+  }
+
   private cleanup(): void {
     const now = Date.now();
+    if (this.db) {
+      this.db.prepare(`
+        DELETE FROM sse_connection_tickets
+        WHERE (state = 'issued' AND expires_at < ?)
+           OR (state = 'consumed' AND consumed_until < ?)
+      `).run(now, now);
+      return;
+    }
+
     for (const [ticket, entry] of this.tickets) {
-      if (now > entry.expiresAt) {
-        this.tickets.delete(ticket);
-      }
+      if (now > entry.expiresAt) this.tickets.delete(ticket);
     }
     for (const [ticket, expiry] of this.consumedTickets) {
-      if (now > expiry) {
-        this.consumedTickets.delete(ticket);
-      }
+      if (now > expiry) this.consumedTickets.delete(ticket);
     }
   }
 
   destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
     clearInterval(this.cleanupInterval);
+    this.db?.close();
   }
 }
