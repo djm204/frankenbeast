@@ -1338,18 +1338,22 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
         const governorTimeFilter = auditSqlTimeClause("created_at", input);
         const safeGovernorJson = "CASE WHEN json_valid(context) THEN context ELSE '{}' END";
         const governorSqlFilters = auditSqlFilterParts([
-          sqlJsonEqualsAny(safeGovernorJson, ["$.agentId", "$.args.agentId", "$.args.args.agentId"], input.agentId),
-          sqlJsonEqualsAny(safeGovernorJson, ["$.profile", "$.activeProfile", "$.args.profile", "$.args.activeProfile", "$.args.args.profile"], input.profile),
-          sqlJsonEqualsAny(safeGovernorJson, ["$.repo", "$.args.repo", "$.args.args.repo"], input.repo),
-          input.tool === undefined ? { clause: "", params: [] } : {
+          sqlJsonEqualsAny(safeGovernorJson, ["$.agentId", "$.args.agentId", "$.args.args.agentId", "$.args.args.args.agentId"], input.agentId),
+          sqlJsonEqualsAny(safeGovernorJson, ["$.profile", "$.activeProfile", "$.args.profile", "$.args.activeProfile", "$.args.args.profile", "$.args.args.activeProfile", "$.args.args.args.profile", "$.args.args.args.activeProfile"], input.profile),
+          sqlJsonEqualsAny(safeGovernorJson, ["$.repo", "$.args.repo", "$.args.args.repo", "$.args.args.args.repo"], input.repo),
+          input.tool === undefined || input.tool === UNKNOWN_MEMORY_AUDIT_TOOL ? { clause: "", params: [] } : {
             clause: `(${[
               sqlToolEqualsExpression("action"),
               sqlToolEqualsExpression("json_extract(" + safeGovernorJson + ", '$.tool')"),
               sqlToolEqualsExpression("json_extract(" + safeGovernorJson + ", '$.toolName')"),
               sqlToolEqualsExpression("json_extract(" + safeGovernorJson + ", '$.args.tool')"),
               sqlToolEqualsExpression("json_extract(" + safeGovernorJson + ", '$.args.toolName')"),
+              sqlToolEqualsExpression("json_extract(" + safeGovernorJson + ", '$.args.args.tool')"),
+              sqlToolEqualsExpression("json_extract(" + safeGovernorJson + ", '$.args.args.toolName')"),
+              sqlToolEqualsExpression("json_extract(" + safeGovernorJson + ", '$.args.args.args.tool')"),
+              sqlToolEqualsExpression("json_extract(" + safeGovernorJson + ", '$.args.args.args.toolName')"),
             ].join(" OR ")})`,
-            params: [input.tool, input.tool, input.tool, input.tool, input.tool, input.tool, input.tool, input.tool, input.tool, input.tool],
+            params: Array.from({ length: 18 }, () => input.tool!),
           },
           input.decision === undefined ? { clause: "", params: [] } : { clause: "decision = ?", params: [input.decision] },
         ]);
@@ -1415,11 +1419,11 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
         const auditTimeFilter = auditSqlTimeClause("created_at", input);
         const safeAuditPayloadJson = "CASE WHEN json_valid(payload) THEN payload ELSE '{}' END";
         const auditSqlFilters = auditSqlFilterParts([
-          sqlJsonEqualsAny(safeAuditPayloadJson, ["$.args.agentId", "$.args.args.agentId", "$.agentId"], input.agentId),
-          sqlJsonEqualsAny(safeAuditPayloadJson, ["$.args.profile", "$.args.activeProfile", "$.args.args.profile", "$.profile", "$.activeProfile"], input.profile),
-          sqlJsonEqualsAny(safeAuditPayloadJson, ["$.args.repo", "$.args.args.repo", "$.repo"], input.repo),
-          sqlExcludesAuditReportTool(safeAuditPayloadJson, ["$.toolName", "$.tool", "$.args.tool", "$.args.toolName", "$.args.args.tool", "$.args.args.toolName"]),
-          sqlJsonToolEqualsAny(safeAuditPayloadJson, ["$.toolName", "$.tool", "$.args.tool", "$.args.toolName", "$.args.args.tool", "$.args.args.toolName"], input.tool),
+          sqlJsonEqualsAny(safeAuditPayloadJson, ["$.args.agentId", "$.args.args.agentId", "$.args.args.args.agentId", "$.agentId"], input.agentId),
+          sqlJsonEqualsAny(safeAuditPayloadJson, ["$.args.profile", "$.args.activeProfile", "$.args.args.profile", "$.args.args.activeProfile", "$.args.args.args.profile", "$.args.args.args.activeProfile", "$.profile", "$.activeProfile"], input.profile),
+          sqlJsonEqualsAny(safeAuditPayloadJson, ["$.args.repo", "$.args.args.repo", "$.args.args.args.repo", "$.repo"], input.repo),
+          input.tool === "fbeast_memory_access_audit_report" ? { clause: "", params: [] } : sqlExcludesAuditReportTool(safeAuditPayloadJson, ["$.toolName", "$.tool", "$.args.tool", "$.args.toolName", "$.args.args.tool", "$.args.args.toolName", "$.args.args.args.tool", "$.args.args.args.toolName"]),
+          input.tool === UNKNOWN_MEMORY_AUDIT_TOOL ? { clause: "", params: [] } : sqlJsonToolEqualsAny(safeAuditPayloadJson, ["$.toolName", "$.tool", "$.args.tool", "$.args.toolName", "$.args.args.tool", "$.args.args.toolName", "$.args.args.args.tool", "$.args.args.args.toolName"], input.tool),
           sqlAuditDecisionEquals(safeAuditPayloadJson, input.decision),
         ]);
         const auditTimeCondition = auditTimeFilter.clause ? `AND ${auditTimeFilter.clause.slice("WHERE ".length)}` : "";

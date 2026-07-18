@@ -1466,6 +1466,8 @@ describe("createBrainAdapter", () => {
     const auditSql = prepareSql.find((sql) => sql.includes("FROM audit_trail"));
     expect(auditSql).toContain("$.args.args.tool");
     expect(auditSql).toContain("$.args.args.toolName");
+    expect(auditSql).toContain("$.args.args.args.tool");
+    expect(auditSql).toContain("$.args.args.args.toolName");
   });
 
   it("does not cap source scans before operation filtering", async () => {
@@ -1610,6 +1612,19 @@ describe("createBrainAdapter", () => {
       targetClass: "memory-access",
       decision: "unknown_tool",
       reason: "unknown memory tool probe",
+    });
+  });
+
+  it("includes unknown memory-tool probes when filtering by the unknown sentinel", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ tool: "fbeast_memory_unknown", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      tool: "fbeast_memory_unknown",
+      operation: "unknown",
+      decision: "unknown_tool",
     });
   });
 
