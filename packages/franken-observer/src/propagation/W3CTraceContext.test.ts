@@ -59,6 +59,10 @@ describe('parseTraceparent', () => {
     expect(parseTraceparent(`0g-${TRACE_ID}-${SPAN_ID}-01`)).toBeNull()
   })
 
+  it.each(['0', '000', '0G'])('returns null for invalid version field %s', version => {
+    expect(parseTraceparent(`${version}-${TRACE_ID}-${SPAN_ID}-01`)).toBeNull()
+  })
+
   it('returns null for null input', () => {
     expect(parseTraceparent(null)).toBeNull()
   })

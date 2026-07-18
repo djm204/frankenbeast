@@ -247,7 +247,7 @@ describe('build-runner integration — dep construction wiring', () => {
       try {
         writeFileSync(
           join(tmpDir, '01_test_chunk.md'),
-          '# Test\n\n## Verification Command\n\n```bash\necho ok\n```\n',
+          '# Chunk 01: test_chunk\n\n## Verification Command\n\n```bash\necho ok\n```\n',
         );
         const builder = new ChunkFileGraphBuilder(tmpDir);
         const plan = await builder.build({ goal: 'test' });

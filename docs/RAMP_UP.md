@@ -165,7 +165,7 @@ Most packages build with `tsc`; `franken-web` uses `tsc && vite build`.
 | `docs/PROGRESS.md` | PR-by-PR progress tracking, verified test counts, and Phase 8 CLI gap-closure work |
 | `docs/adr/` | ADRs covering monorepo structure, hex architecture, Hono, shared types, Beast Loop, circuit breakers, CLI execution, Approach C, pluggable CLI providers, multi-pass planning, chat dispatch, external comms, network operator control plane, tracked-agent init workflow, and ADR-036 sandboxed Beast execution |
 | `docs/guides/` | quickstart, run-dashboard-chat, deploy-beasts, add-llm-provider, wrap-external-agent, fix-github-issues |
-| `docs/onboarding/` | contributor onboarding, repository ownership, agent role map, issue complexity rubric, PM-swarm glossary, test-command decision tree |
+| `docs/onboarding/` | contributor onboarding, repository ownership, agent role map, issue complexity rubric, agent coordination glossary, test-command decision tree |
 | `docs/plans/` | Design docs and implementation plans (MCP, beast-runner, approach-c, CLI E2E, pluggable providers, interview UX, etc.) |
 
 ## Secret Store

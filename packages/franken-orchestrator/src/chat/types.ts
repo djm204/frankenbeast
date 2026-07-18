@@ -1,12 +1,14 @@
 import {
   ChatBeastContextSchema,
   ChatSessionResponseSchema,
+  PendingApprovalSchema,
   TokenTotalsSchema,
   TranscriptMessageSchema,
 } from '@franken/types';
 import type {
   ChatBeastContext,
   ChatSessionResponse,
+  PendingApproval,
   TranscriptMessage,
   TurnOutcome,
 } from '@franken/types';
@@ -41,5 +43,19 @@ export type { ChatBeastContext, TranscriptMessage, TurnOutcome };
 
 export { ChatBeastContextSchema, TranscriptMessageSchema, TokenTotalsSchema };
 
-export const ChatSessionSchema = ChatSessionResponseSchema;
-export type ChatSession = ChatSessionResponse;
+export const ChatSessionSchema = ChatSessionResponseSchema.extend({
+  pendingApproval: PendingApprovalSchema.extend({
+    approvalToken: PendingApprovalSchema.shape.description.optional(),
+    requester: PendingApprovalSchema.shape.description.optional(),
+    workerId: PendingApprovalSchema.shape.description.optional(),
+    workdir: PendingApprovalSchema.shape.description.optional(),
+  }).nullable().optional(),
+});
+export type ChatSession = Omit<ChatSessionResponse, 'pendingApproval'> & {
+  pendingApproval?: (PendingApproval & {
+    approvalToken?: string | undefined;
+    requester?: string | undefined;
+    workerId?: string | undefined;
+    workdir?: string | undefined;
+  }) | null | undefined;
+};

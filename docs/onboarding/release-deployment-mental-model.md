@@ -6,11 +6,11 @@ Use this guide when you need to understand what happens after an issue is picked
 
 | Stage                | Owner                               | Required evidence                                                           | Contributor mental model                                                                               |
 | -------------------- | ----------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| Issue triage         | PM or issue worker                  | Labels, acceptance criteria, duplicate check                                | The issue defines exactly one unit of work. Do not broaden it into adjacent backlog.                   |
+| Issue triage         | Coordinator or issue worker         | Labels, acceptance criteria, duplicate check                                | The issue defines exactly one unit of work. Do not broaden it into adjacent backlog.                   |
 | Branch and worktree  | Issue worker                        | One issue, one branch, one PR                                               | Start from `origin/main` in an isolated worktree. Keep the issue number in the branch name.            |
 | Implementation       | Issue worker                        | Focused diff, tests/docs for the acceptance criteria                        | Make the smallest change that proves the issue is resolved. Keep unrelated cleanup out.                |
 | Local verification   | Issue worker                        | Exact commands and outcomes                                                 | Run the narrowest deterministic checks first, then a broader gate when practical.                      |
-| Pull request         | Issue worker                        | Conventional Commit title, `Closes #<issue-number>`, verification notes     | The PR body is the handoff contract for reviewers, PMs, and future workers.                            |
+| Pull request         | Issue worker                        | Conventional Commit title, `Closes #<issue-number>`, verification notes     | The PR body is the handoff contract for reviewers, coordinators, and future workers.                   |
 | CI and Codex review  | Issue worker until clean or blocked | Green CI, current-head `@codex review` clean, zero unresolved Codex threads | Older green checks or older Codex all-clears are stale after every push.                               |
 | Merge                | PR owner or delegated closer        | Squash merge title in Conventional Commit form                              | Merge only after the current head satisfies CI, review, and issue scope gates.                         |
 | Release automation   | Maintainer / Release Please         | Release PR, changelog entries, GitHub release tag                           | Merged conventional commits are inputs to Release Please; release PRs package them into a version.     |
@@ -62,7 +62,7 @@ Deployment ownership depends on the changed surface:
 - Security-sensitive changes: follow [`SECURITY.md`](../../SECURITY.md) for vulnerability handling, secret hygiene, HTTPS/network exposure, and security check expectations.
 - Rollback or force-with-lease branch recovery: follow the [worker push rollback runbook](../runbooks/worker-push-rollback.md) instead of issuing ad hoc destructive git commands.
 
-Post-merge monitoring is owned by the surface owner or delegated closer named in the PR handoff. If ownership is ambiguous, stop and ask the PM or maintainer before assuming another worker will monitor it.
+Post-merge monitoring is owned by the surface owner or delegated closer named in the PR handoff. If ownership is ambiguous, stop and ask the coordinator or maintainer before assuming another worker will monitor it.
 
 ## Rollback and incident expectations
 

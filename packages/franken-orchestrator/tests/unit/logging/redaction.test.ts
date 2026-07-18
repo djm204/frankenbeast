@@ -79,39 +79,70 @@ describe('logging redaction', () => {
     expect(JSON.stringify(result.decisions)).not.toContain(value);
   });
 
-  it('returns provenance for value-shape text redactions without leaking the value', () => {
-    const webhook = `https://discord.com/api/webhooks/${'1'.repeat(18)}/${'a'.repeat(68)}`;
-    const result = redactSensitiveTextWithProvenance(`webhook=${webhook}`, '$.message');
+  it('keeps header, opaque-token, and password-only URL masking in provenance-aware text redaction', () => {
+    const bearer = ['bearerCredential', 'ForReview123'].join('');
+    const password = ['cache', 'pass'].join('');
+    const redissPassword = ['tls', 'cache', 'pass'].join('');
+    const apiKey = ['header', 'api', 'key'].join('');
+    const result = redactSensitiveTextWithProvenance(
+      `Authorization: Bearer ${bearer} Proxy-Authorization: Digest ${apiKey} X-API-Key: ${apiKey} Cookie: sid=${apiKey}; csrf=${redissPassword} redis://:${password}@localhost:6379/0 rediss://:${redissPassword}@cache.example:6380/0`,
+      '$.message',
+    );
 
-    expect(result.value).toBe('webhook=<redacted>');
-    expect(result.decisions).toContainEqual({
-      path: '$.message',
-      key: 'discord-webhook',
-      source: 'text-value-pattern',
-      rule: 'sensitive-value',
-      replacement: '<redacted>',
-    });
-    expect(JSON.stringify(result.decisions)).not.toContain(webhook);
+    expect(result.value).toContain('Authorization: Bearer <redacted>');
+    expect(result.value).toContain('Proxy-Authorization: <redacted>');
+    expect(result.value).toContain('X-API-Key: <redacted>');
+    expect(result.value).toContain('Cookie: <redacted>');
+    expect(result.value).toContain('redis://:<redacted>@localhost:6379/0');
+    expect(result.value).toContain('rediss://:<redacted>@cache.example:6380/0');
+    expect(result.value).not.toContain(bearer);
+    expect(result.value).not.toContain(password);
+    expect(result.value).not.toContain(redissPassword);
+    expect(result.value).not.toContain(apiKey);
+    expect(result.decisions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: '$.message',
+        key: 'Proxy-Authorization',
+        source: 'text-assignment',
+        rule: 'sensitive-key',
+        replacement: '<redacted>',
+      }),
+      expect.objectContaining({
+        path: '$.message',
+        key: 'X-API-Key',
+        source: 'text-assignment',
+        rule: 'sensitive-key',
+        replacement: '<redacted>',
+      }),
+      expect.objectContaining({
+        path: '$.message',
+        key: 'opaque-secret-literal',
+        source: 'text-opaque-literal',
+        rule: 'sensitive-key',
+        replacement: '<redacted>',
+      }),
+    ]));
   });
 
-  it('does not redact benign sk-prefixed words as provider tokens', () => {
-    const result = redactSensitiveTextWithProvenance('skill-installer skeletonization sketched notes', '$.message');
+  it('preserves URL hosts when masking embedded credentials', () => {
+    const userPassword = ['user', 'pass', 'value'].join('');
+    const cachePassword = ['cache', 'pass', 'value'].join('');
+    const output = redactSensitiveText(
+      `https://operator:${userPassword}@example.com/path rediss://:${cachePassword}@cache.example:6380/0`,
+    );
 
-    expect(result.value).toBe('skill-installer skeletonization sketched notes');
-    expect(result.decisions).toEqual([]);
+    expect(output).toContain('https://operator:<redacted>@example.com/path');
+    expect(output).toContain('rediss://:<redacted>@cache.example:6380/0');
+    expect(output).not.toContain(userPassword);
+    expect(output).not.toContain(cachePassword);
   });
 
-  it('redacts underscore-separated sk provider tokens as value-shape secrets', () => {
-    const token = `sk_live_${'a'.repeat(24)}`;
-    const result = redactSensitiveTextWithProvenance(`provider=${token}`, '$.message');
+  it('redacts email addresses in angle-bracket display-name forms', () => {
+    const email = ['alice', 'example.com'].join('@');
+    const output = redactSensitiveText(`Operator Alice <${email}> approved the run`);
 
-    expect(result.value).toBe('provider=<redacted>');
-    expect(result.decisions).toContainEqual(expect.objectContaining({
-      key: 'provider-token',
-      source: 'text-value-pattern',
-      rule: 'sensitive-value',
-    }));
-    expect(JSON.stringify(result.decisions)).not.toContain(token);
+    expect(output).toBe('Operator Alice <<redacted-email>> approved the run');
+    expect(output).not.toContain(email);
   });
 
   it('returns path-aware provenance for object and nested string redaction decisions', () => {

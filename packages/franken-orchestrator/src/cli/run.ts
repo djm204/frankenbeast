@@ -36,9 +36,10 @@ import { createDefaultRegistry } from '../skills/providers/cli-provider.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
 import { basename, delimiter, dirname, join, resolve as resolvePath } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { startChatServer } from '../http/chat-server.js';
 import { createSqliteAnalyticsService } from '../analytics/sqlite-analytics-service.js';
+import { buildSloDashboardFromKanban, createSqliteSloDashboardSource } from '../availability/slo-dashboard.js';
 import { parse as parseDotenv } from 'dotenv';
 import { createSecretStore } from '../network/secret-store.js';
 import { filterNetworkServices, resolveNetworkServices, type ResolvedNetworkService } from '../network/network-registry.js';
@@ -72,6 +73,12 @@ import {
   type DashboardAvailabilitySnapshot,
   type DashboardProviderSnapshot,
 } from '../http/routes/dashboard-status.js';
+
+const DEFAULT_SLO_KANBAN_DB = () => join(process.env.HERMES_HOME ?? join(homedir(), '.hermes'), 'kanban.db');
+
+function resolveSloKanbanDbPath(): string {
+  return process.env.HERMES_KANBAN_DB ?? DEFAULT_SLO_KANBAN_DB();
+}
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -1400,6 +1407,7 @@ async function runChatCommandIfRequested(
                 }
                 return MaintenanceModeService.forProjectRoot(root).getState();
               },
+              getSloDashboard: () => buildSloDashboardFromKanban(createSqliteSloDashboardSource({ kanbanDbPath: resolveSloKanbanDbPath() })),
             },
           }
         : {}),

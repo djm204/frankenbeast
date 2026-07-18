@@ -79,7 +79,7 @@ Use this decision tree before handing a branch to review. Pick the narrowest com
 - Do not run package scripts from a stale shell directory. Prefix directory-sensitive commands with the repository root or package path when handing commands to another worker.
 - Do not broaden a docs-only issue into package refactors just to make a test command exist; add a focused docs verifier instead.
 
-## PM/worker handoff shape
+## Coordinator/worker handoff shape
 
 Include the decision, exact command, and result in PRs and Kanban handoffs:
 

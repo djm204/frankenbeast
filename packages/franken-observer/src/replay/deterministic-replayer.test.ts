@@ -1,10 +1,25 @@
-import { describe, expect, it } from 'vitest';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { afterEach, describe, expect, it } from 'vitest';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ReplayContentStore } from './replay-content-store.js';
 import { DeterministicReplayer } from './deterministic-replayer.js';
 import type { ReplayRecord } from './replay-record.js';
+
+const replayTempRoots: string[] = [];
+
+function createReplayTempRoot(): string {
+  const root = mkdtempSync(join(tmpdir(), 'replay-'));
+  replayTempRoots.push(root);
+  return root;
+}
+
+afterEach(() => {
+  for (const root of replayTempRoots.splice(0)) {
+    rmSync(root, { recursive: true, force: true });
+    expect(existsSync(root)).toBe(false);
+  }
+});
 
 function corruptReplayBlob(baseDir: string, ref: string, replacement: string): void {
   writeFileSync(join(baseDir, 'blobs', ref), replacement, 'utf8');
@@ -12,7 +27,7 @@ function corruptReplayBlob(baseDir: string, ref: string, replacement: string): v
 
 describe('DeterministicReplayer', () => {
   it('replays a saved llm.response without calling a live provider', () => {
-    const root = mkdtempSync(join(tmpdir(), 'replay-'));
+    const root = createReplayTempRoot();
     const store = new ReplayContentStore(root);
     const ref = store.put(JSON.stringify({ text: 'cached answer' }));
     const replayer = new DeterministicReplayer(store);
@@ -24,7 +39,7 @@ describe('DeterministicReplayer', () => {
   });
 
   it('throws if a referenced blob fails hash verification', () => {
-    const root = mkdtempSync(join(tmpdir(), 'replay-'));
+    const root = createReplayTempRoot();
     const store = new ReplayContentStore(root);
     const ref = store.put('x');
     corruptReplayBlob(root, ref, 'y');
@@ -38,7 +53,7 @@ describe('DeterministicReplayer', () => {
   });
 
   it('replays a saved tool.result by run and ordinal', () => {
-    const root = mkdtempSync(join(tmpdir(), 'replay-'));
+    const root = createReplayTempRoot();
     const store = new ReplayContentStore(root);
     const first = store.put(JSON.stringify({ ok: true }));
     const second = store.put(JSON.stringify({ ok: false }));

@@ -183,7 +183,7 @@ function buildChecklist(options) {
     persona: options.persona,
     root,
     items,
-    docs: ['ONBOARDING.md', 'docs/guides/quickstart.md', 'docs/RAMP_UP.md'],
+    docs: ['ONBOARDING.md', 'docs/onboarding/persona-quickstart-tracks.md', 'docs/guides/quickstart.md', 'docs/RAMP_UP.md'],
     nextAction: options.persona === 'coding-agent'
       ? 'Run the worker preflight JSON command, attach it to the issue/PR handoff, then choose the narrowest verification gate for your change.'
       : 'Work through required items in phase order, then run optional items only when the matching workflow needs them.',

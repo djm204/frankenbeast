@@ -9,7 +9,7 @@ Use this template to run a deterministic disaster-recovery tabletop before chang
 | Exercise name | `<short incident name>` |
 | Date / window | `<YYYY-MM-DD HH:MM UTC>` |
 | Facilitator | `<name>` |
-| Participants | `<operator, PM, worker owner, approver>` |
+| Participants | `<operator, coordinator, worker owner, approver>` |
 | Systems in scope | `<cron jobs, worker queues, approvals, state manifests>` |
 | Systems out of scope | `<anything that must not be touched>` |
 | Backup manifest | `<path, URI, or snapshot id>` |

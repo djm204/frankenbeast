@@ -22,8 +22,13 @@ export const ClientSocketEventSchema = z.discriminatedUnion('type', [
 
 export type ClientSocketEvent = z.infer<typeof ClientSocketEventSchema>;
 
+const serverEventShape = <T extends z.ZodRawShape>(shape: T) => z.object({
+  eventId: z.string().min(1).optional(),
+  ...shape,
+}).strict();
+
 export const ServerSocketEventSchema = z.discriminatedUnion('type', [
-  z.object({
+  serverEventShape({
     type: z.literal('session.ready'),
     sessionId: z.string().min(1),
     projectId: z.string().min(1),
@@ -43,58 +48,62 @@ export const ServerSocketEventSchema = z.discriminatedUnion('type', [
       risk: z.string().optional(),
       affectedFiles: z.array(z.string()).optional(),
       sessionId: z.string().optional(),
+      approvalToken: z.string().optional(),
+      requester: z.string().optional(),
+      workerId: z.string().optional(),
+      workdir: z.string().optional(),
     }).nullable().optional(),
-  }).strict(),
-  z.object({
+  }),
+  serverEventShape({
     type: z.literal('message.accepted'),
     clientMessageId: z.string().min(1),
     sessionId: z.string().min(1),
     timestamp: z.string(),
-  }).strict(),
-  z.object({
+  }),
+  serverEventShape({
     type: z.literal('message.delivered'),
     clientMessageId: z.string().min(1),
     timestamp: z.string(),
-  }).strict(),
-  z.object({
+  }),
+  serverEventShape({
     type: z.literal('message.read'),
     clientMessageId: z.string().min(1).optional(),
     messageId: z.string().min(1).optional(),
     timestamp: z.string(),
-  }).strict(),
-  z.object({
+  }),
+  serverEventShape({
     type: z.literal('assistant.typing.start'),
     timestamp: z.string(),
-  }).strict(),
-  z.object({
+  }),
+  serverEventShape({
     type: z.literal('assistant.message.delta'),
     messageId: z.string().min(1),
     chunk: z.string(),
     modelTier: z.string().optional(),
-  }).strict(),
-  z.object({
+  }),
+  serverEventShape({
     type: z.literal('assistant.message.complete'),
     messageId: z.string().min(1),
     content: z.string(),
     modelTier: z.string().optional(),
     timestamp: z.string(),
-  }).strict(),
-  z.object({
+  }),
+  serverEventShape({
     type: z.literal('turn.execution.start'),
     data: z.record(z.string(), z.unknown()).optional(),
     timestamp: z.string(),
-  }).strict(),
-  z.object({
+  }),
+  serverEventShape({
     type: z.literal('turn.execution.progress'),
     data: z.record(z.string(), z.unknown()).optional(),
     timestamp: z.string(),
-  }).strict(),
-  z.object({
+  }),
+  serverEventShape({
     type: z.literal('turn.execution.complete'),
     data: z.record(z.string(), z.unknown()).optional(),
     timestamp: z.string(),
-  }).strict(),
-  z.object({
+  }),
+  serverEventShape({
     type: z.literal('turn.approval.requested'),
     description: z.string().min(1),
     timestamp: z.string(),
@@ -103,22 +112,26 @@ export const ServerSocketEventSchema = z.discriminatedUnion('type', [
     risk: z.string().optional(),
     affectedFiles: z.array(z.string()).optional(),
     sessionId: z.string().optional(),
-  }).strict(),
-  z.object({
+    approvalToken: z.string().optional(),
+    requester: z.string().optional(),
+    workerId: z.string().optional(),
+    workdir: z.string().optional(),
+  }),
+  serverEventShape({
     type: z.literal('turn.approval.resolved'),
     approved: z.boolean(),
     timestamp: z.string(),
-  }).strict(),
-  z.object({
+  }),
+  serverEventShape({
     type: z.literal('turn.error'),
     code: z.string().min(1),
     message: z.string().min(1),
     timestamp: z.string(),
-  }).strict(),
-  z.object({
+  }),
+  serverEventShape({
     type: z.literal('pong'),
     timestamp: z.string(),
-  }).strict(),
+  }),
 ]);
 
 export type ServerSocketEvent = z.infer<typeof ServerSocketEventSchema>;

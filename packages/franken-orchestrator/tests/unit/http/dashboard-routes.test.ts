@@ -44,6 +44,30 @@ function createMockDeps(): DashboardRouteDeps {
       startedAt: '2026-07-16T10:00:00.000Z',
       allowedCommands: ['beasts list', 'beasts status <run-id>'],
     }),
+    getSloDashboard: vi.fn().mockReturnValue({
+      generatedAt: '2026-07-17T00:00:00.000Z',
+      source: { kanban: true, approvals: true, runs: true },
+      windows: [
+        {
+          label: '1h',
+          seconds: 3600,
+          sampleSize: 4,
+          metrics: [
+            {
+              id: 'run_success_rate',
+              label: 'Run success rate',
+              value: 97,
+              unit: 'percent',
+              target: 95,
+              comparator: '>=',
+              status: 'ok',
+              description: 'Completed terminal runs divided by all terminal Kanban runs.',
+            },
+          ],
+          failureCategories: [{ category: 'provider', count: 1 }],
+        },
+      ],
+    }),
     operatorToken: TEST_DASHBOARD_TOKEN,
     ticketStore: ticketStore = new SseConnectionTicketStore(),
   };
@@ -91,6 +115,18 @@ describe('dashboard routes', () => {
         startedAt: '2026-07-16T10:00:00.000Z',
         allowedCommands: ['beasts list', 'beasts status <run-id>'],
       });
+      expect(body.slo).toMatchObject({
+        source: { kanban: true, approvals: true, runs: true },
+        windows: [
+          {
+            label: '1h',
+            metrics: [
+              { id: 'run_success_rate', value: 97, status: 'ok' },
+            ],
+            failureCategories: [{ category: 'provider', count: 1 }],
+          },
+        ],
+      });
       expect(body.availability).toEqual({
         status: 'healthy',
         dependencies: [
@@ -104,6 +140,19 @@ describe('dashboard routes', () => {
           },
         ],
       });
+    });
+
+    it('keeps the dashboard snapshot available when optional SLO loading fails', async () => {
+      const deps = createMockDeps();
+      deps.getSloDashboard = vi.fn().mockRejectedValue(new Error('database is locked'));
+      const app = createDashboardRoutes(deps);
+      const res = await app.request('/');
+
+      expect(res.status).toBe(200);
+      const body = await res.json() as Record<string, unknown>;
+      expect(body.skills).toHaveLength(2);
+      expect(body.availability).toMatchObject({ status: 'healthy' });
+      expect(body.slo).toBeUndefined();
     });
 
     it('reports partial dependency outages with remediation and safe-work guidance', async () => {
@@ -342,7 +391,8 @@ describe('dashboard routes', () => {
       }
       reader.cancel();
 
-      // SSE format: event: snapshot\ndata: ...\n\n
+      // SSE format: id: ...\nevent: snapshot\ndata: ...\n\n
+      expect(text).toMatch(/id: dashboard:[0-9a-f-]{36}:1/);
       expect(text).toContain('event: snapshot');
 
       // Extract the data line for the snapshot event
@@ -355,6 +405,43 @@ describe('dashboard routes', () => {
       expect(data.skills).toHaveLength(2);
       expect(data.security.profile).toBe('standard');
       expect(data.providers).toHaveLength(1);
+    });
+
+    it('keeps snapshot ids monotonic across dashboard SSE reconnects', async () => {
+      const deps = createMockDeps();
+      const app = createDashboardRoutes(deps);
+      const readInitialStreamText = async (
+        ticket: string,
+        targetApp: ReturnType<typeof createDashboardRoutes> = app,
+      ) => {
+        const res = await targetApp.request(`/events?ticket=${ticket}`);
+        const reader = res.body!.getReader();
+        const decoder = new TextDecoder();
+        let text = '';
+        for (let i = 0; i < 10; i++) {
+          const { value, done } = await reader.read();
+          if (value) text += decoder.decode(value, { stream: true });
+          if (done || text.includes('event: snapshot')) break;
+        }
+        await reader.cancel();
+        return text;
+      };
+
+      const firstText = await readInitialStreamText(await issueDashboardTicket(app));
+      const secondText = await readInitialStreamText(await issueDashboardTicket(app));
+
+      const firstId = firstText.match(/^id: (dashboard:[0-9a-f-]{36}:1)$/m)?.[1];
+      const secondId = secondText.match(/^id: (dashboard:[0-9a-f-]{36}:2)$/m)?.[1];
+      expect(firstId).toBeDefined();
+      expect(secondId).toBeDefined();
+      const firstEpoch = firstId!.split(':')[1];
+      expect(secondId).toBe(`dashboard:${firstEpoch}:2`);
+
+      const restartedApp = createDashboardRoutes(createMockDeps());
+      const restartedText = await readInitialStreamText(await issueDashboardTicket(restartedApp), restartedApp);
+      const restartedId = restartedText.match(/^id: (dashboard:[0-9a-f-]{36}:1)$/m)?.[1];
+      expect(restartedId).toBeDefined();
+      expect(restartedId!.split(':')[1]).not.toBe(firstEpoch);
     });
 
     it('streams a fresh snapshot when dashboard state changes after connect', async () => {

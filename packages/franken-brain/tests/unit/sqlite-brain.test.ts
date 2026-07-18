@@ -115,6 +115,361 @@ describe('SqliteBrain', () => {
     });
   });
 
+  describe('memory retention policy report', () => {
+    it('documents policy ordering and protects user preferences from compaction', () => {
+      brain.working.set('user.preference.response-style', 'concise');
+      brain.working.set('env.node.version', { value: '20.x', memoryClass: 'environment_fact' });
+      brain.working.set('scratch.task-state', { value: 'temporary analysis', memoryClass: 'transient_observation' });
+      brain.working.set('ops.tmp', {
+        value: 'short lived process state',
+        category: 'temporary-operational',
+        sourceScope: 'test',
+        expiresAt: '2027-01-01T00:30:00.000Z',
+      });
+
+      const report = brain.memoryRetentionReport({
+        now: '2027-01-01T00:00:00.000Z',
+        maxEntries: 2,
+      });
+
+      expect(report.policies.map((policy) => policy.class)).toContain('user_preference');
+      expect(report.entries.find((entry) => entry.key === 'user.preference.response-style')).toMatchObject({
+        class: 'user_preference',
+        action: 'protect',
+        protected: true,
+      });
+      expect(report.entries.find((entry) => entry.key === 'ops.tmp')).toMatchObject({
+        class: 'temporary_operational',
+        action: 'compact',
+      });
+      expect(report.compactionCandidates.map((entry) => entry.key)).toEqual([
+        'ops.tmp',
+        'scratch.task-state',
+      ]);
+      expect(report.compactionCandidates).not.toContainEqual(
+        expect.objectContaining({ key: 'user.preference.response-style' }),
+      );
+    });
+
+    it('reports episodic entries nearing expiry or compaction by class', () => {
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'temporary task progress that should not become durable memory',
+        details: { memoryClass: 'transient_observation' },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      brain.episodic.record({
+        type: 'decision',
+        summary: 'repo convention: use conventional commits',
+        details: { memoryClass: 'project_convention' },
+        createdAt: '2024-01-01T00:00:00.000Z',
+      });
+
+      const report = brain.memoryRetentionReport({ now: '2026-01-09T00:00:00.000Z' });
+
+      expect(report.entries.find((entry) => entry.class === 'transient_observation')).toMatchObject({
+        store: 'episodic',
+        action: 'compact',
+      });
+      expect(report.entries.find((entry) => entry.class === 'project_convention')).toMatchObject({
+        store: 'episodic',
+        action: 'compact',
+      });
+    });
+
+    it('reports expired TTL rows without mutating memory or compacting active entries unnecessarily', () => {
+      const futureExpiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+      brain.working.set('fresh.env', { value: 'node 20', memoryClass: 'environment_fact' });
+      brain.working.set('fresh.procedure', { value: 'run npm test', memoryClass: 'learned_procedure' });
+      brain.working.set('expired.one', {
+        value: 'old scratch',
+        category: 'temporary-operational',
+        expiresAt: futureExpiry,
+      });
+      brain.working.set('expired.two', {
+        value: 'old scratch 2',
+        category: 'temporary-operational',
+        expiresAt: futureExpiry,
+      });
+
+      const report = brain.memoryRetentionReport({
+        now: new Date(Date.parse(futureExpiry) + 24 * 60 * 60 * 1000).toISOString(),
+        maxEntries: 2,
+      });
+
+      expect(report.entries.filter((entry) => entry.action === 'expired').map((entry) => entry.key)).toEqual([
+        'expired.one',
+        'expired.two',
+      ]);
+      expect(report.compactionCandidates).toEqual([]);
+      expect(brain.working.snapshot()).toHaveProperty('expired.one');
+    });
+
+    it('treats TTL-managed working memory as temporary even when explicit classes are present', () => {
+      brain.working.set('ttl.user-pref', {
+        value: 'temporary rollout note',
+        memoryClass: 'user_preference',
+        category: 'temporary-operational',
+        expiresAt: '2027-01-01T00:00:00.000Z',
+      });
+
+      const report = brain.memoryRetentionReport({ now: '2027-01-02T00:00:00.000Z' });
+
+      expect(report.entries.find((entry) => entry.key === 'ttl.user-pref')).toMatchObject({
+        class: 'temporary_operational',
+        action: 'expired',
+      });
+    });
+
+    it('uses the same temporary TTL marker semantics as working memory cleanup', () => {
+      brain.working.set('class-only-expiry', {
+        value: 'reported temp but not a TTL-managed temporary operational value',
+        memoryClass: 'temporary_operational',
+        expiresAt: '2027-01-01T00:00:00.000Z',
+      });
+
+      const report = brain.memoryRetentionReport({ now: '2027-01-01T00:00:01.000Z' });
+
+      expect(report.entries.find((entry) => entry.key === 'class-only-expiry')).toMatchObject({
+        class: 'temporary_operational',
+        action: 'retain',
+      });
+      expect(report.entries.find((entry) => entry.key === 'class-only-expiry')).not.toHaveProperty('expiresAt');
+      expect(brain.working.has('class-only-expiry')).toBe(true);
+    });
+
+    it('suppresses runtime entries covered by cross-process deletion guards before retention reporting', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-retention-rtf-guard-'));
+      const dbPath = join(dir, 'brain.db');
+      let stale: SqliteBrain | undefined;
+      let db: Database.Database | undefined;
+
+      try {
+        stale = new SqliteBrain(dbPath);
+        stale.working.set('contact', 'alice@example.test');
+        stale.flush();
+
+        db = new Database(dbPath);
+        db.prepare(`INSERT INTO memory_deletion_guards (selector_hash, guard_kind, value_hash, created_at) VALUES (?, ?, ?, ?)`).run(
+          'selector-hash',
+          'working:query',
+          queryGuardHash('alice@example.test'),
+          '2026-07-14T00:00:00.000Z',
+        );
+        db.prepare(`DELETE FROM working_memory WHERE key = ?`).run('contact');
+        db.close();
+        db = undefined;
+
+        expect(stale!.memoryRetentionReport().entries.map((entry) => entry.key)).not.toContain('contact');
+        expect(stale!.working.has('contact')).toBe(false);
+      } finally {
+        db?.close();
+        stale?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('protects right-to-forget audit events from retention compaction reports', () => {
+      brain.episodic.record({
+        type: 'observation',
+        step: 'right-to-forget',
+        summary: 'Right-to-forget deletion completed',
+        details: {
+          selectorHash: 'a'.repeat(64),
+          deleted: { working: 1, episodic: 0, derived: 1 },
+        },
+        createdAt: '2020-01-01T00:00:00.000Z',
+      });
+
+      const report = brain.memoryRetentionReport({ now: '2027-01-01T00:00:00.000Z' });
+
+      expect(report.entries.find((entry) => entry.class === 'audit_record')).toMatchObject({
+        action: 'protect',
+        protected: true,
+      });
+      expect(report.compactionCandidates.map((entry) => entry.class)).not.toContain('audit_record');
+    });
+
+    it('treats explicit audit class aliases as protected audit records', () => {
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'Manual deletion audit trail entry',
+        details: { memoryClass: 'audit-record' },
+        createdAt: '2020-01-01T00:00:00.000Z',
+      });
+      brain.working.set('manual.audit', {
+        value: 'operator approved deletion hash abc123',
+        category: 'governance-audit',
+      });
+      brain.working.set('manual.audit.later-field', {
+        value: 'operator approved deletion hash def456',
+        category: 'custom-retention-category',
+        type: 'audit_record',
+      });
+
+      const report = brain.memoryRetentionReport({ now: '2027-01-01T00:00:00.000Z' });
+
+      const auditEntries = report.entries.filter((entry) => entry.class === 'audit_record');
+      expect(auditEntries).toEqual(expect.arrayContaining([
+        expect.objectContaining({ store: 'episodic', action: 'protect', protected: true }),
+        expect.objectContaining({ store: 'working', key: 'manual.audit', action: 'protect', protected: true }),
+        expect.objectContaining({ store: 'working', key: 'manual.audit.later-field', action: 'protect', protected: true }),
+      ]));
+      expect(report.compactionCandidates).not.toContainEqual(expect.objectContaining({ class: 'audit_record' }));
+    });
+
+    it('reports expired TTL working entries without deleting them during the report', () => {
+      brain.working.set('expired.operational', {
+        value: 'short-lived cache',
+        category: 'temporary-operational',
+        sourceScope: 'test',
+        expiresAt: '2027-01-01T00:00:00.000Z',
+      });
+
+      const report = brain.memoryRetentionReport({ now: '2027-01-02T00:00:00.000Z' });
+
+      expect(report.entries.find((entry) => entry.key === 'expired.operational')).toMatchObject({
+        class: 'temporary_operational',
+        action: 'expired',
+      });
+      expect(brain.memoryRetentionReport({ now: '2027-01-02T00:00:00.000Z' }).entries)
+        .toContainEqual(expect.objectContaining({ key: 'expired.operational', action: 'expired' }));
+    });
+
+    it('counts existing compaction candidates before applying entry budgets', () => {
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'fresh high-priority retained note',
+        details: { memoryClass: 'learned_procedure' },
+        createdAt: '2026-01-08T00:00:00.000Z',
+      });
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'fresh low-priority retained note',
+        details: { memoryClass: 'environment_fact' },
+        createdAt: '2026-01-08T00:00:00.000Z',
+      });
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'aged scratch observation',
+        details: { memoryClass: 'transient_observation' },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+
+      const report = brain.memoryRetentionReport({
+        now: '2026-01-09T00:00:00.000Z',
+        maxEntries: 2,
+      });
+
+      expect(report.compactionCandidates.map((entry) => entry.key)).toEqual(['3']);
+    });
+
+    it('does not apply the working-memory cap as a default report budget', () => {
+      const bounded = new SqliteBrain(':memory:', { maxEntries: 1 });
+      bounded.episodic.record({
+        type: 'observation',
+        summary: 'fresh procedure one',
+        details: { memoryClass: 'learned_procedure' },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      bounded.episodic.record({
+        type: 'observation',
+        summary: 'fresh procedure two',
+        details: { memoryClass: 'learned_procedure' },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+
+      const report = bounded.memoryRetentionReport({ now: '2026-01-02T00:00:00.000Z' });
+
+      expect(report.compactionCandidates).toEqual([]);
+      bounded.close();
+    });
+
+    it('uses persisted working-memory age for retention windows', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'retention-age-'));
+      const dbPath = join(dir, 'memory.sqlite');
+      brain.close();
+      brain = new SqliteBrain(dbPath);
+      brain.working.set('env.old-host', { value: 'linux host', memoryClass: 'environment_fact' });
+      brain.flush();
+      const db = new Database(dbPath);
+      try {
+        db.prepare(`UPDATE working_memory SET updated_at = ? WHERE key = ?`).run(
+          '2025-01-01T00:00:00.000Z',
+          'env.old-host',
+        );
+      } finally {
+        db.close();
+      }
+
+      const report = brain.memoryRetentionReport({ now: '2026-01-01T00:00:00.000Z' });
+
+      expect(report.entries.find((entry) => entry.key === 'env.old-host')).toMatchObject({
+        class: 'environment_fact',
+        action: 'compact',
+      });
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('returns cloned policy objects in entries', () => {
+      brain.working.set('env.node.version', { value: '20.x', memoryClass: 'environment_fact' });
+      const report = brain.memoryRetentionReport();
+      const [entry] = report.entries;
+      entry!.policy.description = 'mutated by caller';
+
+      expect(brain.memoryRetentionReport().entries[0]!.policy.description).not.toBe('mutated by caller');
+    });
+
+    it('honors explicit temporary and uncategorized classes', () => {
+      brain.working.set('explicit.tmp', {
+        value: 'scratch state',
+        category: 'temporary-operational',
+        expiresAt: '2027-01-01T00:00:00.000Z',
+      });
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'uncategorized note',
+        details: { memoryClass: 'uncategorized' },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+
+      const report = brain.memoryRetentionReport({ now: '2027-01-02T00:00:00.000Z' });
+
+      expect(report.entries.find((entry) => entry.key === 'explicit.tmp')).toMatchObject({
+        class: 'temporary_operational',
+        action: 'expired',
+        expiresAt: '2027-01-01T00:00:00.000Z',
+      });
+      expect(report.entries.find((entry) => entry.store === 'episodic' && entry.class === 'uncategorized')).toMatchObject({
+        store: 'episodic',
+        class: 'uncategorized',
+      });
+    });
+
+    it('requires fbeast scoping markers before assigning episodic agent ids', () => {
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'domain event with agent metadata',
+        details: { agentId: 'domain-agent' },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'scoped agent event',
+        details: { __fbeastMemoryScope: 'fbeast:agent-memory', agentId: 'scoped-agent' },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+
+      const report = brain.memoryRetentionReport({ now: '2026-01-02T00:00:00.000Z' });
+
+      expect(report.entries).not.toContainEqual(expect.objectContaining({ agentId: 'domain-agent' }));
+      expect(report.entries).toContainEqual(expect.objectContaining({
+        store: 'episodic',
+        agentId: 'scoped-agent',
+      }));
+    });
+  });
+
   describe('skill evolution review gate', () => {
     it('creates a review item after repeated sanitized skill failures', () => {
       for (const evidenceId of ['task-1', 'task-2', 'task-3']) {
@@ -479,6 +834,31 @@ describe('SqliteBrain', () => {
       brain.rightToForget({ sourceScope: 'import-1' });
 
       expect(() => brain.working.set('project:import-1:new-item', 'secret')).toThrow(/right-to-forget/);
+    });
+
+    it('guards memory review proposals whose sourceId matches a forgotten source scope', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.timezone',
+        value: 'UTC',
+        source: 'chat',
+        sourceId: 'msg-42',
+        confidence: 0.8,
+        reason: 'User stated timezone preference.',
+      });
+      brain.memoryReview.approve(candidate.id, { reviewer: 'operator' });
+
+      brain.rightToForget({ sourceScope: 'msg-42' });
+
+      expect(() => brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.locale',
+        value: 'en-US',
+        source: 'chat',
+        sourceId: 'msg-42',
+        confidence: 0.8,
+        reason: 'Same forgotten message id with different content.',
+      })).toThrow(/right-to-forget/);
     });
 
     it('deletes episodic events whose step matches the query selector', () => {
@@ -1529,6 +1909,89 @@ describe('SqliteBrain', () => {
       ]);
     });
 
+    it('exposes compact provenance and confidence metadata on the agent read path', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.response-style',
+        value: 'concise',
+        source: 'chat:turn-42',
+        sourceType: 'user',
+        sourceId: 'msg-42',
+        evidenceId: 'transcript-42',
+        confidence: 0.92,
+        reason: 'User explicitly requested concise responses.',
+        revalidateAt: '2026-08-01T00:00:00.000Z',
+      });
+      brain.memoryReview.approve(candidate.id, { reviewer: 'operator' });
+
+      const [entry] = brain.memoryReview.listForAgent({
+        key: 'user.preference.response-style',
+        now: '2026-07-16T00:00:00.000Z',
+      });
+
+      expect(entry).toMatchObject({
+        targetStore: 'working',
+        key: 'user.preference.response-style',
+        value: 'concise',
+        metadata: expect.objectContaining({
+          sourceType: 'user',
+          source: 'chat:turn-42',
+          sourceId: 'msg-42',
+          evidenceId: 'transcript-42',
+          confidence: 0.92,
+          expired: false,
+          needsRevalidation: false,
+        }),
+      });
+      expect(entry?.compact).toContain('user.preference.response-style="concise"');
+      expect(entry?.compact).toContain('source=user:"msg-42"');
+      expect(entry?.compact).toContain('confidence=');
+      expect(entry?.compact).toContain('revalidate=2026-08-01T00:00:00.000Z');
+    });
+
+    it('hides expired inferred memories from compact agent reads by default', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.location.city',
+        value: 'Paris',
+        source: 'inferred:session-7',
+        sourceId: 'session-7',
+        confidence: 0.6,
+        reason: 'User mentioned a Paris train connection; this is inferred.',
+        expiresAt: '2026-07-15T00:00:00.000Z',
+      });
+      brain.memoryReview.approve(candidate.id, { reviewer: 'operator' });
+
+      expect(
+        brain.memoryReview.listForAgent({
+          key: 'user.location.city',
+          now: '2026-07-16T00:00:00.000Z',
+        }),
+      ).toEqual([]);
+
+      expect(
+        brain.memoryReview.listForAgent({
+          key: 'user.location.city',
+          now: '2026-07-16T00:00:00.000Z',
+          includeExpired: true,
+        }),
+      ).toEqual([
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            sourceType: 'inferred',
+            sourceId: 'session-7',
+            expired: true,
+          }),
+        }),
+      ]);
+      expect(brain.memoryReview.listProvenance({ key: 'user.location.city' })).toEqual([
+        expect.objectContaining({
+          key: 'user.location.city',
+          expiresAt: '2026-07-15T00:00:00.000Z',
+        }),
+      ]);
+    });
+
     it('filters memory provenance by source and validates invalid viewer filters', () => {
       const repoCandidate = brain.memoryReview.propose({
         targetStore: 'working',
@@ -1536,7 +1999,7 @@ describe('SqliteBrain', () => {
         value: 'main',
         source: 'repo-config',
         confidence: 0.8,
-        reason: 'Observed from GitHub repository metadata.',
+        reason: 'Observed from GitHub repository metadata; not from a chat transcript.',
       });
       const chatCandidate = brain.memoryReview.propose({
         targetStore: 'working',
@@ -2566,6 +3029,64 @@ describe('SqliteBrain', () => {
         source: 'chat:turn-9',
         evidenceId: 'msg-9',
       });
+    });
+
+    it('redacts quarantined secret values on reject and suppressed duplicates', () => {
+      const secret = 'fake-secret-for-redaction-test';
+      const proposal = {
+        targetStore: 'working' as const,
+        key: 'OPENAI_API_KEY',
+        value: secret,
+        source: 'fbeast_memory_store:quarantine',
+        evidenceId: 'quarantine:OPENAI_API_KEY',
+        confidence: 1,
+        reason: 'Sensitive memory quarantined for operator review (value-shape-indicates-secret).',
+      };
+      const candidate = brain.memoryReview.propose(proposal);
+
+      const rejected = brain.memoryReview.reject(candidate.id, {
+        reviewer: 'operator',
+        note: 'Discard leaked secret.',
+      });
+
+      expect(rejected).toMatchObject({
+        status: 'rejected',
+        value: '[never-store-redacted]',
+        source: '[never-store-redacted]',
+        reason: '[never-store-redacted]',
+      });
+      expect(rejected.evidenceId).toBeUndefined();
+      expect(brain.memoryReview.list('rejected')).toEqual([
+        expect.objectContaining({
+          id: candidate.id,
+          value: '[never-store-redacted]',
+          source: '[never-store-redacted]',
+        }),
+      ]);
+      const suppressed = brain.memoryReview.propose(proposal);
+      expect(suppressed).toMatchObject({
+        status: 'suppressed',
+        suppressionReason: 'rejected',
+        value: '[never-store-redacted]',
+        source: '[never-store-redacted]',
+        reason: '[never-store-redacted]',
+      });
+      expect(suppressed.evidenceId).toBeUndefined();
+
+      const db = (brain as unknown as { db: Database.Database }).db;
+      const persisted = [
+        ...db.prepare(`SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_candidates`).all(),
+        ...db.prepare(`SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_suppressions`).all(),
+      ];
+      expect(JSON.stringify(persisted)).not.toContain(secret);
+      for (const row of persisted as Array<{ value: string; source: string; evidence_id: string | null; reason: string; reviewer: string | null; note: string | null }>) {
+        expect(row.value).toBe(JSON.stringify('[never-store-redacted]'));
+        expect(row.source).toBe('[never-store-redacted]');
+        expect(row.evidence_id).toBeNull();
+        expect(row.reason).toBe('[never-store-redacted]');
+        expect(row.reviewer).toBeNull();
+        expect(row.note).toBeNull();
+      }
     });
 
     it('marks a candidate as never-store and suppresses future matching proposals', () => {

@@ -1,6 +1,6 @@
 # Corrupted worktrees and queues incident runbook
 
-Use this runbook when Git worktrees, Kanban task queues, approval-cop queues, dead-letter queues, dispatcher workers, or PM/liveness state look inconsistent. It is a focused repair companion to the [incident command checklist](incident-command-checklist.md): keep diagnosis read-only first, make a backup before every repair, and route any destructive command through approval-cop/HITL.
+Use this runbook when Git worktrees, Kanban task queues, approval-cop queues, dead-letter queues, dispatcher workers, or coordination/liveness state look inconsistent. It is a focused repair companion to the [incident command checklist](incident-command-checklist.md): keep diagnosis read-only first, make a backup before every repair, and route any destructive command through approval-cop/HITL.
 
 ## Scope and safety rules
 

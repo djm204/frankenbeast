@@ -1,6 +1,6 @@
 # Troubleshooting stalled workers
 
-Use this guide when a PM, liveness monitor, or operator sees a worker that has stopped making visible progress. The goal is to classify the worker before taking action so recovery does not duplicate PRs, overwrite active work, or hide a real blocker.
+Use this guide when a coordinator, liveness monitor, or operator sees a worker that has stopped making visible progress. The goal is to classify the worker before taking action so recovery does not duplicate PRs, overwrite active work, or hide a real blocker.
 
 ## Fast triage checklist
 
@@ -39,6 +39,20 @@ gh pr view <pr-number> --repo djm204/frankenbeast --json number,state,mergeState
 gh pr checks <pr-number> --repo djm204/frankenbeast
 ```
 
+## Crash-only restart contract
+
+Coordinator/liveness watchdog recovery of an abnormal worker exit must produce one auditable restart contract row before a coordinator, repair owner, or dispatcher starts another worker from the stalled-card path. Manual/API restarts must still follow the fast triage checklist above, but this watchdog contract row specifically records `exitReason`, `pid`, `heartbeatAgeMs`, and `nextAction`, then classifies the liveness state as terminal, retryable, or HITL:
+
+| Exit/state | Disposition | Next action |
+| --- | --- | --- |
+| Setup/spawn failure or protocol violation before the worker can own the task | HITL | `replace-with-doctor`; preserve spawn error, PID if known, stderr tail, and task context instead of blind respawn loops. The token is a stable runtime contract value; human-facing handoffs should describe the owner as a repair owner. |
+| Crash while the card is blocked or waiting on approval/provider/CI evidence | HITL | `defer-with-evidence`; keep the human/external gate visible and do not auto-respawn over it. |
+| Dead PID for an otherwise running card, with no sibling owner and no active PR/worktree owner | Retryable | `restart-once`; clear stale PID/current-run metadata only after evidence is recorded. |
+| Another live PID already owns the same worker card | HITL | `suppress-duplicate-respawn`; stop or park duplicates and record the surviving PID/run id. |
+| Completed/stopped/deleted card with no active crash evidence | Terminal | `no-op`; do not resurrect terminal work from stale liveness snapshots. |
+
+The contract is intentionally crash-only: recovery starts from the recorded evidence and either restarts exactly once, defers to a human/external gate, or replaces the card with a repair-owner lane. It must not churn stale `ready`/`running` states or keep stale active worker ids after a terminal decision.
+
 ## Recovery actions by outcome
 
 ### Active worker
@@ -68,7 +82,7 @@ gh pr checks <pr-number> --repo djm204/frankenbeast
 ## Edge cases that must stay explicit
 
 - Do not merge on Codex silence, usage-limit text, or an all-clear from an older head.
-- Do not respawn a worker just because a PM liveness file is stale; verify the live Kanban task and PR state first.
+- Do not respawn a worker just because a coordination liveness file is stale; verify the live Kanban task and PR state first.
 - Do not delete dirty worktrees until their commits are pushed, abandoned by an explicit owner decision, or safely copied into the recovery handoff.
 - Do not broaden a one-issue worker into adjacent issues while recovering it.
 

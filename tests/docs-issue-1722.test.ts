@@ -53,15 +53,15 @@ describe('issue #1722 provider outage recovery drill docs', () => {
   it('links the drill from adjacent availability and DR docs', () => {
     const issueGuide = readText('docs/guides/fix-github-issues.md');
     const incidentChecklist = readText('docs/dr/incident-command-checklist.md');
-    const pmSwarmGlossary = readText('docs/onboarding/pm-swarm-runtime-glossary.md');
+    const coordinationGlossary = readText('docs/onboarding/agent-coordination-runtime-glossary.md');
     const drill = readText('docs/dr/provider-outage-recovery-drill.md');
 
     expect(issueGuide).toContain('docs/dr/provider-outage-recovery-drill.md');
     expect(incidentChecklist).toContain('provider-outage-recovery-drill.md');
-    expect(pmSwarmGlossary).toContain('../dr/provider-outage-recovery-drill.md');
+    expect(coordinationGlossary).toContain('../dr/provider-outage-recovery-drill.md');
     expect(drill).toContain('../guides/fix-github-issues.md#backpressure');
     expect(drill).toContain('incident-command-checklist.md');
-    expect(drill).toContain('../onboarding/pm-swarm-runtime-glossary.md');
+    expect(drill).toContain('../onboarding/agent-coordination-runtime-glossary.md');
     expect(drill).toContain('../guides/add-llm-provider.md');
   });
 
