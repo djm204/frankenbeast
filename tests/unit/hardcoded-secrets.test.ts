@@ -1144,6 +1144,93 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('scripts/install-url-cron.sh:4');
   });
 
+  it('rejects Codex round 26 cron scanner bypasses', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'round-26-cron.mjs'),
+      [
+        "const cli = 'gh';",
+        "const fromCliAlias = execFileSync(cli, ['auth', 'token']);",
+        'const cliEntry = `0 1 * * * agy pr --token ${fromCliAlias}`;',
+        "const bracketEnv = process['env'];",
+        'const fromBracketEnv = bracketEnv.GITHUB_TOKEN;',
+        'const bracketEntry = `0 2 * * * agy pr --token ${fromBracketEnv}`;',
+        'let shadowed = process.env.GITHUB_TOKEN;',
+        'if (debug) {',
+        "  const shadowed = 'diagnostic';",
+        '}',
+        'const shadowedEntry = `0 3 * * * agy pr --token ${shadowed}`;',
+        'const [destructured] = [process.env.GITHUB_TOKEN];',
+        'const destructuredEntry = `0 4 * * * agy pr --token ${destructured}`;',
+        'const stagedCredential = process.env.GITHUB_TOKEN;',
+        'const stagedEntry = `${process.argv[2]} agy pr --token ${stagedCredential}`;',
+        "writeFileSync('/tmp/round-26-jobs', stagedEntry);",
+        "execFileSync('crontab', ['/tmp/round-26-jobs']);",
+        'const midnightEntry = `@midnight agy pr --token ${process.env.GITHUB_TOKEN}`;',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'round-26-cron.py'),
+      [
+        'import os as os_',
+        'import subprocess',
+        'from pathlib import Path',
+        "TOKEN_ENV = 'GITHUB_TOKEN'",
+        'from_pop = os_.environ.pop(TOKEN_ENV)',
+        "pop_entry = f'0 5 * * * agy pr --token {from_pop}'",
+        'get_env = os_.getenv',
+        "from_getter = get_env('GITHUB_TOKEN')",
+        "getter_entry = f'0 6 * * * agy pr --token {from_getter}'",
+        "tuple_credential, _ = os_.environ['GITHUB_TOKEN'], None",
+        "tuple_entry = f'0 7 * * * agy pr --token {tuple_credential}'",
+        "staged = f'{sys.argv[1]} agy pr --token {os_.environ[\"GITHUB_TOKEN\"]}'",
+        "Path('/tmp/round-26-python-jobs').write_text(staged)",
+        "subprocess.run(['crontab', '/tmp/round-26-python-jobs'])",
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'round-26-cron.sh'),
+      [
+        'auth="$(/usr/bin/printenv GITHUB_TOKEN)"',
+        'CRON_CMD="0 8 * * * agy pr --token $auth"',
+        "printf '%s\\n' '0 9 * * * agy pr' >/tmp/round-26-shell-jobs",
+        "printf '%s\\n' \"--token $GITHUB_TOKEN\" >>/tmp/round-26-shell-jobs",
+        'crontab -u "$USER" /tmp/round-26-shell-jobs',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'round-26-sink.mjs'),
+      [
+        "const sink = '/usr/bin/crontab';",
+        'const sinkEntry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        "spawnSync(sink, ['-'], { input: sinkEntry });",
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/round-26-cron.mjs:3');
+    expect(result.stderr).toContain('scripts/round-26-cron.mjs:6');
+    expect(result.stderr).toContain('scripts/round-26-cron.mjs:11');
+    expect(result.stderr).toContain('scripts/round-26-cron.mjs:13');
+    expect(result.stderr).toContain('scripts/round-26-cron.mjs:16');
+    expect(result.stderr).toContain('scripts/round-26-cron.mjs:18');
+    expect(result.stderr).toContain('scripts/round-26-cron.py:6');
+    expect(result.stderr).toContain('scripts/round-26-cron.py:9');
+    expect(result.stderr).toContain('scripts/round-26-cron.py:11');
+    expect(result.stderr).toContain('scripts/round-26-cron.py:13');
+    expect(result.stderr).toContain('scripts/round-26-cron.sh:2');
+    expect(result.stderr).toContain('scripts/round-26-cron.sh:4');
+    expect(result.stderr).toContain('scripts/round-26-sink.mjs:3');
+  });
+
   it('allows quoted runtime env-file credentials in shell cron commands and heredocs', () => {
     const root = makeFixtureRoot();
     const scriptDir = join(root, 'scripts');
