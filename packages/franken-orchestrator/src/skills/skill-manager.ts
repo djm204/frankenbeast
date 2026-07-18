@@ -234,7 +234,7 @@ export class SkillManager {
         [catalogEntry.name]: catalogEntry.installConfig,
       },
     });
-    const tools = catalogEntry.toolDefinitions?.length
+    const tools = catalogEntry.toolDefinitions !== undefined
       ? requireSecurityReviewByDefault(
         SkillToolManifestSchema.parse(catalogEntry.toolDefinitions),
       )

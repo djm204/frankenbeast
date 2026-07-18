@@ -363,6 +363,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       }
       throwMaintenanceModeError(error);
       throwCapacityReservationError(error);
+      throwAgentToolPolicyError(error);
       throw error;
     }
   });
@@ -452,6 +453,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       }
       throwMaintenanceModeError(error);
       throwCapacityReservationError(error);
+      throwAgentToolPolicyError(error);
       throw error;
     }
   });
@@ -537,6 +539,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       }
       throwMaintenanceModeError(error);
       throwCapacityReservationError(error);
+      throwAgentToolPolicyError(error);
       throw error;
     }
   });
@@ -640,6 +643,17 @@ function throwCapacityReservationError(error: unknown): void {
         decision: error.decision,
         capacity: error.state,
       },
+    );
+  }
+}
+
+function throwAgentToolPolicyError(error: unknown): void {
+  if (error instanceof AgentToolPolicyError) {
+    throw new HttpError(
+      403,
+      'AGENT_TOOL_POLICY_DENIED',
+      error.message,
+      { validation: error.validation },
     );
   }
 }

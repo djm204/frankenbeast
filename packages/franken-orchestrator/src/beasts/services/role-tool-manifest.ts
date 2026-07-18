@@ -10,8 +10,18 @@ export interface ToolPolicyValidationContext {
   readonly definitionId?: string | undefined;
   readonly initActionKind?: string | undefined;
   readonly initActionConfig?: Readonly<Record<string, unknown>> | undefined;
-  readonly trustedSkillToolManifests?: Readonly<Record<string, readonly string[]>> | undefined;
+  readonly trustedSkillToolManifests?: TrustedSkillToolManifestSource | undefined;
 }
+
+export type TrustedSkillToolManifestSource =
+  | Readonly<Record<string, readonly string[]>>
+  | (() => Readonly<Record<string, readonly string[]>>);
+
+export type CanonicalAgentToolPolicyConfig = Readonly<{
+  agentRole?: AgentRole | undefined;
+  requestedTools: readonly string[];
+  skills?: readonly string[] | undefined;
+}>;
 
 export interface ToolPolicyValidationResult {
   readonly allowed: boolean;
@@ -135,9 +145,7 @@ function runtimeToolsFromConfig(
   context: ToolPolicyValidationContext,
 ): string[] {
   const tools: string[] = [];
-  const workflow = context.definitionId === 'martin-loop'
-    ? context.initActionKind ?? context.definitionId
-    : context.definitionId ?? context.initActionKind;
+  const workflow = context.initActionKind ?? context.definitionId;
   if (workflow === 'martin-loop') {
     tools.push(...ROLE_TOOL_MANIFESTS.coding);
   }
@@ -152,9 +160,7 @@ function runtimeToolsFromConfig(
 }
 
 function workflowRequiredTools(context: ToolPolicyValidationContext): string[] {
-  const workflow = context.definitionId === 'martin-loop'
-    ? context.initActionKind ?? context.definitionId
-    : context.definitionId ?? context.initActionKind;
+  const workflow = context.initActionKind ?? context.definitionId;
   switch (workflow) {
     case 'martin-loop':
       return ['read_file', 'search_files', 'write_file', 'patch', 'terminal'];
@@ -168,10 +174,13 @@ function workflowRequiredTools(context: ToolPolicyValidationContext): string[] {
 }
 
 function trustedSkillToolManifestFor(context: ToolPolicyValidationContext, skill: string): string[] | undefined {
-  if (!context.trustedSkillToolManifests || !Object.hasOwn(context.trustedSkillToolManifests, skill)) {
+  const manifests = typeof context.trustedSkillToolManifests === 'function'
+    ? context.trustedSkillToolManifests()
+    : context.trustedSkillToolManifests;
+  if (!manifests || !Object.hasOwn(manifests, skill)) {
     return undefined;
   }
-  const raw = context.trustedSkillToolManifests?.[skill];
+  const raw = manifests[skill];
   return arrayOfTools(raw);
 }
 

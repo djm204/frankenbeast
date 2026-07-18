@@ -173,9 +173,11 @@ describe('BeastDispatchService', () => {
 
     expect(run.dispatchedBy).toBe('dashboard');
     expect(run.configSnapshot).toEqual({
+      agentRole: 'coding',
       provider: 'claude',
       objective: 'Implement the dispatch panel',
       chunkDirectory: 'docs/chunks',
+      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
       skills: [],
     });
     expect(metrics.render()).toContain('beast_runs_created_total{definition_id="martin-loop",source="dashboard"} 1');
@@ -221,9 +223,11 @@ describe('BeastDispatchService', () => {
     });
 
     expect(run.configSnapshot).toEqual({
+      agentRole: 'coding',
       provider: 'claude',
       objective: 'Implement the dispatch panel',
       chunkDirectory: 'docs/chunks',
+      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
       skills: [],
       promptConfig: { text: 'Launch with this context.' },
       gitConfig: { preset: 'feature-branch', baseBranch: 'develop', branchPattern: '', prCreation: 'auto', mergeStrategy: 'squash', commitConvention: 'conventional' },
@@ -270,9 +274,11 @@ describe('BeastDispatchService', () => {
     });
 
     expect(run.configSnapshot).toEqual({
+      agentRole: 'coding',
       provider: 'claude',
       objective: 'Implement the dispatch panel',
       chunkDirectory: 'docs/chunks',
+      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
       promptConfig: { text: 'Launch with this context.' },
       skills: [],
     });
@@ -746,13 +752,13 @@ describe('BeastDispatchService', () => {
     };
     const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
     const agent = agents.createAgent({
-      definitionId: 'triage-lane',
+      definitionId: 'docs-lane',
       source: 'api',
       createdByUser: 'operator',
-      initAction: { kind: 'chunk-plan', command: 'triage', config: {} },
+      initAction: { kind: 'chunk-plan', command: 'docs', config: {} },
       initConfig: {
-        role: 'triage',
-        requestedTools: ['read_file'],
+        role: 'docs',
+        requestedTools: ['read_file', 'search_files', 'write_file'],
         skills: [],
       },
     });

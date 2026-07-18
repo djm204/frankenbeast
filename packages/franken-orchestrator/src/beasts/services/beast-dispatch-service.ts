@@ -15,7 +15,7 @@ import {
   capacityItemFromConfig,
 } from './capacity-reservation-policy.js';
 import type { MaintenanceModeService } from './maintenance-mode-service.js';
-import { AgentToolPolicyError, validateAgentRoleTools } from './role-tool-manifest.js';
+import { AgentToolPolicyError, defaultAgentToolPolicyConfig, validateAgentRoleTools } from './role-tool-manifest.js';
 import type { ToolPolicyDenial, ToolPolicyValidationContext } from './role-tool-manifest.js';
 
 export interface BeastDispatchServiceOptions {
@@ -237,8 +237,8 @@ export class BeastDispatchService {
       : undefined;
     const moduleConfig = request.moduleConfig ?? trackedAgent?.moduleConfig;
     const parsedConfigSnapshot: Readonly<Record<string, unknown>> = moduleConfig
-      ? { ...config, modules: moduleConfig }
-      : config;
+      ? { ...defaultAgentToolPolicyConfig(definition.id), ...config, modules: moduleConfig }
+      : { ...defaultAgentToolPolicyConfig(definition.id), ...config };
     const configSnapshot = preserveTrackedAgentPolicyConfig(parsedConfigSnapshot, trackedAgent);
     this.assertRoleToolManifestAllows(request, configSnapshot);
     const executionMode = request.executionMode ?? definition.executionModeDefault;
@@ -428,12 +428,21 @@ export class BeastDispatchService {
     request: CreateBeastRunRequest,
     configSnapshot: Readonly<Record<string, unknown>>,
   ): void {
-    if (!request.trackedAgentId) {
-      return;
-    }
     const trackedAgent = request.trackedAgentId
       ? this.repository.requireTrackedAgent(request.trackedAgentId)
       : undefined;
+    if (trackedAgent && trackedAgent.definitionId !== request.definitionId) {
+      throw new AgentToolPolicyError({
+        allowed: false,
+        rawRole: undefined,
+        requestedTools: [],
+        denials: [{
+          role: '<definition-mismatch>',
+          requestedTool: `definition:${request.definitionId}`,
+          reason: `tracked agent '${trackedAgent.id}' was created for definition '${trackedAgent.definitionId}' and cannot dispatch definition '${request.definitionId}'`,
+        }],
+      });
+    }
     const policyConfig = trackedAgent
       ? {
         ...request.config,

@@ -15,7 +15,6 @@ import {
 import type { MaintenanceModeService } from './maintenance-mode-service.js';
 import {
   AgentToolPolicyError,
-  defaultAgentToolPolicyConfig,
   validateAgentRoleTools,
   type ToolPolicyDenial,
   type ToolPolicyValidationContext,
@@ -343,10 +342,7 @@ export class BeastRunService {
       ? this.repository.getTrackedAgent(run.trackedAgentId)
       : undefined;
     const initActionKind = trackedAgent?.initAction.kind;
-    const validation = validateAgentRoleTools({
-      ...defaultAgentToolPolicyConfig(run.definitionId, initActionKind),
-      ...run.configSnapshot,
-    }, {
+    const validation = validateAgentRoleTools(run.configSnapshot, {
       definitionId: run.definitionId,
       initActionKind,
       initActionConfig: trackedAgent?.initAction.config,

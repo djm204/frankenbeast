@@ -20,7 +20,7 @@ import { BeastRunService } from './services/beast-run-service.js';
 import { MaintenanceModeService } from './services/maintenance-mode-service.js';
 import { PrometheusBeastMetrics } from './telemetry/prometheus-beast-metrics.js';
 import { SkillManager } from '../skills/skill-manager.js';
-import type { ToolPolicyValidationContext } from './services/role-tool-manifest.js';
+
 
 export interface BeastServicePaths {
   beastsDb: string;
@@ -53,7 +53,8 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   const ticketStore = new SseConnectionTicketStore();
   const capacityPolicy = createCapacityReservationPolicyFromEnv();
   const maintenance = MaintenanceModeService.forProjectRoot(projectRoot);
-  const trustedSkillToolManifests = collectTrustedSkillToolManifests(paths.skillsDir ?? join(projectRoot, 'skills'));
+  const trustedSkillsDir = paths.skillsDir ?? join(projectRoot, 'skills');
+  const trustedSkillToolManifests = () => collectTrustedSkillToolManifests(trustedSkillsDir);
 
   // Deferred reference to break circular dep: executor → runService → executors → executor
   // eslint-disable-next-line prefer-const
@@ -125,7 +126,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
 
 function collectTrustedSkillToolManifests(
   skillsDir: string,
-): ToolPolicyValidationContext['trustedSkillToolManifests'] {
+): Readonly<Record<string, readonly string[]>> {
   const skillManager = new SkillManager(skillsDir, new Set());
   return Object.fromEntries(
     skillManager.listInstalled()

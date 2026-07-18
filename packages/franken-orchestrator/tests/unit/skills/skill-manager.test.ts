@@ -177,6 +177,20 @@ describe('SkillManager', () => {
       expect(existsSync(join(skillsDir, 'github', 'tools.json'))).toBe(false);
       expect(manager.readTools('github')).toEqual([]);
     });
+
+    it('writes an empty tools manifest when the catalog explicitly declares no runtime tools', async () => {
+      await manager.install({
+        name: 'prompt-only',
+        description: 'Prompt-only context',
+        provider: 'cli',
+        installConfig: { command: 'prompt-only-server' },
+        authFields: [],
+        toolDefinitions: [],
+      });
+
+      expect(existsSync(join(skillsDir, 'prompt-only', 'tools.json'))).toBe(true);
+      expect(manager.readTools('prompt-only')).toEqual([]);
+    });
   });
 
   describe('installCustom()', () => {
