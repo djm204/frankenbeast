@@ -371,4 +371,52 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('parser=secret-env-scanner input=file-too-large');
     expect(result.stderr).not.toContain(oversizedPayload);
   });
+
+  it('redacts raw credential-shaped token matches from deterministic scan findings', () => {
+    const root = makeFixtureRoot();
+    const sourceDir = join(root, 'packages', 'example', 'src');
+    mkdirSync(sourceDir, { recursive: true });
+    const githubToken = `github_pat_${'A'.repeat(40)}`;
+    const classicGithubToken = `ghp_${'D'.repeat(40)}`;
+    const anthropicToken = `sk-ant-${'B'.repeat(40)}`;
+    const googleToken = `AIza${'C'.repeat(35)}`;
+    const adjacentSecret = 'super-secret';
+    writeFileSync(
+      join(sourceDir, 'config.ts'),
+      [
+        `export const github = '${githubToken}';`,
+        `export const anthropic = '${anthropicToken}';`,
+        `export const google = '${googleToken}';`,
+        `export const classicGitHub = '${classicGithubToken}';`,
+        `const jwtSecret = '${adjacentSecret}'; const gh = '${githubToken}';`,
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(root, '.env.example'),
+      [
+        `SERVICE_URL=https://user:dbpass@example.test?token=${githubToken}`,
+        `JWT_SECRET=prefix-${classicGithubToken}-local-secret`,
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('packages/example/src/config.ts:1');
+    expect(result.stderr).toContain('packages/example/src/config.ts:2');
+    expect(result.stderr).toContain('packages/example/src/config.ts:3');
+    expect(result.stderr).toContain('packages/example/src/config.ts:4');
+    expect(result.stderr).toContain('packages/example/src/config.ts:5');
+    expect(result.stderr).toContain('SERVICE_URL=<redacted>');
+    expect(result.stderr).toContain('JWT_SECRET=<redacted>');
+    expect(result.stderr).not.toContain(githubToken);
+    expect(result.stderr).not.toContain(classicGithubToken);
+    expect(result.stderr).not.toContain(anthropicToken);
+    expect(result.stderr).not.toContain(googleToken);
+    expect(result.stderr).not.toContain(adjacentSecret);
+    expect(result.stderr).not.toContain('dbpass');
+    expect(result.stderr).not.toContain('local-secret');
+  });
 });
