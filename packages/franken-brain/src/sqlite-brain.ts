@@ -35,6 +35,13 @@ export interface WorkingMemoryLimits {
   maxTotalBytes: number;
 }
 
+export interface WorkingMemoryHydrationLimits {
+  /** Maximum persisted rows read into memory during startup hydration. */
+  maxRows: number;
+  /** Maximum combined persisted key/value bytes read during startup hydration. */
+  maxBytes: number;
+}
+
 export const DEFAULT_WORKING_MEMORY_LIMITS: WorkingMemoryLimits = {
   maxEntries: 10_000,
   maxValueBytes: 5 * 1024 * 1024,
@@ -85,6 +92,7 @@ export interface MemoryEncryptionOptions {
 
 export interface SqliteBrainOptions {
   hydrateWorkingMemoryFromDb?: boolean;
+  workingMemoryHydrationLimits?: Partial<WorkingMemoryHydrationLimits>;
   encryption?: MemoryEncryptionOptions;
 }
 
@@ -863,6 +871,26 @@ export class WorkingMemoryLimitError extends Error {
   }
 }
 
+export class WorkingMemoryHydrationLimitError extends Error {
+  readonly code = 'WORKING_MEMORY_HYDRATION_LIMIT_EXCEEDED';
+
+  constructor(
+    readonly rowCount: number,
+    readonly byteCount: number | undefined,
+    readonly maxRows: number,
+    readonly maxBytes: number,
+  ) {
+    const rowDiagnostic = byteCount === undefined ? `at least ${rowCount}` : `${rowCount}`;
+    const byteDiagnostic =
+      byteCount === undefined ? 'byte count skipped after row overflow' : `${byteCount} bytes`;
+    super(
+      `Persisted working memory hydration requires ${rowDiagnostic} rows and ${byteDiagnostic}, ` +
+        `exceeding startup limits of ${maxRows} rows and ${maxBytes} bytes`,
+    );
+    this.name = 'WorkingMemoryHydrationLimitError';
+  }
+}
+
 export class MemoryDeletionGuardError extends Error {
   constructor(message: string) {
     super(message);
@@ -1197,21 +1225,61 @@ class SqliteWorkingMemory implements IWorkingMemory {
     private encryption?: MemoryCipher,
     private audit?: MemoryAccessAuditRecorder,
     private onPrunedPersistedKeys?: (keys: readonly string[]) => void,
+    hydrationLimits?: WorkingMemoryHydrationLimits,
   ) {
-    this.loadPersistedSerializedFromDb();
     if (hydrateFromDb) {
-      this.loadFromDb();
+      this.loadFromDb(hydrationLimits);
+    } else {
+      this.loadPersistedSerializedFromDb();
     }
   }
 
-  private loadPersistedSerializedFromDb(): Array<{
+  private loadPersistedSerializedFromDb(
+    hydrationLimits?: WorkingMemoryHydrationLimits,
+  ): Array<{
     key: string;
     value: string;
     updatedAt: string;
   }> {
-    const rows = this.db
-      .prepare(`SELECT key, value, updated_at AS updatedAt FROM working_memory ORDER BY key ASC`)
-      .all() as Array<{ key: string; value: string; updatedAt: string }>;
+    const selectRows = this.db.prepare(
+      `SELECT key, value, updated_at AS updatedAt FROM working_memory ORDER BY key ASC`,
+    );
+    const readRows = () => {
+      if (hydrationLimits) {
+        const rowOverflow = this.db
+          .prepare(`SELECT 1 AS present FROM working_memory LIMIT 1 OFFSET ?`)
+          .get(hydrationLimits.maxRows) as { present: 1 } | undefined;
+        if (rowOverflow) {
+          throw new WorkingMemoryHydrationLimitError(
+            hydrationLimits.maxRows + 1,
+            undefined,
+            hydrationLimits.maxRows,
+            hydrationLimits.maxBytes,
+          );
+        }
+        const stats = this.db
+          .prepare(
+            `SELECT COUNT(*) AS rowCount,
+                    COALESCE(SUM(length(CAST(key AS BLOB)) + length(CAST(value AS BLOB))), 0) AS byteCount
+               FROM (SELECT key, value FROM working_memory LIMIT ?)`,
+          )
+          .get(hydrationLimits.maxRows) as { rowCount: number; byteCount: number };
+        if (stats.byteCount > hydrationLimits.maxBytes) {
+          throw new WorkingMemoryHydrationLimitError(
+            stats.rowCount,
+            stats.byteCount,
+            hydrationLimits.maxRows,
+            hydrationLimits.maxBytes,
+          );
+        }
+      }
+      return selectRows.all() as Array<{ key: string; value: string; updatedAt: string }>;
+    };
+    // Keep the preflight and snapshot read atomic with respect to writers.
+    const rows =
+      hydrationLimits && !this.db.inTransaction
+        ? this.db.transaction(readRows).immediate()
+        : readRows();
     const decryptedRows = rows.map((row) => ({
       key: row.key,
       value: this.encryption?.decrypt(row.value) ?? row.value,
@@ -1224,8 +1292,8 @@ class SqliteWorkingMemory implements IWorkingMemory {
   }
 
   /** Hydrate in-memory state from persisted SQLite working_memory rows. */
-  private loadFromDb(): void {
-    const rows = this.loadPersistedSerializedFromDb();
+  private loadFromDb(hydrationLimits?: WorkingMemoryHydrationLimits): void {
+    const rows = this.loadPersistedSerializedFromDb(hydrationLimits);
 
     let prepared: Array<{
       key: string;
@@ -5245,6 +5313,24 @@ export class SqliteBrain implements IBrain {
     workingMemoryLimits?: Partial<WorkingMemoryLimits>,
     options: SqliteBrainOptions = {},
   ) {
+    const requestedHydrationLimits = options.workingMemoryHydrationLimits;
+    const hydrationLimits = requestedHydrationLimits
+      ? {
+          maxRows:
+            requestedHydrationLimits.maxRows ?? DEFAULT_WORKING_MEMORY_LIMITS.maxEntries,
+          maxBytes:
+            requestedHydrationLimits.maxBytes ?? DEFAULT_WORKING_MEMORY_LIMITS.maxTotalBytes,
+        }
+      : undefined;
+    if (hydrationLimits) {
+      for (const [name, value] of Object.entries(hydrationLimits)) {
+        if (!Number.isSafeInteger(value) || value < 1) {
+          throw new RangeError(
+            `workingMemoryHydrationLimits.${name} must be a positive safe integer`,
+          );
+        }
+      }
+    }
     this.dbPath = normalizeSqliteDbPath(dbPath);
     this.db = new Database(dbPath);
     this.db.pragma('busy_timeout = 5000');
@@ -5259,17 +5345,23 @@ export class SqliteBrain implements IBrain {
     assertMemoryEncryptionState(this.db, dbPath, encryption);
     this.auditRecorder = (event) => insertMemoryAccessAuditEvent(this.db, event, encryption);
     this.accessAudit = new SqliteMemoryAccessAuditTrail(this.db, encryption);
-    this.working = new SqliteWorkingMemory(
-      this.db,
-      {
-        ...DEFAULT_WORKING_MEMORY_LIMITS,
-        ...workingMemoryLimits,
-      },
-      options.hydrateWorkingMemoryFromDb ?? true,
-      encryption,
-      (event) => this.auditRecorder(event),
-      (keys) => SqliteBrain.expireLivePrunedWorkingKeys(this.dbPath, keys),
-    );
+    try {
+      this.working = new SqliteWorkingMemory(
+        this.db,
+        {
+          ...DEFAULT_WORKING_MEMORY_LIMITS,
+          ...workingMemoryLimits,
+        },
+        options.hydrateWorkingMemoryFromDb ?? true,
+        encryption,
+        (event) => this.auditRecorder(event),
+        (keys) => SqliteBrain.expireLivePrunedWorkingKeys(this.dbPath, keys),
+        hydrationLimits,
+      );
+    } catch (error) {
+      this.db.close();
+      throw error;
+    }
     this.episodic = new SqliteEpisodicMemory(
       this.db,
       encryption,

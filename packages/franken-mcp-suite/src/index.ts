@@ -20,6 +20,7 @@ export {
   type BrainAdapter,
   type BrainAdapterOptions,
 } from './adapters/brain-adapter.js';
+export { WorkingMemoryHydrationLimitError } from '@franken/brain';
 export { createObserverAdapter, type ObserverAdapter } from './adapters/observer-adapter.js';
 export { createGovernorAdapter, type GovernorAdapter } from './adapters/governor-adapter.js';
 export { createPlannerAdapter, type PlannerAdapter } from './adapters/planner-adapter.js';

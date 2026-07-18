@@ -1,6 +1,7 @@
 export {
   SqliteBrain,
   WorkingMemoryLimitError,
+  WorkingMemoryHydrationLimitError,
   MemoryDeletionGuardError,
   UnsupportedMemorySchemaVersionError,
   MemoryEncryptionKeyUnavailableError,
@@ -16,6 +17,7 @@ export {
   SqliteMemoryReviewQueue,
   SqliteMemoryAccessAuditTrail,
   type WorkingMemoryLimits,
+  type WorkingMemoryHydrationLimits,
   type SqliteBrainOptions,
   type MemoryRetentionClass,
   type MemoryRetentionAction,

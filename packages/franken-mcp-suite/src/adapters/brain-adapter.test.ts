@@ -11,7 +11,7 @@ const { databaseInstances, brainInstances, workingMemoryRowsByPath } = vi.hoiste
   }> = [];
   const brainInstances: Array<{
     dbPath: string;
-    limits: { maxEntries?: number; maxTotalBytes?: number } | undefined;
+    limits: { maxRows?: number; maxBytes?: number } | undefined;
     working: {
       restore: ReturnType<typeof vi.fn>;
       snapshot: ReturnType<typeof vi.fn>;
@@ -427,7 +427,10 @@ vi.mock("@franken/brain", () => ({
   SqliteBrain: vi.fn(function MockSqliteBrain(
     this: unknown,
     dbPath: string,
-    limits?: { maxEntries?: number; maxTotalBytes?: number },
+    _workingMemoryLimits?: unknown,
+    options?: {
+      workingMemoryHydrationLimits?: { maxRows?: number; maxBytes?: number };
+    },
   ) {
     let workingSnapshot: Record<string, unknown> = {
       "task-1": "working entry",
@@ -690,7 +693,11 @@ vi.mock("@franken/brain", () => ({
       },
       flush: vi.fn(),
     };
-    brainInstances.push({ ...brain, dbPath, limits });
+    brainInstances.push({
+      ...brain,
+      dbPath,
+      limits: options?.workingMemoryHydrationLimits,
+    });
     Object.assign(this as object, brain);
   }),
 }));
@@ -712,7 +719,7 @@ describe("createBrainAdapter", () => {
     expect(brainInstances).toHaveLength(1);
     expect(brainInstances[0]).toMatchObject({
       dbPath: "/tmp/beast.db",
-      limits: { maxEntries: 10_000, maxTotalBytes: 64 * 1024 * 1024 },
+      limits: { maxRows: 10_000, maxBytes: 64 * 1024 * 1024 },
     });
     expect(brainInstances[0]!.working.restore).not.toHaveBeenCalled();
   });
@@ -724,7 +731,7 @@ describe("createBrainAdapter", () => {
 
     expect(brainInstances[0]).toMatchObject({
       dbPath: "/tmp/bounded.db",
-      limits: { maxEntries: 2, maxTotalBytes: 1_000 },
+      limits: { maxRows: 2, maxBytes: 1_000 },
     });
   });
 

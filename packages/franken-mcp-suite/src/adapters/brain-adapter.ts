@@ -1132,12 +1132,14 @@ export function createBrainAdapter(
   options: BrainAdapterOptions = {},
 ): BrainAdapter {
   const hydrationBudget = resolveHydrationBudget(options);
-  // SqliteBrain owns working-memory hydration, expiry, startup pruning, and
-  // concurrent-row safety. Passing the limits into that single hydration path
-  // avoids the adapter's former unbounded second SELECT/restore cycle.
-  const brain = new SqliteBrain(dbPath, {
-    maxEntries: hydrationBudget.maxRows,
-    maxTotalBytes: hydrationBudget.maxBytes,
+  // SqliteBrain owns the single startup hydration read and its concurrency
+  // safety. Startup-only limits avoid the adapter's former unbounded second
+  // SELECT/restore cycle without changing normal working-memory write limits.
+  const brain = new SqliteBrain(dbPath, undefined, {
+    workingMemoryHydrationLimits: {
+      maxRows: hydrationBudget.maxRows,
+      maxBytes: hydrationBudget.maxBytes,
+    },
   });
 
   const resolveMemoryType = (
