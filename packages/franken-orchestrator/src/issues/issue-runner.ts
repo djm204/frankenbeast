@@ -843,20 +843,26 @@ function liveSiblingPidsByCardId(snapshots: readonly IssueWorkerCardProcessSnaps
   return new Map([...byCard].map(([cardId, pids]) => [cardId, [...pids].sort((a, b) => a - b)]));
 }
 
-function samePidLiveProbeRecencyByCardId(snapshots: readonly IssueWorkerCardProcessSnapshot[]): Map<string, Map<number, number>> {
-  const byCard = new Map<string, Map<number, number>>();
-  for (const snapshot of snapshots) {
+function samePidLiveProbeRecencyByCardId(
+  snapshots: readonly IssueWorkerCardProcessSnapshot[],
+): Map<string, Map<number, { readonly recencyMs: number; readonly index: number }>> {
+  const byCard = new Map<string, Map<number, { readonly recencyMs: number; readonly index: number }>>();
+  snapshots.forEach((snapshot, index) => {
     const cardId = snapshot.cardId.trim();
     const status = snapshot.status?.trim().toLowerCase();
     if (!cardId
       || snapshot.alive === false
       || (status && TERMINAL_WORKER_CARD_STATUSES.has(status))
       || !Number.isSafeInteger(snapshot.pid)
-      || snapshot.pid <= 0) continue;
-    const byPid = byCard.get(cardId) ?? new Map<number, number>();
-    byPid.set(snapshot.pid, Math.max(byPid.get(snapshot.pid) ?? 0, snapshotRecencyMs(snapshot)));
+      || snapshot.pid <= 0) return;
+    const byPid = byCard.get(cardId) ?? new Map<number, { readonly recencyMs: number; readonly index: number }>();
+    const recencyMs = snapshotRecencyMs(snapshot);
+    const existingProbe = byPid.get(snapshot.pid);
+    if (existingProbe === undefined || recencyMs > existingProbe.recencyMs || (recencyMs === existingProbe.recencyMs && index > existingProbe.index)) {
+      byPid.set(snapshot.pid, { recencyMs, index });
+    }
     byCard.set(cardId, byPid);
-  }
+  });
   return byCard;
 }
 
@@ -873,12 +879,17 @@ function siblingPidsForSnapshot(
 
 function hasSamePidLiveProbe(
   snapshot: IssueWorkerCardProcessSnapshot,
-  liveProbeRecencyByCardId: ReadonlyMap<string, ReadonlyMap<number, number>>,
+  liveProbeRecencyByCardId: ReadonlyMap<string, ReadonlyMap<number, { readonly recencyMs: number; readonly index: number }>>,
+  snapshotIndex: number,
 ): boolean {
   if (snapshot.alive === false || !Number.isSafeInteger(snapshot.pid) || snapshot.pid <= 0) return false;
-  const liveProbeRecencyMs = liveProbeRecencyByCardId.get(snapshot.cardId.trim())?.get(snapshot.pid);
+  const liveProbe = liveProbeRecencyByCardId.get(snapshot.cardId.trim())?.get(snapshot.pid);
   const snapshotRecency = snapshotRecencyMs(snapshot);
-  return liveProbeRecencyMs !== undefined && liveProbeRecencyMs >= snapshotRecency;
+  return liveProbe !== undefined && (
+    liveProbe.recencyMs > snapshotRecency
+    || (liveProbe.recencyMs === 0 && snapshotRecency === 0)
+    || (liveProbe.recencyMs === snapshotRecency && liveProbe.index > snapshotIndex)
+  );
 }
 
 function normalizeKanbanState(status: string): string {
@@ -1124,7 +1135,7 @@ export function detectStuckRunWatchdogFindings(
             Math.max(terminalRecencyByCardId.get(normalizedCardId) ?? 0, terminalRecencyMs),
           );
           const existingKey = deadFindingKeysByCardId.get(normalizedCardId);
-          if (existingKey && terminalRecencyMs >= existingKey.recencyMs) {
+          if (existingKey && terminalRecencyMs > existingKey.recencyMs) {
             const newestKey = newestDeadFindingKeysByCardId.get(normalizedCardId);
             const newestFinding = newestDeadFindingsByCardId.get(normalizedCardId);
             if (newestKey && newestFinding && newestKey.recencyMs > terminalRecencyMs) {
@@ -1159,7 +1170,7 @@ export function detectStuckRunWatchdogFindings(
     const minimumStaleSignals = providedActivitySignalCount;
     const freshLongRunningWaitActivity = [heartbeatAgeMs, outputAgeMs, toolActivityAgeMs, stateTransitionAgeMs]
       .some((age) => age !== undefined && age < longRunningWaitGraceMs);
-    const samePidLiveProbe = hasSamePidLiveProbe(snapshot, samePidLiveProbes);
+    const samePidLiveProbe = hasSamePidLiveProbe(snapshot, samePidLiveProbes, findingIndex);
     const processStatus: IssueStuckRunWatchdogFinding['processStatus'] = snapshot.alive === false || (snapshot.alive !== true && !samePidLiveProbe && status !== undefined && crashKanbanState(status))
       ? 'dead'
       : hasPositivePid
