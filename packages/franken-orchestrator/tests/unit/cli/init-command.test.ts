@@ -313,6 +313,28 @@ describe('handleInitCommand', () => {
     expect(config.enableTracing).toBe(false);
   });
 
+  it('uses the requested init backend when switching away from an existing backend', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-command-'));
+    const frankenbeastDir = join(tempDir, '.fbeast');
+    const configFile = join(frankenbeastDir, 'config.json');
+    const resolvedConfig = defaultConfig();
+    resolvedConfig.network.secureBackend = 'os-keychain';
+    const io = makeInitIo();
+
+    await handleInitCommand({
+      args: makeArgs({ initBackend: 'local-encrypted' }),
+      config: resolvedConfig,
+      configLoadFallback: true,
+      io,
+      paths: makePaths(tempDir, configFile),
+      print: () => undefined,
+    });
+
+    expect(io.ask).toHaveBeenCalledWith('Enter passphrase for local encrypted store:');
+    const config = JSON.parse(await readFile(configFile, 'utf-8')) as { network: { secureBackend: string } };
+    expect(config.network.secureBackend).toBe('local-encrypted');
+  });
+
   it('fails fast without prompting when init is non-interactive and config is missing', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-init-command-'));
     const frankenbeastDir = join(tempDir, '.fbeast');

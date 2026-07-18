@@ -1,7 +1,9 @@
+import { Buffer } from 'node:buffer';
 import type { CliResult } from './cli-runner.js';
 import type { ISecretStore, SecretStoreDetection } from '../secret-store.js';
 
 type CliRunner = (command: string, args: string[]) => Promise<CliResult>;
+type StdinRunner = (command: string, args: string[], stdin: string) => Promise<CliResult>;
 
 const TITLE_PREFIX = 'frankenbeast/';
 
@@ -14,7 +16,10 @@ interface BwItem {
 export class BitwardenStore implements ISecretStore {
   readonly id = 'bitwarden';
 
-  constructor(private readonly runner: CliRunner) {}
+  constructor(
+    private readonly runner: CliRunner,
+    private readonly stdinRunner?: StdinRunner | undefined,
+  ) {}
 
   async detect(): Promise<SecretStoreDetection> {
     const result = await this.runner('bw', ['--version']);
@@ -30,17 +35,22 @@ export class BitwardenStore implements ISecretStore {
   }
 
   async store(key: string, value: string): Promise<void> {
+    if (!this.stdinRunner) {
+      throw new Error('Bitwarden store writes require a stdin-capable runner to avoid exposing secret values in process arguments.');
+    }
+
     const name = `${TITLE_PREFIX}${key}`;
     const getResult = await this.runner('bw', ['get', 'item', name]);
 
     if (getResult.exitCode === 0) {
-      // Item exists — edit it
+      // Item exists — edit it. Send the encoded payload through stdin so neither the
+      // plaintext note nor its reversible base64 form appears in process arguments.
       const existing = JSON.parse(getResult.stdout) as BwItem;
       const payload = { ...existing, notes: value };
       const encoded = Buffer.from(JSON.stringify(payload)).toString('base64');
-      await this.runner('bw', ['edit', 'item', existing.id, encoded]);
+      await this.stdinRunner('bw', ['edit', 'item', existing.id], encoded);
     } else {
-      // Item does not exist — create it
+      // Item does not exist — create it. Keep the encoded payload off argv.
       const payload = {
         type: 2,
         name,
@@ -48,7 +58,7 @@ export class BitwardenStore implements ISecretStore {
         secureNote: { type: 0 },
       };
       const encoded = Buffer.from(JSON.stringify(payload)).toString('base64');
-      await this.runner('bw', ['create', 'item', encoded]);
+      await this.stdinRunner('bw', ['create', 'item'], encoded);
     }
   }
 

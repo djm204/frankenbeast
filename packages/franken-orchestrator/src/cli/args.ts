@@ -739,6 +739,9 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     if (!validBackends.has(initBackend)) {
       throw new TypeError(`Invalid init backend '${values.backend}'. Valid: local-encrypted, os-keychain, 1password, bitwarden`);
     }
+    if (initBackend === 'os-keychain' && process.platform !== 'linux') {
+      throw new TypeError('Invalid init backend os-keychain on this platform. os-keychain is write-capable only on Linux Secret Service; use local-encrypted, 1password, or bitwarden.');
+    }
   }
 
   const providersRaw = values.providers;

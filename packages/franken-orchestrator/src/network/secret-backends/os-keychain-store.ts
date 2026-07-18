@@ -131,6 +131,13 @@ export class OsKeychainStore implements ISecretStore {
     }
   }
 
+  private requireStdinRunner(backend: string): StdinRunner {
+    if (!this.stdinRunner) {
+      throw new Error(`${backend} store writes require a stdin-capable runner to avoid exposing secret values in process arguments.`);
+    }
+    return this.stdinRunner;
+  }
+
   // ── Linux (secret-tool / GNOME Keyring) ─────────────────────────────────────
 
   private async detectLinux(): Promise<SecretStoreDetection> {
@@ -152,7 +159,7 @@ export class OsKeychainStore implements ISecretStore {
   }
 
   private async storeLinuxRaw(key: string, value: string): Promise<void> {
-    // secret-tool store reads the secret from stdin
+    // secret-tool store reads the secret from stdin.
     const args = [
       'store',
       '--label=frankenbeast',
@@ -161,12 +168,7 @@ export class OsKeychainStore implements ISecretStore {
       'key',
       key,
     ];
-    if (this.stdinRunner) {
-      await this.stdinRunner('secret-tool', args, value);
-    } else {
-      // Fallback: pass value as trailing arg (for mock runner compatibility in tests)
-      await this.runner('secret-tool', [...args, value]);
-    }
+    await this.requireStdinRunner('secret-tool')('secret-tool', args, value);
   }
 
   private async resolveLinux(key: string): Promise<string | undefined> {
@@ -209,9 +211,13 @@ export class OsKeychainStore implements ISecretStore {
 
   private async detectDarwin(): Promise<SecretStoreDetection> {
     const result = await this.runner('security', ['help']);
-    // security help exits 0 on macOS; stderr may contain usage info
+    // security help exits 0 on macOS; stderr may contain usage info.
     if (result.exitCode === 0 || result.stderr.length > 0) {
-      return { available: true };
+      return {
+        available: false,
+        reason: 'macOS Keychain writes are disabled because security add-generic-password requires secret material in process arguments or an interactive prompt.',
+        setupInstructions: 'Use the local-encrypted, 1Password, or Bitwarden secret backend for write-capable noninteractive secret storage.',
+      };
     }
     return {
       available: false,
@@ -226,13 +232,27 @@ export class OsKeychainStore implements ISecretStore {
   }
 
   private async storeDarwinRaw(key: string, value: string): Promise<void> {
-    await this.runner('security', [
-      'add-generic-password',
-      '-U',
-      '-s', SERVICE,
-      '-a', key,
-      '-w', value,
-    ]);
+    if (key === KEYS_META_KEY) {
+      // The manifest contains backend key names, not secret values; keep it writable
+      // so deleting an existing macOS Keychain credential can also remove stale
+      // manifest entries without reintroducing credential argv exposure.
+      const result = await this.runner('security', [
+        'add-generic-password',
+        '-U',
+        '-s', SERVICE,
+        '-a', key,
+        '-w', value,
+      ]);
+      if (result.exitCode !== 0) {
+        throw new Error(`Failed to store keychain manifest: ${result.stderr || result.stdout}`);
+      }
+      return;
+    }
+    // The macOS `security add-generic-password` CLI only documents `-w <password>`
+    // (or prompting) for credential writes. Supplying `-w <password>` exposes the
+    // secret in argv, while noninteractive prompting is not a reliable stdin API.
+    // Fail closed rather than silently writing credentials through an argv-exposing path.
+    throw new Error('macOS Keychain writes are disabled because security add-generic-password requires secret material in process arguments or an interactive prompt.');
   }
 
   private async resolveDarwin(key: string): Promise<string | undefined> {
@@ -273,7 +293,11 @@ export class OsKeychainStore implements ISecretStore {
   private async detectWin32(): Promise<SecretStoreDetection> {
     const result = await this.runner('cmdkey', ['/list']);
     if (result.exitCode === 0) {
-      return { available: true };
+      return {
+        available: false,
+        reason: 'Windows Credential Manager writes are disabled because cmdkey requires secret material in process arguments.',
+        setupInstructions: 'Use the local-encrypted, 1Password, or Bitwarden secret backend for write-capable noninteractive secret storage.',
+      };
     }
     return {
       available: false,
@@ -283,11 +307,13 @@ export class OsKeychainStore implements ISecretStore {
   }
 
   private async storeWin32(key: string, value: string): Promise<void> {
-    await this.runner('cmdkey', [
-      `/generic:${SERVICE}/${key}`,
-      `/user:${SERVICE}`,
-      `/pass:${value}`,
-    ]);
+    void key;
+    void value;
+    // The documented built-in backend is `cmdkey`, whose `/pass:<password>` write
+    // path exposes the secret in argv. Do not switch to an unverified external
+    // PowerShell module here; fail closed unless a safe built-in write path is
+    // added later.
+    throw new Error('Windows Credential Manager writes are disabled because cmdkey requires secret material in process arguments.');
   }
 
   private async resolveWin32(key: string): Promise<string | undefined> {
