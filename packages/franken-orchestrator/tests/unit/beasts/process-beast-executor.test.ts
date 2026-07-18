@@ -2002,7 +2002,10 @@ describe('ProcessBeastExecutor', () => {
       const splitArgSecret = ['split', 'credential', 'value'].join('-');
       const supervisor = {
         spawn: vi.fn(async () => {
-          throw Object.assign(new Error(`spawn failed for --token=${configuredSecret}`), { code: 'TOPSECRETVALUE123' });
+          throw Object.assign(
+            new Error(`spawn failed for --token=${configuredSecret} --password ${splitArgSecret}`),
+            { code: 'TOPSECRETVALUE123' },
+          );
         }),
         stop: vi.fn(async () => {}),
         kill: vi.fn(async () => {}),
@@ -2047,7 +2050,7 @@ describe('ProcessBeastExecutor', () => {
       expect(spawnEvent!.payload).not.toHaveProperty('args');
 
       expect(onSpawnFailureDebug).toHaveBeenCalledWith({
-        error: 'spawn failed for --token=[REDACTED]',
+        error: 'spawn failed for --token=[REDACTED] --password [REDACTED]',
         code: 'SPAWN_FAILED',
         command: '/private/operator/bin/[REDACTED]',
         args: ['--token=[REDACTED]', '--password', '[REDACTED]', '/private/operator/worktree'],

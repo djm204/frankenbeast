@@ -128,6 +128,13 @@ function redactFailureStderrTail(stderrTail: readonly string[], configuredSecret
   return stderrTail.map(line => redactBeastLogLine(line, configuredSecrets));
 }
 
+function redactSpawnErrorMessage(errorMessage: string, configuredSecrets: readonly string[]): string {
+  return redactBeastLogLine(errorMessage, configuredSecrets).replace(
+    /((?:^|\s)--?[a-z0-9_-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|auth|credential|webhook[_-]?url)[a-z0-9_-]*\s+)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s]+)/gi,
+    `$1${REDACTED_SECRET}`,
+  );
+}
+
 function normalizeSpawnErrorCode(error: unknown): string {
   const code = (error as NodeJS.ErrnoException | undefined)?.code;
   return typeof code === 'string' && SAFE_SPAWN_ERROR_CODES.has(code)
@@ -521,7 +528,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
 
       try {
         this.options.onSpawnFailureDebug?.({
-          error: redactBeastLogLine(errorMessage, configuredSecrets),
+          error: redactSpawnErrorMessage(errorMessage, configuredSecrets),
           code: errorCode,
           command: redactBeastLogLine(processSpec.command, configuredSecrets),
           args: redactSpawnArgs(processSpec.args, configuredSecrets),
