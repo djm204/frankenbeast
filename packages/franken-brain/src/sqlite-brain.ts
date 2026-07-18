@@ -3382,6 +3382,7 @@ export class SqliteMemoryReviewQueue {
   ): MemoryCandidate {
     const now = isoNow();
     let rejectedCandidate: MemoryCandidate | undefined;
+    let purgeRejectedSecretContent = false;
     const tx = this.db.transaction(() => {
       const candidate = this.requireCandidate(id, 'pending');
       this.assertDecisionOptionsNotDeletionGuarded(options);
@@ -3400,6 +3401,7 @@ export class SqliteMemoryReviewQueue {
       this.markDecision(id, 'rejected', now, options);
       if (redactRejected && rejectedSignature) {
         this.redactRejectedRows(rejectedSignature, now);
+        purgeRejectedSecretContent = true;
       }
       rejectedCandidate = this.requireCandidate(id);
       this.audit?.({
@@ -3426,6 +3428,9 @@ export class SqliteMemoryReviewQueue {
         },
       });
       throw error;
+    }
+    if (purgeRejectedSecretContent) {
+      purgeDeletedSqliteContent(this.db, this.dbPath);
     }
     const result = rejectedCandidate ?? this.requireCandidate(id, 'rejected');
     return result;
