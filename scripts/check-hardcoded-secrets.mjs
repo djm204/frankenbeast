@@ -28,7 +28,7 @@ const sensitiveEnvNames = [
 ].map((parts) => parts.join('_'));
 
 const sensitiveIdentifierPattern = /\b(?:[A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY|PASSPHRASE)|[A-Z0-9_]*(?:SECRET_KEY|ACCESS_KEY)|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)\b/i;
-const credentialTokenPattern = /\b(?:github_pat_[a-zA-Z0-9_]{40,}|gh[opusr]_[a-zA-Z0-9_.-]{20,}|sk-ant-[a-zA-Z0-9_-]{40,}|AIza[a-zA-Z0-9_-]{35})\b/g;
+const credentialTokenPattern = /\b(?:github_pat_[a-zA-Z0-9_]{40,}(?![a-zA-Z0-9_])|gh[opusr]_[a-zA-Z0-9_.-]{20,}(?![a-zA-Z0-9_.-])|sk-ant-[a-zA-Z0-9_-]{40,}(?![a-zA-Z0-9_-])|AIza[a-zA-Z0-9_-]{35}(?![a-zA-Z0-9_-]))/g;
 const fallbackOperatorPattern = /(?:=|:|\?\?|\|\|)\s*$/;
 const DEFAULT_MAX_SCANNED_FILE_BYTES = 1_000_000;
 const DEFAULT_MAX_SCANNED_LINE_CHARS = 20_000;
@@ -216,8 +216,11 @@ function redactSourceLine(line) {
 
 function hardcodedSensitiveEnvFinding(line) {
   const trimmed = line.trimStart();
-  if (!trimmed || trimmed.startsWith('#')) {
+  if (!trimmed) {
     return null;
+  }
+  if (trimmed.startsWith('#')) {
+    return hasCredentialToken(trimmed) ? '<redacted>' : null;
   }
   const match = trimmed.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
   if (!match) {
@@ -395,7 +398,7 @@ async function scanSourceFile(file, findings) {
     const code = stripComments(line, commentState).trim();
 
     if (hasCredentialToken(line)) {
-      findings.push(`${toRepoPath(file)}:${index + 1}: ${redactSourceLine(line.trim())}`);
+      findings.push(`${toRepoPath(file)}:${index + 1}: <redacted>`);
       pendingSensitiveFallbackLine = null;
       continue;
     }
