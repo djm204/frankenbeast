@@ -9,7 +9,7 @@ const TITLE_PREFIX = 'frankenbeast/';
 
 const REQUIRED_OP_EDIT_STDIN_VERSION = [2, 23, 0] as const;
 
-interface OnePasswordItemTemplate {
+interface OnePasswordItemTemplate extends Record<string, unknown> {
   id?: string;
   title?: string;
   category?: string;
@@ -48,6 +48,43 @@ function itemTemplateForSecret(title: string, value: string): OnePasswordItemTem
         value,
       },
     ],
+  };
+}
+
+function itemTemplateForExistingSecret(stdout: string, fallbackTitle: string, value: string): OnePasswordItemTemplate {
+  let item: OnePasswordItemTemplate;
+  try {
+    item = JSON.parse(stdout) as OnePasswordItemTemplate;
+  } catch {
+    throw new Error('1Password item already exists but its JSON could not be parsed; refusing to edit because the existing item cannot be safely preserved.');
+  }
+
+  const passkeys = item.passkeys;
+  if (Array.isArray(passkeys) && passkeys.length > 0) {
+    throw new Error('1Password item already exists with passkeys; refusing to edit because unsupported item data cannot be safely preserved. Delete and recreate the item to rotate this secret.');
+  }
+
+  if (!Array.isArray(item.fields)) {
+    throw new Error('1Password item already exists without editable fields; refusing to edit because the existing item cannot be safely preserved.');
+  }
+
+  const passwordFieldIndex = item.fields.findIndex((field) =>
+    field.id === 'password'
+    || field.purpose === 'PASSWORD'
+    || field.label === 'password');
+  if (passwordFieldIndex < 0) {
+    throw new Error('1Password item already exists without a password field; refusing to edit because the existing item cannot be safely preserved.');
+  }
+
+  return {
+    ...item,
+    title: item.title ?? fallbackTitle,
+    category: item.category ?? 'LOGIN',
+    fields: item.fields.map((field, index) => (
+      index === passwordFieldIndex
+        ? { ...field, value }
+        : field
+    )),
   };
 }
 
@@ -109,10 +146,16 @@ export class OnePasswordStore implements ISecretStore {
     const getResult = await this.runner('op', ['item', 'get', title, `--vault=${VAULT}`, '--format=json']);
 
     if (getResult.exitCode === 0) {
-      // 1Password JSON-template edits can drop unsupported item data such as passkeys,
-      // and field assignment edits would put secret values in argv. Fail closed for
-      // existing items until the CLI exposes a reliable stdin update primitive.
-      throw new Error('1Password item already exists; refusing to edit existing items because safe stdin updates cannot reliably preserve unsupported item data such as passkeys. Delete and recreate the item to rotate this secret.');
+      const itemId = itemIdFromJson(getResult.stdout) ?? title;
+      const template = itemTemplateForExistingSecret(getResult.stdout, title, value);
+      const result = await this.stdinRunner('op', [
+        'item',
+        'edit',
+        itemId,
+        `--vault=${VAULT}`,
+      ], JSON.stringify(template));
+      assertSuccess(result, '1Password item edit');
+      return;
     }
 
     // Item does not exist — create it from a piped JSON template instead of argv assignments.

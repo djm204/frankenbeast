@@ -149,6 +149,29 @@ describe('runInitWizard – with secretStore', () => {
     const result = await runInitWizard({ io, initialState: state, secretStore });
     expect(result.config.network.operatorTokenRef).toBe('network.operatorTokenRef');
   });
+
+  it('aborts before prompting for raw secrets when the selected secret store is unavailable', async () => {
+    const io = makeIO([
+      'y',      // Enable Chat?
+      'y',      // Enable Dashboard?
+      'n',      // Enable Comms?
+      'claude', // Default provider
+      'secure', // Security mode
+      TEST_MY_SECRET_OP_TOKEN, // Must not be prompted/stored after failed detection.
+    ]);
+    const secretStore = makeSecretStore({
+      available: false,
+      reason: 'macOS Keychain writes are disabled',
+      setupInstructions: 'Use local-encrypted instead.',
+    });
+    const state = createEmptyInitState('/tmp/test-config.json');
+
+    await expect(runInitWizard({ io, initialState: state, secretStore })).rejects.toThrow('Secret backend');
+
+    expect(secretStore.store).not.toHaveBeenCalled();
+    expect(io.ask).toHaveBeenCalledTimes(5);
+    expect(io.display).toHaveBeenCalledWith("Secret backend 'mock' is not available: macOS Keychain writes are disabled");
+  });
 });
 
 describe('runInitWizard – with secretStore and Slack enabled', () => {
