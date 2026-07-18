@@ -6,7 +6,7 @@ type StdinRunner = (command: string, args: string[], stdin: string) => Promise<C
 
 const VAULT = 'frankenbeast';
 const TITLE_PREFIX = 'frankenbeast/';
-
+const REQUIRED_OP_EDIT_STDIN_VERSION = [2, 23, 0] as const;
 const BACKEND_MARKER_ID = 'frankenbeast-managed';
 const BACKEND_MARKER_VALUE = 'secret-store-v1';
 
@@ -14,6 +14,7 @@ interface OnePasswordItemTemplate {
   id?: string;
   title?: string;
   category?: string;
+  passkeys?: unknown;
   fields?: Array<{
     id?: string;
     type?: string;
@@ -40,6 +41,7 @@ function itemTemplateForSecret(title: string, value: string): OnePasswordItemTem
   return {
     title,
     category: 'LOGIN',
+    passkeys: [],
     fields: [
       {
         id: 'password',
@@ -58,8 +60,67 @@ function itemTemplateForSecret(title: string, value: string): OnePasswordItemTem
   };
 }
 
-function existingItemEditError(): Error {
-  return new Error('1Password item already exists with a different value; refusing to edit existing items because safe stdin updates cannot reliably preserve unsupported item data such as passkeys. Delete and recreate the item to rotate this secret.');
+function itemTemplateForExistingSecret(stdout: string, fallbackTitle: string, value: string): OnePasswordItemTemplate {
+  let item: OnePasswordItemTemplate;
+  try {
+    item = JSON.parse(stdout) as OnePasswordItemTemplate;
+  } catch {
+    throw new Error('1Password item already exists but its JSON could not be parsed; refusing to edit because the existing item cannot be safely preserved.');
+  }
+
+  const passkeys = item.passkeys;
+  if (!Object.prototype.hasOwnProperty.call(item, 'passkeys') || !Array.isArray(passkeys)) {
+    throw new Error('1Password item already exists without explicit passkey metadata; refusing to template-edit because passkeys or unsupported item data cannot be reliably detected. Delete and recreate the item to rotate this secret.');
+  }
+  if (passkeys.length > 0) {
+    throw new Error('1Password item already exists with passkeys; refusing to edit because unsupported item data cannot be safely preserved. Delete and recreate the item to rotate this secret.');
+  }
+
+  if (!Array.isArray(item.fields)) {
+    throw new Error('1Password item already exists without editable fields; refusing to edit because the existing item cannot be safely preserved.');
+  }
+
+  const hasBackendMarker = item.fields.some(field =>
+    field.id === BACKEND_MARKER_ID
+    && field.label === BACKEND_MARKER_ID
+    && field.value === BACKEND_MARKER_VALUE);
+  if (!hasBackendMarker) {
+    throw new Error('1Password item already exists but is not marked as frankenbeast-managed; refusing to template-edit because passkeys or unsupported item data cannot be reliably detected. Delete and recreate the item to rotate this secret.');
+  }
+
+  const passwordFieldIndex = item.fields.findIndex((field) =>
+    field.id === 'password'
+    || field.purpose === 'PASSWORD'
+    || field.label === 'password');
+  if (passwordFieldIndex < 0) {
+    throw new Error('1Password item already exists without a password field; refusing to edit because the existing item cannot be safely preserved.');
+  }
+
+  return {
+    ...item,
+    title: item.title ?? fallbackTitle,
+    category: item.category ?? 'LOGIN',
+    fields: item.fields.map((field, index) => (
+      index === passwordFieldIndex
+        ? { ...field, value }
+        : field
+    )),
+  };
+}
+
+function parseVersion(stdout: string): [number, number, number] | undefined {
+  const match = stdout.match(/(\d+)\.(\d+)\.(\d+)/);
+  if (!match) return undefined;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function versionAtLeast(actual: [number, number, number] | undefined, required: readonly [number, number, number]): boolean {
+  if (!actual) return false;
+  for (let i = 0; i < required.length; i += 1) {
+    if (actual[i]! > required[i]!) return true;
+    if (actual[i]! < required[i]!) return false;
+  }
+  return true;
 }
 
 function assertSuccess(result: CliResult, operation: string): void {
@@ -79,6 +140,13 @@ export class OnePasswordStore implements ISecretStore {
   async detect(): Promise<SecretStoreDetection> {
     const result = await this.runner('op', ['--version']);
     if (result.exitCode === 0) {
+      if (!versionAtLeast(parseVersion(result.stdout), REQUIRED_OP_EDIT_STDIN_VERSION)) {
+        return {
+          available: false,
+          reason: `1Password CLI ${result.stdout.trim() || 'version unknown'} does not support JSON-template edits from stdin`,
+          setupInstructions: 'Install 1Password CLI 2.23.0 or newer so secret upserts can use stdin without exposing values in process arguments.',
+        };
+      }
       return { available: true };
     }
     return {
@@ -98,14 +166,16 @@ export class OnePasswordStore implements ISecretStore {
     const getResult = await this.runner('op', ['item', 'get', title, `--vault=${VAULT}`, '--format=json']);
 
     if (getResult.exitCode === 0) {
-      const itemId = itemIdFromJson(getResult.stdout);
-      if (itemId) {
-        const current = await this.runner('op', ['read', `op://${VAULT}/${itemId}/password`]);
-        if (current.exitCode === 0 && current.stdout.replace(/\n$/, '') === value) {
-          return;
-        }
-      }
-      throw existingItemEditError();
+      const itemId = itemIdFromJson(getResult.stdout) ?? title;
+      const template = itemTemplateForExistingSecret(getResult.stdout, title, value);
+      const result = await this.stdinRunner('op', [
+        'item',
+        'edit',
+        itemId,
+        `--vault=${VAULT}`,
+      ], JSON.stringify(template));
+      assertSuccess(result, '1Password item edit');
+      return;
     }
 
     // Item does not exist — create it from a piped JSON template instead of argv assignments.
