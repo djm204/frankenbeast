@@ -1,6 +1,6 @@
 # Cron script error envelopes
 
-Use `scripts/run-cron-script.mjs` when a scheduled or cron-owned command needs machine-readable failure output for PM/liveness tooling.
+Use `scripts/run-cron-script.mjs` when a scheduled or cron-owned command needs machine-readable failure output for coordination/liveness tooling.
 
 ```bash
 node scripts/run-cron-script.mjs --name nightly-smoke -- npm run test:root -- tests/unit/cron-script-error-envelope.test.ts

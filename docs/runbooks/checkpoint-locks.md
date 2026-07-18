@@ -20,7 +20,7 @@ The structured result includes:
 - `status: 'absent' | 'held' | 'stale'`
 - `safeToRemove: boolean`
 - `ownerPid` and `ownerAlive` when the lock has a parseable owner record
-- `reason`, suitable for logs or PM/liveness reports
+- `reason`, suitable for logs or coordination/liveness reports
 - `unlockHint`, a conservative human-readable instruction
 
 ## Safe unlock policy

@@ -58,6 +58,41 @@ describe('BeastDispatchService', () => {
     expect(repo.listRuns()).toHaveLength(0);
   });
 
+  it('preserves configured Martin Loop provider aliases for direct runs', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: {
+        start: vi.fn(async () => repo.createAttempt('placeholder', { status: 'running' })),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+      container: {
+        start: vi.fn(),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+
+    const run = await dispatch.createRun({
+      definitionId: 'martin-loop',
+      config: {
+        provider: 'prod-claude',
+        objective: 'Implement the dispatch panel',
+        chunkDirectory: 'docs/chunks',
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'pfk',
+      executionMode: 'process',
+    });
+    expect(run.configSnapshot.provider).toBe('prod-claude');
+    expect(executors.process.start).not.toHaveBeenCalled();
+    expect(repo.listRuns()).toHaveLength(1);
+  });
+
   it('fails closed when a persisted maintenance state file is not an object', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

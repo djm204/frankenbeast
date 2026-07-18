@@ -82,4 +82,30 @@ describe('BeastInterviewService', () => {
       prompt: 'What should the martin loop accomplish?',
     });
   });
+
+  it('accepts valid option-backed Martin Loop provider answers', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-interview-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const service = new BeastInterviewService(repo, new BeastCatalogService());
+    const started = service.start('martin-loop');
+
+    const progressed = service.answer(started.id, 'codex');
+
+    expect(progressed.complete).toBe(false);
+    expect(progressed.session.answers).toEqual({ provider: 'codex' });
+    expect(progressed.currentPrompt).toMatchObject({ key: 'objective' });
+  });
+
+  it('rejects invalid option-backed Martin Loop provider answers before persisting them', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-interview-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const service = new BeastInterviewService(repo, new BeastCatalogService());
+    const started = service.start('martin-loop');
+
+    expect(() => service.answer(started.id, 'not-a-provider')).toThrow(
+      "Invalid answer for 'provider': expected one of claude, codex, gemini, aider",
+    );
+    expect(service.resume(started.id).session.answers).toEqual({});
+  });
+
 });

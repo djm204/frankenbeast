@@ -78,7 +78,7 @@ describe('issue #1773 repository ownership manifest', () => {
     expect(new Set(packagePaths).size).toBe(packagePaths.length);
   });
 
-  it('documents use, edge cases, and the onboarding entrypoint for operators and PM handoffs', () => {
+  it('documents use, edge cases, and the onboarding entrypoint for operators and coordinator handoffs', () => {
     const guide = readText(guidePath);
     const onboarding = readText('ONBOARDING.md');
 
@@ -86,7 +86,7 @@ describe('issue #1773 repository ownership manifest', () => {
       '# Repository ownership manifest',
       'docs/onboarding/repository-ownership.manifest.json',
       'Unknown or cross-cutting paths',
-      'PM/worker handoff',
+      'Coordinator/worker handoff',
       'Do not guess an owner from package names alone.',
       'If a change spans multiple owners, list every touched manifest entry',
     ]) {

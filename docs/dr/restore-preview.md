@@ -17,7 +17,7 @@ This fixture is covered by `packages/franken-orchestrator/tests/unit/dr/restore-
 
 ## Backup encryption verification report
 
-`buildBackupEncryptionVerificationReport(manifest, options)` produces a deterministic, structured report that operators and PM/liveness tooling can inspect before trusting a disaster-recovery backup artifact. The report is read-only and includes:
+`buildBackupEncryptionVerificationReport(manifest, options)` produces a deterministic, structured report that operators and coordination/liveness tooling can inspect before trusting a disaster-recovery backup artifact. The report is read-only and includes:
 
 - `status`: `verified`, `warning`, or `failed`
 - `encrypted`: whether the manifest explicitly reports encryption is enabled
@@ -50,7 +50,7 @@ Tests cover verified metadata, missing metadata, malformed runtime-loaded metada
 
 ## Approval ledger recovery report
 
-`buildApprovalLedgerRecoveryReport(backupManifest, liveManifest, options)` is the dedicated approval-ledger recovery tool. It is read-only, deterministic, and returns structured output for operators and PM/liveness automation:
+`buildApprovalLedgerRecoveryReport(backupManifest, liveManifest, options)` is the dedicated approval-ledger recovery tool. It is read-only, deterministic, and returns structured output for operators and coordination/liveness automation:
 
 - `status`: `clean`, `review-required`, or `blocked`
 - `wouldWrite`: always `false`
@@ -113,7 +113,7 @@ Invalid timestamps fail explicitly, and `capturedAt` may not be later than `gene
 
 ## Cross-file state consistency checker
 
-`buildCrossFileStateConsistencyReport(manifest, options)` is a read-only checker for one state manifest before restore. It compares the logical records across the manifest's state files (`tasks`, `approvals`, `memory`, and `cron`) and returns structured output for PM/liveness automation:
+`buildCrossFileStateConsistencyReport(manifest, options)` is a read-only checker for one state manifest before restore. It compares the logical records across the manifest's state files (`tasks`, `approvals`, `memory`, and `cron`) and returns structured output for coordination/liveness automation:
 
 - `status`: `clean`, `warning`, or `blocked`
 - `wouldWrite`: always `false`
@@ -132,7 +132,7 @@ The checker only emits safe metadata; it does not echo record `value` payloads, 
 
 ## Kanban partial-write recovery report
 
-`buildKanbanPartialWriteRecoveryReport(manifest, options)` is a read-only guard for damaged or partially written Kanban task snapshots. It inspects task status and current-run pointers without mutating state and returns structured output for PM/liveness tooling:
+`buildKanbanPartialWriteRecoveryReport(manifest, options)` is a read-only guard for damaged or partially written Kanban task snapshots. It inspects task status and current-run pointers without mutating state and returns structured output for coordination/liveness tooling:
 
 - `status`: `clean`, `review-required`, or `blocked`
 - `wouldWrite`: always `false`
@@ -171,7 +171,7 @@ Expected interpretation:
 - `severity`: `blocker`
 - recovery guidance: do not automatically resurrect the card; confirm why the live card is absent, then explicitly recreate a new card or skip that backup record.
 
-This guardrail keeps restore-preview output consumable by PM/liveness tooling: backup-only cards require an explicit operator decision instead of being presented as safe informational drift.
+This guardrail keeps restore-preview output consumable by coordination/liveness tooling: backup-only cards require an explicit operator decision instead of being presented as safe informational drift.
 
 ## Recovery mode
 

@@ -93,7 +93,7 @@ describe('issue #1664 first-PR agent runbook', () => {
       'by body/title search or by a `resolve/issue-$ISSUE_NUMBER-*` head branch',
       'replacing the placeholders with your actual issue-scoped paths and commit subject',
       'Replace the placeholder commands with the narrowest regression for the files you touched',
-      'Run it only after the PM/HITL reviewer has authorized push and PR creation for the assigned issue.',
+      'Run it only after the coordinator/HITL reviewer has authorized push and PR creation for the assigned issue.',
       'authorized Codex review for this PR',
       'push, merge, delete a branch, close an issue, edit labels, or rerun over the Codex cap',
       'local worktree state includes unrelated staged/dirty files you cannot safely separate',
