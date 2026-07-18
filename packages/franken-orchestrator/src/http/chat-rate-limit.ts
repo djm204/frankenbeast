@@ -52,11 +52,28 @@ export function chatMutationKey(sessionId: string): string {
 
 export class ChatMutationAdmission {
   private readonly inFlightMutations = new Set<string>();
+  private readonly mutationQueues = new Map<string, Promise<void>>();
 
   constructor(private readonly limiter: InMemoryRateLimiter) {}
 
   takeRateLimit(key: string): boolean {
     return this.limiter.take(key).allowed;
+  }
+
+  async runExclusive<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
+    const mutationKey = chatMutationKey(sessionId);
+    const previous = this.mutationQueues.get(mutationKey) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(run);
+    const currentDone = current.then(() => undefined, () => undefined);
+    this.mutationQueues.set(mutationKey, currentDone);
+
+    try {
+      return await current;
+    } finally {
+      if (this.mutationQueues.get(mutationKey) === currentDone) {
+        this.mutationQueues.delete(mutationKey);
+      }
+    }
   }
 
   begin(sessionId: string): boolean {
