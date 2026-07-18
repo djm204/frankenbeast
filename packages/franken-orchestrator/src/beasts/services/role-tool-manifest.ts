@@ -135,7 +135,10 @@ function runtimeToolsFromConfig(
   context: ToolPolicyValidationContext,
 ): string[] {
   const tools: string[] = [];
-  if (context.definitionId === 'martin-loop' || context.initActionKind === 'martin-loop') {
+  const workflow = context.definitionId === 'martin-loop'
+    ? context.initActionKind ?? context.definitionId
+    : context.definitionId ?? context.initActionKind;
+  if (workflow === 'martin-loop') {
     tools.push(...ROLE_TOOL_MANIFESTS.coding);
   }
   const gitConfig = config.gitConfig;
@@ -149,7 +152,9 @@ function runtimeToolsFromConfig(
 }
 
 function workflowRequiredTools(context: ToolPolicyValidationContext): string[] {
-  const workflow = context.definitionId ?? context.initActionKind;
+  const workflow = context.definitionId === 'martin-loop'
+    ? context.initActionKind ?? context.definitionId
+    : context.definitionId ?? context.initActionKind;
   switch (workflow) {
     case 'martin-loop':
       return ['read_file', 'search_files', 'write_file', 'patch', 'terminal'];
@@ -175,10 +180,26 @@ export function defaultAgentToolPolicyConfig(
   initActionKind?: string | undefined,
 ): Readonly<Record<string, unknown>> {
   return {
-    agentRole: 'coding',
+    agentRole: defaultAgentRoleForWorkflow(definitionId, initActionKind),
     requestedTools: workflowRequiredTools({ definitionId, initActionKind }),
     skills: [],
   };
+}
+
+function defaultAgentRoleForWorkflow(
+  definitionId: string,
+  initActionKind?: string | undefined,
+): AgentRole {
+  const workflow = definitionId === 'martin-loop'
+    ? initActionKind ?? definitionId
+    : definitionId;
+  switch (workflow) {
+    case 'chunk-plan':
+    case 'design-interview':
+      return 'docs';
+    default:
+      return 'coding';
+  }
 }
 
 function skillToolDenials(

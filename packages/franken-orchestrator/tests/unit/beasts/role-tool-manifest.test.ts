@@ -238,4 +238,17 @@ describe('role tool manifest policy', () => {
       initActionKind: 'martin-loop',
     })).toMatchObject({ allowed: true, role: 'coding', denials: [] });
   });
+
+  it('defaults document workflows to the docs least-privilege role', () => {
+    expect(defaultAgentToolPolicyConfig('chunk-plan', 'chunk-plan')).toEqual({
+      agentRole: 'docs',
+      requestedTools: ['read_file', 'search_files', 'write_file'],
+      skills: [],
+    });
+    expect(defaultAgentToolPolicyConfig('martin-loop', 'design-interview')).toEqual({
+      agentRole: 'docs',
+      requestedTools: ['read_file', 'write_file'],
+      skills: [],
+    });
+  });
 });

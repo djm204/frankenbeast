@@ -12,6 +12,7 @@ import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-bea
 import { AgentService } from '../../../src/beasts/services/agent-service.js';
 import { CapacityReservationPolicy } from '../../../src/beasts/services/capacity-reservation-policy.js';
 import { MaintenanceModeError, MaintenanceModeService } from '../../../src/beasts/services/maintenance-mode-service.js';
+import { AgentToolPolicyError } from '../../../src/beasts/services/role-tool-manifest.js';
 
 const CODING_POLICY = {
   agentRole: 'coding',
@@ -567,6 +568,63 @@ describe('BeastRunService', () => {
 
     expect(started.status).toBe('running');
     expect(executors.process.start).toHaveBeenCalledOnce();
+  });
+
+  it('validates persisted queued run tool policy before starting an attempt', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: {
+        start: vi.fn(async (run: { id: string }) => repo.createAttempt(run.id, { status: 'running' })),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+      container: {
+        start: vi.fn(),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+    };
+    const runs = new BeastRunService(repo, new BeastCatalogService(), executors, metrics, logs, {
+      trustedSkillToolManifests: { 'safe-docs': ['read_file'] },
+    });
+    const agents = new AgentService(repo, () => '2026-03-11T00:00:00.000Z');
+    const agent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'dashboard',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: {
+        provider: 'claude',
+        objective: 'Queued run should fail closed on start',
+        chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
+      },
+    });
+    const run = repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {
+        provider: 'claude',
+        objective: 'Queued run should fail closed on start',
+        chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
+        skills: ['manifestless-after-creation'],
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-11T00:00:00.000Z',
+    });
+    agents.linkRun(agent.id, run.id);
+
+    await expect(runs.start(run.id, 'operator')).rejects.toBeInstanceOf(AgentToolPolicyError);
+
+    expect(executors.process.start).not.toHaveBeenCalled();
+    expect(repo.getRun(run.id)).toMatchObject({ id: run.id, status: 'queued' });
   });
 
   it('reserves linked-agent capacity before awaiting executor start', async () => {

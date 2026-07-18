@@ -13,11 +13,19 @@ import {
   capacityItemFromConfig,
 } from './capacity-reservation-policy.js';
 import type { MaintenanceModeService } from './maintenance-mode-service.js';
+import {
+  AgentToolPolicyError,
+  defaultAgentToolPolicyConfig,
+  validateAgentRoleTools,
+  type ToolPolicyDenial,
+  type ToolPolicyValidationContext,
+} from './role-tool-manifest.js';
 
 export interface BeastRunServiceOptions {
   eventBus?: BeastEventBus;
   capacityPolicy?: CapacityReservationPolicy | undefined;
   maintenance?: MaintenanceModeService | undefined;
+  trustedSkillToolManifests?: ToolPolicyValidationContext['trustedSkillToolManifests'] | undefined;
 }
 
 export class UnknownBeastRunError extends Error {
@@ -70,6 +78,7 @@ export class BeastRunService {
 
   async start(runId: string, _actor: string): Promise<BeastRun> {
     this.serviceOptions.maintenance?.assertDispatchAllowed();
+    this.assertRoleToolManifestAllows(this.requireRun(runId));
     const run = this.reserveTrackedAgentCapacityForStart(this.requireRun(runId));
     const definition = this.getDefinitionOrThrow(run.definitionId);
     const priorAttemptId = run.currentAttemptId;
@@ -285,6 +294,7 @@ export class BeastRunService {
   async restart(runId: string, actor: string): Promise<BeastRun> {
     this.serviceOptions.maintenance?.assertDispatchAllowed();
     const run = this.requireRun(runId);
+    this.assertRoleToolManifestAllows(run);
     if (run.status === 'running') {
       this.assertTrackedAgentCapacity(run);
       await this.stop(runId, actor);
@@ -326,6 +336,28 @@ export class BeastRunService {
       throw new Error(`Unknown Beast definition: ${definitionId}`);
     }
     return definition;
+  }
+
+  private assertRoleToolManifestAllows(run: BeastRun): void {
+    const trackedAgent = run.trackedAgentId
+      ? this.repository.getTrackedAgent(run.trackedAgentId)
+      : undefined;
+    const initActionKind = trackedAgent?.initAction.kind;
+    const validation = validateAgentRoleTools({
+      ...defaultAgentToolPolicyConfig(run.definitionId, initActionKind),
+      ...run.configSnapshot,
+    }, {
+      definitionId: run.definitionId,
+      initActionKind,
+      initActionConfig: trackedAgent?.initAction.config,
+      trustedSkillToolManifests: this.serviceOptions.trustedSkillToolManifests,
+    });
+    if (validation.allowed) return;
+
+    for (const denial of validation.denials) {
+      defaultToolPolicyLogger(denial);
+    }
+    throw new AgentToolPolicyError(validation);
   }
 
   notifyRunStatusChange(runId: string): void {
@@ -457,4 +489,8 @@ export class BeastRunService {
       this.serviceOptions.eventBus?.publish(publication);
     }
   }
+}
+
+function defaultToolPolicyLogger(entry: ToolPolicyDenial): void {
+  console.warn('[agent-tool-policy-denial]', JSON.stringify(entry));
 }

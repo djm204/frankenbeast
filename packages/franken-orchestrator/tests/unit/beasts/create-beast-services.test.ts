@@ -109,7 +109,7 @@ describe('createBeastServices', () => {
 
   it('loads installed skill tool manifests for tracked-agent validation and dispatch', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-create-beast-services-'));
-    const skillDir = join(tempDir, '.fbeast', 'skills', 'context-only');
+    const skillDir = join(tempDir, 'dashboard-skills', 'context-only');
     await mkdir(skillDir, { recursive: true });
     await writeFile(
       join(skillDir, 'mcp.json'),
@@ -124,6 +124,7 @@ describe('createBeastServices', () => {
       beastsDb: join(tempDir, 'beast.db'),
       beastLogsDir: join(tempDir, 'logs'),
       root: tempDir,
+      skillsDir: join(tempDir, 'dashboard-skills'),
     });
 
     try {
@@ -158,6 +159,41 @@ describe('createBeastServices', () => {
 
       expect(run.configSnapshot).toMatchObject({ skills: ['context-only'] });
       expect(processExecutorConstructor.mock.calls.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      services.dispose();
+    }
+  });
+
+  it('does not trust installed skills that omit an explicit tools manifest', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-create-beast-services-'));
+    const skillDir = join(tempDir, 'skills', 'manifestless');
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(
+      join(skillDir, 'mcp.json'),
+      JSON.stringify({ mcpServers: { manifestless: { command: 'manifestless' } } }),
+    );
+    const { createBeastServices } = await import('../../../src/beasts/create-beast-services.js');
+    const services = createBeastServices({
+      beastsDb: join(tempDir, 'beast.db'),
+      beastLogsDir: join(tempDir, 'logs'),
+      root: tempDir,
+    });
+
+    try {
+      expect(() => services.agents.createAgent({
+        definitionId: 'martin-loop',
+        source: 'dashboard',
+        createdByUser: 'operator',
+        initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+        initConfig: {
+          provider: 'claude',
+          objective: 'Use a manifestless skill',
+          chunkDirectory: 'docs/chunks',
+          agentRole: 'coding',
+          requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+          skills: ['manifestless'],
+        },
+      })).toThrow(/coding:skill:manifestless/);
     } finally {
       services.dispose();
     }

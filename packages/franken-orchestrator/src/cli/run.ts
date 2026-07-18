@@ -1343,10 +1343,11 @@ async function runChatCommandIfRequested(
     const beastDaemonUrl = explicitBeastDaemonUrl ?? detectedBeastDaemonUrl;
     const localBeastServices = beastOperatorToken && !beastDaemonUrl
       ? createBeastServices({
-          beastsDb: join(paths.frankenbeastDir, 'beast.db'),
-          beastLogsDir: paths.beastLogsDir,
-          root,
-        })
+        beastsDb: join(paths.frankenbeastDir, 'beast.db'),
+        beastLogsDir: paths.beastLogsDir,
+        root,
+        skillsDir: join(root, 'skills'),
+      })
       : undefined;
     const allowedOrigins = Array.from(new Set([
       ...(args.allowOrigin ? [args.allowOrigin] : []),

@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { BeastEventBus } from './events/beast-event-bus.js';
 import { BeastLogStore } from './events/beast-log-store.js';
@@ -25,6 +26,7 @@ export interface BeastServicePaths {
   beastsDb: string;
   beastLogsDir: string;
   root?: string | undefined;
+  skillsDir?: string | undefined;
 }
 
 export interface BeastServiceBundle {
@@ -51,7 +53,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   const ticketStore = new SseConnectionTicketStore();
   const capacityPolicy = createCapacityReservationPolicyFromEnv();
   const maintenance = MaintenanceModeService.forProjectRoot(projectRoot);
-  const trustedSkillToolManifests = collectTrustedSkillToolManifests(join(projectRoot, '.fbeast', 'skills'));
+  const trustedSkillToolManifests = collectTrustedSkillToolManifests(paths.skillsDir ?? join(projectRoot, 'skills'));
 
   // Deferred reference to break circular dep: executor → runService → executors → executor
   // eslint-disable-next-line prefer-const
@@ -92,7 +94,12 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
     runs: repository.listRuns(),
   });
 
-  runService = new BeastRunService(repository, catalog, executors, metrics, logStore, { eventBus, capacityPolicy, maintenance });
+  runService = new BeastRunService(repository, catalog, executors, metrics, logStore, {
+    eventBus,
+    capacityPolicy,
+    maintenance,
+    trustedSkillToolManifests,
+  });
 
   return {
     agents: new AgentService(repository, undefined, { capacityPolicy, trustedSkillToolManifests }),
@@ -121,10 +128,12 @@ function collectTrustedSkillToolManifests(
 ): ToolPolicyValidationContext['trustedSkillToolManifests'] {
   const skillManager = new SkillManager(skillsDir, new Set());
   return Object.fromEntries(
-    skillManager.listInstalled().map((skill) => [
-      skill.name,
-      skillManager.readTools(skill.name).map((tool) => tool.name),
-    ]),
+    skillManager.listInstalled()
+      .filter((skill) => existsSync(join(skillsDir, skill.name, 'tools.json')))
+      .map((skill) => [
+        skill.name,
+        skillManager.readTools(skill.name).map((tool) => tool.name),
+      ]),
   );
 }
 
