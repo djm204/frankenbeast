@@ -145,6 +145,30 @@ describe('SseConnectionTicketStore', () => {
     }
   });
 
+  it('contains periodic cleanup failures and reports them without crashing the daemon', () => {
+    vi.useFakeTimers();
+    const onCleanupError = vi.fn();
+    const cleanupStore = new SseConnectionTicketStore({
+      cleanupIntervalMs: 10,
+      onCleanupError,
+    });
+    const failure = new Error('database is busy');
+    const cleanupSpy = vi
+      .spyOn(cleanupStore as unknown as { cleanup(): void }, 'cleanup')
+      .mockImplementationOnce(() => {
+        throw failure;
+      });
+
+    try {
+      expect(() => vi.advanceTimersByTime(10)).not.toThrow();
+      expect(cleanupSpy).toHaveBeenCalledOnce();
+      expect(onCleanupError).toHaveBeenCalledWith(failure);
+    } finally {
+      cleanupStore.destroy();
+      vi.useRealTimers();
+    }
+  });
+
   it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1.5])(
     'rejects invalid consumedRetentionMs value %s',
     (consumedRetentionMs) => {

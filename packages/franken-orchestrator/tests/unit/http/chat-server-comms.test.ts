@@ -76,6 +76,30 @@ describe('startChatServer comms pass-through', () => {
     expect(opts).toHaveProperty('commsRuntime', commsRuntime);
   });
 
+  it('persists chat SSE tickets across chat-server restarts', async () => {
+    const sessionStoreDir = await mkdtemp(join(tmpdir(), 'chat-server-sse-tickets-'));
+    tempDirs.push(sessionStoreDir);
+    const options = {
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir,
+      llm: { complete: vi.fn().mockResolvedValue('ok') },
+      projectName: 'test',
+      operatorToken: TEST_OPERATOR_TOKEN,
+    } as const;
+
+    handle = await startChatServer(options);
+    const issuingStore = mockedCreateChatApp.mock.calls[0]![0].chatStreamTicketStore;
+    const ticket = issuingStore!.issue(TEST_OPERATOR_TOKEN, 'session-1');
+    await handle.close();
+    handle = undefined;
+
+    mockedCreateChatApp.mockClear();
+    handle = await startChatServer(options);
+    const restartedStore = mockedCreateChatApp.mock.calls[0]![0].chatStreamTicketStore;
+    expect(restartedStore!.consume(ticket, TEST_OPERATOR_TOKEN, 'session-1')).toBe('valid');
+  });
+
   it('closes analytics dependencies when the chat server shuts down', async () => {
     const analyticsClose = vi.fn();
     handle = await startChatServer({

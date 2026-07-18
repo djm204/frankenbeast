@@ -306,7 +306,11 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     ?? (options.commsConfig
       ? createCommsRuntimeAdapter(runtime.runtime, sessionStore, options.sessionStoreDir, options.projectName, chatRateLimiter)
       : undefined);
-  const chatStreamTicketStore = effectiveOperatorToken ? new SseConnectionTicketStore() : undefined;
+  const chatStreamTicketStore = effectiveOperatorToken
+    ? new SseConnectionTicketStore({
+        databasePath: join(options.sessionStoreDir, 'sse-connection-tickets.sqlite'),
+      })
+    : undefined;
   const app = createChatApp({
     sessionStore,
     engine: runtime.engine,
