@@ -21,6 +21,8 @@ interface PersistedTicketRow {
 export interface SseConnectionTicketStoreOptions {
   ttlMs?: number;
   cleanupIntervalMs?: number;
+  /** Best-effort observer for periodic cleanup failures. */
+  onCleanupError?: (error: unknown) => void | Promise<void>;
   /** SQLite database shared by daemon processes. Omit only for isolated/test stores. */
   databasePath?: string;
   /**
@@ -103,7 +105,21 @@ export class SseConnectionTicketStore {
       `);
     }
 
-    this.cleanupInterval = setInterval(() => this.cleanup(), cleanupMs);
+    this.cleanupInterval = setInterval(() => {
+      try {
+        this.cleanup();
+      } catch (error) {
+        // Cleanup is opportunistic. A transient SQLITE_BUSY/I/O failure must
+        // not escape the timer callback and terminate the daemon; the next
+        // interval retries it.
+        try {
+          void Promise.resolve(options?.onCleanupError?.(error)).catch(() => {});
+        } catch {
+          // Observability hooks must not turn a recoverable cleanup failure
+          // back into an uncaught timer exception.
+        }
+      }
+    }, cleanupMs);
     this.cleanupInterval.unref?.();
   }
 
