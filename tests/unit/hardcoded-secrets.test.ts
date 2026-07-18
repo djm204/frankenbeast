@@ -340,6 +340,8 @@ describe('hard-coded example secret scanner', () => {
         'const token = process.env.GITHUB_TOKEN;',
         "if (!process.env.GITHUB_TOKEN) throw new Error('cron requires GITHUB_TOKEN');",
         "const CRON_CMD = '0 3 * * * gh auth token | agy pr';",
+        "token = 'gh auth token';",
+        "const ENTRY = '0 3 * * * ' + token;",
       ].join('\n'),
       'utf8',
     );
@@ -347,6 +349,45 @@ describe('hard-coded example secret scanner', () => {
     const result = runScanner(root);
 
     expect(result.status).toBe(0);
+  });
+
+  it('rejects broader cron credential persistence patterns', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'install-cron.mjs'),
+      [
+        'const { GITHUB_PERSONAL_ACCESS_TOKEN } = process.env;',
+        'const tokenAssignment = `GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_PERSONAL_ACCESS_TOKEN}`;',
+        "const CRON_CMD = '0 3 * * MON ' + tokenAssignment;",
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'install-cron.sh'),
+      [
+        'GITHUB_PAT_VALUE="$GITHUB_PAT"',
+        'CRON_CMD="0 3 * * * GITHUB_PAT=$GITHUB_PAT_VALUE agy pr"',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'install-cron.py'),
+      [
+        'from os import environ',
+        "pat = environ['GH_PAT']",
+        "CRON_CMD = f'0 3 * * MON GH_PAT={pat} agy pr'",
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/install-cron.mjs:3');
+    expect(result.stderr).toContain('scripts/install-cron.sh:2');
+    expect(result.stderr).toContain('scripts/install-cron.py:3');
   });
 
   it('documents cron credential rotation guidance', () => {

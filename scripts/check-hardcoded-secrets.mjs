@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const defaultRoot = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const root = process.env.FRANKENBEAST_SECRETS_SCAN_ROOT ?? defaultRoot;
-const scannedExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py']);
+const scannedExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.sh', '.bash']);
 const sourceRoots = ['packages', 'scripts'];
 const ignoredPathParts = new Set([
   '.git',
@@ -27,7 +27,7 @@ const sensitiveEnvNames = [
   ['SECRET', 'KEY'],
 ].map((parts) => parts.join('_'));
 
-const sensitiveIdentifierPattern = /\b(?:[A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY|PASSPHRASE)|[A-Z0-9_]*(?:SECRET_KEY|ACCESS_KEY)|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)\b/i;
+const sensitiveIdentifierPattern = /\b(?:[A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY|PASSPHRASE|PAT)|[A-Z0-9_]*(?:SECRET_KEY|ACCESS_KEY)|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)\b/i;
 const fallbackOperatorPattern = /(?:=|:|\?\?|\|\|)\s*$/;
 const DEFAULT_MAX_SCANNED_FILE_BYTES = 1_000_000;
 const DEFAULT_MAX_SCANNED_LINE_CHARS = 20_000;
@@ -150,7 +150,11 @@ function shouldScanSource(path) {
   if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(path)) {
     return false;
   }
-  return scannedExtensions.has(extensionOf(path));
+  const extension = extensionOf(path);
+  if ((extension === '.sh' || extension === '.bash') && !/(?:^|\/)install[^/]*cron[^/]*\.(?:sh|bash)$/i.test(rel)) {
+    return false;
+  }
+  return scannedExtensions.has(extension);
 }
 
 async function* walk(dir, shouldScan) {
@@ -225,6 +229,7 @@ function stripComments(line, state, options = {}) {
   let quote = null;
   let escaped = false;
   const python = options.language === 'python';
+  const shell = options.language === 'shell';
 
   for (let index = 0; index < line.length; index += 1) {
     const char = line[index];
@@ -260,7 +265,7 @@ function stripComments(line, state, options = {}) {
       return output;
     }
 
-    if (python && char === '#') {
+    if ((python || shell) && char === '#') {
       return output;
     }
 
@@ -277,7 +282,14 @@ function stripComments(line, state, options = {}) {
 }
 
 function lineLanguage(path) {
-  return extensionOf(path) === '.py' ? 'python' : 'javascript';
+  const extension = extensionOf(path);
+  if (extension === '.py') {
+    return 'python';
+  }
+  if (extension === '.sh' || extension === '.bash') {
+    return 'shell';
+  }
+  return 'javascript';
 }
 
 function codeOutsideStringLiterals(line) {
@@ -319,10 +331,24 @@ function hasHardcodedSourceLiteral(line) {
 }
 
 function hasSensitiveEnvAccess(line) {
-  const envAccessPattern = /(?:(?:\(?process\.env\)?|import\.meta\.env)\??(?:\.([A-Z0-9_]+)|\[['"`]([^'"`]+)['"`]\])|(?:os\.environ(?:\.(?:get|setdefault))?|os\.getenv|\bgetenv)\s*\(\s*['"`]([^'"`]+)['"`]|os\.environ\s*\[\s*['"`]([^'"`]+)['"`]\s*\])/gi;
+  const envAccessPattern = /(?:(?:\(?process\.env\)?|import\.meta\.env)\??(?:\.([A-Z0-9_]+)|\[['"`]([^'"`]+)['"`]\])|(?:os\.environ(?:\.(?:get|setdefault))?|os\.getenv|\bgetenv|\benviron(?:\.(?:get|setdefault))?)\s*\(\s*['"`]([^'"`]+)['"`]|(?:os\.)?environ\s*\[\s*['"`]([^'"`]+)['"`]\s*\])/gi;
   for (const match of line.matchAll(envAccessPattern)) {
-    const name = match[1] ?? match[2] ?? match[3] ?? match[4] ?? '';
+    const name = match[1] ?? match[2] ?? match[3] ?? match[4] ?? match[5] ?? '';
     if (sensitiveIdentifierPattern.test(name)) {
+      return true;
+    }
+  }
+  for (const match of line.matchAll(/\$\{?([A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY|PASSPHRASE|PAT|ACCESS_KEY)[A-Z0-9_]*)\}?/gi)) {
+    if (sensitiveIdentifierPattern.test(match[1])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function expressionUsesSensitiveAlias(expression, aliases) {
+  for (const alias of aliases) {
+    if (hasAliasInterpolation(expression, alias)) {
       return true;
     }
   }
@@ -330,18 +356,33 @@ function hasSensitiveEnvAccess(line) {
 }
 
 function collectSensitiveEnvAliases(line, aliases) {
+  const destructured = line.match(/^\s*(?:const|let|var)\s*\{([^}]+)\}\s*=\s*(?:\(?process\.env\)?|import\.meta\.env)\s*;?$/);
+  if (destructured) {
+    for (const part of destructured[1].split(',')) {
+      const [rawName, rawAlias] = part.split(':').map((value) => value?.trim()).filter(Boolean);
+      const alias = (rawAlias ?? rawName ?? '').replace(/\s*=.*$/, '').trim();
+      const envName = rawName?.trim() ?? '';
+      if (alias && sensitiveIdentifierPattern.test(envName)) {
+        aliases.add(alias);
+      }
+    }
+    return;
+  }
+
   const assignment = line.match(/^\s*(?:const|let|var)?\s*([A-Za-z_$][\w$]*)(?:\s*:\s*[^=]+)?\s*=\s*(.+)$/);
   if (!assignment) {
     return;
   }
   const [, alias, expression] = assignment;
-  if (hasSensitiveEnvAccess(expression)) {
+  if (hasSensitiveEnvAccess(expression) || expressionUsesSensitiveAlias(expression, aliases)) {
     aliases.add(alias);
+  } else {
+    aliases.delete(alias);
   }
 }
 
 function hasCronScheduleLiteral(line) {
-  const cronField = String.raw`(?:\*|\*\/\d+|\d+|\d+-\d+|\d+(?:,\d+)*)`;
+  const cronField = String.raw`(?:\*|\*\/\d+|\d+|\d+-\d+|\d+(?:,\d+)*|[A-Z]{3}(?:-[A-Z]{3})?|[A-Z]{3}(?:,[A-Z]{3})*)`;
   const cronSchedule = new RegExp(String.raw`(?:^|\s)${cronField}\s+${cronField}\s+${cronField}\s+${cronField}\s+${cronField}\s+\S`);
   return stringLiterals(line).some((literal) => cronSchedule.test(literal.value));
 }
@@ -362,11 +403,21 @@ function hasAliasInterpolation(line, alias) {
   return bareAliasPattern.test(outsideStrings);
 }
 
+function hasCronCredentialLiteral(line) {
+  return stringLiterals(line).some((literal) => {
+    const value = literal.value;
+    if (!hasCronScheduleLiteral(`${literal.quote}${value}${literal.quote}`) && !/\bCRON(?:_CMD|_COMMAND)?\b|\bcrontab\b/i.test(line)) {
+      return false;
+    }
+    return new RegExp(`${sensitiveIdentifierPattern.source}\\s*=\\s*[^\\s'\"` + '`' + `]+`, 'i').test(value);
+  });
+}
+
 function hasCronSecretInterpolation(line, aliases, inCronContext = false) {
   if (!inCronContext && !hasCronCommandMarker(line)) {
     return false;
   }
-  if (hasSensitiveEnvAccess(line)) {
+  if (hasSensitiveEnvAccess(line) || hasCronCredentialLiteral(line)) {
     return true;
   }
   for (const alias of aliases) {
@@ -375,6 +426,16 @@ function hasCronSecretInterpolation(line, aliases, inCronContext = false) {
     }
   }
   return false;
+}
+
+function isCronContinuationLine(line, inCronContext, pendingCronCommand) {
+  if (!inCronContext) {
+    return false;
+  }
+  if (/\(\s*$|[+\\,]\s*$/.test(line)) {
+    return true;
+  }
+  return pendingCronCommand && /^[furbFURB]*['"`]/.test(line) && !/[)];?\s*$/.test(line);
 }
 
 const sensitiveAssignmentNamePattern = /(?:[A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|PRIVATE_KEY|ACCESS_KEY|PASSPHRASE)|[A-Z0-9_]*(?:AUTH|OPERATOR|BEARER|ACCESS|REFRESH)_TOKEN|(?:accessToken|refreshToken|authToken|operatorToken|bearerToken)|[A-Za-z_$][\w$]*(?:ApiKey|Secret|Password|PrivateKey|AccessKey|AuthToken|OperatorToken|BearerToken|AccessToken|RefreshToken)|[a-z_$][\w$]*(?:_secret|_token|_password|_api_key|_access_key))\b/;
@@ -466,7 +527,7 @@ async function scanSourceFile(file, findings) {
     }
 
     collectSensitiveEnvAliases(code, sensitiveEnvAliases);
-    pendingCronCommand = inCronContext && !/[;)]\s*$/.test(code);
+    pendingCronCommand = isCronContinuationLine(code, inCronContext, pendingCronCommand);
 
     if (pendingSensitiveFallbackLine && hasHardcodedSourceLiteral(code)) {
       findings.push(`${toRepoPath(file)}:${index + 1}: ${redactSourceLine(code)}`);
