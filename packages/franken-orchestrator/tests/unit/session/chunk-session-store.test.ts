@@ -84,8 +84,30 @@ describe('FileChunkSessionStore', () => {
 
     const file = snapshots.writeSnapshot(session, 'pre-compaction');
     expect(file).toContain('01_demo');
+    expect(file).toMatch(/-pre-compaction\.json$/u);
     expect(snapshots.list('demo-plan', '01_demo')).toHaveLength(1);
   });
+
+  it.each(['', '../outside', 'shell;touch-pwned', String.raw`path\escape`, 'a'.repeat(65)])(
+    'rejects the unsafe snapshot reason %j before touching the filesystem',
+    (reason) => {
+      const root = mkdtempSync(join(tmpdir(), 'chunk-snapshot-unsafe-reason-'));
+      tmpDirs.push(root);
+      const snapshots = new FileChunkSessionSnapshotStore(root);
+      const session = createChunkSession({
+        planName: 'demo-plan',
+        taskId: 'impl:01_demo',
+        chunkId: '01_demo',
+        promiseTag: 'IMPL_01_demo_DONE',
+        workingDir: root,
+        provider: 'claude',
+        maxTokens: 200000,
+      });
+
+      expect(() => snapshots.writeSnapshot(session, reason)).toThrowError('Invalid chunk snapshot reason');
+      expect(existsSync(join(root, 'demo-plan'))).toBe(false);
+    },
+  );
 
   describe('atomic writes', () => {
     it('leaves no temp files behind after save()', () => {
