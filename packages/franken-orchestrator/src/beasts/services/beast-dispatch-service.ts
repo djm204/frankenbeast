@@ -128,6 +128,28 @@ function pickSharedRuntimeConfig(config: Readonly<Record<string, unknown>>): Rea
   );
 }
 
+export function normalizeBeastRunConfig(
+  definition: BeastDefinition,
+  requestedConfig: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  const firstAttempt = definition.configSchema.safeParse(requestedConfig);
+  if (firstAttempt.success) return firstAttempt.data;
+
+  const hasUnrecognizedKeys = firstAttempt.error.issues.some(
+    (issue) => issue.code === 'unrecognized_keys',
+  );
+  if (!hasUnrecognizedKeys) throw firstAttempt.error;
+
+  const shape = (definition.configSchema as { shape?: Record<string, unknown> }).shape;
+  const stripped = shape
+    ? Object.fromEntries(Object.entries(requestedConfig).filter(([key]) => key in shape))
+    : requestedConfig;
+  return {
+    ...definition.configSchema.parse(stripped),
+    ...pickSharedRuntimeConfig(requestedConfig),
+  };
+}
+
 export interface CreateBeastRunRequest {
   readonly definitionId: string;
   readonly config: Readonly<Record<string, unknown>>;
@@ -153,33 +175,9 @@ export class BeastDispatchService {
   async createRun(request: CreateBeastRunRequest): Promise<BeastRun> {
     this.options.maintenance?.assertDispatchAllowed();
     const definition = this.getDefinitionOrThrow(request.definitionId);
-    // Try parsing as-is first. If it fails with unrecognized_keys (strict schema
-    // rejecting extra fields from agent init config), strip to only known keys.
-    let config: Readonly<Record<string, unknown>>;
-    const firstAttempt = definition.configSchema.safeParse(request.config);
-    if (firstAttempt.success) {
-      config = firstAttempt.data;
-    } else {
-      const hasUnrecognizedKeys = firstAttempt.error.issues.some(
-        (issue) => issue.code === 'unrecognized_keys',
-      );
-      if (!hasUnrecognizedKeys) {
-        // Real validation error — surface it
-        throw firstAttempt.error;
-      }
-      // Extract only the keys the schema knows about, then restore shared runtime
-      // config accepted by the spawned process contract (for example dashboard
-      // selected skills and git workflow policy). Wizard review metadata remains
-      // stripped so strict definition schemas are still protected from unknowns.
-      const shape = (definition.configSchema as { shape?: Record<string, unknown> }).shape;
-      const stripped = shape
-        ? Object.fromEntries(Object.entries(request.config).filter(([k]) => k in shape))
-        : request.config;
-      config = {
-        ...definition.configSchema.parse(stripped),
-        ...pickSharedRuntimeConfig(request.config),
-      };
-    }
+    // Normalize strict definition fields while preserving approved shared runtime
+    // keys; retry paths reuse this same contract when rebuilding redacted snapshots.
+    const config = normalizeBeastRunConfig(definition, request.config);
     const moduleConfig = request.moduleConfig ?? this.resolveAgentModuleConfig(request.trackedAgentId);
     const configSnapshot: Readonly<Record<string, unknown>> = moduleConfig
       ? { ...config, modules: moduleConfig }
@@ -271,7 +269,8 @@ export class BeastDispatchService {
             status: agentStatus,
             updatedAt,
           });
-          if (agentStatus === 'running' && this.repository.hasActiveDispatchFailure(updated.trackedAgentId)) {
+          if ((agentStatus === 'running' || agentStatus === 'awaiting_approval')
+            && this.repository.hasActiveDispatchFailure(updated.trackedAgentId)) {
             const recoveredEvent = {
               level: 'info' as const,
               type: 'agent.dispatch.recovered',
