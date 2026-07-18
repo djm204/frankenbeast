@@ -5,6 +5,7 @@ const { databaseInstances, brainInstances, workingMemoryRowsByPath } = vi.hoiste
   const databaseInstances: Array<{
     pragma: ReturnType<typeof vi.fn>;
     prepare: ReturnType<typeof vi.fn>;
+    transaction: ReturnType<typeof vi.fn>;
     close: ReturnType<typeof vi.fn>;
     dbPath: string;
     options: unknown;
@@ -47,6 +48,16 @@ vi.mock("better-sqlite3", () => ({
       pragma: vi.fn(),
       prepare: vi.fn((sql: string) => ({
         get: vi.fn((tableName?: string) => {
+          if (sql.includes("COUNT(*)") && sql.includes("working_memory")) {
+            const rows = workingMemoryRowsByPath.get(_dbPath) ?? [];
+            return {
+              rowCount: rows.length,
+              byteCount: rows.reduce(
+                (total, row) => total + Buffer.byteLength(row.key) + Buffer.byteLength(row.value),
+                0,
+              ),
+            };
+          }
           if (sql.includes("sqlite_master") && (tableName === "governor_log" || tableName === "audit_trail")) {
             return { name: tableName };
           }
@@ -406,6 +417,7 @@ vi.mock("better-sqlite3", () => ({
           return workingMemoryRowsByPath.get(_dbPath) ?? [];
         }),
       })),
+      transaction: vi.fn((callback: () => unknown) => callback),
       close: vi.fn(),
       dbPath: _dbPath,
       options,
@@ -681,7 +693,7 @@ describe("createBrainAdapter", () => {
     vi.clearAllMocks();
   });
 
-  it("configures WAL and a busy timeout on the adapter read connection before rehydrating memory", () => {
+  it("configures WAL and a busy timeout and measures hydration before loading rows", () => {
     createBrainAdapter("/tmp/beast.db");
 
     expect(databaseInstances).toHaveLength(1);
@@ -689,10 +701,56 @@ describe("createBrainAdapter", () => {
     expect(readDb.options).toBeUndefined();
     expect(readDb.pragma).toHaveBeenNthCalledWith(1, "journal_mode = WAL");
     expect(readDb.pragma).toHaveBeenNthCalledWith(2, "busy_timeout = 5000");
-    expect(readDb.prepare).toHaveBeenCalledWith(
-      "SELECT key, value FROM working_memory",
-    );
+    expect(readDb.prepare).toHaveBeenCalledWith(expect.stringContaining("COUNT(*)"));
+    expect(readDb.prepare).toHaveBeenCalledWith("SELECT key, value FROM working_memory");
+    expect(readDb.transaction).toHaveBeenCalledOnce();
     expect(readDb.close).toHaveBeenCalledOnce();
+  });
+
+  it("fails startup with a recoverable diagnostic before hydrating too many rows", () => {
+    workingMemoryRowsByPath.set("/tmp/oversized.db", [
+      { key: "one", value: JSON.stringify("first") },
+      { key: "two", value: JSON.stringify("second") },
+      { key: "three", value: JSON.stringify("third") },
+    ]);
+
+    expect(() =>
+      createBrainAdapter("/tmp/oversized.db", {
+        hydration: { maxRows: 2, maxBytes: 1_000 },
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        name: "BrainAdapterHydrationLimitError",
+        code: "BRAIN_ADAPTER_HYDRATION_LIMIT_EXCEEDED",
+        rowCount: 3,
+        maxRows: 2,
+      }),
+    );
+    expect(brainInstances).toHaveLength(0);
+    expect(databaseInstances[0]!.close).toHaveBeenCalledOnce();
+  });
+
+  it("fails startup before hydration when the working-memory byte budget is exceeded", () => {
+    workingMemoryRowsByPath.set("/tmp/oversized-bytes.db", [
+      { key: "large", value: JSON.stringify("💾".repeat(20)) },
+    ]);
+
+    expect(() =>
+      createBrainAdapter("/tmp/oversized-bytes.db", {
+        hydration: { maxRows: 10, maxBytes: 32 },
+      }),
+    ).toThrow(/byte budget 32/);
+    expect(brainInstances).toHaveLength(0);
+  });
+
+  it("rejects invalid hydration budgets before opening the database", () => {
+    expect(() =>
+      createBrainAdapter("/tmp/beast.db", {
+        hydration: { maxRows: 0 },
+      }),
+    ).toThrow("hydration.maxRows must be a positive safe integer");
+    expect(databaseInstances).toHaveLength(0);
+    expect(brainInstances).toHaveLength(0);
   });
 
   it("keeps direct API memory reads isolated by profile database path", async () => {
