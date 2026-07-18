@@ -1508,10 +1508,9 @@ function isTaskReferenceBookkeeping(text: string): boolean {
   }
   if (
     hasSpecificTaskReference &&
-    /^(?:i\s+prefer|i'd\s+prefer|my\s+preference\s+is|i\s+like|i\s+(?:do\s+not|don'?t)\s+want|(?:please\s+)?(?:keep|avoid|do\s+not|don't|never|prefer|use))\b/i.test(
+    /^\s*(?:please\s+)?use\s+(?:pr|pull\s+request|issue|ticket|task)\s*#?\d+\s*$/i.test(
       text,
     ) &&
-    !/^\s*(?:when|if)\b/i.test(text) &&
     !isDocumentationUpdateLesson(text)
   ) {
     return true;
