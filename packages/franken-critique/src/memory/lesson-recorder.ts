@@ -1596,7 +1596,7 @@ function isOneOffPostTaskProgress(text: string): boolean {
     return true;
   }
   return (
-    /\b(?:updated|implemented|fixed|merged|reviewed|pushed|opened|addressed|completed|blocked|failed)\b/i.test(
+    /\b(?:updated|implemented|fixed|merged|reviewed|pushed|opened|addressed|completed|complete|done|blocked|failed)\b/i.test(
       text,
     ) &&
     (/\b(?:pr|pull\s+request|issue|ticket|task|commit|review)\b/i.test(
@@ -1710,12 +1710,7 @@ function scoreVerificationEvidenceMatch(
 ): number {
   const verificationTokens = tokenizePostTaskVerificationText(verificationSummary);
   const candidateTokens = new Set(
-    tokenizePostTaskVerificationText(
-      [
-        candidate.text,
-        ...candidate.evidence.map((evidence) => evidence.summary),
-      ].join(' '),
-    ),
+    tokenizePostTaskVerificationText(candidate.text),
   );
   return verificationTokens.filter((token) => candidateTokens.has(token)).length;
 }
@@ -1818,6 +1813,9 @@ function dedupePostTaskLessonCandidates(
     dedupedById.set(candidate.id, {
       ...primary,
       evidence: [...primary.evidence, ...secondary.evidence],
+      privacyFilter: mergePostTaskPrivacyFilters(primary.privacyFilter, [
+        secondary.privacyFilter,
+      ]),
     });
   }
   return [...dedupedById.values()];

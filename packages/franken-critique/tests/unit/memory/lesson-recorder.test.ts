@@ -834,6 +834,21 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('does not attach verification based only on evidence kind labels', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-evidence-label-verification',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['Please keep summaries concise'],
+      verificationSteps: ['Verified user correction'],
+    });
+
+    expect(report.candidates).toHaveLength(1);
+    expect(report.candidates[0]?.evidence).toHaveLength(1);
+    expect(report.candidates[0]?.evidence).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'verification' })]),
+    );
+  });
+
   it('admits redacted raw preferences after recategorizing task-state corrections', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-preference-with-state',
@@ -1360,11 +1375,13 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
-  it('rejects transient repo status as task state', () => {
+  it.each(['Frankenbeast CI was down today', 'Project is complete', 'Repository is done'])(
+    'rejects transient repo status %p as task state',
+    (note) => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-transient-repo-status',
       completedAt: '2026-07-16T00:00:00.000Z',
-      notes: ['Frankenbeast CI was down today'],
+      notes: [note],
     });
 
     expect(report.candidates[0]).toEqual(
@@ -1373,7 +1390,8 @@ describe('extractPostTaskLessonCandidates', () => {
         review: expect.objectContaining({ status: 'discarded' }),
       }),
     );
-  });
+    },
+  );
 
   it('discards raw retry/fallback tool-failure status without a workaround', () => {
     const report = extractPostTaskLessonCandidates({
@@ -1820,6 +1838,30 @@ describe('extractPostTaskLessonCandidates', () => {
           expect.objectContaining({ kind: 'tool-failure' }),
           expect.objectContaining({ kind: 'task-note' }),
         ]),
+      }),
+    );
+  });
+
+  it('merges privacy filters conservatively when deduplicating redacted candidates', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-duplicate-sensitive-lesson-text',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: [
+        'When API key [REDACTED_API_KEY] appears in logs, redact it',
+        'When API key sk-1234567890abcdef1234567890abcdef appears in logs, redact it',
+      ],
+    });
+
+    expect(report.candidates).toHaveLength(1);
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        privacyFilter: expect.objectContaining({
+          sensitive: true,
+          approvalRequired: true,
+          redactions: expect.arrayContaining([
+            expect.objectContaining({ replacement: '[REDACTED_API_KEY]' }),
+          ]),
+        }),
       }),
     );
   });
