@@ -89,7 +89,6 @@ describe('OnePasswordStore', () => {
       expect(JSON.parse(createCall!.stdin!)).toMatchObject({
         title: 'frankenbeast/comms.slack.botTokenRef',
         category: 'LOGIN',
-        passkeys: [],
         fields: [
           {
             id: 'password',
@@ -109,41 +108,20 @@ describe('OnePasswordStore', () => {
       expectNoArgContains(mock.calls, TEST_SLACK_BOT_TOKEN);
     });
 
-    it('upserts existing backend-owned 1Password items via stdin JSON edits', async () => {
+    it('fails closed rather than template-editing existing 1Password items', async () => {
       mock.responses.set('item get', {
         stdout: JSON.stringify({
           id: 'abc123',
           title: 'frankenbeast/comms.slack.botTokenRef',
           category: 'LOGIN',
-          passkeys: [],
-          fields: [
-            { id: 'password', type: 'CONCEALED', purpose: 'PASSWORD', label: 'password', value: 'old' },
-            { id: 'frankenbeast-managed', type: 'STRING', label: 'frankenbeast-managed', value: 'secret-store-v1' },
-          ],
+          fields: [{ id: 'password', type: 'CONCEALED', purpose: 'PASSWORD', label: 'password', value: 'old' }],
         }),
         stderr: '',
         exitCode: 0,
       });
-      mock.responses.set('item edit', { stdout: '{}', stderr: '', exitCode: 0 });
 
-      await store.store('comms.slack.botTokenRef', UPDATED_SLACK_BOT_TOKEN);
-
-      const editCall = mock.calls.find(c => c.args.includes('edit'));
-      expect(editCall).toBeDefined();
-      expect(editCall).toMatchObject({
-        command: 'op',
-        args: ['item', 'edit', 'abc123', '--vault=frankenbeast'],
-      });
-      expect(JSON.parse(editCall!.stdin!)).toMatchObject({
-        id: 'abc123',
-        title: 'frankenbeast/comms.slack.botTokenRef',
-        category: 'LOGIN',
-        passkeys: [],
-        fields: [
-          { id: 'password', type: 'CONCEALED', purpose: 'PASSWORD', label: 'password', value: UPDATED_SLACK_BOT_TOKEN },
-          { id: 'frankenbeast-managed', type: 'STRING', label: 'frankenbeast-managed', value: 'secret-store-v1' },
-        ],
-      });
+      await expect(store.store('comms.slack.botTokenRef', UPDATED_SLACK_BOT_TOKEN)).rejects.toThrow('refusing to edit existing items');
+      expect(mock.calls.some(c => c.args.includes('edit'))).toBe(false);
       expectNoArgContains(mock.calls, UPDATED_SLACK_BOT_TOKEN);
     });
 
@@ -160,47 +138,8 @@ describe('OnePasswordStore', () => {
         exitCode: 0,
       });
 
-      await expect(store.store('comms.slack.botTokenRef', UPDATED_SLACK_BOT_TOKEN)).rejects.toThrow('unsupported item data cannot be safely preserved');
+      await expect(store.store('comms.slack.botTokenRef', UPDATED_SLACK_BOT_TOKEN)).rejects.toThrow('refusing to edit existing items');
       expect(mock.calls.some(c => c.args.includes('edit'))).toBe(false);
-      expectNoArgContains(mock.calls, UPDATED_SLACK_BOT_TOKEN);
-    });
-
-    it('fails closed for existing items without the frankenbeast-managed marker', async () => {
-      mock.responses.set('item get', {
-        stdout: JSON.stringify({
-          id: 'abc123',
-          title: 'frankenbeast/comms.slack.botTokenRef',
-          category: 'LOGIN',
-          passkeys: [],
-          fields: [{ id: 'password', type: 'CONCEALED', purpose: 'PASSWORD', label: 'password', value: 'old' }],
-        }),
-        stderr: '',
-        exitCode: 0,
-      });
-
-      await expect(store.store('comms.slack.botTokenRef', UPDATED_SLACK_BOT_TOKEN)).rejects.toThrow('not marked as frankenbeast-managed');
-      expect(mock.calls.some(c => c.args.includes('edit'))).toBe(false);
-      expectNoArgContains(mock.calls, UPDATED_SLACK_BOT_TOKEN);
-    });
-
-    it('surfaces failed 1Password stdin edits', async () => {
-      mock.responses.set('item get', {
-        stdout: JSON.stringify({
-          id: 'abc123',
-          title: 'frankenbeast/comms.slack.botTokenRef',
-          category: 'LOGIN',
-          passkeys: [],
-          fields: [
-            { id: 'password', type: 'CONCEALED', purpose: 'PASSWORD', label: 'password', value: 'old' },
-            { id: 'frankenbeast-managed', type: 'STRING', label: 'frankenbeast-managed', value: 'secret-store-v1' },
-          ],
-        }),
-        stderr: '',
-        exitCode: 0,
-      });
-      mock.responses.set('item edit', { stdout: '', stderr: 'edit rejected', exitCode: 1 });
-
-      await expect(store.store('comms.slack.botTokenRef', UPDATED_SLACK_BOT_TOKEN)).rejects.toThrow('1Password item edit failed: edit rejected');
       expectNoArgContains(mock.calls, UPDATED_SLACK_BOT_TOKEN);
     });
 

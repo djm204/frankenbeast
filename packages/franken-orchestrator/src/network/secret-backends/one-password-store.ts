@@ -22,7 +22,6 @@ interface OnePasswordItemTemplate {
     label?: string;
     value?: string;
   }>;
-  passkeys?: unknown;
 }
 
 function titleForKey(key: string): string {
@@ -42,7 +41,6 @@ function itemTemplateForSecret(title: string, value: string): OnePasswordItemTem
   return {
     title,
     category: 'LOGIN',
-    passkeys: [],
     fields: [
       {
         id: 'password',
@@ -61,52 +59,12 @@ function itemTemplateForSecret(title: string, value: string): OnePasswordItemTem
   };
 }
 
-function itemTemplateForExistingSecret(stdout: string, fallbackTitle: string, value: string): OnePasswordItemTemplate {
-  let item: OnePasswordItemTemplate;
-  try {
-    item = JSON.parse(stdout) as OnePasswordItemTemplate;
-  } catch {
-    throw new Error('1Password item already exists but its JSON could not be parsed; refusing to edit because the existing item cannot be safely preserved.');
-  }
-
-  const passkeys = item.passkeys;
-  if (!Object.prototype.hasOwnProperty.call(item, 'passkeys') || !Array.isArray(passkeys)) {
-    throw new Error('1Password item already exists without explicit passkey metadata; refusing to template-edit because passkeys or unsupported item data cannot be reliably detected. Delete and recreate the item to rotate this secret.');
-  }
-  if (passkeys.length > 0) {
-    throw new Error('1Password item already exists with passkeys; refusing to edit because unsupported item data cannot be safely preserved. Delete and recreate the item to rotate this secret.');
-  }
-
-  if (!Array.isArray(item.fields)) {
-    throw new Error('1Password item already exists without editable fields; refusing to edit because the existing item cannot be safely preserved.');
-  }
-
-  const hasBackendMarker = item.fields.some(field =>
-    field.id === BACKEND_MARKER_ID
-    && field.label === BACKEND_MARKER_ID
-    && field.value === BACKEND_MARKER_VALUE);
-  if (!hasBackendMarker) {
-    throw new Error('1Password item already exists but is not marked as frankenbeast-managed; refusing to template-edit because passkeys or unsupported item data cannot be reliably detected. Delete and recreate the item to rotate this secret.');
-  }
-
-  const passwordFieldIndex = item.fields.findIndex((field) =>
-    field.id === 'password'
-    || field.purpose === 'PASSWORD'
-    || field.label === 'password');
-  if (passwordFieldIndex < 0) {
-    throw new Error('1Password item already exists without a password field; refusing to edit because the existing item cannot be safely preserved.');
-  }
-
-  return {
-    ...item,
-    title: item.title ?? fallbackTitle,
-    category: item.category ?? 'LOGIN',
-    fields: item.fields.map((field, index) => (
-      index === passwordFieldIndex
-        ? { ...field, value }
-        : field
-    )),
-  };
+function itemTemplateForExistingSecret(_stdout: string, _fallbackTitle: string, _value: string): OnePasswordItemTemplate {
+  // 1Password JSON-template edits overwrite unsupported data such as passkeys,
+  // and field assignment edits would put secret values in argv. Fail closed for
+  // existing items until the CLI exposes a reliable stdin update primitive that
+  // can prove unsupported item data will be preserved.
+  throw new Error('1Password item already exists; refusing to edit existing items because safe stdin updates cannot reliably preserve unsupported item data such as passkeys. Delete and recreate the item to rotate this secret.');
 }
 
 function parseVersion(stdout: string): [number, number, number] | undefined {
@@ -167,15 +125,7 @@ export class OnePasswordStore implements ISecretStore {
     const getResult = await this.runner('op', ['item', 'get', title, `--vault=${VAULT}`, '--format=json']);
 
     if (getResult.exitCode === 0) {
-      const itemId = itemIdFromJson(getResult.stdout) ?? title;
-      const template = itemTemplateForExistingSecret(getResult.stdout, title, value);
-      const result = await this.stdinRunner('op', [
-        'item',
-        'edit',
-        itemId,
-        `--vault=${VAULT}`,
-      ], JSON.stringify(template));
-      assertSuccess(result, '1Password item edit');
+      itemTemplateForExistingSecret(getResult.stdout, title, value);
       return;
     }
 
