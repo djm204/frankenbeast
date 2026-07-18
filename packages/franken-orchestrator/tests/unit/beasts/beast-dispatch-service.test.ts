@@ -519,9 +519,13 @@ describe('BeastDispatchService', () => {
     const eventBus = new BeastEventBus();
     const publishSpy = vi.spyOn(eventBus, 'publish');
     const agents = new AgentService(repo, () => '2026-03-17T00:00:00.000Z');
+    const secret = 'dispatch-secret-value-1234567890';
+    const sensitiveCommand = '/opt/private/bin/provider --token super-secret';
     const executors = {
       process: {
-        start: vi.fn(async () => { throw new Error('spawn failed'); }),
+        start: vi.fn(async () => {
+          throw new Error(`spawn failed: token=${secret} command=${sensitiveCommand}`);
+        }),
         stop: vi.fn(),
         kill: vi.fn(),
       },
@@ -553,6 +557,17 @@ describe('BeastDispatchService', () => {
       agentId: agent.id,
       status: 'failed',
     });
+    const exposedSurfaces = JSON.stringify({
+      runEvents: repo.listEvents(run.id),
+      agentEvents: repo.listTrackedAgentEvents(agent.id),
+      logs: await logs.read(run.id, 'system'),
+      publications: publishSpy.mock.calls,
+    });
+    expect(exposedSurfaces).not.toContain(secret);
+    expect(exposedSurfaces).not.toContain(sensitiveCommand);
+    expect(exposedSurfaces).not.toContain('/opt/private/bin/provider');
+    expect(exposedSurfaces).not.toContain('super-secret');
+    expect(exposedSurfaces).not.toContain('spawn failed');
   });
 
   it('does not start a run that was stopped by onRunCreated cleanup', async () => {

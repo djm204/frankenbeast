@@ -6,7 +6,10 @@ import { DeletedTrackedAgentError, UnknownTrackedAgentError } from '../../beasts
 import { CapacityReservationError } from '../../beasts/services/capacity-reservation-policy.js';
 import { MaintenanceModeError, type MaintenanceModeService } from '../../beasts/services/maintenance-mode-service.js';
 import type { AgentService } from '../../beasts/services/agent-service.js';
-import type { BeastDispatchService } from '../../beasts/services/beast-dispatch-service.js';
+import {
+  SAFE_DISPATCH_FAILURE_MESSAGE,
+  type BeastDispatchService,
+} from '../../beasts/services/beast-dispatch-service.js';
 import type { BeastRunService } from '../../beasts/services/beast-run-service.js';
 import {
   BEAST_CONTROL_MAX_BODY_SIZE,
@@ -48,8 +51,6 @@ const PatchAgentConfigBody = z.object({
   description: z.string().optional(),
   moduleConfig: ModuleConfigSchema.optional(),
 }).strict();
-
-const SAFE_DISPATCH_FAILURE_MESSAGE = 'Tracked agent dispatch failed';
 
 export interface AgentRoutesDeps {
   agents: AgentService;
@@ -215,7 +216,11 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
           details: {
             agentId: agent.id,
             dispatchError: SAFE_DISPATCH_FAILURE_MESSAGE,
-            agent: failedAgent,
+            agent: {
+              id: failedAgent.id,
+              status: failedAgent.status,
+              dispatchRunId: failedAgent.dispatchRunId,
+            },
           },
         },
       }, 409);

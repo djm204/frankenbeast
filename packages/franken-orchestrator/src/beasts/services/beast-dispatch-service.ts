@@ -27,6 +27,8 @@ export interface BeastExecutors {
   readonly container: BeastExecutor;
 }
 
+export const SAFE_DISPATCH_FAILURE_MESSAGE = 'Tracked agent dispatch failed';
+
 const SHARED_RUNTIME_CONFIG_KEYS = [
   'skills',
   'gitConfig',
@@ -276,9 +278,8 @@ export class BeastDispatchService {
           });
         }
         return updated;
-      } catch (error) {
+      } catch {
         const failedAt = new Date(wallClockNow()).toISOString();
-        const errorMessage = error instanceof Error ? error.message : String(error);
         const failedRun = this.repository.transaction(() => {
           const updatedRun = this.repository.updateRun(run.id, {
             status: 'failed',
@@ -288,7 +289,7 @@ export class BeastDispatchService {
           this.repository.appendEvent(run.id, {
             type: 'run.start_failed',
             payload: {
-              error: errorMessage,
+              error: SAFE_DISPATCH_FAILURE_MESSAGE,
             },
             createdAt: failedAt,
           });
@@ -305,7 +306,7 @@ export class BeastDispatchService {
               level: 'error' as const,
               type: 'agent.dispatch.failed',
               message: `Failed to start Beast run ${updatedRun.id}`,
-              payload: { runId: updatedRun.id, error: errorMessage },
+              payload: { runId: updatedRun.id, error: SAFE_DISPATCH_FAILURE_MESSAGE },
               createdAt: failedAt,
             };
             this.repository.appendTrackedAgentEvent(updatedRun.trackedAgentId, failedEvent);
@@ -316,7 +317,7 @@ export class BeastDispatchService {
           }
           return updatedRun;
         });
-        await this.appendLogSafely(run.id, 'system', 'stderr', `start_failed: ${errorMessage}`);
+        await this.appendLogSafely(run.id, 'system', 'stderr', `start_failed: ${SAFE_DISPATCH_FAILURE_MESSAGE}`);
         return failedRun;
       }
     }

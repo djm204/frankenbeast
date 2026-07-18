@@ -1554,11 +1554,12 @@ describe('agent routes integration', () => {
     const repository = new SQLiteBeastRepository(join(TMP, 'redacted-dispatch-errors.db'));
     const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
     const runs = { getRun: vi.fn(), start: vi.fn(), stop: vi.fn(), kill: vi.fn(), restart: vi.fn() };
-    const secret = 'dispatch-secret-value-1234567890';
+    const exceptionSecret = 'dispatch-secret-value-1234567890';
+    const requestSecret = 'request-secret-value-0987654321';
     const sensitiveCommand = '/opt/private/bin/provider --token super-secret';
     const dispatch = {
       createRun: vi.fn(async () => {
-        throw new Error(`Provider spawn failed: token=${secret} command=${sensitiveCommand}`);
+        throw new Error(`Provider spawn failed: token=${exceptionSecret}`);
       }),
     };
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -1581,10 +1582,20 @@ describe('agent routes integration', () => {
         definitionId: 'martin-loop',
         initAction: {
           kind: 'martin-loop',
-          command: 'martin-loop',
-          config: { provider: 'claude', objective: 'Redact dispatch failure', chunkDirectory: 'docs/chunks' },
+          command: sensitiveCommand,
+          config: {
+            provider: 'claude',
+            objective: 'Redact dispatch failure',
+            chunkDirectory: 'docs/chunks',
+            token: requestSecret,
+          },
         },
-        initConfig: { provider: 'claude', objective: 'Redact dispatch failure', chunkDirectory: 'docs/chunks' },
+        initConfig: {
+          provider: 'claude',
+          objective: 'Redact dispatch failure',
+          chunkDirectory: 'docs/chunks',
+          token: requestSecret,
+        },
       }),
     });
 
@@ -1598,13 +1609,15 @@ describe('agent routes integration', () => {
       events: detail.events,
       logs: consoleError.mock.calls,
     });
+    const responseSurface = JSON.stringify(responseBody);
 
     expect(responseBody.error.details.dispatchError).toBe(SAFE_DISPATCH_FAILURE_MESSAGE);
-    expect(exposedSurfaces).not.toContain(secret);
-    expect(exposedSurfaces).not.toContain(sensitiveCommand);
-    expect(exposedSurfaces).not.toContain('/opt/private/bin/provider');
-    expect(exposedSurfaces).not.toContain('super-secret');
+    expect(exposedSurfaces).not.toContain(exceptionSecret);
     expect(exposedSurfaces).not.toContain('Provider spawn failed');
+    expect(responseSurface).not.toContain(requestSecret);
+    expect(responseSurface).not.toContain(sensitiveCommand);
+    expect(responseSurface).not.toContain('/opt/private/bin/provider');
+    expect(responseSurface).not.toContain('super-secret');
     consoleError.mockRestore();
   });
 
