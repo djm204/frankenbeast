@@ -45,7 +45,7 @@ Coordinator/liveness watchdog recovery of an abnormal worker exit must produce o
 
 | Exit/state | Disposition | Next action |
 | --- | --- | --- |
-| Setup/spawn failure or protocol violation before the worker can own the task | HITL | `replace-with-repair-owner`; preserve spawn error, PID if known, stderr tail, and task context instead of blind respawn loops. |
+| Setup/spawn failure or protocol violation before the worker can own the task | HITL | `replace-with-doctor`; preserve spawn error, PID if known, stderr tail, and task context instead of blind respawn loops. The token is a stable runtime contract value; human-facing handoffs should describe the owner as a repair owner. |
 | Crash while the card is blocked or waiting on approval/provider/CI evidence | HITL | `defer-with-evidence`; keep the human/external gate visible and do not auto-respawn over it. |
 | Dead PID for an otherwise running card, with no sibling owner and no active PR/worktree owner | Retryable | `restart-once`; clear stale PID/current-run metadata only after evidence is recorded. |
 | Another live PID already owns the same worker card | HITL | `suppress-duplicate-respawn`; stop or park duplicates and record the surviving PID/run id. |
