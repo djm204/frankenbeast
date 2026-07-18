@@ -118,6 +118,29 @@ describe('PrCreator', () => {
     );
   });
 
+  it('redacts credential-bearing remotes in the policy denial log', async () => {
+    const exec = mockExec();
+    const creator = new PrCreator(
+      {
+        targetBranch: 'main',
+        disabled: false,
+        remote: 'https://x-access-token:s3cr3t@github.com/org/repo.git',
+        pushPolicy: { allowedGitRemotes: ['origin'] },
+        githubCapabilityCheck: { disabled: true },
+      },
+      exec,
+    );
+    const logger = makeLogger();
+
+    const result = await creator.create(baseResult, logger);
+
+    expect(result).toBeNull();
+    const denial = logger.error.mock.calls.find(c => c[0] === 'PrCreator: git push blocked by policy');
+    expect(denial).toBeDefined();
+    expect(JSON.stringify(denial)).not.toContain('s3cr3t');
+    expect(JSON.stringify(denial)).toContain('//***@');
+  });
+
   it('allows push to a configured non-origin remote when no pushPolicy is set', async () => {
     const exec = mockExec();
     const creator = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'upstream' }, exec);

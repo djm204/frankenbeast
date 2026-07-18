@@ -4,7 +4,7 @@ import type { BeastResult, TaskOutcome } from '../types.js';
 import type { ILogger } from '../deps.js';
 import { commandFailureFromExecError } from '../errors/command-failure.js';
 import { completeWithCacheHint } from '../cache/cached-cli-llm-client.js';
-import { evaluatePolicy, type PolicyConfig } from '@franken/governor';
+import type { PolicyConfig } from '@franken/governor';
 import {
   checkGitHubTokenCapabilities,
   type GitHubLowRiskCapabilityPolicy,
@@ -127,6 +127,12 @@ function isSafeRemote(value: string): boolean {
   if (REMOTE_FORBIDDEN_CHAR_RE.test(value)) return false;
   if (REMOTE_TRANSPORT_HELPER_RE.test(value)) return false; // ext::/fd:: helpers
   return true;
+}
+
+
+/** Masks the userinfo (credentials) portion of a URL-style remote for logging. */
+function redactRemote(value: string): string {
+  return value.replace(/\/\/[^@/]+@/, '//***@');
 }
 
 export class PrCreator {
@@ -313,6 +319,10 @@ export class PrCreator {
 
     this.assertGitHubCapabilities(branch, logger, { requirePullRequestsWrite: existing.length === 0 });
 
+    if (!(await this.checkPushPolicy(logger))) {
+      return null;
+    }
+
     if (!this.pushBranch(branch, logger)) {
       return null;
     }
@@ -380,19 +390,41 @@ export class PrCreator {
     }
   }
 
-  private pushBranch(branch: string, logger?: ILogger): boolean {
-    // Policy-as-code gate: pushes to remotes outside the policy whitelist are
-    // refused. Defaults to whitelisting the configured remote, so behaviour only
-    // changes when an explicit (stricter) pushPolicy is configured.
-    const decision = evaluatePolicy(
-      'git-push',
-      this.config.pushPolicy ?? { allowedGitRemotes: [this.config.remote] },
-      { remote: this.config.remote },
-    );
-    if (!decision.allow) {
-      logger?.error('PrCreator: git push blocked by policy', { reason: decision.reason });
+  /**
+   * Policy-as-code gate for the `git-push` action. Without an explicit
+   * pushPolicy the configured remote is trusted and `@franken/governor` is
+   * never loaded — it is an optional module (see createGovernanceDeps in
+   * dep-factory), so it must not become a hard import-time dependency. When a
+   * policy is configured but the governor module is unavailable, the gate
+   * fails closed.
+   */
+  private async checkPushPolicy(logger?: ILogger): Promise<boolean> {
+    const policy = this.config.pushPolicy;
+    if (!policy) return true;
+
+    let evaluatePolicy: typeof import('@franken/governor').evaluatePolicy;
+    try {
+      ({ evaluatePolicy } = await import('@franken/governor'));
+    } catch {
+      logger?.error('PrCreator: pushPolicy is configured but @franken/governor is unavailable; refusing to push');
       return false;
     }
+
+    const decision = evaluatePolicy('git-push', policy, { remote: this.config.remote });
+    if (!decision.allow) {
+      // The engine's reason embeds the raw remote, which may be a
+      // credential-bearing URL — redact it before logging.
+      const redacted = redactRemote(this.config.remote);
+      logger?.error('PrCreator: git push blocked by policy', {
+        remote: redacted,
+        reason: decision.reason.split(this.config.remote).join(redacted),
+      });
+      return false;
+    }
+    return true;
+  }
+
+  private pushBranch(branch: string, logger?: ILogger): boolean {
     // Push a fully-qualified refspec so a branch literally named e.g. `+foo`
     // is published verbatim rather than parsed as a `+`-prefixed (force) refspec.
     const refspec = `refs/heads/${branch}:refs/heads/${branch}`;
