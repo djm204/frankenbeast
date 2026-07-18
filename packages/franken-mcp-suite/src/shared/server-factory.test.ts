@@ -72,6 +72,25 @@ describe('createMcpServer', () => {
     expect(calls).toEqual([{ msg: 'hi' }]);
   });
 
+  it('returns a stable public error without leaking thrown handler details', async () => {
+    const sensitiveDetail = '/srv/private/config.json?token=' + 'example-secret-value';
+    const tool: ToolDef = {
+      name: 'failing_tool',
+      description: 'fails internally',
+      inputSchema: { type: 'object', properties: {} },
+      handler: async () => { throw new Error(`provider failed while reading ${sensitiveDetail}`); },
+    };
+    const server = createMcpServer('t', '1', [tool]);
+
+    const result = await server.callTool('failing_tool', {});
+
+    expect(result).toEqual({
+      content: [{ type: 'text', text: 'Error: Tool execution failed [MCP_TOOL_HANDLER_ERROR]' }],
+      isError: true,
+    });
+    expect(JSON.stringify(result)).not.toContain(sensitiveDetail);
+  });
+
   it('requires an OWN required property (rejects prototype-chain keys)', async () => {
     const { calls, callTool } = makeServerWithSpy();
     const res = await callTool('echo', Object.create({ msg: 'x' }));
