@@ -843,11 +843,22 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('redacts task-state task ids before returning review reports', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'pushed branch feature/customer-fix',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['Prefer not to use emojis'],
+    });
+
+    expect(report.taskId).toMatch(/^redacted-task:/);
+    expect(JSON.stringify(report)).not.toContain('feature/customer-fix');
+  });
+
   it('still redacts concrete customer references in generic policy wording', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-customer-policy-with-concrete-tenant',
       completedAt: '2026-07-16T00:00:00.000Z',
-      userCorrections: ['User prefers lessons to avoid copying customer data for Tenant ACME-123'],
+      userCorrections: ['User prefers customer data for customer ACME-123 to stay out of lessons'],
     });
 
     expect(JSON.stringify(report)).not.toContain('ACME-123');
@@ -1685,6 +1696,8 @@ describe('extractPostTaskLessonCandidates', () => {
     'Please use issue 123',
     'User wants https://github.com/acme/foo/pull/123 merged',
     'User wants https://github.com/acme/foo/issues/123 closed',
+    'User wants https://github.com/acme/foo/pull/123/files reviewed',
+    'User wants https://github.com/acme/foo/issues/123?foo=bar closed',
   ])(
     'discards terse task-reference command %p',
     (correction) => {

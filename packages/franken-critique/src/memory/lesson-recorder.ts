@@ -186,7 +186,7 @@ const PRIVACY_REDACTION_RULES: readonly PrivacyRedactionRule[] = [
     kind: 'task-state',
     label: 'task-reference',
     pattern:
-      /(?:https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/(?:pull|issues)\/\d+\b|\b(?:(?:PR|pull request|issue|ticket)\s*#?\d+|(?:commit|sha)\s+[0-9a-f]{7,40}|task\s+t_[0-9a-f]{6,}|(?:impl|harden):issue-\d+|issue-\d+)\b)/gi,
+      /(?:https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/(?:pull|issues)\/\d+(?:[^\s'"`)\]]*)?|\b(?:(?:PR|pull request|issue|ticket)\s*#?\d+|(?:commit|sha)\s+[0-9a-f]{7,40}|task\s+t_[0-9a-f]{6,}|(?:impl|harden):issue-\d+|issue-\d+)\b)/gi,
     replacement: '[REDACTED_TASK_REFERENCE]',
   },
 ];
@@ -199,7 +199,7 @@ const CUSTOMER_DATA_PATTERNS: readonly RegExp[] = [
 ];
 
 const TASK_STATE_PATTERNS: readonly RegExp[] = [
-  /https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/(?:pull|issues)\/\d+\b/i,
+  /https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/(?:pull|issues)\/\d+(?:[^\s'"`)\]]*)?/i,
   /\b(?:PR|pull request)\s*#?\d+\b/i,
   /\bissue\s*#?\d+\b/i,
   /\bticket\s*#?\d+\b/i,
@@ -1028,7 +1028,7 @@ export function extractPostTaskLessonCandidates(
     flagCustomerData: true,
   });
   const taskId = (
-    taskIdDecision.sensitive
+    taskIdDecision.sensitive || taskIdDecision.action === 'reject'
       ? `redacted-task:${stableHash(rawTaskId)}`
       : rawTaskId
   ) as TaskId;
@@ -4056,7 +4056,7 @@ function isGenericCustomerPolicyText(text: string): boolean {
 }
 
 function hasConcreteCustomerReference(text: string): boolean {
-  return /\b(?:[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*|[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*)|[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*|[Cc]ustomer\s+account\b|[Cc]ustomer\s+(?:account\s+)?[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b/.test(
+  return /\b(?:[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*|[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*)|[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*|[Cc]ustomer\s+account\b|[Cc]ustomer\s+(?:account\s+)?[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|[Cc]ustomer\s+(?!(?:data|identifiers?|records?|information|privacy|pii)\b)[A-Za-z0-9][A-Za-z0-9_.:-]*)\b/.test(
     text,
   );
 }
