@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
 
 export type AgentLifecycleAction = 'start' | 'stop' | 'restart' | 'resume' | 'delete' | 'kill';
@@ -7,6 +7,7 @@ interface AgentActionBarProps {
   status: string;
   hasLinkedRun: boolean;
   agentLabel?: string;
+  resetKey?: string;
   pendingAction?: AgentLifecycleAction | null;
   onStart: () => void;
   onStop: () => void;
@@ -86,8 +87,12 @@ function actionLabel(action: AgentLifecycleAction, label: string, pendingAction:
   return pendingAction === action ? PENDING_LABELS[action] : label;
 }
 
-export function AgentActionBar({ status, hasLinkedRun, agentLabel = 'this tracked agent', pendingAction = null, onStart, onStop, onRestart, onResume, onDelete, onKill }: AgentActionBarProps) {
+export function AgentActionBar({ status, hasLinkedRun, agentLabel = 'this tracked agent', resetKey, pendingAction = null, onStart, onStop, onRestart, onResume, onDelete, onKill }: AgentActionBarProps) {
   const [forceRestart, setForceRestart] = useState(false);
+
+  useEffect(() => {
+    setForceRestart(false);
+  }, [resetKey, status]);
 
   const isInitOrDispatch = status === 'initializing' || status === 'dispatching';
   const isRunning = status === 'running';

@@ -178,6 +178,30 @@ describe('AgentDetailPanel', () => {
     expect(screen.queryByDisplayValue('Unsaved old agent')).toBeNull();
   });
 
+  it('resets Force Restart state when the selected running agent changes', () => {
+    const { rerender } = render(<AgentDetailPanel isOpen={true} detail={detail} logs={[]} {...handlers} />);
+
+    const forceCheckbox = screen.getByLabelText('Force') as HTMLInputElement;
+    fireEvent.click(forceCheckbox);
+    expect(forceCheckbox.checked).toBe(true);
+
+    rerender(<AgentDetailPanel
+      isOpen={true}
+      detail={{
+        ...detail,
+        agent: {
+          ...detail.agent,
+          id: 'agent-2',
+          name: 'Second agent',
+        },
+      }}
+      logs={[]}
+      {...handlers}
+    />);
+
+    expect((screen.getByLabelText('Force') as HTMLInputElement).checked).toBe(false);
+  });
+
   it('keeps edit mode open and surfaces save errors', async () => {
     handlers.onSaveConfig.mockRejectedValueOnce(new Error('HTTP 500'));
     render(<AgentDetailPanel isOpen={true} detail={detail} logs={[]} {...handlers} />);
