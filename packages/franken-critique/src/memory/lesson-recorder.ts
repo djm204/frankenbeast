@@ -4056,7 +4056,7 @@ function isGenericCustomerPolicyText(text: string): boolean {
 }
 
 function hasConcreteCustomerReference(text: string): boolean {
-  return /\b(?:[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*|[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*)|[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*|[Cc]ustomer\s+account\b|[Cc]ustomer\s+(?:account\s+)?[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|[Cc]ustomer\s+(?!(?:data|identifiers?|records?|information|privacy|pii)\b)[A-Za-z0-9][A-Za-z0-9_.:-]*)\b/.test(
+  return /\b(?:[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*|[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*)|[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*|[Cc]ustomer\s+(?:account\s+)?(?!(?:data|identifiers?|records?|information|privacy|pii)\b)(?:[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|[A-Za-z0-9][A-Za-z0-9_.:-]*))\b/.test(
     text,
   );
 }
