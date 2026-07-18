@@ -1048,6 +1048,35 @@ describe('stuck-run watchdog', () => {
     expect(findings).toEqual([]);
   });
 
+  it('ignores future-dated terminal watermarks when evaluating real dead attempts', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_future_terminal_before_dead',
+        pid: 7413,
+        runId: 'run-future-complete',
+        status: 'completed',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T13:00:00.000Z',
+      },
+      {
+        cardId: 't_future_terminal_before_dead',
+        pid: 7412,
+        runId: 'run-real-dead',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      cardId: 't_future_terminal_before_dead',
+      pid: 7412,
+      restartDisposition: 'retryable',
+      nextAction: 'restart-once',
+    });
+  });
+
   it('does not let omitted-liveness terminal snapshots clear dead restart candidates', () => {
     const findings = detectStuckRunWatchdogFindings([
       {
@@ -1543,6 +1572,31 @@ describe('stuck-run watchdog', () => {
     });
   });
 
+  it('lets a later undated same-PID live probe override an undated crash despite an older dated probe', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_dated_live_then_undated_crash_then_live',
+        pid: 7426,
+        status: 'running',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+      {
+        cardId: 't_dated_live_then_undated_crash_then_live',
+        pid: 7426,
+        status: 'failed',
+      },
+      {
+        cardId: 't_dated_live_then_undated_crash_then_live',
+        pid: 7426,
+        status: 'running',
+        alive: true,
+      },
+    ], { nowMs });
+
+    expect(findings.some(finding => finding.processStatus === 'dead')).toBe(false);
+  });
+
   it('counts live crash-status probes as live evidence', () => {
     const findings = detectStuckRunWatchdogFindings([
       {
@@ -1766,6 +1820,26 @@ describe('stuck-run watchdog', () => {
     expect(contract).toMatchObject({
       exitReason: 'signal_SIGTERM',
       disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+    });
+  });
+
+  it('reports terminal operator signals through the watchdog detector', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_signal_stop_completed_watchdog',
+        pid: 7423,
+        status: 'completed',
+        alive: false,
+        exitReason: 'signal_SIGTERM',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_signal_stop_completed_watchdog',
+      exitReason: 'signal_SIGTERM',
+      processStatus: 'dead',
+      restartDisposition: 'hitl',
       nextAction: 'defer-with-evidence',
     });
   });

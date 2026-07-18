@@ -845,8 +845,8 @@ function liveSiblingPidsByCardId(snapshots: readonly IssueWorkerCardProcessSnaps
 
 function samePidLiveProbeRecencyByCardId(
   snapshots: readonly IssueWorkerCardProcessSnapshot[],
-): Map<string, Map<number, { readonly recencyMs: number; readonly index: number }>> {
-  const byCard = new Map<string, Map<number, { readonly recencyMs: number; readonly index: number }>>();
+): Map<string, Map<number, { readonly recencyMs: number; readonly index: number; readonly latestIndex: number }>> {
+  const byCard = new Map<string, Map<number, { readonly recencyMs: number; readonly index: number; readonly latestIndex: number }>>();
   snapshots.forEach((snapshot, index) => {
     const cardId = snapshot.cardId.trim();
     const status = snapshot.status?.trim().toLowerCase();
@@ -855,11 +855,13 @@ function samePidLiveProbeRecencyByCardId(
       || (status && TERMINAL_WORKER_CARD_STATUSES.has(status) && !(snapshot.alive === true && CRASH_WORKER_CARD_STATUSES.has(status)))
       || !Number.isSafeInteger(snapshot.pid)
       || snapshot.pid <= 0) return;
-    const byPid = byCard.get(cardId) ?? new Map<number, { readonly recencyMs: number; readonly index: number }>();
+    const byPid = byCard.get(cardId) ?? new Map<number, { readonly recencyMs: number; readonly index: number; readonly latestIndex: number }>();
     const recencyMs = snapshotRecencyMs(snapshot);
     const existingProbe = byPid.get(snapshot.pid);
     if (existingProbe === undefined || recencyMs > existingProbe.recencyMs || (recencyMs === existingProbe.recencyMs && index > existingProbe.index)) {
-      byPid.set(snapshot.pid, { recencyMs, index });
+      byPid.set(snapshot.pid, { recencyMs, index, latestIndex: Math.max(existingProbe?.latestIndex ?? -1, index) });
+    } else if (index > existingProbe.latestIndex) {
+      byPid.set(snapshot.pid, { ...existingProbe, latestIndex: index });
     }
     byCard.set(cardId, byPid);
   });
@@ -879,7 +881,7 @@ function siblingPidsForSnapshot(
 
 function hasSamePidLiveProbe(
   snapshot: IssueWorkerCardProcessSnapshot,
-  liveProbeRecencyByCardId: ReadonlyMap<string, ReadonlyMap<number, { readonly recencyMs: number; readonly index: number }>>,
+  liveProbeRecencyByCardId: ReadonlyMap<string, ReadonlyMap<number, { readonly recencyMs: number; readonly index: number; readonly latestIndex: number }>>,
   snapshotIndex: number,
 ): boolean {
   if (snapshot.alive === false || !Number.isSafeInteger(snapshot.pid) || snapshot.pid <= 0) return false;
@@ -887,7 +889,7 @@ function hasSamePidLiveProbe(
   const snapshotRecency = snapshotRecencyMs(snapshot);
   return liveProbe !== undefined && (
     snapshotRecency === 0
-      ? liveProbe.index > snapshotIndex
+      ? liveProbe.latestIndex > snapshotIndex
       : liveProbe.recencyMs > snapshotRecency || (liveProbe.recencyMs === snapshotRecency && liveProbe.index > snapshotIndex)
   );
 }
@@ -1129,10 +1131,12 @@ export function detectStuckRunWatchdogFindings(
     if (!snapshot.cardId.trim()) continue;
     const hasPositivePid = Number.isSafeInteger(snapshot.pid) && snapshot.pid > 0;
     const status = snapshot.status?.trim().toLowerCase();
-    if (status && TERMINAL_WORKER_CARD_STATUSES.has(status) && !crashKanbanState(status) && !explicitProcessCrash(snapshot) && !setupFailureExitReason(snapshot.exitReason ?? '')) {
+    if (status && TERMINAL_WORKER_CARD_STATUSES.has(status) && !crashKanbanState(status) && !explicitProcessCrash(snapshot) && !setupFailureExitReason(snapshot.exitReason ?? '') && !operatorControlledSignalExitReason(snapshot.exitReason ?? '')) {
       const normalizedCardId = snapshot.cardId.trim();
       if (snapshot.alive === false) {
-        const terminalKey = { recencyMs: snapshotRecencyMs(snapshot), index: snapshotIndex };
+        const terminalRecencyMs = snapshotRecencyMs(snapshot);
+        if (terminalRecencyMs > nowMs) continue;
+        const terminalKey = { recencyMs: terminalRecencyMs, index: snapshotIndex };
         const existingTerminalKey = terminalRecencyByCardId.get(normalizedCardId);
         if (existingTerminalKey === undefined
           || terminalKey.recencyMs > existingTerminalKey.recencyMs
