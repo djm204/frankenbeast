@@ -370,7 +370,7 @@ function hasSensitiveEnvAccess(line, envContainerAliases = new Set(), envNameAli
   }
   for (const alias of envContainerAliases) {
     const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const aliasAccessPattern = new RegExp(`\\b${escaped}\\??(?:\\.(?:get|setdefault)\\s*\\(\\s*['"\`]([^'"\`]+)['"\`]|\\.([A-Z0-9_]+)|\\?\\.\\[['"\`]([^'"\`]+)['"\`]\\]|\\[['"\`]([^'"\`]+)['"\`]\\]|\\[\\s*([A-Za-z_$][\\w$]*)\\s*\\])`, 'gi');
+    const aliasAccessPattern = new RegExp(`\\b${escaped}\\??(?:\\.(?:get|setdefault|pop)\\s*\\(\\s*['"\`]([^'"\`]+)['"\`]|\\.([A-Z0-9_]+)|\\?\\.\\[['"\`]([^'"\`]+)['"\`]\\]|\\[['"\`]([^'"\`]+)['"\`]\\]|\\[\\s*([A-Za-z_$][\\w$]*)\\s*\\])`, 'gi');
     for (const match of line.matchAll(aliasAccessPattern)) {
       const name = match[1] ?? match[2] ?? match[3] ?? match[4] ?? '';
       const nameAlias = match[5] ?? '';
@@ -429,10 +429,12 @@ function expressionUsesSensitiveAlias(expression, aliases) {
 }
 
 function collectSensitiveEnvAliases(line, aliases, envNameAliases, envContainerAliases = new Set(), envGetterAliases = new Set(), destructuredEnvState = null, options = {}) {
-  const osImportAlias = line.match(/^\s*import\s+os\s+as\s+([A-Za-z_$][\w$]*)\s*;?$/);
-  if (osImportAlias) {
-    options.osModuleAliases?.add(osImportAlias[1]);
-    return;
+  const pythonImports = line.match(/^\s*import\s+(.+)$/);
+  if (pythonImports) {
+    for (const rawPart of pythonImports[1].split(',')) {
+      const osImportAlias = rawPart.trim().match(/^os\s+as\s+([A-Za-z_$][\w$]*)$/);
+      if (osImportAlias) options.osModuleAliases?.add(osImportAlias[1]);
+    }
   }
 
   const groupedOsImport = line.match(/^\s*from\s+os\s+import\s+(.+)$/);
@@ -487,6 +489,15 @@ function collectSensitiveEnvAliases(line, aliases, envNameAliases, envContainerA
     return;
   }
 
+  const processEnvImport = line.match(/^\s*import\s*\{([^}]+)\}\s*from\s*['"](?:node:)?process['"]\s*;?$/);
+  if (processEnvImport) {
+    for (const part of processEnvImport[1].split(',')) {
+      const envImport = part.trim().match(/^env(?:\s+as\s+([A-Za-z_$][\w$]*))?$/);
+      if (envImport) envContainerAliases.add(envImport[1] ?? 'env');
+    }
+    return;
+  }
+
   const processDestructured = line.match(/^\s*(?:const|let|var)\s*\{([^}]+)\}\s*=\s*process\s*;?$/);
   if (processDestructured) {
     for (const part of processDestructured[1].split(',')) {
@@ -517,11 +528,13 @@ function collectSensitiveEnvAliases(line, aliases, envNameAliases, envContainerA
     return;
   }
 
-  const assignment = line.match(/^\s*(?:(?:export\s+)?(?:const|let|var)\s+|(?:export|readonly|local(?:\s+-[A-Za-z]+)*|declare(?:\s+-[A-Za-z]+)*)\s+)?([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)(?:\s*:\s*[^=]+)?\s*(?:\+=|(?:\|\||&&|\?\?)?=)\s*(.+)$/);
+  const assignment = line.match(/^\s*(?:(?:export\s+)?(?:const|let|var)\s+|(?:export|readonly|local(?:\s+-[A-Za-z]+)*|declare(?:\s+-[A-Za-z]+)*)\s+)?([A-Za-z_$][\w$]*(?:(?:\.[A-Za-z_$][\w$]*)|(?:\[['"`][A-Za-z_$][\w$]*['"`]\]))*)(?:\s*:\s*[^=]+)?\s*(?:\+=|(?:\|\||&&|\?\?)?=)\s*(.+)$/);
   if (!assignment) {
     return;
   }
-  const [, alias, expression] = assignment;
+  const rawAlias = assignment[1];
+  const alias = rawAlias.replace(/\[['"`]([A-Za-z_$][\w$]*)['"`]\]/g, '.$1');
+  const expression = assignment[2];
   const trimmedExpression = expression.trim();
   const aliasedOsEnviron = [...(options.osModuleAliases ?? [])].some((moduleAlias) => trimmedExpression.replace(/;$/, '') === `${moduleAlias}.environ`);
   if (/^(?:\(?process\.env\)?|import\.meta\.env|(?:os\.)?environ)\s*;?$/.test(trimmedExpression) || aliasedOsEnviron) {
@@ -596,10 +609,14 @@ function collectCronScheduleAliases(line, aliases, pendingState = null) {
   }
 }
 
+function normalizePropertyAccess(line) {
+  return line.replace(/\[['"`]([A-Za-z_$][\w$]*)['"`]\]/g, '.$1');
+}
+
 function hasAliasInterpolation(line, alias) {
   const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const templateInterpolationPattern = new RegExp(`(?:\\$?\\{\\s*${escaped}(?:\\b[^}]*)?\\}|\\$${escaped}\\b|\\.\\.\\.${escaped}\\b)`, 'u');
-  const normalizedLine = line.replace(/\?\./g, '.');
+  const normalizedLine = normalizePropertyAccess(line.replace(/\?\./g, '.'));
   if (stringLiterals(normalizedLine).some((literal) => templateInterpolationPattern.test(literal.value))) {
     return true;
   }
@@ -651,7 +668,7 @@ function hasProgrammaticGhAuthTokenCall(line, ghAuthArgAliases = new Set()) {
 }
 
 function collectGhAuthArgAliases(line, aliases) {
-  const assignment = line.match(/^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(.+)$/);
+  const assignment = line.match(/^\s*(?:(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)\s*=\s*(.+)$/);
   if (!assignment) return;
   const literals = stringLiterals(assignment[2]).map((literal) => literal.value.trim());
   if (literals.includes('auth') && literals.includes('token')) aliases.add(assignment[1]);
@@ -672,7 +689,7 @@ function collectAsyncGhAuthTokenCallbackAliases(line, aliases) {
 }
 
 function hasInstallTimeGhAuthTokenSubstitution(line) {
-  const ghCommand = String.raw`(?:[A-Za-z_][A-Za-z0-9_]*=[^\s]+\s+)*(?:(?:command\s+)?gh|(?:\/[A-Za-z0-9._-]+)*\/gh)`;
+  const ghCommand = String.raw`(?:env\s+)?(?:[A-Za-z_][A-Za-z0-9_]*=[^\s]+\s+)*(?:command\s+)?(?:gh|(?:\/[A-Za-z0-9._-]+)*\/gh)`;
   const unescapedSubstitution = new RegExp(String.raw`(^|[^\\])(?:\$\(\s*${ghCommand}\s+auth\s+token\b|` + '`' + String.raw`\s*${ghCommand}\s+auth\s+token\b)`);
   const literals = stringLiterals(line);
   let cursor = 0;
@@ -731,7 +748,10 @@ function isCronContinuationLine(line, inCronContext, pendingCronCommand) {
 function cronStagingStartLines(lines) {
   const starts = new Set();
   for (const [index, line] of lines.entries()) {
-    const target = /(?:^|\s)>{1,2}\s*([^\s;]+)/.exec(line)?.[1]?.replace(/^['"]|['"]$/g, '');
+    const target = (
+      /(?:^|\s)>{1,2}\s*([^\s;]+)/.exec(line)?.[1]
+      ?? /\|\s*tee(?:\s+-a)?\s+([^\s;]+)/.exec(line)?.[1]
+    )?.replace(/^['"]|['"]$/g, '');
     if (!target) continue;
     const escapedTarget = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     if (lines.slice(index + 1).some((laterLine) => new RegExp(`\\bcrontab\\s+(?:--\\s+)?(?:<\\s*)?['"]?${escapedTarget}['"]?(?:\\s|$)`).test(laterLine))) {
@@ -741,9 +761,29 @@ function cronStagingStartLines(lines) {
   return starts;
 }
 
-function multilineProgrammaticCrontabLines(lines) {
+function collectProgrammaticCrontabAliases(lines) {
+  const callNames = new Set(['execFileSync', 'execFile', 'spawnSync', 'spawn', 'execSync', 'exec', 'check_output', 'check_call', 'Popen', 'run']);
+  const commandNames = new Set();
+  for (const line of lines) {
+    const importLine = line.match(/^\s*from\s+subprocess\s+import\s+(.+)$/);
+    if (importLine) {
+      for (const part of importLine[1].split(',')) {
+        const imported = part.trim().match(/^(?:run|check_output|check_call|Popen)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/);
+        if (imported) callNames.add(imported[1] ?? part.trim());
+      }
+    }
+    const assignment = line.match(/^\s*(?:(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)\s*=\s*['"`]crontab['"`]\s*;?$/);
+    if (assignment) commandNames.add(assignment[1]);
+  }
+  return { callNames, commandNames };
+}
+
+function multilineProgrammaticCrontabLines(lines, aliases = collectProgrammaticCrontabAliases(lines)) {
   const indexes = new Set();
-  const callStart = /\b(?:execFileSync|execFile|spawnSync|spawn|execSync|exec|check_output|check_call|Popen|run|subprocess\.(?:run|check_output|check_call|Popen))\s*\(/;
+  const callPattern = [...aliases.callNames]
+    .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|');
+  const callStart = new RegExp(`\\b(?:${callPattern}|subprocess\\.(?:run|check_output|check_call|Popen))\\s*\\(`);
   for (let start = 0; start < lines.length; start += 1) {
     if (!callStart.test(codeOutsideStringLiterals(lines[start]))) continue;
     let combined = '';
@@ -756,7 +796,10 @@ function multilineProgrammaticCrontabLines(lines) {
       depth -= [...outsideStrings].filter((character) => character === ')').length;
       if (depth <= 0) break;
     }
-    if (hasCronCommandMarker(combined)) {
+    const outsideCombined = codeOutsideStringLiterals(combined);
+    const commandAliasUsed = [...aliases.commandNames].some((name) => new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'u').test(outsideCombined));
+    const literalCrontabCommand = stringLiterals(combined).some((literal) => literal.value.trim() === 'crontab');
+    if (hasCronCommandMarker(combined) || commandAliasUsed || literalCrontabCommand) {
       for (let index = start; index <= end; index += 1) indexes.add(index);
     }
     start = end;

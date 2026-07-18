@@ -1036,6 +1036,64 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('scripts/install-more-cron.mjs:9');
   });
 
+  it('rejects imported env, bracket properties, aliased sinks, tee staging, and wrapped gh calls', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'install-alias-cron.py'),
+      [
+        'import os as os_, subprocess',
+        'from subprocess import run as run_cmd, check_output',
+        'env = os_.environ',
+        "credential = env.pop('GITHUB_TOKEN')",
+        "entry = f'{sys.argv[1]} agy pr --token {credential}'",
+        "run_cmd(['crontab', '-'], input=entry)",
+        "gh_args = ['auth', 'token']",
+        "second_credential = check_output(['gh', *gh_args], text=True)",
+        "second = f'0 7 * * * agy pr --token {second_credential}'",
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'install-alias-cron.mjs'),
+      [
+        "import { env } from 'node:process';",
+        'const cfg = {};',
+        "cfg['credential'] = env.GITHUB_TOKEN;",
+        "const bracketEntry = `0 8 * * * agy pr --token ${cfg['credential']}`;",
+        "const cmd = 'crontab';",
+        'const dynamicEntry = `${process.argv[2]} agy pr --token ${env.GITHUB_TOKEN}`;',
+        "spawnSync(cmd, ['-'], { input: dynamicEntry });",
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'install-tee-cron.sh'),
+      [
+        "printf '%s\\n' '0 9 * * * agy pr' | tee /tmp/jobs",
+        "printf '%s\\n' \"GITHUB_TOKEN=$GITHUB_TOKEN\" | tee -a /tmp/jobs",
+        'crontab /tmp/jobs',
+        'auth="$(command /usr/bin/gh auth token)"',
+        'CRON_CMD="0 10 * * * agy pr --token $auth"',
+        'other="$(env GH_HOST=github.com gh auth token)"',
+        'CRON_CMD_2="0 11 * * * agy pr --token $other"',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/install-alias-cron.py:6');
+    expect(result.stderr).toContain('scripts/install-alias-cron.py:9');
+    expect(result.stderr).toContain('scripts/install-alias-cron.mjs:4');
+    expect(result.stderr).toContain('scripts/install-alias-cron.mjs:7');
+    expect(result.stderr).toContain('scripts/install-tee-cron.sh:2');
+    expect(result.stderr).toContain('scripts/install-tee-cron.sh:5');
+    expect(result.stderr).toContain('scripts/install-tee-cron.sh:7');
+  });
+
   it('allows quoted runtime env-file credentials in shell cron commands and heredocs', () => {
     const root = makeFixtureRoot();
     const scriptDir = join(root, 'scripts');
