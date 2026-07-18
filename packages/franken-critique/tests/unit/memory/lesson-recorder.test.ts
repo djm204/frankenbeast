@@ -854,6 +854,41 @@ describe('extractPostTaskLessonCandidates', () => {
     expect(JSON.stringify(report)).not.toContain('feature/customer-fix');
   });
 
+  it('redacts task-state candidate text without direct redaction spans', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-branch-state',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['pushed branch feature/customer-fix'],
+    });
+
+    expect(JSON.stringify(report)).not.toContain('feature/customer-fix');
+    expect(report.candidates[0]?.text).toMatch(
+      /^\[REDACTED_TASK_REFERENCE:[A-Za-z0-9_-]{12}\]$/,
+    );
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'task-state',
+        suggestedDestination: 'discard',
+      }),
+    );
+  });
+
+  it('classifies no-learning noise as discard rather than task-state', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-no-learning-signal',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Always happy to help'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'discard',
+        suggestedDestination: 'discard',
+        privacyFilter: expect.objectContaining({ category: 'discard' }),
+      }),
+    );
+  });
+
   it('still redacts concrete customer references in generic policy wording', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-customer-policy-with-concrete-tenant',
@@ -1907,9 +1942,11 @@ describe('extractPostTaskLessonCandidates', () => {
       notes: ['pushed branch feature/customer-fix'],
     });
 
+    expect(report.candidates[0]?.text).toMatch(
+      /^\[REDACTED_TASK_REFERENCE:[A-Za-z0-9_-]{12}\]$/,
+    );
     expect(report.candidates[0]).toEqual(
       expect.objectContaining({
-        text: '[REDACTED_TASK_REFERENCE]',
         category: 'task-state',
         suggestedDestination: 'discard',
       }),

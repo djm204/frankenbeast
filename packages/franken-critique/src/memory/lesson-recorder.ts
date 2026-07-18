@@ -1091,7 +1091,7 @@ export function extractPostTaskLessonCandidates(
       publicDecision.action === 'reject' &&
       sanitizedText === normalizedText
     ) {
-      sanitizedText = '[REDACTED_TASK_REFERENCE]';
+      sanitizedText = `[REDACTED_TASK_REFERENCE:${stableHash(normalizedText).slice(0, 12)}]`;
     }
     const suggestedDestination = options.forceDiscard
       ? 'discard'
