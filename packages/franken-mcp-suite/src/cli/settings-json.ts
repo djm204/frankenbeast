@@ -1,4 +1,4 @@
-import { chmodSync, closeSync, copyFileSync, fsyncSync, lstatSync, openSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, copyFileSync, fsyncSync, lstatSync, openSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -32,18 +32,23 @@ export function readJsonObjectFileOrRecover(path: string, content: string): Reco
 
 export function writeJsonFileAtomic(path: string, value: unknown): void {
   const content = JSON.stringify(value, null, 2) + '\n';
+  writeTextFileAtomic(path, content);
+}
+
+export function writeTextFileAtomic(path: string, content: string): void {
   const targetPath = resolveAtomicWriteTarget(path);
   const existingMode = getExistingFileMode(targetPath);
   const dir = dirname(targetPath);
   let tempPath = join(dir, `.${basename(targetPath)}.tmp-${randomUUID()}`);
 
   try {
+    backupExistingFile(targetPath);
     for (;;) {
       try {
         writeFileSync(tempPath, content, { encoding: 'utf-8', flag: 'wx', mode: existingMode });
         break;
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        if (errorCode(error) !== 'EEXIST') throw error;
         tempPath = join(dir, `.${basename(targetPath)}.tmp-${randomUUID()}`);
       }
     }
@@ -54,6 +59,35 @@ export function writeJsonFileAtomic(path: string, value: unknown): void {
   } catch (error) {
     rmSync(tempPath, { force: true });
     throw error;
+  }
+}
+
+export function backupFileBeforeMutation(path: string): string | undefined {
+  return backupExistingFile(resolveAtomicWriteTarget(path));
+}
+
+function backupExistingFile(targetPath: string): string | undefined {
+  let existingMode: number | undefined;
+  try {
+    existingMode = statSync(targetPath).mode & 0o777;
+  } catch (error) {
+    if (isNotFound(error)) return undefined;
+    throw error;
+  }
+
+  const dir = dirname(targetPath);
+  let backupPath = join(dir, `${basename(targetPath)}.backup-${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID()}.bak`);
+  for (;;) {
+    try {
+      writeFileSync(backupPath, readFileSync(targetPath), { flag: 'wx', mode: existingMode });
+      chmodSync(backupPath, existingMode);
+      fsyncFile(backupPath);
+      fsyncDirectory(dir);
+      return backupPath;
+    } catch (error) {
+      if (errorCode(error) !== 'EEXIST') throw error;
+      backupPath = join(dir, `${basename(targetPath)}.backup-${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID()}.bak`);
+    }
   }
 }
 
@@ -86,10 +120,16 @@ function getExistingFileMode(path: string): number | undefined {
 }
 
 function isNotFound(error: unknown): boolean {
+  return errorCode(error) === 'ENOENT';
+}
+
+function errorCode(error: unknown): string | undefined {
   return typeof error === 'object'
     && error !== null
     && 'code' in error
-    && (error as { code?: string }).code === 'ENOENT';
+    && typeof (error as { code?: unknown }).code === 'string'
+    ? (error as { code: string }).code
+    : undefined;
 }
 
 function stripJsonCommentsAndTrailingCommas(content: string): string {
@@ -229,9 +269,6 @@ function fsyncDirectory(path: string): void {
 }
 
 function isUnsupportedDirectoryFsync(error: unknown): boolean {
-  return typeof error === 'object'
-    && error !== null
-    && 'code' in error
-    && (error as { code?: string }).code !== undefined
-    && ['EINVAL', 'EISDIR', 'EPERM', 'ENOTSUP'].includes((error as { code: string }).code);
+  const code = errorCode(error);
+  return code !== undefined && ['EINVAL', 'EISDIR', 'EPERM', 'ENOTSUP'].includes(code);
 }
