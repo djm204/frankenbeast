@@ -398,6 +398,7 @@ If a coordinator, liveness monitor, or operator reports a stalled worker after s
 
 ## Further reading
 
+- [Onboarding guide index](docs/onboarding/README.md) — choose a focused path by goal and find every onboarding reference in one place.
 - [Quickstart](docs/guides/quickstart.md)
 - [Run the Dashboard Chat](docs/guides/run-dashboard-chat.md)
 - [Run the CLI Beast Harness](docs/guides/run-cli-beast.md)
