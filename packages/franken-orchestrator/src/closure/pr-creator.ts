@@ -4,7 +4,6 @@ import type { BeastResult, TaskOutcome } from '../types.js';
 import type { ILogger } from '../deps.js';
 import { commandFailureFromExecError } from '../errors/command-failure.js';
 import { completeWithCacheHint } from '../cache/cached-cli-llm-client.js';
-import type { PolicyConfig } from '@franken/governor';
 import {
   checkGitHubTokenCapabilities,
   type GitHubLowRiskCapabilityPolicy,
@@ -33,6 +32,33 @@ export class PrCreationRequiredActionError extends Error {
   }
 }
 
+/**
+ * Structural mirror of @franken/governor's PolicyConfig / Decision for the
+ * `git-push` action. Kept local — and the module loaded via a non-literal
+ * dynamic import below — so nothing in this file, or in packages that
+ * type-check it through relative imports (e.g. franken-web's vite-env chain),
+ * requires @franken/governor to be installed. The orchestrator's pr-creator
+ * tests exercise the real module through this seam, so signature drift fails
+ * tests rather than going unnoticed.
+ */
+export interface PushPolicyConfig {
+  readonly allowedGitRemotes?: readonly string[];
+}
+
+interface PushPolicyDecision {
+  readonly allow: boolean;
+  readonly reason: string;
+}
+
+type PushPolicyEvaluator = (
+  action: 'git-push',
+  config: PushPolicyConfig,
+  details: { readonly remote: string },
+) => PushPolicyDecision;
+
+// Non-literal specifier: keeps tsc from statically resolving the optional module.
+const GOVERNOR_MODULE_ID: string = '@franken/governor';
+
 export interface PrCreatorConfig {
   readonly targetBranch: string;
   readonly disabled: boolean;
@@ -49,7 +75,7 @@ export interface PrCreatorConfig {
    * whitelisted, so behaviour is unchanged; supply an explicit policy to
    * restrict which remotes may be pushed to.
    */
-  readonly pushPolicy?: PolicyConfig | undefined;
+  readonly pushPolicy?: PushPolicyConfig | undefined;
 }
 
 export interface PrCreateOptions {
@@ -414,9 +440,9 @@ export class PrCreator {
       return false;
     }
 
-    let evaluatePolicy: typeof import('@franken/governor').evaluatePolicy;
+    let evaluatePolicy: PushPolicyEvaluator;
     try {
-      ({ evaluatePolicy } = await import('@franken/governor'));
+      ({ evaluatePolicy } = (await import(GOVERNOR_MODULE_ID)) as { evaluatePolicy: PushPolicyEvaluator });
     } catch {
       logger?.error('PrCreator: pushPolicy is configured but @franken/governor is unavailable; refusing to push');
       return false;
