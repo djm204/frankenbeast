@@ -1663,6 +1663,33 @@ describe('stuck-run watchdog', () => {
     expect(findings.some(finding => finding.processStatus === 'dead')).toBe(false);
   });
 
+  it('suppresses same-PID crash warnings after newer terminal cleanup', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_crash_probe_then_terminal_cleanup',
+        pid: 7426,
+        status: 'failed',
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+      {
+        cardId: 't_crash_probe_then_terminal_cleanup',
+        pid: 7426,
+        status: 'running',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+      {
+        cardId: 't_crash_probe_then_terminal_cleanup',
+        pid: 7426,
+        status: 'completed',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:59:30.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([]);
+  });
+
   it('counts live crash-status probes as live evidence', () => {
     const findings = detectStuckRunWatchdogFindings([
       {
