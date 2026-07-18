@@ -285,6 +285,39 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it.each(['No workaround: gh pr checks returned 502', 'Workaround: none'])(
+    'discards empty workaround labels %p',
+    (failure) => {
+      const report = extractPostTaskLessonCandidates({
+        taskId: 'post-task-empty-workaround-label',
+        completedAt: '2026-07-16T00:00:00.000Z',
+        toolFailures: [failure],
+      });
+
+      expect(report.candidates[0]).toEqual(
+        expect.objectContaining({
+          category: 'task-state',
+          suggestedDestination: 'discard',
+        }),
+      );
+    },
+  );
+
+  it('keeps actionable workaround labels for skill review', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-actionable-workaround-label',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      toolFailures: ['Workaround: use gh run view'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'procedure',
+        suggestedDestination: 'skill',
+      }),
+    );
+  });
+
   it('discards failed retry narration without a recovery action', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-failed-retry-narration',
@@ -797,6 +830,17 @@ describe('extractPostTaskLessonCandidates', () => {
     expect(report.taskId).toMatch(/^redacted-task:/);
     expect(JSON.stringify(report)).not.toContain('owner@example.com');
     expect(JSON.stringify(report)).not.toContain('ACME-123');
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        text: 'User prefers lessons to avoid copying customer identifiers',
+        privacyFilter: expect.objectContaining({
+          sensitive: false,
+          approvalRequired: false,
+          flags: [],
+          redactions: [],
+        }),
+      }),
+    );
   });
 
   it('attaches matching verification steps to a single pending lesson candidate', () => {

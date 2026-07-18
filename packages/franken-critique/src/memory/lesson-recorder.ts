@@ -186,7 +186,7 @@ const PRIVACY_REDACTION_RULES: readonly PrivacyRedactionRule[] = [
     kind: 'task-state',
     label: 'task-reference',
     pattern:
-      /\b(?:(?:PR|pull request|issue|ticket)\s*#?\d+|(?:commit|sha)\s+[0-9a-f]{7,40}|task\s+t_[0-9a-f]{6,}|(?:impl|harden):issue-\d+|issue-\d+)\b/gi,
+      /(?:https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/(?:pull|issues)\/\d+\b|\b(?:(?:PR|pull request|issue|ticket)\s*#?\d+|(?:commit|sha)\s+[0-9a-f]{7,40}|task\s+t_[0-9a-f]{6,}|(?:impl|harden):issue-\d+|issue-\d+)\b)/gi,
     replacement: '[REDACTED_TASK_REFERENCE]',
   },
 ];
@@ -199,6 +199,7 @@ const CUSTOMER_DATA_PATTERNS: readonly RegExp[] = [
 ];
 
 const TASK_STATE_PATTERNS: readonly RegExp[] = [
+  /https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/(?:pull|issues)\/\d+\b/i,
   /\b(?:PR|pull request)\s*#?\d+\b/i,
   /\bissue\s*#?\d+\b/i,
   /\bticket\s*#?\d+\b/i,
@@ -1413,7 +1414,7 @@ function hasReusableToolFailureSignal(text: string): boolean {
   if (isFailedRetryOrFallbackStatus(text) && !hasStatusRecoveryGuidance(text)) {
     return false;
   }
-  if (/\bworkaround\s*:/i.test(text)) return true;
+  if (/\bworkaround\s*:/i.test(text)) return hasActionableWorkaroundLabel(text);
   const hasInstructionalWorkaround =
     /\b(?:when|if)\b.{0,160}\b(?:run|check|use|retry|fallback|workaround)\b|\b(?:run|check|use|retry|fallback|workaround)\b.{0,160}\b(?:when|if|after|before|instead|giving\s+up)\b/i.test(
       text,
@@ -1440,7 +1441,19 @@ function isFailedRetryOrFallbackStatus(text: string): boolean {
 function hasStatusRecoveryGuidance(text: string): boolean {
   return (
     /(?:;|,)\s*(?:use|run|check|retry|fallback)\b/i.test(text) ||
-    /\bworkaround\b/i.test(text)
+    hasActionableWorkaroundLabel(text)
+  );
+}
+
+function hasActionableWorkaroundLabel(text: string): boolean {
+  const match = /\bworkaround\s*:\s*(.+)$/i.exec(text);
+  if (!match) return false;
+  const detail = match[1]!.trim();
+  if (!detail || /^(?:none|no|n\/a|na|not\s+needed|not\s+available|nothing|-+)$/i.test(detail)) {
+    return false;
+  }
+  return /\b(?:use|run|check|retry|rerun|fallback|switch|install|pin|set|export|disable|enable)\b/i.test(
+    detail,
   );
 }
 
@@ -3987,6 +4000,7 @@ function createPrivacyDecision(
   }
   const containsCustomerData =
     options.flagCustomerData !== false &&
+    !isGenericCustomerPolicyText(rawText) &&
     CUSTOMER_DATA_PATTERNS.some((pattern) => pattern.test(rawText));
   if (containsCustomerData) {
     flags.add('customer-data');
@@ -4031,6 +4045,12 @@ function createPrivacyDecision(
           ? PRIVACY_FILTER_SENSITIVE_REASON
           : PRIVACY_FILTER_ADMIT_REASON,
   };
+}
+
+function isGenericCustomerPolicyText(text: string): boolean {
+  return /\bcustomer\s+(?:data|identifiers?|records?|information|privacy|pii)\b/i.test(
+    text,
+  );
 }
 
 function extractCustomerSegments(text: string): string[] {
