@@ -568,7 +568,11 @@ function auditToolArgs(context: Record<string, unknown>): Record<string, unknown
   if (toolInput) return nestedObjectField(toolInput, "args") ?? toolInput;
   const directArgs = nestedObjectField(context, "args");
   const directTool = stringAuditField(context, "tool") ?? stringAuditField(context, "toolName");
-  if (directArgs && directTool && unqualifyToolName(directTool) === "execute_tool") {
+  if (directArgs && directTool !== undefined && unqualifyToolName(directTool) === "execute_tool") {
+    const nestedTool = stringAuditField(directArgs, "tool") ?? stringAuditField(directArgs, "toolName");
+    if (nestedTool && unqualifyToolName(nestedTool) === "execute_tool") {
+      return auditToolArgs(directArgs);
+    }
     return nestedObjectField(directArgs, "args") ?? directArgs;
   }
   return directArgs ?? context;
@@ -591,9 +595,12 @@ function nestedMemoryAuditContext(toolName: string, context: Record<string, unkn
   if (unqualifyToolName(toolName) !== "execute_tool") return undefined;
   const nestedTool = nestedAuditTool(context);
   if (!nestedTool) return undefined;
-  const nestedArgs = auditToolArgs(context);
-  if (unqualifyToolName(nestedTool) === "execute_tool" && nestedArgs === context) return undefined;
-  return { tool: nestedTool, args: nestedArgs };
+  const directArgs = nestedObjectField(context, "args");
+  if (unqualifyToolName(nestedTool) === "execute_tool") {
+    if (!directArgs || directArgs === context) return undefined;
+    return { tool: nestedTool, args: directArgs };
+  }
+  return { tool: nestedTool, args: auditToolArgs(context) };
 }
 
 function inferMemoryAccess(toolName: string, context: Record<string, unknown>): { operation: string; targetStore: string; targetClass: string } {
@@ -947,11 +954,11 @@ function sqlAuditDecisionEquals(jsonExpression: string, value: string | undefine
     : value === "error"
       ? ` OR json_extract(${jsonExpression}, '$.ok') = 0`
       : value === "unknown"
-        ? ` OR (json_type(${jsonExpression}, '$.decision') IS NULL AND json_type(${jsonExpression}, '$.ok') IS NULL)`
+        ? ` OR (json_type(${jsonExpression}, '$.decision') IS NULL AND json_type(${jsonExpression}, '$.ok') IS NULL) OR (json_type(${jsonExpression}, '$.decision') = 'text' AND json_extract(${jsonExpression}, '$.decision') NOT IN (${Array.from(SAFE_AUDIT_DECISIONS).map(() => "?").join(", ")}))`
         : "";
   return {
     clause: `(json_extract(${jsonExpression}, '$.decision') = ?${derivedClause})`,
-    params: [value],
+    params: value === "unknown" ? [value, ...Array.from(SAFE_AUDIT_DECISIONS)] : [value],
   };
 }
 
@@ -1395,7 +1402,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           sqlJsonEqualsAny(safeAuditPayloadJson, ["$.args.agentId", "$.args.args.agentId", "$.agentId"], input.agentId),
           sqlJsonEqualsAny(safeAuditPayloadJson, ["$.args.profile", "$.args.activeProfile", "$.args.args.profile", "$.profile", "$.activeProfile"], input.profile),
           sqlJsonEqualsAny(safeAuditPayloadJson, ["$.args.repo", "$.args.args.repo", "$.repo"], input.repo),
-          sqlJsonToolEqualsAny(safeAuditPayloadJson, ["$.toolName", "$.tool", "$.args.tool", "$.args.toolName"], input.tool),
+          sqlJsonToolEqualsAny(safeAuditPayloadJson, ["$.toolName", "$.tool", "$.args.tool", "$.args.toolName", "$.args.args.tool", "$.args.args.toolName"], input.tool),
           sqlAuditDecisionEquals(safeAuditPayloadJson, input.decision),
         ]);
         const auditTimeCondition = auditTimeFilter.clause ? `AND ${auditTimeFilter.clause.slice("WHERE ".length)}` : "";

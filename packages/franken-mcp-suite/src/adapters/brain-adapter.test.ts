@@ -321,6 +321,11 @@ vi.mock("better-sqlite3", () => ({
               },
               {
                 eventType: "tool_call",
+                payload: JSON.stringify({ source: "central-dispatch", toolName: "execute_tool", ok: true, args: { tool: "execute_tool", args: { tool: "fbeast_memory_store", args: { agentId: "agent-deep-proxied", profile: "deep-proxied-tool-filter-test", type: "working" } } } }),
+                createdAt: "2026-07-16T13:58:45.000Z",
+              },
+              {
+                eventType: "tool_call",
                 payload: JSON.stringify({ __fbeastHookSource: "fbeast-hook", toolName: "fbeast_memory_store", phase: "post-tool", ok: true, args: { agentId: "agent-hook-post", profile: "hook-test", type: "working" } }),
                 createdAt: "2026-07-16T14:00:05.000Z",
               },
@@ -1423,6 +1428,37 @@ describe("createBrainAdapter", () => {
     expect(auditSql).toContain("json_type");
     expect(auditSql).toContain("$.decision");
     expect(auditSql).toContain("$.ok");
+  });
+
+  it("includes unsafe explicit decisions when filtering for unknown", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ decision: "unknown", profile: "decision-secret-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      agentId: "agent-decision",
+      decision: "unknown",
+    });
+    const prepareSql = databaseInstances.at(-1)!.prepare.mock.calls.map(([sql]) => String(sql));
+    const auditSql = prepareSql.find((sql) => sql.includes("FROM audit_trail"));
+    expect(auditSql).toContain("NOT IN");
+  });
+
+  it("includes nested proxy tools in audit SQL tool filters", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ tool: "fbeast_memory_store", profile: "deep-proxied-tool-filter-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      agentId: "agent-deep-proxied",
+      tool: "fbeast_memory_store",
+    });
+    const prepareSql = databaseInstances.at(-1)!.prepare.mock.calls.map(([sql]) => String(sql));
+    const auditSql = prepareSql.find((sql) => sql.includes("FROM audit_trail"));
+    expect(auditSql).toContain("$.args.args.tool");
+    expect(auditSql).toContain("$.args.args.toolName");
   });
 
   it("does not cap source scans before operation filtering", async () => {

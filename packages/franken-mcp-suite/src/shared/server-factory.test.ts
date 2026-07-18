@@ -301,6 +301,18 @@ describe('createMcpServer', () => {
     });
   });
 
+  it('normalizes memory access audit timestamp filters before audit logging', () => {
+    expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_access_audit_report', {
+      since: '2026-07-17 00:00:00',
+      until: 'Fri, 17 Jul 2026 00:00:00 GMT (operator@example.test)',
+      limit: 25,
+    })).toEqual({
+      since: '2026-07-17T00:00:00.000Z',
+      until: '[memory-access-audit-report-args-redacted]',
+      limit: 25,
+    });
+  });
+
   it('rejects non-finite number arguments before invoking the handler', async () => {
     const calls: unknown[] = [];
     const tool: ToolDef = {

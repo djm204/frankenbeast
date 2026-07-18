@@ -257,6 +257,27 @@ function normalizeAuditDateString(value: unknown): string | undefined {
   return Number.isFinite(parsedMs) ? new Date(parsedMs).toISOString() : undefined;
 }
 
+function normalizeMemoryAccessAuditDateString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  const normalized = trimmed.includes('T') ? trimmed : trimmed.replace(' ', 'T');
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})?$/);
+  if (!match) return undefined;
+  const [, yearRaw, monthRaw, dayRaw, hourRaw, minuteRaw, secondRaw = '00'] = match;
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  const second = Number(secondRaw);
+  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) return undefined;
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  if (day < 1 || day > daysInMonth) return undefined;
+  const timestamp = normalized.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(normalized) ? normalized : `${normalized}Z`;
+  const parsedMs = Date.parse(timestamp);
+  return Number.isFinite(parsedMs) ? new Date(parsedMs).toISOString() : undefined;
+}
+
 function unqualifyMcpToolName(toolName: string): string {
   const marker = '__';
   const index = toolName.lastIndexOf(marker);
@@ -467,9 +488,17 @@ function redactMemoryAccessAuditReportArgs(sanitized: Record<string, unknown>, r
   }
   for (const key of Object.keys(sanitized)) {
     const value = sanitized[key];
+    if (key === 'since' || key === 'until') {
+      const normalized = normalizeMemoryAccessAuditDateString(value);
+      if (normalized === undefined) {
+        sanitized[key] = redaction;
+      } else {
+        sanitized[key] = normalized;
+      }
+      continue;
+    }
     if (!MEMORY_ACCESS_AUDIT_REPORT_SAFE_AUDIT_KEYS.has(key)
       || (MEMORY_ACCESS_AUDIT_REPORT_STRING_KEYS.has(key) && typeof value !== 'string')
-      || ((key === 'since' || key === 'until') && normalizeAuditDateString(value) === undefined)
       || (key === 'limit' && !isSafeMemoryAccessAuditReportLimit(value))) {
       sanitized[key] = redaction;
     }
