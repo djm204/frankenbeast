@@ -847,8 +847,10 @@ function samePidLiveProbeRecencyByCardId(snapshots: readonly IssueWorkerCardProc
   const byCard = new Map<string, Map<number, number>>();
   for (const snapshot of snapshots) {
     const cardId = snapshot.cardId.trim();
+    const status = snapshot.status?.trim().toLowerCase();
     if (!cardId
       || snapshot.alive !== true
+      || (status && TERMINAL_WORKER_CARD_STATUSES.has(status))
       || !Number.isSafeInteger(snapshot.pid)
       || snapshot.pid <= 0) continue;
     const byPid = byCard.get(cardId) ?? new Map<number, number>();
@@ -875,7 +877,8 @@ function hasSamePidLiveProbe(
 ): boolean {
   if (snapshot.alive === false || !Number.isSafeInteger(snapshot.pid) || snapshot.pid <= 0) return false;
   const liveProbeRecencyMs = liveProbeRecencyByCardId.get(snapshot.cardId.trim())?.get(snapshot.pid);
-  return liveProbeRecencyMs !== undefined && liveProbeRecencyMs > snapshotRecencyMs(snapshot);
+  const snapshotRecency = snapshotRecencyMs(snapshot);
+  return liveProbeRecencyMs !== undefined && (liveProbeRecencyMs > snapshotRecency || (liveProbeRecencyMs === 0 && snapshotRecency === 0));
 }
 
 function normalizeKanbanState(status: string): string {
@@ -900,6 +903,11 @@ function operatorControlledSignalExitReason(exitReason: string): boolean {
 
 function dispatcherRestartExitReason(exitReason: string): boolean {
   return /^dispatcher_restart_/i.test(exitReason.trim());
+}
+
+function setupFailureExitReason(exitReason: string): boolean {
+  return exitReason === 'spawn_failed'
+    || /^(?:spawn(?:[_ -]?(?:fail(?:ed|ure)?|error))?\b|start[_ -]?failed\b|setup\b|enoent\b|eacces\b|protocol[_ -]?violation\b)/i.test(exitReason.trim());
 }
 
 export function buildWorkerCrashOnlyRestartContract(
@@ -943,7 +951,7 @@ export function buildWorkerCrashOnlyRestartContract(
     };
   }
 
-  if (intentionalNonRetryExitReason(rawExitReason) || (terminalKanbanState(kanbanState) && !crashKanbanState(kanbanState))) {
+  if (intentionalNonRetryExitReason(rawExitReason)) {
     return {
       disposition: 'terminal',
       nextAction: 'no-op',
@@ -961,10 +969,19 @@ export function buildWorkerCrashOnlyRestartContract(
     };
   }
 
-  if (rawExitReason === 'spawn_failed' || /^(?:spawn(?:[_ -]?(?:fail(?:ed|ure)?|error))?\b|start[_ -]?failed\b|setup\b|enoent\b|eacces\b|protocol[_ -]?violation\b)/i.test(rawExitReason.trim())) {
+  if (setupFailureExitReason(rawExitReason)) {
     return {
       disposition: 'hitl',
       nextAction: 'replace-with-doctor',
+      ...base,
+      evidence,
+    };
+  }
+
+  if (terminalKanbanState(kanbanState) && !crashKanbanState(kanbanState)) {
+    return {
+      disposition: 'terminal',
+      nextAction: 'no-op',
       ...base,
       evidence,
     };

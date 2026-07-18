@@ -1311,6 +1311,27 @@ describe('stuck-run watchdog', () => {
     });
   });
 
+  it('routes setup failures to doctor even after terminal Kanban cleanup', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_completed_spawn_failed',
+      pid: 7422,
+      status: 'completed',
+      alive: false,
+      exitReason: 'spawn_failed',
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'completed',
+    });
+
+    expect(contract).toMatchObject({
+      exitReason: 'spawn_failed',
+      disposition: 'hitl',
+      nextAction: 'replace-with-doctor',
+      kanbanState: 'completed',
+    });
+  });
+
   it('treats crash-like terminal statuses as retryable process crashes', () => {
     const contract = buildWorkerCrashOnlyRestartContract({
       cardId: 't_direct_failed',
@@ -1439,6 +1460,55 @@ describe('stuck-run watchdog', () => {
       processStatus: 'dead',
       restartDisposition: 'retryable',
       nextAction: 'restart-once',
+    });
+  });
+
+  it('does not treat terminal same-PID records as live crash probes', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_same_pid_terminal_probe',
+        pid: 7426,
+        status: 'failed',
+        lastHeartbeatAt: '2026-07-16T11:55:00.000Z',
+      },
+      {
+        cardId: 't_same_pid_terminal_probe',
+        pid: 7426,
+        status: 'completed',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_same_pid_terminal_probe',
+      processStatus: 'dead',
+      restartDisposition: 'retryable',
+      nextAction: 'restart-once',
+    });
+  });
+
+  it('honors undated same-PID live probes as ambiguous live evidence', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_undated_same_pid_probe',
+        pid: 7426,
+        status: 'failed',
+      },
+      {
+        cardId: 't_undated_same_pid_probe',
+        pid: 7426,
+        status: 'running',
+        alive: true,
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_undated_same_pid_probe',
+      pid: 7426,
+      processStatus: 'alive',
+      restartDisposition: 'hitl',
+      nextAction: 'defer-with-evidence',
     });
   });
 
