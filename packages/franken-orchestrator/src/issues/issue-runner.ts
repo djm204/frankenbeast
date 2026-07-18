@@ -887,7 +887,7 @@ function hasSamePidLiveProbe(
   const snapshotRecency = snapshotRecencyMs(snapshot);
   return liveProbe !== undefined && (
     snapshotRecency === 0
-      ? liveProbe.recencyMs > 0 || liveProbe.index > snapshotIndex
+      ? liveProbe.index > snapshotIndex
       : liveProbe.recencyMs > snapshotRecency || (liveProbe.recencyMs === snapshotRecency && liveProbe.index > snapshotIndex)
   );
 }
@@ -971,6 +971,15 @@ export function buildWorkerCrashOnlyRestartContract(
     };
   }
 
+  if (operatorControlledSignalExitReason(rawExitReason)) {
+    return {
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      ...base,
+      evidence,
+    };
+  }
+
   if (
     terminalKanbanState(kanbanState)
     && !crashKanbanState(kanbanState)
@@ -997,15 +1006,6 @@ export function buildWorkerCrashOnlyRestartContract(
     return {
       disposition: 'hitl',
       nextAction: 'replace-with-doctor',
-      ...base,
-      evidence,
-    };
-  }
-
-  if (operatorControlledSignalExitReason(rawExitReason)) {
-    return {
-      disposition: 'hitl',
-      nextAction: 'defer-with-evidence',
       ...base,
       evidence,
     };

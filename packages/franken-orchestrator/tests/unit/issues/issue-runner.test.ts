@@ -1518,7 +1518,7 @@ describe('stuck-run watchdog', () => {
     });
   });
 
-  it('honors dated same-PID live probes before undated crash snapshots', () => {
+  it('does not let an older dated same-PID live probe mask a later undated crash snapshot', () => {
     const [finding] = detectStuckRunWatchdogFindings([
       {
         cardId: 't_dated_live_then_undated_crash',
@@ -1537,9 +1537,9 @@ describe('stuck-run watchdog', () => {
     expect(finding).toMatchObject({
       cardId: 't_dated_live_then_undated_crash',
       pid: 7426,
-      processStatus: 'alive',
-      restartDisposition: 'hitl',
-      nextAction: 'defer-with-evidence',
+      processStatus: 'dead',
+      restartDisposition: 'retryable',
+      nextAction: 'restart-once',
     });
   });
 
@@ -1741,6 +1741,26 @@ describe('stuck-run watchdog', () => {
       category: 'process-crash',
       processStatus: 'dead',
       kanbanState: 'running',
+    });
+
+    expect(contract).toMatchObject({
+      exitReason: 'signal_SIGTERM',
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+    });
+  });
+
+  it('preserves operator signal investigation after the Kanban card becomes terminal', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_signal_stop_completed',
+      pid: 7423,
+      status: 'completed',
+      alive: false,
+      exitReason: 'signal_SIGTERM',
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'completed',
     });
 
     expect(contract).toMatchObject({
