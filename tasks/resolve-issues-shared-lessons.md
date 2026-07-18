@@ -1,5 +1,10 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-18 — Cron credential scanner closeout
+- For cron credential scanners, taint propagation must cover neutral alias names, exported declarations, destructured env containers, env-name variables, multiline assignments, shell indirect expansions, printenv/getenv aliases, and programmatic CLI calls; otherwise hardening that only matches direct `process.env`/`$TOKEN` reads leaves easy PAT-persistence bypasses.
+- When expanding shell-file scanning for cron writers, avoid both basename-only install/setup filters and scanning every shell script blindly; include cron/crontab-named writers while preserving non-cron bootstrap scripts to prevent fixture false positives.
+- If Codex keeps finding valid edge cases after an over-cap current-head review, fix/reply/resolve every finding, run local and CI checks, then stop for explicit approval before exceeding the agreed review cap again.
+
 ## 2026-07-17 — PR #2358 stalled closeout and Codex gate handling
 - For stalled PR closeout, re-verify live PR head, mergeability, CI rollup, unresolved Codex threads, and the latest top-level Codex response before acting; a stale green/clean state can become `mergeable=CONFLICTING`/`mergeStateStatus=DIRTY` after main advances even when required CI is still green.
 - Treat Codex usage-limit responses as a hard review-gate blocker for the current round: do not repeatedly retrigger `@codex review`, do not treat historical inline finding lists as active blockers when GraphQL review threads are resolved, and wait for restored usage/approved over-cap review before merging.
