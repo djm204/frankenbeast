@@ -833,7 +833,7 @@ function liveSiblingPidsByCardId(snapshots: readonly IssueWorkerCardProcessSnaps
     const status = snapshot.status?.trim().toLowerCase();
     if (!cardId
       || snapshot.alive === false
-      || (status && TERMINAL_WORKER_CARD_STATUSES.has(status))
+      || (status && TERMINAL_WORKER_CARD_STATUSES.has(status) && !(snapshot.alive === true && CRASH_WORKER_CARD_STATUSES.has(status)))
       || !Number.isSafeInteger(snapshot.pid)
       || snapshot.pid <= 0) continue;
     const pids = byCard.get(cardId) ?? new Set<number>();
@@ -852,7 +852,7 @@ function samePidLiveProbeRecencyByCardId(
     const status = snapshot.status?.trim().toLowerCase();
     if (!cardId
       || snapshot.alive === false
-      || (status && TERMINAL_WORKER_CARD_STATUSES.has(status))
+      || (status && TERMINAL_WORKER_CARD_STATUSES.has(status) && !(snapshot.alive === true && CRASH_WORKER_CARD_STATUSES.has(status)))
       || !Number.isSafeInteger(snapshot.pid)
       || snapshot.pid <= 0) return;
     const byPid = byCard.get(cardId) ?? new Map<number, { readonly recencyMs: number; readonly index: number }>();
@@ -887,7 +887,7 @@ function hasSamePidLiveProbe(
   const snapshotRecency = snapshotRecencyMs(snapshot);
   return liveProbe !== undefined && (
     snapshotRecency === 0
-      ? liveProbe.index > snapshotIndex
+      ? liveProbe.recencyMs > 0 || liveProbe.index > snapshotIndex
       : liveProbe.recencyMs > snapshotRecency || (liveProbe.recencyMs === snapshotRecency && liveProbe.index > snapshotIndex)
   );
 }
@@ -971,6 +971,19 @@ export function buildWorkerCrashOnlyRestartContract(
     };
   }
 
+  if (
+    terminalKanbanState(kanbanState)
+    && !crashKanbanState(kanbanState)
+    && !setupFailureExitReason(rawExitReason)
+  ) {
+    return {
+      disposition: 'terminal',
+      nextAction: 'no-op',
+      ...base,
+      evidence,
+    };
+  }
+
   if (activePrUrl || activeWorktreePath) {
     return {
       disposition: 'hitl',
@@ -993,15 +1006,6 @@ export function buildWorkerCrashOnlyRestartContract(
     return {
       disposition: 'hitl',
       nextAction: 'defer-with-evidence',
-      ...base,
-      evidence,
-    };
-  }
-
-  if (terminalKanbanState(kanbanState) && !crashKanbanState(kanbanState)) {
-    return {
-      disposition: 'terminal',
-      nextAction: 'no-op',
       ...base,
       evidence,
     };
@@ -1253,7 +1257,6 @@ export function detectStuckRunWatchdogFindings(
       }
       const terminalKey = terminalRecencyByCardId.get(normalizedCardId);
       const terminalSuppressesCandidate = terminalKey !== undefined
-        && candidateKey.recencyMs > 0
         && (terminalKey.recencyMs > candidateKey.recencyMs || (terminalKey.recencyMs === candidateKey.recencyMs && terminalKey.index > candidateKey.index));
       if (terminalSuppressesCandidate) {
         findingIndex += 1;
