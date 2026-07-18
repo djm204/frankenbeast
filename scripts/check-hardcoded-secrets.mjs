@@ -28,6 +28,7 @@ const sensitiveEnvNames = [
 ].map((parts) => parts.join('_'));
 
 const sensitiveIdentifierPattern = /\b(?:[A-Z0-9_]*(?:^|_)PAT(?:_|\b)[A-Z0-9_]*|[A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY|PASSPHRASE)|[A-Z0-9_]*(?:SECRET_KEY|ACCESS_KEY)|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)\b/i;
+const credentialTokenPattern = /\b(?:github_pat_[a-zA-Z0-9_]{40,}(?![a-zA-Z0-9_])|gh[opusr]_[a-zA-Z0-9_.-]{20,}(?![a-zA-Z0-9_.-])|sk-ant-[a-zA-Z0-9_-]{40,}(?![a-zA-Z0-9_-])|AIza[a-zA-Z0-9_-]{35}(?![a-zA-Z0-9_-]))/g;
 const fallbackOperatorPattern = /(?:=|:|\?\?|\|\|)\s*$/;
 const DEFAULT_MAX_SCANNED_FILE_BYTES = 1_000_000;
 const DEFAULT_MAX_SCANNED_LINE_CHARS = 20_000;
@@ -195,8 +196,17 @@ function redactEnvAssignment(name) {
   return `${name}=<redacted>`;
 }
 
+function redactCredentialTokens(text) {
+  return text.replace(credentialTokenPattern, '[REDACTED]');
+}
+
+function hasCredentialToken(text) {
+  credentialTokenPattern.lastIndex = 0;
+  return credentialTokenPattern.test(text);
+}
+
 function redactSourceLine(line) {
-  const redactPlainText = (value) => value
+  const redactPlainText = (value) => redactCredentialTokens(value)
     .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{8,})\b/gi, '<redacted>')
     .replace(new RegExp(`(${sensitiveIdentifierPattern.source})\\s*=\\s*[^\\s'\"` + '`' + `]+`, 'gi'), '$1=<redacted>');
   const literals = stringLiterals(line);
@@ -216,15 +226,25 @@ function redactSourceLine(line) {
 
 function hardcodedSensitiveEnvFinding(line) {
   const trimmed = line.trimStart();
-  if (!trimmed || trimmed.startsWith('#')) {
+  if (!trimmed) {
     return null;
   }
-  const match = trimmed.match(/^(?:export\s+)?([A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|ACCESS|PASSPHRASE|PAT)[A-Z0-9_]*)\s*=\s*(.*)$/);
+  if (trimmed.startsWith('#')) {
+    return hasCredentialToken(trimmed) ? '<redacted>' : null;
+  }
+  const match = trimmed.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
   if (!match) {
     return null;
   }
   const [, name, value] = match;
-  if (!sensitiveIdentifierPattern.test(name) || value.trim().length === 0) {
+  const hasValue = value.trim().length > 0;
+  if (!hasValue) {
+    return null;
+  }
+  if (hasCredentialToken(value)) {
+    return redactEnvAssignment(name);
+  }
+  if (!sensitiveIdentifierPattern.test(name)) {
     return null;
   }
   return redactEnvAssignment(name);
@@ -732,6 +752,12 @@ async function scanSourceFile(file, findings) {
 
   for (const [index, line] of lines.entries()) {
     const code = stripComments(line, commentState, { language }).trim();
+
+    if (hasCredentialToken(line)) {
+      findings.push(`${toRepoPath(file)}:${index + 1}: <redacted>`);
+      pendingSensitiveFallbackLine = null;
+      continue;
+    }
     if (!code) {
       continue;
     }
