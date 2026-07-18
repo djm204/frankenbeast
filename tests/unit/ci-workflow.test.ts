@@ -145,7 +145,7 @@ on:
 
     it('cancels superseded pull request runs without cancelling main branch pushes', () => {
       expect(expectRecord(workflow.concurrency, 'workflow.concurrency')).toEqual({
-        group: '${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}',
+        group: '${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}',
         'cancel-in-progress': "${{ github.event_name == 'pull_request' }}",
       });
     });
