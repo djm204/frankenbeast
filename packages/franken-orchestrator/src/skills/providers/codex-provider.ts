@@ -7,6 +7,7 @@
 
 import type { ICliProvider, ProviderOpts } from './cli-provider.js';
 import { tryExtractTextFromNode, BASE_RATE_LIMIT_PATTERNS } from './stream-json-utils.js';
+import { sanitizeRunConfigIntegrityEnv } from '../../cli/run-config-integrity.js';
 
 const RATE_LIMIT_PATTERNS = BASE_RATE_LIMIT_PATTERNS;
 
@@ -71,7 +72,7 @@ export class CodexProvider implements ICliProvider {
 
   filterEnv(env: Record<string, string>): Record<string, string> {
     return {
-      ...env,
+      ...sanitizeRunConfigIntegrityEnv(env),
       FRANKENBEAST_SPAWNED: '1',
     };
   }

@@ -1,10 +1,19 @@
 import { readFileSync, statSync } from 'node:fs';
 import { z } from 'zod';
 import { parseSafeJson } from '../utils/safe-json.js';
-
+import {
+  RUN_CONFIG_INTEGRITY_BYPASS_ENV,
+  RUN_CONFIG_INTEGRITY_ENV,
+  RUN_CONFIG_INTEGRITY_SECRET_ENV,
+  verifyRunConfigIntegrity,
+} from './run-config-integrity.js';
 
 function printLine(...args: unknown[]): void {
   console.info(...args);
+}
+
+function printWarning(...args: unknown[]): void {
+  console.warn(...args);
 }
 export const LlmOverrideSchema = z.object({
   provider: z.string().optional(),
@@ -75,12 +84,49 @@ export class RunConfigParseError extends Error {
  * Load and validate a RunConfig from a JSON file path.
  * Throws if the file does not exist or the content fails Zod validation.
  */
-export function loadRunConfig(filePath: string): RunConfig {
+const verifiedRunConfigCache = new Map<string, Buffer>();
+
+function runConfigCacheKey(filePath: string, manifestPath: string): string {
+  return `${filePath}\u0000${manifestPath}`;
+}
+
+function verifyRunConfigIntegrityFromEnv(filePath: string): Buffer | undefined {
+  if (process.env[RUN_CONFIG_INTEGRITY_BYPASS_ENV] === '1') {
+    printWarning(`runtime config integrity bypass enabled for ${filePath}`);
+    return undefined;
+  }
+
+  const manifestPath = process.env[RUN_CONFIG_INTEGRITY_ENV];
+  const secret = process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV];
+  if (!manifestPath && !secret) return undefined;
+  const cacheKey = manifestPath ? runConfigCacheKey(filePath, manifestPath) : undefined;
+  if (!secret && cacheKey) {
+    const cachedBytes = verifiedRunConfigCache.get(cacheKey);
+    if (cachedBytes) return cachedBytes;
+  }
+  const verifiedBytes = verifyRunConfigIntegrity(filePath, manifestPath ?? '', secret ?? '');
+  if (cacheKey) {
+    verifiedRunConfigCache.set(cacheKey, verifiedBytes);
+  }
+  delete process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV];
+  return verifiedBytes;
+}
+
+function readRunConfigRaw(filePath: string): string {
+  const verifiedBytes = verifyRunConfigIntegrityFromEnv(filePath);
+  if (verifiedBytes) {
+    return verifiedBytes.toString('utf-8');
+  }
+
   const info = statSync(filePath);
   if (info.size > 1_048_576) {
     throw new RunConfigParseError(filePath, `Run config ${filePath} exceeds maxBytes: ${info.size} > 1048576`);
   }
-  const raw = readFileSync(filePath, 'utf-8');
+  return readFileSync(filePath, 'utf-8');
+}
+
+export function loadRunConfigDocument(filePath: string): unknown {
+  const raw = readRunConfigRaw(filePath);
   let parsed: unknown;
   try {
     parsed = parseSafeJson(raw, {
@@ -95,7 +141,11 @@ export function loadRunConfig(filePath: string): RunConfig {
     const reason = error instanceof Error ? error.message : String(error);
     throw new RunConfigParseError(filePath, reason, error instanceof Error ? { cause: error } : undefined);
   }
-  return RunConfigSchema.parse(parsed);
+  return parsed;
+}
+
+export function loadRunConfig(filePath: string): RunConfig {
+  return RunConfigSchema.parse(loadRunConfigDocument(filePath));
 }
 
 /**
@@ -108,4 +158,10 @@ export function loadRunConfigFromEnv(): RunConfig | undefined {
   const config = loadRunConfig(filePath);
   printLine(`loaded config from ${filePath}`);
   return config;
+}
+
+export function loadRunConfigDocumentFromEnv(): unknown | undefined {
+  const filePath = process.env['FRANKENBEAST_RUN_CONFIG'];
+  if (!filePath) return undefined;
+  return loadRunConfigDocument(filePath);
 }

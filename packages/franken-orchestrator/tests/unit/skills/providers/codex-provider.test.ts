@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { CodexProvider } from '../../../../src/skills/providers/codex-provider.js';
 import type { ICliProvider } from '../../../../src/skills/providers/cli-provider.js';
+import { RUN_CONFIG_INTEGRITY_ENV, RUN_CONFIG_INTEGRITY_SECRET_ENV } from '../../../../src/cli/run-config-integrity.js';
 
 describe('CodexProvider', () => {
   const provider = new CodexProvider();
@@ -57,13 +58,23 @@ describe('CodexProvider', () => {
 
   // -- filterEnv -----------------------------------------------------------
 
-  it('filterEnv marks spawned child processes without filtering credentials', () => {
-    const env = { PATH: '/usr/bin', OPENAI_API_KEY: 'test-env-value', HOME: '/home/user' };
+  it('filterEnv marks spawned child processes and strips runtime config integrity state', () => {
+    const env = {
+      PATH: '/usr/bin',
+      OPENAI_API_KEY: 'test-env-value',
+      HOME: '/home/user',
+      [RUN_CONFIG_INTEGRITY_ENV]: '/tmp/run-config.integrity',
+      [RUN_CONFIG_INTEGRITY_SECRET_ENV]: 'signing-key',
+    };
     const filtered = provider.filterEnv(env);
     expect(filtered).toEqual({
-      ...env,
+      PATH: '/usr/bin',
+      OPENAI_API_KEY: 'test-env-value',
+      HOME: '/home/user',
       FRANKENBEAST_SPAWNED: '1',
     });
+    expect(env).toHaveProperty(RUN_CONFIG_INTEGRITY_ENV, '/tmp/run-config.integrity');
+    expect(env).toHaveProperty(RUN_CONFIG_INTEGRITY_SECRET_ENV, 'signing-key');
   });
 
   it('filterEnv returns a copy, does not mutate input', () => {

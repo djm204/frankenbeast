@@ -31,6 +31,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
 import { tryExtractTextFromNode } from '../skills/providers/stream-json-utils.js';
+import { sanitizeRunConfigIntegrityEnv } from '../cli/run-config-integrity.js';
 
 const MANAGED_START = '<!-- FRANKENBEAST MANAGED SECTION - DO NOT EDIT -->';
 const MANAGED_END = '<!-- END FRANKENBEAST SECTION -->';
@@ -64,7 +65,7 @@ export class GeminiCliAdapter implements ILlmProvider {
   constructor(private options: GeminiCliOptions = {}) {}
 
   async isAvailable(): Promise<boolean> {
-    return isCliAvailable(this.binaryPath);
+    return isCliAvailable(this.binaryPath, sanitizeRunConfigIntegrityEnv(process.env as Record<string, string>));
   }
 
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {
@@ -83,7 +84,7 @@ export class GeminiCliAdapter implements ILlmProvider {
       const proc = spawn(this.binaryPath, args, {
         cwd: workspaceDir,
         env: {
-          ...process.env,
+          ...sanitizeRunConfigIntegrityEnv(process.env as Record<string, string>),
           GEMINI_CLI_SYSTEM_DEFAULTS_PATH: this.effectiveSystemDefaultsPath(),
           GEMINI_CLI_SYSTEM_SETTINGS_PATH: settingsPath,
         },
@@ -120,7 +121,7 @@ export class GeminiCliAdapter implements ILlmProvider {
       const { stdout, exitCode } = await collectCliOutput(
         this.binaryPath,
         ['tool', 'list', '--json'],
-        { ...process.env } as Record<string, string>,
+        sanitizeRunConfigIntegrityEnv(process.env as Record<string, string>),
       );
       if (exitCode !== 0 || !stdout.trim()) {
         return this.discoverFromSettingsFile();
