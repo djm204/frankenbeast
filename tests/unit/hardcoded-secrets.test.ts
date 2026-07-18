@@ -348,6 +348,9 @@ describe('hard-coded example secret scanner', () => {
         "const CRON_CMD = '0 3 * * * gh auth token | agy pr';",
         "token = 'gh auth token';",
         "const ENTRY = '0 3 * * * ' + token;",
+        "const NEXT_CRON =",
+        "  '0 3 * * * gh auth token';",
+        'const laterTokenDiagnostic = process.env.GITHUB_TOKEN;',
         "const compat = process.env.COMPAT ?? 'legacy';",
       ].join('\n'),
       'utf8',
@@ -368,6 +371,10 @@ describe('hard-coded example secret scanner', () => {
         'const { GITHUB_PERSONAL_ACCESS_TOKEN } = process.env;',
         'const tokenAssignment = `GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_PERSONAL_ACCESS_TOKEN}`;',
         "const CRON_CMD = '0 3 * * MON ' + tokenAssignment;",
+        "const envName = 'GITHUB_PERSONAL_ACCESS_TOKEN';",
+        'const pat = process.env[envName];',
+        'const PARTS = ["* * * * *", "agy", "pr", "--token", pat];',
+        "const CRON_CMD_2 = PARTS.join(' ');",
       ].join('\n'),
       'utf8',
     );
@@ -376,6 +383,8 @@ describe('hard-coded example secret scanner', () => {
       [
         'GITHUB_PAT_VALUE="$GITHUB_PAT"',
         'CRON_CMD="0 3 * * * GITHUB_PAT=$GITHUB_PAT_VALUE agy pr"',
+        'local pat="$GITHUB_PERSONAL_ACCESS_TOKEN"',
+        'CRON_CMD_2="* * * * * agy pr --token $pat"',
       ].join('\n'),
       'utf8',
     );
@@ -384,6 +393,9 @@ describe('hard-coded example secret scanner', () => {
       [
         'GITHUB_PAT_VALUE="$GITHUB_PAT"',
         'CRON_CMD="0 3 * * * GITHUB_PAT=$GITHUB_PAT_VALUE agy pr"',
+        'crontab <<EOF',
+        '* * * * * GITHUB_TOKEN=$GITHUB_TOKEN agy pr',
+        'EOF',
       ].join('\n'),
       'utf8',
     );
@@ -393,6 +405,14 @@ describe('hard-coded example secret scanner', () => {
         'from os import environ',
         "pat = environ['GH_PAT']",
         "CRON_CMD = f'0 3 * * MON GH_PAT={pat} agy pr'",
+        "TOKEN_ENV = 'GITHUB_PERSONAL_ACCESS_TOKEN'",
+        'github_pat = environ[TOKEN_ENV]',
+        "CRON_CMD_2 = f'@daily agy pr --pat={github_pat.strip()}'",
+        "hardcoded_pat = 'ghp_1234567890abcdef'",
+        "CRON_CMD_3 = f'* * * * * agy pr --token {hardcoded_pat}'",
+        'CRON_CMD_4 = f"""',
+        '* * * * * GITHUB_TOKEN={pat} agy pr',
+        '"""',
       ].join('\n'),
       'utf8',
     );

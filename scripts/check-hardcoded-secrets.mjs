@@ -373,7 +373,7 @@ function collectSensitiveEnvAliases(line, aliases, envNameAliases) {
     return;
   }
 
-  const assignment = line.match(/^\s*(?:const|let|var)?\s*([A-Za-z_$][\w$]*)(?:\s*:\s*[^=]+)?\s*=\s*(.+)$/);
+  const assignment = line.match(/^\s*(?:(?:const|let|var|local|export)\s+)?([A-Za-z_$][\w$]*)(?:\s*:\s*[^=]+)?\s*=\s*(.+)$/);
   if (!assignment) {
     return;
   }
@@ -384,30 +384,34 @@ function collectSensitiveEnvAliases(line, aliases, envNameAliases) {
   } else {
     envNameAliases.delete(alias);
   }
-  const envNameAliasAccess = new RegExp(String.raw`(?:os\.environ(?:\.(?:get|setdefault))?|os\.getenv|\bgetenv|\benviron(?:\.(?:get|setdefault))?)\s*\(\s*([A-Za-z_$][\w$]*)|(?:os\.)?environ\s*\[\s*([A-Za-z_$][\w$]*)\s*\]`, 'u').exec(expression);
-  const envAlias = envNameAliasAccess?.[1] ?? envNameAliasAccess?.[2] ?? '';
-  if (hasSensitiveEnvAccess(expression) || (envAlias && envNameAliases.has(envAlias)) || expressionUsesSensitiveAlias(expression, aliases)) {
+  const envNameAliasAccess = new RegExp(String.raw`(?:os\.environ(?:\.(?:get|setdefault))?|os\.getenv|\bgetenv|\benviron(?:\.(?:get|setdefault))?)\s*\(\s*([A-Za-z_$][\w$]*)|(?:os\.)?environ\s*\[\s*([A-Za-z_$][\w$]*)\s*\]|(?:process\.env|import\.meta\.env)\s*\[\s*([A-Za-z_$][\w$]*)\s*\]`, 'u').exec(expression);
+  const envAlias = envNameAliasAccess?.[1] ?? envNameAliasAccess?.[2] ?? envNameAliasAccess?.[3] ?? '';
+  if (hasInlineTokenMaterial(expression) || hasSensitiveEnvAccess(expression) || (envAlias && envNameAliases.has(envAlias)) || expressionUsesSensitiveAlias(expression, aliases)) {
     aliases.add(alias);
   } else {
     aliases.delete(alias);
   }
 }
 
-function hasCronScheduleLiteral(line) {
+function hasCronScheduleText(value) {
   const cronComponent = String.raw`(?:\*|\d+(?:-\d+)?|[A-Z]{3}(?:-[A-Z]{3})?)(?:\/\d+)?`;
   const cronField = String.raw`${cronComponent}(?:,${cronComponent})*`;
   const cronSchedule = new RegExp(String.raw`(?:^|\s)${cronField}\s+${cronField}\s+${cronField}\s+${cronField}\s+${cronField}(?:\s+\S|\s*$)`);
-  return stringLiterals(line).some((literal) => /^(?:@(?:reboot|yearly|annually|monthly|weekly|daily|hourly))\s+\S/i.test(literal.value.trim()) || cronSchedule.test(literal.value));
+  return /^(?:@(?:reboot|yearly|annually|monthly|weekly|daily|hourly))\s+\S/i.test(value.trim()) || cronSchedule.test(value);
+}
+
+function hasCronScheduleLiteral(line) {
+  return stringLiterals(line).some((literal) => hasCronScheduleText(literal.value));
 }
 
 function hasCronCommandMarker(line) {
   const outsideStrings = codeOutsideStringLiterals(line);
-  return /(?:\bCRON(?:_CMD|_COMMAND)?\b|\bcrontab\b)/i.test(outsideStrings) || hasCronScheduleLiteral(line);
+  return /(?:\bCRON(?:_CMD|_COMMAND)?\b|\bcrontab\b)/i.test(outsideStrings) || hasCronScheduleLiteral(line) || hasCronScheduleText(line);
 }
 
 function hasAliasInterpolation(line, alias) {
   const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const templateInterpolationPattern = new RegExp(`(?:\\$?\\{\\s*${escaped}(?:\\b[^}]*)?\\})`, 'u');
+  const templateInterpolationPattern = new RegExp(`(?:\\$?\\{\\s*${escaped}(?:\\b[^}]*)?\\}|\\$${escaped}\\b)`, 'u');
   if (stringLiterals(line).some((literal) => templateInterpolationPattern.test(literal.value))) {
     return true;
   }
@@ -415,8 +419,12 @@ function hasAliasInterpolation(line, alias) {
     return true;
   }
   const outsideStrings = codeOutsideStringLiterals(line);
-  const bareAliasPattern = new RegExp(`(?:^|[+,(=:\\s])${escaped}(?:\\s*(?:[+),;]|$))`, 'u');
+  const bareAliasPattern = new RegExp(`(?:^|[+,(=:]|\\s|\\[)${escaped}(?:\\s*(?:[+),;]|\\]|$))`, 'u');
   return bareAliasPattern.test(outsideStrings);
+}
+
+function hasInlineTokenMaterial(value) {
+  return /\b(?:gh[pousr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{8,})\b/i.test(value);
 }
 
 function hasCronCredentialLiteral(line) {
@@ -424,16 +432,20 @@ function hasCronCredentialLiteral(line) {
     const value = literal.value;
     const cronLike = hasCronScheduleLiteral(`${literal.quote}${value}${literal.quote}`) || /\bCRON(?:_CMD|_COMMAND)?\b|\bcrontab\b/i.test(line);
     const hasCredentialAssignment = new RegExp(`${sensitiveIdentifierPattern.source}\\s*=\\s*[^\\s'\"` + '`' + `]+`, 'i').test(value);
-    const hasInlineTokenMaterial = /\b(?:gh[pousr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{8,})\b/i.test(value);
-    return (cronLike || hasCredentialAssignment) && (hasCredentialAssignment || hasInlineTokenMaterial);
+    const hasInlineTokenMaterialValue = hasInlineTokenMaterial(value);
+    return (cronLike || hasCredentialAssignment) && (hasCredentialAssignment || hasInlineTokenMaterialValue);
   });
+}
+
+function hasCronCredentialText(line) {
+  return new RegExp(`${sensitiveIdentifierPattern.source}\\s*=\\s*[^\\s'\"` + '`' + `]+`, 'i').test(line) || hasInlineTokenMaterial(line);
 }
 
 function hasCronSecretInterpolation(line, aliases, inCronContext = false) {
   if (!inCronContext && !hasCronCommandMarker(line)) {
     return false;
   }
-  if (hasSensitiveEnvAccess(line) || hasCronCredentialLiteral(line)) {
+  if (hasSensitiveEnvAccess(line) || hasCronCredentialLiteral(line) || (inCronContext && hasCronCredentialText(line))) {
     return true;
   }
   for (const alias of aliases) {
@@ -452,7 +464,7 @@ function isCronContinuationLine(line, inCronContext, pendingCronCommand) {
     return true;
   }
   if (/^[furbFURB]*['"`]/.test(line)) {
-    return true;
+    return !/;\s*$/.test(line);
   }
   return pendingCronCommand && !/[)];?\s*$/.test(line);
 }
