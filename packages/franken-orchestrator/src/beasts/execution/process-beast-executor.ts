@@ -711,7 +711,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     const redactedConfigSnapshot = redactRunConfigSnapshot(isolatedConfigSnapshot, configuredSecrets);
     const serializedRunConfig = JSON.stringify(redactedConfigSnapshot, null, 2);
     const integrityManifest = createRunConfigIntegrityManifest(serializedRunConfig, runConfigIntegritySecret, {
-      configPath: configFilePath,
+      configPath: this.resolveSpawnedRunConfigPath(spawnedSpec, configFilePath),
     });
     writeFileSync(configFilePath, serializedRunConfig, { mode: RUN_CONFIG_FILE_MODE });
     const runConfigOwner = resolveRunConfigOwner(this.options.runConfigOwner);
@@ -773,6 +773,30 @@ export class ProcessBeastExecutor implements BeastExecutor {
     this.pendingConfigFilePaths.set(run.id, configFilePath);
     this.pendingConfigManifestPaths.set(run.id, configManifestPath);
     return { configFilePath, configManifestPath };
+  }
+
+  private resolveSpawnedRunConfigPath(spawnedSpec: BeastProcessSpec, fallbackPath: string): string {
+    const directEnvPath = spawnedSpec.env?.FRANKENBEAST_RUN_CONFIG;
+    if (directEnvPath) {
+      return directEnvPath;
+    }
+
+    for (let index = 0; index < spawnedSpec.args.length; index += 1) {
+      const arg = spawnedSpec.args[index];
+      if (arg !== '-e' && arg !== '--env') {
+        continue;
+      }
+      const envArg = spawnedSpec.args[index + 1];
+      if (!envArg) {
+        continue;
+      }
+      const prefix = 'FRANKENBEAST_RUN_CONFIG=';
+      if (envArg.startsWith(prefix)) {
+        return envArg.slice(prefix.length);
+      }
+    }
+
+    return fallbackPath;
   }
 
   async stop(runId: string, attemptId: string, options?: StopOptions): Promise<BeastRunAttempt> {
