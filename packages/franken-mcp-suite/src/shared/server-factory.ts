@@ -675,10 +675,19 @@ function redactObserverLogArgs(sanitized: Record<string, unknown>, redaction = '
 }
 
 function redactObserverLogEnvelope(sanitized: Record<string, unknown>, redaction = '[observer-metadata-redacted]'): Record<string, unknown> {
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'metadata')) {
+    sanitized['metadata'] = redaction;
+  }
   if (Object.prototype.hasOwnProperty.call(sanitized, 'args')) {
     const args = sanitized['args'];
     sanitized['args'] = isObjectLike(args) && !Array.isArray(args)
       ? redactObserverLogArgs(args as Record<string, unknown>, redaction)
+      : redaction;
+  }
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
+    const context = sanitized['context'];
+    sanitized['context'] = isObjectLike(context) && !Array.isArray(context)
+      ? redactObserverLogArgs(context as Record<string, unknown>, redaction)
       : redaction;
   }
   return sanitized;
@@ -786,13 +795,10 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
     return sanitized;
   }
   if (auditedTool === OBSERVER_LOG_TOOL || auditedAction === OBSERVER_LOG_TOOL) {
-    if (unqualifiedToolName === 'execute_tool') {
-      return redactObserverLogEnvelope(sanitized);
-    }
     if (unqualifiedToolName === OBSERVER_LOG_TOOL) {
       return redactObserverLogArgs(sanitized);
     }
-    return sanitized;
+    return redactObserverLogEnvelope(sanitized);
   }
   if (auditedTool !== 'fbeast_memory_right_to_forget' && auditedAction !== 'fbeast_memory_right_to_forget') return sanitized;
   if (auditedAction === 'fbeast_memory_right_to_forget' && Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
@@ -871,7 +877,7 @@ export function validateToolArguments(
     if ((prop.type === 'number' || (Array.isArray(prop.type) && prop.type.includes('number'))) && typeof value === 'number' && !Number.isFinite(value)) {
       return { ok: false, message: `Tool ${tool.name} property ${key} must be a finite number` };
     }
-    if (typeof value === 'string') {
+    if (typeof value === 'string' && (prop.minLength !== undefined || prop.maxLength !== undefined)) {
       let length = 0;
       const codePoints = value[Symbol.iterator]();
       while (!codePoints.next().done) {

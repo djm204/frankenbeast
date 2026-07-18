@@ -389,6 +389,30 @@ describe('createMcpServer', () => {
         sessionId: 'session-1',
       },
     });
+
+    expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
+      tool: 'fbeast_observer_log',
+      args: 'invalid envelope',
+      metadata: 'x'.repeat(1_000_001),
+    })).toEqual({
+      tool: 'fbeast_observer_log',
+      args: '[observer-metadata-redacted]',
+      metadata: '[observer-metadata-redacted]',
+    });
+
+    expect(sanitizeToolArgumentsForAuditTrail('fbeast_governor_check', {
+      action: 'fbeast_observer_log',
+      context: {
+        event: 'tool_call',
+        metadata: 'x'.repeat(1_000_001),
+      },
+    })).toEqual({
+      action: 'fbeast_observer_log',
+      context: {
+        event: 'tool_call',
+        metadata: '[observer-metadata-redacted]',
+      },
+    });
   });
 
   it('redacts memory access audit report rejected selectors from direct and proxy audit records', () => {
