@@ -426,6 +426,56 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('scripts/install-cron.py:3');
   });
 
+  it('rejects cron credential scanner edge cases without leaking raw tokens', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    const rawPat = 'ghp_' + 'a'.repeat(16);
+    writeFileSync(
+      join(scriptDir, 'install-cron.mjs'),
+      [
+        'const {',
+        '  GITHUB_TOKEN: pat,',
+        '} = process.env;',
+        'const schedule = "0 3 * * mon";',
+        'const CRON_CMD =',
+        "  schedule + ' agy pr --token ' + pat.trim();",
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'install-cron.py'),
+      [
+        'from os import environ',
+        "github_pat = environ['GITHUB_PERSONAL_ACCESS_TOKEN']",
+        "entry = f'* * * * * agy pr --token {github_pat.strip()}'",
+        'raw = """',
+        `* * * * * GH_PAT=${rawPat} agy pr`,
+        '"""',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'cron-install.sh'),
+      [
+        'echo /tmp/*',
+        'GITHUB_PAT_VALUE="$GITHUB_PAT"',
+        'CRON_CMD="* * * * * GITHUB_PAT=$GITHUB_PAT_VALUE agy pr"',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/install-cron.mjs:6');
+    expect(result.stderr).toContain('scripts/install-cron.py:3');
+    expect(result.stderr).toContain('scripts/install-cron.py:5');
+    expect(result.stderr).toContain('scripts/cron-install.sh:3');
+    expect(result.stderr).toContain('GH_PAT=<redacted>');
+    expect(result.stderr).not.toContain(rawPat);
+  });
+
   it('documents cron credential rotation guidance', () => {
     const doc = readFileSync(resolve(ROOT, 'docs/cron-credential-safety.md'), 'utf8');
 
