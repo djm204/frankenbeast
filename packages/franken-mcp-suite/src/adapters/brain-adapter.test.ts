@@ -217,6 +217,13 @@ vi.mock("better-sqlite3", () => ({
                 createdAt: "2026-07-16T14:36:00.000Z",
               },
               {
+                action: "fbeast_memory_query",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "__proto__", profile: "toString", repo: "constructor", type: "working" }),
+                decision: "approved",
+                reason: "prototype-name audit subject",
+                createdAt: "2026-07-16T14:40:00.000Z",
+              },
+              {
                 action: "fbeast_memory_access_audit_report",
                 context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "agent-a", profile: "default", repo: "djm204/frankenbeast" }),
                 decision: "approved",
@@ -1566,6 +1573,30 @@ describe("createBrainAdapter", () => {
     expect(auditQueries.every((sql) => sql.includes("LIMIT ?"))).toBe(true);
   });
 
+  it("excludes access-audit report invocations before audit-trail scan limits", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    await brain.memoryAccessAuditReport({ profile: "default", limit: 50 });
+
+    const reportDb = databaseInstances.at(-1);
+    const auditQuery = reportDb!.prepare.mock.calls
+      .map(([sql]) => String(sql))
+      .find((sql) => sql.includes("FROM audit_trail"));
+    expect(auditQuery).toContain("NOT");
+    expect(auditQuery!.indexOf("NOT")).toBeLessThan(auditQuery!.indexOf("ORDER BY id DESC"));
+  });
+
+  it("counts audit summary keys that collide with Object prototype properties", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "toString", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.summary.byAgent["__proto__"]).toBe(1);
+    expect(report.summary.byProfile.toString).toBe(1);
+    expect(report.summary.byRepo.constructor).toBe(1);
+  });
+
   it("includes unknown memory-tool probes in audit reports", async () => {
     const brain = createBrainAdapter("/tmp/beast.db");
 
@@ -1573,7 +1604,7 @@ describe("createBrainAdapter", () => {
 
     expect(report.count).toBe(1);
     expect(report.events[0]).toMatchObject({
-      tool: "fbeast_memory_delete_all",
+      tool: "fbeast_memory_unknown",
       operation: "unknown",
       targetStore: "memory",
       targetClass: "memory-access",

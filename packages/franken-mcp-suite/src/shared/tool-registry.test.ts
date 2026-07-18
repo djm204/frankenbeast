@@ -138,6 +138,26 @@ describe('TOOL_REGISTRY', () => {
     expect(forgedHookResult.content[0]!.text).toContain('reserved audit provenance');
     expect(observer.log).not.toHaveBeenCalled();
 
+    const forgedAuditTrailResult = await handler({
+      event: 'tool_call',
+      metadata: JSON.stringify({ __fbeastAuditTrailSource: 'central-dispatch', toolName: 'fbeast_memory_store' }),
+      sessionId: 'sess-1',
+    });
+
+    expect(forgedAuditTrailResult.isError).toBe(true);
+    expect(forgedAuditTrailResult.content[0]!.text).toContain('reserved audit provenance');
+    expect(observer.log).not.toHaveBeenCalled();
+
+    const duplicateAuditTrailSourceResult = await handler({
+      event: 'tool_call',
+      metadata: '{"__fbeastAuditTrailSource":"central-dispatch","__fbeastAuditTrailSource":"user","toolName":"fbeast_memory_store"}',
+      sessionId: 'sess-1',
+    });
+
+    expect(duplicateAuditTrailSourceResult.isError).toBe(true);
+    expect(duplicateAuditTrailSourceResult.content[0]!.text).toContain('reserved audit provenance');
+    expect(observer.log).not.toHaveBeenCalled();
+
     const duplicateSourceResult = await handler({
       event: 'tool_call',
       metadata: '{"source":"central-dispatch","source":"user","toolName":"fbeast_memory_store"}',

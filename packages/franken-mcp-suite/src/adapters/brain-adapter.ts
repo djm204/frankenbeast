@@ -628,7 +628,7 @@ function inferMemoryAccess(toolName: string, context: Record<string, unknown>): 
 function memoryAuditToolName(toolName: string, context: Record<string, unknown> = {}): string | undefined {
   const unqualified = unqualifyToolName(toolName);
   if (Object.prototype.hasOwnProperty.call(MEMORY_ACCESS_TOOL_OPERATIONS, unqualified)) return unqualified;
-  if (unqualified.startsWith("fbeast_memory_")) return unqualified;
+  if (unqualified.startsWith("fbeast_memory_")) return UNKNOWN_MEMORY_AUDIT_TOOL;
   if (unqualified !== "execute_tool") return undefined;
   const nested = nestedMemoryAuditContext(toolName, context);
   if (!nested) return undefined;
@@ -665,6 +665,7 @@ const AUDIT_TRAIL_SOURCE_KEY = "__fbeastAuditTrailSource";
 const GOVERNANCE_SOURCE_KEY = "__fbeastGovernanceSource";
 const HOOK_GOVERNANCE_SOURCE_KEY = "__fbeastHookSource";
 const HOOK_GOVERNANCE_SOURCE = "fbeast-hook";
+const UNKNOWN_MEMORY_AUDIT_TOOL = "fbeast_memory_unknown";
 
 function hasTrustedGovernorProvenance(context: Record<string, unknown>): boolean {
   return context[GOVERNANCE_SOURCE_KEY] === CENTRAL_AUDIT_SOURCE
@@ -885,15 +886,29 @@ function auditSqlTimeClause(column: string, input: MemoryAccessAuditReportInput)
 
 function summarizeAuditEvents(events: MemoryAccessAuditEvent[]): MemoryAccessAuditReport["summary"] {
   const summary: MemoryAccessAuditReport["summary"] = { byTool: {}, byOperation: {}, byDecision: {}, byAgent: {}, byProfile: {}, byRepo: {} };
+  const increment = (bucket: Record<string, number>, key: string) => {
+    const current = Object.prototype.hasOwnProperty.call(bucket, key) ? bucket[key] ?? 0 : 0;
+    Object.defineProperty(bucket, key, {
+      value: current + 1,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+  };
   for (const event of events) {
-    summary.byTool[event.tool] = (summary.byTool[event.tool] ?? 0) + 1;
-    summary.byOperation[event.operation] = (summary.byOperation[event.operation] ?? 0) + 1;
-    summary.byDecision[event.decision] = (summary.byDecision[event.decision] ?? 0) + 1;
-    if (event.agentId) summary.byAgent[event.agentId] = (summary.byAgent[event.agentId] ?? 0) + 1;
-    if (event.profile) summary.byProfile[event.profile] = (summary.byProfile[event.profile] ?? 0) + 1;
-    if (event.repo) summary.byRepo[event.repo] = (summary.byRepo[event.repo] ?? 0) + 1;
+    increment(summary.byTool, event.tool);
+    increment(summary.byOperation, event.operation);
+    increment(summary.byDecision, event.decision);
+    if (event.agentId) increment(summary.byAgent, event.agentId);
+    if (event.profile) increment(summary.byProfile, event.profile);
+    if (event.repo) increment(summary.byRepo, event.repo);
   }
   return summary;
+}
+
+function sqlExcludesAuditReportTool(jsonExpression: string, paths: string[]): { clause: string; params: string[] } {
+  const reportToolClause = sqlJsonToolEqualsAny(jsonExpression, paths, "fbeast_memory_access_audit_report");
+  return { clause: `NOT ${reportToolClause.clause}`, params: reportToolClause.params };
 }
 
 function filterMemoryAccessEvents(events: MemoryAccessAuditEvent[], input: MemoryAccessAuditReportInput): MemoryAccessAuditEvent[] {
@@ -1403,6 +1418,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           sqlJsonEqualsAny(safeAuditPayloadJson, ["$.args.agentId", "$.args.args.agentId", "$.agentId"], input.agentId),
           sqlJsonEqualsAny(safeAuditPayloadJson, ["$.args.profile", "$.args.activeProfile", "$.args.args.profile", "$.profile", "$.activeProfile"], input.profile),
           sqlJsonEqualsAny(safeAuditPayloadJson, ["$.args.repo", "$.args.args.repo", "$.repo"], input.repo),
+          sqlExcludesAuditReportTool(safeAuditPayloadJson, ["$.toolName", "$.tool", "$.args.tool", "$.args.toolName", "$.args.args.tool", "$.args.args.toolName"]),
           sqlJsonToolEqualsAny(safeAuditPayloadJson, ["$.toolName", "$.tool", "$.args.tool", "$.args.toolName", "$.args.args.tool", "$.args.args.toolName"], input.tool),
           sqlAuditDecisionEquals(safeAuditPayloadJson, input.decision),
         ]);

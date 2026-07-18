@@ -107,8 +107,11 @@ function hasDuplicateRootJsonKey(value: string, key: string): boolean {
 function usesReservedObserverProvenance(metadata: string): boolean {
   const parsed = parseJsonObject(metadata);
   return hasDuplicateRootJsonKey(metadata, 'source')
+    || hasDuplicateRootJsonKey(metadata, RESERVED_AUDIT_TRAIL_SOURCE_KEY)
     || hasDuplicateRootJsonKey(metadata, RESERVED_HOOK_SOURCE_KEY)
     || parsed?.['source'] === RESERVED_AUDIT_SOURCE
+    || parsed?.[RESERVED_AUDIT_TRAIL_SOURCE_KEY] === RESERVED_AUDIT_SOURCE
+    || parsed?.[RESERVED_AUDIT_TRAIL_SOURCE_KEY] === RESERVED_HOOK_SOURCE
     || parsed?.[RESERVED_HOOK_SOURCE_KEY] === RESERVED_HOOK_SOURCE;
 }
 
@@ -126,6 +129,7 @@ const MEMORY_REVIEW_STATUSES = ['pending', 'approved', 'rejected', 'never_store'
 const MEMORY_REVIEW_ACTIONS = ['approve', 'reject', 'never_store', 'resolve_conflict'] as const;
 const MEMORY_CONFLICT_RESOLUTIONS = ['keep_existing', 'replace_existing', 'keep_both_scoped', 'reject_candidate', 'expire_existing'] as const;
 const RESERVED_AUDIT_SOURCE = 'central-dispatch';
+const RESERVED_AUDIT_TRAIL_SOURCE_KEY = '__fbeastAuditTrailSource';
 const RESERVED_GOVERNANCE_SOURCE_KEY = '__fbeastGovernanceSource';
 const RESERVED_HOOK_SOURCE_KEY = '__fbeastHookSource';
 const RESERVED_HOOK_SOURCE = 'fbeast-hook';
