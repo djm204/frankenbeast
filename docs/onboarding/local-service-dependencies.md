@@ -1,6 +1,6 @@
 # Local service dependency explainer
 
-Use this guide before telling a newcomer, PM, or worker to start every local service. Frankenbeast has a small core bootstrap path and several optional services. Most onboarding failures are faster to diagnose when the handoff says which service is actually required, how to verify it, and which failures are out of scope.
+Use this guide before telling a newcomer, coordinator, or worker to start every local service. Frankenbeast has a small core bootstrap path and several optional services. Most onboarding failures are faster to diagnose when the handoff says which service is actually required, how to verify it, and which failures are out of scope.
 
 Structured source: `docs/onboarding/local-service-dependencies.manifest.json`.
 
@@ -87,9 +87,9 @@ Structured source: `docs/onboarding/local-service-dependencies.manifest.json`.
 - Do not start the full Docker stack just because a docs test, static typecheck, or CLI help command failed.
 - Do not assume Docker is required for onboarding. `npm run bootstrap -- --no-docker` is the default first-run path.
 - Do not overwrite a remote service URL by starting a local container on the same port. If `CHROMA_URL` or another URL points away from localhost, verify that external dependency instead.
-- Do not mark a PM/worker blocked on "local services" without naming the exact service id, health-check command, observed result, and capability being tested.
+- Do not mark a coordinator/worker blocked on "local services" without naming the exact service id, health-check command, observed result, and capability being tested.
 
-## PM/worker handoff template
+## Coordinator/worker handoff template
 
 ```text
 Local service dependency check:

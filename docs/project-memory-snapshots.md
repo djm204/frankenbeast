@@ -1,13 +1,13 @@
 # Project-scoped memory snapshots
 
-Project memory snapshots are compact, auditable memory bundles that PMs can attach to one-issue worker handoffs when normal profile-wide memory would leak unrelated preferences, conventions, or personal facts into a task.
+Project memory snapshots are compact, auditable memory bundles that coordinators can attach to one-issue worker handoffs when normal profile-wide memory would leak unrelated preferences, conventions, or personal facts into a task.
 
 Use a snapshot when:
 
 - a worker is launched for a specific repository or issue family;
 - the task needs durable project conventions or lessons from prior workers;
 - unrelated user/profile memories would be distracting or sensitive;
-- the PM needs the handoff to be reproducible from source records.
+- the coordinator needs the handoff to be reproducible from source records.
 
 Do not use a snapshot as a replacement for live issue/PR inspection. Workers must still verify GitHub, CI, and repository state before acting.
 
@@ -50,8 +50,8 @@ Every included entry carries compact provenance metadata:
 - `ageDays`: computed age at snapshot generation;
 - `confidence` and `sensitivity`.
 
-The rendered `snapshot.text` is suitable for attaching to a PM handoff. Entry text and provenance string fields are JSON-quoted so newlines and prompt-like content cannot break out of the bullet/provenance wrapper. Keep the structured `snapshot.entries` when a machine-readable audit trail is needed.
+The rendered `snapshot.text` is suitable for attaching to a coordination handoff. Entry text and provenance string fields are JSON-quoted so newlines and prompt-like content cannot break out of the bullet/provenance wrapper. Keep the structured `snapshot.entries` when a machine-readable audit trail is needed.
 
-## PM guidance
+## Coordinator guidance
 
-PMs should attach snapshots immediately after the task brief and before worker-specific instructions. Prefer fewer high-confidence entries over large dumps. If a required convention is missing from the snapshot, update the source memory/lesson record and regenerate the snapshot instead of hand-editing the rendered text.
+coordinators should attach snapshots immediately after the task brief and before worker-specific instructions. Prefer fewer high-confidence entries over large dumps. If a required convention is missing from the snapshot, update the source memory/lesson record and regenerate the snapshot instead of hand-editing the rendered text.

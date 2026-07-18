@@ -27,7 +27,7 @@ describe('issue #1770 coding-agent PR etiquette guide', () => {
       '## Fast checklist',
       '## Required PR body fields',
       '## Review and update etiquette',
-      '## PM and worker handoff notes',
+      '## Coordinator and worker handoff notes',
       '## Maintainer review cues',
     ]) {
       expect(guide).toContain(requiredHeading);

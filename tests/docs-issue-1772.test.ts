@@ -21,7 +21,7 @@ describe('issue #1772 onboarding test command decision tree', () => {
       'Did you change shared types or cross-package contracts?',
       'Did you change integration, eval, E2E, or live-benchmark behavior?',
       'Are you preparing a CI-equivalent local handoff?',
-      'PM/worker handoff shape',
+      'Coordinator/worker handoff shape',
     ]) {
       expect(guide).toContain(requiredText);
     }
