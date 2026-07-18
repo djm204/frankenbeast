@@ -566,6 +566,9 @@ describe('hard-coded example secret scanner', () => {
         'const exportedEntry = `0 4 * * * agy pr --token ${exportedCredential}`;',
         'const { GITHUB_TOKEN: typedCredential }: NodeJS.ProcessEnv = process.env;',
         'const typedEntry = `0 5 * * * agy pr --token ${typedCredential}`;',
+        'const env = process.env;',
+        'const { GITHUB_TOKEN: envAliasCredential } = env;',
+        'const envAliasEntry = `0 7 * * * agy pr --token ${envAliasCredential}`;',
         'const CRON_CMD = `',
         'GITHUB_TOKEN=${process.env.GITHUB_TOKEN} agy pr',
         '`;',
@@ -581,10 +584,17 @@ describe('hard-coded example secret scanner', () => {
       [
         'from os import environ as env',
         'from os import path, getenv as get_env',
+        'from subprocess import check_output',
         "credential = env.get('GITHUB_TOKEN')",
         "entry = f'0 3 * * * agy pr --token {credential}'",
         "credential2 = get_env('GITHUB_TOKEN')",
         "entry2 = f'0 4 * * * agy pr --token {credential2}'",
+        'credential3 = env.get(',
+        "  'GITHUB_TOKEN'",
+        ')',
+        "entry3 = f'0 5 * * * agy pr --token {credential3}'",
+        "credential4 = check_output(['gh', 'auth', 'token'], text=True)",
+        "entry4 = f'0 6 * * * agy pr --token {credential4}'",
       ].join('\n'),
       'utf8',
     );
@@ -594,6 +604,11 @@ describe('hard-coded example secret scanner', () => {
         'cat <<EOF | crontab -',
         'GITHUB_TOKEN=$GITHUB_TOKEN',
         'EOF',
+        'name=GITHUB_TOKEN',
+        'auth="${!name}"',
+        'CRON_CMD="* * * * * agy pr --token $auth"',
+        'backtick_auth=`gh auth token`',
+        'CRON_CMD_2="* * * * * agy pr --token $backtick_auth"',
       ].join('\n'),
       'utf8',
     );
@@ -604,11 +619,16 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('scripts/install-cron.mjs:4');
     expect(result.stderr).toContain('scripts/install-cron.mjs:6');
     expect(result.stderr).toContain('scripts/install-cron.mjs:8');
-    expect(result.stderr).toContain('scripts/install-cron.mjs:10');
-    expect(result.stderr).toContain('scripts/install-cron.py:4');
-    expect(result.stderr).toContain('scripts/install-cron.py:6');
+    expect(result.stderr).toContain('scripts/install-cron.mjs:11');
+    expect(result.stderr).toContain('scripts/install-cron.mjs:13');
+    expect(result.stderr).toContain('scripts/install-cron.py:5');
+    expect(result.stderr).toContain('scripts/install-cron.py:7');
+    expect(result.stderr).toContain('scripts/install-cron.py:11');
+    expect(result.stderr).toContain('scripts/install-cron.py:13');
     expect(result.stderr).toContain('scripts/cron-install.sh:2');
-    expect(result.stderr).not.toContain('scripts/install-cron.mjs:15');
+    expect(result.stderr).toContain('scripts/cron-install.sh:6');
+    expect(result.stderr).toContain('scripts/cron-install.sh:8');
+    expect(result.stderr).not.toContain('scripts/install-cron.mjs:18');
   });
 
   it('allows runtime gh token substitutions in cron strings', () => {
@@ -618,6 +638,15 @@ describe('hard-coded example secret scanner', () => {
     writeFileSync(
       join(scriptDir, 'install-cron.mjs'),
       "const CRON_CMD = '0 3 * * * GITHUB_TOKEN=$(gh auth token) agy pr';\n",
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'cron-install.sh'),
+      [
+        "cat <<'EOF' | crontab -",
+        '0 3 * * * GITHUB_TOKEN=$(gh auth token) agy pr',
+        'EOF',
+      ].join('\n'),
       'utf8',
     );
 
