@@ -16,7 +16,7 @@ import {
   ChatSocketSessionTicketStore,
   verifyChatSocketRequest,
 } from './ws-chat-auth.js';
-import { ClientSocketEventSchema, type ChatSessionResponse, type ClientSocketEvent, type ServerSocketEvent, deterministicUuid, isoNow } from '@franken/types';
+import { ClientSocketEventSchema, type ChatSessionResponse, deterministicUuid, isoNow } from '@franken/types';
 import { InMemoryRateLimiter } from '../beasts/http/beast-rate-limit.js';
 import { ChatMutationAdmission, chatClientKey, createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, type ChatRateLimitOptions } from './chat-rate-limit.js';
 
@@ -30,6 +30,18 @@ interface ConnectionState {
   remoteAddress?: string | undefined;
   rateLimitKey: string;
 }
+
+type ClientSocketEvent =
+  | { type: 'message.send'; clientMessageId: string; content: string; executionMode?: 'process' | 'container' | undefined }
+  | { type: 'approval.respond'; approved: boolean }
+  | { type: 'message.read'; messageId: string }
+  | { type: 'ping' };
+
+type ServerSocketEvent = {
+  eventId?: string | undefined;
+  type: string;
+  [key: string]: unknown;
+};
 
 export interface ChatSocketMessageRateLimitOptions {
   max: number;
@@ -301,7 +313,7 @@ export class ChatSocketController {
 
     let event: ClientSocketEvent;
     try {
-      event = ClientSocketEventSchema.parse(JSON.parse(raw));
+      event = ClientSocketEventSchema.parse(JSON.parse(raw)) as ClientSocketEvent;
     } catch {
       this.emit(peer, {
         type: 'turn.error',
