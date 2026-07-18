@@ -278,6 +278,37 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('packages/example/src/config.ts:2');
   });
 
+  it('rejects cron commands that interpolate sensitive environment aliases', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    const tokenValue = ['persisted', 'github', 'pat'].join('-');
+    writeFileSync(
+      join(scriptDir, 'install_pr_cron.py'),
+      [
+        'import os',
+        "github_pat = os.environ['GITHUB_PERSONAL_ACCESS_TOKEN']",
+        `CRON_CMD = f"* * * * * GITHUB_PERSONAL_ACCESS_TOKEN={github_pat} agy pr --token ${tokenValue}"`,
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/install_pr_cron.py:3');
+    expect(result.stderr).toContain('CRON_CMD = f"<redacted>"');
+    expect(result.stderr).not.toContain(tokenValue);
+  });
+
+  it('documents cron credential rotation guidance', () => {
+    const doc = readFileSync(resolve(ROOT, 'docs/cron-credential-safety.md'), 'utf8');
+
+    expect(doc).toContain('must not persist GitHub personal access tokens');
+    expect(doc).toContain('gh auth token');
+    expect(doc.toLowerCase()).toContain('rotate any github credentials');
+  });
+
   it('allows sensitive env checks with ordinary diagnostic strings', () => {
     const root = makeFixtureRoot();
     const sourceDir = join(root, 'packages', 'example', 'src');

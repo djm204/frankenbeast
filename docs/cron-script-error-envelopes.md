@@ -35,3 +35,7 @@ Fields operators should key on:
 - `recoverable`: opt-in operator hint; pass `--recoverable` for transient jobs where retrying later is expected.
 
 For usage/configuration errors, the wrapper also emits the envelope and exits `2`, making missing command separators (`--`) and malformed cron definitions explicit instead of silent scheduler drift.
+
+## Credential safety
+
+Cron installers must not write PATs or other bearer credentials into crontab entries. Keep generated crontab text non-secret and fetch GitHub credentials at runtime through `gh auth token`, a restricted `0600` env file, or an operator credential helper. See [Cron credential safety](./cron-credential-safety.md) for installation and rotation guidance.

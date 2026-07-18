@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const defaultRoot = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const root = process.env.FRANKENBEAST_SECRETS_SCAN_ROOT ?? defaultRoot;
-const scannedExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
+const scannedExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py']);
 const sourceRoots = ['packages', 'scripts'];
 const ignoredPathParts = new Set([
   '.git',
@@ -294,10 +294,38 @@ function hasHardcodedSourceLiteral(line) {
 }
 
 function hasSensitiveEnvAccess(line) {
-  const envAccessPattern = /(?:(?:\(?process\.env\)?|import\.meta\.env)\??(?:\.([A-Z0-9_]+)|\[['"`]([^'"`]+)['"`]\]))/gi;
+  const envAccessPattern = /(?:(?:\(?process\.env\)?|import\.meta\.env)\??(?:\.([A-Z0-9_]+)|\[['"`]([^'"`]+)['"`]\])|(?:os\.environ(?:\.(?:get|setdefault))?|os\.getenv)\s*\(\s*['"`]([^'"`]+)['"`]|os\.environ\s*\[\s*['"`]([^'"`]+)['"`]\s*\])/gi;
   for (const match of line.matchAll(envAccessPattern)) {
-    const name = match[1] ?? match[2] ?? '';
+    const name = match[1] ?? match[2] ?? match[3] ?? match[4] ?? '';
     if (sensitiveIdentifierPattern.test(name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function collectSensitiveEnvAliases(line, aliases) {
+  const assignment = line.match(/^\s*(?:const|let|var)?\s*([A-Za-z_$][\w$]*)\s*=\s*(.+)$/);
+  if (!assignment) {
+    return;
+  }
+  const [, alias, expression] = assignment;
+  if (hasSensitiveEnvAccess(expression)) {
+    aliases.add(alias);
+  }
+}
+
+function hasCronSecretInterpolation(line, aliases) {
+  if (!/(?:\bCRON(?:_CMD|_COMMAND)?\b|\bcrontab\b|\bcron\b|\*\s+\*\s+\*\s+\*\s+\*)/i.test(line)) {
+    return false;
+  }
+  if (hasSensitiveEnvAccess(line)) {
+    return true;
+  }
+  for (const alias of aliases) {
+    const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const interpolationPattern = new RegExp(`(?:\\$?\\{\\s*${escaped}\\s*\\}|\\b${escaped}\\b)`, 'u');
+    if (interpolationPattern.test(line)) {
       return true;
     }
   }
@@ -373,12 +401,22 @@ async function scanSourceFile(file, findings) {
   if (!lines) return;
   const commentState = { inBlockComment: false };
   let pendingSensitiveFallbackLine = null;
+  const sensitiveEnvAliases = new Set();
 
   for (const [index, line] of lines.entries()) {
     const code = stripComments(line, commentState).trim();
     if (!code) {
       continue;
     }
+
+    if (hasCronSecretInterpolation(code, sensitiveEnvAliases)) {
+      findings.push(`${toRepoPath(file)}:${index + 1}: ${redactSourceLine(code)}`);
+      pendingSensitiveFallbackLine = null;
+      collectSensitiveEnvAliases(code, sensitiveEnvAliases);
+      continue;
+    }
+
+    collectSensitiveEnvAliases(code, sensitiveEnvAliases);
 
     if (pendingSensitiveFallbackLine && hasHardcodedSourceLiteral(code)) {
       findings.push(`${toRepoPath(file)}:${index + 1}: ${redactSourceLine(code)}`);
