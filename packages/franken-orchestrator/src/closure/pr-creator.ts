@@ -478,9 +478,10 @@ export class PrCreator {
         const urls = output.split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
         remoteUrls = urls.length > 0 ? urls : undefined;
       } catch {
-        // The configured remote may be a URL rather than a named remote, in
-        // which case get-url fails and the remote itself is the destination.
-        remoteUrls = /:\/\/|@/.test(this.config.remote) ? [this.config.remote] : undefined;
+        // get-url only fails when the remote is not a *named* remote, so the
+        // configured value itself is the destination (scheme URL, scp-like
+        // [user@]host:path, or a bogus name the URL whitelist will reject).
+        remoteUrls = [this.config.remote];
       }
     }
 

@@ -219,6 +219,31 @@ describe('PrCreator', () => {
     );
   });
 
+  it('treats a userless scp-like URL remote as its own destination when whitelisted', async () => {
+    const scpRemote = 'github.com:org/repo.git';
+    const exec = mockExec({ 'git remote get-url': new Error('No such remote') });
+    const creator = new PrCreator(
+      {
+        targetBranch: 'main',
+        disabled: false,
+        remote: scpRemote,
+        pushPolicy: {
+          allowedGitRemotes: [],
+          allowedGitRemoteUrls: [scpRemote],
+        },
+        githubCapabilityCheck: { disabled: true },
+      },
+      exec,
+    );
+    const logger = makeLogger();
+
+    const result = await creator.create(baseResult, logger);
+
+    expect(result?.url).toBe('https://example.com/pr/1');
+    const pushCall = exec.mock.calls.find(c => c[0] === 'git' && (c[1] as string[]).includes('push'));
+    expect(pushCall?.[1]).toContain(scpRemote);
+  });
+
   it('fails closed when pushPolicy is explicitly malformed', async () => {
     const exec = mockExec();
     const creator = new PrCreator(

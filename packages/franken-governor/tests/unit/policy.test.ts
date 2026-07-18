@@ -60,6 +60,17 @@ describe('policy engine', () => {
     ).allow).toBe(false);
   });
 
+  it('redacts credential-bearing values in malformed remoteUrls denial reasons', () => {
+    const decision = evaluatePolicy(
+      'git-push',
+      { allowedGitRemotes: ['origin'], allowedGitRemoteUrls: ['https://github.com/org/repo.git'] },
+      { remote: 'origin', remoteUrls: 'https://user:t0k3n@github.com/org/repo.git' },
+    );
+    expect(decision.allow).toBe(false);
+    expect(decision.reason).not.toContain('t0k3n');
+    expect(decision.reason).toContain('//***@github.com');
+  });
+
   it('accepts a URL-valued remote listed in allowedGitRemoteUrls without a name match', () => {
     const url = 'https://github.com/org/repo.git';
     const decision = evaluatePolicy(

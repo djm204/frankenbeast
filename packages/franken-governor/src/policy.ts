@@ -94,7 +94,7 @@ export function evaluate(action: Action, config: PolicyConfig = defaultPolicy, d
           && urls.length > 0
           && urls.every((url) => typeof url === 'string' && urlList.includes(url));
         if (!allUrlsAllowed) {
-          const shown = Array.isArray(urls) ? urls.map(redactRemote).join(', ') : String(urls);
+          const shown = Array.isArray(urls) ? urls.map(redactRemote).join(', ') : redactRemote(urls);
           return {
             allow: false,
             reason: `Remote "${redactRemote(d.remote)}" resolves to push URL(s) [${shown}], not all of which are allowed by policy`,
