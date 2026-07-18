@@ -849,7 +849,7 @@ function samePidLiveProbeRecencyByCardId(snapshots: readonly IssueWorkerCardProc
     const cardId = snapshot.cardId.trim();
     const status = snapshot.status?.trim().toLowerCase();
     if (!cardId
-      || snapshot.alive !== true
+      || snapshot.alive === false
       || (status && TERMINAL_WORKER_CARD_STATUSES.has(status))
       || !Number.isSafeInteger(snapshot.pid)
       || snapshot.pid <= 0) continue;
@@ -1105,6 +1105,8 @@ export function detectStuckRunWatchdogFindings(
   const samePidLiveProbes = samePidLiveProbeRecencyByCardId(snapshots);
   const deadFindingsByCardId = new Map<string, IssueStuckRunWatchdogFinding>();
   const deadFindingKeysByCardId = new Map<string, { readonly safetyRank: number; readonly recencyMs: number; readonly index: number }>();
+  const newestDeadFindingsByCardId = new Map<string, IssueStuckRunWatchdogFinding>();
+  const newestDeadFindingKeysByCardId = new Map<string, { readonly safetyRank: number; readonly recencyMs: number; readonly index: number }>();
   const terminalRecencyByCardId = new Map<string, number>();
   let findingIndex = 0;
 
@@ -1112,7 +1114,7 @@ export function detectStuckRunWatchdogFindings(
     if (!snapshot.cardId.trim()) continue;
     const hasPositivePid = Number.isSafeInteger(snapshot.pid) && snapshot.pid > 0;
     const status = snapshot.status?.trim().toLowerCase();
-    if (status && TERMINAL_WORKER_CARD_STATUSES.has(status) && !crashKanbanState(status) && !explicitProcessCrash(snapshot)) {
+    if (status && TERMINAL_WORKER_CARD_STATUSES.has(status) && !crashKanbanState(status) && !explicitProcessCrash(snapshot) && !setupFailureExitReason(snapshot.exitReason ?? '')) {
       const normalizedCardId = snapshot.cardId.trim();
       if (snapshot.alive === false) {
         const terminalRecencyMs = snapshotRecencyMs(snapshot);
@@ -1123,8 +1125,15 @@ export function detectStuckRunWatchdogFindings(
           );
           const existingKey = deadFindingKeysByCardId.get(normalizedCardId);
           if (existingKey && terminalRecencyMs >= existingKey.recencyMs) {
-            deadFindingKeysByCardId.delete(normalizedCardId);
-            deadFindingsByCardId.delete(normalizedCardId);
+            const newestKey = newestDeadFindingKeysByCardId.get(normalizedCardId);
+            const newestFinding = newestDeadFindingsByCardId.get(normalizedCardId);
+            if (newestKey && newestFinding && newestKey.recencyMs > terminalRecencyMs) {
+              deadFindingKeysByCardId.set(normalizedCardId, newestKey);
+              deadFindingsByCardId.set(normalizedCardId, newestFinding);
+            } else {
+              deadFindingKeysByCardId.delete(normalizedCardId);
+              deadFindingsByCardId.delete(normalizedCardId);
+            }
           }
         }
       }
@@ -1223,6 +1232,11 @@ export function detectStuckRunWatchdogFindings(
         recencyMs: snapshotRecencyMs(snapshot),
         index: findingIndex,
       };
+      const newestKey = newestDeadFindingKeysByCardId.get(normalizedCardId);
+      if (newestKey === undefined || candidateKey.recencyMs > newestKey.recencyMs || (candidateKey.recencyMs === newestKey.recencyMs && candidateKey.index > newestKey.index)) {
+        newestDeadFindingKeysByCardId.set(normalizedCardId, candidateKey);
+        newestDeadFindingsByCardId.set(normalizedCardId, finding);
+      }
       const terminalRecencyMs = terminalRecencyByCardId.get(normalizedCardId);
       if (terminalRecencyMs !== undefined && terminalRecencyMs >= candidateKey.recencyMs) {
         findingIndex += 1;

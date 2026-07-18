@@ -990,6 +990,41 @@ describe('stuck-run watchdog', () => {
     expect(findings).toEqual([]);
   });
 
+  it('preserves newer retryable dead attempts when older HITL evidence is cleared by terminal cleanup', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_terminal_between_dead_attempts',
+        pid: 7426,
+        status: 'failed',
+        alive: false,
+        exitReason: 'spawn_failed',
+        lastHeartbeatAt: '2026-07-16T11:50:00.000Z',
+      },
+      {
+        cardId: 't_terminal_between_dead_attempts',
+        pid: 7427,
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+      {
+        cardId: 't_terminal_between_dead_attempts',
+        pid: 7428,
+        status: 'completed',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:55:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      cardId: 't_terminal_between_dead_attempts',
+      pid: 7427,
+      restartDisposition: 'retryable',
+      nextAction: 'restart-once',
+    });
+  });
+
   it('uses terminal recency watermarks when terminal snapshots arrive before older dead attempts', () => {
     const findings = detectStuckRunWatchdogFindings([
       {
@@ -1332,6 +1367,26 @@ describe('stuck-run watchdog', () => {
     });
   });
 
+  it('reports terminal setup failures through watchdog contract evaluation', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_watchdog_completed_spawn_failed',
+        pid: 7422,
+        status: 'completed',
+        alive: false,
+        exitReason: 'spawn_failed',
+        lastHeartbeatAt: '2026-07-16T11:55:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_watchdog_completed_spawn_failed',
+      exitReason: 'spawn_failed',
+      restartDisposition: 'hitl',
+      nextAction: 'replace-with-doctor',
+    });
+  });
+
   it('treats crash-like terminal statuses as retryable process crashes', () => {
     const contract = buildWorkerCrashOnlyRestartContract({
       cardId: 't_direct_failed',
@@ -1505,6 +1560,31 @@ describe('stuck-run watchdog', () => {
 
     expect(finding).toMatchObject({
       cardId: 't_undated_same_pid_probe',
+      pid: 7426,
+      processStatus: 'alive',
+      restartDisposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+    });
+  });
+
+  it('honors omitted-liveness same-PID live snapshots', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_omitted_liveness_same_pid_probe',
+        pid: 7426,
+        status: 'failed',
+        lastHeartbeatAt: '2026-07-16T11:55:00.000Z',
+      },
+      {
+        cardId: 't_omitted_liveness_same_pid_probe',
+        pid: 7426,
+        status: 'running',
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_omitted_liveness_same_pid_probe',
       pid: 7426,
       processStatus: 'alive',
       restartDisposition: 'hitl',
