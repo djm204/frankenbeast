@@ -41,10 +41,29 @@ describe('ChatMutationAdmission concurrency', () => {
 
     await Promise.resolve();
     expect(order).toEqual(['first:start']);
+    expect(admission.begin('session-1')).toBe(false);
 
     releaseFirstRun.resolve();
     await expect(Promise.all([first, second])).resolves.toEqual(['first', 'second']);
     expect(order).toEqual(['first:start', 'first:end', 'second:start', 'second:end']);
+  });
+
+  it('waits for begin/end guarded turns before running queued mutations', async () => {
+    const admission = new ChatMutationAdmission(new InMemoryRateLimiter({ windowMs: 60_000, max: 10 }));
+    const order: string[] = [];
+
+    expect(admission.begin('session-1')).toBe(true);
+    const queued = admission.runExclusive('session-1', async () => {
+      order.push('queued');
+      return 'queued';
+    });
+
+    await Promise.resolve();
+    expect(order).toEqual([]);
+
+    admission.end('session-1');
+    await expect(queued).resolves.toBe('queued');
+    expect(order).toEqual(['queued']);
   });
 });
 

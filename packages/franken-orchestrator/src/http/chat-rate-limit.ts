@@ -51,7 +51,7 @@ export function chatMutationKey(sessionId: string): string {
 }
 
 export class ChatMutationAdmission {
-  private readonly inFlightMutations = new Set<string>();
+  private readonly activeTurns = new Map<string, { done: Promise<void>; release: () => void }>();
   private readonly mutationQueues = new Map<string, Promise<void>>();
 
   constructor(private readonly limiter: InMemoryRateLimiter) {}
@@ -78,14 +78,29 @@ export class ChatMutationAdmission {
 
   begin(sessionId: string): boolean {
     const mutationKey = chatMutationKey(sessionId);
-    if (this.inFlightMutations.has(mutationKey)) {
+    if (this.mutationQueues.has(mutationKey)) {
       return false;
     }
-    this.inFlightMutations.add(mutationKey);
+
+    let release!: () => void;
+    const done = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.activeTurns.set(mutationKey, { done, release });
+    this.mutationQueues.set(mutationKey, done);
     return true;
   }
 
   end(sessionId: string): void {
-    this.inFlightMutations.delete(chatMutationKey(sessionId));
+    const mutationKey = chatMutationKey(sessionId);
+    const activeTurn = this.activeTurns.get(mutationKey);
+    if (!activeTurn) {
+      return;
+    }
+    this.activeTurns.delete(mutationKey);
+    activeTurn.release();
+    if (this.mutationQueues.get(mutationKey) === activeTurn.done) {
+      this.mutationQueues.delete(mutationKey);
+    }
   }
 }
