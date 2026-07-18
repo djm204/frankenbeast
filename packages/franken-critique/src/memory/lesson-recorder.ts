@@ -4062,11 +4062,25 @@ function hasConcreteCustomerReference(text: string): boolean {
 }
 
 function extractCustomerSegments(text: string): string[] {
+  const trailingCustomerToken =
+    '(?:\\s+(?!(?:and|needs?|contains?|before|for|with)\\b)(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}';
   const patterns = [
-    /\b[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b/g,
-    /\b[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*)(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b/g,
-    /\b[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b/g,
-    /\b[Cc]ustomer(?:\s+account)?(?:\s+[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})?(?:\s+[A-Za-z0-9_.:-]+){1,3}\b/g,
+    new RegExp(
+      `\\b[Tt]enant\\s+[A-Za-z0-9][A-Za-z0-9_.:-]*${trailingCustomerToken}\\b`,
+      'g',
+    ),
+    new RegExp(
+      `\\b[Cc]lient\\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*)${trailingCustomerToken}\\b`,
+      'g',
+    ),
+    new RegExp(
+      `\\b[Aa]ccount\\s+[A-Z0-9][A-Za-z0-9_.:-]*${trailingCustomerToken}\\b`,
+      'g',
+    ),
+    new RegExp(
+      `\\b[Cc]ustomer\\s+account(?:\\s+[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,})?${trailingCustomerToken}\\b|\\b[Cc]ustomer\\s+[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}${trailingCustomerToken}\\b|\\b[Cc]ustomer\\s+(?!(?:data|identifiers?|records?|information|privacy|pii)\\b)[A-Za-z0-9][A-Za-z0-9_.:-]*${trailingCustomerToken}\\b`,
+      'g',
+    ),
   ];
   const segments = patterns.flatMap((pattern) => text.match(pattern) ?? []);
   return segments.flatMap((segment) => {
@@ -4076,10 +4090,13 @@ function extractCustomerSegments(text: string): string[] {
     if (!emailMatch) {
       return [segment];
     }
+    const leadingContext = segment.slice(0, emailMatch.index).trim();
     const trailingIdentifier = segment
       .slice(emailMatch.index + emailMatch[0].length)
       .trim();
-    return trailingIdentifier ? [trailingIdentifier] : [];
+    return [leadingContext, trailingIdentifier].filter(
+      (part): part is string => part.length > 0,
+    );
   });
 }
 
