@@ -14,7 +14,7 @@ describe('createAuditSink', () => {
     const logged: ObserverLogInput[] = [];
     const observer: ObserverAdapter = {
       async log(input) { logged.push(input); return { id: 1, hash: 'h' }; },
-      async logCost() {},
+      async logCost() { return { costUsd: 0, unknownModel: false }; },
       async cost() { return { totalPromptTokens: 0, totalCompletionTokens: 0, totalCostUsd: 0, byModel: [] }; },
       async trail() { return []; },
     };
@@ -28,6 +28,7 @@ describe('createAuditSink', () => {
     expect(JSON.parse(logged[0]!.metadata)).toEqual({
       tool: 'fbeast_memory_forget',
       ok: false,
+      __fbeastAuditTrailSource: 'central-dispatch',
       source: 'central-dispatch',
     });
   });
@@ -37,7 +38,7 @@ describe('createAuditSink', () => {
     const logged: ObserverLogInput[] = [];
     const observer: ObserverAdapter = {
       async log(input) { logged.push(input); return { id: 1, hash: 'h' }; },
-      async logCost() {},
+      async logCost() { return { costUsd: 0, unknownModel: false }; },
       async cost() { return { totalPromptTokens: 0, totalCompletionTokens: 0, totalCostUsd: 0, byModel: [] }; },
       async trail() { return []; },
     };
@@ -48,6 +49,7 @@ describe('createAuditSink', () => {
     expect(JSON.parse(logged[0]!.metadata)).toEqual({
       tool: 'fbeast_memory_forget',
       ok: false,
+      __fbeastAuditTrailSource: 'central-dispatch',
       source: 'central-dispatch',
       decision: 'denied',
       args: { key: 'prod-secret' },
@@ -60,7 +62,7 @@ describe('createAuditSink', () => {
     const logged: ObserverLogInput[] = [];
     const observer: ObserverAdapter = {
       async log(input) { logged.push(input); return { id: 1, hash: 'h' }; },
-      async logCost() {},
+      async logCost() { return { costUsd: 0, unknownModel: false }; },
       async cost() { return { totalPromptTokens: 0, totalCompletionTokens: 0, totalCostUsd: 0, byModel: [] }; },
       async trail() { return []; },
     };

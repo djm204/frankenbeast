@@ -106,6 +106,7 @@ describe('runHook', () => {
     expect(firstLog.event).toBe('tool_call');
     expect(firstLog.sessionId).toBe('session-1');
     expect(JSON.parse(firstLog.metadata)).toEqual({
+      __fbeastAuditTrailSource: 'fbeast-hook',
       __fbeastHookSource: 'fbeast-hook',
       toolName: 'fbeast_memory_query',
       args: {
