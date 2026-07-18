@@ -48,6 +48,8 @@ export interface FbeastMcpServer {
   /** Invoke a tool through the same validation gate the MCP CallTool path uses. */
   callTool(name: string, args: unknown): Promise<ToolResult>;
   start(): Promise<void>;
+  /** Close the transport and release server-owned resources. */
+  close(): Promise<void>;
 }
 
 export interface GovernanceDecision {
@@ -86,6 +88,8 @@ export interface AuditSink {
     /** Validated call arguments, so the trail records *what* was attempted. */
     args?: Record<string, unknown>;
   }): Promise<void> | void;
+  /** Release resources owned by the sink, when applicable. */
+  close?(): void;
 }
 
 export interface CreateMcpServerOptions {
@@ -101,6 +105,8 @@ export interface CreateMcpServerOptions {
    * giving the central path a server-side audit trail independent of hooks.
    */
   audit?: AuditSink;
+  /** Release resources owned by the caller when the MCP connection closes. */
+  onClose?: () => void;
   /** Default execution deadline for each tool call. Defaults to 30 seconds. */
   defaultToolTimeoutMs?: number;
 }
@@ -925,6 +931,23 @@ export function createMcpServer(
   validateToolDeadlineConfiguration(tools, options);
   const server = new Server({ name, version }, { capabilities: { tools: {} } });
   const toolMap = new Map(tools.map((t) => [t.name, t]));
+  let closed = false;
+  const closeResources = (): void => {
+    if (closed) return;
+    closed = true;
+    const errors: unknown[] = [];
+    for (const close of [options.onClose, options.audit?.close?.bind(options.audit)]) {
+      if (!close) continue;
+      try {
+        close();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw new AggregateError(errors, `Failed to close ${name} resources`);
+  };
+  server.onclose = closeResources;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: tools.map((t) => ({
@@ -946,6 +969,13 @@ export function createMcpServer(
     async start() {
       const transport = new StdioServerTransport();
       await server.connect(transport);
+    },
+    async close() {
+      try {
+        await server.close();
+      } finally {
+        closeResources();
+      }
     },
   };
 }

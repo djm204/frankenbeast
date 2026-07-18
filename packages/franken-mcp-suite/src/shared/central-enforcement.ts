@@ -62,6 +62,9 @@ export function createAuditSink(source: string | ObserverAdapter): AuditSink {
         sessionId: resolveSessionId(),
       });
     },
+    close() {
+      observer?.close?.();
+    },
   };
 }
 
