@@ -923,6 +923,22 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('redacts customer ids after generic labels with punctuation', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-customer-policy-colon-id',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['User prefers customer data: acme-123 to stay out of lessons'],
+    });
+
+    expect(JSON.stringify(report)).not.toContain('acme-123');
+    expect(report.candidates[0]?.privacyFilter).toEqual(
+      expect.objectContaining({
+        sensitive: true,
+        flags: expect.arrayContaining(['customer-data']),
+      }),
+    );
+  });
+
   it('attaches matching verification steps to a single pending lesson candidate', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-verification-evidence',
@@ -1373,6 +1389,22 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('admits validate-only reusable lessons', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-validate-only-procedure',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['Always validate API responses'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'procedure',
+        suggestedDestination: 'skill',
+        review: expect.objectContaining({ status: 'pending-review' }),
+      }),
+    );
+  });
+
   it('keeps simple conditional run recovery lessons reviewable', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-simple-conditional-run-recovery',
@@ -1698,10 +1730,11 @@ describe('extractPostTaskLessonCandidates', () => {
       toolFailures: [
         'Retry with gh run view failed',
         'fallback using gh run view timed out',
+        'When npm install failed, retry attempts failed',
       ],
     });
 
-    expect(report.candidates).toHaveLength(2);
+    expect(report.candidates).toHaveLength(3);
     for (const candidate of report.candidates) {
       expect(candidate).toEqual(
         expect.objectContaining({
@@ -1969,6 +2002,23 @@ describe('extractPostTaskLessonCandidates', () => {
       }),
     );
     expect(JSON.stringify(report)).not.toContain('feature/customer-fix');
+  });
+
+  it('hashes forced-discard task-state notes even when they contain reusable-signal words', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-redacted-validate-branch-note',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['pushed branch feature/validate-fix'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        text: expect.stringMatching(/^\[REDACTED_TASK_REFERENCE:/),
+        category: 'task-state',
+        suggestedDestination: 'discard',
+      }),
+    );
+    expect(JSON.stringify(report)).not.toContain('feature/validate-fix');
   });
 
   it('redacts rejected task-state verification evidence before attaching it', () => {

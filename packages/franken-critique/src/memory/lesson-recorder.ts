@@ -1087,7 +1087,7 @@ export function extractPostTaskLessonCandidates(
       };
     }
     if (
-      category === 'task-state' &&
+      publicDecision.category === 'task-state' &&
       publicDecision.action === 'reject'
     ) {
       sanitizedText = `[REDACTED_TASK_REFERENCE:${stableHash(normalizedText).slice(0, 12)}]`;
@@ -1398,6 +1398,9 @@ function hasExplicitPostTaskLessonSignal(text: string): boolean {
   if (hasReusableProcedureGuidance(text)) return true;
   if (isOneOffModalTaskReminder(text)) return false;
   if (isOneOffPostTaskProgress(text)) return false;
+  if (/\b(?:ran|verified|passed)\b.{0,80}\bvalidate\b.{0,80}\bfix\b/i.test(text)) {
+    return false;
+  }
   if (isOneOffShouldCorrection(text)) return false;
   if (isNegatedKeywordOnlyStatus(text)) return false;
   if (isRawUserPreferenceCorrection(text)) return true;
@@ -1417,10 +1420,10 @@ function hasExplicitPostTaskLessonSignal(text: string): boolean {
     return true;
   }
   return (
-    /\b(?:always|avoid|ensure|prefer|require|retry|redact|fallback|workaround)\b/i.test(
+    /\b(?:always|avoid|ensure|prefer|require|retry|validate|redact|fallback|workaround)\b/i.test(
       text,
     ) &&
-    /\b(?:when|if|before|after|use|run|check|verify|record|save|persist|redact|fallback|workaround|require|ensure|prefer|avoid)\b/i.test(
+    /\b(?:when|if|before|after|use|run|check|verify|validate|record|save|persist|redact|retry|fallback|workaround|require|ensure|prefer|avoid)\b/i.test(
       text,
     )
   );
@@ -1433,7 +1436,7 @@ function hasReusableToolFailureSignal(text: string): boolean {
   }
   if (/\bworkaround\s*:/i.test(text)) return hasActionableWorkaroundLabel(text);
   const hasInstructionalWorkaround =
-    /\b(?:when|if)\b.{0,160}\b(?:run|check|use|retry|fallback|workaround)\b|\b(?:run|check|use|retry|fallback|workaround)\b.{0,160}\b(?:when|if|after|before|instead|giving\s+up)\b/i.test(
+    /\b(?:when|if)\b.{0,160}\b(?:run|check|use|workaround)\b|\b(?:run|check|use|workaround)\b.{0,160}\b(?:when|if|after|before|instead|giving\s+up)\b/i.test(
       text,
     ) ||
     /(?:;|,)\s*(?:use|run|check|retry|fallback)\b/i.test(text) ||
@@ -1452,12 +1455,14 @@ function hasReusableToolFailureSignal(text: string): boolean {
 function isFailedRetryOrFallbackStatus(text: string): boolean {
   return /\b(?:retry|fallback)\s+(?:with|using|via|by)\b.{0,100}\b(?:failed|error|returned\s+\d{3}|timed\s+out|timeout|crashed)\b/i.test(
     text,
+  ) || /\b(?:when|if)\b.{0,100}\b(?:failed|error|timed\s+out|timeout|crashed)\b.{0,100}\b(?:retry|fallback)\b.{0,60}\b(?:failed|error|timed\s+out|timeout|crashed)\b/i.test(
+    text,
   );
 }
 
 function hasStatusRecoveryGuidance(text: string): boolean {
   return (
-    /(?:;|,)\s*(?:use|run|check|retry|fallback)\b/i.test(text) ||
+    /(?:;|,)\s*(?:use|run|check)\b/i.test(text) ||
     hasActionableWorkaroundLabel(text)
   );
 }
@@ -4082,7 +4087,7 @@ function isGenericCustomerPolicyText(text: string): boolean {
 }
 
 function hasConcreteCustomerReference(text: string): boolean {
-  return /\b(?:[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*|[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*|[a-z][A-Za-z0-9_.:-]*\s+(?:data|records?|information|identifiers?))|[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*|[Cc]ustomer\s+(?:account\s+)?(?!(?:data|identifiers?|records?|information|privacy|pii)\b)(?:[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|[A-Za-z0-9][A-Za-z0-9_.:-]*)|[Cc]ustomer\s+(?:data|identifiers?|records?|information|privacy|pii)\s+for\s+[A-Za-z0-9][A-Za-z0-9_.:-]*)\b/.test(
+  return /\b(?:[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*|[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*|[a-z][A-Za-z0-9_.:-]*\s+(?:data|records?|information|identifiers?))|[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*|[Cc]ustomer\s+(?:account\s+)?(?!(?:data|identifiers?|records?|information|privacy|pii)\b)(?:[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|[A-Za-z0-9][A-Za-z0-9_.:-]*)|[Cc]ustomer\s+(?:data|identifiers?|records?|information|privacy|pii)\s*(?:for|[:=-])\s*[A-Za-z0-9][A-Za-z0-9_.:-]*)\b/.test(
     text,
   );
 }
@@ -4107,7 +4112,10 @@ function extractCustomerSegments(text: string): string[] {
       `\\b[Cc]ustomer\\s+account(?:\\s+[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,})?${trailingCustomerToken}\\b|\\b[Cc]ustomer\\s+[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}${trailingCustomerToken}\\b|\\b[Cc]ustomer\\s+(?!(?:data|identifiers?|records?|information|privacy|pii)\\b)[A-Za-z0-9][A-Za-z0-9_.:-]*${trailingCustomerToken}\\b`,
       'g',
     ),
-    /\b[Cc]ustomer\s+(?:data|identifiers?|records?|information|privacy|pii)\s+for\s+([A-Za-z0-9][A-Za-z0-9_.:-]*)\b/g,
+    new RegExp(
+      `\\b[Cc]ustomer\\s+(?:data|identifiers?|records?|information|privacy|pii)\\s*(?:for|[:=-])\\s*[A-Za-z0-9][A-Za-z0-9_.:-]*${trailingCustomerToken}\\b`,
+      'g',
+    ),
   ];
   const segments = patterns.flatMap((pattern) =>
     Array.from(text.matchAll(pattern), (match) => match[1] ?? match[0]),
