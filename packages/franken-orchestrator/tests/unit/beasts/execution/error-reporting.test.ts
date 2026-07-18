@@ -10,6 +10,7 @@ import { ProcessBeastExecutor } from '../../../../src/beasts/execution/process-b
 import { martinLoopDefinition } from '../../../../src/beasts/definitions/martin-loop-definition.js';
 import type { ProcessCallbacks } from '../../../../src/beasts/execution/process-supervisor.js';
 import type { BeastExecutors } from '../../../../src/beasts/services/beast-dispatch-service.js';
+import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../../../../src/beasts/services/dispatch-failure-message.js';
 import type { BeastMetrics } from '../../../../src/beasts/telemetry/beast-metrics.js';
 
 const NONEXISTENT_PROCESS_PID = 2_147_483_647;
@@ -292,7 +293,7 @@ describe('Error Reporting to Dashboard', () => {
       const spawnFailedEvent = events.find((e) => e.type === 'run.spawn_failed');
       expect(spawnFailedEvent).toBeDefined();
       expect(spawnFailedEvent!.payload).toMatchObject({
-        error: 'spawn ENOENT',
+        error: SAFE_DISPATCH_FAILURE_MESSAGE,
         code: 'ENOENT',
       });
 
