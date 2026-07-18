@@ -4,6 +4,7 @@ import type { BeastResult, TaskOutcome } from '../types.js';
 import type { ILogger } from '../deps.js';
 import { commandFailureFromExecError } from '../errors/command-failure.js';
 import { completeWithCacheHint } from '../cache/cached-cli-llm-client.js';
+import { evaluatePolicy, type PolicyConfig } from '@franken/governor';
 import {
   checkGitHubTokenCapabilities,
   type GitHubLowRiskCapabilityPolicy,
@@ -43,6 +44,12 @@ export interface PrCreatorConfig {
     readonly required?: GitHubRequiredCapabilities;
     readonly lowRiskPolicy?: GitHubLowRiskCapabilityPolicy;
   } | undefined;
+  /**
+   * Policy for the `git-push` action. When omitted, the configured remote is
+   * whitelisted, so behaviour is unchanged; supply an explicit policy to
+   * restrict which remotes may be pushed to.
+   */
+  readonly pushPolicy?: PolicyConfig | undefined;
 }
 
 export interface PrCreateOptions {
@@ -135,6 +142,7 @@ export class PrCreator {
       disableBranding: config.disableBranding ?? false,
       commitConvention: config.commitConvention ?? 'conventional',
       githubCapabilityCheck: config.githubCapabilityCheck,
+      pushPolicy: config.pushPolicy,
     };
     this.exec = exec;
     this.llm = llm;
@@ -373,6 +381,18 @@ export class PrCreator {
   }
 
   private pushBranch(branch: string, logger?: ILogger): boolean {
+    // Policy-as-code gate: pushes to remotes outside the policy whitelist are
+    // refused. Defaults to whitelisting the configured remote, so behaviour only
+    // changes when an explicit (stricter) pushPolicy is configured.
+    const decision = evaluatePolicy(
+      'git-push',
+      this.config.pushPolicy ?? { allowedGitRemotes: [this.config.remote] },
+      { remote: this.config.remote },
+    );
+    if (!decision.allow) {
+      logger?.error('PrCreator: git push blocked by policy', { reason: decision.reason });
+      return false;
+    }
     // Push a fully-qualified refspec so a branch literally named e.g. `+foo`
     // is published verbatim rather than parsed as a `+`-prefixed (force) refspec.
     const refspec = `refs/heads/${branch}:refs/heads/${branch}`;

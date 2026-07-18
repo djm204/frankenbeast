@@ -99,6 +99,38 @@ describe('PrCreator', () => {
     expect(logger.warn).toHaveBeenCalled();
   });
 
+  it('blocks push when pushPolicy excludes the configured remote', async () => {
+    const exec = mockExec();
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin', pushPolicy: { allowedGitRemotes: ['upstream'] } },
+      exec,
+    );
+    const logger = makeLogger();
+
+    const result = await creator.create(baseResult, logger);
+
+    expect(result).toBeNull();
+    const pushed = exec.mock.calls.some(c => c[0] === 'git' && (c[1] as string[]).includes('push'));
+    expect(pushed).toBe(false);
+    expect(logger.error).toHaveBeenCalledWith(
+      'PrCreator: git push blocked by policy',
+      expect.objectContaining({ reason: expect.stringContaining('not allowed') }),
+    );
+  });
+
+  it('allows push to a configured non-origin remote when no pushPolicy is set', async () => {
+    const exec = mockExec();
+    const creator = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'upstream' }, exec);
+    const logger = makeLogger();
+
+    await creator.create(baseResult, logger);
+
+    const pushCall = exec.mock.calls.find(c => c[0] === 'git' && (c[1] as string[]).includes('push'));
+    expect(pushCall?.[1]).toEqual([
+      'push', 'upstream', 'refs/heads/feature/branch:refs/heads/feature/branch',
+    ]);
+  });
+
   it('pushes branch and creates PR with descriptive body', async () => {
     const exec = mockExec();
     const creator = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'origin' }, exec);
