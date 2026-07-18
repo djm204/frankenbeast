@@ -11,7 +11,7 @@
   ],
   "roleMappings": [
     {
-      "roleId": "coordinator-shard",
+      "roleId": "pm-shard",
       "roleName": "Coordinator shard / orchestrator",
       "whenToUse": "Creates one-issue worker cards, prevents duplicate ownership, and routes cross-package or ambiguous work before implementation begins.",
       "owns": [
@@ -69,7 +69,7 @@
       "verification": ["npm run test:root -- tests/docs-issue-1766.test.ts"]
     },
     {
-      "roleId": "repair-recovery",
+      "roleId": "doctor-recovery",
       "roleName": "Repair / recovery worker",
       "whenToUse": "Diagnoses blocked, crashed, stale, or churned cards and restores the existing scoped owner path without duplicating work.",
       "owns": [

@@ -42,7 +42,8 @@ Out of scope:
 | LLM/model provider | Produces natural-language plans and tool-call intents from mixed trusted/untrusted context. | Untrusted for authority; output must not bypass code gates. |
 | Retrieved-content author | Controls files, web pages, issue/PR comments, logs, and tool output quoted into prompts. | Untrusted data source. |
 | Tool backend / subprocess | Executes shell, filesystem, network, browser, MCP, or GitHub operations. | Trusted only for the specific validated operation. |
-| Issue worker | Runs with delegated task context and may coordinate children or approvals. | Same trust level as agent runtime but narrower task scope. |
+| Coordinator or repair owner | Runs with delegated task context and may coordinate children, approvals, or recovery actions. | Same trust level as agent runtime but bounded by coordination or recovery scope. |
+| Issue worker | Runs one scoped issue/branch/PR lifecycle and records exact blockers for coordinators or reviewers. | Same trust level as agent runtime but narrower task scope; does not own child coordination or approval decisions. |
 | Malicious local project | Supplies repo files, scripts, package hooks, config, docs, and generated tool metadata. | Untrusted until validated; can attempt supply-chain and prompt-injection attacks. |
 
 ## Trust boundaries

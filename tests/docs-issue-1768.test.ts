@@ -42,7 +42,11 @@ describe('issue #1768 agent coordination runtime glossary', () => {
       '| `worker_ids` |',
       '| Active PR guard |',
       '| Review gate |',
+      '| Usage-limited |',
+      '| Stale-head clean |',
+      '| Unresolved review threads |',
       '| Approval runner |',
+      '| Approval token state |',
       '| Repair card |',
       '| Shared lessons file |',
     ]) {

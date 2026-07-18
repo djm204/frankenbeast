@@ -46,9 +46,9 @@ describe('issue #1766 agent role responsibility map', () => {
     expect(roleMap.schemaVersion).toBe(1);
     expect(roleMap.ownershipManifest).toBe(ownershipManifestPath);
     expect(roleMap.roleMappings.map((role) => role.roleId)).toEqual([
-      'coordinator-shard',
+      'pm-shard',
       'issue-worker',
-      'repair-recovery',
+      'doctor-recovery',
       'reviewer',
       'docs-onboarding-worker',
     ]);
@@ -99,6 +99,7 @@ describe('issue #1766 agent role responsibility map', () => {
       'Do not let the first matching path hide additional owners.',
       'Do not let the agent role override repository ownership.',
       'Do not respawn a worker or create a duplicate branch until live Kanban, GitHub, and worktree evidence proves there is no active owner.',
+      'Keep role ids stable',
     ]) {
       expect(guide).toContain(requiredText);
     }

@@ -45,4 +45,4 @@ The handoff should include all required fields from the role manifest: `agentRol
 
 ## Maintaining the role map
 
-Update `docs/onboarding/agent-role-responsibility-map.manifest.json`, this guide, and the matching docs verifier whenever Frankenbeast adds a durable agent role or changes the repository ownership manifest. Keep role ids stable, lowercase, and LLM-friendly; keep `mustNotOwn` explicit so failure modes are actionable rather than silently ambiguous.
+Update `docs/onboarding/agent-role-responsibility-map.manifest.json`, this guide, and the matching docs verifier whenever Frankenbeast adds a durable agent role or changes the repository ownership manifest. Keep role ids stable, lowercase, and LLM-friendly; durable ids can preserve older internal names for compatibility even when display names and operator-facing prose change. Keep `mustNotOwn` explicit so failure modes are actionable rather than silently ambiguous.
