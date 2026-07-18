@@ -44,6 +44,15 @@ export const defaultPolicy: PolicyConfig = {
  * `allow` is false they should abort the operation and surface the reason to the
  * user (or to the governor approval flow).
  */
+/**
+ * Masks the userinfo (credentials) portion of a URL-style remote so reasons
+ * are safe to surface in logs and approval UIs. Greedy through the last `@`
+ * before the host's first `/`, so credentials containing `@` are fully hidden.
+ */
+function redactRemote(remote: unknown): string {
+  return String(remote).replace(/\/\/[^/]*@/, '//***@');
+}
+
 export function evaluate(action: Action, config: PolicyConfig = defaultPolicy, details?: unknown): Decision {
   switch (action) {
     case 'git-push': {
@@ -53,9 +62,11 @@ export function evaluate(action: Action, config: PolicyConfig = defaultPolicy, d
       // it is a real array of exact remote names.
       const allowed = Array.isArray(config.allowedGitRemotes)
         && config.allowedGitRemotes.includes(remote as string);
+      // Reasons are meant to be surfaced verbatim; never echo raw remotes,
+      // which may be credential-bearing URLs.
       return allowed
-        ? { allow: true, reason: `Remote "${remote}" is whitelisted for git push` }
-        : { allow: false, reason: `Remote "${remote}" is not allowed by policy` };
+        ? { allow: true, reason: `Remote "${redactRemote(remote)}" is whitelisted for git push` }
+        : { allow: false, reason: `Remote "${redactRemote(remote)}" is not allowed by policy` };
     }
     case 'cron-modify':
     case 'memory-edit':
