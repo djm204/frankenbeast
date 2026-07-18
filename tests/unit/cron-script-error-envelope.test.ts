@@ -275,6 +275,28 @@ describe('cron script error envelope runner', () => {
     expect(envelope.message).toContain('Refusing to run unattended cron command');
   });
 
+  it('refuses shell-wrapped dangerous skip-permissions cron commands without explicit opt-in', () => {
+    const result = runCronScript([
+      '--name',
+      'unsafe-shell-cron',
+      '--',
+      process.execPath,
+      '-e',
+      "process.exit(process.argv.includes('--dangerously-skip-permissions') ? 0 : 9)",
+      '-- --dangerously-skip-permissions',
+    ]);
+
+    expect(result.status).toBe(64);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope).toMatchObject({
+      script: 'unsafe-shell-cron',
+      exitCode: 64,
+      failureKind: 'security',
+      permissionMode: 'dangerous-skip-permissions',
+    });
+    expect(envelope.command).toContain('-- --dangerously-skip-permissions');
+  });
+
   it('runs dangerous skip-permissions cron commands only with auditable opt-in', () => {
     const result = runCronScript([
       '--name',

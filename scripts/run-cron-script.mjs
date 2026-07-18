@@ -64,7 +64,7 @@ function parseArgs(argv) {
 }
 
 function commandUsesDangerousSkipPermissions(command) {
-  return command.some((part) => part === '--dangerously-skip-permissions');
+  return command.some((part) => part.includes('--dangerously-skip-permissions'));
 }
 
 function appendTail(current, chunk, limit = STDERR_TAIL_LIMIT) {

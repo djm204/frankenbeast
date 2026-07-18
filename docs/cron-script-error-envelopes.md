@@ -32,7 +32,7 @@ Fields operators should key on:
 
 - `type`: stable discriminator for log parsers and liveness monitors.
 - `script`: cron job name supplied by `--name`; keep it stable across schedule changes.
-- `failureKind`: `usage`, `spawn`, `exit`, `signal`, or `internal`.
+- `failureKind`: `usage`, `security`, `spawn`, `exit`, `signal`, or `internal`.
 - `exitCode` and `signal`: process outcome suitable for alert routing.
 - `permissionMode`: `least-privilege` by default, or `dangerous-skip-permissions` when the cron command intentionally includes `--dangerously-skip-permissions` with the matching wrapper opt-in.
 - `stderrTail`: capped to the last 4096 characters so alerts stay useful without dumping full logs.
