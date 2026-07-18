@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
@@ -3029,6 +3029,131 @@ describe('SqliteBrain', () => {
         source: 'chat:turn-9',
         evidenceId: 'msg-9',
       });
+    });
+
+    it('redacts quarantined secret values on reject and suppressed duplicates', () => {
+      const secret = 'fake-secret-for-redaction-test';
+      const proposal = {
+        targetStore: 'working' as const,
+        key: 'OPENAI_API_KEY',
+        value: secret,
+        source: 'fbeast_memory_store:quarantine',
+        evidenceId: 'quarantine:OPENAI_API_KEY',
+        confidence: 1,
+        reason: 'Sensitive memory quarantined for operator review (value-shape-indicates-secret).',
+      };
+      const candidate = brain.memoryReview.propose(proposal);
+
+      const rejected = brain.memoryReview.reject(candidate.id, {
+        reviewer: 'operator',
+        note: 'Discard leaked secret.',
+      });
+
+      expect(rejected).toMatchObject({
+        status: 'rejected',
+        value: '[never-store-redacted]',
+        source: '[never-store-redacted]',
+        reason: '[never-store-redacted]',
+      });
+      expect(rejected.evidenceId).toBeUndefined();
+      expect(brain.memoryReview.list('rejected')).toEqual([
+        expect.objectContaining({
+          id: candidate.id,
+          value: '[never-store-redacted]',
+          source: '[never-store-redacted]',
+        }),
+      ]);
+      const suppressed = brain.memoryReview.propose(proposal);
+      expect(suppressed).toMatchObject({
+        status: 'suppressed',
+        suppressionReason: 'rejected',
+        value: '[never-store-redacted]',
+        source: '[never-store-redacted]',
+        reason: '[never-store-redacted]',
+      });
+      expect(suppressed.evidenceId).toBeUndefined();
+
+      const db = (brain as unknown as { db: Database.Database }).db;
+      const persisted = [
+        ...db.prepare(`SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_candidates`).all(),
+        ...db.prepare(`SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_suppressions`).all(),
+      ];
+      expect(JSON.stringify(persisted)).not.toContain(secret);
+      for (const row of persisted as Array<{ value: string; source: string; evidence_id: string | null; reason: string; reviewer: string | null; note: string | null }>) {
+        expect(row.value).toBe(JSON.stringify('[never-store-redacted]'));
+        expect(row.source).toBe('[never-store-redacted]');
+        expect(row.evidence_id).toBeNull();
+        expect(row.reason).toBe('[never-store-redacted]');
+        expect(row.reviewer).toBeNull();
+        expect(row.note).toBeNull();
+      }
+    });
+
+    it('enables SQLite secure deletion before redacting rejected quarantined secrets', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-reject-redact-secure-delete-'));
+      const dbPath = join(dir, 'brain.db');
+      const secret = 'fake-secret-for-secure-delete-test';
+      const fileBrain = new SqliteBrain(dbPath);
+
+      try {
+        const candidate = fileBrain.memoryReview.propose({
+          targetStore: 'working',
+          key: 'OPENAI_API_KEY',
+          value: secret,
+          source: 'fbeast_memory_store:quarantine',
+          evidenceId: 'quarantine:OPENAI_API_KEY',
+          confidence: 1,
+          reason: 'Sensitive memory quarantined for operator review (value-shape-indicates-secret).',
+        });
+
+        fileBrain.memoryReview.reject(candidate.id, { reviewer: 'operator' });
+
+        const db = (fileBrain as unknown as { db: Database.Database }).db;
+        expect(db.pragma('secure_delete', { simple: true })).toBe(1);
+        const persisted = [
+          ...db.prepare(`SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_candidates`).all(),
+          ...db.prepare(`SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_suppressions`).all(),
+        ];
+        expect(JSON.stringify(persisted)).not.toContain(secret);
+      } finally {
+        fileBrain.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('purges rejected quarantined secrets from file-backed SQLite pages and WAL', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-reject-purge-pages-'));
+      const dbPath = join(dir, 'brain.db');
+      const secret = 'fake-secret-for-rejected-page-purge-test';
+      const fileBrain = new SqliteBrain(dbPath);
+
+      try {
+        const candidate = fileBrain.memoryReview.propose({
+          targetStore: 'working',
+          key: 'OPENAI_API_KEY',
+          value: secret,
+          source: 'fbeast_memory_store:quarantine',
+          evidenceId: 'quarantine:OPENAI_API_KEY',
+          confidence: 1,
+          reason: 'Sensitive memory quarantined for operator review (value-shape-indicates-secret).',
+        });
+
+        fileBrain.memoryReview.reject(candidate.id, { reviewer: 'operator' });
+        fileBrain.close();
+
+        for (const suffix of ['', '-wal', '-shm']) {
+          const path = `${dbPath}${suffix}`;
+          if (!existsSync(path)) continue;
+          expect(readFileSync(path).toString('utf8')).not.toContain(secret);
+        }
+      } finally {
+        try {
+          fileBrain.close();
+        } catch {
+          // Already closed by the assertion path.
+        }
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it('marks a candidate as never-store and suppresses future matching proposals', () => {

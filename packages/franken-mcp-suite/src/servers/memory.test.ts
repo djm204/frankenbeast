@@ -366,6 +366,75 @@ describe("Memory Server", () => {
     expect(result.content[0]!.text).not.toContain(sensitiveValue);
   });
 
+  it("quarantines authorization-header memory values for review without echoing them", async () => {
+    const sensitiveValue = ["Authorization: Basic ", "a".repeat(32)].join("");
+    const brain = createBrainStub({ store: vi.fn(), proposeMemory: vi.fn().mockResolvedValue({
+      id: "memcand_header",
+      targetStore: "working",
+      key: "request-headers",
+      value: sensitiveValue,
+      source: "fbeast_memory_store:quarantine",
+      evidenceId: "quarantine:request-headers",
+      confidence: 1,
+      reason: "Sensitive memory quarantined for operator review (value-shape-indicates-secret).",
+      status: "pending",
+      createdAt: "2026-07-17T00:00:00.000Z",
+      updatedAt: "2026-07-17T00:00:00.000Z",
+    }) });
+    const server = createMemoryServer({ brain });
+
+    const result = await server.callTool("fbeast_memory_store", {
+      key: "request-headers",
+      value: sensitiveValue,
+      type: "working",
+    });
+
+    expect(brain.store).not.toHaveBeenCalled();
+    expect(brain.proposeMemory).toHaveBeenCalledWith(expect.objectContaining({
+      key: "request-headers",
+      value: "<redacted>",
+      reason: expect.stringContaining("value-shape-indicates-secret"),
+    }));
+    expect(result.content[0]!.text).not.toContain(sensitiveValue);
+  });
+
+  it("quarantines lowercase, mixed-case, and non-standard authorization header values", async () => {
+    for (const sensitiveValue of [
+      ["authorization: Basic ", "b".repeat(24)].join(""),
+      ["authorization: ApiKey ", "d".repeat(24)].join(""),
+      ["pRoXy-AuThOrIzAtIoN: ApiKey ", "c".repeat(24)].join(""),
+    ]) {
+      const brain = createBrainStub({ store: vi.fn(), proposeMemory: vi.fn().mockResolvedValue({
+        id: "memcand_header_case",
+        targetStore: "working",
+        key: "request_headers",
+        value: "<redacted>",
+        source: "fbeast_memory_store:quarantine",
+        evidenceId: "quarantine:request_headers",
+        confidence: 1,
+        reason: "Sensitive memory quarantined for operator review (value-shape-indicates-secret).",
+        status: "pending",
+        createdAt: "2026-07-17T00:00:00.000Z",
+        updatedAt: "2026-07-17T00:00:00.000Z",
+      }) });
+      const server = createMemoryServer({ brain });
+
+      const result = await server.callTool("fbeast_memory_store", {
+        key: "request_headers",
+        value: sensitiveValue,
+        type: "working",
+      });
+
+      expect(brain.store).not.toHaveBeenCalled();
+      expect(brain.proposeMemory).toHaveBeenCalledWith(expect.objectContaining({
+        key: "request_headers",
+        value: "<redacted>",
+        reason: expect.stringContaining("value-shape-indicates-secret"),
+      }));
+      expect(result.content[0]!.text).not.toContain(sensitiveValue);
+    }
+  });
+
   it("reports suppressed sensitive memory quarantine candidates without a review action", async () => {
     const brain = createBrainStub({
       store: vi.fn(),
@@ -421,6 +490,56 @@ describe("Memory Server", () => {
       type: "working",
     });
     expect(brain.proposeMemory).not.toHaveBeenCalled();
+  });
+
+  it("keeps benign sk-prefixed words on the direct store path", async () => {
+    const brain = createBrainStub({ store: vi.fn().mockResolvedValue(undefined), proposeMemory: vi.fn() });
+    const server = createMemoryServer({ brain });
+
+    await server.callTool("fbeast_memory_store", {
+      key: "installer_notes",
+      value: "skill-installer and skeletonization notes are benign documentation.",
+      type: "working",
+    });
+
+    expect(brain.store).toHaveBeenCalledWith({
+      key: "installer_notes",
+      value: "skill-installer and skeletonization notes are benign documentation.",
+      type: "working",
+    });
+    expect(brain.proposeMemory).not.toHaveBeenCalled();
+  });
+
+  it("quarantines underscore-separated sk provider tokens", async () => {
+    const sensitiveValue = `sk_live_${"a".repeat(24)}`;
+    const brain = createBrainStub({ store: vi.fn(), proposeMemory: vi.fn().mockResolvedValue({
+      id: "memcand_sk_live",
+      targetStore: "working",
+      key: "provider_note",
+      value: sensitiveValue,
+      source: "fbeast_memory_store:quarantine",
+      evidenceId: "quarantine:provider_note",
+      confidence: 1,
+      reason: "Sensitive memory quarantined for operator review (value-shape-indicates-secret).",
+      status: "pending",
+      createdAt: "2026-07-17T00:00:00.000Z",
+      updatedAt: "2026-07-17T00:00:00.000Z",
+    }) });
+    const server = createMemoryServer({ brain });
+
+    const result = await server.callTool("fbeast_memory_store", {
+      key: "provider_note",
+      value: sensitiveValue,
+      type: "working",
+    });
+
+    expect(brain.store).not.toHaveBeenCalled();
+    expect(brain.proposeMemory).toHaveBeenCalledWith(expect.objectContaining({
+      key: "provider_note",
+      value: "<redacted>",
+      reason: expect.stringContaining("value-shape-indicates-secret"),
+    }));
+    expect(result.content[0]!.text).not.toContain(sensitiveValue);
   });
 
   it("rejects blank agent ids before storing private memory as shared", async () => {

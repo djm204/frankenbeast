@@ -3382,6 +3382,7 @@ export class SqliteMemoryReviewQueue {
   ): MemoryCandidate {
     const now = isoNow();
     let rejectedCandidate: MemoryCandidate | undefined;
+    let purgeRejectedSecretContent = false;
     const tx = this.db.transaction(() => {
       const candidate = this.requireCandidate(id, 'pending');
       this.assertDecisionOptionsNotDeletionGuarded(options);
@@ -3394,8 +3395,17 @@ export class SqliteMemoryReviewQueue {
           conflictGuard,
         );
       }
+      const rejectedSignature = this.rejectedSignature(candidate);
+      const redactRejected = this.shouldRedactRejectedCandidate(candidate);
+      if (redactRejected) {
+        enableSqliteSecureDelete(this.db, this.dbPath);
+      }
       this.insertSuppression(candidate, 'rejected', now, options);
       this.markDecision(id, 'rejected', now, options);
+      if (redactRejected && rejectedSignature) {
+        this.redactRejectedRows(rejectedSignature, now);
+        purgeRejectedSecretContent = true;
+      }
       rejectedCandidate = this.requireCandidate(id);
       this.audit?.({
         operation: 'review.reject',
@@ -3421,6 +3431,9 @@ export class SqliteMemoryReviewQueue {
         },
       });
       throw error;
+    }
+    if (purgeRejectedSecretContent) {
+      purgeDeletedSqliteContent(this.db, this.dbPath);
     }
     const result = rejectedCandidate ?? this.requireCandidate(id, 'rejected');
     return result;
@@ -4594,6 +4607,10 @@ export class SqliteMemoryReviewQueue {
     this.markMatchingPendingSuppressed(candidate, reason, createdAt, options);
   }
 
+  private shouldRedactRejectedCandidate(candidate: MemoryCandidateProposal): boolean {
+    return candidate.source === 'fbeast_memory_store:quarantine';
+  }
+
   private markMatchingPendingSuppressed(
     candidate: MemoryCandidate,
     suppressionReason: MemorySuppressionReason,
@@ -4639,6 +4656,43 @@ export class SqliteMemoryReviewQueue {
         this.encodeText(NEVER_STORE_REDACTED_VALUE),
         candidate.targetStore,
         candidate.key,
+      );
+  }
+
+  private redactRejectedRows(signature: string, redactedAt: string): void {
+    const rows = this.db
+      .prepare(`SELECT * FROM memory_review_candidates WHERE status IN ('rejected', 'suppressed')`)
+      .all() as MemoryCandidateRow[];
+    for (const row of rows) {
+      const candidate = this.rowToCandidate(row);
+      if (this.rejectedSignature(candidate, { createKey: false }) !== signature) {
+        continue;
+      }
+      this.db
+        .prepare(
+          `UPDATE memory_review_candidates
+           SET value = ?, source = ?, source_id = NULL, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL, updated_at = ?
+           WHERE id = ?`,
+        )
+        .run(
+          this.encodeValue(NEVER_STORE_REDACTED_VALUE),
+          this.encodeText(NEVER_STORE_REDACTED_VALUE),
+          this.encodeText(NEVER_STORE_REDACTED_VALUE),
+          redactedAt,
+          row.id,
+        );
+    }
+    this.db
+      .prepare(
+        `UPDATE memory_review_suppressions
+         SET value = ?, source = ?, source_id = NULL, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL
+         WHERE signature = ? AND suppression_reason = 'rejected'`,
+      )
+      .run(
+        this.encodeValue(NEVER_STORE_REDACTED_VALUE),
+        this.encodeText(NEVER_STORE_REDACTED_VALUE),
+        this.encodeText(NEVER_STORE_REDACTED_VALUE),
+        signature,
       );
   }
 
@@ -4713,11 +4767,33 @@ export class SqliteMemoryReviewQueue {
     suppressionReason: MemorySuppressionReason,
   ): MemoryCandidate {
     const now = isoNow();
-    const safeProposal = suppressionReason === 'never_store'
-      ? { ...proposal, value: NEVER_STORE_REDACTED_VALUE }
+    const shouldRedact = suppressionReason === 'never_store' ||
+      (suppressionReason === 'rejected' && this.shouldRedactRejectedCandidate(proposal));
+    const safeProposal: MemoryCandidateProposal = shouldRedact
+      ? {
+          targetStore: proposal.targetStore,
+          key: proposal.key,
+          value: NEVER_STORE_REDACTED_VALUE,
+          source: NEVER_STORE_REDACTED_VALUE,
+          ...(proposal.sourceType ? { sourceType: proposal.sourceType } : {}),
+          confidence: proposal.confidence,
+          reason: NEVER_STORE_REDACTED_VALUE,
+          ...(proposal.expiresAt ? { expiresAt: proposal.expiresAt } : {}),
+          ...(proposal.revalidateAt ? { revalidateAt: proposal.revalidateAt } : {}),
+        }
       : proposal;
     return {
-      ...safeProposal,
+      targetStore: safeProposal.targetStore,
+      key: safeProposal.key,
+      value: safeProposal.value,
+      source: safeProposal.source,
+      sourceType: normalizeMemorySourceType(safeProposal.sourceType, safeProposal.source),
+      ...(safeProposal.sourceId ? { sourceId: safeProposal.sourceId } : {}),
+      ...(safeProposal.evidenceId ? { evidenceId: safeProposal.evidenceId } : {}),
+      confidence: safeProposal.confidence,
+      reason: safeProposal.reason,
+      ...(safeProposal.expiresAt ? { expiresAt: safeProposal.expiresAt } : {}),
+      ...(safeProposal.revalidateAt ? { revalidateAt: safeProposal.revalidateAt } : {}),
       id: `memcand_suppressed_${createHash('sha256')
         .update(this.suppressionSignature(proposal, suppressionReason) ?? '')
         .digest('hex')
@@ -4857,12 +4933,6 @@ function normalizeMemorySourceType(
   if (normalized.startsWith('repo') || normalized.startsWith('system:') || normalized.includes('config')) return 'system';
   return 'unknown';
 }
-
-
-function optionalTextMatches(stored: string | undefined, incoming: string | undefined): boolean {
-  return stored === undefined || incoming === undefined || stored === incoming;
-}
-
 function validateOptionalIsoTimestamp(value: string | undefined, fieldName: string): void {
   if (value === undefined) return;
   if (typeof value !== 'string' || value.trim().length === 0 || !Number.isFinite(Date.parse(value))) {
@@ -6826,10 +6896,15 @@ function sqliteStringLiteral(value: string): string {
 }
 
 function purgeDeletedSqliteContent(db: Database.Database, dbPath: string): void {
+  enableSqliteSecureDelete(db, dbPath);
   if (dbPath === ':memory:') return;
-  db.pragma('secure_delete = ON');
   db.pragma('wal_checkpoint(TRUNCATE)');
   db.exec('VACUUM');
+}
+
+function enableSqliteSecureDelete(db: Database.Database, dbPath: string): void {
+  if (dbPath === ':memory:') return;
+  db.pragma('secure_delete = ON');
 }
 
 type NormalizedRightToForgetSelector = Omit<RightToForgetSelector, 'type'> & { type?: RightToForgetMemoryType };
