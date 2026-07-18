@@ -145,6 +145,39 @@ describe('OnePasswordStore', () => {
       expectNoArgContains(mock.calls, UPDATED_SLACK_BOT_TOKEN);
     });
 
+    it('migrates legacy backend-owned 1Password items after passkey metadata confirms no passkeys', async () => {
+      mock.responses.set('item get', {
+        stdout: JSON.stringify({
+          id: 'abc123',
+          title: 'frankenbeast/comms.slack.botTokenRef',
+          category: 'LOGIN',
+          passkeys: [],
+          fields: [
+            { id: 'password', type: 'CONCEALED', purpose: 'PASSWORD', label: 'password', value: 'old' },
+          ],
+        }),
+        stderr: '',
+        exitCode: 0,
+      });
+      mock.responses.set('item edit', { stdout: '{}', stderr: '', exitCode: 0 });
+
+      await store.store('comms.slack.botTokenRef', UPDATED_SLACK_BOT_TOKEN);
+
+      const editCall = mock.calls.find(c => c.args.includes('edit'));
+      expect(editCall).toBeDefined();
+      expect(JSON.parse(editCall!.stdin!)).toMatchObject({
+        id: 'abc123',
+        title: 'frankenbeast/comms.slack.botTokenRef',
+        category: 'LOGIN',
+        passkeys: [],
+        fields: [
+          { id: 'password', value: UPDATED_SLACK_BOT_TOKEN },
+          { id: 'frankenbeast-managed', value: 'secret-store-v1' },
+        ],
+      });
+      expectNoArgContains(mock.calls, UPDATED_SLACK_BOT_TOKEN);
+    });
+
     it('fails closed for existing items without explicit passkey metadata', async () => {
       mock.responses.set('item get', {
         stdout: JSON.stringify({

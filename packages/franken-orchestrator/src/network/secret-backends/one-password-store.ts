@@ -84,11 +84,30 @@ function itemTemplateForExistingSecret(stdout: string, fallbackTitle: string, va
     field.id === BACKEND_MARKER_ID
     && field.label === BACKEND_MARKER_ID
     && field.value === BACKEND_MARKER_VALUE);
-  if (!hasBackendMarker) {
-    throw new Error('1Password item already exists but is not marked as frankenbeast-managed; refusing to template-edit because passkeys or unsupported item data cannot be reliably detected. Delete and recreate the item to rotate this secret.');
+  const passwordFields = item.fields.filter((field) =>
+    field.id === 'password'
+    || field.purpose === 'PASSWORD'
+    || field.label === 'password');
+  const legacyBackendOwnedItem = !hasBackendMarker
+    && item.title === fallbackTitle
+    && item.category === 'LOGIN'
+    && passwordFields.length === 1;
+  if (!hasBackendMarker && !legacyBackendOwnedItem) {
+    throw new Error('1Password item already exists but is not marked as frankenbeast-managed; refusing to template-edit because unsupported item data cannot be reliably attributed to this backend. Delete and recreate the item to rotate this secret.');
   }
+  const migratedFields = hasBackendMarker
+    ? item.fields
+    : [
+        ...item.fields,
+        {
+          id: BACKEND_MARKER_ID,
+          type: 'STRING',
+          label: BACKEND_MARKER_ID,
+          value: BACKEND_MARKER_VALUE,
+        },
+      ];
 
-  const passwordFieldIndex = item.fields.findIndex((field) =>
+  const passwordFieldIndex = migratedFields.findIndex((field) =>
     field.id === 'password'
     || field.purpose === 'PASSWORD'
     || field.label === 'password');
@@ -100,7 +119,7 @@ function itemTemplateForExistingSecret(stdout: string, fallbackTitle: string, va
     ...item,
     title: item.title ?? fallbackTitle,
     category: item.category ?? 'LOGIN',
-    fields: item.fields.map((field, index) => (
+    fields: migratedFields.map((field, index) => (
       index === passwordFieldIndex
         ? { ...field, value }
         : field
