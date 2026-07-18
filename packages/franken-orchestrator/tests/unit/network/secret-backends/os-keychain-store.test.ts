@@ -130,15 +130,10 @@ describe('OsKeychainStore', () => {
       expect(detection.available).toBe(true);
     });
 
-    it('stores via security stdin without exposing the value in argv', async () => {
-      mock.responses.set('add-generic-password', { stdout: '', stderr: '', exitCode: 0 });
-      await store.store('key', TEST_SLACK_BOT_TOKEN);
-      const addCall = mock.calls.find(c => c.args.includes('add-generic-password'));
-      expect(addCall).toBeDefined();
-      expect(addCall!.args).toContain('-U');
-      expect(addCall?.stdin).toBe(`${TEST_SLACK_BOT_TOKEN}\n`);
-      expect(addCall!.args).not.toContain('-w');
+    it('fails closed instead of exposing macOS Keychain values in argv', async () => {
+      await expect(store.store('key', TEST_SLACK_BOT_TOKEN)).rejects.toThrow('macOS Keychain writes are disabled');
       expectNoArgContains(mock.calls, TEST_SLACK_BOT_TOKEN);
+      expect(mock.calls.some(c => c.args.includes('add-generic-password'))).toBe(false);
     });
 
     it('resolves via security find-generic-password -w', async () => {
@@ -163,15 +158,10 @@ describe('OsKeychainStore', () => {
       expect(detection.available).toBe(true);
     });
 
-    it('stores via PowerShell stdin without exposing the value in argv', async () => {
-      mock.responses.set('New-StoredCredential', { stdout: '', stderr: '', exitCode: 0 });
-      await store.store('key', TEST_SLACK_BOT_TOKEN);
-      const addCall = mock.calls.find(c => c.command === 'powershell' && c.args.some(a => a.includes('New-StoredCredential')));
-      expect(addCall).toBeDefined();
-      expect(addCall?.stdin).toBe(TEST_SLACK_BOT_TOKEN);
-      expect(addCall!.args.join(' ')).toContain("-Target 'frankenbeast/key'");
-      expect(addCall!.args.join(' ')).toContain('-Password $password');
+    it('fails closed instead of exposing cmdkey passwords in argv', async () => {
+      await expect(store.store('key', TEST_SLACK_BOT_TOKEN)).rejects.toThrow('Windows Credential Manager writes are disabled');
       expectNoArgContains(mock.calls, TEST_SLACK_BOT_TOKEN);
+      expect(mock.calls.some(c => c.command === 'cmdkey' && c.args.some(arg => arg.startsWith('/pass:')))).toBe(false);
     });
 
     it('escapes apostrophes in PowerShell credential targets when resolving', async () => {

@@ -62,7 +62,7 @@ describe('OnePasswordStore', () => {
   });
 
   describe('store and resolve', () => {
-    it('creates new item with the password supplied through stdin', async () => {
+    it('creates new item from a JSON template supplied through stdin', async () => {
       mock.responses.set('item get', { stdout: '', stderr: 'not found', exitCode: 1 });
       mock.responses.set('item create', { stdout: '{}', stderr: '', exitCode: 0 });
 
@@ -74,18 +74,37 @@ describe('OnePasswordStore', () => {
         args: [
           'item',
           'create',
-          '--category=Login',
-          '--title=frankenbeast/comms.slack.botTokenRef',
           '--vault=frankenbeast',
-          'password=-',
+          '-',
         ],
-        stdin: TEST_SLACK_BOT_TOKEN,
+      });
+      expect(JSON.parse(createCall!.stdin!)).toMatchObject({
+        title: 'frankenbeast/comms.slack.botTokenRef',
+        category: 'LOGIN',
+        fields: [
+          {
+            id: 'password',
+            type: 'CONCEALED',
+            purpose: 'PASSWORD',
+            label: 'password',
+            value: TEST_SLACK_BOT_TOKEN,
+          },
+        ],
       });
       expectNoArgContains(mock.calls, TEST_SLACK_BOT_TOKEN);
     });
 
-    it('edits existing item with the password supplied through stdin', async () => {
-      mock.responses.set('item get', { stdout: '{"id":"abc123"}', stderr: '', exitCode: 0 });
+    it('edits existing item from a JSON template supplied through stdin', async () => {
+      mock.responses.set('item get', {
+        stdout: JSON.stringify({
+          id: 'abc123',
+          title: 'frankenbeast/comms.slack.botTokenRef',
+          category: 'LOGIN',
+          fields: [{ id: 'password', type: 'CONCEALED', purpose: 'PASSWORD', label: 'password', value: 'old' }],
+        }),
+        stderr: '',
+        exitCode: 0,
+      });
       mock.responses.set('item edit', { stdout: '{}', stderr: '', exitCode: 0 });
 
       await store.store('comms.slack.botTokenRef', UPDATED_SLACK_BOT_TOKEN);
@@ -98,9 +117,12 @@ describe('OnePasswordStore', () => {
           'edit',
           'frankenbeast/comms.slack.botTokenRef',
           '--vault=frankenbeast',
-          'password=-',
+          '-',
         ],
-        stdin: UPDATED_SLACK_BOT_TOKEN,
+      });
+      expect(JSON.parse(editCall!.stdin!)).toMatchObject({
+        id: 'abc123',
+        fields: [{ value: UPDATED_SLACK_BOT_TOKEN }],
       });
       expectNoArgContains(mock.calls, UPDATED_SLACK_BOT_TOKEN);
     });
@@ -129,6 +151,11 @@ describe('OnePasswordStore', () => {
     it('uses the same raw item title for URL-unsafe keys across store and resolve', async () => {
       const key = 'comms/slack@workspace.botTokenRef';
       const title = 'frankenbeast/comms/slack@workspace.botTokenRef';
+      mock.responses.set('item get', { stdout: '', stderr: 'not found', exitCode: 1 });
+      mock.responses.set('item create', { stdout: '{}', stderr: '', exitCode: 0 });
+
+      await store.store(key, TEST_SLACK_BOT_TOKEN);
+      mock.responses.delete('item get');
       mock.responses.set('--format=json', {
         stdout: JSON.stringify({ id: 'unsafe-item-id' }),
         stderr: '',
@@ -139,29 +166,14 @@ describe('OnePasswordStore', () => {
         stderr: '',
         exitCode: 0,
       });
-      mock.responses.set('item get', { stdout: '', stderr: 'not found', exitCode: 1 });
-      mock.responses.set('item create', { stdout: '{}', stderr: '', exitCode: 0 });
-
-      await store.store(key, TEST_SLACK_BOT_TOKEN);
       const value = await store.resolve(key);
 
       expect(value).toBe(RESOLVED_SLACK_BOT_TOKEN);
       expect(mock.calls).toContainEqual({
         command: 'op',
-        args: ['item', 'get', title, '--vault=frankenbeast'],
+        args: ['item', 'get', title, '--vault=frankenbeast', '--format=json'],
       });
-      expect(mock.calls).toContainEqual({
-        command: 'op',
-        args: [
-          'item',
-          'create',
-          '--category=Login',
-          `--title=${title}`,
-          '--vault=frankenbeast',
-          'password=-',
-        ],
-        stdin: TEST_SLACK_BOT_TOKEN,
-      });
+      expect(mock.calls.some(c => c.command === 'op' && c.args.join('\0') === ['item', 'create', '--vault=frankenbeast', '-'].join('\0'))).toBe(true);
       expect(mock.calls).toContainEqual({
         command: 'op',
         args: [
@@ -181,6 +193,11 @@ describe('OnePasswordStore', () => {
     it('resolves keys with spaces and URL-reserved symbols through the raw stored title', async () => {
       const key = 'providers.openai/workspace token?region=us east&scope=chat';
       const title = 'frankenbeast/providers.openai/workspace token?region=us east&scope=chat';
+      mock.responses.set('item get', { stdout: '', stderr: 'not found', exitCode: 1 });
+      mock.responses.set('item create', { stdout: '{}', stderr: '', exitCode: 0 });
+
+      await store.store(key, TEST_SLACK_BOT_TOKEN);
+      mock.responses.delete('item get');
       mock.responses.set('--format=json', {
         stdout: JSON.stringify({ id: 'reserved-symbol-item-id' }),
         stderr: '',
@@ -191,29 +208,14 @@ describe('OnePasswordStore', () => {
         stderr: '',
         exitCode: 0,
       });
-      mock.responses.set('item get', { stdout: '', stderr: 'not found', exitCode: 1 });
-      mock.responses.set('item create', { stdout: '{}', stderr: '', exitCode: 0 });
-
-      await store.store(key, TEST_SLACK_BOT_TOKEN);
       const value = await store.resolve(key);
 
       expect(value).toBe(RESOLVED_SLACK_BOT_TOKEN);
       expect(mock.calls).toContainEqual({
         command: 'op',
-        args: ['item', 'get', title, '--vault=frankenbeast'],
+        args: ['item', 'get', title, '--vault=frankenbeast', '--format=json'],
       });
-      expect(mock.calls).toContainEqual({
-        command: 'op',
-        args: [
-          'item',
-          'create',
-          '--category=Login',
-          `--title=${title}`,
-          '--vault=frankenbeast',
-          'password=-',
-        ],
-        stdin: TEST_SLACK_BOT_TOKEN,
-      });
+      expect(mock.calls.some(c => c.command === 'op' && c.args.join('\0') === ['item', 'create', '--vault=frankenbeast', '-'].join('\0'))).toBe(true);
       expect(mock.calls).toContainEqual({
         command: 'op',
         args: [

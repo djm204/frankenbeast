@@ -7,6 +7,19 @@ type StdinRunner = (command: string, args: string[], stdin: string) => Promise<C
 const VAULT = 'frankenbeast';
 const TITLE_PREFIX = 'frankenbeast/';
 
+interface OnePasswordItemTemplate {
+  id?: string;
+  title?: string;
+  category?: string;
+  fields?: Array<{
+    id?: string;
+    type?: string;
+    purpose?: string;
+    label?: string;
+    value?: string;
+  }>;
+}
+
 function titleForKey(key: string): string {
   return `${TITLE_PREFIX}${key}`;
 }
@@ -15,6 +28,43 @@ function itemIdFromJson(stdout: string): string | undefined {
   try {
     const item = JSON.parse(stdout) as { id?: unknown };
     return typeof item.id === 'string' && item.id.length > 0 ? item.id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function itemTemplateForSecret(title: string, value: string, existing?: OnePasswordItemTemplate): OnePasswordItemTemplate {
+  const fields = [...(existing?.fields ?? [])];
+  const passwordField = fields.find(
+    field => field.id === 'password' || field.purpose === 'PASSWORD' || field.label === 'password',
+  );
+
+  if (passwordField) {
+    passwordField.value = value;
+    passwordField.type = passwordField.type ?? 'CONCEALED';
+    passwordField.purpose = passwordField.purpose ?? 'PASSWORD';
+  } else {
+    fields.push({
+      id: 'password',
+      type: 'CONCEALED',
+      purpose: 'PASSWORD',
+      label: 'password',
+      value,
+    });
+  }
+
+  return {
+    ...existing,
+    title: existing?.title ?? title,
+    category: existing?.category ?? 'LOGIN',
+    fields,
+  };
+}
+
+function parseItemTemplate(stdout: string): OnePasswordItemTemplate | undefined {
+  try {
+    const parsed = JSON.parse(stdout) as OnePasswordItemTemplate;
+    return parsed && typeof parsed === 'object' ? parsed : undefined;
   } catch {
     return undefined;
   }
@@ -47,27 +97,28 @@ export class OnePasswordStore implements ISecretStore {
     }
 
     const title = titleForKey(key);
-    const getResult = await this.runner('op', ['item', 'get', title, `--vault=${VAULT}`]);
+    const getResult = await this.runner('op', ['item', 'get', title, `--vault=${VAULT}`, '--format=json']);
 
     if (getResult.exitCode === 0) {
-      // Item exists — edit it. `password=-` makes op read the concealed field from stdin.
+      // Item exists — edit it by piping a JSON template so sensitive fields never appear in argv.
+      const existing = parseItemTemplate(getResult.stdout);
+      const template = itemTemplateForSecret(title, value, existing);
       await this.stdinRunner('op', [
         'item',
         'edit',
         title,
         `--vault=${VAULT}`,
-        'password=-',
-      ], value);
+        '-',
+      ], JSON.stringify(template));
     } else {
-      // Item does not exist — create it. `password=-` makes op read the concealed field from stdin.
+      // Item does not exist — create it from a piped JSON template instead of argv assignments.
+      const template = itemTemplateForSecret(title, value);
       await this.stdinRunner('op', [
         'item',
         'create',
-        '--category=Login',
-        `--title=${title}`,
         `--vault=${VAULT}`,
-        'password=-',
-      ], value);
+        '-',
+      ], JSON.stringify(template));
     }
   }
 
@@ -84,12 +135,10 @@ export class OnePasswordStore implements ISecretStore {
     if (itemResult.exitCode !== 0) {
       return undefined;
     }
-
     const itemId = itemIdFromJson(itemResult.stdout);
     if (!itemId) {
       return undefined;
     }
-
     const result = await this.runner('op', ['read', `op://${VAULT}/${itemId}/password`]);
     if (result.exitCode !== 0) {
       return undefined;

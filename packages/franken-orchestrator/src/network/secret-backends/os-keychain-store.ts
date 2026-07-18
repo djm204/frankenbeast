@@ -228,13 +228,13 @@ export class OsKeychainStore implements ISecretStore {
   }
 
   private async storeDarwinRaw(key: string, value: string): Promise<void> {
-    // Omit `-w <password>` so the secret is supplied on stdin instead of argv.
-    await this.requireStdinRunner('security')('security', [
-      'add-generic-password',
-      '-U',
-      '-s', SERVICE,
-      '-a', key,
-    ], `${value}\n`);
+    void key;
+    void value;
+    // The macOS `security add-generic-password` CLI only documents `-w <password>`
+    // (or prompting) for writes. Supplying `-w <password>` exposes the secret in
+    // argv, while noninteractive prompting is not a reliable stdin API. Fail
+    // closed rather than silently writing through an argv-exposing path.
+    throw new Error('macOS Keychain writes are disabled because security add-generic-password requires secret material in process arguments or an interactive prompt.');
   }
 
   private async resolveDarwin(key: string): Promise<string | undefined> {
@@ -270,7 +270,7 @@ export class OsKeychainStore implements ISecretStore {
     }
   }
 
-  // ── Windows (PowerShell / Credential Manager) ───────────────────────────────
+  // ── Windows (cmdkey / Credential Manager) ───────────────────────────────────
 
   private async detectWin32(): Promise<SecretStoreDetection> {
     const result = await this.runner('cmdkey', ['/list']);
@@ -285,14 +285,13 @@ export class OsKeychainStore implements ISecretStore {
   }
 
   private async storeWin32(key: string, value: string): Promise<void> {
-    const target = `${SERVICE}/${key}`;
-    const quotedTarget = quotePowerShellSingleQuotedString(target);
-    const quotedUser = quotePowerShellSingleQuotedString(SERVICE);
-    await this.requireStdinRunner('powershell')('powershell', [
-      '-NoProfile',
-      '-Command',
-      `$password = [Console]::In.ReadToEnd(); New-StoredCredential -Target ${quotedTarget} -UserName ${quotedUser} -Password $password -Persist LocalMachine | Out-Null`,
-    ], value);
+    void key;
+    void value;
+    // The documented built-in backend is `cmdkey`, whose `/pass:<password>` write
+    // path exposes the secret in argv. Do not switch to an unverified external
+    // PowerShell module here; fail closed unless a safe built-in write path is
+    // added later.
+    throw new Error('Windows Credential Manager writes are disabled because cmdkey requires secret material in process arguments.');
   }
 
   private async resolveWin32(key: string): Promise<string | undefined> {
