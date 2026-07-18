@@ -242,6 +242,8 @@ const MEMORY_EXPORT_SAFE_READ_SCOPES = new Set(['all', 'shared', 'agent']);
 const MEMORY_EXPORT_SAFE_REDACTIONS = new Set(['safe', 'none']);
 const MEMORY_RETENTION_REPORT_TOOL = 'fbeast_memory_retention_report';
 const MEMORY_RETENTION_REPORT_SAFE_AUDIT_KEYS = new Set(['readScope', 'now', 'expiryHorizonMs', 'maxEntries']);
+const MEMORY_ACCESS_AUDIT_REPORT_TOOL = 'fbeast_memory_access_audit_report';
+const MEMORY_ACCESS_AUDIT_REPORT_SAFE_AUDIT_KEYS = new Set(['agentId', 'profile', 'repo', 'since', 'until', 'operation', 'tool', 'decision', 'limit']);
 const MEMORY_REVIEW_DECIDE_SAFE_AUDIT_KEYS = new Set(['id', 'action', 'resolution']);
 const MEMORY_REVIEW_DECIDE_SAFE_ACTIONS = new Set(['approve', 'reject', 'never_store', 'resolve_conflict']);
 const MEMORY_REVIEW_DECIDE_SAFE_RESOLUTIONS = new Set(['keep_existing', 'replace_existing', 'keep_both_scoped', 'reject_candidate', 'expire_existing']);
@@ -449,6 +451,37 @@ function redactMemoryRetentionReportEnvelope(sanitized: Record<string, unknown>,
   return sanitized;
 }
 
+function redactMemoryAccessAuditReportArgs(sanitized: Record<string, unknown>, redaction = '[memory-access-audit-report-args-redacted]'): Record<string, unknown> {
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'invalid')) {
+    sanitized['invalid'] = redaction;
+    return sanitized;
+  }
+  for (const key of Object.keys(sanitized)) {
+    if (!MEMORY_ACCESS_AUDIT_REPORT_SAFE_AUDIT_KEYS.has(key)) {
+      sanitized[key] = redaction;
+    }
+  }
+  return sanitized;
+}
+
+function redactMemoryAccessAuditReportEnvelope(sanitized: Record<string, unknown>, redaction = '[memory-access-audit-report-args-redacted]'): Record<string, unknown> {
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'args')) {
+    const args = sanitized['args'];
+    sanitized['args'] = isObjectLike(args) && !Array.isArray(args)
+      ? redactMemoryAccessAuditReportArgs(args as Record<string, unknown>, redaction)
+      : redaction;
+  }
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
+    sanitized['context'] = redaction;
+  }
+  for (const key of Object.keys(sanitized)) {
+    if (!['tool', 'action', 'args', 'context'].includes(key)) {
+      sanitized[key] = redaction;
+    }
+  }
+  return sanitized;
+}
+
 function redactMemoryStoreArgs(sanitized: Record<string, unknown>, redaction = '[memory-store-value-redacted]'): Record<string, unknown> {
   if (Object.prototype.hasOwnProperty.call(sanitized, 'invalid')) {
     sanitized['invalid'] = redaction;
@@ -489,11 +522,12 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
   const isMemoryReviewPropose = unqualifiedToolName === MEMORY_REVIEW_PROPOSE_TOOL;
   const isDirectMemoryExport = unqualifiedToolName === MEMORY_EXPORT_TOOL;
   const isDirectMemoryRetentionReport = unqualifiedToolName === MEMORY_RETENTION_REPORT_TOOL;
+  const isDirectMemoryAccessAuditReport = unqualifiedToolName === MEMORY_ACCESS_AUDIT_REPORT_TOOL;
   const isDirectMemoryReviewDecide = unqualifiedToolName === MEMORY_REVIEW_DECIDE_TOOL;
   const isDirectMemorySourceAttribution = unqualifiedToolName === MEMORY_SOURCE_ATTRIBUTION_TOOL;
   const isDirectMemoryStore = unqualifiedToolName === MEMORY_STORE_TOOL;
   const isDirectRightToForget = unqualifiedToolName === 'fbeast_memory_right_to_forget';
-  const auditedTool = isDirectMemoryExport || isDirectMemoryRetentionReport || isDirectMemoryReviewDecide || isMemoryReviewPropose || isDirectMemoryStore || isDirectMemorySourceAttribution || isDirectRightToForget
+  const auditedTool = isDirectMemoryExport || isDirectMemoryRetentionReport || isDirectMemoryAccessAuditReport || isDirectMemoryReviewDecide || isMemoryReviewPropose || isDirectMemoryStore || isDirectMemorySourceAttribution || isDirectRightToForget
     ? unqualifiedToolName
     : typeof sanitized['tool'] === 'string'
       ? unqualifyMcpToolName(sanitized['tool'])
@@ -520,6 +554,18 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
     }
     if (isDirectMemoryRetentionReport) {
       return redactMemoryRetentionReportArgs(sanitized);
+    }
+    return sanitized;
+  }
+  if (auditedTool === MEMORY_ACCESS_AUDIT_REPORT_TOOL || auditedAction === MEMORY_ACCESS_AUDIT_REPORT_TOOL) {
+    if (unqualifiedToolName === 'execute_tool') {
+      return redactMemoryAccessAuditReportEnvelope(sanitized);
+    }
+    if (auditedAction === MEMORY_ACCESS_AUDIT_REPORT_TOOL && Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
+      sanitized['context'] = '[memory-access-audit-report-args-redacted]';
+    }
+    if (isDirectMemoryAccessAuditReport) {
+      return redactMemoryAccessAuditReportArgs(sanitized);
     }
     return sanitized;
   }

@@ -257,6 +257,46 @@ describe('createMcpServer', () => {
     });
   });
 
+  it('redacts memory access audit report rejected selectors from direct and proxy audit records', () => {
+    expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_access_audit_report', {
+      operation: 'delete',
+      tool: 'fbeast_memory_store',
+      key: 'OPENAI_API_KEY',
+      query: 'alice@example.test',
+      value: 'example value that must not be echoed',
+      limit: 25,
+    })).toEqual({
+      operation: 'delete',
+      tool: 'fbeast_memory_store',
+      key: '[memory-access-audit-report-args-redacted]',
+      query: '[memory-access-audit-report-args-redacted]',
+      value: '[memory-access-audit-report-args-redacted]',
+      limit: 25,
+    });
+
+    expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
+      tool: 'fbeast_memory_access_audit_report',
+      args: {
+        operation: 'delete',
+        tool: 'fbeast_memory_store',
+        key: 'OPENAI_API_KEY',
+        query: 'alice@example.test',
+        value: 'example value that must not be echoed',
+      },
+      context: 'contains selectors',
+    })).toEqual({
+      tool: 'fbeast_memory_access_audit_report',
+      args: {
+        operation: 'delete',
+        tool: 'fbeast_memory_store',
+        key: '[memory-access-audit-report-args-redacted]',
+        query: '[memory-access-audit-report-args-redacted]',
+        value: '[memory-access-audit-report-args-redacted]',
+      },
+      context: '[memory-access-audit-report-args-redacted]',
+    });
+  });
+
   it('rejects non-finite number arguments before invoking the handler', async () => {
     const calls: unknown[] = [];
     const tool: ToolDef = {
