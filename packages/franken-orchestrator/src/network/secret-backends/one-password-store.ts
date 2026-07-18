@@ -7,7 +7,6 @@ type StdinRunner = (command: string, args: string[], stdin: string) => Promise<C
 const VAULT = 'frankenbeast';
 const TITLE_PREFIX = 'frankenbeast/';
 
-const REQUIRED_OP_EDIT_STDIN_VERSION = [2, 23, 0] as const;
 const BACKEND_MARKER_ID = 'frankenbeast-managed';
 const BACKEND_MARKER_VALUE = 'secret-store-v1';
 
@@ -59,27 +58,8 @@ function itemTemplateForSecret(title: string, value: string): OnePasswordItemTem
   };
 }
 
-function itemTemplateForExistingSecret(_stdout: string, _fallbackTitle: string, _value: string): OnePasswordItemTemplate {
-  // 1Password JSON-template edits overwrite unsupported data such as passkeys,
-  // and field assignment edits would put secret values in argv. Fail closed for
-  // existing items until the CLI exposes a reliable stdin update primitive that
-  // can prove unsupported item data will be preserved.
-  throw new Error('1Password item already exists; refusing to edit existing items because safe stdin updates cannot reliably preserve unsupported item data such as passkeys. Delete and recreate the item to rotate this secret.');
-}
-
-function parseVersion(stdout: string): [number, number, number] | undefined {
-  const match = stdout.match(/(\d+)\.(\d+)\.(\d+)/);
-  if (!match) return undefined;
-  return [Number(match[1]), Number(match[2]), Number(match[3])];
-}
-
-function versionAtLeast(actual: [number, number, number] | undefined, required: readonly [number, number, number]): boolean {
-  if (!actual) return false;
-  for (let i = 0; i < required.length; i += 1) {
-    if (actual[i]! > required[i]!) return true;
-    if (actual[i]! < required[i]!) return false;
-  }
-  return true;
+function existingItemEditError(): Error {
+  return new Error('1Password item already exists with a different value; refusing to edit existing items because safe stdin updates cannot reliably preserve unsupported item data such as passkeys. Delete and recreate the item to rotate this secret.');
 }
 
 function assertSuccess(result: CliResult, operation: string): void {
@@ -99,13 +79,6 @@ export class OnePasswordStore implements ISecretStore {
   async detect(): Promise<SecretStoreDetection> {
     const result = await this.runner('op', ['--version']);
     if (result.exitCode === 0) {
-      if (!versionAtLeast(parseVersion(result.stdout), REQUIRED_OP_EDIT_STDIN_VERSION)) {
-        return {
-          available: false,
-          reason: `1Password CLI ${result.stdout.trim() || 'version unknown'} does not support JSON-template creates from stdin`,
-          setupInstructions: 'Install 1Password CLI 2.23.0 or newer so secret creates can use stdin without exposing values in process arguments.',
-        };
-      }
       return { available: true };
     }
     return {
@@ -125,8 +98,14 @@ export class OnePasswordStore implements ISecretStore {
     const getResult = await this.runner('op', ['item', 'get', title, `--vault=${VAULT}`, '--format=json']);
 
     if (getResult.exitCode === 0) {
-      itemTemplateForExistingSecret(getResult.stdout, title, value);
-      return;
+      const itemId = itemIdFromJson(getResult.stdout);
+      if (itemId) {
+        const current = await this.runner('op', ['read', `op://${VAULT}/${itemId}/password`]);
+        if (current.exitCode === 0 && current.stdout.replace(/\n$/, '') === value) {
+          return;
+        }
+      }
+      throw existingItemEditError();
     }
 
     // Item does not exist — create it from a piped JSON template instead of argv assignments.
