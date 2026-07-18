@@ -344,7 +344,7 @@ describe('hard-coded example secret scanner', () => {
       join(sourceDir, 'install-cron.mjs'),
       [
         'const token = process.env.GITHUB_TOKEN;',
-        "if (!process.env.GITHUB_TOKEN) throw new Error('cron requires GITHUB_TOKEN');",
+        "if (!process.env.GITHUB_TOKEN) throw new Error('crontab requires GITHUB_TOKEN');",
         "const CRON_CMD = '0 3 * * * gh auth token | agy pr';",
         "token = 'gh auth token';",
         "const ENTRY = '0 3 * * * ' + token;",
@@ -425,6 +425,42 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('scripts/install-cron.sh:2');
     expect(result.stderr).toContain('scripts/cron-install.sh:2');
     expect(result.stderr).toContain('scripts/install-cron.py:3');
+  });
+
+  it('rejects quoted, async, and multiline cron credential persistence variants', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'install-cron.mjs'),
+      [
+        "const quoted = '0 3 * * * GITHUB_TOKEN=\"abc123\" agy pr';",
+        "execFile('gh', ['auth', 'token'], (error, stdout) => {",
+        '  const credential = stdout.trim();',
+        '  const entry = `0 3 * * * agy pr --token ${credential}`;',
+        '});',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'install-cron.py'),
+      [
+        'from os import environ',
+        'credential = environ.get(',
+        "  'GITHUB_TOKEN',",
+        '  None,',
+        ')',
+        "entry = f'0 3 * * * agy pr --token {credential}'",
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/install-cron.mjs:1');
+    expect(result.stderr).toContain('scripts/install-cron.mjs:4');
+    expect(result.stderr).toContain('scripts/install-cron.py:6');
   });
 
   it('rejects cron credential scanner edge cases without leaking raw tokens', () => {
