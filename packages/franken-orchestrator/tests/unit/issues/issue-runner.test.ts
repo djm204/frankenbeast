@@ -1013,6 +1013,34 @@ describe('stuck-run watchdog', () => {
     expect(findings).toEqual([]);
   });
 
+  it('does not let omitted-liveness terminal snapshots clear dead restart candidates', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_dead_then_terminal_without_probe',
+        pid: 7412,
+        runId: 'run-old-dead',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+      {
+        cardId: 't_dead_then_terminal_without_probe',
+        pid: 7413,
+        runId: 'run-new-complete-no-probe',
+        status: 'completed',
+        lastHeartbeatAt: '2026-07-16T11:31:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      cardId: 't_dead_then_terminal_without_probe',
+      pid: 7412,
+      restartDisposition: 'retryable',
+      nextAction: 'restart-once',
+    });
+  });
+
   it('treats dispatcher restart stop reasons as HITL repair evidence before retrying', () => {
     const [finding] = detectStuckRunWatchdogFindings([
       {

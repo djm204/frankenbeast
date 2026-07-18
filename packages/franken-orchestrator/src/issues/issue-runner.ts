@@ -1082,15 +1082,17 @@ export function detectStuckRunWatchdogFindings(
     const status = snapshot.status?.trim().toLowerCase();
     if (status && TERMINAL_WORKER_CARD_STATUSES.has(status) && !crashKanbanState(status) && !explicitProcessCrash(snapshot)) {
       const normalizedCardId = snapshot.cardId.trim();
-      const terminalRecencyMs = snapshotRecencyMs(snapshot);
-      terminalRecencyByCardId.set(
-        normalizedCardId,
-        Math.max(terminalRecencyByCardId.get(normalizedCardId) ?? 0, terminalRecencyMs),
-      );
-      const existingKey = deadFindingKeysByCardId.get(normalizedCardId);
-      if (existingKey && snapshot.alive !== true && terminalRecencyMs >= existingKey.recencyMs) {
-        deadFindingKeysByCardId.delete(normalizedCardId);
-        deadFindingsByCardId.delete(normalizedCardId);
+      if (snapshot.alive === false) {
+        const terminalRecencyMs = snapshotRecencyMs(snapshot);
+        terminalRecencyByCardId.set(
+          normalizedCardId,
+          Math.max(terminalRecencyByCardId.get(normalizedCardId) ?? 0, terminalRecencyMs),
+        );
+        const existingKey = deadFindingKeysByCardId.get(normalizedCardId);
+        if (existingKey && terminalRecencyMs >= existingKey.recencyMs) {
+          deadFindingKeysByCardId.delete(normalizedCardId);
+          deadFindingsByCardId.delete(normalizedCardId);
+        }
       }
       continue;
     }
