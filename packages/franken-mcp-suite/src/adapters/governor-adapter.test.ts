@@ -48,6 +48,21 @@ describe('GovernorAdapter', () => {
     expect(row).toEqual({ context: '[duplicate-reserved-provenance-rejected]', decision: 'denied' });
   });
 
+  it('rejects unicode-escaped duplicate reserved provenance keys', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({
+      action: 'fbeast_memory_query',
+      context: '{"\\u005f_fbeastGovernanceSource":"caller","__fbeastGovernanceSource":"central-dispatch","type":"working"}',
+    })).resolves.toMatchObject({ decision: 'denied' });
+
+    const db = new Database(dbPath);
+    const row = db.prepare(`SELECT context, decision FROM governor_log WHERE action = ?`).get('fbeast_memory_query') as { context: string; decision: string };
+    db.close();
+    expect(row).toEqual({ context: '[duplicate-reserved-provenance-rejected]', decision: 'denied' });
+  });
+
   it('allows reserved provenance key mentions inside string payloads', async () => {
     const dbPath = tracked(tmpDbPath());
     const governor = createGovernorAdapter(dbPath);

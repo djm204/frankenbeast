@@ -216,6 +216,7 @@ function rootObjectKeys(context: string): string[] {
       while (index < context.length) {
         const inner = context[index];
         if (inner === '\\') {
+          value += `${inner}${context[index + 1] ?? ''}`;
           index += 2;
           continue;
         }
@@ -227,7 +228,13 @@ function rootObjectKeys(context: string): string[] {
       if (depth === 1) {
         let lookahead = index;
         while (lookahead < context.length && /\s/.test(context[lookahead] ?? '')) lookahead += 1;
-        if (context[lookahead] === ':') keys.push(value);
+        if (context[lookahead] === ':') {
+          try {
+            keys.push(JSON.parse(`"${value}"`) as string);
+          } catch {
+            keys.push(value);
+          }
+        }
       }
       continue;
     }

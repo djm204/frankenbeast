@@ -374,6 +374,16 @@ vi.mock("better-sqlite3", () => ({
                 payload: JSON.stringify({ source: "central-dispatch", toolName: "fbeast_memory_store", ok: true, args: { agentId: "agent-denied-merge", profile: "denied-merge-test", type: "working" } }),
                 createdAt: "2026-07-16T14:50:05.000Z",
               },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ source: "central-dispatch", toolName: "mcp__fbeast-memory__fbeast_memory_store", ok: true, args: { agentId: "agent-qualified", profile: "qualified-tool-test", type: "working" } }),
+                createdAt: "2026-07-16T15:00:00.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ source: "central-dispatch", toolName: "fbeast_memory_query", ok: true, args: { agentId: "agent-active-profile", activeProfile: "active-profile-test", type: "working" } }),
+                createdAt: "2026-07-16T15:05:00.000Z",
+              },
             ];
           }
           return workingMemoryRowsByPath.get(_dbPath) ?? [];
@@ -1357,6 +1367,49 @@ describe("createBrainAdapter", () => {
     expect(governorSql).toContain("LIMIT ?");
     expect(auditSql).toContain("$.args.profile");
     expect(auditSql).toContain("LIMIT ?");
+  });
+
+  it("normalizes qualified tool names in audit SQL prefilters", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ tool: "fbeast_memory_store", profile: "qualified-tool-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      tool: "fbeast_memory_store",
+      agentId: "agent-qualified",
+    });
+    const prepareSql = databaseInstances.at(-1)!.prepare.mock.calls.map(([sql]) => String(sql));
+    const governorSql = prepareSql.find((sql) => sql.includes("FROM governor_log"));
+    const auditSql = prepareSql.find((sql) => sql.includes("FROM audit_trail"));
+    expect(governorSql).toContain("LIKE ('%__' || ?)");
+    expect(auditSql).toContain("LIKE ('%__' || ?)");
+  });
+
+  it("includes ok-derived decisions in audit-trail SQL filters and activeProfile extraction", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ decision: "approved", profile: "active-profile-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      agentId: "agent-active-profile",
+      profile: "active-profile-test",
+      decision: "approved",
+    });
+    const prepareSql = databaseInstances.at(-1)!.prepare.mock.calls.map(([sql]) => String(sql));
+    const auditSql = prepareSql.find((sql) => sql.includes("FROM audit_trail"));
+    expect(auditSql).toContain("$.ok");
+  });
+
+  it("does not cap source scans before operation filtering", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    await brain.memoryAccessAuditReport({ operation: "read", limit: 5 });
+
+    const prepareSql = databaseInstances.at(-1)!.prepare.mock.calls.map(([sql]) => String(sql));
+    expect(prepareSql.find((sql) => sql.includes("FROM governor_log"))).not.toContain("LIMIT ?");
+    expect(prepareSql.find((sql) => sql.includes("FROM audit_trail"))).not.toContain("LIMIT ?");
   });
 
   it("does not attribute access audit report filters to acting agents", async () => {

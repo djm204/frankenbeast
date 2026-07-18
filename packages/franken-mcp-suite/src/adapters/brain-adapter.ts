@@ -928,6 +928,31 @@ function sqlJsonEqualsAny(jsonExpression: string, paths: string[], value: string
   };
 }
 
+function sqlToolEqualsExpression(expression: string): string {
+  return `(${expression} = ? OR ${expression} LIKE ('%__' || ?))`;
+}
+
+function sqlJsonToolEqualsAny(jsonExpression: string, paths: string[], value: string | undefined): { clause: string; params: string[] } {
+  if (value === undefined) return { clause: "", params: [] };
+  return {
+    clause: `(${paths.map((path) => sqlToolEqualsExpression(`json_extract(${jsonExpression}, '${path}')`)).join(" OR ")})`,
+    params: paths.flatMap(() => [value, value]),
+  };
+}
+
+function sqlAuditDecisionEquals(jsonExpression: string, value: string | undefined): { clause: string; params: string[] } {
+  if (value === undefined) return { clause: "", params: [] };
+  const derivedOkClause = value === "approved"
+    ? ` OR json_extract(${jsonExpression}, '$.ok') = 1`
+    : value === "error"
+      ? ` OR json_extract(${jsonExpression}, '$.ok') = 0`
+      : "";
+  return {
+    clause: `(json_extract(${jsonExpression}, '$.decision') = ?${derivedOkClause})`,
+    params: [value],
+  };
+}
+
 function auditSqlFilterParts(parts: Array<{ clause: string; params: string[] }>): { clauses: string[]; params: string[] } {
   const clauses: string[] = [];
   const params: string[] = [];
@@ -1280,6 +1305,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
     async memoryAccessAuditReport(input = {}) {
       const limit = resolveQueryLimit(input.limit ?? MAX_QUERY_LIMIT);
       const scanLimit = resolveMemoryAccessAuditScanLimit(limit);
+      const sourceScanLimit = input.operation === undefined ? scanLimit : undefined;
       const reportDb = new Database(dbPath);
       configureBrainAdapterDb(reportDb);
       try {
@@ -1291,8 +1317,14 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           sqlJsonEqualsAny(safeGovernorJson, ["$.profile", "$.activeProfile", "$.args.profile", "$.args.activeProfile", "$.args.args.profile"], input.profile),
           sqlJsonEqualsAny(safeGovernorJson, ["$.repo", "$.args.repo", "$.args.args.repo"], input.repo),
           input.tool === undefined ? { clause: "", params: [] } : {
-            clause: "(action = ? OR json_extract(" + safeGovernorJson + ", '$.tool') = ? OR json_extract(" + safeGovernorJson + ", '$.toolName') = ? OR json_extract(" + safeGovernorJson + ", '$.args.tool') = ? OR json_extract(" + safeGovernorJson + ", '$.args.toolName') = ?)",
-            params: [input.tool, input.tool, input.tool, input.tool, input.tool],
+            clause: `(${[
+              sqlToolEqualsExpression("action"),
+              sqlToolEqualsExpression("json_extract(" + safeGovernorJson + ", '$.tool')"),
+              sqlToolEqualsExpression("json_extract(" + safeGovernorJson + ", '$.toolName')"),
+              sqlToolEqualsExpression("json_extract(" + safeGovernorJson + ", '$.args.tool')"),
+              sqlToolEqualsExpression("json_extract(" + safeGovernorJson + ", '$.args.toolName')"),
+            ].join(" OR ")})`,
+            params: [input.tool, input.tool, input.tool, input.tool, input.tool, input.tool, input.tool, input.tool, input.tool, input.tool],
           },
           input.decision === undefined ? { clause: "", params: [] } : { clause: "decision = ?", params: [input.decision] },
         ]);
@@ -1314,8 +1346,8 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           FROM governor_log
           ${governorWhere}
           ORDER BY id DESC
-          ${sqlLimitClause(scanLimit)}
-        `).all(CENTRAL_AUDIT_SOURCE, HOOK_GOVERNANCE_SOURCE, ...governorTimeFilter.params, ...governorSqlFilters.params, ...sqlLimitParams(scanLimit)) as Array<{ action: string; context: string; decision: string; reason: string | null; createdAt: string }>
+          ${sqlLimitClause(sourceScanLimit)}
+        `).all(CENTRAL_AUDIT_SOURCE, HOOK_GOVERNANCE_SOURCE, ...governorTimeFilter.params, ...governorSqlFilters.params, ...sqlLimitParams(sourceScanLimit)) as Array<{ action: string; context: string; decision: string; reason: string | null; createdAt: string }>
           : [];
         for (const row of governorRows) {
           const context = parseAuditContext(row.context);
@@ -1361,11 +1393,8 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           sqlJsonEqualsAny(safeAuditPayloadJson, ["$.args.agentId", "$.args.args.agentId", "$.agentId"], input.agentId),
           sqlJsonEqualsAny(safeAuditPayloadJson, ["$.args.profile", "$.args.activeProfile", "$.args.args.profile", "$.profile", "$.activeProfile"], input.profile),
           sqlJsonEqualsAny(safeAuditPayloadJson, ["$.args.repo", "$.args.args.repo", "$.repo"], input.repo),
-          input.tool === undefined ? { clause: "", params: [] } : {
-            clause: "(json_extract(" + safeAuditPayloadJson + ", '$.toolName') = ? OR json_extract(" + safeAuditPayloadJson + ", '$.tool') = ? OR json_extract(" + safeAuditPayloadJson + ", '$.args.tool') = ? OR json_extract(" + safeAuditPayloadJson + ", '$.args.toolName') = ?)",
-            params: [input.tool, input.tool, input.tool, input.tool],
-          },
-          sqlJsonEqualsAny(safeAuditPayloadJson, ["$.decision"], input.decision),
+          sqlJsonToolEqualsAny(safeAuditPayloadJson, ["$.toolName", "$.tool", "$.args.tool", "$.args.toolName"], input.tool),
+          sqlAuditDecisionEquals(safeAuditPayloadJson, input.decision),
         ]);
         const auditTimeCondition = auditTimeFilter.clause ? `AND ${auditTimeFilter.clause.slice("WHERE ".length)}` : "";
         const auditMetadataCondition = auditSqlFilters.clauses.length ? `AND ${auditSqlFilters.clauses.join(" AND ")}` : "";
@@ -1383,8 +1412,8 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
             ${auditTimeCondition}
             ${auditMetadataCondition}
           ORDER BY id DESC
-          ${sqlLimitClause(scanLimit)}
-        `).all(CENTRAL_AUDIT_SOURCE, HOOK_GOVERNANCE_SOURCE, ...auditTimeFilter.params, ...auditSqlFilters.params, ...sqlLimitParams(scanLimit)) as Array<{ eventType: string; payload: string; createdAt: string }>
+          ${sqlLimitClause(sourceScanLimit)}
+        `).all(CENTRAL_AUDIT_SOURCE, HOOK_GOVERNANCE_SOURCE, ...auditTimeFilter.params, ...auditSqlFilters.params, ...sqlLimitParams(sourceScanLimit)) as Array<{ eventType: string; payload: string; createdAt: string }>
           : [];
         for (const row of auditRows) {
           const payload = parseAuditContext(row.payload);
@@ -1398,7 +1427,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           const isAuditReportInvocation = auditedTool === "fbeast_memory_access_audit_report";
           const agentId = isAuditReportInvocation ? undefined : stringAuditField(accessArgs, "agentId") ?? stringAuditField(payload, "agentId");
           const cardId = isAuditReportInvocation ? undefined : stringAuditField(accessArgs, "cardId") ?? stringAuditField(accessArgs, "taskId") ?? stringAuditField(payload, "cardId") ?? stringAuditField(payload, "taskId");
-          const profile = isAuditReportInvocation ? undefined : stringAuditField(accessArgs, "profile") ?? stringAuditField(payload, "profile");
+          const profile = isAuditReportInvocation ? undefined : stringAuditField(accessArgs, "profile") ?? stringAuditField(accessArgs, "activeProfile") ?? stringAuditField(payload, "profile") ?? stringAuditField(payload, "activeProfile");
           const repo = isAuditReportInvocation ? undefined : stringAuditField(accessArgs, "repo") ?? stringAuditField(payload, "repo");
           events.push({
             timestamp: normalizeAuditTimestamp(row.createdAt),
