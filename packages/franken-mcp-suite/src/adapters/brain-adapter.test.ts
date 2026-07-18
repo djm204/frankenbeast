@@ -1366,7 +1366,31 @@ describe("createBrainAdapter", () => {
 
     expect(report.events[0]).toMatchObject({ decision: "unknown" });
     expect(report.summary.byDecision).toEqual({ unknown: 1 });
-    expect(serialized).not.toContain("sk-secret-decision");
+    expect(serialized).not.toContain("«redacted:sk-…»");
+  });
+
+  it("treats timezone-less ISO audit filters as UTC", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const utcReport = await brain.memoryAccessAuditReport({ since: "2026-07-16T10:30:00Z", until: "2026-07-16T10:30:00Z", limit: 20 });
+    const timezoneLessReport = await brain.memoryAccessAuditReport({ since: "2026-07-16T10:30:00", until: "2026-07-16T10:30:00", limit: 20 });
+
+    expect(timezoneLessReport.events).toEqual(utcReport.events);
+    expect(timezoneLessReport.events.map((event) => event.timestamp)).toEqual(["2026-07-16T10:30:00.000Z"]);
+  });
+
+  it("keeps filtered memory access audit scans bounded before dedupe", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    await brain.memoryAccessAuditReport({ profile: "default", limit: 50 });
+
+    const reportDb = databaseInstances[1];
+    expect(reportDb).toBeDefined();
+    const auditQueries = reportDb!.prepare.mock.calls
+      .map(([sql]) => String(sql))
+      .filter((sql) => sql.includes("FROM governor_log") || sql.includes("FROM audit_trail"));
+    expect(auditQueries).toHaveLength(2);
+    expect(auditQueries.every((sql) => sql.includes("LIMIT ?"))).toBe(true);
   });
 
   it("ignores caller-forged observer and public governor memory probes", async () => {

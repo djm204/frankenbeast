@@ -452,6 +452,14 @@ function redactMemoryRetentionReportEnvelope(sanitized: Record<string, unknown>,
   return sanitized;
 }
 
+function isSafeMemoryAccessAuditReportLimit(value: unknown): boolean {
+  if (typeof value !== 'string' && typeof value !== 'number') return false;
+  const text = String(value).trim();
+  if (!/^\d+$/.test(text)) return false;
+  const parsed = Number(text);
+  return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= 1000;
+}
+
 function redactMemoryAccessAuditReportArgs(sanitized: Record<string, unknown>, redaction = '[memory-access-audit-report-args-redacted]'): Record<string, unknown> {
   if (Object.prototype.hasOwnProperty.call(sanitized, 'invalid')) {
     sanitized['invalid'] = redaction;
@@ -461,7 +469,8 @@ function redactMemoryAccessAuditReportArgs(sanitized: Record<string, unknown>, r
     const value = sanitized[key];
     if (!MEMORY_ACCESS_AUDIT_REPORT_SAFE_AUDIT_KEYS.has(key)
       || (MEMORY_ACCESS_AUDIT_REPORT_STRING_KEYS.has(key) && typeof value !== 'string')
-      || (key === 'limit' && (typeof value !== 'number' || !Number.isFinite(value)))) {
+      || ((key === 'since' || key === 'until') && normalizeAuditDateString(value) === undefined)
+      || (key === 'limit' && !isSafeMemoryAccessAuditReportLimit(value))) {
       sanitized[key] = redaction;
     }
   }
