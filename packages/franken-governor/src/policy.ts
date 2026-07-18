@@ -48,7 +48,11 @@ export function evaluate(action: Action, config: PolicyConfig = defaultPolicy, d
   switch (action) {
     case 'git-push': {
       const remote = typeof details === 'object' && details !== null && 'remote' in details ? (details as any).remote : undefined;
-      const allowed = config.allowedGitRemotes?.includes(remote as string);
+      // Policy data may arrive from JSON/env or untyped JS callers; a string
+      // here would make `.includes` a substring check, so fail closed unless
+      // it is a real array of exact remote names.
+      const allowed = Array.isArray(config.allowedGitRemotes)
+        && config.allowedGitRemotes.includes(remote as string);
       return allowed
         ? { allow: true, reason: `Remote "${remote}" is whitelisted for git push` }
         : { allow: false, reason: `Remote "${remote}" is not allowed by policy` };

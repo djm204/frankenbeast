@@ -130,9 +130,13 @@ function isSafeRemote(value: string): boolean {
 }
 
 
-/** Masks the userinfo (credentials) portion of a URL-style remote for logging. */
+/**
+ * Masks the userinfo (credentials) portion of a URL-style remote for logging.
+ * The greedy `[^/]*` masks through the *last* `@` before the host's first `/`,
+ * so credentials that themselves contain `@` are fully redacted.
+ */
 function redactRemote(value: string): string {
-  return value.replace(/\/\/[^@/]+@/, '//***@');
+  return value.replace(/\/\/[^/]*@/, '//***@');
 }
 
 export class PrCreator {
@@ -312,16 +316,18 @@ export class PrCreator {
       targetBranch = 'main';
     }
 
+    // Policy gate runs before any GitHub preflight so a policy-denied remote
+    // is reported as a policy decision, not as a gh/token problem.
+    if (!(await this.checkPushPolicy(logger))) {
+      return null;
+    }
+
     const existing = this.findExistingPr(branch, logger);
     if (existing === null) {
       return null;
     }
 
     this.assertGitHubCapabilities(branch, logger, { requirePullRequestsWrite: existing.length === 0 });
-
-    if (!(await this.checkPushPolicy(logger))) {
-      return null;
-    }
 
     if (!this.pushBranch(branch, logger)) {
       return null;

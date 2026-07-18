@@ -124,9 +124,8 @@ describe('PrCreator', () => {
       {
         targetBranch: 'main',
         disabled: false,
-        remote: 'https://x-access-token:s3cr3t@github.com/org/repo.git',
+        remote: 'https://x-access-token:s3cr3t@pass@github.com/org/repo.git',
         pushPolicy: { allowedGitRemotes: ['origin'] },
-        githubCapabilityCheck: { disabled: true },
       },
       exec,
     );
@@ -138,7 +137,11 @@ describe('PrCreator', () => {
     const denial = logger.error.mock.calls.find(c => c[0] === 'PrCreator: git push blocked by policy');
     expect(denial).toBeDefined();
     expect(JSON.stringify(denial)).not.toContain('s3cr3t');
-    expect(JSON.stringify(denial)).toContain('//***@');
+    expect(JSON.stringify(denial)).not.toContain('pass');
+    expect(JSON.stringify(denial)).toContain('//***@github.com');
+    // Policy gate runs before GitHub preflights, so no gh/git command executed.
+    const ghCalled = exec.mock.calls.some(c => c[0] === 'gh');
+    expect(ghCalled).toBe(false);
   });
 
   it('allows push to a configured non-origin remote when no pushPolicy is set', async () => {
