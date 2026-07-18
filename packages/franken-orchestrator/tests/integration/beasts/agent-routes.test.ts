@@ -1609,15 +1609,13 @@ describe('agent routes integration', () => {
       events: detail.events,
       logs: consoleError.mock.calls,
     });
-    const responseSurface = JSON.stringify(responseBody);
-
     expect(responseBody.error.details.dispatchError).toBe(SAFE_DISPATCH_FAILURE_MESSAGE);
     expect(exposedSurfaces).not.toContain(exceptionSecret);
     expect(exposedSurfaces).not.toContain('Provider spawn failed');
-    expect(responseSurface).not.toContain(requestSecret);
-    expect(responseSurface).not.toContain(sensitiveCommand);
-    expect(responseSurface).not.toContain('/opt/private/bin/provider');
-    expect(responseSurface).not.toContain('super-secret');
+    expect(exposedSurfaces).not.toContain(requestSecret);
+    expect(exposedSurfaces).not.toContain(sensitiveCommand);
+    expect(exposedSurfaces).not.toContain('/opt/private/bin/provider');
+    expect(exposedSurfaces).not.toContain('super-secret');
     consoleError.mockRestore();
   });
 

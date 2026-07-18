@@ -15,6 +15,7 @@ import {
   verifyRunConfigIntegrity,
 } from '../../../src/cli/run-config-integrity.js';
 import type { BeastDefinition } from '../../../src/beasts/types.js';
+import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../../../src/beasts/services/dispatch-failure-message.js';
 
 function createTestRun(repo: SQLiteBeastRepository) {
   return repo.createRun({
@@ -607,7 +608,7 @@ describe('ProcessBeastExecutor', () => {
 
     const spawnFailedEvent = repo.listEvents(run.id).find((event) => event.type === 'run.spawn_failed');
     expect(spawnFailedEvent?.payload).toMatchObject({
-      error: 'spawn failed',
+      error: SAFE_DISPATCH_FAILURE_MESSAGE,
       crashClassification: {
         kind: 'spawn_failure',
         severity: 'error',
@@ -1984,10 +1985,10 @@ describe('ProcessBeastExecutor', () => {
       const spawnEvent = repo.listEvents(run.id).find((e) => e.type === 'run.spawn_failed');
       expect(spawnEvent?.payload).toMatchObject({
         code: 'ENOENT',
-        command: '/definitely/not-a-real-command-franken-1013',
-        args: [],
+        error: SAFE_DISPATCH_FAILURE_MESSAGE,
       });
-      expect(String(spawnEvent?.payload.error)).toContain('ENOENT');
+      expect(spawnEvent?.payload).not.toHaveProperty('command');
+      expect(spawnEvent?.payload).not.toHaveProperty('args');
     });
 
     it('appends run.spawn_failed event with error details', async () => {
@@ -2008,11 +2009,11 @@ describe('ProcessBeastExecutor', () => {
       const spawnEvent = events.find((e) => e.type === 'run.spawn_failed');
       expect(spawnEvent).toBeDefined();
       expect(spawnEvent!.payload).toMatchObject({
-        error: 'spawn ENOENT',
+        error: SAFE_DISPATCH_FAILURE_MESSAGE,
         code: 'ENOENT',
       });
-      expect(spawnEvent!.payload.command).toBeDefined();
-      expect(spawnEvent!.payload.args).toBeDefined();
+      expect(spawnEvent!.payload).not.toHaveProperty('command');
+      expect(spawnEvent!.payload).not.toHaveProperty('args');
     });
 
     it('calls onRunStatusChange on spawn failure', async () => {

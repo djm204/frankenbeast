@@ -6,6 +6,7 @@ import type { BeastExecutor } from '../execution/beast-executor.js';
 import type { BeastMetrics } from '../telemetry/beast-metrics.js';
 import { BeastCatalogService } from './beast-catalog-service.js';
 import { wallClockNow } from '@franken/types';
+import { SAFE_DISPATCH_FAILURE_MESSAGE } from './dispatch-failure-message.js';
 import { UnknownBeastDefinitionError } from '../errors.js';
 import { GitConfigSchema, LlmConfigSchema, PromptConfigSchema } from '../../cli/run-config-loader.js';
 import {
@@ -26,8 +27,6 @@ export interface BeastExecutors {
   readonly process: BeastExecutor;
   readonly container: BeastExecutor;
 }
-
-export const SAFE_DISPATCH_FAILURE_MESSAGE = 'Tracked agent dispatch failed';
 
 const SHARED_RUNTIME_CONFIG_KEYS = [
   'skills',

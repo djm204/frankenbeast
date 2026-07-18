@@ -14,6 +14,7 @@ import {
 import { wallClockNow } from '@franken/types';
 import type { ProcessSupervisorLike } from './process-supervisor.js';
 import { classifyWorkerCrash } from './worker-crash-classification.js';
+import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../services/dispatch-failure-message.js';
 import type { BeastDefinition, BeastProcessSpec, BeastRun, BeastRunAttempt, BeastRunStatus, ModuleConfig } from '../types.js';
 import {
   createRunConfigIntegrityManifest,
@@ -456,7 +457,6 @@ export class ProcessBeastExecutor implements BeastExecutor {
         },
       });
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
       const errorCode = (error as NodeJS.ErrnoException).code;
       const failedAt = new Date(wallClockNow()).toISOString();
 
@@ -474,10 +474,8 @@ export class ProcessBeastExecutor implements BeastExecutor {
       const spawnFailedEvent = {
         type: 'run.spawn_failed' as const,
         payload: {
-          error: errorMessage,
+          error: SAFE_DISPATCH_FAILURE_MESSAGE,
           ...(errorCode ? { code: errorCode } : {}),
-          command: processSpec.command,
-          args: [...processSpec.args],
           crashClassification,
         },
         createdAt: failedAt,

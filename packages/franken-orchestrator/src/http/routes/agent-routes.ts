@@ -6,10 +6,8 @@ import { DeletedTrackedAgentError, UnknownTrackedAgentError } from '../../beasts
 import { CapacityReservationError } from '../../beasts/services/capacity-reservation-policy.js';
 import { MaintenanceModeError, type MaintenanceModeService } from '../../beasts/services/maintenance-mode-service.js';
 import type { AgentService } from '../../beasts/services/agent-service.js';
-import {
-  SAFE_DISPATCH_FAILURE_MESSAGE,
-  type BeastDispatchService,
-} from '../../beasts/services/beast-dispatch-service.js';
+import type { BeastDispatchService } from '../../beasts/services/beast-dispatch-service.js';
+import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../../beasts/services/dispatch-failure-message.js';
 import type { BeastRunService } from '../../beasts/services/beast-run-service.js';
 import {
   BEAST_CONTROL_MAX_BODY_SIZE,
@@ -146,9 +144,9 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
     deps.agents.appendEvent(agent.id, {
       level: 'info',
       type: 'agent.command.sent',
-      message: `Sent init command ${body.initAction.command}`,
+      message: 'Sent init command',
       payload: {
-        command: body.initAction.command,
+        kind: body.initAction.kind,
       },
     });
 

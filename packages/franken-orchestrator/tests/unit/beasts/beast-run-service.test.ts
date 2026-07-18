@@ -12,6 +12,7 @@ import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-bea
 import { AgentService } from '../../../src/beasts/services/agent-service.js';
 import { CapacityReservationPolicy } from '../../../src/beasts/services/capacity-reservation-policy.js';
 import { MaintenanceModeError, MaintenanceModeService } from '../../../src/beasts/services/maintenance-mode-service.js';
+import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../../../src/beasts/services/dispatch-failure-message.js';
 
 describe('BeastRunService', () => {
   let workDir: string | undefined;
@@ -673,11 +674,11 @@ describe('BeastRunService', () => {
     expect(repo.listEvents(run.id)).toEqual(expect.arrayContaining([
       expect.objectContaining({
         type: 'run.start_failed',
-        payload: { error: 'spawn ENOENT' },
+        payload: { error: SAFE_DISPATCH_FAILURE_MESSAGE },
       }),
     ]));
-    await expect(logs.read(run.id, 'system')).resolves.toContainEqual(expect.stringContaining('start_failed: spawn ENOENT'));
-    await expect(runs.readLogs(run.id)).resolves.toContainEqual(expect.stringContaining('start_failed: spawn ENOENT'));
+    await expect(logs.read(run.id, 'system')).resolves.toContainEqual(expect.stringContaining(`start_failed: ${SAFE_DISPATCH_FAILURE_MESSAGE}`));
+    await expect(runs.readLogs(run.id)).resolves.toContainEqual(expect.stringContaining(`start_failed: ${SAFE_DISPATCH_FAILURE_MESSAGE}`));
     expect(repo.getTrackedAgent(agent.id)).toMatchObject({
       status: 'failed',
       dispatchRunId: run.id,
@@ -687,7 +688,7 @@ describe('BeastRunService', () => {
         level: 'error',
         type: 'agent.dispatch.failed',
         message: `Failed to start Beast run ${run.id}`,
-        payload: { runId: run.id, error: 'spawn ENOENT' },
+        payload: { runId: run.id, error: SAFE_DISPATCH_FAILURE_MESSAGE },
       }),
     ]));
     expect(publish).toHaveBeenCalledWith(expect.objectContaining({
@@ -764,10 +765,10 @@ describe('BeastRunService', () => {
     expect(failed.currentAttemptId).toBeUndefined();
     expect(failed.latestExitCode).toBeUndefined();
     expect(failed.startedAt).toBeUndefined();
-    await expect(runs.readLogs(run.id)).resolves.toContainEqual(expect.stringContaining('start_failed: config invalid'));
+    await expect(runs.readLogs(run.id)).resolves.toContainEqual(expect.stringContaining(`start_failed: ${SAFE_DISPATCH_FAILURE_MESSAGE}`));
     expect(repo.listEvents(run.id).at(-1)).toMatchObject({
       type: 'run.start_failed',
-      payload: { error: 'config invalid' },
+      payload: { error: SAFE_DISPATCH_FAILURE_MESSAGE },
     });
   });
 
@@ -848,14 +849,14 @@ describe('BeastRunService', () => {
       status: 'failed',
       stopReason: 'spawn_failed',
     });
-    await expect(runs.readLogs(run.id)).resolves.toContainEqual(expect.stringContaining('start_failed: spawn ENOENT'));
+    await expect(runs.readLogs(run.id)).resolves.toContainEqual(expect.stringContaining(`start_failed: ${SAFE_DISPATCH_FAILURE_MESSAGE}`));
     expect(repo.listEvents(run.id).map((event) => event.type)).toEqual(['run.created', 'run.spawn_failed']);
     expect(repo.listTrackedAgentEvents(agent.id)).toEqual(expect.arrayContaining([
       expect.objectContaining({
         level: 'error',
         type: 'agent.dispatch.failed',
         message: `Failed to start Beast run ${run.id}`,
-        payload: { runId: run.id, error: 'spawn ENOENT' },
+        payload: { runId: run.id, error: SAFE_DISPATCH_FAILURE_MESSAGE },
       }),
     ]));
     expect(publish).toHaveBeenCalledWith(expect.objectContaining({
@@ -1016,7 +1017,7 @@ describe('BeastRunService', () => {
     expect(failed.currentAttemptId).toBeUndefined();
     expect(failed.latestExitCode).toBeUndefined();
     expect(failed.startedAt).toBeUndefined();
-    await expect(runs.readLogs(run.id)).resolves.toContainEqual(expect.stringContaining('start_failed: spawn ENOENT'));
+    await expect(runs.readLogs(run.id)).resolves.toContainEqual(expect.stringContaining(`start_failed: ${SAFE_DISPATCH_FAILURE_MESSAGE}`));
 
     executors.process.start.mockImplementationOnce(async (retryRun: { id: string }) => {
       repo.createAttempt(retryRun.id, {

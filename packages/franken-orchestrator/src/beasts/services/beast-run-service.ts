@@ -4,6 +4,7 @@ import type { BeastEventBus, BeastSseEvent } from '../events/beast-event-bus.js'
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import type { BeastMetrics } from '../telemetry/beast-metrics.js';
 import type { BeastExecutors } from './beast-dispatch-service.js';
+import { SAFE_DISPATCH_FAILURE_MESSAGE } from './dispatch-failure-message.js';
 import { BeastCatalogService } from './beast-catalog-service.js';
 import { isoNow } from '@franken/types';
 import {
@@ -93,7 +94,7 @@ export class BeastRunService {
       this.syncTrackedAgent(updated);
       return updated;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = SAFE_DISPATCH_FAILURE_MESSAGE;
       const currentRun = this.repository.getRun(run.id);
       if (
         currentRun
