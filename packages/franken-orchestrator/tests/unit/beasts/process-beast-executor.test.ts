@@ -1993,6 +1993,34 @@ describe('ProcessBeastExecutor', () => {
       expect(spawnEvent?.payload).not.toHaveProperty('args');
     });
 
+    it('preserves the safe E2BIG code when spawning exceeds the OS argument limit', async () => {
+      workDir = await createTempWorkDir();
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const supervisor = {
+        spawn: vi.fn(async () => {
+          throw Object.assign(new Error('spawn E2BIG with sensitive argv details'), { code: 'E2BIG' });
+        }),
+        stop: vi.fn(async () => {}),
+        kill: vi.fn(async () => {}),
+      };
+      const onSpawnFailureDebug = vi.fn();
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { onSpawnFailureDebug });
+      const run = createTestRun(repo);
+
+      await expect(executor.start(run, martinLoopDefinition)).rejects.toMatchObject({
+        message: 'Worker process could not be spawned.',
+        code: 'E2BIG',
+      });
+
+      const spawnEvent = repo.listEvents(run.id).find((event) => event.type === 'run.spawn_failed');
+      expect(spawnEvent?.payload).toMatchObject({
+        error: 'Worker process could not be spawned.',
+        code: 'E2BIG',
+      });
+      expect(onSpawnFailureDebug).toHaveBeenCalledWith(expect.objectContaining({ code: 'E2BIG' }));
+    });
+
     it('redacts spawn failure command details from durable events and protected debug output', async () => {
       workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

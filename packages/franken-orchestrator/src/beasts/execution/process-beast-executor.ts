@@ -31,6 +31,7 @@ const SPAWN_FAILED_CODE = 'SPAWN_FAILED';
 const SAFE_SPAWN_ERROR_CODES = new Set([
   'EACCES',
   'EAGAIN',
+  'E2BIG',
   'EISDIR',
   'EINVAL',
   'EMFILE',
