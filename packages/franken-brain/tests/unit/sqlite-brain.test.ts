@@ -3089,6 +3089,38 @@ describe('SqliteBrain', () => {
       }
     });
 
+    it('enables SQLite secure deletion before redacting rejected quarantined secrets', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-reject-redact-secure-delete-'));
+      const dbPath = join(dir, 'brain.db');
+      const secret = 'fake-secret-for-secure-delete-test';
+      const fileBrain = new SqliteBrain(dbPath);
+
+      try {
+        const candidate = fileBrain.memoryReview.propose({
+          targetStore: 'working',
+          key: 'OPENAI_API_KEY',
+          value: secret,
+          source: 'fbeast_memory_store:quarantine',
+          evidenceId: 'quarantine:OPENAI_API_KEY',
+          confidence: 1,
+          reason: 'Sensitive memory quarantined for operator review (value-shape-indicates-secret).',
+        });
+
+        fileBrain.memoryReview.reject(candidate.id, { reviewer: 'operator' });
+
+        const db = (fileBrain as unknown as { db: Database.Database }).db;
+        expect(db.pragma('secure_delete', { simple: true })).toBe(1);
+        const persisted = [
+          ...db.prepare(`SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_candidates`).all(),
+          ...db.prepare(`SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_suppressions`).all(),
+        ];
+        expect(JSON.stringify(persisted)).not.toContain(secret);
+      } finally {
+        fileBrain.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('marks a candidate as never-store and suppresses future matching proposals', () => {
       const candidate = brain.memoryReview.propose({
         targetStore: 'working',

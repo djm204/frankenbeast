@@ -3397,6 +3397,9 @@ export class SqliteMemoryReviewQueue {
       }
       const rejectedSignature = this.rejectedSignature(candidate);
       const redactRejected = this.shouldRedactRejectedCandidate(candidate);
+      if (redactRejected) {
+        enableSqliteSecureDelete(this.db, this.dbPath);
+      }
       this.insertSuppression(candidate, 'rejected', now, options);
       this.markDecision(id, 'rejected', now, options);
       if (redactRejected && rejectedSignature) {
@@ -6893,10 +6896,15 @@ function sqliteStringLiteral(value: string): string {
 }
 
 function purgeDeletedSqliteContent(db: Database.Database, dbPath: string): void {
+  enableSqliteSecureDelete(db, dbPath);
   if (dbPath === ':memory:') return;
-  db.pragma('secure_delete = ON');
   db.pragma('wal_checkpoint(TRUNCATE)');
   db.exec('VACUUM');
+}
+
+function enableSqliteSecureDelete(db: Database.Database, dbPath: string): void {
+  if (dbPath === ':memory:') return;
+  db.pragma('secure_delete = ON');
 }
 
 type NormalizedRightToForgetSelector = Omit<RightToForgetSelector, 'type'> & { type?: RightToForgetMemoryType };
