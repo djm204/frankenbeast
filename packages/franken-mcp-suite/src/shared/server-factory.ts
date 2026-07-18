@@ -244,6 +244,7 @@ const MEMORY_RETENTION_REPORT_TOOL = 'fbeast_memory_retention_report';
 const MEMORY_RETENTION_REPORT_SAFE_AUDIT_KEYS = new Set(['readScope', 'now', 'expiryHorizonMs', 'maxEntries']);
 const MEMORY_ACCESS_AUDIT_REPORT_TOOL = 'fbeast_memory_access_audit_report';
 const MEMORY_ACCESS_AUDIT_REPORT_SAFE_AUDIT_KEYS = new Set(['agentId', 'profile', 'repo', 'since', 'until', 'operation', 'tool', 'decision', 'limit']);
+const MEMORY_ACCESS_AUDIT_REPORT_STRING_KEYS = new Set(['agentId', 'profile', 'repo', 'since', 'until', 'operation', 'tool', 'decision']);
 const MEMORY_REVIEW_DECIDE_SAFE_AUDIT_KEYS = new Set(['id', 'action', 'resolution']);
 const MEMORY_REVIEW_DECIDE_SAFE_ACTIONS = new Set(['approve', 'reject', 'never_store', 'resolve_conflict']);
 const MEMORY_REVIEW_DECIDE_SAFE_RESOLUTIONS = new Set(['keep_existing', 'replace_existing', 'keep_both_scoped', 'reject_candidate', 'expire_existing']);
@@ -457,7 +458,10 @@ function redactMemoryAccessAuditReportArgs(sanitized: Record<string, unknown>, r
     return sanitized;
   }
   for (const key of Object.keys(sanitized)) {
-    if (!MEMORY_ACCESS_AUDIT_REPORT_SAFE_AUDIT_KEYS.has(key)) {
+    const value = sanitized[key];
+    if (!MEMORY_ACCESS_AUDIT_REPORT_SAFE_AUDIT_KEYS.has(key)
+      || (MEMORY_ACCESS_AUDIT_REPORT_STRING_KEYS.has(key) && typeof value !== 'string')
+      || (key === 'limit' && (typeof value !== 'number' || !Number.isFinite(value)))) {
       sanitized[key] = redaction;
     }
   }

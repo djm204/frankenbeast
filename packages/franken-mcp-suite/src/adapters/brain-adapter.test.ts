@@ -1314,14 +1314,14 @@ describe("createBrainAdapter", () => {
     expect(prepareSql.find((sql) => sql.includes("FROM audit_trail"))).toContain("LIMIT ?");
   });
 
-  it("does not cap source scans before applying metadata filters", async () => {
+  it("keeps memory access audit source scans bounded when metadata filters are present", async () => {
     const brain = createBrainAdapter("/tmp/beast.db");
 
     await brain.memoryAccessAuditReport({ profile: "sparse-duplicate-test", limit: 5 });
 
     const prepareSql = databaseInstances.at(-1)!.prepare.mock.calls.map(([sql]) => String(sql));
-    expect(prepareSql.find((sql) => sql.includes("FROM governor_log"))).not.toContain("LIMIT ?");
-    expect(prepareSql.find((sql) => sql.includes("FROM audit_trail"))).not.toContain("LIMIT ?");
+    expect(prepareSql.find((sql) => sql.includes("FROM governor_log"))).toContain("LIMIT ?");
+    expect(prepareSql.find((sql) => sql.includes("FROM audit_trail"))).toContain("LIMIT ?");
   });
 
   it("keeps rapid repeated memory accesses as separate audit events", async () => {

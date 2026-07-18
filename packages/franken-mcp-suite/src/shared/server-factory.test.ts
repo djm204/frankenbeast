@@ -261,6 +261,8 @@ describe('createMcpServer', () => {
     expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_access_audit_report', {
       operation: 'delete',
       tool: 'fbeast_memory_store',
+      agentId: { token: 'SECRET_TOKEN_SHOULD_NOT_LEAK' },
+      decision: { secret: 'SECRET_DECISION_SHOULD_NOT_LEAK' },
       key: 'OPENAI_API_KEY',
       query: 'alice@example.test',
       value: 'example value that must not be echoed',
@@ -268,6 +270,8 @@ describe('createMcpServer', () => {
     })).toEqual({
       operation: 'delete',
       tool: 'fbeast_memory_store',
+      agentId: '[memory-access-audit-report-args-redacted]',
+      decision: '[memory-access-audit-report-args-redacted]',
       key: '[memory-access-audit-report-args-redacted]',
       query: '[memory-access-audit-report-args-redacted]',
       value: '[memory-access-audit-report-args-redacted]',

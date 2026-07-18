@@ -185,6 +185,8 @@ const SUPPORTED_MEMORY_TYPES = ["working", "episodic"] as const;
 const DEFAULT_QUERY_LIMIT = 20;
 const DEFAULT_ATTRIBUTION_LIMIT = 50;
 const MAX_QUERY_LIMIT = 1000;
+const MEMORY_ACCESS_AUDIT_SCAN_MULTIPLIER = 50;
+const MAX_MEMORY_ACCESS_AUDIT_SCAN_LIMIT = 10_000;
 const AGENT_WORKING_KEY_PREFIX = "__fbeast_agent_memory__/";
 const AGENT_MEMORY_SCOPE_MARKER = "fbeast:agent-memory";
 const MAX_OPERATIONAL_TTL_MS = 365 * 24 * 60 * 60 * 1000;
@@ -632,7 +634,10 @@ function includeMemoryAuditTool(toolName: string, context: Record<string, unknow
 function normalizeAuditTimestamp(timestamp: string): string {
   const trimmed = timestamp.trim();
   if (trimmed.length === 0) return trimmed;
-  const normalized = trimmed.includes("T") ? trimmed : `${trimmed.replace(" ", "T")}Z`;
+  const hasExplicitTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(trimmed);
+  const normalized = trimmed.includes("T")
+    ? `${trimmed}${hasExplicitTimezone ? "" : "Z"}`
+    : `${trimmed.replace(" ", "T")}Z`;
   const ms = Date.parse(normalized);
   return Number.isNaN(ms) ? trimmed : new Date(ms).toISOString();
 }
@@ -899,6 +904,13 @@ function hasPostScanAuditFilter(input: MemoryAccessAuditReportInput): boolean {
     || input.tool !== undefined
     || input.operation !== undefined
     || input.decision !== undefined;
+}
+
+function resolveMemoryAccessAuditScanLimit(resultLimit: number): number {
+  return Math.min(
+    Math.max(resultLimit * MEMORY_ACCESS_AUDIT_SCAN_MULTIPLIER, MAX_QUERY_LIMIT),
+    MAX_MEMORY_ACCESS_AUDIT_SCAN_LIMIT,
+  );
 }
 
 function sqlLimitClause(limit: number | undefined): string {
@@ -1249,7 +1261,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
 
     async memoryAccessAuditReport(input = {}) {
       const limit = resolveQueryLimit(input.limit ?? MAX_QUERY_LIMIT);
-      const scanLimit = hasPostScanAuditFilter(input) ? undefined : Math.max(limit * 50, MAX_QUERY_LIMIT);
+      const scanLimit = resolveMemoryAccessAuditScanLimit(limit);
       const reportDb = new Database(dbPath);
       configureBrainAdapterDb(reportDb);
       try {
