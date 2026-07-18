@@ -551,6 +551,8 @@ describe('BeastDispatchService', () => {
     });
 
     expect(run.status).toBe('failed');
+    expect(run.configSnapshot).toEqual({});
+    expect(repo.getRun(run.id)?.configSnapshot).toEqual({});
     const agentStatusEvents = publishSpy.mock.calls.filter(([e]) => e.type === 'agent.status');
     expect(agentStatusEvents).toHaveLength(1);
     expect(agentStatusEvents[0][0].data).toMatchObject({

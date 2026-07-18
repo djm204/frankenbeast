@@ -282,6 +282,7 @@ export class BeastDispatchService {
         const failedRun = this.repository.transaction(() => {
           const updatedRun = this.repository.updateRun(run.id, {
             status: 'failed',
+            ...(run.trackedAgentId ? { configSnapshot: {} } : {}),
             finishedAt: failedAt,
             stopReason: 'start_failed',
           });

@@ -103,6 +103,9 @@ export class BeastRunService {
           || currentRun.attemptCount > priorAttemptCount
         )
       ) {
+        if (currentRun.status === 'failed' && currentRun.trackedAgentId) {
+          this.repository.updateRun(currentRun.id, { configSnapshot: {} });
+        }
         throw new Error(SAFE_DISPATCH_FAILURE_MESSAGE);
       }
       const priorAttempt = priorAttemptId ? this.repository.getAttempt(priorAttemptId) : undefined;
@@ -123,6 +126,7 @@ export class BeastRunService {
         await this.appendLogSafely(run.id, 'system', 'stderr', `start_failed: ${errorMessage}`);
         const { failedRun, publications } = this.repository.transaction(() => {
           const normalizedRun = this.repository.updateRun(run.id, {
+            ...(run.trackedAgentId ? { configSnapshot: {} } : {}),
             startedAt: null,
             currentAttemptId: null,
             latestExitCode: null,
@@ -174,6 +178,7 @@ export class BeastRunService {
       const { failedRun, publications } = this.repository.transaction(() => {
         const updatedRun = this.repository.updateRun(run.id, {
           status: 'failed',
+          ...(run.trackedAgentId ? { configSnapshot: {} } : {}),
           startedAt: null,
           finishedAt: failedAt,
           currentAttemptId: null,
@@ -424,6 +429,21 @@ export class BeastRunService {
         type: 'agent.status',
         data: { agentId: trackedAgentId, status, updatedAt },
       }];
+
+      if (trackedAgent.status === 'failed' && status === 'running') {
+        const recoveredEvent = {
+          level: 'info' as const,
+          type: 'agent.dispatch.recovered',
+          message: `Tracked agent dispatch recovered for run ${run.id}`,
+          payload: { runId: run.id },
+          createdAt: updatedAt,
+        };
+        this.repository.appendTrackedAgentEvent(trackedAgentId, recoveredEvent);
+        pendingPublications.push({
+          type: 'agent.event',
+          data: { agentId: trackedAgentId, event: recoveredEvent },
+        });
+      }
 
       if ((run.status === 'failed' || run.status === 'completed' || run.status === 'stopped')) {
         const level: 'error' | 'info' = run.status === 'failed' ? 'error' : 'info';

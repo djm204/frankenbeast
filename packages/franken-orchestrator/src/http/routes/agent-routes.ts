@@ -224,21 +224,18 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       }, 409);
     }
 
-    const createdDetail = deps.agents.getAgentDetail(agent.id);
     return c.json({
-      data: hasDispatchFailure(createdDetail.events)
-        ? redactDispatchFailedAgentResponse(createdDetail.agent)
-        : createdDetail.agent,
+      data: redactAgentIfNeeded(deps.agents.getAgent(agent.id), deps),
     }, 201);
   });
 
   app.get('/v1/beasts/agents', (c) => {
+    const redactedAgentIds = deps.agents.listDispatchFailureRedactedAgentIds();
     return c.json({
       data: {
-        agents: deps.agents.listAgents().map((agent) => {
-          const events = deps.agents.getAgentDetail(agent.id).events;
-          return hasDispatchFailure(events) ? redactDispatchFailedAgentResponse(agent) : agent;
-        }),
+        agents: deps.agents.listAgents().map((agent) => redactedAgentIds.has(agent.id)
+          ? redactDispatchFailedAgentResponse(agent)
+          : agent),
         capacityReservation: deps.agents.getCapacityReservationState(),
       },
     });
@@ -248,7 +245,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
     const agentId = c.req.param('agentId');
     try {
       const detail = deps.agents.getAgentDetail(agentId);
-      const redactDispatchFailure = hasDispatchFailure(detail.events);
+      const redactDispatchFailure = deps.agents.hasActiveDispatchFailure(agentId);
       return c.json({
         data: {
           ...detail,
@@ -298,7 +295,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
           ],
         },
       });
-      return c.json({ data: updated });
+      return c.json({ data: redactAgentIfNeeded(updated, deps) });
     } catch (error) {
       if (error instanceof UnknownTrackedAgentError) {
         throw new HttpError(
@@ -387,7 +384,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
         message: 'Stop requested before a linked run was created',
         payload: {},
       });
-      return c.json({ data: updated });
+      return c.json({ data: redactAgentIfNeeded(updated, deps) });
     } catch (error) {
       if (error instanceof UnknownTrackedAgentError) {
         throw new HttpError(
@@ -657,6 +654,7 @@ async function startLinkedAgentRun(deps: AgentRoutesDeps, agent: TrackedAgent): 
   if (!agent.dispatchRunId) {
     throw new Error(`Tracked agent '${agent.id}' has no linked run`);
   }
+  restoreFailedRunConfigSnapshot(deps, agent);
   return deps.runs.start(agent.dispatchRunId, 'operator');
 }
 
@@ -664,7 +662,18 @@ async function restartLinkedAgentRun(deps: AgentRoutesDeps, agent: TrackedAgent)
   if (!agent.dispatchRunId) {
     throw new Error(`Tracked agent '${agent.id}' has no linked run`);
   }
+  restoreFailedRunConfigSnapshot(deps, agent);
   return deps.runs.restart(agent.dispatchRunId, 'operator');
+}
+
+function restoreFailedRunConfigSnapshot(deps: AgentRoutesDeps, agent: TrackedAgent): void {
+  if (!agent.dispatchRunId) return;
+  const run = deps.runs.getRun(agent.dispatchRunId);
+  if (run?.status !== 'failed' || Object.keys(run.configSnapshot).length > 0) return;
+  deps.runs.updateConfigSnapshot(run.id, {
+    ...agent.initConfig,
+    ...(agent.moduleConfig ? { modules: agent.moduleConfig } : {}),
+  });
 }
 
 function assertAgentCapacityAvailable(deps: AgentRoutesDeps, agent: TrackedAgent): void {
@@ -695,8 +704,10 @@ function redactDispatchFailedAgentResponse(agent: TrackedAgent) {
   };
 }
 
-function hasDispatchFailure(events: readonly TrackedAgentEvent[]): boolean {
-  return events.some((event) => event.type === 'agent.dispatch.failed');
+function redactAgentIfNeeded(agent: TrackedAgent, deps: AgentRoutesDeps) {
+  return deps.agents.hasActiveDispatchFailure(agent.id)
+    ? redactDispatchFailedAgentResponse(agent)
+    : agent;
 }
 
 function redactDispatchFailedAgentEvents(events: readonly TrackedAgentEvent[]): TrackedAgentEvent[] {
@@ -713,6 +724,13 @@ function redactDispatchFailedAgentEvents(events: readonly TrackedAgentEvent[]): 
         ...event,
         message: SAFE_DISPATCH_FAILURE_MESSAGE,
         payload: { error: SAFE_DISPATCH_FAILURE_MESSAGE },
+      };
+    }
+    if (event.type === 'agent.dispatch.linked') {
+      return {
+        ...event,
+        message: 'Linked Beast run',
+        payload: {},
       };
     }
     return event;

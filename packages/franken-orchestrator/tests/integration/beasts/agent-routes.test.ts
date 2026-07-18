@@ -1618,15 +1618,38 @@ describe('agent routes integration', () => {
       message: `Provider spawn failed: token=${exceptionSecret}`,
       payload: { error: exceptionSecret, runId: 'run_historical-secret-link' },
     });
+    agents.appendEvent(responseBody.error.details.agentId, {
+      level: 'info',
+      type: 'agent.dispatch.linked',
+      message: 'Linked Beast run run_historical-secret-link',
+      payload: { runId: 'run_historical-secret-link' },
+    });
     const detailResponse = await app.request(`/v1/beasts/agents/${responseBody.error.details.agentId}`, { headers });
     expect(detailResponse.status).toBe(200);
     const detail = await detailResponse.json() as {
       data: { agent: Record<string, unknown>; events: AgentEvent[] };
     };
+    expect(detail.data.agent).not.toHaveProperty('dispatchRunId');
+    expect(JSON.stringify(detail.data.events)).not.toContain('run_historical-secret-link');
+
+    const patchResponse = await app.request(`/v1/beasts/agents/${responseBody.error.details.agentId}/config`, {
+      method: 'PATCH',
+      headers,
+      body: '{}',
+    });
+    expect(patchResponse.status).toBe(200);
+    const patchedAgent = await patchResponse.json() as { data: Record<string, unknown> };
+    const stopResponse = await app.request(`/v1/beasts/agents/${responseBody.error.details.agentId}/stop`, {
+      method: 'POST',
+      headers,
+    });
+    expect(stopResponse.status).toBe(200);
+    const stoppedAgent = await stopResponse.json() as { data: Record<string, unknown> };
     const exposedSurfaces = JSON.stringify({
       responseBody,
       agent: detail.data.agent,
       events: detail.data.events,
+      mutationResponses: [patchedAgent, stoppedAgent],
       logs: consoleError.mock.calls,
     });
     expect(responseBody.error.details.dispatchError).toBe(SAFE_DISPATCH_FAILURE_MESSAGE);

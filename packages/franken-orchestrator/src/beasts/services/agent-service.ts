@@ -118,6 +118,14 @@ export class AgentService {
     };
   }
 
+  listDispatchFailureRedactedAgentIds(): Set<string> {
+    return new Set(this.repository.listActiveDispatchFailureAgentIds());
+  }
+
+  hasActiveDispatchFailure(agentId: string): boolean {
+    return this.repository.hasActiveDispatchFailure(agentId);
+  }
+
   appendEvent(agentId: string, request: AppendTrackedAgentEventRequest): TrackedAgentEvent {
     return this.repository.appendTrackedAgentEvent(agentId, {
       ...request,

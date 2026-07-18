@@ -670,7 +670,9 @@ describe('BeastRunService', () => {
       id: run.id,
       status: 'failed',
       stopReason: 'start_failed',
+      configSnapshot: {},
     });
+    expect(repo.getRun(run.id)?.configSnapshot).toEqual({});
     expect(repo.listEvents(run.id)).toEqual(expect.arrayContaining([
       expect.objectContaining({
         type: 'run.start_failed',
