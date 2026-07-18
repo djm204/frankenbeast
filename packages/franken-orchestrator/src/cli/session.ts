@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { resolveContainedExistingPath } from '@franken/types/path-containment';
 import { tmpdir } from 'node:os';
 import { BeastLoop } from '../beast-loop.js';
