@@ -906,6 +906,23 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('redacts lowercase client identifiers in post-task preference reports', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-lowercase-client-reference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['User prefers client acme-123 data stay out of lessons'],
+    });
+
+    expect(JSON.stringify(report)).not.toContain('acme-123');
+    expect(report.candidates[0]?.privacyFilter).toEqual(
+      expect.objectContaining({
+        sensitive: true,
+        approvalRequired: true,
+        flags: expect.arrayContaining(['customer-data']),
+      }),
+    );
+  });
+
   it('attaches matching verification steps to a single pending lesson candidate', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-verification-evidence',
@@ -1939,7 +1956,7 @@ describe('extractPostTaskLessonCandidates', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-redacted-branch-note',
       completedAt: '2026-07-16T00:00:00.000Z',
-      notes: ['pushed branch feature/customer-fix'],
+      notes: ['pushed branch feature/customer-fix with token=12345678'],
     });
 
     expect(report.candidates[0]?.text).toMatch(
@@ -1951,6 +1968,17 @@ describe('extractPostTaskLessonCandidates', () => {
         suggestedDestination: 'discard',
       }),
     );
+    expect(JSON.stringify(report)).not.toContain('feature/customer-fix');
+  });
+
+  it('redacts rejected task-state verification evidence before attaching it', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-redacted-verification-branch-note',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['When a build times out, rerun npm test before changing code'],
+      verificationSteps: ['Verified pushed branch feature/customer-fix with gh run view'],
+    });
+
     expect(JSON.stringify(report)).not.toContain('feature/customer-fix');
   });
 
