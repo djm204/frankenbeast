@@ -209,6 +209,13 @@ vi.mock("better-sqlite3", () => ({
                 reason: "card a write",
                 createdAt: "2026-07-16T14:35:00.000Z",
               },
+              {
+                action: "fbeast_memory_delete_all",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "agent-unknown-tool", profile: "unknown-tool-test" }),
+                decision: "unknown_tool",
+                reason: "unknown memory tool probe",
+                createdAt: "2026-07-16T14:36:00.000Z",
+              },
             ];
           }
           if (sql.includes("FROM audit_trail")) {
@@ -1314,14 +1321,14 @@ describe("createBrainAdapter", () => {
     expect(prepareSql.find((sql) => sql.includes("FROM audit_trail"))).toContain("LIMIT ?");
   });
 
-  it("keeps memory access audit source scans bounded when metadata filters are present", async () => {
+  it("searches past the bounded source window when metadata filters are present", async () => {
     const brain = createBrainAdapter("/tmp/beast.db");
 
     await brain.memoryAccessAuditReport({ profile: "sparse-duplicate-test", limit: 5 });
 
     const prepareSql = databaseInstances.at(-1)!.prepare.mock.calls.map(([sql]) => String(sql));
-    expect(prepareSql.find((sql) => sql.includes("FROM governor_log"))).toContain("LIMIT ?");
-    expect(prepareSql.find((sql) => sql.includes("FROM audit_trail"))).toContain("LIMIT ?");
+    expect(prepareSql.find((sql) => sql.includes("FROM governor_log"))).not.toContain("LIMIT ?");
+    expect(prepareSql.find((sql) => sql.includes("FROM audit_trail"))).not.toContain("LIMIT ?");
   });
 
   it("keeps rapid repeated memory accesses as separate audit events", async () => {
@@ -1379,18 +1386,34 @@ describe("createBrainAdapter", () => {
     expect(timezoneLessReport.events.map((event) => event.timestamp)).toEqual(["2026-07-16T10:30:00.000Z"]);
   });
 
-  it("keeps filtered memory access audit scans bounded before dedupe", async () => {
+  it("searches filtered memory access audit scans past the prefilter window", async () => {
     const brain = createBrainAdapter("/tmp/beast.db");
 
     await brain.memoryAccessAuditReport({ profile: "default", limit: 50 });
 
-    const reportDb = databaseInstances[1];
+    const reportDb = databaseInstances.at(-1);
     expect(reportDb).toBeDefined();
     const auditQueries = reportDb!.prepare.mock.calls
       .map(([sql]) => String(sql))
       .filter((sql) => sql.includes("FROM governor_log") || sql.includes("FROM audit_trail"));
     expect(auditQueries).toHaveLength(2);
-    expect(auditQueries.every((sql) => sql.includes("LIMIT ?"))).toBe(true);
+    expect(auditQueries.every((sql) => !sql.includes("LIMIT ?"))).toBe(true);
+  });
+
+  it("includes unknown memory-tool probes in audit reports", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ decision: "unknown_tool", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      tool: "fbeast_memory_delete_all",
+      operation: "unknown",
+      targetStore: "memory",
+      targetClass: "memory-access",
+      decision: "unknown_tool",
+      reason: "unknown memory tool probe",
+    });
   });
 
   it("ignores caller-forged observer and public governor memory probes", async () => {

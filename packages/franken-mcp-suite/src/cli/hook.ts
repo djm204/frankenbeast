@@ -194,10 +194,10 @@ function hookArgsFromContext(context: string, toolName: string): Record<string, 
 
 function sanitizeHookAuditArgs(toolName: string | undefined, args: Record<string, unknown>): Record<string, unknown> | undefined {
   const normalized = unqualifyMcpToolName(toolName ?? '');
-  const mayBeMemory = MEMORY_AUDIT_ARG_TOOLS.has(normalized) || 'agentId' in args || 'profile' in args || 'readScope' in args || 'type' in args;
+  const mayBeMemory = normalized.startsWith('fbeast_memory_') || MEMORY_AUDIT_ARG_TOOLS.has(normalized) || 'agentId' in args || 'profile' in args || 'readScope' in args || 'type' in args;
   if (!mayBeMemory) return undefined;
   const safe: Record<string, unknown> = {};
-  for (const key of ['agentId', 'profile', 'repo', 'type', 'operation', 'decision', 'readScope', 'limit', 'dryRun', 'redaction', 'activeProfile', 'crossProfile']) {
+  for (const key of ['agentId', 'profile', 'repo', 'type', 'operation', 'decision', 'readScope', 'limit', 'dryRun', 'redaction', 'activeProfile', 'crossProfile', 'action', 'resolution']) {
     if (Object.prototype.hasOwnProperty.call(args, key)) safe[key] = args[key];
   }
   for (const key of ['key', 'query', 'category', 'sourceScope', 'memoryKey']) {

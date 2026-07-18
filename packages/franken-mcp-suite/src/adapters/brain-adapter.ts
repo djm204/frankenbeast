@@ -621,6 +621,7 @@ function inferMemoryAccess(toolName: string, context: Record<string, unknown>): 
 function memoryAuditToolName(toolName: string, context: Record<string, unknown> = {}): string | undefined {
   const unqualified = unqualifyToolName(toolName);
   if (Object.prototype.hasOwnProperty.call(MEMORY_ACCESS_TOOL_OPERATIONS, unqualified)) return unqualified;
+  if (unqualified.startsWith("fbeast_memory_")) return unqualified;
   if (unqualified !== "execute_tool") return undefined;
   const nested = nestedMemoryAuditContext(toolName, context);
   if (!nested) return undefined;
@@ -1261,7 +1262,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
 
     async memoryAccessAuditReport(input = {}) {
       const limit = resolveQueryLimit(input.limit ?? MAX_QUERY_LIMIT);
-      const scanLimit = resolveMemoryAccessAuditScanLimit(limit);
+      const scanLimit = hasPostScanAuditFilter(input) ? undefined : resolveMemoryAccessAuditScanLimit(limit);
       const reportDb = new Database(dbPath);
       configureBrainAdapterDb(reportDb);
       try {

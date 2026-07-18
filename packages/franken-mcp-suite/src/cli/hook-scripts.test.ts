@@ -465,6 +465,44 @@ describe('Codex hook scripts', () => {
     expect(context).not.toContain('SECRET_TOKEN_SHOULD_NOT_LEAK');
   });
 
+  it('forwards memory review actions so hook audit reports retain approve/reject operations', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const contextFile = join(root, 'context.txt');
+    const { postTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(postTool, {
+      tool_name: 'execute_tool',
+      tool_input: {
+        tool: 'fbeast_memory_review_decide',
+        args: {
+          id: 'memcand_1',
+          action: 'approve',
+          resolution: 'keep_both_scoped',
+          profile: 'default',
+          note: 'SECRET_TOKEN_SHOULD_NOT_LEAK',
+        },
+      },
+      tool_response: { ok: true },
+      session_id: 'sess-1',
+    }, binDir, { FBEAST_CAPTURE_CONTEXT_FILE: contextFile });
+
+    expect(result.status, result.stderr).toBe(0);
+    const context = readFileSync(contextFile, 'utf8');
+    expect(JSON.parse(context)).toEqual({
+      tool_input: {
+        tool: 'fbeast_memory_review_decide',
+        args: {
+          action: 'approve',
+          resolution: 'keep_both_scoped',
+          profile: 'default',
+        },
+      },
+    });
+    expect(context).not.toContain('SECRET_TOKEN_SHOULD_NOT_LEAK');
+  });
+
   it('forwards proxied memory access audit report evidence without raw selectors or destructive filter values', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
