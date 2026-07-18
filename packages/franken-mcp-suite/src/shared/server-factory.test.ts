@@ -363,6 +363,34 @@ describe('createMcpServer', () => {
     });
   });
 
+  it('redacts observer metadata from direct and proxy audit records', () => {
+    expect(sanitizeToolArgumentsForAuditTrail('fbeast_observer_log', {
+      event: 'tool_call',
+      metadata: 'x'.repeat(1_000_001),
+      sessionId: 'session-1',
+    })).toEqual({
+      event: 'tool_call',
+      metadata: '[observer-metadata-redacted]',
+      sessionId: 'session-1',
+    });
+
+    expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
+      tool: 'fbeast_observer_log',
+      args: {
+        event: 'tool_call',
+        metadata: 'x'.repeat(1_000_001),
+        sessionId: 'session-1',
+      },
+    })).toEqual({
+      tool: 'fbeast_observer_log',
+      args: {
+        event: 'tool_call',
+        metadata: '[observer-metadata-redacted]',
+        sessionId: 'session-1',
+      },
+    });
+  });
+
   it('redacts memory access audit report rejected selectors from direct and proxy audit records', () => {
     expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_access_audit_report', {
       operation: 'delete',

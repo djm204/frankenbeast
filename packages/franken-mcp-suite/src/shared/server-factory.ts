@@ -359,6 +359,7 @@ const MEMORY_REVIEW_DECIDE_SAFE_ACTIONS = new Set(['approve', 'reject', 'never_s
 const MEMORY_REVIEW_DECIDE_SAFE_RESOLUTIONS = new Set(['keep_existing', 'replace_existing', 'keep_both_scoped', 'reject_candidate', 'expire_existing']);
 const MEMORY_STORE_TOOL = 'fbeast_memory_store';
 const MEMORY_STORE_SAFE_AUDIT_KEYS = new Set(['key', 'type', 'agentId', 'ttlMs']);
+const OBSERVER_LOG_TOOL = 'fbeast_observer_log';
 
 function normalizeAuditDateString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
@@ -666,6 +667,23 @@ function redactMemoryStoreEnvelope(sanitized: Record<string, unknown>, redaction
   return sanitized;
 }
 
+function redactObserverLogArgs(sanitized: Record<string, unknown>, redaction = '[observer-metadata-redacted]'): Record<string, unknown> {
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'metadata')) {
+    sanitized['metadata'] = redaction;
+  }
+  return sanitized;
+}
+
+function redactObserverLogEnvelope(sanitized: Record<string, unknown>, redaction = '[observer-metadata-redacted]'): Record<string, unknown> {
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'args')) {
+    const args = sanitized['args'];
+    sanitized['args'] = isObjectLike(args) && !Array.isArray(args)
+      ? redactObserverLogArgs(args as Record<string, unknown>, redaction)
+      : redaction;
+  }
+  return sanitized;
+}
+
 export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unknown): Record<string, unknown> {
   const sanitized = sanitizeToolArgumentsForAudit(args);
   const unqualifiedToolName = unqualifyMcpToolName(toolName);
@@ -767,6 +785,15 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
     }
     return sanitized;
   }
+  if (auditedTool === OBSERVER_LOG_TOOL || auditedAction === OBSERVER_LOG_TOOL) {
+    if (unqualifiedToolName === 'execute_tool') {
+      return redactObserverLogEnvelope(sanitized);
+    }
+    if (unqualifiedToolName === OBSERVER_LOG_TOOL) {
+      return redactObserverLogArgs(sanitized);
+    }
+    return sanitized;
+  }
   if (auditedTool !== 'fbeast_memory_right_to_forget' && auditedAction !== 'fbeast_memory_right_to_forget') return sanitized;
   if (auditedAction === 'fbeast_memory_right_to_forget' && Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
     sanitized['context'] = '[right-to-forget-args-redacted]';
@@ -845,12 +872,16 @@ export function validateToolArguments(
       return { ok: false, message: `Tool ${tool.name} property ${key} must be a finite number` };
     }
     if (typeof value === 'string') {
-      const length = Array.from(value).length;
+      let length = 0;
+      const codePoints = value[Symbol.iterator]();
+      while (!codePoints.next().done) {
+        length += 1;
+        if (prop.maxLength !== undefined && length > prop.maxLength) {
+          return { ok: false, message: `Tool ${tool.name} property ${key} must be at most ${prop.maxLength} characters` };
+        }
+      }
       if (prop.minLength !== undefined && length < prop.minLength) {
         return { ok: false, message: `Tool ${tool.name} property ${key} must be at least ${prop.minLength} characters` };
-      }
-      if (prop.maxLength !== undefined && length > prop.maxLength) {
-        return { ok: false, message: `Tool ${tool.name} property ${key} must be at most ${prop.maxLength} characters` };
       }
     }
     if (typeof value === 'number' && prop.minimum !== undefined && value < prop.minimum) {
