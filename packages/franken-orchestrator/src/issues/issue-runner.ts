@@ -854,6 +854,16 @@ function siblingPidsForSnapshot(
     .sort((a, b) => a - b);
 }
 
+function hasSamePidLiveProbe(
+  snapshot: IssueWorkerCardProcessSnapshot,
+  livePidsByCardId: ReadonlyMap<string, readonly number[]>,
+): boolean {
+  return snapshot.alive !== false
+    && Number.isSafeInteger(snapshot.pid)
+    && snapshot.pid > 0
+    && (livePidsByCardId.get(snapshot.cardId.trim()) ?? []).includes(snapshot.pid);
+}
+
 function normalizeKanbanState(status: string): string {
   return status.trim().toLowerCase().replace(/[\s_]+/g, '-');
 }
@@ -919,6 +929,15 @@ export function buildWorkerCrashOnlyRestartContract(
     };
   }
 
+  if (intentionalNonRetryExitReason(rawExitReason) || (terminalKanbanState(kanbanState) && !crashKanbanState(kanbanState))) {
+    return {
+      disposition: 'terminal',
+      nextAction: 'no-op',
+      ...base,
+      evidence,
+    };
+  }
+
   if (activePrUrl || activeWorktreePath) {
     return {
       disposition: 'hitl',
@@ -941,15 +960,6 @@ export function buildWorkerCrashOnlyRestartContract(
     return {
       disposition: 'hitl',
       nextAction: 'defer-with-evidence',
-      ...base,
-      evidence,
-    };
-  }
-
-  if (intentionalNonRetryExitReason(rawExitReason) || (terminalKanbanState(kanbanState) && !crashKanbanState(kanbanState))) {
-    return {
-      disposition: 'terminal',
-      nextAction: 'no-op',
       ...base,
       evidence,
     };
@@ -1063,15 +1073,20 @@ export function detectStuckRunWatchdogFindings(
   const liveSiblings = liveSiblingPidsByCardId(snapshots);
   const deadFindingsByCardId = new Map<string, IssueStuckRunWatchdogFinding>();
   const deadFindingKeysByCardId = new Map<string, { readonly safetyRank: number; readonly recencyMs: number; readonly index: number }>();
+  const terminalRecencyByCardId = new Map<string, number>();
   let findingIndex = 0;
 
   for (const snapshot of snapshots) {
     if (!snapshot.cardId.trim()) continue;
     const hasPositivePid = Number.isSafeInteger(snapshot.pid) && snapshot.pid > 0;
     const status = snapshot.status?.trim().toLowerCase();
-    if (status && TERMINAL_WORKER_CARD_STATUSES.has(status) && !explicitProcessCrash(snapshot)) {
+    if (status && TERMINAL_WORKER_CARD_STATUSES.has(status) && !crashKanbanState(status) && !explicitProcessCrash(snapshot)) {
       const normalizedCardId = snapshot.cardId.trim();
       const terminalRecencyMs = snapshotRecencyMs(snapshot);
+      terminalRecencyByCardId.set(
+        normalizedCardId,
+        Math.max(terminalRecencyByCardId.get(normalizedCardId) ?? 0, terminalRecencyMs),
+      );
       const existingKey = deadFindingKeysByCardId.get(normalizedCardId);
       if (existingKey && snapshot.alive !== true && terminalRecencyMs >= existingKey.recencyMs) {
         deadFindingKeysByCardId.delete(normalizedCardId);
@@ -1099,7 +1114,8 @@ export function detectStuckRunWatchdogFindings(
     const minimumStaleSignals = providedActivitySignalCount;
     const freshLongRunningWaitActivity = [heartbeatAgeMs, outputAgeMs, toolActivityAgeMs, stateTransitionAgeMs]
       .some((age) => age !== undefined && age < longRunningWaitGraceMs);
-    const processStatus: IssueStuckRunWatchdogFinding['processStatus'] = snapshot.alive === false || (snapshot.alive !== true && status !== undefined && crashKanbanState(status))
+    const samePidLiveProbe = hasSamePidLiveProbe(snapshot, liveSiblings);
+    const processStatus: IssueStuckRunWatchdogFinding['processStatus'] = snapshot.alive === false || (snapshot.alive !== true && !samePidLiveProbe && status !== undefined && crashKanbanState(status))
       ? 'dead'
       : hasPositivePid
         ? 'alive'
@@ -1171,6 +1187,11 @@ export function detectStuckRunWatchdogFindings(
         recencyMs: snapshotRecencyMs(snapshot),
         index: findingIndex,
       };
+      const terminalRecencyMs = terminalRecencyByCardId.get(normalizedCardId);
+      if (terminalRecencyMs !== undefined && terminalRecencyMs >= candidateKey.recencyMs) {
+        findingIndex += 1;
+        continue;
+      }
       const existingKey = deadFindingKeysByCardId.get(normalizedCardId);
       const candidateIsSafer = existingKey === undefined
         || candidateKey.safetyRank > existingKey.safetyRank

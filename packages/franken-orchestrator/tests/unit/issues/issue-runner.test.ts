@@ -990,6 +990,29 @@ describe('stuck-run watchdog', () => {
     expect(findings).toEqual([]);
   });
 
+  it('uses terminal recency watermarks when terminal snapshots arrive before older dead attempts', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_terminal_before_old_dead',
+        pid: 7413,
+        runId: 'run-new-complete',
+        status: 'completed',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:31:00.000Z',
+      },
+      {
+        cardId: 't_terminal_before_old_dead',
+        pid: 7412,
+        runId: 'run-old-dead',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([]);
+  });
+
   it('treats dispatcher restart stop reasons as HITL repair evidence before retrying', () => {
     const [finding] = detectStuckRunWatchdogFindings([
       {
@@ -1336,6 +1359,35 @@ describe('stuck-run watchdog', () => {
     });
   });
 
+  it('honors same-PID live probes before inferring status-only crash snapshots are dead', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_same_pid_probe',
+        pid: 7426,
+        status: 'failed',
+        lastHeartbeatAt: '2026-07-16T11:55:00.000Z',
+      },
+      {
+        cardId: 't_same_pid_probe',
+        pid: 7426,
+        status: 'running',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([
+      expect.objectContaining({
+        cardId: 't_same_pid_probe',
+        pid: 7426,
+        processStatus: 'alive',
+        restartDisposition: 'hitl',
+        nextAction: 'defer-with-evidence',
+      }),
+    ]);
+    expect(findings[0]!.recommendedAction).not.toContain('respawn one focused worker');
+  });
+
   it('keeps intentional operator exits non-retryable in direct restart contracts', () => {
     const contract = buildWorkerCrashOnlyRestartContract({
       cardId: 't_operator_stop',
@@ -1354,6 +1406,32 @@ describe('stuck-run watchdog', () => {
       disposition: 'terminal',
       nextAction: 'no-op',
     });
+  });
+
+  it('keeps intentional exits terminal even when active ownership evidence is present', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_operator_stop_owned',
+      pid: 7420,
+      status: 'running',
+      alive: false,
+      exitReason: 'operator_stop',
+      activePrUrl: 'https://github.com/djm204/frankenbeast/pull/2560',
+      activeWorktreePath: '/tmp/frankenbeast/.worktrees/t_operator_stop_owned',
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'running',
+    });
+
+    expect(contract).toMatchObject({
+      exitReason: 'operator_stop',
+      disposition: 'terminal',
+      nextAction: 'no-op',
+    });
+    expect(contract.evidence).toEqual(expect.arrayContaining([
+      'activePr=https://github.com/djm204/frankenbeast/pull/2560',
+      'activeWorktree=/tmp/frankenbeast/.worktrees/t_operator_stop_owned',
+    ]));
   });
 
   it('defers external signal exits for operator investigation in direct restart contracts', () => {
