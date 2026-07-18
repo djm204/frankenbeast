@@ -310,10 +310,15 @@ describe('hard-coded example secret scanner', () => {
       [
         'from os import getenv',
         "github_pat: str = getenv('GITHUB_PERSONAL_ACCESS_TOKEN')",
-        "entry = f'0 3 * * * GITHUB_PERSONAL_ACCESS_TOKEN={github_pat} agy pr'",
+        'github_pat = github_pat.strip()',
+        "entry = f'0 0-23/2 * * * GITHUB_PERSONAL_ACCESS_TOKEN={github_pat} agy pr'",
         'CRON_CMD = (',
         "  '*/5 * * * * agy issue-fixer '",
         "  f'--pat={github_pat}'",
+        ')',
+        'entry = (',
+        "  '0 3 * * * '",
+        "  f'GITHUB_PERSONAL_ACCESS_TOKEN={github_pat} agy pr'",
         ')',
         "safe = 'gh auth token | agy pr'",
         "# CRON_CMD = f\"* * * * * GITHUB_PERSONAL_ACCESS_TOKEN={getenv('GITHUB_PERSONAL_ACCESS_TOKEN')}\"",
@@ -324,10 +329,11 @@ describe('hard-coded example secret scanner', () => {
     const result = runScanner(root);
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('scripts/install_cron.py:3');
-    expect(result.stderr).toContain('scripts/install_cron.py:6');
-    expect(result.stderr).not.toContain('scripts/install_cron.py:8');
-    expect(result.stderr).not.toContain('scripts/install_cron.py:9');
+    expect(result.stderr).toContain('scripts/install_cron.py:4');
+    expect(result.stderr).toContain('scripts/install_cron.py:7');
+    expect(result.stderr).toContain('scripts/install_cron.py:11');
+    expect(result.stderr).not.toContain('scripts/install_cron.py:13');
+    expect(result.stderr).not.toContain('scripts/install_cron.py:14');
   });
 
   it('allows safe cron diagnostics and gh auth token command text', () => {
@@ -342,6 +348,7 @@ describe('hard-coded example secret scanner', () => {
         "const CRON_CMD = '0 3 * * * gh auth token | agy pr';",
         "token = 'gh auth token';",
         "const ENTRY = '0 3 * * * ' + token;",
+        "const compat = process.env.COMPAT ?? 'legacy';",
       ].join('\n'),
       'utf8',
     );
@@ -373,6 +380,14 @@ describe('hard-coded example secret scanner', () => {
       'utf8',
     );
     writeFileSync(
+      join(scriptDir, 'cron-install.sh'),
+      [
+        'GITHUB_PAT_VALUE="$GITHUB_PAT"',
+        'CRON_CMD="0 3 * * * GITHUB_PAT=$GITHUB_PAT_VALUE agy pr"',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
       join(scriptDir, 'install-cron.py'),
       [
         'from os import environ',
@@ -387,6 +402,7 @@ describe('hard-coded example secret scanner', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('scripts/install-cron.mjs:3');
     expect(result.stderr).toContain('scripts/install-cron.sh:2');
+    expect(result.stderr).toContain('scripts/cron-install.sh:2');
     expect(result.stderr).toContain('scripts/install-cron.py:3');
   });
 

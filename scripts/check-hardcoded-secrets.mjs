@@ -27,7 +27,7 @@ const sensitiveEnvNames = [
   ['SECRET', 'KEY'],
 ].map((parts) => parts.join('_'));
 
-const sensitiveIdentifierPattern = /\b(?:[A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY|PASSPHRASE|PAT)|[A-Z0-9_]*(?:SECRET_KEY|ACCESS_KEY)|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)\b/i;
+const sensitiveIdentifierPattern = /\b(?:(?:GITHUB|GH)_PAT|[A-Z0-9_]+_PAT|[A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY|PASSPHRASE)|[A-Z0-9_]*(?:SECRET_KEY|ACCESS_KEY)|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)\b/i;
 const fallbackOperatorPattern = /(?:=|:|\?\?|\|\|)\s*$/;
 const DEFAULT_MAX_SCANNED_FILE_BYTES = 1_000_000;
 const DEFAULT_MAX_SCANNED_LINE_CHARS = 20_000;
@@ -151,7 +151,7 @@ function shouldScanSource(path) {
     return false;
   }
   const extension = extensionOf(path);
-  if ((extension === '.sh' || extension === '.bash') && !/(?:^|\/)install[^/]*cron[^/]*\.(?:sh|bash)$/i.test(rel)) {
+  if ((extension === '.sh' || extension === '.bash') && !/(?:^|\/)[^/]*(?:(?:install|setup)[^/]*cron|cron[^/]*(?:install|setup))[^/]*\.(?:sh|bash)$/i.test(rel)) {
     return false;
   }
   return scannedExtensions.has(extension);
@@ -351,6 +351,10 @@ function expressionUsesSensitiveAlias(expression, aliases) {
     if (hasAliasInterpolation(expression, alias)) {
       return true;
     }
+    const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`\\b${escaped}\\s*(?:\\.|\\?\\.)`, 'u').test(codeOutsideStringLiterals(expression))) {
+      return true;
+    }
   }
   return false;
 }
@@ -382,8 +386,9 @@ function collectSensitiveEnvAliases(line, aliases) {
 }
 
 function hasCronScheduleLiteral(line) {
-  const cronField = String.raw`(?:\*|\*\/\d+|\d+|\d+-\d+|\d+(?:,\d+)*|[A-Z]{3}(?:-[A-Z]{3})?|[A-Z]{3}(?:,[A-Z]{3})*)`;
-  const cronSchedule = new RegExp(String.raw`(?:^|\s)${cronField}\s+${cronField}\s+${cronField}\s+${cronField}\s+${cronField}\s+\S`);
+  const cronComponent = String.raw`(?:\*|\d+(?:-\d+)?|[A-Z]{3}(?:-[A-Z]{3})?)(?:\/\d+)?`;
+  const cronField = String.raw`${cronComponent}(?:,${cronComponent})*`;
+  const cronSchedule = new RegExp(String.raw`(?:^|\s)${cronField}\s+${cronField}\s+${cronField}\s+${cronField}\s+${cronField}(?:\s+\S|\s*$)`);
   return stringLiterals(line).some((literal) => cronSchedule.test(literal.value));
 }
 
@@ -435,7 +440,10 @@ function isCronContinuationLine(line, inCronContext, pendingCronCommand) {
   if (/\(\s*$|[+\\,]\s*$/.test(line)) {
     return true;
   }
-  return pendingCronCommand && /^[furbFURB]*['"`]/.test(line) && !/[)];?\s*$/.test(line);
+  if (/^[furbFURB]*['"`]/.test(line)) {
+    return true;
+  }
+  return pendingCronCommand && !/[)];?\s*$/.test(line);
 }
 
 const sensitiveAssignmentNamePattern = /(?:[A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|PRIVATE_KEY|ACCESS_KEY|PASSPHRASE)|[A-Z0-9_]*(?:AUTH|OPERATOR|BEARER|ACCESS|REFRESH)_TOKEN|(?:accessToken|refreshToken|authToken|operatorToken|bearerToken)|[A-Za-z_$][\w$]*(?:ApiKey|Secret|Password|PrivateKey|AccessKey|AuthToken|OperatorToken|BearerToken|AccessToken|RefreshToken)|[a-z_$][\w$]*(?:_secret|_token|_password|_api_key|_access_key))\b/;
