@@ -439,6 +439,9 @@ describe('hard-coded example secret scanner', () => {
         '  const credential = stdout.trim();',
         '  const entry = `0 3 * * * agy pr --token ${credential}`;',
         '});',
+        "const envName = 'GITHUB_TOKEN';",
+        'const optionalCredential = process.env?.[envName];',
+        'const optionalEntry = `0 4 * * * agy pr --token ${optionalCredential}`;',
       ].join('\n'),
       'utf8',
     );
@@ -454,13 +457,28 @@ describe('hard-coded example secret scanner', () => {
       ].join('\n'),
       'utf8',
     );
+    writeFileSync(
+      join(scriptDir, 'install-cron.sh'),
+      [
+        'auth="$(command gh auth token)"',
+        'CRON_CMD="0 3 * * * agy pr --token $auth"',
+        'crontab <<CRON.EOF',
+        'GITHUB_TOKEN=$GITHUB_TOKEN',
+        '0 4 * * * agy pr',
+        'CRON.EOF',
+      ].join('\n'),
+      'utf8',
+    );
 
     const result = runScanner(root);
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('scripts/install-cron.mjs:1');
     expect(result.stderr).toContain('scripts/install-cron.mjs:4');
+    expect(result.stderr).toContain('scripts/install-cron.mjs:8');
     expect(result.stderr).toContain('scripts/install-cron.py:6');
+    expect(result.stderr).toContain('scripts/install-cron.sh:2');
+    expect(result.stderr).toContain('scripts/install-cron.sh:4');
   });
 
   it('rejects cron credential scanner edge cases without leaking raw tokens', () => {

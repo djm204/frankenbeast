@@ -364,7 +364,7 @@ function hasSensitiveEnvAccess(line, envContainerAliases = new Set(), envNameAli
       }
     }
   }
-  const variableEnvAccessPattern = /(?:(?:process\.env|import\.meta\.env|(?:os\.)?environ)\s*\[\s*([A-Za-z_$][\w$]*)\s*\]|(?:os\.environ(?:\.(?:get|setdefault))?|os\.getenv|\bgetenv|\benviron(?:\.(?:get|setdefault))?)\s*\(\s*([A-Za-z_$][\w$]*))/g;
+  const variableEnvAccessPattern = /(?:(?:process\.env|import\.meta\.env|(?:os\.)?environ)\s*(?:\?\.)?\[\s*([A-Za-z_$][\w$]*)\s*\]|(?:os\.environ(?:\.(?:get|setdefault))?|os\.getenv|\bgetenv|\benviron(?:\.(?:get|setdefault))?)\s*\(\s*([A-Za-z_$][\w$]*))/g;
   for (const match of line.matchAll(variableEnvAccessPattern)) {
     const envNameAlias = match[1] ?? match[2] ?? '';
     if (envNameAlias && envNameAliases.has(envNameAlias)) {
@@ -595,7 +595,7 @@ function collectAsyncGhAuthTokenCallbackAliases(line, aliases) {
 }
 
 function hasInstallTimeGhAuthTokenSubstitution(line) {
-  const unescapedSubstitution = /(^|[^\\])(?:\$\(\s*gh\s+auth\s+token\b|`\s*gh\s+auth\s+token\b)/;
+  const unescapedSubstitution = /(^|[^\\])(?:\$\(\s*(?:command\s+)?gh\s+auth\s+token\b|`\s*(?:command\s+)?gh\s+auth\s+token\b)/;
   const literals = stringLiterals(line);
   let cursor = 0;
   for (const literal of literals) {
@@ -632,7 +632,7 @@ function isCronContinuationLine(line, inCronContext, pendingCronCommand) {
   if (!inCronContext) {
     return false;
   }
-  if (/\(\s*$|[=+\\,]\s*$|(?:=|\+)\s*[furbFURB]*[`'"]{1,3}\s*$|<<-?\s*['"]?[A-Za-z_][\w-]*['"]?(?:\s|$)|(?:[furbFURB]*)?(?:'''|\"\"\")\s*$/.test(line)) {
+  if (/\(\s*$|[=+\\,]\s*$|(?:=|\+)\s*[furbFURB]*[`'"]{1,3}\s*$|<<-?\s*['"]?[A-Za-z_][\w.-]*['"]?(?:\s|$)|(?:[furbFURB]*)?(?:'''|\"\"\")\s*$/.test(line)) {
     return true;
   }
   if (/^[furbFURB]*['"`]/.test(line)) {
@@ -642,7 +642,7 @@ function isCronContinuationLine(line, inCronContext, pendingCronCommand) {
 }
 
 function cronHeredocInfo(line) {
-  const match = line.match(/<<-?\s*(\\?)(['"]?)([A-Za-z_][\w-]*)\2(?:\s|$)/);
+  const match = line.match(/<<-?\s*(\\?)(['"]?)([A-Za-z_][\w.-]*)\2(?:\s|$)/);
   return match ? { delimiter: match[3], quoted: Boolean(match[1] || match[2]) } : null;
 }
 
