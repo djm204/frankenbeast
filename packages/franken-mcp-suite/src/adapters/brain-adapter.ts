@@ -905,15 +905,6 @@ function filterMemoryAccessEvents(events: MemoryAccessAuditEvent[], input: Memor
   });
 }
 
-function hasPostScanAuditFilter(input: MemoryAccessAuditReportInput): boolean {
-  return input.agentId !== undefined
-    || input.profile !== undefined
-    || input.repo !== undefined
-    || input.tool !== undefined
-    || input.operation !== undefined
-    || input.decision !== undefined;
-}
-
 function resolveMemoryAccessAuditScanLimit(resultLimit: number): number {
   return Math.min(
     Math.max(resultLimit * MEMORY_ACCESS_AUDIT_SCAN_MULTIPLIER, MAX_QUERY_LIMIT),
