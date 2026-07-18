@@ -5,12 +5,13 @@ const { databaseInstances, brainInstances, workingMemoryRowsByPath } = vi.hoiste
   const databaseInstances: Array<{
     pragma: ReturnType<typeof vi.fn>;
     prepare: ReturnType<typeof vi.fn>;
-    transaction: ReturnType<typeof vi.fn>;
     close: ReturnType<typeof vi.fn>;
     dbPath: string;
     options: unknown;
   }> = [];
   const brainInstances: Array<{
+    dbPath: string;
+    limits: { maxEntries?: number; maxTotalBytes?: number } | undefined;
     working: {
       restore: ReturnType<typeof vi.fn>;
       snapshot: ReturnType<typeof vi.fn>;
@@ -24,6 +25,7 @@ const { databaseInstances, brainInstances, workingMemoryRowsByPath } = vi.hoiste
       record: ReturnType<typeof vi.fn>;
     };
     rightToForget: ReturnType<typeof vi.fn>;
+    memoryRetentionReport: ReturnType<typeof vi.fn>;
     memoryReview: {
       propose: ReturnType<typeof vi.fn>;
       approve: ReturnType<typeof vi.fn>;
@@ -48,16 +50,6 @@ vi.mock("better-sqlite3", () => ({
       pragma: vi.fn(),
       prepare: vi.fn((sql: string) => ({
         get: vi.fn((tableName?: string) => {
-          if (sql.includes("COUNT(*)") && sql.includes("working_memory")) {
-            const rows = workingMemoryRowsByPath.get(_dbPath) ?? [];
-            return {
-              rowCount: rows.length,
-              byteCount: rows.reduce(
-                (total, row) => total + Buffer.byteLength(row.key) + Buffer.byteLength(row.value),
-                0,
-              ),
-            };
-          }
           if (sql.includes("sqlite_master") && (tableName === "governor_log" || tableName === "audit_trail")) {
             return { name: tableName };
           }
@@ -417,7 +409,6 @@ vi.mock("better-sqlite3", () => ({
           return workingMemoryRowsByPath.get(_dbPath) ?? [];
         }),
       })),
-      transaction: vi.fn((callback: () => unknown) => callback),
       close: vi.fn(),
       dbPath: _dbPath,
       options,
@@ -428,7 +419,16 @@ vi.mock("better-sqlite3", () => ({
 }));
 
 vi.mock("@franken/brain", () => ({
-  SqliteBrain: vi.fn(function MockSqliteBrain(this: unknown) {
+  DEFAULT_WORKING_MEMORY_LIMITS: {
+    maxEntries: 10_000,
+    maxValueBytes: 5 * 1024 * 1024,
+    maxTotalBytes: 64 * 1024 * 1024,
+  },
+  SqliteBrain: vi.fn(function MockSqliteBrain(
+    this: unknown,
+    dbPath: string,
+    limits?: { maxEntries?: number; maxTotalBytes?: number },
+  ) {
     let workingSnapshot: Record<string, unknown> = {
       "task-1": "working entry",
       "agents/oncall/runbook": "shared runbook",
@@ -478,6 +478,18 @@ vi.mock("@franken/brain", () => ({
         value: "beta entry",
       },
     };
+    const persistedRows = workingMemoryRowsByPath.get(dbPath);
+    if (persistedRows !== undefined) {
+      workingSnapshot = Object.fromEntries(
+        persistedRows.map((row) => {
+          try {
+            return [row.key, JSON.parse(row.value)];
+          } catch {
+            return [row.key, row.value];
+          }
+        }),
+      );
+    }
     const brain = {
       working: {
         restore: vi.fn((snapshot: Record<string, unknown>) => {
@@ -678,7 +690,7 @@ vi.mock("@franken/brain", () => ({
       },
       flush: vi.fn(),
     };
-    brainInstances.push(brain);
+    brainInstances.push({ ...brain, dbPath, limits });
     Object.assign(this as object, brain);
   }),
 }));
@@ -693,54 +705,27 @@ describe("createBrainAdapter", () => {
     vi.clearAllMocks();
   });
 
-  it("configures WAL and a busy timeout and measures hydration before loading rows", () => {
+  it("delegates startup hydration to SqliteBrain with its bounded defaults", () => {
     createBrainAdapter("/tmp/beast.db");
 
-    expect(databaseInstances).toHaveLength(1);
-    const readDb = databaseInstances[0];
-    expect(readDb.options).toBeUndefined();
-    expect(readDb.pragma).toHaveBeenNthCalledWith(1, "journal_mode = WAL");
-    expect(readDb.pragma).toHaveBeenNthCalledWith(2, "busy_timeout = 5000");
-    expect(readDb.prepare).toHaveBeenCalledWith(expect.stringContaining("COUNT(*)"));
-    expect(readDb.prepare).toHaveBeenCalledWith("SELECT key, value FROM working_memory");
-    expect(readDb.transaction).toHaveBeenCalledOnce();
-    expect(readDb.close).toHaveBeenCalledOnce();
+    expect(databaseInstances).toHaveLength(0);
+    expect(brainInstances).toHaveLength(1);
+    expect(brainInstances[0]).toMatchObject({
+      dbPath: "/tmp/beast.db",
+      limits: { maxEntries: 10_000, maxTotalBytes: 64 * 1024 * 1024 },
+    });
+    expect(brainInstances[0]!.working.restore).not.toHaveBeenCalled();
   });
 
-  it("fails startup with a recoverable diagnostic before hydrating too many rows", () => {
-    workingMemoryRowsByPath.set("/tmp/oversized.db", [
-      { key: "one", value: JSON.stringify("first") },
-      { key: "two", value: JSON.stringify("second") },
-      { key: "three", value: JSON.stringify("third") },
-    ]);
+  it("passes configurable hydration budgets to SqliteBrain's bounded startup path", () => {
+    createBrainAdapter("/tmp/bounded.db", {
+      hydration: { maxRows: 2, maxBytes: 1_000 },
+    });
 
-    expect(() =>
-      createBrainAdapter("/tmp/oversized.db", {
-        hydration: { maxRows: 2, maxBytes: 1_000 },
-      }),
-    ).toThrow(
-      expect.objectContaining({
-        name: "BrainAdapterHydrationLimitError",
-        code: "BRAIN_ADAPTER_HYDRATION_LIMIT_EXCEEDED",
-        rowCount: 3,
-        maxRows: 2,
-      }),
-    );
-    expect(brainInstances).toHaveLength(0);
-    expect(databaseInstances[0]!.close).toHaveBeenCalledOnce();
-  });
-
-  it("fails startup before hydration when the working-memory byte budget is exceeded", () => {
-    workingMemoryRowsByPath.set("/tmp/oversized-bytes.db", [
-      { key: "large", value: JSON.stringify("💾".repeat(20)) },
-    ]);
-
-    expect(() =>
-      createBrainAdapter("/tmp/oversized-bytes.db", {
-        hydration: { maxRows: 10, maxBytes: 32 },
-      }),
-    ).toThrow(/byte budget 32/);
-    expect(brainInstances).toHaveLength(0);
+    expect(brainInstances[0]).toMatchObject({
+      dbPath: "/tmp/bounded.db",
+      limits: { maxEntries: 2, maxTotalBytes: 1_000 },
+    });
   });
 
   it("rejects invalid hydration budgets before opening the database", () => {
@@ -783,16 +768,10 @@ describe("createBrainAdapter", () => {
     expect(doctorRows).toEqual([
       { key: "profile-note", value: "doctor profile memory", type: "working" },
     ]);
-    expect(databaseInstances.map((db) => db.dbPath)).toEqual([
+    expect(brainInstances.map((brain) => brain.dbPath)).toEqual([
       "/tmp/profiles/default/beast.db",
       "/tmp/profiles/doctor/beast.db",
     ]);
-    expect(brainInstances[0]!.working.restore).toHaveBeenCalledWith({
-      "profile-note": "default profile memory",
-    });
-    expect(brainInstances[1]!.working.restore).toHaveBeenCalledWith({
-      "profile-note": "doctor profile memory",
-    });
     expect(JSON.stringify(defaultRows)).not.toContain("doctor profile memory");
     expect(JSON.stringify(doctorRows)).not.toContain("default profile memory");
   });

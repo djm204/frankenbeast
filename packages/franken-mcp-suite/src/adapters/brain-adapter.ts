@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  DEFAULT_WORKING_MEMORY_LIMITS,
   SqliteBrain,
   type MemoryAttributionListOptions,
   type MemoryCandidate,
@@ -190,9 +191,6 @@ const MAX_MEMORY_ACCESS_AUDIT_SCAN_LIMIT = 10_000;
 const AGENT_WORKING_KEY_PREFIX = "__fbeast_agent_memory__/";
 const AGENT_MEMORY_SCOPE_MARKER = "fbeast:agent-memory";
 const MAX_OPERATIONAL_TTL_MS = 365 * 24 * 60 * 60 * 1000;
-const DEFAULT_HYDRATION_MAX_ROWS = 10_000;
-const DEFAULT_HYDRATION_MAX_BYTES = 16 * 1024 * 1024;
-
 export interface BrainAdapterOptions {
   hydration?: {
     /** Maximum working-memory rows restored during adapter construction. */
@@ -202,33 +200,14 @@ export interface BrainAdapterOptions {
   };
 }
 
-export class BrainAdapterHydrationLimitError extends Error {
-  readonly code = "BRAIN_ADAPTER_HYDRATION_LIMIT_EXCEEDED";
-
-  constructor(
-    readonly rowCount: number,
-    readonly byteCount: number,
-    readonly maxRows: number,
-    readonly maxBytes: number,
-  ) {
-    const exceeded = [
-      rowCount > maxRows ? `row budget ${maxRows} (found ${rowCount})` : undefined,
-      byteCount > maxBytes ? `byte budget ${maxBytes} (found ${byteCount})` : undefined,
-    ].filter((value): value is string => value !== undefined);
-    super(
-      `BrainAdapter startup hydration exceeded ${exceeded.join(" and ")}. ` +
-        "Increase the hydration budget or compact the working_memory table before retrying.",
-    );
-    this.name = "BrainAdapterHydrationLimitError";
-  }
-}
-
 function resolveHydrationBudget(options: BrainAdapterOptions): {
   maxRows: number;
   maxBytes: number;
 } {
-  const maxRows = options.hydration?.maxRows ?? DEFAULT_HYDRATION_MAX_ROWS;
-  const maxBytes = options.hydration?.maxBytes ?? DEFAULT_HYDRATION_MAX_BYTES;
+  const maxRows =
+    options.hydration?.maxRows ?? DEFAULT_WORKING_MEMORY_LIMITS.maxEntries;
+  const maxBytes =
+    options.hydration?.maxBytes ?? DEFAULT_WORKING_MEMORY_LIMITS.maxTotalBytes;
   for (const [name, value] of [
     ["maxRows", maxRows],
     ["maxBytes", maxBytes],
@@ -238,13 +217,6 @@ function resolveHydrationBudget(options: BrainAdapterOptions): {
     }
   }
   return { maxRows, maxBytes };
-}
-
-function isMissingWorkingMemoryTable(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    /no such table:\s*working_memory\b/i.test(error.message)
-  );
 }
 
 type SupportedMemoryType = (typeof SUPPORTED_MEMORY_TYPES)[number];
@@ -1160,6 +1132,13 @@ export function createBrainAdapter(
   options: BrainAdapterOptions = {},
 ): BrainAdapter {
   const hydrationBudget = resolveHydrationBudget(options);
+  // SqliteBrain owns working-memory hydration, expiry, startup pruning, and
+  // concurrent-row safety. Passing the limits into that single hydration path
+  // avoids the adapter's former unbounded second SELECT/restore cycle.
+  const brain = new SqliteBrain(dbPath, {
+    maxEntries: hydrationBudget.maxRows,
+    maxTotalBytes: hydrationBudget.maxBytes,
+  });
 
   const resolveMemoryType = (
     type: string | undefined,
@@ -1172,58 +1151,6 @@ export function createBrainAdapter(
       `Unsupported memory type: ${type}. Supported types: ${SUPPORTED_MEMORY_TYPES.join(", ")}`,
     );
   };
-
-  // Rehydrate working memory from SQLite so entries survive process restarts.
-  // SqliteBrain's constructor starts with an empty in-memory Map; flush() writes
-  // to the working_memory table but construction doesn't read it back.
-  const readDb = new Database(dbPath);
-  configureBrainAdapterDb(readDb);
-  let hydrationSnapshot: Record<string, unknown> = {};
-  try {
-    const readSnapshot = readDb.transaction(() => {
-      const stats = readDb
-        .prepare(
-          "SELECT COUNT(*) AS rowCount, " +
-            "COALESCE(SUM(length(CAST(key AS BLOB)) + length(CAST(value AS BLOB))), 0) AS byteCount " +
-            "FROM working_memory",
-        )
-        .get() as { rowCount: number; byteCount: number };
-      if (
-        stats.rowCount > hydrationBudget.maxRows ||
-        stats.byteCount > hydrationBudget.maxBytes
-      ) {
-        throw new BrainAdapterHydrationLimitError(
-          stats.rowCount,
-          stats.byteCount,
-          hydrationBudget.maxRows,
-          hydrationBudget.maxBytes,
-        );
-      }
-      return readDb
-        .prepare("SELECT key, value FROM working_memory")
-        .all() as Array<{ key: string; value: string }>;
-    });
-    const rows = readSnapshot();
-    hydrationSnapshot = Object.fromEntries(
-      rows.map((row) => {
-        try {
-          return [row.key, JSON.parse(row.value)];
-        } catch {
-          return [row.key, row.value];
-        }
-      }),
-    );
-  } catch (error) {
-    // SqliteBrain creates the table on first use, so a missing table is an empty snapshot.
-    if (!isMissingWorkingMemoryTable(error)) throw error;
-  } finally {
-    readDb.close();
-  }
-
-  const brain = new SqliteBrain(dbPath);
-  if (Object.keys(hydrationSnapshot).length > 0) {
-    brain.working.restore(hydrationSnapshot);
-  }
 
   return {
     async query(input) {

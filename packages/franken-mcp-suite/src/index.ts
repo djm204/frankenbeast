@@ -16,7 +16,6 @@ export { createAuditSink, createCentralOptions } from './shared/central-enforcem
 
 // Adapters
 export {
-  BrainAdapterHydrationLimitError,
   createBrainAdapter,
   type BrainAdapter,
   type BrainAdapterOptions,
