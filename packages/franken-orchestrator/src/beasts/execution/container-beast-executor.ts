@@ -5,7 +5,7 @@ import type { BeastEventBus } from '../events/beast-event-bus.js';
 import type { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import { ProcessBeastExecutor, type ProcessBeastExecutorOptions } from './process-beast-executor.js';
 import { ProcessSupervisor, type ProcessSupervisorLike } from './process-supervisor.js';
-import { toDockerSpec, writableWorkspaceUser } from './docker-container-runtime.js';
+import { containerVisiblePath, toDockerSpec, writableWorkspaceUser } from './docker-container-runtime.js';
 import { DEFAULT_SANDBOX_POLICY, type SandboxPolicy } from './sandbox-policy.js';
 
 export interface ContainerBeastExecutorDeps {
@@ -80,6 +80,9 @@ export class ContainerBeastExecutor implements BeastExecutor {
     options.transformSpec = (run, _originalSpec, mergedSpec) => toDockerSpec(mergedSpec, policy, {
       containerName: containerNameForRunAttempt(run, nextAttemptNumber(run)),
     });
+    options.runConfigIntegrityPath = (_run, _originalSpec, _mergedSpec, _spawnedSpec, hostConfigPath) => (
+      containerVisiblePath(hostConfigPath, policy)
+    );
     options.attemptMetadata = (run, originalSpec, dockerSpec, handle) => (
       containerAttemptMetadata(policy, run, originalSpec, dockerSpec, handle, nextAttemptNumber(run))
     );

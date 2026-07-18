@@ -6,6 +6,7 @@
  */
 
 import type { ICliProvider, ProviderOpts } from './cli-provider.js';
+import { RUN_CONFIG_INTEGRITY_SECRET_ENV } from '../../cli/run-config-integrity.js';
 import { tryExtractTextFromNode, stripHookJson, BASE_RATE_LIMIT_PATTERNS } from './stream-json-utils.js';
 
 // Re-export for backward compatibility (used by providers/index.ts)
@@ -133,7 +134,7 @@ export class ClaudeProvider implements ICliProvider {
   filterEnv(env: Record<string, string>): Record<string, string> {
     const filtered = { ...env };
     for (const key of Object.keys(filtered)) {
-      if (key.startsWith('CLAUDE')) {
+      if (key.startsWith('CLAUDE') || key === RUN_CONFIG_INTEGRITY_SECRET_ENV) {
         delete filtered[key];
       }
     }

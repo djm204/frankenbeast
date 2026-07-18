@@ -1,10 +1,11 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { z } from 'zod';
 
 export const RUN_CONFIG_INTEGRITY_ALGORITHM = 'hmac-sha256';
 export const RUN_CONFIG_INTEGRITY_VERSION = 1;
 export const DEFAULT_RUN_CONFIG_INTEGRITY_TTL_MS = 24 * 60 * 60 * 1000;
+export const DEFAULT_RUN_CONFIG_MAX_BYTES = 1_048_576;
 
 export const RUN_CONFIG_INTEGRITY_ENV = 'FRANKENBEAST_RUN_CONFIG_INTEGRITY';
 export const RUN_CONFIG_INTEGRITY_SECRET_ENV = 'FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET';
@@ -32,6 +33,7 @@ export interface CreateRunConfigIntegrityManifestOptions {
 
 export interface VerifyRunConfigIntegrityOptions {
   readonly nowUnixMs?: number | undefined;
+  readonly maxBytes?: number | undefined;
 }
 
 export class RunConfigIntegrityError extends Error {
@@ -112,6 +114,11 @@ export function verifyRunConfigIntegrity(
   }
   if (!secret) {
     throw new RunConfigIntegrityError(configPath, 'missing runtime config integrity secret');
+  }
+  const maxBytes = options.maxBytes ?? DEFAULT_RUN_CONFIG_MAX_BYTES;
+  const configInfo = statSync(configPath);
+  if (configInfo.size > maxBytes) {
+    throw new RunConfigIntegrityError(configPath, `run config exceeds maxBytes: ${configInfo.size} > ${maxBytes}`);
   }
 
   let manifest: RunConfigIntegrityManifest;

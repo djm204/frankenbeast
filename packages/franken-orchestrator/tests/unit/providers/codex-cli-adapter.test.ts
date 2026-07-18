@@ -129,6 +129,27 @@ describe('CodexCliAdapter', () => {
       expect(proc.kill).not.toHaveBeenCalled();
     });
 
+    it('does not pass the run-config integrity secret to spawned Codex processes', async () => {
+      const previous = process.env['FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET'];
+      process.env['FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET'] = 'dummy-integrity-secret';
+      try {
+        mockSpawn([
+          JSON.stringify({ type: 'message', content: 'Hello from Codex' }),
+          JSON.stringify({ type: 'done', usage: { input_tokens: 1, output_tokens: 1 } }),
+        ]);
+        await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+
+        const spawnOptions = (spawn as ReturnType<typeof vi.fn>).mock.calls.at(-1)![2] as { env: Record<string, string> };
+        expect(spawnOptions.env).not.toHaveProperty('FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET');
+      } finally {
+        if (previous === undefined) {
+          delete process.env['FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET'];
+        } else {
+          process.env['FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET'] = previous;
+        }
+      }
+    });
+
     it('handles spawn failure errors without leaking unhandled events', async () => {
       const proc = mockSpawnError('codex: command not found');
       const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));

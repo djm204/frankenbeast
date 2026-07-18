@@ -57,13 +57,21 @@ describe('CodexProvider', () => {
 
   // -- filterEnv -----------------------------------------------------------
 
-  it('filterEnv marks spawned child processes without filtering credentials', () => {
-    const env = { PATH: '/usr/bin', OPENAI_API_KEY: 'test-env-value', HOME: '/home/user' };
+  it('filterEnv marks spawned child processes without filtering credentials except run-config integrity secrets', () => {
+    const env = {
+      PATH: '/usr/bin',
+      OPENAI_API_KEY: 'test-env-value',
+      HOME: '/home/user',
+      FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET: 'test-integrity-secret',
+    };
     const filtered = provider.filterEnv(env);
     expect(filtered).toEqual({
-      ...env,
+      PATH: '/usr/bin',
+      OPENAI_API_KEY: 'test-env-value',
+      HOME: '/home/user',
       FRANKENBEAST_SPAWNED: '1',
     });
+    expect(filtered).not.toHaveProperty('FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET');
   });
 
   it('filterEnv returns a copy, does not mutate input', () => {

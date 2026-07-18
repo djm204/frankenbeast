@@ -1,9 +1,11 @@
 import type { BeastProcessSpec } from '../types.js';
 import type { SandboxPolicy } from './sandbox-policy.js';
+import {
+  RUN_CONFIG_INTEGRITY_BYPASS_ENV,
+  RUN_CONFIG_INTEGRITY_SECRET_ENV,
+} from '../../cli/run-config-integrity.js';
 import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
 import { realpathSync, statSync } from 'node:fs';
-
-const RUN_CONFIG_INTEGRITY_SECRET_ENV = 'FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET';
 
 function canonicalExistingPath(path: string): string {
   try {
@@ -31,6 +33,10 @@ function remapHostWorkspacePath(value: string, policy: SandboxPolicy): string {
   return `${policy.workspaceContainerPath}/${rel.split(sep).join('/')}`;
 }
 
+export function containerVisiblePath(value: string, policy: SandboxPolicy): string {
+  return remapHostWorkspacePath(value, policy);
+}
+
 function containerCommand(command: string, policy: SandboxPolicy): string {
   const remapped = remapHostWorkspacePath(command, policy);
   if (remapped !== command || !isAbsolute(command)) {
@@ -49,12 +55,13 @@ function dockerEnv(spec: BeastProcessSpec, policy: SandboxPolicy): { args: strin
     `GIT_CONFIG_VALUE_0=${policy.workspaceContainerPath}`,
   ];
   const processEnv: Record<string, string> = {};
+  const bypassValue = spec.env?.[RUN_CONFIG_INTEGRITY_BYPASS_ENV] ?? process.env[RUN_CONFIG_INTEGRITY_BYPASS_ENV];
   for (const key of policy.envAllowlist) {
-    const value = spec.env?.[key];
+    const value = key === RUN_CONFIG_INTEGRITY_BYPASS_ENV ? bypassValue : spec.env?.[key];
     if (value !== undefined) {
       const remappedValue = remapHostWorkspacePath(value, policy);
-      processEnv[key] = remappedValue;
       if (key === RUN_CONFIG_INTEGRITY_SECRET_ENV) {
+        processEnv[key] = remappedValue;
         args.push('-e', key);
       } else {
         args.push('-e', `${key}=${remappedValue}`);

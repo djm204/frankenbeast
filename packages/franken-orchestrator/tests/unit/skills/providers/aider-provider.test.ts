@@ -59,12 +59,14 @@ describe('AiderProvider', () => {
       AIDER_MODEL: 'gpt-4',
       AIDER_API_KEY: 'ak-123',
       HOME: '/home/user',
+      FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET: 'test-integrity-secret',
     };
     const filtered = provider.filterEnv(env);
     expect(filtered).toHaveProperty('PATH', '/usr/bin');
     expect(filtered).toHaveProperty('HOME', '/home/user');
     expect(filtered).not.toHaveProperty('AIDER_MODEL');
     expect(filtered).not.toHaveProperty('AIDER_API_KEY');
+    expect(filtered).not.toHaveProperty('FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET');
   });
 
   it('filterEnv returns a copy, does not mutate input', () => {

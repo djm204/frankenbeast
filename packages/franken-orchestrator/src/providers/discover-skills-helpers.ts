@@ -1,5 +1,20 @@
 import { spawn } from 'node:child_process';
 import type { AuthField } from '@franken/types';
+import {
+  RUN_CONFIG_INTEGRITY_ENV,
+  RUN_CONFIG_INTEGRITY_SECRET_ENV,
+} from '../cli/run-config-integrity.js';
+
+const RUN_CONFIG_ENV = 'FRANKENBEAST_RUN_CONFIG';
+
+export function sanitizedProcessEnv(overrides: Record<string, string> = {}): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key === RUN_CONFIG_ENV || key === RUN_CONFIG_INTEGRITY_ENV || key === RUN_CONFIG_INTEGRITY_SECRET_ENV || value === undefined) continue;
+    env[key] = value;
+  }
+  return { ...env, ...overrides };
+}
 
 export interface CollectResult {
   stdout: string;

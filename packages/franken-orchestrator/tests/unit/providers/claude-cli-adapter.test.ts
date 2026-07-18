@@ -157,6 +157,13 @@ describe('ClaudeCliAdapter', () => {
       const env = adapter.sanitizedEnv();
       expect(env['FRANKENBEAST_SPAWNED']).toBe('1');
     });
+
+    it('strips the run-config integrity secret', () => {
+      process.env['FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET'] = 'dummy-integrity-secret';
+      const env = adapter.sanitizedEnv();
+      expect(env['FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET']).toBeUndefined();
+      delete process.env['FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET'];
+    });
   });
 
   describe('execute()', () => {

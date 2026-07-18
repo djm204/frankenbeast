@@ -12,7 +12,7 @@ import type {
 } from '@franken/types';
 import { deterministicUuid } from '@franken/types';
 import { formatHandoff } from './format-handoff.js';
-import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
+import { collectCliOutput, extractAuthFields, isCliAvailable, sanitizedProcessEnv } from './discover-skills-helpers.js';
 import { tryExtractTextFromNode } from '../skills/providers/stream-json-utils.js';
 
 function terminateRunningProcess(proc: ChildProcess): void {
@@ -133,14 +133,14 @@ export class ClaudeCliAdapter implements ILlmProvider {
   }
 
   sanitizedEnv(): Record<string, string> {
-    const env = { ...process.env };
+    const env = sanitizedProcessEnv();
     for (const key of Object.keys(env)) {
       if (key.startsWith('CLAUDE')) {
         delete env[key];
       }
     }
     env['FRANKENBEAST_SPAWNED'] = '1';
-    return env as Record<string, string>;
+    return env;
   }
 
   private async *parseStream(

@@ -24,6 +24,12 @@ import { ProviderRegistry, createDefaultRegistry } from './providers/cli-provide
 import { tryExtractTextFromNode } from './providers/index.js';
 import { createChunkSession, createChunkTranscriptEntry, type ChunkSession } from '../session/chunk-session.js';
 import { classifyCommandFailure, commandFailureFromExecError, parseResetTimeText, type CommandFailure } from '../errors/command-failure.js';
+import {
+  RUN_CONFIG_INTEGRITY_ENV,
+  RUN_CONFIG_INTEGRITY_SECRET_ENV,
+} from '../cli/run-config-integrity.js';
+
+const RUN_CONFIG_ENV = 'FRANKENBEAST_RUN_CONFIG';
 
 type RunLoopRateLimitState = {
   readonly activeProvider: string;
@@ -297,7 +303,9 @@ function spawnIteration(
       : [...providerArgs, prompt];
 
     const parentEnv = { ...(process.env as Record<string, string>) };
-    delete parentEnv['FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET'];
+    delete parentEnv[RUN_CONFIG_ENV];
+    delete parentEnv[RUN_CONFIG_INTEGRITY_ENV];
+    delete parentEnv[RUN_CONFIG_INTEGRITY_SECRET_ENV];
     const env = provider.filterEnv(parentEnv);
 
     const child = spawn(cmd, args, {

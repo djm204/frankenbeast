@@ -104,8 +104,8 @@ describe('toDockerSpec', () => {
       'FRANKENBEAST_RUN_CONFIG=/workspace/.fbeast/rc.json',
     ]));
     expect(spec.args).not.toEqual(expect.arrayContaining(['-e', 'GITHUB_TOKEN=ghp_should_not_leak']));
-    expect(spec.env).toMatchObject({ FRANKENBEAST_RUN_CONFIG: '/workspace/.fbeast/rc.json' });
     expect(spec.env).not.toHaveProperty('GITHUB_TOKEN');
+    expect(spec.env).not.toHaveProperty('FRANKENBEAST_RUN_CONFIG');
   });
 
   it('passes integrity secrets by process env without persisting the value in docker args', () => {
@@ -114,15 +114,32 @@ describe('toDockerSpec', () => {
         ...base,
         env: {
           ...base.env,
-          FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET: 'secret-value',
+          FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET: 'dummy-integrity-secret',
         },
       },
       { ...DEFAULT_SANDBOX_POLICY, workspaceHostPath: '/proj' },
     );
 
     expect(spec.args).toEqual(expect.arrayContaining(['-e', 'FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET']));
-    expect(spec.args).not.toEqual(expect.arrayContaining(['-e', 'FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET=secret-value']));
-    expect(spec.env).toMatchObject({ FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET: 'secret-value' });
+    expect(spec.args).not.toEqual(expect.arrayContaining(['-e', 'FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET=dummy-integrity-secret']));
+    expect(spec.env).toMatchObject({ FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET: 'dummy-integrity-secret' });
+  });
+
+  it('propagates the integrity bypass flag from host env when policy allows it', () => {
+    const previous = process.env['FRANKENBEAST_RUN_CONFIG_INTEGRITY_BYPASS'];
+    process.env['FRANKENBEAST_RUN_CONFIG_INTEGRITY_BYPASS'] = '1';
+    try {
+      const spec = toDockerSpec(base, { ...DEFAULT_SANDBOX_POLICY, workspaceHostPath: '/proj' });
+
+      expect(spec.args).toEqual(expect.arrayContaining(['-e', 'FRANKENBEAST_RUN_CONFIG_INTEGRITY_BYPASS=1']));
+      expect(spec.env).not.toHaveProperty('FRANKENBEAST_RUN_CONFIG_INTEGRITY_BYPASS');
+    } finally {
+      if (previous === undefined) {
+        delete process.env['FRANKENBEAST_RUN_CONFIG_INTEGRITY_BYPASS'];
+      } else {
+        process.env['FRANKENBEAST_RUN_CONFIG_INTEGRITY_BYPASS'] = previous;
+      }
+    }
   });
 
   it('appends the original command and args after the image', () => {

@@ -236,6 +236,13 @@ export interface ProcessBeastExecutorOptions {
     originalSpec: BeastProcessSpec,
     mergedSpec: BeastProcessSpec,
   ) => BeastProcessSpec;
+  runConfigIntegrityPath?: (
+    run: BeastRun,
+    originalSpec: BeastProcessSpec,
+    mergedSpec: BeastProcessSpec,
+    spawnedSpec: BeastProcessSpec,
+    hostConfigPath: string,
+  ) => string;
   attemptMetadata?: (
     run: BeastRun,
     originalSpec: BeastProcessSpec,
@@ -710,7 +717,9 @@ export class ProcessBeastExecutor implements BeastExecutor {
     );
     const redactedConfigSnapshot = redactRunConfigSnapshot(isolatedConfigSnapshot, configuredSecrets);
     const serializedRunConfig = JSON.stringify(redactedConfigSnapshot, null, 2);
-    const signedConfigPath = spawnedSpec.env?.FRANKENBEAST_RUN_CONFIG ?? configFilePath;
+    const signedConfigPath = this.options.runConfigIntegrityPath?.(run, processSpec, mergedSpec, spawnedSpec, configFilePath)
+      ?? spawnedSpec.env?.FRANKENBEAST_RUN_CONFIG
+      ?? configFilePath;
     const integrityManifest = createRunConfigIntegrityManifest(serializedRunConfig, runConfigIntegritySecret, {
       configPath: signedConfigPath,
     });

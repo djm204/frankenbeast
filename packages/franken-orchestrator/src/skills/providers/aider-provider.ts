@@ -7,6 +7,7 @@
  */
 
 import type { ICliProvider, ProviderOpts } from './cli-provider.js';
+import { RUN_CONFIG_INTEGRITY_SECRET_ENV } from '../../cli/run-config-integrity.js';
 
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
 
@@ -45,7 +46,7 @@ export class AiderProvider implements ICliProvider {
   filterEnv(env: Record<string, string>): Record<string, string> {
     const filtered = { ...env };
     for (const key of Object.keys(filtered)) {
-      if (key.startsWith('AIDER')) {
+      if (key.startsWith('AIDER') || key === RUN_CONFIG_INTEGRITY_SECRET_ENV) {
         delete filtered[key];
       }
     }

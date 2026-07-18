@@ -71,6 +71,7 @@ describe('ClaudeProvider', () => {
       CLAUDE_CODE_ENTRYPOINT: 'claude-vscode',
       CLAUDE_API_KEY: 'test-env-value',
       CLAUDECODE: 'true',
+      FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET: 'test-integrity-secret',
     };
     const filtered = provider.filterEnv(env);
     expect(filtered).toHaveProperty('PATH', '/usr/bin');
@@ -78,6 +79,7 @@ describe('ClaudeProvider', () => {
     expect(filtered).not.toHaveProperty('CLAUDE_CODE_ENTRYPOINT');
     expect(filtered).not.toHaveProperty('CLAUDE_API_KEY');
     expect(filtered).not.toHaveProperty('CLAUDECODE');
+    expect(filtered).not.toHaveProperty('FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET');
   });
 
   it('filterEnv returns a copy, does not mutate input', () => {

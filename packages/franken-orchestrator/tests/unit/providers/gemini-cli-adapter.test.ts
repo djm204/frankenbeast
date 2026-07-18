@@ -309,9 +309,19 @@ describe('GeminiCliAdapter', () => {
     });
 
     it('runs from the configured workspace while scoping temp Gemini context through settings', async () => {
+      const previous = process.env['FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET'];
+      process.env['FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET'] = 'dummy-integrity-secret';
       mockSpawn([JSON.stringify({ type: 'message_stop' })]);
 
-      await collectEvents(adapter.execute({ systemPrompt: 'private sys', messages: [{ role: 'user', content: 'Hi' }] }));
+      try {
+        await collectEvents(adapter.execute({ systemPrompt: 'private sys', messages: [{ role: 'user', content: 'Hi' }] }));
+      } finally {
+        if (previous === undefined) {
+          delete process.env['FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET'];
+        } else {
+          process.env['FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET'] = previous;
+        }
+      }
 
       const spawnCall = (spawn as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
       const spawnArgs = spawnCall[1] as string[];
@@ -322,6 +332,7 @@ describe('GeminiCliAdapter', () => {
       expect(settingsPath).toContain('franken-gemini-settings-');
       expect(spawnOptions.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH).toBeTruthy();
       expect(settingsPath).not.toContain(tempDir);
+      expect(spawnOptions.env).not.toHaveProperty('FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET');
       expect(spawnArgs).not.toContain('private sys');
       expect(existsSync(join(tempDir, 'GEMINI.md'))).toBe(false);
       expect(existsSync(settingsPath)).toBe(false);

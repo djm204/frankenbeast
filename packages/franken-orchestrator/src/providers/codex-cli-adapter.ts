@@ -12,7 +12,7 @@ import type {
 } from '@franken/types';
 import { deterministicUuid } from '@franken/types';
 import { formatHandoff } from './format-handoff.js';
-import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
+import { collectCliOutput, extractAuthFields, isCliAvailable, sanitizedProcessEnv } from './discover-skills-helpers.js';
 
 function terminateRunningProcess(proc: ChildProcess): void {
   if (proc.exitCode === null && proc.signalCode === null) {
@@ -44,12 +44,13 @@ export class CodexCliAdapter implements ILlmProvider {
   constructor(private options: CodexCliOptions = {}) {}
 
   async isAvailable(): Promise<boolean> {
-    return isCliAvailable(this.binaryPath);
+    return isCliAvailable(this.binaryPath, sanitizedProcessEnv());
   }
 
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {
     const args = this.buildArgs(request);
     const proc = spawn(this.binaryPath, args, {
+      env: sanitizedProcessEnv(),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -78,7 +79,7 @@ export class CodexCliAdapter implements ILlmProvider {
       const { stdout, exitCode } = await collectCliOutput(
         this.binaryPath,
         ['mcp', 'list', '--json'],
-        { ...process.env } as Record<string, string>,
+        sanitizedProcessEnv(),
       );
       if (exitCode !== 0 || !stdout.trim()) return [];
 

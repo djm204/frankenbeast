@@ -72,6 +72,7 @@ describe('GeminiProvider', () => {
       GOOGLE_CLOUD_PROJECT: 'my-project',
       GOOGLE_API_KEY: 'ga-456',
       HOME: '/home/user',
+      FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET: 'test-integrity-secret',
     };
     const filtered = provider.filterEnv(env);
     expect(filtered).toHaveProperty('PATH', '/usr/bin');
@@ -80,6 +81,7 @@ describe('GeminiProvider', () => {
     expect(filtered).not.toHaveProperty('GEMINI_API_KEY');
     expect(filtered).not.toHaveProperty('GOOGLE_CLOUD_PROJECT');
     expect(filtered).not.toHaveProperty('GOOGLE_API_KEY');
+    expect(filtered).not.toHaveProperty('FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET');
   });
 
   it('filterEnv returns a copy, does not mutate input', () => {

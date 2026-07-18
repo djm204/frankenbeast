@@ -462,10 +462,13 @@ describe('MartinLoop', () => {
     expect(onProviderSwitch).toHaveBeenCalledWith('codex', 'claude', 'post-sleep-reset');
   });
 
-  // ── 10. Strips CLAUDE* env vars for claude provider ──
+  // ── 10. Strips provider/run-config env vars for child providers ──
 
   it('strips CLAUDE* env vars when spawning claude via provider filterEnv', async () => {
     process.env['CLAUDECODE'] = 'some-value';
+    process.env['FRANKENBEAST_RUN_CONFIG'] = '/tmp/run-config.json';
+    process.env['FRANKENBEAST_RUN_CONFIG_INTEGRITY'] = '/tmp/run-config.json.sig';
+    process.env['FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET'] = 'test-integrity-secret';
 
     queueMock({ stdout: 'ok\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
@@ -474,8 +477,14 @@ describe('MartinLoop', () => {
 
     const spawnEnv = (mockSpawn.mock.calls[0] as unknown[])[2] as { env: Record<string, string> };
     expect(spawnEnv.env).not.toHaveProperty('CLAUDECODE');
+    expect(spawnEnv.env).not.toHaveProperty('FRANKENBEAST_RUN_CONFIG');
+    expect(spawnEnv.env).not.toHaveProperty('FRANKENBEAST_RUN_CONFIG_INTEGRITY');
+    expect(spawnEnv.env).not.toHaveProperty('FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET');
 
     delete process.env['CLAUDECODE'];
+    delete process.env['FRANKENBEAST_RUN_CONFIG'];
+    delete process.env['FRANKENBEAST_RUN_CONFIG_INTEGRITY'];
+    delete process.env['FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET'];
   });
 
   // ── 11. Token estimation via provider ──

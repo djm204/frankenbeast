@@ -2,6 +2,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { z } from 'zod';
 import { parseSafeJson } from '../utils/safe-json.js';
 import {
+  DEFAULT_RUN_CONFIG_MAX_BYTES,
   RUN_CONFIG_INTEGRITY_BYPASS_ENV,
   RUN_CONFIG_INTEGRITY_ENV,
   RUN_CONFIG_INTEGRITY_SECRET_ENV,
@@ -98,8 +99,8 @@ function verifyRunConfigIntegrityFromEnv(filePath: string): void {
 
 export function loadRunConfig(filePath: string): RunConfig {
   const info = statSync(filePath);
-  if (info.size > 1_048_576) {
-    throw new RunConfigParseError(filePath, `Run config ${filePath} exceeds maxBytes: ${info.size} > 1048576`);
+  if (info.size > DEFAULT_RUN_CONFIG_MAX_BYTES) {
+    throw new RunConfigParseError(filePath, `Run config ${filePath} exceeds maxBytes: ${info.size} > ${DEFAULT_RUN_CONFIG_MAX_BYTES}`);
   }
   verifyRunConfigIntegrityFromEnv(filePath);
   const raw = readFileSync(filePath, 'utf-8');
@@ -107,7 +108,7 @@ export function loadRunConfig(filePath: string): RunConfig {
   try {
     parsed = parseSafeJson(raw, {
       context: `Run config ${filePath}`,
-      maxBytes: 1_048_576,
+      maxBytes: DEFAULT_RUN_CONFIG_MAX_BYTES,
       maxDepth: 64,
       maxContainers: 10_000,
       maxObjectKeys: 20_000,

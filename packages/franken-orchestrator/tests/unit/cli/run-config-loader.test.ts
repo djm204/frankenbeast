@@ -253,6 +253,22 @@ describe('RunConfigLoader', () => {
       expect(() => loadRunConfig(filePath)).toThrow('signature mismatch');
     });
 
+    it('rejects oversized signed configs before reading payload bytes', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'run-config-'));
+      const filePath = join(workDir, 'oversized.json');
+      const secret = 'test-secret-value';
+      const bytes = JSON.stringify({ provider: 'claude', payload: 'x'.repeat(1_048_577) });
+      await writeFile(filePath, bytes);
+      const manifestPath = join(workDir, 'oversized.json.integrity');
+      await writeFile(manifestPath, JSON.stringify(createRunConfigIntegrityManifest(bytes, secret, {
+        configPath: filePath,
+      })));
+      process.env[RUN_CONFIG_INTEGRITY_ENV] = manifestPath;
+      process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV] = secret;
+
+      expect(() => loadRunConfig(filePath)).toThrow('exceeds maxBytes');
+    });
+
     it('fails closed when a signed manifest is replayed for a different config path', async () => {
       workDir = await mkdtemp(join(tmpdir(), 'run-config-'));
       const filePath = join(workDir, 'config.json');

@@ -6,6 +6,7 @@
  */
 
 import type { ICliProvider, ProviderOpts } from './cli-provider.js';
+import { RUN_CONFIG_INTEGRITY_SECRET_ENV } from '../../cli/run-config-integrity.js';
 import { tryExtractTextFromNode, BASE_RATE_LIMIT_PATTERNS } from './stream-json-utils.js';
 
 const RATE_LIMIT_PATTERNS = BASE_RATE_LIMIT_PATTERNS;
@@ -70,8 +71,10 @@ export class CodexProvider implements ICliProvider {
   }
 
   filterEnv(env: Record<string, string>): Record<string, string> {
+    const filtered = { ...env };
+    delete filtered[RUN_CONFIG_INTEGRITY_SECRET_ENV];
     return {
-      ...env,
+      ...filtered,
       FRANKENBEAST_SPAWNED: '1',
     };
   }
