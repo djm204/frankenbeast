@@ -661,6 +661,7 @@ function sqliteTableExists(db: Database.Database, tableName: string): boolean {
 }
 
 const CENTRAL_AUDIT_SOURCE = "central-dispatch";
+const AUDIT_TRAIL_SOURCE_KEY = "__fbeastAuditTrailSource";
 const GOVERNANCE_SOURCE_KEY = "__fbeastGovernanceSource";
 const HOOK_GOVERNANCE_SOURCE_KEY = "__fbeastHookSource";
 const HOOK_GOVERNANCE_SOURCE = "fbeast-hook";
@@ -677,13 +678,13 @@ function governorSourceDetail(context: Record<string, unknown>): MemoryAccessAud
 }
 
 function hasTrustedAuditTrailProvenance(payload: Record<string, unknown>): boolean {
-  return payload["source"] === CENTRAL_AUDIT_SOURCE
-    || payload[HOOK_GOVERNANCE_SOURCE_KEY] === HOOK_GOVERNANCE_SOURCE;
+  return payload[AUDIT_TRAIL_SOURCE_KEY] === CENTRAL_AUDIT_SOURCE
+    || payload[AUDIT_TRAIL_SOURCE_KEY] === HOOK_GOVERNANCE_SOURCE;
 }
 
 function auditTrailSourceDetail(payload: Record<string, unknown>): MemoryAccessAuditSourceDetail | undefined {
-  if (payload["source"] === CENTRAL_AUDIT_SOURCE) return "central-dispatch";
-  if (payload[HOOK_GOVERNANCE_SOURCE_KEY] === HOOK_GOVERNANCE_SOURCE) return "fbeast-hook";
+  if (payload[AUDIT_TRAIL_SOURCE_KEY] === CENTRAL_AUDIT_SOURCE) return "central-dispatch";
+  if (payload[AUDIT_TRAIL_SOURCE_KEY] === HOOK_GOVERNANCE_SOURCE) return "fbeast-hook";
   return undefined;
 }
 
@@ -1414,8 +1415,8 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           WHERE event_type = 'tool_call'
             AND json_valid(payload)
             AND (
-              json_extract(payload, '$.source') = ?
-              OR json_extract(payload, '$.__fbeastHookSource') = ?
+              json_extract(payload, '$.__fbeastAuditTrailSource') = ?
+              OR json_extract(payload, '$.__fbeastAuditTrailSource') = ?
             )
             AND (payload LIKE '%fbeast_memory%' OR payload LIKE '%execute_tool%')
             ${auditTimeCondition}

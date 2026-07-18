@@ -300,6 +300,7 @@ export async function runHook(
     await resolvedDeps.observer.log({
       event: 'tool_call',
       metadata: JSON.stringify({
+        __fbeastAuditTrailSource: HOOK_GOVERNANCE_SOURCE,
         [HOOK_GOVERNANCE_SOURCE_KEY]: HOOK_GOVERNANCE_SOURCE,
         toolName,
         ...(hookArgs ? { args: hookArgs } : {}),

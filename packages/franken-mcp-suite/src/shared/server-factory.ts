@@ -484,7 +484,6 @@ function isSafeMemoryAccessAuditReportLimit(value: unknown): boolean {
 function redactMemoryAccessAuditReportArgs(sanitized: Record<string, unknown>, redaction = '[memory-access-audit-report-args-redacted]'): Record<string, unknown> {
   if (Object.prototype.hasOwnProperty.call(sanitized, 'invalid')) {
     sanitized['invalid'] = redaction;
-    return sanitized;
   }
   for (const key of Object.keys(sanitized)) {
     const value = sanitized[key];

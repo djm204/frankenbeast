@@ -301,6 +301,22 @@ describe('createMcpServer', () => {
     });
   });
 
+  it('redacts memory access audit report siblings when invalid is caller-supplied', () => {
+    expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_access_audit_report', {
+      invalid: 'caller supplied marker',
+      query: 'alice@example.test',
+      key: 'OPENAI_API_KEY',
+      value: 'example value that must not be echoed',
+      limit: 25,
+    })).toEqual({
+      invalid: '[memory-access-audit-report-args-redacted]',
+      query: '[memory-access-audit-report-args-redacted]',
+      key: '[memory-access-audit-report-args-redacted]',
+      value: '[memory-access-audit-report-args-redacted]',
+      limit: 25,
+    });
+  });
+
   it('normalizes memory access audit timestamp filters before audit logging', () => {
     expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_access_audit_report', {
       since: '2026-07-17 00:00:00',

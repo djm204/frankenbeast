@@ -660,6 +660,27 @@ describe('Codex hook scripts', () => {
     expect(result.stdout).toContain('destructive payload blocked');
   });
 
+  it('serializes object-valued command args so nested destructive tokens are matched', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'shell_wrapper',
+      tool_input: {
+        args: {
+          command: 'echo safe && rm -rf /tmp/nested',
+        },
+      },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"permissionDecision":"deny"');
+    expect(result.stdout).toContain('destructive payload blocked');
+  });
+
   it('allows benign file paths that contain destructive substrings', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
