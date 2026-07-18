@@ -703,8 +703,9 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
   const isDirectMemoryReviewDecide = unqualifiedToolName === MEMORY_REVIEW_DECIDE_TOOL;
   const isDirectMemorySourceAttribution = unqualifiedToolName === MEMORY_SOURCE_ATTRIBUTION_TOOL;
   const isDirectMemoryStore = unqualifiedToolName === MEMORY_STORE_TOOL;
+  const isDirectObserverLog = unqualifiedToolName === OBSERVER_LOG_TOOL;
   const isDirectRightToForget = unqualifiedToolName === 'fbeast_memory_right_to_forget';
-  const auditedTool = isDirectMemoryExport || isDirectMemoryRetentionReport || isDirectMemoryAccessAuditReport || isDirectMemoryReviewDecide || isMemoryReviewPropose || isDirectMemoryStore || isDirectMemorySourceAttribution || isDirectRightToForget
+  const auditedTool = isDirectMemoryExport || isDirectMemoryRetentionReport || isDirectMemoryAccessAuditReport || isDirectMemoryReviewDecide || isMemoryReviewPropose || isDirectMemoryStore || isDirectMemorySourceAttribution || isDirectObserverLog || isDirectRightToForget
     ? unqualifiedToolName
     : typeof sanitized['tool'] === 'string'
       ? unqualifyMcpToolName(sanitized['tool'])
@@ -841,6 +842,41 @@ function typeDescription(type: string | readonly string[]): string {
   return typeof type === 'string' ? type : type.join(' or ');
 }
 
+function exceedsStringCodePointLimit(value: string, maximum: number): boolean {
+  let length = 0;
+  const codePoints = value[Symbol.iterator]();
+  while (!codePoints.next().done) {
+    length += 1;
+    if (length > maximum) return true;
+  }
+  return false;
+}
+
+function sanitizeRejectedToolArgumentsForAudit(tool: ToolSchemaDef, args: unknown): Record<string, unknown> {
+  if (!isObjectLike(args)) return sanitizeToolArgumentsForAuditTrail(tool.name, args);
+  if (!isPlainJsonObject(args)) return sanitizeToolArgumentsForAuditTrail(tool.name, args);
+  const bounded: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  const descriptors = Object.getOwnPropertyDescriptors(args);
+  for (const key of Reflect.ownKeys(descriptors)) {
+    if (typeof key !== 'string') continue;
+    const descriptor = descriptors[key];
+    if (!descriptor || 'get' in descriptor || 'set' in descriptor) {
+      bounded[key] = '[accessor]';
+      continue;
+    }
+    const value = descriptor.value;
+    const property = tool.inputSchema.properties[key];
+    if (property?.maxLength !== undefined && typeof value === 'string' && exceedsStringCodePointLimit(value, property.maxLength)) {
+      bounded[key] = '[schema-bound-exceeded]';
+    } else if (property?.maxItems !== undefined && Array.isArray(value) && value.length > property.maxItems) {
+      bounded[key] = '[schema-bound-exceeded]';
+    } else {
+      bounded[key] = value;
+    }
+  }
+  return sanitizeToolArgumentsForAuditTrail(tool.name, bounded);
+}
+
 export function validateToolArguments(
   tool: ToolSchemaDef,
   args: unknown,
@@ -849,6 +885,14 @@ export function validateToolArguments(
     return { ok: false, message: `Tool ${tool.name} expects an object argument` };
   }
   const obj = args as Record<string, unknown>;
+  const schema = tool.inputSchema;
+  const descriptors = Object.getOwnPropertyDescriptors(obj);
+  for (const [key, property] of Object.entries(schema.properties)) {
+    const descriptor = descriptors[key];
+    if (descriptor && 'value' in descriptor && Array.isArray(descriptor.value) && property.maxItems !== undefined && descriptor.value.length > property.maxItems) {
+      return { ok: false, message: `Tool ${tool.name} property ${key} must contain at most ${property.maxItems} items` };
+    }
+  }
   // The proxy wrapper validates only its envelope here. Its nested `args`
   // payload is validated after target resolution so governance/audit can record
   // the real target tool instead of the generic execute_tool wrapper.
@@ -856,8 +900,7 @@ export function validateToolArguments(
   if (!shape.ok) {
     return { ok: false, message: `Tool ${tool.name} rejected unsafe argument shape: ${shape.message}` };
   }
-  const descriptors = Object.getOwnPropertyDescriptors(obj);
-  const schema = tool.inputSchema;
+
   for (const req of schema.required ?? []) {
     const descriptor = descriptors[req];
     if (!descriptor || descriptor.value === undefined) {
@@ -933,12 +976,11 @@ async function dispatchTool(
       process.stderr.write(`fbeast audit failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}\n`);
     }
   };
-  // Normalize the raw payload to an object so a malformed (null/array/scalar)
-  // probe is still captured in the audit record rather than dropped.
-  const rawArgs = sanitizeToolArgumentsForAuditTrail(toolName, args);
-
   const tool = toolMap.get(toolName);
   if (!tool) {
+    // Normalize the raw payload to an object so a malformed
+    // (null/array/scalar) unknown-tool probe is still captured.
+    const rawArgs = sanitizeToolArgumentsForAuditTrail(toolName, args);
     await recordAudit({ ok: false, decision: 'unknown_tool', args: rawArgs });
     return { content: [{ type: 'text' as const, text: `Unknown tool: ${toolName}` }], isError: true };
   }
@@ -946,7 +988,7 @@ async function dispatchTool(
   // non-object) on the wire must reach the validator and be rejected.
   const validated = validateToolArguments(tool, args === undefined ? {} : args);
   if (!validated.ok) {
-    await recordAudit({ ok: false, decision: 'validation_error', args: rawArgs });
+    await recordAudit({ ok: false, decision: 'validation_error', args: sanitizeRejectedToolArgumentsForAudit(tool, args) });
     return { content: [{ type: 'text' as const, text: `Error: ${validated.message}` }], isError: true };
   }
   // Central governance gate: enforced server-side regardless of client hooks.

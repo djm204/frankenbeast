@@ -374,6 +374,18 @@ describe('createMcpServer', () => {
       sessionId: 'session-1',
     });
 
+    expect(sanitizeToolArgumentsForAuditTrail('fbeast_observer_log', {
+      event: 'tool_call',
+      metadata: 'x'.repeat(1_000_001),
+      sessionId: 'session-1',
+      tool: 'untrusted-payload-name',
+    })).toEqual({
+      event: 'tool_call',
+      metadata: '[observer-metadata-redacted]',
+      sessionId: 'session-1',
+      tool: 'untrusted-payload-name',
+    });
+
     expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
       tool: 'fbeast_observer_log',
       args: {
@@ -503,6 +515,7 @@ describe('createMcpServer', () => {
 
   it('enforces string length bounds before invoking the handler', async () => {
     const calls: unknown[] = [];
+    const recorded: Array<{ decision?: string; args?: Record<string, unknown> }> = [];
     const tool: ToolDef = {
       name: 'search',
       description: 'search',
@@ -513,13 +526,14 @@ describe('createMcpServer', () => {
       },
       handler: async (a) => { calls.push(a); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
     };
-    const srv = createMcpServer('t', '1', [tool]);
+    const srv = createMcpServer('t', '1', [tool], { audit: { record: async (entry) => { recorded.push(entry); } } });
 
     expect((await srv.callTool('search', { query: 'x' })).content[0]!.text).toContain('at least 2 characters');
     expect((await srv.callTool('search', { query: 'abcd' })).content[0]!.text).toContain('at most 3 characters');
     expect(await srv.callTool('search', { query: 'abc' })).not.toHaveProperty('isError');
     expect(await srv.callTool('search', { query: '😀😀' })).not.toHaveProperty('isError');
     expect(calls).toEqual([{ query: 'abc' }, { query: '😀😀' }]);
+    expect(recorded.find((entry) => entry.decision === 'validation_error' && entry.args?.['query'] === '[schema-bound-exceeded]')).toBeDefined();
   });
 
   it('enforces numeric bounds before invoking the handler', async () => {
@@ -560,6 +574,12 @@ describe('createMcpServer', () => {
     expect((await srv.callTool('batch', { items: [1, 2, 3] })).content[0]!.text).toContain('at most 2 items');
     expect(await srv.callTool('batch', { items: [1, 2] })).not.toHaveProperty('isError');
     expect(calls).toEqual([{ items: [1, 2] }]);
+
+    const oversizedWithAccessor = [1, 2, 3];
+    Object.defineProperty(oversizedWithAccessor, '0', { get: () => { throw new Error('must not be read'); } });
+    const boundedBeforeTraversal = validateToolArguments(tool, { items: oversizedWithAccessor });
+    expect(boundedBeforeTraversal.ok).toBe(false);
+    if (!boundedBeforeTraversal.ok) expect(boundedBeforeTraversal.message).toContain('at most 2 items');
   });
 
   it('accepts arguments matching any listed schema type', async () => {
