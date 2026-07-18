@@ -172,13 +172,13 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
   // factory rejects malformed `execute_tool`/`search_tools` calls (missing or
   // non-object `args`, non-string `tool`, unknown tool) *before* the handler
   // runs, so those probes never reach the target-level audit. Wire a wrapper
-  // audit that forwards ONLY those pre-handler rejections — keyed by their
-  // `decision` (`validation_error`/`unknown_tool`) — so malformed proxy probes
-  // are recorded without double-auditing successful calls (the handler already
-  // audits the resolved target) or auditing read-only `search_tools` listings.
+  // audit that forwards pre-handler rejections and wrapper timeouts — keyed by
+  // their `decision` — so malformed or stalled proxy attempts are recorded
+  // without double-auditing successful calls (the handler already audits the
+  // resolved target) or auditing read-only `search_tools` listings.
   const wrapperAudit: AuditSink = {
     record(event) {
-      if (event.decision === 'validation_error' || event.decision === 'unknown_tool') {
+      if (event.decision === 'validation_error' || event.decision === 'unknown_tool' || event.decision === 'timeout') {
         return audit.record(event);
       }
     },

@@ -320,6 +320,22 @@ describe('proxy server', () => {
       });
     });
 
+    it('audits an execute_tool wrapper timeout with its sanitized target envelope', async () => {
+      executeToolDef.timeoutMs = 10;
+      gateCheck.mockImplementationOnce(() => new Promise(() => {}));
+      const envelope = { tool: 'test_tool', args: { key: 'v' } };
+
+      const res = await server.callTool('execute_tool', envelope) as { isError?: boolean };
+
+      expect(res.isError).toBe(true);
+      expect(auditRecord).toHaveBeenCalledWith({
+        tool: 'execute_tool',
+        ok: false,
+        decision: 'timeout',
+        args: envelope,
+      });
+    });
+
     it('does NOT double-audit a successful execute_tool call at the wrapper level', async () => {
       const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
       vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
