@@ -219,6 +219,8 @@ export class BeastDispatchService {
         this.repository.updateTrackedAgent(request.trackedAgentId, {
           status: 'dispatching',
           dispatchRunId: createdRun.id,
+          initConfig: config,
+          ...(moduleConfig ? { moduleConfig } : {}),
           updatedAt: linkedAt,
         });
         const linkedEvent = {

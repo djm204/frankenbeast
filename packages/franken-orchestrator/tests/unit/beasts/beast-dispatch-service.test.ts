@@ -537,13 +537,19 @@ describe('BeastDispatchService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: { provider: 'claude', objective: 'SSE fail test', chunkDirectory: '.' } },
-      initConfig: { provider: 'claude', objective: 'SSE fail test', chunkDirectory: '.' },
+      initConfig: {},
     });
 
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
       trackedAgentId: agent.id,
-      config: { provider: 'claude', objective: 'SSE fail test', chunkDirectory: '.' },
+      config: {
+        provider: 'claude',
+        objective: 'SSE fail test',
+        chunkDirectory: '.',
+        identity: { name: secret },
+      },
+      moduleConfig: { firewall: true, skills: false, planner: true },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'operator',
       executionMode: 'process',
@@ -553,6 +559,11 @@ describe('BeastDispatchService', () => {
     expect(run.status).toBe('failed');
     expect(run.configSnapshot).toEqual({});
     expect(repo.getRun(run.id)?.configSnapshot).toEqual({});
+    expect(repo.getTrackedAgent(agent.id)).toMatchObject({
+      initConfig: { provider: 'claude', objective: 'SSE fail test', chunkDirectory: '.' },
+      moduleConfig: { firewall: true, skills: false, planner: true },
+    });
+    expect(JSON.stringify(repo.getTrackedAgent(agent.id)?.initConfig)).not.toContain(secret);
     const agentStatusEvents = publishSpy.mock.calls.filter(([e]) => e.type === 'agent.status');
     expect(agentStatusEvents).toHaveLength(1);
     expect(agentStatusEvents[0][0].data).toMatchObject({
