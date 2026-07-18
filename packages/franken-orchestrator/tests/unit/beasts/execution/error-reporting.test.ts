@@ -12,6 +12,9 @@ import type { ProcessCallbacks } from '../../../../src/beasts/execution/process-
 import type { BeastExecutors } from '../../../../src/beasts/services/beast-dispatch-service.js';
 import type { BeastMetrics } from '../../../../src/beasts/telemetry/beast-metrics.js';
 
+const NONEXISTENT_PROCESS_PID = 2_147_483_647;
+const NONEXISTENT_PROCESS_PID_WITH_DEFAULT_TIMEOUT = 2_147_483_646;
+
 function createSupervisorMock() {
   return {
     spawn: vi.fn(async (_spec: unknown, _callbacks: unknown) => ({ pid: 4242 })),
@@ -304,7 +307,7 @@ describe('Error Reporting to Dashboard', () => {
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const supervisor = {
-        spawn: vi.fn(async (_spec: unknown, _callbacks: unknown) => ({ pid: 5555 })),
+        spawn: vi.fn(async (_spec: unknown, _callbacks: unknown) => ({ pid: NONEXISTENT_PROCESS_PID })),
         stop: vi.fn(async () => {
           // stop() returns but does NOT trigger onExit — process is stuck
         }),
@@ -332,7 +335,7 @@ describe('Error Reporting to Dashboard', () => {
 
       // Without a verified persisted process start time, recovered process
       // cleanup must fail closed to direct PID signaling.
-      expect(supervisor.kill).toHaveBeenCalledWith(5555, { processGroupOwned: false });
+      expect(supervisor.kill).toHaveBeenCalledWith(NONEXISTENT_PROCESS_PID, { processGroupOwned: false });
     });
 
     it('applies default timeout when no timeoutMs is provided (escalates stuck process)', async () => {
@@ -340,7 +343,7 @@ describe('Error Reporting to Dashboard', () => {
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const supervisor = {
-        spawn: vi.fn(async (_spec: unknown, _callbacks: unknown) => ({ pid: 7777 })),
+        spawn: vi.fn(async (_spec: unknown, _callbacks: unknown) => ({ pid: NONEXISTENT_PROCESS_PID_WITH_DEFAULT_TIMEOUT })),
         stop: vi.fn(async () => {
           // stop() returns but does NOT trigger onExit — process is stuck
         }),
@@ -369,7 +372,7 @@ describe('Error Reporting to Dashboard', () => {
 
       // Without a verified persisted process start time, recovered process
       // cleanup must fail closed to direct PID signaling.
-      expect(supervisor.kill).toHaveBeenCalledWith(7777, { processGroupOwned: false });
+      expect(supervisor.kill).toHaveBeenCalledWith(NONEXISTENT_PROCESS_PID_WITH_DEFAULT_TIMEOUT, { processGroupOwned: false });
     });
 
     it('does not escalate to kill when process exits before timeout', async () => {

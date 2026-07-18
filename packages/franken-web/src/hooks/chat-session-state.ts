@@ -26,6 +26,40 @@ export interface PendingSend {
   reject: (error: Error) => void;
 }
 
+function parseReplayCursor(eventId: string): { stream: string; sequence: number } | null {
+  const match = /^(.*?)(?:[#:/-])(\d+)$/.exec(eventId);
+  if (!match) return null;
+  const sequence = Number(match[2]);
+  if (!Number.isSafeInteger(sequence)) return null;
+  return { stream: match[1] || 'default', sequence };
+}
+
+export function shouldApplySocketEvent(
+  payload: { eventId?: string },
+  processedEventIds: Set<string>,
+  replayCursors: Map<string, number>,
+): boolean {
+  if (!payload.eventId) return true;
+  if (processedEventIds.has(payload.eventId)) return false;
+
+  const cursor = parseReplayCursor(payload.eventId);
+  if (cursor) {
+    const previous = replayCursors.get(cursor.stream);
+    if (previous !== undefined && cursor.sequence <= previous) {
+      processedEventIds.add(payload.eventId);
+      return false;
+    }
+    replayCursors.set(cursor.stream, cursor.sequence);
+  }
+
+  processedEventIds.add(payload.eventId);
+  if (processedEventIds.size > 1_000) {
+    const oldest = processedEventIds.values().next().value;
+    if (oldest) processedEventIds.delete(oldest);
+  }
+  return true;
+}
+
 export class NonRetryableSendError extends Error {
   readonly retryableSend = false;
 }

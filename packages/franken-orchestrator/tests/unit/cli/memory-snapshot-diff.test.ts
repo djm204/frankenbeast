@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
-import { SqliteBrain } from '@franken/brain';
+import { CURRENT_MEMORY_SCHEMA_VERSION, SqliteBrain } from '@franken/brain';
 import type { BrainSnapshot } from '@franken/types';
 import { parseArgs } from '../../../src/cli/args.js';
 import { diffMemorySnapshots, generateDuplicateMemoryReport, handleMemoryCommand, verifyMemoryBackup } from '../../../src/cli/memory-snapshot-diff.js';
@@ -336,7 +336,7 @@ describe('handleMemoryCommand', () => {
 
     expect(verifyMemoryBackup(backupPath)).toMatchObject({
       schema: {
-        version: 1,
+        version: CURRENT_MEMORY_SCHEMA_VERSION,
         requiredTablesPresent: true,
         stores: [
           { store: 'working_memory', version: 0, recordCount: 1 },

@@ -54,6 +54,7 @@ export type SecurityAction = 'status' | 'set' | undefined;
 export type MemoryAction = 'snapshot-diff' | 'verify-backup' | 'duplicate-report' | undefined;
 export type DrAction =
   | 'backup'
+  | 'export'
   | 'list'
   | 'verify'
   | 'restore'
@@ -132,6 +133,7 @@ const VALID_NETWORK_ACTIONS = new Set(['up', 'down', 'status', 'start', 'stop', 
 const VALID_MEMORY_ACTIONS = new Set(['snapshot-diff', 'verify-backup', 'duplicate-report']);
 const VALID_DR_ACTIONS = new Set([
   'backup',
+  'export',
   'list',
   'verify',
   'restore',
@@ -273,7 +275,9 @@ Memory Commands:
 
 Disaster-Recovery Commands:
   dr backup <state-dir> <backup-file> <key-file>
-                                  Create an encrypted backup of Kanban, approval, liveness, run metadata, and related state
+                                   Create an encrypted backup of Kanban, approval, liveness, run metadata, and related state
+  dr export [--dry-run] <state-dir> <export-file>
+                                   Create a redacted point-in-time incident export with manifest, config checksums, summaries, and log tails
   dr list <backup-file>           List encrypted backup manifest metadata without decrypting file contents
   dr verify <backup-file> <key-file>
                                   Decrypt and verify backup integrity without writing state
@@ -644,7 +648,8 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     drKeyFilePath = positionals[3];
     const maxPositionals = drAction === 'backup' || drAction === 'restore' || drAction === 'dead-letter-retire'
       ? 4
-      : drAction === 'verify'
+      : drAction === 'export'
+        || drAction === 'verify'
         || drAction === 'restore-dry-run'
         || drAction === 'snapshot-diff'
         || drAction === 'dead-letter-inspect'
@@ -762,7 +767,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     ? parseFiniteDecimalOption('--budget', values.budget, { minExclusive: 0 })
     : 10;
   const port = values.port !== undefined
-    ? parseIntegerOption('--port', values.port, { min: 0, max: 65535 })
+    ? parseIntegerOption('--port', values.port, { min: 1, max: 65535 })
     : (subcommand === 'chat-server' ? 3737 : subcommand === 'beasts-daemon' ? 4050 : undefined);
 
   const hasModuleFlags = values['no-firewall'] || values['no-skills'] || values['no-memory']

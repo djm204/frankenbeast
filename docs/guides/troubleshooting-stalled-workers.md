@@ -39,6 +39,20 @@ gh pr view <pr-number> --repo djm204/frankenbeast --json number,state,mergeState
 gh pr checks <pr-number> --repo djm204/frankenbeast
 ```
 
+## Crash-only restart contract
+
+Coordinator/liveness watchdog recovery of an abnormal worker exit must produce one auditable restart contract row before a coordinator, repair owner, or dispatcher starts another worker from the stalled-card path. Manual/API restarts must still follow the fast triage checklist above, but this watchdog contract row specifically records `exitReason`, `pid`, `heartbeatAgeMs`, and `nextAction`, then classifies the liveness state as terminal, retryable, or HITL:
+
+| Exit/state | Disposition | Next action |
+| --- | --- | --- |
+| Setup/spawn failure or protocol violation before the worker can own the task | HITL | `replace-with-repair-owner`; preserve spawn error, PID if known, stderr tail, and task context instead of blind respawn loops. |
+| Crash while the card is blocked or waiting on approval/provider/CI evidence | HITL | `defer-with-evidence`; keep the human/external gate visible and do not auto-respawn over it. |
+| Dead PID for an otherwise running card, with no sibling owner and no active PR/worktree owner | Retryable | `restart-once`; clear stale PID/current-run metadata only after evidence is recorded. |
+| Another live PID already owns the same worker card | HITL | `suppress-duplicate-respawn`; stop or park duplicates and record the surviving PID/run id. |
+| Completed/stopped/deleted card with no active crash evidence | Terminal | `no-op`; do not resurrect terminal work from stale liveness snapshots. |
+
+The contract is intentionally crash-only: recovery starts from the recorded evidence and either restarts exactly once, defers to a human/external gate, or replaces the card with a repair-owner lane. It must not churn stale `ready`/`running` states or keep stale active worker ids after a terminal decision.
+
 ## Recovery actions by outcome
 
 ### Active worker

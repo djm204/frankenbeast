@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
@@ -11,6 +11,7 @@ import {
   type DashboardProviderSnapshot,
 } from './dashboard-status.js';
 import type { MaintenanceModeState } from '../../beasts/services/maintenance-mode-service.js';
+import type { SloDashboard } from '../../availability/slo-dashboard.js';
 
 const DASHBOARD_SNAPSHOT_POLL_MS = 1_000;
 const DASHBOARD_HEARTBEAT_MS = 30_000;
@@ -22,8 +23,17 @@ export interface DashboardRouteDeps {
   getProviders: () => DashboardProviderSnapshot[];
   getDependencies?: (() => DashboardDependencySnapshot[]) | undefined;
   getMaintenanceMode?: (() => MaintenanceModeState | Promise<MaintenanceModeState>) | undefined;
+  getSloDashboard?: (() => SloDashboard | Promise<SloDashboard>) | undefined;
   operatorToken?: string | undefined;
   ticketStore?: SseConnectionTicketStore | undefined;
+}
+
+async function readOptionalSloDashboard(deps: DashboardRouteDeps): Promise<SloDashboard | undefined> {
+  try {
+    return await deps.getSloDashboard?.();
+  } catch {
+    return undefined;
+  }
 }
 
 async function buildSnapshot(deps: DashboardRouteDeps) {
@@ -42,7 +52,20 @@ async function buildSnapshot(deps: DashboardRouteDeps) {
     providers,
     availability,
     maintenance: await deps.getMaintenanceMode?.(),
+    slo: await readOptionalSloDashboard(deps),
   };
+}
+
+function snapshotDiffKey(snapshot: Awaited<ReturnType<typeof buildSnapshot>>): string {
+  const { slo, ...rest } = snapshot;
+  if (!slo) return JSON.stringify(snapshot);
+  return JSON.stringify({
+    ...rest,
+    slo: {
+      ...slo,
+      generatedAt: '<volatile>',
+    },
+  });
 }
 
 function safeTokenCompare(a: string, b: string): boolean {
@@ -82,6 +105,11 @@ export function createDashboardRoutes(deps: DashboardRouteDeps): Hono {
   const ticketStore = deps.ticketStore;
   const operatorToken = deps.operatorToken;
 
+  // Event ids are scoped to this route instance instead of each connection and
+  // include an epoch so a restarted dashboard route never reuses old ids.
+  const dashboardSnapshotEpoch = randomUUID();
+  let dashboardSnapshotSequence = 0;
+
   // GET /api/dashboard — aggregated snapshot of all dashboard state
   app.get('/', async (c) => {
     return c.json(await buildSnapshot(deps));
@@ -120,10 +148,14 @@ export function createDashboardRoutes(deps: DashboardRouteDeps): Hono {
     }
 
     return streamSSE(c, async (stream) => {
-      let lastSnapshot = JSON.stringify(await buildSnapshot(deps));
+      const initialSnapshot = await buildSnapshot(deps);
+      let lastSnapshot = JSON.stringify(initialSnapshot);
+      let lastSnapshotDiffKey = snapshotDiffKey(initialSnapshot);
 
       // Send initial snapshot
+      dashboardSnapshotSequence += 1;
       await stream.writeSSE({
+        id: `dashboard:${dashboardSnapshotEpoch}:${dashboardSnapshotSequence}`,
         event: 'snapshot',
         data: lastSnapshot,
       });
@@ -137,18 +169,23 @@ export function createDashboardRoutes(deps: DashboardRouteDeps): Hono {
 
       const snapshotInterval = setInterval(async () => {
         let nextSnapshot: string;
+        let nextSnapshotDiffKey: string;
         try {
-          nextSnapshot = JSON.stringify(await buildSnapshot(deps));
+          const snapshot = await buildSnapshot(deps);
+          nextSnapshot = JSON.stringify(snapshot);
+          nextSnapshotDiffKey = snapshotDiffKey(snapshot);
         } catch {
           return;
         }
 
-        if (nextSnapshot === lastSnapshot) {
+        if (nextSnapshotDiffKey === lastSnapshotDiffKey) {
           return;
         }
         lastSnapshot = nextSnapshot;
+        lastSnapshotDiffKey = nextSnapshotDiffKey;
+        dashboardSnapshotSequence += 1;
         try {
-          await stream.writeSSE({ event: 'snapshot', data: nextSnapshot });
+          await stream.writeSSE({ id: `dashboard:${dashboardSnapshotEpoch}:${dashboardSnapshotSequence}`, event: 'snapshot', data: nextSnapshot });
         } catch {
           clearAll();
         }
