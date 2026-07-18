@@ -33,7 +33,7 @@ The repository currently contains the following 10 active packages:
 - `franken-web` – @franken/web: React dashboard
 - `live-bench` – @franken/live-bench: Live CLI benchmark tooling
 
-Earlier standalone package surfaces have been consolidated into `@franken/orchestrator` and `@franken/mcp-suite` per [ADR-031](docs/adr/031-architecture-consolidation-provider-agnostic.md). Treat the ten active packages above as the authoritative workspace set.
+Earlier standalone package surfaces have been consolidated into `@franken/orchestrator` and `@franken/mcp-suite` per [ADR-031](docs/adr/031-architecture-consolidation-provider-agnostic.md); they are not standalone workspaces anymore. Treat the ten active packages above as the authoritative workspace set.
 
 **Build commands** (all via Turborepo):
 - `npm run build` — runs `turbo run build` (dependency-ordered)
