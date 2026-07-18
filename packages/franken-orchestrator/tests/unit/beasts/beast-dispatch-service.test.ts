@@ -511,7 +511,7 @@ describe('BeastDispatchService', () => {
     });
   });
 
-  it('publishes agent.status SSE event on startNow failure with tracked agent', async () => {
+  it('redacts executor-recorded spawn failures across startNow telemetry', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const logs = new BeastLogStore(join(workDir, 'logs'));
@@ -519,9 +519,23 @@ describe('BeastDispatchService', () => {
     const eventBus = new BeastEventBus();
     const publishSpy = vi.spyOn(eventBus, 'publish');
     const agents = new AgentService(repo, () => '2026-03-17T00:00:00.000Z');
+    const secret = ['dispatch', 'spawn', 'secret'].join('-');
     const executors = {
       process: {
-        start: vi.fn(async () => { throw new Error('spawn failed'); }),
+        start: vi.fn(async (startedRun: { id: string }) => {
+          const failedAt = '2026-03-17T00:00:00.000Z';
+          repo.updateRun(startedRun.id, {
+            status: 'failed',
+            finishedAt: failedAt,
+            stopReason: 'spawn_failed',
+          });
+          repo.appendEvent(startedRun.id, {
+            type: 'run.spawn_failed',
+            payload: { error: 'Worker process could not be spawned.', code: 'ENOENT' },
+            createdAt: failedAt,
+          });
+          throw new Error(`spawn failed for --token=${secret}`);
+        }),
         stop: vi.fn(),
         kill: vi.fn(),
       },
@@ -546,13 +560,32 @@ describe('BeastDispatchService', () => {
       startNow: true,
     });
 
-    expect(run.status).toBe('failed');
+    expect(run).toMatchObject({ status: 'failed', stopReason: 'spawn_failed' });
     const agentStatusEvents = publishSpy.mock.calls.filter(([e]) => e.type === 'agent.status');
     expect(agentStatusEvents).toHaveLength(1);
     expect(agentStatusEvents[0][0].data).toMatchObject({
       agentId: agent.id,
       status: 'failed',
     });
+    expect(repo.listEvents(run.id).map((event) => event.type)).toEqual([
+      'run.created',
+      'run.spawn_failed',
+    ]);
+    expect(repo.listTrackedAgentEvents(agent.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'agent.dispatch.failed',
+        payload: { runId: run.id, error: 'Worker process could not be spawned.' },
+      }),
+    ]));
+    await expect(logs.read(run.id, 'system')).resolves.toContainEqual(
+      expect.stringContaining('start_failed: Worker process could not be spawned.'),
+    );
+    expect(JSON.stringify({
+      events: repo.listEvents(run.id),
+      agentEvents: repo.listTrackedAgentEvents(agent.id),
+      publications: publishSpy.mock.calls,
+      logs: await logs.read(run.id, 'system'),
+    })).not.toContain(secret);
   });
 
   it('does not start a run that was stopped by onRunCreated cleanup', async () => {

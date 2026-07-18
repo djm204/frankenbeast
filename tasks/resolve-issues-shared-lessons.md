@@ -357,5 +357,8 @@
 ## 2026-07-17 — Orchestrator chaos-test closeout
 - For orchestrator chaos/stability regressions, keep dropped-provider and thrown-tool cases deterministic: use fake timers around never-settling promises, assert cleanup with zero leaked timers, and build dependent workspaces before package typecheck when source-only workspace packages make bare orchestrator `tsc --noEmit` report missing `@franken/*` declarations.
 
+## 2026-07-18 — Spawn-failure telemetry redaction
+- Sanitizing the primary failure event is insufficient when the original exception is rethrown: audit every caller that can wrap it into run events, tracked-agent timelines, SSE publications, or durable logs. Rethrow a stable public error, allowlist diagnostic error codes, keep raw command/argv out of durable summaries, and test both immediate dispatch and later run-start paths with secret-bearing failures.
+
 ## 2026-07-18 — Durable SSE ticket wiring
 - A persistent store implementation is not durable unless every daemon construction path supplies a stable database path; add a restart-level wiring test, and contain best-effort timer cleanup failures so transient SQLite errors cannot escape callbacks and terminate the process.
