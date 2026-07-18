@@ -10,6 +10,7 @@ vi.mock('node:child_process', () => ({
   spawn: vi.fn(),
 }));
 import { spawn } from 'node:child_process';
+import { RUN_CONFIG_INTEGRITY_SECRET_ENV } from '../../../src/cli/run-config-integrity.js';
 
 function mockSpawn(stdoutLines: string[], exitCode = 0) {
   const stdout = new PassThrough();
@@ -258,6 +259,23 @@ describe('GeminiCliAdapter', () => {
   });
 
   describe('execute()', () => {
+    it('does not expose runtime config signing keys to the Gemini CLI process', async () => {
+      const originalSecret = process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV];
+      process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV] = 'signing-key';
+      try {
+        mockSpawn([JSON.stringify({ type: 'message_stop' })]);
+        await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+        const spawnOptions = (spawn as ReturnType<typeof vi.fn>).mock.calls[0]?.[2] as { env?: Record<string, string> } | undefined;
+        expect(spawnOptions?.env).not.toHaveProperty(RUN_CONFIG_INTEGRITY_SECRET_ENV);
+      } finally {
+        if (originalSecret === undefined) {
+          delete process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV];
+        } else {
+          process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV] = originalSecret;
+        }
+      }
+    });
+
     it('handles spawn failure errors without leaking unhandled events', async () => {
       const proc = mockSpawnError('gemini: command not found');
       const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));

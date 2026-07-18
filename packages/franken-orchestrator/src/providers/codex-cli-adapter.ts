@@ -13,6 +13,7 @@ import type {
 import { deterministicUuid } from '@franken/types';
 import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
+import { sanitizeRunConfigIntegrityEnv } from '../cli/run-config-integrity.js';
 
 function terminateRunningProcess(proc: ChildProcess): void {
   if (proc.exitCode === null && proc.signalCode === null) {
@@ -50,6 +51,7 @@ export class CodexCliAdapter implements ILlmProvider {
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {
     const args = this.buildArgs(request);
     const proc = spawn(this.binaryPath, args, {
+      env: sanitizeRunConfigIntegrityEnv(process.env as Record<string, string>),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -78,7 +80,7 @@ export class CodexCliAdapter implements ILlmProvider {
       const { stdout, exitCode } = await collectCliOutput(
         this.binaryPath,
         ['mcp', 'list', '--json'],
-        { ...process.env } as Record<string, string>,
+        sanitizeRunConfigIntegrityEnv(process.env as Record<string, string>),
       );
       if (exitCode !== 0 || !stdout.trim()) return [];
 

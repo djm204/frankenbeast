@@ -57,11 +57,11 @@ describe('nonRootUserForWorkspace', () => {
     expect(nonRootUserForWorkspace('/root-owned-workspace')).toBe('10001:10001');
   });
 
-  it('allows runtime config integrity env vars through the sandbox policy', () => {
+  it('allows runtime config manifest env through the sandbox policy without inheriting the signing key', () => {
     expect(DEFAULT_BEAST_ENV_ALLOWLIST).toEqual(expect.arrayContaining([
       'FRANKENBEAST_RUN_CONFIG',
       'FRANKENBEAST_RUN_CONFIG_INTEGRITY',
-      'FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET',
     ]));
+    expect(DEFAULT_BEAST_ENV_ALLOWLIST).not.toContain('FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET');
   });
 });

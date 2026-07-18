@@ -53,6 +53,12 @@ function sha256Hex(bytes: string | Buffer): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
+export function sanitizeRunConfigIntegrityEnv(env: Record<string, string>): Record<string, string> {
+  const sanitized = { ...env };
+  delete sanitized[RUN_CONFIG_INTEGRITY_SECRET_ENV];
+  return sanitized;
+}
+
 function readBoundedFileSync(path: string, maxBytes: number, description: string): Buffer {
   const info = statSync(path);
   if (info.size > maxBytes) {

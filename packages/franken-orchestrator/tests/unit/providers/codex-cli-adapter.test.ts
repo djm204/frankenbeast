@@ -8,6 +8,7 @@ vi.mock('node:child_process', () => ({
   spawn: vi.fn(),
 }));
 import { spawn } from 'node:child_process';
+import { RUN_CONFIG_INTEGRITY_SECRET_ENV } from '../../../src/cli/run-config-integrity.js';
 
 function mockSpawn(stdoutLines: string[], exitCode = 0) {
   const stdout = new PassThrough();
@@ -118,6 +119,23 @@ describe('CodexCliAdapter', () => {
   });
 
   describe('execute()', () => {
+    it('does not expose runtime config signing keys to the Codex CLI process', async () => {
+      const originalSecret = process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV];
+      process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV] = 'signing-key';
+      try {
+        mockSpawn([JSON.stringify({ type: 'done' })]);
+        await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+        const spawnOptions = (spawn as ReturnType<typeof vi.fn>).mock.calls[0]?.[2] as { env?: Record<string, string> } | undefined;
+        expect(spawnOptions?.env).not.toHaveProperty(RUN_CONFIG_INTEGRITY_SECRET_ENV);
+      } finally {
+        if (originalSecret === undefined) {
+          delete process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV];
+        } else {
+          process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV] = originalSecret;
+        }
+      }
+    });
+
     it('parses text content events', async () => {
       const proc = mockSpawn([
         JSON.stringify({ type: 'message', content: 'Hello from Codex' }),
@@ -154,8 +172,11 @@ describe('CodexCliAdapter', () => {
     it('emits error on non-zero exit code', async () => {
       mockSpawn([], 1);
       const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'x' }] }));
-      expect(events[0]!.type).toBe('error');
-      expect((events[0] as any).retryable).toBe(false);
+      expect(events[0]).toEqual({
+        type: 'error',
+        error: 'codex process exited with code 1',
+        retryable: false,
+      });
     });
 
     it('emits retryable error on rate limit message', async () => {
