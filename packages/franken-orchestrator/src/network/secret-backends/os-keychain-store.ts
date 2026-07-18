@@ -232,12 +232,26 @@ export class OsKeychainStore implements ISecretStore {
   }
 
   private async storeDarwinRaw(key: string, value: string): Promise<void> {
-    void key;
-    void value;
+    if (key === KEYS_META_KEY) {
+      // The manifest contains backend key names, not secret values; keep it writable
+      // so deleting an existing macOS Keychain credential can also remove stale
+      // manifest entries without reintroducing credential argv exposure.
+      const result = await this.runner('security', [
+        'add-generic-password',
+        '-U',
+        '-s', SERVICE,
+        '-a', key,
+        '-w', value,
+      ]);
+      if (result.exitCode !== 0) {
+        throw new Error(`Failed to store keychain manifest: ${result.stderr || result.stdout}`);
+      }
+      return;
+    }
     // The macOS `security add-generic-password` CLI only documents `-w <password>`
-    // (or prompting) for writes. Supplying `-w <password>` exposes the secret in
-    // argv, while noninteractive prompting is not a reliable stdin API. Fail
-    // closed rather than silently writing through an argv-exposing path.
+    // (or prompting) for credential writes. Supplying `-w <password>` exposes the
+    // secret in argv, while noninteractive prompting is not a reliable stdin API.
+    // Fail closed rather than silently writing credentials through an argv-exposing path.
     throw new Error('macOS Keychain writes are disabled because security add-generic-password requires secret material in process arguments or an interactive prompt.');
   }
 

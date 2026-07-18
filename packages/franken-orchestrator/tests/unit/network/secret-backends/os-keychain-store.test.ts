@@ -142,6 +142,30 @@ describe('OsKeychainStore', () => {
       const value = await store.resolve('key');
       expect(value).toBe('resolved-value');
     });
+
+    it('preserves delete and manifest cleanup without writing credential values', async () => {
+      mock.responses.set('delete-generic-password', { stdout: '', stderr: '', exitCode: 0 });
+      mock.responses.set('find-generic-password', { stdout: JSON.stringify(['key']) + '\n', stderr: '', exitCode: 0 });
+      mock.responses.set('add-generic-password', { stdout: '', stderr: '', exitCode: 0 });
+
+      await store.delete('key');
+
+      const manifestCall = mock.calls.find(
+        c => c.args.includes('add-generic-password') && c.args.includes('__frankenbeast_keys__'),
+      );
+      expect(manifestCall).toBeDefined();
+      expect(manifestCall!.args).toEqual([
+        'add-generic-password',
+        '-U',
+        '-s',
+        'frankenbeast',
+        '-a',
+        '__frankenbeast_keys__',
+        '-w',
+        '[]',
+      ]);
+      expectNoArgContains(mock.calls, TEST_SLACK_BOT_TOKEN);
+    });
   });
 
   describe('win32 platform', () => {
