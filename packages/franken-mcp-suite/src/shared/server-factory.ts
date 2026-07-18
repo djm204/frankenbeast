@@ -15,9 +15,21 @@ export interface ToolResult {
   isError?: boolean;
 }
 
+export interface ToolPropertySchema {
+  type: string | readonly string[];
+  description: string;
+  enum?: readonly unknown[];
+  minLength?: number;
+  maxLength?: number;
+  minimum?: number;
+  maximum?: number;
+  minItems?: number;
+  maxItems?: number;
+}
+
 export interface ToolInputSchema {
   type: 'object';
-  properties: Record<string, { type: string | readonly string[]; description: string; enum?: readonly unknown[] }>;
+  properties: Record<string, ToolPropertySchema>;
   required?: string[];
 }
 
@@ -831,6 +843,27 @@ export function validateToolArguments(
     }
     if ((prop.type === 'number' || (Array.isArray(prop.type) && prop.type.includes('number'))) && typeof value === 'number' && !Number.isFinite(value)) {
       return { ok: false, message: `Tool ${tool.name} property ${key} must be a finite number` };
+    }
+    if (typeof value === 'string') {
+      const length = Array.from(value).length;
+      if (prop.minLength !== undefined && length < prop.minLength) {
+        return { ok: false, message: `Tool ${tool.name} property ${key} must be at least ${prop.minLength} characters` };
+      }
+      if (prop.maxLength !== undefined && length > prop.maxLength) {
+        return { ok: false, message: `Tool ${tool.name} property ${key} must be at most ${prop.maxLength} characters` };
+      }
+    }
+    if (typeof value === 'number' && prop.minimum !== undefined && value < prop.minimum) {
+      return { ok: false, message: `Tool ${tool.name} property ${key} must be at least ${prop.minimum}` };
+    }
+    if (typeof value === 'number' && prop.maximum !== undefined && value > prop.maximum) {
+      return { ok: false, message: `Tool ${tool.name} property ${key} must be at most ${prop.maximum}` };
+    }
+    if (Array.isArray(value) && prop.minItems !== undefined && value.length < prop.minItems) {
+      return { ok: false, message: `Tool ${tool.name} property ${key} must contain at least ${prop.minItems} items` };
+    }
+    if (Array.isArray(value) && prop.maxItems !== undefined && value.length > prop.maxItems) {
+      return { ok: false, message: `Tool ${tool.name} property ${key} must contain at most ${prop.maxItems} items` };
     }
     if (prop.enum && !prop.enum.includes(value)) {
       return { ok: false, message: `Tool ${tool.name} property ${key} must be one of: ${prop.enum.join(', ')}` };

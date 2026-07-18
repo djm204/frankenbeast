@@ -449,6 +449,67 @@ describe('createMcpServer', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('enforces string length bounds before invoking the handler', async () => {
+    const calls: unknown[] = [];
+    const tool: ToolDef = {
+      name: 'search',
+      description: 'search',
+      inputSchema: {
+        type: 'object',
+        properties: { query: { type: 'string', description: 'query', minLength: 2, maxLength: 3 } },
+        required: ['query'],
+      },
+      handler: async (a) => { calls.push(a); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+    };
+    const srv = createMcpServer('t', '1', [tool]);
+
+    expect((await srv.callTool('search', { query: 'x' })).content[0]!.text).toContain('at least 2 characters');
+    expect((await srv.callTool('search', { query: 'abcd' })).content[0]!.text).toContain('at most 3 characters');
+    expect(await srv.callTool('search', { query: 'abc' })).not.toHaveProperty('isError');
+    expect(await srv.callTool('search', { query: '😀😀' })).not.toHaveProperty('isError');
+    expect(calls).toEqual([{ query: 'abc' }, { query: '😀😀' }]);
+  });
+
+  it('enforces numeric bounds before invoking the handler', async () => {
+    const calls: unknown[] = [];
+    const tool: ToolDef = {
+      name: 'page',
+      description: 'page',
+      inputSchema: {
+        type: 'object',
+        properties: { limit: { type: 'integer', description: 'limit', minimum: 1, maximum: 100 } },
+        required: ['limit'],
+      },
+      handler: async (a) => { calls.push(a); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+    };
+    const srv = createMcpServer('t', '1', [tool]);
+
+    expect((await srv.callTool('page', { limit: 0 })).content[0]!.text).toContain('at least 1');
+    expect((await srv.callTool('page', { limit: 101 })).content[0]!.text).toContain('at most 100');
+    expect(await srv.callTool('page', { limit: 100 })).not.toHaveProperty('isError');
+    expect(calls).toEqual([{ limit: 100 }]);
+  });
+
+  it('enforces array item bounds before invoking the handler', async () => {
+    const calls: unknown[] = [];
+    const tool: ToolDef = {
+      name: 'batch',
+      description: 'batch',
+      inputSchema: {
+        type: 'object',
+        properties: { items: { type: 'array', description: 'items', minItems: 1, maxItems: 2 } },
+        required: ['items'],
+      },
+      handler: async (a) => { calls.push(a); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+    };
+    const srv = createMcpServer('t', '1', [tool]);
+
+    expect((await srv.callTool('batch', { items: [] })).content[0]!.text).toContain('at least 1 items');
+    expect((await srv.callTool('batch', { items: [1, 2, 3] })).content[0]!.text).toContain('at most 2 items');
+    expect(await srv.callTool('batch', { items: [1, 2] })).not.toHaveProperty('isError');
+    expect(calls).toEqual([{ items: [1, 2] }]);
+  });
+
   it('accepts arguments matching any listed schema type', async () => {
     const calls: unknown[] = [];
     const tool: ToolDef = {
