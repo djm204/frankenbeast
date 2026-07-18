@@ -108,7 +108,7 @@ export function verifyRunConfigIntegrity(
   manifestPath: string,
   secret: string,
   options: VerifyRunConfigIntegrityOptions = {},
-): void {
+): string {
   if (!manifestPath) {
     throw new RunConfigIntegrityError(configPath, 'missing runtime config integrity manifest');
   }
@@ -156,8 +156,10 @@ export function verifyRunConfigIntegrity(
     throw new RunConfigIntegrityError(configPath, 'signature mismatch');
   }
 
-  const actualSha256 = sha256Hex(readFileSync(configPath));
+  const configBytes = readFileSync(configPath, 'utf-8');
+  const actualSha256 = sha256Hex(configBytes);
   if (actualSha256 !== manifest.configSha256.toLowerCase()) {
     throw new RunConfigIntegrityError(configPath, 'checksum mismatch');
   }
+  return configBytes;
 }

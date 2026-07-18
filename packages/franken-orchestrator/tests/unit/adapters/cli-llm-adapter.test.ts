@@ -452,6 +452,31 @@ describe('CliLlmAdapter', () => {
           process.env = originalEnv;
         }
       });
+
+      it('strips signed run-config env vars from spawned provider processes', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          FRANKENBEAST_RUN_CONFIG: '/tmp/run-config.json',
+          FRANKENBEAST_RUN_CONFIG_INTEGRITY: '/tmp/run-config.json.sig',
+          FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET: 'dummy-integrity-secret',
+          PATH: '/usr/bin',
+        };
+
+        try {
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(codexProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env).not.toHaveProperty('FRANKENBEAST_RUN_CONFIG');
+          expect(env).not.toHaveProperty('FRANKENBEAST_RUN_CONFIG_INTEGRITY');
+          expect(env).not.toHaveProperty('FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET');
+          expect(env['PATH']).toBe('/usr/bin');
+        } finally {
+          process.env = originalEnv;
+        }
+      });
     });
 
     describe('common behavior', () => {

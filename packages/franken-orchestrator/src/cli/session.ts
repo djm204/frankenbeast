@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { resolveContainedExistingPath } from '@franken/types/path-containment';
 import { tmpdir } from 'node:os';
@@ -47,7 +46,12 @@ function loadPromptConfigFromEnv(): RunConfig['promptConfig'] | undefined {
 }
 
 function loadCompatibleRunConfigFromEnv(): RunConfig | undefined {
-  const runConfig = loadRunConfigFromEnv();
+  let runConfig: RunConfig | undefined;
+  try {
+    runConfig = loadRunConfigFromEnv();
+  } catch {
+    return undefined;
+  }
   const result = RunConfigSchema.safeParse(runConfig);
   return result.success ? result.data : undefined;
 }

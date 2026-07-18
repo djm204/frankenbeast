@@ -85,16 +85,16 @@ export class RunConfigParseError extends Error {
  * Load and validate a RunConfig from a JSON file path.
  * Throws if the file does not exist or the content fails Zod validation.
  */
-function verifyRunConfigIntegrityFromEnv(filePath: string): void {
+function readVerifiedRunConfigBytes(filePath: string): string {
   if (process.env[RUN_CONFIG_INTEGRITY_BYPASS_ENV] === '1') {
     printWarning(`runtime config integrity bypass enabled for ${filePath}`);
-    return;
+    return readFileSync(filePath, 'utf-8');
   }
 
   const manifestPath = process.env[RUN_CONFIG_INTEGRITY_ENV];
   const secret = process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV];
-  if (!manifestPath && !secret) return;
-  verifyRunConfigIntegrity(filePath, manifestPath ?? '', secret ?? '');
+  if (!manifestPath && !secret) return readFileSync(filePath, 'utf-8');
+  return verifyRunConfigIntegrity(filePath, manifestPath ?? '', secret ?? '');
 }
 
 export function loadRunConfig(filePath: string): RunConfig {
@@ -102,8 +102,7 @@ export function loadRunConfig(filePath: string): RunConfig {
   if (info.size > DEFAULT_RUN_CONFIG_MAX_BYTES) {
     throw new RunConfigParseError(filePath, `Run config ${filePath} exceeds maxBytes: ${info.size} > ${DEFAULT_RUN_CONFIG_MAX_BYTES}`);
   }
-  verifyRunConfigIntegrityFromEnv(filePath);
-  const raw = readFileSync(filePath, 'utf-8');
+  const raw = readVerifiedRunConfigBytes(filePath);
   let parsed: unknown;
   try {
     parsed = parseSafeJson(raw, {
