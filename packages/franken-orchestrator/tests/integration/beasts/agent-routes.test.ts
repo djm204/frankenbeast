@@ -10,6 +10,7 @@ import { BeastCatalogService } from '../../../src/beasts/services/beast-catalog-
 import { BeastInterviewService } from '../../../src/beasts/services/beast-interview-service.js';
 import { BeastDispatchService } from '../../../src/beasts/services/beast-dispatch-service.js';
 import { BeastRunService } from '../../../src/beasts/services/beast-run-service.js';
+import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../../../src/beasts/services/dispatch-failure-message.js';
 import { AgentService } from '../../../src/beasts/services/agent-service.js';
 import { MaintenanceModeError } from '../../../src/beasts/services/maintenance-mode-service.js';
 import { CapacityReservationError, CapacityReservationPolicy } from '../../../src/beasts/services/capacity-reservation-policy.js';
@@ -27,8 +28,6 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/agent-routes');
 
 type AgentEvent = { type: string };
-
-const SAFE_DISPATCH_FAILURE_MESSAGE = 'Tracked agent dispatch failed';
 
 function expectEventsToIncludeTypes(events: AgentEvent[], requiredTypes: string[]) {
   const actualTypes = new Set(events.map((event) => event.type));
