@@ -1614,6 +1614,47 @@ describe('SqliteBrain', () => {
       bounded.close();
     });
 
+    it('prunes oldest persisted rows on startup when maxEntries is reduced', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-reduced-limit-'));
+      const dbPath = join(dir, 'brain.db');
+      let seeded: SqliteBrain | undefined;
+      let reopened: SqliteBrain | undefined;
+      let db: Database.Database | undefined;
+
+      try {
+        seeded = new SqliteBrain(dbPath, { maxEntries: 3 });
+        seeded.working.set('oldest', { value: 1 });
+        seeded.working.set('middle', { value: 2 });
+        seeded.working.set('newest', { value: 3 });
+        seeded.flush();
+        seeded.close();
+        seeded = undefined;
+
+        db = new Database(dbPath);
+        db.prepare(`UPDATE working_memory SET updated_at = ? WHERE key = ?`).run('2026-07-01T00:00:00.000Z', 'oldest');
+        db.prepare(`UPDATE working_memory SET updated_at = ? WHERE key = ?`).run('2026-07-02T00:00:00.000Z', 'middle');
+        db.prepare(`UPDATE working_memory SET updated_at = ? WHERE key = ?`).run('2026-07-03T00:00:00.000Z', 'newest');
+        db.close();
+        db = undefined;
+
+        expect(() => {
+          reopened = new SqliteBrain(dbPath, { maxEntries: 2 });
+        }).not.toThrow();
+        expect(reopened?.working.keys().sort()).toEqual(['middle', 'newest']);
+        expect(reopened?.working.get('oldest')).toBeUndefined();
+
+        db = new Database(dbPath);
+        expect(
+          db.prepare(`SELECT key FROM working_memory ORDER BY key ASC`).all(),
+        ).toEqual([{ key: 'middle' }, { key: 'newest' }]);
+      } finally {
+        db?.close();
+        reopened?.close();
+        seeded?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('tracks usage as entries are added, counting key and value bytes', () => {
       brain.working.set('a', 'hello');
       const usage = brain.working.usage();
@@ -1760,9 +1801,10 @@ describe('SqliteBrain', () => {
       expect(() => brain.working.set('large-token', largeToken)).toThrow(/cannot be safely evaluated/);
     });
 
-    it('constructor hydration honors stricter custom working memory limits', () => {
+    it('constructor hydration prunes persisted rows to honor stricter custom entry limits', () => {
       const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-'));
       const dbPath = join(dir, 'brain.db');
+      let reopened: SqliteBrain | undefined;
 
       try {
         const roomy = new SqliteBrain(dbPath, { maxEntries: 3 });
@@ -1771,10 +1813,11 @@ describe('SqliteBrain', () => {
         roomy.flush();
         roomy.close();
 
-        expect(() => new SqliteBrain(dbPath, { maxEntries: 1 })).toThrow(
-          WorkingMemoryLimitError,
-        );
+        reopened = new SqliteBrain(dbPath, { maxEntries: 1 });
+        expect(reopened.working.keys()).toHaveLength(1);
+        expect(reopened.working.usage().limits.maxEntries).toBe(1);
       } finally {
+        reopened?.close();
         rmSync(dir, { recursive: true, force: true });
       }
     });

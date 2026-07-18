@@ -1180,6 +1180,16 @@ class SqliteWorkingMemory implements IWorkingMemory {
   private deletedKeys = new Set<string>();
   private totalBytes = 0;
 
+  private static readonly persistedRowOrder = (
+    left: { key: string; updatedAt: string },
+    right: { key: string; updatedAt: string },
+  ): number => {
+    const updatedAtComparison = left.updatedAt.localeCompare(right.updatedAt);
+    return updatedAtComparison === 0
+      ? left.key.localeCompare(right.key)
+      : updatedAtComparison;
+  };
+
   constructor(
     private db: Database.Database,
     private limits: WorkingMemoryLimits = DEFAULT_WORKING_MEMORY_LIMITS,
@@ -1196,13 +1206,15 @@ class SqliteWorkingMemory implements IWorkingMemory {
   private loadPersistedSerializedFromDb(): Array<{
     key: string;
     value: string;
+    updatedAt: string;
   }> {
     const rows = this.db
-      .prepare(`SELECT key, value FROM working_memory ORDER BY key ASC`)
-      .all() as Array<{ key: string; value: string }>;
+      .prepare(`SELECT key, value, updated_at AS updatedAt FROM working_memory ORDER BY key ASC`)
+      .all() as Array<{ key: string; value: string; updatedAt: string }>;
     const decryptedRows = rows.map((row) => ({
       key: row.key,
       value: this.encryption?.decrypt(row.value) ?? row.value,
+      updatedAt: row.updatedAt,
     }));
     this.persistedSerialized = new Map(
       decryptedRows.map((row) => [row.key, row.value]),
@@ -1214,7 +1226,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
   private loadFromDb(): void {
     const rows = this.loadPersistedSerializedFromDb();
 
-    const prepared: Array<[string, unknown, string, number]> = [];
+    let prepared: Array<[string, unknown, string, number, string]> = [];
     const expiredRows: Array<{ key: string; serialized: string }> = [];
     let total = 0;
     for (const row of rows) {
@@ -1228,7 +1240,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
         parsed,
       );
       total += size;
-      prepared.push([row.key, normalized, serialized, size]);
+      prepared.push([row.key, normalized, serialized, size, row.updatedAt]);
     }
     const preservedRows = this.deleteExpiredPersistedRows(expiredRows);
     const preparedKeys = new Set(prepared.map(([key]) => key));
@@ -1241,13 +1253,22 @@ class SqliteWorkingMemory implements IWorkingMemory {
         parsed,
       );
       total += size;
-      prepared.push([row.key, normalized, serialized, size]);
+      prepared.push([row.key, normalized, serialized, size, row.updatedAt]);
       preparedKeys.add(row.key);
     }
     if (prepared.length > this.limits.maxEntries) {
-      throw new WorkingMemoryLimitError(
-        `Persisted working memory has ${prepared.length} entries after TTL cleanup, exceeding maxEntries (${this.limits.maxEntries})`,
-      );
+      const rowsToDrop = [...prepared]
+        .sort(([leftKey, , , , leftUpdatedAt], [rightKey, , , , rightUpdatedAt]) =>
+          SqliteWorkingMemory.persistedRowOrder(
+            { key: leftKey, updatedAt: leftUpdatedAt },
+            { key: rightKey, updatedAt: rightUpdatedAt },
+          ),
+        )
+        .slice(0, prepared.length - this.limits.maxEntries);
+      this.prunePersistedRows(rowsToDrop.map(([key]) => key));
+      const droppedKeys = new Set(rowsToDrop.map(([key]) => key));
+      prepared = prepared.filter(([key]) => !droppedKeys.has(key));
+      total = prepared.reduce((sum, [, , , size]) => sum + size, 0);
     }
     if (!Number.isSafeInteger(total) || total > this.limits.maxTotalBytes) {
       throw new WorkingMemoryLimitError(
@@ -1267,6 +1288,26 @@ class SqliteWorkingMemory implements IWorkingMemory {
       this.sizes.set(key, size);
       this.serialized.set(key, serialized);
       this.totalBytes += size;
+    }
+  }
+
+  private prunePersistedRows(keys: readonly string[]): void {
+    if (keys.length === 0) return;
+    const deleteKey = this.db.prepare(`DELETE FROM working_memory WHERE key = ?`);
+    const deleteProvenance = this.db.prepare(
+      `DELETE FROM memory_review_provenance WHERE target_store = 'working' AND memory_key = ?`,
+    );
+    const tx = this.db.transaction(() => {
+      for (const key of keys) {
+        deleteProvenance.run(key);
+        deleteKey.run(key);
+      }
+    });
+    tx.immediate();
+    for (const key of keys) {
+      this.persistedSerialized.delete(key);
+      this.dirtyKeys.delete(key);
+      this.deletedKeys.delete(key);
     }
   }
 
@@ -1655,13 +1696,13 @@ class SqliteWorkingMemory implements IWorkingMemory {
 
   private deleteExpiredPersistedRows(
     rows: ReadonlyArray<{ key: string; serialized: string | undefined }>,
-  ): Array<{ key: string; serialized: string }> {
-    const preservedRows: Array<{ key: string; serialized: string }> = [];
+  ): Array<{ key: string; serialized: string; updatedAt: string }> {
+    const preservedRows: Array<{ key: string; serialized: string; updatedAt: string }> = [];
     if (rows.length === 0) return preservedRows;
-    const selectValue = this.db.prepare(`SELECT value FROM working_memory WHERE key = ?`);
+    const selectValue = this.db.prepare(`SELECT value, updated_at AS updatedAt FROM working_memory WHERE key = ?`);
     const deleteKey = this.db.prepare(`DELETE FROM working_memory WHERE key = ?`);
     for (const { key, serialized } of rows) {
-      const row = selectValue.get(key) as { value: string } | undefined;
+      const row = selectValue.get(key) as { value: string; updatedAt: string } | undefined;
       if (row === undefined) {
         this.persistedSerialized.delete(key);
         this.deletedKeys.delete(key);
@@ -1671,13 +1712,13 @@ class SqliteWorkingMemory implements IWorkingMemory {
       const currentSerialized = this.encryption?.decrypt(row.value) ?? row.value;
       if (serialized !== undefined && currentSerialized !== serialized) {
         this.persistedSerialized.set(key, currentSerialized);
-        preservedRows.push({ key, serialized: currentSerialized });
+        preservedRows.push({ key, serialized: currentSerialized, updatedAt: row.updatedAt });
         continue;
       }
       const parsed = parseStoredWorkingMemoryValue(currentSerialized);
       if (!isExpiredWorkingMemoryValue(parsed)) {
         this.persistedSerialized.set(key, currentSerialized);
-        preservedRows.push({ key, serialized: currentSerialized });
+        preservedRows.push({ key, serialized: currentSerialized, updatedAt: row.updatedAt });
         continue;
       }
       deleteKey.run(key);
