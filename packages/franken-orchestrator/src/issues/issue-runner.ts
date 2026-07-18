@@ -887,7 +887,6 @@ function hasSamePidLiveProbe(
   const snapshotRecency = snapshotRecencyMs(snapshot);
   return liveProbe !== undefined && (
     liveProbe.recencyMs > snapshotRecency
-    || (liveProbe.recencyMs === 0 && snapshotRecency === 0)
     || (liveProbe.recencyMs === snapshotRecency && liveProbe.index > snapshotIndex)
   );
 }
@@ -1118,33 +1117,36 @@ export function detectStuckRunWatchdogFindings(
   const deadFindingKeysByCardId = new Map<string, { readonly safetyRank: number; readonly recencyMs: number; readonly index: number }>();
   const newestDeadFindingsByCardId = new Map<string, IssueStuckRunWatchdogFinding>();
   const newestDeadFindingKeysByCardId = new Map<string, { readonly safetyRank: number; readonly recencyMs: number; readonly index: number }>();
-  const terminalRecencyByCardId = new Map<string, number>();
+  const terminalRecencyByCardId = new Map<string, { readonly recencyMs: number; readonly index: number }>();
   let findingIndex = 0;
 
-  for (const snapshot of snapshots) {
+  for (const [snapshotIndex, snapshot] of snapshots.entries()) {
     if (!snapshot.cardId.trim()) continue;
     const hasPositivePid = Number.isSafeInteger(snapshot.pid) && snapshot.pid > 0;
     const status = snapshot.status?.trim().toLowerCase();
     if (status && TERMINAL_WORKER_CARD_STATUSES.has(status) && !crashKanbanState(status) && !explicitProcessCrash(snapshot) && !setupFailureExitReason(snapshot.exitReason ?? '')) {
       const normalizedCardId = snapshot.cardId.trim();
       if (snapshot.alive === false) {
-        const terminalRecencyMs = snapshotRecencyMs(snapshot);
-        if (terminalRecencyMs > 0) {
-          terminalRecencyByCardId.set(
-            normalizedCardId,
-            Math.max(terminalRecencyByCardId.get(normalizedCardId) ?? 0, terminalRecencyMs),
-          );
-          const existingKey = deadFindingKeysByCardId.get(normalizedCardId);
-          if (existingKey && terminalRecencyMs > existingKey.recencyMs) {
-            const newestKey = newestDeadFindingKeysByCardId.get(normalizedCardId);
-            const newestFinding = newestDeadFindingsByCardId.get(normalizedCardId);
-            if (newestKey && newestFinding && newestKey.recencyMs > terminalRecencyMs) {
-              deadFindingKeysByCardId.set(normalizedCardId, newestKey);
-              deadFindingsByCardId.set(normalizedCardId, newestFinding);
-            } else {
-              deadFindingKeysByCardId.delete(normalizedCardId);
-              deadFindingsByCardId.delete(normalizedCardId);
-            }
+        const terminalKey = { recencyMs: snapshotRecencyMs(snapshot), index: snapshotIndex };
+        const existingTerminalKey = terminalRecencyByCardId.get(normalizedCardId);
+        if (existingTerminalKey === undefined
+          || terminalKey.recencyMs > existingTerminalKey.recencyMs
+          || (terminalKey.recencyMs === existingTerminalKey.recencyMs && terminalKey.index > existingTerminalKey.index)) {
+          terminalRecencyByCardId.set(normalizedCardId, terminalKey);
+        }
+        const existingKey = deadFindingKeysByCardId.get(normalizedCardId);
+        const terminalClearsExisting = existingKey !== undefined
+          && terminalKey.recencyMs > 0
+          && (terminalKey.recencyMs > existingKey.recencyMs || (terminalKey.recencyMs === existingKey.recencyMs && terminalKey.index > existingKey.index));
+        if (existingKey && terminalClearsExisting) {
+          const newestKey = newestDeadFindingKeysByCardId.get(normalizedCardId);
+          const newestFinding = newestDeadFindingsByCardId.get(normalizedCardId);
+          if (newestKey && newestFinding && (newestKey.recencyMs > terminalKey.recencyMs || (newestKey.recencyMs === terminalKey.recencyMs && newestKey.index > terminalKey.index))) {
+            deadFindingKeysByCardId.set(normalizedCardId, newestKey);
+            deadFindingsByCardId.set(normalizedCardId, newestFinding);
+          } else {
+            deadFindingKeysByCardId.delete(normalizedCardId);
+            deadFindingsByCardId.delete(normalizedCardId);
           }
         }
       }
@@ -1248,8 +1250,11 @@ export function detectStuckRunWatchdogFindings(
         newestDeadFindingKeysByCardId.set(normalizedCardId, candidateKey);
         newestDeadFindingsByCardId.set(normalizedCardId, finding);
       }
-      const terminalRecencyMs = terminalRecencyByCardId.get(normalizedCardId);
-      if (terminalRecencyMs !== undefined && terminalRecencyMs > candidateKey.recencyMs) {
+      const terminalKey = terminalRecencyByCardId.get(normalizedCardId);
+      const terminalSuppressesCandidate = terminalKey !== undefined
+        && candidateKey.recencyMs > 0
+        && (terminalKey.recencyMs > candidateKey.recencyMs || (terminalKey.recencyMs === candidateKey.recencyMs && terminalKey.index > candidateKey.index));
+      if (terminalSuppressesCandidate) {
         findingIndex += 1;
         continue;
       }
