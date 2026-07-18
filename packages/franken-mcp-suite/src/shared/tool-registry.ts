@@ -167,7 +167,7 @@ const SENSITIVE_MEMORY_VALUE_PATTERNS = [
   /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/[^\s:@/]*:[^\s@/]+@[^\s]+/i,
   /\b(?:Bearer|Basic|token)\s+[A-Za-z0-9._~+/=-]{20,}\b/i,
   /\b(?:Cookie|Set-Cookie):\s*[^\r\n]+/i,
-  /\b(?:Proxy-)?Authorization:\s*(?:Basic|Bearer|token)?\s*[A-Za-z0-9._~+/=-]{20,}\b/i,
+  /\b(?:Proxy-)?Authorization:\s*(?:Bearer|Basic|token)?\s*[^\r\n]{8,}/i,
 ];
 
 const SENSITIVE_MEMORY_REDACTION = '<redacted>';

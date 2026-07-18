@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
@@ -3117,6 +3117,41 @@ describe('SqliteBrain', () => {
         expect(JSON.stringify(persisted)).not.toContain(secret);
       } finally {
         fileBrain.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('purges rejected quarantined secrets from file-backed SQLite pages and WAL', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-reject-purge-pages-'));
+      const dbPath = join(dir, 'brain.db');
+      const secret = 'fake-secret-for-rejected-page-purge-test';
+      const fileBrain = new SqliteBrain(dbPath);
+
+      try {
+        const candidate = fileBrain.memoryReview.propose({
+          targetStore: 'working',
+          key: 'OPENAI_API_KEY',
+          value: secret,
+          source: 'fbeast_memory_store:quarantine',
+          evidenceId: 'quarantine:OPENAI_API_KEY',
+          confidence: 1,
+          reason: 'Sensitive memory quarantined for operator review (value-shape-indicates-secret).',
+        });
+
+        fileBrain.memoryReview.reject(candidate.id, { reviewer: 'operator' });
+        fileBrain.close();
+
+        for (const suffix of ['', '-wal', '-shm']) {
+          const path = `${dbPath}${suffix}`;
+          if (!existsSync(path)) continue;
+          expect(readFileSync(path).toString('utf8')).not.toContain(secret);
+        }
+      } finally {
+        try {
+          fileBrain.close();
+        } catch {
+          // Already closed by the assertion path.
+        }
         rmSync(dir, { recursive: true, force: true });
       }
     });
