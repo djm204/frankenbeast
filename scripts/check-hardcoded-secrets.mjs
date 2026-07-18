@@ -584,14 +584,16 @@ function hasProgrammaticGhAuthTokenCall(line) {
 
 function collectAsyncGhAuthTokenCallbackAliases(line, aliases) {
   if (!/\b(?:execFile|exec)\s*\(/.test(line) || !/\bgh\b[^\n]*\bauth\b[^\n]*\btoken\b/.test(line)) {
-    return;
+    return false;
   }
   const arrowCallback = /,\s*\(\s*[A-Za-z_$][\w$]*\s*,\s*([A-Za-z_$][\w$]*)/.exec(line);
   const functionCallback = /function\s*\(\s*[A-Za-z_$][\w$]*\s*,\s*([A-Za-z_$][\w$]*)/.exec(line);
   const stdoutAlias = arrowCallback?.[1] ?? functionCallback?.[1];
   if (stdoutAlias) {
     aliases.add(stdoutAlias);
+    return true;
   }
+  return false;
 }
 
 function hasInstallTimeGhAuthTokenSubstitution(line) {
@@ -725,6 +727,7 @@ async function scanSourceFile(file, findings) {
   let pendingCronHeredocDelimiter = null;
   let pendingCronQuotedHeredoc = false;
   let pendingAliasName = null;
+  let pendingAsyncGhAuthCall = '';
   const language = lineLanguage(file);
 
   for (const [index, line] of lines.entries()) {
@@ -751,7 +754,14 @@ async function scanSourceFile(file, findings) {
       }
     }
 
-    collectAsyncGhAuthTokenCallbackAliases(code, sensitiveEnvAliases);
+    if (pendingAsyncGhAuthCall || /\b(?:execFile|exec)\s*\(/.test(code)) {
+      const candidate = pendingAsyncGhAuthCall ? `${pendingAsyncGhAuthCall} ${code}` : code;
+      if (collectAsyncGhAuthTokenCallbackAliases(candidate, sensitiveEnvAliases) || candidate.length > 8192 || /;\s*$/.test(code)) {
+        pendingAsyncGhAuthCall = '';
+      } else {
+        pendingAsyncGhAuthCall = candidate;
+      }
+    }
 
     const inCronContext = pendingCronCommand || hasCronCommandMarker(code, cronScheduleAliases);
     if (hasCronSecretInterpolation(code, sensitiveEnvAliases, envContainerAliases, sensitiveEnvNameAliases, envGetterAliases, inCronContext, { shell: language === 'shell', quotedHeredoc: pendingCronQuotedHeredoc }, cronScheduleAliases)) {

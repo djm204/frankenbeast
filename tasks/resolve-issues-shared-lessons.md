@@ -2,6 +2,8 @@
 
 ## 2026-07-18 — Cron credential scanner closeout
 - For cron credential scanners, taint propagation must cover neutral alias names, exported declarations, destructured env containers, env-name variables, multiline assignments, shell indirect expansions, printenv/getenv aliases, and programmatic CLI calls; otherwise hardening that only matches direct `process.env`/`$TOKEN` reads leaves easy PAT-persistence bypasses.
+- Cron-context detection should inspect code outside string literals plus actual schedule literals, not diagnostic text that merely says `crontab`; credential assignment parsing must handle quoted values while preserving runtime `$(gh auth token)` as safe.
+- Async child-process taint needs both returned child/stdout aliases and callback stdout parameters, including multiline calls; once a multiline alias becomes sensitive, trailing defaults/options must not clear it before the call closes.
 - When expanding shell-file scanning for cron writers, avoid both basename-only install/setup filters and scanning every shell script blindly; include cron/crontab-named writers while preserving non-cron bootstrap scripts to prevent fixture false positives.
 - If Codex keeps finding valid edge cases after an over-cap current-head review, fix/reply/resolve every finding, run local and CI checks, then stop for explicit approval before exceeding the agreed review cap again.
 

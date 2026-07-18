@@ -446,6 +446,28 @@ describe('hard-coded example secret scanner', () => {
       'utf8',
     );
     writeFileSync(
+      join(scriptDir, 'quoted-cron.py'),
+      [
+        `one = '0 3 * * * GITHUB_TOKEN="abc123" agy pr'`,
+        `two = "0 4 * * * GH_PAT='def456' agy pr"`,
+        'three = "0 5 * * * GITHUB_TOKEN=`ghi789` agy pr"',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'async-multiline-cron.mjs'),
+      [
+        'execFile(',
+        "  'gh',",
+        "  ['auth', 'token'],",
+        '  (error, credential) => {',
+        '    const entry = `0 7 * * * agy pr --token ${credential}`;',
+        '  },',
+        ');',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
       join(scriptDir, 'install-cron.py'),
       [
         'from os import environ',
@@ -476,6 +498,10 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('scripts/install-cron.mjs:1');
     expect(result.stderr).toContain('scripts/install-cron.mjs:4');
     expect(result.stderr).toContain('scripts/install-cron.mjs:8');
+    expect(result.stderr).toContain('scripts/quoted-cron.py:1');
+    expect(result.stderr).toContain('scripts/quoted-cron.py:2');
+    expect(result.stderr).toContain('scripts/quoted-cron.py:3');
+    expect(result.stderr).toContain('scripts/async-multiline-cron.mjs:5');
     expect(result.stderr).toContain('scripts/install-cron.py:6');
     expect(result.stderr).toContain('scripts/install-cron.sh:2');
     expect(result.stderr).toContain('scripts/install-cron.sh:4');
