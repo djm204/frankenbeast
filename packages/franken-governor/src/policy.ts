@@ -30,10 +30,11 @@ export interface PolicyConfig {
   /** Allowed git remote names for push operations */
   allowedGitRemotes?: readonly string[];
   /**
-   * When set, the caller must supply the remote's *resolved* URL in
-   * `details.remoteUrl` and it must appear here. This binds a whitelisted
-   * remote name to its expected destination, so rewriting the name's URL in
-   * .git/config cannot redirect a permitted push.
+   * When set, the caller must supply *every* resolved push URL for the remote
+   * in `details.remoteUrls` and all of them must appear here. This binds a
+   * whitelisted remote name to its expected destination(s), so rewriting the
+   * name's URL(s) in .git/config cannot redirect a permitted push. A remote
+   * that is itself a URL listed here is also accepted without a name match.
    */
   allowedGitRemoteUrls?: readonly string[];
 }
@@ -69,25 +70,34 @@ export function evaluate(action: Action, config: PolicyConfig = defaultPolicy, d
   }
   switch (action) {
     case 'git-push': {
-      const d = (typeof details === 'object' && details !== null ? details : {}) as { remote?: unknown; remoteUrl?: unknown };
+      const d = (typeof details === 'object' && details !== null ? details : {}) as { remote?: unknown; remoteUrls?: unknown };
       // Policy data may arrive from JSON/env or untyped JS callers; a string
       // here would make `.includes` a substring check, so fail closed unless
-      // it is a real array of exact remote names.
+      // whitelists are real arrays of exact values.
       // Reasons are meant to be surfaced verbatim; never echo raw remotes or
       // URLs, which may be credential-bearing.
-      const nameAllowed = Array.isArray(config.allowedGitRemotes)
-        && config.allowedGitRemotes.includes(d.remote as string);
+      const urlList = config.allowedGitRemoteUrls;
+      if (urlList !== undefined && !Array.isArray(urlList)) {
+        return { allow: false, reason: 'Malformed allowedGitRemoteUrls; denying by default' };
+      }
+      // A remote that is itself a whitelisted URL is acceptable without a name
+      // match; PrCreator supports URL-valued remotes directly.
+      const nameAllowed = (Array.isArray(config.allowedGitRemotes)
+        && config.allowedGitRemotes.includes(d.remote as string))
+        || (Array.isArray(urlList) && urlList.includes(d.remote as string));
       if (!nameAllowed) {
         return { allow: false, reason: `Remote "${redactRemote(d.remote)}" is not allowed by policy` };
       }
-      if (config.allowedGitRemoteUrls !== undefined) {
-        if (!Array.isArray(config.allowedGitRemoteUrls)) {
-          return { allow: false, reason: 'Malformed allowedGitRemoteUrls; denying by default' };
-        }
-        if (typeof d.remoteUrl !== 'string' || !config.allowedGitRemoteUrls.includes(d.remoteUrl)) {
+      if (urlList !== undefined) {
+        const urls = d.remoteUrls;
+        const allUrlsAllowed = Array.isArray(urls)
+          && urls.length > 0
+          && urls.every((url) => typeof url === 'string' && urlList.includes(url));
+        if (!allUrlsAllowed) {
+          const shown = Array.isArray(urls) ? urls.map(redactRemote).join(', ') : String(urls);
           return {
             allow: false,
-            reason: `Remote "${redactRemote(d.remote)}" resolves to URL "${redactRemote(d.remoteUrl)}", which is not allowed by policy`,
+            reason: `Remote "${redactRemote(d.remote)}" resolves to push URL(s) [${shown}], not all of which are allowed by policy`,
           };
         }
       }

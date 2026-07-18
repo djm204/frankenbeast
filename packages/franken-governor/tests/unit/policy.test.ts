@@ -41,17 +41,33 @@ describe('policy engine', () => {
       allowedGitRemotes: ['origin'],
       allowedGitRemoteUrls: ['https://github.com/org/repo.git'],
     };
-    expect(evaluatePolicy('git-push', config, { remote: 'origin', remoteUrl: 'https://github.com/org/repo.git' }).allow).toBe(true);
+    expect(evaluatePolicy('git-push', config, { remote: 'origin', remoteUrls: ['https://github.com/org/repo.git'] }).allow).toBe(true);
     // A rewritten .git/config URL for a whitelisted name must be denied.
-    expect(evaluatePolicy('git-push', config, { remote: 'origin', remoteUrl: 'ssh://attacker.example/repo.git' }).allow).toBe(false);
-    // Missing resolution fails closed.
+    expect(evaluatePolicy('git-push', config, { remote: 'origin', remoteUrls: ['ssh://attacker.example/repo.git'] }).allow).toBe(false);
+    // Every configured pushurl must be whitelisted, not just the first.
+    expect(evaluatePolicy('git-push', config, {
+      remote: 'origin',
+      remoteUrls: ['https://github.com/org/repo.git', 'ssh://attacker.example/repo.git'],
+    }).allow).toBe(false);
+    // Missing or empty resolution fails closed.
     expect(evaluatePolicy('git-push', config, { remote: 'origin' }).allow).toBe(false);
+    expect(evaluatePolicy('git-push', config, { remote: 'origin', remoteUrls: [] }).allow).toBe(false);
     // Malformed URL whitelist fails closed.
     expect(evaluatePolicy(
       'git-push',
       { allowedGitRemotes: ['origin'], allowedGitRemoteUrls: 'https://github.com/org/repo.git' as unknown as readonly string[] },
-      { remote: 'origin', remoteUrl: 'https://github.com/org/repo.git' },
+      { remote: 'origin', remoteUrls: ['https://github.com/org/repo.git'] },
     ).allow).toBe(false);
+  });
+
+  it('accepts a URL-valued remote listed in allowedGitRemoteUrls without a name match', () => {
+    const url = 'https://github.com/org/repo.git';
+    const decision = evaluatePolicy(
+      'git-push',
+      { allowedGitRemotes: ['origin'], allowedGitRemoteUrls: [url] },
+      { remote: url, remoteUrls: [url] },
+    );
+    expect(decision.allow).toBe(true);
   });
 
   it('denies instead of throwing when the policy config is malformed', () => {

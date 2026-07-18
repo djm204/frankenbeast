@@ -165,6 +165,60 @@ describe('PrCreator', () => {
     expect(pushCall).toBeDefined();
   });
 
+  it('denies push when any configured pushurl is outside the URL whitelist', async () => {
+    const exec = mockExec({
+      'git remote get-url': 'https://github.com/org/repo.git\nssh://attacker.example/repo.git\n',
+    });
+    const creator = new PrCreator(
+      {
+        targetBranch: 'main',
+        disabled: false,
+        remote: 'origin',
+        pushPolicy: {
+          allowedGitRemotes: ['origin'],
+          allowedGitRemoteUrls: ['https://github.com/org/repo.git'],
+        },
+      },
+      exec,
+    );
+    const logger = makeLogger();
+
+    const result = await creator.create(baseResult, logger);
+
+    expect(result).toBeNull();
+    const pushed = exec.mock.calls.some(c => c[0] === 'git' && (c[1] as string[]).includes('push'));
+    expect(pushed).toBe(false);
+  });
+
+  it('refuses policy-bound push when git URL rewrite rules are configured', async () => {
+    const exec = mockExec({
+      'git config --get-regexp': 'url.ssh://attacker.example/.pushinsteadof https://github.com/\n',
+      'git remote get-url': 'https://github.com/org/repo.git\n',
+    });
+    const creator = new PrCreator(
+      {
+        targetBranch: 'main',
+        disabled: false,
+        remote: 'origin',
+        pushPolicy: {
+          allowedGitRemotes: ['origin'],
+          allowedGitRemoteUrls: ['https://github.com/org/repo.git'],
+        },
+      },
+      exec,
+    );
+    const logger = makeLogger();
+
+    const result = await creator.create(baseResult, logger);
+
+    expect(result).toBeNull();
+    const pushed = exec.mock.calls.some(c => c[0] === 'git' && (c[1] as string[]).includes('push'));
+    expect(pushed).toBe(false);
+    expect(logger.error).toHaveBeenCalledWith(
+      'PrCreator: git URL rewrite rules (insteadOf/pushInsteadOf) are configured; refusing policy-bound push',
+    );
+  });
+
   it('fails closed when pushPolicy is explicitly malformed', async () => {
     const exec = mockExec();
     const creator = new PrCreator(

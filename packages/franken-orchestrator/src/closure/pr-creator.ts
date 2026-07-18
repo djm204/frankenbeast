@@ -54,7 +54,7 @@ interface PushPolicyDecision {
 type PushPolicyEvaluator = (
   action: 'git-push',
   config: PushPolicyConfig,
-  details: { readonly remote: string; readonly remoteUrl?: string | undefined },
+  details: { readonly remote: string; readonly remoteUrls?: readonly string[] | undefined },
 ) => PushPolicyDecision;
 
 // Non-literal specifier: keeps tsc from statically resolving the optional module.
@@ -448,23 +448,43 @@ export class PrCreator {
       logger?.error('PrCreator: pushPolicy is configured but @franken/governor is unavailable; refusing to push');
       return false;
     }
+    // A skewed/older governor build can import fine without this export;
+    // destructuring would silently yield undefined, so verify before calling.
+    if (typeof evaluatePolicy !== 'function') {
+      logger?.error('PrCreator: @franken/governor does not export evaluatePolicy; refusing to push');
+      return false;
+    }
 
-    // When the policy binds names to URLs, evaluate the *resolved* push URL so
-    // a rewritten .git/config entry for a whitelisted name cannot redirect the
-    // push. Resolution failure leaves remoteUrl undefined, which the engine
-    // treats as a denial.
-    let remoteUrl: string | undefined;
+    // When the policy binds names to URLs, evaluate *every* resolved push URL
+    // (a remote can have multiple pushurls and `git push` sends to all of
+    // them), so a rewritten .git/config entry for a whitelisted name cannot
+    // redirect the push. Resolution failure leaves remoteUrls undefined, which
+    // the engine treats as a denial.
+    let remoteUrls: readonly string[] | undefined;
     if (policy.allowedGitRemoteUrls !== undefined) {
+      // url.<base>.insteadOf / .pushInsteadOf rewrite validated URLs at push
+      // time, silently redirecting the destination — fail closed if any exist.
       try {
-        remoteUrl = this.exec('git', ['remote', 'get-url', '--push', this.config.remote]).trim() || undefined;
+        const rewriteRules = this.exec('git', ['config', '--get-regexp', '^url\\..*\\.(insteadof|pushinsteadof)$']).trim();
+        if (rewriteRules.length > 0) {
+          logger?.error('PrCreator: git URL rewrite rules (insteadOf/pushInsteadOf) are configured; refusing policy-bound push');
+          return false;
+        }
+      } catch {
+        // git config exits non-zero when no key matches: no rewrite rules.
+      }
+      try {
+        const output = this.exec('git', ['remote', 'get-url', '--push', '--all', this.config.remote]).trim();
+        const urls = output.split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
+        remoteUrls = urls.length > 0 ? urls : undefined;
       } catch {
         // The configured remote may be a URL rather than a named remote, in
         // which case get-url fails and the remote itself is the destination.
-        remoteUrl = /:\/\/|@/.test(this.config.remote) ? this.config.remote : undefined;
+        remoteUrls = /:\/\/|@/.test(this.config.remote) ? [this.config.remote] : undefined;
       }
     }
 
-    const decision = evaluatePolicy('git-push', policy, { remote: this.config.remote, remoteUrl });
+    const decision = evaluatePolicy('git-push', policy, { remote: this.config.remote, remoteUrls });
     if (!decision.allow) {
       // The engine's reason embeds the raw remote, which may be a
       // credential-bearing URL — redact it before logging.
