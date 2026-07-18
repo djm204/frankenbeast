@@ -833,7 +833,7 @@ function liveSiblingPidsByCardId(snapshots: readonly IssueWorkerCardProcessSnaps
     const status = snapshot.status?.trim().toLowerCase();
     if (!cardId
       || snapshot.alive === false
-      || (status && TERMINAL_WORKER_CARD_STATUSES.has(status) && !(snapshot.alive === true && CRASH_WORKER_CARD_STATUSES.has(status)))
+      || (status && TERMINAL_WORKER_CARD_STATUSES.has(status))
       || !Number.isSafeInteger(snapshot.pid)
       || snapshot.pid <= 0) continue;
     const pids = byCard.get(cardId) ?? new Set<number>();
@@ -843,10 +843,10 @@ function liveSiblingPidsByCardId(snapshots: readonly IssueWorkerCardProcessSnaps
   return new Map([...byCard].map(([cardId, pids]) => [cardId, [...pids].sort((a, b) => a - b)]));
 }
 
-function samePidLiveProbeRecencyByCardId(
+function samePidLiveProbesByCardId(
   snapshots: readonly IssueWorkerCardProcessSnapshot[],
-): Map<string, Map<number, { readonly recencyMs: number; readonly index: number; readonly latestIndex: number }>> {
-  const byCard = new Map<string, Map<number, { readonly recencyMs: number; readonly index: number; readonly latestIndex: number }>>();
+): Map<string, Map<number, Array<{ readonly recencyMs: number; readonly index: number }>>> {
+  const byCard = new Map<string, Map<number, Array<{ readonly recencyMs: number; readonly index: number }>>>();
   snapshots.forEach((snapshot, index) => {
     const cardId = snapshot.cardId.trim();
     const status = snapshot.status?.trim().toLowerCase();
@@ -855,14 +855,10 @@ function samePidLiveProbeRecencyByCardId(
       || (status && TERMINAL_WORKER_CARD_STATUSES.has(status) && !(snapshot.alive === true && CRASH_WORKER_CARD_STATUSES.has(status)))
       || !Number.isSafeInteger(snapshot.pid)
       || snapshot.pid <= 0) return;
-    const byPid = byCard.get(cardId) ?? new Map<number, { readonly recencyMs: number; readonly index: number; readonly latestIndex: number }>();
-    const recencyMs = snapshotRecencyMs(snapshot);
-    const existingProbe = byPid.get(snapshot.pid);
-    if (existingProbe === undefined || recencyMs > existingProbe.recencyMs || (recencyMs === existingProbe.recencyMs && index > existingProbe.index)) {
-      byPid.set(snapshot.pid, { recencyMs, index, latestIndex: Math.max(existingProbe?.latestIndex ?? -1, index) });
-    } else if (index > existingProbe.latestIndex) {
-      byPid.set(snapshot.pid, { ...existingProbe, latestIndex: index });
-    }
+    const byPid = byCard.get(cardId) ?? new Map<number, Array<{ readonly recencyMs: number; readonly index: number }>>();
+    const probes = byPid.get(snapshot.pid) ?? [];
+    probes.push({ recencyMs: snapshotRecencyMs(snapshot), index });
+    byPid.set(snapshot.pid, probes);
     byCard.set(cardId, byPid);
   });
   return byCard;
@@ -881,17 +877,17 @@ function siblingPidsForSnapshot(
 
 function hasSamePidLiveProbe(
   snapshot: IssueWorkerCardProcessSnapshot,
-  liveProbeRecencyByCardId: ReadonlyMap<string, ReadonlyMap<number, { readonly recencyMs: number; readonly index: number; readonly latestIndex: number }>>,
+  liveProbesByCardId: ReadonlyMap<string, ReadonlyMap<number, readonly { readonly recencyMs: number; readonly index: number }[]>>,
   snapshotIndex: number,
 ): boolean {
   if (snapshot.alive === false || !Number.isSafeInteger(snapshot.pid) || snapshot.pid <= 0) return false;
-  const liveProbe = liveProbeRecencyByCardId.get(snapshot.cardId.trim())?.get(snapshot.pid);
+  const liveProbes = liveProbesByCardId.get(snapshot.cardId.trim())?.get(snapshot.pid) ?? [];
   const snapshotRecency = snapshotRecencyMs(snapshot);
-  return liveProbe !== undefined && (
-    snapshotRecency === 0
-      ? liveProbe.latestIndex > snapshotIndex
-      : liveProbe.recencyMs > snapshotRecency || (liveProbe.recencyMs === snapshotRecency && liveProbe.index > snapshotIndex)
-  );
+  return liveProbes.some(liveProbe => snapshotRecency === 0
+    ? liveProbe.index > snapshotIndex
+    : liveProbe.recencyMs > snapshotRecency
+      || (liveProbe.recencyMs === snapshotRecency && liveProbe.index > snapshotIndex)
+      || (liveProbe.recencyMs === 0 && liveProbe.index > snapshotIndex));
 }
 
 function normalizeKanbanState(status: string): string {
@@ -1119,7 +1115,7 @@ export function detectStuckRunWatchdogFindings(
   const longRunningWaitGraceMs = options.longRunningWaitGraceMs ?? DEFAULT_STUCK_RUN_WAIT_GRACE_MS;
   const findings: IssueStuckRunWatchdogFinding[] = [];
   const liveSiblings = liveSiblingPidsByCardId(snapshots);
-  const samePidLiveProbes = samePidLiveProbeRecencyByCardId(snapshots);
+  const samePidLiveProbes = samePidLiveProbesByCardId(snapshots);
   const deadFindingsByCardId = new Map<string, IssueStuckRunWatchdogFinding>();
   const deadFindingKeysByCardId = new Map<string, { readonly safetyRank: number; readonly recencyMs: number; readonly index: number }>();
   const newestDeadFindingsByCardId = new Map<string, IssueStuckRunWatchdogFinding>();
@@ -1145,7 +1141,6 @@ export function detectStuckRunWatchdogFindings(
         }
         const existingKey = deadFindingKeysByCardId.get(normalizedCardId);
         const terminalClearsExisting = existingKey !== undefined
-          && terminalKey.recencyMs > 0
           && (terminalKey.recencyMs > existingKey.recencyMs || (terminalKey.recencyMs === existingKey.recencyMs && terminalKey.index > existingKey.index));
         if (existingKey && terminalClearsExisting) {
           const newestKey = newestDeadFindingKeysByCardId.get(normalizedCardId);
@@ -1182,7 +1177,7 @@ export function detectStuckRunWatchdogFindings(
     const freshLongRunningWaitActivity = [heartbeatAgeMs, outputAgeMs, toolActivityAgeMs, stateTransitionAgeMs]
       .some((age) => age !== undefined && age < longRunningWaitGraceMs);
     const samePidLiveProbe = hasSamePidLiveProbe(snapshot, samePidLiveProbes, snapshotIndex);
-    const processStatus: IssueStuckRunWatchdogFinding['processStatus'] = snapshot.alive === false || (snapshot.alive !== true && !samePidLiveProbe && ((status !== undefined && crashKanbanState(status)) || setupFailureExitReason(snapshot.exitReason ?? '')))
+    const processStatus: IssueStuckRunWatchdogFinding['processStatus'] = snapshot.alive === false || (snapshot.alive !== true && !samePidLiveProbe && (operatorControlledSignalExitReason(snapshot.exitReason ?? '') || (status !== undefined && crashKanbanState(status)) || setupFailureExitReason(snapshot.exitReason ?? '')))
       ? 'dead'
       : hasPositivePid
         ? 'alive'
