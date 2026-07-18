@@ -160,7 +160,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
   async function withChatMutationAdmission<T>(
     c: Context,
     sessionId: string,
-    run: () => Promise<T>,
+    run: (session: NonNullable<ReturnType<ISessionStore['get']>>) => Promise<T>,
   ): Promise<T> {
     if (!admission.takeRateLimit(chatClientKey({
       action: 'message',
@@ -169,14 +169,8 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     }))) {
       throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
     }
-    if (!admission.begin(sessionId)) {
-      throw new HttpError(429, 'RATE_LIMITED', 'Chat mutation already in progress');
-    }
-    try {
-      return await run();
-    } finally {
-      admission.end(sessionId);
-    }
+
+    return admission.runExclusive(sessionId, async () => run(getSessionOrThrow(sessionStore, sessionId)));
   }
 
   function approvalRequester(c: Context): string {
@@ -387,9 +381,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const id = validateChatSessionId(c.req.param('id'));
     const body = await parseJsonBody(c);
     const { content, executionMode } = validateBody(SubmitMessageBody, body);
-    const session = getSessionOrThrow(sessionStore, id);
-
-    return withChatMutationAdmission(c, session.id, async () => {
+    return withChatMutationAdmission(c, id, async (session) => {
       if (session.pendingApproval || session.state === 'pending_approval') {
         return c.json({
           error: {
@@ -466,9 +458,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const id = validateChatSessionId(c.req.param('id'));
     const body = await parseJsonBody(c);
     const { approved } = validateBody(ApproveBody, body);
-    const session = getSessionOrThrow(sessionStore, id);
-
-    return withChatMutationAdmission(c, session.id, async () => {
+    return withChatMutationAdmission(c, id, async (session) => {
       if (!session.pendingApproval) {
         if (session.state === 'approved' || session.state === 'rejected') {
           return c.json({
