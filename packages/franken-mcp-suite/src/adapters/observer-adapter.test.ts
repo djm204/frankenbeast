@@ -146,6 +146,32 @@ describe('ObserverAdapter', () => {
     })).rejects.toThrow('Cannot append audit row to invalid trail tail');
   });
 
+  it('rejects a legacy tail downgraded from a current full-hash parent', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const observer = createObserverAdapter(dbPath);
+    const sessionId = randomUUID();
+    const first = await observer.log({
+      event: 'tool_call',
+      metadata: JSON.stringify({ tool: 'memory', step: 1 }),
+      sessionId,
+    });
+    const legacyMetadata = JSON.stringify({ sessionId, eventType: 'tool_result', tool: 'memory', step: 2 });
+    const downgradedHash = legacy16AuditHash(legacyMetadata, first.hash);
+
+    mutateAuditTrailDirectly(dbPath, (db) => {
+      db.prepare(`
+        INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(sessionId, 'tool_result', legacyMetadata, downgradedHash, first.hash);
+    });
+
+    await expect(observer.log({
+      event: 'tool_call',
+      metadata: JSON.stringify({ tool: 'memory', retry: true }),
+      sessionId,
+    })).rejects.toThrow('Cannot append audit row to invalid trail tail');
+  });
+
   it('binds the event type into the first audit hash', async () => {
     const firstHashFrom = async (event: string): Promise<string> => {
       const observer = createObserverAdapter(tracked(tmpDbPath()));
@@ -348,6 +374,62 @@ describe('ObserverAdapter', () => {
     const migratedTrail = await observer.trail(sessionId);
     expect(migratedTrail[0]!.hash).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(migratedTrail[1]!.parentHash).toBe(migratedTrail[0]!.hash);
+  });
+
+  it('holds the write lock from legacy verification through migration', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const observer = createObserverAdapter(dbPath);
+    const sessionId = randomUUID();
+    const legacyMetadata = JSON.stringify({ sessionId, eventType: 'tool_call', tool: 'memory' });
+    const legacyHash = legacy16AuditHash(legacyMetadata);
+    const setupDb = new Database(dbPath);
+    setupDb.prepare(`
+      INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(sessionId, 'tool_call', legacyMetadata, legacyHash, null);
+    setupDb.close();
+
+    const competingDb = new Database(dbPath);
+    competingDb.pragma('busy_timeout = 0');
+    const competingMetadata = JSON.stringify({ tool: 'memory', concurrent: true });
+    const competingHash = fullAuditHash(sessionId, 'tool_result', competingMetadata, legacyHash);
+    const originalPrepare = Database.prototype.prepare;
+    let competingWriteError: unknown;
+    const prepareSpy = vi.spyOn(Database.prototype, 'prepare').mockImplementation(function (source: string) {
+      const statement = originalPrepare.call(this, source);
+      if (!source.includes('FROM audit_trail WHERE session_id = ? ORDER BY id ASC')) return statement;
+
+      const originalAll = statement.all.bind(statement) as (...params: unknown[]) => unknown[];
+      vi.spyOn(statement, 'all').mockImplementation((...params: unknown[]) => {
+        const rows = originalAll(...params);
+        try {
+          competingDb.prepare(`
+            INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
+            VALUES (?, ?, ?, ?, ?)
+          `).run(sessionId, 'tool_result', competingMetadata, competingHash, legacyHash);
+        } catch (error) {
+          competingWriteError = error;
+        }
+        return rows;
+      });
+      return statement;
+    });
+
+    try {
+      expect(await observer.verify(sessionId)).toEqual({ ok: true, checked: 1 });
+    } finally {
+      prepareSpy.mockRestore();
+      competingDb.close();
+    }
+
+    expect(competingWriteError).toMatchObject({ code: 'SQLITE_BUSY' });
+    expect(await observer.trail(sessionId)).toHaveLength(1);
+    await expect(observer.log({
+      event: 'tool_result',
+      metadata: competingMetadata,
+      sessionId,
+    })).resolves.toEqual(expect.objectContaining({ hash: expect.stringMatching(/^sha256:[a-f0-9]{64}$/) }));
+    expect(await observer.verify(sessionId)).toEqual({ ok: true, checked: 2 });
   });
 
   it('does not rewrite a valid legacy prefix when a later row is invalid', async () => {
