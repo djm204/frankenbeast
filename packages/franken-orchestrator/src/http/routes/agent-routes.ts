@@ -250,7 +250,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
         data: {
           ...detail,
           agent: redactDispatchFailure ? redactDispatchFailedAgentResponse(detail.agent) : detail.agent,
-          events: redactDispatchFailure ? redactDispatchFailedAgentEvents(detail.events) : detail.events,
+          events: redactDispatchFailedAgentEvents(detail.events),
         },
       });
     } catch (error) {
@@ -654,7 +654,6 @@ async function startLinkedAgentRun(deps: AgentRoutesDeps, agent: TrackedAgent): 
   if (!agent.dispatchRunId) {
     throw new Error(`Tracked agent '${agent.id}' has no linked run`);
   }
-  restoreFailedRunConfigSnapshot(deps, agent);
   return deps.runs.start(agent.dispatchRunId, 'operator');
 }
 
@@ -662,18 +661,7 @@ async function restartLinkedAgentRun(deps: AgentRoutesDeps, agent: TrackedAgent)
   if (!agent.dispatchRunId) {
     throw new Error(`Tracked agent '${agent.id}' has no linked run`);
   }
-  restoreFailedRunConfigSnapshot(deps, agent);
   return deps.runs.restart(agent.dispatchRunId, 'operator');
-}
-
-function restoreFailedRunConfigSnapshot(deps: AgentRoutesDeps, agent: TrackedAgent): void {
-  if (!agent.dispatchRunId) return;
-  const run = deps.runs.getRun(agent.dispatchRunId);
-  if (run?.status !== 'failed' || Object.keys(run.configSnapshot).length > 0) return;
-  deps.runs.updateConfigSnapshot(run.id, {
-    ...agent.initConfig,
-    ...(agent.moduleConfig ? { modules: agent.moduleConfig } : {}),
-  });
 }
 
 function assertAgentCapacityAvailable(deps: AgentRoutesDeps, agent: TrackedAgent): void {
@@ -694,6 +682,7 @@ function assertAgentCapacityAvailable(deps: AgentRoutesDeps, agent: TrackedAgent
 function redactDispatchFailedAgentResponse(agent: TrackedAgent) {
   return {
     ...agent,
+    name: undefined,
     initAction: {
       ...agent.initAction,
       command: '[REDACTED]',

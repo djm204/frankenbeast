@@ -71,7 +71,18 @@ export class BeastRunService {
 
   async start(runId: string, _actor: string): Promise<BeastRun> {
     this.serviceOptions.maintenance?.assertDispatchAllowed();
-    const run = this.reserveTrackedAgentCapacityForStart(this.requireRun(runId));
+    let run = this.reserveTrackedAgentCapacityForStart(this.requireRun(runId));
+    if (run.trackedAgentId && Object.keys(run.configSnapshot).length === 0) {
+      const trackedAgent = this.repository.getTrackedAgent(run.trackedAgentId);
+      if (trackedAgent) {
+        run = this.repository.updateRun(run.id, {
+          configSnapshot: {
+            ...trackedAgent.initConfig,
+            ...(trackedAgent.moduleConfig ? { modules: trackedAgent.moduleConfig } : {}),
+          },
+        });
+      }
+    }
     const definition = this.getDefinitionOrThrow(run.definitionId);
     const priorAttemptId = run.currentAttemptId;
     const priorAttemptCount = run.attemptCount;
@@ -430,7 +441,7 @@ export class BeastRunService {
         data: { agentId: trackedAgentId, status, updatedAt },
       }];
 
-      if (trackedAgent.status === 'failed' && status === 'running') {
+      if (status === 'running' && this.repository.hasActiveDispatchFailure(trackedAgentId)) {
         const recoveredEvent = {
           level: 'info' as const,
           type: 'agent.dispatch.recovered',

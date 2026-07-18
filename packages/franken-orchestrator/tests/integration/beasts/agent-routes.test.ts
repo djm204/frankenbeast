@@ -1595,6 +1595,7 @@ describe('agent routes integration', () => {
           objective: 'Redact dispatch failure',
           chunkDirectory: 'docs/chunks',
           token: requestSecret,
+          identity: { name: requestSecret },
         },
       }),
     });
@@ -1630,6 +1631,7 @@ describe('agent routes integration', () => {
       data: { agent: Record<string, unknown>; events: AgentEvent[] };
     };
     expect(detail.data.agent).not.toHaveProperty('dispatchRunId');
+    expect(detail.data.agent).not.toHaveProperty('name');
     expect(JSON.stringify(detail.data.events)).not.toContain('run_historical-secret-link');
 
     const patchResponse = await app.request(`/v1/beasts/agents/${responseBody.error.details.agentId}/config`, {
@@ -1645,6 +1647,22 @@ describe('agent routes integration', () => {
     });
     expect(stopResponse.status).toBe(200);
     const stoppedAgent = await stopResponse.json() as { data: Record<string, unknown> };
+    agents.appendEvent(responseBody.error.details.agentId, {
+      level: 'info',
+      type: 'agent.dispatch.recovered',
+      message: 'Tracked agent dispatch recovered',
+      payload: {},
+    });
+    const recoveredDetailResponse = await app.request(
+      `/v1/beasts/agents/${responseBody.error.details.agentId}`,
+      { headers },
+    );
+    const recoveredDetail = await recoveredDetailResponse.json() as {
+      data: { events: AgentEvent[] };
+    };
+    expect(JSON.stringify(recoveredDetail.data.events)).not.toContain(exceptionSecret);
+    expect(JSON.stringify(recoveredDetail.data.events)).not.toContain(sensitiveCommand);
+    expect(JSON.stringify(recoveredDetail.data.events)).not.toContain('run_historical-secret-link');
     const exposedSurfaces = JSON.stringify({
       responseBody,
       agent: detail.data.agent,

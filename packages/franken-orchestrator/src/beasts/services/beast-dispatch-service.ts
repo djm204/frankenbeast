@@ -271,6 +271,20 @@ export class BeastDispatchService {
             status: agentStatus,
             updatedAt,
           });
+          if (agentStatus === 'running' && this.repository.hasActiveDispatchFailure(updated.trackedAgentId)) {
+            const recoveredEvent = {
+              level: 'info' as const,
+              type: 'agent.dispatch.recovered',
+              message: `Tracked agent dispatch recovered for run ${updated.id}`,
+              payload: { runId: updated.id },
+              createdAt: updatedAt,
+            };
+            this.repository.appendTrackedAgentEvent(updated.trackedAgentId, recoveredEvent);
+            this.options.eventBus?.publish({
+              type: 'agent.event',
+              data: { agentId: updated.trackedAgentId, event: recoveredEvent },
+            });
+          }
           this.options.eventBus?.publish({
             type: 'agent.status',
             data: { agentId: updated.trackedAgentId, status: agentStatus, updatedAt },
