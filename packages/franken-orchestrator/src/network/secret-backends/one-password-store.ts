@@ -69,10 +69,7 @@ function itemTemplateForExistingSecret(stdout: string, fallbackTitle: string, va
   }
 
   const passkeys = item.passkeys;
-  if (!Object.prototype.hasOwnProperty.call(item, 'passkeys') || !Array.isArray(passkeys)) {
-    throw new Error('1Password item already exists without explicit passkey metadata; refusing to template-edit because passkeys or unsupported item data cannot be reliably detected. Delete and recreate the item to rotate this secret.');
-  }
-  if (passkeys.length > 0) {
+  if (Array.isArray(passkeys) && passkeys.length > 0) {
     throw new Error('1Password item already exists with passkeys; refusing to edit because unsupported item data cannot be safely preserved. Delete and recreate the item to rotate this secret.');
   }
 
