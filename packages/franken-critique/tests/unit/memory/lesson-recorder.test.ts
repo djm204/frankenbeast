@@ -858,7 +858,7 @@ describe('extractPostTaskLessonCandidates', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-customer-policy-with-concrete-tenant',
       completedAt: '2026-07-16T00:00:00.000Z',
-      userCorrections: ['User prefers customer data for customer ACME-123 to stay out of lessons'],
+      userCorrections: ['User prefers customer data for ACME-123 to stay out of lessons'],
     });
 
     expect(JSON.stringify(report)).not.toContain('ACME-123');
@@ -1698,6 +1698,7 @@ describe('extractPostTaskLessonCandidates', () => {
     'User wants https://github.com/acme/foo/issues/123 closed',
     'User wants https://github.com/acme/foo/pull/123/files reviewed',
     'User wants https://github.com/acme/foo/issues/123?foo=bar closed',
+    'User wants https://github.com/acme/foo/commit/1234567890abcdef merged',
   ])(
     'discards terse task-reference command %p',
     (correction) => {
