@@ -952,7 +952,7 @@ function sqlJsonEqualsAny(jsonExpression: string, paths: string[], value: string
 }
 
 function sqlToolEqualsExpression(expression: string): string {
-  return `(${expression} = ? OR ${expression} LIKE ('%__' || ?))`;
+  return `(COALESCE(${expression} = ?, 0) OR COALESCE(${expression} LIKE ('%__' || ?), 0))`;
 }
 
 function sqlJsonToolEqualsAny(jsonExpression: string, paths: string[], value: string | undefined): { clause: string; params: string[] } {

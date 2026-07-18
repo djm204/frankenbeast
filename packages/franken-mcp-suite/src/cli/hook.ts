@@ -150,13 +150,10 @@ function markHookGovernanceContext(context: string): string {
       });
     }
   } catch {
-    // Non-JSON legacy hook contexts are still governed; wrap them so downstream
-    // audit reports can distinguish trusted hook rows from public governor probes.
+    // Non-JSON legacy hook contexts are still governed as raw command text so
+    // policy regexes see executable whitespace such as tabs and newlines.
   }
-  return JSON.stringify({
-    [HOOK_GOVERNANCE_SOURCE_KEY]: HOOK_GOVERNANCE_SOURCE,
-    contextText: context,
-  });
+  return context;
 }
 
 function parseJsonRecord(text: string): Record<string, unknown> | undefined {
