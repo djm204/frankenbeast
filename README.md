@@ -923,10 +923,23 @@ External communications are implemented in `@franken/orchestrator` under `packag
 |---------|-----------|----------|
 | Slack | Events API + Interactivity | HMAC-SHA256 signature verification |
 | Discord | Gateway events | ED25519 signature verification |
-| Telegram | Webhook | Token-based authentication |
+| Telegram | Webhook | Telegram `secret_token` header validation |
 | WhatsApp | Cloud API | SHA256 signature verification |
 
 Channels route through the orchestrator comms pipeline. See [ADR-016](docs/adr/016-external-comms-gateway.md) for the original gateway decision and the orchestrator comms source for current implementation details.
+
+### Telegram webhook setup and migration
+
+Telegram updates use the fixed `https://<public-host>/webhooks/telegram` route. Configure a dedicated, randomly generated webhook secret through `comms.telegram.webhookSecretTokenRef`, then pass the resolved value as Telegram's `secret_token` when registering the webhook. The secret must be 1–256 characters using only A-Z, a-z, 0-9, `_`, and `-`, as required by the Telegram Bot API. Telegram sends that value in `X-Telegram-Bot-Api-Secret-Token`; Frankenbeast rejects requests whose header is missing or invalid. Do not append the bot token to the webhook URL.
+
+To migrate an existing token-bearing webhook URL:
+
+1. Generate a new webhook secret that is independent of the Telegram bot token and store it directly in the configured secret backend under the reference named by `comms.telegram.webhookSecretTokenRef`. If the logical reference changes, update `.fbeast/config.json` too. Do not rely on `frankenbeast init --repair` to rotate a complete configuration; it exits without changing secrets when verification already passes.
+2. After storing the secret, re-register the webhook with Telegram using the fixed `/webhooks/telegram` URL and the same new value in the Bot API `secret_token` parameter. Telegram's `setWebhook` call replaces the previous webhook URL.
+3. Send a test update and confirm the fixed route accepts the `X-Telegram-Bot-Api-Secret-Token` header. A legacy token-bearing path returns `404` when sent directly to the chat server. The supported `dashboard-web` reverse proxy instead rewrites legacy token-bearing paths to `/webhooks/telegram` before forwarding, so verify the fixed upstream route and header validation rather than expecting a proxy-level `404`.
+4. If the old URL may have appeared in proxy logs, screenshots, or support tools, rotate the bot token with BotFather and update `comms.telegram.botTokenRef`; then remove or redact retained copies of the old URL.
+
+Never log the resolved bot token or webhook secret. Treat both secret-store references as server-side configuration.
 
 Delivery-channel sensitivity defaults fail-closed: runtime replies marked with `sensitivity: "sensitive"` or metadata `deliverySensitivity: "sensitive"` are withheld from Slack, Discord, Telegram, and WhatsApp unless that channel explicitly sets `allowSensitiveDelivery: true`. Unknown sensitivity labels are treated as sensitive. Withheld messages send a generic operator guidance notice and route metadata only, never the sensitive payload or interactive actions.
 
