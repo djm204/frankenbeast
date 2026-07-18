@@ -29,6 +29,13 @@ export interface Decision {
 export interface PolicyConfig {
   /** Allowed git remote names for push operations */
   allowedGitRemotes?: readonly string[];
+  /**
+   * When set, the caller must supply the remote's *resolved* URL in
+   * `details.remoteUrl` and it must appear here. This binds a whitelisted
+   * remote name to its expected destination, so rewriting the name's URL in
+   * .git/config cannot redirect a permitted push.
+   */
+  allowedGitRemoteUrls?: readonly string[];
 }
 
 /** Default policy – allow everything (except actions that have explicit safe checks). */
@@ -62,17 +69,29 @@ export function evaluate(action: Action, config: PolicyConfig = defaultPolicy, d
   }
   switch (action) {
     case 'git-push': {
-      const remote = typeof details === 'object' && details !== null && 'remote' in details ? (details as any).remote : undefined;
+      const d = (typeof details === 'object' && details !== null ? details : {}) as { remote?: unknown; remoteUrl?: unknown };
       // Policy data may arrive from JSON/env or untyped JS callers; a string
       // here would make `.includes` a substring check, so fail closed unless
       // it is a real array of exact remote names.
-      const allowed = Array.isArray(config.allowedGitRemotes)
-        && config.allowedGitRemotes.includes(remote as string);
-      // Reasons are meant to be surfaced verbatim; never echo raw remotes,
-      // which may be credential-bearing URLs.
-      return allowed
-        ? { allow: true, reason: `Remote "${redactRemote(remote)}" is whitelisted for git push` }
-        : { allow: false, reason: `Remote "${redactRemote(remote)}" is not allowed by policy` };
+      // Reasons are meant to be surfaced verbatim; never echo raw remotes or
+      // URLs, which may be credential-bearing.
+      const nameAllowed = Array.isArray(config.allowedGitRemotes)
+        && config.allowedGitRemotes.includes(d.remote as string);
+      if (!nameAllowed) {
+        return { allow: false, reason: `Remote "${redactRemote(d.remote)}" is not allowed by policy` };
+      }
+      if (config.allowedGitRemoteUrls !== undefined) {
+        if (!Array.isArray(config.allowedGitRemoteUrls)) {
+          return { allow: false, reason: 'Malformed allowedGitRemoteUrls; denying by default' };
+        }
+        if (typeof d.remoteUrl !== 'string' || !config.allowedGitRemoteUrls.includes(d.remoteUrl)) {
+          return {
+            allow: false,
+            reason: `Remote "${redactRemote(d.remote)}" resolves to URL "${redactRemote(d.remoteUrl)}", which is not allowed by policy`,
+          };
+        }
+      }
+      return { allow: true, reason: `Remote "${redactRemote(d.remote)}" is whitelisted for git push` };
     }
     case 'cron-modify':
     case 'memory-edit':

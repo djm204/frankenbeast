@@ -36,6 +36,24 @@ describe('policy engine', () => {
     expect(allowed.allow).toBe(true);
   });
 
+  it('binds whitelisted remote names to expected URLs when allowedGitRemoteUrls is set', () => {
+    const config = {
+      allowedGitRemotes: ['origin'],
+      allowedGitRemoteUrls: ['https://github.com/org/repo.git'],
+    };
+    expect(evaluatePolicy('git-push', config, { remote: 'origin', remoteUrl: 'https://github.com/org/repo.git' }).allow).toBe(true);
+    // A rewritten .git/config URL for a whitelisted name must be denied.
+    expect(evaluatePolicy('git-push', config, { remote: 'origin', remoteUrl: 'ssh://attacker.example/repo.git' }).allow).toBe(false);
+    // Missing resolution fails closed.
+    expect(evaluatePolicy('git-push', config, { remote: 'origin' }).allow).toBe(false);
+    // Malformed URL whitelist fails closed.
+    expect(evaluatePolicy(
+      'git-push',
+      { allowedGitRemotes: ['origin'], allowedGitRemoteUrls: 'https://github.com/org/repo.git' as unknown as readonly string[] },
+      { remote: 'origin', remoteUrl: 'https://github.com/org/repo.git' },
+    ).allow).toBe(false);
+  });
+
   it('denies instead of throwing when the policy config is malformed', () => {
     for (const bad of [null, 'origin', 42, true]) {
       const decision = evaluatePolicy('git-push', bad as never, { remote: 'origin' });

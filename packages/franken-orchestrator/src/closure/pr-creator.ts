@@ -43,6 +43,7 @@ export class PrCreationRequiredActionError extends Error {
  */
 export interface PushPolicyConfig {
   readonly allowedGitRemotes?: readonly string[];
+  readonly allowedGitRemoteUrls?: readonly string[];
 }
 
 interface PushPolicyDecision {
@@ -53,7 +54,7 @@ interface PushPolicyDecision {
 type PushPolicyEvaluator = (
   action: 'git-push',
   config: PushPolicyConfig,
-  details: { readonly remote: string },
+  details: { readonly remote: string; readonly remoteUrl?: string | undefined },
 ) => PushPolicyDecision;
 
 // Non-literal specifier: keeps tsc from statically resolving the optional module.
@@ -448,7 +449,22 @@ export class PrCreator {
       return false;
     }
 
-    const decision = evaluatePolicy('git-push', policy, { remote: this.config.remote });
+    // When the policy binds names to URLs, evaluate the *resolved* push URL so
+    // a rewritten .git/config entry for a whitelisted name cannot redirect the
+    // push. Resolution failure leaves remoteUrl undefined, which the engine
+    // treats as a denial.
+    let remoteUrl: string | undefined;
+    if (policy.allowedGitRemoteUrls !== undefined) {
+      try {
+        remoteUrl = this.exec('git', ['remote', 'get-url', '--push', this.config.remote]).trim() || undefined;
+      } catch {
+        // The configured remote may be a URL rather than a named remote, in
+        // which case get-url fails and the remote itself is the destination.
+        remoteUrl = /:\/\/|@/.test(this.config.remote) ? this.config.remote : undefined;
+      }
+    }
+
+    const decision = evaluatePolicy('git-push', policy, { remote: this.config.remote, remoteUrl });
     if (!decision.allow) {
       // The engine's reason embeds the raw remote, which may be a
       // credential-bearing URL — redact it before logging.
