@@ -219,7 +219,7 @@ function hardcodedSensitiveEnvFinding(line) {
   if (!trimmed || trimmed.startsWith('#')) {
     return null;
   }
-  const match = trimmed.match(/^(?:export\s+)?([A-Z0-9_]+)\s*=\s*(.*)$/);
+  const match = trimmed.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
   if (!match) {
     return null;
   }
@@ -393,13 +393,14 @@ async function scanSourceFile(file, findings) {
 
   for (const [index, line] of lines.entries()) {
     const code = stripComments(line, commentState).trim();
-    if (!code) {
+
+    if (hasCredentialToken(line)) {
+      findings.push(`${toRepoPath(file)}:${index + 1}: ${redactSourceLine(line.trim())}`);
+      pendingSensitiveFallbackLine = null;
       continue;
     }
 
-    if (hasCredentialToken(code)) {
-      findings.push(`${toRepoPath(file)}:${index + 1}: ${redactSourceLine(code)}`);
-      pendingSensitiveFallbackLine = null;
+    if (!code) {
       continue;
     }
 

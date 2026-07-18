@@ -389,6 +389,8 @@ describe('hard-coded example secret scanner', () => {
         `export const google = '${googleToken}';`,
         `export const classicGitHub = '${classicGithubToken}';`,
         `const jwtSecret = '${adjacentSecret}'; const gh = '${githubToken}';`,
+        `// leaked token: ${githubToken}`,
+        `/* leaked token: ${anthropicToken} */`,
       ].join('\n'),
       'utf8',
     );
@@ -396,6 +398,7 @@ describe('hard-coded example secret scanner', () => {
       join(root, '.env.example'),
       [
         `SERVICE_URL=https://user:dbpass@example.test?token=${githubToken}`,
+        `service_url=https://example.test/?token=${googleToken}`,
         `JWT_SECRET=prefix-${classicGithubToken}-local-secret`,
       ].join('\n'),
       'utf8',
@@ -409,7 +412,10 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('packages/example/src/config.ts:3');
     expect(result.stderr).toContain('packages/example/src/config.ts:4');
     expect(result.stderr).toContain('packages/example/src/config.ts:5');
+    expect(result.stderr).toContain('packages/example/src/config.ts:6');
+    expect(result.stderr).toContain('packages/example/src/config.ts:7');
     expect(result.stderr).toContain('SERVICE_URL=<redacted>');
+    expect(result.stderr).toContain('service_url=<redacted>');
     expect(result.stderr).toContain('JWT_SECRET=<redacted>');
     expect(result.stderr).not.toContain(githubToken);
     expect(result.stderr).not.toContain(classicGithubToken);
