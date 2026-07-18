@@ -2,6 +2,7 @@ import type { CliResult } from './cli-runner.js';
 import type { ISecretStore, SecretStoreDetection } from '../secret-store.js';
 
 type CliRunner = (command: string, args: string[]) => Promise<CliResult>;
+type StdinRunner = (command: string, args: string[], stdin: string) => Promise<CliResult>;
 
 const VAULT = 'frankenbeast';
 const TITLE_PREFIX = 'frankenbeast/';
@@ -22,7 +23,10 @@ function itemIdFromJson(stdout: string): string | undefined {
 export class OnePasswordStore implements ISecretStore {
   readonly id = '1password';
 
-  constructor(private readonly runner: CliRunner) {}
+  constructor(
+    private readonly runner: CliRunner,
+    private readonly stdinRunner?: StdinRunner | undefined,
+  ) {}
 
   async detect(): Promise<SecretStoreDetection> {
     const result = await this.runner('op', ['--version']);
@@ -38,28 +42,32 @@ export class OnePasswordStore implements ISecretStore {
   }
 
   async store(key: string, value: string): Promise<void> {
+    if (!this.stdinRunner) {
+      throw new Error('1Password store writes require a stdin-capable runner to avoid exposing secret values in process arguments.');
+    }
+
     const title = titleForKey(key);
     const getResult = await this.runner('op', ['item', 'get', title, `--vault=${VAULT}`]);
 
     if (getResult.exitCode === 0) {
-      // Item exists — edit it
-      await this.runner('op', [
+      // Item exists — edit it. `password=-` makes op read the concealed field from stdin.
+      await this.stdinRunner('op', [
         'item',
         'edit',
         title,
         `--vault=${VAULT}`,
-        `password=${value}`,
-      ]);
+        'password=-',
+      ], value);
     } else {
-      // Item does not exist — create it
-      await this.runner('op', [
+      // Item does not exist — create it. `password=-` makes op read the concealed field from stdin.
+      await this.stdinRunner('op', [
         'item',
         'create',
         '--category=Login',
         `--title=${title}`,
         `--vault=${VAULT}`,
-        `password=${value}`,
-      ]);
+        'password=-',
+      ], value);
     }
   }
 

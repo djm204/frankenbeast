@@ -8,7 +8,7 @@ const RESOLVED_SLACK_BOT_TOKEN = testCredential('RESOLVED_SLACK_BOT_TOKEN');
 
 // Same mock runner pattern as OnePasswordStore/BitwardenStore tests
 function createMockRunner() {
-  const calls: Array<{ command: string; args: string[] }> = [];
+  const calls: Array<{ command: string; args: string[]; stdin?: string }> = [];
   const responses = new Map<string, CliResult>();
   const runner = async (command: string, args: string[]): Promise<CliResult> => {
     calls.push({ command, args });
@@ -18,7 +18,21 @@ function createMockRunner() {
     }
     return { stdout: '', stderr: 'not found', exitCode: 1 };
   };
-  return { runner, calls, responses };
+  const stdinRunner = async (command: string, args: string[], stdin: string): Promise<CliResult> => {
+    calls.push({ command, args, stdin });
+    const key = `${command} ${args.join(' ')}`;
+    for (const [pattern, result] of responses) {
+      if (key.includes(pattern)) return result;
+    }
+    return { stdout: '', stderr: '', exitCode: 0 };
+  };
+  return { runner, stdinRunner, calls, responses };
+}
+
+function expectNoArgContains(calls: Array<{ args: string[] }>, secret: string) {
+  for (const call of calls) {
+    expect(call.args.join('\0')).not.toContain(secret);
+  }
 }
 
 describe('OsKeychainStore', () => {
@@ -28,7 +42,7 @@ describe('OsKeychainStore', () => {
 
     beforeEach(() => {
       mock = createMockRunner();
-      store = new OsKeychainStore({ runner: mock.runner, platform: 'linux' });
+      store = new OsKeychainStore({ runner: mock.runner, stdinRunner: mock.stdinRunner, platform: 'linux' });
     });
 
     it('detects via secret-tool availability', async () => {
@@ -43,11 +57,19 @@ describe('OsKeychainStore', () => {
       expect(detection.setupInstructions).toContain('secret-tool');
     });
 
-    it('stores via secret-tool store', async () => {
+    it('stores via secret-tool stdin without exposing the value in argv', async () => {
       mock.responses.set('store', { stdout: '', stderr: '', exitCode: 0 });
       await store.store('comms.slack.botTokenRef', TEST_SLACK_BOT_TOKEN);
       const storeCall = mock.calls.find(c => c.args.includes('store'));
       expect(storeCall).toBeDefined();
+      expect(storeCall?.stdin).toBe(TEST_SLACK_BOT_TOKEN);
+      expectNoArgContains(mock.calls, TEST_SLACK_BOT_TOKEN);
+    });
+
+    it('fails closed when storing without a stdin-capable runner', async () => {
+      const unsafeStore = new OsKeychainStore({ runner: mock.runner, platform: 'linux' });
+      await expect(unsafeStore.store('key', TEST_SLACK_BOT_TOKEN)).rejects.toThrow('stdin-capable runner');
+      expectNoArgContains(mock.calls, TEST_SLACK_BOT_TOKEN);
     });
 
     it('resolves via secret-tool lookup', async () => {
@@ -67,24 +89,17 @@ describe('OsKeychainStore', () => {
     });
 
     it('updates key manifest on store and delete', async () => {
-      // Track what gets written to the manifest
-      const manifestWrites: string[] = [];
       mock.responses.set('store', { stdout: '', stderr: '', exitCode: 0 });
       mock.responses.set('clear', { stdout: '', stderr: '', exitCode: 0 });
 
-      // Store a key — manifest lookup returns empty (first time)
       await store.store('my-key', 'my-value');
-      // The store call writes the key, then writes the manifest
       const manifestStoreCall = mock.calls.find(
         c => c.args.includes('store') && c.args.includes('__frankenbeast_keys__'),
       );
       expect(manifestStoreCall).toBeDefined();
-      // The manifest value should contain 'my-key'
-      const manifestValue = manifestStoreCall!.args[manifestStoreCall!.args.length - 1];
-      manifestWrites.push(manifestValue);
-      expect(JSON.parse(manifestValue)).toEqual(['my-key']);
+      expect(JSON.parse(manifestStoreCall!.stdin!)).toEqual(['my-key']);
+      expectNoArgContains(mock.calls, 'my-value');
 
-      // Now simulate the manifest existing for delete
       mock.responses.set('lookup', {
         stdout: JSON.stringify(['my-key']) + '\n',
         stderr: '',
@@ -92,13 +107,11 @@ describe('OsKeychainStore', () => {
       });
       mock.calls.length = 0;
       await store.delete('my-key');
-      // Should write an empty manifest
       const deleteManifestCall = mock.calls.find(
         c => c.args.includes('store') && c.args.includes('__frankenbeast_keys__'),
       );
       expect(deleteManifestCall).toBeDefined();
-      const deleteManifestValue = deleteManifestCall!.args[deleteManifestCall!.args.length - 1];
-      expect(JSON.parse(deleteManifestValue)).toEqual([]);
+      expect(JSON.parse(deleteManifestCall!.stdin!)).toEqual([]);
     });
   });
 
@@ -108,7 +121,7 @@ describe('OsKeychainStore', () => {
 
     beforeEach(() => {
       mock = createMockRunner();
-      store = new OsKeychainStore({ runner: mock.runner, platform: 'darwin' });
+      store = new OsKeychainStore({ runner: mock.runner, stdinRunner: mock.stdinRunner, platform: 'darwin' });
     });
 
     it('detects via security command', async () => {
@@ -117,13 +130,15 @@ describe('OsKeychainStore', () => {
       expect(detection.available).toBe(true);
     });
 
-    it('stores via security add-generic-password -U', async () => {
+    it('stores via security stdin without exposing the value in argv', async () => {
       mock.responses.set('add-generic-password', { stdout: '', stderr: '', exitCode: 0 });
-      await store.store('key', 'value');
+      await store.store('key', TEST_SLACK_BOT_TOKEN);
       const addCall = mock.calls.find(c => c.args.includes('add-generic-password'));
       expect(addCall).toBeDefined();
-      // -U flag for upsert
       expect(addCall!.args).toContain('-U');
+      expect(addCall?.stdin).toBe(`${TEST_SLACK_BOT_TOKEN}\n`);
+      expect(addCall!.args).not.toContain('-w');
+      expectNoArgContains(mock.calls, TEST_SLACK_BOT_TOKEN);
     });
 
     it('resolves via security find-generic-password -w', async () => {
@@ -139,7 +154,7 @@ describe('OsKeychainStore', () => {
 
     beforeEach(() => {
       mock = createMockRunner();
-      store = new OsKeychainStore({ runner: mock.runner, platform: 'win32' });
+      store = new OsKeychainStore({ runner: mock.runner, stdinRunner: mock.stdinRunner, platform: 'win32' });
     });
 
     it('detects via cmdkey', async () => {
@@ -148,11 +163,15 @@ describe('OsKeychainStore', () => {
       expect(detection.available).toBe(true);
     });
 
-    it('stores via cmdkey /generic', async () => {
-      mock.responses.set('cmdkey', { stdout: '', stderr: '', exitCode: 0 });
-      await store.store('key', 'value');
-      const addCall = mock.calls.find(c => c.args.some(a => a.includes('/generic:')));
+    it('stores via PowerShell stdin without exposing the value in argv', async () => {
+      mock.responses.set('New-StoredCredential', { stdout: '', stderr: '', exitCode: 0 });
+      await store.store('key', TEST_SLACK_BOT_TOKEN);
+      const addCall = mock.calls.find(c => c.command === 'powershell' && c.args.some(a => a.includes('New-StoredCredential')));
       expect(addCall).toBeDefined();
+      expect(addCall?.stdin).toBe(TEST_SLACK_BOT_TOKEN);
+      expect(addCall!.args.join(' ')).toContain("-Target 'frankenbeast/key'");
+      expect(addCall!.args.join(' ')).toContain('-Password $password');
+      expectNoArgContains(mock.calls, TEST_SLACK_BOT_TOKEN);
     });
 
     it('escapes apostrophes in PowerShell credential targets when resolving', async () => {

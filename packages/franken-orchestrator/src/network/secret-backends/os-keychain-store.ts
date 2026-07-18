@@ -131,6 +131,13 @@ export class OsKeychainStore implements ISecretStore {
     }
   }
 
+  private requireStdinRunner(backend: string): StdinRunner {
+    if (!this.stdinRunner) {
+      throw new Error(`${backend} store writes require a stdin-capable runner to avoid exposing secret values in process arguments.`);
+    }
+    return this.stdinRunner;
+  }
+
   // ── Linux (secret-tool / GNOME Keyring) ─────────────────────────────────────
 
   private async detectLinux(): Promise<SecretStoreDetection> {
@@ -152,7 +159,7 @@ export class OsKeychainStore implements ISecretStore {
   }
 
   private async storeLinuxRaw(key: string, value: string): Promise<void> {
-    // secret-tool store reads the secret from stdin
+    // secret-tool store reads the secret from stdin.
     const args = [
       'store',
       '--label=frankenbeast',
@@ -161,12 +168,7 @@ export class OsKeychainStore implements ISecretStore {
       'key',
       key,
     ];
-    if (this.stdinRunner) {
-      await this.stdinRunner('secret-tool', args, value);
-    } else {
-      // Fallback: pass value as trailing arg (for mock runner compatibility in tests)
-      await this.runner('secret-tool', [...args, value]);
-    }
+    await this.requireStdinRunner('secret-tool')('secret-tool', args, value);
   }
 
   private async resolveLinux(key: string): Promise<string | undefined> {
@@ -226,13 +228,13 @@ export class OsKeychainStore implements ISecretStore {
   }
 
   private async storeDarwinRaw(key: string, value: string): Promise<void> {
-    await this.runner('security', [
+    // Omit `-w <password>` so the secret is supplied on stdin instead of argv.
+    await this.requireStdinRunner('security')('security', [
       'add-generic-password',
       '-U',
       '-s', SERVICE,
       '-a', key,
-      '-w', value,
-    ]);
+    ], `${value}\n`);
   }
 
   private async resolveDarwin(key: string): Promise<string | undefined> {
@@ -268,7 +270,7 @@ export class OsKeychainStore implements ISecretStore {
     }
   }
 
-  // ── Windows (cmdkey / Credential Manager) ───────────────────────────────────
+  // ── Windows (PowerShell / Credential Manager) ───────────────────────────────
 
   private async detectWin32(): Promise<SecretStoreDetection> {
     const result = await this.runner('cmdkey', ['/list']);
@@ -283,11 +285,14 @@ export class OsKeychainStore implements ISecretStore {
   }
 
   private async storeWin32(key: string, value: string): Promise<void> {
-    await this.runner('cmdkey', [
-      `/generic:${SERVICE}/${key}`,
-      `/user:${SERVICE}`,
-      `/pass:${value}`,
-    ]);
+    const target = `${SERVICE}/${key}`;
+    const quotedTarget = quotePowerShellSingleQuotedString(target);
+    const quotedUser = quotePowerShellSingleQuotedString(SERVICE);
+    await this.requireStdinRunner('powershell')('powershell', [
+      '-NoProfile',
+      '-Command',
+      `$password = [Console]::In.ReadToEnd(); New-StoredCredential -Target ${quotedTarget} -UserName ${quotedUser} -Password $password -Persist LocalMachine | Out-Null`,
+    ], value);
   }
 
   private async resolveWin32(key: string): Promise<string | undefined> {

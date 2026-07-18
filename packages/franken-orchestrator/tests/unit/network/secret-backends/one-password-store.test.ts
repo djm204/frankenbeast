@@ -8,7 +8,7 @@ const UPDATED_SLACK_BOT_TOKEN = testCredential('UPDATED_SLACK_BOT_TOKEN');
 const RESOLVED_SLACK_BOT_TOKEN = testCredential('RESOLVED_SLACK_BOT_TOKEN');
 
 function createMockRunner() {
-  const calls: Array<{ command: string; args: string[] }> = [];
+  const calls: Array<{ command: string; args: string[]; stdin?: string }> = [];
   const responses = new Map<string, CliResult>();
 
   const runner = async (command: string, args: string[]): Promise<CliResult> => {
@@ -20,7 +20,22 @@ function createMockRunner() {
     return { stdout: '', stderr: 'not found', exitCode: 1 };
   };
 
-  return { runner, calls, responses };
+  const stdinRunner = async (command: string, args: string[], stdin: string): Promise<CliResult> => {
+    calls.push({ command, args, stdin });
+    const key = `${command} ${args.join(' ')}`;
+    for (const [pattern, result] of responses) {
+      if (key.includes(pattern)) return result;
+    }
+    return { stdout: '', stderr: '', exitCode: 0 };
+  };
+
+  return { runner, stdinRunner, calls, responses };
+}
+
+function expectNoArgContains(calls: Array<{ args: string[] }>, secret: string) {
+  for (const call of calls) {
+    expect(call.args.join('\0')).not.toContain(secret);
+  }
 }
 
 describe('OnePasswordStore', () => {
@@ -29,7 +44,7 @@ describe('OnePasswordStore', () => {
 
   beforeEach(() => {
     mock = createMockRunner();
-    store = new OnePasswordStore(mock.runner);
+    store = new OnePasswordStore(mock.runner, mock.stdinRunner);
   });
 
   describe('detect', () => {
@@ -47,22 +62,53 @@ describe('OnePasswordStore', () => {
   });
 
   describe('store and resolve', () => {
-    it('creates new item when key does not exist', async () => {
+    it('creates new item with the password supplied through stdin', async () => {
       mock.responses.set('item get', { stdout: '', stderr: 'not found', exitCode: 1 });
       mock.responses.set('item create', { stdout: '{}', stderr: '', exitCode: 0 });
 
       await store.store('comms.slack.botTokenRef', TEST_SLACK_BOT_TOKEN);
       const createCall = mock.calls.find(c => c.args.includes('create'));
       expect(createCall).toBeDefined();
+      expect(createCall).toMatchObject({
+        command: 'op',
+        args: [
+          'item',
+          'create',
+          '--category=Login',
+          '--title=frankenbeast/comms.slack.botTokenRef',
+          '--vault=frankenbeast',
+          'password=-',
+        ],
+        stdin: TEST_SLACK_BOT_TOKEN,
+      });
+      expectNoArgContains(mock.calls, TEST_SLACK_BOT_TOKEN);
     });
 
-    it('edits existing item when key already exists', async () => {
+    it('edits existing item with the password supplied through stdin', async () => {
       mock.responses.set('item get', { stdout: '{"id":"abc123"}', stderr: '', exitCode: 0 });
       mock.responses.set('item edit', { stdout: '{}', stderr: '', exitCode: 0 });
 
       await store.store('comms.slack.botTokenRef', UPDATED_SLACK_BOT_TOKEN);
       const editCall = mock.calls.find(c => c.args.includes('edit'));
       expect(editCall).toBeDefined();
+      expect(editCall).toMatchObject({
+        command: 'op',
+        args: [
+          'item',
+          'edit',
+          'frankenbeast/comms.slack.botTokenRef',
+          '--vault=frankenbeast',
+          'password=-',
+        ],
+        stdin: UPDATED_SLACK_BOT_TOKEN,
+      });
+      expectNoArgContains(mock.calls, UPDATED_SLACK_BOT_TOKEN);
+    });
+
+    it('fails closed when storing without a stdin-capable runner', async () => {
+      const unsafeStore = new OnePasswordStore(mock.runner);
+      await expect(unsafeStore.store('key', TEST_SLACK_BOT_TOKEN)).rejects.toThrow('stdin-capable runner');
+      expectNoArgContains(mock.calls, TEST_SLACK_BOT_TOKEN);
     });
 
     it('resolves a stored secret via op item get', async () => {
@@ -112,8 +158,9 @@ describe('OnePasswordStore', () => {
           '--category=Login',
           `--title=${title}`,
           '--vault=frankenbeast',
-          `password=${TEST_SLACK_BOT_TOKEN}`,
+          'password=-',
         ],
+        stdin: TEST_SLACK_BOT_TOKEN,
       });
       expect(mock.calls).toContainEqual({
         command: 'op',
@@ -163,8 +210,9 @@ describe('OnePasswordStore', () => {
           '--category=Login',
           `--title=${title}`,
           '--vault=frankenbeast',
-          `password=${TEST_SLACK_BOT_TOKEN}`,
+          'password=-',
         ],
+        stdin: TEST_SLACK_BOT_TOKEN,
       });
       expect(mock.calls).toContainEqual({
         command: 'op',

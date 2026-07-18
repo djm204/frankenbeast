@@ -8,7 +8,7 @@ const UPDATED_SLACK_BOT_TOKEN = testCredential('UPDATED_SLACK_BOT_TOKEN');
 const RESOLVED_SLACK_BOT_TOKEN = testCredential('RESOLVED_SLACK_BOT_TOKEN');
 
 function createMockRunner() {
-  const calls: Array<{ command: string; args: string[] }> = [];
+  const calls: Array<{ command: string; args: string[]; stdin?: string }> = [];
   const responses = new Map<string, CliResult>();
 
   const runner = async (command: string, args: string[]): Promise<CliResult> => {
@@ -20,7 +20,25 @@ function createMockRunner() {
     return { stdout: '', stderr: 'not found', exitCode: 1 };
   };
 
-  return { runner, calls, responses };
+  const stdinRunner = async (command: string, args: string[], stdin: string): Promise<CliResult> => {
+    calls.push({ command, args, stdin });
+    const key = `${command} ${args.join(' ')}`;
+    for (const [pattern, result] of responses) {
+      if (key.includes(pattern)) return result;
+    }
+    return { stdout: '', stderr: '', exitCode: 0 };
+  };
+
+  return { runner, stdinRunner, calls, responses };
+}
+
+function expectNoArgContains(calls: Array<{ args: string[] }>, secret: string) {
+  const encodedSecret = Buffer.from(secret).toString('base64');
+  for (const call of calls) {
+    const argv = call.args.join('\0');
+    expect(argv).not.toContain(secret);
+    expect(argv).not.toContain(encodedSecret);
+  }
 }
 
 describe('BitwardenStore', () => {
@@ -29,7 +47,7 @@ describe('BitwardenStore', () => {
 
   beforeEach(() => {
     mock = createMockRunner();
-    store = new BitwardenStore(mock.runner);
+    store = new BitwardenStore(mock.runner, mock.stdinRunner);
   });
 
   describe('detect', () => {
@@ -47,24 +65,23 @@ describe('BitwardenStore', () => {
   });
 
   describe('store', () => {
-    it('creates new item when key does not exist', async () => {
+    it('creates new item with the encoded payload supplied through stdin', async () => {
       mock.responses.set('get item', { stdout: '', stderr: 'Not found.', exitCode: 1 });
       mock.responses.set('create item', { stdout: '{"id":"new123"}', stderr: '', exitCode: 0 });
 
       await store.store('comms.slack.botTokenRef', TEST_SLACK_BOT_TOKEN);
       const createCall = mock.calls.find(c => c.args.includes('create'));
       expect(createCall).toBeDefined();
-      expect(createCall?.args).toContain('item');
-      // Should pass base64-encoded payload
-      const payload = createCall?.args[2];
-      expect(payload).toBeDefined();
-      const decoded = JSON.parse(Buffer.from(payload!, 'base64').toString('utf-8'));
+      expect(createCall?.args).toEqual(['create', 'item']);
+      expect(createCall?.stdin).toBeDefined();
+      const decoded = JSON.parse(Buffer.from(createCall!.stdin!, 'base64').toString('utf-8'));
       expect(decoded.type).toBe(2);
       expect(decoded.name).toBe('frankenbeast/comms.slack.botTokenRef');
       expect(decoded.notes).toBe(TEST_SLACK_BOT_TOKEN);
+      expectNoArgContains(mock.calls, TEST_SLACK_BOT_TOKEN);
     });
 
-    it('edits existing item when key already exists', async () => {
+    it('edits existing item with the encoded payload supplied through stdin', async () => {
       mock.responses.set('get item', {
         stdout: JSON.stringify({ id: 'abc123', name: 'frankenbeast/comms.slack.botTokenRef', notes: 'old-value' }),
         stderr: '',
@@ -75,12 +92,17 @@ describe('BitwardenStore', () => {
       await store.store('comms.slack.botTokenRef', UPDATED_SLACK_BOT_TOKEN);
       const editCall = mock.calls.find(c => c.args.includes('edit'));
       expect(editCall).toBeDefined();
-      expect(editCall?.args).toContain('abc123');
-      // Should pass base64-encoded payload
-      const payload = editCall?.args[3];
-      expect(payload).toBeDefined();
-      const decoded = JSON.parse(Buffer.from(payload!, 'base64').toString('utf-8'));
+      expect(editCall?.args).toEqual(['edit', 'item', 'abc123']);
+      expect(editCall?.stdin).toBeDefined();
+      const decoded = JSON.parse(Buffer.from(editCall!.stdin!, 'base64').toString('utf-8'));
       expect(decoded.notes).toBe(UPDATED_SLACK_BOT_TOKEN);
+      expectNoArgContains(mock.calls, UPDATED_SLACK_BOT_TOKEN);
+    });
+
+    it('fails closed when storing without a stdin-capable runner', async () => {
+      const unsafeStore = new BitwardenStore(mock.runner);
+      await expect(unsafeStore.store('key', TEST_SLACK_BOT_TOKEN)).rejects.toThrow('stdin-capable runner');
+      expectNoArgContains(mock.calls, TEST_SLACK_BOT_TOKEN);
     });
   });
 
