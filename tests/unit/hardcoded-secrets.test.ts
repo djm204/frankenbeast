@@ -352,6 +352,7 @@ describe('hard-coded example secret scanner', () => {
         "  '0 3 * * * gh auth token';",
         'const laterTokenDiagnostic = process.env.GITHUB_TOKEN;',
         "const compat = process.env.COMPAT ?? 'legacy';",
+        "const configPath = process.env.CONFIG_PATH ?? './config.json';",
       ].join('\n'),
       'utf8',
     );
@@ -434,12 +435,15 @@ describe('hard-coded example secret scanner', () => {
     writeFileSync(
       join(scriptDir, 'install-cron.mjs'),
       [
+        'const { owner } = options;',
+        'const pat = process.env.GITHUB_TOKEN;',
         'const {',
-        '  GITHUB_TOKEN: pat,',
+        '  GITHUB_TOKEN: destructuredPat,',
         '} = process.env;',
         'const schedule = "0 3 * * mon";',
         'const CRON_CMD =',
         "  schedule + ' agy pr --token ' + pat.trim();",
+        'const CRON_CMD_2 = `0 3 * * mon agy pr --token ${destructuredPat.trim()}`;',
       ].join('\n'),
       'utf8',
     );
@@ -461,6 +465,14 @@ describe('hard-coded example secret scanner', () => {
         'echo /tmp/*',
         'GITHUB_PAT_VALUE="$GITHUB_PAT"',
         'CRON_CMD="* * * * * GITHUB_PAT=$GITHUB_PAT_VALUE agy pr"',
+        'readonly pat="$GITHUB_TOKEN"',
+        'CRON_CMD_2="* * * * * agy pr --token $pat"',
+        'declare -r other_pat="$GITHUB_PAT"',
+        'CRON_CMD_3="* * * * * agy pr --token $other_pat"',
+        'crontab <<EOF',
+        'GITHUB_TOKEN=$GITHUB_TOKEN',
+        'EOF',
+        'CRON_CMD_4="0 3 * * * agy pr --token $(gh auth token)"',
       ].join('\n'),
       'utf8',
     );
@@ -468,10 +480,15 @@ describe('hard-coded example secret scanner', () => {
     const result = runScanner(root);
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('scripts/install-cron.mjs:6');
+    expect(result.stderr).toContain('scripts/install-cron.mjs:8');
+    expect(result.stderr).toContain('scripts/install-cron.mjs:9');
     expect(result.stderr).toContain('scripts/install-cron.py:3');
     expect(result.stderr).toContain('scripts/install-cron.py:5');
     expect(result.stderr).toContain('scripts/cron-install.sh:3');
+    expect(result.stderr).toContain('scripts/cron-install.sh:5');
+    expect(result.stderr).toContain('scripts/cron-install.sh:7');
+    expect(result.stderr).toContain('scripts/cron-install.sh:9');
+    expect(result.stderr).toContain('scripts/cron-install.sh:11');
     expect(result.stderr).toContain('GH_PAT=<redacted>');
     expect(result.stderr).not.toContain(rawPat);
   });

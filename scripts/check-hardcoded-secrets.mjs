@@ -27,7 +27,7 @@ const sensitiveEnvNames = [
   ['SECRET', 'KEY'],
 ].map((parts) => parts.join('_'));
 
-const sensitiveIdentifierPattern = /\b(?:[A-Z0-9_]*(?:_PAT|PAT_)[A-Z0-9_]*|[A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY|PASSPHRASE)|[A-Z0-9_]*(?:SECRET_KEY|ACCESS_KEY)|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)\b/i;
+const sensitiveIdentifierPattern = /\b(?:[A-Z0-9_]*(?:^|_)PAT(?:_|\b)[A-Z0-9_]*|[A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY|PASSPHRASE)|[A-Z0-9_]*(?:SECRET_KEY|ACCESS_KEY)|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)\b/i;
 const fallbackOperatorPattern = /(?:=|:|\?\?|\|\|)\s*$/;
 const DEFAULT_MAX_SCANNED_FILE_BYTES = 1_000_000;
 const DEFAULT_MAX_SCANNED_LINE_CHARS = 20_000;
@@ -364,12 +364,15 @@ function expressionUsesSensitiveAlias(expression, aliases) {
 
 function collectSensitiveEnvAliases(line, aliases, envNameAliases, destructuredEnvState = null) {
   if (destructuredEnvState?.active) {
-    const end = line.match(/^(.*)\}\s*=\s*(?:\(?process\.env\)?|import\.meta\.env)\s*;?$/);
-    const parts = end ? [...destructuredEnvState.parts, end[1]] : [...destructuredEnvState.parts, line];
-    if (end) {
+    const envEnd = line.match(/^(.*)\}\s*=\s*(?:\(?process\.env\)?|import\.meta\.env)\s*;?$/);
+    const anyEnd = envEnd ?? line.match(/^(.*)\}\s*=\s*.+;?$/);
+    const parts = anyEnd ? [...destructuredEnvState.parts, anyEnd[1]] : [...destructuredEnvState.parts, line];
+    if (anyEnd) {
       destructuredEnvState.active = false;
       destructuredEnvState.parts = [];
-      collectSensitiveEnvAliases(`const {${parts.join(',')}} = process.env;`, aliases, envNameAliases, null);
+      if (envEnd) {
+        collectSensitiveEnvAliases(`const {${parts.join(',')}} = process.env;`, aliases, envNameAliases, null);
+      }
     } else {
       destructuredEnvState.parts = parts;
     }
@@ -390,13 +393,13 @@ function collectSensitiveEnvAliases(line, aliases, envNameAliases, destructuredE
   }
 
   const destructuredStart = line.match(/^\s*(?:const|let|var)\s*\{\s*(.*)$/);
-  if (destructuredStart && destructuredEnvState) {
+  if (destructuredStart && destructuredEnvState && !destructuredStart[1].includes('}')) {
     destructuredEnvState.active = true;
     destructuredEnvState.parts = [destructuredStart[1]];
     return;
   }
 
-  const assignment = line.match(/^\s*(?:(?:const|let|var|local|export)\s+)?([A-Za-z_$][\w$]*)(?:\s*:\s*[^=]+)?\s*=\s*(.+)$/);
+  const assignment = line.match(/^\s*(?:(?:const|let|var|local|export|readonly|declare(?:\s+-[A-Za-z]+)*)\s+)?([A-Za-z_$][\w$]*)(?:\s*:\s*[^=]+)?\s*=\s*(.+)$/);
   if (!assignment) {
     return;
   }
@@ -464,11 +467,15 @@ function hasCronCredentialText(line) {
   return new RegExp(`${sensitiveIdentifierPattern.source}\\s*=\\s*[^\\s'\"` + '`' + `]+`, 'i').test(line) || hasInlineTokenMaterial(line);
 }
 
+function hasInstallTimeGhAuthTokenSubstitution(line) {
+  return /\$\(\s*gh\s+auth\s+token\s*\)/.test(line);
+}
+
 function hasCronSecretInterpolation(line, aliases, inCronContext = false) {
   if (!inCronContext && !hasCronCommandMarker(line)) {
     return false;
   }
-  if (hasSensitiveEnvAccess(line) || hasCronCredentialLiteral(line) || (inCronContext && hasCronCredentialText(line))) {
+  if (hasSensitiveEnvAccess(line) || hasCronCredentialLiteral(line) || (inCronContext && (hasCronCredentialText(line) || hasInstallTimeGhAuthTokenSubstitution(line)))) {
     return true;
   }
   for (const alias of aliases) {
@@ -483,7 +490,7 @@ function isCronContinuationLine(line, inCronContext, pendingCronCommand) {
   if (!inCronContext) {
     return false;
   }
-  if (/\(\s*$|[=+\\,]\s*$|(?:[furbFURB]*)?(?:'''|\"\"\")\s*$/.test(line)) {
+  if (/\(\s*$|[=+\\,]\s*$|<<-?\s*['"]?[A-Za-z_][\w-]*['"]?\s*$|(?:[furbFURB]*)?(?:'''|\"\"\")\s*$/.test(line)) {
     return true;
   }
   if (/^[furbFURB]*['"`]/.test(line)) {
