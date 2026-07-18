@@ -347,7 +347,7 @@ describe("Memory Server", () => {
     expect(brain.store).not.toHaveBeenCalled();
     expect(brain.proposeMemory).toHaveBeenCalledWith({
       key: "OPENAI_API_KEY",
-      value: sensitiveValue,
+      value: "<redacted>",
       source: "fbeast_memory_store:quarantine",
       evidenceId: "quarantine:OPENAI_API_KEY",
       confidence: 1,
@@ -392,7 +392,7 @@ describe("Memory Server", () => {
     expect(brain.store).not.toHaveBeenCalled();
     expect(brain.proposeMemory).toHaveBeenCalledWith(expect.objectContaining({
       key: "request-headers",
-      value: sensitiveValue,
+      value: "<redacted>",
       reason: expect.stringContaining("value-shape-indicates-secret"),
     }));
     expect(result.content[0]!.text).not.toContain(sensitiveValue);
@@ -499,7 +499,7 @@ describe("Memory Server", () => {
     expect(brain.store).not.toHaveBeenCalled();
     expect(brain.proposeMemory).toHaveBeenCalledWith(expect.objectContaining({
       key: "provider_note",
-      value: sensitiveValue,
+      value: "<redacted>",
       reason: expect.stringContaining("value-shape-indicates-secret"),
     }));
     expect(result.content[0]!.text).not.toContain(sensitiveValue);
