@@ -1172,8 +1172,8 @@ export function detectStuckRunWatchdogFindings(
     const minimumStaleSignals = providedActivitySignalCount;
     const freshLongRunningWaitActivity = [heartbeatAgeMs, outputAgeMs, toolActivityAgeMs, stateTransitionAgeMs]
       .some((age) => age !== undefined && age < longRunningWaitGraceMs);
-    const samePidLiveProbe = hasSamePidLiveProbe(snapshot, samePidLiveProbes, findingIndex);
-    const processStatus: IssueStuckRunWatchdogFinding['processStatus'] = snapshot.alive === false || (snapshot.alive !== true && !samePidLiveProbe && status !== undefined && crashKanbanState(status))
+    const samePidLiveProbe = hasSamePidLiveProbe(snapshot, samePidLiveProbes, snapshotIndex);
+    const processStatus: IssueStuckRunWatchdogFinding['processStatus'] = snapshot.alive === false || (snapshot.alive !== true && !samePidLiveProbe && ((status !== undefined && crashKanbanState(status)) || setupFailureExitReason(snapshot.exitReason ?? '')))
       ? 'dead'
       : hasPositivePid
         ? 'alive'
@@ -1243,7 +1243,7 @@ export function detectStuckRunWatchdogFindings(
       const candidateKey = {
         safetyRank: restartContractSafetyRank(restartContract),
         recencyMs: snapshotRecencyMs(snapshot),
-        index: findingIndex,
+        index: snapshotIndex,
       };
       const newestKey = newestDeadFindingKeysByCardId.get(normalizedCardId);
       if (newestKey === undefined || candidateKey.recencyMs > newestKey.recencyMs || (candidateKey.recencyMs === newestKey.recencyMs && candidateKey.index > newestKey.index)) {
