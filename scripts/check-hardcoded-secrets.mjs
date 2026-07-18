@@ -287,7 +287,7 @@ function stripComments(line, state, options = {}) {
       continue;
     }
 
-    if (char === '/' && next === '/') {
+    if (!python && !shell && char === '/' && next === '/') {
       return output;
     }
 
@@ -361,7 +361,7 @@ function hasHardcodedSourceLiteral(line) {
 }
 
 function hasSensitiveEnvAccess(line, envContainerAliases = new Set(), envNameAliases = new Set(), envGetterAliases = new Set(), options = {}) {
-  const envAccessPattern = /(?:(?:\(?process(?:\.env|\[['"`]env['"`]\])\)?|import\.meta\.env)\??(?:\.([A-Z0-9_]+)|\?\.\[['"`]([^'"`]+)['"`]\]|\[['"`]([^'"`]+)['"`]\])|(?:os\.environ(?:\.(?:get|setdefault|pop))?|os\.getenv|\bgetenv|\benviron(?:\.(?:get|setdefault|pop))?)\s*\(\s*['"`]([^'"`]+)['"`]|(?:os\.)?environ\s*\[\s*['"`]([^'"`]+)['"`]\s*\])/gi;
+  const envAccessPattern = /(?:(?:\(?process(?:\?\.env|\.env|\?\.\[['"`]env['"`]\]|\[['"`]env['"`]\])\)?|import\.meta\.env)\??(?:\.([A-Z0-9_]+)|\?\.\[['"`]([^'"`]+)['"`]\]|\[['"`]([^'"`]+)['"`]\])|(?:os\.environ(?:\.(?:get|setdefault|pop))?|os\.getenv|\bgetenv|\benviron(?:\.(?:get|setdefault|pop))?)\s*\(\s*['"`]([^'"`]+)['"`]|(?:os\.)?environ\s*\[\s*['"`]([^'"`]+)['"`]\s*\])/gi;
   for (const match of line.matchAll(envAccessPattern)) {
     const name = match[1] ?? match[2] ?? match[3] ?? match[4] ?? match[5] ?? '';
     if (sensitiveIdentifierPattern.test(name)) {
@@ -615,7 +615,7 @@ function normalizePropertyAccess(line) {
 
 function hasAliasInterpolation(line, alias) {
   const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const templateInterpolationPattern = new RegExp(`(?:\\$?\\{\\s*${escaped}(?:\\b[^}]*)?\\}|\\$${escaped}\\b|\\.\\.\\.${escaped}\\b)`, 'u');
+  const templateInterpolationPattern = new RegExp(`(?:(?:\\$?\\{)[^}]*${escaped}(?=$|[^A-Za-z0-9_$])[^}]*\\}|\\$${escaped}\\b|\\.\\.\\.${escaped}\\b)`, 'u');
   const normalizedLine = normalizePropertyAccess(line.replace(/\?\./g, '.'));
   if (stringLiterals(normalizedLine).some((literal) => templateInterpolationPattern.test(literal.value))) {
     return true;
@@ -667,11 +667,22 @@ function hasProgrammaticGhAuthTokenCall(line, ghAuthArgAliases = new Set()) {
   return [...ghAuthArgAliases].some((alias) => new RegExp(`\\b${alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'u').test(line));
 }
 
-function collectGhAuthArgAliases(line, aliases) {
+function collectGhAuthArgAliases(line, aliases, partsByAlias = new Map()) {
   const assignment = line.match(/^\s*(?:(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)\s*=\s*(.+)$/);
-  if (!assignment) return;
-  const literals = stringLiterals(assignment[2]).map((literal) => literal.value.trim());
-  if (literals.includes('auth') && literals.includes('token')) aliases.add(assignment[1]);
+  if (assignment) {
+    const literals = new Set(stringLiterals(assignment[2]).map((literal) => literal.value.trim()));
+    if (literals.has('auth') || literals.has('token')) partsByAlias.set(assignment[1], literals);
+    else partsByAlias.delete(assignment[1]);
+  }
+  const mutation = line.match(/^\s*([A-Za-z_$][\w$]*)\.(?:push|append)\s*\((.+)\)\s*;?$/);
+  if (mutation) {
+    const parts = partsByAlias.get(mutation[1]) ?? new Set();
+    for (const literal of stringLiterals(mutation[2])) parts.add(literal.value.trim());
+    partsByAlias.set(mutation[1], parts);
+  }
+  for (const [alias, parts] of partsByAlias) {
+    if (parts.has('auth') && parts.has('token')) aliases.add(alias);
+  }
 }
 
 function collectAsyncGhAuthTokenCallbackAliases(line, aliases) {
@@ -689,7 +700,7 @@ function collectAsyncGhAuthTokenCallbackAliases(line, aliases) {
 }
 
 function hasInstallTimeGhAuthTokenSubstitution(line) {
-  const ghCommand = String.raw`(?:env\s+)?(?:[A-Za-z_][A-Za-z0-9_]*=[^\s]+\s+)*(?:command\s+)?(?:gh|(?:\/[A-Za-z0-9._-]+)*\/gh)`;
+  const ghCommand = String.raw`(?:(?:env|(?:\/[A-Za-z0-9._-]+)*\/env)\s+)?(?:[A-Za-z_][A-Za-z0-9_]*=[^\s]+\s+)*(?:command\s+)?(?:gh|(?:\/[A-Za-z0-9._-]+)*\/gh)`;
   const unescapedSubstitution = new RegExp(String.raw`(^|[^\\])(?:\$\(\s*${ghCommand}\s+auth\s+token\b|` + '`' + String.raw`\s*${ghCommand}\s+auth\s+token\b)`);
   const literals = stringLiterals(line);
   let cursor = 0;
@@ -798,7 +809,7 @@ function multilineProgrammaticCrontabLines(lines, aliases = collectProgrammaticC
     }
     const outsideCombined = codeOutsideStringLiterals(combined);
     const commandAliasUsed = [...aliases.commandNames].some((name) => new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'u').test(outsideCombined));
-    const literalCrontabCommand = stringLiterals(combined).some((literal) => literal.value.trim() === 'crontab');
+    const literalCrontabCommand = stringLiterals(combined).some((literal) => /(?:^|[\s|/])crontab(?:\s|$)/.test(literal.value));
     if (hasCronCommandMarker(combined) || commandAliasUsed || literalCrontabCommand) {
       for (let index = start; index <= end; index += 1) indexes.add(index);
     }
@@ -896,6 +907,7 @@ async function scanSourceFile(file, findings) {
   const envGetterAliases = new Set();
   const osModuleAliases = new Set(['os']);
   const ghAuthArgAliases = new Set();
+  const ghAuthArgParts = new Map();
   const cronScheduleAliases = new Set();
   const pendingCronScheduleState = { alias: null };
   const destructuredEnvState = { active: false, parts: [] };
@@ -955,7 +967,7 @@ async function scanSourceFile(file, findings) {
     if (hasCronSecretInterpolation(code, sensitiveEnvAliases, envContainerAliases, sensitiveEnvNameAliases, envGetterAliases, inCronContext, { shell: language === 'shell', quotedHeredoc: pendingCronQuotedHeredoc, ghAuthArgAliases }, cronScheduleAliases)) {
       findings.push(`${toRepoPath(file)}:${index + 1}: ${redactSourceLine(code)}`);
       pendingSensitiveFallbackLine = null;
-      collectGhAuthArgAliases(code, ghAuthArgAliases);
+      collectGhAuthArgAliases(code, ghAuthArgAliases, ghAuthArgParts);
       collectSensitiveEnvAliases(code, sensitiveEnvAliases, sensitiveEnvNameAliases, envContainerAliases, envGetterAliases, destructuredEnvState, { shell: language === 'shell', osModuleAliases, ghAuthArgAliases });
       collectCronScheduleAliases(code, cronScheduleAliases, pendingCronScheduleState);
       const heredoc = pendingCronHeredocDelimiter ? null : cronHeredocInfo(code);
@@ -967,7 +979,7 @@ async function scanSourceFile(file, findings) {
       continue;
     }
 
-    collectGhAuthArgAliases(code, ghAuthArgAliases);
+    collectGhAuthArgAliases(code, ghAuthArgAliases, ghAuthArgParts);
     collectSensitiveEnvAliases(code, sensitiveEnvAliases, sensitiveEnvNameAliases, envContainerAliases, envGetterAliases, destructuredEnvState, { shell: language === 'shell', osModuleAliases, ghAuthArgAliases });
     collectCronScheduleAliases(code, cronScheduleAliases, pendingCronScheduleState);
     const multilineAlias = code.match(/^\s*(?:(?:export\s+)?(?:const|let|var)\s+|(?:export|readonly|local(?:\s+-[A-Za-z]+)*|declare(?:\s+-[A-Za-z]+)*)\s+)?([A-Za-z_$][\w$]*)(?:\s*:\s*[^=]+)?\s*(?:\|\||&&|\?\?)?=\s*(?:.*[([{]\s*|(?:process|import|os)\s*)?$/);
