@@ -36,6 +36,14 @@ describe('policy engine', () => {
     expect(allowed.allow).toBe(true);
   });
 
+  it('denies instead of throwing when the policy config is malformed', () => {
+    for (const bad of [null, 'origin', 42, true]) {
+      const decision = evaluatePolicy('git-push', bad as never, { remote: 'origin' });
+      expect(decision.allow).toBe(false);
+      expect(decision.reason).toContain('Malformed policy config');
+    }
+  });
+
   it('denies actions that have no policy rule yet', () => {
     for (const action of ['cron-modify', 'memory-edit', 'cross-profile-write', 'webhook-send'] as const) {
       const decision = evaluatePolicy(action, defaultPolicy);

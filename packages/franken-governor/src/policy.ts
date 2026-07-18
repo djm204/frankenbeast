@@ -54,6 +54,12 @@ function redactRemote(remote: unknown): string {
 }
 
 export function evaluate(action: Action, config: PolicyConfig = defaultPolicy, details?: unknown): Decision {
+  // The default parameter only covers `undefined`; JS/JSON callers can still
+  // pass null or other non-objects. Deny rather than throw so the gate stays
+  // fail-closed for malformed policy data.
+  if (typeof config !== 'object' || config === null) {
+    return { allow: false, reason: 'Malformed policy config; denying by default' };
+  }
   switch (action) {
     case 'git-push': {
       const remote = typeof details === 'object' && details !== null && 'remote' in details ? (details as any).remote : undefined;
