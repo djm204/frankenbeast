@@ -9,6 +9,7 @@ vi.mock('../shared/tool-registry.js', () => ({
         name: 'test_tool',
         server: 'memory',
         description: 'A test tool',
+        timeoutMs: 10,
         inputSchema: { type: 'object', properties: { key: { type: 'string', description: 'Key' } }, required: ['key'] },
         makeHandler: vi.fn(),
       },
@@ -171,7 +172,33 @@ describe('proxy server', () => {
 
       const toolArgs = { key: 'bar' };
       await executeToolDef.handler({ tool: 'test_tool', args: toolArgs });
-      expect(fakeHandler).toHaveBeenCalledWith(toolArgs);
+      expect(fakeHandler).toHaveBeenCalledWith(toolArgs, expect.objectContaining({
+        signal: expect.any(AbortSignal),
+        timeoutMs: 10,
+      }));
+    });
+
+    it('times out proxied registry handlers and audits the timeout', async () => {
+      const entry = mockRegistry.get('test_tool')!;
+      vi.mocked(entry.makeHandler).mockReturnValue(vi.fn(async () => {
+        await new Promise<void>(() => undefined);
+        return { content: [{ type: 'text', text: 'unreachable' }] };
+      }));
+
+      const result = await executeToolDef.handler({ tool: 'test_tool', args: { key: 'value' } }) as {
+        content: Array<{ type: string; text: string }>;
+        isError: boolean;
+      };
+
+      expect(result).toEqual({
+        content: [{ type: 'text', text: 'Error: Tool execution timed out after 10ms [MCP_TOOL_TIMEOUT]' }],
+        isError: true,
+      });
+      expect(auditRecord).toHaveBeenCalledWith(expect.objectContaining({
+        tool: 'test_tool',
+        ok: false,
+        decision: 'timeout',
+      }));
     });
 
     it('validates proxied target tool args before calling the target handler', async () => {

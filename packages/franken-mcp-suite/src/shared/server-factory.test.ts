@@ -91,6 +91,65 @@ describe('createMcpServer', () => {
     expect(JSON.stringify(result)).not.toContain(sensitiveDetail);
   });
 
+  it('bounds hanging handlers with a structured timeout and abort signal', async () => {
+    let receivedSignal: AbortSignal | undefined;
+    const auditEvents: Parameters<AuditSink['record']>[0][] = [];
+    const tool: ToolDef = {
+      name: 'hanging_tool',
+      description: 'hangs until cancelled',
+      inputSchema: { type: 'object', properties: {} },
+      handler: async (_args, context) => {
+        receivedSignal = context!.signal;
+        await new Promise<void>(() => undefined);
+        return { content: [{ type: 'text' as const, text: 'unreachable' }] };
+      },
+    };
+    const server = createMcpServer('t', '1', [tool], {
+      defaultToolTimeoutMs: 10,
+      audit: { record: async (event) => { auditEvents.push(event); } },
+    });
+
+    const result = await server.callTool('hanging_tool', {});
+
+    expect(result).toEqual({
+      content: [{ type: 'text', text: 'Error: Tool execution timed out after 10ms [MCP_TOOL_TIMEOUT]' }],
+      isError: true,
+    });
+    expect(receivedSignal?.aborted).toBe(true);
+    expect(auditEvents).toEqual([
+      expect.objectContaining({ tool: 'hanging_tool', ok: false, decision: 'timeout' }),
+    ]);
+  });
+
+  it('honors a per-tool timeout override while preserving nominal results', async () => {
+    const tool: ToolDef = {
+      name: 'slow_tool',
+      description: 'finishes within its override',
+      inputSchema: { type: 'object', properties: {} },
+      timeoutMs: 100,
+      handler: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return { content: [{ type: 'text' as const, text: 'ok' }] };
+      },
+    };
+    const server = createMcpServer('t', '1', [tool], { defaultToolTimeoutMs: 5 });
+
+    await expect(server.callTool('slow_tool', {})).resolves.toEqual({
+      content: [{ type: 'text', text: 'ok' }],
+    });
+  });
+
+  it('rejects invalid timeout configuration before serving requests', () => {
+    expect(() => createMcpServer('t', '1', [], { defaultToolTimeoutMs: 0 })).toThrow(/defaultToolTimeoutMs/);
+    expect(() => createMcpServer('t', '1', [{
+      name: 'bad_timeout',
+      description: 'invalid timeout',
+      inputSchema: { type: 'object', properties: {} },
+      timeoutMs: Number.POSITIVE_INFINITY,
+      handler: async () => ({ content: [{ type: 'text' as const, text: 'ok' }] }),
+    }])).toThrow(/timeoutMs/);
+  });
+
   it('requires an OWN required property (rejects prototype-chain keys)', async () => {
     const { calls, callTool } = makeServerWithSpy();
     const res = await callTool('echo', Object.create({ msg: 'x' }));

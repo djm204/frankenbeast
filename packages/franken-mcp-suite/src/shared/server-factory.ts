@@ -26,9 +26,20 @@ export interface ToolSchemaDef {
   inputSchema: ToolInputSchema;
 }
 
+export interface ToolExecutionContext {
+  /** Aborted when the tool reaches its execution deadline. */
+  signal: AbortSignal;
+  /** Absolute Unix timestamp, in milliseconds, when execution expires. */
+  deadlineAt: number;
+  /** Effective deadline duration after applying any per-tool override. */
+  timeoutMs: number;
+}
+
 export interface ToolDef extends ToolSchemaDef {
   description: string;
-  handler: (args: Record<string, unknown>) => Promise<ToolResult>;
+  /** Optional per-tool override for the server's default execution deadline. */
+  timeoutMs?: number;
+  handler: (args: Record<string, unknown>, context?: ToolExecutionContext) => Promise<ToolResult>;
 }
 
 export interface FbeastMcpServer {
@@ -90,6 +101,80 @@ export interface CreateMcpServerOptions {
    * giving the central path a server-side audit trail independent of hooks.
    */
   audit?: AuditSink;
+  /** Default execution deadline for each tool call. Defaults to 30 seconds. */
+  defaultToolTimeoutMs?: number;
+}
+
+export const DEFAULT_TOOL_TIMEOUT_MS = 30_000;
+const MAX_TOOL_TIMEOUT_MS = 2_147_483_647;
+
+function validateToolTimeoutMs(name: string, value: number): number {
+  if (!Number.isSafeInteger(value) || value < 1 || value > MAX_TOOL_TIMEOUT_MS) {
+    throw new RangeError(`${name} must be an integer between 1 and ${MAX_TOOL_TIMEOUT_MS} milliseconds`);
+  }
+  return value;
+}
+
+function validateToolDeadlineConfiguration(tools: ToolDef[], options: CreateMcpServerOptions): void {
+  validateToolTimeoutMs('defaultToolTimeoutMs', options.defaultToolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS);
+  for (const tool of tools) {
+    if (tool.timeoutMs !== undefined) validateToolTimeoutMs(`${tool.name}.timeoutMs`, tool.timeoutMs);
+  }
+}
+
+export interface ToolExecutionResult {
+  result: ToolResult;
+  timedOut: boolean;
+}
+
+export async function executeToolWithDeadline(
+  tool: ToolDef,
+  args: Record<string, unknown>,
+  defaultToolTimeoutMs = DEFAULT_TOOL_TIMEOUT_MS,
+): Promise<ToolExecutionResult> {
+  validateToolTimeoutMs('defaultToolTimeoutMs', defaultToolTimeoutMs);
+  const timeoutMs = tool.timeoutMs === undefined
+    ? defaultToolTimeoutMs
+    : validateToolTimeoutMs(`${tool.name}.timeoutMs`, tool.timeoutMs);
+  const controller = new AbortController();
+  const context: ToolExecutionContext = {
+    signal: controller.signal,
+    deadlineAt: Date.now() + timeoutMs,
+    timeoutMs,
+  };
+  const timeoutError = Symbol('tool-timeout');
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(timeoutError);
+      controller.abort(new Error(`Tool execution timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    timer.unref?.();
+  });
+
+  try {
+    const result = await Promise.race([tool.handler(args, context), timeout]);
+    return { result, timedOut: false };
+  } catch (error) {
+    if (error === timeoutError) {
+      return {
+        result: {
+          content: [{ type: 'text', text: `Error: Tool execution timed out after ${timeoutMs}ms [MCP_TOOL_TIMEOUT]` }],
+          isError: true,
+        },
+        timedOut: true,
+      };
+    }
+    return {
+      result: {
+        content: [{ type: 'text', text: 'Error: Tool execution failed [MCP_TOOL_HANDLER_ERROR]' }],
+        isError: true,
+      },
+      timedOut: false,
+    };
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 const DENIED_ARGUMENT_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
@@ -805,16 +890,17 @@ async function dispatchTool(
       };
     }
   }
-  let result: ToolResult;
-  try {
-    result = await tool.handler(validated.value);
-  } catch {
-    result = {
-      content: [{ type: 'text' as const, text: 'Error: Tool execution failed [MCP_TOOL_HANDLER_ERROR]' }],
-      isError: true,
-    };
-  }
-  await recordAudit({ ok: !result.isError, args: validated.value });
+  const execution = await executeToolWithDeadline(
+    tool,
+    validated.value,
+    options.defaultToolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
+  );
+  const result = execution.result;
+  await recordAudit({
+    ok: !result.isError,
+    ...(execution.timedOut ? { decision: 'timeout' } : {}),
+    args: validated.value,
+  });
   return result;
 }
 
@@ -824,6 +910,7 @@ export function createMcpServer(
   tools: ToolDef[],
   options: CreateMcpServerOptions = {},
 ): FbeastMcpServer {
+  validateToolDeadlineConfiguration(tools, options);
   const server = new Server({ name, version }, { capabilities: { tools: {} } });
   const toolMap = new Map(tools.map((t) => [t.name, t]));
 

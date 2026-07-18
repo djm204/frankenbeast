@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createMcpServer, sanitizeToolArgumentsForAuditTrail, validateToolArguments, type AuditSink, type FbeastMcpServer, type GovernanceGate, type ToolDef, type ToolResult } from '../shared/server-factory.js';
+import { createMcpServer, DEFAULT_TOOL_TIMEOUT_MS, executeToolWithDeadline, sanitizeToolArgumentsForAuditTrail, validateToolArguments, type AuditSink, type FbeastMcpServer, type GovernanceGate, type ToolDef } from '../shared/server-factory.js';
 import { isMain } from '../shared/is-main.js';
 import { handleStartupFailure } from '../shared/shutdown.js';
 import { searchTools, TOOL_REGISTRY, createAdapterSet, type AdapterSet } from '../shared/tool-registry.js';
@@ -45,6 +45,12 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
   // lazily, preserving lazy-DB behavior.
   const governance = deps.governance ?? createGovernanceGate(dbPath);
   const audit = deps.audit ?? createAuditSink(dbPath);
+  // The proxy wrapper must outlive the longest registered target deadline; the
+  // resolved target is independently bounded below by executeToolWithDeadline.
+  const proxyExecutionTimeoutMs = [...TOOL_REGISTRY.values()].reduce(
+    (longest, tool) => Math.max(longest, tool.timeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS),
+    DEFAULT_TOOL_TIMEOUT_MS,
+  );
 
   function getAdapters(): AdapterSet {
     if (!cachedAdapters) {
@@ -76,6 +82,7 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
     {
       name: 'execute_tool',
       description: 'Execute any fbeast tool by name with args object.',
+      timeoutMs: proxyExecutionTimeoutMs,
       inputSchema: {
         type: 'object',
         properties: {
@@ -138,17 +145,19 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
           };
         }
         const adapters = getAdapters();
-        const handler = entry.makeHandler(adapters);
-        let result: ToolResult;
-        try {
-          result = (await handler(validated.value)) as ToolResult;
-        } catch (err) {
-          result = {
-            content: [{ type: 'text', text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
-            isError: true,
-          };
-        }
-        await recordAudit({ ok: !result.isError });
+        const targetTool: ToolDef = {
+          name: entry.name,
+          description: entry.description,
+          inputSchema: entry.inputSchema,
+          ...(entry.timeoutMs !== undefined ? { timeoutMs: entry.timeoutMs } : {}),
+          handler: entry.makeHandler(adapters),
+        };
+        const execution = await executeToolWithDeadline(targetTool, validated.value);
+        const result = execution.result;
+        await recordAudit({
+          ok: !result.isError,
+          ...(execution.timedOut ? { decision: 'timeout' } : {}),
+        });
         return result;
       },
     },

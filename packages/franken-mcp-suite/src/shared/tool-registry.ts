@@ -6,7 +6,7 @@ import { createObserverAdapter, type ObserverAdapter } from '../adapters/observe
 import { createPlannerAdapter, type PlannerAdapter } from '../adapters/planner-adapter.js';
 import { createSkillsAdapter, type SkillsAdapter } from '../adapters/skills-adapter.js';
 import { parseObserverCostArgs } from './observer-cost-validation.js';
-import type { ToolDef, ToolInputSchema, ToolResult } from './server-factory.js';
+import type { ToolDef, ToolExecutionContext, ToolInputSchema, ToolResult } from './server-factory.js';
 
 export interface AdapterSet {
   brain: BrainAdapter;
@@ -28,7 +28,12 @@ interface ToolStub {
 
 interface ToolFull extends ToolStub {
   inputSchema: ToolInputSchema;
-  makeHandler: (adapters: AdapterSet) => (args: Record<string, unknown>) => Promise<ToolResult>;
+  /** Optional execution deadline override for this registry entry. */
+  timeoutMs?: number;
+  makeHandler: (adapters: AdapterSet) => (
+    args: Record<string, unknown>,
+    context?: ToolExecutionContext,
+  ) => Promise<ToolResult>;
 }
 
 export type ServerAdapterDeps = Partial<AdapterSet>;
@@ -1063,6 +1068,7 @@ const TOOLS: ToolFull[] = [
     name: 'fbeast_firewall_scan_file',
     server: 'firewall',
     description: 'Detect prompt injection in file contents',
+    timeoutMs: 60_000,
     inputSchema: {
       type: 'object',
       properties: {
@@ -1323,10 +1329,11 @@ export const TOOL_REGISTRY: Map<string, ToolFull> = new Map(TOOLS.map((t) => [t.
 export function createToolDefsForServer(server: ToolServer, adapters: ServerAdapterDeps): ToolDef[] {
   return TOOLS
     .filter((tool) => tool.server === server)
-    .map(({ name, description, inputSchema, makeHandler }) => ({
+    .map(({ name, description, inputSchema, timeoutMs, makeHandler }) => ({
       name,
       description,
       inputSchema,
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       handler: makeHandler(adapters as AdapterSet),
     }));
 }
