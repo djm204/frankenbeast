@@ -59,6 +59,16 @@ describe('ObserverAdapter', () => {
     dbPaths.length = 0;
   });
 
+  it('closes its SQLite handle through the public lifecycle', async () => {
+    const observer = createObserverAdapter(tracked(tmpDbPath()));
+
+    await observer.log({ event: 'tool_call', metadata: '{}', sessionId: 'close-test' });
+    observer.close?.();
+    expect(() => observer.close?.()).not.toThrow();
+
+    await expect(observer.trail('close-test')).rejects.toThrow(/database connection is not open/i);
+  });
+
   it('chains later audit hashes through the previous entry hash', async () => {
     const secondHashFrom = async (firstMetadata: string): Promise<string> => {
       const observer = createObserverAdapter(tracked(tmpDbPath()));
@@ -96,6 +106,80 @@ describe('ObserverAdapter', () => {
     expect(first.hash).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(second.hash).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(verification).toEqual({ ok: true, checked: 2 });
+  });
+
+  it('does not scan the full audit history before appending to a long trail', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const observer = createObserverAdapter(dbPath);
+    const sessionId = randomUUID();
+
+    for (let index = 0; index < 200; index += 1) {
+      await observer.log({
+        event: 'tool_call',
+        metadata: JSON.stringify({ tool: 'memory', index }),
+        sessionId,
+      });
+    }
+
+    mutateAuditTrailDirectly(dbPath, (db) => {
+      db.prepare('UPDATE audit_trail SET payload = ? WHERE session_id = ? AND id = (SELECT MIN(id) FROM audit_trail WHERE session_id = ?)')
+        .run(JSON.stringify({ tool: 'memory', tampered: true }), sessionId, sessionId);
+    });
+
+    await expect(observer.log({
+      event: 'tool_result',
+      metadata: JSON.stringify({ tool: 'memory', ok: true }),
+      sessionId,
+    })).resolves.toEqual(expect.objectContaining({ hash: expect.stringMatching(/^sha256:[a-f0-9]{64}$/) }));
+
+    const verification = await observer.verify(sessionId);
+    expect(verification.ok).toBe(false);
+    expect(verification.firstInvalid?.index).toBe(0);
+  });
+
+  it('rejects an append when the audit tail itself is invalid', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const observer = createObserverAdapter(dbPath);
+    const sessionId = randomUUID();
+
+    await observer.log({ event: 'tool_call', metadata: JSON.stringify({ tool: 'memory' }), sessionId });
+    await observer.log({ event: 'tool_result', metadata: JSON.stringify({ tool: 'memory', ok: true }), sessionId });
+    mutateAuditTrailDirectly(dbPath, (db) => {
+      db.prepare('UPDATE audit_trail SET payload = ? WHERE session_id = ? AND id = (SELECT MAX(id) FROM audit_trail WHERE session_id = ?)')
+        .run(JSON.stringify({ tool: 'memory', tampered: true }), sessionId, sessionId);
+    });
+
+    await expect(observer.log({
+      event: 'tool_call',
+      metadata: JSON.stringify({ tool: 'memory', retry: true }),
+      sessionId,
+    })).rejects.toThrow('Cannot append audit row to invalid trail tail');
+  });
+
+  it('rejects a legacy tail downgraded from a current full-hash parent', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const observer = createObserverAdapter(dbPath);
+    const sessionId = randomUUID();
+    const first = await observer.log({
+      event: 'tool_call',
+      metadata: JSON.stringify({ tool: 'memory', step: 1 }),
+      sessionId,
+    });
+    const legacyMetadata = JSON.stringify({ sessionId, eventType: 'tool_result', tool: 'memory', step: 2 });
+    const downgradedHash = legacy16AuditHash(legacyMetadata, first.hash);
+
+    mutateAuditTrailDirectly(dbPath, (db) => {
+      db.prepare(`
+        INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(sessionId, 'tool_result', legacyMetadata, downgradedHash, first.hash);
+    });
+
+    await expect(observer.log({
+      event: 'tool_call',
+      metadata: JSON.stringify({ tool: 'memory', retry: true }),
+      sessionId,
+    })).rejects.toThrow('Cannot append audit row to invalid trail tail');
   });
 
   it('binds the event type into the first audit hash', async () => {
@@ -277,7 +361,7 @@ describe('ObserverAdapter', () => {
     expect(trail[1]!.parentHash).toBe(trail[0]!.hash);
   });
 
-  it('migrates an intact legacy tail before appending a new audit row', async () => {
+  it('leaves a legacy tail untouched on append and migrates it during explicit verification', async () => {
     const dbPath = tracked(tmpDbPath());
     const observer = createObserverAdapter(dbPath);
     const sessionId = randomUUID();
@@ -291,11 +375,71 @@ describe('ObserverAdapter', () => {
     db.close();
 
     await observer.log({ event: 'tool_result', metadata: JSON.stringify({ tool: 'memory', ok: true }), sessionId });
-    const trail = await observer.trail(sessionId);
+    const appendedTrail = await observer.trail(sessionId);
 
-    expect(trail[0]!.hash).toMatch(/^sha256:[a-f0-9]{64}$/);
-    expect(trail[0]!.hash).not.toBe(firstLegacyHash);
-    expect(trail[1]!.parentHash).toBe(trail[0]!.hash);
+    expect(appendedTrail[0]!.hash).toBe(firstLegacyHash);
+    expect(appendedTrail[1]!.parentHash).toBe(firstLegacyHash);
+
+    expect(await observer.verify(sessionId)).toEqual({ ok: true, checked: 2 });
+    const migratedTrail = await observer.trail(sessionId);
+    expect(migratedTrail[0]!.hash).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(migratedTrail[1]!.parentHash).toBe(migratedTrail[0]!.hash);
+  });
+
+  it('holds the write lock from legacy verification through migration', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const observer = createObserverAdapter(dbPath);
+    const sessionId = randomUUID();
+    const legacyMetadata = JSON.stringify({ sessionId, eventType: 'tool_call', tool: 'memory' });
+    const legacyHash = legacy16AuditHash(legacyMetadata);
+    const setupDb = new Database(dbPath);
+    setupDb.prepare(`
+      INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(sessionId, 'tool_call', legacyMetadata, legacyHash, null);
+    setupDb.close();
+
+    const competingDb = new Database(dbPath);
+    competingDb.pragma('busy_timeout = 0');
+    const competingMetadata = JSON.stringify({ tool: 'memory', concurrent: true });
+    const competingHash = fullAuditHash(sessionId, 'tool_result', competingMetadata, legacyHash);
+    const originalPrepare = Database.prototype.prepare;
+    let competingWriteError: unknown;
+    const prepareSpy = vi.spyOn(Database.prototype, 'prepare').mockImplementation(function (source: string) {
+      const statement = originalPrepare.call(this, source);
+      if (!source.includes('FROM audit_trail WHERE session_id = ? ORDER BY id ASC')) return statement;
+
+      const originalAll = statement.all.bind(statement) as (...params: unknown[]) => unknown[];
+      vi.spyOn(statement, 'all').mockImplementation((...params: unknown[]) => {
+        const rows = originalAll(...params);
+        try {
+          competingDb.prepare(`
+            INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
+            VALUES (?, ?, ?, ?, ?)
+          `).run(sessionId, 'tool_result', competingMetadata, competingHash, legacyHash);
+        } catch (error) {
+          competingWriteError = error;
+        }
+        return rows;
+      });
+      return statement;
+    });
+
+    try {
+      expect(await observer.verify(sessionId)).toEqual({ ok: true, checked: 1 });
+    } finally {
+      prepareSpy.mockRestore();
+      competingDb.close();
+    }
+
+    expect(competingWriteError).toMatchObject({ code: 'SQLITE_BUSY' });
+    expect(await observer.trail(sessionId)).toHaveLength(1);
+    await expect(observer.log({
+      event: 'tool_result',
+      metadata: competingMetadata,
+      sessionId,
+    })).resolves.toEqual(expect.objectContaining({ hash: expect.stringMatching(/^sha256:[a-f0-9]{64}$/) }));
+    expect(await observer.verify(sessionId)).toEqual({ ok: true, checked: 2 });
   });
 
   it('does not rewrite a valid legacy prefix when a later row is invalid', async () => {

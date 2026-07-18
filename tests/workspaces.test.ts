@@ -81,6 +81,12 @@ describe("npm workspaces configuration", () => {
       expect(rootPkg.workspaces).toEqual(["packages/*"]);
     });
 
+    it("links every workspace for local development", () => {
+      expect(rootPkg.scripts?.["local:link"]).toBe(
+        "npm run build && npm link --workspaces",
+      );
+    });
+
     it("derives the complete package inventory from the workspace glob", () => {
       const packageDirs = readdirSync(join(ROOT, "packages"), {
         withFileTypes: true,

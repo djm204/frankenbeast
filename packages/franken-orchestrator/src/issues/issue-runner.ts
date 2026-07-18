@@ -843,6 +843,27 @@ function liveSiblingPidsByCardId(snapshots: readonly IssueWorkerCardProcessSnaps
   return new Map([...byCard].map(([cardId, pids]) => [cardId, [...pids].sort((a, b) => a - b)]));
 }
 
+function samePidLiveProbesByCardId(
+  snapshots: readonly IssueWorkerCardProcessSnapshot[],
+): Map<string, Map<number, Array<{ readonly recencyMs: number; readonly index: number }>>> {
+  const byCard = new Map<string, Map<number, Array<{ readonly recencyMs: number; readonly index: number }>>>();
+  snapshots.forEach((snapshot, index) => {
+    const cardId = snapshot.cardId.trim();
+    const status = snapshot.status?.trim().toLowerCase();
+    if (!cardId
+      || snapshot.alive === false
+      || (status && TERMINAL_WORKER_CARD_STATUSES.has(status) && !(snapshot.alive === true && CRASH_WORKER_CARD_STATUSES.has(status)))
+      || !Number.isSafeInteger(snapshot.pid)
+      || snapshot.pid <= 0) return;
+    const byPid = byCard.get(cardId) ?? new Map<number, Array<{ readonly recencyMs: number; readonly index: number }>>();
+    const probes = byPid.get(snapshot.pid) ?? [];
+    probes.push({ recencyMs: snapshotRecencyMs(snapshot), index });
+    byPid.set(snapshot.pid, probes);
+    byCard.set(cardId, byPid);
+  });
+  return byCard;
+}
+
 function siblingPidsForSnapshot(
   snapshot: IssueWorkerCardProcessSnapshot,
   livePidsByCardId: ReadonlyMap<string, readonly number[]>,
@@ -852,6 +873,21 @@ function siblingPidsForSnapshot(
   return [...new Set([...explicit, ...derived]
     .filter((pid) => Number.isSafeInteger(pid) && pid > 0 && pid !== snapshot.pid))]
     .sort((a, b) => a - b);
+}
+
+function hasSamePidLiveProbe(
+  snapshot: IssueWorkerCardProcessSnapshot,
+  liveProbesByCardId: ReadonlyMap<string, ReadonlyMap<number, readonly { readonly recencyMs: number; readonly index: number }[]>>,
+  snapshotIndex: number,
+): boolean {
+  if (snapshot.alive === false || !Number.isSafeInteger(snapshot.pid) || snapshot.pid <= 0) return false;
+  const liveProbes = liveProbesByCardId.get(snapshot.cardId.trim())?.get(snapshot.pid) ?? [];
+  const snapshotRecency = snapshotRecencyMs(snapshot);
+  return liveProbes.some(liveProbe => snapshotRecency === 0
+    ? liveProbe.index > snapshotIndex
+    : liveProbe.recencyMs > snapshotRecency
+      || (liveProbe.recencyMs === snapshotRecency && liveProbe.index > snapshotIndex)
+      || (liveProbe.recencyMs === 0 && liveProbe.index > snapshotIndex));
 }
 
 function normalizeKanbanState(status: string): string {
@@ -876,6 +912,11 @@ function operatorControlledSignalExitReason(exitReason: string): boolean {
 
 function dispatcherRestartExitReason(exitReason: string): boolean {
   return /^dispatcher_restart_/i.test(exitReason.trim());
+}
+
+function setupFailureExitReason(exitReason: string): boolean {
+  return exitReason === 'spawn_failed'
+    || /^(?:spawn(?:[_ -]?(?:fail(?:ed|ure)?|error))?\b|start[_ -]?failed\b|setup\b|enoent\b|eacces\b|protocol[_ -]?violation\b)/i.test(exitReason.trim());
 }
 
 export function buildWorkerCrashOnlyRestartContract(
@@ -919,10 +960,10 @@ export function buildWorkerCrashOnlyRestartContract(
     };
   }
 
-  if (rawExitReason === 'spawn_failed' || /^(?:spawn(?:[_ -]?(?:fail(?:ed|ure)?|error))?\b|start[_ -]?failed\b|setup\b|enoent\b|eacces\b|protocol[_ -]?violation\b)/i.test(rawExitReason.trim())) {
+  if (intentionalNonRetryExitReason(rawExitReason)) {
     return {
-      disposition: 'hitl',
-      nextAction: 'replace-with-doctor',
+      disposition: 'terminal',
+      nextAction: 'no-op',
       ...base,
       evidence,
     };
@@ -937,10 +978,32 @@ export function buildWorkerCrashOnlyRestartContract(
     };
   }
 
-  if (intentionalNonRetryExitReason(rawExitReason) || (terminalKanbanState(kanbanState) && !crashKanbanState(kanbanState))) {
+  if (
+    terminalKanbanState(kanbanState)
+    && !crashKanbanState(kanbanState)
+    && !setupFailureExitReason(rawExitReason)
+  ) {
     return {
       disposition: 'terminal',
       nextAction: 'no-op',
+      ...base,
+      evidence,
+    };
+  }
+
+  if (activePrUrl || activeWorktreePath) {
+    return {
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      ...base,
+      evidence,
+    };
+  }
+
+  if (setupFailureExitReason(rawExitReason)) {
+    return {
+      disposition: 'hitl',
+      nextAction: 'replace-with-doctor',
       ...base,
       evidence,
     };
@@ -954,15 +1017,6 @@ export function buildWorkerCrashOnlyRestartContract(
     || dispatcherRestartExitReason(rawExitReason)
     || knownLongRunningWait(input.category)
   ) {
-    return {
-      disposition: 'hitl',
-      nextAction: 'defer-with-evidence',
-      ...base,
-      evidence,
-    };
-  }
-
-  if (activePrUrl || activeWorktreePath) {
     return {
       disposition: 'hitl',
       nextAction: 'defer-with-evidence',
@@ -1061,15 +1115,75 @@ export function detectStuckRunWatchdogFindings(
   const longRunningWaitGraceMs = options.longRunningWaitGraceMs ?? DEFAULT_STUCK_RUN_WAIT_GRACE_MS;
   const findings: IssueStuckRunWatchdogFinding[] = [];
   const liveSiblings = liveSiblingPidsByCardId(snapshots);
+  const samePidLiveProbes = samePidLiveProbesByCardId(snapshots);
   const deadFindingsByCardId = new Map<string, IssueStuckRunWatchdogFinding>();
   const deadFindingKeysByCardId = new Map<string, { readonly safetyRank: number; readonly recencyMs: number; readonly index: number }>();
+  const newestDeadFindingsByCardId = new Map<string, IssueStuckRunWatchdogFinding>();
+  const newestDeadFindingKeysByCardId = new Map<string, { readonly safetyRank: number; readonly recencyMs: number; readonly index: number }>();
+  const terminalRecencyByCardId = new Map<string, { readonly recencyMs: number; readonly index: number }>();
+  snapshots.forEach((snapshot, index) => {
+    const status = snapshot.status?.trim().toLowerCase();
+    const isTerminalCleanup = status !== undefined
+      && TERMINAL_WORKER_CARD_STATUSES.has(status)
+      && !crashKanbanState(status)
+      && !explicitProcessCrash(snapshot)
+      && !setupFailureExitReason(snapshot.exitReason ?? '')
+      && !operatorControlledSignalExitReason(snapshot.exitReason ?? '');
+    if (!isTerminalCleanup || snapshot.alive !== false) return;
+    const recencyMs = snapshotRecencyMs(snapshot);
+    if (recencyMs > nowMs) return;
+    const cardId = snapshot.cardId.trim();
+    const existing = terminalRecencyByCardId.get(cardId);
+    if (existing === undefined || recencyMs > existing.recencyMs || (recencyMs === existing.recencyMs && index > existing.index)) {
+      terminalRecencyByCardId.set(cardId, { recencyMs, index });
+    }
+  });
   let findingIndex = 0;
 
-  for (const snapshot of snapshots) {
+  for (const [snapshotIndex, snapshot] of snapshots.entries()) {
     if (!snapshot.cardId.trim()) continue;
     const hasPositivePid = Number.isSafeInteger(snapshot.pid) && snapshot.pid > 0;
     const status = snapshot.status?.trim().toLowerCase();
-    if (status && TERMINAL_WORKER_CARD_STATUSES.has(status) && !explicitProcessCrash(snapshot)) continue;
+    const normalizedCardId = snapshot.cardId.trim();
+    const isTerminalCleanup = status !== undefined
+      && TERMINAL_WORKER_CARD_STATUSES.has(status)
+      && !crashKanbanState(status)
+      && !explicitProcessCrash(snapshot)
+      && !setupFailureExitReason(snapshot.exitReason ?? '')
+      && !operatorControlledSignalExitReason(snapshot.exitReason ?? '');
+    const terminalWatermark = terminalRecencyByCardId.get(normalizedCardId);
+    const snapshotRecency = snapshotRecencyMs(snapshot);
+    if (!isTerminalCleanup && terminalWatermark !== undefined
+      && (terminalWatermark.recencyMs > snapshotRecency
+        || (terminalWatermark.recencyMs === snapshotRecency && terminalWatermark.index > snapshotIndex))) continue;
+    if (isTerminalCleanup) {
+      if (snapshot.alive === false) {
+        const terminalRecencyMs = snapshotRecency;
+        if (terminalRecencyMs > nowMs) continue;
+        const terminalKey = { recencyMs: terminalRecencyMs, index: snapshotIndex };
+        const existingTerminalKey = terminalRecencyByCardId.get(normalizedCardId);
+        if (existingTerminalKey === undefined
+          || terminalKey.recencyMs > existingTerminalKey.recencyMs
+          || (terminalKey.recencyMs === existingTerminalKey.recencyMs && terminalKey.index > existingTerminalKey.index)) {
+          terminalRecencyByCardId.set(normalizedCardId, terminalKey);
+        }
+        const existingKey = deadFindingKeysByCardId.get(normalizedCardId);
+        const terminalClearsExisting = existingKey !== undefined
+          && (terminalKey.recencyMs > existingKey.recencyMs || (terminalKey.recencyMs === existingKey.recencyMs && terminalKey.index > existingKey.index));
+        if (existingKey && terminalClearsExisting) {
+          const newestKey = newestDeadFindingKeysByCardId.get(normalizedCardId);
+          const newestFinding = newestDeadFindingsByCardId.get(normalizedCardId);
+          if (newestKey && newestFinding && (newestKey.recencyMs > terminalKey.recencyMs || (newestKey.recencyMs === terminalKey.recencyMs && newestKey.index > terminalKey.index))) {
+            deadFindingKeysByCardId.set(normalizedCardId, newestKey);
+            deadFindingsByCardId.set(normalizedCardId, newestFinding);
+          } else {
+            deadFindingKeysByCardId.delete(normalizedCardId);
+            deadFindingsByCardId.delete(normalizedCardId);
+          }
+        }
+      }
+      continue;
+    }
 
     const category = normalizeStuckRunBlockerCategory(snapshot);
     const heartbeatAgeMs = ageMs(snapshot.lastHeartbeatAt, nowMs);
@@ -1090,7 +1204,8 @@ export function detectStuckRunWatchdogFindings(
     const minimumStaleSignals = providedActivitySignalCount;
     const freshLongRunningWaitActivity = [heartbeatAgeMs, outputAgeMs, toolActivityAgeMs, stateTransitionAgeMs]
       .some((age) => age !== undefined && age < longRunningWaitGraceMs);
-    const processStatus: IssueStuckRunWatchdogFinding['processStatus'] = snapshot.alive === false
+    const samePidLiveProbe = hasSamePidLiveProbe(snapshot, samePidLiveProbes, snapshotIndex);
+    const processStatus: IssueStuckRunWatchdogFinding['processStatus'] = snapshot.alive === false || (snapshot.alive !== true && !samePidLiveProbe && (operatorControlledSignalExitReason(snapshot.exitReason ?? '') || (status !== undefined && crashKanbanState(status)) || setupFailureExitReason(snapshot.exitReason ?? '')))
       ? 'dead'
       : hasPositivePid
         ? 'alive'
@@ -1128,7 +1243,6 @@ export function detectStuckRunWatchdogFindings(
       ...(heartbeatAgeMs !== undefined ? { heartbeatAgeMs } : {}),
       kanbanState: status ?? 'unknown',
     });
-    const normalizedCardId = snapshot.cardId.trim();
     evidence.push(...restartContract.evidence);
 
     const recommendedAction = remediationForCrashOnlyRestartContract(restartContract, category, processStatus);
@@ -1160,8 +1274,20 @@ export function detectStuckRunWatchdogFindings(
       const candidateKey = {
         safetyRank: restartContractSafetyRank(restartContract),
         recencyMs: snapshotRecencyMs(snapshot),
-        index: findingIndex,
+        index: snapshotIndex,
       };
+      const newestKey = newestDeadFindingKeysByCardId.get(normalizedCardId);
+      if (newestKey === undefined || candidateKey.recencyMs > newestKey.recencyMs || (candidateKey.recencyMs === newestKey.recencyMs && candidateKey.index > newestKey.index)) {
+        newestDeadFindingKeysByCardId.set(normalizedCardId, candidateKey);
+        newestDeadFindingsByCardId.set(normalizedCardId, finding);
+      }
+      const terminalKey = terminalRecencyByCardId.get(normalizedCardId);
+      const terminalSuppressesCandidate = terminalKey !== undefined
+        && (terminalKey.recencyMs > candidateKey.recencyMs || (terminalKey.recencyMs === candidateKey.recencyMs && terminalKey.index > candidateKey.index));
+      if (terminalSuppressesCandidate) {
+        findingIndex += 1;
+        continue;
+      }
       const existingKey = deadFindingKeysByCardId.get(normalizedCardId);
       const candidateIsSafer = existingKey === undefined
         || candidateKey.safetyRank > existingKey.safetyRank

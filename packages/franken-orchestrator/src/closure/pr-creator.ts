@@ -32,6 +32,34 @@ export class PrCreationRequiredActionError extends Error {
   }
 }
 
+/**
+ * Structural mirror of @franken/governor's PolicyConfig / Decision for the
+ * `git-push` action. Kept local — and the module loaded via a non-literal
+ * dynamic import below — so nothing in this file, or in packages that
+ * type-check it through relative imports (e.g. franken-web's vite-env chain),
+ * requires @franken/governor to be installed. The orchestrator's pr-creator
+ * tests exercise the real module through this seam, so signature drift fails
+ * tests rather than going unnoticed.
+ */
+export interface PushPolicyConfig {
+  readonly allowedGitRemotes?: readonly string[];
+  readonly allowedGitRemoteUrls?: readonly string[];
+}
+
+interface PushPolicyDecision {
+  readonly allow: boolean;
+  readonly reason: string;
+}
+
+type PushPolicyEvaluator = (
+  action: 'git-push',
+  config: PushPolicyConfig,
+  details: { readonly remote: string; readonly remoteUrls?: readonly string[] | undefined },
+) => PushPolicyDecision;
+
+// Non-literal specifier: keeps tsc from statically resolving the optional module.
+const GOVERNOR_MODULE_ID: string = '@franken/governor';
+
 export interface PrCreatorConfig {
   readonly targetBranch: string;
   readonly disabled: boolean;
@@ -43,6 +71,12 @@ export interface PrCreatorConfig {
     readonly required?: GitHubRequiredCapabilities;
     readonly lowRiskPolicy?: GitHubLowRiskCapabilityPolicy;
   } | undefined;
+  /**
+   * Policy for the `git-push` action. When omitted, the configured remote is
+   * whitelisted, so behaviour is unchanged; supply an explicit policy to
+   * restrict which remotes may be pushed to.
+   */
+  readonly pushPolicy?: PushPolicyConfig | undefined;
 }
 
 export interface PrCreateOptions {
@@ -122,6 +156,16 @@ function isSafeRemote(value: string): boolean {
   return true;
 }
 
+
+/**
+ * Masks the userinfo (credentials) portion of a URL-style remote for logging.
+ * The greedy `[^/]*` masks through the *last* `@` before the host's first `/`,
+ * so credentials that themselves contain `@` are fully redacted.
+ */
+function redactRemote(value: string): string {
+  return value.replace(/\/\/[^/]*@/, '//***@');
+}
+
 export class PrCreator {
   private readonly config: PrCreatorConfig;
   private readonly exec: ExecFn;
@@ -135,6 +179,7 @@ export class PrCreator {
       disableBranding: config.disableBranding ?? false,
       commitConvention: config.commitConvention ?? 'conventional',
       githubCapabilityCheck: config.githubCapabilityCheck,
+      pushPolicy: config.pushPolicy,
     };
     this.exec = exec;
     this.llm = llm;
@@ -298,6 +343,12 @@ export class PrCreator {
       targetBranch = 'main';
     }
 
+    // Policy gate runs before any GitHub preflight so a policy-denied remote
+    // is reported as a policy decision, not as a gh/token problem.
+    if (!(await this.checkPushPolicy(logger))) {
+      return null;
+    }
+
     const existing = this.findExistingPr(branch, logger);
     if (existing === null) {
       return null;
@@ -370,6 +421,82 @@ export class PrCreator {
       logger?.error('PrCreator: command failed', this.commandFailure('git', formatCommand(command, args), error));
       return null;
     }
+  }
+
+  /**
+   * Policy-as-code gate for the `git-push` action. Without an explicit
+   * pushPolicy the configured remote is trusted and `@franken/governor` is
+   * never loaded — it is an optional module (see createGovernanceDeps in
+   * dep-factory), so it must not become a hard import-time dependency. When a
+   * policy is configured but the governor module is unavailable, the gate
+   * fails closed.
+   */
+  private async checkPushPolicy(logger?: ILogger): Promise<boolean> {
+    const policy = this.config.pushPolicy;
+    if (policy === undefined) return true;
+    // Untyped/JSON-derived config can smuggle in null/false/etc.; an explicit
+    // but malformed policy must disable pushes, not disable the gate.
+    if (typeof policy !== 'object' || policy === null) {
+      logger?.error('PrCreator: pushPolicy is malformed; refusing to push', { pushPolicyType: typeof policy });
+      return false;
+    }
+
+    let evaluatePolicy: PushPolicyEvaluator;
+    try {
+      ({ evaluatePolicy } = (await import(GOVERNOR_MODULE_ID)) as { evaluatePolicy: PushPolicyEvaluator });
+    } catch {
+      logger?.error('PrCreator: pushPolicy is configured but @franken/governor is unavailable; refusing to push');
+      return false;
+    }
+    // A skewed/older governor build can import fine without this export;
+    // destructuring would silently yield undefined, so verify before calling.
+    if (typeof evaluatePolicy !== 'function') {
+      logger?.error('PrCreator: @franken/governor does not export evaluatePolicy; refusing to push');
+      return false;
+    }
+
+    // When the policy binds names to URLs, evaluate *every* resolved push URL
+    // (a remote can have multiple pushurls and `git push` sends to all of
+    // them), so a rewritten .git/config entry for a whitelisted name cannot
+    // redirect the push. Resolution failure leaves remoteUrls undefined, which
+    // the engine treats as a denial.
+    let remoteUrls: readonly string[] | undefined;
+    if (policy.allowedGitRemoteUrls !== undefined) {
+      // url.<base>.insteadOf / .pushInsteadOf rewrite validated URLs at push
+      // time, silently redirecting the destination — fail closed if any exist.
+      try {
+        const rewriteRules = this.exec('git', ['config', '--get-regexp', '^url\\..*\\.(insteadof|pushinsteadof)$']).trim();
+        if (rewriteRules.length > 0) {
+          logger?.error('PrCreator: git URL rewrite rules (insteadOf/pushInsteadOf) are configured; refusing policy-bound push');
+          return false;
+        }
+      } catch {
+        // git config exits non-zero when no key matches: no rewrite rules.
+      }
+      try {
+        const output = this.exec('git', ['remote', 'get-url', '--push', '--all', this.config.remote]).trim();
+        const urls = output.split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
+        remoteUrls = urls.length > 0 ? urls : undefined;
+      } catch {
+        // get-url only fails when the remote is not a *named* remote, so the
+        // configured value itself is the destination (scheme URL, scp-like
+        // [user@]host:path, or a bogus name the URL whitelist will reject).
+        remoteUrls = [this.config.remote];
+      }
+    }
+
+    const decision = evaluatePolicy('git-push', policy, { remote: this.config.remote, remoteUrls });
+    if (!decision.allow) {
+      // The engine's reason embeds the raw remote, which may be a
+      // credential-bearing URL — redact it before logging.
+      const redacted = redactRemote(this.config.remote);
+      logger?.error('PrCreator: git push blocked by policy', {
+        remote: redacted,
+        reason: decision.reason.split(this.config.remote).join(redacted),
+      });
+      return false;
+    }
+    return true;
   }
 
   private pushBranch(branch: string, logger?: ILogger): boolean {
