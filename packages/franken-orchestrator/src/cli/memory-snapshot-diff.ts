@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import Database from 'better-sqlite3';
 import { CURRENT_MEMORY_SCHEMA_VERSION } from '@franken/brain';
 import { BrainSnapshotSchema, ExecutionStateSchema, type BrainSnapshot, type EpisodicEvent } from '@franken/types';
+import type { ZodIssue } from 'zod';
 const REQUIRED_BACKUP_TABLES = [
   'working_memory',
   'episodic_events',
@@ -274,7 +275,7 @@ function verifyCheckpointStateShape(rowid: number, value: string): void {
   const parsed = JSON.parse(value) as unknown;
   const result = ExecutionStateSchema.safeParse(parsed);
   if (!result.success) {
-    throw new Error(`Invalid checkpoint state in checkpoints.state row ${rowid}: ${result.error.issues.map((issue) => issue.path.join('.') + ' ' + issue.message).join('; ')}`);
+    throw new Error(`Invalid checkpoint state in checkpoints.state row ${rowid}: ${result.error.issues.map((issue: ZodIssue) => issue.path.join('.') + ' ' + issue.message).join('; ')}`);
   }
 }
 
@@ -678,7 +679,7 @@ async function readSnapshot(path: string): Promise<BrainSnapshot> {
 
   const result = BrainSnapshotSchema.safeParse(parsed);
   if (!result.success) {
-    throw new Error(`Invalid memory snapshot ${path}: ${result.error.issues.map((issue) => issue.path.join('.') + ' ' + issue.message).join('; ')}`);
+    throw new Error(`Invalid memory snapshot ${path}: ${result.error.issues.map((issue: ZodIssue) => issue.path.join('.') + ' ' + issue.message).join('; ')}`);
   }
   return result.data as unknown as BrainSnapshot;
 }
