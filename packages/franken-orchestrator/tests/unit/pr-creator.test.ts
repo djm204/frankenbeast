@@ -118,6 +118,25 @@ describe('PrCreator', () => {
     );
   });
 
+  it('fails closed when pushPolicy is explicitly malformed', async () => {
+    const exec = mockExec();
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin', pushPolicy: null as never },
+      exec,
+    );
+    const logger = makeLogger();
+
+    const result = await creator.create(baseResult, logger);
+
+    expect(result).toBeNull();
+    const pushed = exec.mock.calls.some(c => c[0] === 'git' && (c[1] as string[]).includes('push'));
+    expect(pushed).toBe(false);
+    expect(logger.error).toHaveBeenCalledWith(
+      'PrCreator: pushPolicy is malformed; refusing to push',
+      expect.objectContaining({ pushPolicyType: 'object' }),
+    );
+  });
+
   it('redacts credential-bearing remotes in the policy denial log', async () => {
     const exec = mockExec();
     const creator = new PrCreator(

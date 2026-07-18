@@ -406,7 +406,13 @@ export class PrCreator {
    */
   private async checkPushPolicy(logger?: ILogger): Promise<boolean> {
     const policy = this.config.pushPolicy;
-    if (!policy) return true;
+    if (policy === undefined) return true;
+    // Untyped/JSON-derived config can smuggle in null/false/etc.; an explicit
+    // but malformed policy must disable pushes, not disable the gate.
+    if (typeof policy !== 'object' || policy === null) {
+      logger?.error('PrCreator: pushPolicy is malformed; refusing to push', { pushPolicyType: typeof policy });
+      return false;
+    }
 
     let evaluatePolicy: typeof import('@franken/governor').evaluatePolicy;
     try {
