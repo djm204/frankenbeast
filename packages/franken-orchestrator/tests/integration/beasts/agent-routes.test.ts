@@ -28,6 +28,8 @@ const TMP = join(__dirname, '__fixtures__/agent-routes');
 
 type AgentEvent = { type: string };
 
+const SAFE_DISPATCH_FAILURE_MESSAGE = 'Tracked agent dispatch failed';
+
 function expectEventsToIncludeTypes(events: AgentEvent[], requiredTypes: string[]) {
   const actualTypes = new Set(events.map((event) => event.type));
 
@@ -1530,7 +1532,8 @@ describe('agent routes integration', () => {
     expect(created.error.code).toBe('AGENT_DISPATCH_FAILED');
     expect(created.error.message).toContain('Dispatch failed for tracked agent');
     expect(created.error.details.agentId).toBeTruthy();
-    expect(created.error.details.dispatchError).toContain('outputDir');
+    expect(created.error.details.dispatchError).toBe(SAFE_DISPATCH_FAILURE_MESSAGE);
+    expect(created.error.message).not.toContain('outputDir');
     expect(created.error.details.agent.status).toBe('failed');
 
     const detailResponse = await app.request(`/v1/beasts/agents/${created.error.details.agentId}`, {
@@ -1544,6 +1547,65 @@ describe('agent routes integration', () => {
     };
     expect(detail.data.agent.status).toBe('failed');
     expectEventsToIncludeTypes(detail.data.events, ['agent.dispatch.failed']);
+  });
+
+  it('does not expose unexpected dispatch exception details in logs, events, or responses', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const repository = new SQLiteBeastRepository(join(TMP, 'redacted-dispatch-errors.db'));
+    const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
+    const runs = { getRun: vi.fn(), start: vi.fn(), stop: vi.fn(), kill: vi.fn(), restart: vi.fn() };
+    const secret = 'dispatch-secret-value-1234567890';
+    const sensitiveCommand = '/opt/private/bin/provider --token super-secret';
+    const dispatch = {
+      createRun: vi.fn(async () => {
+        throw new Error(`Provider spawn failed: token=${secret} command=${sensitiveCommand}`);
+      }),
+    };
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const app = new Hono();
+    app.onError(errorHandler);
+    app.route('/', agentRoutes({
+      agents,
+      dispatch: dispatch as never,
+      runs: runs as never,
+      operatorToken: TEST_SUPER_SECRET_OPERATOR_TOKEN,
+      security: new TransportSecurityService(),
+    }));
+    const headers = new Headers({ 'content-type': 'application/json' });
+    headers.set('authorization', ['Bearer', TEST_SUPER_SECRET_OPERATOR_TOKEN].join(' '));
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        initAction: {
+          kind: 'martin-loop',
+          command: 'martin-loop',
+          config: { provider: 'claude', objective: 'Redact dispatch failure', chunkDirectory: 'docs/chunks' },
+        },
+        initConfig: { provider: 'claude', objective: 'Redact dispatch failure', chunkDirectory: 'docs/chunks' },
+      }),
+    });
+
+    expect(response.status).toBe(409);
+    const responseBody = await response.json() as {
+      error: { message: string; details: { agentId: string; dispatchError: string } };
+    };
+    const detail = agents.getAgentDetail(responseBody.error.details.agentId);
+    const exposedSurfaces = JSON.stringify({
+      responseBody,
+      events: detail.events,
+      logs: consoleError.mock.calls,
+    });
+
+    expect(responseBody.error.details.dispatchError).toBe(SAFE_DISPATCH_FAILURE_MESSAGE);
+    expect(exposedSurfaces).not.toContain(secret);
+    expect(exposedSurfaces).not.toContain(sensitiveCommand);
+    expect(exposedSurfaces).not.toContain('/opt/private/bin/provider');
+    expect(exposedSurfaces).not.toContain('super-secret');
+    expect(exposedSurfaces).not.toContain('Provider spawn failed');
+    consoleError.mockRestore();
   });
 
   it('allows starting failed tracked agents via the start endpoint', async () => {

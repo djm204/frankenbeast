@@ -49,6 +49,8 @@ const PatchAgentConfigBody = z.object({
   moduleConfig: ModuleConfigSchema.optional(),
 }).strict();
 
+const SAFE_DISPATCH_FAILURE_MESSAGE = 'Tracked agent dispatch failed';
+
 export interface AgentRoutesDeps {
   agents: AgentService;
   dispatch?: BeastDispatchService;
@@ -197,26 +199,22 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
           },
         }, 409);
       }
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error(`[agent-routes] Dispatch failed for ${agent.id}: ${errorMessage}`);
-      if (error instanceof Error && error.stack) {
-        console.error(error.stack);
-      }
+      console.error(`[agent-routes] ${SAFE_DISPATCH_FAILURE_MESSAGE} for ${agent.id}`);
       deps.agents.updateAgent(agent.id, { status: 'failed' });
       deps.agents.appendEvent(agent.id, {
         level: 'error',
         type: 'agent.dispatch.failed',
-        message: `Dispatch failed: ${errorMessage}`,
-        payload: { error: errorMessage },
+        message: SAFE_DISPATCH_FAILURE_MESSAGE,
+        payload: { error: SAFE_DISPATCH_FAILURE_MESSAGE },
       });
       const failedAgent = deps.agents.getAgent(agent.id);
       return c.json({
         error: {
           code: 'AGENT_DISPATCH_FAILED',
-          message: `Dispatch failed for tracked agent '${agent.id}': ${errorMessage}`,
+          message: `Dispatch failed for tracked agent '${agent.id}'`,
           details: {
             agentId: agent.id,
-            dispatchError: errorMessage,
+            dispatchError: SAFE_DISPATCH_FAILURE_MESSAGE,
             agent: failedAgent,
           },
         },
