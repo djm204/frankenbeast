@@ -815,6 +815,44 @@ describe('hard-coded example secret scanner', () => {
       ].join('\n'),
       'utf8',
     );
+    writeFileSync(
+      join(scriptDir, 'typed-multiline-cron.mjs'),
+      [
+        'const {',
+        '  GITHUB_TOKEN: credential,',
+        '}: NodeJS.ProcessEnv = process.env;',
+        'const entry = `0 5 * * * agy pr --token ${credential}`;',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'split-env-cron.mjs'),
+      [
+        'const credential =',
+        'process',
+        '.env',
+        '.GITHUB_TOKEN;',
+        'const entry = `0 6 * * * agy pr --token ${credential}`;',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'destructured-gh-cron.mjs'),
+      [
+        "const { stdout: credential } = await execFile('gh', ['auth', 'token']);",
+        'const entry = `0 7 * * * agy pr --token ${credential}`;',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'getter-alias-cron.py'),
+      [
+        'get_env = os.environ.get',
+        "credential = get_env('GITHUB_TOKEN')",
+        "entry = f'0 8 * * * agy pr --token {credential}'",
+      ].join('\n'),
+      'utf8',
+    );
 
     const result = runScanner(root);
 
@@ -822,6 +860,10 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('scripts/indirect-cron.sh:3');
     expect(result.stderr).toContain('scripts/template-cron.mjs:3');
     expect(result.stderr).toContain('scripts/object-cron.mjs:3');
+    expect(result.stderr).toContain('scripts/typed-multiline-cron.mjs:4');
+    expect(result.stderr).toContain('scripts/split-env-cron.mjs:5');
+    expect(result.stderr).toContain('scripts/destructured-gh-cron.mjs:2');
+    expect(result.stderr).toContain('scripts/getter-alias-cron.py:3');
   });
 
   it('allows runtime gh token substitutions in cron strings', () => {
@@ -830,7 +872,10 @@ describe('hard-coded example secret scanner', () => {
     mkdirSync(scriptDir, { recursive: true });
     writeFileSync(
       join(scriptDir, 'install-cron.mjs'),
-      "const CRON_CMD = '0 3 * * * GITHUB_TOKEN=$(gh auth token) agy pr';\n",
+      [
+        "const CRON_CMD = '0 3 * * * GITHUB_TOKEN=$(gh auth token) agy pr';",
+        "const CRON_CMD_2 = '0 4 * * * GITHUB_TOKEN=$(command gh auth token) agy pr';",
+      ].join('\n'),
       'utf8',
     );
     writeFileSync(

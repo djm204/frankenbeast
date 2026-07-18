@@ -5,6 +5,7 @@
 - Cron-context detection should inspect code outside string literals plus actual schedule literals, not diagnostic text that merely says `crontab`; credential assignment parsing must handle quoted values while preserving runtime `$(gh auth token)` as safe.
 - Async child-process taint needs both returned child/stdout aliases and callback stdout parameters, including multiline calls; once a multiline alias becomes sensitive, trailing defaults/options must not clear it before the call closes.
 - Indirect shell `printenv` names, schedule aliases inside template interpolation, and dotted object-property assignments all require explicit taint propagation; option literals such as `--token` must remain non-sensitive when paired with a runtime `$(gh auth token)` value.
+- Multiline TypeScript destructuring, split `process.env` chains, destructured async stdout, and cached `os.environ.get` getters need dedicated alias paths; runtime cron allow-lists should treat `command gh auth token` like direct `gh auth token`.
 - When expanding shell-file scanning for cron writers, avoid both basename-only install/setup filters and scanning every shell script blindly; include cron/crontab-named writers while preserving non-cron bootstrap scripts to prevent fixture false positives.
 - If Codex keeps finding valid edge cases after an over-cap current-head review, fix/reply/resolve every finding, run local and CI checks, then stop for explicit approval before exceeding the agreed review cap again.
 

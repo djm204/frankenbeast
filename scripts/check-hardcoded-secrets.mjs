@@ -443,8 +443,8 @@ function collectSensitiveEnvAliases(line, aliases, envNameAliases, envContainerA
   }
 
   if (destructuredEnvState?.active) {
-  const envEnd = line.match(/^(.*)\}\s*=\s*(?:\(?process\.env\)?|import\.meta\.env|([A-Za-z_$][\w$]*))\s*;?$/);
-  const anyEnd = envEnd ?? line.match(/^(.*)\}\s*=\s*.+;?$/);
+    const envEnd = line.match(/^(.*)\}\s*(?::\s*[^=]+)?=\s*(?:\(?process\.env\)?|import\.meta\.env|([A-Za-z_$][\w$]*))\s*;?$/);
+    const anyEnd = envEnd ?? line.match(/^(.*)\}\s*=\s*.+;?$/);
     const parts = anyEnd ? [...destructuredEnvState.parts, anyEnd[1]] : [...destructuredEnvState.parts, line];
     if (anyEnd) {
       destructuredEnvState.active = false;
@@ -495,6 +495,18 @@ function collectSensitiveEnvAliases(line, aliases, envNameAliases, envContainerA
     return;
   }
 
+  const commandDestructured = line.match(/^\s*(?:const|let|var)\s*\{([^}]+)\}\s*=\s*(?:await\s+)?(.+)$/);
+  if (commandDestructured && hasProgrammaticGhAuthTokenCall(commandDestructured[2])) {
+    for (const part of commandDestructured[1].split(',')) {
+      const [rawName, rawAlias] = part.split(':').map((value) => value?.trim()).filter(Boolean);
+      const alias = (rawAlias ?? rawName ?? '').replace(/\s*=.*$/, '').trim();
+      if (alias) {
+        aliases.add(alias);
+      }
+    }
+    return;
+  }
+
   const assignment = line.match(/^\s*(?:(?:export\s+)?(?:const|let|var)\s+|(?:export|readonly|local(?:\s+-[A-Za-z]+)*|declare(?:\s+-[A-Za-z]+)*)\s+)?([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)(?:\s*:\s*[^=]+)?\s*(?:\|\||&&|\?\?)?=\s*(.+)$/);
   if (!assignment) {
     return;
@@ -506,7 +518,7 @@ function collectSensitiveEnvAliases(line, aliases, envNameAliases, envContainerA
   } else {
     envContainerAliases.delete(alias);
   }
-  if (/^(?:os\.)?getenv\s*;?$/.test(trimmedExpression)) {
+  if (/^(?:(?:os\.)?getenv|os\.environ\.get)\s*;?$/.test(trimmedExpression)) {
     envGetterAliases.add(alias);
   } else {
     envGetterAliases.delete(alias);
@@ -579,13 +591,13 @@ function hasInlineTokenMaterial(value) {
 
 function hasPersistedCredentialAssignment(value) {
   const normalizedValue = value.replace(/\\(["'`])/g, '$1');
-  const assignmentPattern = new RegExp(`${sensitiveIdentifierPattern.source}\\s*=\\s*(?:(["'` + '`' + `])([^"'` + '`' + `]*?)\\1|((?:\\\\?\\$\\(\\s*gh\\s+auth\\s+token(?:[^)]*)\\))|[^\\s]+))`, 'i');
+  const assignmentPattern = new RegExp(`${sensitiveIdentifierPattern.source}\\s*=\\s*(?:(["'` + '`' + `])([^"'` + '`' + `]*?)\\1|((?:\\\\?\\$\\(\\s*(?:command\\s+)?gh\\s+auth\\s+token(?:[^)]*)\\))|[^\\s]+))`, 'i');
   const match = assignmentPattern.exec(normalizedValue);
   if (!match) {
     return false;
   }
   const assignedValue = match[2] ?? match[3] ?? '';
-  return !/^\\?\$\(\s*gh\s+auth\s+token(?:[^)]*)\)$/i.test(assignedValue);
+  return !/^\\?\$\(\s*(?:command\s+)?gh\s+auth\s+token(?:[^)]*)\)$/i.test(assignedValue);
 }
 
 function hasCronCredentialLiteral(line) {
@@ -779,7 +791,7 @@ async function scanSourceFile(file, findings) {
       } else if (!sensitiveEnvAliases.has(pendingAliasName) && !isFormattingOnlyLine(code) && !/^[\])},;]+$/.test(code)) {
         sensitiveEnvAliases.delete(pendingAliasName);
       }
-      if (!/[([{,]\s*$/.test(code) && !/^\.(?:env|[A-Z0-9_]+)?\s*[,;]?$/.test(code) && !/^[\])},;]+$/.test(code)) {
+      if (!/[([{,]\s*$/.test(code) && !/^(?:process(?:\.env)?|import\.meta(?:\.env)?)$/.test(code) && !/^\.(?:env|[A-Z0-9_]+)?\s*[,;]?$/.test(code) && !/^[\])},;]+$/.test(code)) {
         pendingAliasName = null;
       }
     }
