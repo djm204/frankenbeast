@@ -120,11 +120,10 @@ describe('sandbox Dockerfile', () => {
   }, 60_000);
 
   it('declares a non-root default container UID', () => {
-    const userLine = dockerfile.split('\n').find((line) => line.startsWith('USER '));
+    const userDirective = dockerfile.match(/^USER\s+([^\s:]+)(?::[^\s]+)?\s*$/mu);
 
-    expect(userLine).toBeDefined();
-    expect(userLine).not.toBe('USER root');
-    expect(userLine).not.toBe('USER 0');
-    expect(userLine?.split(/\s+/)[1]?.split(':')[0]).not.toBe('0');
+    expect(userDirective, 'Dockerfile must declare a valid USER directive').not.toBeNull();
+    expect(userDirective?.[1]).not.toBe('root');
+    expect(userDirective?.[1]).not.toBe('0');
   });
 });
