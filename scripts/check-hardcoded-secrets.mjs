@@ -333,7 +333,7 @@ function hasHardcodedSourceLiteral(line) {
   return false;
 }
 
-function hasSensitiveEnvAccess(line, envContainerAliases = new Set(), envNameAliases = new Set()) {
+function hasSensitiveEnvAccess(line, envContainerAliases = new Set(), envNameAliases = new Set(), envGetterAliases = new Set()) {
   const envAccessPattern = /(?:(?:\(?process\.env\)?|import\.meta\.env)\??(?:\.([A-Z0-9_]+)|\[['"`]([^'"`]+)['"`]\])|(?:os\.environ(?:\.(?:get|setdefault))?|os\.getenv|\bgetenv|\benviron(?:\.(?:get|setdefault))?)\s*\(\s*['"`]([^'"`]+)['"`]|(?:os\.)?environ\s*\[\s*['"`]([^'"`]+)['"`]\s*\])/gi;
   for (const match of line.matchAll(envAccessPattern)) {
     const name = match[1] ?? match[2] ?? match[3] ?? match[4] ?? match[5] ?? '';
@@ -352,6 +352,15 @@ function hasSensitiveEnvAccess(line, envContainerAliases = new Set(), envNameAli
       }
     }
   }
+  for (const getter of envGetterAliases) {
+    const escaped = getter.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const getterPattern = new RegExp("\\b" + escaped + "\\s*\\(\\s*['\"`]([^'\"`]+)['\"`]", 'gi');
+    for (const match of line.matchAll(getterPattern)) {
+      if (sensitiveIdentifierPattern.test(match[1] ?? '')) {
+        return true;
+      }
+    }
+  }
   const variableEnvAccessPattern = /(?:(?:process\.env|import\.meta\.env|(?:os\.)?environ)\s*\[\s*([A-Za-z_$][\w$]*)\s*\]|(?:os\.environ(?:\.(?:get|setdefault))?|os\.getenv|\bgetenv|\benviron(?:\.(?:get|setdefault))?)\s*\(\s*([A-Za-z_$][\w$]*))/g;
   for (const match of line.matchAll(variableEnvAccessPattern)) {
     const envNameAlias = match[1] ?? match[2] ?? '';
@@ -361,6 +370,13 @@ function hasSensitiveEnvAccess(line, envContainerAliases = new Set(), envNameAli
   }
   for (const match of line.matchAll(/\$\{?([A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY|PASSPHRASE|PAT|ACCESS_KEY)[A-Z0-9_]*)\}?/gi)) {
     if (sensitiveIdentifierPattern.test(match[1])) {
+      return true;
+    }
+  }
+  for (const match of line.matchAll(/(?:\$\(\s*printenv\s+([A-Z0-9_]+)\s*\)|\$\{!([A-Za-z_$][\w$]*)\})/gi)) {
+    const name = match[1] ?? '';
+    const nameAlias = match[2] ?? '';
+    if ((name && sensitiveIdentifierPattern.test(name)) || (nameAlias && envNameAliases.has(nameAlias))) {
       return true;
     }
   }
@@ -380,10 +396,15 @@ function expressionUsesSensitiveAlias(expression, aliases) {
   return false;
 }
 
-function collectSensitiveEnvAliases(line, aliases, envNameAliases, envContainerAliases = new Set(), destructuredEnvState = null) {
+function collectSensitiveEnvAliases(line, aliases, envNameAliases, envContainerAliases = new Set(), envGetterAliases = new Set(), destructuredEnvState = null, options = {}) {
   const importEnvAlias = line.match(/^\s*from\s+os\s+import\s+environ\s+as\s+([A-Za-z_$][\w$]*)\s*$/);
   if (importEnvAlias) {
     envContainerAliases.add(importEnvAlias[1]);
+    return;
+  }
+  const importGetenvAlias = line.match(/^\s*from\s+os\s+import\s+getenv\s+as\s+([A-Za-z_$][\w$]*)\s*$/);
+  if (importGetenvAlias) {
+    envGetterAliases.add(importGetenvAlias[1]);
     return;
   }
 
@@ -395,7 +416,7 @@ function collectSensitiveEnvAliases(line, aliases, envNameAliases, envContainerA
       destructuredEnvState.active = false;
       destructuredEnvState.parts = [];
       if (envEnd) {
-        collectSensitiveEnvAliases(`const {${parts.join(',')}} = process.env;`, aliases, envNameAliases, envContainerAliases, null);
+        collectSensitiveEnvAliases(`const {${parts.join(',')}} = process.env;`, aliases, envNameAliases, envContainerAliases, envGetterAliases, null, options);
       }
     } else {
       destructuredEnvState.parts = parts;
@@ -416,6 +437,17 @@ function collectSensitiveEnvAliases(line, aliases, envNameAliases, envContainerA
     return;
   }
 
+  const processDestructured = line.match(/^\s*(?:const|let|var)\s*\{([^}]+)\}\s*=\s*process\s*;?$/);
+  if (processDestructured) {
+    for (const part of processDestructured[1].split(',')) {
+      const [rawName, rawAlias] = part.split(':').map((value) => value?.trim()).filter(Boolean);
+      if (rawName === 'env') {
+        envContainerAliases.add((rawAlias ?? rawName).replace(/\s*=.*$/, '').trim());
+      }
+    }
+    return;
+  }
+
   const destructuredStart = line.match(/^\s*(?:const|let|var)\s*\{\s*(.*)$/);
   if (destructuredStart && destructuredEnvState && !destructuredStart[1].includes('}')) {
     destructuredEnvState.active = true;
@@ -423,7 +455,7 @@ function collectSensitiveEnvAliases(line, aliases, envNameAliases, envContainerA
     return;
   }
 
-  const assignment = line.match(/^\s*(?:(?:const|let|var|export|readonly|local(?:\s+-[A-Za-z]+)*|declare(?:\s+-[A-Za-z]+)*)\s+)?([A-Za-z_$][\w$]*)(?:\s*:\s*[^=]+)?\s*=\s*(.+)$/);
+  const assignment = line.match(/^\s*(?:(?:export\s+)?(?:const|let|var)\s+|(?:export|readonly|local(?:\s+-[A-Za-z]+)*|declare(?:\s+-[A-Za-z]+)*)\s+)?([A-Za-z_$][\w$]*)(?:\s*:\s*[^=]+)?\s*=\s*(.+)$/);
   if (!assignment) {
     return;
   }
@@ -441,7 +473,7 @@ function collectSensitiveEnvAliases(line, aliases, envNameAliases, envContainerA
   }
   const envNameAliasAccess = new RegExp(String.raw`(?:os\.environ(?:\.(?:get|setdefault))?|os\.getenv|\bgetenv|\benviron(?:\.(?:get|setdefault))?)\s*\(\s*([A-Za-z_$][\w$]*)|(?:os\.)?environ\s*\[\s*([A-Za-z_$][\w$]*)\s*\]|(?:process\.env|import\.meta\.env)\s*\[\s*([A-Za-z_$][\w$]*)\s*\]`, 'u').exec(expression);
   const envAlias = envNameAliasAccess?.[1] ?? envNameAliasAccess?.[2] ?? envNameAliasAccess?.[3] ?? '';
-  if (hasInlineTokenMaterial(expression) || hasSensitiveEnvAccess(expression, envContainerAliases, envNameAliases) || hasInstallTimeGhAuthTokenSubstitution(expression) || (envAlias && envNameAliases.has(envAlias)) || expressionUsesSensitiveAlias(expression, aliases)) {
+  if (hasInlineTokenMaterial(expression) || hasSensitiveEnvAccess(expression, envContainerAliases, envNameAliases, envGetterAliases) || (options.shell && hasInstallTimeGhAuthTokenSubstitution(expression)) || (envAlias && envNameAliases.has(envAlias)) || expressionUsesSensitiveAlias(expression, aliases)) {
     aliases.add(alias);
   } else {
     aliases.delete(alias);
@@ -474,7 +506,7 @@ function hasAliasInterpolation(line, alias) {
     return true;
   }
   const outsideStrings = codeOutsideStringLiterals(line);
-  const bareAliasPattern = new RegExp(`(?:^|[+,(=:]|\\s|\\[)${escaped}(?:\\s*(?:[+),;]|\\]|$))`, 'u');
+  const bareAliasPattern = new RegExp(`(?:^|[+,(=:|?]|\\s|\\[)${escaped}(?:\\s*(?:[+),;}]|\\]|\\|\\||\\?\\?|$))`, 'u');
   return bareAliasPattern.test(outsideStrings);
 }
 
@@ -512,11 +544,11 @@ function hasInstallTimeGhAuthTokenSubstitution(line) {
   return unescapedSubstitution.test(line.slice(cursor));
 }
 
-function hasCronSecretInterpolation(line, aliases, envContainerAliases = new Set(), envNameAliases = new Set(), inCronContext = false) {
+function hasCronSecretInterpolation(line, aliases, envContainerAliases = new Set(), envNameAliases = new Set(), envGetterAliases = new Set(), inCronContext = false, options = {}) {
   if (!inCronContext && !hasCronCommandMarker(line)) {
     return false;
   }
-  if (hasSensitiveEnvAccess(line, envContainerAliases, envNameAliases) || hasCronCredentialLiteral(line) || (inCronContext && (hasCronCredentialText(line) || hasInstallTimeGhAuthTokenSubstitution(line)))) {
+  if (hasSensitiveEnvAccess(line, envContainerAliases, envNameAliases, envGetterAliases) || hasCronCredentialLiteral(line) || (inCronContext && (hasCronCredentialText(line) || (options.shell && hasInstallTimeGhAuthTokenSubstitution(line))))) {
     return true;
   }
   for (const alias of aliases) {
@@ -617,6 +649,7 @@ async function scanSourceFile(file, findings) {
   const sensitiveEnvAliases = new Set();
   const sensitiveEnvNameAliases = new Set();
   const envContainerAliases = new Set();
+  const envGetterAliases = new Set();
   const destructuredEnvState = { active: false, parts: [] };
   let pendingCronCommand = false;
   let pendingCronHeredocDelimiter = null;
@@ -635,16 +668,16 @@ async function scanSourceFile(file, findings) {
     }
 
     const inCronContext = pendingCronCommand || hasCronCommandMarker(code);
-    if (hasCronSecretInterpolation(code, sensitiveEnvAliases, envContainerAliases, sensitiveEnvNameAliases, inCronContext)) {
+    if (hasCronSecretInterpolation(code, sensitiveEnvAliases, envContainerAliases, sensitiveEnvNameAliases, envGetterAliases, inCronContext, { shell: language === 'shell' })) {
       findings.push(`${toRepoPath(file)}:${index + 1}: ${redactSourceLine(code)}`);
       pendingSensitiveFallbackLine = null;
-      collectSensitiveEnvAliases(code, sensitiveEnvAliases, sensitiveEnvNameAliases, envContainerAliases, destructuredEnvState);
+      collectSensitiveEnvAliases(code, sensitiveEnvAliases, sensitiveEnvNameAliases, envContainerAliases, envGetterAliases, destructuredEnvState, { shell: language === 'shell' });
       pendingCronHeredocDelimiter = pendingCronHeredocDelimiter ?? cronHeredocDelimiter(code);
       pendingCronCommand = Boolean(pendingCronHeredocDelimiter);
       continue;
     }
 
-    collectSensitiveEnvAliases(code, sensitiveEnvAliases, sensitiveEnvNameAliases, envContainerAliases, destructuredEnvState);
+    collectSensitiveEnvAliases(code, sensitiveEnvAliases, sensitiveEnvNameAliases, envContainerAliases, envGetterAliases, destructuredEnvState, { shell: language === 'shell' });
     pendingCronHeredocDelimiter = pendingCronHeredocDelimiter ?? cronHeredocDelimiter(code);
     pendingCronCommand = isCronContinuationLine(code, inCronContext, pendingCronCommand);
 
