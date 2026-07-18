@@ -215,6 +215,7 @@ const PREFERENCE_PATTERNS: readonly RegExp[] = [
 
 const ENVIRONMENT_FACT_PATTERNS: readonly RegExp[] = [
   /\b(?:repo|repository|project|package|workspace)\s+(?:uses|requires|runs|is)\b/i,
+  /\bfrankenbeast\s+(?:uses|requires|runs|is)\b/i,
   /(?:^|\s)(?:package\s+)?@franken\/[a-z0-9-]+\s+(?:uses|requires|runs|is)\b/i,
 ];
 
@@ -1380,6 +1381,7 @@ function hasExplicitPostTaskLessonSignal(text: string): boolean {
   if (isOneOffModalTaskReminder(text)) return false;
   if (isOneOffPostTaskProgress(text)) return false;
   if (isOneOffShouldCorrection(text)) return false;
+  if (isNegatedKeywordOnlyStatus(text)) return false;
   if (isRawUserPreferenceCorrection(text)) return true;
   if (PREFERENCE_PATTERNS.some((pattern) => pattern.test(text))) return true;
   if (ENVIRONMENT_FACT_PATTERNS.some((pattern) => pattern.test(text))) {
@@ -1467,7 +1469,13 @@ function isTaskScopedToolFailureReference(text: string): boolean {
 
 function hasReusableProcedureGuidance(text: string): boolean {
   if (isConditionalFailureStatus(text)) return false;
-  return /\b(?:always|when|if)\b.{0,160}\b(?:run|running|use|using|check|checks?|verify|retry|fallback|workaround)\b.{0,160}\b(?:before|after|instead|when|if|tests?|giving\s+up)\b|\b(?:run|running|use|using|check|checks?|verify|retry|fallback|workaround)\b.{0,160}\b(?:always|when|if|before|after|instead|giving\s+up)\b/i.test(
+  return /\b(?:always|when|if)\b.{0,160}\b(?:run|running|use|using|check|checks?|verify|retry|fallback|workaround)\b.{0,160}\b(?:before|after|instead|when|if|tests?|giving\s+up)\b|\b(?:when|if)\b.{0,160}\b(?:fails|failed|failure|errors?|errored|timed\s*out|timeout|crashes|crashed)\b.{0,120}\b(?:run|use|check|retry|fallback)\b|\b(?:run|running|use|using|check|checks?|verify|retry|fallback|workaround)\b.{0,160}\b(?:always|when|if|before|after|instead|giving\s+up)\b/i.test(
+    text,
+  );
+}
+
+function isNegatedKeywordOnlyStatus(text: string): boolean {
+  return /^\s*no\s+(?:retry|retries|preference|preferences|fallback|workaround)\b.{0,80}\b(?:needed|required|stated|used|applied|attempted)\b/i.test(
     text,
   );
 }
@@ -1506,10 +1514,7 @@ function isTaskReferenceBookkeeping(text: string): boolean {
     !/^\s*(?:when|if)\b/i.test(text) &&
     !isDocumentationUpdateLesson(text)
   ) {
-    return /\b(?:pr|pull\s+request|issue|ticket|task)\b/i.test(text) &&
-      /\b(?:merge|merged|close|closed|open|opened|fix|fixed|complete|completed|done|approve|approved|review|reviewed)\b/i.test(
-        text,
-      );
+    return true;
   }
   if (hasSpecificTaskReference && !isDocumentationUpdateLesson(text)) {
     if (

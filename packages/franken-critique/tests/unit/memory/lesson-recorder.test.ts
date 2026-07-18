@@ -1060,6 +1060,21 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('routes repo-name environment facts to memory review', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-repo-env-fact',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Frankenbeast uses pnpm'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'environment-fact',
+        suggestedDestination: 'memory',
+      }),
+    );
+  });
+
   it('classifies first-person preferences as memory lessons', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-first-person-preference',
@@ -1215,6 +1230,21 @@ describe('extractPostTaskLessonCandidates', () => {
       expect.objectContaining({
         suggestedDestination: 'skill',
         review: expect.objectContaining({ status: 'pending-review' }),
+      }),
+    );
+  });
+
+  it('keeps simple conditional run recovery lessons reviewable', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-simple-conditional-run-recovery',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['When npm test fails, run npm ci'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'procedure',
+        suggestedDestination: 'skill',
       }),
     );
   });
@@ -1571,6 +1601,24 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it.each(['Use PR #123', 'Please use issue 123'])(
+    'discards terse task-reference command %p',
+    (correction) => {
+      const report = extractPostTaskLessonCandidates({
+        taskId: 'post-task-terse-task-reference-command',
+        completedAt: '2026-07-16T00:00:00.000Z',
+        userCorrections: [correction],
+      });
+
+      expect(report.candidates[0]).toEqual(
+        expect.objectContaining({
+          category: 'task-state',
+          suggestedDestination: 'discard',
+        }),
+      );
+    },
+  );
+
   it('routes terse prefer-not-to-use corrections to memory', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-prefer-not-to-use',
@@ -1739,10 +1787,10 @@ describe('extractPostTaskLessonCandidates', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-keyword-only-progress',
       completedAt: '2026-07-16T00:00:00.000Z',
-      notes: ['Always happy to help', 'No retry was needed'],
+      notes: ['Always happy to help', 'No retry was needed', 'No preference was stated'],
     });
 
-    expect(report.candidates).toHaveLength(2);
+    expect(report.candidates).toHaveLength(3);
     for (const candidate of report.candidates) {
       expect(candidate).toEqual(
         expect.objectContaining({
