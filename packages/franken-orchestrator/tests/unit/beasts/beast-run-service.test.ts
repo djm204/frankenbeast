@@ -1084,7 +1084,7 @@ describe('BeastRunService', () => {
       startedAt: attempt.startedAt,
     });
 
-    await expect(runs.start(run.id, 'operator')).rejects.toThrow('duplicate start failed');
+    await expect(runs.start(run.id, 'operator')).rejects.toThrow(SAFE_DISPATCH_FAILURE_MESSAGE);
 
     expect(repo.getRun(run.id)).toMatchObject({
       id: run.id,
@@ -1130,7 +1130,7 @@ describe('BeastRunService', () => {
       startNow: false,
     });
 
-    await expect(runs.start(run.id, 'operator')).rejects.toThrow('post-start tracking failed');
+    await expect(runs.start(run.id, 'operator')).rejects.toThrow(SAFE_DISPATCH_FAILURE_MESSAGE);
 
     expect(repo.getRun(run.id)).toMatchObject({
       id: run.id,
@@ -1182,7 +1182,7 @@ describe('BeastRunService', () => {
       executorMetadata: { backend: 'process' },
     });
 
-    await expect(runs.start(run.id, 'operator')).rejects.toThrow('post-start tracking failed');
+    await expect(runs.start(run.id, 'operator')).rejects.toThrow(SAFE_DISPATCH_FAILURE_MESSAGE);
 
     const attempts = repo.listAttempts(run.id);
     expect(attempts).toHaveLength(2);
@@ -1236,7 +1236,7 @@ describe('BeastRunService', () => {
       startedAt: attempt.startedAt,
     });
 
-    await expect(runs.start(run.id, 'operator')).rejects.toThrow('transient config write failed');
+    await expect(runs.start(run.id, 'operator')).rejects.toThrow(SAFE_DISPATCH_FAILURE_MESSAGE);
 
     expect(repo.getRun(run.id)).toMatchObject({
       id: run.id,

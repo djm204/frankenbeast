@@ -103,7 +103,7 @@ export class BeastRunService {
           || currentRun.attemptCount > priorAttemptCount
         )
       ) {
-        throw error;
+        throw new Error(SAFE_DISPATCH_FAILURE_MESSAGE);
       }
       const priorAttempt = priorAttemptId ? this.repository.getAttempt(priorAttemptId) : undefined;
       if (priorAttempt?.status === 'running') {
@@ -116,7 +116,7 @@ export class BeastRunService {
           stopReason: run.stopReason ?? null,
         });
         this.syncTrackedAgent(restoredRun);
-        throw error;
+        throw new Error(SAFE_DISPATCH_FAILURE_MESSAGE);
       }
       if (currentRun?.status === 'failed' && currentRun.finishedAt && currentRun.finishedAt !== run.finishedAt) {
         const failedAt = currentRun.finishedAt;

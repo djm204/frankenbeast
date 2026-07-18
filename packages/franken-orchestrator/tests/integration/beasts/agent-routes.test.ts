@@ -174,6 +174,7 @@ function createStandaloneAgentApp() {
 
 describe('agent routes integration', () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     rmSync(TMP, { recursive: true, force: true });
   });
 
@@ -1603,10 +1604,15 @@ describe('agent routes integration', () => {
     const responseBody = await response.json() as {
       error: { message: string; details: { agentId: string; dispatchError: string } };
     };
-    const detail = agents.getAgentDetail(responseBody.error.details.agentId);
+    const detailResponse = await app.request(`/v1/beasts/agents/${responseBody.error.details.agentId}`, { headers });
+    expect(detailResponse.status).toBe(200);
+    const detail = await detailResponse.json() as {
+      data: { agent: Record<string, unknown>; events: AgentEvent[] };
+    };
     const exposedSurfaces = JSON.stringify({
       responseBody,
-      events: detail.events,
+      agent: detail.data.agent,
+      events: detail.data.events,
       logs: consoleError.mock.calls,
     });
     expect(responseBody.error.details.dispatchError).toBe(SAFE_DISPATCH_FAILURE_MESSAGE);

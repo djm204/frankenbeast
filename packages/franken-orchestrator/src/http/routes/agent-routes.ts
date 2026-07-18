@@ -230,7 +230,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
   app.get('/v1/beasts/agents', (c) => {
     return c.json({
       data: {
-        agents: deps.agents.listAgents(),
+        agents: deps.agents.listAgents().map(redactFailedAgentResponse),
         capacityReservation: deps.agents.getCapacityReservationState(),
       },
     });
@@ -239,8 +239,12 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
   app.get('/v1/beasts/agents/:agentId', (c) => {
     const agentId = c.req.param('agentId');
     try {
+      const detail = deps.agents.getAgentDetail(agentId);
       return c.json({
-        data: deps.agents.getAgentDetail(agentId),
+        data: {
+          ...detail,
+          agent: redactFailedAgentResponse(detail.agent),
+        },
       });
     } catch (error) {
       if (error instanceof UnknownTrackedAgentError) {
@@ -666,6 +670,18 @@ function assertAgentCapacityAvailable(deps: AgentRoutesDeps, agent: TrackedAgent
       },
     );
   }
+}
+
+function redactFailedAgentResponse(agent: TrackedAgent) {
+  if (agent.status !== 'failed') {
+    return agent;
+  }
+
+  return {
+    ...agent,
+    initAction: { kind: agent.initAction.kind },
+    initConfig: {},
+  };
 }
 
 async function dispatchDetachedAgent(
