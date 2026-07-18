@@ -130,7 +130,7 @@ function redactFailureStderrTail(stderrTail: readonly string[], configuredSecret
 
 function redactSpawnErrorMessage(errorMessage: string, configuredSecrets: readonly string[]): string {
   return redactBeastLogLine(errorMessage, configuredSecrets).replace(
-    /((?:^|\s)--?[a-z0-9_-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|auth|credential|webhook[_-]?url)[a-z0-9_-]*\s+)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s]+)/gi,
+    /((?:^|\s)--?[a-z0-9_-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|auth|credential|webhook[_-]?url)[a-z0-9_-]*(?:\s+|=))(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s]+)/gi,
     `$1${REDACTED_SECRET}`,
   );
 }
@@ -166,7 +166,7 @@ function redactSpawnArgs(
     if (flagName && !arg.includes('=') && isConfiguredSecretKey(flagName)) {
       redactNext = true;
     }
-    return redactBeastLogLine(arg, configuredSecrets);
+    return redactSpawnErrorMessage(arg, configuredSecrets);
   });
 }
 
