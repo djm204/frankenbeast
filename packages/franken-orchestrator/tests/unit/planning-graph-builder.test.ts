@@ -20,7 +20,7 @@ describe('runPlanning with GraphBuilder', () => {
   });
 
   it('uses ChunkFileGraphBuilder to populate ctx.plan and still runs it through critique', async () => {
-    writeFileSync(join(tmpDir, '05_sample.md'), 'Sample chunk', 'utf-8');
+    writeFileSync(join(tmpDir, '05_sample.md'), '# Chunk 05: sample\n\nSample chunk', 'utf-8');
 
     const ctx = new BeastContext('proj', 'sess', 'input');
     ctx.sanitizedIntent = { goal: 'build from chunks' };
@@ -48,7 +48,7 @@ describe('runPlanning with GraphBuilder', () => {
   });
 
   it('throws CritiqueSpiralError when critique rejects a graph-builder plan', async () => {
-    writeFileSync(join(tmpDir, '05_sample.md'), 'Sample chunk', 'utf-8');
+    writeFileSync(join(tmpDir, '05_sample.md'), '# Chunk 05: sample\n\nSample chunk', 'utf-8');
 
     const ctx = new BeastContext('proj', 'sess', 'input');
     ctx.sanitizedIntent = { goal: 'build from chunks' };
@@ -72,7 +72,7 @@ describe('runPlanning with GraphBuilder', () => {
   });
 
   it('throws CritiqueBudgetHaltError when critique halts on a graph-builder plan', async () => {
-    writeFileSync(join(tmpDir, '05_sample.md'), 'Sample chunk', 'utf-8');
+    writeFileSync(join(tmpDir, '05_sample.md'), '# Chunk 05: sample\n\nSample chunk', 'utf-8');
 
     const ctx = new BeastContext('proj', 'sess', 'input');
     ctx.sanitizedIntent = { goal: 'build from chunks' };

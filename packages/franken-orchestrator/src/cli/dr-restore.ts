@@ -4,7 +4,7 @@ import {
   buildRestoreDryRunReport,
   type RestorePreviewManifest,
 } from '../dr/restore-preview.js';
-import { diffStateSnapshotDirectories, maskOpaqueSecretLiterals } from '../dr/state-snapshot-diff.js';
+import { diffStateSnapshotDirectories } from '../dr/state-snapshot-diff.js';
 import {
   createEncryptedStateBackup,
   readStateBackupEnvelope,
@@ -18,11 +18,13 @@ import {
   retireDeadLetterEntry,
   type DeadLetterEntry,
 } from '../dr/dead-letter-queue.js';
-import { redactLogData } from '../logging/redaction.js';
+import { createPointInTimeExport } from '../dr/point-in-time-export.js';
+import { maskOpaqueSecretLiterals, redactLogData } from '../logging/redaction.js';
 
 export interface DrCommandDeps {
   readonly action:
     | 'backup'
+    | 'export'
     | 'list'
     | 'verify'
     | 'restore'
@@ -94,7 +96,6 @@ export async function readRestoreManifest(manifestPath: string): Promise<Restore
 function printRedactedJson(print: (message: string) => void, report: unknown): void {
   print(maskOpaqueSecretLiterals(JSON.stringify(redactLogData(report), null, 2)));
 }
-
 
 function summarizeDeadLetterEntry(entry: DeadLetterEntry): Omit<DeadLetterEntry, 'lastError' | 'payload'> {
   return {
@@ -210,6 +211,19 @@ export async function handleDrCommand(deps: DrCommandDeps): Promise<void> {
     return;
   }
 
+  if (action === 'export') {
+    if (!backupManifestPath || !liveManifestPath) {
+      throw new Error('dr export requires <state-dir> <export-file>');
+    }
+    printRedactedJson(print, await createPointInTimeExport({
+      stateDir: backupManifestPath,
+      outputPath: liveManifestPath,
+      dryRun: deps.dryRun === true,
+      ...(deps.generatedAt === undefined ? {} : { generatedAt: deps.generatedAt }),
+    }));
+    return;
+  }
+
   if (action === 'list') {
     if (!backupManifestPath) {
       throw new Error('dr list requires <backup-file>');
@@ -249,7 +263,7 @@ export async function handleDrCommand(deps: DrCommandDeps): Promise<void> {
   }
 
   if (action !== 'restore-dry-run') {
-    throw new Error('Usage: frankenbeast dr <backup|list|verify|restore|restore-dry-run|snapshot-diff|dead-letter-list|dead-letter-inspect|dead-letter-replay-dry-run|dead-letter-retire> ...');
+    throw new Error('Usage: frankenbeast dr <backup|export|list|verify|restore|restore-dry-run|snapshot-diff|dead-letter-list|dead-letter-inspect|dead-letter-replay-dry-run|dead-letter-retire> ...');
   }
   if (!backupManifestPath || !liveManifestPath) {
     throw new Error('dr restore-dry-run requires two manifest JSON files: <backup-manifest.json> <live-manifest.json>');

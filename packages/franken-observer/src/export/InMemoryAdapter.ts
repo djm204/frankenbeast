@@ -69,7 +69,7 @@ export class InMemoryAdapter implements ExportAdapter {
 function cloneTrace(trace: Trace): Trace {
   return {
     id: trace.id,
-    goal: trace.goal,
+    goal: redactSensitiveText(trace.goal),
     status: trace.status,
     startedAt: trace.startedAt,
     ...(trace.endedAt !== undefined ? { endedAt: trace.endedAt } : {}),
@@ -82,20 +82,64 @@ function cloneTrace(trace: Trace): Trace {
       startedAt: span.startedAt,
       ...(span.endedAt !== undefined ? { endedAt: span.endedAt } : {}),
       ...(span.durationMs !== undefined ? { durationMs: span.durationMs } : {}),
-      ...(span.errorMessage !== undefined ? { errorMessage: span.errorMessage } : {}),
+      ...(span.errorMessage !== undefined ? { errorMessage: redactSensitiveText(span.errorMessage) } : {}),
       metadata: cloneMetadata(span.metadata),
-      thoughtBlocks: [...span.thoughtBlocks],
+      thoughtBlocks: span.thoughtBlocks.map(redactSensitiveText),
     })),
   }
+}
+
+const REDACTED = '<redacted>'
+const REDACTION_MARKERS = new Set(['[REDACTED]', '<redacted>', '***'])
+const SENSITIVE_METADATA_KEY_RE = /(?:^|[_-])(?:SECRET|TOKEN|PASSWORD|PASSWD|PWD|CREDENTIAL|COOKIE|BEARER|AUTH|AUTHORIZATION|API[_-]?KEY|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|CLAUDE[_-]?SESSION)(?:$|[_-])/iu
+const SENSITIVE_TEXT_PATTERNS = [
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gu,
+  /\b(?:sk|gho|ghp|glpat|xox[baprs])-?[A-Za-z0-9_\-]{12,}\b/gu,
+  /\bnpm_[A-Za-z0-9_\-]{12,}\b/gu,
+  /https:\/\/(?:discord(?:app)?\.com|canary\.discord\.com)\/api\/webhooks\/\d+\/[A-Za-z0-9_\-]+/giu,
+  /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/[^\s:@/]*:[^\s@/]+@[^\s]+/giu,
+  /\b(?:Bearer|token)\s+[A-Za-z0-9._~+/=-]{20,}\b/giu,
+  /\b(?:Cookie|Set-Cookie):\s*[^\r\n]+/giu,
+  /\b(?:Proxy-)?Authorization:\s*[^\r\n]+/giu,
+]
+const SENSITIVE_ASSIGNMENT_RE = /\b([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)/gu
+const SENSITIVE_JSON_FIELD_RE = /("([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*)("(?:\\.|[^"\\])*"|[^,}\]\s]+)/gu
+
+function redactSensitiveText(text: string): string {
+  let redacted = text.replace(SENSITIVE_ASSIGNMENT_RE, (match, key: string) => {
+    return isSensitiveMetadataKey(key) ? `${key}=${REDACTED}` : match
+  })
+  redacted = redacted.replace(SENSITIVE_JSON_FIELD_RE, (match, prefix: string, key: string) => {
+    return isSensitiveMetadataKey(key) ? `${prefix}"${REDACTED}"` : match
+  })
+  for (const pattern of SENSITIVE_TEXT_PATTERNS) {
+    redacted = redacted.replace(pattern, REDACTED)
+  }
+  return redacted
 }
 
 function cloneMetadata(metadata: Record<string, unknown>): Record<string, unknown> {
   return cloneMetadataValue(metadata) as Record<string, unknown>
 }
 
+function normalizeSensitiveKey(key: string): string {
+  return key
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[^a-z0-9]+/giu, '_')
+}
+
+function isSensitiveMetadataKey(key: string): boolean {
+  return SENSITIVE_METADATA_KEY_RE.test(normalizeSensitiveKey(key))
+}
+
 function cloneMetadataValue(value: unknown, seen = new WeakMap<object, unknown>()): unknown {
   if (typeof value === 'function' || typeof value === 'symbol') {
     return String(value)
+  }
+
+  if (typeof value === 'string') {
+    return redactSensitiveText(value)
   }
 
   if (value === null || typeof value !== 'object') {
@@ -128,7 +172,10 @@ function cloneMetadataValue(value: unknown, seen = new WeakMap<object, unknown>(
     const cloned = new Map<unknown, unknown>()
     seen.set(value, cloned)
     for (const [key, nestedValue] of value.entries()) {
-      cloned.set(cloneMetadataValue(key, seen), cloneMetadataValue(nestedValue, seen))
+      cloned.set(
+        cloneMetadataValue(key, seen),
+        typeof key === 'string' ? redactMetadataEntry(key, nestedValue, seen) : cloneMetadataValue(nestedValue, seen),
+      )
     }
     return cloned
   }
@@ -152,16 +199,16 @@ function cloneMetadataValue(value: unknown, seen = new WeakMap<object, unknown>(
   if (value instanceof Error) {
     const cloned: Record<string, unknown> = {
       name: value.name,
-      message: value.message,
+      message: redactSensitiveText(value.message),
     }
     seen.set(value, cloned)
-    if (value.stack !== undefined) cloned['stack'] = value.stack
+    if (value.stack !== undefined) cloned['stack'] = redactSensitiveText(value.stack)
     if ('cause' in value) cloned['cause'] = cloneMetadataValue(value.cause, seen)
     if (value instanceof AggregateError) {
       cloned['errors'] = cloneMetadataValue(value.errors, seen)
     }
     for (const [key, nestedValue] of Object.entries(value)) {
-      defineMetadataProperty(cloned, key, cloneMetadataValue(nestedValue, seen))
+      defineMetadataProperty(cloned, key, redactMetadataEntry(key, nestedValue, seen))
     }
     return cloned
   }
@@ -169,9 +216,19 @@ function cloneMetadataValue(value: unknown, seen = new WeakMap<object, unknown>(
   const cloned: Record<string, unknown> = {}
   seen.set(value, cloned)
   for (const [key, nestedValue] of Object.entries(value)) {
-    defineMetadataProperty(cloned, key, cloneMetadataValue(nestedValue, seen))
+    defineMetadataProperty(cloned, key, redactMetadataEntry(key, nestedValue, seen))
   }
   return cloned
+}
+
+function redactMetadataEntry(key: string, value: unknown, seen: WeakMap<object, unknown>): unknown {
+  if (!isSensitiveMetadataKey(key)) {
+    return cloneMetadataValue(value, seen)
+  }
+  if (typeof value === 'string' && REDACTION_MARKERS.has(value)) {
+    return value
+  }
+  return REDACTED
 }
 
 function cloneArrayBufferView(value: ArrayBufferView): ArrayBufferView {

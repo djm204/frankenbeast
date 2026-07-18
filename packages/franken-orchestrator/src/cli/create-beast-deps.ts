@@ -168,7 +168,11 @@ export function createBeastDeps(
   const reflectionFn = config.reflection !== false
     ? async () => {
         const { ReflectionEvaluator } = await import('@franken/critique');
-        const evaluator = new ReflectionEvaluator({ llmClient: registryLlmClient });
+        const evaluator = new ReflectionEvaluator({
+          llmClient: {
+            complete: (prompt: string) => registryLlmClient.complete(prompt),
+          },
+        });
         const result = await evaluator.evaluate({
           content: 'Current execution state',
           metadata: { phase: 'execution', stepsCompleted: 0, objective: 'Reflect on progress' },

@@ -341,6 +341,58 @@ describe('DashboardApiClient', () => {
       }
     });
 
+    it('deduplicates replayed EventSource snapshots and resumes from the last event id', async () => {
+      vi.useFakeTimers();
+      const closeFns = [vi.fn(), vi.fn()];
+      const listeners: Array<Record<string, (event: { data?: string; lastEventId?: string }) => void>> = [];
+
+      const MockEventSource = vi.fn(function (this: {
+        addEventListener?: (type: string, handler: (event: { data?: string; lastEventId?: string }) => void) => void;
+        close?: () => void;
+      }) {
+        const index = listeners.length;
+        listeners[index] = {};
+        this.addEventListener = vi.fn((type: string, handler: (event: { data?: string; lastEventId?: string }) => void) => {
+          listeners[index]![type] = handler;
+        });
+        this.close = closeFns[index];
+      });
+
+      const originalEventSource = globalThis.EventSource;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).EventSource = MockEventSource;
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: 'ticket-1' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: 'ticket-2' }) });
+
+      try {
+        const client = new DashboardApiClient(BASE_URL);
+        const onSnapshot = vi.fn();
+        const unsub = await client.subscribeToDashboard(onSnapshot);
+        const snapshot = makeMockSnapshot();
+
+        listeners[0]!.snapshot!({ data: JSON.stringify(snapshot), lastEventId: 'dash:1' });
+        listeners[0]!.snapshot!({ data: JSON.stringify({ ...snapshot, providers: [] }), lastEventId: 'dash:1' });
+        expect(onSnapshot).toHaveBeenCalledTimes(1);
+
+        listeners[0]!.error!({});
+        await vi.advanceTimersByTimeAsync(1_000);
+
+        expect(MockEventSource).toHaveBeenNthCalledWith(2, `${BASE_URL}/api/dashboard/events?ticket=ticket-2&lastEventId=dash%3A1`);
+
+        unsub();
+        expect(closeFns[1]).toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+        if (originalEventSource) {
+          globalThis.EventSource = originalEventSource;
+        } else {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          delete (globalThis as any).EventSource;
+        }
+      }
+    });
+
     it('mints a fresh one-shot ticket after EventSource errors', async () => {
       vi.useFakeTimers();
       const closeFns = [vi.fn(), vi.fn()];

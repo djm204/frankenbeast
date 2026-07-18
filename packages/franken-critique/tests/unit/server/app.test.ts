@@ -92,6 +92,29 @@ describe('Critique Hono Server', () => {
       });
 
       expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.message).toBe('Invalid request');
+      expect(body.error.details).toEqual(
+        expect.arrayContaining([expect.objectContaining({ path: ['code'] })]),
+      );
+    });
+
+    it('returns a structured 400 for malformed JSON', async () => {
+      const app = createCritiqueApp({ pipeline: makePipeline() });
+      const res = await app.request('/v1/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{ "code":',
+      });
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body).toEqual({
+        error: {
+          message: 'Invalid JSON request body',
+          type: 'invalid_json',
+        },
+      });
     });
 
     it('passes context through to pipeline', async () => {
@@ -180,6 +203,39 @@ describe('Critique Hono Server', () => {
       evictOldestRateLimitBucket(requestCounts);
 
       expect([...requestCounts.keys()]).toEqual(['newest', 'middle']);
+    });
+
+    it.each([
+      ['negative', -1],
+      ['fractional', 1.5],
+      ['NaN', Number.NaN],
+      ['Infinity', Infinity],
+    ])(
+      'rejects invalid %s rate-limit configuration',
+      (_name, rateLimitPerMinute) => {
+        expect(() =>
+          createCritiqueApp({
+            rateLimitPerMinute,
+            pipeline: makePipeline(),
+          }),
+        ).toThrow('rateLimitPerMinute must be a positive finite integer');
+      },
+    );
+
+    it('treats 0 as an explicit disabled rate-limit value', async () => {
+      const app = createCritiqueApp({
+        rateLimitPerMinute: 0,
+        pipeline: makePipeline(),
+      });
+
+      for (let i = 0; i < 3; i++) {
+        const res = await app.request('/v1/review', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: 'x' }),
+        });
+        expect(res.status).toBe(200);
+      }
     });
 
     it('returns 429 after exceeding limit', async () => {

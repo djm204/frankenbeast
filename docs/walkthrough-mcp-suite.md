@@ -63,10 +63,10 @@ cd packages/franken-mcp-suite
 npx vitest run src/cli/init.test.ts
 
 # Integration tests only
-npx vitest run src/integration/
+npx vitest run --config vitest.integration.config.ts
 
 # The full-cycle test (requires codex binary)
-npx vitest run src/integration/full-cycle.integration.test.ts
+npx vitest run --config vitest.integration.config.ts src/integration/full-cycle.integration.test.ts
 ```
 
 ### Orchestrator tests

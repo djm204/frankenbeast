@@ -33,10 +33,25 @@ describe('CircuitBreaker', () => {
     it.each([
       ['NaN', Number.NaN],
       ['Infinity', Number.POSITIVE_INFINITY],
+      ['-Infinity', Number.NEGATIVE_INFINITY],
       ['negative values', -0.01],
     ])('throws RangeError for invalid spendUsd: %s', (_label, spendUsd) => {
       expect(() => breaker.check(spendUsd)).toThrow(RangeError)
       expect(() => breaker.check(spendUsd)).toThrow('spendUsd must be a finite non-negative number')
+    })
+
+    it('does not mutate trip state or emit handlers for invalid spendUsd', () => {
+      const handler = vi.fn()
+      breaker.on('limit-reached', handler)
+
+      breaker.check(0.51)
+      expect(handler).toHaveBeenCalledOnce()
+
+      expect(() => breaker.check(Number.NaN)).toThrow(RangeError)
+      expect(handler).toHaveBeenCalledOnce()
+
+      breaker.check(0.60)
+      expect(handler).toHaveBeenCalledOnce()
     })
   })
 
@@ -146,6 +161,7 @@ describe('CircuitBreaker', () => {
     it.each([
       ['NaN', Number.NaN],
       ['Infinity', Number.POSITIVE_INFINITY],
+      ['-Infinity', Number.NEGATIVE_INFINITY],
       ['negative values', -0.01],
     ])('throws RangeError for invalid limitUsd: %s', (_label, limitUsd) => {
       expect(() => new CircuitBreaker({ limitUsd })).toThrow(RangeError)
