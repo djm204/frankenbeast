@@ -1644,6 +1644,13 @@ describe('SqliteBrain', () => {
           maxRows: 1,
         });
 
+        expect(() =>
+          new SqliteBrain(dbPath, undefined, {
+            hydrateWorkingMemoryFromDb: false,
+            workingMemoryHydrationLimits: { maxRows: 1, maxBytes: 10_000 },
+          }),
+        ).toThrow(WorkingMemoryHydrationLimitError);
+
         let byteError: unknown;
         try {
           new SqliteBrain(dbPath, undefined, {

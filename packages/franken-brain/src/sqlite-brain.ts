@@ -1230,7 +1230,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
     if (hydrateFromDb) {
       this.loadFromDb(hydrationLimits);
     } else {
-      this.loadPersistedSerializedFromDb();
+      this.loadPersistedSerializedFromDb(hydrationLimits);
     }
   }
 
