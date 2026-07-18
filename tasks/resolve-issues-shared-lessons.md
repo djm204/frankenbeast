@@ -1,5 +1,12 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-17 — PR #2358 stalled closeout and Codex gate handling
+- For stalled PR closeout, re-verify live PR head, mergeability, CI rollup, unresolved Codex threads, and the latest top-level Codex response before acting; a stale green/clean state can become `mergeable=CONFLICTING`/`mergeStateStatus=DIRTY` after main advances even when required CI is still green.
+- Treat Codex usage-limit responses as a hard review-gate blocker for the current round: do not repeatedly retrigger `@codex review`, do not treat historical inline finding lists as active blockers when GraphQL review threads are resolved, and wait for restored usage/approved over-cap review before merging.
+- When a PR is behind the remote branch or main has moved, fast-forward the existing issue worktree to the PR head before touching files, then resolve only the merge-conflict files with minimal edits; for PR #2358 the known conflict surface included `brain-adapter.test.ts`, `memory.test.ts`, `tool-registry.ts`, and this shared lessons DSM.
+- Preserve the one-agent-per-issue policy during doctor/PM closeout: if an existing worktree/card owns the PR, leave evidence-backed handoff comments instead of spawning a duplicate worker or parallel replacement; every PM status comment should explicitly state whether duplicate edits/workers were created.
+- DSM/docs-only closeout notes still move the PR head if committed, so after pushing them, re-check CI on the new head and report whether the push was a documentation/lesson-only change versus a code fix.
+
 ## 2026-07-17 — Architecture docs package-name consistency
 - For docs-only architecture fixes, add narrow regression tests that slice the relevant README/docs sections and assert legacy labels are absent there, rather than banning every historical MOD reference across the repository; configuration/env docs may still need legacy toggles for compatibility.
 
@@ -28,8 +35,8 @@
 - For one-record-per-file snapshot exports, prefer immutable ids when present but fall back to the source path instead of mutable display names such as `name`; otherwise a rename appears as remove+add instead of one changed record. Coalesce identical aggregate/per-record duplicates so missing duplicate exports do not count as state drift.
 - For subsystem inference and worker ids, prefer explicit directory segments before filename substrings (`memory/task-notes.json` is memory), and let real worker registry records replace task-extracted worker references instead of suffixing them as duplicate workers.
 - For state snapshot diff follow-ups, treat direct approval primitive maps (`approvals.json`/`approvals/pending.json` with token keys) as keyed approval records without misclassifying single approval records, prefer task map/file fallback identity over mutable worker ownership, skip aggregate wrapper metadata once nested collections are extracted, keep explicit subsystem directories authoritative over generic basenames (`memory/state.json` stays memory), recheck byte-size caps after read, wrap directory/file read failures, and pass success/error paths plus parser messages, object keys, ids, and changed-field names through shared redaction so path/key strings with `token=`/`password=` fragments are scrubbed too.
-
 ## 2026-07-16 — Memory attribution scope and MCP inventory review fixes
+- For hook/governor memory audit closeout, treat `__fbeastHookSource` as reserved provenance on both pre-tool and observer paths: public observer logs must reject forged hook markers, hook JSON wrapping must write trusted provenance after spreading user context, execute_tool audit reports should infer nested memory tools from `args.tool`, and redaction helpers must merge trusted provenance back into sanitized memory export/review-decision contexts.
 - MCP memory tooling: adding a new registry tool must update package README combined-server tool counts and `tool-registry.test.ts` aggregate/search count expectations, not only server-specific tests, or full `@franken/mcp-suite` CI fails despite targeted memory tests passing.
 - Memory attribution privacy: source-attribution viewers must honor the same `readScope`/`agentId` controls as memory query/frontload and translate internal scoped working keys back to logical keys before returning results; governor redaction for proxied attribution calls should match the narrow attribution-argument shape so ordinary memory store/proposal calls are not over-redacted.
 

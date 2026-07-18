@@ -70,8 +70,8 @@ export const NON_EXECUTING_TOOLS: ReadonlySet<string> = new Set([
   'fbeast_memory_query',
   'fbeast_memory_frontload',
   'fbeast_memory_export',
-  'fbeast_memory_retention_report',
-  'fbeast_plan_decompose',
+  'fbeast_memory_access_audit_report',
+  'fbeast_memory_retention_report',  'fbeast_plan_decompose',
   'fbeast_plan_status',
   'fbeast_plan_validate',
   'fbeast_critique_evaluate',
@@ -179,6 +179,82 @@ function contextValueTargetsTool(value: unknown, toolName: string): boolean {
   return typeof value === 'string' && unqualifyMcpActionName(value) === toolName;
 }
 
+function trustedGovernanceProvenance(context: string): Record<string, string> {
+  try {
+    const parsed = JSON.parse(context) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const record = parsed as Record<string, unknown>;
+    return {
+      ...(record['__fbeastGovernanceSource'] === 'central-dispatch' ? { __fbeastGovernanceSource: 'central-dispatch' } : {}),
+      ...(record['__fbeastHookSource'] === 'fbeast-hook' ? { __fbeastHookSource: 'fbeast-hook' } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
+
+function redactedGovernanceEnvelope(context: string, redaction: string, extras: Record<string, unknown> = {}): string {
+  const provenance = trustedGovernanceProvenance(context);
+  if (Object.keys(provenance).length === 0) return redaction;
+  return JSON.stringify({ ...provenance, ...extras, context: redaction });
+}
+
+function mergeTrustedGovernanceProvenance(context: string, payload: Record<string, unknown>): Record<string, unknown> {
+  return { ...trustedGovernanceProvenance(context), ...payload };
+}
+
+function rootObjectKeys(context: string): string[] {
+  const keys: string[] = [];
+  let depth = 0;
+  let index = 0;
+
+  while (index < context.length) {
+    const char = context[index];
+    if (char === '"') {
+      let value = '';
+      index += 1;
+      while (index < context.length) {
+        const inner = context[index];
+        if (inner === '\\') {
+          value += `${inner}${context[index + 1] ?? ''}`;
+          index += 2;
+          continue;
+        }
+        if (inner === '"') break;
+        value += inner;
+        index += 1;
+      }
+      index += 1;
+      if (depth === 1) {
+        let lookahead = index;
+        while (lookahead < context.length && /\s/.test(context[lookahead] ?? '')) lookahead += 1;
+        if (context[lookahead] === ':') {
+          try {
+            keys.push(JSON.parse(`"${value}"`) as string);
+          } catch {
+            keys.push(value);
+          }
+        }
+      }
+      continue;
+    }
+    if (char === '{' || char === '[') depth += 1;
+    if (char === '}' || char === ']') depth -= 1;
+    index += 1;
+  }
+  return keys;
+}
+
+function hasDuplicateReservedProvenanceKeys(context: string): boolean {
+  const counts = new Map<string, number>();
+  for (const key of rootObjectKeys(context)) {
+    if (key !== '__fbeastGovernanceSource' && key !== '__fbeastHookSource') continue;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    if ((counts.get(key) ?? 0) > 1) return true;
+  }
+  return false;
+}
+
 function contextTargetsTool(context: string, toolName: string): boolean {
   try {
     const parsed = JSON.parse(context) as unknown;
@@ -229,7 +305,8 @@ function memoryReviewDecisionArgsFromContext(context: string, options: { require
 
 function redactRightToForgetGovernanceContext(action: string, context: string): string {
   if (unqualifyMcpActionName(action) !== 'fbeast_memory_right_to_forget') return context;
-  return '[right-to-forget-context-redacted]';
+  const dryRun = isRightToForgetDryRun(action, context);
+  return redactedGovernanceEnvelope(context, '[right-to-forget-context-redacted]', { dryRun });
 }
 
 function redactMemoryReviewProposalGovernanceContext(action: string, context: string): string {
@@ -247,27 +324,27 @@ function redactMemoryReviewDecisionGovernanceContext(action: string, context: st
   const decisionArgs = memoryReviewDecisionArgsFromContext(context, { requireExplicitTarget: unqualified === 'execute_tool' });
   if (unqualified === 'execute_tool'
     && contextTargetsTool(context, 'fbeast_memory_review_decide')) {
-    return JSON.stringify({
+    return JSON.stringify(mergeTrustedGovernanceProvenance(context, {
       tool: 'fbeast_memory_review_decide',
       ...(typeof decisionArgs?.['id'] === 'string' ? { id: decisionArgs['id'] } : {}),
       ...(typeof decisionArgs?.['action'] === 'string' ? { action: decisionArgs['action'] } : {}),
       ...(typeof decisionArgs?.['resolution'] === 'string' ? { resolution: decisionArgs['resolution'] } : {}),
       ...(decisionArgs !== undefined && Object.prototype.hasOwnProperty.call(decisionArgs, 'reviewer') ? { reviewer: '[memory-review-decision-metadata-redacted]' } : {}),
       ...(decisionArgs !== undefined && Object.prototype.hasOwnProperty.call(decisionArgs, 'note') ? { note: '[memory-review-decision-metadata-redacted]' } : {}),
-    });
+    }));
   }
   if (unqualified !== 'fbeast_memory_review_decide') return context;
   try {
     const parsed = JSON.parse(context) as unknown;
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return context;
     const record = parsed as Record<string, unknown>;
-    return JSON.stringify({
+    return JSON.stringify(mergeTrustedGovernanceProvenance(context, {
       ...(typeof record['id'] === 'string' ? { id: record['id'] } : {}),
       ...(typeof record['action'] === 'string' ? { action: record['action'] } : {}),
       ...(typeof record['resolution'] === 'string' ? { resolution: record['resolution'] } : {}),
       ...(Object.prototype.hasOwnProperty.call(record, 'reviewer') ? { reviewer: '[memory-review-decision-metadata-redacted]' } : {}),
       ...(Object.prototype.hasOwnProperty.call(record, 'note') ? { note: '[memory-review-decision-metadata-redacted]' } : {}),
-    });
+    }));
   } catch {
     return context;
   }
@@ -279,7 +356,7 @@ function redactMemorySourceAttributionGovernanceContext(action: string, context:
     || (unqualified === 'execute_tool'
       && (contextTargetsTool(context, 'fbeast_memory_source_attribution')
         || contextLooksLikeMemorySourceAttributionArgs(context)))) {
-    return '{}';
+    return JSON.stringify(mergeTrustedGovernanceProvenance(context, {}));
   }
   return context;
 }
@@ -306,6 +383,12 @@ function contextLooksLikeMemorySourceAttributionArgs(context: string): boolean {
 
 function sanitizeMemoryExportGovernanceArgs(args: Record<string, unknown>): Record<string, unknown> {
   const safe: Record<string, unknown> = {};
+  if (args['__fbeastGovernanceSource'] === 'central-dispatch') {
+    safe['__fbeastGovernanceSource'] = 'central-dispatch';
+  }
+  if (args['__fbeastHookSource'] === 'fbeast-hook') {
+    safe['__fbeastHookSource'] = 'fbeast-hook';
+  }
   if (typeof args['readScope'] === 'string' && ['all', 'shared', 'agent'].includes(args['readScope'])) {
     safe['readScope'] = args['readScope'];
   }
@@ -434,7 +517,13 @@ function redactMemoryExportGovernanceContext(action: string, context: string): s
         : nestedArgs !== null && typeof nestedArgs === 'object' && !Array.isArray(nestedArgs)
           ? nestedArgs as Record<string, unknown>
           : undefined;
-      return JSON.stringify({ tool: 'fbeast_memory_export', args: args === undefined ? MEMORY_EXPORT_CONTEXT_REDACTION : sanitizeMemoryExportGovernanceArgs(args) });
+      return JSON.stringify({
+        ...trustedGovernanceProvenance(context),
+        tool: 'fbeast_memory_export',
+        args: args === undefined
+          ? MEMORY_EXPORT_CONTEXT_REDACTION
+          : sanitizeMemoryExportGovernanceArgs(args),
+      });
     }
     return JSON.stringify(sanitizeMemoryExportGovernanceArgs(record));
   } catch {
@@ -786,6 +875,14 @@ export function createGovernorAdapter(dbPath: string): GovernorAdapter {
   return {
     async check(input) {
       const isDryRunForget = isRightToForgetDryRun(input.action, input.context);
+      if (hasDuplicateReservedProvenanceKeys(input.context)) {
+        const reason = 'Duplicate reserved fbeast provenance keys are not allowed.';
+        store.db.prepare(`
+          INSERT INTO governor_log (action, context, decision, reason)
+          VALUES (?, ?, ?, ?)
+        `).run(input.action, '[duplicate-reserved-provenance-rejected]', 'denied', reason);
+        return { decision: 'denied', reason };
+      }
       const context = redactGovernanceContext(input.action, input.context);
       const result = isDryRunForget
         ? {

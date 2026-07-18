@@ -257,6 +257,78 @@ describe('createMcpServer', () => {
     });
   });
 
+  it('redacts memory access audit report rejected selectors from direct and proxy audit records', () => {
+    expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_access_audit_report', {
+      operation: 'delete',
+      tool: 'fbeast_memory_store',
+      agentId: { token: 'SECRET_TOKEN_SHOULD_NOT_LEAK' },
+      decision: { secret: 'SECRET_DECISION_SHOULD_NOT_LEAK' },
+      key: 'OPENAI_API_KEY',
+      query: 'alice@example.test',
+      value: 'example value that must not be echoed',
+      limit: 25,
+    })).toEqual({
+      operation: 'delete',
+      tool: 'fbeast_memory_store',
+      agentId: '[memory-access-audit-report-args-redacted]',
+      decision: '[memory-access-audit-report-args-redacted]',
+      key: '[memory-access-audit-report-args-redacted]',
+      query: '[memory-access-audit-report-args-redacted]',
+      value: '[memory-access-audit-report-args-redacted]',
+      limit: 25,
+    });
+
+    expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
+      tool: 'fbeast_memory_access_audit_report',
+      args: {
+        operation: 'delete',
+        tool: 'fbeast_memory_store',
+        key: 'OPENAI_API_KEY',
+        query: 'alice@example.test',
+        value: 'example value that must not be echoed',
+      },
+      context: 'contains selectors',
+    })).toEqual({
+      tool: 'fbeast_memory_access_audit_report',
+      args: {
+        operation: 'delete',
+        tool: 'fbeast_memory_store',
+        key: '[memory-access-audit-report-args-redacted]',
+        query: '[memory-access-audit-report-args-redacted]',
+        value: '[memory-access-audit-report-args-redacted]',
+      },
+      context: '[memory-access-audit-report-args-redacted]',
+    });
+  });
+
+  it('redacts memory access audit report siblings when invalid is caller-supplied', () => {
+    expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_access_audit_report', {
+      invalid: 'caller supplied marker',
+      query: 'alice@example.test',
+      key: 'OPENAI_API_KEY',
+      value: 'example value that must not be echoed',
+      limit: 25,
+    })).toEqual({
+      invalid: '[memory-access-audit-report-args-redacted]',
+      query: '[memory-access-audit-report-args-redacted]',
+      key: '[memory-access-audit-report-args-redacted]',
+      value: '[memory-access-audit-report-args-redacted]',
+      limit: 25,
+    });
+  });
+
+  it('normalizes memory access audit timestamp filters before audit logging', () => {
+    expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_access_audit_report', {
+      since: '2026-07-17 00:00:00',
+      until: 'Fri, 17 Jul 2026 00:00:00 GMT (operator@example.test)',
+      limit: 25,
+    })).toEqual({
+      since: '2026-07-17T00:00:00.000Z',
+      until: '[memory-access-audit-report-args-redacted]',
+      limit: 25,
+    });
+  });
+
   it('rejects non-finite number arguments before invoking the handler', async () => {
     const calls: unknown[] = [];
     const tool: ToolDef = {
@@ -269,6 +341,28 @@ describe('createMcpServer', () => {
     const res = await srv.callTool('cost', { costUsd: Infinity });
     expect(res.isError).toBe(true);
     expect(calls).toHaveLength(0);
+  });
+
+  it('accepts arguments matching any listed schema type', async () => {
+    const calls: unknown[] = [];
+    const tool: ToolDef = {
+      name: 'audit_report',
+      description: 'audit report',
+      inputSchema: { type: 'object', properties: { limit: { type: ['string', 'number'], description: 'limit' } } },
+      handler: async (a) => { calls.push(a); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+    };
+    const srv = createMcpServer('t', '1', [tool]);
+
+    const stringLimit = await srv.callTool('audit_report', { limit: '50' });
+    const numericLimit = await srv.callTool('audit_report', { limit: 50 });
+    const bad = await srv.callTool('audit_report', { limit: true });
+
+    expect(stringLimit).not.toHaveProperty('isError');
+    expect(numericLimit).not.toHaveProperty('isError');
+
+    expect(bad.isError).toBe(true);
+    expect(bad.content[0]!.text).toContain('string or number');
+    expect(calls).toEqual([{ limit: '50' }, { limit: 50 }]);
   });
 
   it('rejects enum values not advertised by the input schema', async () => {

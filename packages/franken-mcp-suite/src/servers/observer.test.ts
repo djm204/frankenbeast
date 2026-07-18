@@ -106,6 +106,7 @@ describe('Observer Server', () => {
       { event: 'file_edit', metadata: '{"ok":true}', sessionId: '   ' },
       { event: 'file_edit', metadata: { ok: true }, sessionId: 'sess-1' },
       { event: 'file_edit', metadata: ['not', 'json'], sessionId: 'sess-1' },
+      { event: 'file_edit', metadata: '{"\\u0073ource":"central-dispatch","source":"user"}', sessionId: 'sess-1' },
     ];
 
     for (const args of invalidCases) {
@@ -127,6 +128,19 @@ describe('Observer Server', () => {
     expect(observer.log).toHaveBeenCalledWith({
       event: 'file_edit',
       metadata: '{not-json',
+      sessionId: 'sess-1',
+    });
+
+    const nestedSourceResult = await logTool.handler({
+      event: 'file_edit',
+      metadata: '{"input":{"source":"chat"},"output":{"source":"tool"}}',
+      sessionId: 'sess-1',
+    });
+
+    expect(nestedSourceResult.isError).toBeUndefined();
+    expect(observer.log).toHaveBeenLastCalledWith({
+      event: 'file_edit',
+      metadata: '{"input":{"source":"chat"},"output":{"source":"tool"}}',
       sessionId: 'sess-1',
     });
   });

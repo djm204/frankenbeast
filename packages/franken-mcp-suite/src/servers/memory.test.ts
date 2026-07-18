@@ -17,6 +17,13 @@ function createBrainStub(overrides: Partial<BrainAdapter> = {}): BrainAdapter {
       working: [],
       episodic: [],
     }),
+    memoryAccessAuditReport: vi.fn().mockResolvedValue({
+      generatedAt: "2026-07-16T00:00:00.000Z",
+      filters: {},
+      count: 0,
+      events: [],
+      summary: { byTool: {}, byOperation: {}, byDecision: {} },
+    }),
     memoryRetentionReport: vi.fn().mockResolvedValue({
       generatedAt: "2026-07-15T00:00:00.000Z",
       policies: [],
@@ -82,6 +89,7 @@ describe("Memory Server", () => {
       "fbeast_memory_source_attribution",
       "fbeast_memory_review_conflicts",
       "fbeast_memory_review_decide",
+      "fbeast_memory_access_audit_report",
     ]);
     const storeTool = server.tools.find(
       (t) => t.name === "fbeast_memory_store",
@@ -189,6 +197,28 @@ describe("Memory Server", () => {
         working: [{ key: "adr", value: "use adapters" }],
         episodic: [],
       }),
+      memoryAccessAuditReport: vi.fn().mockResolvedValue({
+        generatedAt: "2026-07-16T00:00:00.000Z",
+        filters: { agentId: "agent-a" },
+        count: 1,
+        events: [{
+          timestamp: "2026-07-16T00:00:00.000Z",
+          agentId: "agent-a",
+          profile: "default",
+          repo: "djm204/frankenbeast",
+          tool: "fbeast_memory_query",
+          operation: "read",
+          targetStore: "working|episodic",
+          targetClass: "memory-query",
+          decision: "approved",
+          reason: "allowed",
+        }],
+        summary: {
+          byTool: { fbeast_memory_query: 1 },
+          byOperation: { read: 1 },
+          byDecision: { approved: 1 },
+        },
+      }),
       rightToForget: vi.fn().mockResolvedValue({
         selectorHash: "hashed-selector",
         dryRun: false,
@@ -214,10 +244,13 @@ describe("Memory Server", () => {
     const exportTool = server.tools.find(
       (t) => t.name === "fbeast_memory_export",
     )!;
+    const auditReportTool = server.tools.find(
+      (t) => t.name === "fbeast_memory_access_audit_report",
+    )!;
+    expect(auditReportTool.inputSchema.properties.limit.type).toEqual(["string", "number"]);
     const retentionReportTool = server.tools.find(
       (t) => t.name === "fbeast_memory_retention_report",
-    )!;
-    const rightToForgetTool = server.tools.find(
+    )!;    const rightToForgetTool = server.tools.find(
       (t) => t.name === "fbeast_memory_right_to_forget",
     )!;
 
@@ -280,6 +313,29 @@ describe("Memory Server", () => {
       limit: 1000,
     });
 
+    const auditResult = await auditReportTool.handler({
+      agentId: "agent-a",
+      profile: "default",
+      repo: "djm204/frankenbeast",
+      tool: "fbeast_memory_query",
+      operation: "read",
+      decision: "approved",
+      since: "2026-07-16T00:00:00.000Z",
+      until: "2026-07-17T00:00:00.000Z",
+      limit: "50",
+    });
+    expect(brain.memoryAccessAuditReport).toHaveBeenCalledWith({
+      agentId: "agent-a",
+      profile: "default",
+      repo: "djm204/frankenbeast",
+      tool: "fbeast_memory_query",
+      operation: "read",
+      decision: "approved",
+      since: "2026-07-16T00:00:00.000Z",
+      until: "2026-07-17T00:00:00.000Z",
+      limit: 50,
+    });
+    expect(auditResult.content[0]!.text).toContain('"fbeast_memory_query"');
     const retentionReportResult = await retentionReportTool.handler({
       now: "2026-07-15T00:00:00.000Z",
       expiryHorizonMs: "60000",
@@ -295,7 +351,6 @@ describe("Memory Server", () => {
       maxEntries: 5,
     });
     expect(retentionReportResult.content[0]!.text).toContain('"compactionCandidates"');
-
     const forgetResult = await forgetTool.handler({ key: "adr", agentId: "agent-a" });
     expect(brain.forget).toHaveBeenCalledWith("adr", { agentId: "agent-a" });
     expect(forgetResult.content[0]!.text).toContain("Removed memory: adr");

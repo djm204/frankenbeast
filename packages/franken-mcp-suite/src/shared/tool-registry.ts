@@ -39,11 +39,100 @@ function splitCsvArg(value: unknown, fallback?: string[]): string[] | undefined 
   return parsed.length > 0 ? parsed : fallback;
 }
 
+function parseJsonObject(value: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function countRootJsonKey(value: string, key: string): number {
+  let count = 0;
+  let depth = 0;
+  let index = 0;
+
+  const skipWhitespace = (from: number): number => {
+    let next = from;
+    while (next < value.length && /\s/.test(value[next]!)) next++;
+    return next;
+  };
+
+  while (index < value.length) {
+    const char = value[index]!;
+    if (char === '"') {
+      const start = index;
+      index++;
+      let escaped = false;
+      while (index < value.length) {
+        const inner = value[index]!;
+        if (escaped) {
+          escaped = false;
+        } else if (inner === '\\') {
+          escaped = true;
+        } else if (inner === '"') {
+          break;
+        }
+        index++;
+      }
+      if (index >= value.length) return count;
+      const end = index;
+      const after = skipWhitespace(end + 1);
+      if (depth === 1 && value[after] === ':') {
+        try {
+          if (JSON.parse(value.slice(start, end + 1)) === key) count++;
+        } catch {
+          // Malformed JSON is allowed through existing adapter behavior; duplicate
+          // detection is best-effort and should not reject arbitrary log text.
+        }
+      }
+      index++;
+      continue;
+    }
+    if (char === '{' || char === '[') depth++;
+    if (char === '}' || char === ']') depth = Math.max(0, depth - 1);
+    index++;
+  }
+
+  return count;
+}
+
+function hasDuplicateRootJsonKey(value: string, key: string): boolean {
+  return countRootJsonKey(value, key) > 1;
+}
+
+function usesReservedObserverProvenance(metadata: string): boolean {
+  const parsed = parseJsonObject(metadata);
+  return hasDuplicateRootJsonKey(metadata, 'source')
+    || hasDuplicateRootJsonKey(metadata, RESERVED_AUDIT_TRAIL_SOURCE_KEY)
+    || hasDuplicateRootJsonKey(metadata, RESERVED_HOOK_SOURCE_KEY)
+    || parsed?.['source'] === RESERVED_AUDIT_SOURCE
+    || parsed?.[RESERVED_AUDIT_TRAIL_SOURCE_KEY] === RESERVED_AUDIT_SOURCE
+    || parsed?.[RESERVED_AUDIT_TRAIL_SOURCE_KEY] === RESERVED_HOOK_SOURCE
+    || parsed?.[RESERVED_HOOK_SOURCE_KEY] === RESERVED_HOOK_SOURCE;
+}
+
+function usesReservedGovernorProvenance(context: string): boolean {
+  const parsed = parseJsonObject(context);
+  return hasDuplicateRootJsonKey(context, RESERVED_GOVERNANCE_SOURCE_KEY)
+    || hasDuplicateRootJsonKey(context, RESERVED_HOOK_SOURCE_KEY)
+    || parsed?.[RESERVED_GOVERNANCE_SOURCE_KEY] === RESERVED_AUDIT_SOURCE
+    || parsed?.[RESERVED_HOOK_SOURCE_KEY] === RESERVED_HOOK_SOURCE;
+}
+
 const DEFAULT_MEMORY_QUERY_LIMIT = 20;
 const MAX_MEMORY_QUERY_LIMIT = 1000;
 const MEMORY_REVIEW_STATUSES = ['pending', 'approved', 'rejected', 'never_store', 'suppressed'] as const;
 const MEMORY_REVIEW_ACTIONS = ['approve', 'reject', 'never_store', 'resolve_conflict'] as const;
 const MEMORY_CONFLICT_RESOLUTIONS = ['keep_existing', 'replace_existing', 'keep_both_scoped', 'reject_candidate', 'expire_existing'] as const;
+const RESERVED_AUDIT_SOURCE = 'central-dispatch';
+const RESERVED_AUDIT_TRAIL_SOURCE_KEY = '__fbeastAuditTrailSource';
+const RESERVED_GOVERNANCE_SOURCE_KEY = '__fbeastGovernanceSource';
+const RESERVED_HOOK_SOURCE_KEY = '__fbeastHookSource';
+const RESERVED_HOOK_SOURCE = 'fbeast-hook';
 
 type MemoryReviewStatus = (typeof MEMORY_REVIEW_STATUSES)[number];
 type MemoryReviewAction = (typeof MEMORY_REVIEW_ACTIONS)[number];
@@ -57,6 +146,48 @@ function parseMemoryQueryLimit(value: unknown): { ok: true; value: number } | { 
 function parseMemoryExportLimit(value: unknown): { ok: true; value: number } | { ok: false; message: string } {
   if (value === undefined) return { ok: true, value: MAX_MEMORY_QUERY_LIMIT };
   return parsePositiveMemoryLimit(value);
+}
+
+function parseMemoryAccessAuditLimit(value: unknown): { ok: true; value: number } | { ok: false; message: string } {
+  if (value === undefined) return { ok: true, value: MAX_MEMORY_QUERY_LIMIT };
+  return parsePositiveMemoryLimit(value);
+}
+
+function parseMemoryAccessAuditStringFilter(name: string, value: unknown): { ok: true; value?: string } | { ok: false; message: string } {
+  if (value === undefined) return { ok: true };
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return { ok: false, message: `${name} must be a non-empty string when provided` };
+  }
+  const trimmed = value.trim();
+  if ((name === 'since' || name === 'until') && !isValidMemoryAccessAuditTimestamp(trimmed)) {
+    return { ok: false, message: `${name} must be a valid timestamp when provided` };
+  }
+  return { ok: true, value: trimmed };
+}
+
+function isValidMemoryAccessAuditTimestamp(value: string): boolean {
+  const normalized = value.includes('T') ? value : value.replace(' ', 'T');
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})?$/);
+  if (!match) return false;
+  const [, yearRaw, monthRaw, dayRaw, hourRaw, minuteRaw, secondRaw = '00'] = match;
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  const second = Number(secondRaw);
+  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) return false;
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  if (day < 1 || day > daysInMonth) return false;
+  return Number.isFinite(Date.parse(normalized.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(normalized) ? normalized : `${normalized}Z`));
+}
+
+function parseMemoryAccessAuditDecision(value: unknown): { ok: true; value?: string } | { ok: false; message: string } {
+  if (value === undefined) return { ok: true };
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return { ok: false, message: 'decision must be a non-empty string when provided' };
+  }
+  return { ok: true, value: value.trim() };
 }
 
 function parsePositiveMemoryLimit(value: unknown): { ok: true; value: number } | { ok: false; message: string } {
@@ -723,6 +854,50 @@ const TOOLS: ToolFull[] = [
     },
   },
 
+  {
+    name: 'fbeast_memory_access_audit_report',
+    server: 'memory',
+    description: 'Report redacted memory access by agent, profile, repo, tool, operation, and decision',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agentId: { type: 'string', description: 'Filter by agent id when available' },
+        profile: { type: 'string', description: 'Filter by active/profile name when available' },
+        repo: { type: 'string', description: 'Filter by repository identifier when available' },
+        since: { type: 'string', description: 'Inclusive lower timestamp bound (ISO string or SQLite timestamp)' },
+        until: { type: 'string', description: 'Inclusive upper timestamp bound (ISO string or SQLite timestamp)' },
+        operation: { type: 'string', description: 'Filter by operation, such as read, write, delete, review, or review:approve' },
+        tool: { type: 'string', description: 'Filter by memory tool name, such as fbeast_memory_query or fbeast_memory_store' },
+        decision: { type: 'string', description: 'Filter by any recorded governance/audit decision, such as approved, denied, validation_error, unknown_tool, or error' },
+        limit: { type: ['string', 'number'], description: 'Max audit events returned (default 1000)' },
+      },
+    },
+    makeHandler: ({ brain }) => async (args) => {
+      const limit = parseMemoryAccessAuditLimit(args['limit']);
+      if (!limit.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_access_audit_report ${limit.message}` }], isError: true };
+      }
+      const decision = parseMemoryAccessAuditDecision(args['decision']);
+      if (!decision.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_access_audit_report ${decision.message}` }], isError: true };
+      }
+      const filters: Record<string, string> = {};
+      for (const name of ['agentId', 'profile', 'repo', 'since', 'until', 'operation', 'tool'] as const) {
+        const parsed = parseMemoryAccessAuditStringFilter(name, args[name]);
+        if (!parsed.ok) {
+          return { content: [{ type: 'text', text: `Error: fbeast_memory_access_audit_report ${parsed.message}` }], isError: true };
+        }
+        if (parsed.value !== undefined) filters[name] = parsed.value;
+      }
+      const report = await brain.memoryAccessAuditReport({
+        ...filters,
+        ...(decision.value ? { decision: decision.value } : {}),
+        limit: limit.value,
+      });
+      return { content: [{ type: 'text', text: JSON.stringify(report, null, 2) }] };
+    },
+  },
+
   // --- planner ---
   {
     name: 'fbeast_plan_decompose',
@@ -920,6 +1095,9 @@ const TOOLS: ToolFull[] = [
       if (!metadataArg.ok) {
         return { content: [{ type: 'text', text: `Error: fbeast_observer_log ${metadataArg.message}` }], isError: true };
       }
+      if (usesReservedObserverProvenance(metadataArg.value)) {
+        return { content: [{ type: 'text', text: 'Error: fbeast_observer_log reserved audit provenance is internal-only' }], isError: true };
+      }
       const sessionIdArg = parseNonEmptyStringArg('sessionId', args['sessionId']);
       if (!sessionIdArg.ok) {
         return { content: [{ type: 'text', text: `Error: fbeast_observer_log ${sessionIdArg.message}` }], isError: true };
@@ -1032,6 +1210,9 @@ const TOOLS: ToolFull[] = [
     makeHandler: ({ governor }) => async (args) => {
       const action = String(args['action']);
       const context = String(args['context']);
+      if (usesReservedGovernorProvenance(context)) {
+        return { content: [{ type: 'text', text: 'Error: fbeast_governor_check reserved governance provenance is internal-only' }], isError: true };
+      }
       const { decision, reason } = await governor.check({ action, context });
       return { content: [{ type: 'text', text: `**Decision:** ${decision}\n**Reason:** ${reason}` }] };
     },
