@@ -145,9 +145,10 @@ describe('SseConnectionTicketStore', () => {
     }
   });
 
-  it('contains periodic cleanup failures and reports them without crashing the daemon', () => {
+  it('contains periodic cleanup and async observer failures without crashing the daemon', async () => {
     vi.useFakeTimers();
-    const onCleanupError = vi.fn();
+    const observerFailure = new Error('observer unavailable');
+    const onCleanupError = vi.fn().mockRejectedValue(observerFailure);
     const cleanupStore = new SseConnectionTicketStore({
       cleanupIntervalMs: 10,
       onCleanupError,
@@ -161,6 +162,7 @@ describe('SseConnectionTicketStore', () => {
 
     try {
       expect(() => vi.advanceTimersByTime(10)).not.toThrow();
+      await Promise.resolve();
       expect(cleanupSpy).toHaveBeenCalledOnce();
       expect(onCleanupError).toHaveBeenCalledWith(failure);
     } finally {

@@ -22,7 +22,7 @@ export interface SseConnectionTicketStoreOptions {
   ttlMs?: number;
   cleanupIntervalMs?: number;
   /** Best-effort observer for periodic cleanup failures. */
-  onCleanupError?: (error: unknown) => void;
+  onCleanupError?: (error: unknown) => void | Promise<void>;
   /** SQLite database shared by daemon processes. Omit only for isolated/test stores. */
   databasePath?: string;
   /**
@@ -113,7 +113,7 @@ export class SseConnectionTicketStore {
         // not escape the timer callback and terminate the daemon; the next
         // interval retries it.
         try {
-          options?.onCleanupError?.(error);
+          void Promise.resolve(options?.onCleanupError?.(error)).catch(() => {});
         } catch {
           // Observability hooks must not turn a recoverable cleanup failure
           // back into an uncaught timer exception.
