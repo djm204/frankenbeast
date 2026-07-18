@@ -117,13 +117,30 @@ describe('OnePasswordStore', () => {
           'edit',
           'frankenbeast/comms.slack.botTokenRef',
           '--vault=frankenbeast',
-          '-',
         ],
       });
       expect(JSON.parse(editCall!.stdin!)).toMatchObject({
         id: 'abc123',
         fields: [{ value: UPDATED_SLACK_BOT_TOKEN }],
       });
+      expectNoArgContains(mock.calls, UPDATED_SLACK_BOT_TOKEN);
+    });
+
+    it('fails closed rather than whole-template editing 1Password items with passkeys', async () => {
+      mock.responses.set('item get', {
+        stdout: JSON.stringify({
+          id: 'abc123',
+          title: 'frankenbeast/comms.slack.botTokenRef',
+          category: 'LOGIN',
+          fields: [{ id: 'password', type: 'CONCEALED', purpose: 'PASSWORD', label: 'password', value: 'old' }],
+          passkeys: [{ credentialId: 'passkey-credential' }],
+        }),
+        stderr: '',
+        exitCode: 0,
+      });
+
+      await expect(store.store('comms.slack.botTokenRef', UPDATED_SLACK_BOT_TOKEN)).rejects.toThrow('contains passkeys');
+      expect(mock.calls.some(c => c.args.includes('edit'))).toBe(false);
       expectNoArgContains(mock.calls, UPDATED_SLACK_BOT_TOKEN);
     });
 

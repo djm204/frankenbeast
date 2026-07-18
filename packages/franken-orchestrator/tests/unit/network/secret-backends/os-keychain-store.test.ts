@@ -124,10 +124,11 @@ describe('OsKeychainStore', () => {
       store = new OsKeychainStore({ runner: mock.runner, stdinRunner: mock.stdinRunner, platform: 'darwin' });
     });
 
-    it('detects via security command', async () => {
+    it('does not advertise macOS Keychain as write-capable', async () => {
       mock.responses.set('help', { stdout: '', stderr: 'Usage:', exitCode: 0 });
       const detection = await store.detect();
-      expect(detection.available).toBe(true);
+      expect(detection.available).toBe(false);
+      expect(detection.reason).toContain('writes are disabled');
     });
 
     it('fails closed instead of exposing macOS Keychain values in argv', async () => {
@@ -152,10 +153,11 @@ describe('OsKeychainStore', () => {
       store = new OsKeychainStore({ runner: mock.runner, stdinRunner: mock.stdinRunner, platform: 'win32' });
     });
 
-    it('detects via cmdkey', async () => {
+    it('does not advertise Windows Credential Manager as write-capable', async () => {
       mock.responses.set('cmdkey', { stdout: 'Currently stored credentials', stderr: '', exitCode: 0 });
       const detection = await store.detect();
-      expect(detection.available).toBe(true);
+      expect(detection.available).toBe(false);
+      expect(detection.reason).toContain('writes are disabled');
     });
 
     it('fails closed instead of exposing cmdkey passwords in argv', async () => {

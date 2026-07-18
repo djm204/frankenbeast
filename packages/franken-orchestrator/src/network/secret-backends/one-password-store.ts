@@ -18,6 +18,7 @@ interface OnePasswordItemTemplate {
     label?: string;
     value?: string;
   }>;
+  passkeys?: unknown;
 }
 
 function titleForKey(key: string): string {
@@ -70,6 +71,10 @@ function parseItemTemplate(stdout: string): OnePasswordItemTemplate | undefined 
   }
 }
 
+function hasPasskeys(item: OnePasswordItemTemplate | undefined): boolean {
+  return Array.isArray(item?.passkeys) && item.passkeys.length > 0;
+}
+
 export class OnePasswordStore implements ISecretStore {
   readonly id = '1password';
 
@@ -102,13 +107,15 @@ export class OnePasswordStore implements ISecretStore {
     if (getResult.exitCode === 0) {
       // Item exists — edit it by piping a JSON template so sensitive fields never appear in argv.
       const existing = parseItemTemplate(getResult.stdout);
+      if (hasPasskeys(existing)) {
+        throw new Error('1Password item contains passkeys; refusing whole-template edit because the 1Password CLI does not preserve passkeys in JSON templates.');
+      }
       const template = itemTemplateForSecret(title, value, existing);
       await this.stdinRunner('op', [
         'item',
         'edit',
         title,
         `--vault=${VAULT}`,
-        '-',
       ], JSON.stringify(template));
     } else {
       // Item does not exist — create it from a piped JSON template instead of argv assignments.

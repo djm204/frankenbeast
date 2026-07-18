@@ -211,9 +211,13 @@ export class OsKeychainStore implements ISecretStore {
 
   private async detectDarwin(): Promise<SecretStoreDetection> {
     const result = await this.runner('security', ['help']);
-    // security help exits 0 on macOS; stderr may contain usage info
+    // security help exits 0 on macOS; stderr may contain usage info.
     if (result.exitCode === 0 || result.stderr.length > 0) {
-      return { available: true };
+      return {
+        available: false,
+        reason: 'macOS Keychain writes are disabled because security add-generic-password requires secret material in process arguments or an interactive prompt.',
+        setupInstructions: 'Use the env, file, 1Password, or Bitwarden secret backend for write-capable noninteractive secret storage.',
+      };
     }
     return {
       available: false,
@@ -275,7 +279,11 @@ export class OsKeychainStore implements ISecretStore {
   private async detectWin32(): Promise<SecretStoreDetection> {
     const result = await this.runner('cmdkey', ['/list']);
     if (result.exitCode === 0) {
-      return { available: true };
+      return {
+        available: false,
+        reason: 'Windows Credential Manager writes are disabled because cmdkey requires secret material in process arguments.',
+        setupInstructions: 'Use the env, file, 1Password, or Bitwarden secret backend for write-capable noninteractive secret storage.',
+      };
     }
     return {
       available: false,
