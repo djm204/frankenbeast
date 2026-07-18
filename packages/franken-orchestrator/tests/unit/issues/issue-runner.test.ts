@@ -1416,6 +1416,58 @@ describe('stuck-run watchdog', () => {
     expect(findings[0]!.recommendedAction).not.toContain('respawn one focused worker');
   });
 
+  it('prefers newer same-PID crash snapshots over older live probes', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_same_pid_probe_newer_crash',
+        pid: 7426,
+        status: 'running',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T11:50:00.000Z',
+      },
+      {
+        cardId: 't_same_pid_probe_newer_crash',
+        pid: 7426,
+        status: 'failed',
+        lastHeartbeatAt: '2026-07-16T11:55:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_same_pid_probe_newer_crash',
+      pid: 7426,
+      processStatus: 'dead',
+      restartDisposition: 'retryable',
+      nextAction: 'restart-once',
+    });
+  });
+
+  it('does not let undated terminal records clear undated dead restart candidates', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_undated_terminal_then_dead',
+        pid: 7427,
+        status: 'completed',
+        alive: false,
+      },
+      {
+        cardId: 't_undated_terminal_then_dead',
+        pid: 7428,
+        status: 'running',
+        alive: false,
+      },
+    ], { nowMs });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      cardId: 't_undated_terminal_then_dead',
+      pid: 7428,
+      processStatus: 'dead',
+      restartDisposition: 'retryable',
+      nextAction: 'restart-once',
+    });
+  });
+
   it('keeps intentional operator exits non-retryable in direct restart contracts', () => {
     const contract = buildWorkerCrashOnlyRestartContract({
       cardId: 't_operator_stop',
