@@ -843,6 +843,23 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('still redacts concrete customer references in generic policy wording', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-customer-policy-with-concrete-tenant',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['User prefers lessons to avoid copying customer data for Tenant ACME-123'],
+    });
+
+    expect(JSON.stringify(report)).not.toContain('ACME-123');
+    expect(report.candidates[0]?.privacyFilter).toEqual(
+      expect.objectContaining({
+        sensitive: true,
+        approvalRequired: true,
+        flags: expect.arrayContaining(['customer-data']),
+      }),
+    );
+  });
+
   it('attaches matching verification steps to a single pending lesson candidate', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-verification-evidence',

@@ -4048,16 +4048,27 @@ function createPrivacyDecision(
 }
 
 function isGenericCustomerPolicyText(text: string): boolean {
-  return /\bcustomer\s+(?:data|identifiers?|records?|information|privacy|pii)\b/i.test(
+  return (
+    /\bcustomer\s+(?:data|identifiers?|records?|information|privacy|pii)\b/i.test(
+      text,
+    ) && !hasConcreteCustomerReference(text)
+  );
+}
+
+function hasConcreteCustomerReference(text: string): boolean {
+  return /\b(?:[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*|[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*)|[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*|[Cc]ustomer\s+account\b|[Cc]ustomer\s+(?:account\s+)?[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b/.test(
     text,
   );
 }
 
 function extractCustomerSegments(text: string): string[] {
-  const segments =
-    text.match(
-      /\b[Cc]ustomer(?:\s+account)?(?:\s+[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})?(?:\s+[A-Za-z0-9_.:-]+){1,3}\b|\b[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b|\b[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*)(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b|\b[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b/g,
-    ) ?? [];
+  const patterns = [
+    /\b[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b/g,
+    /\b[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*)(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b/g,
+    /\b[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b/g,
+    /\b[Cc]ustomer(?:\s+account)?(?:\s+[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})?(?:\s+[A-Za-z0-9_.:-]+){1,3}\b/g,
+  ];
+  const segments = patterns.flatMap((pattern) => text.match(pattern) ?? []);
   return segments.flatMap((segment) => {
     const emailMatch = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.exec(
       segment,
