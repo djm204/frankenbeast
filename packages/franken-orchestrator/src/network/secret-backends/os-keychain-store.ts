@@ -216,7 +216,7 @@ export class OsKeychainStore implements ISecretStore {
       return {
         available: false,
         reason: 'macOS Keychain writes are disabled because security add-generic-password requires secret material in process arguments or an interactive prompt.',
-        setupInstructions: 'Use the env, file, 1Password, or Bitwarden secret backend for write-capable noninteractive secret storage.',
+        setupInstructions: 'Use the local-encrypted, 1Password, or Bitwarden secret backend for write-capable noninteractive secret storage.',
       };
     }
     return {
@@ -296,7 +296,7 @@ export class OsKeychainStore implements ISecretStore {
       return {
         available: false,
         reason: 'Windows Credential Manager writes are disabled because cmdkey requires secret material in process arguments.',
-        setupInstructions: 'Use the env, file, 1Password, or Bitwarden secret backend for write-capable noninteractive secret storage.',
+        setupInstructions: 'Use the local-encrypted, 1Password, or Bitwarden secret backend for write-capable noninteractive secret storage.',
       };
     }
     return {

@@ -60,11 +60,11 @@ describe('OnePasswordStore', () => {
       expect(detection.setupInstructions).toContain('1Password CLI');
     });
 
-    it('requires a 1Password CLI version with stdin JSON-template edits', async () => {
+    it('requires a 1Password CLI version with stdin JSON-template creates', async () => {
       mock.responses.set('--version', { stdout: '2.22.0', stderr: '', exitCode: 0 });
       const detection = await store.detect();
       expect(detection.available).toBe(false);
-      expect(detection.reason).toContain('does not support JSON-template edits from stdin');
+      expect(detection.reason).toContain('does not support JSON-template creates from stdin');
       expect(detection.setupInstructions).toContain('2.23.0');
     });
   });
@@ -102,7 +102,7 @@ describe('OnePasswordStore', () => {
       expectNoArgContains(mock.calls, TEST_SLACK_BOT_TOKEN);
     });
 
-    it('edits existing item from a JSON template supplied through stdin', async () => {
+    it('fails closed rather than whole-template editing existing 1Password items', async () => {
       mock.responses.set('item get', {
         stdout: JSON.stringify({
           id: 'abc123',
@@ -113,24 +113,9 @@ describe('OnePasswordStore', () => {
         stderr: '',
         exitCode: 0,
       });
-      mock.responses.set('item edit', { stdout: '{}', stderr: '', exitCode: 0 });
 
-      await store.store('comms.slack.botTokenRef', UPDATED_SLACK_BOT_TOKEN);
-      const editCall = mock.calls.find(c => c.args.includes('edit'));
-      expect(editCall).toBeDefined();
-      expect(editCall).toMatchObject({
-        command: 'op',
-        args: [
-          'item',
-          'edit',
-          'frankenbeast/comms.slack.botTokenRef',
-          '--vault=frankenbeast',
-        ],
-      });
-      expect(JSON.parse(editCall!.stdin!)).toMatchObject({
-        id: 'abc123',
-        fields: [{ value: UPDATED_SLACK_BOT_TOKEN }],
-      });
+      await expect(store.store('comms.slack.botTokenRef', UPDATED_SLACK_BOT_TOKEN)).rejects.toThrow('refusing to edit existing items');
+      expect(mock.calls.some(c => c.args.includes('edit'))).toBe(false);
       expectNoArgContains(mock.calls, UPDATED_SLACK_BOT_TOKEN);
     });
 
@@ -147,9 +132,17 @@ describe('OnePasswordStore', () => {
         exitCode: 0,
       });
 
-      await expect(store.store('comms.slack.botTokenRef', UPDATED_SLACK_BOT_TOKEN)).rejects.toThrow('contains passkeys');
+      await expect(store.store('comms.slack.botTokenRef', UPDATED_SLACK_BOT_TOKEN)).rejects.toThrow('refusing to edit existing items');
       expect(mock.calls.some(c => c.args.includes('edit'))).toBe(false);
       expectNoArgContains(mock.calls, UPDATED_SLACK_BOT_TOKEN);
+    });
+
+    it('surfaces failed 1Password stdin creates', async () => {
+      mock.responses.set('item get', { stdout: '', stderr: 'not found', exitCode: 1 });
+      mock.responses.set('item create', { stdout: '', stderr: 'unsupported template', exitCode: 1 });
+
+      await expect(store.store('comms.slack.botTokenRef', TEST_SLACK_BOT_TOKEN)).rejects.toThrow('1Password item create failed: unsupported template');
+      expectNoArgContains(mock.calls, TEST_SLACK_BOT_TOKEN);
     });
 
     it('fails closed when storing without a stdin-capable runner', async () => {

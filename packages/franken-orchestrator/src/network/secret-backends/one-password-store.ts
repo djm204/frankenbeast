@@ -20,7 +20,6 @@ interface OnePasswordItemTemplate {
     label?: string;
     value?: string;
   }>;
-  passkeys?: unknown;
 }
 
 function titleForKey(key: string): string {
@@ -36,41 +35,20 @@ function itemIdFromJson(stdout: string): string | undefined {
   }
 }
 
-function itemTemplateForSecret(title: string, value: string, existing?: OnePasswordItemTemplate): OnePasswordItemTemplate {
-  const fields = [...(existing?.fields ?? [])];
-  const passwordField = fields.find(
-    field => field.id === 'password' || field.purpose === 'PASSWORD' || field.label === 'password',
-  );
-
-  if (passwordField) {
-    passwordField.value = value;
-    passwordField.type = passwordField.type ?? 'CONCEALED';
-    passwordField.purpose = passwordField.purpose ?? 'PASSWORD';
-  } else {
-    fields.push({
-      id: 'password',
-      type: 'CONCEALED',
-      purpose: 'PASSWORD',
-      label: 'password',
-      value,
-    });
-  }
-
+function itemTemplateForSecret(title: string, value: string): OnePasswordItemTemplate {
   return {
-    ...existing,
-    title: existing?.title ?? title,
-    category: existing?.category ?? 'LOGIN',
-    fields,
+    title,
+    category: 'LOGIN',
+    fields: [
+      {
+        id: 'password',
+        type: 'CONCEALED',
+        purpose: 'PASSWORD',
+        label: 'password',
+        value,
+      },
+    ],
   };
-}
-
-function parseItemTemplate(stdout: string): OnePasswordItemTemplate | undefined {
-  try {
-    const parsed = JSON.parse(stdout) as OnePasswordItemTemplate;
-    return parsed && typeof parsed === 'object' ? parsed : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function parseVersion(stdout: string): [number, number, number] | undefined {
@@ -88,8 +66,10 @@ function versionAtLeast(actual: [number, number, number] | undefined, required: 
   return true;
 }
 
-function hasPasskeys(item: OnePasswordItemTemplate | undefined): boolean {
-  return Array.isArray(item?.passkeys) && item.passkeys.length > 0;
+function assertSuccess(result: CliResult, operation: string): void {
+  if (result.exitCode !== 0) {
+    throw new Error(`${operation} failed: ${result.stderr || result.stdout}`);
+  }
 }
 
 export class OnePasswordStore implements ISecretStore {
@@ -106,8 +86,8 @@ export class OnePasswordStore implements ISecretStore {
       if (!versionAtLeast(parseVersion(result.stdout), REQUIRED_OP_EDIT_STDIN_VERSION)) {
         return {
           available: false,
-          reason: `1Password CLI ${result.stdout.trim() || 'version unknown'} does not support JSON-template edits from stdin`,
-          setupInstructions: 'Install 1Password CLI 2.23.0 or newer so secret updates can use stdin without exposing values in process arguments.',
+          reason: `1Password CLI ${result.stdout.trim() || 'version unknown'} does not support JSON-template creates from stdin`,
+          setupInstructions: 'Install 1Password CLI 2.23.0 or newer so secret creates can use stdin without exposing values in process arguments.',
         };
       }
       return { available: true };
@@ -129,28 +109,21 @@ export class OnePasswordStore implements ISecretStore {
     const getResult = await this.runner('op', ['item', 'get', title, `--vault=${VAULT}`, '--format=json']);
 
     if (getResult.exitCode === 0) {
-      // Item exists — edit it by piping a JSON template so sensitive fields never appear in argv.
-      const existing = parseItemTemplate(getResult.stdout);
-      if (hasPasskeys(existing)) {
-        throw new Error('1Password item contains passkeys; refusing whole-template edit because the 1Password CLI does not preserve passkeys in JSON templates.');
-      }
-      const template = itemTemplateForSecret(title, value, existing);
-      await this.stdinRunner('op', [
-        'item',
-        'edit',
-        title,
-        `--vault=${VAULT}`,
-      ], JSON.stringify(template));
-    } else {
-      // Item does not exist — create it from a piped JSON template instead of argv assignments.
-      const template = itemTemplateForSecret(title, value);
-      await this.stdinRunner('op', [
-        'item',
-        'create',
-        `--vault=${VAULT}`,
-        '-',
-      ], JSON.stringify(template));
+      // 1Password JSON-template edits can drop unsupported item data such as passkeys,
+      // and field assignment edits would put secret values in argv. Fail closed for
+      // existing items until the CLI exposes a reliable stdin update primitive.
+      throw new Error('1Password item already exists; refusing to edit existing items because safe stdin updates cannot reliably preserve unsupported item data such as passkeys. Delete and recreate the item to rotate this secret.');
     }
+
+    // Item does not exist — create it from a piped JSON template instead of argv assignments.
+    const template = itemTemplateForSecret(title, value);
+    const result = await this.stdinRunner('op', [
+      'item',
+      'create',
+      `--vault=${VAULT}`,
+      '-',
+    ], JSON.stringify(template));
+    assertSuccess(result, '1Password item create');
   }
 
   async resolve(key: string): Promise<string | undefined> {
