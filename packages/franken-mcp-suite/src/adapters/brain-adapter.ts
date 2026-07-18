@@ -734,6 +734,12 @@ function auditOperationsCorrelate(left: string, right: string): boolean {
   return left === right;
 }
 
+function auditDecisionsCorrelate(left: string, right: string): boolean {
+  const safeLeft = safeAuditDecision(left) ?? "unknown";
+  const safeRight = safeAuditDecision(right) ?? "unknown";
+  return !((safeLeft === "denied" || safeRight === "denied") && safeLeft !== safeRight);
+}
+
 function auditTargetStoresCorrelate(left: string, right: string): boolean {
   if (left === right) return true;
   if (left.includes('|') || right.includes('|')) return true;
@@ -743,6 +749,7 @@ function auditTargetStoresCorrelate(left: string, right: string): boolean {
 function auditEventsCorrelate(left: MemoryAccessAuditEventInternal, right: MemoryAccessAuditEventInternal): boolean {
   return left.tool === right.tool
     && auditOperationsCorrelate(left.operation, right.operation)
+    && auditDecisionsCorrelate(left.decision, right.decision)
     && auditTargetStoresCorrelate(left.targetStore, right.targetStore)
     && auditValuesCorrelate(left.agentId, right.agentId)
     && auditValuesCorrelate(left.cardId, right.cardId)
@@ -920,6 +927,25 @@ function sqlLimitClause(limit: number | undefined): string {
 
 function sqlLimitParams(limit: number | undefined): number[] {
   return limit === undefined ? [] : [limit];
+}
+
+function sqlJsonEqualsAny(jsonExpression: string, paths: string[], value: string | undefined): { clause: string; params: string[] } {
+  if (value === undefined) return { clause: "", params: [] };
+  return {
+    clause: `(${paths.map((path) => `json_extract(${jsonExpression}, '${path}') = ?`).join(" OR ")})`,
+    params: paths.map(() => value),
+  };
+}
+
+function auditSqlFilterParts(parts: Array<{ clause: string; params: string[] }>): { clauses: string[]; params: string[] } {
+  const clauses: string[] = [];
+  const params: string[] = [];
+  for (const part of parts) {
+    if (!part.clause) continue;
+    clauses.push(part.clause);
+    params.push(...part.params);
+  }
+  return { clauses, params };
 }
 
 function stableRedactedKey(key: string): string {
@@ -1262,13 +1288,23 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
 
     async memoryAccessAuditReport(input = {}) {
       const limit = resolveQueryLimit(input.limit ?? MAX_QUERY_LIMIT);
-      const scanLimit = hasPostScanAuditFilter(input) ? undefined : resolveMemoryAccessAuditScanLimit(limit);
+      const scanLimit = resolveMemoryAccessAuditScanLimit(limit);
       const reportDb = new Database(dbPath);
       configureBrainAdapterDb(reportDb);
       try {
         const events: MemoryAccessAuditEventInternal[] = [];
         const governorTimeFilter = auditSqlTimeClause("created_at", input);
         const safeGovernorJson = "CASE WHEN json_valid(context) THEN context ELSE '{}' END";
+        const governorSqlFilters = auditSqlFilterParts([
+          sqlJsonEqualsAny(safeGovernorJson, ["$.agentId", "$.args.agentId", "$.args.args.agentId"], input.agentId),
+          sqlJsonEqualsAny(safeGovernorJson, ["$.profile", "$.activeProfile", "$.args.profile", "$.args.activeProfile", "$.args.args.profile"], input.profile),
+          sqlJsonEqualsAny(safeGovernorJson, ["$.repo", "$.args.repo", "$.args.args.repo"], input.repo),
+          input.tool === undefined ? { clause: "", params: [] } : {
+            clause: "(action = ? OR json_extract(" + safeGovernorJson + ", '$.tool') = ? OR json_extract(" + safeGovernorJson + ", '$.toolName') = ? OR json_extract(" + safeGovernorJson + ", '$.args.tool') = ? OR json_extract(" + safeGovernorJson + ", '$.args.toolName') = ?)",
+            params: [input.tool, input.tool, input.tool, input.tool, input.tool],
+          },
+          input.decision === undefined ? { clause: "", params: [] } : { clause: "decision = ?", params: [input.decision] },
+        ]);
         const governorProvenanceCondition = `(
             json_extract(${safeGovernorJson}, '$.${GOVERNANCE_SOURCE_KEY}') = ?
             OR json_extract(${safeGovernorJson}, '$.${HOOK_GOVERNANCE_SOURCE_KEY}') = ?
@@ -1279,6 +1315,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           governorProvenanceCondition,
           governorMemoryCondition,
           governorTimeCondition,
+          ...governorSqlFilters.clauses,
         ].filter(Boolean).join(" AND ")}`;
         const governorRows = sqliteTableExists(reportDb, "governor_log")
           ? reportDb.prepare(`
@@ -1287,7 +1324,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           ${governorWhere}
           ORDER BY id DESC
           ${sqlLimitClause(scanLimit)}
-        `).all(CENTRAL_AUDIT_SOURCE, HOOK_GOVERNANCE_SOURCE, ...governorTimeFilter.params, ...sqlLimitParams(scanLimit)) as Array<{ action: string; context: string; decision: string; reason: string | null; createdAt: string }>
+        `).all(CENTRAL_AUDIT_SOURCE, HOOK_GOVERNANCE_SOURCE, ...governorTimeFilter.params, ...governorSqlFilters.params, ...sqlLimitParams(scanLimit)) as Array<{ action: string; context: string; decision: string; reason: string | null; createdAt: string }>
           : [];
         for (const row of governorRows) {
           const context = parseAuditContext(row.context);
@@ -1297,10 +1334,19 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           const access = inferMemoryAccess(row.action, context);
           const accessArgs = auditToolArgs(context);
           const auditedTool = memoryAuditToolName(row.action, context) ?? unqualifyToolName(row.action);
-          const profile = stringAuditField(accessArgs, "profile") ?? stringAuditField(accessArgs, "activeProfile") ?? stringAuditField(context, "profile") ?? stringAuditField(context, "activeProfile");
-          const agentId = stringAuditField(accessArgs, "agentId") ?? stringAuditField(context, "agentId");
-          const cardId = stringAuditField(accessArgs, "cardId") ?? stringAuditField(accessArgs, "taskId") ?? stringAuditField(context, "cardId") ?? stringAuditField(context, "taskId");
-          const repo = stringAuditField(accessArgs, "repo") ?? stringAuditField(context, "repo");
+          const isAuditReportInvocation = auditedTool === "fbeast_memory_access_audit_report";
+          const profile = isAuditReportInvocation
+            ? undefined
+            : stringAuditField(accessArgs, "profile") ?? stringAuditField(accessArgs, "activeProfile") ?? stringAuditField(context, "profile") ?? stringAuditField(context, "activeProfile");
+          const agentId = isAuditReportInvocation
+            ? undefined
+            : stringAuditField(accessArgs, "agentId") ?? stringAuditField(context, "agentId");
+          const cardId = isAuditReportInvocation
+            ? undefined
+            : stringAuditField(accessArgs, "cardId") ?? stringAuditField(accessArgs, "taskId") ?? stringAuditField(context, "cardId") ?? stringAuditField(context, "taskId");
+          const repo = isAuditReportInvocation
+            ? undefined
+            : stringAuditField(accessArgs, "repo") ?? stringAuditField(context, "repo");
           events.push({
             timestamp: normalizeAuditTimestamp(row.createdAt),
             ...(agentId ? { agentId } : {}),
@@ -1319,7 +1365,19 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
         }
 
         const auditTimeFilter = auditSqlTimeClause("created_at", input);
+        const safeAuditPayloadJson = "CASE WHEN json_valid(payload) THEN payload ELSE '{}' END";
+        const auditSqlFilters = auditSqlFilterParts([
+          sqlJsonEqualsAny(safeAuditPayloadJson, ["$.args.agentId", "$.args.args.agentId", "$.agentId"], input.agentId),
+          sqlJsonEqualsAny(safeAuditPayloadJson, ["$.args.profile", "$.args.activeProfile", "$.args.args.profile", "$.profile", "$.activeProfile"], input.profile),
+          sqlJsonEqualsAny(safeAuditPayloadJson, ["$.args.repo", "$.args.args.repo", "$.repo"], input.repo),
+          input.tool === undefined ? { clause: "", params: [] } : {
+            clause: "(json_extract(" + safeAuditPayloadJson + ", '$.toolName') = ? OR json_extract(" + safeAuditPayloadJson + ", '$.tool') = ? OR json_extract(" + safeAuditPayloadJson + ", '$.args.tool') = ? OR json_extract(" + safeAuditPayloadJson + ", '$.args.toolName') = ?)",
+            params: [input.tool, input.tool, input.tool, input.tool],
+          },
+          sqlJsonEqualsAny(safeAuditPayloadJson, ["$.decision"], input.decision),
+        ]);
         const auditTimeCondition = auditTimeFilter.clause ? `AND ${auditTimeFilter.clause.slice("WHERE ".length)}` : "";
+        const auditMetadataCondition = auditSqlFilters.clauses.length ? `AND ${auditSqlFilters.clauses.join(" AND ")}` : "";
         const auditRows = sqliteTableExists(reportDb, "audit_trail")
           ? reportDb.prepare(`
           SELECT event_type AS eventType, payload, created_at AS createdAt
@@ -1332,9 +1390,10 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
             )
             AND (payload LIKE '%fbeast_memory%' OR payload LIKE '%execute_tool%')
             ${auditTimeCondition}
+            ${auditMetadataCondition}
           ORDER BY id DESC
           ${sqlLimitClause(scanLimit)}
-        `).all(CENTRAL_AUDIT_SOURCE, HOOK_GOVERNANCE_SOURCE, ...auditTimeFilter.params, ...sqlLimitParams(scanLimit)) as Array<{ eventType: string; payload: string; createdAt: string }>
+        `).all(CENTRAL_AUDIT_SOURCE, HOOK_GOVERNANCE_SOURCE, ...auditTimeFilter.params, ...auditSqlFilters.params, ...sqlLimitParams(scanLimit)) as Array<{ eventType: string; payload: string; createdAt: string }>
           : [];
         for (const row of auditRows) {
           const payload = parseAuditContext(row.payload);
@@ -1345,10 +1404,11 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           const access = inferMemoryAccess(toolName, payload);
           const accessArgs = auditToolArgs(payload);
           const auditedTool = memoryAuditToolName(toolName, payload) ?? unqualifyToolName(toolName);
-          const agentId = stringAuditField(accessArgs, "agentId") ?? stringAuditField(payload, "agentId");
-          const cardId = stringAuditField(accessArgs, "cardId") ?? stringAuditField(accessArgs, "taskId") ?? stringAuditField(payload, "cardId") ?? stringAuditField(payload, "taskId");
-          const profile = stringAuditField(accessArgs, "profile") ?? stringAuditField(payload, "profile");
-          const repo = stringAuditField(accessArgs, "repo") ?? stringAuditField(payload, "repo");
+          const isAuditReportInvocation = auditedTool === "fbeast_memory_access_audit_report";
+          const agentId = isAuditReportInvocation ? undefined : stringAuditField(accessArgs, "agentId") ?? stringAuditField(payload, "agentId");
+          const cardId = isAuditReportInvocation ? undefined : stringAuditField(accessArgs, "cardId") ?? stringAuditField(accessArgs, "taskId") ?? stringAuditField(payload, "cardId") ?? stringAuditField(payload, "taskId");
+          const profile = isAuditReportInvocation ? undefined : stringAuditField(accessArgs, "profile") ?? stringAuditField(payload, "profile");
+          const repo = isAuditReportInvocation ? undefined : stringAuditField(accessArgs, "repo") ?? stringAuditField(payload, "repo");
           events.push({
             timestamp: normalizeAuditTimestamp(row.createdAt),
             ...(agentId ? { agentId } : {}),

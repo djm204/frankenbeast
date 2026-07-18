@@ -216,6 +216,20 @@ vi.mock("better-sqlite3", () => ({
                 reason: "unknown memory tool probe",
                 createdAt: "2026-07-16T14:36:00.000Z",
               },
+              {
+                action: "fbeast_memory_access_audit_report",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "agent-a", profile: "default", repo: "djm204/frankenbeast" }),
+                decision: "approved",
+                reason: "report query",
+                createdAt: "2026-07-16T14:45:00.000Z",
+              },
+              {
+                action: "fbeast_memory_store",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "agent-denied-merge", profile: "denied-merge-test", type: "working" }),
+                decision: "denied",
+                reason: "blocked before tool",
+                createdAt: "2026-07-16T14:50:00.000Z",
+              },
             ];
           }
           if (sql.includes("FROM audit_trail")) {
@@ -349,6 +363,16 @@ vi.mock("better-sqlite3", () => ({
                 eventType: "tool_call",
                 payload: JSON.stringify({ source: "central-dispatch", toolName: "fbeast_memory_store", ok: true, args: { agentId: "agent-card-dedupe", profile: "card-dedupe-test", type: "working", cardId: "card-b" } }),
                 createdAt: "2026-07-16T14:35:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ source: "central-dispatch", toolName: "fbeast_memory_access_audit_report", ok: true, args: { agentId: "agent-a", profile: "default", repo: "djm204/frankenbeast" } }),
+                createdAt: "2026-07-16T14:45:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ source: "central-dispatch", toolName: "fbeast_memory_store", ok: true, args: { agentId: "agent-denied-merge", profile: "denied-merge-test", type: "working" } }),
+                createdAt: "2026-07-16T14:50:05.000Z",
               },
             ];
           }
@@ -1321,14 +1345,44 @@ describe("createBrainAdapter", () => {
     expect(prepareSql.find((sql) => sql.includes("FROM audit_trail"))).toContain("LIMIT ?");
   });
 
-  it("searches past the bounded source window when metadata filters are present", async () => {
+  it("keeps memory access audit source scans bounded when metadata filters are present", async () => {
     const brain = createBrainAdapter("/tmp/beast.db");
 
     await brain.memoryAccessAuditReport({ profile: "sparse-duplicate-test", limit: 5 });
 
     const prepareSql = databaseInstances.at(-1)!.prepare.mock.calls.map(([sql]) => String(sql));
-    expect(prepareSql.find((sql) => sql.includes("FROM governor_log"))).not.toContain("LIMIT ?");
-    expect(prepareSql.find((sql) => sql.includes("FROM audit_trail"))).not.toContain("LIMIT ?");
+    const governorSql = prepareSql.find((sql) => sql.includes("FROM governor_log"));
+    const auditSql = prepareSql.find((sql) => sql.includes("FROM audit_trail"));
+    expect(governorSql).toContain("$.profile");
+    expect(governorSql).toContain("LIMIT ?");
+    expect(auditSql).toContain("$.args.profile");
+    expect(auditSql).toContain("LIMIT ?");
+  });
+
+  it("does not attribute access audit report filters to acting agents", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ tool: "fbeast_memory_access_audit_report", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      tool: "fbeast_memory_access_audit_report",
+      operation: "read",
+      decision: "approved",
+    });
+    expect(report.events[0]).not.toHaveProperty("agentId");
+    expect(report.events[0]).not.toHaveProperty("profile");
+    expect(report.summary.byAgent).toEqual({});
+    expect(report.summary.byProfile).toEqual({});
+  });
+
+  it("does not merge denied governor rows into later successful accesses", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "denied-merge-test", limit: 20 });
+
+    expect(report.count).toBe(2);
+    expect(report.summary.byDecision).toEqual({ approved: 1, denied: 1 });
   });
 
   it("keeps rapid repeated memory accesses as separate audit events", async () => {
@@ -1386,7 +1440,7 @@ describe("createBrainAdapter", () => {
     expect(timezoneLessReport.events.map((event) => event.timestamp)).toEqual(["2026-07-16T10:30:00.000Z"]);
   });
 
-  it("searches filtered memory access audit scans past the prefilter window", async () => {
+  it("keeps filtered memory access audit scans bounded before dedupe", async () => {
     const brain = createBrainAdapter("/tmp/beast.db");
 
     await brain.memoryAccessAuditReport({ profile: "default", limit: 50 });
@@ -1397,7 +1451,7 @@ describe("createBrainAdapter", () => {
       .map(([sql]) => String(sql))
       .filter((sql) => sql.includes("FROM governor_log") || sql.includes("FROM audit_trail"));
     expect(auditQueries).toHaveLength(2);
-    expect(auditQueries.every((sql) => !sql.includes("LIMIT ?"))).toBe(true);
+    expect(auditQueries.every((sql) => sql.includes("LIMIT ?"))).toBe(true);
   });
 
   it("includes unknown memory-tool probes in audit reports", async () => {
