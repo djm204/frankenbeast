@@ -282,6 +282,23 @@ describe('network degraded health handling', () => {
     })).resolves.toBe('degraded');
   });
 
+  it('rejects healthy config-only probes with the wrong service identity', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      ok: true,
+      status: 'healthy',
+      service: 'unrelated-service',
+    })));
+
+    await expect(healthcheckNetworkService({
+      id: 'chat-server',
+      displayName: 'Chat Server',
+      pid: 0,
+      healthUrl: 'http://127.0.0.1:3737/health',
+      serviceIdentity: 'chat-server',
+      startedAt: '2026-07-17T00:00:00.000Z',
+    })).resolves.toBe(false);
+  });
+
   it('reuses a port whose health identity is read-only degraded', async () => {
     const server = createServer((_req, res) => {
       res.statusCode = 503;

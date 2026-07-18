@@ -1959,7 +1959,7 @@ function buildStateStoreHealthDependency(
         safeWork: ['Continue read-only inspection; avoid operations that need persisted state.'],
       };
     }
-    accessSync(candidate, constants.W_OK);
+    accessSync(candidate, constants.W_OK | constants.X_OK);
     return {
       name: 'state-store',
       type: 'state-store',
@@ -2042,8 +2042,13 @@ async function buildCliServiceHealthSnapshot(
     const supervisorStatus = await supervisor.status();
     stateStore = buildStateStoreHealthDependency(paths, supervisorStatus.stateCorruptions);
     networkServices = supervisorStatus.services;
+    const configuredServices = await resolveManagedProcessHealthFromConfig(args, config, root);
+    const knownServiceIds = new Set(networkServices.map((service) => service.id));
+    const missingConfiguredServices = configuredServices.filter((service) => !knownServiceIds.has(service.id));
     if (networkServices.length === 0) {
-      networkServices = await resolveManagedProcessHealthFromConfig(args, config, root);
+      networkServices = configuredServices;
+    } else if (missingConfiguredServices.length > 0) {
+      networkServices = [...networkServices, ...missingConfiguredServices];
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
