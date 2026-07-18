@@ -1663,7 +1663,12 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
-  it.each(['Use PR #123', 'Please use issue 123'])(
+  it.each([
+    'Use PR #123',
+    'Please use issue 123',
+    'User wants https://github.com/acme/foo/pull/123 merged',
+    'User wants https://github.com/acme/foo/issues/123 closed',
+  ])(
     'discards terse task-reference command %p',
     (correction) => {
       const report = extractPostTaskLessonCandidates({
