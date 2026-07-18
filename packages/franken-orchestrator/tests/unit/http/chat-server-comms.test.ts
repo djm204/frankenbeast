@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import process from 'node:process';
@@ -92,6 +92,10 @@ describe('startChatServer comms pass-through', () => {
     handle = await startChatServer(options);
     const issuingStore = mockedCreateChatApp.mock.calls[0]![0].chatStreamTicketStore;
     const ticket = issuingStore!.issue(TEST_OPERATOR_TOKEN, 'session-1');
+    if (process.platform !== 'win32') {
+      const ticketStoreStat = await stat(join(sessionStoreDir, 'sse-connection-tickets'));
+      expect(ticketStoreStat.mode & 0o777).toBe(0o700);
+    }
     await handle.close();
     handle = undefined;
 

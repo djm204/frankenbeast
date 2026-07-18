@@ -1,5 +1,5 @@
 import { createServer, type Server as HttpServer } from 'node:http';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { Hono } from 'hono';
@@ -308,9 +308,13 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
       : undefined);
   const chatStreamTicketStore = effectiveOperatorToken
     ? (() => {
-        mkdirSync(options.sessionStoreDir, { recursive: true });
+        const ticketStoreDir = join(options.sessionStoreDir, 'sse-connection-tickets');
+        mkdirSync(ticketStoreDir, { recursive: true, mode: 0o700 });
+        // The directory protects both the database and SQLite WAL sidecars.
+        // Enforce the mode for pre-existing directories as well as new ones.
+        chmodSync(ticketStoreDir, 0o700);
         return new SseConnectionTicketStore({
-          databasePath: join(options.sessionStoreDir, 'sse-connection-tickets.sqlite'),
+          databasePath: join(ticketStoreDir, 'tickets.sqlite'),
         });
       })()
     : undefined;
