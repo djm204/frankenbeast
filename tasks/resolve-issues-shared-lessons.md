@@ -8,6 +8,7 @@
 - Multiline TypeScript destructuring, split `process.env` chains, destructured async stdout, and cached `os.environ.get` getters need dedicated alias paths; runtime cron allow-lists should treat `command gh auth token` like direct `gh auth token`.
 - When expanding shell-file scanning for cron writers, avoid both basename-only install/setup filters and scanning every shell script blindly; include cron/crontab-named writers while preserving non-cron bootstrap scripts to prevent fixture false positives.
 - If Codex keeps finding valid edge cases after an over-cap current-head review, fix/reply/resolve every finding, run local and CI checks, then stop for explicit approval before exceeding the agreed review cap again.
+- Separate shell interpolation parsing from JavaScript template interpolation, carry quote/heredoc context across lines, recognize staged crontab files and programmatic crontab sinks, and propagate aliased Python `os.environ`; otherwise a line-oriented scanner both misses persisted credentials and rejects safe runtime `$(gh auth token)` strings.
 
 ## 2026-07-17 — PR #2358 stalled closeout and Codex gate handling
 - For stalled PR closeout, re-verify live PR head, mergeability, CI rollup, unresolved Codex threads, and the latest top-level Codex response before acting; a stale green/clean state can become `mergeable=CONFLICTING`/`mergeStateStatus=DIRTY` after main advances even when required CI is still green.

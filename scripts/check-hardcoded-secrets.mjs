@@ -360,7 +360,7 @@ function hasHardcodedSourceLiteral(line) {
   return false;
 }
 
-function hasSensitiveEnvAccess(line, envContainerAliases = new Set(), envNameAliases = new Set(), envGetterAliases = new Set()) {
+function hasSensitiveEnvAccess(line, envContainerAliases = new Set(), envNameAliases = new Set(), envGetterAliases = new Set(), options = {}) {
   const envAccessPattern = /(?:(?:\(?process\.env\)?|import\.meta\.env)\??(?:\.([A-Z0-9_]+)|\?\.\[['"`]([^'"`]+)['"`]\]|\[['"`]([^'"`]+)['"`]\])|(?:os\.environ(?:\.(?:get|setdefault))?|os\.getenv|\bgetenv|\benviron(?:\.(?:get|setdefault))?)\s*\(\s*['"`]([^'"`]+)['"`]|(?:os\.)?environ\s*\[\s*['"`]([^'"`]+)['"`]\s*\])/gi;
   for (const match of line.matchAll(envAccessPattern)) {
     const name = match[1] ?? match[2] ?? match[3] ?? match[4] ?? match[5] ?? '';
@@ -395,18 +395,20 @@ function hasSensitiveEnvAccess(line, envContainerAliases = new Set(), envNameAli
       return true;
     }
   }
-  for (const match of line.matchAll(/\$\{?([A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY|PASSPHRASE|PAT|ACCESS_KEY)[A-Z0-9_]*)\}?/gi)) {
-    if (sensitiveIdentifierPattern.test(match[1])) {
-      return true;
+  if (options.shell) {
+    for (const match of line.matchAll(/\$\{?([A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY|PASSPHRASE|PAT|ACCESS_KEY)[A-Z0-9_]*)\}?/gi)) {
+      if (sensitiveIdentifierPattern.test(match[1])) {
+        return true;
+      }
     }
-  }
-  for (const match of line.matchAll(/(?:\$\(\s*printenv\s+(?:['"]?\$?([A-Za-z_$][\w$]*)['"]?|['"]?\$\{([A-Za-z_$][\w$]*)\}['"]?|([A-Z0-9_]+))\s*\)|\$\{!([A-Za-z_$][\w$]*)\})/gi)) {
-    const possibleAlias = match[1] ?? '';
-    const bracedAlias = match[2] ?? '';
-    const name = match[3] ?? '';
-    const nameAlias = match[4] || bracedAlias || possibleAlias;
-    if ((possibleAlias && sensitiveIdentifierPattern.test(possibleAlias)) || (name && sensitiveIdentifierPattern.test(name)) || (nameAlias && envNameAliases.has(nameAlias))) {
-      return true;
+    for (const match of line.matchAll(/(?:\$\(\s*printenv\s+(?:['"]?\$?([A-Za-z_$][\w$]*)['"]?|['"]?\$\{([A-Za-z_$][\w$]*)\}['"]?|([A-Z0-9_]+))\s*\)|\$\{!([A-Za-z_$][\w$]*)\})/gi)) {
+      const possibleAlias = match[1] ?? '';
+      const bracedAlias = match[2] ?? '';
+      const name = match[3] ?? '';
+      const nameAlias = match[4] || bracedAlias || possibleAlias;
+      if ((possibleAlias && sensitiveIdentifierPattern.test(possibleAlias)) || (name && sensitiveIdentifierPattern.test(name)) || (nameAlias && envNameAliases.has(nameAlias))) {
+        return true;
+      }
     }
   }
   return false;
@@ -426,6 +428,12 @@ function expressionUsesSensitiveAlias(expression, aliases) {
 }
 
 function collectSensitiveEnvAliases(line, aliases, envNameAliases, envContainerAliases = new Set(), envGetterAliases = new Set(), destructuredEnvState = null, options = {}) {
+  const osImportAlias = line.match(/^\s*import\s+os\s+as\s+([A-Za-z_$][\w$]*)\s*;?$/);
+  if (osImportAlias) {
+    options.osModuleAliases?.add(osImportAlias[1]);
+    return;
+  }
+
   const groupedOsImport = line.match(/^\s*from\s+os\s+import\s+(.+)$/);
   if (groupedOsImport) {
     for (const rawPart of groupedOsImport[1].split(',')) {
@@ -513,7 +521,8 @@ function collectSensitiveEnvAliases(line, aliases, envNameAliases, envContainerA
   }
   const [, alias, expression] = assignment;
   const trimmedExpression = expression.trim();
-  if (/^(?:\(?process\.env\)?|import\.meta\.env|(?:os\.)?environ)\s*;?$/.test(trimmedExpression)) {
+  const aliasedOsEnviron = [...(options.osModuleAliases ?? [])].some((moduleAlias) => trimmedExpression.replace(/;$/, '') === `${moduleAlias}.environ`);
+  if (/^(?:\(?process\.env\)?|import\.meta\.env|(?:os\.)?environ)\s*;?$/.test(trimmedExpression) || aliasedOsEnviron) {
     envContainerAliases.add(alias);
   } else {
     envContainerAliases.delete(alias);
@@ -523,7 +532,9 @@ function collectSensitiveEnvAliases(line, aliases, envNameAliases, envContainerA
   } else {
     envGetterAliases.delete(alias);
   }
-  const envNameLiteral = stringLiterals(expression).map((literal) => literal.value.trim()).find((literal) => sensitiveIdentifierPattern.test(literal));
+  const envNameLiteral = stringLiterals(expression)
+    .map((literal) => literal.value.trim())
+    .find((literal) => /^[A-Za-z_$][\w$]*$/.test(literal) && sensitiveIdentifierPattern.test(literal));
   const shellEnvNameLiteral = options.shell && sensitiveIdentifierPattern.test(expression.trim()) ? expression.trim() : '';
   if (envNameLiteral || shellEnvNameLiteral) {
     envNameAliases.add(alias);
@@ -532,7 +543,7 @@ function collectSensitiveEnvAliases(line, aliases, envNameAliases, envContainerA
   }
   const envNameAliasAccess = new RegExp(String.raw`(?:os\.environ(?:\.(?:get|setdefault))?|os\.getenv|\bgetenv|\benviron(?:\.(?:get|setdefault))?)\s*\(\s*([A-Za-z_$][\w$]*)|(?:os\.)?environ\s*\[\s*([A-Za-z_$][\w$]*)\s*\]|(?:process\.env|import\.meta\.env)\s*\[\s*([A-Za-z_$][\w$]*)\s*\]`, 'u').exec(expression);
   const envAlias = envNameAliasAccess?.[1] ?? envNameAliasAccess?.[2] ?? envNameAliasAccess?.[3] ?? '';
-  if (hasInlineTokenMaterial(expression) || hasSensitiveEnvAccess(expression, envContainerAliases, envNameAliases, envGetterAliases) || ((options.shell && hasInstallTimeGhAuthTokenSubstitution(expression)) || hasProgrammaticGhAuthTokenCall(expression)) || (envAlias && envNameAliases.has(envAlias)) || expressionUsesSensitiveAlias(expression, aliases)) {
+  if (hasInlineTokenMaterial(expression) || hasSensitiveEnvAccess(expression, envContainerAliases, envNameAliases, envGetterAliases, { shell: options.shell }) || ((options.shell && hasInstallTimeGhAuthTokenSubstitution(expression)) || hasProgrammaticGhAuthTokenCall(expression)) || (envAlias && envNameAliases.has(envAlias)) || expressionUsesSensitiveAlias(expression, aliases)) {
     aliases.add(alias);
   } else {
     aliases.delete(alias);
@@ -552,7 +563,8 @@ function hasCronScheduleLiteral(line) {
 
 function hasCronCommandMarker(line, cronScheduleAliases = new Set()) {
   const outsideStrings = codeOutsideStringLiterals(line);
-  if (/(?:\bCRON(?:_CMD|_COMMAND)?\b|\bcrontab\b)/i.test(outsideStrings) || hasCronScheduleLiteral(line) || hasCronScheduleText(line)) {
+  const programmaticCrontabCall = /\b(?:execFileSync|execFile|spawnSync|spawn|execSync|exec)\s*\(\s*['"`]crontab['"`]/.test(line);
+  if (/(?:\bCRON(?:_CMD|_COMMAND)?\b|\bcrontab\b)/i.test(outsideStrings) || programmaticCrontabCall || hasCronScheduleLiteral(line) || hasCronScheduleText(line)) {
     return true;
   }
   for (const alias of cronScheduleAliases) {
@@ -633,7 +645,8 @@ function collectAsyncGhAuthTokenCallbackAliases(line, aliases) {
 }
 
 function hasInstallTimeGhAuthTokenSubstitution(line) {
-  const unescapedSubstitution = /(^|[^\\])(?:\$\(\s*(?:command\s+)?gh\s+auth\s+token\b|`\s*(?:command\s+)?gh\s+auth\s+token\b)/;
+  const ghCommand = String.raw`(?:(?:command\s+)?gh|(?:\/[A-Za-z0-9._-]+)*\/gh)`;
+  const unescapedSubstitution = new RegExp(String.raw`(^|[^\\])(?:\$\(\s*${ghCommand}\s+auth\s+token\b|` + '`' + String.raw`\s*${ghCommand}\s+auth\s+token\b)`);
   const literals = stringLiterals(line);
   let cursor = 0;
   for (const literal of literals) {
@@ -655,7 +668,7 @@ function hasCronSecretInterpolation(line, aliases, envContainerAliases = new Set
   if (!inCronContext && !hasCronCommandMarker(line, cronScheduleAliases)) {
     return false;
   }
-  if (hasSensitiveEnvAccess(line, envContainerAliases, envNameAliases, envGetterAliases) || hasCronCredentialLiteral(line) || (inCronContext && (hasCronCredentialText(line) || ((options.shell && !options.quotedHeredoc && hasInstallTimeGhAuthTokenSubstitution(line)) || hasProgrammaticGhAuthTokenCall(line))))) {
+  if (hasSensitiveEnvAccess(line, envContainerAliases, envNameAliases, envGetterAliases, { shell: options.shell }) || hasCronCredentialLiteral(line) || (inCronContext && (hasCronCredentialText(line) || ((options.shell && !options.quotedHeredoc && hasInstallTimeGhAuthTokenSubstitution(line)) || hasProgrammaticGhAuthTokenCall(line))))) {
     return true;
   }
   for (const alias of aliases) {
@@ -676,7 +689,28 @@ function isCronContinuationLine(line, inCronContext, pendingCronCommand) {
   if (/^[furbFURB]*['"`]/.test(line)) {
     return !/;\s*$/.test(line);
   }
+  for (const quote of ['`', "'", '"']) {
+    let count = 0;
+    for (let index = 0; index < line.length; index += 1) {
+      if (line[index] === quote && (index === 0 || line[index - 1] !== '\\')) count += 1;
+    }
+    if (count % 2 === 1) return true;
+  }
   return pendingCronCommand && !/[)\]}];?,?\s*$/.test(line);
+}
+
+function cronStagingHeredocStartLines(lines) {
+  const starts = new Set();
+  for (const [index, line] of lines.entries()) {
+    const heredoc = cronHeredocInfo(line);
+    const target = /(?:^|\s)>{1,2}\s*([^\s;]+)/.exec(line)?.[1]?.replace(/^['"]|['"]$/g, '');
+    if (!heredoc || !target) continue;
+    const escapedTarget = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (lines.slice(index + 1).some((laterLine) => new RegExp(`\\bcrontab\\s+(?:--\\s+)?['"]?${escapedTarget}['"]?(?:\\s|$)`).test(laterLine))) {
+      starts.add(index);
+    }
+  }
+  return starts;
 }
 
 function cronHeredocInfo(line) {
@@ -757,6 +791,7 @@ async function scanSourceFile(file, findings) {
   const sensitiveEnvNameAliases = new Set();
   const envContainerAliases = new Set();
   const envGetterAliases = new Set();
+  const osModuleAliases = new Set(['os']);
   const cronScheduleAliases = new Set();
   const destructuredEnvState = { active: false, parts: [] };
   let pendingCronCommand = false;
@@ -765,6 +800,7 @@ async function scanSourceFile(file, findings) {
   let pendingAliasName = null;
   let pendingAsyncGhAuthCall = '';
   const language = lineLanguage(file);
+  const cronStagingStarts = language === 'shell' ? cronStagingHeredocStartLines(lines) : new Set();
 
   for (const [index, line] of lines.entries()) {
     const code = stripComments(line, commentState, { language }).trim();
@@ -786,7 +822,7 @@ async function scanSourceFile(file, findings) {
     }
 
     if (pendingAliasName) {
-      if (hasInlineTokenMaterial(code) || hasSensitiveEnvAccess(code, envContainerAliases, sensitiveEnvNameAliases, envGetterAliases) || hasProgrammaticGhAuthTokenCall(code) || (language === 'shell' && hasInstallTimeGhAuthTokenSubstitution(code)) || expressionUsesSensitiveAlias(code, sensitiveEnvAliases) || stringLiterals(code).some((literal) => isSensitiveAliasLiteral(literal.value.trim())) || /^\.([A-Z0-9_]+)\s*[),;]?$/.test(code)) {
+      if (hasInlineTokenMaterial(code) || hasSensitiveEnvAccess(code, envContainerAliases, sensitiveEnvNameAliases, envGetterAliases, { shell: language === 'shell' }) || hasProgrammaticGhAuthTokenCall(code) || (language === 'shell' && hasInstallTimeGhAuthTokenSubstitution(code)) || expressionUsesSensitiveAlias(code, sensitiveEnvAliases) || stringLiterals(code).some((literal) => isSensitiveAliasLiteral(literal.value.trim())) || /^\.([A-Z0-9_]+)\s*[),;]?$/.test(code)) {
         sensitiveEnvAliases.add(pendingAliasName);
       } else if (!sensitiveEnvAliases.has(pendingAliasName) && !isFormattingOnlyLine(code) && !/^[\])},;]+$/.test(code)) {
         sensitiveEnvAliases.delete(pendingAliasName);
@@ -805,11 +841,11 @@ async function scanSourceFile(file, findings) {
       }
     }
 
-    const inCronContext = pendingCronCommand || hasCronCommandMarker(code, cronScheduleAliases);
+    const inCronContext = pendingCronCommand || cronStagingStarts.has(index) || hasCronCommandMarker(code, cronScheduleAliases);
     if (hasCronSecretInterpolation(code, sensitiveEnvAliases, envContainerAliases, sensitiveEnvNameAliases, envGetterAliases, inCronContext, { shell: language === 'shell', quotedHeredoc: pendingCronQuotedHeredoc }, cronScheduleAliases)) {
       findings.push(`${toRepoPath(file)}:${index + 1}: ${redactSourceLine(code)}`);
       pendingSensitiveFallbackLine = null;
-      collectSensitiveEnvAliases(code, sensitiveEnvAliases, sensitiveEnvNameAliases, envContainerAliases, envGetterAliases, destructuredEnvState, { shell: language === 'shell' });
+      collectSensitiveEnvAliases(code, sensitiveEnvAliases, sensitiveEnvNameAliases, envContainerAliases, envGetterAliases, destructuredEnvState, { shell: language === 'shell', osModuleAliases });
       collectCronScheduleAliases(code, cronScheduleAliases);
       const heredoc = pendingCronHeredocDelimiter ? null : cronHeredocInfo(code);
       if (heredoc) {
@@ -820,7 +856,7 @@ async function scanSourceFile(file, findings) {
       continue;
     }
 
-    collectSensitiveEnvAliases(code, sensitiveEnvAliases, sensitiveEnvNameAliases, envContainerAliases, envGetterAliases, destructuredEnvState, { shell: language === 'shell' });
+    collectSensitiveEnvAliases(code, sensitiveEnvAliases, sensitiveEnvNameAliases, envContainerAliases, envGetterAliases, destructuredEnvState, { shell: language === 'shell', osModuleAliases });
     collectCronScheduleAliases(code, cronScheduleAliases);
     const multilineAlias = code.match(/^\s*(?:(?:export\s+)?(?:const|let|var)\s+|(?:export|readonly|local(?:\s+-[A-Za-z]+)*|declare(?:\s+-[A-Za-z]+)*)\s+)?([A-Za-z_$][\w$]*)(?:\s*:\s*[^=]+)?\s*(?:\|\||&&|\?\?)?=\s*(?:.*[([{]\s*|(?:process|import|os)\s*)?$/);
     if (multilineAlias) {
