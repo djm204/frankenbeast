@@ -203,11 +203,45 @@ function mergeTrustedGovernanceProvenance(context: string, payload: Record<strin
   return { ...trustedGovernanceProvenance(context), ...payload };
 }
 
+function rootObjectKeys(context: string): string[] {
+  const keys: string[] = [];
+  let depth = 0;
+  let index = 0;
+
+  while (index < context.length) {
+    const char = context[index];
+    if (char === '"') {
+      let value = '';
+      index += 1;
+      while (index < context.length) {
+        const inner = context[index];
+        if (inner === '\\') {
+          index += 2;
+          continue;
+        }
+        if (inner === '"') break;
+        value += inner;
+        index += 1;
+      }
+      index += 1;
+      if (depth === 1) {
+        let lookahead = index;
+        while (lookahead < context.length && /\s/.test(context[lookahead] ?? '')) lookahead += 1;
+        if (context[lookahead] === ':') keys.push(value);
+      }
+      continue;
+    }
+    if (char === '{' || char === '[') depth += 1;
+    if (char === '}' || char === ']') depth -= 1;
+    index += 1;
+  }
+  return keys;
+}
+
 function hasDuplicateReservedProvenanceKeys(context: string): boolean {
   const counts = new Map<string, number>();
-  for (const match of context.matchAll(/"(__fbeast(?:Governance|Hook)Source)"\s*:/g)) {
-    const key = match[1] ?? '';
-    if (key.length === 0) continue;
+  for (const key of rootObjectKeys(context)) {
+    if (key !== '__fbeastGovernanceSource' && key !== '__fbeastHookSource') continue;
     counts.set(key, (counts.get(key) ?? 0) + 1);
     if ((counts.get(key) ?? 0) > 1) return true;
   }

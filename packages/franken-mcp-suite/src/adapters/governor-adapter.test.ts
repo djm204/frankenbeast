@@ -48,6 +48,27 @@ describe('GovernorAdapter', () => {
     expect(row).toEqual({ context: '[duplicate-reserved-provenance-rejected]', decision: 'denied' });
   });
 
+  it('allows reserved provenance key mentions inside string payloads', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const governor = createGovernorAdapter(dbPath);
+
+    const context = JSON.stringify({
+      __fbeastHookSource: 'fbeast-hook',
+      contextText: 'payload mentions "__fbeastHookSource": twice and "__fbeastHookSource": again as data',
+    });
+
+    await expect(governor.check({
+      action: 'edit_file',
+      context,
+    })).resolves.toMatchObject({ decision: 'approved' });
+
+    const db = new Database(dbPath);
+    const row = db.prepare(`SELECT context, decision FROM governor_log WHERE action = ?`).get('edit_file') as { context: string; decision: string };
+    db.close();
+    expect(row.decision).toBe('approved');
+    expect(row.context).toContain('contextText');
+  });
+
   it('requires review for legacy memory forget and explicit right-to-forget privacy deletions', async () => {
     // Durable memory deletion is a high-risk action on every path (hook,
     // fbeast_governor_check, central gate, governor_log). Dry-run privacy
