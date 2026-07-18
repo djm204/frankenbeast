@@ -66,6 +66,21 @@ describe('cron script error envelope runner', () => {
     expect(envelope.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
+  it('passes shell metacharacter prompt arguments without changing command structure', () => {
+    const injectionDir = mkdtempSync(join(tmpdir(), 'franken-cron-shell-'));
+    const injectionPath = join(injectionDir, 'injected');
+    const prompt = `quote " spaced value $(touch ${injectionPath}) \`id\` ; echo injected`;
+    const inspector = "console.error(JSON.stringify({ argv: process.argv.slice(1) })); process.exit(9)";
+    const result = runCronScript(['--name', 'metacharacter-prompt', '--', process.execPath, '-e', inspector, prompt]);
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.command).toEqual([process.execPath, '-e', inspector, prompt]);
+    expect(envelope.stderrTail).toContain(JSON.stringify({ argv: [prompt] }));
+    expect(existsSync(injectionPath)).toBe(false);
+    rmSync(injectionDir, { recursive: true, force: true });
+  });
+
   it('redacts secret-looking argv before emitting envelopes', () => {
     const result = runCronScript([
       '--name',
