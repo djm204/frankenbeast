@@ -143,6 +143,13 @@ on:
       expect(expectRecord(triggers.pull_request, 'workflow.on.pull_request')).toEqual({ branches: ['main'] });
     });
 
+    it('cancels superseded pull request runs without cancelling main branch pushes', () => {
+      expect(expectRecord(workflow.concurrency, 'workflow.concurrency')).toEqual({
+        group: '${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}',
+        'cancel-in-progress': "${{ github.event_name == 'pull_request' }}",
+      });
+    });
+
     it('uses the repository-pinned minimum supported Node.js version', () => {
       const setupNode = expectSteps(expectCiJob(workflow)).find((step) => step.uses === 'actions/setup-node@v7');
       expect(setupNode).toBeTruthy();
