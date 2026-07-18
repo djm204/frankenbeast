@@ -182,8 +182,16 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
         return audit.record(event);
       }
     },
+    close() {
+      audit.close?.();
+    },
   };
-  return createMcpServer('fbeast-proxy', '0.1.0', tools, { audit: wrapperAudit });
+  return createMcpServer('fbeast-proxy', '0.1.0', tools, {
+    audit: wrapperAudit,
+    onClose() {
+      cachedAdapters?.observer.close?.();
+    },
+  });
 }
 
 // CLI entry point

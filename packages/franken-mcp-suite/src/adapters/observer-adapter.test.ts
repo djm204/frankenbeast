@@ -59,6 +59,16 @@ describe('ObserverAdapter', () => {
     dbPaths.length = 0;
   });
 
+  it('closes its SQLite handle through the public lifecycle', async () => {
+    const observer = createObserverAdapter(tracked(tmpDbPath()));
+
+    await observer.log({ event: 'tool_call', metadata: '{}', sessionId: 'close-test' });
+    observer.close?.();
+    expect(() => observer.close?.()).not.toThrow();
+
+    await expect(observer.trail('close-test')).rejects.toThrow(/database connection is not open/i);
+  });
+
   it('chains later audit hashes through the previous entry hash', async () => {
     const secondHashFrom = async (firstMetadata: string): Promise<string> => {
       const observer = createObserverAdapter(tracked(tmpDbPath()));

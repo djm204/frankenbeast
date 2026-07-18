@@ -1,5 +1,9 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-18 — MCP-owned SQLite lifecycle
+- When an MCP server owns or lazily creates a SQLite-backed adapter, expose an idempotent adapter `close()` and connect it to the SDK server's `onclose` path as well as an explicit public server `close()`. Central audit wrappers must forward cleanup, and proxy servers must release both their audit observer and any lazily-created adapter set.
+- In fresh monorepo worktrees, build internal workspace packages before package-level TypeScript checks; otherwise missing generated `dist` declarations produce unrelated module-resolution errors.
+
 ## 2026-07-18 — MCP execution deadline review fixes
 - A `Promise.race` timer cannot preempt synchronous handler work because the event loop is blocked; deadline wrappers must re-check wall-clock time after handler resolution/rejection and convert late completion into the same structured timeout while aborting the supplied signal. Keep that timer ref'ed so in-process callers with no other active handles still receive the timeout result.
 - Nested dispatch wrappers must have a deadline strictly longer than the longest inner target deadline, including validation/governance/audit slack, or the wrapper can win the timeout race and lose resolved-target timeout auditing.

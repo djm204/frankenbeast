@@ -70,6 +70,8 @@ export interface ObserverAdapter {
   cost(input: { sessionId?: string }): Promise<ObserverCostSummary>;
   trail(sessionId: string): Promise<ObserverTrailEntry[]>;
   verify(sessionId: string): Promise<ObserverVerifyResult>;
+  /** Release the adapter's SQLite handle when its owner shuts down. */
+  close?(): void;
 }
 
 function hasDefaultPricing(model: string): boolean {
@@ -88,6 +90,7 @@ function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; m
 
 export function createObserverAdapter(dbPath: string): ObserverAdapter {
   const store = createSqliteStore(dbPath);
+  let closed = false;
   const costCalculator = new CostCalculator(DEFAULT_PRICING, {
     onUnknownModel: (model) => {
       process.stderr.write(`[fbeast-observer] Unknown model "${model}" — cost will be recorded as $0.0000 until pricing is configured.\n`);
@@ -202,6 +205,12 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
 
     async verify(sessionId) {
       return verifyAuditTrail(store, sessionId, { migrate: true });
+    },
+
+    close() {
+      if (closed) return;
+      closed = true;
+      store.close();
     },
   };
 }
