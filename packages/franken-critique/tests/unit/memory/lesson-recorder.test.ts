@@ -153,11 +153,15 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
-  it('routes bare prefer-to-use corrections to memory review', () => {
+  it.each([
+    'Prefer to use British English',
+    'Prefer to use pnpm',
+    'I prefer the gh CLI',
+  ])('routes bare prefer-to-use correction %p to memory review', (correction) => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-prefer-to-use-preference',
       completedAt: '2026-07-16T00:00:00.000Z',
-      userCorrections: ['Prefer to use British English'],
+      userCorrections: [correction],
     });
 
     expect(report.candidates[0]).toEqual(

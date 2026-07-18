@@ -1260,6 +1260,16 @@ function isRawUserPreferenceCorrection(text: string): boolean {
     return true;
   }
   if (
+    /^(?:please\s+)?prefer\s+to\s+use\s+(?:the\s+)?(?:gh\s+cli|github\s+cli|cli|pnpm|npm|yarn|node|bun|deno|uv|pip|poetry|package\s+manager)\b/i.test(
+      text,
+    ) ||
+    /^i\s+prefer\s+(?:to\s+use\s+)?(?:the\s+)?(?:gh\s+cli|github\s+cli|cli|pnpm|npm|yarn|node|bun|deno|uv|pip|poetry|package\s+manager)\b/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  if (
     /^(?:please\s+)?(?:do\s+not\s+use|don't\s+use|never\s+use|avoid(?:\s+using|\s+use)?)\s+(?:the\s+)?(?:gh\s+cli|github\s+cli|cli|pnpm|npm|yarn|node|bun|deno|uv|pip|poetry|package\s+manager)\b/i.test(
       text,
     )
