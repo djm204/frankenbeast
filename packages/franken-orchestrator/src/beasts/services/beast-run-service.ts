@@ -93,8 +93,10 @@ export class BeastRunService {
       this.syncTrackedAgent(updated);
       return updated;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
       const currentRun = this.repository.getRun(run.id);
+      const errorMessage = currentRun?.stopReason === 'spawn_failed'
+        ? 'Worker process could not be spawned.'
+        : error instanceof Error ? error.message : String(error);
       if (
         currentRun
         && (

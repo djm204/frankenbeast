@@ -779,6 +779,7 @@ describe('BeastRunService', () => {
     const eventBus = new BeastEventBus();
     const publish = vi.spyOn(eventBus, 'publish');
     const agents = new AgentService(repo, () => '2026-03-10T00:02:00.000Z');
+    const secret = ['run', 'spawn', 'secret'].join('-');
     const executors = {
       process: {
         start: vi.fn(async (run: { id: string }) => {
@@ -790,10 +791,10 @@ describe('BeastRunService', () => {
           });
           repo.appendEvent(run.id, {
             type: 'run.spawn_failed',
-            payload: { error: 'spawn ENOENT' },
+            payload: { error: 'Worker process could not be spawned.', code: 'ENOENT' },
             createdAt: failedAt,
           });
-          throw new Error('spawn ENOENT');
+          throw new Error(`spawn failed for --token=${secret}`);
         }),
         stop: vi.fn(),
         kill: vi.fn(),
@@ -848,14 +849,16 @@ describe('BeastRunService', () => {
       status: 'failed',
       stopReason: 'spawn_failed',
     });
-    await expect(runs.readLogs(run.id)).resolves.toContainEqual(expect.stringContaining('start_failed: spawn ENOENT'));
+    await expect(runs.readLogs(run.id)).resolves.toContainEqual(
+      expect.stringContaining('start_failed: Worker process could not be spawned.'),
+    );
     expect(repo.listEvents(run.id).map((event) => event.type)).toEqual(['run.created', 'run.spawn_failed']);
     expect(repo.listTrackedAgentEvents(agent.id)).toEqual(expect.arrayContaining([
       expect.objectContaining({
         level: 'error',
         type: 'agent.dispatch.failed',
         message: `Failed to start Beast run ${run.id}`,
-        payload: { runId: run.id, error: 'spawn ENOENT' },
+        payload: { runId: run.id, error: 'Worker process could not be spawned.' },
       }),
     ]));
     expect(publish).toHaveBeenCalledWith(expect.objectContaining({
@@ -865,6 +868,12 @@ describe('BeastRunService', () => {
         event: expect.objectContaining({ type: 'agent.dispatch.failed' }),
       }),
     }));
+    expect(JSON.stringify({
+      events: repo.listEvents(run.id),
+      agentEvents: repo.listTrackedAgentEvents(agent.id),
+      publications: publish.mock.calls,
+      logs: await runs.readLogs(run.id),
+    })).not.toContain(secret);
   });
 
   it('does not duplicate tracked-agent failure notifications already emitted by the executor callback', async () => {
@@ -1016,7 +1025,9 @@ describe('BeastRunService', () => {
     expect(failed.currentAttemptId).toBeUndefined();
     expect(failed.latestExitCode).toBeUndefined();
     expect(failed.startedAt).toBeUndefined();
-    await expect(runs.readLogs(run.id)).resolves.toContainEqual(expect.stringContaining('start_failed: spawn ENOENT'));
+    await expect(runs.readLogs(run.id)).resolves.toContainEqual(
+      expect.stringContaining('start_failed: Worker process could not be spawned.'),
+    );
 
     executors.process.start.mockImplementationOnce(async (retryRun: { id: string }) => {
       repo.createAttempt(retryRun.id, {

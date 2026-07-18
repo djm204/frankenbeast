@@ -26,6 +26,21 @@ const REDACTED_SECRET = '[REDACTED]';
 const MIN_CONFIGURED_SECRET_LENGTH = 6;
 const RUN_CONFIG_DIR_MODE = 0o700;
 const RUN_CONFIG_FILE_MODE = 0o600;
+const SPAWN_FAILED_ERROR = 'Worker process could not be spawned.';
+const SPAWN_FAILED_CODE = 'SPAWN_FAILED';
+const SAFE_SPAWN_ERROR_CODES = new Set([
+  'EACCES',
+  'EAGAIN',
+  'EISDIR',
+  'EINVAL',
+  'EMFILE',
+  'ENFILE',
+  'ENOENT',
+  'ENOMEM',
+  'ENOTDIR',
+  'EPERM',
+  'ETXTBSY',
+]);
 
 export interface RunConfigSnapshotOwner {
   readonly uid: number;
@@ -111,6 +126,28 @@ function redactBeastLogLine(line: string, configuredSecrets: readonly string[] =
 
 function redactFailureStderrTail(stderrTail: readonly string[], configuredSecrets: readonly string[]): string[] {
   return stderrTail.map(line => redactBeastLogLine(line, configuredSecrets));
+}
+
+function normalizeSpawnErrorCode(error: unknown): string {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return typeof code === 'string' && SAFE_SPAWN_ERROR_CODES.has(code)
+    ? code
+    : SPAWN_FAILED_CODE;
+}
+
+function summarizeSpawnCommand(
+  processSpec: BeastProcessSpec,
+): Readonly<{ argumentCount: number }> {
+  return {
+    argumentCount: processSpec.args.length,
+  };
+}
+
+export interface SpawnFailureDebugDetails {
+  readonly error: string;
+  readonly code: string;
+  readonly command: string;
+  readonly args: readonly string[];
 }
 
 function redactRunConfigValue(
@@ -243,6 +280,8 @@ export interface ProcessBeastExecutorOptions {
     handle: { pid: number },
   ) => Readonly<Record<string, unknown>>;
   worktreeIsolation?: GitWorktreeIsolationConfig | undefined;
+  /** Optional protected debug sink. Values are scrubbed before this callback is invoked. */
+  onSpawnFailureDebug?: (details: SpawnFailureDebugDetails) => void;
 }
 
 function applyRunConfigOwnership(path: string, owner: RunConfigSnapshotOwner | undefined): void {
@@ -457,8 +496,19 @@ export class ProcessBeastExecutor implements BeastExecutor {
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      const errorCode = (error as NodeJS.ErrnoException).code;
+      const errorCode = normalizeSpawnErrorCode(error);
       const failedAt = new Date(wallClockNow()).toISOString();
+
+      try {
+        this.options.onSpawnFailureDebug?.({
+          error: redactBeastLogLine(errorMessage, configuredSecrets),
+          code: errorCode,
+          command: redactBeastLogLine(processSpec.command, configuredSecrets),
+          args: processSpec.args.map(arg => redactBeastLogLine(arg, configuredSecrets)),
+        });
+      } catch {
+        // Debug diagnostics are best-effort and must not replace the spawn failure.
+      }
 
       this.repository.updateRun(run.id, {
         status: 'failed',
@@ -474,10 +524,9 @@ export class ProcessBeastExecutor implements BeastExecutor {
       const spawnFailedEvent = {
         type: 'run.spawn_failed' as const,
         payload: {
-          error: errorMessage,
-          ...(errorCode ? { code: errorCode } : {}),
-          command: processSpec.command,
-          args: [...processSpec.args],
+          error: SPAWN_FAILED_ERROR,
+          code: errorCode,
+          commandSummary: summarizeSpawnCommand(processSpec),
           crashClassification,
         },
         createdAt: failedAt,
@@ -497,7 +546,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       });
 
       this.options.onRunStatusChange?.(run.id);
-      throw error;
+      throw Object.assign(new Error(SPAWN_FAILED_ERROR), { code: errorCode });
     }
     this.pendingSpawnHandles.set(run.id, handle);
 
