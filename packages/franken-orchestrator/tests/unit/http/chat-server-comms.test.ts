@@ -77,8 +77,9 @@ describe('startChatServer comms pass-through', () => {
   });
 
   it('persists chat SSE tickets across chat-server restarts', async () => {
-    const sessionStoreDir = await mkdtemp(join(tmpdir(), 'chat-server-sse-tickets-'));
-    tempDirs.push(sessionStoreDir);
+    const projectDir = await mkdtemp(join(tmpdir(), 'chat-server-sse-tickets-'));
+    tempDirs.push(projectDir);
+    const sessionStoreDir = join(projectDir, 'chat');
     const options = {
       host: '127.0.0.1',
       port: 0,
