@@ -5,6 +5,7 @@ import type { BeastDispatchService } from '../../../src/beasts/services/beast-di
 import type { BeastInterviewService } from '../../../src/beasts/services/beast-interview-service.js';
 import type { AgentInitService } from '../../../src/beasts/services/agent-init-service.js';
 import { MaintenanceModeError } from '../../../src/beasts/services/maintenance-mode-service.js';
+import { InvalidBeastInterviewAnswerError } from '../../../src/beasts/interview-answers.js';
 import type { BeastInterviewPrompt } from '../../../src/beasts/types.js';
 
 const providerPrompt: BeastInterviewPrompt = {
@@ -75,6 +76,48 @@ describe('ChatBeastDispatchAdapter', () => {
       config: {},
     });
     expect(result?.assistantMessage).toContain('Which provider should run the martin loop?');
+  });
+
+  it('keeps chat beast interviews active after invalid option-backed answers', async () => {
+    const answer = vi.fn(() => {
+      throw new InvalidBeastInterviewAnswerError(providerPrompt, 'not-a-provider');
+    });
+    const adapter = new ChatBeastDispatchAdapter({
+      catalog: {
+        listDefinitions: () => [
+          { id: 'martin-loop', label: 'Martin Loop' },
+        ],
+      } as unknown as BeastCatalogService,
+      interviews: { answer } as unknown as BeastInterviewService,
+      dispatch: {} as BeastDispatchService,
+      agentInit: {} as AgentInitService,
+    });
+
+    const result = await adapter.handle('not-a-provider', {
+      projectId: 'proj',
+      sessionId: 'chat-1',
+      transcript: [],
+      beastContext: {
+        agentId: 'agent-1',
+        definitionId: 'martin-loop',
+        interviewSessionId: 'interview-1',
+        status: 'interviewing',
+      },
+    });
+
+    expect(answer).toHaveBeenCalledWith('interview-1', 'not-a-provider');
+    expect(result).toMatchObject({
+      kind: 'interview',
+      definitionId: 'martin-loop',
+      beastContext: {
+        agentId: 'agent-1',
+        definitionId: 'martin-loop',
+        interviewSessionId: 'interview-1',
+        status: 'interviewing',
+      },
+    });
+    expect(result?.assistantMessage).toContain("Invalid answer for 'provider'");
+    expect(result?.assistantMessage).toContain('Options: claude, codex');
   });
 
   it('answers interview prompts and dispatches a Beast run when the interview completes', async () => {

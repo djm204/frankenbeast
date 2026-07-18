@@ -21,4 +21,17 @@ describe('collectBeastConfig', () => {
       chunkDirectory: 'docs/chunks',
     });
   });
+
+  it('rejects answers outside prompt options before schema parsing', async () => {
+    const io = {
+      ask: vi.fn().mockResolvedValue('not-a-provider'),
+      display: vi.fn(),
+    };
+
+    await expect(collectBeastConfig(io, martinLoopDefinition)).rejects.toThrow(
+      "Invalid answer for 'provider': expected one of claude, codex, gemini, aider",
+    );
+    expect(io.ask).toHaveBeenCalledTimes(1);
+  });
+
 });

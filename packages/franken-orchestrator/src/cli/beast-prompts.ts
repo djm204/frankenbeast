@@ -1,5 +1,6 @@
 import type { InterviewIO } from '../planning/interview-loop.js';
 import type { BeastDefinition } from '../beasts/types.js';
+import { coerceInterviewAnswer } from '../beasts/interview-answers.js';
 
 export async function collectBeastConfig(
   io: InterviewIO,
@@ -9,9 +10,7 @@ export async function collectBeastConfig(
 
   for (const prompt of definition.interviewPrompts) {
     const answer = await io.ask(prompt.prompt);
-    answers[prompt.key] = prompt.kind === 'boolean'
-      ? ['true', 'yes', 'y'].includes(answer.trim().toLowerCase())
-      : answer;
+    answers[prompt.key] = coerceInterviewAnswer(prompt, answer);
   }
 
   return definition.configSchema.parse(answers);

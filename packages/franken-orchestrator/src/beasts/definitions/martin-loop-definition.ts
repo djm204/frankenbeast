@@ -7,6 +7,8 @@ const promptConfigSchema = z.object({
   files: z.array(z.string()).optional(),
 }).strict();
 
+const martinLoopProviderSchema = z.string().min(1);
+
 export const martinLoopDefinition: BeastDefinition = {
   id: 'martin-loop',
   version: 1,
@@ -14,7 +16,7 @@ export const martinLoopDefinition: BeastDefinition = {
   description: 'Create a tracked agent for MartinLoop, validate the chunk directory, then dispatch execution.',
   executionModeDefault: 'process',
   configSchema: z.object({
-    provider: z.string().min(1),
+    provider: martinLoopProviderSchema,
     objective: z.string().min(1),
     chunkDirectory: z.string().min(1),
     projectRoot: z.string().optional(),

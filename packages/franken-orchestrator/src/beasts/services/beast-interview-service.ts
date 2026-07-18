@@ -6,6 +6,7 @@ import type {
 import { isoNow } from '@franken/types';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import { BeastCatalogService } from './beast-catalog-service.js';
+import { coerceInterviewAnswer } from '../interview-answers.js';
 
 export interface BeastInterviewProgress {
   readonly session: BeastInterviewSession;
@@ -83,7 +84,7 @@ export class BeastInterviewService {
 
     const nextAnswers = {
       ...session.answers,
-      [prompt.key]: coerceAnswer(prompt, answer),
+      [prompt.key]: coerceInterviewAnswer(prompt, answer),
     };
     const now = isoNow();
     const nextPrompt = currentPrompt(definition, nextAnswers);
@@ -134,12 +135,4 @@ function currentPrompt(
   answers: Readonly<Record<string, unknown>>,
 ): BeastInterviewPrompt | undefined {
   return definition.interviewPrompts.find((prompt) => answers[prompt.key] === undefined);
-}
-
-function coerceAnswer(prompt: BeastInterviewPrompt, answer: string): unknown {
-  if (prompt.kind === 'boolean') {
-    const normalized = answer.trim().toLowerCase();
-    return normalized === 'true' || normalized === 'yes' || normalized === 'y';
-  }
-  return answer;
 }
