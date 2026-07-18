@@ -3,6 +3,7 @@ import { PassThrough } from 'node:stream';
 import { EventEmitter } from 'node:events';
 import type { BrainSnapshot, LlmStreamEvent } from '@franken/types';
 import { ClaudeCliAdapter } from '../../../src/providers/claude-cli-adapter.js';
+import { RUN_CONFIG_INTEGRITY_SECRET_ENV } from '../../../src/cli/run-config-integrity.js';
 
 vi.mock('node:child_process', () => ({
   spawn: vi.fn(),
@@ -156,6 +157,21 @@ describe('ClaudeCliAdapter', () => {
     it('sets FRANKENBEAST_SPAWNED=1', () => {
       const env = adapter.sanitizedEnv();
       expect(env['FRANKENBEAST_SPAWNED']).toBe('1');
+    });
+
+    it('strips runtime config signing keys', () => {
+      const originalSecret = process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV];
+      process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV] = 'signing-key';
+      try {
+        const env = adapter.sanitizedEnv();
+        expect(env).not.toHaveProperty(RUN_CONFIG_INTEGRITY_SECRET_ENV);
+      } finally {
+        if (originalSecret === undefined) {
+          delete process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV];
+        } else {
+          process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV] = originalSecret;
+        }
+      }
     });
   });
 
