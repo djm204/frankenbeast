@@ -858,10 +858,10 @@ describe('extractPostTaskLessonCandidates', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-customer-policy-with-concrete-tenant',
       completedAt: '2026-07-16T00:00:00.000Z',
-      userCorrections: ['User prefers customer data for ACME-123 to stay out of lessons'],
+      userCorrections: ['User prefers customer data for acme-123 to stay out of lessons'],
     });
 
-    expect(JSON.stringify(report)).not.toContain('ACME-123');
+    expect(JSON.stringify(report)).not.toContain('acme-123');
     expect(report.candidates[0]?.privacyFilter).toEqual(
       expect.objectContaining({
         sensitive: true,
@@ -1892,11 +1892,29 @@ describe('extractPostTaskLessonCandidates', () => {
     for (const candidate of report.candidates) {
       expect(candidate).toEqual(
         expect.objectContaining({
+          category: 'discard',
           suggestedDestination: 'discard',
           review: expect.objectContaining({ status: 'discarded' }),
         }),
       );
     }
+  });
+
+  it('redacts rejected task-state note text before returning review reports', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-redacted-branch-note',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['pushed branch feature/customer-fix'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        text: '[REDACTED_TASK_REFERENCE]',
+        category: 'task-state',
+        suggestedDestination: 'discard',
+      }),
+    );
+    expect(JSON.stringify(report)).not.toContain('feature/customer-fix');
   });
 
   it('deduplicates the same lesson text across evidence kinds', () => {

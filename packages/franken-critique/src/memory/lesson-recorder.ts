@@ -1054,12 +1054,14 @@ export function extractPostTaskLessonCandidates(
       flagCustomerData: true,
     });
     let publicDecision = toPublicPrivacyDecision(privacyDecision);
-    const sanitizedText = redactSensitiveText(
+    let sanitizedText = redactSensitiveText(
       normalizedText,
       privacyDecision.redactions,
     );
     const category = options.forceDiscard
-      ? 'task-state'
+      ? privacyDecision.category === 'task-state'
+        ? 'task-state'
+        : 'discard'
       : inferPostTaskLessonCategory(
           kind,
           sanitizedText,
@@ -1074,12 +1076,22 @@ export function extractPostTaskLessonCandidates(
     if (options.forceDiscard) {
       publicDecision = {
         ...publicDecision,
-        category: 'task-state',
+        category:
+          category === 'discard' && !isPlainNoSignalDiscardCandidate(normalizedText)
+            ? 'task-state'
+            : category,
         action: 'reject',
         approvalRequired: false,
         reason:
           'Post-task candidate lacks an explicit reusable learning signal and is rejected before durable learning.',
       };
+    }
+    if (
+      category === 'task-state' &&
+      publicDecision.action === 'reject' &&
+      sanitizedText === normalizedText
+    ) {
+      sanitizedText = '[REDACTED_TASK_REFERENCE]';
     }
     const suggestedDestination = options.forceDiscard
       ? 'discard'
@@ -1100,7 +1112,12 @@ export function extractPostTaskLessonCandidates(
       id: `post-task-lesson:${stableHash(`${taskId}\n${sanitizedText}`)}`,
       taskId,
       text: sanitizedText,
-      category: discarded ? 'task-state' : category,
+      category:
+        discarded && category === 'discard' && isPlainNoSignalDiscardCandidate(normalizedText)
+          ? 'discard'
+          : discarded
+            ? 'task-state'
+            : category,
       suggestedDestination,
       evidence,
       privacyFilter: publicDecision,
@@ -1490,6 +1507,12 @@ function hasReusableProcedureGuidance(text: string): boolean {
 
 function isNegatedKeywordOnlyStatus(text: string): boolean {
   return /^\s*no\s+(?:retry|retries|preference|preferences|fallback|workaround)\b.{0,80}\b(?:needed|required|stated|used|applied|attempted)\b/i.test(
+    text,
+  );
+}
+
+function isPlainNoSignalDiscardCandidate(text: string): boolean {
+  return /^(?:always\s+happy\s+to\s+help|no\s+retry\s+was\s+needed|no\s+preference\s+was\s+stated)$/i.test(
     text,
   );
 }
@@ -4057,7 +4080,7 @@ function isGenericCustomerPolicyText(text: string): boolean {
 }
 
 function hasConcreteCustomerReference(text: string): boolean {
-  return /\b(?:[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*|[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*)|[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*|[Cc]ustomer\s+(?:account\s+)?(?!(?:data|identifiers?|records?|information|privacy|pii)\b)(?:[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|[A-Za-z0-9][A-Za-z0-9_.:-]*)|[Cc]ustomer\s+(?:data|identifiers?|records?|information|privacy|pii)\s+for\s+[A-Z0-9][A-Za-z0-9_.:-]*)\b/.test(
+  return /\b(?:[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*|[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*)|[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*|[Cc]ustomer\s+(?:account\s+)?(?!(?:data|identifiers?|records?|information|privacy|pii)\b)(?:[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|[A-Za-z0-9][A-Za-z0-9_.:-]*)|[Cc]ustomer\s+(?:data|identifiers?|records?|information|privacy|pii)\s+for\s+[A-Za-z0-9][A-Za-z0-9_.:-]*)\b/.test(
     text,
   );
 }
@@ -4082,7 +4105,7 @@ function extractCustomerSegments(text: string): string[] {
       `\\b[Cc]ustomer\\s+account(?:\\s+[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,})?${trailingCustomerToken}\\b|\\b[Cc]ustomer\\s+[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}${trailingCustomerToken}\\b|\\b[Cc]ustomer\\s+(?!(?:data|identifiers?|records?|information|privacy|pii)\\b)[A-Za-z0-9][A-Za-z0-9_.:-]*${trailingCustomerToken}\\b`,
       'g',
     ),
-    /\b[Cc]ustomer\s+(?:data|identifiers?|records?|information|privacy|pii)\s+for\s+([A-Z0-9][A-Za-z0-9_.:-]*)\b/g,
+    /\b[Cc]ustomer\s+(?:data|identifiers?|records?|information|privacy|pii)\s+for\s+([A-Za-z0-9][A-Za-z0-9_.:-]*)\b/g,
   ];
   const segments = patterns.flatMap((pattern) =>
     Array.from(text.matchAll(pattern), (match) => match[1] ?? match[0]),
