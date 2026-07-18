@@ -98,6 +98,54 @@ describe('ObserverAdapter', () => {
     expect(verification).toEqual({ ok: true, checked: 2 });
   });
 
+  it('does not scan the full audit history before appending to a long trail', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const observer = createObserverAdapter(dbPath);
+    const sessionId = randomUUID();
+
+    for (let index = 0; index < 200; index += 1) {
+      await observer.log({
+        event: 'tool_call',
+        metadata: JSON.stringify({ tool: 'memory', index }),
+        sessionId,
+      });
+    }
+
+    mutateAuditTrailDirectly(dbPath, (db) => {
+      db.prepare('UPDATE audit_trail SET payload = ? WHERE session_id = ? AND id = (SELECT MIN(id) FROM audit_trail WHERE session_id = ?)')
+        .run(JSON.stringify({ tool: 'memory', tampered: true }), sessionId, sessionId);
+    });
+
+    await expect(observer.log({
+      event: 'tool_result',
+      metadata: JSON.stringify({ tool: 'memory', ok: true }),
+      sessionId,
+    })).resolves.toEqual(expect.objectContaining({ hash: expect.stringMatching(/^sha256:[a-f0-9]{64}$/) }));
+
+    const verification = await observer.verify(sessionId);
+    expect(verification.ok).toBe(false);
+    expect(verification.firstInvalid?.index).toBe(0);
+  });
+
+  it('rejects an append when the audit tail itself is invalid', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const observer = createObserverAdapter(dbPath);
+    const sessionId = randomUUID();
+
+    await observer.log({ event: 'tool_call', metadata: JSON.stringify({ tool: 'memory' }), sessionId });
+    await observer.log({ event: 'tool_result', metadata: JSON.stringify({ tool: 'memory', ok: true }), sessionId });
+    mutateAuditTrailDirectly(dbPath, (db) => {
+      db.prepare('UPDATE audit_trail SET payload = ? WHERE session_id = ? AND id = (SELECT MAX(id) FROM audit_trail WHERE session_id = ?)')
+        .run(JSON.stringify({ tool: 'memory', tampered: true }), sessionId, sessionId);
+    });
+
+    await expect(observer.log({
+      event: 'tool_call',
+      metadata: JSON.stringify({ tool: 'memory', retry: true }),
+      sessionId,
+    })).rejects.toThrow('Cannot append audit row to invalid trail tail');
+  });
+
   it('binds the event type into the first audit hash', async () => {
     const firstHashFrom = async (event: string): Promise<string> => {
       const observer = createObserverAdapter(tracked(tmpDbPath()));
@@ -277,7 +325,7 @@ describe('ObserverAdapter', () => {
     expect(trail[1]!.parentHash).toBe(trail[0]!.hash);
   });
 
-  it('migrates an intact legacy tail before appending a new audit row', async () => {
+  it('leaves a legacy tail untouched on append and migrates it during explicit verification', async () => {
     const dbPath = tracked(tmpDbPath());
     const observer = createObserverAdapter(dbPath);
     const sessionId = randomUUID();
@@ -291,11 +339,15 @@ describe('ObserverAdapter', () => {
     db.close();
 
     await observer.log({ event: 'tool_result', metadata: JSON.stringify({ tool: 'memory', ok: true }), sessionId });
-    const trail = await observer.trail(sessionId);
+    const appendedTrail = await observer.trail(sessionId);
 
-    expect(trail[0]!.hash).toMatch(/^sha256:[a-f0-9]{64}$/);
-    expect(trail[0]!.hash).not.toBe(firstLegacyHash);
-    expect(trail[1]!.parentHash).toBe(trail[0]!.hash);
+    expect(appendedTrail[0]!.hash).toBe(firstLegacyHash);
+    expect(appendedTrail[1]!.parentHash).toBe(firstLegacyHash);
+
+    expect(await observer.verify(sessionId)).toEqual({ ok: true, checked: 2 });
+    const migratedTrail = await observer.trail(sessionId);
+    expect(migratedTrail[0]!.hash).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(migratedTrail[1]!.parentHash).toBe(migratedTrail[0]!.hash);
   });
 
   it('does not rewrite a valid legacy prefix when a later row is invalid', async () => {

@@ -98,37 +98,29 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
     async log(input) {
       const payload = parseMetadata(input.metadata);
       const metadata = canonicalMetadata(input.metadata);
-      const preflight = verifyAuditTrail(store, input.sessionId, {
-        migrate: true,
-        allowUnboundLegacy16Rows: true,
-      });
-      if (!preflight.ok) {
-        throw new Error(`Cannot append audit row to invalid trail at index ${preflight.firstInvalid?.index ?? 'unknown'}`);
-      }
-      const lastRow = store.db.prepare(
-        'SELECT hash FROM audit_trail WHERE session_id = ? ORDER BY id DESC LIMIT 1',
-      ).get(input.sessionId) as { hash: string } | undefined;
-
       const auditEvent = createAuditEvent(input.event, payload, {
         phase: 'mcp',
         provider: 'fbeast-mcp',
         input: metadata,
       });
-
       const baseHash = buildEventBaseHash(input.sessionId, input.event, metadata, auditEvent.inputHash);
-      const hash = buildAuditHash(baseHash, lastRow?.hash);
-      const result = store.db.prepare(`
-        INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(
-        input.sessionId,
-        input.event,
-        metadata,
-        hash,
-        lastRow?.hash ?? null,
-      );
 
-      return { id: Number(result.lastInsertRowid), hash };
+      return store.db.transaction((): ObserverLogResult => {
+        const parentHash = validateAuditTail(store, input.sessionId);
+        const hash = buildAuditHash(baseHash, parentHash);
+        const result = store.db.prepare(`
+          INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(
+          input.sessionId,
+          input.event,
+          metadata,
+          hash,
+          parentHash ?? null,
+        );
+
+        return { id: Number(result.lastInsertRowid), hash };
+      }).immediate();
     },
 
     async logCost(input) {
@@ -222,6 +214,36 @@ interface PendingAuditMigration {
   id: number;
   hash: string;
   parentHash: string | undefined;
+}
+
+function validateAuditTail(
+  store: ReturnType<typeof createSqliteStore>,
+  sessionId: string,
+): string | undefined {
+  const rows = store.db.prepare(
+    'SELECT id, event_type AS eventType, payload, hash, parent_hash AS parentHash, created_at AS createdAt FROM audit_trail WHERE session_id = ? ORDER BY id DESC LIMIT 2',
+  ).all(sessionId) as AuditTrailRow[];
+  const tail = rows[0];
+  if (!tail) return undefined;
+
+  const previousHash = rows[1]?.hash;
+  const actualParentHash = tail.parentHash ?? undefined;
+  const metadata = tail.payload;
+  const payload = parseMetadata(metadata);
+  const auditEvent = createAuditEvent(tail.eventType, payload, {
+    phase: 'mcp',
+    provider: 'fbeast-mcp',
+    input: metadata,
+  });
+  const baseHash = buildEventBaseHash(sessionId, tail.eventType, metadata, auditEvent.inputHash);
+  const matchesCurrent = tail.hash === buildAuditHash(baseHash, previousHash);
+  const matchesLegacy16 = buildMatchingLegacy16Hash(tail, previousHash) === tail.hash;
+
+  if (actualParentHash !== previousHash || (!matchesCurrent && !matchesLegacy16)) {
+    throw new Error('Cannot append audit row to invalid trail tail');
+  }
+
+  return tail.hash;
 }
 
 function verifyAuditTrail(
