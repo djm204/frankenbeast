@@ -237,7 +237,9 @@ function validateAuditTail(
   });
   const baseHash = buildEventBaseHash(sessionId, tail.eventType, metadata, auditEvent.inputHash);
   const matchesCurrent = tail.hash === buildAuditHash(baseHash, previousHash);
-  const matchesLegacy16 = buildMatchingLegacy16Hash(tail, previousHash) === tail.hash;
+  const legacyParentIsValid = previousHash === undefined || isLegacy16Hash(previousHash);
+  const matchesLegacy16 = legacyParentIsValid
+    && buildMatchingLegacy16Hash(tail, previousHash) === tail.hash;
 
   if (actualParentHash !== previousHash || (!matchesCurrent && !matchesLegacy16)) {
     throw new Error('Cannot append audit row to invalid trail tail');
@@ -247,6 +249,15 @@ function validateAuditTail(
 }
 
 function verifyAuditTrail(
+  store: ReturnType<typeof createSqliteStore>,
+  sessionId: string,
+  options: { migrate: boolean; allowUnboundLegacy16Rows?: boolean },
+): ObserverVerifyResult {
+  const verify = (): ObserverVerifyResult => inspectAuditTrail(store, sessionId, options);
+  return options.migrate ? store.db.transaction(verify).immediate() : verify();
+}
+
+function inspectAuditTrail(
   store: ReturnType<typeof createSqliteStore>,
   sessionId: string,
   options: { migrate: boolean; allowUnboundLegacy16Rows?: boolean },
@@ -304,12 +315,10 @@ function verifyAuditTrail(
     expectedLegacy16ParentHash = matchesLegacy16 ? row.hash : undefined;
   }
 
-  if (options.migrate && pendingMigrations.length > 0) {
-    store.db.transaction((migrations: PendingAuditMigration[]) => {
-      for (const migration of migrations) {
-        migrateAuditRow(store, migration.id, migration.hash, migration.parentHash);
-      }
-    })(pendingMigrations);
+  if (options.migrate) {
+    for (const migration of pendingMigrations) {
+      migrateAuditRow(store, migration.id, migration.hash, migration.parentHash);
+    }
   }
 
   return { ok: true, checked: rows.length };
