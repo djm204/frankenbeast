@@ -878,7 +878,7 @@ function hasSamePidLiveProbe(
   if (snapshot.alive === false || !Number.isSafeInteger(snapshot.pid) || snapshot.pid <= 0) return false;
   const liveProbeRecencyMs = liveProbeRecencyByCardId.get(snapshot.cardId.trim())?.get(snapshot.pid);
   const snapshotRecency = snapshotRecencyMs(snapshot);
-  return liveProbeRecencyMs !== undefined && (liveProbeRecencyMs > snapshotRecency || (liveProbeRecencyMs === 0 && snapshotRecency === 0));
+  return liveProbeRecencyMs !== undefined && liveProbeRecencyMs >= snapshotRecency;
 }
 
 function normalizeKanbanState(status: string): string {
@@ -978,19 +978,19 @@ export function buildWorkerCrashOnlyRestartContract(
     };
   }
 
-  if (terminalKanbanState(kanbanState) && !crashKanbanState(kanbanState)) {
+  if (operatorControlledSignalExitReason(rawExitReason)) {
     return {
-      disposition: 'terminal',
-      nextAction: 'no-op',
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
       ...base,
       evidence,
     };
   }
 
-  if (operatorControlledSignalExitReason(rawExitReason)) {
+  if (terminalKanbanState(kanbanState) && !crashKanbanState(kanbanState)) {
     return {
-      disposition: 'hitl',
-      nextAction: 'defer-with-evidence',
+      disposition: 'terminal',
+      nextAction: 'no-op',
       ...base,
       evidence,
     };
@@ -1238,7 +1238,7 @@ export function detectStuckRunWatchdogFindings(
         newestDeadFindingsByCardId.set(normalizedCardId, finding);
       }
       const terminalRecencyMs = terminalRecencyByCardId.get(normalizedCardId);
-      if (terminalRecencyMs !== undefined && terminalRecencyMs >= candidateKey.recencyMs) {
+      if (terminalRecencyMs !== undefined && terminalRecencyMs > candidateKey.recencyMs) {
         findingIndex += 1;
         continue;
       }
