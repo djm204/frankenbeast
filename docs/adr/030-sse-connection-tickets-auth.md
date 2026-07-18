@@ -14,12 +14,19 @@ The operator token must be validated before establishing the SSE stream, but it 
 
 Use a **connection ticket** pattern — an industry-standard approach for authenticating SSE and WebSocket connections.
 
+**Canonical endpoints:**
+
+- Ticket issuance: `POST /v1/beasts/events/ticket`
+- Dashboard stream: `GET /v1/beasts/events/stream?ticket=<uuid>`
+
+These paths are shared by the daemon routes in `packages/franken-orchestrator/src/http/routes/beast-sse-routes.ts` and the dashboard client in `packages/franken-web/src/lib/beast-api.ts`. Older per-agent `/api/beasts/:id/events` examples are not the dashboard stream contract.
+
 **Flow:**
 
 1. Dashboard calls `POST /v1/beasts/events/ticket` with `Authorization: Bearer <operator-token>`
 2. Daemon validates the bearer token, generates a single-use UUID ticket, stores it in an in-memory map with a 30-second TTL
 3. Response: `{ ticket: "<uuid>" }`
-4. Dashboard opens `EventSource` to `/v1/beasts/events/stream?ticket=<uuid>`
+4. Dashboard opens `EventSource` to the canonical `/v1/beasts/events/stream?ticket=<uuid>` endpoint
 5. Daemon validates the ticket: must exist, not expired, not already used
 6. Ticket is burned (deleted from map) on first use
 7. SSE stream is established and authenticated for the lifetime of the connection
@@ -32,7 +39,7 @@ Use a **connection ticket** pattern — an industry-standard approach for authen
 
 **Reconnection:**
 
-When `EventSource` auto-reconnects (network interruption), it opens a new HTTP request. The client must obtain a fresh ticket before reconnecting. The `useBeastEventStream` React hook handles this: on connection error, request a new ticket, then reconnect.
+When `EventSource` reconnects after a network interruption, it opens a new HTTP request. The client must obtain a fresh ticket before reconnecting. The dashboard client's `BeastApiClient.subscribeToEvents` method handles this by requesting a new ticket and creating a new `EventSource` for the canonical stream endpoint.
 
 ## Consequences
 
