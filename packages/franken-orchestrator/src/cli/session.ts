@@ -19,7 +19,13 @@ import type { ProjectPaths } from './project-root.js';
 import type { ReviewIO } from '../issues/issue-review.js';
 import type { IssueFetchOptions, IssueOutcome } from '../issues/types.js';
 import { createCliDeps, type CliDepOptions } from './dep-factory.js';
-import { PromptConfigSchema, RunConfigSchema, loadRunConfigFromEnv, type RunConfig } from './run-config-loader.js';
+import {
+  PromptConfigSchema,
+  RunConfigSchema,
+  loadRunConfigDocumentFromEnv,
+  loadRunConfigFromEnv,
+  type RunConfig,
+} from './run-config-loader.js';
 import { extractDesignSummary, formatDesignCard } from './design-summary.js';
 import { reviewLoop } from './review-loop.js';
 import { isNoOpDesign } from './noop-detector.js';
@@ -42,15 +48,14 @@ function appendPromptContext(value: string, promptText: string | undefined): str
 }
 
 function loadPromptConfigFromEnv(): RunConfig['promptConfig'] | undefined {
-  let runConfig: RunConfig | undefined;
-  try {
-    runConfig = loadRunConfigFromEnv();
-  } catch (error) {
-    if (error instanceof ZodError) return undefined;
-    throw error;
-  }
-  if (!runConfig?.promptConfig) return undefined;
-  return PromptConfigSchema.parse(runConfig.promptConfig);
+  const runConfigDocument = loadRunConfigDocumentFromEnv();
+  const promptConfig = typeof runConfigDocument === 'object' && runConfigDocument !== null
+    ? (runConfigDocument as Record<string, unknown>)['promptConfig']
+    : undefined;
+  const result = PromptConfigSchema.optional().safeParse(
+    promptConfig,
+  );
+  return result.success ? result.data : undefined;
 }
 
 function loadCompatibleRunConfigFromEnv(): RunConfig | undefined {

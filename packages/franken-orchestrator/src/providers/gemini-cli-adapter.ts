@@ -65,7 +65,7 @@ export class GeminiCliAdapter implements ILlmProvider {
   constructor(private options: GeminiCliOptions = {}) {}
 
   async isAvailable(): Promise<boolean> {
-    return isCliAvailable(this.binaryPath);
+    return isCliAvailable(this.binaryPath, sanitizeRunConfigIntegrityEnv(process.env as Record<string, string>));
   }
 
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {

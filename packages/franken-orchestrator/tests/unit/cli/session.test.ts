@@ -5,6 +5,11 @@ import { tmpdir } from 'node:os';
 import { getProjectPaths, scaffoldFrankenbeast } from '../../../src/cli/project-root.js';
 import type { ProjectPaths } from '../../../src/cli/project-root.js';
 import type { InterviewIO } from '../../../src/planning/interview-loop.js';
+import {
+  createRunConfigIntegrityManifest,
+  RUN_CONFIG_INTEGRITY_ENV,
+  RUN_CONFIG_INTEGRITY_SECRET_ENV,
+} from '../../../src/cli/run-config-integrity.js';
 
 // ── Mock heavy dependencies ──
 
@@ -222,6 +227,8 @@ describe('Session', () => {
   afterEach(() => {
     console.info = origLog;
     delete process.env.FRANKENBEAST_RUN_CONFIG;
+    delete process.env[RUN_CONFIG_INTEGRITY_ENV];
+    delete process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV];
   });
 
   describe('SessionPhase type', () => {
@@ -311,6 +318,34 @@ describe('Session', () => {
         expect.any(Object),
         expect.objectContaining({ maxDurationMs: 99_000 }),
       );
+      rmSync(root, { recursive: true, force: true });
+    });
+
+    it('preserves signed prompt context when unrelated runtime fields are incompatible', async () => {
+      const { Session } = await import('../../../src/cli/session.js');
+      const root = resolve(tmpdir(), `fb-run-config-prompt-legacy-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      mkdirSync(root, { recursive: true });
+      const configPath = resolve(root, 'run-config.json');
+      const secret = 'prompt-signing-key';
+      const bytes = JSON.stringify({
+        promptConfig: { text: 'dashboard context survives legacy fields' },
+        maxDurationMs: 'legacy-invalid',
+      });
+      writeFileSync(configPath, bytes);
+      const manifestPath = resolve(root, 'run-config.json.integrity');
+      writeFileSync(manifestPath, JSON.stringify(createRunConfigIntegrityManifest(bytes, secret, {
+        configPath,
+      })));
+      process.env.FRANKENBEAST_RUN_CONFIG = configPath;
+      process.env[RUN_CONFIG_INTEGRITY_ENV] = manifestPath;
+      process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV] = secret;
+      const config = makeConfig({ entryPhase: 'interview', exitAfter: 'interview' });
+
+      await new Session(config).start();
+
+      expect(mockInterviewBuild).toHaveBeenCalledWith(expect.objectContaining({
+        goal: expect.stringContaining('dashboard context survives legacy fields'),
+      }));
       rmSync(root, { recursive: true, force: true });
     });
 

@@ -112,18 +112,21 @@ function verifyRunConfigIntegrityFromEnv(filePath: string): Buffer | undefined {
   return verifiedBytes;
 }
 
-export function loadRunConfig(filePath: string): RunConfig {
+function readRunConfigRaw(filePath: string): string {
   const verifiedBytes = verifyRunConfigIntegrityFromEnv(filePath);
-  let raw: string;
   if (verifiedBytes) {
-    raw = verifiedBytes.toString('utf-8');
-  } else {
-    const info = statSync(filePath);
-    if (info.size > 1_048_576) {
-      throw new RunConfigParseError(filePath, `Run config ${filePath} exceeds maxBytes: ${info.size} > 1048576`);
-    }
-    raw = readFileSync(filePath, 'utf-8');
+    return verifiedBytes.toString('utf-8');
   }
+
+  const info = statSync(filePath);
+  if (info.size > 1_048_576) {
+    throw new RunConfigParseError(filePath, `Run config ${filePath} exceeds maxBytes: ${info.size} > 1048576`);
+  }
+  return readFileSync(filePath, 'utf-8');
+}
+
+export function loadRunConfigDocument(filePath: string): unknown {
+  const raw = readRunConfigRaw(filePath);
   let parsed: unknown;
   try {
     parsed = parseSafeJson(raw, {
@@ -138,7 +141,11 @@ export function loadRunConfig(filePath: string): RunConfig {
     const reason = error instanceof Error ? error.message : String(error);
     throw new RunConfigParseError(filePath, reason, error instanceof Error ? { cause: error } : undefined);
   }
-  return RunConfigSchema.parse(parsed);
+  return parsed;
+}
+
+export function loadRunConfig(filePath: string): RunConfig {
+  return RunConfigSchema.parse(loadRunConfigDocument(filePath));
 }
 
 /**
@@ -151,4 +158,10 @@ export function loadRunConfigFromEnv(): RunConfig | undefined {
   const config = loadRunConfig(filePath);
   printLine(`loaded config from ${filePath}`);
   return config;
+}
+
+export function loadRunConfigDocumentFromEnv(): unknown | undefined {
+  const filePath = process.env['FRANKENBEAST_RUN_CONFIG'];
+  if (!filePath) return undefined;
+  return loadRunConfigDocument(filePath);
 }

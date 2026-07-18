@@ -10,7 +10,11 @@ vi.mock('node:child_process', () => ({
   spawn: vi.fn(),
 }));
 import { spawn } from 'node:child_process';
-import { RUN_CONFIG_INTEGRITY_ENV, RUN_CONFIG_INTEGRITY_SECRET_ENV } from '../../../src/cli/run-config-integrity.js';
+import {
+  RUN_CONFIG_INTEGRITY_BYPASS_ENV,
+  RUN_CONFIG_INTEGRITY_ENV,
+  RUN_CONFIG_INTEGRITY_SECRET_ENV,
+} from '../../../src/cli/run-config-integrity.js';
 
 function mockSpawn(stdoutLines: string[], exitCode = 0) {
   const stdout = new PassThrough();
@@ -72,6 +76,7 @@ describe('GeminiCliAdapter', () => {
   let tempDir: string;
 
   beforeEach(() => {
+    (spawn as ReturnType<typeof vi.fn>).mockClear();
     tempDir = mkdtempSync(join(tmpdir(), 'gemini-test-'));
     adapter = new GeminiCliAdapter({ workingDir: tempDir, model: 'gemini-2.5-flash' });
   });
@@ -253,6 +258,41 @@ describe('GeminiCliAdapter', () => {
           delete process.env.GEMINI_CLI_TRUST_WORKSPACE;
         } else {
           process.env.GEMINI_CLI_TRUST_WORKSPACE = originalTrustWorkspace;
+        }
+      }
+    });
+  });
+
+  describe('isAvailable()', () => {
+    it('does not expose runtime config integrity state to the Gemini availability probe', async () => {
+      const originalManifest = process.env[RUN_CONFIG_INTEGRITY_ENV];
+      const originalSecret = process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV];
+      const originalBypass = process.env[RUN_CONFIG_INTEGRITY_BYPASS_ENV];
+      process.env[RUN_CONFIG_INTEGRITY_ENV] = '/tmp/run-config.integrity';
+      process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV] = 'signing-key';
+      process.env[RUN_CONFIG_INTEGRITY_BYPASS_ENV] = '1';
+      try {
+        mockSpawn([]);
+        await expect(adapter.isAvailable()).resolves.toBe(true);
+        const spawnOptions = (spawn as ReturnType<typeof vi.fn>).mock.calls[0]?.[2] as { env?: Record<string, string> } | undefined;
+        expect(spawnOptions?.env).not.toHaveProperty(RUN_CONFIG_INTEGRITY_ENV);
+        expect(spawnOptions?.env).not.toHaveProperty(RUN_CONFIG_INTEGRITY_SECRET_ENV);
+        expect(spawnOptions?.env).not.toHaveProperty(RUN_CONFIG_INTEGRITY_BYPASS_ENV);
+      } finally {
+        if (originalManifest === undefined) {
+          delete process.env[RUN_CONFIG_INTEGRITY_ENV];
+        } else {
+          process.env[RUN_CONFIG_INTEGRITY_ENV] = originalManifest;
+        }
+        if (originalSecret === undefined) {
+          delete process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV];
+        } else {
+          process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV] = originalSecret;
+        }
+        if (originalBypass === undefined) {
+          delete process.env[RUN_CONFIG_INTEGRITY_BYPASS_ENV];
+        } else {
+          process.env[RUN_CONFIG_INTEGRITY_BYPASS_ENV] = originalBypass;
         }
       }
     });

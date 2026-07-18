@@ -58,6 +58,7 @@ export function sanitizeRunConfigIntegrityEnv(env: Record<string, string>): Reco
   const sanitized = { ...env };
   delete sanitized[RUN_CONFIG_INTEGRITY_ENV];
   delete sanitized[RUN_CONFIG_INTEGRITY_SECRET_ENV];
+  delete sanitized[RUN_CONFIG_INTEGRITY_BYPASS_ENV];
   return sanitized;
 }
 

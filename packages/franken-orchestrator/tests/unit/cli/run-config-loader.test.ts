@@ -14,10 +14,22 @@ import {
   RUN_CONFIG_INTEGRITY_ENV,
   RUN_CONFIG_INTEGRITY_SECRET_ENV,
   RunConfigIntegrityError,
+  sanitizeRunConfigIntegrityEnv,
 } from '../../../src/cli/run-config-integrity.js';
 
 describe('RunConfigLoader', () => {
   let workDir: string | undefined;
+
+  describe('sanitizeRunConfigIntegrityEnv', () => {
+    it('removes manifest, secret, and bypass integrity state from child envs', () => {
+      expect(sanitizeRunConfigIntegrityEnv({
+        PATH: '/usr/bin',
+        [RUN_CONFIG_INTEGRITY_ENV]: '/tmp/run-config.integrity',
+        [RUN_CONFIG_INTEGRITY_SECRET_ENV]: 'signing-key',
+        [RUN_CONFIG_INTEGRITY_BYPASS_ENV]: '1',
+      })).toEqual({ PATH: '/usr/bin' });
+    });
+  });
 
   afterEach(async () => {
     if (workDir) {
