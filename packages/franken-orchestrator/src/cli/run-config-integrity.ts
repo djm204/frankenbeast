@@ -1,5 +1,6 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { z } from 'zod';
 
 export const RUN_CONFIG_INTEGRITY_ALGORITHM = 'hmac-sha256';
@@ -55,6 +56,7 @@ function sha256Hex(bytes: string | Buffer): string {
 
 export function sanitizeRunConfigIntegrityEnv(env: Record<string, string>): Record<string, string> {
   const sanitized = { ...env };
+  delete sanitized[RUN_CONFIG_INTEGRITY_ENV];
   delete sanitized[RUN_CONFIG_INTEGRITY_SECRET_ENV];
   return sanitized;
 }
@@ -71,6 +73,7 @@ function canonicalIntegrityPayload(fields: Omit<RunConfigIntegrityManifest, 'sig
   return [
     `version:${fields.version}`,
     `algorithm:${encodeURIComponent(fields.algorithm)}`,
+    `configPath:${encodeURIComponent(fields.configPath ?? '')}`,
     `configSha256:${fields.configSha256.toLowerCase()}`,
     `createdAtUnixMs:${fields.createdAtUnixMs}`,
     `expiresAtUnixMs:${fields.expiresAtUnixMs}`,
@@ -151,6 +154,9 @@ export function verifyRunConfigIntegrity(
   }
   if (manifest.createdAtUnixMs > now + 60_000) {
     throw new RunConfigIntegrityError(configPath, 'runtime config signature timestamp is in the future');
+  }
+  if (manifest.configPath && resolve(manifest.configPath) !== resolve(configPath)) {
+    throw new RunConfigIntegrityError(configPath, 'runtime config path mismatch');
   }
 
   const unsigned = {

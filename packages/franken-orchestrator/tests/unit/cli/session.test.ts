@@ -295,6 +295,25 @@ describe('Session', () => {
       rmSync(root, { recursive: true, force: true });
     });
 
+    it('falls back when compatible runtime budget config cannot be parsed', async () => {
+      const { Session } = await import('../../../src/cli/session.js');
+      const { BeastLoop } = await import('../../../src/beast-loop.js');
+      const root = resolve(tmpdir(), `fb-run-config-runtime-invalid-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      mkdirSync(root, { recursive: true });
+      const configPath = resolve(root, 'run-config.json');
+      writeFileSync(configPath, JSON.stringify({ maxDurationMs: 'legacy-invalid' }));
+      process.env.FRANKENBEAST_RUN_CONFIG = configPath;
+      const config = makeConfig({ entryPhase: 'execute', maxDurationMs: 99_000 });
+
+      await new Session(config).start();
+
+      expect(BeastLoop).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({ maxDurationMs: 99_000 }),
+      );
+      rmSync(root, { recursive: true, force: true });
+    });
+
     it('does not double-count failed task outcomes in the build summary footer', async () => {
       const { Session } = await import('../../../src/cli/session.js');
       mockBeastRun.mockResolvedValueOnce({

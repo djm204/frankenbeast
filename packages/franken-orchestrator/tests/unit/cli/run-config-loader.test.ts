@@ -182,6 +182,24 @@ describe('RunConfigLoader', () => {
       expect(loadRunConfig(filePath)).toMatchObject(config);
     });
 
+    it('fails closed when a manifest is replayed for a different config path', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'run-config-'));
+      const secret = 'test-secret-value';
+      const bytes = JSON.stringify({ provider: 'claude' });
+      const originalPath = join(workDir, 'original.json');
+      const replayPath = join(workDir, 'replay.json');
+      await writeFile(originalPath, bytes);
+      await writeFile(replayPath, bytes);
+      const manifestPath = join(workDir, 'original.json.integrity');
+      await writeFile(manifestPath, JSON.stringify(createRunConfigIntegrityManifest(bytes, secret, {
+        configPath: originalPath,
+      })));
+      process.env[RUN_CONFIG_INTEGRITY_ENV] = manifestPath;
+      process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV] = secret;
+
+      expect(() => loadRunConfig(replayPath)).toThrow('runtime config path mismatch');
+    });
+
     it('fails closed before JSON parsing when a signed config is tampered', async () => {
       workDir = await mkdtemp(join(tmpdir(), 'run-config-'));
       const filePath = join(workDir, 'tampered.json');

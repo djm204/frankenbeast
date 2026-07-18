@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { resolveContainedExistingPath } from '@franken/types/path-containment';
 import { tmpdir } from 'node:os';
+import { ZodError } from 'zod';
 import { BeastLoop } from '../beast-loop.js';
 import { ChunkFileGraphBuilder } from '../planning/chunk-file-graph-builder.js';
 import { LlmGraphBuilder } from '../planning/llm-graph-builder.js';
@@ -41,13 +42,25 @@ function appendPromptContext(value: string, promptText: string | undefined): str
 }
 
 function loadPromptConfigFromEnv(): RunConfig['promptConfig'] | undefined {
-  const runConfig = loadRunConfigFromEnv();
+  let runConfig: RunConfig | undefined;
+  try {
+    runConfig = loadRunConfigFromEnv();
+  } catch (error) {
+    if (error instanceof ZodError) return undefined;
+    throw error;
+  }
   if (!runConfig?.promptConfig) return undefined;
   return PromptConfigSchema.parse(runConfig.promptConfig);
 }
 
 function loadCompatibleRunConfigFromEnv(): RunConfig | undefined {
-  const runConfig = loadRunConfigFromEnv();
+  let runConfig: RunConfig | undefined;
+  try {
+    runConfig = loadRunConfigFromEnv();
+  } catch (error) {
+    if (error instanceof ZodError) return undefined;
+    throw error;
+  }
   const result = RunConfigSchema.safeParse(runConfig);
   return result.success ? result.data : undefined;
 }
