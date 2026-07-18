@@ -398,10 +398,11 @@ describe("Memory Server", () => {
     expect(result.content[0]!.text).not.toContain(sensitiveValue);
   });
 
-  it("quarantines lowercase and mixed-case authorization header values", async () => {
+  it("quarantines lowercase, mixed-case, and non-standard authorization header values", async () => {
     for (const sensitiveValue of [
       ["authorization: Basic ", "b".repeat(24)].join(""),
-      ["pRoXy-AuThOrIzAtIoN: token ", "c".repeat(24)].join(""),
+      ["authorization: ApiKey ", "d".repeat(24)].join(""),
+      ["pRoXy-AuThOrIzAtIoN: ApiKey ", "c".repeat(24)].join(""),
     ]) {
       const brain = createBrainStub({ store: vi.fn(), proposeMemory: vi.fn().mockResolvedValue({
         id: "memcand_header_case",
