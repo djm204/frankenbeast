@@ -186,7 +186,7 @@ const PRIVACY_REDACTION_RULES: readonly PrivacyRedactionRule[] = [
     kind: 'task-state',
     label: 'task-reference',
     pattern:
-      /(?:https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/(?:pull|issues)\/\d+(?:[^\s'"`)\]]*)?|https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/commit\/[0-9a-f]{7,40}(?:[^\s'"`)\]]*)?|\b(?:(?:PR|pull request|issue|ticket)\s*#?\d+|(?:commit|sha)\s+[0-9a-f]{7,40}|task\s+t_[0-9a-f]{6,}|(?:impl|harden):issue-\d+|issue-\d+)\b)/gi,
+      /(?:https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/(?:pull|issues)\/\d+(?:[^\s'"`)\]]*)?|https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/actions\/runs\/\d+(?:[^\s'"`)\]]*)?|https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/commit\/[0-9a-f]{7,40}(?:[^\s'"`)\]]*)?|\b(?:(?:PR|pull request|issue|ticket)\s*#?\d+|(?:commit|sha)\s+[0-9a-f]{7,40}|task\s+t_[0-9a-f]{6,}|(?:impl|harden):issue-\d+|issue-\d+)\b)/gi,
     replacement: '[REDACTED_TASK_REFERENCE]',
   },
 ];
@@ -200,6 +200,7 @@ const CUSTOMER_DATA_PATTERNS: readonly RegExp[] = [
 
 const TASK_STATE_PATTERNS: readonly RegExp[] = [
   /https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/(?:pull|issues)\/\d+(?:[^\s'"`)\]]*)?/i,
+  /https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/actions\/runs\/\d+(?:[^\s'"`)\]]*)?/i,
   /https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/commit\/[0-9a-f]{7,40}(?:[^\s'"`)\]]*)?/i,
   /\b(?:PR|pull request)\s*#?\d+\b/i,
   /\bissue\s*#?\d+\b/i,
@@ -218,7 +219,7 @@ const PREFERENCE_PATTERNS: readonly RegExp[] = [
 const ENVIRONMENT_FACT_PATTERNS: readonly RegExp[] = [
   /\b(?:repo|repository|project|package|workspace)\s+(?:uses|requires|runs|is)\b/i,
   /\bfrankenbeast\s+(?:uses|requires|runs|is)\b/i,
-  /(?:^|\s)(?:package\s+)?@franken\/[a-z0-9-]+\s+(?:uses|requires|runs|is)\b/i,
+  /(?:^|\s)(?:package\s+)?@franken\/[a-z0-9-]+\s+(?:package\s+)?(?:uses|requires|runs|is)\b/i,
 ];
 
 const LESSON_FEEDBACK_WEIGHTING_GUIDANCE =
@@ -1463,6 +1464,7 @@ function isFailedRetryOrFallbackStatus(text: string): boolean {
 function hasStatusRecoveryGuidance(text: string): boolean {
   return (
     /(?:;|,)\s*(?:use|run|check)\b/i.test(text) ||
+    /(?:;|,)\s*(?:retry|fallback)\s+.{1,80}\binstead\b/i.test(text) ||
     hasActionableWorkaroundLabel(text)
   );
 }
@@ -4087,7 +4089,7 @@ function isGenericCustomerPolicyText(text: string): boolean {
 }
 
 function hasConcreteCustomerReference(text: string): boolean {
-  return /\b(?:[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*|[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*|[a-z][A-Za-z0-9_.:-]*\s+(?:data|records?|information|identifiers?))|[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*|[Cc]ustomer\s+(?:account\s+)?(?!(?:data|identifiers?|records?|information|privacy|pii)\b)(?:[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|[A-Za-z0-9][A-Za-z0-9_.:-]*)|[Cc]ustomer\s+(?:data|identifiers?|records?|information|privacy|pii)\s*(?:for|[:=-])\s*[A-Za-z0-9][A-Za-z0-9_.:-]*)\b/.test(
+  return /\b(?:[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*|[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*|[a-z][A-Za-z0-9_.:-]*\s+(?:data|records?|information|identifiers?))|[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*|[Cc]ustomer\s+(?:account\s+)?(?!(?:data|identifiers?|records?|information|privacy|pii)\b)(?:[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|[A-Za-z0-9][A-Za-z0-9_.:-]*)|[Cc]ustomer\s+(?:data|identifiers?|records?|information|privacy|pii)\s*(?:(?:for|[:=-])\s*|\s+)[A-Za-z0-9][A-Za-z0-9_.:-]*)\b/.test(
     text,
   );
 }
@@ -4113,7 +4115,7 @@ function extractCustomerSegments(text: string): string[] {
       'g',
     ),
     new RegExp(
-      `\\b[Cc]ustomer\\s+(?:data|identifiers?|records?|information|privacy|pii)\\s*(?:for|[:=-])\\s*[A-Za-z0-9][A-Za-z0-9_.:-]*${trailingCustomerToken}\\b`,
+      `\\b[Cc]ustomer\\s+(?:data|identifiers?|records?|information|privacy|pii)\\s*(?:(?:for|[:=-])\\s*|\\s+)[A-Za-z0-9][A-Za-z0-9_.:-]*${trailingCustomerToken}\\b`,
       'g',
     ),
   ];

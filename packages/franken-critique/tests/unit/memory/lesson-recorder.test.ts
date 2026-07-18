@@ -533,6 +533,21 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('keeps retry/fallback recovery clauses that name an alternative action', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-retry-status-with-retry-workaround',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      toolFailures: ['Retry with gh pr checks failed; retry gh run view instead'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'procedure',
+        suggestedDestination: 'skill',
+      }),
+    );
+  });
+
   it('discards numbered task references even in conditional notes', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-numbered-pr-conditional',
@@ -682,7 +697,11 @@ describe('extractPostTaskLessonCandidates', () => {
     },
   );
 
-  it.each(['The package @franken/foo uses pnpm', '@franken/foo uses pnpm'])(
+  it.each([
+    'The package @franken/foo uses pnpm',
+    '@franken/foo uses pnpm',
+    'The @franken/foo package uses pnpm',
+  ])(
     'admits package-scoped environment fact %p',
     (note) => {
       const report = extractPostTaskLessonCandidates({
@@ -928,6 +947,22 @@ describe('extractPostTaskLessonCandidates', () => {
       taskId: 'post-task-customer-policy-colon-id',
       completedAt: '2026-07-16T00:00:00.000Z',
       userCorrections: ['User prefers customer data: acme-123 to stay out of lessons'],
+    });
+
+    expect(JSON.stringify(report)).not.toContain('acme-123');
+    expect(report.candidates[0]?.privacyFilter).toEqual(
+      expect.objectContaining({
+        sensitive: true,
+        flags: expect.arrayContaining(['customer-data']),
+      }),
+    );
+  });
+
+  it('redacts customer ids after generic labels separated by whitespace', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-customer-identifiers-id',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['User prefers customer identifiers acme-123 stay out of lessons'],
     });
 
     expect(JSON.stringify(report)).not.toContain('acme-123');
@@ -1784,6 +1819,7 @@ describe('extractPostTaskLessonCandidates', () => {
     'User wants https://github.com/acme/foo/pull/123/files reviewed',
     'User wants https://github.com/acme/foo/issues/123?foo=bar closed',
     'User wants https://github.com/acme/foo/commit/1234567890abcdef merged',
+    'User wants https://github.com/acme/foo/actions/runs/123 inspected',
   ])(
     'discards terse task-reference command %p',
     (correction) => {
