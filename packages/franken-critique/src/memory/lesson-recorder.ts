@@ -215,7 +215,7 @@ const PREFERENCE_PATTERNS: readonly RegExp[] = [
 
 const ENVIRONMENT_FACT_PATTERNS: readonly RegExp[] = [
   /\b(?:repo|repository|project|package|workspace)\s+(?:uses|requires|runs|is)\b/i,
-  /\b(?:package\s+)?@franken\/[a-z0-9-]+\s+(?:uses|requires|runs|is)\b/i,
+  /(?:^|\s)(?:package\s+)?@franken\/[a-z0-9-]+\s+(?:uses|requires|runs|is)\b/i,
 ];
 
 const LESSON_FEEDBACK_WEIGHTING_GUIDANCE =

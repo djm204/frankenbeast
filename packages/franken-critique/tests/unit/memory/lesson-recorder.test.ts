@@ -649,20 +649,23 @@ describe('extractPostTaskLessonCandidates', () => {
     },
   );
 
-  it('admits package-scoped environment facts', () => {
-    const report = extractPostTaskLessonCandidates({
-      taskId: 'post-task-package-env-fact',
-      completedAt: '2026-07-16T00:00:00.000Z',
-      notes: ['The package @franken/foo uses pnpm'],
-    });
+  it.each(['The package @franken/foo uses pnpm', '@franken/foo uses pnpm'])(
+    'admits package-scoped environment fact %p',
+    (note) => {
+      const report = extractPostTaskLessonCandidates({
+        taskId: 'post-task-package-env-fact',
+        completedAt: '2026-07-16T00:00:00.000Z',
+        notes: [note],
+      });
 
-    expect(report.candidates[0]).toEqual(
-      expect.objectContaining({
-        category: 'environment-fact',
-        suggestedDestination: 'memory',
-      }),
-    );
-  });
+      expect(report.candidates[0]).toEqual(
+        expect.objectContaining({
+          category: 'environment-fact',
+          suggestedDestination: 'memory',
+        }),
+      );
+    },
+  );
 
   it('accepts conditional use-workaround notes', () => {
     const report = extractPostTaskLessonCandidates({
