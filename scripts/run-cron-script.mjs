@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { constants as osConstants } from 'node:os';
 
-const USAGE = 'Usage: node scripts/run-cron-script.mjs --name <job-name> -- <command> [args...]';
+const USAGE = 'Usage: node scripts/run-cron-script.mjs --name <job-name> [--allow-dangerous-skip-permissions] -- <command> [args...]';
 const STDERR_TAIL_LIMIT = 4_096;
 const STDERR_REDACTION_CONTEXT_LIMIT = STDERR_TAIL_LIMIT * 16;
 const KILL_GRACE_MS = Number.parseInt(process.env.CRON_SCRIPT_KILL_GRACE_MS ?? '5000', 10);
@@ -20,6 +20,7 @@ function parseArgs(argv) {
 
   let name;
   let recoverable = false;
+  let allowDangerousSkipPermissions = false;
   for (let index = 0; index < optionArgs.length; index += 1) {
     const arg = optionArgs[index];
     if (arg === '--name') {
@@ -29,6 +30,10 @@ function parseArgs(argv) {
     }
     if (arg === '--recoverable') {
       recoverable = true;
+      continue;
+    }
+    if (arg === '--allow-dangerous-skip-permissions') {
+      allowDangerousSkipPermissions = true;
       continue;
     }
     throw Object.assign(new Error(`${USAGE}; unknown option ${JSON.stringify(arg)}`), {
@@ -42,7 +47,24 @@ function parseArgs(argv) {
     throw Object.assign(new Error(USAGE), { exitCode: 2, failureKind: 'usage', scriptName: name || 'unknown' });
   }
 
-  return { name, recoverable, command };
+  const permissionMode = commandUsesDangerousSkipPermissions(command) ? 'dangerous-skip-permissions' : 'least-privilege';
+  if (permissionMode === 'dangerous-skip-permissions' && !allowDangerousSkipPermissions) {
+    throw Object.assign(new Error(
+      'Refusing to run unattended cron command with --dangerously-skip-permissions; pass --allow-dangerous-skip-permissions only after documenting the trust boundary and blast radius.',
+    ), {
+      exitCode: 64,
+      failureKind: 'security',
+      scriptName: name,
+      command,
+      permissionMode,
+    });
+  }
+
+  return { name, recoverable, command, permissionMode };
+}
+
+function commandUsesDangerousSkipPermissions(command) {
+  return command.some((part) => part === '--dangerously-skip-permissions');
 }
 
 function appendTail(current, chunk, limit = STDERR_TAIL_LIMIT) {
@@ -443,7 +465,7 @@ function spawnFailureExitCode(error) {
   return error?.code === 'EACCES' || error?.code === 'EPERM' ? 126 : 127;
 }
 
-function writeEnvelope({ script, command, exitCode, signal = null, failureKind = 'exit', message, stderrTail = '', durationMs, recoverable = false }) {
+function writeEnvelope({ script, command, exitCode, signal = null, failureKind = 'exit', message, stderrTail = '', durationMs, recoverable = false, permissionMode = 'least-privilege' }) {
   const envelope = {
     schemaVersion: 1,
     type: 'franken.cron.script.error',
@@ -453,6 +475,7 @@ function writeEnvelope({ script, command, exitCode, signal = null, failureKind =
     failureKind,
     exitCode,
     signal,
+    permissionMode,
     durationMs,
     recoverable,
     message: redactMessage(message, command),
@@ -481,7 +504,7 @@ function findJsonStringEnd(text, start, delimiter, initialBackslashes = 0) {
   return -1;
 }
 
-async function runCronScript({ name, recoverable, command }) {
+async function runCronScript({ name, recoverable, command, permissionMode }) {
   const started = Date.now();
   const [bin, ...args] = command;
   let stderrTail = '';
@@ -556,6 +579,7 @@ async function runCronScript({ name, recoverable, command }) {
         stderrTail,
         durationMs,
         recoverable,
+        permissionMode,
       });
     };
 
@@ -631,7 +655,7 @@ async function runCronScript({ name, recoverable, command }) {
 
     child = spawn(bin, args, {
       cwd: process.cwd(),
-      env: process.env,
+      env: { ...process.env, FRANKENBEAST_CRON_PERMISSION_MODE: permissionMode },
       shell: process.platform === 'win32',
       stdio: ['inherit', 'inherit', 'pipe'],
     });
@@ -678,6 +702,7 @@ async function runCronScript({ name, recoverable, command }) {
           stderrTail,
           durationMs,
           recoverable,
+          permissionMode,
         });
       }
       finish(exitCode);
@@ -736,6 +761,7 @@ async function runCronScript({ name, recoverable, command }) {
         stderrTail,
         durationMs,
         recoverable,
+        permissionMode,
       });
       finish(exitCode);
     });
@@ -760,13 +786,16 @@ main().catch((error) => {
   const exitCode = Number.isInteger(error?.exitCode) ? error.exitCode : 1;
   const failureKind = typeof error?.failureKind === 'string' ? error.failureKind : 'internal';
   const script = typeof error?.scriptName === 'string' ? error.scriptName : 'unknown';
+  const command = Array.isArray(error?.command) ? error.command : [];
+  const permissionMode = typeof error?.permissionMode === 'string' ? error.permissionMode : 'least-privilege';
   writeEnvelope({
     script,
-    command: [],
+    command,
     exitCode,
     failureKind,
     message: error instanceof Error ? error.message : String(error),
     durationMs: 0,
+    permissionMode,
   });
   process.exitCode = exitCode;
 });

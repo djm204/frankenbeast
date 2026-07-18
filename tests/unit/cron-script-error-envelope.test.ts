@@ -249,6 +249,49 @@ describe('cron script error envelope runner', () => {
     expect(envelope.stderrTail).toContain('TRUNCATED_SECRET=[REDACTED]');
   });
 
+  it('refuses dangerous skip-permissions cron commands without explicit opt-in', () => {
+    const result = runCronScript([
+      '--name',
+      'unsafe-agent-cron',
+      '--',
+      process.execPath,
+      '-e',
+      'process.exit(0)',
+      '--dangerously-skip-permissions',
+    ]);
+
+    expect(result.status).toBe(64);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope).toMatchObject({
+      schemaVersion: 1,
+      type: 'franken.cron.script.error',
+      script: 'unsafe-agent-cron',
+      exitCode: 64,
+      signal: null,
+      failureKind: 'security',
+      permissionMode: 'dangerous-skip-permissions',
+    });
+    expect(envelope.command).toContain('--dangerously-skip-permissions');
+    expect(envelope.message).toContain('Refusing to run unattended cron command');
+  });
+
+  it('runs dangerous skip-permissions cron commands only with auditable opt-in', () => {
+    const result = runCronScript([
+      '--name',
+      'acknowledged-agent-cron',
+      '--allow-dangerous-skip-permissions',
+      '--',
+      process.execPath,
+      '-e',
+      "if (process.env.FRANKENBEAST_CRON_PERMISSION_MODE !== 'dangerous-skip-permissions') process.exit(9)",
+      '--',
+      '--dangerously-skip-permissions',
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+  });
+
   it('fails with an explicit envelope when the cron command is missing', () => {
     const result = runCronScript(['--name', 'missing-command']);
 
@@ -261,8 +304,9 @@ describe('cron script error envelope runner', () => {
       exitCode: 2,
       signal: null,
       failureKind: 'usage',
+      permissionMode: 'least-privilege',
     });
-    expect(envelope.message).toContain('Usage: node scripts/run-cron-script.mjs --name <job-name> -- <command> [args...]');
+    expect(envelope.message).toContain('Usage: node scripts/run-cron-script.mjs --name <job-name> [--allow-dangerous-skip-permissions] -- <command> [args...]');
   });
 
   it('keeps the envelope parseable when stderr lacks a trailing newline', () => {
