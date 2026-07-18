@@ -60,7 +60,7 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting, dependency update ex
 
 Frankenbeast is currently organized as 10 npm workspace packages under `packages/*`. Several originally separate MOD packages have been consolidated into the orchestrator or MCP suite: firewall/security middleware, skills/provider loading, heartbeat/reflection, external comms, and MCP registration are current implementation surfaces inside `@franken/orchestrator` and `@franken/mcp-suite`, not standalone package directories.
 
-The diagrams below describe the Beast-loop model and still use MOD labels as capability names. For the exact current package map, treat the package inventory table as authoritative.
+The diagrams below use current package names or implementation-surface names, and the package inventory table remains the authoritative workspace map.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full interconnection diagram.
 
@@ -72,23 +72,23 @@ flowchart TD
         direction TB
 
         subgraph P1["Phase 1: Ingestion"]
-            FW["MOD-01 Firewall<br/>Injection scan, PII mask"]
-            MEM["MOD-03 Brain<br/>Context hydration"]
+            FW["@franken/orchestrator firewall<br/>Injection scan, PII mask"]
+            MEM["@franken/brain<br/>Context hydration"]
         end
 
         subgraph P2["Phase 2: Planning"]
-            PL["MOD-04 Planner<br/>DAG task graph"]
-            CR["MOD-06 Critique<br/>8 evaluators, loop"]
+            PL["@franken/planner<br/>DAG task graph"]
+            CR["@franken/critique<br/>8 evaluators, loop"]
         end
 
         subgraph P3["Phase 3: Execution"]
-            SK["MOD-02 Skills<br/>Registry + MCP tools"]
-            GOV["MOD-07 Governor<br/>HITL approval gates"]
+            SK["@franken/orchestrator skills<br/>Registry + MCP tools"]
+            GOV["@franken/governor<br/>HITL approval gates"]
         end
 
         subgraph P4["Phase 4: Closure"]
-            OB["MOD-05 Observer<br/>Traces, cost, evals"]
-            HB["MOD-08 Heartbeat<br/>Reflection + briefs"]
+            OB["@franken/observer<br/>Traces, cost, evals"]
+            HB["@franken/orchestrator heartbeat<br/>Reflection + briefs"]
         end
 
         CB["Circuit Breakers<br/>Injection → halt | Budget → HITL | Spiral → escalate"]
@@ -124,14 +124,14 @@ flowchart TD
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant FW as Firewall (MOD-01)
-    participant MEM as Brain (MOD-03)
-    participant PL as Planner (MOD-04)
-    participant CR as Critique (MOD-06)
-    participant SK as Skills (MOD-02)
-    participant GOV as Governor (MOD-07)
-    participant OB as Observer (MOD-05)
-    participant HB as Heartbeat (MOD-08)
+    participant FW as @franken/orchestrator firewall
+    participant MEM as @franken/brain
+    participant PL as @franken/planner
+    participant CR as @franken/critique
+    participant SK as @franken/orchestrator skills
+    participant GOV as @franken/governor
+    participant OB as @franken/observer
+    participant HB as @franken/orchestrator heartbeat
 
     U->>FW: raw input
 
@@ -188,18 +188,18 @@ sequenceDiagram
 graph TB
     User([User Input])
 
-    subgraph "MOD-01: Firewall"
+    subgraph "@franken/orchestrator firewall"
         FW_IN["Inbound Interceptors<br/>Injection Scanner, PII Masker"]
         FW_ADAPT["Adapter Pipeline<br/>Claude / OpenAI / Ollama"]
         FW_OUT["Outbound Interceptors<br/>Schema Enforcer, Hallucination Scraper"]
         FW_IN --> FW_ADAPT --> FW_OUT
     end
 
-    subgraph "MOD-02: Skills"
+    subgraph "@franken/orchestrator skills"
         SK_REG["Skill Registry<br/>ISkillRegistry"]
     end
 
-    subgraph "MOD-03: Brain"
+    subgraph "@franken/brain"
         MEM_W["Working Memory"]
         MEM_E["Episodic Memory<br/>SQLite"]
         MEM_S["Semantic Memory<br/>ChromaDB"]
@@ -209,12 +209,12 @@ graph TB
         MEM_O --> MEM_S
     end
 
-    subgraph "MOD-04: Planner"
+    subgraph "@franken/planner"
         PL_DAG["DAG Builder<br/>Linear / Parallel / Recursive"]
         PL_COT["CoT Gate<br/>RationaleBlock"]
     end
 
-    subgraph "MOD-05: Observer"
+    subgraph "@franken/observer"
         OB_TRACE["TraceContext + Spans"]
         OB_COST["TokenCounter + CostCalc"]
         OB_CB["Circuit Breaker"]
@@ -223,7 +223,7 @@ graph TB
         OB_COST --> OB_CB
     end
 
-    subgraph "MOD-06: Critique"
+    subgraph "@franken/critique"
         CR_DET["Deterministic Evaluators<br/>Safety, GhostDep, LogicLoop, ADR"]
         CR_HEUR["Heuristic Evaluators<br/>Factuality, Conciseness, Complexity"]
         CR_LOOP["Critique Loop"]
@@ -231,7 +231,7 @@ graph TB
         CR_HEUR --> CR_LOOP
     end
 
-    subgraph "MOD-07: Governor"
+    subgraph "@franken/governor"
         GOV_TRIG["Trigger Evaluators<br/>Budget / Skill / Confidence / Ambiguity"]
         GOV_GW["Approval Gateway<br/>CLI / Slack channels"]
         GOV_SEC["HMAC-SHA256 Signing"]
@@ -239,14 +239,14 @@ graph TB
         GOV_SEC --> GOV_GW
     end
 
-    subgraph "MOD-08: Heartbeat"
+    subgraph "@franken/orchestrator heartbeat"
         HB_DET["Deterministic Check"]
         HB_REFL["Reflection Engine"]
         HB_DISP["Action Dispatcher"]
         HB_DET --> HB_REFL --> HB_DISP
     end
 
-    subgraph "MCP Registry"
+    subgraph "@franken/mcp-suite registry"
         MCP_REG["McpRegistry<br/>Tool routing"]
         MCP_CLI["McpClient<br/>JSON-RPC 2.0"]
         MCP_REG --> MCP_CLI

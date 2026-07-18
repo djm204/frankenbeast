@@ -1,5 +1,8 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-17 — Architecture docs package-name consistency
+- For docs-only architecture fixes, add narrow regression tests that slice the relevant README/docs sections and assert legacy labels are absent there, rather than banning every historical MOD reference across the repository; configuration/env docs may still need legacy toggles for compatibility.
+
 ## 2026-07-17 — Setup healthcheck Codex closeout
 - For onboarding setup healthchecks, distinguish pre-service bootstrap from strict local service verification: occupied optional ports should warn with conflict guidance before Docker starts, while `--require-services` can treat expected open ports as healthy. Keep JSON check schemas stable by serializing nullable fields like `action`, and let tests override service URLs so host-running Grafana/Tempo cannot flip optional-service assertions.
 
