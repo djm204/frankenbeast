@@ -886,8 +886,9 @@ function hasSamePidLiveProbe(
   const liveProbe = liveProbeRecencyByCardId.get(snapshot.cardId.trim())?.get(snapshot.pid);
   const snapshotRecency = snapshotRecencyMs(snapshot);
   return liveProbe !== undefined && (
-    liveProbe.recencyMs > snapshotRecency
-    || (liveProbe.recencyMs === snapshotRecency && liveProbe.index > snapshotIndex)
+    snapshotRecency === 0
+      ? liveProbe.index > snapshotIndex
+      : liveProbe.recencyMs > snapshotRecency || (liveProbe.recencyMs === snapshotRecency && liveProbe.index > snapshotIndex)
   );
 }
 
