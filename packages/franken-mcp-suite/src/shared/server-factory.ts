@@ -808,9 +808,9 @@ async function dispatchTool(
   let result: ToolResult;
   try {
     result = await tool.handler(validated.value);
-  } catch (err) {
+  } catch {
     result = {
-      content: [{ type: 'text' as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
+      content: [{ type: 'text' as const, text: 'Error: Tool execution failed [MCP_TOOL_HANDLER_ERROR]' }],
       isError: true,
     };
   }

@@ -999,6 +999,18 @@ const TOOLS: ToolFull[] = [
       const content = String(args['content']);
       const criteria = splitCsvArg(args['criteria']) ?? ['correctness', 'readability', 'security', 'complexity'];
       const evaluators = splitCsvArg(args['evaluators']);
+      const supportedEvaluators = ['logic-loop', 'complexity', 'conciseness'];
+      const unknownEvaluators = evaluators?.filter((name) => !supportedEvaluators.includes(name)) ?? [];
+      if (unknownEvaluators.length > 0) {
+        const noun = unknownEvaluators.length === 1 ? 'evaluator' : 'evaluators';
+        return {
+          content: [{
+            type: 'text',
+            text: `Error: Unknown critique ${noun}: ${unknownEvaluators.join(', ')}. Expected one of: ${supportedEvaluators.join(', ')}`,
+          }],
+          isError: true,
+        };
+      }
       const result = await critique.evaluate(evaluators ? { content, criteria, evaluators } : { content, criteria });
       const findingsText = result.findings.length > 0 ? result.findings.map((f) => `  [${f.severity}] ${f.message}`).join('\n') : '  None';
       const text = [`## Critique Result`, ``, `**verdict:** ${result.verdict}`, `**score:** ${result.score.toFixed(2)}`, `**findings:**`, findingsText].join('\n');
