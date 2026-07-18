@@ -432,11 +432,15 @@ describe('hard-coded example secret scanner', () => {
     const scriptDir = join(root, 'scripts');
     mkdirSync(scriptDir, { recursive: true });
     const rawPat = 'ghp_' + 'a'.repeat(16);
+    writeFileSync(join(root, '.env.example'), `GITHUB_PAT=${rawPat}\n`, 'utf8');
     writeFileSync(
       join(scriptDir, 'install-cron.mjs'),
       [
+        "import { execFileSync } from 'node:child_process';",
         'const { owner } = options;',
         'const pat = process.env.GITHUB_TOKEN;',
+        'const env = process.env;',
+        'const fromEnvAlias = env.GITHUB_TOKEN;',
         'const {',
         '  GITHUB_TOKEN: destructuredPat,',
         '} = process.env;',
@@ -444,6 +448,8 @@ describe('hard-coded example secret scanner', () => {
         'const CRON_CMD =',
         "  schedule + ' agy pr --token ' + pat.trim();",
         'const CRON_CMD_2 = `0 3 * * mon agy pr --token ${destructuredPat.trim()}`;',
+        'const entry = `0 3 * * * agy pr --token ${fromEnvAlias}`;',
+        "execFileSync('crontab', ['-'], { input: entry });",
       ].join('\n'),
       'utf8',
     );
@@ -451,8 +457,11 @@ describe('hard-coded example secret scanner', () => {
       join(scriptDir, 'install-cron.py'),
       [
         'from os import environ',
+        'from os import environ as env',
+        "TOKEN_ENV = 'GITHUB_TOKEN'",
         "github_pat = environ['GITHUB_PERSONAL_ACCESS_TOKEN']",
         "entry = f'* * * * * agy pr --token {github_pat.strip()}'",
+        "entry2 = f'* * * * * agy pr --token {env[TOKEN_ENV]}'",
         'raw = """',
         `* * * * * GH_PAT=${rawPat} agy pr`,
         '"""',
@@ -472,7 +481,13 @@ describe('hard-coded example secret scanner', () => {
         'crontab <<EOF',
         'GITHUB_TOKEN=$GITHUB_TOKEN',
         'EOF',
+        'if [ -z "$GITHUB_TOKEN" ]; then echo missing; fi',
         'CRON_CMD_4="0 3 * * * agy pr --token $(gh auth token)"',
+        "CRON_CMD_SAFE='0 3 * * * agy pr --token $(gh auth token)'",
+        'auth="$(gh auth token)"',
+        'CRON_CMD_5="0 3 * * * agy pr --token $auth"',
+        'local -r local_auth="$GITHUB_TOKEN"',
+        'CRON_CMD_6="0 3 * * * agy pr --token $local_auth"',
       ].join('\n'),
       'utf8',
     );
@@ -480,15 +495,22 @@ describe('hard-coded example secret scanner', () => {
     const result = runScanner(root);
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('scripts/install-cron.mjs:8');
-    expect(result.stderr).toContain('scripts/install-cron.mjs:9');
-    expect(result.stderr).toContain('scripts/install-cron.py:3');
+    expect(result.stderr).toContain('.env.example:1');
+    expect(result.stderr).toContain('scripts/install-cron.mjs:11');
+    expect(result.stderr).toContain('scripts/install-cron.mjs:12');
+    expect(result.stderr).toContain('scripts/install-cron.mjs:13');
     expect(result.stderr).toContain('scripts/install-cron.py:5');
+    expect(result.stderr).toContain('scripts/install-cron.py:6');
+    expect(result.stderr).toContain('scripts/install-cron.py:8');
     expect(result.stderr).toContain('scripts/cron-install.sh:3');
     expect(result.stderr).toContain('scripts/cron-install.sh:5');
     expect(result.stderr).toContain('scripts/cron-install.sh:7');
     expect(result.stderr).toContain('scripts/cron-install.sh:9');
-    expect(result.stderr).toContain('scripts/cron-install.sh:11');
+    expect(result.stderr).toContain('scripts/cron-install.sh:12');
+    expect(result.stderr).toContain('scripts/cron-install.sh:15');
+    expect(result.stderr).toContain('scripts/cron-install.sh:17');
+    expect(result.stderr).not.toContain('scripts/cron-install.sh:11');
+    expect(result.stderr).not.toContain('scripts/cron-install.sh:13');
     expect(result.stderr).toContain('GH_PAT=<redacted>');
     expect(result.stderr).not.toContain(rawPat);
   });
