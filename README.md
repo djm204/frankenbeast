@@ -334,7 +334,7 @@ graph TB
 | `@franken/web` | React dashboard for chat, tracked Beast agents, network controls, analytics/cost/safety views. |
 | `@franken/live-bench` | Live CLI benchmark tooling. |
 
-Historical docs and ADRs may still mention removed packages such as `frankenfirewall`, `franken-skills`, `franken-heartbeat`, `franken-mcp`, and `franken-comms`. Current code paths for those capabilities live in the packages above.
+Earlier standalone package surfaces have been consolidated into `@franken/orchestrator` and `@franken/mcp-suite`. Treat the current ten-package inventory above as authoritative for available workspace packages.
 
 ### Core Principles
 
@@ -917,7 +917,7 @@ The `frankenbeast chat-server` exposes the same runtime over HTTP + WebSocket fo
 
 ## Communications Gateway
 
-External communications are implemented in `@franken/orchestrator` under `packages/franken-orchestrator/src/comms`; there is no current standalone `franken-comms` workspace package. The gateway keeps deterministic session mapping for supported channels:
+External communications are implemented in `@franken/orchestrator` under `packages/franken-orchestrator/src/comms`; they are not provided by a separate workspace package. The gateway keeps deterministic session mapping for supported channels:
 
 | Channel | Transport | Security |
 |---------|-----------|----------|
