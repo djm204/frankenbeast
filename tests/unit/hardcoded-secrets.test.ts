@@ -610,6 +610,7 @@ describe('hard-coded example secret scanner', () => {
         'from os import environ as env',
         'from os import path, getenv as get_env',
         'from subprocess import check_output',
+        'getenv_alias = os.getenv',
         "credential = env.get('GITHUB_TOKEN')",
         "entry = f'0 3 * * * agy pr --token {credential}'",
         "credential2 = get_env('GITHUB_TOKEN')",
@@ -620,6 +621,8 @@ describe('hard-coded example secret scanner', () => {
         "entry3 = f'0 5 * * * agy pr --token {credential3}'",
         "credential4 = check_output(['gh', 'auth', 'token'], text=True)",
         "entry4 = f'0 6 * * * agy pr --token {credential4}'",
+        "credential5 = getenv_alias('GITHUB_TOKEN')",
+        "entry5 = f'0 7 * * * agy pr --token {credential5}'",
       ].join('\n'),
       'utf8',
     );
@@ -660,6 +663,15 @@ describe('hard-coded example secret scanner', () => {
       ].join('\n'),
       'utf8',
     );
+    writeFileSync(
+      join(scriptDir, 'maintenance.sh'),
+      [
+        'cat <<EOF | crontab -',
+        '* * * * * GITHUB_TOKEN=$GITHUB_TOKEN agy pr',
+        'EOF',
+      ].join('\n'),
+      'utf8',
+    );
 
     const result = runScanner(root);
 
@@ -677,10 +689,11 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('scripts/install-cron.mjs:31');
     expect(result.stderr).toContain('scripts/install-cron.mjs:36');
     expect(result.stderr).toContain('scripts/install-cron.mjs:40');
-    expect(result.stderr).toContain('scripts/install-cron.py:5');
-    expect(result.stderr).toContain('scripts/install-cron.py:7');
-    expect(result.stderr).toContain('scripts/install-cron.py:11');
-    expect(result.stderr).toContain('scripts/install-cron.py:13');
+    expect(result.stderr).toContain('scripts/install-cron.py:6');
+    expect(result.stderr).toContain('scripts/install-cron.py:8');
+    expect(result.stderr).toContain('scripts/install-cron.py:12');
+    expect(result.stderr).toContain('scripts/install-cron.py:14');
+    expect(result.stderr).toContain('scripts/install-cron.py:16');
     expect(result.stderr).toContain('scripts/cron-install.sh:2');
     expect(result.stderr).toContain('scripts/cron-install.sh:6');
     expect(result.stderr).toContain('scripts/cron-install.sh:8');
@@ -688,6 +701,7 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('scripts/cron-install.sh:13');
     expect(result.stderr).toContain('scripts/install.sh:2');
     expect(result.stderr).toContain('scripts/nightly.sh:2');
+    expect(result.stderr).toContain('scripts/maintenance.sh:2');
   });
 
   it('allows runtime gh token substitutions in cron strings', () => {

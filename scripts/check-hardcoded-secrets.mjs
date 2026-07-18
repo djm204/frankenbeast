@@ -151,7 +151,10 @@ function shouldScanSource(path) {
     return false;
   }
   const extension = extensionOf(path);
-  if ((extension === '.sh' || extension === '.bash') && !/(?:^|\/)[^/]*(?:cron|crontab|install|setup|github|schedule|scheduler|nightly)[^/]*\.(?:sh|bash)$/i.test(rel)) {
+  if (rel === 'scripts/bootstrap.sh') {
+    return false;
+  }
+  if ((extension === '.sh' || extension === '.bash') && !rel.startsWith('scripts/') && !/(?:^|\/)[^/]*(?:cron|crontab|install|setup|github|schedule|scheduler|nightly)[^/]*\.(?:sh|bash)$/i.test(rel)) {
     return false;
   }
   return scannedExtensions.has(extension);
@@ -473,10 +476,16 @@ function collectSensitiveEnvAliases(line, aliases, envNameAliases, envContainerA
     return;
   }
   const [, alias, expression] = assignment;
-  if (/^(?:\(?process\.env\)?|import\.meta\.env|(?:os\.)?environ)\s*;?$/.test(expression.trim())) {
+  const trimmedExpression = expression.trim();
+  if (/^(?:\(?process\.env\)?|import\.meta\.env|(?:os\.)?environ)\s*;?$/.test(trimmedExpression)) {
     envContainerAliases.add(alias);
   } else {
     envContainerAliases.delete(alias);
+  }
+  if (/^(?:os\.)?getenv\s*;?$/.test(trimmedExpression)) {
+    envGetterAliases.add(alias);
+  } else {
+    envGetterAliases.delete(alias);
   }
   const envNameLiteral = stringLiterals(expression).map((literal) => literal.value.trim()).find((literal) => sensitiveIdentifierPattern.test(literal));
   const shellEnvNameLiteral = options.shell && sensitiveIdentifierPattern.test(expression.trim()) ? expression.trim() : '';
