@@ -551,6 +551,81 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).not.toContain(rawPat);
   });
 
+  it('rejects Codex-reported cron credential scanner edge cases', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'install-cron.mjs'),
+      [
+        'const credential = (',
+        '  process.env.GITHUB_TOKEN',
+        ');',
+        'const entry = `0 3 * * * agy pr --token ${credential}`;',
+        'export const { GITHUB_TOKEN: exportedCredential } = process.env;',
+        'const exportedEntry = `0 4 * * * agy pr --token ${exportedCredential}`;',
+        'const { GITHUB_TOKEN: typedCredential }: NodeJS.ProcessEnv = process.env;',
+        'const typedEntry = `0 5 * * * agy pr --token ${typedCredential}`;',
+        'const CRON_CMD = `',
+        'GITHUB_TOKEN=${process.env.GITHUB_TOKEN} agy pr',
+        '`;',
+        'const entries = [',
+        "  '0 6 * * * gh auth token | agy pr',",
+        '];',
+        'const laterDiagnostic = process.env.GITHUB_TOKEN;',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'install-cron.py'),
+      [
+        'from os import environ as env',
+        'from os import path, getenv as get_env',
+        "credential = env.get('GITHUB_TOKEN')",
+        "entry = f'0 3 * * * agy pr --token {credential}'",
+        "credential2 = get_env('GITHUB_TOKEN')",
+        "entry2 = f'0 4 * * * agy pr --token {credential2}'",
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'cron-install.sh'),
+      [
+        'cat <<EOF | crontab -',
+        'GITHUB_TOKEN=$GITHUB_TOKEN',
+        'EOF',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/install-cron.mjs:4');
+    expect(result.stderr).toContain('scripts/install-cron.mjs:6');
+    expect(result.stderr).toContain('scripts/install-cron.mjs:8');
+    expect(result.stderr).toContain('scripts/install-cron.mjs:10');
+    expect(result.stderr).toContain('scripts/install-cron.py:4');
+    expect(result.stderr).toContain('scripts/install-cron.py:6');
+    expect(result.stderr).toContain('scripts/cron-install.sh:2');
+    expect(result.stderr).not.toContain('scripts/install-cron.mjs:15');
+  });
+
+  it('allows runtime gh token substitutions in cron strings', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'install-cron.mjs'),
+      "const CRON_CMD = '0 3 * * * GITHUB_TOKEN=$(gh auth token) agy pr';\n",
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(0);
+  });
+
   it('documents cron credential rotation guidance', () => {
     const doc = readFileSync(resolve(ROOT, 'docs/cron-credential-safety.md'), 'utf8');
 

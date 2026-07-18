@@ -343,10 +343,10 @@ function hasSensitiveEnvAccess(line, envContainerAliases = new Set(), envNameAli
   }
   for (const alias of envContainerAliases) {
     const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const aliasAccessPattern = new RegExp("\\b" + escaped + "\\??(?:\\.([A-Z0-9_]+)|\\[['\"`]([^'\"`]+)['\"`]\\]|\\[\\s*([A-Za-z_$][\\w$]*)\\s*\\])", 'gi');
+    const aliasAccessPattern = new RegExp("\\b" + escaped + "\\??(?:\\.(?:get|setdefault)\\s*\\(\\s*['\"`]([^'\"`]+)['\"`]|\\.([A-Z0-9_]+)|\\[['\"`]([^'\"`]+)['\"`]\\]|\\[\\s*([A-Za-z_$][\\w$]*)\\s*\\])", 'gi');
     for (const match of line.matchAll(aliasAccessPattern)) {
-      const name = match[1] ?? match[2] ?? '';
-      const nameAlias = match[3] ?? '';
+      const name = match[1] ?? match[2] ?? match[3] ?? '';
+      const nameAlias = match[4] ?? '';
       if ((name && sensitiveIdentifierPattern.test(name)) || (nameAlias && envNameAliases.has(nameAlias))) {
         return true;
       }
@@ -398,14 +398,19 @@ function expressionUsesSensitiveAlias(expression, aliases) {
 }
 
 function collectSensitiveEnvAliases(line, aliases, envNameAliases, envContainerAliases = new Set(), envGetterAliases = new Set(), destructuredEnvState = null, options = {}) {
-  const importEnvAlias = line.match(/^\s*from\s+os\s+import\s+environ\s+as\s+([A-Za-z_$][\w$]*)\s*$/);
-  if (importEnvAlias) {
-    envContainerAliases.add(importEnvAlias[1]);
-    return;
-  }
-  const importGetenvAlias = line.match(/^\s*from\s+os\s+import\s+getenv\s+as\s+([A-Za-z_$][\w$]*)\s*$/);
-  if (importGetenvAlias) {
-    envGetterAliases.add(importGetenvAlias[1]);
+  const groupedOsImport = line.match(/^\s*from\s+os\s+import\s+(.+)$/);
+  if (groupedOsImport) {
+    for (const rawPart of groupedOsImport[1].split(',')) {
+      const part = rawPart.trim();
+      const envMatch = part.match(/^environ(?:\s+as\s+([A-Za-z_$][\w$]*))?$/);
+      if (envMatch) {
+        envContainerAliases.add(envMatch[1] ?? 'environ');
+      }
+      const getenvMatch = part.match(/^getenv(?:\s+as\s+([A-Za-z_$][\w$]*))?$/);
+      if (getenvMatch) {
+        envGetterAliases.add(getenvMatch[1] ?? 'getenv');
+      }
+    }
     return;
   }
 
@@ -425,7 +430,7 @@ function collectSensitiveEnvAliases(line, aliases, envNameAliases, envContainerA
     return;
   }
 
-  const destructured = line.match(/^\s*(?:const|let|var)\s*\{([^}]+)\}\s*=\s*(?:\(?process\.env\)?|import\.meta\.env)\s*;?$/);
+  const destructured = line.match(/^\s*(?:export\s+)?(?:const|let|var)\s*\{([^}]+)\}\s*(?::\s*[^=]+)?=\s*(?:\(?process\.env\)?|import\.meta\.env)\s*;?$/);
   if (destructured) {
     for (const part of destructured[1].split(',')) {
       const [rawName, rawAlias] = part.split(':').map((value) => value?.trim()).filter(Boolean);
@@ -449,7 +454,7 @@ function collectSensitiveEnvAliases(line, aliases, envNameAliases, envContainerA
     return;
   }
 
-  const destructuredStart = line.match(/^\s*(?:const|let|var)\s*\{\s*(.*)$/);
+  const destructuredStart = line.match(/^\s*(?:export\s+)?(?:const|let|var)\s*\{\s*(.*)$/);
   if (destructuredStart && destructuredEnvState && !destructuredStart[1].includes('}')) {
     destructuredEnvState.active = true;
     destructuredEnvState.parts = [destructuredStart[1]];
@@ -515,18 +520,28 @@ function hasInlineTokenMaterial(value) {
   return /\b(?:gh[pousr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{8,})\b/i.test(value);
 }
 
+function hasPersistedCredentialAssignment(value) {
+  const assignmentPattern = new RegExp(`${sensitiveIdentifierPattern.source}\\s*=\\s*((?:\\$\\(\\s*gh\\s+auth\\s+token\\s*\\))|[^\\s'\"` + '`' + `]+)`, 'i');
+  const match = assignmentPattern.exec(value);
+  if (!match) {
+    return false;
+  }
+  const assignedValue = match[1] ?? '';
+  return !/^\$\(\s*gh\s+auth\s+token\s*\)$/i.test(assignedValue);
+}
+
 function hasCronCredentialLiteral(line) {
   return stringLiterals(line).some((literal) => {
     const value = literal.value;
     const cronLike = hasCronScheduleLiteral(`${literal.quote}${value}${literal.quote}`) || /\bCRON(?:_CMD|_COMMAND)?\b|\bcrontab\b/i.test(line);
-    const hasCredentialAssignment = new RegExp(`${sensitiveIdentifierPattern.source}\\s*=\\s*[^\\s'\"` + '`' + `]+`, 'i').test(value);
+    const hasCredentialAssignment = hasPersistedCredentialAssignment(value);
     const hasInlineTokenMaterialValue = hasInlineTokenMaterial(value);
     return (cronLike || hasCredentialAssignment) && (hasCredentialAssignment || hasInlineTokenMaterialValue);
   });
 }
 
 function hasCronCredentialText(line) {
-  return new RegExp(`${sensitiveIdentifierPattern.source}\\s*=\\s*[^\\s'\"` + '`' + `]+`, 'i').test(line) || hasInlineTokenMaterial(line);
+  return hasPersistedCredentialAssignment(line) || hasInlineTokenMaterial(line);
 }
 
 function hasProgrammaticGhAuthTokenCall(line) {
@@ -568,17 +583,17 @@ function isCronContinuationLine(line, inCronContext, pendingCronCommand) {
   if (!inCronContext) {
     return false;
   }
-  if (/\(\s*$|[=+\\,]\s*$|<<-?\s*['"]?[A-Za-z_][\w-]*['"]?\s*$|(?:[furbFURB]*)?(?:'''|\"\"\")\s*$/.test(line)) {
+  if (/\(\s*$|[=+\\,]\s*$|(?:=|\+)\s*[furbFURB]*[`'"]{1,3}\s*$|<<-?\s*['"]?[A-Za-z_][\w-]*['"]?(?:\s|$)|(?:[furbFURB]*)?(?:'''|\"\"\")\s*$/.test(line)) {
     return true;
   }
   if (/^[furbFURB]*['"`]/.test(line)) {
     return !/;\s*$/.test(line);
   }
-  return pendingCronCommand && !/[)];?\s*$/.test(line);
+  return pendingCronCommand && !/[)\]}];?,?\s*$/.test(line);
 }
 
 function cronHeredocDelimiter(line) {
-  const match = line.match(/<<-?\s*['"]?([A-Za-z_][\w-]*)['"]?\s*$/);
+  const match = line.match(/<<-?\s*['"]?([A-Za-z_][\w-]*)['"]?(?:\s|$)/);
   return match?.[1] ?? null;
 }
 
@@ -693,7 +708,7 @@ async function scanSourceFile(file, findings) {
     }
 
     collectSensitiveEnvAliases(code, sensitiveEnvAliases, sensitiveEnvNameAliases, envContainerAliases, envGetterAliases, destructuredEnvState, { shell: language === 'shell' });
-    const multilineAlias = code.match(/^\s*(?:(?:export\s+)?(?:const|let|var)\s+|(?:export|readonly|local(?:\s+-[A-Za-z]+)*|declare(?:\s+-[A-Za-z]+)*)\s+)?([A-Za-z_$][\w$]*)(?:\s*:\s*[^=]+)?\s*=\s*$/);
+    const multilineAlias = code.match(/^\s*(?:(?:export\s+)?(?:const|let|var)\s+|(?:export|readonly|local(?:\s+-[A-Za-z]+)*|declare(?:\s+-[A-Za-z]+)*)\s+)?([A-Za-z_$][\w$]*)(?:\s*:\s*[^=]+)?\s*=\s*(?:[([{]\s*)?$/);
     if (multilineAlias) {
       pendingAliasName = multilineAlias[1];
     }
