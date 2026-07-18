@@ -14,7 +14,7 @@ import { spawnSync } from 'node:child_process';
 import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient } from './mcp-client-paths.js';
 import { writeHookScripts } from './hook-scripts.js';
 import { codexServerName, ensureCodexProjectId } from './codex-server-names.js';
-import { readJsonObjectFileOrRecover, writeJsonFileAtomic } from './settings-json.js';
+import { readJsonObjectFileOrRecover, writeJsonFileAtomic, writeTextFileAtomic } from './settings-json.js';
 
 const ALL_SERVERS: FbeastServer[] = [
   'memory', 'planner', 'critique', 'firewall', 'observer', 'governor', 'skills',
@@ -242,7 +242,7 @@ function writeCodexProjectConfig(
     ].join('\n');
   }).join('\n\n');
   const content = [cleaned, fbeastConfig].filter(Boolean).join('\n\n') + '\n';
-  writeFileSync(configPath, content);
+  writeTextFileAtomic(configPath, content);
 }
 
 function removeFbeastMcpServerTables(toml: string): string {
@@ -454,9 +454,9 @@ function writeAgentsMd(root: string): void {
     if (startIdx !== -1 && endIdx !== -1) {
       content = content.slice(0, startIdx).trimEnd() + content.slice(endIdx + AGENTS_MD_END.length);
     }
-    writeFileSync(agentsPath, content.trimEnd() + '\n\n' + section + '\n');
+    writeTextFileAtomic(agentsPath, content.trimEnd() + '\n\n' + section + '\n');
   } else {
-    writeFileSync(agentsPath, section + '\n');
+    writeTextFileAtomic(agentsPath, section + '\n');
   }
 }
 

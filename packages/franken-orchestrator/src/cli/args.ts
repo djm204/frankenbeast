@@ -25,6 +25,7 @@ export type NetworkAction =
   | 'up'
   | 'down'
   | 'status'
+  | 'health'
   | 'start'
   | 'stop'
   | 'restart'
@@ -120,6 +121,7 @@ export interface CliArgs {
   issueRepo?: string | undefined;
   targetUpstream?: boolean | undefined;
   dryRun?: boolean | undefined;
+  json?: boolean | undefined;
   initVerify: boolean;
   initRepair: boolean;
   initNonInteractive: boolean;
@@ -129,7 +131,7 @@ export interface CliArgs {
 }
 
 const VALID_SUBCOMMANDS = new Set(['init', 'interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'beasts-daemon', 'network', 'memory', 'dr', 'skill', 'security']);
-const VALID_NETWORK_ACTIONS = new Set(['up', 'down', 'status', 'start', 'stop', 'restart', 'logs', 'config', 'credentials', 'help']);
+const VALID_NETWORK_ACTIONS = new Set(['up', 'down', 'status', 'health', 'start', 'stop', 'restart', 'logs', 'config', 'credentials', 'help']);
 const VALID_MEMORY_ACTIONS = new Set(['snapshot-diff', 'verify-backup', 'duplicate-report']);
 const VALID_DR_ACTIONS = new Set([
   'backup',
@@ -252,11 +254,13 @@ Issue Flags (for 'issues' subcommand):
   --repo <owner/repo>     Target repository
   --target-upstream       Use the fork upstream as the canonical repo for issues and PRs
   --dry-run               Preview without executing
+  --json                  Print machine-readable JSON where supported
 
 Network Commands:
   network up [-d]                     Start configured services
   network down                        Tear down managed services
   network status                      Show service health and URLs
+  network health [--json]             Show consolidated web/orchestrator/provider/GitHub/state/loop health
   network start <service|all>         Start one managed service or all
   network stop <service|all>          Stop one managed service or all
   network restart <service|all>       Restart one managed service or all
@@ -557,6 +561,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       repo: { type: 'string' },
       'target-upstream': { type: 'boolean', default: false },
       'dry-run': { type: 'boolean', default: false },
+      json: { type: 'boolean', default: false },
       mode: { type: 'string' },
       set: { type: 'string', multiple: true },
       'no-firewall': { type: 'boolean', default: false },
@@ -843,6 +848,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     issueRepo: values.repo,
     targetUpstream: values['target-upstream'] ?? undefined,
     dryRun: values['dry-run'] ?? undefined,
+    json: values.json ?? undefined,
     beastExecutionMode,
     moduleConfig,
   };

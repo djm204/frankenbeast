@@ -61,7 +61,7 @@ describe('issue #1774 stalled-worker onboarding guide', () => {
     for (const guardrail of [
       'Do not create a duplicate card, branch, worktree, or PR.',
       'Do not merge on Codex silence, usage-limit text, or an all-clear from an older head.',
-      'Do not respawn a worker just because a PM liveness file is stale',
+      'Do not respawn a worker just because a coordination liveness file is stale',
       'Do not delete dirty worktrees until their commits are pushed',
       'Do not broaden a one-issue worker into adjacent issues while recovering it.',
     ]) {

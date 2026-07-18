@@ -2,6 +2,9 @@ import type { BeastProcessSpec } from '../types.js';
 import type { SandboxPolicy } from './sandbox-policy.js';
 import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
 import { realpathSync, statSync } from 'node:fs';
+import { RUN_CONFIG_INTEGRITY_ENV, RUN_CONFIG_INTEGRITY_SECRET_ENV } from '../../cli/run-config-integrity.js';
+
+const INTERNAL_CONTAINER_ENV_ALLOWLIST = [RUN_CONFIG_INTEGRITY_ENV, RUN_CONFIG_INTEGRITY_SECRET_ENV] as const;
 
 function canonicalExistingPath(path: string): string {
   try {
@@ -37,7 +40,7 @@ function containerCommand(command: string, policy: SandboxPolicy): string {
   return basename(command);
 }
 
-function dockerEnvArgs(spec: BeastProcessSpec, policy: SandboxPolicy): string[] {
+function dockerEnv(spec: BeastProcessSpec, policy: SandboxPolicy): { args: string[]; env: Record<string, string> } {
   const args: string[] = [
     '-e',
     'GIT_CONFIG_COUNT=1',
@@ -46,13 +49,20 @@ function dockerEnvArgs(spec: BeastProcessSpec, policy: SandboxPolicy): string[] 
     '-e',
     `GIT_CONFIG_VALUE_0=${policy.workspaceContainerPath}`,
   ];
-  for (const key of policy.envAllowlist) {
+  const env: Record<string, string> = {};
+  const envAllowlist = new Set([...policy.envAllowlist, ...INTERNAL_CONTAINER_ENV_ALLOWLIST]);
+  for (const key of envAllowlist) {
     const value = spec.env?.[key];
     if (value !== undefined) {
+      if (key === RUN_CONFIG_INTEGRITY_SECRET_ENV) {
+        args.push('-e', key);
+        env[key] = value;
+        continue;
+      }
       args.push('-e', `${key}=${remapHostWorkspacePath(value, policy)}`);
     }
   }
-  return args;
+  return { args, env };
 }
 
 function containerCwd(spec: BeastProcessSpec, policy: SandboxPolicy): string {
@@ -90,6 +100,7 @@ export function toDockerSpec(
   policy: SandboxPolicy,
   options: DockerSpecOptions = {},
 ): BeastProcessSpec {
+  const envSpec = dockerEnv(spec, policy);
   return {
     command: 'docker',
     args: [
@@ -112,12 +123,12 @@ export function toDockerSpec(
       workspaceMount(policy),
       '-w',
       containerCwd(spec, policy),
-      ...dockerEnvArgs(spec, policy),
+      ...envSpec.args,
       policy.image,
       containerCommand(spec.command, policy),
       ...spec.args.map((arg) => remapHostWorkspacePath(arg, policy)),
     ],
     cwd: spec.cwd,
-    env: {},
+    env: envSpec.env,
   };
 }

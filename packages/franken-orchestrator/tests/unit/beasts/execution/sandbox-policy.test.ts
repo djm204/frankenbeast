@@ -1,6 +1,6 @@
 import { statSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { nonRootUserForWorkspace } from '../../../../src/beasts/execution/sandbox-policy.js';
+import { DEFAULT_BEAST_ENV_ALLOWLIST, nonRootUserForWorkspace } from '../../../../src/beasts/execution/sandbox-policy.js';
 
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>();
@@ -55,5 +55,13 @@ describe('nonRootUserForWorkspace', () => {
     mockedStatSync.mockReturnValue({ uid: 0, gid: 0 } as ReturnType<typeof statSync>);
 
     expect(nonRootUserForWorkspace('/root-owned-workspace')).toBe('10001:10001');
+  });
+
+  it('allows runtime config manifest env through the sandbox policy without inheriting the signing key', () => {
+    expect(DEFAULT_BEAST_ENV_ALLOWLIST).toEqual(expect.arrayContaining([
+      'FRANKENBEAST_RUN_CONFIG',
+      'FRANKENBEAST_RUN_CONFIG_INTEGRITY',
+    ]));
+    expect(DEFAULT_BEAST_ENV_ALLOWLIST).not.toContain('FRANKENBEAST_RUN_CONFIG_INTEGRITY_SECRET');
   });
 });

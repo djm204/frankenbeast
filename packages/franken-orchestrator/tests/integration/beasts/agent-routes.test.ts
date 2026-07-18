@@ -1443,6 +1443,55 @@ describe('agent routes integration', () => {
     expect(r3.status).toBe(429);
   });
 
+  it('rate-limits tracked-agent lifecycle action requests', async () => {
+    const { app, operatorToken } = createIntegratedBeastApp({ rateLimitMax: 1 });
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    const createResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'design-interview',
+        initAction: {
+          kind: 'design-interview',
+          command: '/interview',
+          config: {
+            goal: 'Rate-limit lifecycle action',
+            outputPath: 'docs/design.md',
+          },
+        },
+        initConfig: {
+          goal: 'Rate-limit lifecycle action',
+          outputPath: 'docs/design.md',
+        },
+        autoDispatch: false,
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json() as { data: { id: string } };
+
+    const firstStart = await app.request(`/v1/beasts/agents/${created.data.id}/start`, {
+      method: 'POST',
+      headers,
+    });
+    const secondStart = await app.request(`/v1/beasts/agents/${created.data.id}/start`, {
+      method: 'POST',
+      headers,
+    });
+
+    expect(firstStart.status).toBe(200);
+    expect(secondStart.status).toBe(429);
+    expect(await secondStart.json()).toEqual({
+      error: {
+        code: 'RATE_LIMITED',
+        message: 'Rate limit exceeded',
+      },
+    });
+  });
+
   it('returns an explicit error when dispatch throws after creating the tracked agent', async () => {
     const { app, operatorToken } = createIntegratedBeastApp();
     const headers = {

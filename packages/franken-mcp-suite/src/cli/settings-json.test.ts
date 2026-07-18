@@ -3,7 +3,7 @@ import { chmodSync, existsSync, lstatSync, mkdtempSync, readdirSync, readFileSyn
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { parseJsonObjectWithComments, writeJsonFileAtomic } from './settings-json.js';
+import { parseJsonObjectWithComments, writeJsonFileAtomic, writeTextFileAtomic } from './settings-json.js';
 
 describe('settings.json helpers', () => {
   it('parses comments and trailing commas without treating comment markers inside strings as comments', () => {
@@ -56,6 +56,33 @@ describe('settings.json helpers', () => {
 
     expect(statSync(settingsPath).mode & 0o777).toBe(0o600);
     expect(JSON.parse(readFileSync(settingsPath, 'utf-8'))).toEqual({ existing: true, updated: true });
+  });
+
+  it('creates a timestamped backup before replacing an existing JSON settings file', () => {
+    const dir = mkdtempSync(join(tmpdir(), `fbeast-settings-${randomUUID()}`));
+    const settingsPath = join(dir, 'settings.json');
+    writeFileSync(settingsPath, '{"existing":true}\n', 'utf-8');
+
+    writeJsonFileAtomic(settingsPath, { updated: true });
+
+    const backups = readdirSync(dir).filter((entry) => /^settings\.json\.backup-.*\.bak$/.test(entry));
+    expect(backups).toHaveLength(1);
+    expect(readFileSync(join(dir, backups[0]!), 'utf-8')).toBe('{"existing":true}\n');
+    expect(JSON.parse(readFileSync(settingsPath, 'utf-8'))).toEqual({ updated: true });
+  });
+
+  it('creates a timestamped backup before replacing existing text settings files', () => {
+    const dir = mkdtempSync(join(tmpdir(), `fbeast-settings-${randomUUID()}`));
+    const configPath = join(dir, 'config.toml');
+    writeFileSync(configPath, '[mcp_servers.keep]\ncommand = "keep"\n', 'utf-8');
+
+    writeTextFileAtomic(configPath, '[mcp_servers.fbeast-memory]\ncommand = "fbeast-memory"\n');
+
+    const backups = readdirSync(dir).filter((entry) => /^config\.toml\.backup-.*\.bak$/.test(entry));
+    expect(backups).toHaveLength(1);
+    expect(readFileSync(join(dir, backups[0]!), 'utf-8')).toBe('[mcp_servers.keep]\ncommand = "keep"\n');
+    expect(readFileSync(configPath, 'utf-8')).toBe('[mcp_servers.fbeast-memory]\ncommand = "fbeast-memory"\n');
+    expect(readdirSync(dir).filter((entry) => entry.includes('.tmp-'))).toEqual([]);
   });
 
   it('updates the target of a symlinked settings file without replacing the symlink', () => {

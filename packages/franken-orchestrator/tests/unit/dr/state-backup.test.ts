@@ -20,6 +20,7 @@ async function makeFixtureState(): Promise<{ dir: string; keyFile: string }> {
   await writeFile(join(stateDir, 'approvals', 'ledger.json'), JSON.stringify({ token: 'secret-approval-token' }), 'utf8');
   await writeFile(join(stateDir, 'liveness', 'worker.json'), JSON.stringify({ heartbeat: 'ok' }), 'utf8');
   await writeFile(join(stateDir, 'runs', 'run-1', 'metadata.json'), JSON.stringify({ taskId: 'task-1' }), 'utf8');
+  await writeFile(join(stateDir, 'runs', 'run-1', 'retry..metadata.json'), JSON.stringify({ taskId: 'task-1', retry: true }), 'utf8');
   await writeFile(join(stateDir, 'profile-memory.json'), JSON.stringify({ user: 'private memory' }), 'utf8');
   const keyFile = join(dir, 'backup.key');
   await writeFile(keyFile, 'test key material', 'utf8');
@@ -45,7 +46,7 @@ describe('encrypted DR state backups', () => {
         kanban: 1,
         approvals: 1,
         liveness: 1,
-        runs: 1,
+        runs: 2,
       }));
       expect(envelope.manifest.files.map((file) => file.path)).toEqual([
         'approvals/ledger.json',
@@ -53,6 +54,7 @@ describe('encrypted DR state backups', () => {
         'liveness/worker.json',
         'profile-memory.json',
         'runs/run-1/metadata.json',
+        'runs/run-1/retry..metadata.json',
       ]);
       expect(raw).not.toContain('secret-approval-token');
       expect(raw).not.toContain('private memory');
@@ -69,7 +71,7 @@ describe('encrypted DR state backups', () => {
     try {
       await createEncryptedStateBackup({ stateDir: join(dir, 'state'), outputPath: backupPath, keyFilePath: keyFile });
       const report = await verifyEncryptedStateBackup(backupPath, keyFile);
-      expect(report.verifiedFiles).toBe(5);
+      expect(report.verifiedFiles).toBe(6);
       expect(report.manifest.categories.approvals).toBe(1);
 
       const parsed = JSON.parse(await readFile(backupPath, 'utf8')) as { ciphertext: string };
@@ -177,6 +179,12 @@ describe('encrypted DR state backups', () => {
       await createEncryptedStateBackup({ stateDir: join(dir, 'state'), outputPath: backupPath, keyFilePath: keyFile });
       await mkdir(outsideDir, { recursive: true });
       await symlink(outsideDir, linkedParent);
+      await expect(restoreEncryptedStateBackup({
+        backupPath,
+        targetDir: join(linkedParent, 'new-target'),
+        keyFilePath: keyFile,
+        dryRun: true,
+      })).rejects.toThrow(/real directory/);
       await expect(restoreEncryptedStateBackup({
         backupPath,
         targetDir: join(linkedParent, 'new-target'),

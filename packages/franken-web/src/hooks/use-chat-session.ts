@@ -28,6 +28,7 @@ import {
   shouldApplySocketEvent,
   updateReceipt,
   type PendingSend,
+  type ServerSocketPayload,
 } from './chat-session-state';
 
 export type SessionStatus = 'idle' | 'connecting' | 'sending' | 'streaming' | 'error';
@@ -419,7 +420,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         return;
       }
 
-      const payload = parsed.data;
+      const payload = parsed.data as ServerSocketPayload;
       if (!shouldApplySocketEvent(
         payload,
         processedSocketEventIdsRef.current,
@@ -818,14 +819,14 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         readyRef.current = true;
         setMessages((current) => {
           const withSnapshot = mergeSessionSnapshot(current, refreshed);
-          const approvedDisplays = (approvalResult.displayMessages ?? []).flatMap((display): Array<{ content: string }> => {
+          const approvedDisplays = (approvalResult.displayMessages ?? []).flatMap((display: unknown): Array<{ content: string }> => {
             if (!display || typeof display !== 'object' || !('content' in display)) {
               return [];
             }
             const content = (display as { content: unknown }).content;
             return typeof content === 'string' ? [{ content }] : [];
           });
-          return approvedDisplays.reduce((messages, display) => appendOrUpdateAssistantMessage(messages, {
+          return approvedDisplays.reduce((messages: ChatMessage[], display: { content: string }) => appendOrUpdateAssistantMessage(messages, {
             type: 'assistant.message.complete',
             messageId: makeId('assistant'),
             content: display.content,

@@ -107,7 +107,7 @@ describe('issue-to-worktree bootstrap helper', () => {
     expect(() => buildIssueWorktreePlan({ issue: 1, title: 'bad', repo: 'not-a-repo' })).toThrow(/OWNER\/REPO/u);
   });
 
-  it('renders copyable dry-run commands and structured fields for PM handoffs', () => {
+  it('renders copyable dry-run commands and structured fields for coordinator handoffs', () => {
     const plan = buildIssueWorktreePlan({
       issue: 1769,
       title: 'feat(onboarding): add issue-to-worktree bootstrap helper',

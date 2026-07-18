@@ -7,11 +7,23 @@
 - Preserve the one-agent-per-issue policy during doctor/PM closeout: if an existing worktree/card owns the PR, leave evidence-backed handoff comments instead of spawning a duplicate worker or parallel replacement; every PM status comment should explicitly state whether duplicate edits/workers were created.
 - DSM/docs-only closeout notes still move the PR head if committed, so after pushing them, re-check CI on the new head and report whether the push was a documentation/lesson-only change versus a code fix.
 
+## 2026-07-17 — Architecture docs package-name consistency
+- For docs-only architecture fixes, add narrow regression tests that slice the relevant README/docs sections and assert legacy labels are absent there, rather than banning every historical MOD reference across the repository; configuration/env docs may still need legacy toggles for compatibility.
+
 ## 2026-07-17 — Setup healthcheck Codex closeout
 - For onboarding setup healthchecks, distinguish pre-service bootstrap from strict local service verification: occupied optional ports should warn with conflict guidance before Docker starts, while `--require-services` can treat expected open ports as healthy. Keep JSON check schemas stable by serializing nullable fields like `action`, and let tests override service URLs so host-running Grafana/Tempo cannot flip optional-service assertions.
 
 ## 2026-07-17 — Gitleaks fixture secret hygiene
 - Secret-redaction tests that spawn child commands must avoid putting full fixture secrets in the command argv source itself; split PEM headers/footers and token-like values inside the generated command text as well as in test source so Gitleaks does not flag the fixture while runtime output still exercises full secret redaction.
+
+## 2026-07-17 — Service health aggregator verification
+- Before running `npm --workspace @franken/orchestrator run typecheck` in a fresh worktree, build internal workspace dependencies first (`@franken/types`, `@franken/observer`, `@franken/brain`, `@franken/critique`, `@franken/governor`, and `@franken/planner`) so typecheck failures reflect the PR diff instead of missing local `dist` declarations.
+
+## 2026-07-17 — Learning sandbox Codex closeout
+- For learning sandbox hardening, treat the public execution context as adversarial: freeze exposed policy/declaration objects, keep enforcement copies private, deny namespaced aliases and observer/terminal surfaces (`exec_command`, `write_stdin`, `apply_patch`), and validate callback outcomes before marking a run promotion-eligible.
+- Snapshot and fixture-tool containment must reject replaced/symlinked workspace roots before descending, include root/file mode metadata, and persist evidence even when verification fails, getters throw, or workspaces disappear. Use unique short hashed run directories so parallel retries cannot overwrite each other.
+- Denylist coverage needs last-segment and dot-namespaced mutation aliases such as `create_file` and `memory.store`, actual client aliases like `Bash`/`Write`/`run_shell_command`, and opaque wrapper entries; denied-tool evidence serialization must avoid invoking hostile `length` getters so blocked calls are recorded before errors can be caught by experiments.
+- Before promoting sandbox runs, await all outstanding `runTool` promises and re-anchor custom handlers/workspace/runs-root paths so unawaited async handlers or symlinked ancestors cannot mutate after evidence is marked passing.
 
 ## 2026-07-16 — Synthetic availability probe review fixes
 - Availability probes should fail closed for real dependencies: do not default provider checks to `node --version` or dashboard checks to a static UI health URL, require explicit provider/backend health targets, and cover missing-target behavior in tests so cron copies cannot produce false-green uptime.

@@ -8,6 +8,11 @@ vi.mock('node:child_process', () => ({
   spawn: vi.fn(),
 }));
 import { spawn } from 'node:child_process';
+import {
+  RUN_CONFIG_INTEGRITY_BYPASS_ENV,
+  RUN_CONFIG_INTEGRITY_ENV,
+  RUN_CONFIG_INTEGRITY_SECRET_ENV,
+} from '../../../src/cli/run-config-integrity.js';
 
 function mockSpawn(stdoutLines: string[], exitCode = 0) {
   const stdout = new PassThrough();
@@ -67,6 +72,7 @@ describe('CodexCliAdapter', () => {
   let adapter: CodexCliAdapter;
 
   beforeEach(() => {
+    (spawn as ReturnType<typeof vi.fn>).mockClear();
     adapter = new CodexCliAdapter({
       profile: 'dev',
       configOverrides: { model: 'o3' },
@@ -117,7 +123,67 @@ describe('CodexCliAdapter', () => {
     });
   });
 
+  describe('isAvailable()', () => {
+    it('does not expose runtime config integrity state to the Codex availability probe', async () => {
+      const originalManifest = process.env[RUN_CONFIG_INTEGRITY_ENV];
+      const originalSecret = process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV];
+      const originalBypass = process.env[RUN_CONFIG_INTEGRITY_BYPASS_ENV];
+      process.env[RUN_CONFIG_INTEGRITY_ENV] = '/tmp/run-config.integrity';
+      process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV] = 'signing-key';
+      process.env[RUN_CONFIG_INTEGRITY_BYPASS_ENV] = '1';
+      try {
+        mockSpawn([]);
+        await expect(adapter.isAvailable()).resolves.toBe(true);
+        const spawnOptions = (spawn as ReturnType<typeof vi.fn>).mock.calls[0]?.[2] as { env?: Record<string, string> } | undefined;
+        expect(spawnOptions?.env).not.toHaveProperty(RUN_CONFIG_INTEGRITY_ENV);
+        expect(spawnOptions?.env).not.toHaveProperty(RUN_CONFIG_INTEGRITY_SECRET_ENV);
+        expect(spawnOptions?.env).not.toHaveProperty(RUN_CONFIG_INTEGRITY_BYPASS_ENV);
+      } finally {
+        if (originalManifest === undefined) {
+          delete process.env[RUN_CONFIG_INTEGRITY_ENV];
+        } else {
+          process.env[RUN_CONFIG_INTEGRITY_ENV] = originalManifest;
+        }
+        if (originalSecret === undefined) {
+          delete process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV];
+        } else {
+          process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV] = originalSecret;
+        }
+        if (originalBypass === undefined) {
+          delete process.env[RUN_CONFIG_INTEGRITY_BYPASS_ENV];
+        } else {
+          process.env[RUN_CONFIG_INTEGRITY_BYPASS_ENV] = originalBypass;
+        }
+      }
+    });
+  });
+
   describe('execute()', () => {
+    it('does not expose runtime config integrity state to the Codex CLI process', async () => {
+      const originalManifest = process.env[RUN_CONFIG_INTEGRITY_ENV];
+      const originalSecret = process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV];
+      process.env[RUN_CONFIG_INTEGRITY_ENV] = '/tmp/run-config.integrity';
+      process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV] = 'signing-key';
+      try {
+        mockSpawn([JSON.stringify({ type: 'done' })]);
+        await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+        const spawnOptions = (spawn as ReturnType<typeof vi.fn>).mock.calls[0]?.[2] as { env?: Record<string, string> } | undefined;
+        expect(spawnOptions?.env).not.toHaveProperty(RUN_CONFIG_INTEGRITY_ENV);
+        expect(spawnOptions?.env).not.toHaveProperty(RUN_CONFIG_INTEGRITY_SECRET_ENV);
+      } finally {
+        if (originalManifest === undefined) {
+          delete process.env[RUN_CONFIG_INTEGRITY_ENV];
+        } else {
+          process.env[RUN_CONFIG_INTEGRITY_ENV] = originalManifest;
+        }
+        if (originalSecret === undefined) {
+          delete process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV];
+        } else {
+          process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV] = originalSecret;
+        }
+      }
+    });
+
     it('parses text content events', async () => {
       const proc = mockSpawn([
         JSON.stringify({ type: 'message', content: 'Hello from Codex' }),
@@ -154,8 +220,11 @@ describe('CodexCliAdapter', () => {
     it('emits error on non-zero exit code', async () => {
       mockSpawn([], 1);
       const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'x' }] }));
-      expect(events[0]!.type).toBe('error');
-      expect((events[0] as any).retryable).toBe(false);
+      expect(events[0]).toEqual({
+        type: 'error',
+        error: 'codex process exited with code 1',
+        retryable: false,
+      });
     });
 
     it('emits retryable error on rate limit message', async () => {

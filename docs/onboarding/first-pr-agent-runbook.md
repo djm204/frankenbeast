@@ -13,7 +13,7 @@ Pick or accept an issue only when all of these are true:
 - [ ] Existing open PRs do not already claim the issue.
 - [ ] The task can be verified with deterministic commands, not only subjective inspection.
 
-Stop and hand back to the PM/HITL reviewer when any checklist item fails.
+Stop and hand back to the coordinator/HITL reviewer when any checklist item fails.
 
 ## Numbered flow
 
@@ -29,7 +29,7 @@ gh pr list --repo djm204/frankenbeast --state open --limit 100 --json number,tit
   --jq ".[] | select(.headRefName | startswith(\"resolve/issue-$ISSUE_NUMBER-\"))"
 ```
 
-Continue only if the issue is open and no open PR already owns it by body/title search or by a `resolve/issue-$ISSUE_NUMBER-*` head branch. If an open PR exists, resume that PR only when the PM explicitly assigns it to you; otherwise stop and report the duplicate.
+Continue only if the issue is open and no open PR already owns it by body/title search or by a `resolve/issue-$ISSUE_NUMBER-*` head branch. If an open PR exists, resume that PR only when the coordinator explicitly assigns it to you; otherwise stop and report the duplicate.
 
 ### 2. Read local policy before editing
 
@@ -47,7 +47,7 @@ sed -n '1,220p' ONBOARDING.md
 sed -n '1,180p' docs/onboarding/coding-agent-pr-etiquette.md
 ```
 
-Apply the most specific current repository guidance. If you enter a nested package or docs directory that has its own `AGENTS.md`, read that scoped file before editing there. If a local instruction conflicts with the issue, stop and ask the PM/HITL reviewer instead of silently broadening scope.
+Apply the most specific current repository guidance. If you enter a nested package or docs directory that has its own `AGENTS.md`, read that scoped file before editing there. If a local instruction conflicts with the issue, stop and ask the coordinator/HITL reviewer instead of silently broadening scope.
 
 ### 3. Create an isolated issue branch/worktree
 
@@ -119,7 +119,7 @@ Replace the placeholder commands with the narrowest regression for the files you
 
 ### 7. Push and open the PR
 
-This step mutates remote GitHub state. Run it only after the PM/HITL reviewer has authorized push and PR creation for the assigned issue.
+This step mutates remote GitHub state. Run it only after the coordinator/HITL reviewer has authorized push and PR creation for the assigned issue.
 
 ```bash
 git push -u origin HEAD
@@ -148,7 +148,7 @@ The PR title and every commit subject must be Conventional Commit formatted. The
 
 ### 8. Trigger the real GitHub Codex gate
 
-Trigger after the PR is open, the current head contains the intended fix, and the PM/HITL reviewer has authorized Codex review for this PR:
+Trigger after the PR is open, the current head contains the intended fix, and the coordinator/HITL reviewer has authorized Codex review for this PR:
 
 ```bash
 PR_NUMBER="${PR_NUMBER:?set the pull request number}"
@@ -189,7 +189,7 @@ Append a compact reusable lesson to `tasks/resolve-issues-shared-lessons.md` onl
 
 ## HITL stop conditions
 
-Stop for PM/HITL review instead of retrying side effects when:
+Stop for coordinator/HITL review instead of retrying side effects when:
 
 - a command would push, merge, delete a branch, close an issue, edit labels, or rerun over the Codex cap without prior authorization;
 - the issue scope expands into a second issue, architecture decision, migration, or security-sensitive behavior;

@@ -1,6 +1,6 @@
 # Restore rehearsal fixture
 
-The restore rehearsal is an isolated disaster-recovery smoke test for the orchestration state that PM-swarm and approval-gated workers depend on.
+The restore rehearsal is an isolated disaster-recovery smoke test for the orchestration state that agent-coordination and approval-gated workers depend on.
 
 Run it locally with:
 

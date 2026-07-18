@@ -288,12 +288,13 @@ const SENSITIVE_MEMORY_KEY_PATTERNS = [
 
 const SENSITIVE_MEMORY_VALUE_PATTERNS = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
-  /\b(?:sk|gho|ghp|glpat|xox[baprs])-?[A-Za-z0-9_\-]{12,}\b/,
+  /\b(?:sk[-_][A-Za-z0-9_\-]{12,}|gh[opusr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{12,}|glpat-[A-Za-z0-9_\-]{12,}|xox[baprs]-[A-Za-z0-9-]{10,})\b/,
   /\bnpm_[A-Za-z0-9_\-]{12,}\b/,
   /https:\/\/(?:discord(?:app)?\.com|canary\.discord\.com)\/api\/webhooks\/\d+\/[A-Za-z0-9_\-]+/i,
   /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/[^\s:@/]*:[^\s@/]+@[^\s]+/i,
-  /\b(?:Bearer|token)\s+[A-Za-z0-9._~+/=-]{20,}\b/i,
+  /\b(?:Bearer|Basic|token)\s+[A-Za-z0-9._~+/=-]{20,}\b/i,
   /\b(?:Cookie|Set-Cookie):\s*[^\r\n]+/i,
+  /\b(?:Proxy-)?Authorization:\s*(?:Bearer|Basic|token)?\s*[^\r\n]{8,}/i,
 ];
 
 const SENSITIVE_MEMORY_REDACTION = '<redacted>';

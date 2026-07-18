@@ -7,6 +7,7 @@
 
 import type { ICliProvider, ProviderOpts } from './cli-provider.js';
 import { tryExtractTextFromNode } from './stream-json-utils.js';
+import { sanitizeRunConfigIntegrityEnv } from '../../cli/run-config-integrity.js';
 
 // Gemini adds RESOURCE_EXHAUSTED to the shared base patterns
 const RATE_LIMIT_PATTERNS =
@@ -82,7 +83,7 @@ export class GeminiProvider implements ICliProvider {
   }
 
   filterEnv(env: Record<string, string>): Record<string, string> {
-    const filtered = { ...env };
+    const filtered = sanitizeRunConfigIntegrityEnv(env);
     for (const key of Object.keys(filtered)) {
       if (key.startsWith('GEMINI') || key.startsWith('GOOGLE')) {
         delete filtered[key];

@@ -26,8 +26,8 @@ const REQUIRED_SURFACES = [
   'GitHub automation',
   'Profile-scoped memory, skills, plugins, cron',
   'MCP tool dispatch',
-  'PM-swarm orchestration',
-  'approval-cop',
+  'External issue-work coordination',
+  'approval runners',
 ];
 
 const REQUIRED_ATTACKS = [
@@ -65,7 +65,7 @@ describe('issue #1667 agent tool execution threat model', () => {
     expect(threatModel).toContain('| Flow | Untrusted inputs | Primary risk | Required controls | Code vs policy |');
     expect(threatModel).toContain('Prompt assembly');
     expect(threatModel).toContain('MCP proxy `execute_tool`');
-    expect(threatModel).toContain('PM-swarm approval-cop');
+    expect(threatModel).toContain('Approval runner');
     expect(threatModel).toContain('Runtime artifact classification');
 
     for (const issueNumber of [1668, 1669, 1670, 1671, 1672]) {

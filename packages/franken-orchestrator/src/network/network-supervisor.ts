@@ -2,6 +2,7 @@ import type { NetworkServiceDefinition, ResolvedNetworkService } from './network
 import { resolveServiceHealth, type NetworkServiceHealthStatus } from './network-health.js';
 import {
   NetworkStateStore,
+  type NetworkStateCorruptionDiagnostic,
   type ManagedNetworkServiceState,
   type NetworkOperatorState,
 } from './network-state-store.js';
@@ -26,7 +27,7 @@ export interface NetworkSupervisorDeps {
     options: StartServiceOptions,
   ) => Promise<{ pid: number }>;
   stopService: (service: ManagedNetworkServiceState) => Promise<void>;
-  healthcheck: (service: ManagedNetworkServiceState) => Promise<boolean>;
+  healthcheck: (service: ManagedNetworkServiceState) => Promise<boolean | 'degraded'>;
   preflightService?: (service: ResolvedNetworkService) => Promise<PreflightServiceResult>;
   now?: () => string;
   startupAttempts?: number;
@@ -37,6 +38,7 @@ export interface NetworkSupervisorStatus {
   mode?: NetworkOperatorState['mode'];
   secureBackend?: string;
   services: NetworkServiceHealthStatus[];
+  stateCorruptions?: NetworkStateCorruptionDiagnostic[] | undefined;
 }
 
 function collectDependents(services: ManagedNetworkServiceState[], target: string): ManagedNetworkServiceState[] {
@@ -312,8 +314,12 @@ export class NetworkSupervisor {
 
   async status(_registry?: Map<string, NetworkServiceDefinition>): Promise<NetworkSupervisorStatus> {
     const state = await this.deps.stateStore.load();
+    const stateCorruptions = this.deps.stateStore.listCorruptions();
     if (!state) {
-      return { services: [] };
+      return {
+        services: [],
+        ...(stateCorruptions.length > 0 ? { stateCorruptions } : {}),
+      };
     }
 
     const services = await Promise.all(
@@ -324,6 +330,7 @@ export class NetworkSupervisor {
       mode: state.mode,
       secureBackend: state.secureBackend,
       services,
+      ...(stateCorruptions.length > 0 ? { stateCorruptions } : {}),
     };
   }
 

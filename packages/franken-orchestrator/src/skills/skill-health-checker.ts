@@ -29,6 +29,11 @@ const UNTRUSTED_HEALTH_CHECK_MESSAGE =
 const HEALTH_CHECK_TIMEOUT_MS = 2000;
 const MCP_INITIALIZE_ID = 1;
 
+interface HealthCheckMcpServerConfig {
+  command: string;
+  args?: string[] | undefined;
+}
+
 /**
  * Check health of MCP servers in a skill's mcp.json.
  * Command-based checks are passive/non-executing unless the caller explicitly
@@ -40,9 +45,10 @@ export class SkillHealthChecker {
     mcpConfig: McpConfig,
     options: SkillHealthOptions = {},
   ): Promise<SkillHealthResult> {
+    const mcpServers = mcpConfig.mcpServers as Record<string, HealthCheckMcpServerConfig>;
     const serverStatuses = await Promise.all(
-      Object.entries(mcpConfig.mcpServers).map(
-        async ([serverName, config]) => {
+      Object.entries(mcpServers).map(
+        async ([serverName, config]: [string, HealthCheckMcpServerConfig]) => {
           if (!options.trustMcpServerCommands) {
             return {
               serverName,
