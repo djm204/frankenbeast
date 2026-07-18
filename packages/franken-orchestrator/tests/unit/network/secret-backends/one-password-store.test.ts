@@ -89,6 +89,7 @@ describe('OnePasswordStore', () => {
       expect(JSON.parse(createCall!.stdin!)).toMatchObject({
         title: 'frankenbeast/comms.slack.botTokenRef',
         category: 'LOGIN',
+        passkeys: [],
         fields: [
           {
             id: 'password',
@@ -96,6 +97,12 @@ describe('OnePasswordStore', () => {
             purpose: 'PASSWORD',
             label: 'password',
             value: TEST_SLACK_BOT_TOKEN,
+          },
+          {
+            id: 'frankenbeast-managed',
+            type: 'STRING',
+            label: 'frankenbeast-managed',
+            value: 'secret-store-v1',
           },
         ],
       });
@@ -108,7 +115,11 @@ describe('OnePasswordStore', () => {
           id: 'abc123',
           title: 'frankenbeast/comms.slack.botTokenRef',
           category: 'LOGIN',
-          fields: [{ id: 'password', type: 'CONCEALED', purpose: 'PASSWORD', label: 'password', value: 'old' }],
+          passkeys: [],
+          fields: [
+            { id: 'password', type: 'CONCEALED', purpose: 'PASSWORD', label: 'password', value: 'old' },
+            { id: 'frankenbeast-managed', type: 'STRING', label: 'frankenbeast-managed', value: 'secret-store-v1' },
+          ],
         }),
         stderr: '',
         exitCode: 0,
@@ -127,7 +138,11 @@ describe('OnePasswordStore', () => {
         id: 'abc123',
         title: 'frankenbeast/comms.slack.botTokenRef',
         category: 'LOGIN',
-        fields: [{ id: 'password', type: 'CONCEALED', purpose: 'PASSWORD', label: 'password', value: UPDATED_SLACK_BOT_TOKEN }],
+        passkeys: [],
+        fields: [
+          { id: 'password', type: 'CONCEALED', purpose: 'PASSWORD', label: 'password', value: UPDATED_SLACK_BOT_TOKEN },
+          { id: 'frankenbeast-managed', type: 'STRING', label: 'frankenbeast-managed', value: 'secret-store-v1' },
+        ],
       });
       expectNoArgContains(mock.calls, UPDATED_SLACK_BOT_TOKEN);
     });
@@ -150,13 +165,35 @@ describe('OnePasswordStore', () => {
       expectNoArgContains(mock.calls, UPDATED_SLACK_BOT_TOKEN);
     });
 
+    it('fails closed for existing items without the frankenbeast-managed marker', async () => {
+      mock.responses.set('item get', {
+        stdout: JSON.stringify({
+          id: 'abc123',
+          title: 'frankenbeast/comms.slack.botTokenRef',
+          category: 'LOGIN',
+          passkeys: [],
+          fields: [{ id: 'password', type: 'CONCEALED', purpose: 'PASSWORD', label: 'password', value: 'old' }],
+        }),
+        stderr: '',
+        exitCode: 0,
+      });
+
+      await expect(store.store('comms.slack.botTokenRef', UPDATED_SLACK_BOT_TOKEN)).rejects.toThrow('not marked as frankenbeast-managed');
+      expect(mock.calls.some(c => c.args.includes('edit'))).toBe(false);
+      expectNoArgContains(mock.calls, UPDATED_SLACK_BOT_TOKEN);
+    });
+
     it('surfaces failed 1Password stdin edits', async () => {
       mock.responses.set('item get', {
         stdout: JSON.stringify({
           id: 'abc123',
           title: 'frankenbeast/comms.slack.botTokenRef',
           category: 'LOGIN',
-          fields: [{ id: 'password', type: 'CONCEALED', purpose: 'PASSWORD', label: 'password', value: 'old' }],
+          passkeys: [],
+          fields: [
+            { id: 'password', type: 'CONCEALED', purpose: 'PASSWORD', label: 'password', value: 'old' },
+            { id: 'frankenbeast-managed', type: 'STRING', label: 'frankenbeast-managed', value: 'secret-store-v1' },
+          ],
         }),
         stderr: '',
         exitCode: 0,
