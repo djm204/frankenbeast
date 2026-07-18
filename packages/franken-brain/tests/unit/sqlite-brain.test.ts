@@ -1755,6 +1755,85 @@ describe('SqliteBrain', () => {
       }
     });
 
+    it('preserves dirty live updates when another startup prunes the persisted row', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-dirty-prune-'));
+      const dbPath = join(dir, 'brain.db');
+      let live: SqliteBrain | undefined;
+      let reopened: SqliteBrain | undefined;
+      let db: Database.Database | undefined;
+
+      try {
+        live = new SqliteBrain(dbPath, { maxEntries: 3 });
+        live.working.set('oldest', { value: 1 });
+        live.working.set('middle', { value: 2 });
+        live.working.set('newest', { value: 3 });
+        live.flush();
+        live.working.set('oldest', { value: 'dirty' });
+
+        db = new Database(dbPath);
+        db.prepare(`UPDATE working_memory SET updated_at = ? WHERE key = ?`).run('2026-07-01T00:00:00.000Z', 'oldest');
+        db.prepare(`UPDATE working_memory SET updated_at = ? WHERE key = ?`).run('2026-07-02T00:00:00.000Z', 'middle');
+        db.prepare(`UPDATE working_memory SET updated_at = ? WHERE key = ?`).run('2026-07-03T00:00:00.000Z', 'newest');
+        db.close();
+        db = undefined;
+
+        reopened = new SqliteBrain(dbPath, { maxEntries: 2 });
+        expect(live.working.get('oldest')).toEqual({ value: 'dirty' });
+        live.flush();
+
+        db = new Database(dbPath);
+        expect(
+          db.prepare(`SELECT key FROM working_memory ORDER BY key ASC`).all(),
+        ).toEqual([{ key: 'middle' }, { key: 'newest' }, { key: 'oldest' }]);
+      } finally {
+        db?.close();
+        reopened?.close();
+        live?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('prunes legacy plain-text persisted rows when startup entry limits are reduced', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-legacy-prune-'));
+      const dbPath = join(dir, 'brain.db');
+      let seeded: SqliteBrain | undefined;
+      let reopened: SqliteBrain | undefined;
+      let db: Database.Database | undefined;
+
+      try {
+        seeded = new SqliteBrain(dbPath, { maxEntries: 3 });
+        seeded.close();
+        seeded = undefined;
+
+        db = new Database(dbPath);
+        db.prepare(`INSERT INTO working_memory (key, value, updated_at) VALUES (?, ?, ?)`).run(
+          'legacy',
+          'plain text value',
+          '2026-07-01T00:00:00.000Z',
+        );
+        db.prepare(`INSERT INTO working_memory (key, value, updated_at) VALUES (?, ?, ?)`).run(
+          'middle',
+          JSON.stringify({ value: 2 }),
+          '2026-07-02T00:00:00.000Z',
+        );
+        db.prepare(`INSERT INTO working_memory (key, value, updated_at) VALUES (?, ?, ?)`).run(
+          'newest',
+          JSON.stringify({ value: 3 }),
+          '2026-07-03T00:00:00.000Z',
+        );
+        db.close();
+        db = undefined;
+
+        reopened = new SqliteBrain(dbPath, { maxEntries: 2 });
+        expect(reopened.working.keys().sort()).toEqual(['middle', 'newest']);
+      } finally {
+        db?.close();
+        reopened?.close();
+        seeded?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('tracks usage as entries are added, counting key and value bytes', () => {
       brain.working.set('a', 'hello');
       const usage = brain.working.usage();

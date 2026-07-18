@@ -1231,6 +1231,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
       key: string;
       normalized: unknown;
       serialized: string;
+      persistedSerialized: string;
       size: number;
       updatedAt: string;
       protected: boolean;
@@ -1248,6 +1249,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
         key: row.key,
         normalized,
         serialized,
+        persistedSerialized: row.serialized,
         size,
         updatedAt: row.updatedAt,
         protected: MEMORY_RETENTION_POLICIES[classifyMemoryEntry({
@@ -1326,7 +1328,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
     }
   }
 
-  private prunePersistedRows(rows: ReadonlyArray<{ key: string; serialized: string; updatedAt: string }>): void {
+  private prunePersistedRows(rows: ReadonlyArray<{ key: string; persistedSerialized: string; updatedAt: string }>): void {
     if (rows.length === 0) return;
     const selectKey = this.db.prepare(`SELECT value, updated_at AS updatedAt FROM working_memory WHERE key = ?`);
     const deleteKey = this.db.prepare(`DELETE FROM working_memory WHERE key = ?`);
@@ -1337,7 +1339,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
       for (const row of rows) {
         const current = selectKey.get(row.key) as { value: string; updatedAt: string } | undefined;
         const currentSerialized = current ? (this.encryption?.decrypt(current.value) ?? current.value) : undefined;
-        if (currentSerialized !== row.serialized || current?.updatedAt !== row.updatedAt) {
+        if (currentSerialized !== row.persistedSerialized || current?.updatedAt !== row.updatedAt) {
           throw new WorkingMemoryLimitError(
             `Persisted working memory row ${row.key} changed before startup pruning could delete it`,
           );
@@ -1360,6 +1362,9 @@ class SqliteWorkingMemory implements IWorkingMemory {
 
   expirePrunedRuntimeKeys(keys: readonly string[]): void {
     for (const key of keys) {
+      if (this.dirtyKeys.has(key) || this.deletedKeys.has(key)) {
+        continue;
+      }
       if (this.store.has(key)) {
         this.totalBytes -= this.sizes.get(key) ?? 0;
       }
