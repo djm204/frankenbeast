@@ -942,13 +942,15 @@ function sqlJsonToolEqualsAny(jsonExpression: string, paths: string[], value: st
 
 function sqlAuditDecisionEquals(jsonExpression: string, value: string | undefined): { clause: string; params: string[] } {
   if (value === undefined) return { clause: "", params: [] };
-  const derivedOkClause = value === "approved"
+  const derivedClause = value === "approved"
     ? ` OR json_extract(${jsonExpression}, '$.ok') = 1`
     : value === "error"
       ? ` OR json_extract(${jsonExpression}, '$.ok') = 0`
-      : "";
+      : value === "unknown"
+        ? ` OR (json_type(${jsonExpression}, '$.decision') IS NULL AND json_type(${jsonExpression}, '$.ok') IS NULL)`
+        : "";
   return {
-    clause: `(json_extract(${jsonExpression}, '$.decision') = ?${derivedOkClause})`,
+    clause: `(json_extract(${jsonExpression}, '$.decision') = ?${derivedClause})`,
     params: [value],
   };
 }

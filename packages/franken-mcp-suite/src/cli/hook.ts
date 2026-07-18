@@ -214,15 +214,18 @@ function effectiveHookAuditTool(toolName: string, hookArgs: Record<string, unkno
 }
 
 function hookAuditOutcomeFromPayload(toolName: string, payload: string): { ok?: boolean; decision?: string } {
+  const normalizedToolName = unqualifyMcpToolName(toolName);
   const parsed = parseJsonRecord(payload);
-  if (!parsed) return {};
+  if (!parsed) {
+    return MEMORY_RESULT_IMPLICIT_SUCCESS_TOOLS.has(normalizedToolName) ? { ok: true } : {};
+  }
   if (typeof parsed['ok'] === 'boolean') return { ok: parsed['ok'] };
   if (typeof parsed['isError'] === 'boolean') return { ok: !parsed['isError'] };
   if (typeof parsed['decision'] === 'string' && parsed['decision'].trim().length > 0) {
     const decision = parsed['decision'].trim();
     return { decision: HOOK_AUDIT_DECISIONS.has(decision) ? decision : 'unknown' };
   }
-  if (MEMORY_RESULT_IMPLICIT_SUCCESS_TOOLS.has(unqualifyMcpToolName(toolName))) {
+  if (MEMORY_RESULT_IMPLICIT_SUCCESS_TOOLS.has(normalizedToolName)) {
     return { ok: true };
   }
   return {};

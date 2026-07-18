@@ -143,6 +143,7 @@ describe('runHook', () => {
     expect(metadata).toMatchObject({
       toolName: 'fbeast_memory_store',
       args: { key: '[memory-selector-redacted]' },
+      ok: true,
     });
     const serialized = JSON.stringify(metadata);
     expect(serialized).not.toContain('ordinary sensitive memory text');

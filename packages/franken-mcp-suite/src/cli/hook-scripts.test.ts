@@ -577,6 +577,22 @@ describe('Codex hook scripts', () => {
     expect(result.stdout).toBe('');
   });
 
+  it('does not forward apply_patch patch bodies carried as string tool_input', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'apply_patch',
+      tool_input: '*** Begin Patch\n rm -rf / and SECRET_TOKEN=abc\n*** End Patch',
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
   it('allows large benign payloads without overflowing argv (ARG_MAX)', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
