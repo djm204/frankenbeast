@@ -160,7 +160,6 @@ export async function executeToolWithDeadline(
       abortForTimeout();
       reject(timeoutError);
     }, timeoutMs);
-    timer.unref?.();
   });
 
   try {

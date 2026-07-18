@@ -44,7 +44,7 @@ const FAKE_STUBS = [
 describe('proxy server', () => {
   let server: ReturnType<typeof createProxyServer>;
   let searchToolsDef: { handler: (args: Record<string, unknown>) => Promise<unknown> };
-  let executeToolDef: { handler: (args: Record<string, unknown>) => Promise<unknown> };
+  let executeToolDef: { timeoutMs?: number; handler: (args: Record<string, unknown>) => Promise<unknown> };
   let gateCheck: ReturnType<typeof vi.fn>;
   let auditRecord: ReturnType<typeof vi.fn>;
 
@@ -98,7 +98,7 @@ describe('proxy server', () => {
 
   describe('execute_tool', () => {
     it('keeps the proxy wrapper deadline longer than every target deadline', () => {
-      expect(executeToolDef.timeoutMs).toBe(31_000);
+      expect(executeToolDef.timeoutMs).toBe(60_000);
     });
 
     it('calls through to handler and returns its result', async () => {

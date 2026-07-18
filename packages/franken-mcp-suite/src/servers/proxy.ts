@@ -51,7 +51,10 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
     (longest, tool) => Math.max(longest, tool.timeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS),
     DEFAULT_TOOL_TIMEOUT_MS,
   );
-  const proxyExecutionTimeoutMs = longestTargetTimeoutMs + 1_000;
+  // Reserve a bounded 30-second budget for target validation, governance,
+  // adapter setup, and audit so those proxy phases cannot consume a target's
+  // own advertised execution deadline.
+  const proxyExecutionTimeoutMs = longestTargetTimeoutMs + DEFAULT_TOOL_TIMEOUT_MS;
 
   function getAdapters(): AdapterSet {
     if (!cachedAdapters) {
