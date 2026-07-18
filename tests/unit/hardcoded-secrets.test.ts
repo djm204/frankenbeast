@@ -784,6 +784,46 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('scripts/maintenance.sh:2');
   });
 
+  it('rejects indirect printenv, schedule-template, and object-property cron credentials', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'indirect-cron.sh'),
+      [
+        'name=GITHUB_TOKEN',
+        'auth="$(printenv "$name")"',
+        'CRON_CMD="0 3 * * * agy pr --token $auth"',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'template-cron.mjs'),
+      [
+        "const schedule = '0 3 * * *';",
+        'const credential = process.env.GITHUB_TOKEN;',
+        'const entry = `${schedule} agy pr --token ${credential}`;',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'object-cron.mjs'),
+      [
+        'const cfg = {};',
+        'cfg.credential = process.env.GITHUB_TOKEN;',
+        'const entry = `0 4 * * * agy pr --token ${cfg.credential}`;',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/indirect-cron.sh:3');
+    expect(result.stderr).toContain('scripts/template-cron.mjs:3');
+    expect(result.stderr).toContain('scripts/object-cron.mjs:3');
+  });
+
   it('allows runtime gh token substitutions in cron strings', () => {
     const root = makeFixtureRoot();
     const scriptDir = join(root, 'scripts');
@@ -807,7 +847,16 @@ describe('hard-coded example secret scanner', () => {
     );
     writeFileSync(
       join(scriptDir, 'runtime-token.mjs'),
-      "spawnSync('deployctl', ['login', '--token', process.env.DEPLOY_TOKEN]);\n",
+      [
+        "spawnSync('deployctl', ['login', '--token', process.env.DEPLOY_TOKEN]);",
+        'const runtimeArgs = [',
+        "  'agy',",
+        "  'pr',",
+        "  '--token',",
+        "  '$(gh auth token)',",
+        '];',
+        "const CRON_CMD = `0 5 * * * ${runtimeArgs.join(' ')}`;",
+      ].join('\n'),
       'utf8',
     );
 

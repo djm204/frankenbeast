@@ -341,6 +341,10 @@ function isSensitiveLiteralName(literal) {
   );
 }
 
+function isSensitiveAliasLiteral(literal) {
+  return !/^--/.test(literal) && (isSensitiveLiteralName(literal) || /^token$/i.test(literal));
+}
+
 function isAllowedSourceLiteral(literal) {
   return isSensitiveLiteralName(literal) || /^\[?<?redacted>?\]?$/i.test(literal);
 }
@@ -400,7 +404,7 @@ function hasSensitiveEnvAccess(line, envContainerAliases = new Set(), envNameAli
     const possibleAlias = match[1] ?? '';
     const bracedAlias = match[2] ?? '';
     const name = match[3] ?? '';
-    const nameAlias = match[4] ?? bracedAlias ?? possibleAlias;
+    const nameAlias = match[4] || bracedAlias || possibleAlias;
     if ((possibleAlias && sensitiveIdentifierPattern.test(possibleAlias)) || (name && sensitiveIdentifierPattern.test(name)) || (nameAlias && envNameAliases.has(nameAlias))) {
       return true;
     }
@@ -491,7 +495,7 @@ function collectSensitiveEnvAliases(line, aliases, envNameAliases, envContainerA
     return;
   }
 
-  const assignment = line.match(/^\s*(?:(?:export\s+)?(?:const|let|var)\s+|(?:export|readonly|local(?:\s+-[A-Za-z]+)*|declare(?:\s+-[A-Za-z]+)*)\s+)?([A-Za-z_$][\w$]*)(?:\s*:\s*[^=]+)?\s*(?:\|\||&&|\?\?)?=\s*(.+)$/);
+  const assignment = line.match(/^\s*(?:(?:export\s+)?(?:const|let|var)\s+|(?:export|readonly|local(?:\s+-[A-Za-z]+)*|declare(?:\s+-[A-Za-z]+)*)\s+)?([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)(?:\s*:\s*[^=]+)?\s*(?:\|\||&&|\?\?)?=\s*(.+)$/);
   if (!assignment) {
     return;
   }
@@ -541,7 +545,7 @@ function hasCronCommandMarker(line, cronScheduleAliases = new Set()) {
   }
   for (const alias of cronScheduleAliases) {
     const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    if (new RegExp(`\\b${escaped}\\b`, 'u').test(codeOutsideStringLiterals(line))) {
+    if (hasAliasInterpolation(line, alias) || new RegExp(`\\b${escaped}\\b`, 'u').test(codeOutsideStringLiterals(line))) {
       return true;
     }
   }
@@ -770,7 +774,7 @@ async function scanSourceFile(file, findings) {
     }
 
     if (pendingAliasName) {
-      if (hasInlineTokenMaterial(code) || hasSensitiveEnvAccess(code, envContainerAliases, sensitiveEnvNameAliases, envGetterAliases) || hasProgrammaticGhAuthTokenCall(code) || (language === 'shell' && hasInstallTimeGhAuthTokenSubstitution(code)) || expressionUsesSensitiveAlias(code, sensitiveEnvAliases) || stringLiterals(code).some((literal) => sensitiveIdentifierPattern.test(literal.value.trim()) || /^token$/i.test(literal.value.trim())) || /^\.([A-Z0-9_]+)\s*[),;]?$/.test(code)) {
+      if (hasInlineTokenMaterial(code) || hasSensitiveEnvAccess(code, envContainerAliases, sensitiveEnvNameAliases, envGetterAliases) || hasProgrammaticGhAuthTokenCall(code) || (language === 'shell' && hasInstallTimeGhAuthTokenSubstitution(code)) || expressionUsesSensitiveAlias(code, sensitiveEnvAliases) || stringLiterals(code).some((literal) => isSensitiveAliasLiteral(literal.value.trim())) || /^\.([A-Z0-9_]+)\s*[),;]?$/.test(code)) {
         sensitiveEnvAliases.add(pendingAliasName);
       } else if (!sensitiveEnvAliases.has(pendingAliasName) && !isFormattingOnlyLine(code) && !/^[\])},;]+$/.test(code)) {
         sensitiveEnvAliases.delete(pendingAliasName);
