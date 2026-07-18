@@ -344,14 +344,24 @@ export async function stopNetworkService(service: { pid: number; detached?: bool
   }
 }
 
-export async function healthcheckNetworkService(service: ManagedNetworkServiceState): Promise<boolean> {
+export async function healthcheckNetworkService(service: ManagedNetworkServiceState): Promise<boolean | 'degraded'> {
   const probeUrl = service.healthUrl ?? service.url;
   if (probeUrl) {
     try {
       const response = await fetch(probeUrl, {
         signal: AbortSignal.timeout(HTTP_CHECK_TIMEOUT_MS),
       });
-      return response.ok || await isDegradedHealthResponse(response);
+      const responseForIdentity = response.clone();
+      const responseForHealth = response.clone();
+      if (service.serviceIdentity) {
+        const identity = await readServiceIdentity(responseForIdentity);
+        if (identity !== service.serviceIdentity) {
+          return false;
+        }
+      }
+      if (response.ok) return true;
+      if (await isDegradedHealthResponse(responseForHealth)) return 'degraded';
+      return false;
     } catch {
       // Fall back to PID checks for services that have not opened HTTP yet.
     }
@@ -424,26 +434,30 @@ async function fetchServiceIdentity(url: string): Promise<string | undefined> {
     const response = await fetch(url, {
       signal: AbortSignal.timeout(HTTP_CHECK_TIMEOUT_MS),
     });
-    const headerIdentity = response.headers.get('x-frankenbeast-service');
-    if (response.ok && headerIdentity) {
-      return headerIdentity;
-    }
-
-    const contentType = response.headers.get('content-type') ?? '';
-    if (!contentType.includes('application/json')) {
-      return undefined;
-    }
-
-    const body = await response.json() as { service?: string; reason?: string; status?: string; ok?: boolean };
-    if (!response.ok) {
-      return body.reason === 'dashboard-build-building' || isDegradedHealthBody(body)
-        ? (headerIdentity ?? body.service)
-        : undefined;
-    }
-    return body.service;
+    return readServiceIdentity(response);
   } catch {
     return undefined;
   }
+}
+
+async function readServiceIdentity(response: Response): Promise<string | undefined> {
+  const headerIdentity = response.headers.get('x-frankenbeast-service');
+  if (response.ok && headerIdentity) {
+    return headerIdentity;
+  }
+
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!contentType.includes('application/json')) {
+    return undefined;
+  }
+
+  const body = await response.json() as { service?: string; reason?: string; status?: string; ok?: boolean };
+  if (!response.ok) {
+    return body.reason === 'dashboard-build-building' || isDegradedHealthBody(body)
+      ? (headerIdentity ?? body.service)
+      : undefined;
+  }
+  return body.service;
 }
 
 function isDegradedHealthBody(body: { status?: string; ok?: boolean }): boolean {

@@ -74,24 +74,25 @@ function parseReplayCursor(eventId: string): { stream: string; sequence: number 
 }
 
 export function shouldApplySocketEvent(
-  payload: { eventId?: string },
+  payload: object,
   processedEventIds: Set<string>,
   replayCursors: Map<string, number>,
 ): boolean {
-  if (!payload.eventId) return true;
-  if (processedEventIds.has(payload.eventId)) return false;
+  const eventId = 'eventId' in payload && typeof payload.eventId === 'string' ? payload.eventId : undefined;
+  if (!eventId) return true;
+  if (processedEventIds.has(eventId)) return false;
 
-  const cursor = parseReplayCursor(payload.eventId);
+  const cursor = parseReplayCursor(eventId);
   if (cursor) {
     const previous = replayCursors.get(cursor.stream);
     if (previous !== undefined && cursor.sequence <= previous) {
-      processedEventIds.add(payload.eventId);
+      processedEventIds.add(eventId);
       return false;
     }
     replayCursors.set(cursor.stream, cursor.sequence);
   }
 
-  processedEventIds.add(payload.eventId);
+  processedEventIds.add(eventId);
   if (processedEventIds.size > 1_000) {
     const oldest = processedEventIds.values().next().value;
     if (oldest) processedEventIds.delete(oldest);

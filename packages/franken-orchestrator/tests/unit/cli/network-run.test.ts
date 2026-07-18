@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve as resolvePath } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -344,6 +344,352 @@ describe('runNetworkCommand', () => {
 
     expect(print).toHaveBeenCalledWith(expect.stringContaining('Mode: secure'));
     expect(print).toHaveBeenCalledWith(expect.stringContaining('chat-server: running'));
+  });
+
+  it('health reports quarantined network state as degraded instead of healthy', async () => {
+    const print = vi.fn();
+
+    await runNetworkCommand(
+      makeArgs({ networkAction: 'health', json: true }),
+      defaultConfig(),
+      '/repo/frankenbeast',
+      makePaths(),
+      {
+        resolveServices: vi.fn(() => []),
+        createSupervisor: vi.fn(() => ({
+          up: vi.fn(),
+          stopAll: vi.fn(),
+          down: vi.fn(),
+          status: vi.fn(async () => ({
+            services: [],
+            stateCorruptions: [{
+              path: '/repo/frankenbeast/.fbeast/network/state.json',
+              quarantinePath: '/repo/frankenbeast/.fbeast/network/state.json.corrupt',
+              reason: 'Unexpected token',
+              repairHint: 'Recover the quarantined state.',
+            }],
+          })),
+          stop: vi.fn(),
+          logs: vi.fn(),
+        })),
+        print,
+        printError: vi.fn(),
+        renderHelp: () => 'network help',
+        waitForShutdown: vi.fn(async () => undefined),
+      },
+    );
+
+    const report = JSON.parse(print.mock.calls.at(-1)?.[0] as string) as {
+      dependencies: Array<{ name: string; status: string; summary: string; remediationHint: string }>;
+    };
+    const stateStore = report.dependencies.find((dependency) => dependency.name === 'state-store');
+    expect(stateStore).toMatchObject({
+      status: 'degraded',
+      remediationHint: 'Recover the quarantined state.',
+    });
+    expect(stateStore?.summary).toContain('quarantined');
+    expect(stateStore?.summary).toContain('Unexpected token');
+  });
+
+  it('health checks the actual network state directory permissions', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'frankenbeast-network-state-health-'));
+    const paths = makePaths(root);
+    await mkdir(join(paths.frankenbeastDir, 'network'), { recursive: true });
+    await chmod(join(paths.frankenbeastDir, 'network'), 0o500);
+    const print = vi.fn();
+    try {
+      await runNetworkCommand(
+        makeArgs({ networkAction: 'health', json: true }),
+        defaultConfig(),
+        root,
+        paths,
+        {
+          resolveServices: vi.fn(() => []),
+          createSupervisor: vi.fn(() => ({
+            up: vi.fn(),
+            stopAll: vi.fn(),
+            down: vi.fn(),
+            status: vi.fn(async () => ({ services: [] })),
+            stop: vi.fn(),
+            logs: vi.fn(),
+          })),
+          print,
+          printError: vi.fn(),
+          renderHelp: () => 'network help',
+          waitForShutdown: vi.fn(async () => undefined),
+        },
+      );
+    } finally {
+      await chmod(join(paths.frankenbeastDir, 'network'), 0o700).catch(() => undefined);
+      await rm(root, { recursive: true, force: true });
+    }
+
+    const report = JSON.parse(print.mock.calls.at(-1)?.[0] as string) as {
+      dependencies: Array<{ name: string; status: string; summary: string }>;
+    };
+    const stateStore = report.dependencies.find((dependency) => dependency.name === 'state-store');
+    expect(stateStore).toMatchObject({ status: 'unavailable' });
+    expect(stateStore?.summary).toContain('/network');
+  });
+
+  it('health requires search permission on network state directories', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'frankenbeast-network-state-search-health-'));
+    const paths = makePaths(root);
+    await mkdir(join(paths.frankenbeastDir, 'network'), { recursive: true });
+    await chmod(join(paths.frankenbeastDir, 'network'), 0o200);
+    const print = vi.fn();
+    try {
+      await runNetworkCommand(
+        makeArgs({ networkAction: 'health', json: true }),
+        defaultConfig(),
+        root,
+        paths,
+        {
+          resolveServices: vi.fn(() => []),
+          createSupervisor: vi.fn(() => ({
+            up: vi.fn(),
+            stopAll: vi.fn(),
+            down: vi.fn(),
+            status: vi.fn(async () => ({ services: [] })),
+            stop: vi.fn(),
+            logs: vi.fn(),
+          })),
+          print,
+          printError: vi.fn(),
+          renderHelp: () => 'network help',
+          waitForShutdown: vi.fn(async () => undefined),
+        },
+      );
+    } finally {
+      await chmod(join(paths.frankenbeastDir, 'network'), 0o700).catch(() => undefined);
+      await rm(root, { recursive: true, force: true });
+    }
+
+    const report = JSON.parse(print.mock.calls.at(-1)?.[0] as string) as {
+      dependencies: Array<{ name: string; status: string }>;
+    };
+    expect(report.dependencies.find((dependency) => dependency.name === 'state-store')).toMatchObject({
+      status: 'unavailable',
+    });
+  });
+
+  it('health rejects a non-directory network state path', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'frankenbeast-network-file-health-'));
+    const paths = makePaths(root);
+    await mkdir(paths.frankenbeastDir, { recursive: true });
+    await writeFile(join(paths.frankenbeastDir, 'network'), 'not a directory', 'utf-8');
+    const print = vi.fn();
+    try {
+      await runNetworkCommand(
+        makeArgs({ networkAction: 'health', json: true }),
+        defaultConfig(),
+        root,
+        paths,
+        {
+          resolveServices: vi.fn(() => []),
+          createSupervisor: vi.fn(() => ({
+            up: vi.fn(),
+            stopAll: vi.fn(),
+            down: vi.fn(),
+            status: vi.fn(async () => ({ services: [] })),
+            stop: vi.fn(),
+            logs: vi.fn(),
+          })),
+          print,
+          printError: vi.fn(),
+          renderHelp: () => 'network help',
+          waitForShutdown: vi.fn(async () => undefined),
+        },
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+
+    const report = JSON.parse(print.mock.calls.at(-1)?.[0] as string) as {
+      dependencies: Array<{ name: string; status: string; summary: string }>;
+    };
+    expect(report.dependencies.find((dependency) => dependency.name === 'state-store')).toMatchObject({
+      status: 'unavailable',
+      summary: expect.stringContaining('not a directory'),
+    });
+  });
+
+  it('health marks configured services unhealthy when persisted state is empty', async () => {
+    const print = vi.fn();
+
+    await runNetworkCommand(
+      makeArgs({ networkAction: 'health', json: true }),
+      defaultConfig(),
+      '/repo/frankenbeast',
+      makePaths(),
+      {
+        resolveServices: vi.fn(() => []),
+        createSupervisor: vi.fn(() => ({
+          up: vi.fn(),
+          stopAll: vi.fn(),
+          down: vi.fn(),
+          status: vi.fn(async () => ({ services: [] })),
+          stop: vi.fn(),
+          logs: vi.fn(),
+        })),
+        print,
+        printError: vi.fn(),
+        renderHelp: () => 'network help',
+        waitForShutdown: vi.fn(async () => undefined),
+      },
+    );
+
+    const report = JSON.parse(print.mock.calls.at(-1)?.[0] as string) as {
+      status: string;
+      dependencies: Array<{ name: string; status: string }>;
+    };
+    expect(report.status).not.toBe('healthy');
+    expect(report.dependencies.some((dependency) => ['web-ui', 'orchestrator-api', 'beasts-daemon'].includes(dependency.name))).toBe(true);
+  });
+
+  it('health includes configured services missing from partial persisted state', async () => {
+    const print = vi.fn();
+
+    await runNetworkCommand(
+      makeArgs({ networkAction: 'health', json: true }),
+      defaultConfig(),
+      '/repo/frankenbeast',
+      makePaths(),
+      {
+        resolveServices: vi.fn(() => []),
+        createSupervisor: vi.fn(() => ({
+          up: vi.fn(),
+          stopAll: vi.fn(),
+          down: vi.fn(),
+          status: vi.fn(async () => ({
+            services: [{
+              id: 'chat-server',
+              displayName: 'chat-server',
+              pid: 101,
+              detached: true,
+              dependsOn: [],
+              startedAt: '2026-07-17T00:00:00.000Z',
+              status: 'running',
+            }],
+          })),
+          stop: vi.fn(),
+          logs: vi.fn(),
+        })),
+        print,
+        printError: vi.fn(),
+        renderHelp: () => 'network help',
+        waitForShutdown: vi.fn(async () => undefined),
+      },
+    );
+
+    const report = JSON.parse(print.mock.calls.at(-1)?.[0] as string) as {
+      status: string;
+      dependencies: Array<{ name: string; status: string }>;
+    };
+    expect(report.dependencies).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'web-ui', status: 'unavailable' }),
+      expect.objectContaining({ name: 'beasts-daemon', status: 'unavailable' }),
+    ]));
+    expect(report.status).toBe('unavailable');
+  });
+
+  it('health downgrades GitHub automation when a token exists without gh', async () => {
+    const originalPath = process.env.PATH;
+    const originalGithubToken = process.env.GITHUB_TOKEN;
+    const originalGhToken = process.env.GH_TOKEN;
+    process.env.PATH = '';
+    process.env.GITHUB_TOKEN = 'test-token';
+    delete process.env.GH_TOKEN;
+    const print = vi.fn();
+    try {
+      await runNetworkCommand(
+        makeArgs({ networkAction: 'health', json: true }),
+        defaultConfig(),
+        '/repo/frankenbeast',
+        makePaths(),
+        {
+          resolveServices: vi.fn(() => []),
+          createSupervisor: vi.fn(() => ({
+            up: vi.fn(),
+            stopAll: vi.fn(),
+            down: vi.fn(),
+            status: vi.fn(async () => ({ services: [] })),
+            stop: vi.fn(),
+            logs: vi.fn(),
+          })),
+          print,
+          printError: vi.fn(),
+          renderHelp: () => 'network help',
+          waitForShutdown: vi.fn(async () => undefined),
+        },
+      );
+    } finally {
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+      if (originalGithubToken === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = originalGithubToken;
+      if (originalGhToken === undefined) delete process.env.GH_TOKEN;
+      else process.env.GH_TOKEN = originalGhToken;
+    }
+
+    const report = JSON.parse(print.mock.calls.at(-1)?.[0] as string) as {
+      dependencies: Array<{ name: string; status: string; summary: string; remediationHint: string }>;
+    };
+    const github = report.dependencies.find((dependency) => dependency.name === 'github-api');
+    expect(github).toMatchObject({ status: 'degraded' });
+    expect(github?.summary).toContain('gh CLI is missing');
+  });
+
+  it('health accepts gh authentication without requiring a token environment variable', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'frankenbeast-gh-auth-'));
+    const gh = join(root, 'gh');
+    await writeFile(gh, '#!/bin/sh\nexit 0\n', 'utf-8');
+    await chmod(gh, 0o700);
+    const originalPath = process.env.PATH;
+    const originalGithubToken = process.env.GITHUB_TOKEN;
+    const originalGhToken = process.env.GH_TOKEN;
+    process.env.PATH = root;
+    delete process.env.GITHUB_TOKEN;
+    delete process.env.GH_TOKEN;
+    const print = vi.fn();
+    try {
+      await runNetworkCommand(
+        makeArgs({ networkAction: 'health', json: true }),
+        defaultConfig(),
+        '/repo/frankenbeast',
+        makePaths(),
+        {
+          resolveServices: vi.fn(() => []),
+          createSupervisor: vi.fn(() => ({
+            up: vi.fn(),
+            stopAll: vi.fn(),
+            down: vi.fn(),
+            status: vi.fn(async () => ({ services: [] })),
+            stop: vi.fn(),
+            logs: vi.fn(),
+          })),
+          print,
+          printError: vi.fn(),
+          renderHelp: () => 'network help',
+          waitForShutdown: vi.fn(async () => undefined),
+        },
+      );
+    } finally {
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+      if (originalGithubToken === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = originalGithubToken;
+      if (originalGhToken === undefined) delete process.env.GH_TOKEN;
+      else process.env.GH_TOKEN = originalGhToken;
+      await rm(root, { recursive: true, force: true });
+    }
+
+    const report = JSON.parse(print.mock.calls.at(-1)?.[0] as string) as {
+      dependencies: Array<{ name: string; status: string; summary: string }>;
+    };
+    const github = report.dependencies.find((dependency) => dependency.name === 'github-api');
+    expect(github).toMatchObject({ status: 'healthy' });
+    expect(github?.summary).toContain('authenticated');
   });
 
   it('prints a scoped credential inventory without secret values', async () => {

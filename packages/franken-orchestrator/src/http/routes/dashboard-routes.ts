@@ -6,6 +6,7 @@ import type { SkillManager } from '../../skills/skill-manager.js';
 import type { SecurityConfig } from '../../middleware/security-profiles.js';
 import { extractOperatorToken, extractOperatorTokenCookie, isCookieOperatorAuthAllowed } from '../operator-auth.js';
 import {
+  type DashboardAvailabilitySnapshot,
   buildDashboardAvailabilitySnapshot,
   type DashboardDependencySnapshot,
   type DashboardProviderSnapshot,
@@ -21,7 +22,8 @@ export interface DashboardRouteDeps {
   skillManager: SkillManager;
   getSecurityConfig: () => SecurityConfig;
   getProviders: () => DashboardProviderSnapshot[];
-  getDependencies?: (() => DashboardDependencySnapshot[]) | undefined;
+  getDependencies?: (() => DashboardDependencySnapshot[] | Promise<DashboardDependencySnapshot[]>) | undefined;
+  getAvailability?: (() => DashboardAvailabilitySnapshot | Promise<DashboardAvailabilitySnapshot>) | undefined;
   getMaintenanceMode?: (() => MaintenanceModeState | Promise<MaintenanceModeState>) | undefined;
   getSloDashboard?: (() => SloDashboard | Promise<SloDashboard>) | undefined;
   operatorToken?: string | undefined;
@@ -36,12 +38,21 @@ async function readOptionalSloDashboard(deps: DashboardRouteDeps): Promise<SloDa
   }
 }
 
+async function buildAvailability(deps: DashboardRouteDeps) {
+  if (deps.getAvailability) {
+    return deps.getAvailability();
+  }
+  const providers = deps.getProviders();
+  const dependencies = deps.getDependencies ? await deps.getDependencies() : [];
+  return buildDashboardAvailabilitySnapshot(providers, dependencies);
+}
+
 async function buildSnapshot(deps: DashboardRouteDeps) {
   const skills = deps.skillManager.listInstalled();
   const enabledSkills = new Set(deps.skillManager.getEnabledSkills());
   const security = deps.getSecurityConfig();
   const providers = deps.getProviders();
-  const availability = buildDashboardAvailabilitySnapshot(providers, deps.getDependencies?.() ?? []);
+  const availability = await buildAvailability(deps);
 
   return {
     skills: skills.map((s) => ({
@@ -113,6 +124,11 @@ export function createDashboardRoutes(deps: DashboardRouteDeps): Hono {
   // GET /api/dashboard — aggregated snapshot of all dashboard state
   app.get('/', async (c) => {
     return c.json(await buildSnapshot(deps));
+  });
+
+  // GET /api/dashboard/health — machine-readable service health aggregator for monitors
+  app.get('/health', async (c) => {
+    return c.json(await buildAvailability(deps));
   });
 
   // POST /api/dashboard/events/ticket — authenticated callers mint a one-shot

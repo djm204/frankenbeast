@@ -833,7 +833,7 @@ export class ChatSocketController {
 
   private emit(peer: ChatSocketPeer, event: ServerSocketEvent): void {
     const connection = this.connections.get(peer);
-    if (!connection || (event as { eventId?: string }).eventId) {
+    if (!connection || ('eventId' in event && event.eventId)) {
       peer.send(JSON.stringify(event));
       return;
     }

@@ -265,7 +265,7 @@ describe('network degraded health handling', () => {
     vi.unstubAllGlobals();
   });
 
-  it('treats read-only degraded health as reachable for stored-service healthchecks', async () => {
+  it('preserves read-only degraded health for stored-service healthchecks', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({
       ok: false,
       status: 'degraded',
@@ -279,7 +279,24 @@ describe('network degraded health handling', () => {
       pid: 4242,
       healthUrl: 'http://127.0.0.1:4050/health',
       startedAt: '2026-07-16T00:00:00.000Z',
-    })).resolves.toBe(true);
+    })).resolves.toBe('degraded');
+  });
+
+  it('rejects healthy config-only probes with the wrong service identity', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      ok: true,
+      status: 'healthy',
+      service: 'unrelated-service',
+    })));
+
+    await expect(healthcheckNetworkService({
+      id: 'chat-server',
+      displayName: 'Chat Server',
+      pid: 0,
+      healthUrl: 'http://127.0.0.1:3737/health',
+      serviceIdentity: 'chat-server',
+      startedAt: '2026-07-17T00:00:00.000Z',
+    })).resolves.toBe(false);
   });
 
   it('reuses a port whose health identity is read-only degraded', async () => {

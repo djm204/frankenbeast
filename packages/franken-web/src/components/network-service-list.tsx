@@ -42,7 +42,7 @@ function canStartService(service: NetworkServiceItem): boolean {
 
 function canStopOrRestartService(service: NetworkServiceItem): boolean {
   const status = normalizeServiceStatus(service.status);
-  return !service.inProcess && (status === 'running' || status === 'stale');
+  return !service.inProcess && (status === 'running' || status === 'stale' || status === 'degraded');
 }
 
 function canViewServiceLogs(service: NetworkServiceItem): boolean {

@@ -6,6 +6,9 @@
 ## 2026-07-17 — Gitleaks fixture secret hygiene
 - Secret-redaction tests that spawn child commands must avoid putting full fixture secrets in the command argv source itself; split PEM headers/footers and token-like values inside the generated command text as well as in test source so Gitleaks does not flag the fixture while runtime output still exercises full secret redaction.
 
+## 2026-07-17 — Service health aggregator verification
+- Before running `npm --workspace @franken/orchestrator run typecheck` in a fresh worktree, build internal workspace dependencies first (`@franken/types`, `@franken/observer`, `@franken/brain`, `@franken/critique`, `@franken/governor`, and `@franken/planner`) so typecheck failures reflect the PR diff instead of missing local `dist` declarations.
+
 ## 2026-07-17 — Learning sandbox Codex closeout
 - For learning sandbox hardening, treat the public execution context as adversarial: freeze exposed policy/declaration objects, keep enforcement copies private, deny namespaced aliases and observer/terminal surfaces (`exec_command`, `write_stdin`, `apply_patch`), and validate callback outcomes before marking a run promotion-eligible.
 - Snapshot and fixture-tool containment must reject replaced/symlinked workspace roots before descending, include root/file mode metadata, and persist evidence even when verification fails, getters throw, or workspaces disappear. Use unique short hashed run directories so parallel retries cannot overwrite each other.
