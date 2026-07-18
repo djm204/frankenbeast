@@ -301,6 +301,54 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).not.toContain(tokenValue);
   });
 
+  it('rejects common Python cron PAT interpolation variants', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'install_cron.py'),
+      [
+        'from os import getenv',
+        "github_pat: str = getenv('GITHUB_PERSONAL_ACCESS_TOKEN')",
+        "entry = f'0 3 * * * GITHUB_PERSONAL_ACCESS_TOKEN={github_pat} agy pr'",
+        'CRON_CMD = (',
+        "  '*/5 * * * * agy issue-fixer '",
+        "  f'--pat={github_pat}'",
+        ')',
+        "safe = 'gh auth token | agy pr'",
+        "# CRON_CMD = f\"* * * * * GITHUB_PERSONAL_ACCESS_TOKEN={getenv('GITHUB_PERSONAL_ACCESS_TOKEN')}\"",
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/install_cron.py:3');
+    expect(result.stderr).toContain('scripts/install_cron.py:6');
+    expect(result.stderr).not.toContain('scripts/install_cron.py:8');
+    expect(result.stderr).not.toContain('scripts/install_cron.py:9');
+  });
+
+  it('allows safe cron diagnostics and gh auth token command text', () => {
+    const root = makeFixtureRoot();
+    const sourceDir = join(root, 'scripts');
+    mkdirSync(sourceDir, { recursive: true });
+    writeFileSync(
+      join(sourceDir, 'install-cron.mjs'),
+      [
+        'const token = process.env.GITHUB_TOKEN;',
+        "if (!process.env.GITHUB_TOKEN) throw new Error('cron requires GITHUB_TOKEN');",
+        "const CRON_CMD = '0 3 * * * gh auth token | agy pr';",
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(0);
+  });
+
   it('documents cron credential rotation guidance', () => {
     const doc = readFileSync(resolve(ROOT, 'docs/cron-credential-safety.md'), 'utf8');
 
