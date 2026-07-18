@@ -916,6 +916,81 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('scripts/install-cron.py:4');
   });
 
+  it('rejects post-processed, staged, dynamic, and equivalent cron credential flows', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'install-dynamic-cron.py'),
+      [
+        'import os',
+        'import subprocess',
+        'import sys',
+        "credential = os.environ.pop('GITHUB_TOKEN')",
+        'schedule = sys.argv[1]',
+        "entry = f'{schedule} agy pr --token {credential}'",
+        "subprocess.run(['crontab', '-'], input=entry)",
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'install-staged-cron.sh'),
+      [
+        "printf '%s\\n' '0 3 * * * agy pr' >/tmp/jobs",
+        "printf '%s\\n' \"--token $GITHUB_TOKEN\" >>/tmp/jobs",
+        'crontab /tmp/jobs',
+        "name='GITHUB_TOKEN'",
+        'auth="$(printenv "$name" | tr -d "\\n")"',
+        'CRON_CMD="0 4 * * * agy pr --token $auth"',
+        'host_auth="$(GH_HOST=github.com gh auth token)"',
+        'CRON_COMMAND="0 5 * * * agy pr --token $host_auth"',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'install-equivalent-cron.mjs'),
+      [
+        'const cfg = {};',
+        "cfg.credential = process['env'].GITHUB_TOKEN;",
+        'const first = `0 6 * * * agy pr --token ${cfg?.credential}`;',
+        "spawnSync('crontab', ['-'], { input: first });",
+        "let appended = '';",
+        'appended += process.env.GITHUB_TOKEN;',
+        'const second = `0 7 * * * agy pr --token ${appended}`;',
+        "spawnSync('crontab', ['-'], { input: second });",
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/install-dynamic-cron.py:7');
+    expect(result.stderr).toContain('scripts/install-staged-cron.sh:2');
+    expect(result.stderr).toContain('scripts/install-staged-cron.sh:6');
+    expect(result.stderr).toContain('scripts/install-staged-cron.sh:8');
+    expect(result.stderr).toContain('scripts/install-equivalent-cron.mjs:3');
+    expect(result.stderr).toContain('scripts/install-equivalent-cron.mjs:7');
+  });
+
+  it('allows quoted runtime env-file credentials in shell cron commands', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'install-runtime-cron.sh'),
+      [
+        "CRON_CMD='0 3 * * * . /etc/franken.env; agy pr --token \"$GITHUB_TOKEN\"'",
+        "CRON_COMMAND=\"0 4 * * * . /etc/franken.env; agy pr --token \\\$GITHUB_TOKEN\"",
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(0);
+  });
+
   it('allows runtime gh token substitutions in cron strings', () => {
     const root = makeFixtureRoot();
     const scriptDir = join(root, 'scripts');
