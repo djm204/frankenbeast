@@ -42,6 +42,19 @@ describe('WizardStepIndicator', () => {
     expect(lockedStep.hasAttribute('disabled')).toBe(true);
   });
 
+  it('hides the locked-step explanation when the current final step is the only incomplete step', () => {
+    render(
+      <WizardStepIndicator
+        steps={STEPS}
+        currentStep={STEPS.length - 1}
+        highestCompleted={STEPS.length - 2}
+        onStepClick={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText(/unlock later steps/i)).toBeNull();
+  });
+
   it('completed steps are clickable', () => {
     const onClick = vi.fn();
     render(<WizardStepIndicator steps={STEPS} currentStep={3} highestCompleted={2} onStepClick={onClick} />);

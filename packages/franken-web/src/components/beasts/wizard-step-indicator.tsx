@@ -11,7 +11,9 @@ interface WizardStepIndicatorProps {
 export function WizardStepIndicator({ steps, currentStep, highestCompleted, stepStatuses = {}, onStepClick }: WizardStepIndicatorProps) {
   const lockedReasonId = useId();
   const firstIncompleteStep = steps[highestCompleted + 1];
-  const hasLockedSteps = highestCompleted < steps.length - 1 && firstIncompleteStep !== undefined;
+  const hasLockedSteps = steps.some(
+    (_, i) => i > highestCompleted && i !== currentStep && stepStatuses[i] !== 'error',
+  );
 
   return (
     <div className="border-b border-beast-border shrink-0" role="navigation" aria-label="Wizard steps">
