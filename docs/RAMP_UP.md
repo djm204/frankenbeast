@@ -9,14 +9,14 @@ A deterministic guardrails framework for AI agents organized as an **npm workspa
 ## Prerequisites
 
 - Node.js version is read from the root `package.json` `engines.node` field (`>=22.13.0 <23 || >=24.0.0 <26`).
-- npm major/minor version is pinned by the root `package.json` `packageManager` field (`npm@11.5.1`).
+- npm version is pinned by the root `package.json` `packageManager` field (`npm@11.5.1`).
 
 To align your local toolchain with these pins, run:
 
 ```bash
 corepack enable npm
-corepack prepare "$(node -p \"require('./package.json').packageManager\")" --activate
-npm --version  # should match the pinned major/minor above
+corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
+npm --version  # should match the pinned version above
 ```
 
 For a full setup gate before making changes, run:
