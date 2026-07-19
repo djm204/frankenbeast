@@ -21,6 +21,7 @@ import { agentRoutes } from '../../../src/http/routes/agent-routes.js';
 import { TransportSecurityService } from '../../../src/http/security/transport-security.js';
 import { BeastEventBus } from '../../../src/beasts/events/beast-event-bus.js';
 import { SseConnectionTicketStore } from '../../../src/beasts/events/sse-connection-ticket.js';
+import Database from 'better-sqlite3';
 
 import { testCredential } from '../../support/test-credentials.js';
 
@@ -1894,7 +1895,8 @@ describe('agent routes integration', () => {
 
   it('does not expose unexpected dispatch exception details in logs, events, or responses', async () => {
     mkdirSync(TMP, { recursive: true });
-    const repository = new SQLiteBeastRepository(join(TMP, 'redacted-dispatch-errors.db'));
+    const dbPath = join(TMP, 'redacted-dispatch-errors.db');
+    const repository = new SQLiteBeastRepository(dbPath);
     const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
     const exceptionSecret = 'dispatch-secret-value-1234567890';
     const requestSecret = 'request-secret-value-0987654321';
@@ -1986,6 +1988,11 @@ describe('agent routes integration', () => {
       message: 'Linked Beast run run_historical-secret-link',
       payload: { runId: 'run_historical-secret-link' },
     });
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tracked_agent_events SET payload = ? WHERE agent_id = ? AND type = ?')
+      .run('{"secret":"must-not-leak"', responseBody.error.details.agentId, 'agent.dispatch.failed');
+    db.close();
+    const corruptWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const detailResponse = await app.request(`/v1/beasts/agents/${responseBody.error.details.agentId}`, { headers });
     expect(detailResponse.status).toBe(200);
     const detail = await detailResponse.json() as {
@@ -1994,6 +2001,8 @@ describe('agent routes integration', () => {
     expect(detail.data.agent).not.toHaveProperty('dispatchRunId');
     expect(detail.data.agent).not.toHaveProperty('name');
     expect(JSON.stringify(detail.data.events)).not.toContain('run_historical-secret-link');
+    expect(corruptWarn).not.toHaveBeenCalledWith(expect.stringContaining('must-not-leak'));
+    corruptWarn.mockRestore();
 
     const patchResponse = await app.request(`/v1/beasts/agents/${responseBody.error.details.agentId}/config`, {
       method: 'PATCH',

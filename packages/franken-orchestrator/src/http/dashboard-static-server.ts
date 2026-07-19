@@ -11,6 +11,7 @@ import { createSecretStore } from '../network/secret-store.js';
 const SERVICE_IDENTITY = 'dashboard-web';
 const LOCAL_HTTP_PROTOCOL = 'http:';
 const RESERVED_PREFIXES = ['/api', '/v1', '/webhooks', '/comms'];
+const TRUSTED_REMOTE_ADDRESS_HEADER = 'x-frankenbeast-remote-address';
 const MIME_TYPES: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
   '.gif': 'image/gif',
@@ -132,6 +133,16 @@ async function createProxyResponse(
   const targetUrl = resolveProxyTargetUrl(apiTarget, sourceUrl);
   const headers = new Headers(request.headers);
   removeHopByHopHeaders(headers);
+  const hadUpstreamProxyMetadata = headers.has('x-forwarded-host') || headers.has('x-forwarded-proto');
+  const trustedRemoteAddress = headers.get(TRUSTED_REMOTE_ADDRESS_HEADER);
+  headers.delete(TRUSTED_REMOTE_ADDRESS_HEADER);
+  if (trustedRemoteAddress
+    && (headers.has('x-forwarded-for') || headers.has('x-real-ip') || !hadUpstreamProxyMetadata)) {
+    const forwardedFor = headers.get('x-forwarded-for');
+    headers.set('x-forwarded-for', forwardedFor
+      ? `${forwardedFor}, ${trustedRemoteAddress}`
+      : trustedRemoteAddress);
+  }
   headers.set('x-forwarded-host', sourceUrl.host);
   headers.set('x-forwarded-proto', sourceUrl.protocol.replace(/:$/, ''));
   if (options.operatorToken) {
@@ -453,7 +464,11 @@ export async function startDashboardStaticServer(options: DashboardStaticServerO
     });
     void readIncomingBody(req)
       .then(async (body) => {
-        const requestInit: RequestInit = { headers: headersFromIncoming(req.headers) };
+        const headers = headersFromIncoming(req.headers);
+        if (req.socket.remoteAddress) {
+          headers.set(TRUSTED_REMOTE_ADDRESS_HEADER, req.socket.remoteAddress);
+        }
+        const requestInit: RequestInit = { headers };
         if (body) {
           requestInit.body = body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as BodyInit;
         }

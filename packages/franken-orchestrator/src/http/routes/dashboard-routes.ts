@@ -13,10 +13,12 @@ import {
 } from './dashboard-status.js';
 import type { MaintenanceModeState } from '../../beasts/services/maintenance-mode-service.js';
 import type { SloDashboard } from '../../availability/slo-dashboard.js';
+import { isLoopbackHost } from '../../network/network-config.js';
 
 const DASHBOARD_SNAPSHOT_POLL_MS = 1_000;
 const DASHBOARD_HEARTBEAT_MS = 30_000;
 const DASHBOARD_SSE_TICKET_SCOPE = 'dashboard';
+const TRUSTED_REMOTE_ADDRESS_HEADER = 'x-frankenbeast-remote-address';
 
 export interface DashboardRouteDeps {
   skillManager: SkillManager;
@@ -86,6 +88,68 @@ function safeTokenCompare(a: string, b: string): boolean {
   return timingSafeEqual(bufA, bufB);
 }
 
+function isLoopbackAddress(address: string): boolean {
+  const normalized = address.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  const ipv4MappedAddress = normalized.match(/^::ffff:(127(?:\.\d{1,3}){3})$/)?.[1];
+  const canonicalIpv4MappedLoopback = /^(?:::ffff:|0:0:0:0:0:ffff:)7f[0-9a-f]{2}:[0-9a-f]{1,4}$/.test(normalized);
+  return canonicalIpv4MappedLoopback || isLoopbackHost(ipv4MappedAddress ?? normalized);
+}
+
+function isForwardedForLoopback(forwardedFor: string | undefined): boolean {
+  if (forwardedFor === undefined) return true;
+  return forwardedFor
+    .split(',')
+    .map((address) => address.trim())
+    .filter(Boolean)
+    .every(isLoopbackAddress);
+}
+
+function isForwardedHostLoopback(forwardedHost: string | undefined): boolean {
+  if (forwardedHost === undefined) return true;
+  return forwardedHost
+    .split(',')
+    .map((host) => host.trim())
+    .filter(Boolean)
+    .every((host) => {
+      try {
+        return isLoopbackAddress(new URL(`https://${host}`).hostname);
+      } catch {
+        return false;
+      }
+    });
+}
+
+function isLoopbackDashboardRequest(c: Context): boolean {
+  const hostname = new URL(c.req.url).hostname;
+  const trustedRemoteAddress = c.req.header(TRUSTED_REMOTE_ADDRESS_HEADER);
+  const realIp = c.req.header('x-real-ip');
+  const forwardedHost = c.req.header('x-forwarded-host');
+  const forwardedFor = c.req.header('x-forwarded-for');
+  const forwardedProto = c.req.header('x-forwarded-proto');
+  const forwardedHostIsLoopback = isForwardedHostLoopback(forwardedHost);
+  const forwardedForIsLoopback = isForwardedForLoopback(forwardedFor);
+  const realIpIsLoopback = realIp === undefined || isLoopbackAddress(realIp);
+  const hasProxyMetadata = forwardedHost !== undefined || forwardedProto !== undefined;
+  const proxyHasClientAddress = !hasProxyMetadata || forwardedFor !== undefined || realIp !== undefined;
+
+  if (trustedRemoteAddress !== undefined) {
+    return isLoopbackAddress(trustedRemoteAddress)
+      && isLoopbackAddress(hostname)
+      && forwardedHostIsLoopback
+      && forwardedForIsLoopback
+      && realIpIsLoopback
+      && proxyHasClientAddress;
+  }
+
+  // Direct Hono callers do not have a Node socket address. Production Node
+  // requests always receive the trusted peer header in http-server-utils.
+  return isLoopbackAddress(hostname)
+    && forwardedHostIsLoopback
+    && forwardedForIsLoopback
+    && realIpIsLoopback
+    && proxyHasClientAddress;
+}
+
 function authenticateTicketRequest(c: Context, operatorToken: string): Response | undefined {
   const headerToken = extractOperatorToken(c.req.header('Authorization'))
     ?? c.req.header('x-frankenbeast-operator-token')
@@ -150,6 +214,14 @@ export function createDashboardRoutes(deps: DashboardRouteDeps): Hono {
   // GET /api/dashboard/events — ticket-authenticated SSE stream for real-time dashboard updates
   app.get('/events', (c) => {
     const ticket = c.req.query('ticket');
+    if (!operatorToken && !isLoopbackDashboardRequest(c)) {
+      return c.json({
+        error: {
+          code: 'FORBIDDEN',
+          message: 'Dashboard events require operator authentication or a loopback-only request',
+        },
+      }, 403);
+    }
     if (operatorToken) {
       if (!ticketStore || !ticket) {
         return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);

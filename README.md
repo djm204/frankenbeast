@@ -15,9 +15,9 @@ Frankenbeast is a safety framework that enforces guardrails *outside* the LLM's 
 
 ## 🚀 One-click onboarding
 
-Want to make your first change? Follow the [contributor guide](CONTRIBUTING.md) from issue selection through setup, focused verification, and pull-request review. If the issue changes only Markdown, use the [docs-only contribution quickstart](docs/onboarding/docs-only-contribution.md) to skip unrelated runtime setup while preserving link checks and review evidence. If your fork is behind, you edited the wrong branch, or a push is rejected, use the [fork and branch recovery guide](docs/onboarding/fork-and-branch-recovery.md) before resetting or rewriting history. If you get blocked, use the [first-contribution help guide](docs/onboarding/getting-help.md) to choose the right discussion and share safe, actionable evidence.
+Want to make your first change? Follow the [contributor guide](CONTRIBUTING.md) from issue selection through setup, focused verification, and pull-request review. If the issue changes only Markdown, use the [docs-only contribution quickstart](docs/onboarding/docs-only-contribution.md) to skip unrelated runtime setup while preserving link checks and review evidence. If your fork is behind, you edited the wrong branch, or a push is rejected, use the [fork and branch recovery guide](docs/onboarding/fork-and-branch-recovery.md) before resetting or rewriting history. If a pull-request check turns red, use the [first-PR CI failure triage guide](docs/onboarding/ci-failure-triage.md) to inspect the current head, reproduce the narrow failure, and avoid blind reruns. If you get blocked, use the [first-contribution help guide](docs/onboarding/getting-help.md) to choose the right discussion and share safe, actionable evidence. After your pull request merges, use the [first-PR completion guide](docs/onboarding/after-your-first-pr.md) to verify issue closure, update your fork, and safely remove the merged branch or worktree.
 
-Starting from a fresh checkout? Use the [Frankenbeast onboarding checklist](ONBOARDING.md) for prerequisites, environment setup, and first-run validation. If you need to choose among the repository's setup, contribution, architecture, agent, and release guides, use the [onboarding guide index](docs/onboarding/README.md) instead of reading every document up front. Dashboard contributors can use the [dashboard UX contribution checklist](docs/onboarding/dashboard-ux-contribution.md) to reproduce, implement, and verify accessible UI changes with reviewable evidence. Read the concise [RAMP_UP.md](docs/RAMP_UP.md) guide when you need a quick contributor orientation. If you want a role-specific path first, choose the [persona quickstart track](docs/onboarding/persona-quickstart-tracks.md) for operators, contributors, or agent-developers. If setup fails, use the [setup troubleshooting matrix](docs/onboarding/setup-troubleshooting-matrix.md) to map symptoms to diagnostic commands, safe remediations, and verification checks. Coding agents should also read the [first-PR agent runbook](docs/onboarding/first-pr-agent-runbook.md) for the end-to-end issue-to-PR flow, the [coding-agent PR etiquette guide](docs/onboarding/coding-agent-pr-etiquette.md) before opening, updating, or merging PRs, and the [release and deployment mental model](docs/onboarding/release-deployment-mental-model.md) before owning post-merge or release handoffs. If you are trying to understand the system before changing it, follow the [Architecture reading path](ONBOARDING.md#architecture-reading-path) for current implementation docs before historical plans, then use the [architecture map for new agent contributors](docs/onboarding/architecture-map.md) to route issues to the right package, tests, approval/HITL boundary, and memory surface. If an agent coordination handoff uses runtime coordination terms, read the [agent coordination runtime glossary](ONBOARDING.md#agent-coordination-runtime-glossary) before acting. New agents that need a low-risk edit/test rehearsal can use the [agent practice fixture](fixtures/agent-practice-fixture/README.md), which includes an intentionally failing scoreboard test, reset script, and sample issue body. Then run the repository bootstrap script:
+Starting from a fresh checkout? Use the [Frankenbeast onboarding checklist](ONBOARDING.md) for prerequisites, environment setup, and first-run validation. If you need to choose among the repository's setup, contribution, architecture, agent, and release guides, use the [onboarding guide index](docs/onboarding/README.md) instead of reading every document up front. Dashboard contributors can use the [dashboard UX contribution checklist](docs/onboarding/dashboard-ux-contribution.md) to reproduce, implement, and verify accessible UI changes with reviewable evidence. Read the concise [RAMP_UP.md](docs/onboarding/RAMP_UP.md) guide when you need a quick contributor orientation. If you want a role-specific path first, choose the [persona quickstart track](docs/onboarding/persona-quickstart-tracks.md) for operators, contributors, or agent-developers. If setup fails, use the [setup troubleshooting matrix](docs/onboarding/setup-troubleshooting-matrix.md) to map symptoms to diagnostic commands, safe remediations, and verification checks. Coding agents should also read the [first-PR agent runbook](docs/onboarding/first-pr-agent-runbook.md) for the end-to-end issue-to-PR flow, the [coding-agent PR etiquette guide](docs/onboarding/coding-agent-pr-etiquette.md) before opening, updating, or merging PRs, and the [release and deployment mental model](docs/onboarding/release-deployment-mental-model.md) before owning post-merge or release handoffs. If you are trying to understand the system before changing it, follow the [Architecture reading path](ONBOARDING.md#architecture-reading-path) for current implementation docs before historical plans, then use the [architecture map for new agent contributors](docs/onboarding/architecture-map.md) to route issues to the right package, tests, approval/HITL boundary, and memory surface. If an agent coordination handoff uses runtime coordination terms, read the [agent coordination runtime glossary](ONBOARDING.md#agent-coordination-runtime-glossary) before acting. New agents that need a low-risk edit/test rehearsal can use the [agent practice fixture](fixtures/agent-practice-fixture/README.md), which includes an intentionally failing scoreboard test, reset script, and sample issue body. Then run the repository bootstrap script:
 
 ```bash
 npm run bootstrap -- --no-docker
@@ -29,17 +29,9 @@ The bootstrap command delegates to [`scripts/bootstrap.sh`](scripts/bootstrap.sh
 ./scripts/bootstrap.sh --dry-run
 ```
 
-## Latest release announcement
+## Releases
 
-[Release v0.45.0](https://github.com/djm204/frankenbeast/releases/tag/v0.45.0) is the latest Frankenbeast release line. It packages the recent one-click onboarding cleanup, security hardening across MCP, observer, orchestrator, governor, and web surfaces, plus deterministic mode improvements for repeatable validation, recovery, and release gates.
-
-Highlights:
-
-- **One-click onboarding:** refreshed init, MCP setup, dashboard, provider, and quickstart guidance so operators can choose the right setup path without mixing local-checkout and published-package commands.
-- **Security hardening:** tightened path containment, webhook/token handling, approval signing, chat/dashboard auth, config validation, and persisted-state hydration safeguards.
-- **Deterministic mode:** expanded root/package verification, release checks, replay validation, and schema guards so CI and operators catch drift before runtime.
-
-Community announcement target: share this release summary in the Frankenbeast Discord once the v0.45.0 GitHub release is published.
+See [GitHub Releases](https://github.com/djm204/frankenbeast/releases) for the latest published release and [CHANGELOG.md](CHANGELOG.md) for the complete release history.
 
 ## Modes
 
@@ -459,8 +451,9 @@ The CLI is available as `frankenbeast`, `franken`, or `frkn` — all are identic
 # Start from scratch — interview, design, plan, execute
 frankenbeast
 
-# Start from an existing design document
-frankenbeast --design-doc docs/my-feature-design.md
+# Start from an existing design document — plan, then execute
+frankenbeast plan --design-doc docs/my-feature-design.md
+frankenbeast run
 
 # Start from existing chunk files
 frankenbeast --plan-dir ./my-chunks/
@@ -551,8 +544,6 @@ Numeric env values are parsed as numbers and then validated with the same schema
 If `stateDir` is set to a path inside a sibling Hermes profile such as `.hermes/profiles/<profile>/...`, Frankenbeast fails closed by default when `<profile>` does not match the active `HERMES_PROFILE` (or `default` when unset). Set `allowCrossProfileStateAccess: true` in an operator-owned config file outside the checked-out repository only for deliberate migrations/imports that must read or write another profile's state; repository-local `.fbeast/config.json` cannot self-approve this opt-in.
 
 ### Operator environment variables
-
-Set `FRANKENBEAST_PLAIN_BANNER=1` to force the CLI startup banner to use the plain ASCII fallback instead of the image-rendered graphic banner. This is useful for CI logs, terminals with limited image rendering support, and log processors that should receive a text-only banner layout. The fallback banner may still include ANSI color codes; leave the variable unset, or set it to any value other than `1`, to keep the normal graphic banner path.
 
 `FRANKENBEAST_NETWORK_MANAGED=1` is an internal child-process marker owned by `frankenbeast network`. The supervisor sets it for managed services such as `chat-server`; operators normally should not export it for standalone local debugging. Managed children suppress the normal CLI startup banner, and managed `chat-server` fails closed without an operator token even on loopback. If a standalone `chat-server` run unexpectedly asks for an operator token on `127.0.0.1` or `localhost`, unset `FRANKENBEAST_NETWORK_MANAGED`; if you intentionally exercise managed semantics, provide `FRANKENBEAST_BEAST_OPERATOR_TOKEN` or the configured secret-store token reference.
 
@@ -1011,11 +1002,12 @@ frankenbeast/
 ├── docs/
 │   ├── ARCHITECTURE.md          # System overview with Mermaid diagrams
 │   ├── PROGRESS.md              # PR-by-PR implementation tracker
-│   ├── RAMP_UP.md               # Concise agent onboarding doc
 │   ├── CONTRACT_MATRIX.md       # Port interface compatibility matrix
 │   ├── beast-loop-explained.md  # Iteration mechanics deep dive
 │   ├── adr/                     # Architecture Decision Records (see docs/adr/*.md)
 │   ├── guides/                  # Quickstart, run/deploy, provider, agent, verification, and issue-workflow guides
+│   ├── onboarding/              # Contributor and agent onboarding guides
+│   │   └── RAMP_UP.md           # Concise agent onboarding doc
 │   └── plans/                   # Design docs and implementation plans
 ├── tests/                       # Root-level integration tests
 ├── scripts/                     # seed.ts, verify-setup.mjs
@@ -1041,7 +1033,7 @@ frankenbeast/
 - [Run the Dashboard Chat](docs/guides/run-dashboard-chat.md) — start the WebSocket chat server and dashboard locally
 - [Run the Network Operator](docs/guides/run-network-operator.md) — start Frankenbeast request-serving services through `frankenbeast network`
 - [Add an LLM Provider](docs/guides/add-llm-provider.md) — add CLI execution providers through `ICliProvider` or API-backed clients through the provider registry
-- [Wrap an External Agent](docs/guides/wrap-external-agent.md) — firewall-as-proxy or full orchestration
+- [Wrap an External Agent](docs/guides/wrap-external-agent.md) — MCP tool governance, orchestrator runtime, or BeastLoop dependency integration
 - [Contract Matrix](docs/CONTRACT_MATRIX.md) — all port interfaces documented
 - [ADRs](docs/adr/) — architectural decisions and rationale
 - [Design Plans](docs/plans/) — design docs and implementation plans

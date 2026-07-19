@@ -7,8 +7,7 @@ import { now as deterministicNow } from '@franken/types';
  * boxed headers, and service highlighting for verbose mode.
  */
 
-import { closeSync, existsSync, openSync, readFileSync, renameSync, statSync, truncateSync, writeSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { closeSync, existsSync, openSync, renameSync, statSync, truncateSync, writeSync } from 'node:fs';
 import type { ILogger } from '../deps.js';
 import { isCommandFailure } from '../errors/command-failure.js';
 import { redactLogData, redactSensitiveText } from './redaction.js';
@@ -73,113 +72,18 @@ export function logHeader(title: string): string {
 
 // ── Banner ──
 
+/** Green ANSI Shadow wordmark matching the Hermes CLI startup style. */
 export const BANNER = `\n${A.green}${A.bold}` +
-  '######## ########     ###    ##    ## ##    ## ######## ##    ## ########  ########    ###     ######  ########\n' +
-  '##       ##     ##   ## ##   ###   ## ##   ##  ##       ###   ## ##     ## ##         ## ##   ##    ##    ##\n' +
-  '##       ##     ##  ##   ##  ####  ## ##  ##   ##       ####  ## ##     ## ##        ##   ##  ##          ##\n' +
-  '######   ########  ##     ## ## ## ## #####    ######   ## ## ## ########  ######   ##     ##  ######     ##\n' +
-  '##       ##   ##   ######### ##  #### ##  ##   ##       ##  #### ##     ## ##       #########       ##    ##\n' +
-  '##       ##    ##  ##     ## ##   ### ##   ##  ##       ##   ### ##     ## ##       ##     ## ##    ##    ##\n' +
-  '##       ##     ## ##     ## ##    ## ##    ## ######## ##    ## ########  ######## ##     ##  ######     ##\n' +
+  '███████╗██████╗  █████╗ ███╗   ██╗██╗  ██╗███████╗███╗   ██╗██████╗ ███████╗ █████╗ ███████╗████████╗\n' +
+  '██╔════╝██╔══██╗██╔══██╗████╗  ██║██║ ██╔╝██╔════╝████╗  ██║██╔══██╗██╔════╝██╔══██╗██╔════╝╚══██╔══╝\n' +
+  '█████╗  ██████╔╝███████║██╔██╗ ██║█████╔╝ █████╗  ██╔██╗ ██║██████╔╝█████╗  ███████║███████╗   ██║   \n' +
+  '██╔══╝  ██╔══██╗██╔══██║██║╚██╗██║██╔═██╗ ██╔══╝  ██║╚██╗██║██╔══██╗██╔══╝  ██╔══██║╚════██║   ██║   \n' +
+  '██║     ██║  ██║██║  ██║██║ ╚████║██║  ██╗███████╗██║ ╚████║██████╔╝███████╗██║  ██║███████║   ██║   \n' +
+  '╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═══╝╚═════╝ ╚══════╝╚═╝  ╚═╝╚══════╝   ╚═╝   ' +
   `${A.reset}\n`;
 
-export function shouldRenderGraphicBanner(options: {
-  logoExists: boolean;
-  forcePlainBanner?: boolean | undefined;
-}): boolean {
-  if (!options.logoExists) {
-    return false;
-  }
-
-  if (options.forcePlainBanner) {
-    return false;
-  }
-
-  return true;
-}
-
-export async function renderBanner(root: string): Promise<string> {
-  const version = readBannerVersion(root);
-  const fallback = buildFallbackBanner(version);
-  const logoPath = resolve(root, 'assets', 'img', 'frankenbeast-github-logo-478x72.png');
-  const renderGraphic = shouldRenderGraphicBanner({
-    logoExists: existsSync(logoPath),
-    forcePlainBanner: process.env.FRANKENBEAST_PLAIN_BANNER === '1',
-  });
-
-  if (!renderGraphic) {
-    return fallback;
-  }
-
-  try {
-    // sharp is an optional dependency used only to render the graphic banner.
-    // It is a heavy native module and may be absent (unsupported platform, or a
-    // slim install); load it lazily so its absence degrades to the ASCII banner
-    // instead of crashing the CLI at import time.
-    const sharp = (await import('sharp')).default;
-    const columns = process.stdout.columns ?? 100;
-    const width = Math.max(28, Math.min(Math.floor(columns * 0.55), 44));
-    const pipeline = sharp(logoPath)
-      .ensureAlpha()
-      .resize({ width, fit: 'inside' });
-    const metadata = await pipeline.metadata();
-
-    if (!metadata.width || !metadata.height) {
-      return fallback;
-    }
-
-    const { data, info } = await pipeline
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-
-    const lines: string[] = [];
-    const stride = info.channels;
-    const pixelAt = (x: number, y: number): [number, number, number, number] => {
-      if (y >= info.height) return [0, 0, 0, 0];
-      const index = (y * info.width + x) * stride;
-      return [
-        data[index] ?? 0,
-        data[index + 1] ?? 0,
-        data[index + 2] ?? 0,
-        data[index + 3] ?? 0,
-      ];
-    };
-
-    for (let y = 0; y < info.height; y += 2) {
-      let line = '';
-      let hasInk = false;
-
-      for (let x = 0; x < info.width; x += 1) {
-        const [r1, g1, b1, a1] = pixelAt(x, y);
-        const [r2, g2, b2, a2] = pixelAt(x, y + 1);
-
-        if (a1 < 18 && a2 < 18) {
-          line += ' ';
-          continue;
-        }
-
-        hasInk = true;
-        const fg = a1 < 18 ? '39' : `38;2;${r1};${g1};${b1}`;
-        const bg = a2 < 18 ? '49' : `48;2;${r2};${g2};${b2}`;
-        line += `\x1b[${fg};${bg}m▀`;
-      }
-
-      if (hasInk) {
-        lines.push(`${line}${A.reset}`);
-      }
-    }
-
-    if (lines.length === 0) {
-      return fallback;
-    }
-
-    const contentWidth = Math.max(...lines.map((line) => stripAnsi(line).length));
-    const title = centerAnsi(`${A.green}${A.bold}🧟 FRANKENBEAST${A.reset}`, contentWidth);
-    const versionLine = centerAnsi(`${A.gray}v${version}${A.reset}`, contentWidth);
-    return `\n${lines.join('\n')}\n\n${title} | ${versionLine}\n`;
-  } catch {
-    return fallback;
-  }
+export async function renderBanner(_root: string): Promise<string> {
+  return BANNER;
 }
 
 // ── Service badge ──
@@ -430,33 +334,6 @@ export class BeastLogger implements ILogger {
 }
 
 export { A as ANSI };
-
-function buildFallbackBanner(version: string): string {
-  const title = `${A.green}${A.bold}FRANKENBEAST${A.reset}`;
-  const versionLine = `${A.gray}v${version}${A.reset}`;
-  return `${BANNER}${centerAnsi(title, 104)}\n${centerAnsi(versionLine, 104)}\n`;
-}
-
-function readBannerVersion(root: string): string {
-  const packageJsonPath = resolve(root, 'package.json');
-  if (!existsSync(packageJsonPath)) {
-    return 'dev';
-  }
-
-  try {
-    const raw = readFileSync(packageJsonPath, 'utf8');
-    const parsed = JSON.parse(raw) as { version?: unknown };
-    return typeof parsed.version === 'string' && parsed.version.length > 0 ? parsed.version : 'dev';
-  } catch {
-    return 'dev';
-  }
-}
-
-function centerAnsi(text: string, width: number): string {
-  const visibleWidth = stripAnsi(text).length;
-  const leftPad = Math.max(0, Math.floor((width - visibleWidth) / 2));
-  return `${' '.repeat(leftPad)}${text}`;
-}
 
 function safeStringify(value: unknown, redactSecrets = true): string {
   try {

@@ -1,6 +1,6 @@
 # franken-critique (MOD-06) Ramp-Up
 
-**Status**: **Integrated safety module** — The primary `@franken/orchestrator` CLI dependency path loads `@franken/critique` when the critique module is enabled. The orchestrator falls back to the local all-pass critique only when the module is explicitly disabled, or when an enabled package is missing and `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1` opts into unsafe degraded mode. The canonical integration status lives in [`../../../docs/RAMP_UP.md`](../../../docs/RAMP_UP.md).
+**Status**: **Integrated safety module** — The primary `@franken/orchestrator` CLI dependency path loads `@franken/critique` when the critique module is enabled. The orchestrator falls back to the local all-pass critique only when the module is explicitly disabled, or when an enabled package is missing and `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1` opts into unsafe degraded mode. The canonical integration status lives in [`../../../docs/onboarding/RAMP_UP.md`](../../../docs/onboarding/RAMP_UP.md).
 
 ## Module Overview
 `franken-critique` implements the Reflexion pattern for the Beast Loop. It scores agent output (plans or code) using a pipeline of deterministic and heuristic evaluators, forcing a correction loop on failures.
@@ -24,7 +24,7 @@
 ## Narrow Integration Notes
 - The critique module depends on caller-provided ports for guardrails, memory, observability, known package metadata, and LLM-backed reflection.
 - The orchestrator can still use the local all-pass critique stub when critique is deliberately disabled by config or environment.
-- Keep this package-level note aligned with the canonical root integration story in [`../../../docs/RAMP_UP.md`](../../../docs/RAMP_UP.md), especially the `dep-factory.ts` / `createBeastDeps()` section.
+- Keep this package-level note aligned with the canonical root integration story in [`../../../docs/onboarding/RAMP_UP.md`](../../../docs/onboarding/RAMP_UP.md), especially the `dep-factory.ts` / `createBeastDeps()` section.
 
 ## Key API
 - `CritiquePipeline`: Executes a sequence of evaluators.

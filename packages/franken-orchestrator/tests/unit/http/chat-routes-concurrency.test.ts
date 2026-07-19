@@ -48,6 +48,35 @@ describe('ChatMutationAdmission concurrency', () => {
     expect(order).toEqual(['first:start', 'first:end', 'second:start', 'second:end']);
   });
 
+  it('continues queued mutations after an earlier mutation fails', async () => {
+    const admission = new ChatMutationAdmission(new InMemoryRateLimiter({ windowMs: 60_000, max: 10 }));
+    const firstRunStarted = deferred();
+    const releaseFirstRun = deferred();
+    const order: string[] = [];
+
+    const first = admission.runExclusive('session-1', async () => {
+      order.push('first:start');
+      firstRunStarted.resolve();
+      await releaseFirstRun.promise;
+      order.push('first:fail');
+      throw new Error('runtime failed');
+    });
+    await firstRunStarted.promise;
+
+    const second = admission.runExclusive('session-1', async () => {
+      order.push('second');
+      return 'second';
+    });
+
+    await Promise.resolve();
+    expect(order).toEqual(['first:start']);
+
+    releaseFirstRun.resolve();
+    await expect(first).rejects.toThrow('runtime failed');
+    await expect(second).resolves.toBe('second');
+    expect(order).toEqual(['first:start', 'first:fail', 'second']);
+  });
+
   it('waits for begin/end guarded turns before running queued mutations', async () => {
     const admission = new ChatMutationAdmission(new InMemoryRateLimiter({ windowMs: 60_000, max: 10 }));
     const order: string[] = [];

@@ -44,7 +44,7 @@ export type { Verdict } from './verdict.js';
 export type { RationaleBlock, VerificationResult } from './rationale.js';
 
 // LLM client interfaces
-export type { ILlmClient, IResultLlmClient } from './llm.js';
+export type { ILlmClient, IResultLlmClient, LlmCompletionOptions } from './llm.js';
 
 // Token
 export type { TokenSpend } from './token.js';
@@ -103,9 +103,11 @@ export type {
   AuthField,
   CritiqueContext,
   ProviderCritiqueFinding,
+  CritiqueFinding,
   CritiqueResult,
   ProviderSkillConfig,
 } from './provider.js';
+
 export {
   ToolDefinitionSchema,
   TokenUsageSchema,

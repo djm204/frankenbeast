@@ -41,6 +41,9 @@ jobs:
   scan:
     name: SAST + secrets + dependency audit
     runs-on: ubuntu-latest
+    # Tool installation, repository scans, report uploads, and issue
+    # reconciliation should complete within one hour even on cold runners.
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v7

@@ -56,52 +56,55 @@ export function ApprovalCard({
   onApprove,
   onReject,
 }: ApprovalCardProps) {
-  if (!pending) {
-    return (
-      <section className="rail-card" aria-label="Pending approval">
-        <div className="rail-card__header">
-          <p className="eyebrow">Approvals</p>
-          <h2>Queue</h2>
-        </div>
-        <p className="rail-card__empty">No approval required.</p>
-      </section>
-    );
-  }
-
   const approvalDescription = approval?.description ?? description ?? '';
   const effectiveSessionId = approval?.sessionId ?? sessionId ?? undefined;
 
   return (
-    <section className="rail-card rail-card--approval" aria-label="Pending approval" aria-busy={resolving}>
+    <section
+      className={`rail-card${pending ? ' rail-card--approval' : ''}`}
+      aria-label="Pending approval"
+    >
       <div className="rail-card__header">
         <p className="eyebrow">Approvals</p>
-        <h2>Approval Required</h2>
+        <div
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          <h2>{pending ? 'Approval Required' : 'Queue'}</h2>
+        </div>
       </div>
-      <p className="approval-card__description">{approvalDescription}</p>
-      <dl className="approval-card__details" aria-label="Approval context">
-        <DetailRow label="Tool" children={approval?.tool} />
-        <DetailRow label="Command" children={approval?.command} />
-        <DetailRow label="Risk" children={approval?.risk} />
-        <DetailRow label="Requested" children={approval?.requestedAt ? formatRequestedAt(approval.requestedAt) : undefined} />
-        <DetailRow label="Affected files" children={approval?.affectedFiles} />
-        <DetailRow label="Session" children={effectiveSessionId} />
-      </dl>
-      {resolving ? (
-        <p className="approval-card__status" role="status">
-          Waiting for approval response…
-        </p>
-      ) : null}
-      {error ? (
-        <p className="approval-card__error" role="alert">
-          {error}
-        </p>
-      ) : null}
-      <div className="approval-card__actions">
-        <button className="button button--primary" disabled={resolving} onClick={onApprove}>
-          {resolving ? 'Submitting…' : 'Approve'}
-        </button>
-        <button className="button button--secondary" disabled={resolving} onClick={onReject}>Reject</button>
-      </div>
+      {!pending ? (
+        <p className="rail-card__empty">No approval required.</p>
+      ) : (
+        <div aria-busy={resolving}>
+          <p className="approval-card__description">{approvalDescription}</p>
+          <dl className="approval-card__details" aria-label="Approval context">
+            <DetailRow label="Tool" children={approval?.tool} />
+            <DetailRow label="Command" children={approval?.command} />
+            <DetailRow label="Risk" children={approval?.risk} />
+            <DetailRow label="Requested" children={approval?.requestedAt ? formatRequestedAt(approval.requestedAt) : undefined} />
+            <DetailRow label="Affected files" children={approval?.affectedFiles} />
+            <DetailRow label="Session" children={effectiveSessionId} />
+          </dl>
+          {resolving ? (
+            <p className="approval-card__status" role="status">
+              Waiting for approval response…
+            </p>
+          ) : null}
+          {error ? (
+            <p className="approval-card__error" role="alert">
+              {error}
+            </p>
+          ) : null}
+          <div className="approval-card__actions">
+            <button className="button button--primary" disabled={resolving} onClick={onApprove}>
+              {resolving ? 'Submitting…' : 'Approve'}
+            </button>
+            <button className="button button--secondary" disabled={resolving} onClick={onReject}>Reject</button>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

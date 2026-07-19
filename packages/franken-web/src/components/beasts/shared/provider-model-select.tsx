@@ -1,3 +1,5 @@
+import { useId } from 'react';
+
 export interface ProviderOption {
   id: string;
   name: string;
@@ -14,6 +16,7 @@ interface ProviderModelSelectProps {
 }
 
 export function ProviderModelSelect({ providers, value, onChange, showUseDefault, useDefault, onUseDefaultChange }: ProviderModelSelectProps) {
+  const modelGuidanceId = useId();
   const selectedProvider = providers.find((p) => p.id === value.provider);
   const hasProviders = providers.length > 0;
 
@@ -63,6 +66,7 @@ export function ProviderModelSelect({ providers, value, onChange, showUseDefault
           value={value.model}
           onChange={(e) => onChange({ ...value, model: e.target.value })}
           aria-label="Model"
+          aria-describedby={!selectedProvider ? modelGuidanceId : undefined}
           disabled={!selectedProvider}
           className="flex-1 bg-beast-control border border-beast-border rounded-lg px-3 py-2 text-beast-text text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent disabled:opacity-50"
         >
@@ -72,6 +76,11 @@ export function ProviderModelSelect({ providers, value, onChange, showUseDefault
           ))}
         </select>
       </div>
+      {!selectedProvider && (
+        <p id={modelGuidanceId} className="text-xs text-beast-muted">
+          Select a provider to choose a model.
+        </p>
+      )}
     </div>
   );
 }

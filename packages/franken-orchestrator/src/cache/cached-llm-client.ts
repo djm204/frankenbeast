@@ -3,24 +3,31 @@ import { LlmCacheStore } from './llm-cache-store.js';
 import { LlmCachePolicy, type CacheablePromptRequest } from './llm-cache-policy.js';
 import { ProviderSessionStore } from './provider-session-store.js';
 import { isoNow } from '@franken/types';
+import type { LlmCompletionOptions } from '@franken/types';
 
 export interface NativeSessionResult {
   content: string;
   sessionId?: string | undefined;
+  clearSession?: boolean | undefined;
 }
 
 export interface NativeSessionController {
   provider: string;
   model: string;
-  resume(sessionId: string | undefined, prompt: string): Promise<NativeSessionResult | undefined>;
+  resume(
+    sessionId: string | undefined,
+    prompt: string,
+    options?: LlmCompletionOptions,
+  ): Promise<NativeSessionResult | undefined>;
 }
 
 export interface CachedPromptRequest extends CacheablePromptRequest {
   nativeSession?: NativeSessionController | undefined;
+  completionOptions?: LlmCompletionOptions | undefined;
 }
 
 export interface CachedLlmClientDeps {
-  llm: { complete(prompt: string): Promise<string> };
+  llm: { complete(prompt: string, options?: LlmCompletionOptions): Promise<string> };
   cacheStore: LlmCacheStore;
   policy: LlmCachePolicy;
   providerSessions: ProviderSessionStore;
@@ -61,7 +68,9 @@ export class CachedLlmClient {
     }
     this.metrics.recordManagedResponseMiss();
 
+    let completionOptions = request.completionOptions;
     if (request.nativeSession && workId) {
+      const nativeStartedAt = Date.now();
       this.metrics.recordNativeSessionAttempt();
       const existingSession = await this.deps.providerSessions.load({
         projectId: request.scope.projectId,
@@ -71,36 +80,44 @@ export class CachedLlmClient {
         promptFingerprint: computed.sessionFingerprint,
       });
 
-      try {
-        const resumed = await request.nativeSession.resume(existingSession?.sessionId, computed.fullPrompt);
-        if (resumed) {
-          this.metrics.recordNativeSessionHit();
-          const sessionId = resumed.sessionId ?? existingSession?.sessionId;
-          if (sessionId) {
-            const now = isoNow();
-            await this.deps.providerSessions.save({
-              projectId: request.scope.projectId,
-              workId,
-              provider: request.nativeSession.provider,
-              model: request.nativeSession.model,
-              sessionId,
-              promptFingerprint: computed.sessionFingerprint,
-              createdAt: existingSession?.createdAt ?? now,
-              updatedAt: now,
-            });
-          }
-          await this.persistCacheArtifacts(request, computed, resumed.content);
-          return resumed.content;
+      const resumed = completionOptions
+        ? await request.nativeSession.resume(
+            existingSession?.sessionId,
+            computed.fullPrompt,
+            completionOptions,
+          )
+        : await request.nativeSession.resume(existingSession?.sessionId, computed.fullPrompt);
+      if (resumed) {
+        this.metrics.recordNativeSessionHit();
+        if (resumed.clearSession) {
+          await this.deps.providerSessions.remove(request.scope.projectId, workId);
         }
-      } catch {
-        // Fall through to backing llm call.
+        const sessionId = resumed.sessionId ?? (resumed.clearSession ? undefined : existingSession?.sessionId);
+        if (sessionId) {
+          const now = isoNow();
+          await this.deps.providerSessions.save({
+            projectId: request.scope.projectId,
+            workId,
+            provider: request.nativeSession.provider,
+            model: request.nativeSession.model,
+            sessionId,
+            promptFingerprint: computed.sessionFingerprint,
+            createdAt: existingSession?.createdAt ?? now,
+            updatedAt: now,
+          });
+        }
+        await this.persistCacheArtifacts(request, computed, resumed.content);
+        return resumed.content;
       }
 
       this.metrics.recordNativeSessionFallback();
+      completionOptions = remainingCompletionOptions(completionOptions, nativeStartedAt);
     }
 
     this.metrics.recordInnerCall();
-    const response = await this.deps.llm.complete(computed.fullPrompt);
+    const response = completionOptions
+      ? await this.deps.llm.complete(computed.fullPrompt, completionOptions)
+      : await this.deps.llm.complete(computed.fullPrompt);
     await this.persistCacheArtifacts(request, computed, response);
     return response;
   }
@@ -152,4 +169,22 @@ export class CachedLlmClient {
       });
     }
   }
+
+  async invalidateProviderSession(projectId: string, workId: string): Promise<void> {
+    await this.deps.providerSessions.remove(projectId, workId);
+  }
+}
+
+function remainingCompletionOptions(
+  options: LlmCompletionOptions | undefined,
+  startedAt: number,
+): LlmCompletionOptions | undefined {
+  if (options?.timeoutMs === undefined) return options;
+  const remainingMs = options.timeoutMs - (Date.now() - startedAt);
+  if (remainingMs <= 0) {
+    throw Object.assign(new Error('LLM completion deadline exceeded before native fallback'), {
+      code: 'ETIMEDOUT',
+    });
+  }
+  return { ...options, timeoutMs: remainingMs };
 }

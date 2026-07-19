@@ -1,5 +1,6 @@
 import type {
   BeastExecutionMode,
+  BeastRun,
   ModuleConfig,
   TrackedAgent,
   TrackedAgentEvent,
@@ -7,7 +8,10 @@ import type {
 } from '../types.js';
 import { isoNow } from '@franken/types';
 import { DeletedTrackedAgentError, UnknownTrackedAgentError } from '../errors.js';
-import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
+import {
+  BeastRepositoryJsonCorruptionError,
+  SQLiteBeastRepository,
+} from '../repository/sqlite-beast-repository.js';
 import type {
   CapacityReservationDecision,
   CapacityReservationPolicy,
@@ -86,11 +90,11 @@ export class AgentService {
   }
 
   listAgents(): TrackedAgent[] {
-    return this.repository.listTrackedAgents();
+    return this.repository.listTrackedAgents({ recoverCorruptJson: true });
   }
 
   getCapacityReservationState(): CapacityReservationState | undefined {
-    return this.options.capacityPolicy?.describe(this.activeCapacityItems());
+    return this.options.capacityPolicy?.describe(this.activeCapacityItems(true));
   }
 
   canStartInitConfig(initConfig: Readonly<Record<string, unknown>>): CapacityReservationDecision {
@@ -123,7 +127,7 @@ export class AgentService {
   getAgentDetail(agentId: string): TrackedAgentDetail {
     return {
       agent: this.getAgent(agentId),
-      events: this.repository.listTrackedAgentEvents(agentId),
+      events: this.repository.listTrackedAgentEvents(agentId, { recoverCorruptJson: true }),
     };
   }
 
@@ -191,13 +195,21 @@ export class AgentService {
     throw new AgentToolPolicyError(validation);
   }
 
-  private activeCapacityItems(): CapacityReservationWorkItem[] {
-    return this.listAgents()
+  private activeCapacityItems(recoverCorruptJson = false): CapacityReservationWorkItem[] {
+    return this.repository.listTrackedAgents({ recoverCorruptJson })
       .filter((agent) => agent.status === 'dispatching'
         || agent.status === 'awaiting_approval'
         || agent.status === 'running')
       .map((agent) => {
-        const linkedRun = agent.dispatchRunId ? this.repository.getRun(agent.dispatchRunId) : undefined;
+        let linkedRun: BeastRun | undefined;
+        try {
+          linkedRun = agent.dispatchRunId ? this.repository.getRun(agent.dispatchRunId) : undefined;
+        } catch (error) {
+          if (!recoverCorruptJson || !(error instanceof BeastRepositoryJsonCorruptionError)) throw error;
+          console.warn(
+            `Using tracked-agent capacity fallback after corrupt Beast JSON in ${error.context.table}.${error.context.column} for row ${error.context.rowId}; persisted state was left unchanged for operator repair.`,
+          );
+        }
         return capacityItemFromConfig(agent.id, linkedRun?.configSnapshot ?? agent.initConfig);
       });
   }

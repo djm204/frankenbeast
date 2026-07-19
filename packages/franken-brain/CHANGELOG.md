@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.15.1](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.15.0...@franken/brain-v0.15.1) (2026-07-19)
+
+
+### Bug Fixes
+
+* **brain:** prune persisted memory on reduced entry limits ([#2635](https://github.com/djm204/frankenbeast/issues/2635)) ([5325b99](https://github.com/djm204/frankenbeast/commit/5325b9923bead81af45d0ff8d0b0c3c2c510f115))
+* **brain:** reject corrupt working memory hydration ([#3263](https://github.com/djm204/frankenbeast/issues/3263)) ([ef5a3d8](https://github.com/djm204/frankenbeast/commit/ef5a3d85dab3c4be70f9055a066abdba7d813760))
+* **brain:** validate working memory keys ([#3265](https://github.com/djm204/frankenbeast/issues/3265)) ([dc6cbfd](https://github.com/djm204/frankenbeast/commit/dc6cbfd9b73793b796d37e239efaf7c83bd85165))
+* **dx:** align workspace TypeScript versions ([#3232](https://github.com/djm204/frankenbeast/issues/3232)) ([5a58ead](https://github.com/djm204/frankenbeast/commit/5a58ead0e541104b41d87e5780419386ea727c26))
+* **mcp:** cap brain startup hydration ([#3247](https://github.com/djm204/frankenbeast/issues/3247)) ([c63e531](https://github.com/djm204/frankenbeast/commit/c63e531ee287b902870c7a8e8e728bf89a4d6198))
+* **security:** address Codex redaction findings ([#2583](https://github.com/djm204/frankenbeast/issues/2583)) ([e497d90](https://github.com/djm204/frankenbeast/commit/e497d904af9fb9ee81aa7a1edc94f53aeb4f6f7d))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.14.0 to 0.14.1
+
 ## [0.15.0](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.14.0...@franken/brain-v0.15.0) (2026-07-18)
 
 

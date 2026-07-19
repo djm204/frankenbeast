@@ -129,6 +129,25 @@ describe('slackRouter', () => {
     expect(gateway.handleAction).toHaveBeenCalledWith('slack', 'session-123', 'approve');
   });
 
+  it('returns 400 when the interactive payload is missing without invoking handlers', async () => {
+    const appWithoutSig = slackRouter({
+      gateway,
+      sessionMapper,
+      signingSecret: secret,
+      verifySignature: false,
+    });
+
+    const res = await appWithoutSig.request('/interactive', {
+      method: 'POST',
+      body: new FormData(),
+    });
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: 'Missing payload' });
+    expect(sessionMapper.mapToSessionId).not.toHaveBeenCalled();
+    expect(gateway.handleAction).not.toHaveBeenCalled();
+  });
+
   it('returns 400 for malformed interactive JSON without invoking handlers', async () => {
     const appWithoutSig = slackRouter({
       gateway,

@@ -256,9 +256,12 @@ describe('Session interview UX', () => {
       expect.stringContaining(`Current document:\n${currentDesignDoc}`),
     );
     expect(readFileSync(paths.designDocFile, 'utf-8')).toBe(revisedDesignDoc);
-    expect(io.display).toHaveBeenCalledTimes(2);
+    expect(io.display).toHaveBeenCalledTimes(3);
     expect((io.display as ReturnType<typeof vi.fn>).mock.calls[1]?.[0]).toContain(
       'rollback handling',
+    );
+    expect((io.display as ReturnType<typeof vi.fn>).mock.calls[2]?.[0]).toContain(
+      'Build log:',
     );
     expect(planBuilds).toEqual([{ goal: revisedDesignDoc }]);
   });

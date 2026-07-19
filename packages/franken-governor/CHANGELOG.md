@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.8.0](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.7.3...franken-governor-v0.8.0) (2026-07-19)
+
+
+### Features
+
+* **governor:** add policy-as-code engine and gate PrCreator git pushes ([#2661](https://github.com/djm204/frankenbeast/issues/2661)) ([ebb2b91](https://github.com/djm204/frankenbeast/commit/ebb2b91b0f94c09159fc7f119f782a017517631c))
+
+
+### Bug Fixes
+
+* **dx:** align workspace TypeScript versions ([#3232](https://github.com/djm204/frankenbeast/issues/3232)) ([5a58ead](https://github.com/djm204/frankenbeast/commit/5a58ead0e541104b41d87e5780419386ea727c26))
+* explain invalid CLI approval responses ([#3314](https://github.com/djm204/frankenbeast/issues/3314)) ([745723f](https://github.com/djm204/frankenbeast/commit/745723f7fe7d78cab6959a1b4451cc305b45eb53))
+* **governor:** authorize Slack approvers ([#3269](https://github.com/djm204/frankenbeast/issues/3269)) ([938940b](https://github.com/djm204/frankenbeast/commit/938940b3f561f5f916ef61505fc05508df877aa5))
+
+
+### Documentation
+
+* **onboarding:** relocate concise agent ramp-up guide ([#3396](https://github.com/djm204/frankenbeast/issues/3396)) ([c39eb74](https://github.com/djm204/frankenbeast/commit/c39eb74886803b2a8f041553cfc742e0655aa483))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.14.0 to 0.14.1
+
 ## [0.7.3](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.7.2...franken-governor-v0.7.3) (2026-07-18)
 
 

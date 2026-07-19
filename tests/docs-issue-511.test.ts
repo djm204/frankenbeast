@@ -8,7 +8,7 @@ const readDoc = (path: string) => readFileSync(resolve(ROOT, path), 'utf8');
 
 describe('issue #511 ramp-up documentation', () => {
   it('keeps RAMP_UP aligned with the current package set', () => {
-    const rampUp = readDoc('docs/RAMP_UP.md');
+    const rampUp = readDoc('docs/onboarding/RAMP_UP.md');
     const packages = readdirSync(resolve(ROOT, 'packages'), { withFileTypes: true })
       .filter((entry) => entry.isDirectory() && existsSync(resolve(ROOT, 'packages', entry.name, 'package.json')))
       .map((entry) => entry.name)
@@ -24,7 +24,7 @@ describe('issue #511 ramp-up documentation', () => {
   });
 
   it('documents fail-closed dependency assembly instead of passthrough fallback', () => {
-    const rampUp = readDoc('docs/RAMP_UP.md');
+    const rampUp = readDoc('docs/onboarding/RAMP_UP.md');
 
     expect(rampUp).toContain('does **not** synthesize permissive passthrough success deps');
     expect(rampUp).toContain('createBeastDeps failed:');
@@ -33,7 +33,7 @@ describe('issue #511 ramp-up documentation', () => {
   });
 
   it('documents explicit resume behavior and provides the agent ramp-up file', () => {
-    const rampUp = readDoc('docs/RAMP_UP.md');
+    const rampUp = readDoc('docs/onboarding/RAMP_UP.md');
     const agentRampUp = readDoc('docs/AGENT_RAMP_UP.md');
 
     expect(rampUp).toContain('Cold `frankenbeast run` clears existing execution checkpoint/chunk-session state');

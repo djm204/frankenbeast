@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import Database from 'better-sqlite3';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -207,6 +208,58 @@ describe('dispatcher queue reconciliation after restart', () => {
     ]));
   });
 
+  it('continues restart reconciliation when an active attempt has corrupt JSON', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-dispatcher-reconcile-'));
+    const dbPath = join(workDir, 'beasts.db');
+    const repo = createRepo(workDir);
+    const agent = createAgent(repo, 'corrupt attempt worker');
+    const run = repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: { objective: 'recover startup', chunkDirectory: '.' },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-20T00:00:01.000Z',
+    });
+    const attempt = repo.createAttempt(run.id, {
+      status: 'running',
+      pid: 4242,
+      startedAt: '2026-03-20T00:01:00.000Z',
+      executorMetadata: { processGroupOwned: true },
+    });
+    repo.updateRun(run.id, { status: 'running' });
+
+    const db = new Database(dbPath);
+    try {
+      db.prepare('UPDATE beast_run_attempts SET executor_metadata = ? WHERE id = ?')
+        .run('{"token":"must-not-leak"', attempt.id);
+    } finally {
+      db.close();
+    }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const report = reconcileDispatcherQueueAfterRestart(repo, {
+      now: () => '2026-03-20T00:05:00.000Z',
+      isPidAlive: () => true,
+    });
+
+    expect(report.findings).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ runId: run.id }),
+    ]));
+    expect(repo.getRun(run.id)).toMatchObject({
+      status: 'running',
+      currentAttemptId: attempt.id,
+    });
+    expect(() => repo.getAttempt(attempt.id)).toThrow();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(
+      `beast_run_attempts.executor_metadata for row ${attempt.id}`,
+    ));
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('must-not-leak'));
+    warn.mockRestore();
+  });
+
   it('does not relink an agent to an older queued run when a newer run already owns dispatch', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-dispatcher-reconcile-'));
     const repo = createRepo(workDir);
@@ -309,6 +362,50 @@ describe('dispatcher queue reconciliation after restart', () => {
     expect(repo.getRun(runTwo.id)).toMatchObject({ status: 'running' });
     expect(repo.listEvents(runOne.id).some(event => event.type === 'run.reconciliation.duplicate_live_agent_run')).toBe(true);
     expect(repo.listEvents(runTwo.id).some(event => event.type === 'run.reconciliation.duplicate_live_agent_run')).toBe(true);
+  });
+
+  it('includes runs with corrupt config snapshots in duplicate live-process detection', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-dispatcher-reconcile-'));
+    const dbPath = join(workDir, 'beasts.db');
+    const repo = createRepo(workDir);
+    const agent = createAgent(repo, 'duplicate corrupt-config worker');
+    const runs = ['first', 'second'].map((objective, index) => repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: { objective },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: `2026-03-20T00:00:0${index + 1}.000Z`,
+    }));
+    runs.forEach((run, index) => repo.createAttempt(run.id, {
+      status: 'running',
+      pid: 3000 + index,
+      executorMetadata: {
+        processGroupOwned: true,
+        processGroupLeaderPid: 3000 + index,
+        processStartTimeTicks: `${3000 + index}-start`,
+      },
+    }));
+    const db = new Database(dbPath);
+    db.prepare('UPDATE beast_runs SET config_snapshot = ? WHERE id = ?')
+      .run('{"secret":"must-not-leak"', runs[0]!.id);
+    db.close();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const report = reconcileDispatcherQueueAfterRestart(repo, {
+      now: () => '2026-03-20T00:05:00.000Z',
+      isPidAlive: () => true,
+      getProcessStartTimeTicks: (pid) => `${pid}-start`,
+    });
+
+    expect(report.checkedRuns).toBe(2);
+    expect(report.duplicateLiveAgentRunCount).toBe(2);
+    expect(report.findings.filter(finding => finding.code === 'duplicate-live-agent-run').map(finding => finding.runId))
+      .toEqual(expect.arrayContaining(runs.map(run => run.id)));
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('must-not-leak'));
+    warn.mockRestore();
   });
 
   it('fails closed when a live PID does not match the attempt process ownership metadata', async () => {

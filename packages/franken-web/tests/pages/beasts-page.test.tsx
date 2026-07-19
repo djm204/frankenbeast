@@ -161,8 +161,10 @@ describe('BeastsPage', () => {
     expect(screen.queryByText('Design Interview')).toBeNull();
   });
 
-  it('shows error banner when error prop is set', () => {
+  it('shows an accessible error alert when error prop is set', () => {
     render(<BeastsPage {...baseProps} error="Something went wrong" />);
+    const alert = screen.getByRole('alert');
+    expect(alert).toBeTruthy();
     expect(screen.getByText('Something went wrong')).toBeTruthy();
   });
 

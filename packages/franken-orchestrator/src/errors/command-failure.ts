@@ -1,4 +1,5 @@
 import { wallClockNow } from '@franken/types';
+import { redactSensitiveText } from '../logging/redaction.js';
 export type CommandFailureKind = 'rate_limit' | 'timeout' | 'spawn_error' | 'command_failed';
 
 export const MAX_RATE_LIMIT_SLEEP_MS = 120_000;
@@ -123,15 +124,17 @@ export function classifyCommandFailure(options: ClassifyCommandFailureOptions): 
     rateLimited,
     ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
     ...(retryAfterClamped ? { retryAfterClamped: true } : {}),
-    stdout,
-    stderr,
+    stdout: redactSensitiveText(stdout),
+    stderr: redactSensitiveText(stderr),
     summary: buildSummary({
       kind,
       tool: options.tool,
       command: options.command,
       provider: options.provider,
       exitCode: options.exitCode,
+      stdout,
       stderr,
+      normalizedOutput: options.normalizedOutput,
     }),
     ...(options.details ? { details: options.details } : {}),
   };
@@ -225,10 +228,12 @@ function buildSummary(input: {
   command: string;
   provider?: string | undefined;
   exitCode?: number | undefined;
+  stdout: string;
   stderr: string;
+  normalizedOutput?: string | undefined;
 }): string {
   const subject = input.provider ?? input.tool;
-  const suffix = buildStderrSuffix(input.stderr);
+  const suffix = buildDiagnosticSuffix(input.normalizedOutput, input.stderr, input.stdout);
   if (input.kind === 'rate_limit') {
     return `${subject} rate limited while running ${input.command}${suffix}`;
   }
@@ -238,9 +243,24 @@ function buildSummary(input: {
   return `${input.tool} command failed: ${input.command}${input.exitCode !== undefined ? ` (exit ${input.exitCode})` : ''}${suffix}`;
 }
 
-function buildStderrSuffix(stderr: string): string {
-  const excerpt = stderr.trim().split('\n').filter(Boolean)[0];
-  return excerpt ? `: ${excerpt}` : '';
+function buildDiagnosticSuffix(normalizedOutput: string | undefined, stderr: string, stdout: string): string {
+  const normalizedExcerpt = diagnosticExcerpt(normalizedOutput ?? '');
+  const stderrExcerpt = diagnosticExcerpt(stderr);
+  const stdoutExcerpt = diagnosticExcerpt(stdout);
+  const parts: string[] = [];
+
+  if (normalizedExcerpt) parts.push(normalizedExcerpt);
+  if (stderrExcerpt && stderrExcerpt !== normalizedExcerpt) {
+    parts.push(normalizedExcerpt ? `stderr: ${stderrExcerpt}` : stderrExcerpt);
+  }
+  if (parts.length === 0 && stdoutExcerpt) parts.push(stdoutExcerpt);
+
+  return parts.length > 0 ? `: ${parts.join(' | ')}` : '';
+}
+
+function diagnosticExcerpt(text: string): string {
+  const firstLine = text.trim().split('\n').find((line) => line.trim().length > 0)?.trim() ?? '';
+  return redactSensitiveText(firstLine).slice(0, 1_000);
 }
 
 function readExecText(value: unknown): string {

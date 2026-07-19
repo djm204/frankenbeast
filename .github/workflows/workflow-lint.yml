@@ -13,6 +13,9 @@ on:
 jobs:
   actionlint:
     runs-on: ubuntu-latest
+    # A single actionlint pass should finish quickly; bound runner use if the
+    # action download or lint process stalls.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 

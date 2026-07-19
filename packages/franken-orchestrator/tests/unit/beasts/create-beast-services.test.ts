@@ -1,9 +1,17 @@
+import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const processExecutorConstructor = vi.hoisted(() => vi.fn());
+const cleanupAbandonedBeastWorktrees = vi.hoisted(() => vi.fn());
+
+vi.mock('../../../src/beasts/execution/git-worktree-isolation.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../../src/beasts/execution/git-worktree-isolation.js')>(),
+  cleanupAbandonedBeastWorktrees,
+}));
 
 vi.mock('../../../src/beasts/execution/process-beast-executor.js', () => ({
   ProcessBeastExecutor: class ProcessBeastExecutorMock {
@@ -25,6 +33,7 @@ describe('createBeastServices', () => {
     delete process.env.FBEAST_AGENT_CAPACITY_RESERVATIONS;
     delete process.env.FBEAST_AGENT_CAPACITY_RELEASED_RESERVATIONS;
     processExecutorConstructor.mockClear();
+    cleanupAbandonedBeastWorktrees.mockClear();
     if (tempDir) {
       await rm(tempDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
       tempDir = undefined;
@@ -81,6 +90,48 @@ describe('createBeastServices', () => {
       expect(restartedServices.ticketStore.consume(ticket, 'operator-token-123')).toBe('valid');
     } finally {
       restartedServices.dispose();
+    }
+  });
+
+  it('starts but suppresses destructive worktree cleanup when persisted run JSON is corrupt', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-create-beast-services-'));
+    const beastsDb = join(tempDir, 'beast.db');
+    const repo = new SQLiteBeastRepository(beastsDb);
+    const run = repo.createRun({
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: { healthy: true },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-20T00:00:00.000Z',
+    });
+    repo.close();
+    const db = new Database(beastsDb);
+    try {
+      db.prepare('UPDATE beast_runs SET config_snapshot = ? WHERE id = ?')
+        .run('{"token":"must-not-leak"', run.id);
+    } finally {
+      db.close();
+    }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { createBeastServices } = await import('../../../src/beasts/create-beast-services.js');
+
+    const services = createBeastServices({
+      beastsDb,
+      beastLogsDir: join(tempDir, 'logs'),
+      root: tempDir,
+    });
+
+    try {
+      expect(cleanupAbandonedBeastWorktrees).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(
+        `Skipping destructive Beast worktree cleanup because persisted JSON is corrupt in beast_runs.config_snapshot for row ${run.id}`,
+      ));
+      expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('must-not-leak'));
+    } finally {
+      services.dispose();
+      warn.mockRestore();
     }
   });
 

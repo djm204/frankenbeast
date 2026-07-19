@@ -1649,6 +1649,7 @@ export async function main(): Promise<void> {
     dryRun: args.dryRun,
     maxCritiqueIterations: config.maxCritiqueIterations,
     maxDurationMs: config.maxDurationMs,
+    planningTimeoutMs: config.planningTimeoutMs,
     enableTracing: config.enableTracing,
     enableHeartbeat: config.enableHeartbeat,
     enableReflection: config.enableReflection,

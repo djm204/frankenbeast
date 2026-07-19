@@ -9,6 +9,34 @@ export interface StreamProgressHandle {
   stop: () => void;
 }
 
+export type NormalizedProviderStreamEvent =
+  | { type: 'reasoning' }
+  | { type: 'tool'; name?: string; path?: string }
+  | { type: 'text'; content: string }
+  | { type: 'usage'; inputTokens?: number; outputTokens?: number; totalTokens?: number }
+  | { type: 'result'; durationMs?: number; costUsd?: number; turns?: number }
+  | { type: 'retry' }
+  | { type: 'error' }
+  | { type: 'unknown'; sourceType: string };
+
+export type StreamProgressEvent =
+  | { type: 'heartbeat'; elapsedMs: number }
+  | { type: 'reasoning' }
+  | { type: 'chunk-detected'; count: number }
+  | { type: 'complete'; durationMs?: number; costUsd?: number; turns?: number };
+
+export interface StreamProgressOptions {
+  /** Emit redacted diagnostics for unrecognized provider frames. */
+  verbose?: boolean;
+  /** Receive provider-neutral normalized events for terminal-only consumers. */
+  onEvent?: (event: NormalizedProviderStreamEvent) => void;
+  write?: (text: string) => void;
+  label?: string;
+  /** Receives derived metadata only; raw provider output is never forwarded. */
+  onProgressEvent?: (event: StreamProgressEvent) => void;
+  heartbeatIntervalMs?: number;
+}
+
 /**
  * Creates a stream progress handler with an integrated spinner.
  * The spinner shows elapsed time from the start; progress lines
@@ -16,31 +44,37 @@ export interface StreamProgressHandle {
  * Call `stop()` after the LLM call resolves to clear the spinner.
  */
 export function createStreamProgressWithSpinner(
-  options: { write?: (text: string) => void; label?: string } = {},
+  options: StreamProgressOptions = {},
 ): StreamProgressHandle {
   const write = options.write ?? ((t: string) => process.stderr.write(t));
   const label = options.label ?? 'LLM working...';
 
   let frameIdx = 0;
   const startMs = wallClockNow();
+  const heartbeatIntervalMs = options.heartbeatIntervalMs ?? 30_000;
+  let lastHeartbeatMs = 0;
 
   const renderSpinner = (): void => {
     const frame = FRAMES[frameIdx % FRAMES.length]!;
     const secs = ((wallClockNow() - startMs) / 1000).toFixed(1);
     write(`\r\x1b[K${frame} ${label} (${secs}s)`);
     frameIdx++;
+    const elapsedMs = wallClockNow() - startMs;
+    if (heartbeatIntervalMs > 0 && elapsedMs - lastHeartbeatMs >= heartbeatIntervalMs) {
+      lastHeartbeatMs = elapsedMs;
+      options.onProgressEvent?.({ type: 'heartbeat', elapsedMs });
+    }
   };
 
   const interval = setInterval(renderSpinner, SPINNER_INTERVAL_MS);
   renderSpinner();
 
-  // Progress lines clear the spinner, write the line, then the spinner re-renders on next tick
   const writeProgress = (text: string): void => {
     write('\r\x1b[K');
     write(text);
   };
 
-  const handler = createStreamProgressHandler(writeProgress);
+  const handler = createStreamProgressHandler(writeProgress, options);
 
   return {
     onLine: handler,
@@ -52,12 +86,177 @@ export function createStreamProgressWithSpinner(
 }
 
 /**
- * Parses stream-json lines from the Claude CLI and renders
- * meaningful progress to the terminal: thinking status, tool use,
- * chunk IDs detected in text output, and completion stats.
+ * Normalizes one parsed Claude, Codex, or Gemini CLI stream frame. The
+ * contract deliberately excludes raw reasoning and error text so consumers
+ * can persist these events without exposing chain-of-thought or secrets.
  */
+export function normalizeProviderStreamEvent(
+  obj: Record<string, unknown>,
+): NormalizedProviderStreamEvent[] {
+  if ('hookSpecificOutput' in obj) return [];
+
+  const type = stringValue(obj['type']);
+  if (!type) return [{ type: 'unknown', sourceType: 'missing-type' }];
+
+  if (type === 'assistant') {
+    const message = asRecord(obj['message']);
+    const events: NormalizedProviderStreamEvent[] = [];
+    const usage = normalizeUsage(message?.['usage']);
+    if (usage) events.push(usage);
+
+    const content = message?.['content'] ?? obj['content'];
+    if (Array.isArray(content)) {
+      for (const value of content) {
+        const block = asRecord(value);
+        if (!block) continue;
+        const blockType = stringValue(block['type']);
+        if (blockType === 'thinking' || blockType === 'reasoning') {
+          events.push({ type: 'reasoning' });
+        } else if (blockType === 'tool_use' || blockType === 'tool_call') {
+          const name = stringValue(block['name']);
+          const path = extractToolPath(block['input']);
+          events.push({ type: 'tool', ...(name ? { name } : {}), ...(path ? { path } : {}) });
+        } else if (blockType === 'text') {
+          const text = stringValue(block['text']);
+          if (text !== undefined) events.push({ type: 'text', content: text });
+        }
+      }
+    } else {
+      const text = extractText(content);
+      if (text !== undefined) events.push({ type: 'text', content: text });
+    }
+    return events;
+  }
+
+  if (type === 'content_block_start') {
+    const block = asRecord(obj['content_block']);
+    const blockType = stringValue(block?.['type']);
+    if (blockType === 'thinking' || blockType === 'reasoning') return [{ type: 'reasoning' }];
+    if (blockType === 'tool_use' || blockType === 'tool_call') {
+      const name = stringValue(block?.['name']);
+      const path = extractToolPath(block?.['input']);
+      return [{ type: 'tool', ...(name ? { name } : {}), ...(path ? { path } : {}) }];
+    }
+    return [];
+  }
+
+  if (type === 'content_block_delta') {
+    const delta = asRecord(obj['delta']);
+    const deltaType = stringValue(delta?.['type']);
+    if (deltaType === 'text_delta' || (deltaType === undefined && typeof delta?.['text'] === 'string')) {
+      const text = stringValue(delta?.['text']);
+      return text === undefined ? [] : [{ type: 'text', content: text }];
+    }
+    if (deltaType === 'thinking_delta') return [{ type: 'reasoning' }];
+    if (deltaType === 'input_json_delta') return [];
+    return [];
+  }
+
+  if (type === 'item.started' || type === 'item.completed' || type === 'item.updated') {
+    const item = asRecord(obj['item']);
+    const itemType = stringValue(item?.['type']);
+    if (itemType === 'reasoning') return [{ type: 'reasoning' }];
+    if (itemType === 'agent_message' || itemType === 'message') {
+      const text = extractText(item?.['text'] ?? item?.['content']);
+      return text === undefined ? [] : [{ type: 'text', content: text }];
+    }
+    if (itemType === 'command_execution') {
+      return [{ type: 'tool', name: 'Bash' }];
+    }
+    if (itemType === 'mcp_tool_call') {
+      const server = stringValue(item?.['server']);
+      const tool = stringValue(item?.['tool']) ?? stringValue(item?.['name']);
+      const name = [server, tool].filter(Boolean).join('.') || 'MCP tool';
+      const path = extractToolPath(item?.['arguments']);
+      return [{ type: 'tool', name, ...(path ? { path } : {}) }];
+    }
+    if (itemType === 'web_search') return [{ type: 'tool', name: 'Search' }];
+    return [{ type: 'unknown', sourceType: `${type}:${itemType ?? 'missing-item-type'}` }];
+  }
+
+  if (type === 'message' || type === 'content' || type === 'event') {
+    const message = asRecord(obj['message']);
+    const role = message?.['role'] ?? obj['role'];
+    if (role === 'user') return [];
+    const text = extractText(message?.['content'] ?? obj['content'] ?? obj['parts'] ?? obj['text']);
+    return text === undefined ? [] : [{ type: 'text', content: text }];
+  }
+
+  if (type === 'tool_use' || type === 'tool_call' || type === 'function_call') {
+    const name = stringValue(obj['tool_name']) ?? stringValue(obj['name']);
+    const input = obj['parameters'] ?? obj['arguments'] ?? obj['input'] ?? {};
+    const path = extractToolPath(input);
+    return [{ type: 'tool', ...(name ? { name } : {}), ...(path ? { path } : {}) }];
+  }
+
+  if (type === 'message_start' || type === 'message_delta') {
+    const message = asRecord(obj['message']);
+    const delta = asRecord(obj['delta']);
+    const usage = normalizeUsage(message?.['usage'] ?? obj['usage'] ?? delta?.['usage']);
+    return usage ? [usage] : [];
+  }
+
+  if (type === 'turn.completed') {
+    const events: NormalizedProviderStreamEvent[] = [];
+    const usage = normalizeUsage(obj['usage']);
+    if (usage) events.push(usage);
+    events.push({ type: 'result' });
+    return events;
+  }
+
+  if (type === 'usage') {
+    const usage = normalizeUsage(obj['usage'] ?? obj);
+    return usage ? [usage] : [];
+  }
+
+  if (type === 'result' || type === 'done') {
+    const stats = asRecord(obj['stats']);
+    const events: NormalizedProviderStreamEvent[] = [];
+    const usage = normalizeUsage(stats ?? obj['usage'] ?? obj);
+    if (usage) events.push(usage);
+    const subtype = stringValue(obj['subtype']);
+    const status = stringValue(obj['status']);
+    if (obj['is_error'] === true || subtype === 'error' || status === 'error' || status === 'failed') {
+      events.push({ type: 'error' });
+      return events;
+    }
+    const message = asRecord(obj['message']);
+    const text = extractText(obj['result'] ?? message?.['content'] ?? obj['content'] ?? obj['text']);
+    if (text !== undefined) events.push({ type: 'text', content: text });
+    const durationMs = numberValue(stats?.['duration_ms']) ?? numberValue(obj['duration_ms']);
+    const costUsd = numberValue(obj['cost_usd']) ?? numberValue(obj['total_cost_usd']);
+    const turns = numberValue(obj['num_turns']);
+    events.push({
+      type: 'result',
+      ...(durationMs !== undefined ? { durationMs } : {}),
+      ...(costUsd !== undefined ? { costUsd } : {}),
+      ...(turns !== undefined ? { turns } : {}),
+    });
+    return events;
+  }
+
+  if (type === 'retry' || type === 'rate_limit' || type === 'rate_limit_event') return [{ type: 'retry' }];
+  if (type === 'error' || type === 'turn.failed') return [{ type: 'error' }];
+
+  if (KNOWN_IGNORED_TYPES.has(type)) return [];
+  return [{ type: 'unknown', sourceType: type }];
+}
+
+const KNOWN_IGNORED_TYPES = new Set([
+  'init',
+  'system',
+  'user',
+  'thread.started',
+  'turn.started',
+  'content_block_stop',
+  'message_stop',
+  'tool_result',
+]);
+
+/** Render normalized provider events as safe, low-volume planning progress. */
 export function createStreamProgressHandler(
   write: (text: string) => void = (t) => process.stderr.write(t),
+  options: StreamProgressOptions = {},
 ): (line: string) => void {
   let lastToolName = '';
   let showedThinking = false;
@@ -73,95 +272,170 @@ export function createStreamProgressHandler(
     try {
       obj = JSON.parse(trimmed) as Record<string, unknown>;
     } catch {
-      return; // Not JSON — skip
+      if (options.verbose) writeUnknown('non-json', write, options);
+      return;
     }
 
-    // Skip hook output
     if ('hookSpecificOutput' in obj) return;
 
-    const type = obj['type'] as string | undefined;
-
-    // content_block_start: detect thinking or tool_use blocks
-    if (type === 'content_block_start') {
-      const block = obj['content_block'] as Record<string, unknown> | undefined;
-      if (!block) return;
-
-      if (block['type'] === 'thinking' && !showedThinking) {
-        showedThinking = true;
-        write(`  ${ANSI.dim}Reasoning...${ANSI.reset}\n`);
-      }
-
-      if (block['type'] === 'tool_use') {
-        lastToolName = block['name'] as string;
-        toolInputAccumulator = '';
-      } else {
+    const rawType = stringValue(obj['type']);
+    const isPartialToolStart = rawType === 'content_block_start';
+    if (rawType === 'content_block_start') {
+      const blockType = stringValue(asRecord(obj['content_block'])?.['type']);
+      if (blockType === 'text') textAccumulator = '';
+      if (blockType !== 'tool_use' && blockType !== 'tool_call') {
         lastToolName = '';
         toolInputAccumulator = '';
       }
-
-      // Reset text accumulator for new text blocks
-      if (block['type'] === 'text') {
-        textAccumulator = '';
-      }
     }
 
-    // content_block_delta: tool input or text output
-    if (type === 'content_block_delta') {
-      const delta = obj['delta'] as Record<string, unknown> | undefined;
-      if (!delta) return;
-
-      // Tool input — show file paths
-      if (delta['type'] === 'input_json_delta' && lastToolName) {
-        const partial = delta['partial_json'] as string | undefined;
-        if (partial) {
-          toolInputAccumulator += partial;
-          const pathMatch = toolInputAccumulator.match(/"file_path"\s*:\s*"([^"]+)"/);
-          if (pathMatch?.[1]) {
-            const action = toolAction(lastToolName);
-            const shortPath = shortenPath(pathMatch[1]);
-            write(`  ${ANSI.dim}${action} ${shortPath}${ANSI.reset}\n`);
-            lastToolName = ''; // Only show once per tool use
+    if (rawType === 'content_block_delta' && lastToolName) {
+      const delta = asRecord(obj['delta']);
+      if (stringValue(delta?.['type']) === 'input_json_delta') {
+        const partialInput = stringValue(delta?.['partial_json']);
+        if (partialInput) {
+          toolInputAccumulator += partialInput;
+          const path = extractToolPathFromPartialJson(toolInputAccumulator);
+          if (path) {
+            renderTool(lastToolName, path, write);
+            lastToolName = '';
             toolInputAccumulator = '';
           }
         }
       }
-
-      // Text delta — accumulate and detect chunk IDs
-      if (delta['type'] === 'text_delta') {
-        const text = delta['text'] as string | undefined;
-        if (text) {
-          textAccumulator += text;
-          detectChunkIds(textAccumulator, seenChunkIds, write);
-        }
-      }
     }
 
-    // result event: show completion stats
-    if (type === 'result') {
-      const cost = obj['cost_usd'] as number | undefined;
-      const duration = obj['duration_ms'] as number | undefined;
-      const numTurns = obj['num_turns'] as number | undefined;
-      const parts: string[] = [];
-      if (duration !== undefined) parts.push(`${(duration / 1000).toFixed(1)}s`);
-      if (cost !== undefined) parts.push(`$${cost.toFixed(4)}`);
-      if (numTurns !== undefined && numTurns > 1) parts.push(`${numTurns} turns`);
-      if (parts.length > 0) {
-        write(`  ${ANSI.dim}LLM done (${parts.join(', ')})${ANSI.reset}\n`);
+    for (const event of normalizeProviderStreamEvent(obj)) {
+      options.onEvent?.(event);
+
+      if (event.type === 'reasoning') {
+        if (!showedThinking) {
+          showedThinking = true;
+          write(`  ${ANSI.dim}Reasoning...${ANSI.reset}\n`);
+          options.onProgressEvent?.({ type: 'reasoning' });
+        }
+      } else if (event.type === 'tool') {
+        if (event.name) {
+          lastToolName = event.name;
+          toolInputAccumulator = '';
+          if (!isPartialToolStart) renderTool(event.name, event.path, write);
+        }
+      } else if (event.type === 'text') {
+        textAccumulator += event.content;
+        detectChunkIds(textAccumulator, seenChunkIds, write, options.onProgressEvent);
+      } else if (event.type === 'result') {
+        const parts: string[] = [];
+        if (event.durationMs !== undefined) parts.push(`${(event.durationMs / 1000).toFixed(1)}s`);
+        if (event.costUsd !== undefined) parts.push(`$${event.costUsd.toFixed(4)}`);
+        if (event.turns !== undefined && event.turns > 1) parts.push(`${event.turns} turns`);
+        write(`  ${ANSI.dim}LLM done${parts.length > 0 ? ` (${parts.join(', ')})` : ''}${ANSI.reset}\n`);
+        options.onProgressEvent?.({
+          type: 'complete',
+          ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
+          ...(event.costUsd !== undefined ? { costUsd: event.costUsd } : {}),
+          ...(event.turns !== undefined ? { turns: event.turns } : {}),
+        });
+      } else if (event.type === 'retry') {
+        write(`  ${ANSI.dim}Provider retrying...${ANSI.reset}\n`);
+      } else if (event.type === 'error') {
+        write(`  ${ANSI.dim}Provider stream error${ANSI.reset}\n`);
+      } else if (event.type === 'unknown' && options.verbose) {
+        writeUnknown(event.sourceType, write, options, false);
       }
     }
   };
 }
 
-/**
- * Scan accumulated text for JSON chunk `"id": "..."` patterns.
- * Each new chunk ID found triggers a progress line.
- */
+function writeUnknown(
+  sourceType: string,
+  write: (text: string) => void,
+  options: StreamProgressOptions,
+  notify = true,
+): void {
+  const event: NormalizedProviderStreamEvent = { type: 'unknown', sourceType };
+  if (notify) options.onEvent?.(event);
+  write(`  ${ANSI.dim}Unknown provider stream event: ${sanitizeEventType(sourceType)}${ANSI.reset}\n`);
+}
+
+function renderTool(name: string, path: string | undefined, write: (text: string) => void): void {
+  const action = toolAction(name);
+  const suffix = path ? ` ${shortenPath(path)}` : '';
+  write(`  ${ANSI.dim}${action}${suffix}${ANSI.reset}\n`);
+}
+
+function extractToolPath(input: unknown): string | undefined {
+  let record = asRecord(input);
+  if (!record && typeof input === 'string') {
+    try {
+      record = asRecord(JSON.parse(input));
+    } catch {
+      return undefined;
+    }
+  }
+  return stringValue(record?.['file_path'])
+    ?? stringValue(record?.['path'])
+    ?? stringValue(record?.['absolute_path']);
+}
+
+function extractToolPathFromPartialJson(input: string): string | undefined {
+  return input.match(/"(?:file_path|path|absolute_path)"\s*:\s*"([^"]+)"/)?.[1];
+}
+
+function normalizeUsage(value: unknown): NormalizedProviderStreamEvent | undefined {
+  const usage = asRecord(value);
+  if (!usage) return undefined;
+  const inputTokens = numberValue(usage['input_tokens']) ?? numberValue(usage['inputTokens'])
+    ?? numberValue(usage['total_input_tokens']) ?? numberValue(usage['promptTokenCount']);
+  const outputTokens = numberValue(usage['output_tokens']) ?? numberValue(usage['outputTokens'])
+    ?? numberValue(usage['total_output_tokens']) ?? numberValue(usage['candidatesTokenCount']);
+  const totalTokens = numberValue(usage['total_tokens']) ?? numberValue(usage['totalTokens'])
+    ?? (inputTokens !== undefined && outputTokens !== undefined ? inputTokens + outputTokens : undefined);
+  if (inputTokens === undefined && outputTokens === undefined && totalTokens === undefined) return undefined;
+  return {
+    type: 'usage',
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+    ...(totalTokens !== undefined ? { totalTokens } : {}),
+  };
+}
+
+function extractText(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  if (!Array.isArray(value)) return undefined;
+  const parts: string[] = [];
+  for (const entry of value) {
+    const record = asRecord(entry);
+    const text = stringValue(record?.['text']) ?? stringValue(record?.['content']);
+    if (text !== undefined) parts.push(text);
+  }
+  return parts.length > 0 ? parts.join('') : undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function sanitizeEventType(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_.:-]/g, '?').slice(0, 120);
+}
+
+/** Scan accumulated text for JSON chunk `"id": "..."` patterns. */
 function detectChunkIds(
   text: string,
   seen: Set<string>,
   write: (text: string) => void,
+  onEvent?: (event: StreamProgressEvent) => void,
 ): void {
-  // Match "id": "some-chunk-id" patterns in JSON array output
   const pattern = /"id"\s*:\s*"([^"]+)"/g;
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(text)) !== null) {
@@ -169,6 +443,7 @@ function detectChunkIds(
     if (!seen.has(id)) {
       seen.add(id);
       write(`  ${ANSI.dim}Planned chunk:${ANSI.reset} ${id}\n`);
+      onEvent?.({ type: 'chunk-detected', count: seen.size });
     }
   }
 }
@@ -180,6 +455,7 @@ function toolAction(name: string): string {
     case 'Edit': return 'Editing';
     case 'Glob': return 'Searching';
     case 'Grep': return 'Searching';
+    case 'Search': return 'Searching';
     case 'Bash': return 'Running';
     default: return `Using ${name}:`;
   }

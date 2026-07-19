@@ -14,6 +14,7 @@ import { deterministicUuid } from '@franken/types';
 import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
 import { sanitizeRunConfigIntegrityEnv } from '../cli/run-config-integrity.js';
+import { resolveCodexSandboxArgs } from './codex-args.js';
 
 function terminateRunningProcess(proc: ChildProcess): void {
   if (proc.exitCode === null && proc.signalCode === null) {
@@ -111,7 +112,22 @@ export class CodexCliAdapter implements ILlmProvider {
   }
 
   buildArgs(request: LlmRequest): string[] {
-    const args = ['exec', '--json', '--ephemeral'];
+    // A profile is not itself a sandbox selection: profiles commonly contain
+    // only model/reasoning settings. Callers that need profile-specific
+    // permissions must pass the explicit config override so workspace-write is
+    // omitted deterministically instead of silently falling back to read-only.
+    const hasConfiguredSandbox = Object.hasOwn(this.options.configOverrides ?? {}, 'sandbox_mode')
+      || Object.hasOwn(this.options.configOverrides ?? {}, 'default_permissions');
+    const { sandboxArgs, extraArgs } = resolveCodexSandboxArgs(
+      this.options.extraArgs,
+      hasConfiguredSandbox,
+    );
+    const args = [
+      'exec',
+      ...sandboxArgs,
+      '--json',
+      '--ephemeral',
+    ];
     if (request.systemPrompt) {
       args.push('-c', `instructions=${request.systemPrompt}`);
     }
@@ -128,9 +144,7 @@ export class CodexCliAdapter implements ILlmProvider {
         args.push('-c', `${key}=${value}`);
       }
     }
-    if (this.options.extraArgs?.length) {
-      args.push(...this.options.extraArgs);
-    }
+    args.push(...extraArgs);
     return args;
   }
 

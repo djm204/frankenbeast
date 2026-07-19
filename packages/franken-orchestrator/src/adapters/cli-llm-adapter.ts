@@ -27,6 +27,8 @@ type CliTransformed = {
   sessionId?: string | undefined;
   cacheSession?: CliCacheSessionHint | undefined;
   requestId?: string | undefined;
+  signal?: AbortSignal | undefined;
+  timeoutMs?: number | undefined;
 };
 
 type ProviderOverride = {
@@ -45,6 +47,15 @@ type LlmReplayRecorder = (record: {
 
 type ReplayRunId = string | (() => string | undefined);
 
+export type CliLlmLifecycleEvent =
+  | { type: 'attempt'; provider: string; attempt: number }
+  | { type: 'complete'; provider: string; attempt: number }
+  | { type: 'rate-limit'; provider: string }
+  | { type: 'failure'; provider: string }
+  | { type: 'fallback'; from: string; to: string }
+  | { type: 'wait'; durationMs: number }
+  | { type: 'timeout'; provider: string; durationMs: number };
+
 type SpawnFn = (
   command: string,
   args: readonly string[],
@@ -61,6 +72,8 @@ export interface CliLlmAdapterOpts {
   chatMode?: boolean;
   /** Called with each complete line of stdout as it arrives (for streaming progress). */
   onStreamLine?: (line: string) => void;
+  /** Called with bounded provider lifecycle metadata; never includes prompt or output. */
+  onLifecycleEvent?: (event: CliLlmLifecycleEvent) => void;
   /** Capture replayable LLM request/response content. */
   replayRecorder?: LlmReplayRecorder | undefined;
   /** Stable run/session id for replay records. Defaults to per-request id. */
@@ -86,6 +99,7 @@ export class CliLlmAdapter implements IAdapter {
     model?: string;
     chatMode: boolean;
     onStreamLine?: (line: string) => void;
+    onLifecycleEvent?: (event: CliLlmLifecycleEvent) => void;
     replayRecorder?: LlmReplayRecorder | undefined;
     replayRunId?: ReplayRunId | undefined;
     providers?: readonly string[] | undefined;
@@ -96,7 +110,7 @@ export class CliLlmAdapter implements IAdapter {
   private readonly _spawn: SpawnFn;
   private readonly registry: ProviderRegistry;
   private readonly responseProviders = new Map<string, string>();
-  private readonly responseSessions = new Map<string, { provider: string; model?: string | undefined; sessionKey: string }>();
+  private readonly responseSessions = new Map<string, { provider: string; model?: string | undefined; sessionId: string }>();
   private readonly chatNativeSessions = new Map<string, string>();
   private chatCallCount = 0;
 
@@ -113,6 +127,7 @@ export class CliLlmAdapter implements IAdapter {
       ...(opts.commandOverride !== undefined ? { commandOverride: opts.commandOverride } : {}),
       ...(opts.model !== undefined ? { model: opts.model } : {}),
       ...(opts.onStreamLine !== undefined ? { onStreamLine: opts.onStreamLine } : {}),
+      ...(opts.onLifecycleEvent !== undefined ? { onLifecycleEvent: opts.onLifecycleEvent } : {}),
       ...(opts.replayRecorder !== undefined ? { replayRecorder: opts.replayRecorder } : {}),
       ...(opts.replayRunId !== undefined ? { replayRunId: opts.replayRunId } : {}),
       ...(opts.providers !== undefined ? { providers: opts.providers } : {}),
@@ -134,6 +149,8 @@ export class CliLlmAdapter implements IAdapter {
       cacheSession?: CliCacheSessionHint;
       sessionContinue?: boolean;
       session_id?: string;
+      signal?: AbortSignal;
+      timeoutMs?: number;
     };
     const userMessages = req.messages.filter((m) => m.role === 'user');
     const last = userMessages[userMessages.length - 1];
@@ -141,7 +158,7 @@ export class CliLlmAdapter implements IAdapter {
     const cacheCapabilities = resolveProviderCacheCapabilities(this.provider);
     const sessionContinue = this.opts.chatMode
       ? req.sessionContinue ?? this.chatCallCount > 0
-      : Boolean(cacheSession?.key && cacheCapabilities.nativeWorkSessions);
+      : Boolean(cacheSession?.key && req.session_id && cacheCapabilities.nativeWorkSessions);
     const transformed: CliTransformed = {
       prompt: last?.content ?? '',
       maxTurns: 1,
@@ -150,6 +167,8 @@ export class CliLlmAdapter implements IAdapter {
       sessionContinue,
       ...(req.session_id ? { sessionId: req.session_id } : {}),
       ...(req.id ? { requestId: req.id } : {}),
+      ...(req.signal ? { signal: req.signal } : {}),
+      ...(req.timeoutMs !== undefined ? { timeoutMs: req.timeoutMs } : {}),
     };
     if (cacheSession) {
       transformed.cacheSession = cacheSession;
@@ -158,7 +177,18 @@ export class CliLlmAdapter implements IAdapter {
   }
 
   async execute(providerRequest: unknown): Promise<string> {
-    const { prompt, maxTurns, model, chatMode, sessionContinue, sessionId, requestId, cacheSession } = providerRequest as CliTransformed;
+    const {
+      prompt,
+      maxTurns,
+      model,
+      chatMode,
+      sessionContinue,
+      sessionId,
+      requestId,
+      cacheSession,
+      signal: callerSignal,
+      timeoutMs: requestedTimeoutMs,
+    } = providerRequest as CliTransformed;
     if (chatMode) this.chatCallCount++;
     const providers = normalizeProviderChain(this.provider.name, this.opts.providers);
     const exhaustedProviders = new Map<string, CommandFailure>();
@@ -166,10 +196,37 @@ export class CliLlmAdapter implements IAdapter {
     const initialProvider = this.provider.name;
     let activeProvider = initialProvider;
     let rateLimitRetryCycles = 0;
+    let attempt = 0;
+    const timeoutMs = requestedTimeoutMs ?? this.opts.timeoutMs;
+    const deadlineAt = Date.now() + timeoutMs;
+    const logicalController = new AbortController();
+    const abortFromCaller = (): void => {
+      logicalController.abort(
+        callerSignal?.reason instanceof Error
+          ? callerSignal.reason
+          : new Error('LLM request cancelled'),
+      );
+    };
+    if (callerSignal?.aborted) {
+      abortFromCaller();
+    } else {
+      callerSignal?.addEventListener('abort', abortFromCaller, { once: true });
+    }
+    const logicalTimeout = setTimeout(() => {
+      logicalController.abort(
+        Object.assign(new Error(`CLI timeout after ${timeoutMs}ms`), { code: 'ETIMEDOUT' }),
+      );
+    }, timeoutMs);
+    logicalTimeout.unref?.();
+    const signal = logicalController.signal;
 
-    while (true) {
+    try {
+      while (true) {
+        throwIfAborted(signal);
+        attempt++;
       const provider = this.resolveProvider(activeProvider);
       const activeModel = this.resolveModel(activeProvider, model);
+      this.opts.onLifecycleEvent?.({ type: 'attempt', provider: activeProvider, attempt });
       if (requestId) {
         const replayRunId = this.resolveReplayRunId(requestId);
         this.opts.replayRecorder?.({
@@ -181,6 +238,7 @@ export class CliLlmAdapter implements IAdapter {
         });
       }
       const activeCommand = this.resolveCommand(activeProvider);
+      const providerSessionContinue = sessionContinue && (chatMode || activeProvider === initialProvider);
       let result: { stdout: string; stderr: string; exitCode: number };
       try {
         result = await this.spawnSingle({
@@ -189,17 +247,23 @@ export class CliLlmAdapter implements IAdapter {
             maxTurns,
             model: activeModel,
             chatMode,
-            sessionContinue,
-            ...(sessionId ? { sessionId: this.resolveProviderSessionId(activeProvider, sessionId, sessionContinue) } : {}),
+            sessionContinue: providerSessionContinue,
+            persistSession: Boolean(cacheSession?.persist),
+            ...(sessionId && (chatMode || activeProvider === initialProvider)
+              ? { sessionId: chatMode ? this.resolveProviderSessionId(activeProvider, sessionId, providerSessionContinue) : sessionId }
+              : {}),
             extraArgs: this.resolveExtraArgs(activeProvider),
           }),
           env: provider.filterEnv(this.captureEnv()),
           prompt,
+          signal,
+          timeoutMs: Math.max(1, deadlineAt - Date.now()),
         });
       } catch (error) {
         if (requestId) {
           this.responseSessions.delete(requestId);
         }
+        throwIfAborted(signal);
 
         const failure = commandFailureFromExecError({
           tool: 'llm',
@@ -217,10 +281,23 @@ export class CliLlmAdapter implements IAdapter {
           },
         });
 
+        if (failure.rateLimited) {
+          this.opts.onLifecycleEvent?.({ type: 'rate-limit', provider: activeProvider });
+        } else if (error instanceof Error && /timeout/i.test(error.message)) {
+          this.opts.onLifecycleEvent?.({
+            type: 'timeout',
+            provider: activeProvider,
+            durationMs: this.opts.timeoutMs,
+          });
+        } else {
+          this.opts.onLifecycleEvent?.({ type: 'failure', provider: activeProvider });
+        }
+
         if (failure.kind === 'spawn_error') {
           exhaustedProviders.set(activeProvider, failure);
           const nextProvider = providers.find((name) => !exhaustedProviders.has(name));
           if (nextProvider) {
+            this.opts.onLifecycleEvent?.({ type: 'fallback', from: activeProvider, to: nextProvider });
             activeProvider = nextProvider;
             continue;
           }
@@ -231,7 +308,8 @@ export class CliLlmAdapter implements IAdapter {
               });
             }
             const sleepMs = this.resolveSleepMs(exhaustedProviders);
-            await sleepFn(sleepMs);
+            this.opts.onLifecycleEvent?.({ type: 'wait', durationMs: sleepMs });
+            await sleepWithAbort(sleepMs, sleepFn, signal);
             rateLimitRetryCycles++;
             exhaustedProviders.clear();
             activeProvider = initialProvider;
@@ -244,6 +322,7 @@ export class CliLlmAdapter implements IAdapter {
       }
 
       if (result.exitCode === 0) {
+        this.opts.onLifecycleEvent?.({ type: 'complete', provider: activeProvider, attempt });
       if (chatMode && sessionId) {
         const nativeSessionId = this.extractNativeSessionId(result.stdout);
         if (nativeSessionId) {
@@ -262,11 +341,14 @@ export class CliLlmAdapter implements IAdapter {
           });
           this.responseProviders.set(requestId, activeProvider);
           if (cacheSession?.persist && resolveProviderCacheCapabilities(provider).persistentAcrossProcesses) {
-            this.responseSessions.set(requestId, {
-              provider: activeProvider,
-              ...(this.resolveModel(activeProvider, model) ? { model: this.resolveModel(activeProvider, model) } : {}),
-              sessionKey: cacheSession.key,
-            });
+            const nativeSessionId = this.extractNativeSessionId(result.stdout);
+            if (nativeSessionId) {
+              this.responseSessions.set(requestId, {
+                provider: activeProvider,
+                ...(this.resolveModel(activeProvider, model) ? { model: this.resolveModel(activeProvider, model) } : {}),
+                sessionId: nativeSessionId,
+              });
+            }
           }
         }
         return result.stdout;
@@ -296,13 +378,16 @@ export class CliLlmAdapter implements IAdapter {
       });
 
       if (!failure.rateLimited) {
+        this.opts.onLifecycleEvent?.({ type: 'failure', provider: activeProvider });
         throw new Error(failure.summary, { cause: failure });
       }
 
+      this.opts.onLifecycleEvent?.({ type: 'rate-limit', provider: activeProvider });
       exhaustedProviders.set(activeProvider, failure);
 
       const nextProvider = providers.find((name) => !exhaustedProviders.has(name));
       if (nextProvider) {
+        this.opts.onLifecycleEvent?.({ type: 'fallback', from: activeProvider, to: nextProvider });
         activeProvider = nextProvider;
         continue;
       }
@@ -313,10 +398,15 @@ export class CliLlmAdapter implements IAdapter {
           cause: lastRateLimitedFailure(exhaustedProviders),
         });
       }
-      await sleepFn(sleepMs);
+      this.opts.onLifecycleEvent?.({ type: 'wait', durationMs: sleepMs });
+      await sleepWithAbort(sleepMs, sleepFn, signal);
       rateLimitRetryCycles++;
       exhaustedProviders.clear();
       activeProvider = initialProvider;
+      }
+    } finally {
+      clearTimeout(logicalTimeout);
+      callerSignal?.removeEventListener('abort', abortFromCaller);
     }
   }
 
@@ -332,7 +422,11 @@ export class CliLlmAdapter implements IAdapter {
     return feature === 'text-completion';
   }
 
-  consumeSessionMetadata(requestId: string): { provider: string; model?: string | undefined; sessionKey: string } | undefined {
+  getProviderName(): string {
+    return this.provider.name;
+  }
+
+  consumeSessionMetadata(requestId: string): { provider: string; model?: string | undefined; sessionId: string } | undefined {
     const session = this.responseSessions.get(requestId);
     if (!session) {
       return undefined;
@@ -439,6 +533,8 @@ export class CliLlmAdapter implements IAdapter {
     args: string[];
     env: Record<string, string>;
     prompt: string;
+    signal?: AbortSignal | undefined;
+    timeoutMs?: number | undefined;
   }): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     return new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve, reject) => {
       const child = this._spawn(input.cmd, input.args, {
@@ -453,22 +549,72 @@ export class CliLlmAdapter implements IAdapter {
       let stdout = '';
       let stderr = '';
       let settled = false;
-      let timedOut = false;
+      let terminated = false;
       let hardKillTimer: ReturnType<typeof setTimeout> | undefined;
       let lineBuffer = '';
 
+      const settle = (fn: () => void): void => {
+        if (settled) return;
+        settled = true;
+        fn();
+      };
+
+      const scheduleHardKill = (): void => {
+        hardKillTimer = setTimeout(() => {
+          try {
+            child.kill('SIGKILL');
+          } catch (error) {
+            console.warn('[CliLlmAdapter] Failed to hard-kill timed-out CLI process', {
+              signal: 'SIGKILL',
+              pid: child.pid,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }, 5_000);
+        // Do not keep short-lived invocations alive for the hard-kill fallback.
+        hardKillTimer.unref();
+      };
+
+      const terminate = (label: 'timed-out' | 'aborted'): void => {
+        terminated = true;
+        try {
+          child.kill('SIGTERM');
+        } catch (error) {
+          console.warn(`[CliLlmAdapter] Failed to terminate ${label} CLI process`, {
+            signal: 'SIGTERM',
+            pid: child.pid,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        scheduleHardKill();
+      };
+
+      const effectiveTimeoutMs = input.timeoutMs ?? this.opts.timeoutMs;
+      const timer = setTimeout(() => {
+        input.signal?.removeEventListener('abort', abortRequest);
+        terminate('timed-out');
+        const error = Object.assign(new Error(`CLI timeout after ${effectiveTimeoutMs}ms`), { code: 'ETIMEDOUT' });
+        settle(() => reject(error));
+      }, effectiveTimeoutMs);
+
       const clearTimers = (): void => {
         clearTimeout(timer);
+        input.signal?.removeEventListener('abort', abortRequest);
         if (hardKillTimer) {
           clearTimeout(hardKillTimer);
           hardKillTimer = undefined;
         }
       };
 
-      const settle = (fn: () => void): void => {
+      const abortRequest = (): void => {
         if (settled) return;
-        settled = true;
-        fn();
+        clearTimeout(timer);
+        input.signal?.removeEventListener('abort', abortRequest);
+        const reason = input.signal?.reason;
+        const timedOut = reason instanceof Error
+          && (reason as NodeJS.ErrnoException).code === 'ETIMEDOUT';
+        terminate(timedOut ? 'timed-out' : 'aborted');
+        settle(() => reject(reason instanceof Error ? reason : new Error('LLM request aborted')));
       };
 
       child.stdout!.on('data', (chunk: Buffer) => {
@@ -491,49 +637,24 @@ export class CliLlmAdapter implements IAdapter {
         stderr += chunk.toString();
       });
 
-      const timer = setTimeout(() => {
-        timedOut = true;
-        try {
-          child.kill('SIGTERM');
-        } catch (error) {
-          console.warn('[CliLlmAdapter] Failed to terminate timed-out CLI process', {
-            signal: 'SIGTERM',
-            pid: child.pid,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-        hardKillTimer = setTimeout(() => {
-          try {
-            child.kill('SIGKILL');
-          } catch (error) {
-            console.warn('[CliLlmAdapter] Failed to hard-kill timed-out CLI process', {
-              signal: 'SIGKILL',
-              pid: child.pid,
-              error: error instanceof Error ? error.message : String(error),
-            });
-          }
-        }, 5_000);
-        // Don't keep the event loop alive waiting on the hard-kill fallback;
-        // short-lived invocations should exit promptly after a timeout reject.
-        hardKillTimer.unref();
-        const error = Object.assign(new Error(`CLI timeout after ${this.opts.timeoutMs}ms`), { code: 'ETIMEDOUT' });
-        settle(() => reject(error));
-      }, this.opts.timeoutMs);
+      if (input.signal?.aborted) {
+        abortRequest();
+      } else {
+        input.signal?.addEventListener('abort', abortRequest, { once: true });
+      }
 
       child.on('close', (code) => {
         clearTimers();
         if (this.opts.onStreamLine && lineBuffer.trim().length > 0) {
           this.opts.onStreamLine(lineBuffer);
         }
-        if (timedOut) return;
+        if (terminated) return;
         settle(() => resolve({ stdout, stderr, exitCode: code ?? 1 }));
       });
 
       child.on('error', (err) => {
-        if (timedOut) {
-          // An 'error' here can mean the process couldn't be killed; keep the
-          // scheduled hard-kill (SIGKILL) so a process that ignored SIGTERM is
-          // still terminated. Only cancel the original deadline timer.
+        if (terminated) {
+          // Preserve the scheduled SIGKILL fallback if termination failed.
           clearTimeout(timer);
           return;
         }
@@ -600,4 +721,51 @@ function buildNoCliProvidersAvailableSummary(exhaustedProviders: Map<string, Com
 
 function defaultSleep(durationMs: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, durationMs));
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  throw signal.reason instanceof Error ? signal.reason : new Error('LLM request aborted');
+}
+
+function sleepWithAbort(
+  durationMs: number,
+  sleepFn: (durationMs: number) => Promise<void>,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  if (!signal) return sleepFn(durationMs);
+  throwIfAborted(signal);
+
+  if (sleepFn === defaultSleep) {
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        signal.removeEventListener('abort', abort);
+        resolve();
+      }, durationMs);
+      const abort = (): void => {
+        clearTimeout(timer);
+        signal.removeEventListener('abort', abort);
+        reject(signal.reason instanceof Error ? signal.reason : new Error('LLM request aborted'));
+      };
+      signal.addEventListener('abort', abort, { once: true });
+    });
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    const abort = (): void => {
+      signal.removeEventListener('abort', abort);
+      reject(signal.reason instanceof Error ? signal.reason : new Error('LLM request aborted'));
+    };
+    signal.addEventListener('abort', abort, { once: true });
+    sleepFn(durationMs).then(
+      () => {
+        signal.removeEventListener('abort', abort);
+        resolve();
+      },
+      (error) => {
+        signal.removeEventListener('abort', abort);
+        reject(error);
+      },
+    );
+  });
 }

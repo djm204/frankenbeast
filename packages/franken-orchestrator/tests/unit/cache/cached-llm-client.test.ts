@@ -173,8 +173,12 @@ describe('CachedLlmClient', () => {
   it('treats corrupt provider-session JSON as a miss before native-session fallback', async () => {
     const { llm, client, rootDir, metrics } = await createHarness();
     const resume = vi.fn<
-      (sessionId: string | undefined, prompt: string) => Promise<{ content: string; sessionId: string } | undefined>
-    >().mockResolvedValueOnce(undefined);
+      (sessionId: string | undefined, prompt: string, options?: { timeoutMs?: number }) => Promise<{ content: string; sessionId: string } | undefined>
+    >().mockImplementationOnce(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return undefined;
+    });
+    const completeSpy = vi.spyOn(llm, 'complete');
     const request = {
       scope: {
         projectId: 'frankenbeast',
@@ -184,6 +188,7 @@ describe('CachedLlmClient', () => {
       stablePrefix: 'skill injection',
       workPrefix: 'issue 99 summary',
       volatileSuffix: 'new comment text',
+      completionOptions: { timeoutMs: 200 },
       nativeSession: {
         provider: 'claude',
         model: 'claude-sonnet-4-6',
@@ -200,7 +205,10 @@ describe('CachedLlmClient', () => {
 
     await expect(client.complete(request)).resolves.toBe('LLM RESULT');
 
-    expect(resume).toHaveBeenCalledWith(undefined, expect.any(String));
+    expect(resume).toHaveBeenCalledWith(undefined, expect.any(String), { timeoutMs: 200 });
+    const fallbackCall = completeSpy.mock.calls[0] as unknown as [string, { timeoutMs: number }];
+    expect(fallbackCall[1].timeoutMs).toBeLessThan(200);
+    expect(fallbackCall[1].timeoutMs).toBeGreaterThan(0);
     expect(llm.callCount).toBe(1);
     expect(metrics.snapshot()).toMatchObject({
       nativeSessionAttempts: 1,
@@ -245,6 +253,63 @@ describe('CachedLlmClient', () => {
       nativeSessionHits: 1,
       nativeSessionFallbacks: 1,
       innerCalls: 1,
+    });
+  });
+
+  it('propagates native-session timeouts without starting a backing LLM call', async () => {
+    const { llm, client, metrics } = await createHarness();
+    const timeout = Object.assign(new Error('CLI timeout after 25ms'), { code: 'ETIMEDOUT' });
+    const resume = vi.fn().mockRejectedValue(timeout);
+
+    await expect(client.complete({
+      scope: {
+        projectId: 'frankenbeast',
+        workId: 'issue:99',
+      },
+      operation: 'issue-triage',
+      stablePrefix: 'skill injection',
+      workPrefix: 'issue 99 summary',
+      volatileSuffix: 'new comment text',
+      nativeSession: {
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+        resume,
+      },
+      completionOptions: { timeoutMs: 25 },
+    })).rejects.toBe(timeout);
+
+    expect(llm.callCount).toBe(0);
+    expect(metrics.snapshot()).toMatchObject({
+      nativeSessionAttempts: 1,
+      nativeSessionFallbacks: 0,
+      innerCalls: 0,
+    });
+  });
+
+  it('preserves native session failures instead of silently doubling the provider call', async () => {
+    const { llm, client, metrics } = await createHarness();
+    const failure = new Error('provider process exited unexpectedly');
+    const resume = vi.fn().mockRejectedValue(failure);
+
+    await expect(client.complete({
+      scope: {
+        projectId: 'frankenbeast',
+        workId: 'plan:session',
+      },
+      operation: 'plan-build',
+      volatileSuffix: 'build plan',
+      nativeSession: {
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+        resume,
+      },
+    })).rejects.toBe(failure);
+
+    expect(llm.callCount).toBe(0);
+    expect(metrics.snapshot()).toMatchObject({
+      nativeSessionAttempts: 1,
+      nativeSessionFallbacks: 0,
+      innerCalls: 0,
     });
   });
 });

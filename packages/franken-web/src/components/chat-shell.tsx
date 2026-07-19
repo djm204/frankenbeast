@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import brandMark from '../../../../assets/img/frankenbeast-github-logo-478x72.png';
 import { useChatSession } from '../hooks/use-chat-session';
 import { TranscriptPane } from './transcript-pane';
@@ -6,7 +6,6 @@ import { Composer } from './composer';
 import { ActivityPane } from './activity-pane';
 import { ApprovalCard } from './approval-card';
 import { CostBadge } from './cost-badge';
-import { NetworkPage } from '../pages/network-page';
 import {
   BeastApiClient,
   BeastApiError,
@@ -21,12 +20,9 @@ import {
 } from '../lib/beast-api';
 import { ChatApiClient, type ChatSessionSummary, type CorruptChatSessionFile } from '../lib/api';
 import { NetworkApiClient, type NetworkConfigResponse, type NetworkStatusResponse } from '../lib/network-api';
-import { BeastsPage } from '../pages/beasts-page';
 import type { AgentLifecycleAction } from './beasts/agent-action-bar';
 import { AnalyticsApiClient } from '../lib/analytics-api';
-import { AnalyticsPage } from '../pages/analytics-page';
 import { DashboardApiClient } from '../lib/dashboard-api';
-import { DashboardPage } from '../pages/dashboard-page';
 import { ChatErrorBanners } from './chat-shell/chat-error-banners';
 import { PlaceholderPage } from './chat-shell/placeholder-page';
 import { PRIMARY_NAV_ROUTES, ROUTES, routeFromHash, type RouteId } from './chat-shell/route-model';
@@ -34,6 +30,17 @@ import { formatSessionOptionLabel } from './chat-shell/session-labels';
 import { getSidebarFocusableElements } from './chat-shell/sidebar-focus';
 import { appendUniqueLogLine, formatStreamedLogLine, getAgentEventRunId } from './chat-shell/beast-log-utils';
 import { networkErrorMessage } from './chat-shell/network-error';
+
+// Route pages are lazy so each becomes its own chunk; they carry route-specific
+// UI the initial chat view never needs, keeping the entry bundle small.
+const DashboardPage = lazy(() =>
+  import('../pages/dashboard-page').then((module) => ({ default: module.DashboardPage })));
+const BeastsPage = lazy(() =>
+  import('../pages/beasts-page').then((module) => ({ default: module.BeastsPage })));
+const NetworkPage = lazy(() =>
+  import('../pages/network-page').then((module) => ({ default: module.NetworkPage })));
+const AnalyticsPage = lazy(() =>
+  import('../pages/analytics-page').then((module) => ({ default: module.AnalyticsPage })));
 
 export interface ChatShellProps {
   baseUrl: string;
@@ -838,6 +845,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
           </dl>
         </header>
 
+        <Suspense fallback={<main className="chat-page" aria-busy="true" />}>
         {route === 'dashboard' ? (
           <main className="dashboard-overview-page">
             <DashboardPage client={dashboardClient} />
@@ -1242,6 +1250,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             <PlaceholderPage routeId={route} />
           </main>
         )}
+        </Suspense>
       </div>
     </div>
   );

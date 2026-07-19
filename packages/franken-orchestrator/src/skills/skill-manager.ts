@@ -24,6 +24,7 @@ import type {
   ProviderSkillConfig,
 } from '@franken/types';
 import { McpConfigSchema, SkillToolManifestSchema } from '@franken/types';
+import { ZodError } from 'zod';
 import type { SkillConfigStore } from './skill-config-store.js';
 import { ProviderSkillTranslator } from './provider-skill-translator.js';
 
@@ -40,6 +41,19 @@ function unsafePathError(path: string, reason: string): Error {
 
 export function isUnsafeSkillPathError(err: unknown): boolean {
   return err instanceof Error && err.message.startsWith('Unsafe skill path ');
+}
+
+function isInvalidSkillManifestError(err: unknown): err is Error {
+  return err instanceof SyntaxError || err instanceof ZodError;
+}
+
+function reportInvalidSkill(name: string, err: Error, reportedSkills: Set<string>): void {
+  if (reportedSkills.has(name)) return;
+  reportedSkills.add(name);
+  const reason = err instanceof SyntaxError
+    ? 'manifest contains malformed JSON'
+    : 'manifest failed schema validation';
+  console.warn(`[SkillManager] Skipping invalid skill '${name}': ${reason}`);
 }
 
 function assertContainedPath(candidate: string, root: string, label: string): void {
@@ -96,6 +110,7 @@ function requireSecurityReviewByDefault(
 
 export class SkillManager {
   private readonly enabledSkills: Set<string>;
+  private readonly reportedInvalidSkills = new Set<string>();
   private readonly skillsDirRoot: string;
   private readonly skillsDirReal: string;
 
@@ -126,6 +141,13 @@ export class SkillManager {
         `Invalid skill name '${name}': must match ${SAFE_NAME.source}`,
       );
     }
+  }
+
+  protected removeSkillPath(
+    path: string,
+    options?: { recursive?: boolean; force?: boolean },
+  ): void {
+    rmSync(path, options);
   }
 
   private skillDirectoryPath(name: string): string {
@@ -221,6 +243,10 @@ export class SkillManager {
           return this.readSkillInfo(e.name);
         } catch (err) {
           if (isUnsafeSkillPathError(err)) return null;
+          if (isInvalidSkillManifestError(err)) {
+            reportInvalidSkill(e.name, err, this.reportedInvalidSkills);
+            return null;
+          }
           throw err;
         }
       })
@@ -284,31 +310,36 @@ export class SkillManager {
     this.validateName(name);
     if (!this.exists(name))
       throw new Error(`Skill '${name}' is not installed`);
+    const nextEnabledSkills = new Set(this.enabledSkills);
+    nextEnabledSkills.add(name);
+    this.configStore?.save(nextEnabledSkills);
     this.enabledSkills.add(name);
-    this.configStore?.save(this.enabledSkills);
   }
 
   disable(name: string): void {
+    const nextEnabledSkills = new Set(this.enabledSkills);
+    nextEnabledSkills.delete(name);
+    this.configStore?.save(nextEnabledSkills);
     this.enabledSkills.delete(name);
-    this.configStore?.save(this.enabledSkills);
   }
 
   remove(name: string): void {
     this.validateName(name);
     const skillDir = this.skillDirectoryPath(name);
     this.assertSkillsRootStable();
+    const nextEnabledSkills = new Set(this.enabledSkills);
+    nextEnabledSkills.delete(name);
+    this.configStore?.assertSaveable();
     if (existsSync(skillDir)) {
       if (lstatSync(skillDir).isSymbolicLink()) {
-        rmSync(skillDir);
-        this.enabledSkills.delete(name);
-        this.configStore?.save(this.enabledSkills);
-        return;
+        this.removeSkillPath(skillDir);
+      } else {
+        assertContainedPath(realpathSync(skillDir), this.skillsDirReal, 'skill directory');
+        this.removeSkillPath(skillDir, { recursive: true });
       }
-      assertContainedPath(realpathSync(skillDir), this.skillsDirReal, 'skill directory');
-      rmSync(skillDir, { recursive: true });
     }
+    this.configStore?.save(nextEnabledSkills);
     this.enabledSkills.delete(name);
-    this.configStore?.save(this.enabledSkills);
   }
 
   exists(name: string): boolean {
@@ -375,14 +406,26 @@ export class SkillManager {
   loadForProvider(provider: ILlmProvider): ProviderSkillConfig {
     const translator = new ProviderSkillTranslator();
     const enabledNames = this.getEnabledSkills();
-    const inputs = enabledNames.map((name) => {
-      const context = this.readContext(name);
-      return {
-        name,
-        mcpConfig: this.readMcpConfig(name) ?? { mcpServers: {} },
-        tools: this.readTools(name),
-        ...(context !== null ? { context } : {}),
-      };
+    const usesCliMcpConfig = provider.type === 'claude-cli'
+      || provider.type === 'codex-cli'
+      || provider.type === 'gemini-cli';
+    const inputs = enabledNames.flatMap((name) => {
+      try {
+        const context = this.readContext(name);
+        return [{
+          name,
+          mcpConfig: this.readMcpConfig(name) ?? { mcpServers: {} },
+          tools: usesCliMcpConfig ? [] : this.readTools(name),
+          ...(context !== null ? { context } : {}),
+        }];
+      } catch (err) {
+        if (isUnsafeSkillPathError(err)) return [];
+        if (isInvalidSkillManifestError(err)) {
+          reportInvalidSkill(name, err, this.reportedInvalidSkills);
+          return [];
+        }
+        throw err;
+      }
     });
     return translator.translate(provider, inputs);
   }

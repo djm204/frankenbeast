@@ -17,7 +17,7 @@ Use a **connection ticket** pattern — an industry-standard approach for authen
 **Canonical endpoints:**
 
 - Ticket issuance: `POST /v1/beasts/events/ticket`
-- Dashboard stream: `GET /v1/beasts/events/stream?ticket=<uuid>`
+- Dashboard stream: `GET /v1/beasts/events/stream/{connectionId}`
 
 These paths are shared by the daemon routes in `packages/franken-orchestrator/src/http/routes/beast-sse-routes.ts` and the dashboard client in `packages/franken-web/src/lib/beast-api.ts`. Older per-agent `/api/beasts/:id/events` examples are not the dashboard stream contract.
 
@@ -25,9 +25,9 @@ These paths are shared by the daemon routes in `packages/franken-orchestrator/sr
 
 1. Dashboard calls `POST /v1/beasts/events/ticket` with `Authorization: Bearer <operator-token>`
 2. Daemon validates the bearer token, generates a single-use UUID ticket, and stores its token digest in the shared Beast SQLite database with a 30-second TTL
-3. Response: `{ ticket: "<uuid>" }`
-4. Dashboard opens `EventSource` to the canonical `/v1/beasts/events/stream?ticket=<uuid>` endpoint
-5. Daemon validates the ticket: must exist, not expired, not already used
+3. Response returns a non-secret connection ID and sets the ticket in an `HttpOnly`, 30-second, `SameSite=Strict` cookie scoped only to `/v1/beasts/events/stream/{connectionId}`; HTTPS requests also set `Secure`
+4. Dashboard opens `EventSource` to the canonical `/v1/beasts/events/stream/{connectionId}` endpoint without putting the ticket in the URL
+5. Daemon reads the scoped cookie and validates it against the connection ID: the ticket must exist, match the connection scope, not be expired, and not be already used
 6. Ticket is atomically marked consumed on first use; the short-lived consumed marker prevents native EventSource retries from looping
 7. SSE stream is established and authenticated for the lifetime of the connection
 
@@ -47,6 +47,7 @@ When `EventSource` reconnects after a network interruption, it opens a new HTTP 
 
 ### Positive
 - Operator token never appears in URLs, logs, or browser history
+- Connection tickets never appear in proxy/server request URLs or access logs
 - Tickets are single-use and short-lived — no replay risk
 - Restart-safe and shared across daemon processes that use the same Beast database
 - Works with existing bearer token auth model
@@ -66,6 +67,6 @@ When `EventSource` reconnects after a network interruption, it opens a new HTTP 
 | Option | Pros | Cons | Rejected Because |
 |--------|------|------|-----------------|
 | Token in query parameter | Simple, no extra round-trip | Token in URLs/logs/history; security risk | OWASP explicitly recommends against this |
-| Cookie-based auth | Auto-sent by browser | Requires session store; CORS cookie complexity; CSRF risk | Adds infrastructure complexity for a dev tool |
+| Long-lived operator-token cookie auth | Auto-sent by browser | Broad credential lifetime and CSRF exposure | A scoped, single-use connection-ticket cookie limits both lifetime and path exposure |
 | Custom protocol over WebSocket | Full header support | More complex than SSE; bidirectional not needed | SSE is simpler for unidirectional push |
 | mTLS / client certificates | Strong auth | Complex setup; not practical for a dev dashboard | Over-engineered for the use case |

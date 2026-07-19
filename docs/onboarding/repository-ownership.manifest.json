@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "defaultOwner": "core-maintainers",
-  "unknownPathPolicy": "For unknown or cross-cutting paths, start with docs/CONTRACT_MATRIX.md and docs/RAMP_UP.md, then list every plausible manifest entry in the coordinator/worker handoff instead of guessing a single owner.",
+  "unknownPathPolicy": "For unknown or cross-cutting paths, start with docs/CONTRACT_MATRIX.md and docs/onboarding/RAMP_UP.md, then list every plausible manifest entry in the coordinator/worker handoff instead of guessing a single owner.",
   "entries": [
     {
       "id": "types-contracts",

@@ -65,6 +65,22 @@ describe('classifyCommandFailure', () => {
     expect(failure.summary).toContain('git checkout main');
   });
 
+  it('summarizes normalized stdout before redacted stderr diagnostics', () => {
+    const failure = classifyCommandFailure({
+      tool: 'llm',
+      provider: 'codex',
+      command: 'codex',
+      exitCode: 1,
+      stdout: '{"type":"error"}',
+      normalizedOutput: 'workspace is not trusted',
+      stderr: 'warning: deprecated option; API_KEY=super-secret-value',
+    });
+
+    expect(failure.summary).toContain('workspace is not trusted');
+    expect(failure.summary).toContain('warning: deprecated option; API_KEY=<redacted>');
+    expect(failure.summary).not.toContain('super-secret-value');
+  });
+
   it('clamps finite provider retry hints and rejects non-finite values', () => {
     const base = {
       tool: 'llm',

@@ -1,5 +1,30 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-19 — MCP integer precision validation
+- JSON-schema `integer` checks at JavaScript transport boundaries must use `Number.isSafeInteger`, not `Number.isInteger`: integral-valued numbers beyond `Number.MAX_SAFE_INTEGER` can no longer represent exact IDs, limits, or pagination values. Cover both accepted safe boundaries and rejected values immediately outside them.
+
+## 2026-07-19 — Live-bench run cleanup TOCTOU hardening
+- For destructive cleanup in attacker-writable directory trees, preflight `lstat`/`realpath` checks are not enough: on POSIX, open the trusted root and each descendant with `O_DIRECTORY|O_NOFOLLOW`, compare root and quarantined leaf device/inode identities, address rename/removal through stable descriptor paths, and keep the recreated run-leaf descriptor open while populating it.
+- Create quarantine entries beside the anchored leaf parent so rename stays on one filesystem, and avoid followable path mutations such as `chmod(path)` between creation and a no-follow open. Use `lstat`-based existence checks so dangling symlinks fail closed; when a platform lacks searchable Linux `/proc/self/fd` paths and no equivalent safe primitive is available, reject secure provisioning rather than restoring path-based TOCTOU cleanup.
+
+## 2026-07-19 — Provider-native cache session isolation
+- Never translate an application cache/work key into a provider continuation flag. Start the first native-capable cache call without `--continue`, capture the provider-issued session id, and resume only that exact id when provider and model still match.
+- Treat only classified stale/invalid-session failures as retryable: emit fallback telemetry, invalidate the stale record before retrying, and retry once in a fresh persisted session; propagate all other provider errors so failures cannot silently double expensive calls.
+
+## 2026-07-19 — Codex-triggered commit re-review on issue #2907
+- When a commit is pushed to an existing PR and there was a prior `@codex review`, always trigger a new review on the new head and collect a fresh `@codex review` clean signal before merging. In this case, a `screen-reader` aria-label update changed, a stale strict assertion in `wizard-dialog.test.tsx` broke once; switching it to a regex was sufficient and CI stayed green on the new commit.
+
+## 2026-07-19 — Deterministic abort handling regression
+- Prefer deterministic abort fixtures over timing sleeps: for HTTP disconnect behavior, verify both in-band and immediate-abort paths by asserting that `AbortSignal` is already aborted when `request.destroyed`/`request.aborted` is true before app handler execution.
+- Use a pre-aborted request object (or equivalent event-driven signal path) in unit tests when asserting handler abort behavior, and keep timeouts only as a bounded safety net, not as fixture synchronization.
+
+## 2026-07-19 — Shared schema typing for websocket event payloads
+- Prefer importing socket event unions from shared contract packages and remove local duplicate unions in UI/runtime state modules; add a small source-inspection regression if the duplicate types are the failure mode so future refactors cannot silently reintroduce drift between schema and state handlers.
+
+## 2026-07-19 — Artifact-path TOCTOU hardening
+- Returning a validated pathname is not a secure file-inspection API: pin both the workspace directory and artifact as file descriptors, traverse through `/proc/self/fd` or `/dev/fd` where available, and compare descriptor/path identities after opening so rename/symlink swaps fail closed.
+- Use `lstat` rather than `existsSync` when dangling symlinks must be rejected, translate only candidate-component `ENOENT` into an ordinary missing artifact, and open untrusted artifact targets with nonblocking/no-follow flags before requiring a regular file.
+
 ## 2026-07-18 — Kanban reviewer isolation
 - Independent review workers must receive a distinct child card or explicitly review-only context; never let a delegated reviewer inherit and complete the implementation parent card, because completion can garbage-collect its workspace before the verified diff is committed and shipped.
 
@@ -41,7 +66,7 @@
 
 ## 2026-07-16 — Synthetic availability probe review fixes
 - Availability probes should fail closed for real dependencies: do not default provider checks to `node --version` or dashboard checks to a static UI health URL, require explicit provider/backend health targets, and cover missing-target behavior in tests so cron copies cannot produce false-green uptime.
-- For cron/CI probe JSON logs, redact both `key=value` and whitespace-separated secret forms, including split `Authorization: Bearer *** argv sequences, before serializing command details or error messages.
+- For cron/CI probe JSON logs, redact both `key=value` and whitespace-separated secret forms, including split `Authorization: Bearer ***` argv sequences, before serializing command details or error messages.
 - When Codex reaches the normal five-trigger cap but posts new valid findings, fix/reply/resolve them and stop for explicit approval before issuing another `@codex review`; zero unresolved threads plus green CI is not a substitute for a fresh current-head clean.
 
 ## 2026-07-16 — Snapshot diff Codex closeout
@@ -372,5 +397,16 @@
 ## 2026-07-18 — Tracked dispatch-failure response redaction
 - Treat a failed run response as a bundle: sanitize the run snapshot, stored attempts, historical events, and logs. Event/log redaction must remain effective after dispatch recovery, and restarting a stopped run whose snapshot was cleared must rebuild validated config from the tracked agent before executor start.
 
+## 2026-07-18 — Beast log path containment
+- Validate run and attempt identifiers at the `BeastLogStore` filesystem boundary against persisted prefixed-UUID formats, preserve the internal `system` attempt sentinel, and retain a resolved-path containment check as defense in depth. Traversal regressions should exercise both append and read paths while normal-path tests use production-shaped identifiers.
+
 ## 2026-07-18 — First-contribution help documentation
 - For broad onboarding-documentation issues, close a concrete workflow gap rather than adding another general quickstart. Make the new path discoverable from README, CONTRIBUTING, and the onboarding index, include safe copyable evidence/templates, and add a focused test that locks those entrypoints and redaction guidance together.
+
+## Lessons
+- 2026-07-19 — Docs regression tests should assert exact pinned values from manifest and treat setup commands as gate-narrow/full setup distinctions.
+- 2026-07-19 — Bounded multi-pass LLM flows need one shared deadline propagated through cache/client/adapter layers, explicit subprocess and retry-wait cancellation, and a caller-side abort race for implementations that ignore signals. Preserve the last useful pre-quality artifact on timeout, use deterministic structural confidence for fast paths, avoid resending unchanged repository context, and test 1/2/4-pass paths plus child-process termination.
+
+## 2026-07-19 — Type export renames and deprecation compatibility
+- When renaming shared public type names for clarity, keep deprecated aliases temporarily (with `@deprecated` JSDoc) for downstream consumers, update docs/tests to use new names, and add targeted tests validating both canonical and deprecated aliases.
+- Before merging such API refactors, require `tsc`, package `lint`, `build`, and focused unit tests for both packages to avoid regressions in public contracts.

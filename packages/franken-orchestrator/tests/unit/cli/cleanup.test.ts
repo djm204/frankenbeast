@@ -13,7 +13,7 @@ describe('cleanupBuild', () => {
 
     const removed = cleanupBuild(root);
 
-    expect(removed).toBeGreaterThan(0);
+    expect(removed).toBe(1);
     expect(existsSync(nested)).toBe(false);
 
     rmSync(root, { recursive: true, force: true });

@@ -114,6 +114,8 @@ export default defineConfig({
       '@franken/types/utils': resolve(__dirname, 'packages/franken-types/src/utils/index.ts'),
       '@franken/types': resolve(__dirname, 'packages/franken-types/src/index.ts'),
       '@franken/orchestrator': resolve(__dirname, 'packages/franken-orchestrator/src/index.ts'),
+      '@franken/mcp-suite': resolve(__dirname, 'packages/franken-mcp-suite/src/index.ts'),
+      '@franken/live-bench': resolve(__dirname, 'packages/live-bench/src/index.ts'),
     },
   },
   test: {

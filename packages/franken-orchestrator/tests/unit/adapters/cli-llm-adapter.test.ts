@@ -424,7 +424,9 @@ describe('CliLlmAdapter', () => {
 
         const args = calls[0]!.args;
         expect(args).toContain('exec');
-        expect(args).toContain('--full-auto');
+        expect(args).toContain('--sandbox');
+        expect(args).toContain('workspace-write');
+        expect(args).not.toContain('--full-auto');
         expect(args).toContain('--json');
         expect(args).toContain('--color');
         // prompt piped via stdin, not in args
@@ -499,6 +501,19 @@ describe('CliLlmAdapter', () => {
         }
       });
 
+      it('reports normalized Codex JSONL failures alongside redacted stderr warnings', async () => {
+        const { spawnFn } = createMockSpawn({
+          stdout: JSON.stringify({ type: 'error', error: { message: 'workspace is not trusted' } }),
+          stderr: 'warning: deprecated option; API_KEY=super-secret-value',
+          exitCode: 1,
+        });
+        const adapter = new CliLlmAdapter(codexProvider, baseOpts, spawnFn);
+
+        await expect(adapter.execute({ prompt: 'test', maxTurns: 1 })).rejects.toThrow(
+          /workspace is not trusted.*warning: deprecated option; API_KEY=<redacted>/,
+        );
+      });
+
       it('kills child process on timeout and rejects', async () => {
         const { spawnFn } = createMockSpawn({
           neverExit: true,
@@ -511,6 +526,63 @@ describe('CliLlmAdapter', () => {
 
         await expect(adapter.execute({ prompt: 'test', maxTurns: 1 }))
           .rejects.toThrow(/timeout/i);
+      });
+
+      it('allows a per-request timeout to extend beyond the adapter default', async () => {
+        vi.useFakeTimers();
+        try {
+          const { spawnFn } = createMockSpawn({ neverExit: true });
+          const adapter = new CliLlmAdapter(
+            claudeProvider,
+            { ...baseOpts, timeoutMs: 50 },
+            spawnFn,
+          );
+
+          const result = adapter.execute({ prompt: 'test', maxTurns: 1, timeoutMs: 100 });
+          let state: 'pending' | 'resolved' | 'rejected' = 'pending';
+          void result.then(
+            () => { state = 'resolved'; },
+            () => { state = 'rejected'; },
+          );
+
+          await vi.advanceTimersByTimeAsync(50);
+          expect(state).toBe('pending');
+          await vi.advanceTimersByTimeAsync(50);
+          await expect(result).rejects.toThrow('CLI timeout after 100ms');
+          expect(state).toBe('rejected');
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('kills the active child process when the request aborts', async () => {
+        const kill = vi.fn(() => true);
+        const spawnFn = (): ChildProcess => {
+          const proc = new EventEmitter() as ChildProcess;
+          Object.defineProperty(proc, 'stdin', { value: new PassThrough(), writable: false });
+          Object.defineProperty(proc, 'stdout', { value: new PassThrough(), writable: false });
+          Object.defineProperty(proc, 'stderr', { value: new PassThrough(), writable: false });
+          Object.defineProperty(proc, 'pid', { value: 24680, writable: false });
+          Object.defineProperty(proc, 'kill', { value: kill, writable: false });
+          return proc;
+        };
+        const adapter = new CliLlmAdapter(
+          claudeProvider,
+          { ...baseOpts, timeoutMs: 60_000 },
+          spawnFn,
+        );
+        const controller = new AbortController();
+
+        const result = adapter.execute({
+          prompt: 'test',
+          maxTurns: 1,
+          signal: controller.signal,
+          timeoutMs: 30_000,
+        });
+        controller.abort(new Error('plan deadline exceeded'));
+
+        await expect(result).rejects.toThrow('plan deadline exceeded');
+        expect(kill).toHaveBeenCalledWith('SIGTERM');
       });
 
       it('warns and still rejects when the timeout SIGTERM fails', async () => {
@@ -706,6 +778,7 @@ describe('CliLlmAdapter', () => {
       });
 
       it('switches to the next provider when the selected provider is rate limited', async () => {
+        const lifecycleEvents: unknown[] = [];
         const { spawnFn, calls } = createQueuedSpawn([
           { stderr: 'rate limit exceeded', exitCode: 1 },
           { stdout: 'codex success', exitCode: 0 },
@@ -715,6 +788,7 @@ describe('CliLlmAdapter', () => {
           {
             ...baseOpts,
             providers: ['codex', 'claude'],
+            onLifecycleEvent: (event: unknown) => lifecycleEvents.push(event),
           } as never,
           spawnFn,
         );
@@ -725,6 +799,13 @@ describe('CliLlmAdapter', () => {
         expect(calls).toHaveLength(2);
         expect(calls[0]!.cmd).toBe('claude');
         expect(calls[1]!.cmd).toBe('codex');
+        expect(lifecycleEvents).toEqual([
+          { type: 'attempt', provider: 'claude', attempt: 1 },
+          { type: 'rate-limit', provider: 'claude' },
+          { type: 'fallback', from: 'claude', to: 'codex' },
+          { type: 'attempt', provider: 'codex', attempt: 2 },
+          { type: 'complete', provider: 'codex', attempt: 2 },
+        ]);
       });
 
       it('switches to the next provider when the selected provider is rate limited via stdout only', async () => {
@@ -792,6 +873,7 @@ describe('CliLlmAdapter', () => {
 
       it('sleeps after all configured providers are exhausted, then retries from the selected provider', async () => {
         const sleepFn = vi.fn(async () => {});
+        const lifecycleEvents: unknown[] = [];
         const { spawnFn, calls } = createQueuedSpawn([
           { stderr: 'retry-after: 5', exitCode: 1 },
           { stderr: 'resets in 3s', exitCode: 1 },
@@ -803,6 +885,7 @@ describe('CliLlmAdapter', () => {
             ...baseOpts,
             providers: ['claude', 'codex'],
             _sleepFn: sleepFn,
+            onLifecycleEvent: (event: unknown) => lifecycleEvents.push(event),
           } as never,
           spawnFn,
         );
@@ -815,6 +898,65 @@ describe('CliLlmAdapter', () => {
         expect(calls[0]!.cmd).toBe('claude');
         expect(calls[1]!.cmd).toBe('codex');
         expect(calls[2]!.cmd).toBe('claude');
+        expect(lifecycleEvents).toContainEqual({ type: 'wait', durationMs: 3_000 });
+        expect(lifecycleEvents).toContainEqual({ type: 'attempt', provider: 'claude', attempt: 3 });
+        expect(lifecycleEvents).toContainEqual({ type: 'complete', provider: 'claude', attempt: 3 });
+      });
+
+      it('aborts an in-flight provider retry wait without starting another process', async () => {
+        const sleepFn = vi.fn(() => new Promise<void>(() => {}));
+        const { spawnFn, calls } = createQueuedSpawn([
+          { stderr: 'retry-after: 5', exitCode: 1 },
+          { stderr: 'resets in 3s', exitCode: 1 },
+          { stdout: 'must not run after cancellation', exitCode: 0 },
+        ]);
+        const adapter = new CliLlmAdapter(
+          claudeProvider,
+          {
+            ...baseOpts,
+            providers: ['claude', 'codex'],
+            _sleepFn: sleepFn,
+          } as never,
+          spawnFn,
+        );
+        const controller = new AbortController();
+
+        const result = adapter.execute({
+          prompt: 'test',
+          maxTurns: 1,
+          signal: controller.signal,
+        });
+        await vi.waitFor(() => expect(sleepFn).toHaveBeenCalledWith(3_000));
+        controller.abort(new Error('plan deadline exceeded'));
+
+        await expect(result).rejects.toThrow('plan deadline exceeded');
+        expect(calls).toHaveLength(2);
+      });
+
+      it('enforces the logical completion timeout while waiting to retry providers', async () => {
+        const sleepFn = vi.fn(() => new Promise<void>(() => {}));
+        const { spawnFn, calls } = createQueuedSpawn([
+          { stderr: 'retry-after: 5', exitCode: 1 },
+          { stderr: 'resets in 3s', exitCode: 1 },
+          { stdout: 'must not run after timeout', exitCode: 0 },
+        ]);
+        const adapter = new CliLlmAdapter(
+          claudeProvider,
+          {
+            ...baseOpts,
+            providers: ['claude', 'codex'],
+            _sleepFn: sleepFn,
+          } as never,
+          spawnFn,
+        );
+
+        await expect(adapter.execute({
+          prompt: 'test',
+          maxTurns: 1,
+          timeoutMs: 25,
+        })).rejects.toThrow('CLI timeout after 25ms');
+        expect(sleepFn).toHaveBeenCalled();
+        expect(calls).toHaveLength(2);
       });
 
       it('retries a rate-limited provider when later fallback provider CLI is missing', async () => {
@@ -891,6 +1033,7 @@ describe('CliLlmAdapter', () => {
           provider: 'adapter',
           model: 'adapter',
           messages: [{ role: 'user', content: 'hello' }],
+          session_id: 'chat-app-1',
         });
 
         expect(request.model).toBe('codex-mini');
@@ -900,6 +1043,7 @@ describe('CliLlmAdapter', () => {
         expect(calls[0]!.cmd).toBe('codex');
         expect(calls[1]!.cmd).toBe('claude');
         expect(calls[1]!.args).not.toContain('codex-mini');
+        expect(calls[1]!.args).not.toContain('--no-session-persistence');
       });
 
       it('normalizes successful fallback output with the provider that produced it', async () => {

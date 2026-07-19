@@ -27,6 +27,9 @@ describe('vite dev proxy configuration', () => {
     expect(CONFIG_SOURCE).toContain('if (operatorToken)');
     expect(CONFIG_SOURCE).toContain("proxyReq.setHeader('x-forwarded-host', req.headers.host)");
     expect(CONFIG_SOURCE).toContain("proxyReq.setHeader('x-forwarded-proto', requestProtocol(req))");
+    expect(CONFIG_SOURCE).toContain('appendProxyPeerAddress(proxyReq, req)');
+    expect(CONFIG_SOURCE).toContain("req.headers['x-forwarded-for']");
+    expect(CONFIG_SOURCE).toContain("req.headers['x-forwarded-proto'] !== undefined");
     expect(CONFIG_SOURCE).not.toContain('headers: { authorization');
     expect(CONFIG_SOURCE).not.toContain('operatorProxy(');
   });
