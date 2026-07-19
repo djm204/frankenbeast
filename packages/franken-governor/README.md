@@ -309,10 +309,10 @@ Key mappings:
 
 | Key | Response Code | Description |
 |-----|--------------|-------------|
-| `a` | `APPROVE` | Approve the action, agent proceeds |
-| `r` | `REGEN` | Reject and request regeneration (prompts for feedback) |
-| `x` | `ABORT` | Abort the action entirely |
-| `d` | `DEBUG` | Approve in debug/inspect mode |
+| `a`, `approve`, `y`, `yes` | `APPROVE` | Approve the action, agent proceeds |
+| `r`, `regenerate` | `REGEN` | Reject and request regeneration (prompts for feedback) |
+| `x`, `abort`, `n`, `no` | `ABORT` | Abort the action entirely |
+| `d`, `debug` | `DEBUG` | Approve in debug/inspect mode |
 
 ### SlackChannel
 
