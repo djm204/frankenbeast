@@ -12,7 +12,8 @@ interface NetworkPageProps {
   selectedLogServiceId?: string;
   logsLoading?: boolean;
   logsError?: string | null;
-  config: NetworkConfigResponse;
+  config: NetworkConfigResponse | null;
+  configError?: string | null;
   onRefresh(): void;
   onStart(serviceId: string): Promise<void> | void;
   onStop(serviceId: string): Promise<void> | void;
@@ -30,6 +31,7 @@ export function NetworkPage({
   logsLoading,
   logsError,
   config,
+  configError = null,
   onRefresh,
   onStart,
   onStop,
@@ -62,7 +64,16 @@ export function NetworkPage({
         </div>
 
         <div className="network-page__rail">
-          <NetworkConfigEditor config={config} onSave={onSaveConfig} />
+          {config ? (
+            <NetworkConfigEditor config={config} onSave={onSaveConfig} />
+          ) : (
+            <section className="rail-card network-config-editor" aria-busy={!configError}>
+              <div className="rail-card__header">
+                <p className="eyebrow">Config</p>
+              </div>
+              <p>{configError ? 'Network config unavailable. Refresh to retry.' : 'Loading network config…'}</p>
+            </section>
+          )}
           <NetworkLogsPanel
             error={logsError}
             isLoading={logsLoading}
