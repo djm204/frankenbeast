@@ -1,11 +1,15 @@
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
+  closeSync,
+  constants,
   cpSync,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   realpathSync,
   renameSync,
@@ -14,7 +18,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join, parse, relative, resolve, sep } from 'node:path';
+import { join, parse, relative, resolve, sep } from 'node:path';
 import { serializeToolCallEvidence } from '../evidence/tool-call-evidence.js';
 import type { BenchmarkMatrixRow, BenchmarkTask } from '../types.js';
 import { LIVE_BENCH_TOOL_CALL_EVIDENCE_ARTIFACT } from '../types.js';
@@ -50,10 +54,15 @@ export interface BenchmarkEnvironmentSnapshot {
   readonly provisionedAt: string;
 }
 
+interface FileIdentity {
+  readonly dev: number;
+  readonly ino: number;
+}
+
 export class WorkspaceProvisioner {
   private readonly fixtures: FixtureStore;
   private readonly runsRoot: string;
-  private readonly runsRootReal: string;
+  private readonly runsRootIdentity: FileIdentity;
 
   constructor(config: WorkspaceProvisionerConfig) {
     this.fixtures = config.fixtures;
@@ -61,7 +70,7 @@ export class WorkspaceProvisioner {
     ensureNoSymlinkPathPrefix(this.runsRoot, 'runs root');
     ensureSafeExistingDirectory(this.runsRoot, 'runs root');
     mkdirSync(this.runsRoot, { recursive: true });
-    this.runsRootReal = realpathSync(this.runsRoot);
+    this.runsRootIdentity = fileIdentity(lstatSync(realpathSync(this.runsRoot)));
   }
 
   provision(row: BenchmarkMatrixRow, task: BenchmarkTask): ProvisionedWorkspace {
@@ -79,9 +88,6 @@ export class WorkspaceProvisioner {
     const runDate = dateSegment(row.runTimestamp);
     const dateDir = resolve(this.runsRoot, runDate);
     ensureContained(dateDir, this.runsRoot, 'run date directory');
-    ensureSafeExistingDirectory(dateDir, 'run date directory');
-    mkdirSync(dateDir, { recursive: true });
-    ensureContained(realpathSync(dateDir), this.runsRootReal, 'run date real directory');
 
     const runDir = resolve(dateDir, row.runId, row.taskId, row.client, row.mode, row.fbeastTopology, modelSegment);
     const workspaceDir = join(runDir, 'workspace');
@@ -91,89 +97,166 @@ export class WorkspaceProvisioner {
 
     ensureContained(runDir, dateDir, 'run directory');
     ensureContained(runDir, this.runsRoot, 'run directory');
-    ensureNoSymlinkPathComponents(dateDir, runDir, 'run directory');
-    ensureSafeExistingDirectory(runDir, 'run directory');
-    removeRunDirectorySafely(runDir, this.runsRoot, this.runsRootReal);
-    mkdirSync(workspaceDir, { recursive: true });
-    mkdirSync(evidenceDir, { recursive: true });
 
-    assertNoSymlinksInTree(fixtureDir);
-    cpSync(fixtureDir, workspaceDir, { recursive: true });
-    if (row.mode === 'baseline') {
-      rmSync(join(workspaceDir, '.fbeast'), { recursive: true, force: true });
+    const preparedRun = prepareRunDirectorySafely(runDir, this.runsRoot, this.runsRootIdentity);
+    try {
+      const anchoredWorkspaceDir = join(preparedRun.anchoredRunDir, 'workspace');
+      const anchoredEvidenceDir = join(preparedRun.anchoredRunDir, 'evidence');
+      mkdirSync(anchoredWorkspaceDir, { mode: 0o700 });
+      mkdirSync(anchoredEvidenceDir, { mode: 0o700 });
+
+      assertNoSymlinksInTree(fixtureDir);
+      cpSync(fixtureDir, anchoredWorkspaceDir, { recursive: true });
+      if (row.mode === 'baseline') {
+        rmSync(join(anchoredWorkspaceDir, '.fbeast'), { recursive: true, force: true });
+      }
+
+      const environment: BenchmarkEnvironmentSnapshot = {
+        version: 1,
+        runId: row.runId,
+        taskId: row.taskId,
+        fixture: task.projectFixture,
+        commitSha: row.commitSha,
+        client: row.client,
+        mode: row.mode,
+        fbeastTopology: row.fbeastTopology,
+        model: row.model,
+        clientVersion: row.clientVersion,
+        hostClass: row.hostClass,
+        runTimestamp: row.runTimestamp,
+        provisionedAt: isoNow(),
+      };
+      writeFileSync(join(preparedRun.anchoredRunDir, 'environment.json'), `${JSON.stringify(environment, null, 2)}\n`, 'utf8');
+      writeFileSync(
+        join(anchoredEvidenceDir, LIVE_BENCH_TOOL_CALL_EVIDENCE_ARTIFACT),
+        serializeToolCallEvidence([]),
+        'utf8',
+      );
+    } finally {
+      preparedRun.close();
     }
-
-    const environment: BenchmarkEnvironmentSnapshot = {
-      version: 1,
-      runId: row.runId,
-      taskId: row.taskId,
-      fixture: task.projectFixture,
-      commitSha: row.commitSha,
-      client: row.client,
-      mode: row.mode,
-      fbeastTopology: row.fbeastTopology,
-      model: row.model,
-      clientVersion: row.clientVersion,
-      hostClass: row.hostClass,
-      runTimestamp: row.runTimestamp,
-      provisionedAt: isoNow(),
-    };
-    writeFileSync(environmentPath, `${JSON.stringify(environment, null, 2)}\n`, 'utf8');
-    writeFileSync(toolCallEvidencePath, serializeToolCallEvidence([]), 'utf8');
 
     return { runDir, workspaceDir, evidenceDir, environmentPath, toolCallEvidencePath };
   }
 }
 
+interface PreparedRunDirectory {
+  readonly anchoredRunDir: string;
+  close(): void;
+}
+
 /**
- * Atomically detaches an existing run directory before recursively removing it.
- * A symlink observed before or after the rename is unlinked without following it,
- * and cleanup fails closed so provisioning never continues on a raced path.
+ * Walks the run path through no-follow directory descriptors, quarantines any
+ * previous leaf, and returns an fd-relative path that stays anchored while the
+ * workspace is populated.
  */
-export function removeRunDirectorySafely(
+export function prepareRunDirectorySafely(
   runDir: string,
   runsRoot: string,
-  expectedRunsRootReal = realpathSync(runsRoot),
+  expectedRunsRootIdentity = fileIdentity(lstatSync(realpathSync(runsRoot))),
+): PreparedRunDirectory {
+  ensureContained(runDir, runsRoot, 'run directory');
+  const rel = relative(runsRoot, runDir);
+  const segments = rel.split(sep).filter((segment) => segment.length > 0);
+  const leaf = segments.pop();
+  if (!leaf) {
+    throw new Error(`Invalid run directory: ${runDir}`);
+  }
+
+  const directoryFlags = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
+  const rootFd = openSync(runsRoot, directoryFlags);
+  let parentFd = rootFd;
+  let runFd: number | undefined;
+
+  try {
+    if (!sameFileIdentity(fileIdentity(fstatSync(rootFd)), expectedRunsRootIdentity)) {
+      throw new Error(`Runs root identity changed during cleanup: ${runsRoot}`);
+    }
+
+    for (const [index, segment] of segments.entries()) {
+      const child = join(fdPath(parentFd), segment);
+      mkdirExclusiveOrVerifyDirectory(
+        child,
+        directoryFlags,
+        index === 0 ? 'run date directory' : 'run directory path component',
+      );
+      const childFd = openSync(child, directoryFlags);
+      if (parentFd !== rootFd) {
+        closeSync(parentFd);
+      }
+      parentFd = childFd;
+    }
+
+    const anchoredRunPath = join(fdPath(parentFd), leaf);
+    removeAnchoredRunDirectory(anchoredRunPath, fdPath(rootFd), runDir, directoryFlags);
+    mkdirSync(anchoredRunPath, { mode: 0o700 });
+    runFd = openSync(anchoredRunPath, directoryFlags);
+    const anchoredRunDir = fdPath(runFd);
+
+    if (parentFd !== rootFd) {
+      closeSync(parentFd);
+      parentFd = rootFd;
+    }
+
+    let closed = false;
+    return {
+      anchoredRunDir,
+      close: () => {
+        if (closed) {
+          return;
+        }
+        closed = true;
+        closeSync(runFd!);
+        closeSync(rootFd);
+      },
+    };
+  } catch (error) {
+    if (runFd !== undefined) {
+      closeSync(runFd);
+    }
+    if (parentFd !== rootFd) {
+      closeSync(parentFd);
+    }
+    closeSync(rootFd);
+    throw error;
+  }
+}
+
+function removeAnchoredRunDirectory(
+  anchoredRunPath: string,
+  anchoredRoot: string,
+  displayRunDir: string,
+  directoryFlags: number,
 ): void {
-  if (!pathExistsNoFollow(runDir)) {
+  if (!pathExistsNoFollow(anchoredRunPath)) {
     return;
   }
 
-  ensureRunsRootAnchored(runsRoot, expectedRunsRootReal);
-  ensureContained(runDir, runsRoot, 'run directory');
-  const initialStat = lstatSync(runDir);
+  const initialStat = lstatSync(anchoredRunPath);
   if (initialStat.isSymbolicLink()) {
-    unlinkSync(runDir);
-    throw new Error(`Run directory changed to a symlink during cleanup: ${runDir}`);
+    unlinkSync(anchoredRunPath);
+    throw new Error(`Run directory changed to a symlink during cleanup: ${displayRunDir}`);
   }
   if (!initialStat.isDirectory()) {
-    throw new Error(`Run directory changed to a non-directory during cleanup: ${runDir}`);
+    throw new Error(`Run directory changed to a non-directory during cleanup: ${displayRunDir}`);
   }
 
-  const cleanupRoot = mkdtempSync(join(runsRoot, '.cleanup-'));
+  const cleanupRoot = mkdtempSync(join(anchoredRoot, '.cleanup-'));
   chmodSync(cleanupRoot, 0o700);
-  const quarantinedRunDir = join(cleanupRoot, 'run');
+  const cleanupFd = openSync(cleanupRoot, directoryFlags);
+  const quarantinedRunDir = join(fdPath(cleanupFd), 'run');
   let removeCleanupRoot = true;
 
   try {
-    renameSync(runDir, quarantinedRunDir);
-    ensureRunsRootAnchored(runsRoot, expectedRunsRootReal);
-    ensureContained(realpathSync(dirname(runDir)), expectedRunsRootReal, 'run directory parent');
+    renameSync(anchoredRunPath, quarantinedRunDir);
     const quarantinedStat = lstatSync(quarantinedRunDir);
-    if (quarantinedStat.dev !== initialStat.dev || quarantinedStat.ino !== initialStat.ino) {
+    if (!sameFileIdentity(fileIdentity(quarantinedStat), fileIdentity(initialStat))) {
       removeCleanupRoot = false;
-      throw new Error(`Run directory identity changed during cleanup: ${runDir}`);
+      throw new Error(`Run directory identity changed during cleanup: ${displayRunDir}`);
     }
-    if (quarantinedStat.isSymbolicLink()) {
-      unlinkSync(quarantinedRunDir);
-      throw new Error(`Run directory changed to a symlink during cleanup: ${runDir}`);
+    if (!quarantinedStat.isDirectory() || quarantinedStat.isSymbolicLink()) {
+      throw new Error(`Run directory type changed during cleanup: ${displayRunDir}`);
     }
-    if (!quarantinedStat.isDirectory()) {
-      unlinkSync(quarantinedRunDir);
-      throw new Error(`Run directory changed to a non-directory during cleanup: ${runDir}`);
-    }
-
-    ensureContained(realpathSync(quarantinedRunDir), realpathSync(cleanupRoot), 'quarantined run directory');
     rmSync(quarantinedRunDir, { recursive: true, force: false });
   } catch (error) {
     if (pathExistsNoFollow(quarantinedRunDir)) {
@@ -186,10 +269,48 @@ export function removeRunDirectorySafely(
     }
     throw error;
   } finally {
-    if (removeCleanupRoot && existsSync(cleanupRoot)) {
+    closeSync(cleanupFd);
+    if (removeCleanupRoot) {
       rmdirSync(cleanupRoot);
     }
   }
+}
+
+function fileIdentity(stat: { dev: number; ino: number }): FileIdentity {
+  return { dev: stat.dev, ino: stat.ino };
+}
+
+function sameFileIdentity(left: FileIdentity, right: FileIdentity): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function mkdirExclusiveOrVerifyDirectory(path: string, directoryFlags: number, label: string): void {
+  try {
+    mkdirSync(path, { mode: 0o700 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+      throw error;
+    }
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink()) {
+      throw new Error(`${label} must not be a symlink: ${path}`);
+    }
+    if (!stat.isDirectory()) {
+      throw new Error(`${label} is not a directory: ${path}`);
+    }
+    const fd = openSync(path, directoryFlags);
+    closeSync(fd);
+  }
+}
+
+function fdPath(fd: number): string {
+  for (const root of ['/proc/self/fd', '/dev/fd']) {
+    const candidate = join(root, String(fd));
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error('Secure fd-relative live-bench workspace provisioning is unsupported on this platform');
 }
 
 const RUN_TIMESTAMP_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{3}))?(Z|[+-]\d{2}:\d{2})$/;
@@ -271,13 +392,6 @@ function ensureContained(child: string, root: string, label: string): void {
   }
 }
 
-function ensureRunsRootAnchored(runsRoot: string, expectedRunsRootReal: string): void {
-  ensureNoSymlinkPathPrefix(runsRoot, 'runs root');
-  if (realpathSync(runsRoot) !== expectedRunsRootReal) {
-    throw new Error(`Runs root identity changed during cleanup: ${runsRoot}`);
-  }
-}
-
 function pathExistsNoFollow(path: string): boolean {
   try {
     lstatSync(path);
@@ -316,26 +430,6 @@ function ensureNoSymlinkPathPrefix(target: string, label: string): void {
     }
     if (lstatSync(current).isSymbolicLink()) {
       throw new Error(`${label} path component must not be a symlink: ${current}`);
-    }
-  }
-}
-
-function ensureNoSymlinkPathComponents(root: string, target: string, label: string): void {
-  const rel = relative(root, target);
-  const parts = rel.split(sep).filter((part) => part.length > 0);
-  let current = root;
-
-  for (let index = 0; index < parts.length; index += 1) {
-    current = join(current, parts[index]!);
-    if (!pathExistsNoFollow(current)) {
-      return;
-    }
-    const stat = lstatSync(current);
-    if (stat.isSymbolicLink()) {
-      throw new Error(`${label} path component must not be a symlink: ${current}`);
-    }
-    if (index < parts.length - 1 && !stat.isDirectory()) {
-      throw new Error(`${label} path component is not a directory: ${current}`);
     }
   }
 }
