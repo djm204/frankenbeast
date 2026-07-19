@@ -202,6 +202,29 @@ describe('GovernorAdapter', () => {
       .resolves.toMatchObject({ decision: 'review_recommended' });
   });
 
+  it('prefers the longest registered MCP server prefix', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'reporting', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: false,
+      },
+    ]);
+    writeFileSync(join(dbPath, '..', 'skills', 'reporting', 'mcp.json'), JSON.stringify({
+      mcpServers: {
+        foo: { command: 'foo-server' },
+        foo__bar: { command: 'foobar-server' },
+      },
+    }));
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__foo__bar__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+  });
+
   it('honors safe tool metadata for slash aliases when the MCP server was renamed', async () => {
     const dbPath = tracked(tmpDbPath());
     installSkill(dbPath, 'memory-skill', [
@@ -268,6 +291,24 @@ describe('GovernorAdapter', () => {
     writeFileSync(join(alternateConfigDir, 'config.json'), JSON.stringify({
       skills: { enabled: ['reporting'] },
     }));
+
+    const governor = createGovernorAdapter(dbPath, join(alternateConfigDir, 'config.json'));
+
+    await expect(governor.check({ action: 'mcp__reporting__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('loads enabled skill profiles installed beside an explicit active config', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const alternateConfigDir = join(dbPath, '..', 'alternate');
+    installSkillAtConfigDir(alternateConfigDir, 'reporting', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]);
 
     const governor = createGovernorAdapter(dbPath, join(alternateConfigDir, 'config.json'));
 

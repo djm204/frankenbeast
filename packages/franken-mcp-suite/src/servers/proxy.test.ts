@@ -34,11 +34,9 @@ vi.mock('../shared/governance-gate.js', () => ({
 
 import { createProxyServer, deriveProxyRoot } from './proxy.js';
 import * as registry from '../shared/tool-registry.js';
-import * as governanceGate from '../shared/governance-gate.js';
 
 const mockSearchTools = vi.mocked(registry.searchTools);
 const mockCreateAdapterSet = vi.mocked(registry.createAdapterSet);
-const mockCreateGovernanceGate = vi.mocked(governanceGate.createGovernanceGate);
 const mockRegistry = registry.TOOL_REGISTRY;
 
 const FAKE_STUBS = [
@@ -107,17 +105,26 @@ describe('proxy server', () => {
       expect(executeToolDef.timeoutMs).toBe(60_000);
     });
 
-    it('resolves a relative active config path against the proxy project root', () => {
-      createProxyServer({
+    it('resolves a relative active config path against the proxy project root', async () => {
+      const server = createProxyServer({
         dbPath: '/tmp/configured-project/.fbeast/beast.db',
         root: '/tmp/configured-project',
         configPath: '.fbeast/config.json',
+        governance: { check: gateCheck },
         audit: { record: auditRecord },
       });
 
-      expect(mockCreateGovernanceGate).toHaveBeenCalledWith(
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+      vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
+      await server.tools.find((tool) => tool.name === 'execute_tool')!
+        .handler({ tool: 'test_tool', args: { key: 'val' } });
+
+      expect(mockCreateAdapterSet).toHaveBeenCalledWith(
         '/tmp/configured-project/.fbeast/beast.db',
-        '/tmp/configured-project/.fbeast/config.json',
+        {
+          root: '/tmp/configured-project',
+          configPath: '/tmp/configured-project/.fbeast/config.json',
+        },
       );
     });
 

@@ -366,7 +366,7 @@ export function createAdapterSet(dbPath: string, options: { root?: string | unde
   return {
     brain: createBrainAdapter(dbPath),
     observer: createObserverAdapter(dbPath),
-    governor: createGovernorAdapter(dbPath),
+    governor: createGovernorAdapter(dbPath, options.configPath),
     planner: createPlannerAdapter(dbPath),
     critique: createCritiqueAdapter(),
     firewall: createFirewallAdapter(dbPath, 'standard', { root: options.root, configPath: options.configPath }),

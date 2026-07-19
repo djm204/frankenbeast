@@ -823,8 +823,8 @@ function profileRequiresHitl(profile: ToolDefinition): boolean {
   return profile.requiresHitl !== false;
 }
 
-function skillRequiresHitl(configPath: string | undefined, skillsDir: string | undefined, action: string): boolean {
-  if (configPath === undefined || skillsDir === undefined) return false;
+function skillRequiresHitl(configPath: string | undefined, skillsDirs: string[], action: string): boolean {
+  if (configPath === undefined || skillsDirs.length === 0) return false;
   const mcpQualifiedName = action.startsWith('mcp__') ? action.slice('mcp__'.length) : undefined;
   const slashQualifiedAction = parseSlashQualifiedSkillAction(action);
   if (mcpQualifiedName === undefined && slashQualifiedAction === undefined) return false;
@@ -832,37 +832,44 @@ function skillRequiresHitl(configPath: string | undefined, skillsDir: string | u
   const enabledSkills = readEnabledSkills(configPath);
   const configUnreadable = enabledSkills === undefined;
   if (!configUnreadable && enabledSkills.size === 0) return false;
-  let skillDirectories;
-  try {
-    skillDirectories = readdirSync(skillsDir, { withFileTypes: true });
-  } catch {
-    return !configUnreadable;
+  const skillDirectories = new Map<string, string>();
+  for (const skillsDir of skillsDirs) {
+    try {
+      for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
+        if (entry.isDirectory() && !skillDirectories.has(entry.name)) {
+          skillDirectories.set(entry.name, join(skillsDir, entry.name));
+        }
+      }
+    } catch {
+      // An explicit active-config skill root may not exist; retain the legacy
+      // database-adjacent root as a fallback for separately stored configs.
+    }
   }
+  if (skillDirectories.size === 0) return !configUnreadable;
 
-  for (const skillDirectory of skillDirectories) {
-    if (!skillDirectory.isDirectory()) continue;
-    if (!configUnreadable && !enabledSkills.has(skillDirectory.name)) continue;
-    const skillDir = join(skillsDir, skillDirectory.name);
+  for (const [skillName, skillDir] of skillDirectories) {
+    if (!configUnreadable && !enabledSkills.has(skillName)) continue;
     const serverNames = readSkillServerNames(skillDir);
     let toolNames: string[] = [];
 
     if (mcpQualifiedName !== undefined) {
-      toolNames = [...serverNames]
-        .map((serverName) => mcpQualifiedName.startsWith(`${serverName}__`)
-          ? mcpQualifiedName.slice(serverName.length + 2)
-          : '')
-        .filter((toolName) => toolName.length > 0);
+      const matchingServerName = [...serverNames]
+        .filter((serverName) => mcpQualifiedName.startsWith(`${serverName}__`))
+        .sort((left, right) => right.length - left.length)[0];
+      toolNames = matchingServerName === undefined
+        ? []
+        : [mcpQualifiedName.slice(matchingServerName.length + 2)];
 
       if (toolNames.length === 0) {
         // Installed skills conventionally use their directory name as the MCP
         // server key. If that registration is stale/unreadable, keep calls to the
         // known directory-name server fail-closed instead of silently skipping it.
-        if (mcpQualifiedName.startsWith(`${skillDirectory.name}__`)) return true;
+        if (mcpQualifiedName.startsWith(`${skillName}__`)) return true;
         continue;
       }
     } else if (slashQualifiedAction !== undefined) {
       const matchesRegisteredServer = serverNames.has(slashQualifiedAction.serverName);
-      const matchesSkillAlias = slashQualifiedAction.serverName === skillDirectory.name;
+      const matchesSkillAlias = slashQualifiedAction.serverName === skillName;
       if (!matchesRegisteredServer && !matchesSkillAlias) continue;
       if (matchesSkillAlias && serverNames.size === 0) return true;
       toolNames = [slashQualifiedAction.toolName];
@@ -881,11 +888,11 @@ function skillRequiresHitl(configPath: string | undefined, skillsDir: string | u
 
     for (const toolName of toolNames) {
       let profile = profiles.find((candidate) => candidate.name === toolName);
-      if (profile === undefined && toolName === skillDirectory.name) {
+      if (profile === undefined && toolName === skillName) {
         if (profiles.length === 1) {
           profile = profiles[0];
         } else {
-          profile = profiles.find((candidate) => candidate.name === skillDirectory.name);
+          profile = profiles.find((candidate) => candidate.name === skillName);
         }
       }
 
@@ -1035,7 +1042,12 @@ export function createGovernorAdapter(dbPath: string, configPath?: string): Gove
   const skillConfigPath = dbPath === ':memory:'
     ? undefined
     : (configPath ?? join(dirname(dbPath), 'config.json'));
-  const installedSkillsDir = dbPath === ':memory:' ? undefined : join(dirname(dbPath), 'skills');
+  const installedSkillsDirs = dbPath === ':memory:'
+    ? []
+    : [...new Set([
+        ...(configPath === undefined ? [] : [join(dirname(configPath), 'skills')]),
+        join(dirname(dbPath), 'skills'),
+      ])];
   const costCalculator = new CostCalculator(DEFAULT_PRICING, {
     onUnknownModel: (model) => {
       process.stderr.write(`[fbeast-governor] Unknown model "${model}" — budget status will report $0.0000 until pricing is configured.\n`);
@@ -1044,7 +1056,7 @@ export function createGovernorAdapter(dbPath: string, configPath?: string): Gove
 
   return {
     async check(input) {
-      const requiresHitl = skillRequiresHitl(skillConfigPath, installedSkillsDir, input.action);
+      const requiresHitl = skillRequiresHitl(skillConfigPath, installedSkillsDirs, input.action);
       const isDryRunForget = !requiresHitl && isRightToForgetDryRun(input.action, input.context);
       if (hasDuplicateReservedProvenanceKeys(input.context)) {
         const reason = 'Duplicate reserved fbeast provenance keys are not allowed.';
