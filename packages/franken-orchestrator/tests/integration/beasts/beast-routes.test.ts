@@ -239,6 +239,15 @@ describe('beast routes', () => {
       finishedAt: '2026-03-10T00:00:01.000Z',
       stopReason: 'spawn_failed',
     });
+    const attempt = repository.createAttempt(run.id, {
+      status: 'failed',
+      startedAt: '2026-03-10T00:00:00.000Z',
+      finishedAt: '2026-03-10T00:00:01.000Z',
+      executorMetadata: {
+        command: 'worker',
+        args: ['--token', 'SECRET_ATTEMPT_TOKEN'],
+      },
+    });
     repository.appendTrackedAgentEvent(agent.id, {
       level: 'error',
       type: 'agent.dispatch.failed',
@@ -251,7 +260,7 @@ describe('beast routes', () => {
       payload: { error: 'SECRET_THROWN_ERROR' },
       createdAt: '2026-03-10T00:00:01.000Z',
     });
-    await logStore.append(run.id, 'system', 'stderr', 'start_failed: SECRET_THROWN_ERROR');
+    await logStore.append(run.id, attempt.id, 'stderr', 'start_failed: SECRET_THROWN_ERROR');
 
     const headers = { authorization: `Bearer ${operatorToken}` };
     const detailResponse = await app.request(`/v1/beasts/runs/${run.id}`, { headers });
@@ -259,10 +268,13 @@ describe('beast routes', () => {
     const detail = await detailResponse.json() as {
       data: {
         run: { configSnapshot: Record<string, unknown> };
+        attempts: Array<{ executorMetadata?: Record<string, unknown> }>;
         events: Array<{ type: string; payload: Record<string, unknown> }>;
       };
     };
     expect(detail.data.run.configSnapshot).toEqual({});
+    expect(detail.data.attempts[0]?.executorMetadata).toBeUndefined();
+    expect(JSON.stringify(detail)).not.toContain('SECRET_ATTEMPT_TOKEN');
     expect(detail.data.events.find((event) => event.type === 'run.start_failed')?.payload).toEqual({
       error: SAFE_DISPATCH_FAILURE_MESSAGE,
     });
@@ -280,6 +292,24 @@ describe('beast routes', () => {
     const logsBody = await logsResponse.json() as { data: { logs: string[] } };
     expect(JSON.stringify(logsBody)).not.toContain('SECRET_THROWN_ERROR');
     expect(logsBody.data.logs.join('\n')).toContain(SAFE_DISPATCH_FAILURE_MESSAGE);
+
+    repository.updateTrackedAgent(agent.id, {
+      status: 'running',
+      dispatchRunId: run.id,
+      updatedAt: '2026-03-10T00:00:02.000Z',
+    });
+    repository.appendTrackedAgentEvent(agent.id, {
+      level: 'info',
+      type: 'agent.dispatch.recovered',
+      message: 'Dispatch recovered.',
+      payload: { runId: run.id },
+      createdAt: '2026-03-10T00:00:02.000Z',
+    });
+
+    const recoveredEventsResponse = await app.request(`/v1/beasts/runs/${run.id}/events`, { headers });
+    expect(JSON.stringify(await recoveredEventsResponse.json())).not.toContain('SECRET_THROWN_ERROR');
+    const recoveredLogsResponse = await app.request(`/v1/beasts/runs/${run.id}/logs`, { headers });
+    expect(JSON.stringify(await recoveredLogsResponse.json())).not.toContain('SECRET_THROWN_ERROR');
   });
 
   it('stops tracked agents when direct run creation is paused by maintenance mode', async () => {

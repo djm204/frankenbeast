@@ -58,22 +58,21 @@ export class BeastRunService {
   }
 
   listAttempts(runId: string) {
-    this.requireRun(runId);
-    return this.repository.listAttempts(runId);
+    const run = this.requireRun(runId);
+    const attempts = this.repository.listAttempts(runId);
+    if (!this.hasActiveDispatchFailure(run)) return attempts;
+    return attempts.map((attempt) => ({ ...attempt, executorMetadata: undefined }));
   }
 
   listEvents(runId: string) {
-    const run = this.requireRun(runId);
-    const events = this.repository.listEvents(runId);
-    if (!this.hasActiveDispatchFailure(run)) return events;
-    return events.map(redactDispatchFailureEvent);
+    this.requireRun(runId);
+    return this.repository.listEvents(runId).map(redactDispatchFailureEvent);
   }
 
   async readLogs(runId: string): Promise<string[]> {
     const run = this.requireRun(runId);
     const attemptId = run.currentAttemptId;
     const lines = await this.logs.read(run.id, attemptId ?? 'system');
-    if (!this.hasActiveDispatchFailure(run)) return lines;
     return lines.map(redactDispatchFailureLogLine);
   }
 
