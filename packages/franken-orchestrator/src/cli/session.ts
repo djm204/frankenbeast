@@ -360,7 +360,10 @@ export class Session {
     // from loading in the spawned CLI. Plugins poison the session by injecting skill
     // instructions that make the CLI explore the codebase instead of returning JSON.
     depOptions.adapterWorkingDir = tmpdir();
-    const progress = createStreamProgressWithSpinner({ label: 'Planning...' });
+    const progress = createStreamProgressWithSpinner({
+      label: 'Planning...',
+      verbose: this.config.verbose,
+    });
     depOptions.onStreamLine = progress.onLine;
     const { cliLlmAdapter, logger, finalize } = await createCliDeps(depOptions);
 

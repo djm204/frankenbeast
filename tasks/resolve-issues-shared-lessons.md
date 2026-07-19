@@ -1,5 +1,8 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-19 — Codex-triggered commit re-review on issue #2907
+- When a commit is pushed to an existing PR and there was a prior `@codex review`, always trigger a new review on the new head and collect a fresh `@codex review` clean signal before merging. In this case, a `screen-reader` aria-label update changed, a stale strict assertion in `wizard-dialog.test.tsx` broke once; switching it to a regex was sufficient and CI stayed green on the new commit.
+
 ## 2026-07-19 — Deterministic abort handling regression
 - Prefer deterministic abort fixtures over timing sleeps: for HTTP disconnect behavior, verify both in-band and immediate-abort paths by asserting that `AbortSignal` is already aborted when `request.destroyed`/`request.aborted` is true before app handler execution.
 - Use a pre-aborted request object (or equivalent event-driven signal path) in unit tests when asserting handler abort behavior, and keep timeouts only as a bounded safety net, not as fixture synchronization.
@@ -392,3 +395,7 @@
 ## Lessons
 - 2026-07-19 — Docs regression tests should assert exact pinned values from manifest and treat setup commands as gate-narrow/full setup distinctions.
 - 2026-07-19 — Bounded multi-pass LLM flows need one shared deadline propagated through cache/client/adapter layers, explicit subprocess and retry-wait cancellation, and a caller-side abort race for implementations that ignore signals. Preserve the last useful pre-quality artifact on timeout, use deterministic structural confidence for fast paths, avoid resending unchanged repository context, and test 1/2/4-pass paths plus child-process termination.
+
+## 2026-07-19 — Type export renames and deprecation compatibility
+- When renaming shared public type names for clarity, keep deprecated aliases temporarily (with `@deprecated` JSDoc) for downstream consumers, update docs/tests to use new names, and add targeted tests validating both canonical and deprecated aliases.
+- Before merging such API refactors, require `tsc`, package `lint`, `build`, and focused unit tests for both packages to avoid regressions in public contracts.
