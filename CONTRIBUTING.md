@@ -75,6 +75,8 @@ The bootstrap command checks the supported Node.js and npm versions, prepares `.
 
 If your issue changes only Markdown, follow the [docs-only contribution quickstart](docs/onboarding/docs-only-contribution.md). It provides the shorter setup, preview, local-link verification, and PR checklist without requiring Docker or optional runtime services.
 
+If your issue changes the browser dashboard, follow the [dashboard UX contribution checklist](docs/onboarding/dashboard-ux-contribution.md). It covers reproducible UX evidence, the narrowest useful development server, accessibility states, focused web tests, and package gates.
+
 ## Verify the change
 
 Use the [test command decision tree](docs/onboarding/test-command-decision-tree.md) to select the narrowest meaningful check, then add broader gates when the change crosses package or root boundaries.
