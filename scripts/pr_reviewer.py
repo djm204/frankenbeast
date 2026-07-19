@@ -4,6 +4,7 @@
 import json
 import os
 import re
+import resource
 import select
 import sqlite3
 import subprocess
@@ -27,6 +28,10 @@ MAX_REVIEW_BYTES = 120_000
 HTTP_TIMEOUT_SECONDS = 30
 GH_DIFF_TIMEOUT_SECONDS = 30
 AGY_TIMEOUT_SECONDS = 300
+SECRET_PATTERN = re.compile(
+    r"(?:github_pat_[a-zA-Z0-9_]{40,}|gh[opusr]_[a-zA-Z0-9]{36,}|"
+    r"sk-ant-[a-zA-Z0-9_-]{40,}|AIzaSy[a-zA-Z0-9_-]{35})"
+)
 DIFF_TRUNCATION_MARKER = (
     f"\n... [DIFF TRUNCATED AFTER {MAX_DIFF_BYTES} BYTES] ..."
 )
@@ -66,6 +71,19 @@ def gh_environment():
     return environment
 
 
+def agy_environment():
+    environment = os.environ.copy()
+    for name in ("GITHUB_PERSONAL_ACCESS_TOKEN", "GITHUB_TOKEN", "GH_TOKEN"):
+        environment.pop(name, None)
+    return environment
+
+
+def limit_review_output_files():
+    resource.setrlimit(
+        resource.RLIMIT_FSIZE, (MAX_REVIEW_BYTES + 1, MAX_REVIEW_BYTES + 1)
+    )
+
+
 def get_open_prs():
     try:
         output = subprocess.check_output(
@@ -87,7 +105,7 @@ def get_open_prs():
         return json.loads(output)
     except Exception as error:
         print(f"Error fetching open PRs: {error}", file=sys.stderr)
-        return []
+        raise
 
 
 def decode_bounded_diff(payload):
@@ -230,9 +248,7 @@ def scan_diff_for_exploits(diff_content):
         "Suspicious Remote Executable download": re.compile(
             r"https?://[^\s'\"]+\.(?:sh|py|pl|exe|bin|bat)"
         ),
-        "Hardcoded Secret / API Key leak": re.compile(
-            r"(?:github_pat_[a-zA-Z0-9_]{40,}|gh[opusr]_[a-zA-Z0-9]{36,}|sk-ant-[a-zA-Z0-9_-]{40,}|AIzaSy[a-zA-Z0-9_-]{35})"
-        ),
+        "Hardcoded Secret / API Key leak": SECRET_PATTERN,
         "Suspicious absolute system path writing": re.compile(
             r"write_to_file\s*\(\s*['\"]/(?:etc|usr|bin|var|opt)"
         ),
@@ -245,7 +261,7 @@ def scan_diff_for_exploits(diff_content):
             for label, regex in patterns.items():
                 match = regex.search(stripped)
                 if match:
-                    safe_line = regex.sub("[REDACTED]", stripped)
+                    safe_line = SECRET_PATTERN.sub("[REDACTED]", stripped)
                     warnings.append(
                         f"* **Line {line_num}** (`{label}`): `{safe_line}`"
                     )
@@ -270,12 +286,21 @@ def run_agy_review(diff_content):
     )
 
     try:
-        with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+        with (
+            tempfile.TemporaryFile() as stdin_file,
+            tempfile.TemporaryFile() as stdout_file,
+            tempfile.TemporaryFile() as stderr_file,
+        ):
+            stdin_file.write(prompt.encode("utf-8"))
+            stdin_file.seek(0)
             process = subprocess.Popen(
-                [AGY_PATH, "--sandbox", "--print", prompt],
+                [AGY_PATH, "--sandbox", "--print"],
                 cwd=WORKSPACE,
+                stdin=stdin_file,
                 stdout=stdout_file,
                 stderr=stderr_file,
+                env=agy_environment(),
+                preexec_fn=limit_review_output_files,
             )
             try:
                 return_code = process.wait(timeout=AGY_TIMEOUT_SECONDS)
@@ -423,17 +448,27 @@ def process_prs():
             continue
 
         security_warnings = scan_diff_for_exploits(diff_content)
+        diff_truncated = diff_content.endswith(DIFF_TRUNCATION_MARKER)
         review_body = run_agy_review(diff_content)
         if not review_body.strip():
-            print(f"Could not generate review for PR #{pr_number}. Setting status as failed.")
-            cursor.execute(
-                "UPDATE pr_reviews SET status = ? WHERE pr_number = ?",
-                ("failed", pr_number),
-            )
-            conn.commit()
-            continue
+            if security_warnings or diff_truncated:
+                review_body = (
+                    "### Automated model review unavailable\n\n"
+                    "The model-backed review failed, but deterministic guardrails found "
+                    "a blocking condition. Retry the full review after addressing it.\n\n"
+                    "VERDICT: REQUEST_CHANGES"
+                )
+            else:
+                print(
+                    f"Could not generate review for PR #{pr_number}. Setting status as failed."
+                )
+                cursor.execute(
+                    "UPDATE pr_reviews SET status = ? WHERE pr_number = ?",
+                    ("failed", pr_number),
+                )
+                conn.commit()
+                continue
 
-        diff_truncated = diff_content.endswith(DIFF_TRUNCATION_MARKER)
         review_body = add_diff_truncation_notice(review_body, diff_content)
         posted = post_pr_review(
             pr_number,
