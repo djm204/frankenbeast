@@ -33,7 +33,7 @@ AGY_TIMEOUT_SECONDS = 300
 SECRET_PATTERN = re.compile(
     r"(?:github_pat_[a-zA-Z0-9_]{40,}|gh[opusr]_[a-zA-Z0-9]{36,}|"
     r"sk-ant-[a-zA-Z0-9_-]{40,}|sk-(?:proj-)?[a-zA-Z0-9_-]{20,}|"
-    r"AIzaSy[a-zA-Z0-9_-]{35})"
+    r"AIza[a-zA-Z0-9_-]{35})"
 )
 DIFF_TRUNCATION_MARKER = (
     f"\n... [DIFF TRUNCATED AFTER {MAX_DIFF_BYTES} BYTES] ..."
@@ -78,7 +78,7 @@ def github_token():
 def gh_environment():
     environment = os.environ.copy()
     token = github_token()
-    if token and not environment.get("GH_TOKEN"):
+    if token:
         environment["GH_TOKEN"] = token
     return environment
 
@@ -461,7 +461,7 @@ def post_pr_review(
     temp_file = WORKSPACE / f".fbeast/pr_review_{pr_number}.md"
     try:
         temp_file.parent.mkdir(parents=True, exist_ok=True)
-        temp_file.write_text(review_body)
+        temp_file.write_text(review_body, encoding="utf-8")
         subprocess.check_call(
             [
                 "gh",
@@ -549,6 +549,7 @@ def process_prs():
                 ("failed", pr_number),
             )
             conn.commit()
+            fatal_failures.append(f"PR #{pr_number}: diff could not be fetched")
             continue
         if not diff_content.strip():
             print(f"Empty diff for PR #{pr_number}. Skipping.")
