@@ -45,6 +45,15 @@ describe('workspace artifact paths', () => {
     expect(() => workspaceArtifactFileExists(join(parent, 'missing-workspace'), 'result.txt')).toThrow(/ENOENT/);
   });
 
+  it('returns false for contained outputs with the wrong filesystem shape', () => {
+    const workspace = tempRoot('live-bench-artifacts-');
+    writeFileSync(join(workspace, 'artifacts'), 'not a directory\n', 'utf8');
+    mkdirSync(join(workspace, 'result-directory'));
+
+    expect(workspaceArtifactFileExists(workspace, 'artifacts/result.txt')).toBe(false);
+    expect(workspaceArtifactFileExists(workspace, 'result-directory')).toBe(false);
+  });
+
   it('rejects a symlinked workspace root', () => {
     const workspace = tempRoot('live-bench-artifacts-');
     const linkParent = tempRoot('live-bench-artifacts-link-');

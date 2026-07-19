@@ -11,6 +11,8 @@ import {
 import { dirname, join, posix, relative, resolve, sep, win32 } from 'node:path';
 import type { BenchmarkTask } from '../types.js';
 
+class ArtifactUnavailableError extends Error {}
+
 export function assertNormalizedWorkspaceRelativePath(value: string, label = 'artifact path'): void {
   if (
     value.length === 0
@@ -88,7 +90,7 @@ export function openWorkspaceArtifactFile(workspaceRoot: string, artifactPath: s
         stat = lstatSync(current);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-          throw new Error(`artifact file does not exist: ${artifactPath}`);
+          throw new ArtifactUnavailableError(`artifact file does not exist: ${artifactPath}`);
         }
         throw error;
       }
@@ -97,7 +99,10 @@ export function openWorkspaceArtifactFile(workspaceRoot: string, artifactPath: s
         throw new Error(`artifact path must not contain symlinks: ${artifactPath}`);
       }
       if (index < parts.length - 1 && !stat.isDirectory()) {
-        throw new Error(`artifact path component must be a directory: ${artifactPath}`);
+        throw new ArtifactUnavailableError(`artifact path component must be a directory: ${artifactPath}`);
+      }
+      if (index === parts.length - 1 && !stat.isFile()) {
+        throw new ArtifactUnavailableError(`artifact path must identify a regular file: ${artifactPath}`);
       }
       assertContained(realpathSync(current), rootReal, 'artifact path');
     }
@@ -124,7 +129,7 @@ export function workspaceArtifactFileExists(workspaceRoot: string, artifactPath:
     closeSync(fd);
     return true;
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith('artifact file does not exist:')) {
+    if (error instanceof ArtifactUnavailableError) {
       return false;
     }
     throw error;
@@ -185,7 +190,7 @@ function assertSafeOpenedArtifact(
     throw new Error(`artifact path changed while it was being opened: ${artifactPath}`);
   }
   if (!opened.isFile()) {
-    throw new Error(`artifact path must identify a regular file: ${artifactPath}`);
+    throw new ArtifactUnavailableError(`artifact path must identify a regular file: ${artifactPath}`);
   }
 }
 
