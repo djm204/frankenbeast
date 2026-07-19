@@ -362,10 +362,31 @@ function formatHealthDiagnostic(
     ...(stderr.byteLength > 0 ? [`stderr: ${stderr.toString('utf8').trim()}`] : []),
     ...(stdout.byteLength > 0 ? [`stdout: ${stdout.toString('utf8').trim()}`] : []),
   ].join('\n');
-  const sanitized = details
-    .replace(/\u001B\[[0-?]*[ -/]*[@-~]/gu, '')
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu, '');
-  return redactSensitiveText(sanitized);
+  return redactSensitiveText(sanitizeTerminalText(details));
+}
+
+function sanitizeTerminalText(text: string): string {
+  const withoutEscapes = text
+    .replace(/\u001B\][^\u0007]*(?:\u0007|\u001B\\)/gu, '')
+    .replace(/\u001B\[[0-?]*[ -/]*[@-~]/gu, '');
+  const normalized: string[] = [];
+  for (const character of withoutEscapes) {
+    if (character === '\b') {
+      if (normalized.at(-1) !== '\n') {
+        normalized.pop();
+      }
+      continue;
+    }
+    if (character === '\r') {
+      normalized.push('\n');
+      continue;
+    }
+    if (/^[\u0000-\u0007\u000B\u000C\u000E-\u001F\u007F]$/u.test(character)) {
+      continue;
+    }
+    normalized.push(character);
+  }
+  return normalized.join('');
 }
 
 async function mapWithConcurrency<Item, Result>(

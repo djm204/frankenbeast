@@ -607,6 +607,28 @@ describe('SkillHealthChecker', () => {
     expect(diagnostic).not.toContain('\u0000');
   });
 
+  it('applies terminal backspace semantics before redacting diagnostics', async () => {
+    const { spawn } = await import('node:child_process');
+    const proc = makeMockProcess();
+    (spawn as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      setTimeout(() => {
+        proc.stderr.emit('data', 'API_X\bKEY=do-not-expose');
+        proc.exitCode = 1;
+        proc.emit('close', 1);
+      }, 10);
+      return proc;
+    });
+
+    const result = await checker.getStatus('backspace', {
+      mcpServers: { backspace: { command: 'backspace-server' } },
+    }, { trustMcpServerCommands: true });
+    const diagnostic = result.serverStatuses[0]?.error ?? '';
+
+    expect(diagnostic).toContain('API_KEY=<redacted>');
+    expect(diagnostic).not.toContain('do-not-expose');
+    expect(diagnostic).not.toContain('\b');
+  });
+
   it('does not retain a sensitive value past the diagnostic bound', async () => {
     const { spawn } = await import('node:child_process');
     const proc = makeMockProcess();
