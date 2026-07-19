@@ -181,7 +181,7 @@ export class CliLlmAdapter implements IAdapter {
         });
       }
       const activeCommand = this.resolveCommand(activeProvider);
-      const providerSessionContinue = sessionContinue && activeProvider === initialProvider;
+      const providerSessionContinue = sessionContinue && (chatMode || activeProvider === initialProvider);
       let result: { stdout: string; stderr: string; exitCode: number };
       try {
         result = await this.spawnSingle({
@@ -192,7 +192,7 @@ export class CliLlmAdapter implements IAdapter {
             chatMode,
             sessionContinue: providerSessionContinue,
             persistSession: Boolean(cacheSession?.persist),
-            ...(sessionId && activeProvider === initialProvider
+            ...(sessionId && (chatMode || activeProvider === initialProvider)
               ? { sessionId: chatMode ? this.resolveProviderSessionId(activeProvider, sessionId, providerSessionContinue) : sessionId }
               : {}),
             extraArgs: this.resolveExtraArgs(activeProvider),

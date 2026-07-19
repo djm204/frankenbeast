@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { access, mkdtemp, rm } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { CachedCliLlmClient } from '../../../src/cache/cached-cli-llm-client.js';
@@ -149,7 +149,7 @@ describe('CachedCliLlmClient', () => {
     await client.complete('first prompt');
     adapter.execute
       .mockRejectedValueOnce(new Error('Claude CLI failed', {
-        cause: { stdout: 'Conversation session not found', stderr: '' },
+        cause: { stdout: 'No conversation found with session ID: stored-session', stderr: '' },
       }))
       .mockResolvedValueOnce('response:fresh');
 
@@ -169,6 +169,45 @@ describe('CachedCliLlmClient', () => {
       'plan%3Aalpha',
       'provider-session.json',
     ))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('ignores legacy provider-session records that contain application work keys', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-cached-cli-'));
+    const sessionDir = join(
+      workDir,
+      '.fbeast',
+      '.cache',
+      'llm',
+      'work',
+      'frankenbeast',
+      'plan%3Alegacy',
+    );
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(join(sessionDir, 'provider-session.json'), JSON.stringify({
+      schemaVersion: 1,
+      projectId: 'frankenbeast',
+      workId: 'plan:legacy',
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      sessionId: 'plan:legacy',
+      promptFingerprint: 'legacy-fingerprint',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    }));
+    const adapter = createAdapter();
+    const client = new CachedCliLlmClient({
+      cacheRootDir: join(workDir, '.fbeast', '.cache', 'llm'),
+      cliAdapter: adapter as never,
+      projectId: 'frankenbeast',
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      operation: 'plan-build',
+      workId: 'plan:legacy',
+    });
+
+    await client.complete('first prompt');
+
+    expect(adapter.transformRequest.mock.calls[0]?.[0]).not.toHaveProperty('session_id');
   });
 
   it('keeps provider-issued sessions for aliases when the CLI model is implicit', async () => {

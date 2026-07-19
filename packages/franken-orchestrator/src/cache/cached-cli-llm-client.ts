@@ -7,6 +7,8 @@ import { ProviderSessionStore } from './provider-session-store.js';
 import { CacheMetrics } from './cache-metrics.js';
 import { now as deterministicNow, seededRandom } from '@franken/types';
 
+const PROVIDER_SESSION_SCHEMA_VERSION = 2;
+
 interface CliSessionMetadata {
   provider: string;
   model?: string | undefined;
@@ -61,7 +63,9 @@ export class CachedCliLlmClient implements ILlmClient {
       },
       cacheStore: new LlmCacheStore(options.cacheRootDir, { schemaVersion: this.schemaVersion }),
       policy: new LlmCachePolicy(),
-      providerSessions: new ProviderSessionStore(options.cacheRootDir, { schemaVersion: this.schemaVersion }),
+      providerSessions: new ProviderSessionStore(options.cacheRootDir, {
+        schemaVersion: PROVIDER_SESSION_SCHEMA_VERSION,
+      }),
       metrics: this.metrics,
     });
   }
@@ -228,5 +232,5 @@ function isExpectedStaleSessionError(error: unknown): boolean {
     break;
   }
   const text = messages.join('\n');
-  return /(?:session|conversation).*(?:expired|invalid|not found|no longer exists|stale)|(?:expired|invalid|stale).*(?:session|conversation)/i.test(text);
+  return /(?:session|conversation).*(?:expired|invalid|not found|no longer exists|stale)|(?:expired|invalid|stale).*(?:session|conversation)|no\s+(?:session|conversation)\s+found/i.test(text);
 }
