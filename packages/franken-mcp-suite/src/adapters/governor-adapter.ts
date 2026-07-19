@@ -1,6 +1,8 @@
 import { SkillTrigger, TriggerRegistry, evaluateHighRiskActionPolicy } from '@franken/governor';
 import type { HighRiskActionClass, HighRiskActionEvidence, TriggerResult, TriggerSeverity } from '@franken/governor';
 import { CostCalculator, DEFAULT_PRICING } from '@franken/observer';
+import { lstatSync, readFileSync, readdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 import { createSqliteStore } from '../shared/sqlite-store.js';
 
@@ -761,7 +763,42 @@ function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; m
   return true;
 }
 
-function assessAction(action: string, context: string): GovernorCheckResult {
+function skillRequiresHitl(skillsDir: string, action: string): boolean {
+  let skillDirectories;
+  try {
+    skillDirectories = readdirSync(skillsDir, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+
+  for (const skillDirectory of skillDirectories) {
+    if (!skillDirectory.isDirectory()) continue;
+    const toolsPath = join(skillsDir, skillDirectory.name, 'tools.json');
+    let tools: unknown;
+    try {
+      if (!lstatSync(toolsPath).isFile()) continue;
+      tools = JSON.parse(readFileSync(toolsPath, 'utf8')) as unknown;
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(tools)) continue;
+
+    for (const tool of tools) {
+      if (tool === null || typeof tool !== 'object' || Array.isArray(tool)) continue;
+      const profile = tool as Record<string, unknown>;
+      const toolName = profile['name'];
+      if (typeof toolName !== 'string') continue;
+      if (toolName !== action && `${skillDirectory.name}/${toolName}` !== action) continue;
+      // SkillManager normalizes omitted flags to true when installing a profile;
+      // preserve that fail-safe default when reading an existing manifest.
+      if (profile['requiresHitl'] !== false) return true;
+    }
+  }
+
+  return false;
+}
+
+function assessAction(action: string, context: string, skillsDir: string): GovernorCheckResult {
   const unqualifiedAction = unqualifyMcpActionName(action);
   const highRiskResult = assessHighRiskAction(unqualifiedAction, context);
   if (highRiskResult !== undefined) return highRiskResult;
@@ -857,7 +894,7 @@ function assessAction(action: string, context: string): GovernorCheckResult {
   // Evaluate via governor SkillTrigger with pattern-derived destructiveness
   const triggerResult: TriggerResult = triggerRegistry.evaluateAll({
     skillId: unqualifiedAction,
-    requiresHitl: false,
+    requiresHitl: skillRequiresHitl(skillsDir, unqualifiedAction),
     isDestructive,
   });
 
@@ -876,6 +913,7 @@ function assessAction(action: string, context: string): GovernorCheckResult {
 
 export function createGovernorAdapter(dbPath: string): GovernorAdapter {
   const store = createSqliteStore(dbPath);
+  const skillsDir = join(dirname(dbPath), 'skills');
   const costCalculator = new CostCalculator(DEFAULT_PRICING, {
     onUnknownModel: (model) => {
       process.stderr.write(`[fbeast-governor] Unknown model "${model}" — budget status will report $0.0000 until pricing is configured.\n`);
@@ -899,7 +937,7 @@ export function createGovernorAdapter(dbPath: string): GovernorAdapter {
             decision: 'approved' as const,
             reason: 'Right-to-forget dryRun is non-mutating and allowed so users can inspect deletion counts before approval.',
           }
-        : assessAction(input.action, context);
+        : assessAction(input.action, context, skillsDir);
 
       store.db.prepare(`
         INSERT INTO governor_log (action, context, decision, reason)

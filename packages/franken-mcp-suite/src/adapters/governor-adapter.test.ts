@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -31,6 +31,25 @@ describe('GovernorAdapter', () => {
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
     const result = await governor.check({ action: 'edit_file', context: '{"path":"src/app.ts"}' });
     expect(result.decision).toBe('approved');
+  });
+
+  it('requires review when an installed skill tool is marked as requiring HITL', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const skillDir = join(dbPath, '..', 'skills', 'reporting');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, 'tools.json'), JSON.stringify([
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]));
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__reporting__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
   });
 
   it('rejects duplicate reserved provenance keys instead of persisting forgeable JSON', async () => {
