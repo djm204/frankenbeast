@@ -73,6 +73,8 @@ The bootstrap command checks the supported Node.js and npm versions, prepares `.
 - Update public documentation when behavior, commands, configuration, or contributor workflow changes.
 - Add or update a focused regression test when the change can drift. Documentation changes commonly use a root test under `tests/docs-issue-<number>.test.ts`.
 
+If your issue changes only Markdown, follow the [docs-only contribution quickstart](docs/onboarding/docs-only-contribution.md). It provides the shorter setup, preview, local-link verification, and PR checklist without requiring Docker or optional runtime services.
+
 ## Verify the change
 
 Use the [test command decision tree](docs/onboarding/test-command-decision-tree.md) to select the narrowest meaningful check, then add broader gates when the change crosses package or root boundaries.
