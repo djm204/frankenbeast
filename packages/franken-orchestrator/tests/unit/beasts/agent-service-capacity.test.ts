@@ -31,14 +31,14 @@ describe('AgentService capacity reservations', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
+      initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
     });
     const securityAgent = service.createAgent({
       definitionId: 'martin-loop',
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { labels: ['security'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
+      initConfig: { labels: ['security'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
     });
     service.updateAgent(normalAgent.id, { status: 'running' });
     service.updateAgent(securityAgent.id, { status: 'running' });

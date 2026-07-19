@@ -51,7 +51,7 @@ describe('BeastDispatchService', () => {
         objective: 'Implement the dispatch panel',
         chunkDirectory: 'docs/chunks',
         agentRole: 'coding',
-        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
         skills: [],
       },
       dispatchedBy: 'dashboard',
@@ -228,7 +228,7 @@ describe('BeastDispatchService', () => {
         objective: 'Implement the dispatch panel',
         chunkDirectory: 'docs/chunks',
         agentRole: 'coding',
-        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
         skills: [],
       },
       dispatchedBy: 'dashboard',
@@ -242,7 +242,7 @@ describe('BeastDispatchService', () => {
       provider: 'claude',
       objective: 'Implement the dispatch panel',
       chunkDirectory: 'docs/chunks',
-      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
       skills: [],
     });
     expect(metrics.render()).toContain('beast_runs_created_total{definition_id="martin-loop",source="dashboard"} 1');
@@ -276,7 +276,7 @@ describe('BeastDispatchService', () => {
         chunkDirectory: 'docs/chunks',
         skills: [],
         agentRole: 'coding',
-        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
         promptConfig: { text: 'Launch with this context.' },
         gitConfig: { preset: 'feature-branch', baseBranch: 'develop', branchPattern: '', prCreation: true, mergeStrategy: 'squash', commitConvention: 'conventional' },
         llmConfig: { default: { provider: 'openai', model: 'gpt-5.3-codex-spark' } },
@@ -292,7 +292,7 @@ describe('BeastDispatchService', () => {
       provider: 'claude',
       objective: 'Implement the dispatch panel',
       chunkDirectory: 'docs/chunks',
-      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
       skills: [],
       promptConfig: { text: 'Launch with this context.' },
       gitConfig: { preset: 'feature-branch', baseBranch: 'develop', branchPattern: '', prCreation: 'auto', mergeStrategy: 'squash', commitConvention: 'conventional' },
@@ -328,7 +328,7 @@ describe('BeastDispatchService', () => {
         objective: 'Implement the dispatch panel',
         chunkDirectory: 'docs/chunks',
         agentRole: 'coding',
-        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
         skills: [],
         llmConfig: { default: { provider: 1 } },
         promptConfig: { text: 'Launch with this context.' },
@@ -343,7 +343,7 @@ describe('BeastDispatchService', () => {
       provider: 'claude',
       objective: 'Implement the dispatch panel',
       chunkDirectory: 'docs/chunks',
-      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
       promptConfig: { text: 'Launch with this context.' },
       skills: [],
     });
@@ -386,7 +386,7 @@ describe('BeastDispatchService', () => {
         objective: 'Implement linkage',
         chunkDirectory: 'docs/chunks',
         agentRole: 'coding',
-        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
     });
 
     const run = await dispatch.createRun({
@@ -435,7 +435,7 @@ describe('BeastDispatchService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { labels: ['availability'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
+      initConfig: { labels: ['availability'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
     });
     const firstRun = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -529,7 +529,7 @@ describe('BeastDispatchService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: { provider: 'claude', objective: 'SSE test', chunkDirectory: '.' } },
-      initConfig: { provider: 'claude', objective: 'SSE test', chunkDirectory: '.', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
+      initConfig: { provider: 'claude', objective: 'SSE test', chunkDirectory: '.', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
     });
 
     await dispatch.createRun({
@@ -574,7 +574,7 @@ describe('BeastDispatchService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: { provider: 'claude', objective: 'Approval test', chunkDirectory: '.' } },
-      initConfig: { provider: 'claude', objective: 'Approval test', chunkDirectory: '.', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
+      initConfig: { provider: 'claude', objective: 'Approval test', chunkDirectory: '.', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
     });
 
     const run = await dispatch.createRun({
@@ -638,7 +638,7 @@ describe('BeastDispatchService', () => {
         chunkDirectory: '.',
         identity: { name: 'Interview agent' },
         agentRole: 'coding',
-        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
         skills: [],
       },
     });
@@ -723,7 +723,7 @@ describe('BeastDispatchService', () => {
         objective: 'Stop before start',
         chunkDirectory: '.',
         agentRole: 'coding',
-        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
         skills: [],
       },
       dispatchedBy: 'dashboard',
@@ -794,7 +794,7 @@ describe('BeastDispatchService', () => {
         objective: 'Collect interview config',
         chunkDirectory: 'docs/chunks',
         agentRole: 'coding',
-        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
         skills: [],
       },
     });
@@ -815,7 +815,7 @@ describe('BeastDispatchService', () => {
 
     expect(run.configSnapshot).toMatchObject({
       agentRole: 'coding',
-      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
       skills: ['context-only'],
     });
   });
@@ -845,7 +845,7 @@ describe('BeastDispatchService', () => {
         objective: 'Collect interview config',
         chunkDirectory: 'docs/chunks',
         agentRole: 'coding',
-        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
         skills: ['context-only'],
       },
     });
@@ -865,7 +865,7 @@ describe('BeastDispatchService', () => {
 
     expect(run.configSnapshot).toMatchObject({
       agentRole: 'coding',
-      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
       skills: ['context-only'],
     });
   });

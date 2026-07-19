@@ -154,7 +154,7 @@ function runtimeToolsFromConfig(
   const gitConfig = config.gitConfig;
   if (typeof gitConfig === 'object' && gitConfig !== null && !Array.isArray(gitConfig)) {
     const prCreation = (gitConfig as Readonly<Record<string, unknown>>).prCreation;
-    if (prCreation === 'auto' || prCreation === 'required') {
+    if (prCreation === 'auto' || prCreation === 'manual') {
       tools.push('github.pr');
     }
   }
@@ -175,6 +175,27 @@ function workflowRequiredTools(context: ToolPolicyValidationContext): string[] {
   }
 }
 
+function skillToolCapability(skill: string, tool: string): string {
+  const normalizedSkill = skill.toLowerCase();
+  const normalizedTool = tool.toLowerCase().replaceAll('-', '_');
+  const isGitHubTool = normalizedSkill.includes('github')
+    || normalizedTool.startsWith('github.')
+    || normalizedTool.startsWith('github_')
+    || normalizedTool.startsWith('mcp__github__');
+  if (!isGitHubTool) return tool;
+
+  if (normalizedTool.includes('comment') || normalizedTool.includes('review')) {
+    return 'github.comment';
+  }
+  if (normalizedTool.includes('pull_request') || /(^|[._])pr([._]|$)/u.test(normalizedTool)) {
+    return 'github.pr';
+  }
+  if (/^(?:mcp__github__|github[._])?(?:get|list|read|search|view|check)_/u.test(normalizedTool)) {
+    return 'github.read';
+  }
+  return tool;
+}
+
 function trustedSkillToolManifestFor(context: ToolPolicyValidationContext, skill: string): string[] | undefined {
   const manifests = typeof context.trustedSkillToolManifests === 'function'
     ? context.trustedSkillToolManifests()
@@ -188,19 +209,20 @@ function trustedSkillToolManifestFor(context: ToolPolicyValidationContext, skill
     const parentTools = Object.hasOwn(manifests, parentSkill)
       ? arrayOfTools(manifests[parentSkill])
       : [];
-    return parentTools.includes(toolId) ? [toolId] : undefined;
+    return parentTools.includes(toolId) ? [skillToolCapability(parentSkill, toolId)] : undefined;
   }
 
   const exactManifest = Object.hasOwn(manifests, skill)
     ? arrayOfTools(manifests[skill])
     : undefined;
-  const isToolDescriptor = Object.values(manifests)
-    .some((tools) => arrayOfTools(tools).includes(skill));
-  if (!exactManifest && !isToolDescriptor) return undefined;
+  const descriptorParents = Object.entries(manifests)
+    .filter(([, tools]) => arrayOfTools(tools).includes(skill))
+    .map(([parentSkill]) => parentSkill);
+  if (!exactManifest && descriptorParents.length === 0) return undefined;
 
   return [...new Set([
-    ...(exactManifest ?? []),
-    ...(isToolDescriptor ? [skill] : []),
+    ...(exactManifest ?? []).map((tool) => skillToolCapability(skill, tool)),
+    ...descriptorParents.map((parentSkill) => skillToolCapability(parentSkill, skill)),
   ])];
 }
 
@@ -208,9 +230,14 @@ export function defaultAgentToolPolicyConfig(
   definitionId: string,
   initActionKind?: string | undefined,
 ): Readonly<Record<string, unknown>> {
+  const context = { definitionId, initActionKind };
+  const agentRole = defaultAgentRoleForWorkflow(definitionId, initActionKind);
   return {
-    agentRole: defaultAgentRoleForWorkflow(definitionId, initActionKind),
-    requestedTools: workflowRequiredTools({ definitionId, initActionKind }),
+    agentRole,
+    requestedTools: [...new Set([
+      ...workflowRequiredTools(context),
+      ...runtimeToolsFromConfig({ agentRole }, context),
+    ])],
     skills: [],
   };
 }
@@ -328,10 +355,18 @@ export function validateAgentRoleTools(
   }
 
   const allowedTools = ROLE_TOOL_MANIFESTS[role];
+  const undeclaredImplicitTools = effectiveTools.filter(
+    (tool) => allowedTools.has(tool) && !explicitTools.includes(tool),
+  );
   const denials = [
     ...malformedSkillsDenial,
     ...implicitSkillsDenial,
     ...skillDenials.filter((denial) => denial.requestedTool.startsWith('skill:')),
+    ...undeclaredImplicitTools.map((requestedTool) => ({
+      role,
+      requestedTool,
+      reason: `implicitly enabled tool '${requestedTool}' must be declared in the explicit least-privilege tool manifest`,
+    })),
     ...effectiveTools
       .filter((tool) => !allowedTools.has(tool))
       .map((requestedTool) => ({

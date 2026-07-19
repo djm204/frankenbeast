@@ -189,11 +189,11 @@ describe('role tool manifest policy', () => {
     })).toMatchObject({
       allowed: false,
       role: 'triage',
-      denials: [expect.objectContaining({
+      denials: expect.arrayContaining([expect.objectContaining({
         role: 'triage',
         requestedTool: 'patch',
         reason: expect.stringContaining("not allowed for role 'triage'"),
-      })],
+      })]),
     });
   });
 
@@ -239,6 +239,67 @@ describe('role tool manifest policy', () => {
     });
   });
 
+  it('requires explicit manifests to cover inferred workflow, runtime, and skill tools', () => {
+    expect(validateAgentRoleTools({
+      agentRole: 'coding',
+      requestedTools: ['read_file'],
+      skills: [],
+    }, { definitionId: 'martin-loop' })).toMatchObject({
+      allowed: false,
+      denials: expect.arrayContaining([expect.objectContaining({
+        requestedTool: 'patch',
+        reason: expect.stringContaining('must be declared'),
+      })]),
+    });
+
+    expect(validateAgentRoleTools({
+      agentRole: 'triage',
+      requestedTools: ['read_file'],
+      skills: ['github'],
+    }, { trustedSkillToolManifests: { github: ['list_repos'] } })).toMatchObject({
+      allowed: false,
+      denials: expect.arrayContaining([expect.objectContaining({
+        requestedTool: 'github.read',
+        reason: expect.stringContaining('must be declared'),
+      })]),
+    });
+  });
+
+  it('maps trusted GitHub read tools to role capability ids', () => {
+    for (const selectedSkill of ['github', 'github/list_repos', 'list_repos']) {
+      expect(validateAgentRoleTools({
+        agentRole: 'triage',
+        requestedTools: ['read_file', 'github.read'],
+        skills: [selectedSkill],
+      }, { trustedSkillToolManifests: { github: ['list_repos'] } })).toMatchObject({
+        allowed: true,
+        denials: [],
+      });
+    }
+  });
+
+  it('treats manual PR creation as a runtime capability requiring explicit declaration', () => {
+    expect(validateAgentRoleTools({
+      agentRole: 'coding',
+      requestedTools: ['read_file'],
+      skills: [],
+      gitConfig: { prCreation: 'manual' },
+    })).toMatchObject({
+      allowed: false,
+      denials: expect.arrayContaining([expect.objectContaining({
+        requestedTool: 'github.pr',
+        reason: expect.stringContaining('must be declared'),
+      })]),
+    });
+
+    expect(validateAgentRoleTools({
+      agentRole: 'coding',
+      requestedTools: ['read_file', 'github.pr'],
+      skills: [],
+      gitConfig: { prCreation: 'manual' },
+    })).toMatchObject({ allowed: true, denials: [] });
+  });
+
   it('resolves selected runtime descriptor ids to their trusted parent skill manifest', () => {
     const context = {
       trustedSkillToolManifests: { 'repo-tools': ['read_file', 'patch'] },
@@ -280,7 +341,10 @@ describe('role tool manifest policy', () => {
   it('derives explicit policy fields for tracked chat init shells', () => {
     expect(defaultAgentToolPolicyConfig('martin-loop', 'martin-loop')).toEqual({
       agentRole: 'coding',
-      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+      requestedTools: [
+        'read_file', 'search_files', 'write_file', 'patch', 'terminal',
+        'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment',
+      ],
       skills: [],
     });
 

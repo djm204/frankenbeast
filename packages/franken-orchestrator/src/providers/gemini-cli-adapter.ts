@@ -142,7 +142,9 @@ export class GeminiCliAdapter implements ILlmProvider {
             env: (t['env'] as Record<string, string>) ?? {},
           },
           authFields: extractAuthFields(t['env'] as Record<string, string>),
-          toolDefinitions: (t['tools'] as Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>) ?? [],
+          ...(Array.isArray(t['tools'])
+            ? { toolDefinitions: t['tools'] as Array<{ name: string; description: string; inputSchema: Record<string, unknown> }> }
+            : {}),
         }));
     } catch {
       return [];

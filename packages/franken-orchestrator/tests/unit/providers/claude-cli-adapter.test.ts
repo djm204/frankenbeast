@@ -406,6 +406,19 @@ describe('ClaudeCliAdapter', () => {
     });
   });
 
+  describe('discoverSkills()', () => {
+    it('preserves MCP tool definitions in discovered catalog entries', async () => {
+      const toolDefinitions = [
+        { name: 'read_repo', description: 'Read a repository file', inputSchema: { type: 'object' } },
+      ];
+      mockSpawn([JSON.stringify([{ name: 'repo', tools: toolDefinitions }])]);
+
+      await expect(adapter.discoverSkills()).resolves.toEqual([
+        expect.objectContaining({ name: 'repo', toolDefinitions }),
+      ]);
+    });
+  });
+
   describe('formatHandoff()', () => {
     it('returns handoff text with delimiters', () => {
       const snapshot: BrainSnapshot = {

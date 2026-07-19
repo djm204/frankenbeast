@@ -17,7 +17,7 @@ import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../../../src/beasts/services/disp
 
 const CODING_POLICY = {
   agentRole: 'coding',
-  requestedTools: ['read_file', 'search_files', 'patch', 'terminal'],
+  requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
   skills: [],
 };
 
@@ -163,7 +163,7 @@ describe('BeastRunService', () => {
         ...CODING_POLICY,
         agentRole: 'coding',
         skills: [],
-        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],},
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],},
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -231,7 +231,7 @@ describe('BeastRunService', () => {
         ...CODING_POLICY,
         agentRole: 'coding',
         skills: [],
-        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],},
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],},
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -370,7 +370,7 @@ describe('BeastRunService', () => {
         ...CODING_POLICY,
         agentRole: 'coding',
         skills: [],
-        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],},
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],},
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -436,7 +436,7 @@ describe('BeastRunService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
+      initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -540,14 +540,14 @@ describe('BeastRunService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
+      initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
     });
     const urgentAgent = agents.createAgent({
       definitionId: 'martin-loop',
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
+      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -698,7 +698,7 @@ describe('BeastRunService', () => {
         objective: 'Queued run should require explicit skills',
         chunkDirectory: 'docs/chunks',
         agentRole: 'coding',
-        requestedTools: ['read_file', 'search_files', 'patch', 'terminal'],
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
       },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'operator',
@@ -746,7 +746,7 @@ describe('BeastRunService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
+      initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
     });
     const run = repo.createRun({
       trackedAgentId: agent.id,
@@ -828,7 +828,7 @@ describe('BeastRunService', () => {
         ...CODING_POLICY,
         agentRole: 'coding',
         skills: [],
-        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],},
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],},
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -1016,7 +1016,7 @@ describe('BeastRunService', () => {
         ...CODING_POLICY,
         agentRole: 'coding',
         skills: [],
-        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],},
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],},
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -1126,7 +1126,7 @@ describe('BeastRunService', () => {
         ...CODING_POLICY,
         agentRole: 'coding',
         skills: [],
-        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],},
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],},
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -1517,7 +1517,7 @@ describe('BeastRunService', () => {
         ...CODING_POLICY,
         agentRole: 'coding',
         skills: [],
-        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],},
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],},
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -1789,7 +1789,7 @@ describe('BeastRunService', () => {
         ...CODING_POLICY,
         agentRole: 'coding',
         skills: [],
-        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],},
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],},
       createdAt: '2026-03-11T00:00:00.000Z',
       updatedAt: '2026-03-11T00:00:00.000Z',
     });

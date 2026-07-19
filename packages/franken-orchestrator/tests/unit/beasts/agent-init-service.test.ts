@@ -29,7 +29,7 @@ describe('AgentInitService', () => {
       chatSessionId: 'sess-1',
       command: '/interview',
       initActionKind: 'design-interview',
-      config: { goal: 'Map the lifecycle', agentRole: 'docs', requestedTools: ['read_file', 'write_file'], skills: [] },
+      config: { goal: 'Map the lifecycle', agentRole: 'docs', requestedTools: ['read_file', 'search_files', 'write_file'], skills: [] },
     });
     const detail = agents.getAgentDetail(agent.id);
 
@@ -37,7 +37,7 @@ describe('AgentInitService', () => {
     expect(agent.initAction.command).toBe('/interview');
     expect(agent.initConfig).toMatchObject({
       agentRole: 'docs',
-      requestedTools: ['read_file', 'write_file'],
+      requestedTools: ['read_file', 'search_files', 'write_file'],
       skills: [],
     });
     expect(detail.events.map((event) => event.type)).toEqual([
@@ -65,7 +65,7 @@ describe('AgentInitService', () => {
 
     expect(agent.initConfig).toMatchObject({
       agentRole: 'coding',
-      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
       skills: [],
     });
     expect(agents.getAgent(agent.id).status).toBe('initializing');
@@ -95,7 +95,7 @@ describe('AgentInitService', () => {
         config: { designDocPath: 'docs/plans/design.md' },
         chatSessionId: 'sess-1',
       },
-      initConfig: { designDocPath: 'docs/plans/design.md', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
+      initConfig: { designDocPath: 'docs/plans/design.md', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
       chatSessionId: 'sess-1',
     });
 
@@ -144,7 +144,7 @@ describe('AgentInitService', () => {
       source: 'chat',
       createdByUser: 'chat-session:sess-1',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {}, chatSessionId: 'sess-1' },
-      initConfig: { provider: 'claude', objective: 'ship', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
+      initConfig: { provider: 'claude', objective: 'ship', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
       chatSessionId: 'sess-1',
     });
 

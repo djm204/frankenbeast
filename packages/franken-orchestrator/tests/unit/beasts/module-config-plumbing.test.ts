@@ -28,7 +28,7 @@ function stubExecutors(repo: SQLiteBeastRepository) {
 
 const CODING_POLICY = {
   agentRole: 'coding',
-  requestedTools: ['read_file', 'search_files', 'patch', 'terminal'],
+  requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
   skills: [],
 };
 
@@ -54,7 +54,7 @@ describe('ModuleConfig plumbing', () => {
         status: 'initializing',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
+        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
         skills: [],
         moduleConfig,
         createdAt: '2026-03-13T00:00:00.000Z',
@@ -77,7 +77,7 @@ describe('ModuleConfig plumbing', () => {
         status: 'initializing',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
+        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
         skills: [],
         createdAt: '2026-03-13T00:00:00.000Z',
         updatedAt: '2026-03-13T00:00:00.000Z',
@@ -98,7 +98,7 @@ describe('ModuleConfig plumbing', () => {
         status: 'initializing',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
+        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
         skills: [],
         createdAt: '2026-03-13T00:00:00.000Z',
         updatedAt: '2026-03-13T00:00:00.000Z',
@@ -124,7 +124,7 @@ describe('ModuleConfig plumbing', () => {
         status: 'initializing',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
+        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
         skills: [],
         moduleConfig: { firewall: false },
         createdAt: '2026-03-13T00:00:00.000Z',
@@ -151,7 +151,7 @@ describe('ModuleConfig plumbing', () => {
         source: 'dashboard',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
+        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
         moduleConfig: { skills: false, planner: false },
       });
 
@@ -168,7 +168,7 @@ describe('ModuleConfig plumbing', () => {
         source: 'dashboard',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
+        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
         skills: [],
       });
 
@@ -228,7 +228,7 @@ describe('ModuleConfig plumbing', () => {
           ...CODING_POLICY,
         agentRole: 'coding',
         skills: [],
-        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],},
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],},
         moduleConfig: { governor: false, heartbeat: false },
       });
 
@@ -296,7 +296,7 @@ describe('ModuleConfig plumbing', () => {
         source: 'dashboard',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
+        initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
         skills: [],
       });
       const urgentAgent = agents.createAgent({
@@ -304,7 +304,7 @@ describe('ModuleConfig plumbing', () => {
         source: 'dashboard',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
+        initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
         skills: [],
       });
 
@@ -371,7 +371,7 @@ describe('ModuleConfig plumbing', () => {
           ...CODING_POLICY,
         agentRole: 'coding',
         skills: [],
-        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],},
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],},
         moduleConfig: { governor: false },
       });
 

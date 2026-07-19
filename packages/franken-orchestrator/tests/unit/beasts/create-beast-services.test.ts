@@ -114,7 +114,7 @@ describe('createBeastServices', () => {
         source: 'dashboard',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'], skills: [] },
+        initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
       });
       services.agents.updateAgent(agent.id, { status: 'running' });
 
@@ -166,7 +166,7 @@ describe('createBeastServices', () => {
           objective: 'Use the selected context skill',
           chunkDirectory: 'docs/chunks',
           agentRole: 'coding',
-          requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+          requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
           skills: ['context-only'],
         },
       });
@@ -225,7 +225,7 @@ describe('createBeastServices', () => {
           objective: 'Use a skill installed after startup',
           chunkDirectory: 'docs/chunks',
           agentRole: 'coding',
-          requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+          requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
           skills: ['late-context'],
         },
       });
@@ -276,7 +276,7 @@ describe('createBeastServices', () => {
           objective: 'Use a manifestless skill',
           chunkDirectory: 'docs/chunks',
           agentRole: 'coding',
-          requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+          requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
           skills: ['manifestless'],
         },
       })).toThrow(/coding:skill:manifestless/);

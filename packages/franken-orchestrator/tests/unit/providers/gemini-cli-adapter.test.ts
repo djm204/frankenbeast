@@ -645,6 +645,19 @@ describe('GeminiCliAdapter', () => {
     });
   });
 
+  describe('discoverSkills()', () => {
+    it('preserves MCP tool definitions in discovered catalog entries', async () => {
+      const toolDefinitions = [
+        { name: 'read_repo', description: 'Read a repository file', inputSchema: { type: 'object' } },
+      ];
+      mockSpawn([JSON.stringify([{ name: 'repo', type: 'mcp', tools: toolDefinitions }])]);
+
+      await expect(adapter.discoverSkills()).resolves.toEqual([
+        expect.objectContaining({ name: 'repo', toolDefinitions }),
+      ]);
+    });
+  });
+
   describe('formatHandoff()', () => {
     it('returns handoff text', () => {
       const snapshot: BrainSnapshot = {
