@@ -164,13 +164,14 @@ describe('ChatShell route heading', () => {
     });
   });
 
-  it('uses the active route label as the primary heading and demotes project context to metadata', () => {
+  it('uses the active route label as the primary heading and demotes project context to metadata', async () => {
     render(<ChatShell baseUrl="http://localhost:3737" projectId="default" version="0.2.1" />);
 
     expect(screen.getByRole('heading', { level: 1, name: 'Network' })).toBeTruthy();
     expect(screen.queryByRole('heading', { level: 1, name: 'default' })).toBeNull();
     expect(screen.getByText('Project: default')).toBeTruthy();
-    expect(screen.getByText('Service controls')).toBeTruthy();
+    // The routed page is lazy-loaded, so its content mounts asynchronously.
+    expect(await screen.findByText('Service controls')).toBeTruthy();
     expect(screen.queryByText('Chat is the only live section in this first Frankenbeast dashboard cut.')).toBeNull();
   });
 
@@ -247,7 +248,7 @@ describe('ChatShell route heading', () => {
     render(<ChatShell baseUrl="http://localhost:3737" projectId="default" version="0.2.1" />);
     await waitFor(() => expect(networkApiMocks.getStatus).toHaveBeenCalledTimes(1));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Refresh' }));
 
     expect((await screen.findByRole('alert')).textContent).toContain('Unable to refresh network status: HTTP 503');
   });
@@ -266,7 +267,7 @@ describe('ChatShell route heading', () => {
 
     render(<ChatShell baseUrl="http://localhost:3737" projectId="default" version="0.2.1" />);
     await waitFor(() => expect(networkApiMocks.getConfig).toHaveBeenCalledTimes(1));
-    expect(screen.getByDisplayValue('initial-model')).toBeDefined();
+    expect(await screen.findByDisplayValue('initial-model')).toBeDefined();
 
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
 
@@ -292,7 +293,7 @@ describe('ChatShell route heading', () => {
     render(<ChatShell baseUrl="http://localhost:3737" projectId="default" version="0.2.1" />);
     await waitFor(() => expect(networkApiMocks.getConfig).toHaveBeenCalledTimes(1));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Refresh' }));
     await waitFor(() => expect(networkApiMocks.getConfig).toHaveBeenCalledTimes(2));
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
 
