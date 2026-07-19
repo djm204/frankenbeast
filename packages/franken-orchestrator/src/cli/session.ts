@@ -49,6 +49,10 @@ function appendPromptContext(value: string, promptText: string | undefined): str
   return `${value}\n\nAdditional prompt context:\n${promptText.trim()}`;
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
 function loadPromptConfigFromEnv(): RunConfig['promptConfig'] | undefined {
   const runConfigDocument = loadRunConfigDocumentFromEnv();
   const promptConfig = typeof runConfigDocument === 'object' && runConfigDocument !== null
@@ -360,12 +364,12 @@ export class Session {
     // from loading in the spawned CLI. Plugins poison the session by injecting skill
     // instructions that make the CLI explore the codebase instead of returning JSON.
     depOptions.adapterWorkingDir = tmpdir();
-    let planLogger: BeastLogger | undefined;
+    const planLogSink: { logger?: BeastLogger } = {};
     const persistProgressEvent = (event: StreamProgressEvent): void => {
-      planLogger?.info('Plan progress', event, 'planner');
+      planLogSink.logger?.info('Plan progress', event, 'planner');
     };
     const persistLifecycleEvent = (event: CliLlmLifecycleEvent): void => {
-      planLogger?.info('LLM provider lifecycle', event, 'planner');
+      planLogSink.logger?.info('LLM provider lifecycle', event, 'planner');
     };
     const progress = createStreamProgressWithSpinner({
       label: 'Planning...',
@@ -375,30 +379,83 @@ export class Session {
     depOptions.onStreamLine = progress.onLine;
     depOptions.onLlmLifecycleEvent = persistLifecycleEvent;
     const { cliLlmAdapter, logger, finalize, artifacts } = await createCliDeps(depOptions);
-    planLogger = logger;
+    planLogSink.logger = logger;
     const planStartedAt = Date.now();
     const elapsed = (): number => Date.now() - planStartedAt;
+    let finalizePromise: Promise<void> | undefined;
+    const finalizePlan = (): Promise<void> => finalizePromise ??= finalize();
+    let activeStage: string | undefined;
+    let activeStageStartedAt: number | undefined;
+    let cancellationSignal: NodeJS.Signals | undefined;
     const planLogFile = artifacts?.logFile ?? paths.logFile;
     const projectLogPath = relative(paths.root, planLogFile) || planLogFile;
-    io.display(`Build log: ${projectLogPath}\nFollow live: tail -f ${JSON.stringify(planLogFile)}`);
+    io.display(`Build log: ${projectLogPath}\nFollow live: tail -f ${shellQuote(planLogFile)}`);
     logger.info('Plan cycle started', { logFile: planLogFile }, 'planner');
 
     const runPlanStage = async <T>(stage: string, operation: () => Promise<T>): Promise<T> => {
+      const stageStartedAt = Date.now();
+      activeStage = stage;
+      activeStageStartedAt = stageStartedAt;
       logger.info('Plan stage started', { stage, totalElapsedMs: elapsed() }, 'planner');
       try {
         const result = await operation();
-        logger.info('Plan stage completed', { stage, totalElapsedMs: elapsed() }, 'planner');
+        if (cancellationSignal) {
+          const error = new Error(`Plan cancelled by ${cancellationSignal}`);
+          error.name = 'AbortError';
+          throw error;
+        }
+        logger.info('Plan stage completed', {
+          stage,
+          stageElapsedMs: Date.now() - stageStartedAt,
+          totalElapsedMs: elapsed(),
+        }, 'planner');
         return result;
       } catch (error) {
         const cancelled = error instanceof Error
           && (error.name === 'AbortError' || /cancel(?:led|ed)/i.test(error.message));
-        logger.warn(cancelled ? 'Plan stage cancelled' : 'Plan stage failed', {
-          stage,
-          totalElapsedMs: elapsed(),
-        }, 'planner');
+        if (!cancellationSignal) {
+          logger.warn(cancelled ? 'Plan stage cancelled' : 'Plan stage failed', {
+            stage,
+            stageElapsedMs: Date.now() - stageStartedAt,
+            totalElapsedMs: elapsed(),
+          }, 'planner');
+        }
         throw error;
+      } finally {
+        if (activeStage === stage) {
+          activeStage = undefined;
+          activeStageStartedAt = undefined;
+        }
       }
     };
+
+    const removeSignalHandlers = (): void => {
+      process.removeListener('SIGINT', onSigint);
+      process.removeListener('SIGTERM', onSigterm);
+    };
+    const handleSignal = (signal: NodeJS.Signals): void => {
+      if (cancellationSignal) return;
+      cancellationSignal = signal;
+      const cancellation = {
+        ...(activeStage ? { stage: activeStage } : {}),
+        ...(activeStageStartedAt !== undefined ? { stageElapsedMs: Date.now() - activeStageStartedAt } : {}),
+        signal,
+        totalElapsedMs: elapsed(),
+      };
+      if (activeStage) logger.warn('Plan stage cancelled', cancellation, 'planner');
+      logger.warn('Plan cycle cancelled', cancellation, 'planner');
+      progress.stop();
+      removeSignalHandlers();
+      const exitCode = signal === 'SIGINT' ? 130 : 143;
+      void finalizePlan().then(
+        () => process.exit(exitCode),
+        () => process.exit(exitCode),
+      );
+    };
+    const onSigint = (): void => handleSignal('SIGINT');
+    const onSigterm = (): void => handleSignal('SIGTERM');
+    process.on('SIGINT', onSigint);
+    process.on('SIGTERM', onSigterm);
 
     try {
       // Load design doc
@@ -489,18 +546,22 @@ export class Session {
     });
     logger.info('Plan cycle completed', {
       chunks: llmGraphBuilder.lastChunks.length,
+      validationWarnings: llmGraphBuilder.lastValidationIssues.length,
       totalElapsedMs: elapsed(),
     }, 'planner');
     } catch (error) {
       const cancelled = error instanceof Error
         && (error.name === 'AbortError' || /cancel(?:led|ed)/i.test(error.message));
-      logger.warn(cancelled ? 'Plan cycle cancelled' : 'Plan cycle failed', {
-        totalElapsedMs: elapsed(),
-      }, 'planner');
+      if (!cancellationSignal) {
+        logger.warn(cancelled ? 'Plan cycle cancelled' : 'Plan cycle failed', {
+          totalElapsedMs: elapsed(),
+        }, 'planner');
+      }
       throw error;
     } finally {
+      removeSignalHandlers();
       progress.stop();
-      await finalize();
+      await finalizePlan();
     }
   }
 

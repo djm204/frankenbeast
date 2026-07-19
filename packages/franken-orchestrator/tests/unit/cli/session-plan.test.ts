@@ -14,7 +14,7 @@ let progressCtorOptions: unknown = undefined;
 let progressInstance: unknown = undefined;
 let llmGraphBuilderCtorArg: unknown = undefined;
 let lastCreateCliDepsOptions: import('../../../src/cli/dep-factory.js').CliDepOptions | undefined;
-let streamProgressOptions: { onEvent?: (event: { type: string; [key: string]: unknown }) => void } | undefined;
+let streamProgressOptions: { onProgressEvent?: (event: { type: string; [key: string]: unknown }) => void } | undefined;
 const mockFinalize = vi.fn(async () => {});
 
 // ── Mock heavy deps ──
@@ -306,7 +306,7 @@ describe('Session plan phase — CliLlmAdapter wiring', () => {
     const expectedLogFile = resolve(config.paths.buildDir, 'session-build.log');
 
     await new Session(config).start();
-    streamProgressOptions?.onEvent?.({ type: 'chunk-detected', count: 2 });
+    streamProgressOptions?.onProgressEvent?.({ type: 'chunk-detected', count: 2 });
     lastCreateCliDepsOptions?.onLlmLifecycleEvent?.({
       type: 'fallback',
       from: 'claude',
@@ -330,8 +330,61 @@ describe('Session plan phase — CliLlmAdapter wiring', () => {
     );
     expect(config.io.display).toHaveBeenCalledWith(expect.stringContaining('Build log:'));
     expect(config.io.display).toHaveBeenCalledWith(expect.stringContaining(expectedLogFile));
-    expect(config.io.display).toHaveBeenCalledWith(expect.stringContaining('tail -f'));
+    expect(config.io.display).toHaveBeenCalledWith(expect.stringContaining(`tail -f '${expectedLogFile}'`));
+    expect(mockDeps.logger.info).toHaveBeenCalledWith(
+      'Plan stage completed',
+      expect.objectContaining({ stage: 'decompose', stageElapsedMs: expect.any(Number), totalElapsedMs: expect.any(Number) }),
+      'planner',
+    );
   });
+
+  it.each(['SIGINT', 'SIGTERM'] as const)(
+    'runPlan() flushes one active-stage cancellation record on %s and removes signal handlers',
+    async (signal) => {
+      const signalHandlers = new Map<NodeJS.Signals, () => void>();
+      const onSpy = vi.spyOn(process, 'on').mockImplementation(((event: string, listener: () => void) => {
+        if (event === 'SIGINT' || event === 'SIGTERM') {
+          signalHandlers.set(event, listener);
+        }
+        return process;
+      }) as typeof process.on);
+      const removeSpy = vi.spyOn(process, 'removeListener').mockImplementation((() => process) as typeof process.removeListener);
+      const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+      let resolveBuild!: () => void;
+      mockLlmGraphBuild.mockImplementationOnce(() => new Promise((resolveBuildPromise) => {
+        resolveBuild = () => resolveBuildPromise({ tasks: [] });
+      }));
+      const { Session } = await import('../../../src/cli/session.js');
+
+      const startPromise = new Session(makeConfig()).start();
+      await vi.waitFor(() => expect(signalHandlers.size).toBe(2));
+      signalHandlers.get(signal)!();
+      await vi.waitFor(() => expect(mockFinalize).toHaveBeenCalledTimes(1));
+      resolveBuild();
+
+      await expect(startPromise).rejects.toThrow(`Plan cancelled by ${signal}`);
+      expect(mockDeps.logger.warn).toHaveBeenCalledWith(
+        'Plan stage cancelled',
+        expect.objectContaining({ stage: 'decompose', signal }),
+        'planner',
+      );
+      expect(mockDeps.logger.warn).toHaveBeenCalledWith(
+        'Plan cycle cancelled',
+        expect.objectContaining({ signal }),
+        'planner',
+      );
+      expect(mockDeps.logger.warn.mock.calls.filter(([message]) => message === 'Plan stage cancelled')).toHaveLength(1);
+      expect(mockDeps.logger.warn.mock.calls.filter(([message]) => message === 'Plan cycle cancelled')).toHaveLength(1);
+      expect(mockFinalize).toHaveBeenCalledTimes(1);
+      expect(exitSpy).toHaveBeenCalledWith(signal === 'SIGINT' ? 130 : 143);
+      expect(removeSpy).toHaveBeenCalledWith('SIGINT', signalHandlers.get('SIGINT'));
+      expect(removeSpy).toHaveBeenCalledWith('SIGTERM', signalHandlers.get('SIGTERM'));
+
+      onSpy.mockRestore();
+      removeSpy.mockRestore();
+      exitSpy.mockRestore();
+    },
+  );
 
   it('runPlan() finalizes CLI dependencies so replay records are persisted', async () => {
     const { Session } = await import('../../../src/cli/session.js');
