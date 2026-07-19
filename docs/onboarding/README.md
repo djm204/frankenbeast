@@ -7,7 +7,7 @@ description: Choose the shortest Frankenbeast onboarding path for setup, contrib
 
 Use this page when you know what you want to accomplish but do not know which onboarding document to open. Pick one row, follow its **start here** link, and branch into the supporting references only when the first guide tells you to.
 
-For a complete clean-checkout setup, use the root [onboarding checklist](../../ONBOARDING.md). For the shortest role-based path, start with the [persona quickstart tracks](persona-quickstart-tracks.md).
+For a complete clean-checkout setup, use the root [onboarding checklist](../../ONBOARDING.md). For the shortest role-based path, start with the [persona quickstart tracks](persona-quickstart-tracks.md). When you are ready to make a change, the root [Contributor guide](../../CONTRIBUTING.md) gives the complete issue-to-pull-request path for a first contribution.
 
 ## Choose by goal
 
