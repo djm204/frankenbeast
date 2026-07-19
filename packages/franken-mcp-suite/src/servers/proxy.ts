@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createMcpServer, DEFAULT_TOOL_TIMEOUT_MS, executeToolWithDeadline, sanitizeToolArgumentsForAuditTrail, validateToolArguments, type AuditSink, type FbeastMcpServer, type GovernanceGate, type ToolDef } from '../shared/server-factory.js';
+import { createMcpServer, DEFAULT_TOOL_TIMEOUT_MS, executeToolWithDeadline, sanitizeRejectedToolArgumentsForAudit, sanitizeToolArgumentsForAuditTrail, validateToolArguments, type AuditSink, type FbeastMcpServer, type GovernanceGate, type ToolDef } from '../shared/server-factory.js';
 import { isMain } from '../shared/is-main.js';
 import { handleStartupFailure } from '../shared/shutdown.js';
 import { searchTools, TOOL_REGISTRY, createAdapterSet, type AdapterSet } from '../shared/tool-registry.js';
@@ -101,9 +101,12 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
         // Best-effort audit of the resolved target, including its args and any
         // governance denial or rejected probe (mirrors dispatchTool); never
         // fails the call.
-        const recordAudit = async (input: { ok: boolean; decision?: string }): Promise<void> => {
+        const recordAudit = async (
+          input: { ok: boolean; decision?: string },
+          argsForAudit: Record<string, unknown> = toolArgs,
+        ): Promise<void> => {
           try {
-            await audit.record({ tool: toolName, ok: input.ok, ...(input.decision !== undefined ? { decision: input.decision } : {}), args: sanitizeToolArgumentsForAuditTrail(toolName, toolArgs) });
+            await audit.record({ tool: toolName, ok: input.ok, ...(input.decision !== undefined ? { decision: input.decision } : {}), args: sanitizeToolArgumentsForAuditTrail(toolName, argsForAudit) });
           } catch (err) {
             process.stderr.write(`fbeast audit failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}\n`);
           }
@@ -126,7 +129,10 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
         // Validate the resolved target's args before governing/running it.
         const validated = validateToolArguments(entry, toolArgs);
         if (!validated.ok) {
-          await recordAudit({ ok: false, decision: 'validation_error' });
+          await recordAudit(
+            { ok: false, decision: 'validation_error' },
+            sanitizeRejectedToolArgumentsForAudit(entry, toolArgs),
+          );
           return { content: [{ type: 'text', text: `Error: ${validated.message}` }], isError: true };
         }
         // Central governance on the resolved target — fails closed on any

@@ -852,7 +852,7 @@ function exceedsStringCodePointLimit(value: string, maximum: number): boolean {
   return false;
 }
 
-function sanitizeRejectedToolArgumentsForAudit(tool: ToolSchemaDef, args: unknown): Record<string, unknown> {
+export function sanitizeRejectedToolArgumentsForAudit(tool: ToolSchemaDef, args: unknown): Record<string, unknown> {
   if (!isObjectLike(args)) return sanitizeToolArgumentsForAuditTrail(tool.name, args);
   if (!isPlainJsonObject(args)) return sanitizeToolArgumentsForAuditTrail(tool.name, args);
   const bounded: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
