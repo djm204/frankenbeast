@@ -31,43 +31,37 @@ git remote add upstream https://github.com/djm204/frankenbeast.git
 git remote -v
 ```
 
-Do not switch, reset, or rebase over uncommitted work. Save it first, including new files:
+Do not switch, reset, or rebase over uncommitted work. If `git status --short` listed changed files, create and name a recovery checkpoint. If the working tree is clean, this block leaves `RECOVERY_STASH` empty instead of selecting an older stash:
 
 ```bash
-git stash push -u -m "wip: issue-${ISSUE_NUMBER} before branch recovery"
-git stash list
+RECOVERY_STASH=""
+if [ -n "$(git status --porcelain)" ]; then
+  git stash push -u -m "wip: issue-${ISSUE_NUMBER} before branch recovery"
+  RECOVERY_STASH="$(git stash list -1 --format='%gd')"
+fi
+printf 'Recovery stash: %s\n' "${RECOVERY_STASH:-none}"
 ```
 
-Keep the stash until the recovered branch contains all expected changes.
+Keep this terminal open so the variable remains available. Keep the named stash until the recovered branch contains all expected changes.
 
 ## Bring an untouched branch up to date
 
-If you have not committed issue work yet, create a fresh branch from current upstream `main`:
+Fetch upstream, then choose exactly one path based on whether the issue branch exists and has been published:
 
 ```bash
 git fetch upstream main
+git branch --list "$BRANCH_NAME"
+```
+
+If the command prints no branch, create it from current upstream `main`:
+
+```bash
 git switch -c "$BRANCH_NAME" upstream/main
-git status --short --branch
 ```
 
-Restore saved edits only after you are on the issue branch:
+If the issue branch exists locally but has never been pushed, rebase its commits onto current upstream `main`:
 
 ```bash
-git stash apply
-```
-
-Verify the expected files are present before removing the recovery checkpoint. If anything is missing, keep the stash and use the [help guide](getting-help.md).
-
-```bash
-git status --short
-git diff --stat
-git stash drop
-```
-
-If the issue branch contains local commits but has never been pushed, rebase it onto current upstream `main`:
-
-```bash
-git fetch upstream main
 git switch "$BRANCH_NAME"
 git rebase upstream/main
 ```
@@ -77,10 +71,27 @@ When a rebase reports conflicts, edit only the named files, then run `git add <r
 Do not rebase a branch that is already on your fork or attached to a pull request. Update published work without rewriting its commits:
 
 ```bash
-git fetch upstream main
 git switch "$BRANCH_NAME"
 git merge upstream/main
 git push
+```
+
+After any one of those paths succeeds, restore only the checkpoint created above:
+
+```bash
+if [ -n "$RECOVERY_STASH" ]; then
+  git stash apply "$RECOVERY_STASH"
+fi
+```
+
+Verify the expected files are present before removing the recovery checkpoint. If anything is missing, keep the stash and use the [help guide](getting-help.md).
+
+```bash
+git status --short
+git diff --stat
+if [ -n "$RECOVERY_STASH" ]; then
+  git stash drop "$RECOVERY_STASH"
+fi
 ```
 
 ## Recover work made on the wrong branch
