@@ -370,7 +370,16 @@ function redactGovernorLogContext(action: string, assessedContext: string): stri
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return assessedContext;
     const record = parsed as Record<string, unknown>;
     const keys = Object.keys(record);
-    const attributionKeys = new Set(['key', 'source', 'limit', 'readScope', 'agentId', 'targetStore']);
+    const attributionKeys = new Set([
+      'key',
+      'source',
+      'limit',
+      'readScope',
+      'agentId',
+      'targetStore',
+      '__fbeastGovernanceSource',
+      '__fbeastHookSource',
+    ]);
     const hasSelector = Object.prototype.hasOwnProperty.call(record, 'key')
       || Object.prototype.hasOwnProperty.call(record, 'source');
     if (hasSelector && keys.every(key => attributionKeys.has(key))) {

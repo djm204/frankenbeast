@@ -178,6 +178,27 @@ describe('GovernorAdapter', () => {
     expect(rows[7]?.context).toContain('profile.delete-policy');
   });
 
+  it('preserves trusted provenance while redacting stripped attribution selectors from durable logs', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"key":"profile.delete-policy","source":"chat:turn-42 secret","__fbeastHookSource":"fbeast-hook"}',
+    })).resolves.toMatchObject({ decision: 'denied' });
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"key":"profile.delete-policy","source":"chat:turn-42 secret","__fbeastGovernanceSource":"central-dispatch"}',
+    })).resolves.toMatchObject({ decision: 'denied' });
+
+    const db = new Database(dbPath);
+    const rows = db.prepare(`SELECT context FROM governor_log WHERE action = ? ORDER BY id ASC`).all('mcp__fbeast-proxy__execute_tool') as Array<{ context: string }>;
+    db.close();
+    expect(JSON.parse(rows[0]?.context ?? '{}')).toEqual({ __fbeastHookSource: 'fbeast-hook' });
+    expect(JSON.parse(rows[1]?.context ?? '{}')).toEqual({ __fbeastGovernanceSource: 'central-dispatch' });
+    expect(rows.every(row => !row.context.includes('profile.delete-policy') && !row.context.includes('chat:turn-42 secret'))).toBe(true);
+  });
+
   it('allows right-to-forget dryRun calls while keeping selector context redacted', async () => {
     const dbPath = tracked(tmpDbPath());
     const governor = createGovernorAdapter(dbPath);
