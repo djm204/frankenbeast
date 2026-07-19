@@ -7,7 +7,6 @@
 - Indirect shell `printenv` names, schedule aliases inside template interpolation, and dotted object-property assignments all require explicit taint propagation; option literals such as `--token` must remain non-sensitive when paired with a runtime `$(gh auth token)` value.
 - Multiline TypeScript destructuring, split `process.env` chains, destructured async stdout, and cached `os.environ.get` getters need dedicated alias paths; runtime cron allow-lists should treat `command gh auth token` like direct `gh auth token`.
 - When expanding shell-file scanning for cron writers, avoid both basename-only install/setup filters and scanning every shell script blindly; include cron/crontab-named writers while preserving non-cron bootstrap scripts to prevent fixture false positives.
-- If Codex keeps finding valid edge cases after an over-cap current-head review, fix/reply/resolve every finding, run local and CI checks, then stop for explicit approval before exceeding the agreed review cap again.
 - Separate shell interpolation parsing from JavaScript template interpolation, carry quote/heredoc context across lines, recognize staged crontab files and programmatic crontab sinks, and propagate aliased Python `os.environ`; otherwise a line-oriented scanner both misses persisted credentials and rejects safe runtime `$(gh auth token)` strings.
 - Treat cron-install taint as a language-aware dataflow problem: cover post-processed/backquoted `printenv`, wrapped/incrementally assembled `gh auth token`, aliased env imports/containers/sinks, dot/bracket/destructuring/joined interpolation flows, multiline schedules/assembly/programmatic sinks, and redirect/tee/stdin staging while preserving shell URLs and excluding quoted heredoc/escaped runtime expansion.
 
@@ -382,6 +381,9 @@
 
 ## 2026-07-18 — Tracked dispatch-failure response redaction
 - Treat a failed run response as a bundle: sanitize the run snapshot, stored attempts, historical events, and logs. Event/log redaction must remain effective after dispatch recovery, and restarting a stopped run whose snapshot was cleared must rebuild validated config from the tracked agent before executor start.
+
+## 2026-07-18 — Beast log path containment
+- Validate run and attempt identifiers at the `BeastLogStore` filesystem boundary against persisted prefixed-UUID formats, preserve the internal `system` attempt sentinel, and retain a resolved-path containment check as defense in depth. Traversal regressions should exercise both append and read paths while normal-path tests use production-shaped identifiers.
 
 ## 2026-07-18 — First-contribution help documentation
 - For broad onboarding-documentation issues, close a concrete workflow gap rather than adding another general quickstart. Make the new path discoverable from README, CONTRIBUTING, and the onboarding index, include safe copyable evidence/templates, and add a focused test that locks those entrypoints and redaction guidance together.
