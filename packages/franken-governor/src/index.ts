@@ -113,3 +113,6 @@ export { SlackChannel } from './channels/index.js';
 export type { HttpClient, SlackCallbackServer, SlackChannelDeps } from './channels/index.js';
 export { HttpApprovalChannel } from './channels/index.js';
 export type { HttpApprovalChannelDeps } from './channels/index.js';
+
+export { evaluate as evaluatePolicy, defaultPolicy } from './policy.js';
+export type { Action as PolicyAction, Decision as PolicyDecision, PolicyConfig } from './policy.js';

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createMcpServer, sanitizeToolArgumentsForAuditTrail, validateToolArguments, type AuditSink, type FbeastMcpServer, type GovernanceGate, type ToolDef, type ToolResult } from '../shared/server-factory.js';
+import { createMcpServer, DEFAULT_TOOL_TIMEOUT_MS, executeToolWithDeadline, sanitizeRejectedToolArgumentsForAudit, sanitizeToolArgumentsForAuditTrail, validateToolArguments, type AuditSink, type FbeastMcpServer, type GovernanceGate, type ToolDef } from '../shared/server-factory.js';
 import { isMain } from '../shared/is-main.js';
 import { handleStartupFailure } from '../shared/shutdown.js';
 import { searchTools, TOOL_REGISTRY, createAdapterSet, type AdapterSet } from '../shared/tool-registry.js';
@@ -45,6 +45,16 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
   // lazily, preserving lazy-DB behavior.
   const governance = deps.governance ?? createGovernanceGate(dbPath);
   const audit = deps.audit ?? createAuditSink(dbPath);
+  // The proxy wrapper must outlive the longest registered target deadline; the
+  // resolved target is independently bounded below by executeToolWithDeadline.
+  const longestTargetTimeoutMs = [...TOOL_REGISTRY.values()].reduce(
+    (longest, tool) => Math.max(longest, tool.timeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS),
+    DEFAULT_TOOL_TIMEOUT_MS,
+  );
+  // Reserve a bounded 30-second budget for target validation, governance,
+  // adapter setup, and audit so those proxy phases cannot consume a target's
+  // own advertised execution deadline.
+  const proxyExecutionTimeoutMs = longestTargetTimeoutMs + DEFAULT_TOOL_TIMEOUT_MS;
 
   function getAdapters(): AdapterSet {
     if (!cachedAdapters) {
@@ -76,6 +86,7 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
     {
       name: 'execute_tool',
       description: 'Execute any fbeast tool by name with args object.',
+      timeoutMs: proxyExecutionTimeoutMs,
       inputSchema: {
         type: 'object',
         properties: {
@@ -90,9 +101,12 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
         // Best-effort audit of the resolved target, including its args and any
         // governance denial or rejected probe (mirrors dispatchTool); never
         // fails the call.
-        const recordAudit = async (input: { ok: boolean; decision?: string }): Promise<void> => {
+        const recordAudit = async (
+          input: { ok: boolean; decision?: string },
+          argsForAudit: Record<string, unknown> = toolArgs,
+        ): Promise<void> => {
           try {
-            await audit.record({ tool: toolName, ok: input.ok, ...(input.decision !== undefined ? { decision: input.decision } : {}), args: sanitizeToolArgumentsForAuditTrail(toolName, toolArgs) });
+            await audit.record({ tool: toolName, ok: input.ok, ...(input.decision !== undefined ? { decision: input.decision } : {}), args: sanitizeToolArgumentsForAuditTrail(toolName, argsForAudit) });
           } catch (err) {
             process.stderr.write(`fbeast audit failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}\n`);
           }
@@ -115,7 +129,10 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
         // Validate the resolved target's args before governing/running it.
         const validated = validateToolArguments(entry, toolArgs);
         if (!validated.ok) {
-          await recordAudit({ ok: false, decision: 'validation_error' });
+          await recordAudit(
+            { ok: false, decision: 'validation_error' },
+            sanitizeRejectedToolArgumentsForAudit(entry, toolArgs),
+          );
           return { content: [{ type: 'text', text: `Error: ${validated.message}` }], isError: true };
         }
         // Central governance on the resolved target — fails closed on any
@@ -138,17 +155,19 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
           };
         }
         const adapters = getAdapters();
-        const handler = entry.makeHandler(adapters);
-        let result: ToolResult;
-        try {
-          result = (await handler(validated.value)) as ToolResult;
-        } catch (err) {
-          result = {
-            content: [{ type: 'text', text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
-            isError: true,
-          };
-        }
-        await recordAudit({ ok: !result.isError });
+        const targetTool: ToolDef = {
+          name: entry.name,
+          description: entry.description,
+          inputSchema: entry.inputSchema,
+          ...(entry.timeoutMs !== undefined ? { timeoutMs: entry.timeoutMs } : {}),
+          handler: entry.makeHandler(adapters),
+        };
+        const execution = await executeToolWithDeadline(targetTool, validated.value);
+        const result = execution.result;
+        await recordAudit({
+          ok: !result.isError,
+          ...(execution.timedOut ? { decision: 'timeout' } : {}),
+        });
         return result;
       },
     },
@@ -159,18 +178,26 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
   // factory rejects malformed `execute_tool`/`search_tools` calls (missing or
   // non-object `args`, non-string `tool`, unknown tool) *before* the handler
   // runs, so those probes never reach the target-level audit. Wire a wrapper
-  // audit that forwards ONLY those pre-handler rejections — keyed by their
-  // `decision` (`validation_error`/`unknown_tool`) — so malformed proxy probes
-  // are recorded without double-auditing successful calls (the handler already
-  // audits the resolved target) or auditing read-only `search_tools` listings.
+  // audit that forwards pre-handler rejections and wrapper timeouts — keyed by
+  // their `decision` — so malformed or stalled proxy attempts are recorded
+  // without double-auditing successful calls (the handler already audits the
+  // resolved target) or auditing read-only `search_tools` listings.
   const wrapperAudit: AuditSink = {
     record(event) {
-      if (event.decision === 'validation_error' || event.decision === 'unknown_tool') {
+      if (event.decision === 'validation_error' || event.decision === 'unknown_tool' || event.decision === 'timeout') {
         return audit.record(event);
       }
     },
+    close() {
+      audit.close?.();
+    },
   };
-  return createMcpServer('fbeast-proxy', '0.1.0', tools, { audit: wrapperAudit });
+  return createMcpServer('fbeast-proxy', '0.1.0', tools, {
+    audit: wrapperAudit,
+    onClose() {
+      cachedAdapters?.observer.close?.();
+    },
+  });
 }
 
 // CLI entry point

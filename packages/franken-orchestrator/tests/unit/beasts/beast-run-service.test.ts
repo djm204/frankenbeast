@@ -782,6 +782,7 @@ describe('BeastRunService', () => {
     const eventBus = new BeastEventBus();
     const publish = vi.spyOn(eventBus, 'publish');
     const agents = new AgentService(repo, () => '2026-03-10T00:02:00.000Z');
+    const secret = ['run', 'spawn', 'secret'].join('-');
     const executors = {
       process: {
         start: vi.fn(async (run: { id: string }) => {
@@ -793,10 +794,10 @@ describe('BeastRunService', () => {
           });
           repo.appendEvent(run.id, {
             type: 'run.spawn_failed',
-            payload: { error: 'spawn ENOENT' },
+            payload: { error: SAFE_DISPATCH_FAILURE_MESSAGE, code: 'ENOENT' },
             createdAt: failedAt,
           });
-          throw new Error('spawn ENOENT');
+          throw new Error(`spawn failed for --token=${secret}`);
         }),
         stop: vi.fn(),
         kill: vi.fn(),
@@ -868,6 +869,12 @@ describe('BeastRunService', () => {
         event: expect.objectContaining({ type: 'agent.dispatch.failed' }),
       }),
     }));
+    expect(JSON.stringify({
+      events: repo.listEvents(run.id),
+      agentEvents: repo.listTrackedAgentEvents(agent.id),
+      publications: publish.mock.calls,
+      logs: await runs.readLogs(run.id),
+    })).not.toContain(secret);
   });
 
   it('does not duplicate tracked-agent failure notifications already emitted by the executor callback', async () => {
@@ -1020,6 +1027,21 @@ describe('BeastRunService', () => {
     expect(failed.latestExitCode).toBeUndefined();
     expect(failed.startedAt).toBeUndefined();
     await expect(runs.readLogs(run.id)).resolves.toContainEqual(expect.stringContaining(`start_failed: ${SAFE_DISPATCH_FAILURE_MESSAGE}`));
+
+    executors.process.start.mockImplementationOnce(async () => {
+      throw new Error('config invalid on retry');
+    });
+
+    const preStartFailed = await runs.start(run.id, 'operator');
+
+    expect(preStartFailed).toMatchObject({ status: 'failed', stopReason: 'start_failed' });
+    await expect(runs.readLogs(run.id)).resolves.toContainEqual(
+      expect.stringContaining(`start_failed: ${SAFE_DISPATCH_FAILURE_MESSAGE}`),
+    );
+    expect(repo.listEvents(run.id)).toContainEqual(expect.objectContaining({
+      type: 'run.start_failed',
+      payload: { error: SAFE_DISPATCH_FAILURE_MESSAGE },
+    }));
 
     executors.process.start.mockImplementationOnce(async (retryRun: { id: string }) => {
       repo.createAttempt(retryRun.id, {

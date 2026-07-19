@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createMcpServer, sanitizeToolArgumentsForAuditTrail, validateToolArguments, type ToolDef, type GovernanceGate, type AuditSink } from './server-factory.js';
 
 describe('createMcpServer', () => {
@@ -6,6 +6,21 @@ describe('createMcpServer', () => {
     const server = createMcpServer('fbeast-memory', '0.1.0', []);
     expect(server).toBeDefined();
     expect(server.name).toBe('fbeast-memory');
+  });
+
+  it('runs close lifecycle callbacks exactly once', async () => {
+    const onClose = vi.fn();
+    const auditClose = vi.fn();
+    const server = createMcpServer('fbeast-memory', '0.1.0', [], {
+      onClose,
+      audit: { record: vi.fn(), close: auditClose },
+    });
+
+    await server.close();
+    await server.close();
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(auditClose).toHaveBeenCalledTimes(1);
   });
 
   it('registers tools from definitions', () => {
@@ -89,6 +104,93 @@ describe('createMcpServer', () => {
       isError: true,
     });
     expect(JSON.stringify(result)).not.toContain(sensitiveDetail);
+  });
+
+  it('bounds hanging handlers with a structured timeout and abort signal', async () => {
+    let receivedSignal: AbortSignal | undefined;
+    const auditEvents: Parameters<AuditSink['record']>[0][] = [];
+    const tool: ToolDef = {
+      name: 'hanging_tool',
+      description: 'hangs until cancelled',
+      inputSchema: { type: 'object', properties: {} },
+      handler: async (_args, context) => {
+        receivedSignal = context!.signal;
+        await new Promise<void>(() => undefined);
+        return { content: [{ type: 'text' as const, text: 'unreachable' }] };
+      },
+    };
+    const server = createMcpServer('t', '1', [tool], {
+      defaultToolTimeoutMs: 10,
+      audit: { record: async (event) => { auditEvents.push(event); } },
+    });
+
+    const result = await server.callTool('hanging_tool', {});
+
+    expect(result).toEqual({
+      content: [{ type: 'text', text: 'Error: Tool execution timed out after 10ms [MCP_TOOL_TIMEOUT]' }],
+      isError: true,
+    });
+    expect(receivedSignal?.aborted).toBe(true);
+    expect(auditEvents).toEqual([
+      expect.objectContaining({ tool: 'hanging_tool', ok: false, decision: 'timeout' }),
+    ]);
+  });
+
+  it('reports synchronous work that finishes after its deadline as timed out', async () => {
+    let receivedSignal: AbortSignal | undefined;
+    const server = createMcpServer('test', '1.0.0', [
+      {
+        name: 'blocking',
+        description: 'Blocks before resolving',
+        timeoutMs: 5,
+        inputSchema: { type: 'object', properties: {} },
+        async handler(_args, context) {
+          receivedSignal = context!.signal;
+          const stopAt = Date.now() + 15;
+          while (Date.now() < stopAt) {
+            // Model an existing synchronous filesystem/CPU handler.
+          }
+          return { content: [{ type: 'text', text: 'late success' }] };
+        },
+      },
+    ]);
+
+    const result = await server.callTool('blocking', {});
+
+    expect(result).toEqual({
+      content: [{ type: 'text', text: 'Error: Tool execution timed out after 5ms [MCP_TOOL_TIMEOUT]' }],
+      isError: true,
+    });
+    expect(receivedSignal?.aborted).toBe(true);
+  });
+
+  it('honors a per-tool timeout override while preserving nominal results', async () => {
+    const tool: ToolDef = {
+      name: 'slow_tool',
+      description: 'finishes within its override',
+      inputSchema: { type: 'object', properties: {} },
+      timeoutMs: 100,
+      handler: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return { content: [{ type: 'text' as const, text: 'ok' }] };
+      },
+    };
+    const server = createMcpServer('t', '1', [tool], { defaultToolTimeoutMs: 5 });
+
+    await expect(server.callTool('slow_tool', {})).resolves.toEqual({
+      content: [{ type: 'text', text: 'ok' }],
+    });
+  });
+
+  it('rejects invalid timeout configuration before serving requests', () => {
+    expect(() => createMcpServer('t', '1', [], { defaultToolTimeoutMs: 0 })).toThrow(/defaultToolTimeoutMs/);
+    expect(() => createMcpServer('t', '1', [{
+      name: 'bad_timeout',
+      description: 'invalid timeout',
+      inputSchema: { type: 'object', properties: {} },
+      timeoutMs: Number.POSITIVE_INFINITY,
+      handler: async () => ({ content: [{ type: 'text' as const, text: 'ok' }] }),
+    }])).toThrow(/timeoutMs/);
   });
 
   it('requires an OWN required property (rejects prototype-chain keys)', async () => {
@@ -276,6 +378,70 @@ describe('createMcpServer', () => {
     });
   });
 
+  it('redacts observer metadata from direct and proxy audit records', () => {
+    expect(sanitizeToolArgumentsForAuditTrail('fbeast_observer_log', {
+      event: 'tool_call',
+      metadata: 'x'.repeat(1_000_001),
+      sessionId: 'session-1',
+    })).toEqual({
+      event: 'tool_call',
+      metadata: '[observer-metadata-redacted]',
+      sessionId: 'session-1',
+    });
+
+    expect(sanitizeToolArgumentsForAuditTrail('fbeast_observer_log', {
+      event: 'tool_call',
+      metadata: 'x'.repeat(1_000_001),
+      sessionId: 'session-1',
+      tool: 'untrusted-payload-name',
+    })).toEqual({
+      event: 'tool_call',
+      metadata: '[observer-metadata-redacted]',
+      sessionId: 'session-1',
+      tool: 'untrusted-payload-name',
+    });
+
+    expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
+      tool: 'fbeast_observer_log',
+      args: {
+        event: 'tool_call',
+        metadata: 'x'.repeat(1_000_001),
+        sessionId: 'session-1',
+      },
+    })).toEqual({
+      tool: 'fbeast_observer_log',
+      args: {
+        event: 'tool_call',
+        metadata: '[observer-metadata-redacted]',
+        sessionId: 'session-1',
+      },
+    });
+
+    expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
+      tool: 'fbeast_observer_log',
+      args: 'invalid envelope',
+      metadata: 'x'.repeat(1_000_001),
+    })).toEqual({
+      tool: 'fbeast_observer_log',
+      args: '[observer-metadata-redacted]',
+      metadata: '[observer-metadata-redacted]',
+    });
+
+    expect(sanitizeToolArgumentsForAuditTrail('fbeast_governor_check', {
+      action: 'fbeast_observer_log',
+      context: {
+        event: 'tool_call',
+        metadata: 'x'.repeat(1_000_001),
+      },
+    })).toEqual({
+      action: 'fbeast_observer_log',
+      context: {
+        event: 'tool_call',
+        metadata: '[observer-metadata-redacted]',
+      },
+    });
+  });
+
   it('redacts memory access audit report rejected selectors from direct and proxy audit records', () => {
     expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_access_audit_report', {
       operation: 'delete',
@@ -360,6 +526,75 @@ describe('createMcpServer', () => {
     const res = await srv.callTool('cost', { costUsd: Infinity });
     expect(res.isError).toBe(true);
     expect(calls).toHaveLength(0);
+  });
+
+  it('enforces string length bounds before invoking the handler', async () => {
+    const calls: unknown[] = [];
+    const recorded: Array<{ decision?: string; args?: Record<string, unknown> }> = [];
+    const tool: ToolDef = {
+      name: 'search',
+      description: 'search',
+      inputSchema: {
+        type: 'object',
+        properties: { query: { type: 'string', description: 'query', minLength: 2, maxLength: 3 } },
+        required: ['query'],
+      },
+      handler: async (a) => { calls.push(a); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+    };
+    const srv = createMcpServer('t', '1', [tool], { audit: { record: async (entry) => { recorded.push(entry); } } });
+
+    expect((await srv.callTool('search', { query: 'x' })).content[0]!.text).toContain('at least 2 characters');
+    expect((await srv.callTool('search', { query: 'abcd' })).content[0]!.text).toContain('at most 3 characters');
+    expect(await srv.callTool('search', { query: 'abc' })).not.toHaveProperty('isError');
+    expect(await srv.callTool('search', { query: '😀😀' })).not.toHaveProperty('isError');
+    expect(calls).toEqual([{ query: 'abc' }, { query: '😀😀' }]);
+    expect(recorded.find((entry) => entry.decision === 'validation_error' && entry.args?.['query'] === '[schema-bound-exceeded]')).toBeDefined();
+  });
+
+  it('enforces numeric bounds before invoking the handler', async () => {
+    const calls: unknown[] = [];
+    const tool: ToolDef = {
+      name: 'page',
+      description: 'page',
+      inputSchema: {
+        type: 'object',
+        properties: { limit: { type: 'integer', description: 'limit', minimum: 1, maximum: 100 } },
+        required: ['limit'],
+      },
+      handler: async (a) => { calls.push(a); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+    };
+    const srv = createMcpServer('t', '1', [tool]);
+
+    expect((await srv.callTool('page', { limit: 0 })).content[0]!.text).toContain('at least 1');
+    expect((await srv.callTool('page', { limit: 101 })).content[0]!.text).toContain('at most 100');
+    expect(await srv.callTool('page', { limit: 100 })).not.toHaveProperty('isError');
+    expect(calls).toEqual([{ limit: 100 }]);
+  });
+
+  it('enforces array item bounds before invoking the handler', async () => {
+    const calls: unknown[] = [];
+    const tool: ToolDef = {
+      name: 'batch',
+      description: 'batch',
+      inputSchema: {
+        type: 'object',
+        properties: { items: { type: 'array', description: 'items', minItems: 1, maxItems: 2 } },
+        required: ['items'],
+      },
+      handler: async (a) => { calls.push(a); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+    };
+    const srv = createMcpServer('t', '1', [tool]);
+
+    expect((await srv.callTool('batch', { items: [] })).content[0]!.text).toContain('at least 1 items');
+    expect((await srv.callTool('batch', { items: [1, 2, 3] })).content[0]!.text).toContain('at most 2 items');
+    expect(await srv.callTool('batch', { items: [1, 2] })).not.toHaveProperty('isError');
+    expect(calls).toEqual([{ items: [1, 2] }]);
+
+    const oversizedWithAccessor = [1, 2, 3];
+    Object.defineProperty(oversizedWithAccessor, '0', { get: () => { throw new Error('must not be read'); } });
+    const boundedBeforeTraversal = validateToolArguments(tool, { items: oversizedWithAccessor });
+    expect(boundedBeforeTraversal.ok).toBe(false);
+    if (!boundedBeforeTraversal.ok) expect(boundedBeforeTraversal.message).toContain('at most 2 items');
   });
 
   it('accepts arguments matching any listed schema type', async () => {

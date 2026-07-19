@@ -14,7 +14,7 @@ describe('issue #1023 GitHub issues guide CLI setup docs', () => {
     const packageJson = readJson<{ scripts?: Record<string, string> }>('package.json');
     const orchestratorPackage = readJson<{ bin?: Record<string, string> }>('packages/franken-orchestrator/package.json');
 
-    expect(packageJson.scripts?.['local:link']).toContain('--workspace=@franken/orchestrator');
+    expect(packageJson.scripts?.['local:link']).toContain('--workspaces');
     expect(orchestratorPackage.bin).toHaveProperty('frankenbeast');
 
     expect(guide).toContain('npm run local:link');

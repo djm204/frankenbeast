@@ -2,6 +2,24 @@ import { describe, it, expect, vi } from 'vitest';
 import { createObserverServer } from './observer.js';
 
 describe('Observer Server', () => {
+  it('closes the observer adapter when the server shuts down', async () => {
+    const close = vi.fn();
+    const server = createObserverServer({
+      observer: {
+        log: vi.fn(),
+        logCost: vi.fn(),
+        cost: vi.fn(),
+        trail: vi.fn(),
+        verify: vi.fn(),
+        close,
+      },
+    });
+
+    await server.close();
+
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   it('exposes 5 tools', () => {
     const server = createObserverServer({
       observer: {

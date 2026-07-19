@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { SseConnectionTicketStore } from '../../../../src/beasts/events/sse-connection-ticket.js';
 
 describe('SseConnectionTicketStore', () => {
@@ -33,6 +36,44 @@ describe('SseConnectionTicketStore', () => {
 
     expect(store.consume(ticket, 'operator-token-123')).toBe('valid');
     expect(store.consume(ticket, 'operator-token-123')).toBe('reused');
+  });
+
+  it('keeps an issued ticket valid after the issuing process store is recreated', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'sse-ticket-store-'));
+    const databasePath = join(dir, 'beast.db');
+    const issuingStore = new SseConnectionTicketStore({ databasePath });
+
+    try {
+      const ticket = issuingStore.issue('operator-token-123');
+      issuingStore.destroy();
+
+      const restartedStore = new SseConnectionTicketStore({ databasePath });
+      try {
+        expect(restartedStore.consume(ticket, 'operator-token-123')).toBe('valid');
+      } finally {
+        restartedStore.destroy();
+      }
+    } finally {
+      issuingStore.destroy();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('shares single-use ticket state across store instances', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'sse-ticket-store-'));
+    const databasePath = join(dir, 'beast.db');
+    const firstStore = new SseConnectionTicketStore({ databasePath });
+    const secondStore = new SseConnectionTicketStore({ databasePath });
+
+    try {
+      const ticket = firstStore.issue('operator-token-123');
+      expect(secondStore.consume(ticket, 'operator-token-123')).toBe('valid');
+      expect(firstStore.consume(ticket, 'operator-token-123')).toBe('reused');
+    } finally {
+      firstStore.destroy();
+      secondStore.destroy();
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('still reports reused after the issue TTL elapses (long-lived stream reconnect)', async () => {
@@ -101,6 +142,32 @@ describe('SseConnectionTicketStore', () => {
       expect(setIntervalSpy).not.toHaveBeenCalled();
     } finally {
       setIntervalSpy.mockRestore();
+    }
+  });
+
+  it('contains periodic cleanup and async observer failures without crashing the daemon', async () => {
+    vi.useFakeTimers();
+    const observerFailure = new Error('observer unavailable');
+    const onCleanupError = vi.fn().mockRejectedValue(observerFailure);
+    const cleanupStore = new SseConnectionTicketStore({
+      cleanupIntervalMs: 10,
+      onCleanupError,
+    });
+    const failure = new Error('database is busy');
+    const cleanupSpy = vi
+      .spyOn(cleanupStore as unknown as { cleanup(): void }, 'cleanup')
+      .mockImplementationOnce(() => {
+        throw failure;
+      });
+
+    try {
+      expect(() => vi.advanceTimersByTime(10)).not.toThrow();
+      await Promise.resolve();
+      expect(cleanupSpy).toHaveBeenCalledOnce();
+      expect(onCleanupError).toHaveBeenCalledWith(failure);
+    } finally {
+      cleanupStore.destroy();
+      vi.useRealTimers();
     }
   });
 

@@ -37,6 +37,9 @@ const SCHEMA = `
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  CREATE INDEX IF NOT EXISTS idx_audit_trail_session_id_id
+    ON audit_trail(session_id, id DESC);
+
   CREATE TABLE IF NOT EXISTS cost_ledger (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id TEXT NOT NULL,

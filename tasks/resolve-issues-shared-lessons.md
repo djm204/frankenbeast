@@ -1,5 +1,13 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-18 — MCP-owned SQLite lifecycle
+- When an MCP server owns or lazily creates a SQLite-backed adapter, expose an idempotent adapter `close()` and connect it to the SDK server's `onclose` path as well as an explicit public server `close()`. Central audit wrappers must forward cleanup, and proxy servers must release both their audit observer and any lazily-created adapter set.
+- In fresh monorepo worktrees, build internal workspace packages before package-level TypeScript checks; otherwise missing generated `dist` declarations produce unrelated module-resolution errors.
+
+## 2026-07-18 — MCP execution deadline review fixes
+- A `Promise.race` timer cannot preempt synchronous handler work because the event loop is blocked; deadline wrappers must re-check wall-clock time after handler resolution/rejection and convert late completion into the same structured timeout while aborting the supplied signal. Keep that timer ref'ed so in-process callers with no other active handles still receive the timeout result.
+- Nested dispatch wrappers must have a deadline strictly longer than the longest inner target deadline, including validation/governance/audit slack, or the wrapper can win the timeout race and lose resolved-target timeout auditing.
+
 ## 2026-07-17 — PR #2358 stalled closeout and Codex gate handling
 - For stalled PR closeout, re-verify live PR head, mergeability, CI rollup, unresolved Codex threads, and the latest top-level Codex response before acting; a stale green/clean state can become `mergeable=CONFLICTING`/`mergeStateStatus=DIRTY` after main advances even when required CI is still green.
 - Treat Codex usage-limit responses as a hard review-gate blocker for the current round: do not repeatedly retrigger `@codex review`, do not treat historical inline finding lists as active blockers when GraphQL review threads are resolved, and wait for restored usage/approved over-cap review before merging.
@@ -348,3 +356,9 @@
 
 ## 2026-07-17 — Orchestrator chaos-test closeout
 - For orchestrator chaos/stability regressions, keep dropped-provider and thrown-tool cases deterministic: use fake timers around never-settling promises, assert cleanup with zero leaked timers, and build dependent workspaces before package typecheck when source-only workspace packages make bare orchestrator `tsc --noEmit` report missing `@franken/*` declarations.
+
+## 2026-07-18 — Spawn-failure telemetry redaction
+- Sanitizing the primary failure event is insufficient when the original exception is rethrown: audit every caller that can wrap it into run events, tracked-agent timelines, SSE publications, or durable logs. Rethrow a stable public error, allowlist diagnostic error codes, keep raw command/argv out of durable summaries, and test both immediate dispatch and later run-start paths with secret-bearing failures.
+
+## 2026-07-18 — Durable SSE ticket wiring
+- A persistent store implementation is not durable unless every daemon construction path supplies a stable database path; add a restart-level wiring test, and contain best-effort timer cleanup failures so transient SQLite errors cannot escape callbacks and terminate the process.

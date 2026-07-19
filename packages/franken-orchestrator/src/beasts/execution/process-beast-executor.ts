@@ -27,6 +27,21 @@ const REDACTED_SECRET = '[REDACTED]';
 const MIN_CONFIGURED_SECRET_LENGTH = 6;
 const RUN_CONFIG_DIR_MODE = 0o700;
 const RUN_CONFIG_FILE_MODE = 0o600;
+const SPAWN_FAILED_CODE = 'SPAWN_FAILED';
+const SAFE_SPAWN_ERROR_CODES = new Set([
+  'EACCES',
+  'EAGAIN',
+  'E2BIG',
+  'EISDIR',
+  'EINVAL',
+  'EMFILE',
+  'ENFILE',
+  'ENOENT',
+  'ENOMEM',
+  'ENOTDIR',
+  'EPERM',
+  'ETXTBSY',
+]);
 
 export interface RunConfigSnapshotOwner {
   readonly uid: number;
@@ -112,6 +127,55 @@ function redactBeastLogLine(line: string, configuredSecrets: readonly string[] =
 
 function redactFailureStderrTail(stderrTail: readonly string[], configuredSecrets: readonly string[]): string[] {
   return stderrTail.map(line => redactBeastLogLine(line, configuredSecrets));
+}
+
+function redactSpawnErrorMessage(errorMessage: string, configuredSecrets: readonly string[]): string {
+  return redactBeastLogLine(errorMessage, configuredSecrets).replace(
+    /((?:^|\s)--?[a-z0-9_-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|auth|credential|webhook[_-]?url)[a-z0-9_-]*(?:\s+|=))(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s]+)/gi,
+    `$1${REDACTED_SECRET}`,
+  );
+}
+
+function normalizeSpawnErrorCode(error: unknown): string {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return typeof code === 'string' && SAFE_SPAWN_ERROR_CODES.has(code)
+    ? code
+    : SPAWN_FAILED_CODE;
+}
+
+function summarizeSpawnCommand(
+  processSpec: BeastProcessSpec,
+): Readonly<{ argumentCount: number }> {
+  return {
+    argumentCount: processSpec.args.length,
+  };
+}
+
+function redactSpawnArgs(
+  args: readonly string[],
+  configuredSecrets: readonly string[],
+): string[] {
+  let redactNext = false;
+  return args.map((arg) => {
+    if (redactNext) {
+      redactNext = false;
+      return REDACTED_SECRET;
+    }
+    const flagName = arg.startsWith('-')
+      ? arg.replace(/^-+/, '').split('=', 1)[0] ?? ''
+      : '';
+    if (flagName && !arg.includes('=') && isConfiguredSecretKey(flagName)) {
+      redactNext = true;
+    }
+    return redactSpawnErrorMessage(arg, configuredSecrets);
+  });
+}
+
+export interface SpawnFailureDebugDetails {
+  readonly error: string;
+  readonly code: string;
+  readonly command: string;
+  readonly args: readonly string[];
 }
 
 function redactRunConfigValue(
@@ -244,6 +308,8 @@ export interface ProcessBeastExecutorOptions {
     handle: { pid: number },
   ) => Readonly<Record<string, unknown>>;
   worktreeIsolation?: GitWorktreeIsolationConfig | undefined;
+  /** Optional protected debug sink. Values are scrubbed before this callback is invoked. */
+  onSpawnFailureDebug?: (details: SpawnFailureDebugDetails) => void;
 }
 
 function applyRunConfigOwnership(path: string, owner: RunConfigSnapshotOwner | undefined): void {
@@ -457,8 +523,20 @@ export class ProcessBeastExecutor implements BeastExecutor {
         },
       });
     } catch (error) {
-      const errorCode = (error as NodeJS.ErrnoException).code;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorCode = normalizeSpawnErrorCode(error);
       const failedAt = new Date(wallClockNow()).toISOString();
+
+      try {
+        this.options.onSpawnFailureDebug?.({
+          error: redactSpawnErrorMessage(errorMessage, configuredSecrets),
+          code: errorCode,
+          command: redactBeastLogLine(processSpec.command, configuredSecrets),
+          args: redactSpawnArgs(processSpec.args, configuredSecrets),
+        });
+      } catch {
+        // Debug diagnostics are best-effort and must not replace the spawn failure.
+      }
 
       this.repository.updateRun(run.id, {
         status: 'failed',
@@ -475,7 +553,8 @@ export class ProcessBeastExecutor implements BeastExecutor {
         type: 'run.spawn_failed' as const,
         payload: {
           error: SAFE_DISPATCH_FAILURE_MESSAGE,
-          ...(errorCode ? { code: errorCode } : {}),
+          code: errorCode,
+          commandSummary: summarizeSpawnCommand(processSpec),
           crashClassification,
         },
         createdAt: failedAt,
@@ -495,7 +574,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       });
 
       this.options.onRunStatusChange?.(run.id);
-      throw error;
+      throw Object.assign(new Error(SAFE_DISPATCH_FAILURE_MESSAGE), { code: errorCode });
     }
     this.pendingSpawnHandles.set(run.id, handle);
 

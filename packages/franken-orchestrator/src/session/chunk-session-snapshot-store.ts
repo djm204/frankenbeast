@@ -10,6 +10,10 @@ export class FileChunkSessionSnapshotStore {
   constructor(private readonly rootDir: string) {}
 
   writeSnapshot(session: ChunkSession, reason: string): string {
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.test(reason)) {
+      throw new Error('Invalid chunk snapshot reason');
+    }
+
     const dir = this.snapshotDir(session.planName, session.chunkId, session.taskId);
     mkdirSync(dir, { recursive: true });
     const ts = new Date(wallClockNow()).toISOString().replace(/[:.]/g, '-');

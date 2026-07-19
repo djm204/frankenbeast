@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import process from 'node:process';
@@ -74,6 +74,35 @@ describe('startChatServer comms pass-through', () => {
     const opts = mockedCreateChatApp.mock.calls[0]![0];
     expect(opts).toHaveProperty('commsConfig', commsConfig);
     expect(opts).toHaveProperty('commsRuntime', commsRuntime);
+  });
+
+  it('persists chat SSE tickets across chat-server restarts', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'chat-server-sse-tickets-'));
+    tempDirs.push(projectDir);
+    const sessionStoreDir = join(projectDir, 'chat');
+    const options = {
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir,
+      llm: { complete: vi.fn().mockResolvedValue('ok') },
+      projectName: 'test',
+      operatorToken: TEST_OPERATOR_TOKEN,
+    } as const;
+
+    handle = await startChatServer(options);
+    const issuingStore = mockedCreateChatApp.mock.calls[0]![0].chatStreamTicketStore;
+    const ticket = issuingStore!.issue(TEST_OPERATOR_TOKEN, 'session-1');
+    if (process.platform !== 'win32') {
+      const ticketStoreStat = await stat(join(sessionStoreDir, 'sse-connection-tickets'));
+      expect(ticketStoreStat.mode & 0o777).toBe(0o700);
+    }
+    await handle.close();
+    handle = undefined;
+
+    mockedCreateChatApp.mockClear();
+    handle = await startChatServer(options);
+    const restartedStore = mockedCreateChatApp.mock.calls[0]![0].chatStreamTicketStore;
+    expect(restartedStore!.consume(ticket, TEST_OPERATOR_TOKEN, 'session-1')).toBe('valid');
   });
 
   it('closes analytics dependencies when the chat server shuts down', async () => {

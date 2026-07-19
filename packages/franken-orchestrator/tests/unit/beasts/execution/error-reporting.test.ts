@@ -282,7 +282,7 @@ describe('Error Reporting to Dashboard', () => {
         createdAt: new Date().toISOString(),
       });
 
-      await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow('spawn ENOENT');
+      await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow(SAFE_DISPATCH_FAILURE_MESSAGE);
 
       // Run should be marked as failed
       const updatedRun = repo.getRun(run.id);

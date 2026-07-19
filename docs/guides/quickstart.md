@@ -110,10 +110,10 @@ When a worker or contributor needs a narrower verification command, use the [tes
 ## 5. Try the orchestrator CLI
 
 The repository root is private and does not publish a root `frankenbeast` binary
-for `npx` to resolve. Link the local workspace CLIs first; the `local:link`
-script builds the packages and links both `@franken/orchestrator` and
-`@franken/mcp-suite` so `frankenbeast`, `franken`, `frkn`, and `fbeast` are on
-your PATH.
+for `npx` to resolve. Link the local workspaces first; the `local:link` script
+builds and links every workspace so their current local packages are available,
+including the `frankenbeast`, `franken`, `frkn`, `fbeast`, and
+`fbeast-live-bench` binaries on your PATH.
 
 ```bash
 # Build and link the local workspace binaries once from the repo root
@@ -142,7 +142,7 @@ frankenbeast issues --repo owner/repo --dry-run
 The `fbeast` binary ships from the `@franken/mcp-suite` package (there is no package named `fbeast`). Install it persistently so both `fbeast` and the `fbeast-*` MCP server binaries stay on PATH — `mcp init` registers servers as bare `fbeast-memory`/`fbeast-proxy` commands the AI client spawns later, so a one-shot `npx` would leave those servers unable to start:
 
 ```bash
-# Install once (global), or link both local CLIs from the monorepo with: npm run local:link
+# Install once (global), or link the local workspaces from the monorepo with: npm run local:link
 npm install -g @franken/mcp-suite
 
 # Standard MCP registration

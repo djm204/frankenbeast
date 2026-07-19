@@ -6,7 +6,7 @@ import { createObserverAdapter, type ObserverAdapter } from '../adapters/observe
 import { createPlannerAdapter, type PlannerAdapter } from '../adapters/planner-adapter.js';
 import { createSkillsAdapter, type SkillsAdapter } from '../adapters/skills-adapter.js';
 import { parseObserverCostArgs } from './observer-cost-validation.js';
-import type { ToolDef, ToolInputSchema, ToolResult } from './server-factory.js';
+import type { ToolDef, ToolExecutionContext, ToolInputSchema, ToolResult } from './server-factory.js';
 
 export interface AdapterSet {
   brain: BrainAdapter;
@@ -28,7 +28,12 @@ interface ToolStub {
 
 interface ToolFull extends ToolStub {
   inputSchema: ToolInputSchema;
-  makeHandler: (adapters: AdapterSet) => (args: Record<string, unknown>) => Promise<ToolResult>;
+  /** Optional execution deadline override for this registry entry. */
+  timeoutMs?: number;
+  makeHandler: (adapters: AdapterSet) => (
+    args: Record<string, unknown>,
+    context?: ToolExecutionContext,
+  ) => Promise<ToolResult>;
 }
 
 export type ServerAdapterDeps = Partial<AdapterSet>;
@@ -453,9 +458,9 @@ const TOOLS: ToolFull[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Search query (substring match on key and value)' },
+        query: { type: 'string', description: 'Search query (substring match on key and value)', minLength: 1, maxLength: 4096 },
         type: { type: 'string', description: 'Filter by type: working or episodic', enum: ['working', 'episodic'] },
-        limit: { type: 'string', description: 'Max results as a positive integer from 1 to 1000 (default 20)' },
+        limit: { type: 'string', description: 'Max results as a positive integer from 1 to 1000 (default 20)', minLength: 1, maxLength: 16 },
         readScope: { type: 'string', description: 'Read scope: all (legacy), shared (hide agent-scoped entries), or agent (shared plus entries for agentId)', enum: ['all', 'shared', 'agent'] },
         agentId: { type: 'string', description: 'Agent id required when readScope is agent' },
       },
@@ -1063,6 +1068,7 @@ const TOOLS: ToolFull[] = [
     name: 'fbeast_firewall_scan_file',
     server: 'firewall',
     description: 'Detect prompt injection in file contents',
+    timeoutMs: 60_000,
     inputSchema: {
       type: 'object',
       properties: {
@@ -1092,9 +1098,9 @@ const TOOLS: ToolFull[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        event: { type: 'string', description: 'Event type (e.g., file_edit, tool_call, decision)' },
-        metadata: { type: 'string', description: 'JSON metadata for this event' },
-        sessionId: { type: 'string', description: 'Session identifier' },
+        event: { type: 'string', description: 'Event type (e.g., file_edit, tool_call, decision)', minLength: 1, maxLength: 256 },
+        metadata: { type: 'string', description: 'JSON metadata for this event', maxLength: 1_000_000 },
+        sessionId: { type: 'string', description: 'Session identifier', minLength: 1, maxLength: 256 },
       },
       required: ['event', 'metadata', 'sessionId'],
     },
@@ -1125,11 +1131,11 @@ const TOOLS: ToolFull[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        sessionId: { type: 'string', description: 'Session identifier' },
-        model: { type: 'string', description: 'Model name (e.g. gpt-4o, claude-opus-4-5)' },
-        promptTokens: { type: 'number', description: 'Input/prompt token count' },
-        completionTokens: { type: 'number', description: 'Output/completion token count' },
-        costUsd: { type: 'number', description: 'Actual cost in USD if known — omit to auto-calculate from pricing table' },
+        sessionId: { type: 'string', description: 'Session identifier', minLength: 1, maxLength: 256 },
+        model: { type: 'string', description: 'Model name (e.g. gpt-4o, claude-opus-4-5)', minLength: 1, maxLength: 256 },
+        promptTokens: { type: 'number', description: 'Input/prompt token count', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+        completionTokens: { type: 'number', description: 'Output/completion token count', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+        costUsd: { type: 'number', description: 'Actual cost in USD if known — omit to auto-calculate from pricing table', minimum: 0 },
       },
       required: ['sessionId', 'model', 'promptTokens', 'completionTokens'],
     },
@@ -1151,7 +1157,7 @@ const TOOLS: ToolFull[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        sessionId: { type: 'string', description: 'Session ID to filter (omit for all sessions)' },
+        sessionId: { type: 'string', description: 'Session ID to filter (omit for all sessions)', minLength: 1, maxLength: 256 },
       },
     },
     makeHandler: ({ observer }) => async (args) => {
@@ -1323,10 +1329,11 @@ export const TOOL_REGISTRY: Map<string, ToolFull> = new Map(TOOLS.map((t) => [t.
 export function createToolDefsForServer(server: ToolServer, adapters: ServerAdapterDeps): ToolDef[] {
   return TOOLS
     .filter((tool) => tool.server === server)
-    .map(({ name, description, inputSchema, makeHandler }) => ({
+    .map(({ name, description, inputSchema, timeoutMs, makeHandler }) => ({
       name,
       description,
       inputSchema,
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       handler: makeHandler(adapters as AdapterSet),
     }));
 }

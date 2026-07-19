@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createAdapterSet, TOOL_STUBS, TOOL_REGISTRY, searchTools, type AdapterSet } from './tool-registry.js';
+import { createAdapterSet, createToolDefsForServer, TOOL_STUBS, TOOL_REGISTRY, searchTools, type AdapterSet } from './tool-registry.js';
 
 const EXPECTED_COUNT = 30;
 
@@ -33,10 +33,37 @@ describe('TOOL_REGISTRY', () => {
     }
   });
 
+  it('publishes explicit bounds for high-risk memory and observer inputs', () => {
+    const memoryQuery = TOOL_REGISTRY.get('fbeast_memory_query')!.inputSchema.properties;
+    expect(memoryQuery['query']).toMatchObject({ minLength: 1, maxLength: 4096 });
+    expect(memoryQuery['limit']).toMatchObject({
+      type: 'string',
+      minLength: 1,
+      maxLength: 16,
+    });
+
+    const observerLog = TOOL_REGISTRY.get('fbeast_observer_log')!.inputSchema.properties;
+    expect(observerLog['event']).toMatchObject({ minLength: 1, maxLength: 256 });
+    expect(observerLog['metadata']).toMatchObject({ maxLength: 1_000_000 });
+    expect(observerLog['sessionId']).toMatchObject({ minLength: 1, maxLength: 256 });
+
+    const observerCost = TOOL_REGISTRY.get('fbeast_observer_log_cost')!.inputSchema.properties;
+    expect(observerCost['promptTokens']).toMatchObject({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
+    expect(observerCost['completionTokens']).toMatchObject({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
+    expect(observerCost['costUsd']).toMatchObject({ minimum: 0 });
+  });
+
   it('all tools have a makeHandler function', () => {
     for (const [name, tool] of TOOL_REGISTRY) {
       expect(typeof tool.makeHandler, `${name} makeHandler is not a function`).toBe('function');
     }
+  });
+
+  it('propagates registry deadline overrides to standalone tool definitions', () => {
+    const tool = createToolDefsForServer('firewall', {} as AdapterSet)
+      .find(({ name }) => name === 'fbeast_firewall_scan_file');
+
+    expect(tool?.timeoutMs).toBe(60_000);
   });
 
   it('TOOL_STUBS and TOOL_REGISTRY contain the same 30 tool names', () => {

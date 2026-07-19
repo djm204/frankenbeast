@@ -307,6 +307,17 @@ describe('ChatShell route heading', () => {
     expect(screen.queryByDisplayValue('stale-model')).toBeNull();
   });
 
+  it('surfaces an initial config load failure without rendering fabricated defaults', async () => {
+    networkApiMocks.getStatus.mockResolvedValue({ mode: 'secure', secureBackend: 'local-encrypted', services: [] });
+    networkApiMocks.getConfig.mockRejectedValueOnce(new Error('HTTP 503'));
+
+    render(<ChatShell baseUrl="http://localhost:3737" projectId="default" version="0.2.1" />);
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Unable to load network config: HTTP 503');
+    expect(screen.queryByRole('button', { name: 'Save config' })).toBeNull();
+    expect(screen.queryByDisplayValue('claude-sonnet-4-6')).toBeNull();
+  });
+
   it('surfaces failed config refreshes from the Network page', async () => {
     networkApiMocks.getStatus.mockResolvedValue({ mode: 'secure', secureBackend: 'local-encrypted', services: [] });
     networkApiMocks.getConfig
