@@ -6,5 +6,6 @@
 - [x] Preserve recoverable drafts and report the active stage on Ctrl-C.
 - [x] Cover event ordering, fallback/retry behavior, spinner timing, and session cancellation with unit tests.
 - [x] Rebase onto `origin/main` and pass targeted tests, orchestrator tests, root build, typecheck, and lint.
-- [ ] Open PR and complete CI/Codex review gate.
+- [x] Open PR #3371.
+- [ ] Complete CI/Codex review gate.
 - [ ] Merge and verify issue closure.
