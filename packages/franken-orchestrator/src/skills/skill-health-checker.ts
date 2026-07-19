@@ -38,6 +38,47 @@ const MAX_CONCURRENT_MCP_HEALTH_PROBES = 4;
 const MAX_MCP_HEALTH_PROBES_PER_CHECK = 20;
 const MCP_INITIALIZE_ID = 1;
 
+class AsyncSemaphore {
+  private available: number;
+  private readonly waiters: Array<() => void> = [];
+
+  constructor(limit: number) {
+    this.available = limit;
+  }
+
+  async run<Result>(operation: () => Promise<Result>): Promise<Result> {
+    await this.acquire();
+    try {
+      return await operation();
+    } finally {
+      this.release();
+    }
+  }
+
+  private acquire(): Promise<void> {
+    if (this.available > 0) {
+      this.available -= 1;
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      this.waiters.push(resolve);
+    });
+  }
+
+  private release(): void {
+    const next = this.waiters.shift();
+    if (next) {
+      next();
+    } else {
+      this.available += 1;
+    }
+  }
+}
+
+const MCP_HEALTH_PROBE_SEMAPHORE = new AsyncSemaphore(
+  MAX_CONCURRENT_MCP_HEALTH_PROBES,
+);
+
 interface HealthCheckMcpServerConfig {
   command: string;
   args?: string[] | undefined;
@@ -77,9 +118,8 @@ export class SkillHealthChecker {
         }
 
         try {
-          const outcome = await this.checkServer(
-            config.command,
-            config.args ?? [],
+          const outcome = await MCP_HEALTH_PROBE_SEMAPHORE.run(() =>
+            this.checkServer(config.command, config.args ?? []),
           );
           return { serverName, ...outcome };
         } catch (err) {
@@ -157,7 +197,10 @@ export class SkillHealthChecker {
           proc.once('exit', finishAfterTermination);
           proc.once('close', finishAfterTermination);
           try {
-            proc.kill();
+            if (!proc.kill()) {
+              finishAfterTermination();
+              return;
+            }
           } catch {
             finishAfterTermination();
             return;
@@ -168,7 +211,9 @@ export class SkillHealthChecker {
           forceKillTimer = setTimeout(() => {
             if (proc.exitCode === null) {
               try {
-                proc.kill('SIGKILL');
+                if (!proc.kill('SIGKILL')) {
+                  finishAfterTermination();
+                }
               } catch {
                 finishAfterTermination();
               }
