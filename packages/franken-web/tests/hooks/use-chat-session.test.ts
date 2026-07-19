@@ -349,6 +349,12 @@ describe('useChatSession', () => {
   it.each([
     ['invalid JSON', (socket: MockWebSocket) => socket.rawMessage('{not json')],
     ['malformed known event', (socket: MockWebSocket) => socket.message({ type: 'assistant.message.delta', messageId: 'assistant-1' })],
+    ['malformed session.ready', (socket: MockWebSocket) => socket.message({
+      type: 'session.ready',
+      sessionId: 'chat-1',
+      projectId: 'test-project',
+      state: 'active',
+    })],
     ['unknown event type', (socket: MockWebSocket) => socket.message({ type: 'session.unknown', timestamp: '2026-03-09T00:00:01Z' })],
   ])('surfaces %s as a recoverable websocket protocol error without mutating chat state', async (_name, sendInvalidEvent) => {
     const { result } = renderHook(() => useChatSession(opts));

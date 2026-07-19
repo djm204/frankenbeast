@@ -1,9 +1,11 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
-import { createSessionId } from '@franken/types';
+import {
+  createSessionId,
+} from '@franken/types';
 import type { ProviderCritiqueFinding } from '@franken/types';
 import type {
   CritiquePipelineResult,
-  CritiqueResult as DeprecatedCritiqueResult,
+  CritiqueResult,
   LessonRollbackWorkflow,
   AgentImprovementScorecard,
   LessonFeedbackWeighting,
@@ -36,9 +38,13 @@ describe('public critique type contracts', () => {
       ],
       shortCircuited: false,
     };
-    const compatibilityAlias: DeprecatedCritiqueResult = pipelineResult;
+    const alias: CritiquePipelineResult = pipelineResult;
+    const legacyAlias: CritiqueResult = pipelineResult;
 
-    expect(compatibilityAlias.results[0]?.findings[0]?.message).toBe(
+    expect(alias.results[0]?.findings[0]?.message).toBe(
+      providerFinding.message,
+    );
+    expect(legacyAlias.results[0]?.findings[0]?.message).toBe(
       providerFinding.message,
     );
   });
