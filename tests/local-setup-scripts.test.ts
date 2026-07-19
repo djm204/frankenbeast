@@ -757,6 +757,13 @@ describe('local setup scripts', () => {
     expect(compose).not.toContain('http://localhost:8000/api/v1/heartbeat');
   });
 
+  it('allows Chroma enough time to become healthy on slow hosts', () => {
+    const compose = read('docker-compose.yml');
+
+    expect(compose).toContain('# ChromaDB can take longer to initialize on slow or resource-constrained hosts.');
+    expect(compose).toMatch(/healthcheck:[\s\S]*?interval: 10s\n\s+timeout: 15s\n\s+retries: 5\n\s+start_period: 30s/u);
+  });
+
   it('pins local compose images and mounts an explicit Tempo config', () => {
     const compose = read('docker-compose.yml');
     const tempoConfig = read('tempo.yaml');

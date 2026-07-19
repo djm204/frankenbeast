@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -10,7 +10,6 @@ import {
   logHeader,
   BANNER,
   renderBanner,
-  shouldRenderGraphicBanner,
 } from '../../../src/logging/beast-logger.js';
 import type { CommandFailure } from '../../../src/errors/command-failure.js';
 
@@ -123,39 +122,28 @@ describe('logHeader', () => {
 // ── BANNER ──
 
 describe('BANNER', () => {
-  it('contains FRANKENBEAST in ASCII art', () => {
-    const plain = stripAnsi(BANNER);
-    expect(plain).toContain('########');
+  const wordmark = [
+    '███████╗██████╗  █████╗ ███╗   ██╗██╗  ██╗███████╗███╗   ██╗██████╗ ███████╗ █████╗ ███████╗████████╗',
+    '██╔════╝██╔══██╗██╔══██╗████╗  ██║██║ ██╔╝██╔════╝████╗  ██║██╔══██╗██╔════╝██╔══██╗██╔════╝╚══██╔══╝',
+    '█████╗  ██████╔╝███████║██╔██╗ ██║█████╔╝ █████╗  ██╔██╗ ██║██████╔╝█████╗  ███████║███████╗   ██║   ',
+    '██╔══╝  ██╔══██╗██╔══██║██║╚██╗██║██╔═██╗ ██╔══╝  ██║╚██╗██║██╔══██╗██╔══╝  ██╔══██║╚════██║   ██║   ',
+    '██║     ██║  ██║██║  ██║██║ ╚████║██║  ██╗███████╗██║ ╚████║██████╔╝███████╗██║  ██║███████║   ██║   ',
+    '╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═══╝╚═════╝ ╚══════╝╚═╝  ╚═╝╚══════╝   ╚═╝   ',
+  ].join('\n');
+
+  it('uses the Hermes CLI ANSI Shadow style for FRANKENBEAST', () => {
+    expect(stripAnsi(BANNER).trim()).toBe(wordmark.trim());
   });
 
   it('uses green ANSI color', () => {
     expect(BANNER).toContain('\x1b[32m');
   });
 
-  it('is under 20 lines', () => {
-    const lines = BANNER.split('\n').filter(l => l.length > 0);
-    expect(lines.length).toBeLessThanOrEqual(20);
-  });
-
-  it('renderBanner falls back to text when the logo path is unavailable', async () => {
+  it('renders only the green FRANKENBEAST wordmark', async () => {
     const banner = await renderBanner('/definitely/missing');
-    const plain = stripAnsi(banner);
-    expect(plain).toContain('FRANKENBEAST');
-    expect(plain).toContain('vdev');
-  });
 
-  it('prefers the graphic banner when the logo exists and plain mode is not forced', () => {
-    expect(shouldRenderGraphicBanner({
-      logoExists: true,
-      forcePlainBanner: false,
-    })).toBe(true);
-  });
-
-  it('falls back to the text banner when plain mode is forced', () => {
-    expect(shouldRenderGraphicBanner({
-      logoExists: true,
-      forcePlainBanner: true,
-    })).toBe(false);
+    expect(banner).toBe(BANNER);
+    expect(stripAnsi(banner)).not.toMatch(/vdev|🧟/u);
   });
 });
 

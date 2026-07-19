@@ -16,6 +16,9 @@ concurrency:
 jobs:
   build-test-lint:
     runs-on: ubuntu-latest
+    # Full monorepo build, tests, coverage, and E2E smoke checks may be slow,
+    # but a stalled run must release its runner within two hours.
+    timeout-minutes: 120
     strategy:
       matrix:
         deterministic-seed: ['1337']
@@ -164,6 +167,9 @@ jobs:
   publish-smoke:
     name: publish smoke (pack + offline install + run)
     runs-on: ubuntu-latest
+    # Packing and installing every publishable workspace should finish well
+    # inside this bound, including cold npm downloads.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
 
