@@ -25,7 +25,7 @@ If a change spans multiple owners, list every touched manifest entry and do not 
 
 ## Unknown or cross-cutting paths
 
-Do not guess an owner from package names alone. For unknown paths, first read `docs/CONTRACT_MATRIX.md`, `docs/RAMP_UP.md`, and nearby package READMEs, then assign `core-maintainers` as the default escalation owner until the manifest is updated.
+Do not guess an owner from package names alone. For unknown paths, first read `docs/CONTRACT_MATRIX.md`, `docs/onboarding/RAMP_UP.md`, and nearby package READMEs, then assign `core-maintainers` as the default escalation owner until the manifest is updated.
 
 Negative/edge cases:
 

@@ -1,6 +1,6 @@
 # franken-governor (MOD-07) Ramp-Up
 
-**Status**: **Integrated safety module** — The primary `@franken/orchestrator` CLI dependency path loads `@franken/governor` when the governor module is enabled. The orchestrator falls back to the local passthrough governor only when the module is explicitly disabled, or when an enabled package is missing and `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1` opts into unsafe degraded mode. The canonical integration status lives in [`../../../docs/RAMP_UP.md`](../../../docs/RAMP_UP.md).
+**Status**: **Integrated safety module** — The primary `@franken/orchestrator` CLI dependency path loads `@franken/governor` when the governor module is enabled. The orchestrator falls back to the local passthrough governor only when the module is explicitly disabled, or when an enabled package is missing and `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1` opts into unsafe degraded mode. The canonical integration status lives in [`../../../docs/onboarding/RAMP_UP.md`](../../../docs/onboarding/RAMP_UP.md).
 
 ## Module Overview
 `franken-governor` is the Human-in-the-loop (HITL) gateway. It pauses agent execution for human approval on high-stakes actions, such as budget breaches, destructive commands, or low-confidence plans.
@@ -25,7 +25,7 @@
 ## Narrow Integration Notes
 - The package supplies trigger, approval, audit, signing, and session-token primitives; callers remain responsible for supplying live context sources and enforcing approval results at execution boundaries.
 - Budget and skill triggers only fire when the caller provides the relevant budget state or skill metadata.
-- Keep this package-level note aligned with the canonical root integration story in [`../../../docs/RAMP_UP.md`](../../../docs/RAMP_UP.md), especially the `dep-factory.ts` / `createBeastDeps()` section.
+- Keep this package-level note aligned with the canonical root integration story in [`../../../docs/onboarding/RAMP_UP.md`](../../../docs/onboarding/RAMP_UP.md), especially the `dep-factory.ts` / `createBeastDeps()` section.
 
 ## Key API
 - `ApprovalGateway`: Central point for requesting approvals.

@@ -12,7 +12,7 @@ function readDoc(path: string) {
 describe('issue #2881', () => {
   it('documents npm version and toolchain prerequisites in RAMP_UP', () => {
     const manifest = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'));
-    const rampUp = readDoc('docs/RAMP_UP.md');
+    const rampUp = readDoc('docs/onboarding/RAMP_UP.md');
 
     expect(rampUp).toContain('## Prerequisites');
     expect(rampUp).toContain('root `package.json` `packageManager` field (`' + manifest.packageManager + '`)');

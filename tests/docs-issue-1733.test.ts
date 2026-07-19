@@ -56,7 +56,7 @@ describe('issue #1733 issue complexity rubric docs', () => {
 
   it('links the rubric from onboarding and issue workflow entrypoints', () => {
     const onboarding = readDoc('ONBOARDING.md');
-    const rampUp = readDoc('docs/RAMP_UP.md');
+    const rampUp = readDoc('docs/onboarding/RAMP_UP.md');
     const issueGuide = readDoc('docs/guides/fix-github-issues.md');
 
     expect(onboarding).toContain('docs/onboarding/issue-complexity-rubric.md');

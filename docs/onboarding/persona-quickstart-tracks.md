@@ -59,7 +59,7 @@ npm run local:verify-setup
 
 - Node.js and npm versions accepted by the root `engines.node` and `packageManager` fields.
 - A clean checkout or isolated worktree for your change.
-- Familiarity with the current package map in `docs/RAMP_UP.md` before changing package boundaries.
+- Familiarity with the current package map in `docs/onboarding/RAMP_UP.md` before changing package boundaries.
 
 ### Setup commands
 

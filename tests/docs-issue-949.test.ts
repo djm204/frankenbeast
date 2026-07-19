@@ -13,7 +13,7 @@ const PACKAGE_RAMP_UP_DOCS = [
 
 describe('issue #949 package ramp-up status docs', () => {
   it('keeps governor and critique package docs aligned with the consolidated root status', () => {
-    const rootRampUp = readText('docs/RAMP_UP.md');
+    const rootRampUp = readText('docs/onboarding/RAMP_UP.md');
 
     expect(rootRampUp).toContain('does **not** synthesize permissive passthrough success deps');
     expect(rootRampUp).toContain('FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1');
@@ -21,7 +21,7 @@ describe('issue #949 package ramp-up status docs', () => {
     for (const docPath of PACKAGE_RAMP_UP_DOCS) {
       const rampUp = readText(docPath);
 
-      expect(rampUp, `${docPath} should link the canonical root ramp-up guide`).toContain('../../../docs/RAMP_UP.md');
+      expect(rampUp, `${docPath} should link the canonical root ramp-up guide`).toContain('../../../docs/onboarding/RAMP_UP.md');
       expect(rampUp, `${docPath} should describe the enabled-module integration path`).toMatch(
         /when the (governor|critique) module is enabled/u,
       );
