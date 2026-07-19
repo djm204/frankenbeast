@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.2](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.15.1...@franken/brain-v0.15.2) (2026-07-19)
+
+
+### Bug Fixes
+
+* **brain:** define public package exports ([#3401](https://github.com/djm204/frankenbeast/issues/3401)) ([8b66824](https://github.com/djm204/frankenbeast/commit/8b66824ef583273d93b23a5619bf7f39979c9dd0))
+
 ## [0.15.1](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.15.0...@franken/brain-v0.15.1) (2026-07-19)
 
 

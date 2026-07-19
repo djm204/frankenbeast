@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/djm204/frankenbeast/compare/franken-web-v0.7.0...franken-web-v0.7.1) (2026-07-19)
+
+
+### Bug Fixes
+
+* **web:** confirm destructive network service actions ([#3403](https://github.com/djm204/frankenbeast/issues/3403)) ([0d60e65](https://github.com/djm204/frankenbeast/commit/0d60e65d45f43ee0bd0e8cd5f5732292bad709bf))
+
 ## [0.7.0](https://github.com/djm204/frankenbeast/compare/franken-web-v0.6.0...franken-web-v0.7.0) (2026-07-19)
 
 
