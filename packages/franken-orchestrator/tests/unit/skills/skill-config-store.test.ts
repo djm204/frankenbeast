@@ -80,7 +80,7 @@ describe('SkillConfigStore', () => {
   });
 
   describe('save()', () => {
-    it('atomically replaces config.json instead of writing through it', () => {
+    it('refuses to copy a symlink target into a local config', () => {
       mkdirSync(configDir, { recursive: true });
       const linkedConfigPath = join(tempDir, 'linked-config.json');
       writeFileSync(
@@ -91,14 +91,9 @@ describe('SkillConfigStore', () => {
       const configPath = join(configDir, 'config.json');
       symlinkSync(linkedConfigPath, configPath);
 
-      store.save(new Set(['github']));
+      expect(() => store.save(new Set(['github']))).toThrow(/symlinked config/i);
 
-      expect(lstatSync(configPath).isSymbolicLink()).toBe(false);
-      expect(statSync(configPath).mode & 0o777).toBe(0o600);
-      expect(JSON.parse(readFileSync(configPath, 'utf-8'))).toEqual({
-        theme: 'dark',
-        skills: { enabled: ['github'] },
-      });
+      expect(lstatSync(configPath).isSymbolicLink()).toBe(true);
       expect(JSON.parse(readFileSync(linkedConfigPath, 'utf-8'))).toEqual({
         theme: 'dark',
         skills: { enabled: ['old'] },

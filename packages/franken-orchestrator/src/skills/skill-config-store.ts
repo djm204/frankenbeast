@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, mkdirSync, statSync, unlinkSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, statSync, unlinkSync, lstatSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import {
   atomicWriteFileSync,
@@ -98,6 +98,9 @@ export class SkillConfigStore {
   private readExistingForSave(): Record<string, unknown> {
     let existing: Record<string, unknown> = {};
     if (existsSync(this.configPath)) {
+      if (lstatSync(this.configPath).isSymbolicLink()) {
+        throw new Error('Cannot save skill toggles because symlinked config files are not supported');
+      }
       try {
         const parsed = JSON.parse(readFileSync(this.configPath, 'utf-8'));
         // Normalize: only use parsed value if it's a plain object
