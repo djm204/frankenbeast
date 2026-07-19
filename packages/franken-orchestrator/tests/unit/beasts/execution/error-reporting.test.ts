@@ -281,7 +281,7 @@ describe('Error Reporting to Dashboard', () => {
         createdAt: new Date().toISOString(),
       });
 
-      await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow('spawn ENOENT');
+      await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow('Worker process could not be spawned.');
 
       // Run should be marked as failed
       const updatedRun = repo.getRun(run.id);
@@ -292,7 +292,7 @@ describe('Error Reporting to Dashboard', () => {
       const spawnFailedEvent = events.find((e) => e.type === 'run.spawn_failed');
       expect(spawnFailedEvent).toBeDefined();
       expect(spawnFailedEvent!.payload).toMatchObject({
-        error: 'spawn ENOENT',
+        error: 'Worker process could not be spawned.',
         code: 'ENOENT',
       });
 

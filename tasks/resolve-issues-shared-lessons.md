@@ -11,6 +11,10 @@
 - Separate shell interpolation parsing from JavaScript template interpolation, carry quote/heredoc context across lines, recognize staged crontab files and programmatic crontab sinks, and propagate aliased Python `os.environ`; otherwise a line-oriented scanner both misses persisted credentials and rejects safe runtime `$(gh auth token)` strings.
 - Treat cron-install taint as a language-aware dataflow problem: cover post-processed/backquoted `printenv`, wrapped/incrementally assembled `gh auth token`, aliased env imports/containers/sinks, dot/bracket/destructuring/joined interpolation flows, multiline schedules/assembly/programmatic sinks, and redirect/tee/stdin staging while preserving shell URLs and excluding quoted heredoc/escaped runtime expansion.
 
+## 2026-07-18 — MCP-owned SQLite lifecycle
+- When an MCP server owns or lazily creates a SQLite-backed adapter, expose an idempotent adapter `close()` and connect it to the SDK server's `onclose` path as well as an explicit public server `close()`. Central audit wrappers must forward cleanup, and proxy servers must release both their audit observer and any lazily-created adapter set.
+- In fresh monorepo worktrees, build internal workspace packages before package-level TypeScript checks; otherwise missing generated `dist` declarations produce unrelated module-resolution errors.
+
 ## 2026-07-18 — MCP execution deadline review fixes
 - A `Promise.race` timer cannot preempt synchronous handler work because the event loop is blocked; deadline wrappers must re-check wall-clock time after handler resolution/rejection and convert late completion into the same structured timeout while aborting the supplied signal. Keep that timer ref'ed so in-process callers with no other active handles still receive the timeout result.
 - Nested dispatch wrappers must have a deadline strictly longer than the longest inner target deadline, including validation/governance/audit slack, or the wrapper can win the timeout race and lose resolved-target timeout auditing.
@@ -363,3 +367,9 @@
 
 ## 2026-07-17 — Orchestrator chaos-test closeout
 - For orchestrator chaos/stability regressions, keep dropped-provider and thrown-tool cases deterministic: use fake timers around never-settling promises, assert cleanup with zero leaked timers, and build dependent workspaces before package typecheck when source-only workspace packages make bare orchestrator `tsc --noEmit` report missing `@franken/*` declarations.
+
+## 2026-07-18 — Spawn-failure telemetry redaction
+- Sanitizing the primary failure event is insufficient when the original exception is rethrown: audit every caller that can wrap it into run events, tracked-agent timelines, SSE publications, or durable logs. Rethrow a stable public error, allowlist diagnostic error codes, keep raw command/argv out of durable summaries, and test both immediate dispatch and later run-start paths with secret-bearing failures.
+
+## 2026-07-18 — Durable SSE ticket wiring
+- A persistent store implementation is not durable unless every daemon construction path supplies a stable database path; add a restart-level wiring test, and contain best-effort timer cleanup failures so transient SQLite errors cannot escape callbacks and terminate the process.

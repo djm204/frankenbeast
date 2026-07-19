@@ -145,6 +145,32 @@ describe('SseConnectionTicketStore', () => {
     }
   });
 
+  it('contains periodic cleanup and async observer failures without crashing the daemon', async () => {
+    vi.useFakeTimers();
+    const observerFailure = new Error('observer unavailable');
+    const onCleanupError = vi.fn().mockRejectedValue(observerFailure);
+    const cleanupStore = new SseConnectionTicketStore({
+      cleanupIntervalMs: 10,
+      onCleanupError,
+    });
+    const failure = new Error('database is busy');
+    const cleanupSpy = vi
+      .spyOn(cleanupStore as unknown as { cleanup(): void }, 'cleanup')
+      .mockImplementationOnce(() => {
+        throw failure;
+      });
+
+    try {
+      expect(() => vi.advanceTimersByTime(10)).not.toThrow();
+      await Promise.resolve();
+      expect(cleanupSpy).toHaveBeenCalledOnce();
+      expect(onCleanupError).toHaveBeenCalledWith(failure);
+    } finally {
+      cleanupStore.destroy();
+      vi.useRealTimers();
+    }
+  });
+
   it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1.5])(
     'rejects invalid consumedRetentionMs value %s',
     (consumedRetentionMs) => {

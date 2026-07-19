@@ -100,6 +100,24 @@ For Beast controls, run the orchestrator/backend setup flow with `frankenbeast i
 
 All servers share `.fbeast/beast.db` (SQLite, WAL mode). Memory frontload is scoped to that database: use a separate database per project when project isolation is required.
 
+### Programmatic lifecycle
+
+Programmatic callers that create an observer adapter or MCP server should close the owner during shutdown. `close()` is idempotent and releases the observer's SQLite handle; MCP server shutdown also closes its owned audit/observer resources.
+
+```ts
+const observer = createObserverAdapter('.fbeast/beast.db');
+try {
+  await observer.log({ event: 'tool_call', metadata: '{}', sessionId: 'session-1' });
+} finally {
+  observer.close?.();
+}
+
+const serverObserver = createObserverAdapter('.fbeast/beast.db');
+const server = createObserverServer({ observer: serverObserver });
+await server.start();
+await server.close();
+```
+
 Memory reads support explicit per-agent scope controls on `fbeast_memory_query` and `fbeast_memory_frontload`:
 
 - omit `readScope` or set `readScope: "all"` for legacy behavior;

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createMcpServer, sanitizeToolArgumentsForAuditTrail, validateToolArguments, type ToolDef, type GovernanceGate, type AuditSink } from './server-factory.js';
 
 describe('createMcpServer', () => {
@@ -6,6 +6,21 @@ describe('createMcpServer', () => {
     const server = createMcpServer('fbeast-memory', '0.1.0', []);
     expect(server).toBeDefined();
     expect(server.name).toBe('fbeast-memory');
+  });
+
+  it('runs close lifecycle callbacks exactly once', async () => {
+    const onClose = vi.fn();
+    const auditClose = vi.fn();
+    const server = createMcpServer('fbeast-memory', '0.1.0', [], {
+      onClose,
+      audit: { record: vi.fn(), close: auditClose },
+    });
+
+    await server.close();
+    await server.close();
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(auditClose).toHaveBeenCalledTimes(1);
   });
 
   it('registers tools from definitions', () => {

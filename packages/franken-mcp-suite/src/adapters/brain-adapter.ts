@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  DEFAULT_WORKING_MEMORY_LIMITS,
   SqliteBrain,
   type MemoryAttributionListOptions,
   type MemoryCandidate,
@@ -190,6 +191,33 @@ const MAX_MEMORY_ACCESS_AUDIT_SCAN_LIMIT = 10_000;
 const AGENT_WORKING_KEY_PREFIX = "__fbeast_agent_memory__/";
 const AGENT_MEMORY_SCOPE_MARKER = "fbeast:agent-memory";
 const MAX_OPERATIONAL_TTL_MS = 365 * 24 * 60 * 60 * 1000;
+export interface BrainAdapterOptions {
+  hydration?: {
+    /** Maximum working-memory rows restored during adapter construction. */
+    maxRows?: number;
+    /** Maximum combined UTF-8 bytes of working-memory keys and values restored. */
+    maxBytes?: number;
+  };
+}
+
+function resolveHydrationBudget(options: BrainAdapterOptions): {
+  maxRows: number;
+  maxBytes: number;
+} {
+  const maxRows =
+    options.hydration?.maxRows ?? DEFAULT_WORKING_MEMORY_LIMITS.maxEntries;
+  const maxBytes =
+    options.hydration?.maxBytes ?? DEFAULT_WORKING_MEMORY_LIMITS.maxTotalBytes;
+  for (const [name, value] of [
+    ["maxRows", maxRows],
+    ["maxBytes", maxBytes],
+  ] as const) {
+    if (!Number.isSafeInteger(value) || value < 1) {
+      throw new Error(`hydration.${name} must be a positive safe integer`);
+    }
+  }
+  return { maxRows, maxBytes };
+}
 
 type SupportedMemoryType = (typeof SUPPORTED_MEMORY_TYPES)[number];
 
@@ -1099,8 +1127,20 @@ function redactEpisodicSummary(
   return fullStringRedaction;
 }
 
-export function createBrainAdapter(dbPath: string): BrainAdapter {
-  const brain = new SqliteBrain(dbPath);
+export function createBrainAdapter(
+  dbPath: string,
+  options: BrainAdapterOptions = {},
+): BrainAdapter {
+  const hydrationBudget = resolveHydrationBudget(options);
+  // SqliteBrain owns the single startup hydration read and its concurrency
+  // safety. Startup-only limits avoid the adapter's former unbounded second
+  // SELECT/restore cycle without changing normal working-memory write limits.
+  const brain = new SqliteBrain(dbPath, undefined, {
+    workingMemoryHydrationLimits: {
+      maxRows: hydrationBudget.maxRows,
+      maxBytes: hydrationBudget.maxBytes,
+    },
+  });
 
   const resolveMemoryType = (
     type: string | undefined,
@@ -1113,32 +1153,6 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
       `Unsupported memory type: ${type}. Supported types: ${SUPPORTED_MEMORY_TYPES.join(", ")}`,
     );
   };
-
-  // Rehydrate working memory from SQLite so entries survive process restarts.
-  // SqliteBrain's constructor starts with an empty in-memory Map; flush() writes
-  // to the working_memory table but construction doesn't read it back.
-  const readDb = new Database(dbPath);
-  configureBrainAdapterDb(readDb);
-  try {
-    const rows = readDb
-      .prepare("SELECT key, value FROM working_memory")
-      .all() as Array<{ key: string; value: string }>;
-    const snap: Record<string, unknown> = {};
-    for (const row of rows) {
-      try {
-        snap[row.key] = JSON.parse(row.value);
-      } catch {
-        snap[row.key] = row.value;
-      }
-    }
-    if (Object.keys(snap).length > 0) {
-      brain.working.restore(snap);
-    }
-  } catch {
-    // Table may not exist yet on first run — that's fine
-  } finally {
-    readDb.close();
-  }
 
   return {
     async query(input) {

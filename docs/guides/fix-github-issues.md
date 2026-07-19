@@ -11,7 +11,9 @@
   npm run local:verify-cli
   ```
 
-  `local:link` builds the repo and links the workspaces that expose the `fbeast` and `frankenbeast` binaries. If you do not want global links, build the full checkout first and use `--help` as the setup smoke test:
+  `local:link` builds the repo and links every workspace, including those that
+  expose the `fbeast` and `frankenbeast` binaries. If you do not want global
+  links, build the full checkout first and use `--help` as the setup smoke test:
 
   ```bash
   npm run build
