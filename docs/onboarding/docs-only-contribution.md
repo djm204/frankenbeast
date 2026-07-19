@@ -18,6 +18,9 @@ gh issue view "$ISSUE_NUMBER" --repo "$REPO"
 gh pr list --repo "$REPO" --state open --limit 100 \
   --search "$ISSUE_NUMBER OR issue-$ISSUE_NUMBER" \
   --json number,title,headRefName,url
+gh pr list --repo "$REPO" --state open --limit 100 \
+  --json number,title,headRefName,url \
+  --jq ".[] | select(.headRefName | contains(\"issue-$ISSUE_NUMBER-\"))"
 ```
 
 If the issue is unclear or an open PR already covers it, comment on the issue instead of starting duplicate work.
@@ -67,7 +70,7 @@ Documentation-only changes do not require the package build, Docker, ChromaDB, G
 
 ## 5. Open a reviewable pull request
 
-Review and stage only the intended files, use a Conventional Commit, and push the branch:
+Review and stage only the intended files, use a Conventional Commit, and push the branch. Because `git add -p` skips untracked files, first run `git add --intent-to-add <new-path>` for each new documentation or test file, replacing the placeholder with its repository-relative path.
 
 ```bash
 git status --short

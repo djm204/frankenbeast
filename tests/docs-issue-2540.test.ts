@@ -25,6 +25,7 @@ describe('issue #2540 docs-only contributor quickstart', () => {
       '## 1. Confirm the issue is available',
       'gh issue view "$ISSUE_NUMBER"',
       'gh pr list',
+      '.headRefName | contains(\\"issue-$ISSUE_NUMBER-\\")',
       '## 2. Create a focused branch',
       'git switch -c "docs/issue-${ISSUE_NUMBER}-short-description"',
       '## 3. Edit and preview',
@@ -32,10 +33,13 @@ describe('issue #2540 docs-only contributor quickstart', () => {
       'npm run test:root -- "tests/docs-issue-${ISSUE_NUMBER}.test.ts"',
       'npm run test:root',
       '## 5. Open a reviewable pull request',
+      'git add --intent-to-add <new-path>',
       'Closes #<issue-number>',
       'Docker and optional local services are not required',
     ]) {
       expect(guide).toContain(expected);
     }
+
+    expect(guide).toMatch(/```bash\nnpm run test:root\n```/);
   });
 });
