@@ -610,12 +610,10 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
         typeof payload.response_url === 'string' &&
         isTrustedSlackResponseUrl(payload.response_url)
       ) {
-        try {
-          await slackResponsePoster.post(payload.response_url, denial);
-        } catch {
-          // Always acknowledge Slack within its interaction window. The pending
-          // approval remains untouched when delivery of the denial fails.
-        }
+        // Slack requires interaction callbacks to be acknowledged promptly.
+        // Deliver denial feedback out-of-band and leave the approval pending
+        // even if response_url delivery later fails.
+        void slackResponsePoster.post(payload.response_url, denial).catch(() => undefined);
       }
       return c.json({
         response_type: 'ephemeral',

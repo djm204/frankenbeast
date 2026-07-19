@@ -719,8 +719,8 @@ describe('Governor Hono Server', () => {
       expect(res.status).toBe(401);
     });
 
-    it('rejects a signed callback from a Slack user outside the configured approver allowlist', async () => {
-      const postSlackResponse = vi.fn().mockResolvedValue(undefined);
+    it('posts an unauthorized denial without delaying the Slack acknowledgement', async () => {
+      const postSlackResponse = vi.fn().mockReturnValue(new Promise<void>(() => undefined));
       const app = createGovernorApp({
         slackSigningSecret: SLACK_SECRET,
         slackApproverUserIds: ['U-AUTHORIZED'],
