@@ -50,6 +50,12 @@ export {
 } from './learning/sandbox.js';
 export { FixtureStore } from './workspace/fixture-store.js';
 export {
+  assertNormalizedWorkspaceRelativePath,
+  assertSafeBenchmarkTaskPaths,
+  isNormalizedWorkspaceRelativePath,
+  resolveWorkspaceArtifactPath,
+} from './workspace/artifact-path.js';
+export {
   WorkspaceProvisioner,
   type WorkspaceProvisionerConfig,
   type ProvisionedWorkspace,

@@ -35,6 +35,7 @@ Key exports:
 | `ToolCallEvidenceManifestSchema`, `serializeToolCallEvidence` | Validate and serialize the full tool-call evidence artifact array. |
 | `FixtureStore` | Manage fixture files used by benchmark workspaces. |
 | `WorkspaceProvisioner` | Create isolated workspaces and capture environment snapshots for benchmark runs. |
+| `resolveWorkspaceArtifactPath` | Resolve an expected artifact or file-check path beneath a workspace while rejecting traversal, absolute paths, and symlinked components. Evaluators must call this before inspecting files. |
 | `runLearningSandboxExperiment` | Run learned-strategy experiments against read-only fixture clones with a deny-by-default tool policy and persisted pass/fail evidence. |
 
 ## CLI
