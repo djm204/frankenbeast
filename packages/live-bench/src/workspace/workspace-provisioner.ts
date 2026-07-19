@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import {
-  chmodSync,
   closeSync,
   constants,
   cpSync,
@@ -18,7 +17,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { join, parse, relative, resolve, sep } from 'node:path';
+import { dirname, join, parse, relative, resolve, sep } from 'node:path';
 import { serializeToolCallEvidence } from '../evidence/tool-call-evidence.js';
 import type { BenchmarkMatrixRow, BenchmarkTask } from '../types.js';
 import { LIVE_BENCH_TOOL_CALL_EVIDENCE_ARTIFACT } from '../types.js';
@@ -156,6 +155,9 @@ export function prepareRunDirectorySafely(
   expectedRunsRootIdentity = fileIdentity(lstatSync(realpathSync(runsRoot))),
 ): PreparedRunDirectory {
   ensureContained(runDir, runsRoot, 'run directory');
+  if (process.platform === 'win32') {
+    return prepareRunDirectoryPortable(runDir, runsRoot, expectedRunsRootIdentity);
+  }
   const rel = relative(runsRoot, runDir);
   const segments = rel.split(sep).filter((segment) => segment.length > 0);
   const leaf = segments.pop();
@@ -188,7 +190,7 @@ export function prepareRunDirectorySafely(
     }
 
     const anchoredRunPath = join(fdPath(parentFd), leaf);
-    removeAnchoredRunDirectory(anchoredRunPath, fdPath(rootFd), runDir, directoryFlags);
+    removeAnchoredRunDirectory(anchoredRunPath, fdPath(parentFd), runDir, directoryFlags);
     mkdirSync(anchoredRunPath, { mode: 0o700 });
     runFd = openSync(anchoredRunPath, directoryFlags);
     const anchoredRunDir = fdPath(runFd);
@@ -222,9 +224,60 @@ export function prepareRunDirectorySafely(
   }
 }
 
+function prepareRunDirectoryPortable(
+  runDir: string,
+  runsRoot: string,
+  expectedRunsRootIdentity: FileIdentity,
+): PreparedRunDirectory {
+  if (!sameFileIdentity(fileIdentity(lstatSync(realpathSync(runsRoot))), expectedRunsRootIdentity)) {
+    throw new Error(`Runs root identity changed during cleanup: ${runsRoot}`);
+  }
+  ensurePortableParentDirectories(runsRoot, dirname(runDir));
+
+  if (pathExistsNoFollow(runDir)) {
+    const initialStat = lstatSync(runDir);
+    if (initialStat.isSymbolicLink()) {
+      unlinkSync(runDir);
+      throw new Error(`Run directory changed to a symlink during cleanup: ${runDir}`);
+    }
+    if (!initialStat.isDirectory()) {
+      throw new Error(`Run directory changed to a non-directory during cleanup: ${runDir}`);
+    }
+
+    const cleanupRoot = mkdtempSync(join(dirname(runDir), '.cleanup-'));
+    const quarantinedRunDir = join(cleanupRoot, 'run');
+    let removeCleanupRoot = true;
+    try {
+      renameSync(runDir, quarantinedRunDir);
+      const quarantinedStat = lstatSync(quarantinedRunDir);
+      if (!sameFileIdentity(fileIdentity(quarantinedStat), fileIdentity(initialStat))) {
+        removeCleanupRoot = false;
+        throw new Error(`Run directory identity changed during cleanup: ${runDir}`);
+      }
+      rmSync(quarantinedRunDir, { recursive: true, force: false });
+    } catch (error) {
+      if (pathExistsNoFollow(quarantinedRunDir)) {
+        removeCleanupRoot = false;
+      }
+      throw error;
+    } finally {
+      if (removeCleanupRoot) {
+        rmdirSync(cleanupRoot);
+      }
+    }
+  }
+
+  mkdirSync(runDir, { mode: 0o700 });
+  const createdStat = lstatSync(runDir);
+  if (!createdStat.isDirectory() || createdStat.isSymbolicLink()) {
+    throw new Error(`Run directory changed during creation: ${runDir}`);
+  }
+  return { anchoredRunDir: runDir, close: () => undefined };
+}
+
 function removeAnchoredRunDirectory(
   anchoredRunPath: string,
-  anchoredRoot: string,
+  anchoredParent: string,
   displayRunDir: string,
   directoryFlags: number,
 ): void {
@@ -241,8 +294,7 @@ function removeAnchoredRunDirectory(
     throw new Error(`Run directory changed to a non-directory during cleanup: ${displayRunDir}`);
   }
 
-  const cleanupRoot = mkdtempSync(join(anchoredRoot, '.cleanup-'));
-  chmodSync(cleanupRoot, 0o700);
+  const cleanupRoot = mkdtempSync(join(anchoredParent, '.cleanup-'));
   const cleanupFd = openSync(cleanupRoot, directoryFlags);
   const quarantinedRunDir = join(fdPath(cleanupFd), 'run');
   let removeCleanupRoot = true;
@@ -430,6 +482,31 @@ function ensureNoSymlinkPathPrefix(target: string, label: string): void {
     }
     if (lstatSync(current).isSymbolicLink()) {
       throw new Error(`${label} path component must not be a symlink: ${current}`);
+    }
+  }
+}
+
+function ensurePortableParentDirectories(root: string, target: string): void {
+  const rel = relative(root, target);
+  const parts = rel.split(sep).filter((part) => part.length > 0);
+  let current = root;
+
+  for (const [index, part] of parts.entries()) {
+    current = join(current, part);
+    try {
+      mkdirSync(current, { mode: 0o700 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+        throw error;
+      }
+    }
+    const stat = lstatSync(current);
+    const label = index === 0 ? 'run date directory' : 'run directory path component';
+    if (stat.isSymbolicLink()) {
+      throw new Error(`${label} must not be a symlink: ${current}`);
+    }
+    if (!stat.isDirectory()) {
+      throw new Error(`${label} is not a directory: ${current}`);
     }
   }
 }
