@@ -344,6 +344,43 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         self.assertEqual(post_review.call_count, 1)
         self.assertTrue(post_review.call_args.kwargs["diff_truncated"])
 
+    def test_file_limit_exit_salvages_truncated_agy_stdout(self):
+        payload = b"x" * self.reviewer.MAX_REVIEW_BYTES
+        result = self.reviewer.decode_agy_result(-25, payload, b"file too large")
+        self.assertTrue(result.endswith("[REVIEW OUTPUT TRUNCATED] ..."))
+
+    def test_failed_gh_diff_is_not_collapsed_to_empty(self):
+        process = FakeProcess(b"")
+        process.returncode = 1
+        with mock.patch.dict(
+            os.environ, {"PR_REVIEWER_REPOSITORY": "djm204/frankenbeast"}
+        ), mock.patch.object(
+            self.reviewer.urllib.request, "urlopen", side_effect=OSError("offline")
+        ), mock.patch.object(self.reviewer.subprocess, "Popen", return_value=process):
+            with self.assertRaises(RuntimeError):
+                self.reviewer.get_pr_diff(999)
+
+    def test_open_pr_enumeration_raises_the_default_limit(self):
+        with mock.patch.object(
+            self.reviewer.subprocess, "check_output", return_value=b"[]"
+        ) as check_output:
+            self.reviewer.get_open_prs()
+        command = check_output.call_args.args[0]
+        limit = int(command[command.index("--limit") + 1])
+        self.assertGreaterEqual(limit, 1000)
+
+    def test_review_file_is_absolute_for_relative_workspace(self):
+        captured = []
+
+        def capture(command, **_kwargs):
+            captured.append(command[-1])
+
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            self.reviewer, "WORKSPACE", Path(directory).resolve()
+        ), mock.patch.object(self.reviewer.subprocess, "check_call", side_effect=capture):
+            self.assertTrue(self.reviewer.post_pr_review(55, "VERDICT: COMMENT", []))
+        self.assertTrue(Path(captured[0]).is_absolute())
+
 
 if __name__ == "__main__":
     unittest.main()

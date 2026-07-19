@@ -10,7 +10,11 @@ describe("automated PR reviewer diff bounds", () => {
       execFileSync(
         "python3",
         ["-m", "unittest", "tests/test_pr_reviewer.py", "-v"],
-        { cwd: repoRoot, encoding: "utf8" },
+        {
+          cwd: repoRoot,
+          encoding: "utf8",
+          env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" },
+        },
       ),
     ).not.toThrow();
   });
