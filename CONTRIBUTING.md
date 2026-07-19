@@ -124,6 +124,44 @@ Keep the pull request title in Conventional Commit form, for example `docs(onboa
 
 After review changes, rerun the affected checks and update the verification evidence. A new commit means the current head must pass CI again before merge.
 
+## Respond to review feedback
+
+Review is a loop, not a one-time handoff. Set your pull-request number, read the latest comments, and inspect current checks before editing:
+
+```bash
+PR_NUMBER="123" # replace with your pull-request number
+gh pr view "$PR_NUMBER" --repo djm204/frankenbeast --comments
+gh api --paginate "repos/djm204/frankenbeast/pulls/$PR_NUMBER/comments" \
+  --jq '.[] | "\(.path):\(.line // .original_line): \(.body)"'
+gh pr checks "$PR_NUMBER" --repo djm204/frankenbeast
+```
+
+`gh pr view --comments` shows the pull request conversation, while the `gh api` command shows inline review comments attached to changed lines. Read both before editing. You can also use the pull request's **Conversation** and **Files changed** tabs on GitHub.
+
+For each comment, decide whether it requests a code or documentation change, asks a question, or refers to an older commit that is already superseded. Ask for clarification when the requested outcome is ambiguous. Otherwise, make the smallest focused update, rerun the affected verification command, and inspect exactly what you will commit:
+
+```bash
+git status --short
+git diff --check
+git diff --stat
+git add -p # stage only the feedback-related hunks
+git diff --cached --stat
+git diff --cached
+COMMIT_SUBJECT="fix(scope): address review feedback" # replace type, scope, and summary
+git commit -m "$COMMIT_SUBJECT"
+git push
+```
+
+Then watch the checks for the pushed commit:
+
+```bash
+gh pr checks "$PR_NUMBER" --repo djm204/frankenbeast --watch
+```
+
+Reply with the change and verification evidence, or explain technically why no change is needed. Resolve a review conversation only after the request is addressed and the reply is visible. Re-open the pull request's comments after every push so a new finding is not missed.
+
+CI and review feedback apply to the current head commit. If you push again, wait for checks and required review on that new head; do not rely on a green check or approval from an older commit. If a merge conflict appears, stop and ask a maintainer for the repository's preferred update strategy rather than force-pushing unfamiliar history.
+
 ## Getting help
 
 For setup failures, start with the [setup troubleshooting matrix](docs/onboarding/setup-troubleshooting-matrix.md). For test selection, use the [test command decision tree](docs/onboarding/test-command-decision-tree.md). For package ownership and architecture, use the [architecture map](docs/onboarding/architecture-map.md) and [repository ownership manifest](docs/onboarding/repository-ownership.md). Ask a focused question on the issue when these guides do not resolve the blocker.
