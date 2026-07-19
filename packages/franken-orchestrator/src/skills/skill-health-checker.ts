@@ -31,6 +31,7 @@ const INCOMPLETE_HANDSHAKE_MESSAGE =
   'MCP initialize handshake was not completed before the command exited';
 
 const HEALTH_CHECK_TIMEOUT_MS = 2000;
+const HEALTH_CHECK_TERMINATION_GRACE_MS = 250;
 /** Maximum number of MCP child-process health probes running at once. */
 const MAX_CONCURRENT_MCP_HEALTH_PROBES = 4;
 /** Maximum number of child processes spawned by one trusted status check. */
@@ -135,10 +136,48 @@ export class SkillHealthChecker {
         }
         settled = true;
         clearTimeout(timer);
-        if (killRunningProcess && proc.exitCode === null && !proc.killed) {
-          proc.kill();
+        const outcome = { status, ...(error === undefined ? {} : { error }) };
+
+        if (killRunningProcess && proc.exitCode === null) {
+          let forceKillTimer: NodeJS.Timeout | undefined = undefined;
+          let terminated = false;
+          const finishAfterTermination = () => {
+            if (terminated) {
+              return;
+            }
+            terminated = true;
+            if (forceKillTimer) {
+              clearTimeout(forceKillTimer);
+            }
+            proc.off('exit', finishAfterTermination);
+            proc.off('close', finishAfterTermination);
+            resolve(outcome);
+          };
+
+          proc.once('exit', finishAfterTermination);
+          proc.once('close', finishAfterTermination);
+          try {
+            proc.kill();
+          } catch {
+            finishAfterTermination();
+            return;
+          }
+          if (terminated) {
+            return;
+          }
+          forceKillTimer = setTimeout(() => {
+            if (proc.exitCode === null) {
+              try {
+                proc.kill('SIGKILL');
+              } catch {
+                finishAfterTermination();
+              }
+            }
+          }, HEALTH_CHECK_TERMINATION_GRACE_MS);
+          return;
         }
-        resolve({ status, ...(error === undefined ? {} : { error }) });
+
+        resolve(outcome);
       };
 
       try {

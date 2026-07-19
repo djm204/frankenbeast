@@ -309,6 +309,59 @@ describe('SkillHealthChecker', () => {
     expect(maxActiveProbes).toBeLessThanOrEqual(4);
   });
 
+  it('keeps a concurrency slot until a probe process exits', async () => {
+    vi.useFakeTimers();
+    const { spawn } = await import('node:child_process');
+    let activeProbes = 0;
+    let maxActiveProbes = 0;
+
+    (spawn as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      const proc = makeMockProcess();
+      activeProbes += 1;
+      maxActiveProbes = Math.max(maxActiveProbes, activeProbes);
+      proc.stdin.write.mockImplementation(() => {
+        setTimeout(() => {
+          proc.stdout.emit('data', formatMcpMessage({
+            jsonrpc: '2.0',
+            id: 1,
+            result: {},
+          }));
+        }, 1);
+        return true;
+      });
+      proc.kill.mockImplementation((signal?: NodeJS.Signals) => {
+        proc.killed = true;
+        if (signal === 'SIGKILL') {
+          setTimeout(() => {
+            activeProbes -= 1;
+            proc.emit('exit', null, 'SIGKILL');
+            proc.emit('close', null, 'SIGKILL');
+          }, 1);
+        }
+        return true;
+      });
+      return proc;
+    });
+
+    const config: McpConfig = {
+      mcpServers: Object.fromEntries(
+        Array.from({ length: 12 }, (_, index) => [
+          `server-${index}`,
+          { command: 'node' },
+        ]),
+      ),
+    };
+
+    const resultPromise = checker.getStatus('stubborn', config, {
+      trustMcpServerCommands: true,
+    });
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.serverStatuses).toHaveLength(12);
+    expect(maxActiveProbes).toBeLessThanOrEqual(4);
+  });
+
   it('skips trusted MCP probes beyond the aggregate limit', async () => {
     vi.useFakeTimers();
     const { spawn } = await import('node:child_process');
@@ -371,8 +424,16 @@ function makeMockProcess() {
     stdout: new EventEmitter(),
     stderr: new EventEmitter(),
     stdin,
-    kill: vi.fn(function kill(this: { killed: boolean }) {
+    kill: vi.fn(function kill(
+      this: EventEmitter & { killed: boolean },
+      signal: NodeJS.Signals = 'SIGTERM',
+    ) {
       this.killed = true;
+      queueMicrotask(() => {
+        this.emit('exit', null, signal);
+        this.emit('close', null, signal);
+      });
+      return true;
     }),
     pid: 123,
     exitCode: null as number | null,
