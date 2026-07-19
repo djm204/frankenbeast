@@ -10,6 +10,7 @@ import {
   symlinkSync,
   chmodSync,
   statSync,
+  readdirSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -167,6 +168,18 @@ describe('SkillConfigStore', () => {
       }
 
       expect(statSync(configPath).mode & 0o777).toBe(0o660);
+    });
+
+    it('refuses to replace an existing read-only config', () => {
+      mkdirSync(configDir, { recursive: true });
+      const configPath = join(configDir, 'config.json');
+      const original = JSON.stringify({ skills: { enabled: ['old'] } });
+      writeFileSync(configPath, original);
+      chmodSync(configPath, 0o444);
+
+      expect(() => store.save(new Set(['github']))).toThrow(/read-only/i);
+      expect(readFileSync(configPath, 'utf-8')).toBe(original);
+      expect(statSync(configPath).mode & 0o777).toBe(0o444);
     });
 
     it('recovers from non-object JSON root on save (e.g. null)', () => {
@@ -351,6 +364,48 @@ describe('SkillManager + SkillConfigStore integration', () => {
     expect(() => manager.remove('github')).toThrow(/still preparing/i);
     expect(manager.exists('github')).toBe(true);
     expect(manager.getEnabledSkills()).toContain('github');
+  });
+
+  it('preflights the complete atomic write path without leaving probe files', async () => {
+    const manager = new SkillManager(skillsDir, new Set(['github']), store);
+    await installSkill(manager, 'github');
+    store.save(new Set(['github']));
+
+    store.assertSaveable();
+
+    expect(readdirSync(configDir).filter((name) => name.includes('write-probe'))).toEqual([]);
+    expect(manager.exists('github')).toBe(true);
+    expect(store.getEnabledSkills()).toContain('github');
+  });
+
+  it('does not delete skill files when the atomic write probe fails', async () => {
+    class FailingProbeConfigStore extends SkillConfigStore {
+      protected override probeAtomicWrite(): void {
+        throw new Error('injected atomic write probe failure');
+      }
+    }
+    const failingStore = new FailingProbeConfigStore(configDir);
+    failingStore.save(new Set(['github']));
+    const manager = new SkillManager(skillsDir, new Set(['github']), failingStore);
+    await installSkill(manager, 'github');
+
+    expect(() => manager.remove('github')).toThrow(/injected atomic write probe failure/);
+    expect(manager.exists('github')).toBe(true);
+    expect(manager.getEnabledSkills()).toContain('github');
+    expect(failingStore.getEnabledSkills()).toContain('github');
+  });
+
+  it('does not delete skill files when the existing config is read-only', async () => {
+    const manager = new SkillManager(skillsDir, new Set(['github']), store);
+    await installSkill(manager, 'github');
+    store.save(new Set(['github']));
+    const configPath = join(configDir, 'config.json');
+    chmodSync(configPath, 0o444);
+
+    expect(() => manager.remove('github')).toThrow(/read-only/i);
+    expect(manager.exists('github')).toBe(true);
+    expect(manager.getEnabledSkills()).toContain('github');
+    expect(store.getEnabledSkills()).toContain('github');
   });
 
   it('does not persist or mutate toggle state when file removal fails', async () => {

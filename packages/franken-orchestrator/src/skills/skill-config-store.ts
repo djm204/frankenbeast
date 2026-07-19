@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, mkdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, statSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import {
   atomicWriteFileSync,
@@ -16,6 +16,7 @@ import {
  *   run config `skills:` field > persisted defaults > empty
  */
 export class SkillConfigStore {
+  private static probeCounter = 0;
   private readonly configPath: string;
 
   constructor(configDir: string) {
@@ -52,18 +53,46 @@ export class SkillConfigStore {
       enabled: [...enabledSkills].sort(),
     };
 
-    const mode = existsSync(this.configPath)
-      ? statSync(this.configPath).mode & 0o777
-      : 0o600;
+    const mode = this.configModeForWrite();
     atomicWriteFileSync(this.configPath, JSON.stringify(existing, null, 2) + '\n', { mode });
   }
 
   assertSaveable(): void {
+    mkdirSync(dirname(this.configPath), { recursive: true });
     this.readExistingForSave();
+    this.configModeForWrite();
     const recovery = recoverStateWriteTransaction(this.configPath);
     if (recovery?.action === 'retained-active-journal') {
       throw new Error(recovery.reason);
     }
+
+    // remove() deletes skill files before persisting their disabled state. Probe
+    // the complete sidecar/temp/rename path in the same directory first so a
+    // directory that cannot support atomic writes fails before those files are
+    // touched. The real save still performs its own recovery for race safety.
+    const probePath = `${this.configPath}.write-probe.${process.pid}.${SkillConfigStore.probeCounter++}`;
+    try {
+      this.probeAtomicWrite(probePath);
+    } finally {
+      try {
+        unlinkSync(probePath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
+  }
+
+  protected probeAtomicWrite(probePath: string): void {
+    atomicWriteFileSync(probePath, '', { mode: 0o600 });
+  }
+
+  private configModeForWrite(): number {
+    if (!existsSync(this.configPath)) return 0o600;
+    const mode = statSync(this.configPath).mode & 0o777;
+    if ((mode & 0o222) === 0) {
+      throw new Error('Cannot save skill toggles because the existing config is read-only');
+    }
+    return mode;
   }
 
   private readExistingForSave(): Record<string, unknown> {
