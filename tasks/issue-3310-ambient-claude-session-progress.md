@@ -7,6 +7,6 @@
 - [x] Retry exactly once with a fresh isolated session for classified stale/invalid provider-session failures.
 - [x] Run focused orchestrator tests.
 - [x] Run orchestrator typecheck, lint, and build.
-- [ ] Commit and open a single issue-scoped PR with `Closes #3310`.
+- [x] Commit and open a single issue-scoped PR with `Closes #3310`.
 - [ ] Obtain green CI and current-head Codex clean with zero unresolved Codex threads.
 - [ ] Squash-merge, verify issue closure, and record any reusable lesson.

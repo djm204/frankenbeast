@@ -1,5 +1,9 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-19 — Provider-native cache session isolation
+- Never translate an application cache/work key into a provider continuation flag. Start the first native-capable cache call without `--continue`, capture the provider-issued session id, and resume only that exact id when provider and model still match.
+- Treat only classified stale/invalid-session failures as retryable: emit fallback telemetry and retry once in a fresh persisted session; propagate all other provider errors so failures cannot silently double expensive calls.
+
 ## 2026-07-19 — Deterministic abort handling regression
 - Prefer deterministic abort fixtures over timing sleeps: for HTTP disconnect behavior, verify both in-band and immediate-abort paths by asserting that `AbortSignal` is already aborted when `request.destroyed`/`request.aborted` is true before app handler execution.
 - Use a pre-aborted request object (or equivalent event-driven signal path) in unit tests when asserting handler abort behavior, and keep timeouts only as a bounded safety net, not as fixture synchronization.
