@@ -1004,6 +1004,7 @@ describe('CliLlmAdapter', () => {
           provider: 'adapter',
           model: 'adapter',
           messages: [{ role: 'user', content: 'hello' }],
+          session_id: 'chat-app-1',
         });
 
         expect(request.model).toBe('codex-mini');
@@ -1013,6 +1014,7 @@ describe('CliLlmAdapter', () => {
         expect(calls[0]!.cmd).toBe('codex');
         expect(calls[1]!.cmd).toBe('claude');
         expect(calls[1]!.args).not.toContain('codex-mini');
+        expect(calls[1]!.args).not.toContain('--no-session-persistence');
       });
 
       it('normalizes successful fallback output with the provider that produced it', async () => {
