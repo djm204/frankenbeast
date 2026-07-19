@@ -24,8 +24,21 @@ export class HttpError extends Error {
   }
 }
 
+const MAX_REQUEST_ID_LENGTH = 128;
+const SAFE_REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
+
+function isSafeRequestId(value: string | undefined): value is string {
+  return value !== undefined
+    && value.length > 0
+    && value.length <= MAX_REQUEST_ID_LENGTH
+    && SAFE_REQUEST_ID_PATTERN.test(value);
+}
+
 export const requestId = createMiddleware(async (c, next) => {
-  const id = c.req.header('x-request-id') ?? deterministicUuid('packages/franken-orchestrator/src/http/middleware.ts');
+  const incomingId = c.req.header('x-request-id');
+  const id = isSafeRequestId(incomingId)
+    ? incomingId
+    : deterministicUuid('packages/franken-orchestrator/src/http/middleware.ts');
   c.set('requestId', id);
   c.header('x-request-id', id);
   await next();

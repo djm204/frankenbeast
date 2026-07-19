@@ -70,6 +70,26 @@ describe('CliChannel', () => {
     expect(response.decision).toBe('DEBUG');
   });
 
+  it('accepts "yes" and "y" as APPROVE aliases', async () => {
+    const channel = new CliChannel({ readline: makeFakeReadline(['yes']), operatorName: 'dev' });
+    const response = await channel.requestApproval(makeRequest());
+    expect(response.decision).toBe('APPROVE');
+
+    const channelWithY = new CliChannel({ readline: makeFakeReadline(['y']), operatorName: 'dev' });
+    const responseWithY = await channelWithY.requestApproval(makeRequest({ requestId: 'req-y' }));
+    expect(responseWithY.decision).toBe('APPROVE');
+  });
+
+  it('accepts "no" and "n" as ABORT aliases', async () => {
+    const channel = new CliChannel({ readline: makeFakeReadline(['no']), operatorName: 'dev' });
+    const response = await channel.requestApproval(makeRequest());
+    expect(response.decision).toBe('ABORT');
+
+    const channelWithN = new CliChannel({ readline: makeFakeReadline(['n']), operatorName: 'dev' });
+    const responseWithN = await channelWithN.requestApproval(makeRequest({ requestId: 'req-n' }));
+    expect(responseWithN.decision).toBe('ABORT');
+  });
+
   it('prompts for feedback when REGEN is selected', async () => {
     const readline = makeFakeReadline(['r', 'use a different approach']);
     const channel = new CliChannel({ readline, operatorName: 'dev' });
@@ -151,5 +171,8 @@ describe('CliChannel', () => {
     const response = await channel.requestApproval(makeRequest());
     expect(response.decision).toBe('APPROVE');
     expect(readline.question).toHaveBeenCalledTimes(3);
+    expect(readline.question).toHaveBeenCalledWith(
+      expect.stringContaining('Please answer a/approve/y/yes, r/regenerate, x/abort/n/no, or d/debug.'),
+    );
   });
 });

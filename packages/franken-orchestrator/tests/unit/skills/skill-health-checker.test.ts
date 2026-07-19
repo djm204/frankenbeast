@@ -272,6 +272,203 @@ describe('SkillHealthChecker', () => {
     expect(result.serverStatuses).toHaveLength(2);
   });
 
+  it('runs at most four trusted MCP probes concurrently', async () => {
+    vi.useFakeTimers();
+    const { spawn } = await import('node:child_process');
+    let activeProbes = 0;
+    let maxActiveProbes = 0;
+
+    (spawn as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      const proc = makeMockProcess();
+      activeProbes += 1;
+      maxActiveProbes = Math.max(maxActiveProbes, activeProbes);
+      setTimeout(() => {
+        activeProbes -= 1;
+        proc.exitCode = 0;
+        proc.emit('close', 0);
+      }, 100);
+      return proc;
+    });
+
+    const config: McpConfig = {
+      mcpServers: Object.fromEntries(
+        Array.from({ length: 12 }, (_, index) => [
+          `server-${index}`,
+          { command: 'echo' },
+        ]),
+      ),
+    };
+
+    const resultPromise = checker.getStatus('bounded', config, {
+      trustMcpServerCommands: true,
+    });
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.serverStatuses).toHaveLength(12);
+    expect(maxActiveProbes).toBeLessThanOrEqual(4);
+  });
+
+  it('shares the four-probe limit across concurrent status checks', async () => {
+    vi.useFakeTimers();
+    const { spawn } = await import('node:child_process');
+    let activeProbes = 0;
+    let maxActiveProbes = 0;
+
+    (spawn as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      const proc = makeMockProcess();
+      activeProbes += 1;
+      maxActiveProbes = Math.max(maxActiveProbes, activeProbes);
+      setTimeout(() => {
+        activeProbes -= 1;
+        proc.exitCode = 0;
+        proc.emit('close', 0);
+      }, 100);
+      return proc;
+    });
+    const makeConfig = (prefix: string): McpConfig => ({
+      mcpServers: Object.fromEntries(
+        Array.from({ length: 6 }, (_, index) => [
+          `${prefix}-${index}`,
+          { command: 'echo' },
+        ]),
+      ),
+    });
+
+    const resultsPromise = Promise.all([
+      checker.getStatus('first', makeConfig('first'), { trustMcpServerCommands: true }),
+      checker.getStatus('second', makeConfig('second'), { trustMcpServerCommands: true }),
+    ]);
+    await vi.runAllTimersAsync();
+    const results = await resultsPromise;
+
+    expect(results[0].serverStatuses).toHaveLength(6);
+    expect(results[1].serverStatuses).toHaveLength(6);
+    expect(maxActiveProbes).toBeLessThanOrEqual(4);
+  });
+
+  it('keeps a concurrency slot until a probe process exits', async () => {
+    vi.useFakeTimers();
+    const { spawn } = await import('node:child_process');
+    let activeProbes = 0;
+    let maxActiveProbes = 0;
+
+    (spawn as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      const proc = makeMockProcess();
+      activeProbes += 1;
+      maxActiveProbes = Math.max(maxActiveProbes, activeProbes);
+      proc.stdin.write.mockImplementation(() => {
+        setTimeout(() => {
+          proc.stdout.emit('data', formatMcpMessage({
+            jsonrpc: '2.0',
+            id: 1,
+            result: {},
+          }));
+        }, 1);
+        return true;
+      });
+      proc.kill.mockImplementation((signal?: NodeJS.Signals) => {
+        proc.killed = true;
+        if (signal === 'SIGKILL') {
+          setTimeout(() => {
+            activeProbes -= 1;
+            proc.emit('exit', null, 'SIGKILL');
+            proc.emit('close', null, 'SIGKILL');
+          }, 1);
+        }
+        return true;
+      });
+      return proc;
+    });
+
+    const config: McpConfig = {
+      mcpServers: Object.fromEntries(
+        Array.from({ length: 12 }, (_, index) => [
+          `server-${index}`,
+          { command: 'node' },
+        ]),
+      ),
+    };
+
+    const resultPromise = checker.getStatus('stubborn', config, {
+      trustMcpServerCommands: true,
+    });
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.serverStatuses).toHaveLength(12);
+    expect(maxActiveProbes).toBeLessThanOrEqual(4);
+  });
+
+  it('settles a probe when process termination cannot be signaled', async () => {
+    vi.useFakeTimers();
+    const { spawn } = await import('node:child_process');
+    const proc = makeMockProcess();
+    proc.stdin.write.mockImplementation(() => {
+      setTimeout(() => {
+        proc.stdout.emit('data', formatMcpMessage({
+          jsonrpc: '2.0',
+          id: 1,
+          result: {},
+        }));
+      }, 1);
+      return true;
+    });
+    proc.kill.mockReturnValue(false);
+    (spawn as ReturnType<typeof vi.fn>).mockReturnValueOnce(proc);
+    const settled = vi.fn();
+
+    void checker.getStatus('unsignalable', {
+      mcpServers: { server: { command: 'node' } },
+    }, { trustMcpServerCommands: true }).then(settled);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(settled).toHaveBeenCalledWith({
+      name: 'unsignalable',
+      status: 'connected',
+      serverStatuses: [{ serverName: 'server', status: 'connected' }],
+    });
+    expect(proc.kill).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips trusted MCP probes beyond the aggregate limit', async () => {
+    vi.useFakeTimers();
+    const { spawn } = await import('node:child_process');
+    (spawn as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      const proc = makeMockProcess();
+      setTimeout(() => {
+        proc.exitCode = 0;
+        proc.emit('close', 0);
+      }, 10);
+      return proc;
+    });
+    const config: McpConfig = {
+      mcpServers: Object.fromEntries(
+        Array.from({ length: 25 }, (_, index) => [
+          `server-${index}`,
+          { command: 'echo' },
+        ]),
+      ),
+    };
+
+    const resultPromise = checker.getStatus('budgeted', config, {
+      trustMcpServerCommands: true,
+    });
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(spawn).toHaveBeenCalledTimes(20);
+    expect(result.serverStatuses).toHaveLength(25);
+    expect(result.serverStatuses.slice(20)).toEqual(
+      Array.from({ length: 5 }, (_, index) => ({
+        serverName: `server-${index + 20}`,
+        status: 'unknown',
+        error: 'MCP health probe skipped because the per-check limit of 20 servers was exceeded',
+      })),
+    );
+  });
+
   it('returns error when trusted spawn fails', async () => {
     const { spawn } = await import('node:child_process');
     const proc = makeMockProcess();
@@ -297,8 +494,16 @@ function makeMockProcess() {
     stdout: new EventEmitter(),
     stderr: new EventEmitter(),
     stdin,
-    kill: vi.fn(function kill(this: { killed: boolean }) {
+    kill: vi.fn(function kill(
+      this: EventEmitter & { killed: boolean },
+      signal: NodeJS.Signals = 'SIGTERM',
+    ) {
       this.killed = true;
+      queueMicrotask(() => {
+        this.emit('exit', null, signal);
+        this.emit('close', null, signal);
+      });
+      return true;
     }),
     pid: 123,
     exitCode: null as number | null,

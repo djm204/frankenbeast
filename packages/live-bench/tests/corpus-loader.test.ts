@@ -84,6 +84,26 @@ describe('corpus loader', () => {
     expect(() => loadTaskFile(emptyToolParamsPath)).toThrow(/Invalid benchmark task/);
   });
 
+  it.each([
+    ['absolute expected artifact', '/tmp/out.txt', 'README.md'],
+    ['parent-traversing expected artifact', '../out.txt', 'README.md'],
+    ['non-normalized expected artifact', 'artifacts/../out.txt', 'README.md'],
+    ['Windows absolute expected artifact', 'C:\\temp\\out.txt', 'README.md'],
+    ['absolute file check', 'README.md', '/tmp/out.txt'],
+    ['parent-traversing file check', 'README.md', '../out.txt'],
+    ['non-normalized file check', 'README.md', 'artifacts/../out.txt'],
+    ['Windows-separated file check', 'README.md', 'artifacts\\out.txt'],
+  ])('rejects unsafe artifact paths: %s', (_description, expectedArtifact, checkPath) => {
+    const root = tempCorpus();
+    const taskPath = writeTask(root, 'core/unsafe-path.task.json', {
+      ...validTask,
+      expectedArtifacts: [expectedArtifact],
+      requiredChecks: [{ type: 'file-exists', path: checkPath }],
+    });
+
+    expect(() => loadTaskFile(taskPath)).toThrow(/normalized relative path/);
+  });
+
   it('rejects unknown normalized task and check fields', () => {
     const root = tempCorpus();
     const taskPath = writeTask(root, 'core/unknown-fields.task.json', {

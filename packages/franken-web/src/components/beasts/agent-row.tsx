@@ -42,6 +42,7 @@ export function AgentRow({ agent, run, density, selected, onClick }: AgentRowPro
   return (
     <button
       type="button"
+      aria-pressed={selected}
       onClick={() => onClick(agent.id)}
       className={`w-full text-left rounded-xl border p-4 transition-colors duration-150
         bg-beast-panel hover:bg-beast-elevated cursor-pointer ${selectedClass}`}

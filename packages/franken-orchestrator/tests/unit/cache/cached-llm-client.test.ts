@@ -247,4 +247,31 @@ describe('CachedLlmClient', () => {
       innerCalls: 1,
     });
   });
+
+  it('preserves native session failures instead of silently doubling the provider call', async () => {
+    const { llm, client, metrics } = await createHarness();
+    const failure = new Error('provider process exited unexpectedly');
+    const resume = vi.fn().mockRejectedValue(failure);
+
+    await expect(client.complete({
+      scope: {
+        projectId: 'frankenbeast',
+        workId: 'plan:session',
+      },
+      operation: 'plan-build',
+      volatileSuffix: 'build plan',
+      nativeSession: {
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+        resume,
+      },
+    })).rejects.toBe(failure);
+
+    expect(llm.callCount).toBe(0);
+    expect(metrics.snapshot()).toMatchObject({
+      nativeSessionAttempts: 1,
+      nativeSessionFallbacks: 0,
+      innerCalls: 0,
+    });
+  });
 });

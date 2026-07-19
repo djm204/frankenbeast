@@ -45,9 +45,36 @@ describe('TraceServer', () => {
       const address = nodeServer?.address()
       expect(address && typeof address === 'object' ? address.address : undefined).toBe('127.0.0.1')
     })
+
+    it('uses an explicitly configured host for binding and the reported URL', async () => {
+      await server.stop()
+      server = new TraceServer({ adapter, port: 0, host: '0.0.0.0' })
+      await server.start()
+
+      const nodeServer = (server as unknown as { server: Server | null }).server
+      const address = nodeServer?.address()
+      expect(address && typeof address === 'object' ? address.address : undefined).toBe('0.0.0.0')
+      expect(server.url).toMatch(/^http:\/\/0\.0\.0\.0:\d+$/)
+    })
   })
 
   describe('GET /', () => {
+    it('prevents sniffing and caching for HTML and trace JSON responses', async () => {
+      const trace = makeTrace('Sensitive trace')
+      await adapter.flush(trace)
+
+      const responses = await Promise.all([
+        fetch(server.url + '/'),
+        fetch(server.url + '/api/traces'),
+        fetch(`${server.url}/api/traces/${trace.id}`),
+      ])
+
+      for (const res of responses) {
+        expect(res.headers.get('x-content-type-options')).toBe('nosniff')
+        expect(res.headers.get('cache-control')).toBe('no-store')
+      }
+    })
+
     it('returns 200', async () => {
       const res = await fetch(server.url + '/')
       expect(res.status).toBe(200)

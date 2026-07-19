@@ -149,6 +149,7 @@ const mockRestartAgent = vi.fn().mockResolvedValue(undefined);
 const mockResumeAgent = vi.fn().mockResolvedValue(undefined);
 const mockStartAgent = vi.fn().mockResolvedValue(undefined);
 const mockStopAgent = vi.fn().mockResolvedValue(undefined);
+const mockPatchAgentConfig = vi.fn().mockResolvedValue(undefined);
 let latestBeastEventHandlers: Record<string, (event: unknown) => void> | null = null;
 const mockSubscribeToEvents = vi.fn().mockImplementation((handlers: Record<string, (event: unknown) => void>) => {
   latestBeastEventHandlers = handlers;
@@ -315,7 +316,7 @@ vi.mock('../../src/lib/beast-api.js', () => ({
     this.resumeAgent = mockResumeAgent;
     this.startAgent = mockStartAgent;
     this.stopAgent = mockStopAgent;
-    this.patchAgentConfig = vi.fn().mockResolvedValue(undefined);
+    this.patchAgentConfig = mockPatchAgentConfig;
     this.startRun = vi.fn().mockResolvedValue(undefined);
     this.stopRun = vi.fn().mockResolvedValue(undefined);
     this.killRun = vi.fn().mockResolvedValue(undefined);
@@ -471,6 +472,8 @@ afterEach(() => {
   });
   mockResumeAgent.mockReset();
   mockResumeAgent.mockResolvedValue(undefined);
+  mockPatchAgentConfig.mockReset();
+  mockPatchAgentConfig.mockResolvedValue(undefined);
   mockGetLogs.mockReset();
   mockGetLogs.mockResolvedValue(['started from chat']);
   mockNetworkGetStatus.mockReset();
@@ -1033,12 +1036,81 @@ describe('ChatShell', () => {
       />,
     );
 
+    // First lazy mount of the beasts page pays the dynamic-import cost, so
+    // allow more than waitFor's 1s default.
     await waitFor(() => {
       expect(screen.getAllByText('agent-1').length).toBeGreaterThan(0);
-    });
+    }, { timeout: 5000 });
 
     expect(screen.getByRole('heading', { level: 1, name: 'Beasts' })).toBeDefined();
     expect(mockListAgents).toHaveBeenCalled();
+  });
+
+  it('persists Beast drawer edits and refreshes the selected agent detail', async () => {
+    window.location.hash = '#/beasts';
+    const currentAgent = {
+      id: 'agent-1',
+      name: 'Current Agent',
+      definitionId: 'chunk-plan',
+      status: 'stopped',
+      source: 'dashboard',
+      createdByUser: 'operator',
+      initAction: {
+        kind: 'chunk-plan',
+        command: '/plan --design-doc docs/plans/design.md',
+        config: { designDocPath: 'docs/plans/design.md' },
+      },
+      initConfig: {
+        identity: { name: 'Current Agent', description: 'Current description' },
+        designDocPath: 'docs/plans/design.md',
+      },
+      moduleConfig: { firewall: true, planner: false },
+      createdAt: '2026-03-11T00:00:00.000Z',
+      updatedAt: '2026-03-11T00:00:01.000Z',
+    };
+    let saved = false;
+    mockListAgents.mockResolvedValue([currentAgent]);
+    mockPatchAgentConfig.mockImplementation(async () => {
+      saved = true;
+    });
+    mockGetAgent.mockImplementation(async () => ({
+      agent: saved
+        ? {
+            ...currentAgent,
+            name: 'Updated Agent',
+            initConfig: {
+              ...currentAgent.initConfig,
+              identity: { name: 'Updated Agent', description: 'Current description' },
+            },
+          }
+        : currentAgent,
+      events: [],
+    }));
+
+    render(
+      <ChatShell
+        baseUrl="http://localhost:3000"
+        projectId="test-project"
+        version="0.9.0"
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('radio', { name: 'Edit' }));
+    fireEvent.change(await screen.findByDisplayValue('Current Agent'), {
+      target: { value: 'Updated Agent' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(mockPatchAgentConfig).toHaveBeenCalledWith('agent-1', {
+        name: 'Updated Agent',
+        description: 'Current description',
+        moduleConfig: { firewall: true, planner: false },
+      });
+      expect(mockGetAgent.mock.calls.filter(([agentId]) => agentId === 'agent-1').length).toBeGreaterThanOrEqual(2);
+      expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
+    });
+    expect(screen.getAllByText('Updated Agent').length).toBeGreaterThan(0);
   });
 
   it('refreshes the beasts fleet after Create Agent auto-dispatch failures', async () => {

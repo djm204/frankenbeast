@@ -10,6 +10,24 @@
 - Separate shell interpolation parsing from JavaScript template interpolation, carry quote/heredoc context across lines, recognize staged crontab files and programmatic crontab sinks, and propagate aliased Python `os.environ`; otherwise a line-oriented scanner both misses persisted credentials and rejects safe runtime `$(gh auth token)` strings.
 - Treat cron-install taint as a language-aware dataflow problem: cover post-processed/backquoted `printenv`, wrapped/incrementally assembled `gh auth token`, aliased env imports/containers/sinks, dot/bracket/destructuring/joined interpolation flows, multiline schedules/assembly/programmatic sinks, and redirect/tee/stdin staging while preserving shell URLs and excluding quoted heredoc/escaped runtime expansion.
 
+## 2026-07-19 — Provider-native cache session isolation
+- Never translate an application cache/work key into a provider continuation flag. Start the first native-capable cache call without `--continue`, capture the provider-issued session id, and resume only that exact id when provider and model still match.
+- Treat only classified stale/invalid-session failures as retryable: emit fallback telemetry, invalidate the stale record before retrying, and retry once in a fresh persisted session; propagate all other provider errors so failures cannot silently double expensive calls.
+
+## 2026-07-19 — Codex-triggered commit re-review on issue #2907
+- When a commit is pushed to an existing PR and there was a prior `@codex review`, always trigger a new review on the new head and collect a fresh `@codex review` clean signal before merging. In this case, a `screen-reader` aria-label update changed, a stale strict assertion in `wizard-dialog.test.tsx` broke once; switching it to a regex was sufficient and CI stayed green on the new commit.
+
+## 2026-07-19 — Deterministic abort handling regression
+- Prefer deterministic abort fixtures over timing sleeps: for HTTP disconnect behavior, verify both in-band and immediate-abort paths by asserting that `AbortSignal` is already aborted when `request.destroyed`/`request.aborted` is true before app handler execution.
+- Use a pre-aborted request object (or equivalent event-driven signal path) in unit tests when asserting handler abort behavior, and keep timeouts only as a bounded safety net, not as fixture synchronization.
+
+## 2026-07-19 — Shared schema typing for websocket event payloads
+- Prefer importing socket event unions from shared contract packages and remove local duplicate unions in UI/runtime state modules; add a small source-inspection regression if the duplicate types are the failure mode so future refactors cannot silently reintroduce drift between schema and state handlers.
+
+## 2026-07-19 — Artifact-path TOCTOU hardening
+- Returning a validated pathname is not a secure file-inspection API: pin both the workspace directory and artifact as file descriptors, traverse through `/proc/self/fd` or `/dev/fd` where available, and compare descriptor/path identities after opening so rename/symlink swaps fail closed.
+- Use `lstat` rather than `existsSync` when dangling symlinks must be rejected, translate only candidate-component `ENOENT` into an ordinary missing artifact, and open untrusted artifact targets with nonblocking/no-follow flags before requiring a regular file.
+
 ## 2026-07-18 — Kanban reviewer isolation
 - Independent review workers must receive a distinct child card or explicitly review-only context; never let a delegated reviewer inherit and complete the implementation parent card, because completion can garbage-collect its workspace before the verified diff is committed and shipped.
 
@@ -387,3 +405,10 @@
 
 ## 2026-07-18 — First-contribution help documentation
 - For broad onboarding-documentation issues, close a concrete workflow gap rather than adding another general quickstart. Make the new path discoverable from README, CONTRIBUTING, and the onboarding index, include safe copyable evidence/templates, and add a focused test that locks those entrypoints and redaction guidance together.
+
+## Lessons
+- 2026-07-19 — Docs regression tests should assert exact pinned values from manifest and treat setup commands as gate-narrow/full setup distinctions.
+
+## 2026-07-19 — Type export renames and deprecation compatibility
+- When renaming shared public type names for clarity, keep deprecated aliases temporarily (with `@deprecated` JSDoc) for downstream consumers, update docs/tests to use new names, and add targeted tests validating both canonical and deprecated aliases.
+- Before merging such API refactors, require `tsc`, package `lint`, `build`, and focused unit tests for both packages to avoid regressions in public contracts.

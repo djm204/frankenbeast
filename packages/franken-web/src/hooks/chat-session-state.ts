@@ -1,7 +1,6 @@
 import {
   type ApproveResult,
   type ChatSession,
-  type PendingApproval,
   type TokenTotals,
   type TranscriptMessage,
 } from '../lib/api';
@@ -9,47 +8,9 @@ import {
   deterministicUuid,
   isoNow,
   seededRandom,
+  type ServerSocketEvent,
 } from '@franken/types';
 import type { ActivityEvent, ChatErrorAction, ChatErrorBanner, ChatMessage, MessageReceipt } from './use-chat-session';
-
-type SocketEventBase = { eventId?: string };
-
-export type ServerSocketPayload = SocketEventBase & (
-  | {
-      type: 'session.ready';
-      sessionId: string;
-      projectId: string;
-      transcript: TranscriptMessage[];
-      state: string;
-      pendingApproval?: PendingApproval | null;
-    }
-  | { type: 'message.accepted'; clientMessageId: string; sessionId: string; timestamp: string }
-  | { type: 'message.delivered'; clientMessageId: string; timestamp: string }
-  | { type: 'message.read'; clientMessageId?: string; messageId?: string; timestamp: string }
-  | { type: 'assistant.typing.start'; timestamp: string }
-  | { type: 'assistant.message.delta'; messageId: string; chunk: string; modelTier?: string }
-  | { type: 'assistant.message.complete'; messageId: string; content: string; modelTier?: string; timestamp: string }
-  | { type: 'turn.execution.start'; data?: Record<string, unknown>; timestamp: string }
-  | { type: 'turn.execution.progress'; data?: Record<string, unknown>; timestamp: string }
-  | { type: 'turn.execution.complete'; data?: Record<string, unknown>; timestamp: string }
-  | {
-      type: 'turn.approval.requested';
-      description: string;
-      timestamp: string;
-      tool?: string;
-      command?: string;
-      risk?: string;
-      affectedFiles?: string[];
-      sessionId?: string;
-      approvalToken?: string;
-      requester?: string;
-      workerId?: string;
-      workdir?: string;
-    }
-  | { type: 'turn.approval.resolved'; approved: boolean; timestamp: string }
-  | { type: 'turn.error'; code: string; message: string; timestamp: string }
-  | { type: 'pong'; timestamp: string }
-);
 
 export const EMPTY_TOKEN_TOTALS: TokenTotals = {
   cheap: 0,
@@ -156,7 +117,7 @@ function normalizeTranscript(messages: TranscriptMessage[]): ChatMessage[] {
 
 export function appendOrUpdateAssistantMessage(
   messages: ChatMessage[],
-  event: Extract<ServerSocketPayload, { type: 'assistant.message.delta' | 'assistant.message.complete' }>,
+  event: Extract<ServerSocketEvent, { type: 'assistant.message.delta' | 'assistant.message.complete' }>,
 ): ChatMessage[] {
   const existingIndex = messages.findIndex((message) => message.id === event.messageId);
   const nextMessage: ChatMessage = {

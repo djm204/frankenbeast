@@ -92,9 +92,11 @@ npm run test:root -- "tests/docs-issue-${ISSUE_NUMBER}.test.ts"
 
 For package code, run that package's targeted test, typecheck, and build scripts when available. Before opening the pull request, record every command you ran and its real result; do not claim a skipped check passed.
 
+If a pull-request check fails, follow the [first-PR CI failure triage guide](docs/onboarding/ci-failure-triage.md). It shows how to confirm the failing head, inspect the exact workflow run, reproduce the narrow command locally, distinguish product failures from transient infrastructure, and request at most one evidence-based rerun.
+
 ## Commit and open a pull request
 
-Review the exact diff, then create a Conventional Commit:
+Review the exact diff, then create a Conventional Commit. First-time contributors can follow the [pull request self-review checklist](docs/onboarding/pull-request-self-review.md) to inspect the complete base-to-head patch, accidental or sensitive files, verification evidence, and the GitHub pull request before requesting review.
 
 If `git status --short` shows an intentional new file with the `??` prefix, first run `git add --intent-to-add <new-path>` for that path. This lets patch mode present the new file without staging unrelated untracked files.
 
@@ -142,6 +144,7 @@ Read the displayed title, body, base branch, and head branch before requesting r
 
 ## Before requesting review
 
+- [ ] The complete base-to-head diff was checked with the [pull request self-review checklist](docs/onboarding/pull-request-self-review.md).
 - [ ] The pull request addresses one issue and contains no unrelated files.
 - [ ] Documentation and commands match the current repository state.
 - [ ] Relevant tests, typechecks, lint, and builds pass, or the pull request explicitly explains why a gate could not run.
@@ -189,6 +192,12 @@ Reply with the change and verification evidence, or explain technically why no c
 
 CI and review feedback apply to the current head commit. If you push again, wait for checks and required review on that new head; do not rely on a green check or approval from an older commit. If a merge conflict appears, stop and ask a maintainer for the repository's preferred update strategy rather than force-pushing unfamiliar history.
 
+## After your pull request merges
+
+Follow the [first-PR completion guide](docs/onboarding/after-your-first-pr.md) before deleting anything. It verifies the merged PR and closed issue, preserves uncommitted work, updates local and forked `main` branches without force-pushing, and removes only the merged contribution branch or clean worktree.
+
+Start the next issue from a new branch based on current `main`; do not reuse the merged branch for unrelated work.
+
 ## Getting help
 
-For setup failures, start with the [setup troubleshooting matrix](docs/onboarding/setup-troubleshooting-matrix.md). For test selection, use the [test command decision tree](docs/onboarding/test-command-decision-tree.md). For package ownership and architecture, use the [architecture map](docs/onboarding/architecture-map.md) and [repository ownership manifest](docs/onboarding/repository-ownership.md). When these guides do not resolve the blocker, follow the [first-contribution help guide](docs/onboarding/getting-help.md) to choose the right GitHub thread, collect safe diagnostic evidence, and ask one answerable question.
+For setup failures, start with the [setup troubleshooting matrix](docs/onboarding/setup-troubleshooting-matrix.md). For test selection, use the [test command decision tree](docs/onboarding/test-command-decision-tree.md). For failing pull-request checks, use the [first-PR CI failure triage guide](docs/onboarding/ci-failure-triage.md). For package ownership and architecture, use the [architecture map](docs/onboarding/architecture-map.md) and [repository ownership manifest](docs/onboarding/repository-ownership.md). When these guides do not resolve the blocker, follow the [first-contribution help guide](docs/onboarding/getting-help.md) to choose the right GitHub thread, collect safe diagnostic evidence, and ask one answerable question.

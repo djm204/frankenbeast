@@ -53,7 +53,7 @@
     "test:ci-retry-fail-fixture": "node tests/fixtures/ci-retry-fail-fixture.cjs",
     "test:docker:sandbox": "node scripts/run-docker-sandbox-smoke.mjs",
     "test:root:watch": "vitest",
-    "test:coverage": "npm run test:coverage:root && turbo run test:coverage --filter=\"./packages/*\" --concurrency=1",
+    "test:coverage": "npm run test:coverage:root && turbo run test:coverage --filter=\"./packages/*\" --concurrency=1 --continue",
     "test:coverage:root": "vitest run --coverage",
     "dr:restore-rehearsal": "tsx scripts/restore-rehearsal.mjs",
     "ci:dr:restore-rehearsal": "npm run dr:restore-rehearsal"

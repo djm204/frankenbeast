@@ -1,4 +1,9 @@
 import { z } from 'zod';
+import { isNormalizedWorkspaceRelativePath } from '../workspace/artifact-path.js';
+
+const WorkspaceRelativePathSchema = z.string().min(1).refine(isNormalizedWorkspaceRelativePath, {
+  message: 'artifact path must be a normalized relative path',
+});
 
 function structurallyEqual(left: unknown, right: unknown): boolean {
   if (Object.is(left, right)) {
@@ -46,8 +51,8 @@ const BenchmarkCheckSchema = z.preprocess((value) => {
   }
   return value;
 }, z.discriminatedUnion('type', [
-  z.object({ type: z.literal('file-exists'), path: z.string().min(1) }).strict(),
-  z.object({ type: z.literal('file-contains'), path: z.string().min(1), text: z.string() }).strict(),
+  z.object({ type: z.literal('file-exists'), path: WorkspaceRelativePathSchema }).strict(),
+  z.object({ type: z.literal('file-contains'), path: WorkspaceRelativePathSchema, text: z.string() }).strict(),
   z.object({ type: z.literal('exit-code'), code: z.number().int() }).strict(),
   z.object({
     type: z.literal('tool-call'),
@@ -62,7 +67,7 @@ const BenchmarkTaskShape = z.object({
   taskClass: z.enum(['tool-critical', 'workflow-critical', 'artifact-critical']),
   projectFixture: z.string().min(1),
   prompt: z.string().min(1),
-  expectedArtifacts: z.array(z.string().min(1)).min(1, 'benchmark tasks must expect at least one artifact'),
+  expectedArtifacts: z.array(WorkspaceRelativePathSchema).min(1, 'benchmark tasks must expect at least one artifact'),
   requiredChecks: z.array(BenchmarkCheckSchema).min(1, 'benchmark tasks must require at least one check'),
   timeoutMs: z.number().int().positive(),
   allowedNondeterminism: z.array(z.string()),

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { useBeastStore } from '../../stores/beast-store';
 import { WizardStepIndicator } from './wizard-step-indicator';
@@ -32,6 +32,7 @@ interface WizardDialogProps {
 }
 
 export function WizardDialog({ isOpen, onClose, onLaunch, catalog, containerRuntime, launching, launchError }: WizardDialogProps) {
+  const descriptionId = useId();
   const {
     wizardStep,
     highestCompleted,
@@ -122,11 +123,16 @@ export function WizardDialog({ isOpen, onClose, onLaunch, catalog, containerRunt
         <Dialog.Content
           className="fixed top-[10vh] left-[12vw] w-[76vw] h-[80vh] bg-beast-panel border border-beast-border
             rounded-2xl z-[70] flex flex-col shadow-2xl shadow-black/40"
-          aria-describedby={undefined}
+          aria-describedby={descriptionId}
         >
           {/* Header */}
           <div className="flex items-center justify-between px-8 py-5 border-b border-beast-border shrink-0">
-            <Dialog.Title className="text-beast-text font-semibold text-lg">Create Agent</Dialog.Title>
+            <div>
+              <Dialog.Title className="text-beast-text font-semibold text-lg">Create Agent</Dialog.Title>
+              <Dialog.Description id={descriptionId} className="sr-only">
+                Configure and launch a new agent. Use Next and Back to move between steps, review your settings, and launch the agent when ready.
+              </Dialog.Description>
+            </div>
             <div className="flex items-center gap-4">
               <button
                 type="button"

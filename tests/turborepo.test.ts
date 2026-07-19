@@ -689,7 +689,11 @@ describe("Turborepo configuration", () => {
       );
 
       expect(rootPkg.scripts.typecheck).toBe("turbo run typecheck");
-      expect(ciWorkflow).toContain("run: npx turbo run build typecheck");
+      expect(ciWorkflow).toContain("run: npm run build");
+      expect(ciWorkflow).toContain("run: npm run typecheck");
+      expect(ciWorkflow.indexOf("run: npm run build")).toBeLessThan(
+        ciWorkflow.indexOf("run: npm run typecheck"),
+      );
       expect(ciWorkflow).not.toContain("run: npx turbo run build lint");
       expect(ciWorkflow).not.toContain(
         "run: npx turbo run build typecheck lint",

@@ -5,6 +5,7 @@ import { execSync } from 'node:child_process';
 import { load } from 'js-yaml';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
+const WORKFLOW_DIR = resolve(ROOT, '.github/workflows');
 const CI_PATH = resolve(ROOT, '.github/workflows/ci.yml');
 const RELEASE_PATH = resolve(ROOT, '.github/workflows/release-please.yml');
 const DAILY_SECURITY_SCAN_PATH = resolve(ROOT, '.github/workflows/daily-security-scan.yml');
@@ -89,13 +90,29 @@ function expectStepByName(
   return step as Record<string, unknown>;
 }
 
-function expectBuildTypecheckStep(workflow: Record<string, unknown>): Record<string, unknown> {
-  return expectStepByRun(
-    expectSteps(expectCiJob(workflow)),
-    'npx turbo run build typecheck',
-    'a Turbo build/typecheck step',
-  );
-}
+describe('GitHub Actions timeout policy', () => {
+  it('sets an explicit bounded timeout for every workflow job', () => {
+    const workflowFiles = readdirSync(WORKFLOW_DIR).filter((file) => /\.ya?ml$/.test(file));
+
+    expect(workflowFiles.length).toBeGreaterThan(0);
+    for (const file of workflowFiles) {
+      const workflow = parseWorkflowYaml(readFileSync(resolve(WORKFLOW_DIR, file), 'utf-8'));
+      const jobs = expectRecord(workflow.jobs, `${file}.jobs`);
+
+      expect(Object.keys(jobs).length, `${file} should define at least one job`).toBeGreaterThan(0);
+      for (const [jobName, jobConfig] of Object.entries(jobs)) {
+        const job = expectRecord(jobConfig, `${file}.jobs.${jobName}`);
+        const timeout = job['timeout-minutes'];
+
+        expect(timeout, `${file}.jobs.${jobName} should set timeout-minutes`).toBeTypeOf('number');
+        expect(timeout, `${file}.jobs.${jobName} timeout should be positive`).toBeGreaterThan(0);
+        expect(timeout, `${file}.jobs.${jobName} timeout should not exceed GitHub's six-hour maximum`).toBeLessThanOrEqual(
+          360,
+        );
+      }
+    }
+  });
+});
 
 describe('CI Workflow (.github/workflows/ci.yml)', () => {
   it('ci.yml file exists', () => {
@@ -131,6 +148,12 @@ on:
       expect(workflow).toHaveProperty('jobs');
     });
 
+    it('grants the workflow token read-only repository contents access', () => {
+      expect(expectRecord(workflow.permissions, 'workflow.permissions')).toEqual({
+        contents: 'read',
+      });
+    });
+
     it('has a workflow name', () => {
       expect(workflow.name).toBe('CI');
     });
@@ -148,6 +171,13 @@ on:
         group: '${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}',
         'cancel-in-progress': "${{ github.event_name == 'pull_request' }}",
       });
+    });
+
+    it('sets explicit upper bounds for every CI job', () => {
+      const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
+
+      expect(expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint')['timeout-minutes']).toBe(120);
+      expect(expectRecord(jobs['publish-smoke'], 'jobs.publish-smoke')['timeout-minutes']).toBe(45);
     });
 
     it('uses the repository-pinned minimum supported Node.js version', () => {
@@ -174,19 +204,51 @@ on:
       expect(content.indexOf('node scripts/check-package-manager.mjs')).toBeLessThan(content.indexOf('npm ci'));
     });
 
-    it('explicitly gates build, typecheck, and the root lint coverage check before running the shared CI test target', () => {
+    it('runs the root build and typecheck scripts as explicit CI gates before lint and tests', () => {
       const steps = expectSteps(expectCiJob(workflow));
-      const buildTypecheckStep = expectBuildTypecheckStep(workflow);
+      const buildStep = expectStepByRun(steps, 'npm run build', 'the root build gate');
+      const typecheckStep = expectStepByRun(steps, 'npm run typecheck', 'the root typecheck gate');
       const workspaceLintStep = expectStepByRun(steps, 'npm run lint', 'a workspace lint gate step');
       const ciTestStep = expectStepByRun(steps, 'npm run test:ci', 'the shared root/package CI test target');
 
-      expect(buildTypecheckStep.name).toBe('Run package build and typecheck');
+      expect(buildStep.name).toBe('Run package build');
+      expect(typecheckStep.name).toBe('Run root typecheck');
       expect(workspaceLintStep.name).toBe('Run workspace lint gate');
       expect(ciTestStep.name).toBe('Run root and package CI test suite');
-      expect(steps.indexOf(buildTypecheckStep)).toBeLessThan(steps.indexOf(workspaceLintStep));
+      expect(steps.indexOf(buildStep)).toBeLessThan(steps.indexOf(typecheckStep));
+      expect(steps.indexOf(typecheckStep)).toBeLessThan(steps.indexOf(workspaceLintStep));
       expect(steps.indexOf(workspaceLintStep)).toBeLessThan(steps.indexOf(ciTestStep));
       expect(content).not.toMatch(/turbo run.*build\s+test\s+lint/);
       expect(content).not.toContain('npx turbo run build typecheck lint');
+    });
+
+    it('runs coverage and publishes all root and workspace reports as an artifact', () => {
+      const steps = expectSteps(expectCiJob(workflow));
+      const packageJson = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8')) as {
+        scripts?: Record<string, string>;
+      };
+      const coverageStep = expectStepByRun(
+        steps,
+        'npm run test:coverage',
+        'the root and workspace coverage suite',
+      );
+      const uploadStep = expectStepByName(
+        steps,
+        'Upload coverage reports',
+        'the coverage artifact upload',
+      );
+      const uploadWith = expectRecord(uploadStep.with, 'coverage upload inputs');
+
+      expect(coverageStep.name).toBe('Run root and workspace coverage suite');
+      expect(coverageStep['continue-on-error']).toBe(true);
+      expect(packageJson.scripts?.['test:coverage']).toContain('--continue');
+      expect(uploadStep.uses).toBe('actions/upload-artifact@v7');
+      expect(uploadStep.if).toBe('always()');
+      expect(uploadWith.name).toBe('coverage-reports');
+      expect(uploadWith.path).toBe('coverage\npackages/*/coverage\n');
+      expect(uploadWith['if-no-files-found']).toBe('error');
+      expect(uploadWith['retention-days']).toBe(30);
+      expect(steps.indexOf(coverageStep)).toBeLessThan(steps.indexOf(uploadStep));
     });
 
     it('runs the deterministic root Vitest suite through the shared CI test script', () => {
@@ -285,8 +347,9 @@ on:
       expect(content).not.toContain('run: npx turbo run test');
     });
 
-    it('documents the package build, typecheck, workspace lint, and shared root/package CI test targets in step names', () => {
-      expect(content).toMatch(/name:\s*Run package build and typecheck/);
+    it('documents the package build, root typecheck, workspace lint, and shared root/package CI test targets in step names', () => {
+      expect(content).toMatch(/name:\s*Run package build/);
+      expect(content).toMatch(/name:\s*Run root typecheck/);
       expect(content).toMatch(/name:\s*Run workspace lint gate/);
       expect(content).toMatch(/name:\s*Run root and package CI test suite/);
       expect(content).toMatch(/name:\s*Run orchestrator E2E smoke CI suite/);
@@ -416,6 +479,12 @@ jobs:
       contents: 'write',
       'pull-requests': 'write',
     });
+  });
+
+  it('sets explicit upper bounds for every release job', () => {
+    expect(expectRecord(jobs['validate-release'], 'jobs.validate-release')['timeout-minutes']).toBe(120);
+    expect(releasePlease['timeout-minutes']).toBe(15);
+    expect(publishNpm['timeout-minutes']).toBe(45);
   });
 
   it('anchors config-file and manifest-file under the release-please action step', () => {

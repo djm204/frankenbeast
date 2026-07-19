@@ -114,7 +114,10 @@ export function BeastsPage({
   return (
     <main className="flex-1 flex flex-col min-h-0 bg-beast-bg">
       {error && (
-        <div className="px-6 py-3 bg-red-900/30 border-b border-red-700 text-red-300 text-sm">
+        <div
+          role="alert"
+          className="px-6 py-3 bg-red-900/30 border-b border-red-700 text-red-300 text-sm"
+        >
           {error}
         </div>
       )}
