@@ -338,6 +338,20 @@ describe('PrometheusAdapter', () => {
       )
     })
 
+    it('multiplies small token counts by the rate before scaling to millions', async () => {
+      const adapter = new PrometheusAdapter({
+        pricingTable: {
+          'small-usage-model': { promptPerMillion: 15, completionPerMillion: 0 },
+        },
+      })
+
+      await adapter.flush(makeTrace('small-usage-model', 1, 0))
+
+      expect(adapter.scrape()).toContain(
+        'franken_observer_cost_usd_total{model="small-usage-model"} 0.000015',
+      )
+    })
+
     it('omits cost metrics when no pricingTable is provided', async () => {
       const adapter = new PrometheusAdapter()
       await adapter.flush(makeTrace('claude-sonnet-4-6', 500, 200))
