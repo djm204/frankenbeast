@@ -11,7 +11,8 @@ export function StepSkills() {
   const selected = values.selectedSkills ?? [];
   const [search, setSearch] = useState('');
 
-  const filtered = skills.filter((skill) =>
+  const enabledSkills = skills.filter((skill) => skill.enabled);
+  const filtered = enabledSkills.filter((skill) =>
     !search || skill.name.toLowerCase().includes(search.toLowerCase()),
   );
 
@@ -54,11 +55,11 @@ export function StepSkills() {
     );
   }
 
-  if (skills.length === 0) {
+  if (enabledSkills.length === 0) {
     return (
       <div className="p-8">
         <p role="status" className="text-sm text-beast-muted">
-          No installed skills are available.
+          No enabled installed skills are available.
         </p>
       </div>
     );

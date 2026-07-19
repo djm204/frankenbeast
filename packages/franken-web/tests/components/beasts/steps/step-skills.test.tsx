@@ -16,7 +16,8 @@ function seedSkills() {
   useDashboardStore.getState().setSnapshot({
     skills: [
       { name: 'code-review', enabled: true, hasContext: true, mcpServerCount: 1 },
-      { name: 'runtime-only', enabled: false, hasContext: false, mcpServerCount: 0 },
+      { name: 'runtime-only', enabled: true, hasContext: false, mcpServerCount: 0 },
+      { name: 'disabled-runtime', enabled: false, hasContext: false, mcpServerCount: 0 },
     ],
     security: snapshotSecurity,
     providers: [],
@@ -41,6 +42,7 @@ describe('StepSkills', () => {
     expect(screen.getByPlaceholderText(/search skills/i)).toBeTruthy();
     expect(screen.getByRole('button', { name: /code-review/i })).toBeTruthy();
     expect(screen.getByRole('button', { name: /runtime-only/i })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /disabled-runtime/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /test generation/i })).toBeNull();
   });
 
@@ -101,12 +103,14 @@ describe('StepSkills', () => {
     expect(screen.getByRole('alert').textContent).toMatch(/inventory request failed/i);
 
     useDashboardStore.getState().setSnapshot({
-      skills: [],
+      skills: [
+        { name: 'disabled-runtime', enabled: false, hasContext: false, mcpServerCount: 0 },
+      ],
       security: snapshotSecurity,
       providers: [],
     });
     rerender(<StepSkills />);
-    expect(screen.getByRole('status').textContent).toMatch(/no installed skills are available/i);
+    expect(screen.getByRole('status').textContent).toMatch(/no enabled installed skills are available/i);
   });
 
   it('filters the runtime inventory without changing persisted skill IDs', () => {
