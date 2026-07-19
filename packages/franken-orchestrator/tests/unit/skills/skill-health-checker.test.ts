@@ -256,7 +256,11 @@ describe('SkillHealthChecker', () => {
 
     expect(result.status).toBe('unknown');
     expect(result.serverStatuses).toEqual([
-      { serverName: 'silent', status: 'unknown' },
+      {
+        serverName: 'silent',
+        status: 'unknown',
+        error: 'MCP initialize handshake timed out',
+      },
     ]);
     expect(proc.kill).toHaveBeenCalledTimes(1);
   });
@@ -482,6 +486,99 @@ describe('SkillHealthChecker', () => {
     };
     const result = await checker.getStatus('bad', config, { trustMcpServerCommands: true });
     expect(result.status).toBe('error');
+    expect(result.serverStatuses[0]).toMatchObject({
+      status: 'error',
+      error: 'Failed to start MCP server: not found',
+    });
+  });
+
+  it('returns sanitized stderr diagnostics when a trusted command exits non-zero', async () => {
+    const { spawn } = await import('node:child_process');
+    const proc = makeMockProcess();
+    (spawn as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      setTimeout(() => {
+        proc.stderr.emit('data', 'startup failed: API_TOKEN=do-not-expose');
+        proc.exitCode = 7;
+        proc.emit('close', 7);
+      }, 10);
+      return proc;
+    });
+
+    const result = await checker.getStatus('broken', {
+      mcpServers: { broken: { command: 'broken-server' } },
+    }, { trustMcpServerCommands: true });
+
+    expect(result.serverStatuses[0]).toMatchObject({
+      status: 'error',
+      error: 'MCP server exited with code 7\nstderr: startup failed: API_TOKEN=<redacted>',
+    });
+    expect(result.serverStatuses[0]?.error).not.toContain('do-not-expose');
+  });
+
+  it('bounds long stderr diagnostics without retaining data beyond 4096 bytes', async () => {
+    const { spawn } = await import('node:child_process');
+    const proc = makeMockProcess();
+    (spawn as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      setTimeout(() => {
+        proc.stderr.emit('data', `old-prefix-${'x'.repeat(5000)}-recent-tail`);
+        proc.exitCode = 1;
+        proc.emit('close', 1);
+      }, 10);
+      return proc;
+    });
+
+    const result = await checker.getStatus('noisy', {
+      mcpServers: { noisy: { command: 'noisy-server' } },
+    }, { trustMcpServerCommands: true });
+    const diagnostic = result.serverStatuses[0]?.error ?? '';
+
+    expect(Buffer.byteLength(diagnostic, 'utf8')).toBeLessThanOrEqual(4160);
+    expect(diagnostic).toContain('old-prefix');
+    expect(diagnostic).not.toContain('-recent-tail');
+  });
+
+  it('redacts sensitive assignments before exposing ANSI-normalized diagnostics', async () => {
+    const { spawn } = await import('node:child_process');
+    const proc = makeMockProcess();
+    (spawn as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      setTimeout(() => {
+        proc.stderr.emit('data', 'API_\u001b[31mTOKEN=do-not-expose');
+        proc.exitCode = 1;
+        proc.emit('close', 1);
+      }, 10);
+      return proc;
+    });
+
+    const result = await checker.getStatus('ansi', {
+      mcpServers: { ansi: { command: 'ansi-server' } },
+    }, { trustMcpServerCommands: true });
+    const diagnostic = result.serverStatuses[0]?.error ?? '';
+
+    expect(diagnostic).toContain('API_TOKEN=<redacted>');
+    expect(diagnostic).not.toContain('do-not-expose');
+    expect(diagnostic).not.toContain('\u001b');
+  });
+
+  it('does not retain a sensitive value past the diagnostic bound', async () => {
+    const { spawn } = await import('node:child_process');
+    const proc = makeMockProcess();
+    (spawn as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      setTimeout(() => {
+        proc.stderr.emit('data', `API_TOKEN=${'s'.repeat(5000)}-secret-tail`);
+        proc.exitCode = 1;
+        proc.emit('close', 1);
+      }, 10);
+      return proc;
+    });
+
+    const result = await checker.getStatus('long-secret', {
+      mcpServers: { 'long-secret': { command: 'long-secret-server' } },
+    }, { trustMcpServerCommands: true });
+    const diagnostic = result.serverStatuses[0]?.error ?? '';
+
+    expect(diagnostic).toContain('API_TOKEN=<redacted>');
+    expect(diagnostic).not.toContain('-secret-tail');
+    expect(Buffer.byteLength(diagnostic, 'utf8')).toBeLessThanOrEqual(4160);
   });
 });
 

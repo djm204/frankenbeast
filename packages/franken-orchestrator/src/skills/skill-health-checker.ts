@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { McpConfig } from '@franken/types';
+import { redactSensitiveText } from '../logging/redaction.js';
 
 export type McpHealthStatus = 'connected' | 'error' | 'unknown';
 
@@ -29,9 +30,15 @@ const SKIPPED_HEALTH_CHECK_MESSAGE =
   'MCP health probe skipped because the per-check limit of 20 servers was exceeded';
 const INCOMPLETE_HANDSHAKE_MESSAGE =
   'MCP initialize handshake was not completed before the command exited';
+const HEALTH_CHECK_TIMEOUT_MESSAGE =
+  'MCP initialize handshake timed out';
 
 const HEALTH_CHECK_TIMEOUT_MS = 2000;
 const HEALTH_CHECK_TERMINATION_GRACE_MS = 250;
+/** Maximum retained prefix for each child-process output stream. */
+const MAX_HEALTH_DIAGNOSTIC_BYTES = 4096;
+/** Bound incomplete protocol data while allowing normal MCP initialize responses. */
+const MAX_MCP_PROTOCOL_BUFFER_BYTES = 1024 * 1024;
 /** Maximum number of MCP child-process health probes running at once. */
 const MAX_CONCURRENT_MCP_HEALTH_PROBES = 4;
 /** Maximum number of child processes spawned by one trusted status check. */
@@ -162,6 +169,8 @@ export class SkillHealthChecker {
       let proc: ChildProcessWithoutNullStreams;
       let settled = false;
       let stdoutBuffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+      let stdoutDiagnosticTail: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+      let stderrDiagnosticTail: Buffer<ArrayBufferLike> = Buffer.alloc(0);
       let timer: NodeJS.Timeout;
 
       const settle = (
@@ -233,17 +242,36 @@ export class SkillHealthChecker {
 
         timer = setTimeout(() => {
           // Timeout without MCP readiness signal — cannot confirm connectivity.
-          settle('unknown');
+          settle('unknown', {
+            error: formatHealthDiagnostic(
+              HEALTH_CHECK_TIMEOUT_MESSAGE,
+              stderrDiagnosticTail,
+              stdoutDiagnosticTail,
+            ),
+          });
         }, HEALTH_CHECK_TIMEOUT_MS);
 
-        proc.on('error', () => {
-          settle('error', { killRunningProcess: false });
+        proc.on('error', (error: Error) => {
+          settle('error', {
+            killRunningProcess: false,
+            error: formatHealthDiagnostic(
+              `Failed to start MCP server: ${error.message}`,
+              stderrDiagnosticTail,
+              stdoutDiagnosticTail,
+            ),
+          });
         });
 
         proc.on('close', (code) => {
           settle(code === 0 ? 'unknown' : 'error', {
             killRunningProcess: false,
-            ...(code === 0 ? { error: INCOMPLETE_HANDSHAKE_MESSAGE } : {}),
+            error: formatHealthDiagnostic(
+              code === 0
+                ? INCOMPLETE_HANDSHAKE_MESSAGE
+                : `MCP server exited with code ${code ?? 'unknown'}`,
+              stderrDiagnosticTail,
+              stdoutDiagnosticTail,
+            ),
           });
         });
 
@@ -255,17 +283,35 @@ export class SkillHealthChecker {
         });
 
         proc.stdout.on('data', (chunk: Buffer | string) => {
+          const chunkBuffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, 'utf8');
+          stdoutDiagnosticTail = appendBoundedDiagnostic(stdoutDiagnosticTail, chunkBuffer);
           stdoutBuffer = Buffer.concat([
             stdoutBuffer,
-            Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, 'utf8'),
+            chunkBuffer,
           ]);
+          if (stdoutBuffer.byteLength > MAX_MCP_PROTOCOL_BUFFER_BYTES) {
+            stdoutBuffer = stdoutBuffer.subarray(-MAX_MCP_PROTOCOL_BUFFER_BYTES);
+          }
           const messages = readMcpMessages(stdoutBuffer);
           stdoutBuffer = messages.remaining;
           if (messages.messages.some(isFailedInitializeResponse)) {
-            settle('error');
+            settle('error', {
+              error: formatHealthDiagnostic(
+                'MCP initialize request failed',
+                stderrDiagnosticTail,
+                stdoutDiagnosticTail,
+              ),
+            });
           } else if (messages.messages.some(isSuccessfulInitializeResponse)) {
             settle('connected');
           }
+        });
+
+        proc.stderr.on('data', (chunk: Buffer | string) => {
+          stderrDiagnosticTail = appendBoundedDiagnostic(
+            stderrDiagnosticTail,
+            Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, 'utf8'),
+          );
         });
 
         proc.stdin.write(formatMcpMessage({
@@ -281,11 +327,45 @@ export class SkillHealthChecker {
             },
           },
         }));
-      } catch {
-        resolve({ status: 'error' });
+      } catch (error) {
+        resolve({
+          status: 'error',
+          error: formatHealthDiagnostic(
+            `Failed to start MCP server: ${error instanceof Error ? error.message : String(error)}`,
+            stderrDiagnosticTail,
+            stdoutDiagnosticTail,
+          ),
+        });
       }
     });
   }
+}
+
+function appendBoundedDiagnostic(
+  current: Buffer<ArrayBufferLike>,
+  chunk: Buffer<ArrayBufferLike>,
+): Buffer<ArrayBufferLike> {
+  const remainingBytes = MAX_HEALTH_DIAGNOSTIC_BYTES - current.byteLength;
+  if (remainingBytes <= 0) {
+    return current;
+  }
+  return Buffer.concat([current, chunk.subarray(0, remainingBytes)]);
+}
+
+function formatHealthDiagnostic(
+  summary: string,
+  stderr: Buffer<ArrayBufferLike>,
+  stdout: Buffer<ArrayBufferLike>,
+): string {
+  const details = [
+    summary,
+    ...(stderr.byteLength > 0 ? [`stderr: ${stderr.toString('utf8').trim()}`] : []),
+    ...(stdout.byteLength > 0 ? [`stdout: ${stdout.toString('utf8').trim()}`] : []),
+  ].join('\n');
+  const sanitized = details
+    .replace(/\u001B\[[0-?]*[ -/]*[@-~]/gu, '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu, '\uFFFD');
+  return redactSensitiveText(sanitized);
 }
 
 async function mapWithConcurrency<Item, Result>(
