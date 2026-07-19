@@ -500,7 +500,8 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
     def test_file_limit_exit_salvages_truncated_agy_stdout(self):
         payload = b"x" * self.reviewer.MAX_REVIEW_BYTES
         result = self.reviewer.decode_agy_result(-25, payload, b"file too large")
-        self.assertTrue(result.endswith("[REVIEW OUTPUT TRUNCATED] ..."))
+        self.assertIn("[REVIEW OUTPUT TRUNCATED]", result)
+        self.assertEqual(self.reviewer.parse_final_verdict(result), "request-changes")
 
     def test_failed_gh_diff_is_not_collapsed_to_empty(self):
         process = FakeProcess(b"")
@@ -638,6 +639,13 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         review_body = post_review.call_args.args[1]
         self.assertNotIn(token, review_body)
         self.assertIn("model review skipped", review_body.lower())
+
+    def test_secret_detection_covers_deleted_and_context_lines(self):
+        token = "ghp_" + "b" * 40
+        for line in (f"-TOKEN={token}", f" TOKEN={token}"):
+            with self.subTest(line=line):
+                self.assertEqual(self.reviewer.scan_diff_for_exploits(line), [])
+                self.assertTrue(self.reviewer.diff_contains_secret(line))
 
     def test_added_line_starting_with_double_plus_is_scanned(self):
         warning = self.reviewer.scan_diff_for_exploits(

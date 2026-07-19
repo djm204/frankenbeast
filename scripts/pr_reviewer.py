@@ -332,6 +332,11 @@ def scan_diff_for_exploits(diff_content):
     return warnings
 
 
+def diff_contains_secret(diff_content):
+    """Return whether any diff line contains secret-shaped content."""
+    return SECRET_PATTERN.search(diff_content) is not None
+
+
 def decode_agy_result(return_code, stdout, stderr):
     output_was_capped = len(stdout) > MAX_REVIEW_BYTES or (
         return_code != 0 and len(stdout) >= MAX_REVIEW_BYTES
@@ -340,6 +345,7 @@ def decode_agy_result(return_code, stdout, stderr):
         return (
             stdout[:MAX_REVIEW_BYTES]
             + b"\n... [REVIEW OUTPUT TRUNCATED] ..."
+            + b"\n\nVERDICT: REQUEST_CHANGES"
         ).decode("utf-8", errors="replace")
     if return_code == 0:
         return stdout.decode("utf-8", errors="replace")
@@ -562,10 +568,7 @@ def process_prs():
 
         security_warnings = scan_diff_for_exploits(diff_content)
         diff_truncated = diff_content.endswith(DIFF_TRUNCATION_MARKER)
-        secret_bearing_diff = any(
-            "Hardcoded Secret / API Key leak" in warning
-            for warning in security_warnings
-        )
+        secret_bearing_diff = diff_contains_secret(diff_content)
         if secret_bearing_diff:
             review_body = (
                 "### Automated model review skipped\n\n"
