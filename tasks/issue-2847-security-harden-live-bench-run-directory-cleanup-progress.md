@@ -8,5 +8,5 @@
 - [x] Run focused tests, package tests, typecheck, build, lint, diff checks, and a targeted static scan.
 - [x] Commit with the required identity and Conventional Commit subject.
 - [x] Push and open one PR that closes only #2847.
-- [ ] Reach green CI and a current-head clean GitHub Codex review with zero unresolved Codex threads.
+- [x] Reach green CI and a current-head clean GitHub Codex review with zero unresolved Codex threads.
 - [ ] Merge, record any durable lesson, and complete the Kanban card.

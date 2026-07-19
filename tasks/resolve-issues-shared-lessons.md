@@ -1,5 +1,9 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-19 — Live-bench run cleanup TOCTOU hardening
+- For destructive cleanup in attacker-writable directory trees, preflight `lstat`/`realpath` checks are not enough: on POSIX, open the trusted root and each descendant with `O_DIRECTORY|O_NOFOLLOW`, compare root and quarantined leaf device/inode identities, address rename/removal through stable descriptor paths, and keep the recreated run-leaf descriptor open while populating it.
+- Create quarantine entries beside the anchored leaf parent so rename stays on one filesystem, and avoid followable path mutations such as `chmod(path)` between creation and a no-follow open. Use `lstat`-based existence checks so dangling symlinks fail closed, and retain an explicit portable path for platforms without `/proc/self/fd` or `/dev/fd`.
+
 ## 2026-07-18 — Kanban reviewer isolation
 - Independent review workers must receive a distinct child card or explicitly review-only context; never let a delegated reviewer inherit and complete the implementation parent card, because completion can garbage-collect its workspace before the verified diff is committed and shipped.
 
