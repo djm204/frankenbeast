@@ -34,6 +34,7 @@ function sqliteBusyError(): Error & { code: string } {
 describe('SQLiteAdapter', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    pragmaMock.mockReset()
   })
 
   it('configures WAL, foreign keys, and a busy timeout so concurrent writers wait for locks', () => {
@@ -44,10 +45,29 @@ describe('SQLiteAdapter', () => {
       'busy_timeout = 5000',
       'journal_mode = WAL',
       'foreign_keys = ON',
+      'user_version',
+      'user_version = 1',
     ])
     expect(execMock).toHaveBeenCalledTimes(1)
 
     adapter.close()
+  })
+
+  it('executes schema DDL only once when multiple adapters open the same initialized database', () => {
+    let schemaVersion = 0
+    pragmaMock.mockImplementation((statement: string) => {
+      if (statement === 'user_version') return schemaVersion
+      if (statement === 'user_version = 1') schemaVersion = 1
+      return undefined
+    })
+
+    const first = new SQLiteAdapter('/tmp/shared-traces.db')
+    const second = new SQLiteAdapter('/tmp/shared-traces.db')
+
+    expect(execMock).toHaveBeenCalledTimes(1)
+
+    first.close()
+    second.close()
   })
 
   it('validates retry options before opening a database handle', () => {

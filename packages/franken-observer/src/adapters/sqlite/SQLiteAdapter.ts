@@ -59,6 +59,8 @@ interface FlushedSpanState {
   thoughtBlocksJson: string
 }
 
+const SQLITE_SCHEMA_VERSION = 1
+
 export interface SQLiteAdapterOptions {
   /** Maximum flushed-span snapshots retained for repeated-flush dirty checks. */
   maxFlushedSpanSnapshots?: number
@@ -297,7 +299,11 @@ export class SQLiteAdapter implements ExportAdapter {
       this.withSqliteLockRetrySync('initialize SQLite adapter', () => {
         this.db.pragma('journal_mode = WAL')
         this.db.pragma('foreign_keys = ON')
-        this.db.exec(CREATE_TABLES)
+        const schemaVersion = this.db.pragma('user_version', { simple: true })
+        if (typeof schemaVersion !== 'number' || schemaVersion < SQLITE_SCHEMA_VERSION) {
+          this.db.exec(CREATE_TABLES)
+          this.db.pragma(`user_version = ${SQLITE_SCHEMA_VERSION}`)
+        }
       })
     } catch (error) {
       this.db.close()
