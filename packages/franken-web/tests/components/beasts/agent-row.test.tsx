@@ -67,8 +67,18 @@ describe('AgentRow', () => {
     expect(onClick).toHaveBeenCalledWith('agent-1');
   });
 
-  it('shows selected highlight', () => {
-    const { container } = render(<AgentRow agent={agent} density="compact" selected={true} onClick={vi.fn()} />);
-    expect((container.firstChild as HTMLElement)?.className).toContain('bg-beast-accent-soft');
+  it('keeps visual and semantic selected state in sync', () => {
+    const { rerender } = render(
+      <AgentRow agent={agent} density="compact" selected={false} onClick={vi.fn()} />,
+    );
+    const row = screen.getByRole('button', { name: /My Test Agent/ });
+
+    expect(row.getAttribute('aria-pressed')).toBe('false');
+    expect(row.className).not.toContain('bg-beast-accent-soft');
+
+    rerender(<AgentRow agent={agent} density="compact" selected={true} onClick={vi.fn()} />);
+
+    expect(row.getAttribute('aria-pressed')).toBe('true');
+    expect(row.className).toContain('bg-beast-accent-soft');
   });
 });
