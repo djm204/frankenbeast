@@ -32,16 +32,23 @@ Run these commands from your Frankenbeast checkout while you are still on the co
 CONTRIBUTION_BRANCH="$(git branch --show-current)"
 CONTRIBUTION_ROOT="$(git rev-parse --show-toplevel)"
 LOCAL_HEAD="$(git rev-parse HEAD)"
+PR_BRANCH="$(gh pr view "$PR_NUMBER" --repo "$REPO" \
+  --json headRefName --jq '.headRefName')"
 PR_HEAD="$(gh pr view "$PR_NUMBER" --repo "$REPO" \
   --json headRefOid --jq '.headRefOid')"
 
-printf 'Contribution branch: %s\nLocal head: %s\nMerged PR head: %s\n' \
-  "$CONTRIBUTION_BRANCH" "$LOCAL_HEAD" "$PR_HEAD"
+printf 'Contribution branch: %s\nMerged PR branch: %s\nLocal head: %s\nMerged PR head: %s\n' \
+  "$CONTRIBUTION_BRANCH" "$PR_BRANCH" "$LOCAL_HEAD" "$PR_HEAD"
 git status --short --branch
 git log --oneline --decorate -3
 
 if [ -z "$CONTRIBUTION_BRANCH" ] || [ "$CONTRIBUTION_BRANCH" = "main" ]; then
   printf 'Stop: expected to be on the merged contribution branch.\n' >&2
+  exit 1
+fi
+
+if [ "$CONTRIBUTION_BRANCH" != "$PR_BRANCH" ]; then
+  printf 'Stop: current branch is not the branch GitHub merged.\n' >&2
   exit 1
 fi
 
@@ -94,9 +101,10 @@ Most external contributors have `origin` pointing to their fork and `upstream` p
 
 ```bash
 git -C "$PRIMARY_CHECKOUT" remote -v
-git -C "$PRIMARY_CHECKOUT" fetch --prune upstream main
-git -C "$PRIMARY_CHECKOUT" switch main
-git -C "$PRIMARY_CHECKOUT" merge --ff-only upstream/main
+git -C "$PRIMARY_CHECKOUT" fetch --prune upstream main || exit 1
+git -C "$PRIMARY_CHECKOUT" switch main || exit 1
+test "$(git -C "$PRIMARY_CHECKOUT" branch --show-current)" = "main" || exit 1
+git -C "$PRIMARY_CHECKOUT" merge --ff-only upstream/main || exit 1
 ```
 
 The `--ff-only` guard stops instead of creating an unexpected merge commit. If it fails because local `main` has commits, another worktree owns `main`, or `upstream` is missing, use the [fork and branch recovery guide](fork-and-branch-recovery.md) rather than resetting or force-pushing.
@@ -104,9 +112,10 @@ The `--ff-only` guard stops instead of creating an unexpected merge commit. If i
 Contributors who intentionally cloned the upstream repository and do not have an `upstream` remote can update from `origin` instead:
 
 ```bash
-git -C "$PRIMARY_CHECKOUT" fetch --prune origin main
-git -C "$PRIMARY_CHECKOUT" switch main
-git -C "$PRIMARY_CHECKOUT" merge --ff-only origin/main
+git -C "$PRIMARY_CHECKOUT" fetch --prune origin main || exit 1
+git -C "$PRIMARY_CHECKOUT" switch main || exit 1
+test "$(git -C "$PRIMARY_CHECKOUT" branch --show-current)" = "main" || exit 1
+git -C "$PRIMARY_CHECKOUT" merge --ff-only origin/main || exit 1
 ```
 
 ## 5. Synchronize your fork
@@ -135,11 +144,20 @@ The uppercase fallback is safe here only because the earlier checks proved that 
 GitHub may already have deleted the remote branch. If it remains, compare its current full commit ID with the merged PR head before requesting deletion from your fork:
 
 ```bash
-REMOTE_HEAD="$(git -C "$PRIMARY_CHECKOUT" ls-remote \
-  --heads origin "$CONTRIBUTION_BRANCH" | cut -f1)"
+REMOTE_OUTPUT=""
+if REMOTE_OUTPUT="$(git -C "$PRIMARY_CHECKOUT" ls-remote --exit-code \
+  --heads origin "$CONTRIBUTION_BRANCH" 2>&1)"; then
+  REMOTE_HEAD="${REMOTE_OUTPUT%%[[:space:]]*}"
+  REMOTE_LOOKUP_STATUS=0
+else
+  REMOTE_LOOKUP_STATUS=$?
+fi
 
-if [ -z "$REMOTE_HEAD" ]; then
+if [ "$REMOTE_LOOKUP_STATUS" -eq 2 ]; then
   printf 'Remote branch is already absent; nothing to delete.\n'
+elif [ "$REMOTE_LOOKUP_STATUS" -ne 0 ]; then
+  printf 'Stop: remote branch lookup failed: %s\n' "$REMOTE_OUTPUT" >&2
+  exit "$REMOTE_LOOKUP_STATUS"
 elif [ "$REMOTE_HEAD" != "$PR_HEAD" ]; then
   printf 'Stop: remote branch has commits that were not in the merged PR.\n' >&2
   exit 1
