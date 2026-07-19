@@ -372,5 +372,8 @@
 ## 2026-07-18 — Tracked dispatch-failure response redaction
 - Treat a failed run response as a bundle: sanitize the run snapshot, stored attempts, historical events, and logs. Event/log redaction must remain effective after dispatch recovery, and restarting a stopped run whose snapshot was cleared must rebuild validated config from the tracked agent before executor start.
 
+## 2026-07-18 — Beast log path containment
+- Validate run and attempt identifiers at the `BeastLogStore` filesystem boundary against persisted prefixed-UUID formats, preserve the internal `system` attempt sentinel, and retain a resolved-path containment check as defense in depth. Traversal regressions should exercise both append and read paths while normal-path tests use production-shaped identifiers.
+
 ## 2026-07-18 — First-contribution help documentation
 - For broad onboarding-documentation issues, close a concrete workflow gap rather than adding another general quickstart. Make the new path discoverable from README, CONTRIBUTING, and the onboarding index, include safe copyable evidence/templates, and add a focused test that locks those entrypoints and redaction guidance together.
