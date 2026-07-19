@@ -105,6 +105,22 @@ describe('workspace provisioning', () => {
     });
   });
 
+  it('detects when a prepared run leaf is moved before population completes', () => {
+    const runsRoot = tempRoot('live-bench-runs-root-');
+    const dateDir = join(runsRoot, '2026-05-23');
+    const runDir = join(dateDir, 'run-d');
+    const movedRunDir = join(runsRoot, 'moved-run-d');
+    mkdirSync(dateDir, { recursive: true });
+
+    const prepared = prepareRunDirectorySafely(runDir, runsRoot);
+    try {
+      renameSync(runDir, movedRunDir);
+      expect(() => prepared.verifyLocation()).toThrow(/moved during provisioning/);
+    } finally {
+      prepared.close();
+    }
+  });
+
   it('atomically replaces an existing run directory without leaving cleanup artifacts', () => {
     const fixturesRoot = tempRoot('live-bench-fixtures-');
     const runsRoot = tempRoot('live-bench-runs-');

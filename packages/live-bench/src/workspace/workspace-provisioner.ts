@@ -99,6 +99,7 @@ export class WorkspaceProvisioner {
 
     const preparedRun = prepareRunDirectorySafely(runDir, this.runsRoot, this.runsRootIdentity);
     try {
+      preparedRun.verifyLocation();
       const anchoredWorkspaceDir = join(preparedRun.anchoredRunDir, 'workspace');
       const anchoredEvidenceDir = join(preparedRun.anchoredRunDir, 'evidence');
       mkdirSync(anchoredWorkspaceDir, { mode: 0o700 });
@@ -131,6 +132,7 @@ export class WorkspaceProvisioner {
         serializeToolCallEvidence([]),
         'utf8',
       );
+      preparedRun.verifyLocation();
     } finally {
       preparedRun.close();
     }
@@ -141,6 +143,7 @@ export class WorkspaceProvisioner {
 
 interface PreparedRunDirectory {
   readonly anchoredRunDir: string;
+  verifyLocation(): void;
   close(): void;
 }
 
@@ -155,7 +158,7 @@ export function prepareRunDirectorySafely(
   expectedRunsRootIdentity = fileIdentity(lstatSync(realpathSync(runsRoot))),
 ): PreparedRunDirectory {
   ensureContained(runDir, runsRoot, 'run directory');
-  if (process.platform === 'win32') {
+  if (process.platform !== 'linux') {
     return prepareRunDirectoryPortable(runDir, runsRoot, expectedRunsRootIdentity);
   }
   const rel = relative(runsRoot, runDir);
@@ -195,20 +198,19 @@ export function prepareRunDirectorySafely(
     runFd = openSync(anchoredRunPath, directoryFlags);
     const anchoredRunDir = fdPath(runFd);
 
-    if (parentFd !== rootFd) {
-      closeSync(parentFd);
-      parentFd = rootFd;
-    }
-
     let closed = false;
     return {
       anchoredRunDir,
+      verifyLocation: () => verifyRunLocation(anchoredRunPath, runFd!, runDir),
       close: () => {
         if (closed) {
           return;
         }
         closed = true;
         closeSync(runFd!);
+        if (parentFd !== rootFd) {
+          closeSync(parentFd);
+        }
         closeSync(rootFd);
       },
     };
@@ -272,7 +274,35 @@ function prepareRunDirectoryPortable(
   if (!createdStat.isDirectory() || createdStat.isSymbolicLink()) {
     throw new Error(`Run directory changed during creation: ${runDir}`);
   }
-  return { anchoredRunDir: runDir, close: () => undefined };
+  const createdIdentity = fileIdentity(createdStat);
+  return {
+    anchoredRunDir: runDir,
+    verifyLocation: () => {
+      const currentStat = lstatSync(runDir);
+      if (currentStat.isSymbolicLink() || !sameFileIdentity(fileIdentity(currentStat), createdIdentity)) {
+        throw new Error(`Run directory moved or changed during provisioning: ${runDir}`);
+      }
+    },
+    close: () => undefined,
+  };
+}
+
+function verifyRunLocation(anchoredRunPath: string, runFd: number, displayRunDir: string): void {
+  let currentStat;
+  try {
+    currentStat = lstatSync(anchoredRunPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error(`Run directory moved during provisioning: ${displayRunDir}`);
+    }
+    throw error;
+  }
+  if (
+    currentStat.isSymbolicLink()
+    || !sameFileIdentity(fileIdentity(currentStat), fileIdentity(fstatSync(runFd)))
+  ) {
+    throw new Error(`Run directory moved or changed during provisioning: ${displayRunDir}`);
+  }
 }
 
 function removeAnchoredRunDirectory(
