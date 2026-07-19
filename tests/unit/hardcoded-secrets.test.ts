@@ -1292,6 +1292,152 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('scripts/round-27-cron.sh:5');
   });
 
+  it('rejects unresolved current-head Codex cron scanner bypasses', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    const packageDir = join(root, 'packages', 'example');
+    mkdirSync(scriptDir, { recursive: true });
+    mkdirSync(packageDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'current-head-cron.mjs'),
+      [
+        "const { auth: { GITHUB_TOKEN: nestedCredential } } = process.env;",
+        'const nestedEntry = `0 1 * * * agy pr --token ${nestedCredential}`;',
+        "const { env: commonEnv } = require('node:process');",
+        'const commonCredential = commonEnv.GITHUB_TOKEN;',
+        'const commonEntry = `0 2 * * * agy pr --token ${commonCredential}`;',
+        "const { execFileSync: runGh } = require('node:child_process');",
+        "const helperCredential = runGh('gh', ['auth', 'token']);",
+        'const helperEntry = `0 3 * * * agy pr --token ${helperCredential}`;',
+        "const child = spawn('crontab', ['-']);",
+        'const stdinEntry = `0 4 * * * agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'child.stdin.write(stdinEntry);',
+        'child.stdin.end();',
+        "const { GITHUB_TOKEN: bracketCredential } = process['env'];",
+        'const bracketEntry = `0 5 * * * agy pr --token ${bracketCredential}`;',
+        "const ghArgs = ['auth'];",
+        "ghArgs.extend(['token']);",
+        "const extendedCredential = execFileSync('gh', ghArgs);",
+        'const extendedEntry = `0 6 * * * agy pr --token ${extendedCredential}`;',
+        'let fallbackCredential = process.env.GITHUB_TOKEN;',
+        'if (!fallbackCredential) fallbackCredential = loadCredential();',
+        'const fallbackEntry = `0 7 * * * agy pr --token ${fallbackCredential}`;',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'multiline-process-import.mjs'),
+      [
+        'import {',
+        '  env as runtimeEnv,',
+        "} from 'node:process';",
+        'const importedCredential = runtimeEnv.GITHUB_TOKEN;',
+        'const entry = `0 8 * * * agy pr --token ${importedCredential}`;',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'stdin-end-cron.mjs'),
+      [
+        "const installer = spawn('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'current-head-cron.py'),
+      [
+        'import os',
+        'import subprocess',
+        'from subprocess import check_output as run_gh',
+        "computed_getenv = os.getenv('GITHUB_' + 'TOKEN')",
+        "getenv_entry = f'0 9 * * * agy pr --token {computed_getenv}'",
+        "computed_environ = os.environ.get('GITHUB_' + 'TOKEN')",
+        "environ_entry = f'0 10 * * * agy pr --token {computed_environ}'",
+        "helper_credential = run_gh(['gh', 'auth', 'token'], text=True)",
+        "helper_entry = f'0 11 * * * agy pr --token {helper_credential}'",
+        "child = subprocess.Popen(['crontab', '-'], stdin=subprocess.PIPE, text=True)",
+        "communicate_entry = f\"0 12 * * * agy pr --token {os.environ['GITHUB_TOKEN']}\"",
+        'child.communicate(communicate_entry)',
+        "system_entry = f\"0 13 * * * agy pr --token {os.environ['GITHUB_TOKEN']}\"",
+        "os.system(f\"printf '%s\\n' '{system_entry}' | crontab -\")",
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'current-head-cron.sh'),
+      [
+        'gh_cli=gh',
+        'auth="$($gh_cli auth token)"',
+        'CRON_CMD="0 14 * * * agy pr --token $auth"',
+        'installer=crontab',
+        'printf "%s\\n" "agy pr --token $GITHUB_TOKEN" | "$installer" -',
+        'jobs=/tmp/current-head-jobs',
+        'printf "GITHUB_TOKEN=%s\\n" "$GITHUB_TOKEN" >"$jobs"',
+        'crontab "$jobs"',
+        '(',
+        "  printf '%s\\n' '0 17 * * * agy pr'",
+        '  printf "--token %s\\n" "$GITHUB_TOKEN"',
+        ') > /tmp/current-head-grouped-jobs',
+        'crontab /tmp/current-head-grouped-jobs',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(packageDir, 'maintenance.sh'),
+      ['entry="0 18 * * * agy pr --token $GITHUB_TOKEN"', 'printf "%s\\n" "$entry" | crontab -'].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    for (const location of [
+      'scripts/current-head-cron.mjs:2',
+      'scripts/current-head-cron.mjs:5',
+      'scripts/current-head-cron.mjs:8',
+      'scripts/current-head-cron.mjs:11',
+      'scripts/current-head-cron.mjs:14',
+      'scripts/current-head-cron.mjs:18',
+      'scripts/current-head-cron.mjs:21',
+      'scripts/multiline-process-import.mjs:5',
+      'scripts/stdin-end-cron.mjs:3',
+      'scripts/current-head-cron.py:5',
+      'scripts/current-head-cron.py:7',
+      'scripts/current-head-cron.py:9',
+      'scripts/current-head-cron.py:12',
+      'scripts/current-head-cron.py:14',
+      'scripts/current-head-cron.sh:3',
+      'scripts/current-head-cron.sh:5',
+      'scripts/current-head-cron.sh:7',
+      'scripts/current-head-cron.sh:11',
+      'packages/example/maintenance.sh:2',
+    ]) {
+      expect(result.stderr).toContain(location);
+    }
+  });
+
+  it('allows direct crontab installs that defer gh auth token lookup until runtime', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'runtime-gh-cron.sh'),
+      [
+        "printf '%s\\n' '0 3 * * * GITHUB_TOKEN=$(gh auth token) agy pr' | crontab -",
+        "crontab - <<'EOF'",
+        '0 4 * * * GITHUB_TOKEN=$(gh auth token) agy pr',
+        'EOF',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(0);
+  });
+
   it('allows bare token arguments and absolute-path runtime gh token substitutions', () => {
     const root = makeFixtureRoot();
     const scriptDir = join(root, 'scripts');
