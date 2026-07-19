@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createMcpServer, sanitizeToolArgumentsForAuditTrail, validateToolArguments, type ToolDef, type GovernanceGate, type AuditSink } from './server-factory.js';
+import { createMcpServer, sanitizeRejectedToolArgumentsForAudit, sanitizeToolArgumentsForAuditTrail, validateToolArguments, type ToolDef, type GovernanceGate, type AuditSink } from './server-factory.js';
 
 describe('createMcpServer', () => {
   it('creates server with name and version', () => {
@@ -398,7 +398,26 @@ describe('createMcpServer', () => {
       event: 'tool_call',
       metadata: '[observer-metadata-redacted]',
       sessionId: 'session-1',
-      tool: 'untrusted-payload-name',
+      tool: '[observer-metadata-redacted]',
+    });
+
+    const observerTool: ToolDef = {
+      name: 'fbeast_observer_log',
+      description: 'observer log',
+      inputSchema: { type: 'object', properties: {} },
+      handler: async () => ({ content: [] }),
+    };
+    expect(sanitizeRejectedToolArgumentsForAudit(
+      observerTool,
+      'SECRET_OBSERVER_METADATA',
+    )).toEqual({ invalid: '[observer-metadata-redacted]' });
+
+    expect(sanitizeToolArgumentsForAuditTrail('fbeast_observer_log', {
+      invalid: 'SECRET_OBSERVER_METADATA',
+      sessionId: 'secret-session-id',
+    })).toEqual({
+      invalid: '[observer-metadata-redacted]',
+      sessionId: '[observer-metadata-redacted]',
     });
 
     expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {

@@ -206,6 +206,58 @@ describe('beast routes', () => {
     expect(logsBody.data.logs.some((line) => line.includes('started'))).toBe(true);
   });
 
+  it('redacts historical snapshots for tracked runs with active dispatch failures', async () => {
+    const { app, operatorToken, repository, agents } = createBeastApp();
+    const agent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'dashboard',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: { provider: 'claude', objective: 'Protect secrets', chunkDirectory: 'docs/chunks' },
+    });
+    repository.updateTrackedAgent(agent.id, {
+      status: 'failed',
+      updatedAt: '2026-03-10T00:00:01.000Z',
+    });
+    const run = repository.createRun({
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {
+        provider: 'claude',
+        objective: 'SECRET_OBJECTIVE',
+        chunkDirectory: 'docs/chunks',
+      },
+      trackedAgentId: agent.id,
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+    repository.updateRun(run.id, {
+      status: 'failed',
+      finishedAt: '2026-03-10T00:00:01.000Z',
+      stopReason: 'spawn_failed',
+    });
+    repository.appendTrackedAgentEvent(agent.id, {
+      level: 'error',
+      type: 'agent.dispatch.failed',
+      message: 'Worker process could not be spawned.',
+      payload: {},
+      createdAt: '2026-03-10T00:00:01.000Z',
+    });
+
+    const headers = { authorization: `Bearer ${operatorToken}` };
+    const detailResponse = await app.request(`/v1/beasts/runs/${run.id}`, { headers });
+    expect(detailResponse.status).toBe(200);
+    const detail = await detailResponse.json() as { data: { run: { configSnapshot: Record<string, unknown> } } };
+    expect(detail.data.run.configSnapshot).toEqual({});
+
+    const listResponse = await app.request('/v1/beasts/runs', { headers });
+    expect(listResponse.status).toBe(200);
+    const list = await listResponse.json() as { data: { runs: Array<{ id: string; configSnapshot: Record<string, unknown> }> } };
+    expect(list.data.runs.find((candidate) => candidate.id === run.id)?.configSnapshot).toEqual({});
+  });
+
   it('stops tracked agents when direct run creation is paused by maintenance mode', async () => {
     const { app, operatorToken, agents } = createBeastApp({ maintenanceEnabled: true });
     const headers = {

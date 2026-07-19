@@ -278,7 +278,7 @@ export class BeastDispatchService {
             updatedAt,
           });
           if ((agentStatus === 'running' || agentStatus === 'awaiting_approval' || agentStatus === 'completed')
-            && this.repository.hasActiveDispatchFailure(updated.trackedAgentId)) {
+            && this.repository.hasUnrecoveredDispatchFailure(updated.trackedAgentId)) {
             const recoveredEvent = {
               level: 'info' as const,
               type: 'agent.dispatch.recovered',

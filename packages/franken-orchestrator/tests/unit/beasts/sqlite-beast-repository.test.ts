@@ -358,6 +358,39 @@ describe('SQLiteBeastRepository', () => {
     expect(repo.listTrackedAgents()).toEqual([agent]);
   });
 
+  it('treats healthy legacy agents with old dispatch-failure markers as recovered', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const agent = repo.createTrackedAgent({
+      definitionId: 'martin-loop',
+      source: 'dashboard',
+      status: 'failed',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: { provider: 'claude', objective: 'Retry safely', chunkDirectory: 'docs/chunks' },
+      createdAt: '2026-03-11T00:00:00.000Z',
+      updatedAt: '2026-03-11T00:00:00.000Z',
+    });
+    repo.appendTrackedAgentEvent(agent.id, {
+      level: 'error',
+      type: 'agent.dispatch.failed',
+      message: 'Worker process could not be spawned.',
+      payload: {},
+      createdAt: '2026-03-11T00:00:01.000Z',
+    });
+
+    expect(repo.hasActiveDispatchFailure(agent.id)).toBe(true);
+    expect(repo.listActiveDispatchFailureAgentIds()).toEqual([agent.id]);
+
+    repo.updateTrackedAgent(agent.id, {
+      status: 'completed',
+      updatedAt: '2026-03-11T00:01:00.000Z',
+    });
+
+    expect(repo.hasActiveDispatchFailure(agent.id)).toBe(false);
+    expect(repo.listActiveDispatchFailureAgentIds()).toEqual([]);
+  });
+
   it('appends tracked agent events and links tracked agents to beast runs', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

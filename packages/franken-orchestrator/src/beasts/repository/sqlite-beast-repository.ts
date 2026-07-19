@@ -630,7 +630,9 @@ export class SQLiteBeastRepository {
     const rows = this.db.prepare(
       `SELECT event.agent_id
          FROM tracked_agent_events AS event
+         JOIN tracked_agents AS agent ON agent.id = event.agent_id
         WHERE event.type = 'agent.dispatch.failed'
+          AND agent.status NOT IN ('running', 'awaiting_approval', 'completed')
           AND event.sequence = (
             SELECT MAX(marker.sequence)
               FROM tracked_agent_events AS marker
@@ -642,6 +644,14 @@ export class SQLiteBeastRepository {
   }
 
   hasActiveDispatchFailure(agentId: string): boolean {
+    const agent = this.getTrackedAgent(agentId);
+    if (agent && (agent.status === 'running' || agent.status === 'awaiting_approval' || agent.status === 'completed')) {
+      return false;
+    }
+    return this.hasUnrecoveredDispatchFailure(agentId);
+  }
+
+  hasUnrecoveredDispatchFailure(agentId: string): boolean {
     const row = this.db.prepare(
       `SELECT 1
          FROM tracked_agent_events AS event

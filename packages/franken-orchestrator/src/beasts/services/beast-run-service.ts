@@ -46,6 +46,13 @@ export class BeastRunService {
     return this.repository.getRun(runId);
   }
 
+  sanitizeRunForResponse(run: BeastRun | undefined): BeastRun | undefined {
+    if (!run?.trackedAgentId || !this.repository.hasActiveDispatchFailure(run.trackedAgentId)) {
+      return run;
+    }
+    return { ...run, configSnapshot: {} };
+  }
+
   updateConfigSnapshot(runId: string, configSnapshot: Readonly<Record<string, unknown>>): BeastRun {
     return this.repository.updateRun(runId, { configSnapshot });
   }
@@ -485,7 +492,7 @@ export class BeastRunService {
       }];
 
       if ((status === 'running' || status === 'awaiting_approval' || status === 'completed')
-        && this.repository.hasActiveDispatchFailure(trackedAgentId)) {
+        && this.repository.hasUnrecoveredDispatchFailure(trackedAgentId)) {
         const recoveredEvent = {
           level: 'info' as const,
           type: 'agent.dispatch.recovered',

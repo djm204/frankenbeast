@@ -366,6 +366,7 @@ const MEMORY_REVIEW_DECIDE_SAFE_RESOLUTIONS = new Set(['keep_existing', 'replace
 const MEMORY_STORE_TOOL = 'fbeast_memory_store';
 const MEMORY_STORE_SAFE_AUDIT_KEYS = new Set(['key', 'type', 'agentId', 'ttlMs']);
 const OBSERVER_LOG_TOOL = 'fbeast_observer_log';
+const OBSERVER_LOG_SAFE_AUDIT_KEYS = new Set(['event', 'sessionId']);
 
 function normalizeAuditDateString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
@@ -674,6 +675,17 @@ function redactMemoryStoreEnvelope(sanitized: Record<string, unknown>, redaction
 }
 
 function redactObserverLogArgs(sanitized: Record<string, unknown>, redaction = '[observer-metadata-redacted]'): Record<string, unknown> {
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'invalid')) {
+    for (const key of Object.keys(sanitized)) {
+      sanitized[key] = redaction;
+    }
+    return sanitized;
+  }
+  for (const key of Object.keys(sanitized)) {
+    if (!OBSERVER_LOG_SAFE_AUDIT_KEYS.has(key)) {
+      sanitized[key] = redaction;
+    }
+  }
   if (Object.prototype.hasOwnProperty.call(sanitized, 'metadata')) {
     sanitized['metadata'] = redaction;
   }
