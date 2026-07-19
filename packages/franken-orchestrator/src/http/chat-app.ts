@@ -112,6 +112,10 @@ function isChatSessionStreamPath(pathname: string): boolean {
   return /^\/v1\/chat\/sessions\/[^/]+\/stream$/.test(pathname);
 }
 
+function isBeastEventStreamPath(pathname: string): boolean {
+  return /^\/v1\/beasts\/events\/stream\/[^/]+$/.test(pathname);
+}
+
 const skillContextPathPattern = /^\/api\/skills\/[^/]+\/context$/;
 
 const controlRequestSizeLimit: MiddlewareHandler = (c, next) => {
@@ -196,13 +200,13 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     // Register both the exact base path and the wildcard: Hono's `/base/*` does
     // not match the base path itself (e.g. `/api/skills`), so collection roots
     // would otherwise slip past auth. This mirrors the beast/agent route guard.
-    // /v1/beasts/events/stream uses one-shot SSE tickets because browser
+    // /v1/beasts/events/stream/:connectionId uses one-shot SSE tickets because browser
     // EventSource cannot send Authorization headers. Protect other Beast proxy
     // routes with the shared bearer token, but let ticketed streams reach the
     // daemon where the ticket is validated.
     app.use('/v1/beasts', requireAuth());
     app.use('/v1/beasts/*', async (c, next) => {
-      if (new URL(c.req.url).pathname === '/v1/beasts/events/stream') {
+      if (isBeastEventStreamPath(new URL(c.req.url).pathname)) {
         await next();
         return;
       }

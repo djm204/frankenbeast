@@ -17,7 +17,7 @@ Use a **connection ticket** pattern — an industry-standard approach for authen
 **Canonical endpoints:**
 
 - Ticket issuance: `POST /v1/beasts/events/ticket`
-- Dashboard stream: `GET /v1/beasts/events/stream`
+- Dashboard stream: `GET /v1/beasts/events/stream/{connectionId}`
 
 These paths are shared by the daemon routes in `packages/franken-orchestrator/src/http/routes/beast-sse-routes.ts` and the dashboard client in `packages/franken-web/src/lib/beast-api.ts`. Older per-agent `/api/beasts/:id/events` examples are not the dashboard stream contract.
 
@@ -25,9 +25,9 @@ These paths are shared by the daemon routes in `packages/franken-orchestrator/sr
 
 1. Dashboard calls `POST /v1/beasts/events/ticket` with `Authorization: Bearer <operator-token>`
 2. Daemon validates the bearer token, generates a single-use UUID ticket, and stores its token digest in the shared Beast SQLite database with a 30-second TTL
-3. Response sets the ticket in an `HttpOnly`, `SameSite=Strict` cookie scoped only to `/v1/beasts/events/stream`; HTTPS requests also set `Secure`
-4. Dashboard opens `EventSource` to the canonical `/v1/beasts/events/stream` endpoint without putting the ticket in the URL
-5. Daemon reads and validates the scoped cookie: the ticket must exist, not be expired, and not be already used
+3. Response returns a non-secret connection ID and sets the ticket in an `HttpOnly`, 30-second, `SameSite=Strict` cookie scoped only to `/v1/beasts/events/stream/{connectionId}`; HTTPS requests also set `Secure`
+4. Dashboard opens `EventSource` to the canonical `/v1/beasts/events/stream/{connectionId}` endpoint without putting the ticket in the URL
+5. Daemon reads the scoped cookie and validates it against the connection ID: the ticket must exist, match the connection scope, not be expired, and not be already used
 6. Ticket is atomically marked consumed on first use; the short-lived consumed marker prevents native EventSource retries from looping
 7. SSE stream is established and authenticated for the lifetime of the connection
 
