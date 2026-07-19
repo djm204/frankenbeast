@@ -3,6 +3,11 @@ import type { IncomingMessage, ServerResponse, Server } from 'node:http'
 import type { ExportAdapter, TraceSummary } from '../export/ExportAdapter.js'
 import type { Trace } from '../core/types.js'
 
+const TRACE_RESPONSE_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'Cache-Control': 'no-store',
+} as const
+
 export interface TraceServerOptions {
   adapter: ExportAdapter
   /** Port to listen on. Use 0 to let the OS assign a free port. Default: 4040 */
@@ -76,7 +81,10 @@ export class TraceServer {
       const path = new URL(req.url ?? '/', `http://localhost`).pathname
 
       if (path === '/' || path === '') {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          ...TRACE_RESPONSE_HEADERS,
+        })
         res.end(buildHtml())
         return
       }
@@ -136,7 +144,10 @@ function formatHostForUrl(host: string): string {
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, { 'Content-Type': 'application/json' })
+  res.writeHead(status, {
+    'Content-Type': 'application/json',
+    ...TRACE_RESPONSE_HEADERS,
+  })
   res.end(JSON.stringify(body))
 }
 
