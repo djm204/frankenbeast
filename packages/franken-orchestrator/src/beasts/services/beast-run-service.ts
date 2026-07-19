@@ -40,7 +40,7 @@ export class BeastRunService {
 
   listRuns(): BeastRun[] {
     const redactedAgentIds = new Set(this.repository.listDispatchFailureHistoryAgentIds());
-    return this.repository.listRuns().map((run) => (
+    return this.repository.listRuns({ recoverCorruptJson: true }).map((run) => (
       run.trackedAgentId && redactedAgentIds.has(run.trackedAgentId)
         ? { ...run, configSnapshot: {} }
         : run
@@ -64,15 +64,16 @@ export class BeastRunService {
 
   listAttempts(runId: string) {
     const run = this.requireRun(runId);
-    const attempts = this.repository.listAttempts(runId);
+    const attempts = this.repository.listAttempts(runId, { recoverCorruptJson: true });
     if (!this.hasDispatchFailureHistory(run)) return attempts;
     return attempts.map((attempt) => ({ ...attempt, executorMetadata: undefined }));
   }
 
   listEvents(runId: string) {
     const run = this.requireRun(runId);
-    if (!this.hasDispatchFailureHistory(run)) return this.repository.listEvents(runId);
-    return this.repository.listEvents(runId).map(redactDispatchFailureEvent);
+    const events = this.repository.listEvents(runId, { recoverCorruptJson: true });
+    if (!this.hasDispatchFailureHistory(run)) return events;
+    return events.map(redactDispatchFailureEvent);
   }
 
   async readLogs(runId: string): Promise<string[]> {

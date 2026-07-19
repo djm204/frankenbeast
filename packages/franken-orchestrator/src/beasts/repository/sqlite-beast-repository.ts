@@ -201,6 +201,10 @@ export class BeastRepositoryJsonCorruptionError extends Error {
   }
 }
 
+export interface CorruptJsonRecoveryOptions {
+  readonly recoverCorruptJson?: boolean;
+}
+
 export class SQLiteBeastRepository {
   private readonly db: Database.Database;
 
@@ -272,9 +276,9 @@ export class SQLiteBeastRepository {
     return row ? mapRun(row) : undefined;
   }
 
-  listRuns(): BeastRun[] {
+  listRuns(options: CorruptJsonRecoveryOptions = {}): BeastRun[] {
     const rows = this.db.prepare('SELECT * FROM beast_runs ORDER BY created_at DESC, id DESC').all() as BeastRunRow[];
-    return rows.map(mapRun);
+    return mapRowsRecoveringCorruptJson(rows, mapRun, options);
   }
 
   createAttempt(runId: string, input: CreateAttemptInput): BeastRunAttempt {
@@ -285,11 +289,11 @@ export class SQLiteBeastRepository {
     return this.transaction(() => this.insertAttempt(runId, input));
   }
 
-  listAttempts(runId: string): BeastRunAttempt[] {
+  listAttempts(runId: string, options: CorruptJsonRecoveryOptions = {}): BeastRunAttempt[] {
     const rows = this.db.prepare(
       'SELECT * FROM beast_run_attempts WHERE run_id = ? ORDER BY attempt_number ASC',
     ).all(runId) as BeastAttemptRow[];
-    return rows.map(mapAttempt);
+    return mapRowsRecoveringCorruptJson(rows, mapAttempt, options);
   }
 
   getAttempt(attemptId: string): BeastRunAttempt | undefined {
@@ -462,11 +466,11 @@ export class SQLiteBeastRepository {
     return event;
   }
 
-  listEvents(runId: string): BeastRunEvent[] {
+  listEvents(runId: string, options: CorruptJsonRecoveryOptions = {}): BeastRunEvent[] {
     const rows = this.db.prepare(
       'SELECT * FROM beast_run_events WHERE run_id = ? ORDER BY sequence ASC',
     ).all(runId) as BeastEventRow[];
-    return rows.map(mapEvent);
+    return mapRowsRecoveringCorruptJson(rows, mapEvent, options);
   }
 
   createTrackedAgent(input: CreateTrackedAgentInput): TrackedAgent {
@@ -519,9 +523,9 @@ export class SQLiteBeastRepository {
     return agent;
   }
 
-  getTrackedAgent(agentId: string): TrackedAgent | undefined {
+  getTrackedAgent(agentId: string, options: CorruptJsonRecoveryOptions = {}): TrackedAgent | undefined {
     const row = this.db.prepare('SELECT * FROM tracked_agents WHERE id = ?').get(agentId) as TrackedAgentRow | undefined;
-    return row ? mapTrackedAgent(row) : undefined;
+    return row ? mapRowsRecoveringCorruptJson([row], mapTrackedAgent, options)[0] : undefined;
   }
 
   requireTrackedAgent(agentId: string): TrackedAgent {
@@ -532,11 +536,11 @@ export class SQLiteBeastRepository {
     return agent;
   }
 
-  listTrackedAgents(): TrackedAgent[] {
+  listTrackedAgents(options: CorruptJsonRecoveryOptions = {}): TrackedAgent[] {
     const rows = this.db.prepare(
       'SELECT * FROM tracked_agents ORDER BY created_at DESC, id DESC',
     ).all() as TrackedAgentRow[];
-    return rows.map(mapTrackedAgent);
+    return mapRowsRecoveringCorruptJson(rows, mapTrackedAgent, options);
   }
 
   updateTrackedAgent(agentId: string, patch: UpdateTrackedAgentPatch): TrackedAgent {
@@ -618,12 +622,12 @@ export class SQLiteBeastRepository {
     return event;
   }
 
-  listTrackedAgentEvents(agentId: string): TrackedAgentEvent[] {
+  listTrackedAgentEvents(agentId: string, options: CorruptJsonRecoveryOptions = {}): TrackedAgentEvent[] {
     this.getTrackedAgentOrThrow(agentId);
     const rows = this.db.prepare(
       'SELECT * FROM tracked_agent_events WHERE agent_id = ? ORDER BY sequence ASC',
     ).all(agentId) as TrackedAgentEventRow[];
-    return rows.map(mapTrackedAgentEvent);
+    return mapRowsRecoveringCorruptJson(rows, mapTrackedAgentEvent, options);
   }
 
   listActiveDispatchFailureAgentIds(): string[] {
@@ -989,9 +993,34 @@ function parseJsonColumn(
   } catch (error) {
     throw new BeastRepositoryJsonCorruptionError({
       ...context,
-      valueSnippet: value.slice(0, 120),
+      valueSnippet: '[redacted]',
     }, error);
   }
+}
+
+function mapRowsRecoveringCorruptJson<Row, Value>(
+  rows: readonly Row[],
+  mapper: (row: Row) => Value,
+  options: CorruptJsonRecoveryOptions,
+): Value[] {
+  if (!options.recoverCorruptJson) {
+    return rows.map(mapper);
+  }
+
+  const values: Value[] = [];
+  for (const row of rows) {
+    try {
+      values.push(mapper(row));
+    } catch (error) {
+      if (!(error instanceof BeastRepositoryJsonCorruptionError)) {
+        throw error;
+      }
+      console.warn(
+        `Skipping corrupt Beast JSON in ${error.context.table}.${error.context.column} for row ${error.context.rowId}; persisted row was left unchanged for repair.`,
+      );
+    }
+  }
+  return values;
 }
 
 function mapTrackedAgentEvent(row: TrackedAgentEventRow): TrackedAgentEvent {

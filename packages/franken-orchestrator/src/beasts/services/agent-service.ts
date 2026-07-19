@@ -77,7 +77,7 @@ export class AgentService {
   }
 
   listAgents(): TrackedAgent[] {
-    return this.repository.listTrackedAgents();
+    return this.repository.listTrackedAgents({ recoverCorruptJson: true });
   }
 
   getCapacityReservationState(): CapacityReservationState | undefined {
@@ -114,7 +114,7 @@ export class AgentService {
   getAgentDetail(agentId: string): TrackedAgentDetail {
     return {
       agent: this.getAgent(agentId),
-      events: this.repository.listTrackedAgentEvents(agentId),
+      events: this.repository.listTrackedAgentEvents(agentId, { recoverCorruptJson: true }),
     };
   }
 
@@ -168,7 +168,7 @@ export class AgentService {
   }
 
   private activeCapacityItems(): CapacityReservationWorkItem[] {
-    return this.listAgents()
+    return this.repository.listTrackedAgents()
       .filter((agent) => agent.status === 'dispatching'
         || agent.status === 'awaiting_approval'
         || agent.status === 'running')

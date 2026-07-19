@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import Database from 'better-sqlite3';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -203,6 +204,58 @@ describe('dispatcher queue reconciliation after restart', () => {
         payload: expect.objectContaining({ code: 'stale-running-attempt-failed' }),
       }),
     ]));
+  });
+
+  it('continues restart reconciliation when an active attempt has corrupt JSON', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-dispatcher-reconcile-'));
+    const dbPath = join(workDir, 'beasts.db');
+    const repo = createRepo(workDir);
+    const agent = createAgent(repo, 'corrupt attempt worker');
+    const run = repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: { objective: 'recover startup', chunkDirectory: '.' },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-20T00:00:01.000Z',
+    });
+    const attempt = repo.createAttempt(run.id, {
+      status: 'running',
+      pid: 4242,
+      startedAt: '2026-03-20T00:01:00.000Z',
+      executorMetadata: { processGroupOwned: true },
+    });
+    repo.updateRun(run.id, { status: 'running' });
+
+    const db = new Database(dbPath);
+    try {
+      db.prepare('UPDATE beast_run_attempts SET executor_metadata = ? WHERE id = ?')
+        .run('{"token":"must-not-leak"', attempt.id);
+    } finally {
+      db.close();
+    }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const report = reconcileDispatcherQueueAfterRestart(repo, {
+      now: () => '2026-03-20T00:05:00.000Z',
+      isPidAlive: () => true,
+    });
+
+    expect(report.findings).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ runId: run.id }),
+    ]));
+    expect(repo.getRun(run.id)).toMatchObject({
+      status: 'running',
+      currentAttemptId: attempt.id,
+    });
+    expect(() => repo.getAttempt(attempt.id)).toThrow();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(
+      `beast_run_attempts.executor_metadata for row ${attempt.id}`,
+    ));
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('must-not-leak'));
+    warn.mockRestore();
   });
 
   it('does not relink an agent to an older queued run when a newer run already owns dispatch', async () => {

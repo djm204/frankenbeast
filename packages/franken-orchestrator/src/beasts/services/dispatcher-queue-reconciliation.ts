@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs';
 import type { BeastRun, BeastRunAttempt, BeastRunStatus, TrackedAgentStatus } from '../types.js';
-import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
+import {
+  BeastRepositoryJsonCorruptionError,
+  SQLiteBeastRepository,
+} from '../repository/sqlite-beast-repository.js';
 import { isoNow } from '@franken/types';
 
 export type DispatcherQueueReconciliationCode =
@@ -41,6 +44,22 @@ export interface DispatcherQueueReconciliationOptions {
 
 const ACTIVE_RUN_STATUSES = new Set<BeastRunStatus>(['queued', 'interviewing', 'running', 'pending_approval']);
 const TERMINAL_RUN_STATUSES = new Set<BeastRunStatus>(['completed', 'failed', 'stopped']);
+const CORRUPT_ATTEMPT = Symbol('corrupt-attempt');
+
+function getAttemptForReconciliation(
+  repository: SQLiteBeastRepository,
+  attemptId: string,
+): BeastRunAttempt | undefined | typeof CORRUPT_ATTEMPT {
+  try {
+    return repository.getAttempt(attemptId);
+  } catch (error) {
+    if (!(error instanceof BeastRepositoryJsonCorruptionError)) throw error;
+    console.warn(
+      `Skipping restart reconciliation for corrupt Beast JSON in ${error.context.table}.${error.context.column} for row ${error.context.rowId}; persisted state was left unchanged for operator repair.`,
+    );
+    return CORRUPT_ATTEMPT;
+  }
+}
 
 export function reconcileDispatcherQueueAfterRestart(
   repository: SQLiteBeastRepository,
@@ -76,7 +95,7 @@ export function reconcileDispatcherQueueAfterRestart(
       });
     }
 
-    for (const run of repository.listRuns()) {
+    for (const run of repository.listRuns({ recoverCorruptJson: true })) {
       if (TERMINAL_RUN_STATUSES.has(run.status)) {
         const finding = reconcileTerminalRun(repository, run, reconciledAt);
         if (finding) findings.push(finding);
@@ -87,7 +106,10 @@ export function reconcileDispatcherQueueAfterRestart(
         continue;
       }
 
-      const currentAttempt = run.currentAttemptId ? repository.getAttempt(run.currentAttemptId) : undefined;
+      const currentAttempt = run.currentAttemptId
+        ? getAttemptForReconciliation(repository, run.currentAttemptId)
+        : undefined;
+      if (currentAttempt === CORRUPT_ATTEMPT) continue;
       const finding = reconcileActiveRun(
         repository,
         run,
@@ -106,7 +128,7 @@ export function reconcileDispatcherQueueAfterRestart(
   });
 
   return {
-    checkedRuns: repository.listRuns().length,
+    checkedRuns: repository.listRuns({ recoverCorruptJson: true }).length,
     findings,
     changedRuns,
     duplicateLiveAgentRunCount: findings.filter((finding) => finding.code === 'duplicate-live-agent-run').length,
@@ -283,9 +305,10 @@ function detectDuplicateLiveAgentRuns(
   isProcessGroupAlive: (pid: number) => boolean,
 ): DispatcherQueueReconciliationFinding[] {
   const liveRunsByAgent = new Map<string, Array<{ run: BeastRun; attempt: BeastRunAttempt; pid: number }>>();
-  for (const run of repository.listRuns()) {
+  for (const run of repository.listRuns({ recoverCorruptJson: true })) {
     if (!run.trackedAgentId || run.status !== 'running' || !run.currentAttemptId) continue;
-    const attempt = repository.getAttempt(run.currentAttemptId);
+    const attempt = getAttemptForReconciliation(repository, run.currentAttemptId);
+    if (attempt === CORRUPT_ATTEMPT) continue;
     const pid = attempt?.pid;
     if (!attempt || typeof pid !== 'number' || pid <= 0 || !attemptOwnsLiveProcess(
       attempt,
@@ -321,7 +344,7 @@ function syncTrackedAgentIfRunOwnsDispatch(
   updatedAt: string,
 ): boolean {
   if (!run.trackedAgentId) return false;
-  const agent = repository.getTrackedAgent(run.trackedAgentId);
+  const agent = repository.getTrackedAgent(run.trackedAgentId, { recoverCorruptJson: true });
   if (!agent || agent.status === 'deleted') return false;
   if (agent.dispatchRunId && agent.dispatchRunId !== run.id) return false;
   if (agent.status === status && agent.dispatchRunId === run.id) return false;
@@ -336,7 +359,7 @@ function syncTrackedAgent(
   updatedAt: string,
 ): void {
   if (!run.trackedAgentId) return;
-  const agent = repository.getTrackedAgent(run.trackedAgentId);
+  const agent = repository.getTrackedAgent(run.trackedAgentId, { recoverCorruptJson: true });
   if (!agent || agent.status === 'deleted') return;
   if (agent.status === status && agent.dispatchRunId === run.id) return;
   repository.updateTrackedAgent(run.trackedAgentId, {

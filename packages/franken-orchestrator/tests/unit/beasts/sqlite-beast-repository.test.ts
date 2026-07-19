@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -111,10 +111,16 @@ function seedCorruptJsonFixture(repo: SQLiteBeastRepository): CorruptJsonFixture
   };
 }
 
-function corruptJsonColumn(dbPath: string, table: string, column: string, rowId: string): void {
+function corruptJsonColumn(
+  dbPath: string,
+  table: string,
+  column: string,
+  rowId: string,
+  value = '{malformed json',
+): void {
   const db = new Database(dbPath);
   try {
-    db.prepare(`UPDATE ${table} SET ${column} = ? WHERE id = ?`).run('{malformed json', rowId);
+    db.prepare(`UPDATE ${table} SET ${column} = ? WHERE id = ?`).run(value, rowId);
   } finally {
     db.close();
   }
@@ -505,13 +511,23 @@ describe('SQLiteBeastRepository', () => {
       name: 'beast_run_attempts.executor_metadata',
       table: 'beast_run_attempts',
       column: 'executor_metadata',
-      exercise: (repo: SQLiteBeastRepository, ids: CorruptJsonFixtureIds) => () => repo.listAttempts(ids.runId),
+      recovers: true,
+      strictExercise: (repo: SQLiteBeastRepository, ids: CorruptJsonFixtureIds) => () => repo.listAttempts(ids.runId),
+      exercise: (repo: SQLiteBeastRepository, ids: CorruptJsonFixtureIds) => () => repo.listAttempts(
+        ids.runId,
+        { recoverCorruptJson: true },
+      ),
     },
     {
       name: 'beast_run_events.payload',
       table: 'beast_run_events',
       column: 'payload',
-      exercise: (repo: SQLiteBeastRepository, ids: CorruptJsonFixtureIds) => () => repo.listEvents(ids.runId),
+      recovers: true,
+      strictExercise: (repo: SQLiteBeastRepository, ids: CorruptJsonFixtureIds) => () => repo.listEvents(ids.runId),
+      exercise: (repo: SQLiteBeastRepository, ids: CorruptJsonFixtureIds) => () => repo.listEvents(
+        ids.runId,
+        { recoverCorruptJson: true },
+      ),
     },
     {
       name: 'beast_interview_sessions.answers',
@@ -529,7 +545,9 @@ describe('SQLiteBeastRepository', () => {
       name: 'tracked_agents.init_config',
       table: 'tracked_agents',
       column: 'init_config',
-      exercise: (repo: SQLiteBeastRepository, ids: CorruptJsonFixtureIds) => () => repo.getTrackedAgent(ids.agentId),
+      recovers: true,
+      strictExercise: (repo: SQLiteBeastRepository) => () => repo.listTrackedAgents(),
+      exercise: (repo: SQLiteBeastRepository) => () => repo.listTrackedAgents({ recoverCorruptJson: true }),
     },
     {
       name: 'tracked_agents.module_config',
@@ -541,34 +559,92 @@ describe('SQLiteBeastRepository', () => {
       name: 'tracked_agent_events.payload',
       table: 'tracked_agent_events',
       column: 'payload',
-      exercise: (repo: SQLiteBeastRepository, ids: CorruptJsonFixtureIds) => () => repo.listTrackedAgentEvents(ids.agentId),
+      recovers: true,
+      strictExercise: (repo: SQLiteBeastRepository, ids: CorruptJsonFixtureIds) => () => (
+        repo.listTrackedAgentEvents(ids.agentId)
+      ),
+      exercise: (repo: SQLiteBeastRepository, ids: CorruptJsonFixtureIds) => () => repo.listTrackedAgentEvents(
+        ids.agentId,
+        { recoverCorruptJson: true },
+      ),
     },
-  ])('reports structured data-corruption details for corrupt $name JSON', async ({ table, column, exercise }) => {
+  ])('handles corrupt $name JSON with structured diagnostics', async ({
+    table,
+    column,
+    exercise,
+    recovers,
+    strictExercise,
+  }) => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
     const dbPath = join(workDir, 'beasts.db');
     const repo = new SQLiteBeastRepository(dbPath);
     const ids = seedCorruptJsonFixture(repo);
     corruptJsonColumn(dbPath, table, column, ids.rowIdFor(table));
 
-    expect(exercise(repo, ids)).toThrow(BeastRepositoryJsonCorruptionError);
+    if (recovers) {
+      if (!strictExercise) throw new Error(`missing strict exercise for ${table}.${column}`);
+      expect(strictExercise(repo, ids)).toThrow(BeastRepositoryJsonCorruptionError);
 
-    try {
-      exercise(repo, ids)();
-      throw new Error('expected corrupt JSON read to throw');
-    } catch (error) {
-      expect(error).toBeInstanceOf(BeastRepositoryJsonCorruptionError);
-      const corruption = error as BeastRepositoryJsonCorruptionError;
-      expect(corruption.context).toMatchObject({
-        table,
-        column,
-        rowId: ids.rowIdFor(table),
-        valueSnippet: '{malformed json',
-      });
-      expect(corruption.message).toContain(`${table}.${column}`);
-      expect(corruption.message).toContain(ids.rowIdFor(table));
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      expect(exercise(repo, ids)()).toEqual([]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(`${table}.${column} for row ${ids.rowIdFor(table)}`));
+      warn.mockRestore();
+    } else {
+      expect(exercise(repo, ids)).toThrow(BeastRepositoryJsonCorruptionError);
+
+      try {
+        exercise(repo, ids)();
+        throw new Error('expected corrupt JSON read to throw');
+      } catch (error) {
+        expect(error).toBeInstanceOf(BeastRepositoryJsonCorruptionError);
+        const corruption = error as BeastRepositoryJsonCorruptionError;
+        expect(corruption.context).toMatchObject({
+          table,
+          column,
+          rowId: ids.rowIdFor(table),
+          valueSnippet: '[redacted]',
+        });
+        expect(corruption.message).toContain(`${table}.${column}`);
+        expect(corruption.message).toContain(ids.rowIdFor(table));
+      }
     }
 
     expect(repo.getRun(ids.healthyRunId)?.configSnapshot).toEqual({ healthy: true });
+  });
+
+  it('keeps healthy runs listable without leaking or mutating a corrupt JSON value', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
+    const dbPath = join(workDir, 'beasts.db');
+    const repo = new SQLiteBeastRepository(dbPath);
+    const ids = seedCorruptJsonFixture(repo);
+    const corruptValue = '{"token":"super-secret-token"';
+    corruptJsonColumn(dbPath, 'beast_runs', 'config_snapshot', ids.runId, corruptValue);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(() => repo.listRuns()).toThrow(BeastRepositoryJsonCorruptionError);
+    expect(repo.listRuns({ recoverCorruptJson: true }).map((run) => run.id)).toEqual([ids.healthyRunId]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`beast_runs.config_snapshot for row ${ids.runId}`));
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('super-secret-token'));
+
+    const db = new Database(dbPath);
+    try {
+      const stored = db.prepare('SELECT config_snapshot FROM beast_runs WHERE id = ?').get(ids.runId) as {
+        config_snapshot: string;
+      };
+      expect(stored.config_snapshot).toBe(corruptValue);
+    } finally {
+      db.close();
+    }
+
+    expect(() => repo.getRun(ids.runId)).toThrow(BeastRepositoryJsonCorruptionError);
+    try {
+      repo.getRun(ids.runId);
+    } catch (error) {
+      const corruption = error as BeastRepositoryJsonCorruptionError;
+      expect(corruption.context.valueSnippet).not.toContain('super-secret-token');
+    }
+
+    warn.mockRestore();
   });
 
   it('migrates legacy beast_runs tables that predate tracked_agent_id', async () => {
