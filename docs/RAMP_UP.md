@@ -6,6 +6,32 @@
 
 A deterministic guardrails framework for AI agents organized as an **npm workspaces monorepo with Turborepo** for build orchestration. The current workspace contains **10 first-party packages** under `packages/`, matching the canonical inventories in [README.md](../README.md#current-workspace-packages) and [docs/guides/quickstart.md](guides/quickstart.md#project-structure): the consolidated core packages, the current MCP suite (`@franken/mcp-suite`), and `live-bench` (`@franken/live-bench`). Cross-package dependencies use workspace references (e.g., `@franken/types`). See [ADR-011](adr/011-real-monorepo-migration.md) and ADR-031 for the earlier consolidation history; pre-consolidation package surfaces were absorbed into the active workspaces listed below.
 
+## Prerequisites
+
+- Node.js version is read from the root `package.json` `engines.node` field (`>=22.13.0 <23 || >=24.0.0 <26`).
+- npm version is pinned by the root `package.json` `packageManager` field (`npm@11.5.1`).
+
+To align your local toolchain with these pins, run:
+
+```bash
+corepack --version  # if this command fails, install Corepack first, e.g. npm i -g corepack
+corepack enable npm
+corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
+npm --version  # should match the pinned version above
+```
+
+For a full setup gate before making changes, run:
+
+```bash
+npm run setup:healthcheck
+```
+
+For a narrower npm-only validation, run:
+
+```bash
+npm run check:package-manager
+```
+
 ## Modules
 
 | Package | Purpose |
