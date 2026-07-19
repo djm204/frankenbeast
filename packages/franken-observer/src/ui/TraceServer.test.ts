@@ -45,6 +45,17 @@ describe('TraceServer', () => {
       const address = nodeServer?.address()
       expect(address && typeof address === 'object' ? address.address : undefined).toBe('127.0.0.1')
     })
+
+    it('uses an explicitly configured host for binding and the reported URL', async () => {
+      await server.stop()
+      server = new TraceServer({ adapter, port: 0, host: '0.0.0.0' })
+      await server.start()
+
+      const nodeServer = (server as unknown as { server: Server | null }).server
+      const address = nodeServer?.address()
+      expect(address && typeof address === 'object' ? address.address : undefined).toBe('0.0.0.0')
+      expect(server.url).toMatch(/^http:\/\/0\.0\.0\.0:\d+$/)
+    })
   })
 
   describe('GET /', () => {
