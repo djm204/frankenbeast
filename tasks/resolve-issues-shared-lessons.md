@@ -1,5 +1,8 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-18 — Kanban reviewer isolation
+- Independent review workers must receive a distinct child card or explicitly review-only context; never let a delegated reviewer inherit and complete the implementation parent card, because completion can garbage-collect its workspace before the verified diff is committed and shipped.
+
 ## 2026-07-18 — Working-memory hydration corruption
 - Fail closed on malformed persisted values that are shaped like structured JSON (`{` or `[` after leading whitespace), while retaining the documented plain-text fallback for genuinely legacy rows. Typed hydration errors should identify the affected key without deleting the row, so operators can repair it and reopen the store.
 

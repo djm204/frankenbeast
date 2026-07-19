@@ -59,6 +59,7 @@ export function StepModules() {
           <button
             key={mod.key}
             type="button"
+            aria-pressed={Boolean(values[mod.key])}
             onClick={() => toggleModule(mod.key)}
             className={`p-4 rounded-xl border-2 text-left transition-colors
               ${values[mod.key]
