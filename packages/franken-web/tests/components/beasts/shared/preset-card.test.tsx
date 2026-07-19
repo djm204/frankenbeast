@@ -22,11 +22,12 @@ describe('PresetCardGroup', () => {
     expect(card?.className).toContain('border-beast-accent');
   });
 
-  it('exposes each card selected state to assistive technology', () => {
+  it('exposes the mutually exclusive selection as a radio group', () => {
     render(<PresetCardGroup presets={presets} selected="one-shot" onSelect={vi.fn()} />);
 
-    expect(screen.getByRole('button', { name: /one-shot/i }).getAttribute('aria-pressed')).toBe('true');
-    expect(screen.getByRole('button', { name: /feature branch/i }).getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByRole('radiogroup', { name: /preset options/i })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: /one-shot/i }).getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByRole('radio', { name: /feature branch/i }).getAttribute('aria-checked')).toBe('false');
   });
 
   it('calls onSelect when card is clicked', () => {

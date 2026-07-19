@@ -15,12 +15,17 @@ interface PresetCardGroupProps {
 
 export function PresetCardGroup({ presets, selected, onSelect }: PresetCardGroupProps) {
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+    <div
+      role="radiogroup"
+      aria-label="Preset options"
+      className="grid grid-cols-2 lg:grid-cols-3 gap-3"
+    >
       {presets.map((preset) => (
         <button
           key={preset.id}
           type="button"
-          aria-pressed={preset.id === selected}
+          role="radio"
+          aria-checked={preset.id === selected}
           onClick={() => onSelect(preset.id)}
           className={`p-4 rounded-xl border-2 text-left transition-all min-h-[5rem]
             ${preset.id === selected
