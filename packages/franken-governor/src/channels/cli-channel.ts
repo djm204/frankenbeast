@@ -14,10 +14,21 @@ export interface CliChannelDeps {
 
 const INPUT_MAP: Record<string, ResponseCode> = {
   a: 'APPROVE',
+  approve: 'APPROVE',
+  y: 'APPROVE',
+  yes: 'APPROVE',
   r: 'REGEN',
+  regenerate: 'REGEN',
   x: 'ABORT',
+  abort: 'ABORT',
+  n: 'ABORT',
+  no: 'ABORT',
   d: 'DEBUG',
+  debug: 'DEBUG',
 };
+
+const INVALID_INPUT_HELP =
+  'Please answer a/approve/y/yes, r/regenerate, x/abort/n/no, or d/debug.';
 
 export class CliChannel implements ApprovalChannel {
   readonly channelId = 'cli';
@@ -54,25 +65,32 @@ export class CliChannel implements ApprovalChannel {
     readonly decision: ResponseCode;
     readonly feedback?: string;
   }> {
-    const prompt = this.formatPrompt(request);
+    const basePrompt = this.formatPrompt(request);
+    let prompt = basePrompt;
 
     while (true) {
-      const input = await this.readline.question(prompt);
+      const input = await this.readline.question(`${prompt}\n> `);
       const trimmed = input.trim();
       const [command = '', ...feedbackParts] = trimmed.split(/\s+/u);
       const decision = INPUT_MAP[command.toLowerCase()];
-      if (decision !== undefined) {
-        const feedback = feedbackParts.join(' ').trim();
-        return feedback.length > 0 ? { decision, feedback } : { decision };
+
+      if (decision === undefined) {
+        prompt = `${basePrompt}\n\n${trimmed ? `"${trimmed}" is not recognized. ` : ''}${INVALID_INPUT_HELP}`;
+        continue;
       }
+
+      const feedback = feedbackParts.join(' ').trim();
+      return feedback.length > 0 ? { decision, feedback } : { decision };
     }
   }
+
 
   private formatPrompt(request: ApprovalRequest): string {
     const lines = [
       '',
       formatApprovalPromptWithBoundaries(request, { includePlanDiff: true }),
-      `\n[a]pprove  [r]egenerate  a[x]bort  [d]ebug\nAppend an acknowledgement token after the decision when a SECURITY NOTICE requires one.\n> `,
+      `[a]pprove  [r]egenerate  a[x]bort  [d]ebug`,
+      'Append an acknowledgement token after the decision when a SECURITY NOTICE requires one.',
     ].filter(Boolean);
 
     return lines.join('\n');
