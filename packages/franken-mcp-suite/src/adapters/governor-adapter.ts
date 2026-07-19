@@ -852,22 +852,41 @@ function skillRequiresHitl(configPath: string | undefined, skillsDirs: string[],
       // a fallback when the project has no same-named installed skill.
     }
   }
+  if (!configUnreadable) {
+    const missingEnabledSkills = [...enabledSkills].filter((skillName) => !skillDirectories.has(skillName));
+    if (mcpQualifiedName !== undefined
+      && missingEnabledSkills.some((skillName) => mcpQualifiedName.startsWith(`${skillName}__`))) {
+      return true;
+    }
+    if (slashQualifiedAction !== undefined && missingEnabledSkills.includes(slashQualifiedAction.serverName)) {
+      return true;
+    }
+  }
   if (skillDirectories.size === 0) return false;
 
-  for (const [skillName, skillDir] of skillDirectories) {
-    if (!configUnreadable && !enabledSkills.has(skillName)) continue;
-    const { names: serverNames, valid: serverConfigValid } = readSkillServerNames(skillDir);
+  const skillRecords = [...skillDirectories]
+    .filter(([skillName]) => configUnreadable || enabledSkills.has(skillName))
+    .map(([skillName, skillDir]) => ({
+      skillName,
+      skillDir,
+      serverConfig: readSkillServerNames(skillDir),
+    }));
+  const globallyMatchingServerName = mcpQualifiedName === undefined
+    ? undefined
+    : skillRecords
+        .flatMap(({ serverConfig }) => [...serverConfig.names])
+        .filter((serverName) => mcpQualifiedName.startsWith(`${serverName}__`))
+        .sort((left, right) => right.length - left.length)[0];
+
+  for (const { skillName, skillDir, serverConfig } of skillRecords) {
+    const { names: serverNames, valid: serverConfigValid } = serverConfig;
     let toolNames: string[] = [];
 
     if (mcpQualifiedName !== undefined) {
-      const matchingServerName = [...serverNames]
-        .filter((serverName) => mcpQualifiedName.startsWith(`${serverName}__`))
-        .sort((left, right) => right.length - left.length)[0];
-      toolNames = matchingServerName === undefined
-        ? []
-        : [mcpQualifiedName.slice(matchingServerName.length + 2)];
-
-      if (toolNames.length === 0) {
+      if (globallyMatchingServerName !== undefined) {
+        if (!serverNames.has(globallyMatchingServerName)) continue;
+        toolNames = [mcpQualifiedName.slice(globallyMatchingServerName.length + 2)];
+      } else {
         // Installed skills conventionally use their directory name as the MCP
         // server key. If that registration is stale/unreadable, keep calls to the
         // known directory-name server fail-closed instead of silently skipping it.

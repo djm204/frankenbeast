@@ -225,6 +225,40 @@ describe('GovernorAdapter', () => {
       .resolves.toMatchObject({ decision: 'approved' });
   });
 
+  it('prefers the longest MCP server prefix across enabled skills', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'short-server', [
+      {
+        name: 'other_tool',
+        description: 'Other tool',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]);
+    installSkill(dbPath, 'long-server', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: false,
+      },
+    ]);
+    writeFileSync(join(dbPath, '..', 'config.json'), JSON.stringify({
+      skills: { enabled: ['short-server', 'long-server'] },
+    }));
+    writeFileSync(join(dbPath, '..', 'skills', 'short-server', 'mcp.json'), JSON.stringify({
+      mcpServers: { foo: { command: 'foo-server' } },
+    }));
+    writeFileSync(join(dbPath, '..', 'skills', 'long-server', 'mcp.json'), JSON.stringify({
+      mcpServers: { foo__bar: { command: 'foobar-server' } },
+    }));
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__foo__bar__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+  });
+
   it('honors safe tool metadata for slash aliases when the MCP server was renamed', async () => {
     const dbPath = tracked(tmpDbPath());
     installSkill(dbPath, 'memory-skill', [
@@ -352,6 +386,8 @@ describe('GovernorAdapter', () => {
 
     await expect(governor.check({ action: 'mcp__fbeast-memory__fbeast_memory_query', context: '{}' }))
       .resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({ action: 'mcp__missing-skill__some_tool', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
   });
 
   it('fails closed when a declared MCP server has an invalid manifest entry', async () => {

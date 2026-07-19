@@ -6,6 +6,7 @@ import { searchTools, TOOL_REGISTRY, createAdapterSet, type AdapterSet } from '.
 import { createGovernanceGate } from '../shared/governance-gate.js';
 import { createAuditSink } from '../shared/central-enforcement.js';
 import { parseArgs } from 'node:util';
+import { isAbsolute, resolve } from 'node:path';
 import { deriveProjectRootFromDbPath, resolveProjectDbPath } from '../shared/resolve-db-path.js';
 
 export function deriveProxyRoot(dbPath: string, explicitRoot?: string | undefined): string | undefined {
@@ -36,9 +37,12 @@ export interface ProxyServerDeps {
 export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
   const root = deriveProxyRoot(deps.dbPath, deps.root);
   const dbPath = resolveProjectDbPath(deps.dbPath, root);
-  const configPath = deps.configPath === undefined
+  const resolvedConfigPath = deps.configPath === undefined
     ? undefined
     : resolveProjectDbPath(deps.configPath, root);
+  const configPath = resolvedConfigPath !== undefined && root !== undefined && !isAbsolute(resolvedConfigPath)
+    ? resolve(root, resolvedConfigPath)
+    : resolvedConfigPath;
   const protectedMode = root === undefined;
   let cachedAdapters: AdapterSet | undefined;
   // Govern/audit the *resolved* target tool, not the `execute_tool` wrapper, so

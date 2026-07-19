@@ -151,6 +151,29 @@ describe('proxy server', () => {
       );
     });
 
+    it('resolves non-.fbeast relative config paths against the proxy root', async () => {
+      const relativeConfigServer = createProxyServer({
+        dbPath: '/tmp/relative-config-project/.fbeast/beast.db',
+        root: '/tmp/relative-config-project',
+        configPath: 'configs/fbeast.json',
+        governance: { check: gateCheck },
+        audit: { record: auditRecord },
+      });
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+      vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
+
+      await relativeConfigServer.tools.find((tool) => tool.name === 'execute_tool')!
+        .handler({ tool: 'test_tool', args: { key: 'val' } });
+
+      expect(mockCreateAdapterSet).toHaveBeenCalledWith(
+        '/tmp/relative-config-project/.fbeast/beast.db',
+        {
+          root: '/tmp/relative-config-project',
+          configPath: '/tmp/relative-config-project/configs/fbeast.json',
+        },
+      );
+    });
+
     it('calls through to handler and returns its result', async () => {
       const fakeResult = { content: [{ type: 'text', text: 'tool executed' }] };
       const fakeHandler = vi.fn().mockResolvedValue(fakeResult);
