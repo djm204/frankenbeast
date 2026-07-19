@@ -11,12 +11,24 @@ import { SessionTokenStore } from '../security/session-token-store.js';
 
 const VALID_DECISIONS = new Set<string>(RESPONSE_CODES);
 
+export interface SlackEphemeralResponse {
+  readonly response_type: 'ephemeral';
+  readonly replace_original: false;
+  readonly text: string;
+}
+
+export interface SlackResponsePoster {
+  post(responseUrl: string, payload: SlackEphemeralResponse): Promise<void>;
+}
+
 export interface GovernorAppOptions {
   signingSecret?: string;
   /** Slack signing secret used to verify `X-Slack-Signature` on inbound callbacks. */
   slackSigningSecret?: string;
   /** Slack user IDs authorized to resolve pending approvals. Empty or omitted fails closed. */
   slackApproverUserIds?: readonly string[];
+  /** Injectable Slack response_url poster; defaults to an HTTPS JSON POST. */
+  slackResponsePoster?: SlackResponsePoster;
   slackWebhookUrl?: string;
   allowUnsignedApprovalsForTests?: boolean;
   /**
@@ -47,6 +59,32 @@ export interface GovernorAppOptions {
 
 /** Maximum age (seconds) for a Slack request timestamp before it is rejected as a replay. */
 const SLACK_MAX_TIMESTAMP_SKEW_SECONDS = 60 * 5;
+
+const DEFAULT_SLACK_RESPONSE_POSTER: SlackResponsePoster = {
+  async post(responseUrl, payload) {
+    const response = await fetch(responseUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(2_000),
+    });
+    if (!response.ok) {
+      throw new Error(`Slack response_url returned HTTP ${response.status}`);
+    }
+  },
+};
+
+function isTrustedSlackResponseUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === 'https:' &&
+      (url.hostname === 'hooks.slack.com' || url.hostname === 'hooks.slack-gov.com')
+    );
+  } catch {
+    return false;
+  }
+}
 
 /** Timing-safe comparison of two equal-purpose strings. */
 function safeEqual(a: string, b: string): boolean {
@@ -219,6 +257,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
   const app = new Hono();
   const registry = options.registry ?? new ApprovalWaiterRegistry();
   const slackApproverUserIds = new Set(options.slackApproverUserIds ?? []);
+  const slackResponsePoster = options.slackResponsePoster ?? DEFAULT_SLACK_RESPONSE_POSTER;
   const approvalQueueBackpressure = normalizeApprovalQueueBackpressure(options.approvalQueueBackpressure);
   let sessionTokenStore: SessionTokenStore | undefined = options.sessionTokenStore;
   if (!sessionTokenStore && options.sessionTokenStorePath) {
@@ -527,6 +566,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
     let payload: {
       actions?: Array<{ action_id?: string; value?: string }>;
       user?: { id?: string; username?: string };
+      response_url?: string;
     };
     try {
       const contentType = c.req.header('content-type') ?? '';
@@ -561,9 +601,25 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
 
     const slackUserId = payload.user?.id;
     if (!slackUserId || !slackApproverUserIds.has(slackUserId)) {
+      const denial: SlackEphemeralResponse = {
+        response_type: 'ephemeral',
+        replace_original: false,
+        text: 'You are not authorized to resolve this approval.',
+      };
+      if (
+        typeof payload.response_url === 'string' &&
+        isTrustedSlackResponseUrl(payload.response_url)
+      ) {
+        try {
+          await slackResponsePoster.post(payload.response_url, denial);
+        } catch {
+          // Always acknowledge Slack within its interaction window. The pending
+          // approval remains untouched when delivery of the denial fails.
+        }
+      }
       return c.json({
         response_type: 'ephemeral',
-        text: 'You are not authorized to resolve this approval.',
+        text: denial.text,
       });
     }
 

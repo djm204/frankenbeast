@@ -457,7 +457,7 @@ const app = createGovernorApp({
 });
 ```
 
-Signed callbacks whose `user.id` is absent or not in `slackApproverUserIds` receive a `200` Slack acknowledgement with an ephemeral denial message and leave the approval pending. The transport-level success prevents Slack from replacing the denial with a generic interaction error; it does not authorize or resolve the action. An omitted or empty allowlist fails closed.
+Signed callbacks whose `user.id` is absent or not in `slackApproverUserIds` receive a `200` Slack acknowledgement and leave the approval pending. For Slack-generated `https://hooks.slack.com/...` or `https://hooks.slack-gov.com/...` response URLs, the governor also posts an ephemeral denial so the actor sees clear feedback; untrusted response URL hosts are ignored. The transport-level success does not authorize or resolve the action. An omitted or empty allowlist fails closed.
 
 ### Signed Approvals (HMAC-SHA256)
 
