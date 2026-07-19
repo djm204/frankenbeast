@@ -21,7 +21,7 @@ import type {
   CritiqueIteration,
 } from '../../../src/types/loop.js';
 import type {
-  CritiqueResult,
+  CritiquePipelineResult,
   EvaluationFinding,
 } from '../../../src/types/evaluation.js';
 
@@ -39,7 +39,7 @@ function createIteration(
   evaluatorName = 'mock',
   findings: EvaluationFinding[] = [],
 ): CritiqueIteration {
-  const result: CritiqueResult = {
+  const result: CritiquePipelineResult = {
     verdict,
     overallScore: verdict === 'pass' ? 1 : 0.3,
     results: [
@@ -57,7 +57,7 @@ function createIteration(
 
 function createIterationFromResult(
   index: number,
-  result: CritiqueResult,
+  result: CritiquePipelineResult,
 ): CritiqueIteration {
   return {
     index,

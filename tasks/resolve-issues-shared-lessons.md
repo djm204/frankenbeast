@@ -391,3 +391,7 @@
 
 ## Lessons
 - 2026-07-19 — Docs regression tests should assert exact pinned values from manifest and treat setup commands as gate-narrow/full setup distinctions.
+
+## 2026-07-19 — Type export renames and deprecation compatibility
+- When renaming shared public type names for clarity, keep deprecated aliases temporarily (with `@deprecated` JSDoc) for downstream consumers, update docs/tests to use new names, and add targeted tests validating both canonical and deprecated aliases.
+- Before merging such API refactors, require `tsc`, package `lint`, `build`, and focused unit tests for both packages to avoid regressions in public contracts.
