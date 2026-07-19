@@ -113,6 +113,27 @@ Closes #<issue-number>
 
 Keep the pull request title in Conventional Commit form, for example `docs(onboarding): clarify first contribution setup`. If you are using `gh`, `gh pr create --repo djm204/frankenbeast --base main` opens the interactive form.
 
+For a copyable, non-interactive first-PR handoff, set a title and list only checks you actually ran:
+
+```bash
+PR_TITLE="docs(onboarding): describe your issue-specific change" # replace this example
+PR_URL=$(gh pr create \
+  --repo djm204/frankenbeast \
+  --base main \
+  --title "$PR_TITLE" \
+  --body "## Summary
+- describe the contributor-facing change
+
+## Verification
+- \`npm run test:root -- tests/docs-issue-${ISSUE_NUMBER}.test.ts\`
+
+Closes #${ISSUE_NUMBER}")
+printf 'Opened %s\n' "$PR_URL"
+gh pr view "$PR_URL" --json number,title,body,baseRefName,headRefName,url
+```
+
+Read the displayed title, body, base branch, and head branch before requesting review. If anything is wrong, correct it with `gh pr edit "$PR_URL"` rather than closing and recreating the pull request. Never list a test that you skipped or that failed.
+
 ## Before requesting review
 
 - [ ] The pull request addresses one issue and contains no unrelated files.
