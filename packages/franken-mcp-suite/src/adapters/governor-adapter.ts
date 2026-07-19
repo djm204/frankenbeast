@@ -354,31 +354,41 @@ function redactMemorySourceAttributionGovernanceContext(action: string, context:
   const unqualified = unqualifyMcpActionName(action);
   if (unqualified === 'fbeast_memory_source_attribution'
     || (unqualified === 'execute_tool'
-      && (contextTargetsTool(context, 'fbeast_memory_source_attribution')
-        || contextLooksLikeMemorySourceAttributionArgs(context)))) {
+      && contextTargetsTool(context, 'fbeast_memory_source_attribution'))) {
     return JSON.stringify(mergeTrustedGovernanceProvenance(context, {}));
   }
   return context;
 }
 
-function contextLooksLikeMemorySourceAttributionArgs(context: string): boolean {
-  try {
-    const parsed = JSON.parse(context) as unknown;
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
-    const record = parsed as Record<string, unknown>;
-    return Object.keys(record).length > 0
-      && Object.keys(record).every(key => [
-        'key',
-        'source',
-        'limit',
-        'readScope',
-        'agentId',
-        'targetStore',
-      ].includes(key))
-      && Object.prototype.hasOwnProperty.call(record, 'source');
-  } catch {
-    return false;
+function redactGovernorLogContext(action: string, assessedContext: string): string {
+  if (unqualifyMcpActionName(action) !== 'execute_tool'
+    || contextTargetsTool(assessedContext, 'fbeast_memory_source_attribution')) {
+    return assessedContext;
   }
+  try {
+    const parsed = JSON.parse(assessedContext) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return assessedContext;
+    const record = parsed as Record<string, unknown>;
+    const keys = Object.keys(record);
+    const attributionKeys = new Set([
+      'key',
+      'source',
+      'limit',
+      'readScope',
+      'agentId',
+      'targetStore',
+      '__fbeastGovernanceSource',
+      '__fbeastHookSource',
+    ]);
+    const hasSelector = Object.prototype.hasOwnProperty.call(record, 'key')
+      || Object.prototype.hasOwnProperty.call(record, 'source');
+    if (hasSelector && keys.every(key => attributionKeys.has(key))) {
+      return JSON.stringify(mergeTrustedGovernanceProvenance(assessedContext, {}));
+    }
+  } catch {
+    // Keep malformed and non-object contexts unchanged for safety/auditability.
+  }
+  return assessedContext;
 }
 
 function sanitizeMemoryExportGovernanceArgs(args: Record<string, unknown>): Record<string, unknown> {
@@ -894,7 +904,7 @@ export function createGovernorAdapter(dbPath: string): GovernorAdapter {
       store.db.prepare(`
         INSERT INTO governor_log (action, context, decision, reason)
         VALUES (?, ?, ?, ?)
-      `).run(input.action, context, result.decision, result.reason);
+      `).run(input.action, redactGovernorLogContext(input.action, context), result.decision, result.reason);
 
       return result;
     },
