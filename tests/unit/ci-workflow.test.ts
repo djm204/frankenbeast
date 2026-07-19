@@ -5,6 +5,7 @@ import { execSync } from 'node:child_process';
 import { load } from 'js-yaml';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
+const WORKFLOW_DIR = resolve(ROOT, '.github/workflows');
 const CI_PATH = resolve(ROOT, '.github/workflows/ci.yml');
 const RELEASE_PATH = resolve(ROOT, '.github/workflows/release-please.yml');
 const DAILY_SECURITY_SCAN_PATH = resolve(ROOT, '.github/workflows/daily-security-scan.yml');
@@ -88,6 +89,30 @@ function expectStepByName(
   expect(step, `CI should include ${label}`).toBeTruthy();
   return step as Record<string, unknown>;
 }
+
+describe('GitHub Actions timeout policy', () => {
+  it('sets an explicit bounded timeout for every workflow job', () => {
+    const workflowFiles = readdirSync(WORKFLOW_DIR).filter((file) => /\.ya?ml$/.test(file));
+
+    expect(workflowFiles.length).toBeGreaterThan(0);
+    for (const file of workflowFiles) {
+      const workflow = parseWorkflowYaml(readFileSync(resolve(WORKFLOW_DIR, file), 'utf-8'));
+      const jobs = expectRecord(workflow.jobs, `${file}.jobs`);
+
+      expect(Object.keys(jobs).length, `${file} should define at least one job`).toBeGreaterThan(0);
+      for (const [jobName, jobConfig] of Object.entries(jobs)) {
+        const job = expectRecord(jobConfig, `${file}.jobs.${jobName}`);
+        const timeout = job['timeout-minutes'];
+
+        expect(timeout, `${file}.jobs.${jobName} should set timeout-minutes`).toBeTypeOf('number');
+        expect(timeout, `${file}.jobs.${jobName} timeout should be positive`).toBeGreaterThan(0);
+        expect(timeout, `${file}.jobs.${jobName} timeout should not exceed GitHub's six-hour maximum`).toBeLessThanOrEqual(
+          360,
+        );
+      }
+    }
+  });
+});
 
 describe('CI Workflow (.github/workflows/ci.yml)', () => {
   it('ci.yml file exists', () => {
