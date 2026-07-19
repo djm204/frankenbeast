@@ -23,7 +23,13 @@ import type { ICliProvider } from './providers/cli-provider.js';
 import { ProviderRegistry, createDefaultRegistry } from './providers/cli-provider.js';
 import { tryExtractTextFromNode } from './providers/index.js';
 import { createChunkSession, createChunkTranscriptEntry, type ChunkSession } from '../session/chunk-session.js';
-import { classifyCommandFailure, commandFailureFromExecError, parseResetTimeText, type CommandFailure } from '../errors/command-failure.js';
+import {
+  classifyCommandFailure,
+  commandFailureFromExecError,
+  MAX_RATE_LIMIT_SLEEP_MS,
+  parseResetTimeText,
+  type CommandFailure,
+} from '../errors/command-failure.js';
 
 type RunLoopRateLimitState = {
   readonly activeProvider: string;
@@ -530,7 +536,7 @@ export class MartinLoop {
                 const sleepSeconds = data.retryAfterMs / 1000;
                 if (sleepSeconds >= 0 && sleepSeconds < shortestSleep) {
                   shortestSleep = sleepSeconds;
-                  shortestSource = `${providerName} parseRetryAfter`;
+                  shortestSource = `${providerName} parseRetryAfter${data.retryAfterClamped ? ` (clamped to ${MAX_RATE_LIMIT_SLEEP_MS / 1000}s)` : ''}`;
                 }
                 continue;
               }
@@ -863,7 +869,7 @@ export class MartinLoop {
         const sleepSeconds = data.retryAfterMs / 1000;
         if (sleepSeconds >= 0 && sleepSeconds < shortestSleep) {
           shortestSleep = sleepSeconds;
-          shortestSource = `${providerName} parseRetryAfter`;
+          shortestSource = `${providerName} parseRetryAfter${data.retryAfterClamped ? ` (clamped to ${MAX_RATE_LIMIT_SLEEP_MS / 1000}s)` : ''}`;
         }
         continue;
       }
