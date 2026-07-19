@@ -1,10 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { defaultConfig } from '../../../src/config/orchestrator-config.js';
 import { NetworkConfigSchema } from '../../../src/network/network-config.js';
 import { createNetworkRegistry, filterNetworkServices, resolveNetworkServices } from '../../../src/network/network-registry.js';
 
 describe('network-registry', () => {
   const context = { repoRoot: '/repo/frankenbeast' };
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
 
   it('selects default services from config', () => {
     const services = resolveNetworkServices(defaultConfig(), context);
@@ -45,6 +49,62 @@ describe('network-registry', () => {
     expect(dashboard?.runtimeConfig.process?.env).toMatchObject({
       FRANKENBEAST_TRUST_PROVIDER_COMMAND_OVERRIDES: '1',
     });
+  });
+
+  it('declares only the runtime environment required by each managed service', () => {
+    const config = defaultConfig();
+    config.network.secureBackend = 'bitwarden';
+    config.comms.slack.enabled = true;
+    config.comms.slack.botTokenRef = 'CUSTOM_SLACK_TOKEN';
+    config.comms.slack.signingSecretRef = 'CUSTOM_SLACK_SIGNING_SECRET';
+    config.comms.discord.enabled = true;
+    config.comms.discord.botTokenRef = 'CUSTOM_DISCORD_TOKEN';
+    config.comms.discord.publicKeyRef = 'a'.repeat(64);
+
+    const services = resolveNetworkServices(config, context);
+    const daemonKeys = services.find((service) => service.id === 'beasts-daemon')
+      ?.runtimeConfig.process?.inheritedEnvKeys ?? [];
+    const chatKeys = services.find((service) => service.id === 'chat-server')
+      ?.runtimeConfig.process?.inheritedEnvKeys ?? [];
+    const dashboardKeys = services.find((service) => service.id === 'dashboard-web')
+      ?.runtimeConfig.process?.inheritedEnvKeys ?? [];
+
+    expect(daemonKeys).toEqual(expect.arrayContaining([
+      'BW_SESSION',
+      'FBEAST_AGENT_CAPACITY_TOTAL',
+      'FRANKENBEAST_MODULE_FIREWALL',
+      'GITHUB_TOKEN',
+    ]));
+    expect(chatKeys).toEqual(expect.arrayContaining([
+      'BW_SESSION',
+      'CUSTOM_SLACK_TOKEN',
+      'CUSTOM_SLACK_SIGNING_SECRET',
+      'CUSTOM_DISCORD_TOKEN',
+      'FRANKENBEAST_MODULE_FIREWALL',
+      'GITHUB_TOKEN',
+    ]));
+    expect(chatKeys).not.toContain('a'.repeat(64));
+    expect(chatKeys).not.toContain('FBEAST_AGENT_CAPACITY_TOTAL');
+    expect(dashboardKeys).toEqual(expect.arrayContaining([
+      'BW_SESSION',
+      'FRANKENBEAST_BEAST_OPERATOR_TOKEN',
+    ]));
+    expect(dashboardKeys).not.toContain('GITHUB_TOKEN');
+    expect(dashboardKeys).not.toContain('FRANKENBEAST_MODULE_FIREWALL');
+  });
+
+  it('declares active 1Password session variables only for the 1Password backend', () => {
+    vi.stubEnv('OP_SESSION_WORK', 'session-for-test');
+    const config = defaultConfig();
+    config.network.secureBackend = '1password';
+
+    const services = resolveNetworkServices(config, context);
+
+    for (const serviceId of ['beasts-daemon', 'chat-server', 'dashboard-web']) {
+      const inheritedEnvKeys = services.find((service) => service.id === serviceId)
+        ?.runtimeConfig.process?.inheritedEnvKeys ?? [];
+      expect(inheritedEnvKeys).toContain('OP_SESSION_WORK');
+    }
   });
 
   it('orders dependencies before dependents', () => {

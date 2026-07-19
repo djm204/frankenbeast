@@ -1,6 +1,7 @@
 import type { OrchestratorConfig } from '../../config/orchestrator-config.js';
 import { localPlaintextOrSecureEndpoint, localPlaintextOrSecureHealthUrl } from '../network-url.js';
 import type { NetworkServiceDefinition } from '../network-registry.js';
+import { inheritedNetworkServiceEnvKeys } from './managed-service-env.js';
 
 export const dashboardWebService: NetworkServiceDefinition = {
   id: 'dashboard-web',
@@ -39,6 +40,7 @@ export const dashboardWebService: NetworkServiceDefinition = {
         'build',
       ],
       cwd: context.repoRoot,
+      inheritedEnvKeys: inheritedNetworkServiceEnvKeys('dashboard-web', config),
       env: {
         FRANKENBEAST_CONFIG_FILE: context.configFile ?? '',
         FRANKENBEAST_DASHBOARD_API_URL: config.dashboard.apiUrl,

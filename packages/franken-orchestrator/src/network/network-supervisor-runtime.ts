@@ -213,43 +213,38 @@ const SAFE_INHERITED_NETWORK_SERVICE_ENV_KEYS = [
   'PATHEXT',
 ] as const;
 
-const REQUIRED_NETWORK_SERVICE_ENV_KEYS: Partial<Record<ResolvedNetworkService['id'], readonly string[]>> = {
-  'beasts-daemon': [
-    'FRANKENBEAST_BEAST_OPERATOR_TOKEN',
-    'VITE_BEAST_OPERATOR_TOKEN',
-    'FRANKENBEAST_PASSPHRASE',
-    'ANTHROPIC_API_KEY',
-    'OPENAI_API_KEY',
-    'GOOGLE_API_KEY',
-    'GEMINI_API_KEY',
-    'GH_TOKEN',
-    'GITHUB_TOKEN',
-  ],
-  'chat-server': [
-    'FRANKENBEAST_BEAST_OPERATOR_TOKEN',
-    'VITE_BEAST_OPERATOR_TOKEN',
-    'FRANKENBEAST_PASSPHRASE',
-    'ANTHROPIC_API_KEY',
-    'OPENAI_API_KEY',
-    'GOOGLE_API_KEY',
-    'GEMINI_API_KEY',
-  ],
-  'dashboard-web': [
-    'FRANKENBEAST_BEAST_OPERATOR_TOKEN',
-    'FRANKENBEAST_PASSPHRASE',
-  ],
-};
+const SAFE_INHERITED_ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+function isUnsafeInheritedEnvKey(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return normalized === 'path'
+    || normalized === 'node_options'
+    || normalized === 'node_path'
+    || normalized === 'ld_preload'
+    || normalized === 'ld_library_path'
+    || normalized === 'bash_env'
+    || normalized.startsWith('dyld_')
+    || normalized.startsWith('npm_config_');
+}
+
+function validateInheritedEnvKey(serviceId: string, key: string): void {
+  if (!SAFE_INHERITED_ENV_KEY_RE.test(key) || isUnsafeInheritedEnvKey(key)) {
+    throw new Error(`Unsafe inherited network service environment key ${key} for ${serviceId}`);
+  }
+}
 
 function allowlistedNetworkProcessEnv(
   serviceId: ResolvedNetworkService['id'],
+  inheritedEnvKeys: readonly string[] | undefined,
   env: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
   const allowedEnv: NodeJS.ProcessEnv = {};
   const allowedKeys = [
     ...SAFE_INHERITED_NETWORK_SERVICE_ENV_KEYS,
-    ...(REQUIRED_NETWORK_SERVICE_ENV_KEYS[serviceId] ?? []),
+    ...(inheritedEnvKeys ?? []),
   ];
   for (const key of allowedKeys) {
+    validateInheritedEnvKey(serviceId, key);
     const value = env[key];
     if (value !== undefined) {
       allowedEnv[key] = value;
@@ -268,9 +263,10 @@ function buildNetworkProcessPath(): string {
 function buildNetworkProcessEnv(
   serviceId: ResolvedNetworkService['id'],
   processSpecEnv: Record<string, string> | undefined,
+  inheritedEnvKeys: readonly string[] | undefined,
 ): NodeJS.ProcessEnv {
   return {
-    ...allowlistedNetworkProcessEnv(serviceId, process.env),
+    ...allowlistedNetworkProcessEnv(serviceId, inheritedEnvKeys, process.env),
     ...processSpecEnv,
     PATH: buildNetworkProcessPath(),
   };
@@ -282,7 +278,7 @@ function buildValidatedProcessSpec(service: ResolvedNetworkService): ValidatedPr
   if (!processSpec) {
     throw new Error(`Service ${service.id} does not have a runnable entrypoint yet`);
   }
-  const env = buildNetworkProcessEnv(service.id, processSpec.env);
+  const env = buildNetworkProcessEnv(service.id, processSpec.env, processSpec.inheritedEnvKeys);
   if (processSpec.command === 'npm' || processSpec.command === 'npm.cmd') {
     return {
       command: process.execPath,

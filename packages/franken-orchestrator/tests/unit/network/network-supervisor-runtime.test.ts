@@ -204,6 +204,11 @@ describe('startNetworkService', () => {
 
     await expect(startNetworkService(makeService('npm', {
       args: BEASTS_DAEMON_ARGS,
+      inheritedEnvKeys: [
+        'FRANKENBEAST_BEAST_OPERATOR_TOKEN',
+        'FRANKENBEAST_PASSPHRASE',
+        'OPENAI_API_KEY',
+      ],
       env: {
         FRANKENBEAST_NETWORK_MANAGED: '1',
         FRANKENBEAST_BEAST_DAEMON_URL: 'http://127.0.0.1:4050',
@@ -221,6 +226,16 @@ describe('startNetworkService', () => {
       OPENAI_API_KEY: 'provider-key-for-test',
     }));
     expect(spawnOptions?.env).not.toHaveProperty('FRANKENBEAST_NETWORK_TEST_SECRET');
+  });
+
+  it('rejects inherited environment keys that can alter the child launcher', async () => {
+    await expect(startNetworkService(makeService('npm', {
+      inheritedEnvKeys: ['NODE_OPTIONS'],
+    }), {
+      detached: false,
+    })).rejects.toThrow('Unsafe inherited network service environment key NODE_OPTIONS for chat-server');
+
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 
   it('rejects process environment overrides that can redirect launcher resolution', async () => {
