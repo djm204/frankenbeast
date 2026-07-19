@@ -148,6 +148,13 @@ on:
       });
     });
 
+    it('sets explicit upper bounds for every CI job', () => {
+      const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
+
+      expect(expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint')['timeout-minutes']).toBe(120);
+      expect(expectRecord(jobs['publish-smoke'], 'jobs.publish-smoke')['timeout-minutes']).toBe(45);
+    });
+
     it('uses the repository-pinned minimum supported Node.js version', () => {
       const setupNode = expectSteps(expectCiJob(workflow)).find((step) => step.uses === 'actions/setup-node@v7');
       expect(setupNode).toBeTruthy();
@@ -447,6 +454,12 @@ jobs:
       contents: 'write',
       'pull-requests': 'write',
     });
+  });
+
+  it('sets explicit upper bounds for every release job', () => {
+    expect(expectRecord(jobs['validate-release'], 'jobs.validate-release')['timeout-minutes']).toBe(120);
+    expect(releasePlease['timeout-minutes']).toBe(15);
+    expect(publishNpm['timeout-minutes']).toBe(45);
   });
 
   it('anchors config-file and manifest-file under the release-please action step', () => {
