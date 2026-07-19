@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { approvalRuntimeInput, UnsafeApprovalCommandError } from '../../chat/approval-input.js';
+import { FileApprovalAuditLog, commandSha256, type ApprovalAuditLog } from '../../chat/approval-audit-log.js';
 import { BeastDaemonRequestError } from '../../chat/beast-daemon-dispatch-adapter.js';
 import { isValidChatSessionId, type CorruptChatSessionFile, type ISessionStore } from '../../chat/session-store.js';
 import type { ConversationEngine } from '../../chat/conversation-engine.js';
@@ -47,6 +48,7 @@ export interface ChatRoutesDeps {
   streamTicketStore?: SseConnectionTicketStore | undefined;
   chatRateLimiter: InMemoryRateLimiter;
   chatMutationAdmission?: ChatMutationAdmission | undefined;
+  approvalAuditLog?: ApprovalAuditLog | undefined;
 }
 
 function getSessionOrThrow(store: ISessionStore, id: string) {
@@ -65,10 +67,25 @@ function validateChatSessionId(id: string): string {
   return id;
 }
 
+function redactPendingApproval(
+  pendingApproval: NonNullable<ReturnType<ISessionStore['get']>>['pendingApproval'],
+): ChatSessionResponse['pendingApproval'] {
+  if (!pendingApproval) return pendingApproval ?? null;
+  const redacted = { ...pendingApproval };
+  delete redacted.approvalToken;
+  delete redacted.requester;
+  delete redacted.workerId;
+  delete redacted.workdir;
+  return redacted;
+}
+
 function sessionResponse(
   session: NonNullable<ReturnType<ISessionStore['get']>>,
 ): ChatSessionResponse {
-  return { ...session };
+  return {
+    ...session,
+    pendingApproval: redactPendingApproval(session.pendingApproval),
+  };
 }
 
 function approvalReadinessResponse(
@@ -136,13 +153,14 @@ function requestAddress(c: Context): string {
 
 export function chatRoutes(deps: ChatRoutesDeps): Hono {
   const { sessionStore, runtime, turnRunner, issueSocketTicket, operatorToken, streamTicketStore } = deps;
+  const approvalAuditLog = deps.approvalAuditLog ?? new FileApprovalAuditLog();
   const app = new Hono();
   const admission = deps.chatMutationAdmission ?? new ChatMutationAdmission(deps.chatRateLimiter);
 
   async function withChatMutationAdmission<T>(
     c: Context,
     sessionId: string,
-    run: () => Promise<T>,
+    run: (session: NonNullable<ReturnType<ISessionStore['get']>>) => Promise<T>,
   ): Promise<T> {
     if (!admission.takeRateLimit(chatClientKey({
       action: 'message',
@@ -151,13 +169,117 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     }))) {
       throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
     }
-    if (!admission.begin(sessionId)) {
-      throw new HttpError(429, 'RATE_LIMITED', 'Chat mutation already in progress');
-    }
+
+    return admission.runExclusive(sessionId, async () => run(getSessionOrThrow(sessionStore, sessionId)));
+  }
+
+  function approvalRequester(c: Context): string {
+    return requestAddress(c);
+  }
+
+  function approvalAuditToken(session: NonNullable<ReturnType<ISessionStore['get']>>, command: string): string {
+    if (session.pendingApproval?.approvalToken) return session.pendingApproval.approvalToken;
+    return `${session.id}:${session.pendingApproval?.requestedAt ?? 'unknown'}:${commandSha256(command)}`;
+  }
+
+  function approvalAuditTokenForPending(
+    session: NonNullable<ReturnType<ISessionStore['get']>>,
+    pendingApproval: NonNullable<NonNullable<ReturnType<ISessionStore['get']>>['pendingApproval']>,
+    command: string,
+  ): string {
+    return pendingApproval.approvalToken ?? `${session.id}:${pendingApproval.requestedAt}:${commandSha256(command)}`;
+  }
+
+  async function hasConsumedApproval(session: NonNullable<ReturnType<ISessionStore['get']>>, command: string): Promise<boolean> {
+    const pendingApproval = session.pendingApproval;
+    if (!pendingApproval) return false;
     try {
-      return await run();
-    } finally {
-      admission.end(sessionId);
+      return await approvalAuditLog.hasConsumedApproval({
+        sessionId: session.id,
+        projectId: session.projectId,
+        token: approvalAuditToken(session, command),
+        commandHash: commandSha256(command),
+      });
+    } catch {
+      return false;
+    }
+  }
+
+  async function recordApprovalDecision(
+    session: NonNullable<ReturnType<ISessionStore['get']>>,
+    decision: 'approved' | 'denied' | 'skipped',
+    decisionSource: string,
+    options: { command?: string; reason?: string; requester?: string | undefined } = {},
+  ): Promise<void> {
+    const pendingApproval = session.pendingApproval;
+    const command = options.command ?? pendingApproval?.command ?? '/approve';
+    try {
+      await approvalAuditLog.recordDecision({
+        sessionId: session.id,
+        projectId: session.projectId,
+        token: approvalAuditToken(session, command),
+        ...(pendingApproval?.workerId ? { workerId: pendingApproval.workerId } : {}),
+        ...(pendingApproval?.workdir ? { workdir: pendingApproval.workdir } : {}),
+        ...(pendingApproval?.requester ? { requester: pendingApproval.requester } : {}),
+        ...(options.requester ? { requester: options.requester } : {}),
+        command,
+        decision,
+        decisionSource,
+        ...(options.reason ? { reason: options.reason } : {}),
+      });
+    } catch {
+      // Approval state transitions should not fail because audit persistence is unavailable.
+    }
+  }
+
+  async function recordApprovalExecution(
+    session: NonNullable<ReturnType<ISessionStore['get']>>,
+    pendingApproval: NonNullable<NonNullable<ReturnType<ISessionStore['get']>>['pendingApproval']>,
+    command: string,
+    exitCode: number,
+    output: string | undefined,
+    requester: string | undefined,
+  ): Promise<void> {
+    try {
+      await approvalAuditLog.recordExecution({
+        sessionId: session.id,
+        projectId: session.projectId,
+        token: approvalAuditTokenForPending(session, pendingApproval, command),
+        ...(pendingApproval.workerId ? { workerId: pendingApproval.workerId } : {}),
+        ...(pendingApproval.workdir ? { workdir: pendingApproval.workdir } : {}),
+        ...(pendingApproval.requester ? { requester: pendingApproval.requester } : {}),
+        ...(requester ? { requester } : {}),
+        command,
+        exitCode,
+        ...(output !== undefined ? { output } : {}),
+      });
+    } catch {
+      // Approval execution should not fail because audit persistence is unavailable.
+    }
+  }
+
+  async function recordApprovalReplay(
+    session: NonNullable<ReturnType<ISessionStore['get']>>,
+    command: string,
+    reason: string,
+    requester: string | undefined,
+  ): Promise<void> {
+    const pendingApproval = session.pendingApproval;
+    if (!pendingApproval) return;
+    try {
+      await approvalAuditLog.recordReplay({
+        sessionId: session.id,
+        projectId: session.projectId,
+        token: approvalAuditTokenForPending(session, pendingApproval, command),
+        ...(pendingApproval.workerId ? { workerId: pendingApproval.workerId } : {}),
+        ...(pendingApproval.workdir ? { workdir: pendingApproval.workdir } : {}),
+        ...(pendingApproval.requester ? { requester: pendingApproval.requester } : {}),
+        ...(requester ? { requester } : {}),
+        command,
+        reason,
+      });
+    } catch {
+      // Replay rejection should not fail because audit persistence is unavailable.
     }
   }
 
@@ -259,9 +381,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const id = validateChatSessionId(c.req.param('id'));
     const body = await parseJsonBody(c);
     const { content, executionMode } = validateBody(SubmitMessageBody, body);
-    const session = getSessionOrThrow(sessionStore, id);
-
-    return withChatMutationAdmission(c, session.id, async () => {
+    return withChatMutationAdmission(c, id, async (session) => {
       if (session.pendingApproval || session.state === 'pending_approval') {
         return c.json({
           error: {
@@ -338,9 +458,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const id = validateChatSessionId(c.req.param('id'));
     const body = await parseJsonBody(c);
     const { approved } = validateBody(ApproveBody, body);
-    const session = getSessionOrThrow(sessionStore, id);
-
-    return withChatMutationAdmission(c, session.id, async () => {
+    return withChatMutationAdmission(c, id, async (session) => {
       if (!session.pendingApproval) {
         if (session.state === 'approved' || session.state === 'rejected') {
           return c.json({
@@ -385,6 +503,10 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
           runtimeInput = approvalRuntimeInput(pendingApproval);
         } catch (error) {
           if (error instanceof UnsafeApprovalCommandError) {
+            await recordApprovalDecision(session, 'skipped', 'parser', {
+              reason: error.message,
+              requester: approvalRequester(c),
+            });
             return c.json({
               error: {
                 code: 'UNSAFE_APPROVAL_COMMAND',
@@ -394,7 +516,23 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
           }
           throw error;
         }
-        const originalState = session.state;
+        if (await hasConsumedApproval(session, runtimeInput)) {
+          await recordApprovalReplay(session, runtimeInput, 'approval was already consumed', approvalRequester(c));
+          session.pendingApproval = null;
+          session.state = 'rejected';
+          session.updatedAt = isoNow();
+          sessionStore.save(session);
+          return c.json({
+            error: {
+              code: 'APPROVAL_REPLAYED',
+              message: 'This approval request was already consumed by a prior execution.',
+            },
+          }, 409);
+        }
+        await recordApprovalDecision(session, 'approved', 'human', {
+          command: runtimeInput,
+          requester: approvalRequester(c),
+        });
         session.pendingApproval = null;
         session.state = 'approved';
         session.updatedAt = isoNow();
@@ -409,17 +547,36 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
             ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
           });
         } catch (error) {
-          session.pendingApproval = pendingApproval;
-          session.state = originalState;
+          await recordApprovalExecution(
+            session,
+            pendingApproval,
+            runtimeInput,
+            1,
+            error instanceof Error ? error.message : String(error),
+            approvalRequester(c),
+          );
+          session.pendingApproval = null;
+          session.state = 'failed';
           session.updatedAt = isoNow();
           sessionStore.save(session);
           throwKnownChatRuntimeError(error);
         }
 
+        await recordApprovalExecution(
+          session,
+          pendingApproval,
+          runtimeInput,
+          result.state === 'failed' ? 1 : 0,
+          result.displayMessages.map((displayMessage) => displayMessage.content).join('\n'),
+          approvalRequester(c),
+        );
         session.state = result.state === 'active' ? 'approved' : result.state;
         session.pendingApproval = null;
         session.beastContext = result.beastContext ?? null;
       } else {
+        await recordApprovalDecision(session, 'denied', 'human', {
+          requester: approvalRequester(c),
+        });
         session.state = 'rejected';
         session.pendingApproval = null;
       }

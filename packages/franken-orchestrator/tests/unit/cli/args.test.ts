@@ -194,6 +194,13 @@ describe('parseArgs', () => {
     expect(args.networkAction).toBe('status');
   });
 
+  it('parses network health with JSON output', () => {
+    const args = parseArgs(['network', 'health', '--json']);
+    expect(args.subcommand).toBe('network');
+    expect(args.networkAction).toBe('health');
+    expect(args.json).toBe(true);
+  });
+
   it('parses network start with target service', () => {
     const args = parseArgs(['network', 'start', 'chat-server']);
     expect(args.subcommand).toBe('network');
@@ -615,14 +622,11 @@ describe('parseArgs', () => {
       expect(chatArgs.budget).toBe(12.5);
       expect(chatArgs.port).toBe(4242);
 
-      const ephemeralPortArgs = parseArgs(['chat-server', '--port', '0']);
-      expect(ephemeralPortArgs.port).toBe(0);
-
       const issueArgs = parseArgs(['issues', '--limit', '50']);
       expect(issueArgs.issueLimit).toBe(50);
     });
 
-    it.each(['abc', 'NaN', 'Infinity', '12abc'])('rejects invalid budget value %s', (value) => {
+    it.each(['abc', 'NaN', 'Infinity', '12abc', '0.01usd'])('rejects invalid budget value %s', (value) => {
       expect(() => parseArgs(['--budget', value])).toThrow(/Invalid --budget/);
     });
 
@@ -631,7 +635,7 @@ describe('parseArgs', () => {
       expect(() => parseArgs(['--budget=-0.01'])).toThrow(/Invalid --budget/);
     });
 
-    it.each(['abc', 'NaN', '3737abc', '8080abc', '3.5', '', '65536'])('rejects invalid port value %s', (value) => {
+    it.each(['abc', 'NaN', '3737abc', '8080abc', '3.5', '', '0', '65536'])('rejects invalid port value %s', (value) => {
       expect(() => parseArgs(['chat-server', '--port', value])).toThrow(/Invalid --port/);
     });
 

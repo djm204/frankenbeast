@@ -137,6 +137,7 @@ export function AgentDetailPanel({
           status={agent.status}
           hasLinkedRun={!!agent.dispatchRunId}
           agentLabel={agent.name?.trim() ? agent.name : agent.id}
+          resetKey={`${isOpen ? 'open' : 'closed'}:${agent.id}`}
           pendingAction={pendingAction}
           onStart={onStart}
           onStop={onStop}

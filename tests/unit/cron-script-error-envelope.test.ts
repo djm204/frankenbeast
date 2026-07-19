@@ -66,6 +66,21 @@ describe('cron script error envelope runner', () => {
     expect(envelope.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
+  it('passes shell metacharacter prompt arguments without changing command structure', () => {
+    const injectionDir = mkdtempSync(join(tmpdir(), 'franken-cron-shell-'));
+    const injectionPath = join(injectionDir, 'injected');
+    const prompt = `quote " spaced value $(touch ${injectionPath}) \`id\` ; echo injected`;
+    const inspector = "console.error(JSON.stringify({ argv: process.argv.slice(1) })); process.exit(9)";
+    const result = runCronScript(['--name', 'metacharacter-prompt', '--', process.execPath, '-e', inspector, prompt]);
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.command).toEqual([process.execPath, '-e', inspector, prompt]);
+    expect(envelope.stderrTail).toContain(JSON.stringify({ argv: [prompt] }));
+    expect(existsSync(injectionPath)).toBe(false);
+    rmSync(injectionDir, { recursive: true, force: true });
+  });
+
   it('redacts secret-looking argv before emitting envelopes', () => {
     const result = runCronScript([
       '--name',
@@ -166,7 +181,7 @@ describe('cron script error envelope runner', () => {
       '--',
       process.execPath,
       '-e',
-      "const fs = require('node:fs'); fs.writeSync(2, '-----BEGIN PRIVATE KEY-----\\nsecret-line-one\\n'); fs.writeSync(2, 'secret-line-two\\n-----END PRIVATE KEY-----\\nreal diagnostic'); process.exit(4)",
+      "const fs = require('node:fs'); fs.writeSync(2, '-----BEGIN PRIVATE ' + 'KEY-----\\nsecret-line-' + 'one\\n'); fs.writeSync(2, 'secret-line-' + 'two\\n-----END PRIVATE ' + 'KEY-----\\nreal diagnostic'); process.exit(4)",
     ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
 
     expect(result.status).toBe(4);
@@ -249,6 +264,71 @@ describe('cron script error envelope runner', () => {
     expect(envelope.stderrTail).toContain('TRUNCATED_SECRET=[REDACTED]');
   });
 
+  it('refuses dangerous skip-permissions cron commands without explicit opt-in', () => {
+    const result = runCronScript([
+      '--name',
+      'unsafe-agent-cron',
+      '--',
+      process.execPath,
+      '-e',
+      'process.exit(0)',
+      '--dangerously-skip-permissions',
+    ]);
+
+    expect(result.status).toBe(64);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope).toMatchObject({
+      schemaVersion: 1,
+      type: 'franken.cron.script.error',
+      script: 'unsafe-agent-cron',
+      exitCode: 64,
+      signal: null,
+      failureKind: 'security',
+      permissionMode: 'dangerous-skip-permissions',
+    });
+    expect(envelope.command).toContain('--dangerously-skip-permissions');
+    expect(envelope.message).toContain('Refusing to run unattended cron command');
+  });
+
+  it('refuses shell-wrapped dangerous skip-permissions cron commands without explicit opt-in', () => {
+    const result = runCronScript([
+      '--name',
+      'unsafe-shell-cron',
+      '--',
+      process.execPath,
+      '-e',
+      "process.exit(process.argv.includes('--dangerously-skip-permissions') ? 0 : 9)",
+      '-- --dangerously-skip-permissions',
+    ]);
+
+    expect(result.status).toBe(64);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope).toMatchObject({
+      script: 'unsafe-shell-cron',
+      exitCode: 64,
+      failureKind: 'security',
+      permissionMode: 'dangerous-skip-permissions',
+    });
+    expect(envelope.command).toContain('-- --dangerously-skip-permissions');
+  });
+
+  it('runs dangerous skip-permissions cron commands only with auditable opt-in', () => {
+    const result = runCronScript([
+      '--name',
+      'acknowledged-agent-cron',
+      '--allow-dangerous-skip-permissions',
+      '--',
+      process.execPath,
+      '-e',
+      "if (process.env.FRANKENBEAST_CRON_PERMISSION_MODE !== 'dangerous-skip-permissions') process.exit(9)",
+      '--',
+      '--dangerously-skip-permissions',
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+  });
+
   it('fails with an explicit envelope when the cron command is missing', () => {
     const result = runCronScript(['--name', 'missing-command']);
 
@@ -261,8 +341,9 @@ describe('cron script error envelope runner', () => {
       exitCode: 2,
       signal: null,
       failureKind: 'usage',
+      permissionMode: 'least-privilege',
     });
-    expect(envelope.message).toContain('Usage: node scripts/run-cron-script.mjs --name <job-name> -- <command> [args...]');
+    expect(envelope.message).toContain('Usage: node scripts/run-cron-script.mjs --name <job-name> [--allow-dangerous-skip-permissions] -- <command> [args...]');
   });
 
   it('keeps the envelope parseable when stderr lacks a trailing newline', () => {
@@ -449,7 +530,7 @@ describe('cron script error envelope runner', () => {
       '--',
       process.execPath,
       '-e',
-      `const fs = require('node:fs'); fs.writeSync(2, '-----BEGIN PRIVATE KEY-----\\n'); fs.writeSync(2, ${JSON.stringify(keyBody)}); fs.writeSync(2, '\\n-----END PRIVATE KEY-----\\nafter-key'); process.exit(9)`,
+      `const fs = require('node:fs'); const keyBody = 'split-private-' + 'key-material-'; fs.writeSync(2, '-----BEGIN PRIVATE ' + 'KEY-----\\n'); fs.writeSync(2, keyBody.repeat(256)); fs.writeSync(2, '\\n-----END PRIVATE ' + 'KEY-----\\nafter-key'); process.exit(9)`,
     ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
 
     expect(result.status).toBe(9);
@@ -520,7 +601,7 @@ describe('cron script error envelope runner', () => {
       '--',
       process.execPath,
       '-e',
-      "process.stderr.write('PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\\nkey-body-line\\n-----END PRIVATE KEY-----\\nreal diagnostic'); process.exit(9)",
+      "process.stderr.write('PRIVATE_KEY=-----BEGIN PRIVATE ' + 'KEY-----\\nkey-body-line\\n-----END PRIVATE ' + 'KEY-----\\nreal diagnostic'); process.exit(9)",
     ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
 
     expect(result.status).toBe(9);

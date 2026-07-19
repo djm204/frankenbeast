@@ -25,6 +25,7 @@ export type NetworkAction =
   | 'up'
   | 'down'
   | 'status'
+  | 'health'
   | 'start'
   | 'stop'
   | 'restart'
@@ -54,10 +55,12 @@ export type SecurityAction = 'status' | 'set' | undefined;
 export type MemoryAction = 'snapshot-diff' | 'verify-backup' | 'duplicate-report' | undefined;
 export type DrAction =
   | 'backup'
+  | 'export'
   | 'list'
   | 'verify'
   | 'restore'
   | 'restore-dry-run'
+  | 'snapshot-diff'
   | 'dead-letter-list'
   | 'dead-letter-inspect'
   | 'dead-letter-replay-dry-run'
@@ -118,6 +121,7 @@ export interface CliArgs {
   issueRepo?: string | undefined;
   targetUpstream?: boolean | undefined;
   dryRun?: boolean | undefined;
+  json?: boolean | undefined;
   initVerify: boolean;
   initRepair: boolean;
   initNonInteractive: boolean;
@@ -127,14 +131,16 @@ export interface CliArgs {
 }
 
 const VALID_SUBCOMMANDS = new Set(['init', 'interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'beasts-daemon', 'network', 'memory', 'dr', 'skill', 'security']);
-const VALID_NETWORK_ACTIONS = new Set(['up', 'down', 'status', 'start', 'stop', 'restart', 'logs', 'config', 'credentials', 'help']);
+const VALID_NETWORK_ACTIONS = new Set(['up', 'down', 'status', 'health', 'start', 'stop', 'restart', 'logs', 'config', 'credentials', 'help']);
 const VALID_MEMORY_ACTIONS = new Set(['snapshot-diff', 'verify-backup', 'duplicate-report']);
 const VALID_DR_ACTIONS = new Set([
   'backup',
+  'export',
   'list',
   'verify',
   'restore',
   'restore-dry-run',
+  'snapshot-diff',
   'dead-letter-list',
   'dead-letter-inspect',
   'dead-letter-replay-dry-run',
@@ -248,11 +254,13 @@ Issue Flags (for 'issues' subcommand):
   --repo <owner/repo>     Target repository
   --target-upstream       Use the fork upstream as the canonical repo for issues and PRs
   --dry-run               Preview without executing
+  --json                  Print machine-readable JSON where supported
 
 Network Commands:
   network up [-d]                     Start configured services
   network down                        Tear down managed services
   network status                      Show service health and URLs
+  network health [--json]             Show consolidated web/orchestrator/provider/GitHub/state/loop health
   network start <service|all>         Start one managed service or all
   network stop <service|all>          Stop one managed service or all
   network restart <service|all>       Restart one managed service or all
@@ -271,7 +279,9 @@ Memory Commands:
 
 Disaster-Recovery Commands:
   dr backup <state-dir> <backup-file> <key-file>
-                                  Create an encrypted backup of Kanban, approval, liveness, run metadata, and related state
+                                   Create an encrypted backup of Kanban, approval, liveness, run metadata, and related state
+  dr export [--dry-run] <state-dir> <export-file>
+                                   Create a redacted point-in-time incident export with manifest, config checksums, summaries, and log tails
   dr list <backup-file>           List encrypted backup manifest metadata without decrypting file contents
   dr verify <backup-file> <key-file>
                                   Decrypt and verify backup integrity without writing state
@@ -279,6 +289,8 @@ Disaster-Recovery Commands:
                                   Restore an encrypted state backup; --dry-run verifies and prints planned writes only
   dr restore-dry-run <backup-manifest.json> <live-manifest.json>
                                   Compare backup/live restore manifests and print read-only JSON output
+  dr snapshot-diff <before-dir> <after-dir>
+                                  Compare two state snapshot/export directories and print redacted incident-triage JSON output
   dr dead-letter-list <queue-file>
                                   List failed automation actions in a dead-letter queue
   dr dead-letter-inspect <queue-file> <entry-id>
@@ -549,6 +561,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       repo: { type: 'string' },
       'target-upstream': { type: 'boolean', default: false },
       'dry-run': { type: 'boolean', default: false },
+      json: { type: 'boolean', default: false },
       mode: { type: 'string' },
       set: { type: 'string', multiple: true },
       'no-firewall': { type: 'boolean', default: false },
@@ -640,8 +653,10 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     drKeyFilePath = positionals[3];
     const maxPositionals = drAction === 'backup' || drAction === 'restore' || drAction === 'dead-letter-retire'
       ? 4
-      : drAction === 'verify'
+      : drAction === 'export'
+        || drAction === 'verify'
         || drAction === 'restore-dry-run'
+        || drAction === 'snapshot-diff'
         || drAction === 'dead-letter-inspect'
         || drAction === 'dead-letter-replay-dry-run'
           ? 3
@@ -724,6 +739,9 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     if (!validBackends.has(initBackend)) {
       throw new TypeError(`Invalid init backend '${values.backend}'. Valid: local-encrypted, os-keychain, 1password, bitwarden`);
     }
+    if (initBackend === 'os-keychain' && process.platform !== 'linux') {
+      throw new TypeError('Invalid init backend os-keychain on this platform. os-keychain is write-capable only on Linux Secret Service; use local-encrypted, 1password, or bitwarden.');
+    }
   }
 
   const providersRaw = values.providers;
@@ -757,7 +775,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     ? parseFiniteDecimalOption('--budget', values.budget, { minExclusive: 0 })
     : 10;
   const port = values.port !== undefined
-    ? parseIntegerOption('--port', values.port, { min: 0, max: 65535 })
+    ? parseIntegerOption('--port', values.port, { min: 1, max: 65535 })
     : (subcommand === 'chat-server' ? 3737 : subcommand === 'beasts-daemon' ? 4050 : undefined);
 
   const hasModuleFlags = values['no-firewall'] || values['no-skills'] || values['no-memory']
@@ -833,6 +851,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     issueRepo: values.repo,
     targetUpstream: values['target-upstream'] ?? undefined,
     dryRun: values['dry-run'] ?? undefined,
+    json: values.json ?? undefined,
     beastExecutionMode,
     moduleConfig,
   };

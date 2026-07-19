@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { chmodSync, chownSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { BeastLogStore } from '../events/beast-log-store.js';
@@ -14,12 +15,33 @@ import { wallClockNow } from '@franken/types';
 import type { ProcessSupervisorLike } from './process-supervisor.js';
 import { classifyWorkerCrash } from './worker-crash-classification.js';
 import type { BeastDefinition, BeastProcessSpec, BeastRun, BeastRunAttempt, BeastRunStatus, ModuleConfig } from '../types.js';
+import {
+  createRunConfigIntegrityManifest,
+  RUN_CONFIG_INTEGRITY_ENV,
+  RUN_CONFIG_INTEGRITY_SECRET_ENV,
+} from '../../cli/run-config-integrity.js';
 
 const STDERR_BUFFER_SIZE = 50;
 const REDACTED_SECRET = '[REDACTED]';
 const MIN_CONFIGURED_SECRET_LENGTH = 6;
 const RUN_CONFIG_DIR_MODE = 0o700;
 const RUN_CONFIG_FILE_MODE = 0o600;
+const SPAWN_FAILED_ERROR = 'Worker process could not be spawned.';
+const SPAWN_FAILED_CODE = 'SPAWN_FAILED';
+const SAFE_SPAWN_ERROR_CODES = new Set([
+  'EACCES',
+  'EAGAIN',
+  'E2BIG',
+  'EISDIR',
+  'EINVAL',
+  'EMFILE',
+  'ENFILE',
+  'ENOENT',
+  'ENOMEM',
+  'ENOTDIR',
+  'EPERM',
+  'ETXTBSY',
+]);
 
 export interface RunConfigSnapshotOwner {
   readonly uid: number;
@@ -105,6 +127,55 @@ function redactBeastLogLine(line: string, configuredSecrets: readonly string[] =
 
 function redactFailureStderrTail(stderrTail: readonly string[], configuredSecrets: readonly string[]): string[] {
   return stderrTail.map(line => redactBeastLogLine(line, configuredSecrets));
+}
+
+function redactSpawnErrorMessage(errorMessage: string, configuredSecrets: readonly string[]): string {
+  return redactBeastLogLine(errorMessage, configuredSecrets).replace(
+    /((?:^|\s)--?[a-z0-9_-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|auth|credential|webhook[_-]?url)[a-z0-9_-]*(?:\s+|=))(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s]+)/gi,
+    `$1${REDACTED_SECRET}`,
+  );
+}
+
+function normalizeSpawnErrorCode(error: unknown): string {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return typeof code === 'string' && SAFE_SPAWN_ERROR_CODES.has(code)
+    ? code
+    : SPAWN_FAILED_CODE;
+}
+
+function summarizeSpawnCommand(
+  processSpec: BeastProcessSpec,
+): Readonly<{ argumentCount: number }> {
+  return {
+    argumentCount: processSpec.args.length,
+  };
+}
+
+function redactSpawnArgs(
+  args: readonly string[],
+  configuredSecrets: readonly string[],
+): string[] {
+  let redactNext = false;
+  return args.map((arg) => {
+    if (redactNext) {
+      redactNext = false;
+      return REDACTED_SECRET;
+    }
+    const flagName = arg.startsWith('-')
+      ? arg.replace(/^-+/, '').split('=', 1)[0] ?? ''
+      : '';
+    if (flagName && !arg.includes('=') && isConfiguredSecretKey(flagName)) {
+      redactNext = true;
+    }
+    return redactSpawnErrorMessage(arg, configuredSecrets);
+  });
+}
+
+export interface SpawnFailureDebugDetails {
+  readonly error: string;
+  readonly code: string;
+  readonly command: string;
+  readonly args: readonly string[];
 }
 
 function redactRunConfigValue(
@@ -213,6 +284,7 @@ type PreparedBeastStartResources = {
   readonly processSpec: BeastProcessSpec;
   readonly worktree: BeastWorktreeAllocation | undefined;
   readonly configFilePath: string;
+  readonly configManifestPath: string;
   readonly spawnedSpec: BeastProcessSpec;
   readonly configuredSecrets: readonly string[];
 };
@@ -236,6 +308,8 @@ export interface ProcessBeastExecutorOptions {
     handle: { pid: number },
   ) => Readonly<Record<string, unknown>>;
   worktreeIsolation?: GitWorktreeIsolationConfig | undefined;
+  /** Optional protected debug sink. Values are scrubbed before this callback is invoked. */
+  onSpawnFailureDebug?: (details: SpawnFailureDebugDetails) => void;
 }
 
 function applyRunConfigOwnership(path: string, owner: RunConfigSnapshotOwner | undefined): void {
@@ -380,7 +454,9 @@ export class ProcessBeastExecutor implements BeastExecutor {
   private readonly pendingSpawnHandles = new Map<string, { pid: number }>();
   private readonly cancelledPendingRunIds = new Set<string>();
   private readonly pendingConfigFilePaths = new Map<string, string>();
+  private readonly pendingConfigManifestPaths = new Map<string, string>();
   private readonly attemptConfigFilePaths = new Map<string, string>();
+  private readonly attemptConfigManifestPaths = new Map<string, string>();
   private readonly worktreeAllocations = new Map<string, BeastWorktreeAllocation>();
 
   constructor(
@@ -395,6 +471,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       processSpec,
       worktree,
       configFilePath,
+      configManifestPath,
       spawnedSpec,
       configuredSecrets,
     } = this.prepareStartResources(run, definition);
@@ -447,8 +524,19 @@ export class ProcessBeastExecutor implements BeastExecutor {
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      const errorCode = (error as NodeJS.ErrnoException).code;
+      const errorCode = normalizeSpawnErrorCode(error);
       const failedAt = new Date(wallClockNow()).toISOString();
+
+      try {
+        this.options.onSpawnFailureDebug?.({
+          error: redactSpawnErrorMessage(errorMessage, configuredSecrets),
+          code: errorCode,
+          command: redactBeastLogLine(processSpec.command, configuredSecrets),
+          args: redactSpawnArgs(processSpec.args, configuredSecrets),
+        });
+      } catch {
+        // Debug diagnostics are best-effort and must not replace the spawn failure.
+      }
 
       this.repository.updateRun(run.id, {
         status: 'failed',
@@ -464,10 +552,9 @@ export class ProcessBeastExecutor implements BeastExecutor {
       const spawnFailedEvent = {
         type: 'run.spawn_failed' as const,
         payload: {
-          error: errorMessage,
-          ...(errorCode ? { code: errorCode } : {}),
-          command: processSpec.command,
-          args: [...processSpec.args],
+          error: SPAWN_FAILED_ERROR,
+          code: errorCode,
+          commandSummary: summarizeSpawnCommand(processSpec),
           crashClassification,
         },
         createdAt: failedAt,
@@ -487,7 +574,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       });
 
       this.options.onRunStatusChange?.(run.id);
-      throw error;
+      throw Object.assign(new Error(SPAWN_FAILED_ERROR), { code: errorCode });
     }
     this.pendingSpawnHandles.set(run.id, handle);
 
@@ -591,7 +678,9 @@ export class ProcessBeastExecutor implements BeastExecutor {
     // The pending allocation map is only for pre-attempt spawn failures.
     this.worktreeAllocations.delete(run.id);
     this.pendingConfigFilePaths.delete(run.id);
+    this.pendingConfigManifestPaths.delete(run.id);
     this.attemptConfigFilePaths.set(attempt.id, configFilePath);
+    this.attemptConfigManifestPaths.set(attempt.id, configManifestPath);
 
     attemptId = attempt.id;
 
@@ -675,7 +764,8 @@ export class ProcessBeastExecutor implements BeastExecutor {
       ? remapRuntimeConfigSnapshot(run.configSnapshot, processSpec.cwd, worktree.executionCwd)
       : run.configSnapshot;
     const isolatedSpec = this.buildIsolatedSpec(processSpec, worktree);
-    const configFilePath = this.prepareRunConfigFile(run, isolatedSpec);
+    const { configFilePath, configManifestPath } = this.prepareRunConfigFiles(run, isolatedSpec);
+    const runConfigIntegritySecret = randomBytes(32).toString('hex');
 
     const mergedSpec = {
       ...isolatedSpec,
@@ -683,6 +773,8 @@ export class ProcessBeastExecutor implements BeastExecutor {
         ...isolatedSpec.env,
         ...moduleEnv,
         FRANKENBEAST_RUN_CONFIG: configFilePath,
+        [RUN_CONFIG_INTEGRITY_ENV]: configManifestPath,
+        [RUN_CONFIG_INTEGRITY_SECRET_ENV]: runConfigIntegritySecret,
       },
     };
     const spawnedSpec = this.options.transformSpec?.(run, processSpec, mergedSpec) ?? mergedSpec;
@@ -694,12 +786,19 @@ export class ProcessBeastExecutor implements BeastExecutor {
       spawnedSpec.env,
     );
     const redactedConfigSnapshot = redactRunConfigSnapshot(isolatedConfigSnapshot, configuredSecrets);
-    writeFileSync(configFilePath, JSON.stringify(redactedConfigSnapshot, null, 2), { mode: RUN_CONFIG_FILE_MODE });
+    const serializedRunConfig = JSON.stringify(redactedConfigSnapshot, null, 2);
+    const integrityManifest = createRunConfigIntegrityManifest(serializedRunConfig, runConfigIntegritySecret, {
+      configPath: this.resolveSpawnedRunConfigPath(spawnedSpec, configFilePath),
+    });
+    writeFileSync(configFilePath, serializedRunConfig, { mode: RUN_CONFIG_FILE_MODE });
     const runConfigOwner = resolveRunConfigOwner(this.options.runConfigOwner);
     applyRunConfigOwnership(configFilePath, runConfigOwner);
     chmodSync(configFilePath, RUN_CONFIG_FILE_MODE);
+    writeFileSync(configManifestPath, JSON.stringify(integrityManifest, null, 2), { mode: RUN_CONFIG_FILE_MODE });
+    applyRunConfigOwnership(configManifestPath, runConfigOwner);
+    chmodSync(configManifestPath, RUN_CONFIG_FILE_MODE);
 
-    return { processSpec, worktree, configFilePath, spawnedSpec, configuredSecrets };
+    return { processSpec, worktree, configFilePath, configManifestPath, spawnedSpec, configuredSecrets };
   }
 
   private allocateWorktree(run: BeastRun, processSpec: BeastProcessSpec): BeastWorktreeAllocation | undefined {
@@ -731,22 +830,50 @@ export class ProcessBeastExecutor implements BeastExecutor {
       : processSpec;
   }
 
-  private prepareRunConfigFile(run: BeastRun, isolatedSpec: BeastProcessSpec): string {
+  private prepareRunConfigFiles(run: BeastRun, isolatedSpec: BeastProcessSpec): { configFilePath: string; configManifestPath: string } {
     const runConfigRoot = resolve(this.options.runConfigRoot ?? isolatedSpec.cwd ?? process.env.FBEAST_ROOT ?? process.cwd());
     const configDir = resolve(this.options.runConfigDir ?? join(runConfigRoot, '.fbeast', '.build', 'run-configs'));
     const runConfigOwner = resolveRunConfigOwner(this.options.runConfigOwner);
     ensureSecureRunConfigDirectory(configDir, runConfigOwner, runConfigRoot);
     const configFilePath = join(configDir, `${run.id}.json`);
-    try {
-      lstatSync(configFilePath);
-      unlinkSync(configFilePath);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        throw error;
+    const configManifestPath = `${configFilePath}.integrity`;
+    for (const stalePath of [configFilePath, configManifestPath]) {
+      try {
+        lstatSync(stalePath);
+        unlinkSync(stalePath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          throw error;
+        }
       }
     }
     this.pendingConfigFilePaths.set(run.id, configFilePath);
-    return configFilePath;
+    this.pendingConfigManifestPaths.set(run.id, configManifestPath);
+    return { configFilePath, configManifestPath };
+  }
+
+  private resolveSpawnedRunConfigPath(spawnedSpec: BeastProcessSpec, fallbackPath: string): string {
+    const directEnvPath = spawnedSpec.env?.FRANKENBEAST_RUN_CONFIG;
+    if (directEnvPath) {
+      return directEnvPath;
+    }
+
+    for (let index = 0; index < spawnedSpec.args.length; index += 1) {
+      const arg = spawnedSpec.args[index];
+      if (arg !== '-e' && arg !== '--env') {
+        continue;
+      }
+      const envArg = spawnedSpec.args[index + 1];
+      if (!envArg) {
+        continue;
+      }
+      const prefix = 'FRANKENBEAST_RUN_CONFIG=';
+      if (envArg.startsWith(prefix)) {
+        return envArg.slice(prefix.length);
+      }
+    }
+
+    return fallbackPath;
   }
 
   async stop(runId: string, attemptId: string, options?: StopOptions): Promise<BeastRunAttempt> {
@@ -924,6 +1051,11 @@ export class ProcessBeastExecutor implements BeastExecutor {
       try { unlinkSync(configPath); } catch { /* already removed */ }
       this.pendingConfigFilePaths.delete(runId);
     }
+    const manifestPath = this.pendingConfigManifestPaths.get(runId);
+    if (manifestPath) {
+      try { unlinkSync(manifestPath); } catch { /* already removed */ }
+      this.pendingConfigManifestPaths.delete(runId);
+    }
   }
 
   private cleanupAttemptConfig(attemptId: string): void {
@@ -931,6 +1063,11 @@ export class ProcessBeastExecutor implements BeastExecutor {
     if (configPath) {
       try { unlinkSync(configPath); } catch { /* already removed */ }
       this.attemptConfigFilePaths.delete(attemptId);
+    }
+    const manifestPath = this.attemptConfigManifestPaths.get(attemptId);
+    if (manifestPath) {
+      try { unlinkSync(manifestPath); } catch { /* already removed */ }
+      this.attemptConfigManifestPaths.delete(attemptId);
     }
   }
 

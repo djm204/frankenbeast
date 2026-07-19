@@ -27,18 +27,35 @@ function reportDefaultListenerError({ event, error }: BeastEventBusListenerError
   });
 }
 
-function cloneJsonCompatibleValue(value: unknown): unknown {
+function cloneJsonCompatibleValue(value: unknown, active = new WeakSet<object>()): unknown {
   if (Array.isArray(value)) {
-    return value.map((item) => cloneJsonCompatibleValue(item));
+    if (active.has(value)) {
+      return '[Circular]';
+    }
+
+    active.add(value);
+    const cloned = value.map((item) => cloneJsonCompatibleValue(item, active));
+    active.delete(value);
+    return cloned;
   }
 
   if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, nestedValue]) => [
-        key,
-        cloneJsonCompatibleValue(nestedValue),
-      ]),
-    );
+    if (active.has(value)) {
+      return '[Circular]';
+    }
+
+    active.add(value);
+    const cloned: Record<string, unknown> = {};
+    for (const [key, nestedValue] of Object.entries(value as Record<string, unknown>)) {
+      Object.defineProperty(cloned, key, {
+        value: cloneJsonCompatibleValue(nestedValue, active),
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+    }
+    active.delete(value);
+    return cloned;
   }
 
   return value;

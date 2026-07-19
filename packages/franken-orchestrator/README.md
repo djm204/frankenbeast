@@ -34,6 +34,7 @@ frankenbeast interview
 frankenbeast plan --design-doc <file>
 frankenbeast run --plan-dir <dir>
 frankenbeast issues
+frankenbeast dr snapshot-diff ./healthy-export ./incident-export
 frankenbeast dr dead-letter-list .fbeast/dead-letter-actions.json
 frankenbeast dr dead-letter-replay-dry-run .fbeast/dead-letter-actions.json <entry-id>
 frankenbeast chat-server
@@ -85,9 +86,21 @@ frankenbeast dr dead-letter-retire <queue-file> <entry-id> "handled manually"
 
 The replay command is dry-run only. Entries classified as side-effecting report that explicit operator approval is required before any future replay executor may run them, while retired or unsafe entries are not replayable.
 
+When dead-letter entries appear alongside corrupted Git worktrees, stuck approval-cop queues, broken Kanban cards, crashed dispatchers, or inconsistent liveness state, follow `docs/dr/corrupted-worktrees-and-queues.md` from the repository root. That runbook separates read-only diagnosis from repair, requires backups before mutation, and marks every destructive queue/worktree/card command as approval-cop/HITL required.
+
+## Disaster recovery state snapshot diff
+
+Incident responders can compare two state snapshot/export directories without manually reading every JSON dump:
+
+```bash
+frankenbeast dr snapshot-diff <before-dir> <after-dir>
+```
+
+The command scans JSON and JSONL files in each directory and emits a redacted JSON report containing both `summary` counts and a human-readable `textSummary`. It groups added, removed, and changed records by tasks/cards, approval tokens, worker IDs, memory records, and cron jobs where those records are present. Approval-token IDs and primitive token arrays are represented by stable short digests, not raw token strings.
+
 ## Flaky liveness fixture replay
 
-Issue-worker liveness/backpressure regressions can be reproduced with colocated JSON replay fixtures in `packages/franken-orchestrator/tests/unit/issues/fixtures/`. The `flaky-liveness-replay.json` fixture captures each liveness tick as thresholds, signals, checkpoint state, and the expected PM-visible worker route. Add new flaky liveness cases there when a capacity spike, dependency breaker, or recovery edge needs deterministic coverage, then run:
+Issue-worker liveness/backpressure regressions can be reproduced with colocated JSON replay fixtures in `packages/franken-orchestrator/tests/unit/issues/fixtures/`. The `flaky-liveness-replay.json` fixture captures each liveness tick as thresholds, signals, checkpoint state, and the expected coordinator-visible worker route. Add new flaky liveness cases there when a capacity spike, dependency breaker, or recovery edge needs deterministic coverage, then run:
 
 ```bash
 npm test --workspace=@franken/orchestrator -- tests/unit/issues/issue-runner.test.ts
@@ -95,13 +108,17 @@ npm test --workspace=@franken/orchestrator -- tests/unit/issues/issue-runner.tes
 
 Keep fixture snapshots narrow and deterministic: prefer structured `signals`, exact `expectedReasons`, and explicit `expectedRoute` values over wall-clock sleeps or prose-only assertions.
 
+## Stuck-run watchdog
+
+Coordinator, liveness, and repair tooling can import `detectStuckRunWatchdogFindings` from `@franken/orchestrator` to turn worker snapshots into compact remediation reports. Each snapshot may provide heartbeat, output, tool-activity, state-transition, process, Kanban-state, and known blocker fields; findings include the computed ages, a likely category (`process-crash`, `approval-gate`, `ci-wait`, `provider-wait`, `dispatcher-bug`, or `unknown`), one recommended action, and a confidence level. CI and provider waits have a grace guard so long-running but still-active checks/model calls do not become false stale-worker alarms before every activity signal is stale.
+
 ## Security limits
 
 Context snapshot imports are size-limited before JSON parsing to reduce resource-exhaustion risk from untrusted or corrupted resume/import files. `loadContext(filePath)` defaults to a 1 MiB cap, opens snapshots in nonblocking mode, rejects non-regular paths from the opened file descriptor, and enforces the same byte cap while reading so oversized content is rejected even if the file changes after metadata inspection. Trusted tooling that intentionally owns a larger snapshot must opt in per import with `loadContext(filePath, { maxBytes })`; invalid overrides such as `0`, negative, non-finite, or unsafe integer values fail closed.
 
-## PM handoff quality rubric
+## Coordinator handoff quality rubric
 
-Provider handoffs include a deterministic PM handoff quality rubric generated from the current brain snapshot. The rubric gives receiving PMs and liveness tooling a structured signal for whether a handoff is ready to promote, retire, or hand to a fresh worker.
+Provider handoffs include a deterministic coordinator handoff quality rubric generated from the current brain snapshot. The rubric gives receiving coordinators and liveness tooling a structured signal for whether a handoff is ready to promote, retire, or hand to a fresh worker.
 
 The rubric checks six criteria:
 

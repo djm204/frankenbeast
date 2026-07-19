@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { handleInitCommand } from '../../../src/cli/init-command.js';
@@ -157,6 +157,33 @@ describe('handleInitCommand', () => {
     expect(initState.selectedModules).toEqual(['chat']);
   });
 
+  function makeInitIo(overrides: Record<string, string> = {}) {
+    return {
+      ask: vi.fn(async (prompt: string) => {
+        if (prompt in overrides) return overrides[prompt]!;
+        switch (prompt) {
+          case 'Enter passphrase for local encrypted store:':
+            return 'test-passphrase';
+          case 'Enable Chat? [y/N]':
+            return '';
+          case 'Enable Dashboard? [Y/n]':
+            return 'n';
+          case 'Enable Comms? [y/N]':
+            return 'n';
+          case 'Default provider [claude]':
+            return '';
+          case 'Security mode [secure/insecure] (default: secure)':
+            return '';
+          case 'Enter operator token (leave blank to auto-generate):':
+            return '';
+          default:
+            return '';
+        }
+      }),
+      display: () => undefined,
+    };
+  }
+
   it('uses resolved fallback config for interactive init when existing config is not an object', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-init-command-'));
     const frankenbeastDir = join(tempDir, '.fbeast');
@@ -165,35 +192,43 @@ describe('handleInitCommand', () => {
     await writeFile(configFile, 'null\n', 'utf-8');
     const resolvedConfig = defaultConfig();
     resolvedConfig.chat.enabled = false;
-    const ask = vi.fn(async (prompt: string) => {
-      switch (prompt) {
-        case 'Enter passphrase for local encrypted store:':
-          return 'test-passphrase';
-        case 'Enable Chat? [y/N]':
-          return '';
-        case 'Enable Dashboard? [Y/n]':
-          return 'n';
-        case 'Enable Comms? [y/N]':
-          return 'n';
-        case 'Default provider [claude]':
-          return '';
-        case 'Security mode [secure/insecure] (default: secure)':
-          return '';
-        case 'Enter operator token (leave blank to auto-generate):':
-          return '';
-        default:
-          return '';
-      }
-    });
+    const io = makeInitIo();
 
     await handleInitCommand({
       args: makeArgs(),
       config: resolvedConfig,
       configLoadFallback: true,
-      io: { ask, display: () => undefined },
+      io,
       paths: makePaths(tempDir, configFile),
       print: () => undefined,
     });
+
+    const config = JSON.parse(await readFile(configFile, 'utf-8')) as { chat: { enabled: boolean } };
+    expect(config.chat.enabled).toBe(false);
+  });
+
+  it('quarantines malformed config JSON before interactive init overwrites it', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-command-'));
+    const frankenbeastDir = join(tempDir, '.fbeast');
+    const configFile = join(frankenbeastDir, 'config.json');
+    await mkdir(frankenbeastDir, { recursive: true });
+    await writeFile(configFile, '{bad json\n', 'utf-8');
+    const resolvedConfig = defaultConfig();
+    resolvedConfig.chat.enabled = false;
+
+    await handleInitCommand({
+      args: makeArgs(),
+      config: resolvedConfig,
+      configLoadFallback: true,
+      io: makeInitIo(),
+      paths: makePaths(tempDir, configFile),
+      print: () => undefined,
+    });
+
+    const files = await readdir(frankenbeastDir);
+    const corruptFile = files.find((file) => file.startsWith('config.json.corrupt-'));
+    expect(corruptFile).toBeDefined();
+    expect(await readFile(join(frankenbeastDir, corruptFile!), 'utf-8')).toBe('{bad json\n');
 
     const config = JSON.parse(await readFile(configFile, 'utf-8')) as { chat: { enabled: boolean } };
     expect(config.chat.enabled).toBe(false);
@@ -276,6 +311,28 @@ describe('handleInitCommand', () => {
 
     expect(config.network.secureBackend).toBe('local-encrypted');
     expect(config.enableTracing).toBe(false);
+  });
+
+  it('uses the requested init backend when switching away from an existing backend', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-command-'));
+    const frankenbeastDir = join(tempDir, '.fbeast');
+    const configFile = join(frankenbeastDir, 'config.json');
+    const resolvedConfig = defaultConfig();
+    resolvedConfig.network.secureBackend = 'os-keychain';
+    const io = makeInitIo();
+
+    await handleInitCommand({
+      args: makeArgs({ initBackend: 'local-encrypted' }),
+      config: resolvedConfig,
+      configLoadFallback: true,
+      io,
+      paths: makePaths(tempDir, configFile),
+      print: () => undefined,
+    });
+
+    expect(io.ask).toHaveBeenCalledWith('Enter passphrase for local encrypted store:');
+    const config = JSON.parse(await readFile(configFile, 'utf-8')) as { network: { secureBackend: string } };
+    expect(config.network.secureBackend).toBe('local-encrypted');
   });
 
   it('fails fast without prompting when init is non-interactive and config is missing', async () => {

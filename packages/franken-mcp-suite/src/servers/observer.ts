@@ -14,7 +14,16 @@ export interface ObserverServerDeps {
 
 export function createObserverServer(deps: ObserverServerDeps, options: CreateMcpServerOptions = {}): FbeastMcpServer {
   const tools = createToolDefsForServer('observer', deps);
-  return createMcpServer('fbeast-observer', '0.1.0', tools, options);
+  return createMcpServer('fbeast-observer', '0.1.0', tools, {
+    ...options,
+    onClose() {
+      try {
+        deps.observer.close?.();
+      } finally {
+        options.onClose?.();
+      }
+    },
+  });
 }
 
 if (isMain(import.meta.url)) {

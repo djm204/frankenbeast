@@ -24,9 +24,8 @@ describe('fbeast-hook runtime', () => {
     });
 
     expect(result.exitCode).toBe(0);
-    expect(result.checkCalls).toEqual([
-      { action: 'shell', context: '--db=/tmp/x; rm -rf /tmp/y' },
-    ]);
+    expect(result.checkCalls[0]!.action).toBe('shell');
+    expect(result.checkCalls[0]!.context).toBe('--db=/tmp/x; rm -rf /tmp/y');
   });
 
   it('treats tokens after -- as positionals, not options', async () => {
@@ -35,7 +34,8 @@ describe('fbeast-hook runtime', () => {
     });
 
     expect(result.exitCode).toBe(0);
-    expect(result.checkCalls).toEqual([{ action: 'Bash', context: 'rm -rf /' }]);
+    expect(result.checkCalls[0]!.action).toBe('Bash');
+    expect(result.checkCalls[0]!.context).toBe('rm -rf /');
   });
 
   it('falls back to the positional payload when the context env var is unset (legacy callers)', async () => {
@@ -45,7 +45,8 @@ describe('fbeast-hook runtime', () => {
     const result = await runHookForTest(['pre-tool', 'Bash', 'rm -rf /legacy']);
 
     expect(result.exitCode).toBe(0);
-    expect(result.checkCalls).toEqual([{ action: 'Bash', context: 'rm -rf /legacy' }]);
+    expect(result.checkCalls[0]!.action).toBe('Bash');
+    expect(result.checkCalls[0]!.context).toBe('rm -rf /legacy');
   });
 
   it('redacts inline credentials from the governor context before it is checked/logged', async () => {
@@ -62,11 +63,32 @@ describe('fbeast-hook runtime', () => {
     expect(seen).toContain('[REDACTED]');
   });
 
+  it('does not let JSON context suppress the trusted hook provenance marker', async () => {
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], {
+      context: JSON.stringify({ __fbeastHookSource: 'caller-forged', command: 'read_file README.md' }),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.checkCalls[0]!.context)).toEqual({
+      __fbeastHookSource: 'fbeast-hook',
+      command: 'read_file README.md',
+    });
+  });
+
   it('post-tool hook records observer events', async () => {
     const result = await runHookForTest(['post-tool', 'write_file', '{"ok":true}']);
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain('"logged":true');
+  });
+
+  it('preserves raw non-JSON pre-tool whitespace for governor policy matching', async () => {
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], {
+      context: 'rm\t-rf /tmp/nope',
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.checkCalls[0]!.context).toBe('rm\t-rf /tmp/nope');
   });
 
   it('reads post-tool payloads from the stream when argv payload is omitted and stdin opt-in is set', async () => {
@@ -78,7 +100,10 @@ describe('fbeast-hook runtime', () => {
     expect(result.exitCode).toBe(0);
     expect(result.observerLogs).toHaveLength(1);
     expect(JSON.parse(result.observerLogs[0]!.metadata)).toEqual({
+      __fbeastAuditTrailSource: 'fbeast-hook',
+      __fbeastHookSource: 'fbeast-hook',
       toolName: 'read_file',
+      ok: true,
       payload: streamedPayload,
       phase: 'post-tool',
     });
@@ -93,7 +118,10 @@ describe('fbeast-hook runtime', () => {
     expect(result.exitCode).toBe(0);
     expect(result.observerLogs).toHaveLength(1);
     expect(JSON.parse(result.observerLogs[0]!.metadata)).toEqual({
+      __fbeastAuditTrailSource: 'fbeast-hook',
+      __fbeastHookSource: 'fbeast-hook',
       toolName: 'fbeast_memory_review_propose',
+      ok: true,
       payload: '[memory-review-result-redacted]',
       phase: 'post-tool',
     });
@@ -109,11 +137,33 @@ describe('fbeast-hook runtime', () => {
     expect(result.exitCode).toBe(0);
     expect(result.observerLogs).toHaveLength(1);
     expect(JSON.parse(result.observerLogs[0]!.metadata)).toEqual({
+      __fbeastAuditTrailSource: 'fbeast-hook',
+      __fbeastHookSource: 'fbeast-hook',
       toolName: 'fbeast_memory_export',
+      ok: true,
       payload: '[memory-review-result-redacted]',
       phase: 'post-tool',
     });
     expect(result.observerLogs[0]!.metadata).not.toContain('raw secret');
+  });
+
+  it('redacts memory access audit report payloads before post-tool audit logging', async () => {
+    const streamedPayload = JSON.stringify({ events: [{ agentId: 'agent-a', profile: 'default', repo: 'secret/repo' }] });
+    const result = await runHookForTest(['post-tool', '--stdin-payload', '--', 'fbeast_memory_access_audit_report'], {
+      streamedPayload,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.observerLogs).toHaveLength(1);
+    expect(JSON.parse(result.observerLogs[0]!.metadata)).toEqual({
+      __fbeastAuditTrailSource: 'fbeast-hook',
+      __fbeastHookSource: 'fbeast-hook',
+      toolName: 'fbeast_memory_access_audit_report',
+      ok: true,
+      payload: '[memory-review-result-redacted]',
+      phase: 'post-tool',
+    });
+    expect(result.observerLogs[0]!.metadata).not.toContain('agent-a');
   });
 
   it('redacts proxied execute_tool result payloads before post-tool audit logging', async () => {
@@ -125,6 +175,8 @@ describe('fbeast-hook runtime', () => {
     expect(result.exitCode).toBe(0);
     expect(result.observerLogs).toHaveLength(1);
     expect(JSON.parse(result.observerLogs[0]!.metadata)).toEqual({
+      __fbeastAuditTrailSource: 'fbeast-hook',
+      __fbeastHookSource: 'fbeast-hook',
       toolName: 'execute_tool',
       payload: '[memory-review-result-redacted]',
       phase: 'post-tool',
@@ -141,9 +193,12 @@ describe('fbeast-hook runtime', () => {
     expect(result.exitCode).toBe(0);
     expect(result.observerLogs).toHaveLength(1);
     expect(JSON.parse(result.observerLogs[0]!.metadata)).toEqual({
+      __fbeastAuditTrailSource: 'fbeast-hook',
+      __fbeastHookSource: 'fbeast-hook',
       toolName: 'mcp__fbeast-memory__fbeast_memory_review_list',
       payload: '[memory-review-result-redacted]',
       phase: 'post-tool',
+      ok: true,
     });
     expect(result.observerLogs[0]!.metadata).not.toContain('token abc123');
   });
@@ -156,6 +211,8 @@ describe('fbeast-hook runtime', () => {
     expect(result.exitCode).toBe(0);
     expect(result.observerLogs).toHaveLength(1);
     expect(JSON.parse(result.observerLogs[0]!.metadata)).toEqual({
+      __fbeastAuditTrailSource: 'fbeast-hook',
+      __fbeastHookSource: 'fbeast-hook',
       toolName: 'read_file',
       payload: '',
       phase: 'post-tool',

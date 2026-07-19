@@ -1,5 +1,110 @@
 # Changelog
 
+## [0.11.0](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.10.1...franken-observer-v0.11.0) (2026-07-18)
+
+
+### Features
+
+* **observer:** add decision outcome attribution ([#2412](https://github.com/djm204/frankenbeast/issues/2412)) ([081eba6](https://github.com/djm204/frankenbeast/commit/081eba6568b2ea05f64409bdd81308a262748756)), closes [#1693](https://github.com/djm204/frankenbeast/issues/1693)
+* **observer:** add transcript retention controls ([#2237](https://github.com/djm204/frankenbeast/issues/2237)) ([465e9f0](https://github.com/djm204/frankenbeast/commit/465e9f0f85fd70d9ece5059cb4dcbb6ea85d4c4a))
+* **observer:** classify runtime artifacts ([#2235](https://github.com/djm204/frankenbeast/issues/2235)) ([ed2f803](https://github.com/djm204/frankenbeast/commit/ed2f803fec0aa19837c51a779c418135b947bed5))
+
+
+### Bug Fixes
+
+* bound and redact error bodies ([de5b902](https://github.com/djm204/frankenbeast/commit/de5b902bb01c41caa2b7678bfbf2db99e2ddb00c))
+* cap and sanitize webhook error bodies ([f9829b1](https://github.com/djm204/frankenbeast/commit/f9829b19a3222dcf5ab194cabfa76a45ff78251a))
+* close remaining HTTP error body review gaps ([685727c](https://github.com/djm204/frankenbeast/commit/685727cba7b472380d1f6510d0ddce66581d430e))
+* **deps:** repair npm security and maintenance update ([4fd8ecc](https://github.com/djm204/frankenbeast/commit/4fd8eccf9b57960572d624aaa18ceac773fddcc0))
+* enrich HTTP error context ([681a32d](https://github.com/djm204/frankenbeast/commit/681a32d638c3b818389746cf220b331d57821e37))
+* enrich HTTP error context ([79b5b40](https://github.com/djm204/frankenbeast/commit/79b5b4064d85b7d2037b30a6b90431cf893def94))
+* **governor:** resolve root test suite merge drift ([29270d5](https://github.com/djm204/frankenbeast/commit/29270d533f252535ff122b422d60095a949e6aab))
+* harden HTTP error body handling ([ba89762](https://github.com/djm204/frankenbeast/commit/ba8976259b36f86639c99382bf9da27ce9d12d8b))
+* harden HTTP error redaction ([e244b16](https://github.com/djm204/frankenbeast/commit/e244b16c21faaa562ea52cd2c7c0ef019e9fca6b))
+* **http:** scrub urls and cloned diagnostic streams ([62fb98c](https://github.com/djm204/frankenbeast/commit/62fb98c3d95a5514de2d96c97af14d96504ca0d8))
+* **observer:** add idempotent webhook receipts ([#2350](https://github.com/djm204/frankenbeast/issues/2350)) ([b6ab9f1](https://github.com/djm204/frankenbeast/commit/b6ab9f145de48914adf7c318b05faa2f97235fb8))
+* **observer:** bound InMemoryAdapter trace retention ([#1969](https://github.com/djm204/frankenbeast/issues/1969)) ([e55ac66](https://github.com/djm204/frankenbeast/commit/e55ac66bec376f202f68784b56563bc59e65cac3))
+* **observer:** bound webhook error body reads ([e78cd20](https://github.com/djm204/frankenbeast/commit/e78cd208471d115e6c602d2abb329b79e55bd3a3))
+* **observer:** cancel exact-cap error body reads ([7e3e412](https://github.com/djm204/frankenbeast/commit/7e3e4123a2b00a9f951d35c24fd8b4c252d90780))
+* **observer:** enforce webhook target allowlist ([0055ddb](https://github.com/djm204/frankenbeast/commit/0055ddba117a7fafcc07e68b4b374cf60dee8ef6))
+* **observer:** retry sqlite lock failures ([7723f66](https://github.com/djm204/frankenbeast/commit/7723f66f67591e6e3fafe3af97bca6a53fb2c77b))
+* **observer:** unref BatchAdapter flush interval timers ([7f5354c](https://github.com/djm204/frankenbeast/commit/7f5354cec9f5ff5392dfe6703d538a4207c0f229)), closes [#2030](https://github.com/djm204/frankenbeast/issues/2030)
+* **observer:** validate attribution token counts ([#2009](https://github.com/djm204/frankenbeast/issues/2009)) ([d3cebf9](https://github.com/djm204/frankenbeast/commit/d3cebf9aa01f9667fc3152f2b01a84b0725be488))
+* **observer:** validate HTTP retry count ([#2172](https://github.com/djm204/frankenbeast/issues/2172)) ([a7d01af](https://github.com/djm204/frankenbeast/commit/a7d01afc6fc198a5461dd602453e4e7bc19d9d97))
+* **observer:** validate outbound webhook targets ([#2307](https://github.com/djm204/frankenbeast/issues/2307)) ([ed2a69c](https://github.com/djm204/frankenbeast/commit/ed2a69c90be9621b05715fb5017686a1ad5886e6))
+* **observer:** validate webhook retry bounds ([#2162](https://github.com/djm204/frankenbeast/issues/2162)) ([58782a9](https://github.com/djm204/frankenbeast/commit/58782a93adb286a8919c310b98954b966032a0b9))
+* **observer:** validate webhook retry counts ([f8ab30d](https://github.com/djm204/frankenbeast/commit/f8ab30d90cb0e69f16886c37fb211e5ea6086a57)), closes [#2015](https://github.com/djm204/frankenbeast/issues/2015)
+* **orchestrator:** close beast attempt cleanup issue ([#2003](https://github.com/djm204/frankenbeast/issues/2003)) ([ae34c42](https://github.com/djm204/frankenbeast/commit/ae34c42ecba98db09aa5b43c097d8ecf0819170e))
+* redact auth data in HTTP errors ([69f5f05](https://github.com/djm204/frankenbeast/commit/69f5f0540bccb21ccf11b943ec43e598fa12095a))
+* redact webhook error endpoints ([3de22b9](https://github.com/djm204/frankenbeast/commit/3de22b904ccedbb35a47dbd74b0ff1e2ba2c174b))
+
+
+### Miscellaneous
+
+* release main ([750094b](https://github.com/djm204/frankenbeast/commit/750094bab0859c49829b4abe85013a5007fc272b))
+* release main ([100e3a8](https://github.com/djm204/frankenbeast/commit/100e3a887b6fbd538e8a1b83f4e88ce4caf6c443))
+* release main ([#1892](https://github.com/djm204/frankenbeast/issues/1892)) ([8b3d61b](https://github.com/djm204/frankenbeast/commit/8b3d61ba99827525b5e60b647e1f1b9bb1877ace))
+* release main ([#2222](https://github.com/djm204/frankenbeast/issues/2222)) ([40d3c99](https://github.com/djm204/frankenbeast/commit/40d3c9941e2d08d6d1b4c9994a3615152234b84b))
+* release main ([#2236](https://github.com/djm204/frankenbeast/issues/2236)) ([c410dd1](https://github.com/djm204/frankenbeast/commit/c410dd1a54bc1346aad48b47d6d30a56e9a0a499))
+* release main ([#2241](https://github.com/djm204/frankenbeast/issues/2241)) ([dc95440](https://github.com/djm204/frankenbeast/commit/dc95440e1d5ab59a176760f6a29dd36812f53699))
+* release main ([#2245](https://github.com/djm204/frankenbeast/issues/2245)) ([c501037](https://github.com/djm204/frankenbeast/commit/c501037be1247eccc0a4cea1a25e6d9dcdebb41f))
+* release main ([#2408](https://github.com/djm204/frankenbeast/issues/2408)) ([5545389](https://github.com/djm204/frankenbeast/commit/55453895d39a81c081dc9e919ac84f7750bfa2ee))
+* release main ([#2409](https://github.com/djm204/frankenbeast/issues/2409)) ([39306c3](https://github.com/djm204/frankenbeast/commit/39306c3d03ed85ffa3624c8aad9c3b963542533b))
+
+
+### Documentation
+
+* **dx:** document Grafana observer env vars ([#2131](https://github.com/djm204/frankenbeast/issues/2131)) ([97c806b](https://github.com/djm204/frankenbeast/commit/97c806bb809dd04f79ac9d5f070e11e71d049c4c))
+* **observer:** document Grafana env vars ([9caf363](https://github.com/djm204/frankenbeast/commit/9caf363b2f822860ac27563fbbf80252eab09bf2)), closes [#2130](https://github.com/djm204/frankenbeast/issues/2130)
+* **observer:** document Langfuse environment variables ([#2185](https://github.com/djm204/frankenbeast/issues/2185)) ([9bb68ca](https://github.com/djm204/frankenbeast/commit/9bb68ca139e2d646ed4f0d16c19b133f8eae1ea0))
+* **observer:** document webhook retry backoff jitter ([#2269](https://github.com/djm204/frankenbeast/issues/2269)) ([656b343](https://github.com/djm204/frankenbeast/commit/656b343daf345c5777cf9c3fe0cdf7764db7138e))
+
+
+### Tests
+
+* document webhook redaction edge cases ([6eb32c9](https://github.com/djm204/frankenbeast/commit/6eb32c9ff5427dc17501482b888487b6ce173bc9))
+* **observer:** assert invalid replay refs skip blob reads ([#2054](https://github.com/djm204/frankenbeast/issues/2054)) ([ad36aea](https://github.com/djm204/frankenbeast/commit/ad36aea28093cb4342b0357dce69bd68862d9d88)), closes [#2052](https://github.com/djm204/frankenbeast/issues/2052)
+* **observer:** clean replay temp fixtures ([9fcb921](https://github.com/djm204/frankenbeast/commit/9fcb921594dd6fcdd4d90dee718a1a97ca8dd94a)), closes [#2067](https://github.com/djm204/frankenbeast/issues/2067)
+* **observer:** cover invalid CircuitBreaker budgets ([d76ddd5](https://github.com/djm204/frankenbeast/commit/d76ddd518f964e3cce57f3b759f72e79af48e35c)), closes [#1965](https://github.com/djm204/frankenbeast/issues/1965)
+* **observer:** cover invalid traceparent version fields ([de157da](https://github.com/djm204/frankenbeast/commit/de157dabb583a1d5b7688f56f7bfa5320505f3a5)), closes [#2055](https://github.com/djm204/frankenbeast/issues/2055)
+* **observer:** cover missing audit hash content ([#2053](https://github.com/djm204/frankenbeast/issues/2053)) ([bb0064f](https://github.com/djm204/frankenbeast/commit/bb0064fd1e991ebefb0fd4d64b412f3f6292b3a0)), closes [#2048](https://github.com/djm204/frankenbeast/issues/2048)
+* **observer:** cover missing rate limit header ([#2202](https://github.com/djm204/frankenbeast/issues/2202)) ([660d3d0](https://github.com/djm204/frankenbeast/commit/660d3d05e6bea29576452db693290b57de58ffd2))
+* **observer:** document webhook async drain ([7dbf4ed](https://github.com/djm204/frankenbeast/commit/7dbf4ed27c1315663abc9fe6f0ed49a71a565c4e)), closes [#2155](https://github.com/djm204/frankenbeast/issues/2155)
+* **security:** add secret redaction regression suite ([#2575](https://github.com/djm204/frankenbeast/issues/2575)) ([04a708f](https://github.com/djm204/frankenbeast/commit/04a708fcf324599aab9c490718ecd625090482c8))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.13.0 to 0.14.0
+
+## [0.10.1](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.10.0...franken-observer-v0.10.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **observer:** unref BatchAdapter flush interval timers ([7f5354c](https://github.com/djm204/frankenbeast/commit/7f5354cec9f5ff5392dfe6703d538a4207c0f229)), closes [#2030](https://github.com/djm204/frankenbeast/issues/2030)
+
+## [0.10.0](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.9.0...franken-observer-v0.10.0) (2026-07-16)
+
+
+### Features
+
+* **observer:** add decision outcome attribution ([#2412](https://github.com/djm204/frankenbeast/issues/2412)) ([081eba6](https://github.com/djm204/frankenbeast/commit/081eba6568b2ea05f64409bdd81308a262748756)), closes [#1693](https://github.com/djm204/frankenbeast/issues/1693)
+
+
+### Bug Fixes
+
+* **observer:** retry sqlite lock failures ([7723f66](https://github.com/djm204/frankenbeast/commit/7723f66f67591e6e3fafe3af97bca6a53fb2c77b))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.12.0 to 0.13.0
+
 ## [0.9.0](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.8.2...franken-observer-v0.9.0) (2026-07-16)
 
 

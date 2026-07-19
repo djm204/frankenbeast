@@ -99,6 +99,7 @@ describe('issue #1766 agent role responsibility map', () => {
       'Do not let the first matching path hide additional owners.',
       'Do not let the agent role override repository ownership.',
       'Do not respawn a worker or create a duplicate branch until live Kanban, GitHub, and worktree evidence proves there is no active owner.',
+      'Keep role ids stable',
     ]) {
       expect(guide).toContain(requiredText);
     }

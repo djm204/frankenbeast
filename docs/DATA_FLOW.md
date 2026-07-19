@@ -4,7 +4,7 @@ This document maps how data moves through Frankenbeast today and how it is inten
 
 Two rules for reading this document:
 
-- **Current** means the code-backed behavior in this repository as of `origin/main` at `b835f52` on 2026-03-13.
+- **Current** means the code-backed behavior in the checked-out branch at the time you read or update this document. Some sections may preserve historical context for older target-state decisions, but live behavior should be verified against the active checkout rather than a fixed point-in-time commit.
 - **Target** means the accepted or proposed end-state described by the ADRs and architecture docs, even where the local CLI path is not fully wired yet.
 
 ## Scope
@@ -435,7 +435,7 @@ flowchart TD
     User["Human operator / external user"]
     Dashboard["franken-web"]
     CLI["frankenbeast CLI"]
-    Comms["franken-comms"]
+    Comms["orchestrator comms surface"]
     Orchestrator["@franken/orchestrator"]
     Firewall["MOD-01 firewall"]
     Skills["MOD-02 skills"]
@@ -566,7 +566,7 @@ flowchart TD
     Verify["channel signature verification + schema validation"]
     Normalize["ChannelInboundMessage normalization"]
     SessionMap["deterministic session mapping"]
-    Gateway["franken-comms gateway"]
+    Gateway["orchestrator comms surface gateway"]
     WS["/v1/chat/ws"]
     Runtime["shared ChatRuntime / ConversationEngine"]
     Stream["streamed events + approval prompts"]

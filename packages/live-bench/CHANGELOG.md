@@ -1,5 +1,65 @@
 # Changelog
 
+## [0.4.0](https://github.com/djm204/frankenbeast/compare/live-bench-v0.3.2...live-bench-v0.4.0) (2026-07-18)
+
+
+### Features
+
+* **learning:** add strategy experiment sandbox ([#2579](https://github.com/djm204/frankenbeast/issues/2579)) ([bc1de3d](https://github.com/djm204/frankenbeast/commit/bc1de3d3e0d685f4a0c5e375a82c657c289fb651))
+* **learning:** add workflow regression benchmark ([#2356](https://github.com/djm204/frankenbeast/issues/2356)) ([b9101f5](https://github.com/djm204/frankenbeast/commit/b9101f5a7d0ddace3cd730532a15b4e72af8fb05))
+
+
+### Bug Fixes
+
+* **deps:** repair npm security and maintenance update ([4fd8ecc](https://github.com/djm204/frankenbeast/commit/4fd8eccf9b57960572d624aaa18ceac773fddcc0))
+* **live-bench:** bound long model path segments ([#2168](https://github.com/djm204/frankenbeast/issues/2168)) ([36ec639](https://github.com/djm204/frankenbeast/commit/36ec639c8b0254080bf9f67369ebeed7fda28939))
+* **orchestrator:** close beast attempt cleanup issue ([#2003](https://github.com/djm204/frankenbeast/issues/2003)) ([ae34c42](https://github.com/djm204/frankenbeast/commit/ae34c42ecba98db09aa5b43c097d8ecf0819170e))
+
+
+### Miscellaneous
+
+* release main ([750094b](https://github.com/djm204/frankenbeast/commit/750094bab0859c49829b4abe85013a5007fc272b))
+* release main ([100e3a8](https://github.com/djm204/frankenbeast/commit/100e3a887b6fbd538e8a1b83f4e88ce4caf6c443))
+* release main ([#1892](https://github.com/djm204/frankenbeast/issues/1892)) ([8b3d61b](https://github.com/djm204/frankenbeast/commit/8b3d61ba99827525b5e60b647e1f1b9bb1877ace))
+* release main ([#2222](https://github.com/djm204/frankenbeast/issues/2222)) ([40d3c99](https://github.com/djm204/frankenbeast/commit/40d3c9941e2d08d6d1b4c9994a3615152234b84b))
+* release main ([#2236](https://github.com/djm204/frankenbeast/issues/2236)) ([c410dd1](https://github.com/djm204/frankenbeast/commit/c410dd1a54bc1346aad48b47d6d30a56e9a0a499))
+* release main ([#2241](https://github.com/djm204/frankenbeast/issues/2241)) ([dc95440](https://github.com/djm204/frankenbeast/commit/dc95440e1d5ab59a176760f6a29dd36812f53699))
+* release main ([#2245](https://github.com/djm204/frankenbeast/issues/2245)) ([c501037](https://github.com/djm204/frankenbeast/commit/c501037be1247eccc0a4cea1a25e6d9dcdebb41f))
+* release main ([#2408](https://github.com/djm204/frankenbeast/issues/2408)) ([5545389](https://github.com/djm204/frankenbeast/commit/55453895d39a81c081dc9e919ac84f7750bfa2ee))
+* release main ([#2409](https://github.com/djm204/frankenbeast/issues/2409)) ([39306c3](https://github.com/djm204/frankenbeast/commit/39306c3d03ed85ffa3624c8aad9c3b963542533b))
+
+
+### Tests
+
+* **live-bench:** relax CLI smoke timeouts ([474c704](https://github.com/djm204/frankenbeast/commit/474c7048b0cad04125a7e12d236c5688f5838cc5))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/observer bumped from 0.10.1 to 0.11.0
+    * @franken/types bumped from 0.13.0 to 0.14.0
+
+## [0.3.2](https://github.com/djm204/frankenbeast/compare/live-bench-v0.3.1...live-bench-v0.3.2) (2026-07-17)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/observer bumped from 0.10.0 to 0.10.1
+
+## [0.3.1](https://github.com/djm204/frankenbeast/compare/live-bench-v0.3.0...live-bench-v0.3.1) (2026-07-16)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/observer bumped from 0.9.0 to 0.10.0
+    * @franken/types bumped from 0.12.0 to 0.13.0
+
 ## [0.3.0](https://github.com/djm204/frankenbeast/compare/live-bench-v0.2.12...live-bench-v0.3.0) (2026-07-16)
 
 

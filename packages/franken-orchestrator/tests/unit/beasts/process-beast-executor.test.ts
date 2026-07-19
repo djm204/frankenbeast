@@ -9,6 +9,11 @@ import { martinLoopDefinition } from '../../../src/beasts/definitions/martin-loo
 import { ProcessBeastExecutor } from '../../../src/beasts/execution/process-beast-executor.js';
 import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
 import { ProcessSupervisor, type ProcessCallbacks } from '../../../src/beasts/execution/process-supervisor.js';
+import {
+  RUN_CONFIG_INTEGRITY_ENV,
+  RUN_CONFIG_INTEGRITY_SECRET_ENV,
+  verifyRunConfigIntegrity,
+} from '../../../src/cli/run-config-integrity.js';
 import type { BeastDefinition } from '../../../src/beasts/types.js';
 
 function createTestRun(repo: SQLiteBeastRepository) {
@@ -83,6 +88,32 @@ async function cleanupTempDirs(): Promise<void> {
   if (failures.length > 0) {
     throw new AggregateError(failures, 'Failed to clean up test temp directories');
   }
+}
+
+async function waitForPersistedLogLines(
+  logs: BeastLogStore,
+  runId: string,
+  attemptId: string,
+  predicate: (lines: string[]) => boolean,
+  timeoutMs = 1_000,
+): Promise<string[]> {
+  const deadline = Date.now() + timeoutMs;
+  let lines: string[] = [];
+  do {
+    lines = (await logs.read(runId, attemptId)).map((line) => {
+      try {
+        const parsed = JSON.parse(line) as { message?: string; line?: string };
+        return parsed.message ?? parsed.line ?? line;
+      } catch {
+        return line;
+      }
+    });
+    if (predicate(lines)) {
+      return lines;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  } while (Date.now() < deadline);
+  return lines;
 }
 
 describe('ProcessBeastExecutor', () => {
@@ -572,11 +603,11 @@ describe('ProcessBeastExecutor', () => {
       createdAt: '2026-03-10T00:00:00.000Z',
     });
 
-    await expect(executor.start(run, createDefinitionWithCwd(workDir))).rejects.toThrow('spawn failed');
+    await expect(executor.start(run, createDefinitionWithCwd(workDir))).rejects.toThrow('Worker process could not be spawned.');
 
     const spawnFailedEvent = repo.listEvents(run.id).find((event) => event.type === 'run.spawn_failed');
     expect(spawnFailedEvent?.payload).toMatchObject({
-      error: 'spawn failed',
+      error: 'Worker process could not be spawned.',
       crashClassification: {
         kind: 'spawn_failure',
         severity: 'error',
@@ -632,7 +663,7 @@ describe('ProcessBeastExecutor', () => {
     const existingWorktreePath = join(workDir, '.frankenbeast', '.worktrees', agent.id);
     mkdirSync(existingWorktreePath, { recursive: true });
 
-    await expect(executor.start(run, createDefinitionWithCwd(workDir))).rejects.toThrow('spawn failed');
+    await expect(executor.start(run, createDefinitionWithCwd(workDir))).rejects.toThrow('Worker process could not be spawned.');
 
     expect(runGit).not.toHaveBeenCalledWith(['worktree', 'remove', '--force', existingWorktreePath], workDir);
     expect(runGit).not.toHaveBeenCalledWith(['branch', '-D', `beast/${agent.id}`], workDir);
@@ -678,7 +709,7 @@ describe('ProcessBeastExecutor', () => {
       createdAt: '2026-03-10T00:00:00.000Z',
     });
 
-    await expect(executor.start(run, createDefinitionWithCwd(workDir))).rejects.toThrow('spawn failed');
+    await expect(executor.start(run, createDefinitionWithCwd(workDir))).rejects.toThrow('Worker process could not be spawned.');
 
     const expectedWorktree = join(workDir, '.frankenbeast', '.worktrees', agent.id);
     expect(runGit).toHaveBeenCalledWith(['worktree', 'add', expectedWorktree, `beast/${agent.id}`], workDir);
@@ -1062,16 +1093,24 @@ describe('ProcessBeastExecutor', () => {
 
       const [spawnedSpec] = supervisor.spawn.mock.calls[0];
       const configPath = join(runConfigDir, `${run.id}.json`);
-      expect((spawnedSpec as { env: Record<string, string> }).env.FRANKENBEAST_RUN_CONFIG).toBe(configPath);
+      const manifestPath = `${configPath}.integrity`;
+      const spawnedEnv = (spawnedSpec as { env: Record<string, string> }).env;
+      expect(spawnedEnv.FRANKENBEAST_RUN_CONFIG).toBe(configPath);
+      expect(spawnedEnv[RUN_CONFIG_INTEGRITY_ENV]).toBe(manifestPath);
+      expect(spawnedEnv[RUN_CONFIG_INTEGRITY_SECRET_ENV]).toMatch(/^[0-9a-f]{64}$/);
       expect(existsSync(configPath)).toBe(true);
+      expect(existsSync(manifestPath)).toBe(true);
       expect(readFileSync(configPath, 'utf8')).toContain('Test objective');
       expect(readFileSync(configPath, 'utf8')).not.toContain('stale snapshot');
       expect(statSync(runConfigDir).mode & 0o777).toBe(0o700);
       expect(statSync(configPath).mode & 0o777).toBe(0o600);
+      expect(statSync(manifestPath).mode & 0o777).toBe(0o600);
+      expect(() => verifyRunConfigIntegrity(configPath, manifestPath, spawnedEnv[RUN_CONFIG_INTEGRITY_SECRET_ENV]!)).not.toThrow();
 
       capturedCallbacks!.onExit(0, null);
 
       expect(existsSync(configPath)).toBe(false);
+      expect(existsSync(manifestPath)).toBe(false);
     });
 
     it('redacts sensitive keys and secret-shaped values before writing run config files', async () => {
@@ -1353,14 +1392,13 @@ describe('ProcessBeastExecutor', () => {
       expect(publishedLogLines).toContain(`stdout [REDACTED] [REDACTED] [REDACTED] ${visibleValue}`);
       expect(publishedLogLines).toContain(`stderr [REDACTED] [REDACTED] ${visibleValue}`);
 
-      const persistedLogLines = (await logs.read(run.id, attempt.id)).map((line) => {
-        try {
-          const parsed = JSON.parse(line);
-          return parsed.message ?? parsed.line ?? line;
-        } catch {
-          return line;
-        }
-      });
+      const persistedLogLines = await waitForPersistedLogLines(
+        logs,
+        run.id,
+        attempt.id,
+        (lines) => lines.some((line) => line.includes(`stdout [REDACTED] [REDACTED] [REDACTED] ${visibleValue}`))
+          && lines.some((line) => line.includes(`stderr [REDACTED] [REDACTED] ${visibleValue}`)),
+      );
       const persistedLogDump = persistedLogLines.join('\\n');
 
       expect(persistedLogDump).toContain(`stdout [REDACTED] [REDACTED] [REDACTED] ${visibleValue}`);
@@ -1858,7 +1896,7 @@ describe('ProcessBeastExecutor', () => {
       const executor = new ProcessBeastExecutor(repo, logs, supervisor, { eventBus });
       const run = createTestRun(repo);
 
-      await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow('spawn ENOENT');
+      await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow('Worker process could not be spawned.');
 
       const statusEvents = publishSpy.mock.calls.filter(([e]) => e.type === 'run.status');
       expect(statusEvents).toHaveLength(1);
@@ -1909,7 +1947,7 @@ describe('ProcessBeastExecutor', () => {
       const executor = new ProcessBeastExecutor(repo, logs, supervisor);
       const run = createTestRun(repo);
 
-      await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow('spawn ENOENT');
+      await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow('Worker process could not be spawned.');
 
       const updatedRun = repo.getRun(run.id);
       expect(updatedRun).toMatchObject({
@@ -1946,35 +1984,110 @@ describe('ProcessBeastExecutor', () => {
       const spawnEvent = repo.listEvents(run.id).find((e) => e.type === 'run.spawn_failed');
       expect(spawnEvent?.payload).toMatchObject({
         code: 'ENOENT',
-        command: '/definitely/not-a-real-command-franken-1013',
-        args: [],
+        error: 'Worker process could not be spawned.',
+        commandSummary: {
+          argumentCount: 0,
+        },
       });
-      expect(String(spawnEvent?.payload.error)).toContain('ENOENT');
+      expect(spawnEvent?.payload).not.toHaveProperty('command');
+      expect(spawnEvent?.payload).not.toHaveProperty('args');
     });
 
-    it('appends run.spawn_failed event with error details', async () => {
+    it('preserves the safe E2BIG code when spawning exceeds the OS argument limit', async () => {
       workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const supervisor = {
-        spawn: vi.fn(async () => { throw Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' }); }),
+        spawn: vi.fn(async () => {
+          throw Object.assign(new Error('spawn E2BIG with sensitive argv details'), { code: 'E2BIG' });
+        }),
         stop: vi.fn(async () => {}),
         kill: vi.fn(async () => {}),
       };
-      const executor = new ProcessBeastExecutor(repo, logs, supervisor);
+      const onSpawnFailureDebug = vi.fn();
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { onSpawnFailureDebug });
       const run = createTestRun(repo);
 
-      await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow();
+      await expect(executor.start(run, martinLoopDefinition)).rejects.toMatchObject({
+        message: 'Worker process could not be spawned.',
+        code: 'E2BIG',
+      });
+
+      const spawnEvent = repo.listEvents(run.id).find((event) => event.type === 'run.spawn_failed');
+      expect(spawnEvent?.payload).toMatchObject({
+        error: 'Worker process could not be spawned.',
+        code: 'E2BIG',
+      });
+      expect(onSpawnFailureDebug).toHaveBeenCalledWith(expect.objectContaining({ code: 'E2BIG' }));
+    });
+
+    it('redacts spawn failure command details from durable events and protected debug output', async () => {
+      workDir = await createTempWorkDir();
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const configuredSecret = ['opaque', 'private', 'material'].join('-');
+      const tokenLikeArg = `${'ghp'}_${'abcdefghijklmnopqrstuvwxyz1234567890'}`;
+      const splitArgSecret = ['split', 'credential', 'value'].join('-');
+      const inlineArgSecret = ['inline', 'private', 'key'].join('-');
+      const supervisor = {
+        spawn: vi.fn(async () => {
+          throw Object.assign(
+            new Error(`spawn failed for --token=${configuredSecret} --password ${splitArgSecret} --private-key=${inlineArgSecret}`),
+            { code: 'TOPSECRETVALUE123' },
+          );
+        }),
+        stop: vi.fn(async () => {}),
+        kill: vi.fn(async () => {}),
+      };
+      const onSpawnFailureDebug = vi.fn();
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { onSpawnFailureDebug });
+      const run = repo.createRun({
+        definitionId: 'test-beast',
+        definitionVersion: 1,
+        executionMode: 'process',
+        configSnapshot: { apiToken: configuredSecret },
+        dispatchedBy: 'cli',
+        dispatchedByUser: 'test',
+        createdAt: new Date().toISOString(),
+      });
+      const definition = {
+        ...martinLoopDefinition,
+        buildProcessSpec: () => ({
+          command: `/private/operator/bin/${tokenLikeArg}`,
+          args: [`--token=${configuredSecret}`, '--password', splitArgSecret, `--private-key=${inlineArgSecret}`, '/private/operator/worktree'],
+          cwd: workDir,
+          env: {},
+        }),
+      } satisfies BeastDefinition;
+
+      await expect(executor.start(run, definition)).rejects.toMatchObject({
+        message: 'Worker process could not be spawned.',
+        code: 'SPAWN_FAILED',
+      });
 
       const events = repo.listEvents(run.id);
       const spawnEvent = events.find((e) => e.type === 'run.spawn_failed');
       expect(spawnEvent).toBeDefined();
       expect(spawnEvent!.payload).toMatchObject({
-        error: 'spawn ENOENT',
-        code: 'ENOENT',
+        error: 'Worker process could not be spawned.',
+        code: 'SPAWN_FAILED',
+        commandSummary: {
+          argumentCount: 5,
+        },
       });
-      expect(spawnEvent!.payload.command).toBeDefined();
-      expect(spawnEvent!.payload.args).toBeDefined();
+      expect(spawnEvent!.payload).not.toHaveProperty('command');
+      expect(spawnEvent!.payload).not.toHaveProperty('args');
+
+      expect(onSpawnFailureDebug).toHaveBeenCalledWith({
+        error: 'spawn failed for --token=[REDACTED] --password [REDACTED] --private-key=[REDACTED]',
+        code: 'SPAWN_FAILED',
+        command: '/private/operator/bin/[REDACTED]',
+        args: ['--token=[REDACTED]', '--password', '[REDACTED]', '--private-key=[REDACTED]', '/private/operator/worktree'],
+      });
+      expect(JSON.stringify({ event: spawnEvent, debug: onSpawnFailureDebug.mock.calls })).not.toContain(configuredSecret);
+      expect(JSON.stringify({ event: spawnEvent, debug: onSpawnFailureDebug.mock.calls })).not.toContain(tokenLikeArg);
+      expect(JSON.stringify({ event: spawnEvent, debug: onSpawnFailureDebug.mock.calls })).not.toContain(splitArgSecret);
+      expect(JSON.stringify({ event: spawnEvent, debug: onSpawnFailureDebug.mock.calls })).not.toContain(inlineArgSecret);
     });
 
     it('calls onRunStatusChange on spawn failure', async () => {
@@ -2010,9 +2123,10 @@ describe('ProcessBeastExecutor', () => {
 
       await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow();
 
-      // Config file should have been cleaned up
+      // Config file and integrity manifest should have been cleaned up
       const configPath = join(runConfigDir, `${run.id}.json`);
       expect(existsSync(configPath)).toBe(false);
+      expect(existsSync(`${configPath}.integrity`)).toBe(false);
     });
   });
 

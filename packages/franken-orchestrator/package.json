@@ -1,6 +1,6 @@
 {
   "name": "@franken/orchestrator",
-  "version": "0.50.0",
+  "version": "0.54.0",
   "description": "The Beast Loop — orchestrator wiring all Frankenbeast modules into a unified agent pipeline",
   "type": "module",
   "main": "dist/index.js",
@@ -44,15 +44,15 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.111.0",
-    "@franken/critique": "0.9.0",
-    "@franken/governor": "0.7.1",
-    "@franken/types": "0.12.0",
-    "@franken/observer": "0.9.0",
+    "@franken/critique": "0.9.2",
+    "@franken/governor": "0.7.3",
+    "@franken/types": "0.14.0",
+    "@franken/observer": "0.11.0",
     "@google/genai": "^2.11.0",
     "better-sqlite3": "^12.11.1",
     "dotenv": "^17.4.2",
-    "@franken/planner": "0.4.19",
-    "@franken/brain": "0.11.0",
+    "@franken/planner": "0.4.21",
+    "@franken/brain": "0.15.0",
     "hono": "^4.12.30",
     "openai": "^6.47.0",
     "ws": "^8.21.1",
@@ -62,7 +62,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^26.1.1",
     "@types/ws": "^8.18.1",
-    "typescript": "^7.0.2",
+    "typescript": "^5.9.3",
     "vitest": "^4.1.9"
   },
   "optionalDependencies": {

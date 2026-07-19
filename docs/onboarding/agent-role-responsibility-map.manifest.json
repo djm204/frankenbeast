@@ -12,7 +12,7 @@
   "roleMappings": [
     {
       "roleId": "pm-shard",
-      "roleName": "PM shard / orchestrator",
+      "roleName": "Coordinator shard / orchestrator",
       "whenToUse": "Creates one-issue worker cards, prevents duplicate ownership, and routes cross-package or ambiguous work before implementation begins.",
       "owns": [
         "issue inventory",
@@ -24,11 +24,11 @@
       "repositoryResponsibilities": [
         {
           "ownershipEntryId": "repo-automation",
-          "reason": "PMs maintain assignment metadata, root guardrails, and workflow evidence for issue-to-PR swarms."
+          "reason": "Coordinators maintain assignment metadata, root guardrails, and workflow evidence for issue-to-PR swarms."
         },
         {
           "ownershipEntryId": "onboarding-docs",
-          "reason": "PMs keep onboarding handoffs aligned with current repository ownership guidance."
+          "reason": "Coordinators keep onboarding handoffs aligned with current repository ownership guidance."
         }
       ],
       "mustNotOwn": [
@@ -44,7 +44,7 @@
     {
       "roleId": "issue-worker",
       "roleName": "One-issue implementation worker",
-      "whenToUse": "Implements exactly one GitHub issue in one branch/worktree/PR after the PM assigns a scoped repository owner surface.",
+      "whenToUse": "Implements exactly one GitHub issue in one branch/worktree/PR after the coordinator assigns a scoped repository owner surface.",
       "owns": [
         "smallest scoped implementation or documentation change",
         "targeted tests or deterministic verifier",
@@ -64,13 +64,13 @@
       ],
       "handoffNotes": [
         "Copy the matched ownership ids, primary owners, escalation owner, verification commands, and local pitfalls into the PR or Kanban handoff.",
-        "If a touched path matches multiple owners, keep all owners in scope or stop for a PM split decision."
+        "If a touched path matches multiple owners, keep all owners in scope or stop for a coordinator split decision."
       ],
       "verification": ["npm run test:root -- tests/docs-issue-1766.test.ts"]
     },
     {
       "roleId": "doctor-recovery",
-      "roleName": "Doctor / recovery worker",
+      "roleName": "Repair / recovery worker",
       "whenToUse": "Diagnoses blocked, crashed, stale, or churned cards and restores the existing scoped owner path without duplicating work.",
       "owns": [
         "live task and PR evidence",
@@ -81,11 +81,11 @@
       "repositoryResponsibilities": [
         {
           "ownershipEntryId": "onboarding-docs",
-          "reason": "Doctors maintain recovery guidance and stalled-worker operational docs."
+          "reason": "Repair owners maintain recovery guidance and stalled-worker operational docs."
         },
         {
           "ownershipEntryId": "repo-automation",
-          "reason": "Doctors verify CI, branch, PR, and workflow state before resuming automation."
+          "reason": "Repair owners verify CI, branch, PR, and workflow state before resuming automation."
         }
       ],
       "mustNotOwn": [

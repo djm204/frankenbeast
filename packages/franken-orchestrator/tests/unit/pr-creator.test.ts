@@ -99,6 +99,209 @@ describe('PrCreator', () => {
     expect(logger.warn).toHaveBeenCalled();
   });
 
+  it('blocks push when pushPolicy excludes the configured remote', async () => {
+    const exec = mockExec();
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin', pushPolicy: { allowedGitRemotes: ['upstream'] } },
+      exec,
+    );
+    const logger = makeLogger();
+
+    const result = await creator.create(baseResult, logger);
+
+    expect(result).toBeNull();
+    const pushed = exec.mock.calls.some(c => c[0] === 'git' && (c[1] as string[]).includes('push'));
+    expect(pushed).toBe(false);
+    expect(logger.error).toHaveBeenCalledWith(
+      'PrCreator: git push blocked by policy',
+      expect.objectContaining({ reason: expect.stringContaining('not allowed') }),
+    );
+  });
+
+  it('denies push when the whitelisted remote name resolves to a non-whitelisted URL', async () => {
+    const exec = mockExec({ 'git remote get-url': 'ssh://attacker.example/repo.git\n' });
+    const creator = new PrCreator(
+      {
+        targetBranch: 'main',
+        disabled: false,
+        remote: 'origin',
+        pushPolicy: {
+          allowedGitRemotes: ['origin'],
+          allowedGitRemoteUrls: ['https://github.com/org/repo.git'],
+        },
+      },
+      exec,
+    );
+    const logger = makeLogger();
+
+    const result = await creator.create(baseResult, logger);
+
+    expect(result).toBeNull();
+    const pushed = exec.mock.calls.some(c => c[0] === 'git' && (c[1] as string[]).includes('push'));
+    expect(pushed).toBe(false);
+  });
+
+  it('allows push when the whitelisted remote name resolves to a whitelisted URL', async () => {
+    const exec = mockExec({ 'git remote get-url': 'https://github.com/org/repo.git\n' });
+    const creator = new PrCreator(
+      {
+        targetBranch: 'main',
+        disabled: false,
+        remote: 'origin',
+        pushPolicy: {
+          allowedGitRemotes: ['origin'],
+          allowedGitRemoteUrls: ['https://github.com/org/repo.git'],
+        },
+        githubCapabilityCheck: { disabled: true },
+      },
+      exec,
+    );
+    const logger = makeLogger();
+
+    const result = await creator.create(baseResult, logger);
+
+    expect(result?.url).toBe('https://example.com/pr/1');
+    const pushCall = exec.mock.calls.find(c => c[0] === 'git' && (c[1] as string[]).includes('push'));
+    expect(pushCall).toBeDefined();
+  });
+
+  it('denies push when any configured pushurl is outside the URL whitelist', async () => {
+    const exec = mockExec({
+      'git remote get-url': 'https://github.com/org/repo.git\nssh://attacker.example/repo.git\n',
+    });
+    const creator = new PrCreator(
+      {
+        targetBranch: 'main',
+        disabled: false,
+        remote: 'origin',
+        pushPolicy: {
+          allowedGitRemotes: ['origin'],
+          allowedGitRemoteUrls: ['https://github.com/org/repo.git'],
+        },
+      },
+      exec,
+    );
+    const logger = makeLogger();
+
+    const result = await creator.create(baseResult, logger);
+
+    expect(result).toBeNull();
+    const pushed = exec.mock.calls.some(c => c[0] === 'git' && (c[1] as string[]).includes('push'));
+    expect(pushed).toBe(false);
+  });
+
+  it('refuses policy-bound push when git URL rewrite rules are configured', async () => {
+    const exec = mockExec({
+      'git config --get-regexp': 'url.ssh://attacker.example/.pushinsteadof https://github.com/\n',
+      'git remote get-url': 'https://github.com/org/repo.git\n',
+    });
+    const creator = new PrCreator(
+      {
+        targetBranch: 'main',
+        disabled: false,
+        remote: 'origin',
+        pushPolicy: {
+          allowedGitRemotes: ['origin'],
+          allowedGitRemoteUrls: ['https://github.com/org/repo.git'],
+        },
+      },
+      exec,
+    );
+    const logger = makeLogger();
+
+    const result = await creator.create(baseResult, logger);
+
+    expect(result).toBeNull();
+    const pushed = exec.mock.calls.some(c => c[0] === 'git' && (c[1] as string[]).includes('push'));
+    expect(pushed).toBe(false);
+    expect(logger.error).toHaveBeenCalledWith(
+      'PrCreator: git URL rewrite rules (insteadOf/pushInsteadOf) are configured; refusing policy-bound push',
+    );
+  });
+
+  it('treats a userless scp-like URL remote as its own destination when whitelisted', async () => {
+    const scpRemote = 'github.com:org/repo.git';
+    const exec = mockExec({ 'git remote get-url': new Error('No such remote') });
+    const creator = new PrCreator(
+      {
+        targetBranch: 'main',
+        disabled: false,
+        remote: scpRemote,
+        pushPolicy: {
+          allowedGitRemotes: [],
+          allowedGitRemoteUrls: [scpRemote],
+        },
+        githubCapabilityCheck: { disabled: true },
+      },
+      exec,
+    );
+    const logger = makeLogger();
+
+    const result = await creator.create(baseResult, logger);
+
+    expect(result?.url).toBe('https://example.com/pr/1');
+    const pushCall = exec.mock.calls.find(c => c[0] === 'git' && (c[1] as string[]).includes('push'));
+    expect(pushCall?.[1]).toContain(scpRemote);
+  });
+
+  it('fails closed when pushPolicy is explicitly malformed', async () => {
+    const exec = mockExec();
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin', pushPolicy: null as never },
+      exec,
+    );
+    const logger = makeLogger();
+
+    const result = await creator.create(baseResult, logger);
+
+    expect(result).toBeNull();
+    const pushed = exec.mock.calls.some(c => c[0] === 'git' && (c[1] as string[]).includes('push'));
+    expect(pushed).toBe(false);
+    expect(logger.error).toHaveBeenCalledWith(
+      'PrCreator: pushPolicy is malformed; refusing to push',
+      expect.objectContaining({ pushPolicyType: 'object' }),
+    );
+  });
+
+  it('redacts credential-bearing remotes in the policy denial log', async () => {
+    const exec = mockExec();
+    const creator = new PrCreator(
+      {
+        targetBranch: 'main',
+        disabled: false,
+        remote: 'https://x-access-token:s3cr3t@pass@github.com/org/repo.git',
+        pushPolicy: { allowedGitRemotes: ['origin'] },
+      },
+      exec,
+    );
+    const logger = makeLogger();
+
+    const result = await creator.create(baseResult, logger);
+
+    expect(result).toBeNull();
+    const denial = logger.error.mock.calls.find(c => c[0] === 'PrCreator: git push blocked by policy');
+    expect(denial).toBeDefined();
+    expect(JSON.stringify(denial)).not.toContain('s3cr3t');
+    expect(JSON.stringify(denial)).not.toContain('pass');
+    expect(JSON.stringify(denial)).toContain('//***@github.com');
+    // Policy gate runs before GitHub preflights, so no gh/git command executed.
+    const ghCalled = exec.mock.calls.some(c => c[0] === 'gh');
+    expect(ghCalled).toBe(false);
+  });
+
+  it('allows push to a configured non-origin remote when no pushPolicy is set', async () => {
+    const exec = mockExec();
+    const creator = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'upstream' }, exec);
+    const logger = makeLogger();
+
+    await creator.create(baseResult, logger);
+
+    const pushCall = exec.mock.calls.find(c => c[0] === 'git' && (c[1] as string[]).includes('push'));
+    expect(pushCall?.[1]).toEqual([
+      'push', 'upstream', 'refs/heads/feature/branch:refs/heads/feature/branch',
+    ]);
+  });
+
   it('pushes branch and creates PR with descriptive body', async () => {
     const exec = mockExec();
     const creator = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'origin' }, exec);

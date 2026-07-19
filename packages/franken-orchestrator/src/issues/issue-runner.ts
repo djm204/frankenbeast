@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { loadavg } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -21,6 +22,7 @@ import type { BeastResult } from '../types.js';
 import type { CliSkillExecutor } from '../skills/cli-skill-executor.js';
 import type { CliSkillConfig } from '../skills/cli-types.js';
 import type { PrCreator } from '../closure/pr-creator.js';
+import { redactSensitiveText } from '../logging/redaction.js';
 
 export interface IssueRuntimeArtifacts {
   readonly planName: string;
@@ -171,10 +173,88 @@ export interface IssueWorkerCardProcessSnapshot {
   readonly alive?: boolean | undefined;
   readonly startedAt?: string | number | Date | undefined;
   readonly lastHeartbeatAt?: string | number | Date | undefined;
+  /** Last stdout/stderr/output event from the worker process. */
+  readonly lastOutputAt?: string | number | Date | undefined;
+  /** Last tool invocation or external side-effect recorded for the worker. */
+  readonly lastToolActivityAt?: string | number | Date | undefined;
+  /** Last Kanban/task state transition observed for this worker card. */
+  readonly lastStateTransitionAt?: string | number | Date | undefined;
+  /** PM/Doctor blocker hint already known before watchdog classification. */
+  readonly blockerCategory?: IssueStuckRunBlockerCategory | undefined;
+  /** Human-readable wait reason, e.g. provider queue, CI checks, or approval token. */
+  readonly waitingOn?: string | undefined;
+  /** Supervisor/dispatcher exit reason preserved from the last run/attempt. */
+  readonly exitReason?: string | undefined;
+  /** Other currently live PIDs observed for the same worker card. */
+  readonly siblingPids?: readonly number[] | undefined;
+  /** Existing PR URL that already owns this worker's issue/branch, if observed. */
+  readonly activePrUrl?: string | undefined;
+  /** Existing worktree path that already owns this worker's issue/branch, if observed. */
+  readonly activeWorktreePath?: string | undefined;
   /** Monotonic heartbeat sequence recorded by the heartbeat writer. */
   readonly heartbeatSequence?: number | undefined;
   /** Writer/reader source for diagnostics when heartbeat state is stale or regressive. */
   readonly source?: string | undefined;
+}
+
+export type IssueStuckRunBlockerCategory =
+  | 'approval-gate'
+  | 'ci-wait'
+  | 'dispatcher-bug'
+  | 'process-crash'
+  | 'provider-wait'
+  | 'unknown';
+
+export interface IssueStuckRunWatchdogOptions {
+  readonly nowMs?: number | undefined;
+  readonly staleHeartbeatMs?: number | undefined;
+  readonly staleOutputMs?: number | undefined;
+  readonly staleToolActivityMs?: number | undefined;
+  readonly staleStateTransitionMs?: number | undefined;
+  readonly longRunningWaitGraceMs?: number | undefined;
+}
+
+export interface IssueStuckRunWatchdogFinding {
+  readonly cardId: string;
+  readonly pid: number;
+  readonly runId?: string | undefined;
+  readonly issueNumber?: number | undefined;
+  readonly owner?: string | undefined;
+  readonly status?: string | undefined;
+  readonly blockerCategory: IssueStuckRunBlockerCategory;
+  readonly confidence: 'low' | 'medium' | 'high';
+  readonly heartbeatAgeMs?: number | undefined;
+  readonly outputAgeMs?: number | undefined;
+  readonly toolActivityAgeMs?: number | undefined;
+  readonly stateTransitionAgeMs?: number | undefined;
+  readonly processStatus: 'alive' | 'dead' | 'unknown';
+  readonly kanbanState: string;
+  readonly exitReason: string;
+  readonly restartDisposition: IssueWorkerRestartDisposition;
+  readonly nextAction: IssueWorkerRestartNextAction;
+  readonly evidence: readonly string[];
+  readonly recommendedAction: string;
+  readonly message: string;
+}
+
+export type IssueWorkerRestartDisposition = 'terminal' | 'retryable' | 'hitl';
+
+export type IssueWorkerRestartNextAction =
+  | 'no-op'
+  | 'restart-once'
+  | 'defer-with-evidence'
+  | 'replace-with-doctor'
+  | 'suppress-duplicate-respawn';
+
+export interface IssueWorkerCrashOnlyRestartContract {
+  readonly disposition: IssueWorkerRestartDisposition;
+  readonly nextAction: IssueWorkerRestartNextAction;
+  readonly exitReason: string;
+  readonly pid: number;
+  readonly heartbeatAgeMs?: number | undefined;
+  readonly processStatus: IssueStuckRunWatchdogFinding['processStatus'];
+  readonly kanbanState: string;
+  readonly evidence: readonly string[];
 }
 
 export interface WorkerHeartbeatMonotonicityFinding {
@@ -203,6 +283,50 @@ export interface DuplicateWorkerCardProcessFinding {
   readonly lastHeartbeatAt?: string | undefined;
   readonly message: string;
   readonly guidance: string;
+}
+
+
+export type KanbanStateMutationOperation = 'comment' | 'block' | 'unblock' | 'complete';
+export type KanbanStateMutationDecisionAction = 'apply' | 'skip' | 'conflict';
+
+export interface KanbanStateMutationRecord {
+  readonly idempotencyKey: string;
+  readonly operation: KanbanStateMutationOperation;
+  readonly contentHash?: string | undefined;
+  readonly appliedAt?: string | number | Date | undefined;
+}
+
+export interface KanbanTaskCommentSnapshot {
+  readonly body: string;
+  readonly idempotencyKey?: string | undefined;
+  readonly author?: string | undefined;
+  readonly createdAt?: string | number | Date | undefined;
+}
+
+export interface KanbanTaskStateSnapshot {
+  readonly taskId: string;
+  readonly status: string;
+  readonly revision?: string | number | undefined;
+  readonly blockReason?: string | undefined;
+  readonly completionSummary?: string | undefined;
+  readonly comments?: readonly KanbanTaskCommentSnapshot[] | undefined;
+  readonly appliedMutations?: readonly KanbanStateMutationRecord[] | undefined;
+}
+
+export interface KanbanStateMutationRequest {
+  readonly operation: KanbanStateMutationOperation;
+  readonly idempotencyKey: string;
+  readonly expectedRevision?: string | number | undefined;
+  readonly body?: string | undefined;
+  readonly contentHash?: string | undefined;
+}
+
+export interface KanbanStateMutationDecision {
+  readonly action: KanbanStateMutationDecisionAction;
+  readonly operation: KanbanStateMutationOperation;
+  readonly idempotencyKey: string;
+  readonly reason: string;
+  readonly evidence: readonly string[];
 }
 
 export interface IssueSchedulerFairnessBucket {
@@ -293,6 +417,11 @@ const ONE_SHOT_MAX_ITERATIONS = 50;
 const ONE_SHOT_STALE_MATE_LIMIT = 3;
 const DEFAULT_SCHEDULER_FAIRNESS_ISSUE_NUMBER_LIMIT = 50;
 const DEFAULT_SCHEDULER_FAIRNESS_WARNING_LIMIT = 50;
+const DEFAULT_STUCK_RUN_STALE_HEARTBEAT_MS = 30 * 60 * 1000;
+const DEFAULT_STUCK_RUN_STALE_OUTPUT_MS = 45 * 60 * 1000;
+const DEFAULT_STUCK_RUN_STALE_TOOL_ACTIVITY_MS = 45 * 60 * 1000;
+const DEFAULT_STUCK_RUN_STALE_STATE_TRANSITION_MS = 60 * 60 * 1000;
+const DEFAULT_STUCK_RUN_WAIT_GRACE_MS = 2 * 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const PRIORITY_AGING_DAYS_PER_RANK = 14;
 const MAX_PRIORITY_AGE_BOOST = 2;
@@ -593,12 +722,592 @@ const TERMINAL_WORKER_CARD_STATUSES = new Set([
   'stopped',
 ]);
 
+const CRASH_WORKER_CARD_STATUSES = new Set([
+  'crashed',
+  'exited',
+  'failed',
+]);
+
 function activeWorkerCardProcess(snapshot: IssueWorkerCardProcessSnapshot): boolean {
   if (snapshot.alive === false) return false;
   if (!snapshot.cardId.trim()) return false;
   if (!Number.isSafeInteger(snapshot.pid) || snapshot.pid <= 0) return false;
   const status = snapshot.status?.trim().toLowerCase();
   return status === undefined || !TERMINAL_WORKER_CARD_STATUSES.has(status);
+}
+
+function ageMs(value: string | number | Date | undefined, nowMs: number): number | undefined {
+  if (value === undefined) return undefined;
+  const date = value instanceof Date ? value : new Date(value);
+  const ms = date.getTime();
+  if (!Number.isFinite(ms) || ms > nowMs) return undefined;
+  return nowMs - ms;
+}
+
+function stale(age: number | undefined, threshold: number): boolean {
+  return age !== undefined && age >= threshold;
+}
+
+function explicitProcessCrash(snapshot: IssueWorkerCardProcessSnapshot): boolean {
+  const status = snapshot.status?.trim().toLowerCase() ?? '';
+  if (CRASH_WORKER_CARD_STATUSES.has(status)) return true;
+  return snapshot.blockerCategory === 'process-crash'
+    && (status === '' || !TERMINAL_WORKER_CARD_STATUSES.has(status));
+}
+
+function redactStuckRunEvidenceText(value: string): string {
+  return redactSensitiveText(value)
+    .replace(/\b([A-Za-z0-9_]*(?:SECRET|PASSWORD|CREDENTIAL)[A-Za-z0-9_]*|[A-Za-z0-9_]*API[_-]?KEY[A-Za-z0-9_]*)\s*:\s*(?:"[^"]*"|'[^']*'|.*?)(?=\s+[A-Za-z0-9_]*(?:SECRET|PASSWORD|CREDENTIAL|API[_-]?KEY)[A-Za-z0-9_]*\s*[:=]|$)/gi, '$1=<redacted>')
+    .replace(/\b([A-Za-z0-9_]*(?:SECRET|PASSWORD|CREDENTIAL)[A-Za-z0-9_]*|[A-Za-z0-9_]*API[_-]?KEY[A-Za-z0-9_]*)\s*=\s*\S+/gi, '$1=<redacted>')
+    .replace(/\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[opusr]_[A-Za-z0-9_.-]{12,})\b/g, '[REDACTED_TOKEN]')
+    .replace(/\b(sk|xox[baprs]?|hf|glpat)-[A-Za-z0-9._/-]+\b/g, '$1-[REDACTED]')
+    .replace(/\b([A-Za-z0-9_-]{20,})\.([A-Za-z0-9_-]{20,})\.([A-Za-z0-9_-]{20,})\b/g, '[REDACTED_JWT]')
+    .replace(/\b((?:approval|session|access|refresh|api)[-_ ]?token)\s*[:=]\s*\S+/gi, '$1=[REDACTED]')
+    .replace(/\b(token)\s*[:=]\s*\S+/gi, '$1=[REDACTED]');
+}
+
+function normalizeStuckRunBlockerCategory(
+  snapshot: IssueWorkerCardProcessSnapshot,
+): IssueStuckRunBlockerCategory {
+  const status = snapshot.status?.trim().toLowerCase() ?? '';
+  if (CRASH_WORKER_CARD_STATUSES.has(status)) return 'process-crash';
+  if (snapshot.blockerCategory && snapshot.blockerCategory !== 'unknown') return snapshot.blockerCategory;
+  const text = `${snapshot.status ?? ''} ${snapshot.waitingOn ?? ''}`.toLowerCase();
+  if (/\bapproval\b|\bhitl\b|\bhuman\b|approval[- ]?token|pending[_ -]approval|operator approval|approval-cop|approve/.test(text)) return 'approval-gate';
+  if (snapshot.alive === false && /\b(crash(?:ed|ing)?|exit(?:ed|ing)?|dead|pid|fail(?:ed|ure|ing)?)\b/.test(text)) return 'process-crash';
+  if (/provider|codex|rate limit|quota|llm|model/.test(text)) return 'provider-wait';
+  if (/\bci\b|ci[- ]?check|status check|check run|workflow|merge queue|github actions?/.test(text)) return 'ci-wait';
+  if (snapshot.alive === false) return 'process-crash';
+  if (/\b(crash(?:ed|ing)?|exit(?:ed|ing)?|dead|pid|fail(?:ed|ure|ing)?)\b/.test(text)) return 'process-crash';
+  if (/dispatcher|kanban|current_run|current run|respawn|heartbeat/.test(text)) return 'dispatcher-bug';
+  return 'unknown';
+}
+
+function remediationForStuckRun(category: IssueStuckRunBlockerCategory, processStatus: IssueStuckRunWatchdogFinding['processStatus']): string {
+  if (processStatus === 'dead' || category === 'process-crash') {
+    return 'Inspect the worker exit/crash logs, clear the stale PID/current-run pointer if no process is alive, then respawn one focused worker.';
+  }
+  switch (category) {
+    case 'approval-gate':
+      return 'Route the exact pending approval command/token to approval-cop or a human, and do not respawn duplicate workers while the gate is pending.';
+    case 'ci-wait':
+      return 'Check live CI/run status and merge queue state, rerun failed checks or unblock shared CI before touching issue code.';
+    case 'dispatcher-bug':
+      return 'Audit Kanban current_run/status/heartbeat consistency and repair dispatcher metadata before unblocking the card.';
+    case 'provider-wait':
+      return 'Check provider quota/rate-limit status and the latest model/bot response; retry later or switch provider only after preserving current work evidence.';
+    default:
+      return 'Open a Doctor card with heartbeat/output/tool/state evidence, verify process liveness, and choose between wait, repair, or single-worker respawn.';
+  }
+}
+
+function confidenceForStuckRun(
+  category: IssueStuckRunBlockerCategory,
+  staleCount: number,
+  processStatus: IssueStuckRunWatchdogFinding['processStatus'],
+): IssueStuckRunWatchdogFinding['confidence'] {
+  if (processStatus === 'dead') return 'high';
+  if (category !== 'unknown' && staleCount >= 3) return 'high';
+  if (category !== 'unknown' || staleCount >= 3) return 'medium';
+  return 'low';
+}
+
+function knownLongRunningWait(category: IssueStuckRunBlockerCategory): boolean {
+  return category === 'ci-wait' || category === 'provider-wait';
+}
+
+function normalizedExitReason(snapshot: IssueWorkerCardProcessSnapshot, category: IssueStuckRunBlockerCategory): string {
+  const explicit = snapshot.exitReason?.trim();
+  if (explicit) return explicit;
+  if (snapshot.alive === false) return 'process_not_alive';
+  const status = snapshot.status?.trim().toLowerCase();
+  if (status && CRASH_WORKER_CARD_STATUSES.has(status)) return status;
+  if (category === 'process-crash') return 'process_crash';
+  return 'unknown';
+}
+
+function liveSiblingPidsByCardId(snapshots: readonly IssueWorkerCardProcessSnapshot[]): Map<string, number[]> {
+  const byCard = new Map<string, Set<number>>();
+  for (const snapshot of snapshots) {
+    const cardId = snapshot.cardId.trim();
+    const status = snapshot.status?.trim().toLowerCase();
+    if (!cardId
+      || snapshot.alive === false
+      || (status && TERMINAL_WORKER_CARD_STATUSES.has(status))
+      || !Number.isSafeInteger(snapshot.pid)
+      || snapshot.pid <= 0) continue;
+    const pids = byCard.get(cardId) ?? new Set<number>();
+    pids.add(snapshot.pid);
+    byCard.set(cardId, pids);
+  }
+  return new Map([...byCard].map(([cardId, pids]) => [cardId, [...pids].sort((a, b) => a - b)]));
+}
+
+function samePidLiveProbesByCardId(
+  snapshots: readonly IssueWorkerCardProcessSnapshot[],
+): Map<string, Map<number, Array<{ readonly recencyMs: number; readonly index: number }>>> {
+  const byCard = new Map<string, Map<number, Array<{ readonly recencyMs: number; readonly index: number }>>>();
+  snapshots.forEach((snapshot, index) => {
+    const cardId = snapshot.cardId.trim();
+    const status = snapshot.status?.trim().toLowerCase();
+    if (!cardId
+      || snapshot.alive === false
+      || (status && TERMINAL_WORKER_CARD_STATUSES.has(status) && !(snapshot.alive === true && CRASH_WORKER_CARD_STATUSES.has(status)))
+      || !Number.isSafeInteger(snapshot.pid)
+      || snapshot.pid <= 0) return;
+    const byPid = byCard.get(cardId) ?? new Map<number, Array<{ readonly recencyMs: number; readonly index: number }>>();
+    const probes = byPid.get(snapshot.pid) ?? [];
+    probes.push({ recencyMs: snapshotRecencyMs(snapshot), index });
+    byPid.set(snapshot.pid, probes);
+    byCard.set(cardId, byPid);
+  });
+  return byCard;
+}
+
+function siblingPidsForSnapshot(
+  snapshot: IssueWorkerCardProcessSnapshot,
+  livePidsByCardId: ReadonlyMap<string, readonly number[]>,
+): number[] {
+  const explicit = snapshot.siblingPids ?? [];
+  const derived = livePidsByCardId.get(snapshot.cardId.trim()) ?? [];
+  return [...new Set([...explicit, ...derived]
+    .filter((pid) => Number.isSafeInteger(pid) && pid > 0 && pid !== snapshot.pid))]
+    .sort((a, b) => a - b);
+}
+
+function hasSamePidLiveProbe(
+  snapshot: IssueWorkerCardProcessSnapshot,
+  liveProbesByCardId: ReadonlyMap<string, ReadonlyMap<number, readonly { readonly recencyMs: number; readonly index: number }[]>>,
+  snapshotIndex: number,
+): boolean {
+  if (snapshot.alive === false || !Number.isSafeInteger(snapshot.pid) || snapshot.pid <= 0) return false;
+  const liveProbes = liveProbesByCardId.get(snapshot.cardId.trim())?.get(snapshot.pid) ?? [];
+  const snapshotRecency = snapshotRecencyMs(snapshot);
+  return liveProbes.some(liveProbe => snapshotRecency === 0
+    ? liveProbe.index > snapshotIndex
+    : liveProbe.recencyMs > snapshotRecency
+      || (liveProbe.recencyMs === snapshotRecency && liveProbe.index > snapshotIndex)
+      || (liveProbe.recencyMs === 0 && liveProbe.index > snapshotIndex));
+}
+
+function normalizeKanbanState(status: string): string {
+  return status.trim().toLowerCase().replace(/[\s_]+/g, '-');
+}
+
+function terminalKanbanState(status: string): boolean {
+  return TERMINAL_WORKER_CARD_STATUSES.has(normalizeKanbanState(status));
+}
+
+function crashKanbanState(status: string): boolean {
+  return CRASH_WORKER_CARD_STATUSES.has(normalizeKanbanState(status));
+}
+
+function intentionalNonRetryExitReason(exitReason: string): boolean {
+  return /^(clean_exit|operator_stop|operator_kill|exit_code_0|completed|cancelled|canceled|stopped|manual_stop|manual_kill)$/i.test(exitReason.trim());
+}
+
+function operatorControlledSignalExitReason(exitReason: string): boolean {
+  return /^signal_(?:sigterm|sigint|sighup)$/i.test(exitReason.trim());
+}
+
+function dispatcherRestartExitReason(exitReason: string): boolean {
+  return /^dispatcher_restart_/i.test(exitReason.trim());
+}
+
+function setupFailureExitReason(exitReason: string): boolean {
+  return exitReason === 'spawn_failed'
+    || /^(?:spawn(?:[_ -]?(?:fail(?:ed|ure)?|error))?\b|start[_ -]?failed\b|setup\b|enoent\b|eacces\b|protocol[_ -]?violation\b)/i.test(exitReason.trim());
+}
+
+export function buildWorkerCrashOnlyRestartContract(
+  snapshot: IssueWorkerCardProcessSnapshot,
+  input: {
+    readonly category: IssueStuckRunBlockerCategory;
+    readonly processStatus: IssueStuckRunWatchdogFinding['processStatus'];
+    readonly heartbeatAgeMs?: number | undefined;
+    readonly kanbanState: string;
+  },
+): IssueWorkerCrashOnlyRestartContract {
+  const rawExitReason = normalizedExitReason(snapshot, input.category);
+  const exitReason = redactStuckRunEvidenceText(rawExitReason);
+  const kanbanState = normalizeKanbanState(input.kanbanState) || 'unknown';
+  const siblingPids = siblingPidsForSnapshot(snapshot, new Map());
+  const activePrUrl = snapshot.activePrUrl?.trim();
+  const activeWorktreePath = snapshot.activeWorktreePath?.trim();
+  const redactedActivePrUrl = activePrUrl ? redactStuckRunEvidenceText(activePrUrl) : undefined;
+  const redactedActiveWorktreePath = activeWorktreePath ? redactStuckRunEvidenceText(activeWorktreePath) : undefined;
+  const evidence = [
+    `exitReason=${exitReason}`,
+    `pid=${snapshot.pid}`,
+    `heartbeatAgeMs=${input.heartbeatAgeMs ?? 'unknown'}`,
+    ...(redactedActivePrUrl ? [`activePr=${redactedActivePrUrl}`] : []),
+    ...(redactedActiveWorktreePath ? [`activeWorktree=${redactedActiveWorktreePath}`] : []),
+  ];
+  const base = {
+    exitReason,
+    pid: snapshot.pid,
+    ...(input.heartbeatAgeMs !== undefined ? { heartbeatAgeMs: input.heartbeatAgeMs } : {}),
+    processStatus: input.processStatus,
+    kanbanState,
+  };
+
+  if (siblingPids.length > 0) {
+    return {
+      disposition: 'hitl',
+      nextAction: 'suppress-duplicate-respawn',
+      ...base,
+      evidence: [...evidence, `siblingPids=${siblingPids.join(',')}`],
+    };
+  }
+
+  if (intentionalNonRetryExitReason(rawExitReason)) {
+    return {
+      disposition: 'terminal',
+      nextAction: 'no-op',
+      ...base,
+      evidence,
+    };
+  }
+
+  if (operatorControlledSignalExitReason(rawExitReason)) {
+    return {
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      ...base,
+      evidence,
+    };
+  }
+
+  if (
+    terminalKanbanState(kanbanState)
+    && !crashKanbanState(kanbanState)
+    && !setupFailureExitReason(rawExitReason)
+  ) {
+    return {
+      disposition: 'terminal',
+      nextAction: 'no-op',
+      ...base,
+      evidence,
+    };
+  }
+
+  if (activePrUrl || activeWorktreePath) {
+    return {
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      ...base,
+      evidence,
+    };
+  }
+
+  if (setupFailureExitReason(rawExitReason)) {
+    return {
+      disposition: 'hitl',
+      nextAction: 'replace-with-doctor',
+      ...base,
+      evidence,
+    };
+  }
+
+  if (
+    kanbanState === 'blocked'
+    || kanbanState === 'pending-approval'
+    || input.category === 'approval-gate'
+    || input.category === 'dispatcher-bug'
+    || dispatcherRestartExitReason(rawExitReason)
+    || knownLongRunningWait(input.category)
+  ) {
+    return {
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      ...base,
+      evidence,
+    };
+  }
+
+  if (input.processStatus === 'dead') {
+    return {
+      disposition: 'retryable',
+      nextAction: 'restart-once',
+      ...base,
+      evidence,
+    };
+  }
+  return {
+    disposition: 'hitl',
+    nextAction: 'defer-with-evidence',
+    ...base,
+    evidence,
+  };
+}
+
+function deferRemediationForStuckRun(category: IssueStuckRunBlockerCategory): string {
+  switch (category) {
+    case 'approval-gate':
+      return 'Route the exact pending approval command/token to approval-cop or a human.';
+    case 'ci-wait':
+      return 'Check live CI/run status and merge queue state, rerun failed checks or unblock shared CI.';
+    case 'provider-wait':
+      return 'Check provider quota/rate-limit status and the latest model/bot response; retry later or switch provider only after preserving current work evidence.';
+    case 'dispatcher-bug':
+      return 'Audit Kanban current_run/status/heartbeat consistency and repair dispatcher metadata before unblocking the card.';
+    default:
+      return 'Open a Doctor card with heartbeat/output/tool/state evidence and verify process liveness.';
+  }
+}
+
+function restartContractSafetyRank(contract: IssueWorkerCrashOnlyRestartContract): number {
+  switch (contract.disposition) {
+    case 'hitl':
+      return 2;
+    case 'terminal':
+    case 'retryable':
+      return 1;
+  }
+}
+
+function snapshotRecencyMs(snapshot: IssueWorkerCardProcessSnapshot): number {
+  return Math.max(
+    0,
+    ...[
+      snapshot.lastHeartbeatAt,
+      snapshot.lastOutputAt,
+      snapshot.lastToolActivityAt,
+      snapshot.lastStateTransitionAt,
+      snapshot.startedAt,
+    ].map((value) => {
+      if (value === undefined) return 0;
+      const date = value instanceof Date ? value : new Date(value);
+      const parsed = date.getTime();
+      return Number.isFinite(parsed) ? parsed : 0;
+    }),
+  );
+}
+
+function remediationForCrashOnlyRestartContract(
+  contract: IssueWorkerCrashOnlyRestartContract,
+  category: IssueStuckRunBlockerCategory,
+  processStatus: IssueStuckRunWatchdogFinding['processStatus'],
+): string {
+  switch (contract.nextAction) {
+    case 'replace-with-doctor':
+      return 'Open or route to a Doctor card with the preserved setup/protocol failure evidence; do not blind-respawn this worker.';
+    case 'defer-with-evidence':
+      return `${deferRemediationForStuckRun(category)} Preserve the wait/crash evidence and defer to the active HITL, CI, provider, or dispatcher investigation gate; do not auto-respawn over the blocker.`;
+    case 'suppress-duplicate-respawn':
+      return 'Suppress duplicate respawn, keep the surviving worker PID/run id as owner, and repair stale duplicate metadata before any restart.';
+    case 'restart-once':
+      return remediationForStuckRun(category, processStatus);
+    case 'no-op':
+      return 'No restart action is required for this terminal worker state; keep the evidence for audit only.';
+  }
+}
+
+export function detectStuckRunWatchdogFindings(
+  snapshots: readonly IssueWorkerCardProcessSnapshot[],
+  options: IssueStuckRunWatchdogOptions = {},
+): IssueStuckRunWatchdogFinding[] {
+  const nowMs = options.nowMs ?? Date.now();
+  const staleHeartbeatMs = options.staleHeartbeatMs ?? DEFAULT_STUCK_RUN_STALE_HEARTBEAT_MS;
+  const staleOutputMs = options.staleOutputMs ?? DEFAULT_STUCK_RUN_STALE_OUTPUT_MS;
+  const staleToolActivityMs = options.staleToolActivityMs ?? DEFAULT_STUCK_RUN_STALE_TOOL_ACTIVITY_MS;
+  const staleStateTransitionMs = options.staleStateTransitionMs ?? DEFAULT_STUCK_RUN_STALE_STATE_TRANSITION_MS;
+  const longRunningWaitGraceMs = options.longRunningWaitGraceMs ?? DEFAULT_STUCK_RUN_WAIT_GRACE_MS;
+  const findings: IssueStuckRunWatchdogFinding[] = [];
+  const liveSiblings = liveSiblingPidsByCardId(snapshots);
+  const samePidLiveProbes = samePidLiveProbesByCardId(snapshots);
+  const deadFindingsByCardId = new Map<string, IssueStuckRunWatchdogFinding>();
+  const deadFindingKeysByCardId = new Map<string, { readonly safetyRank: number; readonly recencyMs: number; readonly index: number }>();
+  const newestDeadFindingsByCardId = new Map<string, IssueStuckRunWatchdogFinding>();
+  const newestDeadFindingKeysByCardId = new Map<string, { readonly safetyRank: number; readonly recencyMs: number; readonly index: number }>();
+  const terminalRecencyByCardId = new Map<string, { readonly recencyMs: number; readonly index: number }>();
+  snapshots.forEach((snapshot, index) => {
+    const status = snapshot.status?.trim().toLowerCase();
+    const isTerminalCleanup = status !== undefined
+      && TERMINAL_WORKER_CARD_STATUSES.has(status)
+      && !crashKanbanState(status)
+      && !explicitProcessCrash(snapshot)
+      && !setupFailureExitReason(snapshot.exitReason ?? '')
+      && !operatorControlledSignalExitReason(snapshot.exitReason ?? '');
+    if (!isTerminalCleanup || snapshot.alive !== false) return;
+    const recencyMs = snapshotRecencyMs(snapshot);
+    if (recencyMs > nowMs) return;
+    const cardId = snapshot.cardId.trim();
+    const existing = terminalRecencyByCardId.get(cardId);
+    if (existing === undefined || recencyMs > existing.recencyMs || (recencyMs === existing.recencyMs && index > existing.index)) {
+      terminalRecencyByCardId.set(cardId, { recencyMs, index });
+    }
+  });
+  let findingIndex = 0;
+
+  for (const [snapshotIndex, snapshot] of snapshots.entries()) {
+    if (!snapshot.cardId.trim()) continue;
+    const hasPositivePid = Number.isSafeInteger(snapshot.pid) && snapshot.pid > 0;
+    const status = snapshot.status?.trim().toLowerCase();
+    const normalizedCardId = snapshot.cardId.trim();
+    const isTerminalCleanup = status !== undefined
+      && TERMINAL_WORKER_CARD_STATUSES.has(status)
+      && !crashKanbanState(status)
+      && !explicitProcessCrash(snapshot)
+      && !setupFailureExitReason(snapshot.exitReason ?? '')
+      && !operatorControlledSignalExitReason(snapshot.exitReason ?? '');
+    const terminalWatermark = terminalRecencyByCardId.get(normalizedCardId);
+    const snapshotRecency = snapshotRecencyMs(snapshot);
+    if (!isTerminalCleanup && terminalWatermark !== undefined
+      && (terminalWatermark.recencyMs > snapshotRecency
+        || (terminalWatermark.recencyMs === snapshotRecency && terminalWatermark.index > snapshotIndex))) continue;
+    if (isTerminalCleanup) {
+      if (snapshot.alive === false) {
+        const terminalRecencyMs = snapshotRecency;
+        if (terminalRecencyMs > nowMs) continue;
+        const terminalKey = { recencyMs: terminalRecencyMs, index: snapshotIndex };
+        const existingTerminalKey = terminalRecencyByCardId.get(normalizedCardId);
+        if (existingTerminalKey === undefined
+          || terminalKey.recencyMs > existingTerminalKey.recencyMs
+          || (terminalKey.recencyMs === existingTerminalKey.recencyMs && terminalKey.index > existingTerminalKey.index)) {
+          terminalRecencyByCardId.set(normalizedCardId, terminalKey);
+        }
+        const existingKey = deadFindingKeysByCardId.get(normalizedCardId);
+        const terminalClearsExisting = existingKey !== undefined
+          && (terminalKey.recencyMs > existingKey.recencyMs || (terminalKey.recencyMs === existingKey.recencyMs && terminalKey.index > existingKey.index));
+        if (existingKey && terminalClearsExisting) {
+          const newestKey = newestDeadFindingKeysByCardId.get(normalizedCardId);
+          const newestFinding = newestDeadFindingsByCardId.get(normalizedCardId);
+          if (newestKey && newestFinding && (newestKey.recencyMs > terminalKey.recencyMs || (newestKey.recencyMs === terminalKey.recencyMs && newestKey.index > terminalKey.index))) {
+            deadFindingKeysByCardId.set(normalizedCardId, newestKey);
+            deadFindingsByCardId.set(normalizedCardId, newestFinding);
+          } else {
+            deadFindingKeysByCardId.delete(normalizedCardId);
+            deadFindingsByCardId.delete(normalizedCardId);
+          }
+        }
+      }
+      continue;
+    }
+
+    const category = normalizeStuckRunBlockerCategory(snapshot);
+    const heartbeatAgeMs = ageMs(snapshot.lastHeartbeatAt, nowMs);
+    const outputAgeMs = ageMs(snapshot.lastOutputAt, nowMs);
+    const toolActivityAgeMs = ageMs(snapshot.lastToolActivityAt, nowMs);
+    const stateTransitionAgeMs = ageMs(snapshot.lastStateTransitionAt ?? snapshot.startedAt, nowMs);
+    const heartbeatStale = stale(heartbeatAgeMs, staleHeartbeatMs);
+    const outputStale = stale(outputAgeMs, staleOutputMs);
+    const toolStale = stale(toolActivityAgeMs, staleToolActivityMs);
+    const stateStale = stale(stateTransitionAgeMs, staleStateTransitionMs);
+    const staleCount = [heartbeatStale, outputStale, toolStale, stateStale].filter(Boolean).length;
+    const providedActivitySignalCount = [
+      heartbeatAgeMs,
+      outputAgeMs,
+      toolActivityAgeMs,
+      stateTransitionAgeMs,
+    ].filter((age) => age !== undefined).length;
+    const minimumStaleSignals = providedActivitySignalCount;
+    const freshLongRunningWaitActivity = [heartbeatAgeMs, outputAgeMs, toolActivityAgeMs, stateTransitionAgeMs]
+      .some((age) => age !== undefined && age < longRunningWaitGraceMs);
+    const samePidLiveProbe = hasSamePidLiveProbe(snapshot, samePidLiveProbes, snapshotIndex);
+    const processStatus: IssueStuckRunWatchdogFinding['processStatus'] = snapshot.alive === false || (snapshot.alive !== true && !samePidLiveProbe && (operatorControlledSignalExitReason(snapshot.exitReason ?? '') || (status !== undefined && crashKanbanState(status)) || setupFailureExitReason(snapshot.exitReason ?? '')))
+      ? 'dead'
+      : hasPositivePid
+        ? 'alive'
+        : 'unknown';
+
+    if (processStatus !== 'dead' && category !== 'process-crash' && providedActivitySignalCount === 0) continue;
+
+    if (
+      knownLongRunningWait(category)
+      && processStatus !== 'dead'
+      && freshLongRunningWaitActivity
+    ) {
+      continue;
+    }
+
+    if (processStatus !== 'dead' && category !== 'process-crash' && staleCount < minimumStaleSignals) continue;
+
+    const evidence = [
+      `heartbeatAgeMs=${heartbeatAgeMs ?? 'unknown'}`,
+      `outputAgeMs=${outputAgeMs ?? 'unknown'}`,
+      `toolActivityAgeMs=${toolActivityAgeMs ?? 'unknown'}`,
+      `stateTransitionAgeMs=${stateTransitionAgeMs ?? 'unknown'}`,
+      `processStatus=${processStatus}`,
+      `kanbanState=${status ?? 'unknown'}`,
+      `blockerCategory=${category}`,
+    ];
+    if (snapshot.waitingOn) evidence.push(`waitingOn=${redactStuckRunEvidenceText(snapshot.waitingOn)}`);
+    const siblingPids = siblingPidsForSnapshot(snapshot, liveSiblings);
+    const restartSnapshot = siblingPids.length > 0
+      ? { ...snapshot, siblingPids }
+      : snapshot;
+    const restartContract = buildWorkerCrashOnlyRestartContract(restartSnapshot, {
+      category,
+      processStatus,
+      ...(heartbeatAgeMs !== undefined ? { heartbeatAgeMs } : {}),
+      kanbanState: status ?? 'unknown',
+    });
+    evidence.push(...restartContract.evidence);
+
+    const recommendedAction = remediationForCrashOnlyRestartContract(restartContract, category, processStatus);
+    const confidence = confidenceForStuckRun(category, staleCount, processStatus);
+    const finding: IssueStuckRunWatchdogFinding = {
+      cardId: normalizedCardId,
+      pid: snapshot.pid,
+      ...(snapshot.runId ? { runId: snapshot.runId } : {}),
+      ...(snapshot.issueNumber !== undefined ? { issueNumber: snapshot.issueNumber } : {}),
+      ...(snapshot.owner ? { owner: snapshot.owner } : {}),
+      ...(snapshot.status ? { status: snapshot.status } : {}),
+      blockerCategory: category,
+      confidence,
+      ...(heartbeatAgeMs !== undefined ? { heartbeatAgeMs } : {}),
+      ...(outputAgeMs !== undefined ? { outputAgeMs } : {}),
+      ...(toolActivityAgeMs !== undefined ? { toolActivityAgeMs } : {}),
+      ...(stateTransitionAgeMs !== undefined ? { stateTransitionAgeMs } : {}),
+      processStatus,
+      kanbanState: status ?? 'unknown',
+      exitReason: restartContract.exitReason,
+      restartDisposition: restartContract.disposition,
+      nextAction: restartContract.nextAction,
+      evidence,
+      recommendedAction,
+      message: `Worker card ${snapshot.cardId.trim()} appears stuck (${category}, ${confidence} confidence): ${recommendedAction}`,
+    };
+
+    if (processStatus === 'dead') {
+      const candidateKey = {
+        safetyRank: restartContractSafetyRank(restartContract),
+        recencyMs: snapshotRecencyMs(snapshot),
+        index: snapshotIndex,
+      };
+      const newestKey = newestDeadFindingKeysByCardId.get(normalizedCardId);
+      if (newestKey === undefined || candidateKey.recencyMs > newestKey.recencyMs || (candidateKey.recencyMs === newestKey.recencyMs && candidateKey.index > newestKey.index)) {
+        newestDeadFindingKeysByCardId.set(normalizedCardId, candidateKey);
+        newestDeadFindingsByCardId.set(normalizedCardId, finding);
+      }
+      const terminalKey = terminalRecencyByCardId.get(normalizedCardId);
+      const terminalSuppressesCandidate = terminalKey !== undefined
+        && (terminalKey.recencyMs > candidateKey.recencyMs || (terminalKey.recencyMs === candidateKey.recencyMs && terminalKey.index > candidateKey.index));
+      if (terminalSuppressesCandidate) {
+        findingIndex += 1;
+        continue;
+      }
+      const existingKey = deadFindingKeysByCardId.get(normalizedCardId);
+      const candidateIsSafer = existingKey === undefined
+        || candidateKey.safetyRank > existingKey.safetyRank
+        || (candidateKey.safetyRank === existingKey.safetyRank && candidateKey.recencyMs > existingKey.recencyMs)
+        || (
+          candidateKey.safetyRank === existingKey.safetyRank
+          && candidateKey.recencyMs === existingKey.recencyMs
+          && candidateKey.index > existingKey.index
+        );
+      if (candidateIsSafer) {
+        deadFindingKeysByCardId.set(normalizedCardId, candidateKey);
+        deadFindingsByCardId.set(normalizedCardId, finding);
+      }
+    } else {
+      findings.push(finding);
+    }
+    findingIndex += 1;
+  }
+
+  return [...findings, ...deadFindingsByCardId.values()].sort((a, b) => a.cardId.localeCompare(b.cardId));
 }
 
 function isoTimestamp(value: string | number | Date | undefined): string | undefined {
@@ -740,6 +1449,154 @@ export function detectDuplicateWorkerCardProcesses(
   }
 
   return findings.sort((a, b) => a.cardId.localeCompare(b.cardId));
+}
+
+
+function normalizedMutationStatus(status: string): string {
+  return status.trim().toLowerCase().replace(/_/g, '-');
+}
+
+function sha256Hex(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function mutationContentTokens(request: KanbanStateMutationRequest): readonly string[] {
+  const tokens = new Set<string>();
+  const explicitHash = request.contentHash?.trim();
+  if (explicitHash) tokens.add(explicitHash);
+  if (request.body !== undefined) {
+    const rawBody = request.body;
+    const body = rawBody.trim();
+    tokens.add(body);
+    const digest = sha256Hex(rawBody);
+    tokens.add(digest);
+    tokens.add(`sha256:${digest}`);
+  }
+  return [...tokens];
+}
+
+function mutationRecordMatches(record: KanbanStateMutationRecord, request: KanbanStateMutationRequest): boolean {
+  if (record.idempotencyKey.trim() !== request.idempotencyKey.trim()) return false;
+  if (record.operation !== request.operation) return false;
+  const requestedTokens = mutationContentTokens(request);
+  if (requestedTokens.length === 0 || record.contentHash === undefined) return true;
+  return requestedTokens.includes(record.contentHash.trim());
+}
+
+function matchingComment(snapshot: KanbanTaskStateSnapshot, request: KanbanStateMutationRequest): KanbanTaskCommentSnapshot | undefined {
+  if (request.operation !== 'comment') return undefined;
+  const requestedKey = request.idempotencyKey.trim();
+  const requestedBody = request.body?.trim();
+  return snapshot.comments?.find((comment) => {
+    if (comment.idempotencyKey?.trim() === requestedKey) return true;
+    return requestedBody !== undefined && comment.body.trim() === requestedBody;
+  });
+}
+
+function statusConverged(snapshot: KanbanTaskStateSnapshot, request: KanbanStateMutationRequest): string | undefined {
+  const status = normalizedMutationStatus(snapshot.status);
+  const body = request.body?.trim();
+  if (request.operation === 'block' && status === 'blocked' && (!body || snapshot.blockReason?.trim() === body)) {
+    return `task ${snapshot.taskId} is already blocked with the requested reason`;
+  }
+  if (request.operation === 'unblock' && status !== 'blocked') {
+    return `task ${snapshot.taskId} is already not blocked`;
+  }
+  if (request.operation === 'complete' && ['done', 'complete', 'completed', 'merged', 'closed'].includes(status)
+    && (!body || snapshot.completionSummary?.trim() === body)) {
+    return `task ${snapshot.taskId} is already complete with the requested summary`;
+  }
+  return undefined;
+}
+
+function revisionsMatch(actual: string | number | undefined, expected: string | number | undefined): boolean {
+  return actual !== undefined && expected !== undefined && String(actual) === String(expected);
+}
+
+export function planKanbanStateMutation(
+  snapshot: KanbanTaskStateSnapshot,
+  request: KanbanStateMutationRequest,
+): KanbanStateMutationDecision {
+  const key = request.idempotencyKey.trim();
+  const evidence: string[] = [`task=${snapshot.taskId}`, `operation=${request.operation}`];
+  if (!key) {
+    return {
+      action: 'conflict',
+      operation: request.operation,
+      idempotencyKey: request.idempotencyKey,
+      reason: 'kanban state mutation requires a non-empty idempotency key',
+      evidence,
+    };
+  }
+  evidence.push(`idempotencyKey=${key}`);
+
+  const priorMutation = snapshot.appliedMutations?.find((record) => mutationRecordMatches(record, request));
+  if (priorMutation) {
+    return {
+      action: 'skip',
+      operation: request.operation,
+      idempotencyKey: key,
+      reason: 'mutation idempotency key was already applied with matching operation/content',
+      evidence: [
+        ...evidence,
+        ...(priorMutation.appliedAt !== undefined ? [`appliedAt=${isoTimestamp(priorMutation.appliedAt) ?? String(priorMutation.appliedAt)}`] : []),
+      ],
+    };
+  }
+
+  const comment = matchingComment(snapshot, request);
+  if (comment) {
+    return {
+      action: 'skip',
+      operation: request.operation,
+      idempotencyKey: key,
+      reason: request.operation === 'comment'
+        ? 'comment mutation already converged on an existing matching comment'
+        : 'mutation idempotency key is already present on an existing comment',
+      evidence: [
+        ...evidence,
+        ...(comment.createdAt !== undefined ? [`commentCreatedAt=${isoTimestamp(comment.createdAt) ?? String(comment.createdAt)}`] : []),
+      ],
+    };
+  }
+
+  const converged = statusConverged(snapshot, request);
+  if (converged) {
+    return {
+      action: 'skip',
+      operation: request.operation,
+      idempotencyKey: key,
+      reason: converged,
+      evidence: [...evidence, `status=${snapshot.status}`],
+    };
+  }
+
+  if (request.expectedRevision !== undefined && !revisionsMatch(snapshot.revision, request.expectedRevision)) {
+    return {
+      action: 'conflict',
+      operation: request.operation,
+      idempotencyKey: key,
+      reason: 'kanban state revision changed before mutation could be applied',
+      evidence: [
+        ...evidence,
+        `expectedRevision=${request.expectedRevision}`,
+        `actualRevision=${snapshot.revision ?? 'unknown'}`,
+        `status=${snapshot.status}`,
+      ],
+    };
+  }
+
+  return {
+    action: 'apply',
+    operation: request.operation,
+    idempotencyKey: key,
+    reason: 'mutation is new for the current task state and compare-and-set guard passed',
+    evidence: [
+      ...evidence,
+      ...(snapshot.revision !== undefined ? [`revision=${snapshot.revision}`] : []),
+      `status=${snapshot.status}`,
+    ],
+  };
 }
 
 function extractSeverity(labels: readonly string[]): number {

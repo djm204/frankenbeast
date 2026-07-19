@@ -143,6 +143,13 @@ on:
       expect(expectRecord(triggers.pull_request, 'workflow.on.pull_request')).toEqual({ branches: ['main'] });
     });
 
+    it('cancels superseded pull request runs without cancelling main branch pushes', () => {
+      expect(expectRecord(workflow.concurrency, 'workflow.concurrency')).toEqual({
+        group: '${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}',
+        'cancel-in-progress': "${{ github.event_name == 'pull_request' }}",
+      });
+    });
+
     it('uses the repository-pinned minimum supported Node.js version', () => {
       const setupNode = expectSteps(expectCiJob(workflow)).find((step) => step.uses === 'actions/setup-node@v7');
       expect(setupNode).toBeTruthy();
@@ -215,8 +222,26 @@ on:
       expect(content).toMatch(/name:\s*Validate bootstrap script \(dry-run\)/);
       expect(content).toContain('npm run bootstrap:dry-run');
       expect(content.indexOf('npm ci')).toBeLessThan(content.indexOf('npm run bootstrap:dry-run'));
-      expect(content.indexOf('npm run bootstrap:dry-run')).toBeLessThan(content.indexOf('npm run audit:dependencies'));
+      expect(content.indexOf('npm run bootstrap:dry-run')).toBeLessThan(content.indexOf('npm run ci:dr:restore-rehearsal'));
       expect(content).toContain('CI_BOOTSTRAP_DRY_RUN: "1"');
+    });
+
+    it('runs the isolated disaster recovery restore rehearsal before later audit gates', () => {
+      const packageJson = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8')) as {
+        scripts?: Record<string, string>;
+      };
+      const steps = expectSteps(expectCiJob(workflow));
+      const restoreStep = expectStepByName(
+        steps,
+        'Disaster recovery restore rehearsal',
+        'the DR restore rehearsal gate',
+      );
+
+      expect(packageJson.scripts?.['dr:restore-rehearsal']).toBe('tsx scripts/restore-rehearsal.mjs');
+      expect(packageJson.scripts?.['ci:dr:restore-rehearsal']).toBe('npm run dr:restore-rehearsal');
+      expect(restoreStep.run).toBe('npm run ci:dr:restore-rehearsal');
+      expect(content.indexOf('npm run bootstrap:dry-run')).toBeLessThan(content.indexOf('npm run ci:dr:restore-rehearsal'));
+      expect(content.indexOf('npm run ci:dr:restore-rehearsal')).toBeLessThan(content.indexOf('npm run audit:dependencies'));
     });
 
     it('runs CI test commands with a fixed deterministic seed matrix', () => {
@@ -234,6 +259,9 @@ on:
       expect(content).toContain("CI_TEST_RETRIES: ${{ vars.CI_TEST_RETRIES || '2' }}");
       expect(packageJson.scripts?.['ci:test:root']).toBe('node scripts/retry-ci-command.mjs -- npm run test:root');
       expect(packageJson.scripts?.['ci:test:packages']).toBe('node scripts/retry-ci-command.mjs -- npx turbo run test');
+      expect(packageJson.scripts?.['ci:test:mcp-suite-integration']).toBe(
+        'node scripts/retry-ci-command.mjs -- npm run test:integration --workspace @franken/mcp-suite',
+      );
       expect(packageJson.scripts?.['ci:test:planner-integration']).toBe(
         'node scripts/retry-ci-command.mjs -- npm run test:integration --workspace @franken/planner',
       );
@@ -244,12 +272,13 @@ on:
         'node scripts/retry-ci-command.mjs -- npm run test:e2e -- tests/e2e/smoke.test.ts tests/e2e/chat/chat-e2e.test.ts',
       );
       expect(packageJson.scripts?.['test:ci']).toBe(
-        'npm run build --workspace @franken/types && npm run ci:test:root && npm run ci:test:packages && npm run ci:test:planner-integration && npm run ci:test:observer-eval',
+        'npm run build --workspace @franken/types && npm run ci:test:root && npm run ci:test:packages && npm run ci:test:mcp-suite-integration && npm run ci:test:planner-integration && npm run ci:test:observer-eval',
       );
       expect(content).toContain('npm run test:ci');
       expect(content).toContain('run: npm run ci:test:e2e');
       expect(content).not.toContain('run: npm run ci:test:root');
       expect(content).not.toContain('run: npm run ci:test:packages');
+      expect(content).not.toContain('run: npm run ci:test:mcp-suite-integration');
       expect(content).not.toContain('run: npm run ci:test:planner-integration');
       expect(content).not.toContain('run: npm run ci:test:observer-eval');
       expect(content).not.toContain('run: npm run test:root');

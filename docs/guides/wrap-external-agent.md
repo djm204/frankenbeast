@@ -1,6 +1,6 @@
 # Wrapping an External Agent with Frankenbeast
 
-The current repo does not ship a `firewall` Docker Compose service or a standalone `frankenfirewall` HTTP proxy on port 9090. External-agent integration should use one of the current surfaces below.
+The current repo does not ship a standalone firewall Docker Compose service or HTTP proxy on port 9090. External-agent integration should use one of the current surfaces below.
 
 ## Option 1: Use MCP mode for tool governance
 

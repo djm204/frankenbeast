@@ -26,7 +26,7 @@ describe('issue #961 local CLI linking docs', () => {
     const packageJson = readJson<{ scripts?: Record<string, string> }>('package.json');
 
     expect(packageJson.scripts?.['local:link']).toBe(
-      'npm run build && npm link --workspace=@franken/mcp-suite --workspace=@franken/orchestrator',
+      'npm run build && npm link --workspaces',
     );
 
     for (const docPath of LOCAL_LINK_DOCS) {

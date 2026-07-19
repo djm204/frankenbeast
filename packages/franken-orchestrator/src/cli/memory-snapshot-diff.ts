@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import Database from 'better-sqlite3';
+import { CURRENT_MEMORY_SCHEMA_VERSION } from '@franken/brain';
 import { BrainSnapshotSchema, ExecutionStateSchema, type BrainSnapshot, type EpisodicEvent } from '@franken/types';
-
-const CURRENT_MEMORY_SCHEMA_VERSION = 1;
+import type { ZodIssue } from 'zod';
 const REQUIRED_BACKUP_TABLES = [
   'working_memory',
   'episodic_events',
@@ -11,23 +11,34 @@ const REQUIRED_BACKUP_TABLES = [
 ] as const;
 const CURRENT_SCHEMA_REQUIRED_TABLES = [
   ...REQUIRED_BACKUP_TABLES,
+  'memory_review_candidates',
+  'memory_review_provenance',
+  'memory_review_suppressions',
   'memory_deletion_guards',
   'memory_deletion_hash_keys',
 ] as const;
 const MEMORY_BACKUP_TABLES = [
   'memory_schema_versions',
   ...REQUIRED_BACKUP_TABLES,
+  'memory_review_candidates',
+  'memory_review_provenance',
+  'memory_review_suppressions',
   'memory_deletion_guards',
   'memory_deletion_hash_keys',
+  'memory_access_audit_events',
 ] as const;
 const JSON_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
   episodic_events: ['details'],
   checkpoints: ['state'],
+  memory_access_audit_events: ['details'],
 };
 const ENCRYPTED_PAYLOAD_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
   working_memory: ['value'],
   episodic_events: ['summary', 'details'],
   checkpoints: ['state'],
+  memory_review_candidates: ['value', 'source', 'source_id', 'evidence_id', 'reason', 'reviewer', 'note'],
+  memory_review_provenance: ['value', 'source', 'source_id', 'evidence_id', 'reason', 'reviewer', 'note'],
+  memory_review_suppressions: ['value', 'source', 'source_id', 'evidence_id', 'reason', 'reviewer', 'note'],
   memory_deletion_hash_keys: ['key_material'],
 };
 const REQUIRED_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
@@ -35,11 +46,21 @@ const REQUIRED_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
   episodic_events: ['id', 'type', 'step', 'summary', 'details', 'created_at'],
   checkpoints: ['id', 'state', 'created_at'],
   memory_schema_versions: ['store', 'version', 'migrated_at'],
+  memory_review_candidates: ['id', 'target_store', 'memory_key', 'value', 'source', 'source_type', 'source_id', 'evidence_id', 'confidence', 'reason', 'expires_at', 'revalidate_at', 'status', 'suppression_reason', 'reviewer', 'note', 'created_at', 'updated_at', 'decided_at', 'schema_version'],
+  memory_review_provenance: ['target_store', 'memory_key', 'value', 'candidate_id', 'source', 'source_type', 'source_id', 'evidence_id', 'confidence', 'reason', 'reviewer', 'note', 'created_at', 'approved_at', 'expires_at', 'revalidate_at', 'schema_version'],
+  memory_review_suppressions: ['signature', 'suppression_reason', 'target_store', 'memory_key', 'value', 'source', 'source_id', 'evidence_id', 'reason', 'reviewer', 'note', 'created_at', 'schema_version'],
   memory_deletion_guards: ['selector_hash', 'guard_kind', 'value_hash', 'created_at'],
   memory_deletion_hash_keys: ['id', 'key_material', 'created_at'],
+  memory_access_audit_events: ['id', 'operation', 'store', 'key_hash', 'query_hash', 'outcome', 'details', 'created_at', 'schema_version'],
+};
+const SCHEMA_V1_MEMORY_REVIEW_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
+  memory_review_candidates: ['id', 'target_store', 'memory_key', 'value', 'source', 'evidence_id', 'confidence', 'reason', 'status', 'suppression_reason', 'reviewer', 'note', 'created_at', 'updated_at', 'decided_at', 'schema_version'],
+  memory_review_provenance: ['target_store', 'memory_key', 'value', 'candidate_id', 'source', 'evidence_id', 'confidence', 'reason', 'reviewer', 'note', 'approved_at', 'schema_version'],
+  memory_review_suppressions: ['signature', 'suppression_reason', 'target_store', 'memory_key', 'value', 'source', 'evidence_id', 'reason', 'reviewer', 'note', 'created_at', 'schema_version'],
 };
 const ENCRYPTED_MEMORY_PREFIX = 'enc:v1:';
 const DELETION_HASH_KEY_ID = 'right-to-forget-hmac-v1';
+const ACCESS_AUDIT_HASH_KEY_ID = 'memory-access-audit-hmac-v1';
 
 export interface SnapshotDiff<T = unknown> {
   readonly added: Record<string, T>;
@@ -254,7 +275,7 @@ function verifyCheckpointStateShape(rowid: number, value: string): void {
   const parsed = JSON.parse(value) as unknown;
   const result = ExecutionStateSchema.safeParse(parsed);
   if (!result.success) {
-    throw new Error(`Invalid checkpoint state in checkpoints.state row ${rowid}: ${result.error.issues.map((issue) => issue.path.join('.') + ' ' + issue.message).join('; ')}`);
+    throw new Error(`Invalid checkpoint state in checkpoints.state row ${rowid}: ${result.error.issues.map((issue: ZodIssue) => issue.path.join('.') + ' ' + issue.message).join('; ')}`);
   }
 }
 
@@ -310,12 +331,26 @@ function verifyPayloadColumns(db: Database.Database, table: string, columns: Set
   }
 }
 
-function verifyRequiredColumns(table: string, columns: Set<string>): void {
-  const requiredColumns = REQUIRED_COLUMNS_BY_TABLE[table] ?? [];
+function verifyRequiredColumns(
+  table: string,
+  columns: Set<string>,
+  storeVersions: Map<string, number>,
+): void {
+  const storeVersion = storeVersions.get(table);
+  const requiredColumns = storeVersion !== undefined && storeVersion < CURRENT_MEMORY_SCHEMA_VERSION
+    ? (SCHEMA_V1_MEMORY_REVIEW_COLUMNS_BY_TABLE[table] ?? REQUIRED_COLUMNS_BY_TABLE[table] ?? [])
+    : (REQUIRED_COLUMNS_BY_TABLE[table] ?? []);
   const missingColumns = requiredColumns.filter((column) => !columns.has(column));
   if (missingColumns.length > 0) {
     throw new Error(`Memory backup table ${table} is missing required column(s): ${missingColumns.join(', ')}`);
   }
+}
+
+function readSchemaStoreVersions(db: Database.Database, tables: Set<string>): Map<string, number> {
+  if (!tables.has('memory_schema_versions')) return new Map();
+  return new Map((db
+    .prepare(`SELECT store, version FROM memory_schema_versions`)
+    .all() as Array<{ store: string; version: number }>).map((row) => [row.store, row.version]));
 }
 
 function verifyDeletionGuardKeyLink(db: Database.Database, tables: Set<string>): void {
@@ -326,6 +361,42 @@ function verifyDeletionGuardKeyLink(db: Database.Database, tables: Set<string>):
     .get(DELETION_HASH_KEY_ID) as { id: string } | undefined;
   if (!row) {
     throw new Error(`Memory backup has deletion guards but is missing canonical deletion hash key ${DELETION_HASH_KEY_ID}`);
+  }
+}
+
+function verifyAccessAuditKeyLink(db: Database.Database, tables: Set<string>): void {
+  if (!tables.has('memory_access_audit_events')) return;
+  const auditColumns = readTableColumns(db, 'memory_access_audit_events');
+  const hashColumns = ['key_hash', 'query_hash'].filter((column) => auditColumns.has(column));
+  if (hashColumns.length === 0) return;
+  for (const column of hashColumns) {
+    const rows = db
+      .prepare(
+        `SELECT ${sqliteIdentifier(column)} AS hashValue
+         FROM memory_access_audit_events
+         WHERE ${sqliteIdentifier(column)} IS NOT NULL`,
+      )
+      .all() as Array<{ hashValue: string }>;
+    const invalid = rows.find((row) => !/^[0-9a-f]{64}$/iu.test(row.hashValue));
+    if (invalid) {
+      throw new Error(
+        `Memory backup has non-HMAC access audit hash value in memory_access_audit_events.${column}`,
+      );
+    }
+  }
+  const hashedPredicate = hashColumns.map((column) => `${sqliteIdentifier(column)} IS NOT NULL`).join(' OR ');
+  const hashedAuditRows = db
+    .prepare(`SELECT COUNT(*) AS count FROM memory_access_audit_events WHERE ${hashedPredicate}`)
+    .get() as { count: number };
+  if (hashedAuditRows.count === 0) return;
+  if (!tables.has('memory_deletion_hash_keys')) {
+    throw new Error(`Memory backup has access audit hashes but is missing memory_deletion_hash_keys table with canonical access audit hash key ${ACCESS_AUDIT_HASH_KEY_ID}`);
+  }
+  const row = db
+    .prepare(`SELECT id FROM memory_deletion_hash_keys WHERE id = ? LIMIT 1`)
+    .get(ACCESS_AUDIT_HASH_KEY_ID) as { id: string } | undefined;
+  if (!row) {
+    throw new Error(`Memory backup has access audit hashes but is missing canonical access audit hash key ${ACCESS_AUDIT_HASH_KEY_ID}`);
   }
 }
 
@@ -533,17 +604,31 @@ export function verifyMemoryBackup(path: string): MemoryBackupVerificationReport
       throw new Error(`Memory backup is missing required table(s): ${missingTables.join(', ')}`);
     }
     if (tables.has('memory_schema_versions')) {
-      const missingCurrentTables = CURRENT_SCHEMA_REQUIRED_TABLES.filter((table) => !tables.has(table));
+      const schemaRowsForMissingTables = db
+        .prepare(`SELECT store, version FROM memory_schema_versions ORDER BY store ASC`)
+        .all() as Array<{ store: string; version: number }>;
+      const registeredStores = schemaRowsForMissingTables.map((row) => row.store);
+      const requiredStores = [
+        'memory_deletion_guards',
+        'memory_deletion_hash_keys',
+        ...(registeredStores.includes('memory_access_audit_events') ? ['memory_access_audit_events'] : []),
+        ...(schemaRowsForMissingTables.some((row) => row.version >= CURRENT_MEMORY_SCHEMA_VERSION)
+          || registeredStores.some((store) => store.startsWith('memory_review_'))
+          ? ['memory_review_candidates', 'memory_review_provenance', 'memory_review_suppressions']
+          : []),
+      ] as const;
+      const missingCurrentTables = requiredStores.filter((table) => !tables.has(table));
       if (missingCurrentTables.length > 0) {
         throw new Error(`Current memory backup is missing required table(s): ${missingCurrentTables.join(', ')}`);
       }
     }
 
     const encryptedStores = readEncryptedStores(db, tables);
+    const storeVersions = readSchemaStoreVersions(db, tables);
     for (const table of MEMORY_BACKUP_TABLES) {
       if (!tables.has(table)) continue;
       const columns = readTableColumns(db, table);
-      verifyRequiredColumns(table, columns);
+      verifyRequiredColumns(table, columns, storeVersions);
       if (columns.has('schema_version')) {
         const future = db
           .prepare(`SELECT schema_version FROM ${sqliteIdentifier(table)} WHERE schema_version > ? LIMIT 1`)
@@ -557,6 +642,7 @@ export function verifyMemoryBackup(path: string): MemoryBackupVerificationReport
       verifyPayloadColumns(db, table, columns, encryptedStores);
     }
     verifyDeletionGuardKeyLink(db, tables);
+    verifyAccessAuditKeyLink(db, tables);
 
     const stores = readSchemaStores(db, tables);
     return {
@@ -593,7 +679,7 @@ async function readSnapshot(path: string): Promise<BrainSnapshot> {
 
   const result = BrainSnapshotSchema.safeParse(parsed);
   if (!result.success) {
-    throw new Error(`Invalid memory snapshot ${path}: ${result.error.issues.map((issue) => issue.path.join('.') + ' ' + issue.message).join('; ')}`);
+    throw new Error(`Invalid memory snapshot ${path}: ${result.error.issues.map((issue: ZodIssue) => issue.path.join('.') + ' ' + issue.message).join('; ')}`);
   }
   return result.data as unknown as BrainSnapshot;
 }

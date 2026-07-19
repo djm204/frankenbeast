@@ -82,6 +82,21 @@ describe('stripHookJson', () => {
     expect(stripHookJson(input)).toBe('[{"id":"chunk1"}]');
   });
 
+  it('strips hook output when an earlier property contains braces in a string', () => {
+    const input = '{ "message": "value with { braces }", "hookSpecificOutput": {} }[{"id":"a"}]';
+    expect(stripHookJson(input)).toBe('[{"id":"a"}]');
+  });
+
+  it('ignores unmatched quotes in raw text before hook output', () => {
+    const input = 'warning: "foo\n{ "hookSpecificOutput": {} }[{"id":"a"}]';
+    expect(stripHookJson(input)).toBe('warning: "foo\n[{"id":"a"}]');
+  });
+
+  it('recovers from unmatched diagnostic braces and quotes before hook output', () => {
+    const input = 'warning: { "foo\n{ "hookSpecificOutput": {} }[{"id":"a"}]';
+    expect(stripHookJson(input)).toBe('warning: { "foo\n[{"id":"a"}]');
+  });
+
   it('strips hook output with nested braces in string values', () => {
     const input = '{ "hookSpecificOutput": { "data": "value with { braces }" } }[{"id":"a"}]';
     expect(stripHookJson(input)).toBe('[{"id":"a"}]');
@@ -90,6 +105,16 @@ describe('stripHookJson', () => {
   it('strips multiple hook objects', () => {
     const input = '{ "hookSpecificOutput": {} }{ "hookSpecificOutput": {} }[1,2,3]';
     expect(stripHookJson(input)).toBe('[1,2,3]');
+  });
+
+  it('strips many hook blocks from large provider output', () => {
+    const hook = '{ "hookSpecificOutput": { "hookEventName": "SessionStart" } }';
+    const retained = 'x'.repeat(1_000_000) + '[{"id":"chunk1"}]';
+    const input = retained.slice(0, 1_000_000) + hook.repeat(2_000) + retained.slice(1_000_000);
+
+    const result = stripHookJson(input);
+
+    expect(result).toBe(retained);
   });
 
   it('returns text unchanged when no hook output present', () => {

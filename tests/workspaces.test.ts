@@ -81,6 +81,12 @@ describe("npm workspaces configuration", () => {
       expect(rootPkg.workspaces).toEqual(["packages/*"]);
     });
 
+    it("links every workspace for local development", () => {
+      expect(rootPkg.scripts?.["local:link"]).toBe(
+        "npm run build && npm link --workspaces",
+      );
+    });
+
     it("derives the complete package inventory from the workspace glob", () => {
       const packageDirs = readdirSync(join(ROOT, "packages"), {
         withFileTypes: true,
@@ -214,25 +220,27 @@ describe("npm workspaces configuration", () => {
         );
     const majorOf = (version: string) => majorMinorPatch(version)[0];
 
-    it("keeps workspace Vitest declarations on the root Vitest major", () => {
-      const rootPkg = readPkg("package.json");
-      const rootVitest = rootPkg.devDependencies?.vitest;
+    it.each(["typescript", "vitest"])(
+      "keeps every %s declaration aligned with the root toolchain version",
+      (dependencyName) => {
+        const rootPkg = readPkg("package.json");
+        const rootVersion = rootPkg.devDependencies?.[dependencyName];
 
-      expect(rootVitest).toBeDefined();
-      const rootVitestMajor = majorOf(rootVitest);
+        expect(rootVersion).toBeDefined();
 
-      for (const path of packageJsonPaths) {
-        const pkg = readPkg(path);
-        const vitestDeclarations = getDirectDependencies(pkg, "vitest");
+        for (const path of packageJsonPaths) {
+          const pkg = readPkg(path);
+          const declarations = getDirectDependencies(pkg, dependencyName);
 
-        for (const { dependencySection, version } of vitestDeclarations) {
-          expect(
-            majorOf(version),
-            `vitest in ${path} ${dependencySection} must stay on root major ${rootVitestMajor}`,
-          ).toBe(rootVitestMajor);
+          for (const { dependencySection, version } of declarations) {
+            expect(
+              version,
+              `${dependencyName} in ${path} ${dependencySection} must match the root version ${rootVersion}`,
+            ).toBe(rootVersion);
+          }
         }
-      }
-    });
+      },
+    );
 
     it("keeps workspace coverage-v8 declarations on the same major as Vitest", () => {
       for (const path of packageJsonPaths) {

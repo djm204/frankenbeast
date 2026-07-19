@@ -68,6 +68,12 @@ export type {
   LessonScopeKind,
   LessonScopeMetadata,
   LessonScopeProvenance,
+  PostTaskLessonCandidate,
+  PostTaskLessonDestination,
+  PostTaskLessonEvidence,
+  PostTaskLessonEvidenceKind,
+  PostTaskLessonExtractionInput,
+  PostTaskLessonExtractionReport,
   CritiqueLesson,
   TokenSpend,
   EscalationRequest,
@@ -112,6 +118,7 @@ export {
   applyHumanFeedbackToLesson,
   detectLessonContradictions,
   critiqueProposedLesson,
+  extractPostTaskLessonCandidates,
   isLessonApplicable,
   updateLessonScope,
   quarantineLesson,
@@ -141,7 +148,11 @@ export { ComplexityEvaluator } from './evaluators/complexity.js';
 export { ScalabilityEvaluator } from './evaluators/scalability.js';
 export { ADRComplianceEvaluator } from './evaluators/adr-compliance.js';
 export { ReflectionEvaluator } from './evaluators/reflection-evaluator.js';
-export type { ReflectionEvaluatorOptions } from './evaluators/reflection-evaluator.js';
+export type {
+  ReflectionCompletionOptions,
+  ReflectionEvaluatorOptions,
+  ReflectionLlmClient,
+} from './evaluators/reflection-evaluator.js';
 
 // Circuit Breakers
 export { MaxIterationBreaker } from './breakers/max-iteration.js';

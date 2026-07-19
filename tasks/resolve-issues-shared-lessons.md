@@ -1,6 +1,53 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-18 — Working-memory hydration corruption
+- Fail closed on malformed persisted values that are shaped like structured JSON (`{` or `[` after leading whitespace), while retaining the documented plain-text fallback for genuinely legacy rows. Typed hydration errors should identify the affected key without deleting the row, so operators can repair it and reopen the store.
+
+## 2026-07-18 — MCP-owned SQLite lifecycle
+- When an MCP server owns or lazily creates a SQLite-backed adapter, expose an idempotent adapter `close()` and connect it to the SDK server's `onclose` path as well as an explicit public server `close()`. Central audit wrappers must forward cleanup, and proxy servers must release both their audit observer and any lazily-created adapter set.
+- In fresh monorepo worktrees, build internal workspace packages before package-level TypeScript checks; otherwise missing generated `dist` declarations produce unrelated module-resolution errors.
+
+## 2026-07-18 — MCP execution deadline review fixes
+- A `Promise.race` timer cannot preempt synchronous handler work because the event loop is blocked; deadline wrappers must re-check wall-clock time after handler resolution/rejection and convert late completion into the same structured timeout while aborting the supplied signal. Keep that timer ref'ed so in-process callers with no other active handles still receive the timeout result.
+- Nested dispatch wrappers must have a deadline strictly longer than the longest inner target deadline, including validation/governance/audit slack, or the wrapper can win the timeout race and lose resolved-target timeout auditing.
+
+## 2026-07-17 — PR #2358 stalled closeout and Codex gate handling
+- For stalled PR closeout, re-verify live PR head, mergeability, CI rollup, unresolved Codex threads, and the latest top-level Codex response before acting; a stale green/clean state can become `mergeable=CONFLICTING`/`mergeStateStatus=DIRTY` after main advances even when required CI is still green.
+- Treat Codex usage-limit responses as a hard review-gate blocker for the current round: do not repeatedly retrigger `@codex review`, do not treat historical inline finding lists as active blockers when GraphQL review threads are resolved, and wait for restored usage/approved over-cap review before merging.
+- When a PR is behind the remote branch or main has moved, fast-forward the existing issue worktree to the PR head before touching files, then resolve only the merge-conflict files with minimal edits; for PR #2358 the known conflict surface included `brain-adapter.test.ts`, `memory.test.ts`, `tool-registry.ts`, and this shared lessons DSM.
+- Preserve the one-agent-per-issue policy during doctor/PM closeout: if an existing worktree/card owns the PR, leave evidence-backed handoff comments instead of spawning a duplicate worker or parallel replacement; every PM status comment should explicitly state whether duplicate edits/workers were created.
+- DSM/docs-only closeout notes still move the PR head if committed, so after pushing them, re-check CI on the new head and report whether the push was a documentation/lesson-only change versus a code fix.
+
+## 2026-07-17 — Architecture docs package-name consistency
+- For docs-only architecture fixes, add narrow regression tests that slice the relevant README/docs sections and assert legacy labels are absent there, rather than banning every historical MOD reference across the repository; configuration/env docs may still need legacy toggles for compatibility.
+
+## 2026-07-17 — Setup healthcheck Codex closeout
+- For onboarding setup healthchecks, distinguish pre-service bootstrap from strict local service verification: occupied optional ports should warn with conflict guidance before Docker starts, while `--require-services` can treat expected open ports as healthy. Keep JSON check schemas stable by serializing nullable fields like `action`, and let tests override service URLs so host-running Grafana/Tempo cannot flip optional-service assertions.
+
+## 2026-07-17 — Gitleaks fixture secret hygiene
+- Secret-redaction tests that spawn child commands must avoid putting full fixture secrets in the command argv source itself; split PEM headers/footers and token-like values inside the generated command text as well as in test source so Gitleaks does not flag the fixture while runtime output still exercises full secret redaction.
+
+## 2026-07-17 — Service health aggregator verification
+- Before running `npm --workspace @franken/orchestrator run typecheck` in a fresh worktree, build internal workspace dependencies first (`@franken/types`, `@franken/observer`, `@franken/brain`, `@franken/critique`, `@franken/governor`, and `@franken/planner`) so typecheck failures reflect the PR diff instead of missing local `dist` declarations.
+
+## 2026-07-17 — Learning sandbox Codex closeout
+- For learning sandbox hardening, treat the public execution context as adversarial: freeze exposed policy/declaration objects, keep enforcement copies private, deny namespaced aliases and observer/terminal surfaces (`exec_command`, `write_stdin`, `apply_patch`), and validate callback outcomes before marking a run promotion-eligible.
+- Snapshot and fixture-tool containment must reject replaced/symlinked workspace roots before descending, include root/file mode metadata, and persist evidence even when verification fails, getters throw, or workspaces disappear. Use unique short hashed run directories so parallel retries cannot overwrite each other.
+- Denylist coverage needs last-segment and dot-namespaced mutation aliases such as `create_file` and `memory.store`, actual client aliases like `Bash`/`Write`/`run_shell_command`, and opaque wrapper entries; denied-tool evidence serialization must avoid invoking hostile `length` getters so blocked calls are recorded before errors can be caught by experiments.
+- Before promoting sandbox runs, await all outstanding `runTool` promises and re-anchor custom handlers/workspace/runs-root paths so unawaited async handlers or symlinked ancestors cannot mutate after evidence is marked passing.
+
+## 2026-07-16 — Synthetic availability probe review fixes
+- Availability probes should fail closed for real dependencies: do not default provider checks to `node --version` or dashboard checks to a static UI health URL, require explicit provider/backend health targets, and cover missing-target behavior in tests so cron copies cannot produce false-green uptime.
+- For cron/CI probe JSON logs, redact both `key=value` and whitespace-separated secret forms, including split `Authorization: Bearer *** argv sequences, before serializing command details or error messages.
+- When Codex reaches the normal five-trigger cap but posts new valid findings, fix/reply/resolve them and stop for explicit approval before issuing another `@codex review`; zero unresolved threads plus green CI is not a substitute for a fresh current-head clean.
+
+## 2026-07-16 — Snapshot diff Codex closeout
+- State snapshot diff redaction must cover metadata as well as values: record ids, source filenames, map keys, primitive-map key/value pairs, parse-error/oversized-file paths, and password-only connection URLs (for example Redis URLs with no username) need regression coverage so incident reports cannot leak PII or credentials through supposedly redacted metadata.
+- For one-record-per-file snapshot exports, prefer immutable ids when present but fall back to the source path instead of mutable display names such as `name`; otherwise a rename appears as remove+add instead of one changed record. Coalesce identical aggregate/per-record duplicates so missing duplicate exports do not count as state drift.
+- For subsystem inference and worker ids, prefer explicit directory segments before filename substrings (`memory/task-notes.json` is memory), and let real worker registry records replace task-extracted worker references instead of suffixing them as duplicate workers.
+- For state snapshot diff follow-ups, treat direct approval primitive maps (`approvals.json`/`approvals/pending.json` with token keys) as keyed approval records without misclassifying single approval records, prefer task map/file fallback identity over mutable worker ownership, skip aggregate wrapper metadata once nested collections are extracted, keep explicit subsystem directories authoritative over generic basenames (`memory/state.json` stays memory), recheck byte-size caps after read, wrap directory/file read failures, and pass success/error paths plus parser messages, object keys, ids, and changed-field names through shared redaction so path/key strings with `token=`/`password=` fragments are scrubbed too.
 ## 2026-07-16 — Memory attribution scope and MCP inventory review fixes
+- For hook/governor memory audit closeout, treat `__fbeastHookSource` as reserved provenance on both pre-tool and observer paths: public observer logs must reject forged hook markers, hook JSON wrapping must write trusted provenance after spreading user context, execute_tool audit reports should infer nested memory tools from `args.tool`, and redaction helpers must merge trusted provenance back into sanitized memory export/review-decision contexts.
 - MCP memory tooling: adding a new registry tool must update package README combined-server tool counts and `tool-registry.test.ts` aggregate/search count expectations, not only server-specific tests, or full `@franken/mcp-suite` CI fails despite targeted memory tests passing.
 - Memory attribution privacy: source-attribution viewers must honor the same `readScope`/`agentId` controls as memory query/frontload and translate internal scoped working keys back to logical keys before returning results; governor redaction for proxied attribution calls should match the narrow attribution-argument shape so ordinary memory store/proposal calls are not over-redacted.
 
@@ -19,6 +66,12 @@
 - DLQ/DR restore output redaction must cover provider token literals (for example `sk-*`, `xox*`) and credentialed database URLs even when they appear inside free-text fields such as `target`, `lastError`, or nested payload strings; test fixtures should prove output does not leak the original secret substrings.
 - For DLQ file locks, treat unparseable lock timestamps as malformed stale-lock candidates and fall back to mtime-based reaping; otherwise a syntactically valid lock JSON with `acquiredAt: not-a-date` can wedge writers forever.
 - When reaping malformed DLQ locks, revalidate the moved file identity after `rename` before unlinking so a stale-lock race cannot delete a fresh active lock; when persisting retry exhaustion, normalize blank caller timestamps before writing so later queue reads do not reject the whole DLQ.
+
+## 2026-07-15 — Memory access audit privacy
+- Memory access audit hashes should use keyed HMACs, not bare SHA-256, and the tests should assert same-selector stability plus raw-value absence rather than pinning an unsalted digest.
+- Keep audit-only HMAC key material separate from exported right-to-forget/deletion guard snapshot keys; audit-only writes must not cause `serialize()` to expose `deletionGuardHashKey`.
+- Put sensitive learning/review keys through the audit event `key` hashing field rather than plaintext `details`, and audit deletion-guard rejections before rethrowing so denied writes are visible without leaking selectors.
+- When broadening audit coverage, wire every public persisted-memory surface through a shared audit sink (working, episodic learning/recall, recovery checkpoint/clear, review queue/provenance, right-to-forget) and update schema metadata tests for the extra audit/hash-key rows.
 
 ## 2026-07-15 — Webhook DNS pinning review fixes
 - For outbound webhook SSRF hardening, validate object-form allowlist origins for credentials too; URL normalization can otherwise hide deceptive `userinfo@host` entries.
@@ -297,3 +350,18 @@
 
 ## 2026-07-16 — DR process cleanup closeout
 - DR process cleanup planners should ignore terminal attempts before PID counting and orphan scans, treat missing-PID live attempts as possible owners of matching processes, and include process-start tokens on executable orphan actions so signal-time consumers can revalidate PID identity before termination.
+
+## 2026-07-16 — Orchestrator focused test command
+- In the root workspace, `npm test -- --run ...` passes `--run` to Turbo and fails. For one orchestrator test file, run `npm run test --workspace @franken/orchestrator -- tests/unit/path.test.ts`; run `npm run build` first if package-local typecheck cannot resolve internal `@franken/*` workspace declarations.
+
+## 2026-07-16 — DR point-in-time export review fixes
+- Incident exports must summarize the real `.fbeast/beast.db` and `kanban.db` SQLite tables, include chat `pendingApproval` session state as approval evidence, stream/hash large logs instead of buffering them, and apply the same redaction to the serialized artifact that the terminal preview uses.
+
+## 2026-07-17 — Orchestrator chaos-test closeout
+- For orchestrator chaos/stability regressions, keep dropped-provider and thrown-tool cases deterministic: use fake timers around never-settling promises, assert cleanup with zero leaked timers, and build dependent workspaces before package typecheck when source-only workspace packages make bare orchestrator `tsc --noEmit` report missing `@franken/*` declarations.
+
+## 2026-07-18 — Spawn-failure telemetry redaction
+- Sanitizing the primary failure event is insufficient when the original exception is rethrown: audit every caller that can wrap it into run events, tracked-agent timelines, SSE publications, or durable logs. Rethrow a stable public error, allowlist diagnostic error codes, keep raw command/argv out of durable summaries, and test both immediate dispatch and later run-start paths with secret-bearing failures.
+
+## 2026-07-18 — Durable SSE ticket wiring
+- A persistent store implementation is not durable unless every daemon construction path supplies a stable database path; add a restart-level wiring test, and contain best-effort timer cleanup failures so transient SQLite errors cannot escape callbacks and terminate the process.

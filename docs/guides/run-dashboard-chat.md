@@ -80,15 +80,6 @@ Use this matrix when choosing frontend backend URL variables for local Vite deve
 
 `VITE_BEAST_API_PROXY_TARGET` only affects Beast control routes (`/v1/beasts/*`). It defaults to `VITE_API_PROXY_TARGET`, so leave it unset when chat/API and Beast controls share the same backend. Set it only when Beast controls run on a separate local daemon or backend target.
 
-Use this backend URL matrix when choosing Vite env vars:
-
-| Local workflow | Backend topology | Vite env vars to set |
-| --- | --- | --- |
-| Chat-only on defaults | `chat-server` listens on `http://127.0.0.1:3737` | None; `npm --workspace @franken/web run dev:chat` already sets the default proxy target. |
-| Chat-only on a custom backend port | `chat-server` listens on a non-default port such as `4242` | Set `VITE_API_PROXY_TARGET=http://127.0.0.1:4242`; leave `VITE_API_URL` unset and leave `VITE_BEAST_API_PROXY_TARGET` unset unless Beast routes use a different target. |
-| Chat plus Beast controls through the same chat backend | `chat-server` serves chat/API routes and proxies `/v1/beasts/*` to its attached Beast control plane | Set `VITE_API_PROXY_TARGET` to the chat-server URL; leave `VITE_BEAST_API_PROXY_TARGET` unset so Beast routes reuse that target. |
-| Chat plus a separate Beast daemon | `chat-server` handles chat/API routes, while `beasts-daemon` handles `/v1/beasts/*` on another port | Set `VITE_API_PROXY_TARGET` to the chat-server URL and `VITE_BEAST_API_PROXY_TARGET` to the daemon URL; keep both requests same-origin through Vite. |
-
 In all local Vite workflows, leave `VITE_API_URL` unset. It is reserved/legacy and does not select the dashboard backend in current local development.
 
 Set `VITE_PROJECT_ID` when you want dashboard chat sessions scoped to a named local project instead of the shared `default` namespace. The frontend passes that value to the chat session API when it lists and resumes sessions, so using a stable per-project value such as `my-project` keeps parallel local checkouts from mixing dashboard chat history. Leave it unset only when the fallback `default` project id is acceptable. Set it inline with the Vite command or in `packages/franken-web/.env.local`; the root `.env.example` intentionally omits a runnable example because the workspace Vite script loads browser env from the web package directory.
@@ -129,6 +120,8 @@ Expected behavior:
 - opening the chat page creates or resumes a session over HTTP
 - the UI then opens a WebSocket connection to `/v1/chat/ws`
 - sending a message streams assistant output back into the transcript
+- WebSocket stream events include monotonic `eventId` values so reconnect/replay paths can ignore duplicate or stale events without duplicating transcript entries
+- dashboard SSE snapshots include monotonic `id: dashboard:<n>` fields; reconnecting clients pass their last processed id as `lastEventId` when minting the next short-lived stream, and client reducers must ignore duplicate event ids
 - approvals show up in the side rail when a turn requires them
 
 ## Security defaults

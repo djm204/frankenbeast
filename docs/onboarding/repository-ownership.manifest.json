@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "defaultOwner": "core-maintainers",
-  "unknownPathPolicy": "For unknown or cross-cutting paths, start with docs/CONTRACT_MATRIX.md and docs/RAMP_UP.md, then list every plausible manifest entry in the PM/worker handoff instead of guessing a single owner.",
+  "unknownPathPolicy": "For unknown or cross-cutting paths, start with docs/CONTRACT_MATRIX.md and docs/RAMP_UP.md, then list every plausible manifest entry in the coordinator/worker handoff instead of guessing a single owner.",
   "entries": [
     {
       "id": "types-contracts",
@@ -106,7 +106,7 @@
     {
       "id": "onboarding-docs",
       "name": "Onboarding, contributor guidance, and repository documentation",
-      "paths": ["docs/onboarding/**", "ONBOARDING.md", "README.md", "docs/RAMP_UP.md", "docs/guides/**"],
+      "paths": ["docs/onboarding/**", "ONBOARDING.md", "CONTRIBUTING.md", "README.md", "docs/RAMP_UP.md", "docs/guides/**"],
       "primaryOwner": "docs-onboarding-maintainers",
       "escalationOwner": "core-maintainers",
       "responsibilities": ["First-run setup, architecture reading path, operator guides, quickstart copy, and agent handoff guidance."],

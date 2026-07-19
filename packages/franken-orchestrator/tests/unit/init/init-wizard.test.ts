@@ -149,6 +149,29 @@ describe('runInitWizard – with secretStore', () => {
     const result = await runInitWizard({ io, initialState: state, secretStore });
     expect(result.config.network.operatorTokenRef).toBe('network.operatorTokenRef');
   });
+
+  it('aborts before prompting for raw secrets when the selected secret store is unavailable', async () => {
+    const io = makeIO([
+      'y',      // Enable Chat?
+      'y',      // Enable Dashboard?
+      'n',      // Enable Comms?
+      'claude', // Default provider
+      'secure', // Security mode
+      TEST_MY_SECRET_OP_TOKEN, // Must not be prompted/stored after failed detection.
+    ]);
+    const secretStore = makeSecretStore({
+      available: false,
+      reason: 'macOS Keychain writes are disabled',
+      setupInstructions: 'Use local-encrypted instead.',
+    });
+    const state = createEmptyInitState('/tmp/test-config.json');
+
+    await expect(runInitWizard({ io, initialState: state, secretStore })).rejects.toThrow('Secret backend');
+
+    expect(secretStore.store).not.toHaveBeenCalled();
+    expect(io.ask).toHaveBeenCalledTimes(5);
+    expect(io.display).toHaveBeenCalledWith("Secret backend 'mock' is not available: macOS Keychain writes are disabled");
+  });
 });
 
 describe('runInitWizard – with secretStore and Slack enabled', () => {
@@ -301,5 +324,52 @@ describe('runInitWizard – scope: secret-backend only', () => {
     expect(result.state.completedSteps).toContain('secret-backend-selection');
     // io.ask should never have been called (no interactive prompts)
     expect(io.ask).not.toHaveBeenCalled();
+  });
+
+  it('preserves base config comms transports when init state has none', async () => {
+    const io = makeIO([]);
+    const secretStore = makeSecretStore({ available: true });
+    const state = createEmptyInitState('/tmp/test-config.json');
+    const baseConfig = defaultConfig();
+    baseConfig.comms.enabled = true;
+    baseConfig.comms.slack = {
+      ...baseConfig.comms.slack,
+      enabled: true,
+      appId: 'existing-slack-app',
+      botTokenRef: 'secret://existing/slack-token',
+      signingSecretRef: 'secret://existing/slack-signing-secret',
+    };
+    baseConfig.comms.discord = {
+      ...baseConfig.comms.discord,
+      enabled: true,
+      applicationId: 'existing-discord-app',
+      botTokenRef: 'secret://existing/discord-token',
+      publicKeyRef: 'existing-discord-public-key',
+    };
+
+    const result = await runInitWizard({
+      io,
+      initialState: state,
+      baseConfig,
+      secretStore,
+      scope: ['secret-backend'],
+    });
+
+    expect(io.ask).not.toHaveBeenCalled();
+    expect(result.state.selectedModules).toEqual(['chat', 'dashboard', 'comms']);
+    expect(result.state.selectedCommsTransports).toEqual(['slack', 'discord']);
+    expect(result.config.comms.enabled).toBe(true);
+    expect(result.config.comms.slack.enabled).toBe(true);
+    expect(result.config.comms.discord.enabled).toBe(true);
+    expect(result.config.comms.telegram.enabled).toBe(false);
+    expect(result.config.comms.whatsapp.enabled).toBe(false);
+    expect(result.state.answers).toMatchObject({
+      'comms.slack.appId': 'existing-slack-app',
+      'comms.slack.botTokenRef': 'secret://existing/slack-token',
+      'comms.slack.signingSecretRef': 'secret://existing/slack-signing-secret',
+      'comms.discord.applicationId': 'existing-discord-app',
+      'comms.discord.botTokenRef': 'secret://existing/discord-token',
+      'comms.discord.publicKeyRef': 'existing-discord-public-key',
+    });
   });
 });

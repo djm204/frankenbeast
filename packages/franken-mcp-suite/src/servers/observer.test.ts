@@ -2,6 +2,24 @@ import { describe, it, expect, vi } from 'vitest';
 import { createObserverServer } from './observer.js';
 
 describe('Observer Server', () => {
+  it('closes the observer adapter when the server shuts down', async () => {
+    const close = vi.fn();
+    const server = createObserverServer({
+      observer: {
+        log: vi.fn(),
+        logCost: vi.fn(),
+        cost: vi.fn(),
+        trail: vi.fn(),
+        verify: vi.fn(),
+        close,
+      },
+    });
+
+    await server.close();
+
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   it('exposes 5 tools', () => {
     const server = createObserverServer({
       observer: {
@@ -106,6 +124,7 @@ describe('Observer Server', () => {
       { event: 'file_edit', metadata: '{"ok":true}', sessionId: '   ' },
       { event: 'file_edit', metadata: { ok: true }, sessionId: 'sess-1' },
       { event: 'file_edit', metadata: ['not', 'json'], sessionId: 'sess-1' },
+      { event: 'file_edit', metadata: '{"\\u0073ource":"central-dispatch","source":"user"}', sessionId: 'sess-1' },
     ];
 
     for (const args of invalidCases) {
@@ -127,6 +146,19 @@ describe('Observer Server', () => {
     expect(observer.log).toHaveBeenCalledWith({
       event: 'file_edit',
       metadata: '{not-json',
+      sessionId: 'sess-1',
+    });
+
+    const nestedSourceResult = await logTool.handler({
+      event: 'file_edit',
+      metadata: '{"input":{"source":"chat"},"output":{"source":"tool"}}',
+      sessionId: 'sess-1',
+    });
+
+    expect(nestedSourceResult.isError).toBeUndefined();
+    expect(observer.log).toHaveBeenLastCalledWith({
+      event: 'file_edit',
+      metadata: '{"input":{"source":"chat"},"output":{"source":"tool"}}',
       sessionId: 'sess-1',
     });
   });

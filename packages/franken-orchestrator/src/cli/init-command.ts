@@ -57,7 +57,8 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
   }
 
   // Interactive and repair paths need the secret store
-  const secureBackend = options.config.network.secureBackend ?? 'local-encrypted';
+  const initBackend = options.args.initBackend as SecureBackend | undefined;
+  const secureBackend = initBackend ?? options.config.network.secureBackend ?? 'local-encrypted';
   let passphrase: string | undefined = process.env.FRANKENBEAST_PASSPHRASE;
   if (secureBackend === 'local-encrypted' && !passphrase) {
     passphrase = (await options.io.ask('Enter passphrase for local encrypted store:')).trim() || undefined;
@@ -67,7 +68,6 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
     io: options.io,
     passphrase,
   });
-  const initBackend = options.args.initBackend as SecureBackend | undefined;
 
   if (options.args.initRepair) {
     const result = await runRepairInit({

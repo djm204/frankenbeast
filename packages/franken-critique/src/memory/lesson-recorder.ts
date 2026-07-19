@@ -30,6 +30,12 @@ import type {
   LessonScopeKind,
   LessonScopeMetadata,
   LessonScopeProvenance,
+  PostTaskLessonCandidate,
+  PostTaskLessonDestination,
+  PostTaskLessonEvidence,
+  PostTaskLessonEvidenceKind,
+  PostTaskLessonExtractionInput,
+  PostTaskLessonExtractionReport,
 } from '../types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
 import type { TaskId } from '../types/common.js';
@@ -180,21 +186,30 @@ const PRIVACY_REDACTION_RULES: readonly PrivacyRedactionRule[] = [
     kind: 'task-state',
     label: 'task-reference',
     pattern:
-      /\b(?:(?:PR|pull request|issue|ticket)\s*#?\d+|(?:commit|sha)\s+[0-9a-f]{7,40}|task\s+t_[0-9a-f]{6,}|(?:impl|harden):issue-\d+|issue-\d+)\b/gi,
+      /(?:https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/(?:pull|issues)\/\d+(?:[^\s'"`)\]]*)?|https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/actions\/runs\/\d+(?:[^\s'"`)\]]*)?|https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/commit\/[0-9a-f]{7,40}(?:[^\s'"`)\]]*)?|\b(?:(?:PR|pull request|issue|ticket)\s*#?\d+|(?:commit|sha)\s+[0-9a-f]{7,40}|task\s+t_[0-9a-f]{6,}|(?:impl|harden):issue-\d+|issue-\d+)\b)/gi,
     replacement: '[REDACTED_TASK_REFERENCE]',
+  },
+  {
+    kind: 'task-state',
+    label: 'branch-reference',
+    pattern: /\bbranch\s+(?:refs\/heads\/)?[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+\b/gi,
+    replacement: 'branch [REDACTED_TASK_REFERENCE]',
   },
 ];
 
 const CUSTOMER_DATA_PATTERNS: readonly RegExp[] = [
   /\bcustomer\s+(?:account\s+)?(?:[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\s+)?[A-Za-z0-9][A-Za-z0-9_.:-]*\b/i,
   /\b[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*\b/,
-  /\b[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*)\b/,
+  /\b[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*|[a-z][A-Za-z0-9_.:-]*\s+(?:data|records?|information|identifiers?))\b/,
   /\b[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*\b/,
 ];
 
 const TASK_STATE_PATTERNS: readonly RegExp[] = [
+  /https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/(?:pull|issues)\/\d+(?:[^\s'"`)\]]*)?/i,
+  /https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/actions\/runs\/\d+(?:[^\s'"`)\]]*)?/i,
+  /https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/commit\/[0-9a-f]{7,40}(?:[^\s'"`)\]]*)?/i,
   /\b(?:PR|pull request)\s*#?\d+\b/i,
-  /\bissue\s*#\d+\b/i,
+  /\bissue\s*#?\d+\b/i,
   /\bticket\s*#?\d+\b/i,
   /\b(?:merged|opened|closed|pushed|committed)\s+(?:PR|pull request|branch|commit)\b/i,
   /\b(?:commit|sha)\s+[0-9a-f]{7,40}\b/i,
@@ -209,8 +224,8 @@ const PREFERENCE_PATTERNS: readonly RegExp[] = [
 
 const ENVIRONMENT_FACT_PATTERNS: readonly RegExp[] = [
   /\b(?:repo|repository|project|package|workspace)\s+(?:uses|requires|runs|is)\b/i,
-  /\b@franken\/[a-z0-9-]+\b/i,
-  /\bfrankenbeast\b/i,
+  /\bfrankenbeast\s+(?:uses|requires|runs|is)\b/i,
+  /(?:^|\s)(?:package\s+)?@franken\/[a-z0-9-]+\s+(?:package\s+)?(?:uses|requires|runs|is)\b/i,
 ];
 
 const LESSON_FEEDBACK_WEIGHTING_GUIDANCE =
@@ -1005,6 +1020,896 @@ export function unquarantineLesson(
     lifecycleStatus: restoredLifecycleStatus,
     unquarantine,
   };
+}
+
+const POST_TASK_LESSON_GOVERNANCE_GUIDANCE =
+  'Post-task lesson candidates are review-queue items only. A reviewer must approve the exact destination before any skill, memory, or docs write occurs; discard task-state-only candidates.';
+
+export function extractPostTaskLessonCandidates(
+  input: PostTaskLessonExtractionInput,
+): PostTaskLessonExtractionReport {
+  const rawTaskId = requireNonEmptyString(
+    input.taskId,
+    'post-task lesson taskId',
+  );
+  const taskIdDecision = createPrivacyDecision(rawTaskId, {
+    flagCustomerData: true,
+  });
+  const taskId = (
+    taskIdDecision.sensitive || taskIdDecision.action === 'reject'
+      ? `redacted-task:${stableHash(rawTaskId)}`
+      : rawTaskId
+  ) as TaskId;
+  const generatedAt = normalizeTimestamp(input.completedAt);
+  const verificationEvidence = createPostTaskVerificationEvidence(
+    input.verificationSteps ?? [],
+  );
+  const candidates: PostTaskLessonCandidate[] = [];
+
+  const normalizeCandidateText = (text: string): string =>
+    text.trim().replace(/\s+/g, ' ');
+
+  const addCandidate = (
+    kind: PostTaskLessonEvidenceKind,
+    text: string,
+    reference?: string,
+    options: { readonly forceDiscard?: boolean } = {},
+  ): void => {
+    const normalizedText = normalizeCandidateText(text);
+    if (!normalizedText) return;
+    const privacyDecision = createPrivacyDecision(normalizedText, {
+      flagCustomerData: true,
+    });
+    let publicDecision = toPublicPrivacyDecision(privacyDecision);
+    let sanitizedText = redactSensitiveText(
+      normalizedText,
+      privacyDecision.redactions,
+    );
+    const category = options.forceDiscard
+      ? privacyDecision.category === 'task-state'
+        ? 'task-state'
+        : 'discard'
+      : inferPostTaskLessonCategory(
+          kind,
+          sanitizedText,
+          privacyDecision.category,
+        );
+    if (!options.forceDiscard && category !== privacyDecision.category) {
+      publicDecision = recategorizePostTaskPrivacyDecision(
+        publicDecision,
+        category,
+      );
+    }
+    if (options.forceDiscard) {
+      publicDecision = {
+        ...publicDecision,
+        category:
+          category === 'discard' && !isPlainNoSignalDiscardCandidate(normalizedText)
+            ? 'task-state'
+            : category,
+        action: 'reject',
+        approvalRequired: false,
+        reason:
+          'Post-task candidate lacks an explicit reusable learning signal and is rejected before durable learning.',
+      };
+    }
+    if (
+      publicDecision.category === 'task-state' &&
+      publicDecision.action === 'reject'
+    ) {
+      sanitizedText = `[REDACTED_TASK_REFERENCE:${stableHash(normalizedText).slice(0, 12)}]`;
+    }
+    const suggestedDestination = options.forceDiscard
+      ? 'discard'
+      : choosePostTaskLessonDestination(
+          category,
+          kind,
+          sanitizedText,
+        );
+    const discarded = suggestedDestination === 'discard';
+    const evidence: PostTaskLessonEvidence[] = [
+      {
+        kind,
+        summary: summarizePostTaskEvidence(kind, sanitizedText),
+        ...(reference ? { reference } : {}),
+      },
+    ];
+    candidates.push({
+      id: `post-task-lesson:${stableHash(`${taskId}\n${sanitizedText}`)}`,
+      taskId,
+      text: sanitizedText,
+      category:
+        discarded && category === 'discard' && isPlainNoSignalDiscardCandidate(normalizedText)
+          ? 'discard'
+          : discarded
+            ? 'task-state'
+            : category,
+      suggestedDestination,
+      evidence,
+      privacyFilter: publicDecision,
+      review: {
+        status: discarded ? 'discarded' : 'pending-review',
+        approvalRequired: !discarded,
+        persistentWriteAllowed: false,
+        reason: discarded
+          ? 'Candidate contains one-off task state or no durable learning signal; do not persist it.'
+          : 'Candidate is queued for human review before any durable learning write.',
+      },
+    });
+  };
+
+  for (const correction of input.userCorrections ?? []) {
+    const normalizedCorrection = normalizeCandidateText(correction);
+    addCandidate('user-correction', normalizedCorrection, undefined, {
+      forceDiscard:
+        !isRawUserPreferenceCorrection(normalizedCorrection) &&
+        !hasExplicitPostTaskLessonSignal(normalizedCorrection),
+    });
+  }
+  for (const failure of input.toolFailures ?? []) {
+    const normalizedFailure = normalizeCandidateText(failure);
+    addCandidate('tool-failure', normalizedFailure, undefined, {
+      forceDiscard: !hasReusableToolFailureSignal(normalizedFailure),
+    });
+  }
+  if (input.summary) {
+    const normalizedSummary = normalizeCandidateText(input.summary);
+    addCandidate('completion-summary', normalizedSummary, undefined, {
+      forceDiscard:
+        !isRawUserPreferenceCorrection(normalizedSummary) &&
+        !hasExplicitPostTaskLessonSignal(normalizedSummary),
+    });
+  }
+  for (const note of input.notes ?? []) {
+    const normalizedNote = normalizeCandidateText(note);
+    addCandidate('task-note', normalizedNote, undefined, {
+      forceDiscard:
+        !isRawUserPreferenceCorrection(normalizedNote) &&
+        !hasExplicitPostTaskLessonSignal(normalizedNote),
+    });
+  }
+
+  const reportCandidates = attachPostTaskVerificationEvidence(
+    dedupePostTaskLessonCandidates(candidates),
+    verificationEvidence,
+  );
+
+  return {
+    schemaVersion: 'post-task-lesson-extraction-v1',
+    taskId,
+    generatedAt,
+    candidates: reportCandidates,
+    governance: {
+      persistentWritesRequireReview: true,
+      allowedDestinations: ['skill', 'memory', 'docs', 'discard'],
+      guidance: POST_TASK_LESSON_GOVERNANCE_GUIDANCE,
+    },
+  };
+}
+
+function choosePostTaskLessonDestination(
+  category: LessonCandidateCategory,
+  kind: PostTaskLessonEvidenceKind,
+  text: string,
+): PostTaskLessonDestination {
+  if (category === 'task-state' || category === 'discard') return 'discard';
+  if (kind === 'tool-failure') return 'skill';
+  if (kind === 'user-correction' && category === 'preference') return 'memory';
+  if (isDocumentationUpdateLesson(text)) return 'docs';
+  if (hasReusableProcedureGuidance(text)) return 'skill';
+  if (category === 'environment-fact') return 'memory';
+  if (category === 'procedure') return 'skill';
+  return 'memory';
+}
+
+function isDocumentationUpdateLesson(text: string): boolean {
+  if (/^\s*(?:please\s+)?(?:don'?t|do\s+not)\s+forget(?:\s+to)?\b.{0,80}\b(?:add|document|record|publish|update|write)\b.{0,80}\b(?:docs?|documentation|readme|runbook|guide)\b/i.test(text)) {
+    return true;
+  }
+  if (
+    /^(?:please\s+)?(?:do\s+not(?!\s+forget\s+to\b)|don't(?!\s+forget\s+to\b)|never|avoid)\b.{0,80}\b(?:add|document|record|publish|update|write)\b.{0,80}\b(?:docs?|readme|runbook|guide)\b|\b(?:avoid|never|don'?t(?!\s+forget\s+to\b)|do\s+not(?!\s+forget\s+to\b))\b.{0,80}\b(?:docs?|documentation|document|write)\b|\b(?:docs?|documentation)\b.{0,80}\b(?:avoid|never|don'?t(?!\s+forget\s+to\b)|do\s+not(?!\s+forget\s+to\b)|unless)\b/i.test(
+      text,
+    )
+  ) {
+    return false;
+  }
+  return /\b(?:add|added|document|documented|record|recorded|publish|published|update|updated|write|wrote|written)\b.{0,80}\b(?:docs?|documentation|readme|runbook|guide)\b|\b(?:docs?|documentation|readme|runbook|guide)\b.{0,80}\b(?:add|added|document|documented|record|recorded|publish|published|update|updated|write|wrote|written)\b/i.test(
+    text,
+  );
+}
+
+function inferPostTaskLessonCategory(
+  kind: PostTaskLessonEvidenceKind,
+  text: string,
+  fallback: LessonCandidateCategory,
+): LessonCandidateCategory {
+  if (isDirectUserPreferenceWording(text)) {
+    return 'preference';
+  }
+  if (hasReusableProcedureGuidance(text)) {
+    return 'procedure';
+  }
+  if (isRawUserPreferenceCorrection(text)) {
+    return 'preference';
+  }
+  if (isDocumentationUpdateLesson(text) && fallback === 'preference') {
+    return 'procedure';
+  }
+  return fallback;
+}
+
+function isDirectUserPreferenceWording(text: string): boolean {
+  return (
+    isRawUserPreferenceCorrection(text) &&
+    /^(?:i\s+prefer|i'd\s+prefer|my\s+preference\s+is|i\s+like|i\s+(?:do\s+not|don'?t)\s+want|prefer\s+not\s+to\s+use|(?:please\s+)?(?:do\s+not\s+use|don't\s+use|never\s+use|avoid\s+using))\b/i.test(
+      text,
+    )
+  );
+}
+
+function recategorizePostTaskPrivacyDecision(
+  decision: LessonPrivacyFilterDecision,
+  category: LessonCandidateCategory,
+): LessonPrivacyFilterDecision {
+  const action =
+    category === 'task-state' || category === 'discard' ? 'reject' : 'admit';
+  return {
+    ...decision,
+    category,
+    action,
+    approvalRequired: action === 'admit' && decision.sensitive,
+    reason:
+      action === 'reject'
+        ? PRIVACY_FILTER_TASK_STATE_REASON
+        : decision.sensitive
+          ? PRIVACY_FILTER_SENSITIVE_REASON
+          : PRIVACY_FILTER_ADMIT_REASON,
+  };
+}
+
+function isRawUserPreferenceCorrection(text: string): boolean {
+  if (
+    isTaskReferenceBookkeeping(text) ||
+    isDocumentationUpdateLesson(text) ||
+    isOneOffUserTaskRequest(text)
+  ) {
+    return false;
+  }
+  const looksProcedural = /\b(?:command|cli|tool|script|test|run|running|workflow|procedure|steps?|fallback|workaround|retry|retrying|gh|npm|pnpm|yarn|node)\b/i.test(
+    text,
+  );
+  if (
+    /^(?:please\s+)?use\s+(?:the\s+)?(?:gh\s+cli|pnpm|npm|yarn)\b/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /^(?:please\s+)?prefer\s+to\s+use\s+(?:the\s+)?(?:gh\s+cli|github\s+cli|cli|pnpm|npm|yarn|node|bun|deno|uv|pip|poetry|package\s+manager)\b/i.test(
+      text,
+    ) ||
+    /^(?:please\s+)?prefer\s+(?:the\s+)?(?:gh\s+cli|github\s+cli|cli|pnpm|npm|yarn|node|bun|deno|uv|pip|poetry|package\s+manager)\b/i.test(
+      text,
+    ) ||
+    /^i\s+prefer\s+(?:to\s+use\s+)?(?:the\s+)?(?:gh\s+cli|github\s+cli|cli|pnpm|npm|yarn|node|bun|deno|uv|pip|poetry|package\s+manager)\b/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /^(?:please\s+)?(?:do\s+not\s+use|don't\s+use|never\s+use|avoid(?:\s+using|\s+use)?)\s+(?:the\s+)?(?:gh\s+cli|github\s+cli|cli|pnpm|npm|yarn|node|bun|deno|uv|pip|poetry|package\s+manager)\b/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /^(?:please\s+)?prefer\s+not\s+to\s+use\b/i.test(text) &&
+    !isTaskReferenceBookkeeping(text)
+  ) {
+    return true;
+  }
+  if (
+    /^i\s+(?:do\s+not|don'?t)\s+want\b/i.test(text) &&
+    /\b(?:logs?|final|summar(?:y|ies|ize)|include|mention|show|share|save|record|persist)\b/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /^(?:i\s+prefer|i'd\s+prefer|my\s+preference\s+is|i\s+like|i\s+(?:do\s+not|don'?t)\s+want)\b/i.test(
+      text,
+    ) &&
+    (/\b(?:summar(?:y|ies)|final|logs?|include|mention|show)\b/i.test(text) ||
+      !looksProcedural)
+  ) {
+    return true;
+  }
+  if (
+    /^(?:please\s+)?(?:use|avoid|do\s+not\s+use|don't\s+use|never\s+use)\b/i.test(
+      text,
+    ) &&
+    !looksProcedural
+  ) {
+    return true;
+  }
+  if (
+    /^(?:please\s+)?use\b/i.test(text) &&
+    /\b(?:pnpm|yarn|npm|gh\s+cli|github\s+cli|cli|package\s+manager)\b/i.test(
+      text,
+    ) &&
+    !/\b(?:when|if|before|after|instead|retry|fallback|workaround|run|running|script|steps?)\b/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /^(?:please\s+)?(?:keep|avoid|do\s+not|don't|never|prefer|use)\b/i.test(
+      text,
+    ) &&
+    /\b(?:include|mention|expose|save|record|persist|show|share|summar(?:y|ies|ize)|final|write|document|docs?|documentation)\b/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /^(?:please\s+)?(?:always\s+)?prefer\s+to\s+use\b/i.test(text) &&
+    !looksProcedural
+  ) {
+    return true;
+  }
+  if (
+    /^(?:please\s+)?always\s+use\b/i.test(text) &&
+    (!looksProcedural ||
+      /\b(?:gh\s+cli|github\s+cli|cli|pnpm|npm|yarn|node|bun|deno|uv|pip|poetry|package\s+manager)\b/i.test(
+        text,
+      ))
+  ) {
+    return true;
+  }
+  if (
+    /^(?:please\s+)?always\s+(?:use|avoid|do\s+not\s+use|don't\s+use|never\s+use)\b/i.test(
+      text,
+    ) &&
+    !looksProcedural
+  ) {
+    return true;
+  }
+  if (
+    /^(?:please\s+)?always\s+(?:keep|prefer|avoid)\b/i.test(text) &&
+    /\b(?:concise|brief|verbose|emoji|emojis|tone|style|format|summar(?:y|ies|ize)|final|response|responses|reply|replies|write|writing)\b/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /^\s*(?:please\s+)?prefer\s+not\s+to\s+use\b/i.test(text)
+  ) {
+    return true;
+  }
+  if (looksProcedural || /\b(?:use|fallback|workaround|verify)\b/i.test(text)) {
+    return false;
+  }
+  return /^(?:please\s+)?(?:keep|avoid|do\s+not|don't|never|prefer)\b/i.test(
+    text,
+  );
+}
+
+function hasExplicitPostTaskLessonSignal(text: string): boolean {
+  if (
+    isTaskReferenceBookkeeping(text) &&
+    !hasReusableGuidanceAfterTaskStateClause(text)
+  ) {
+    return false;
+  }
+  if (
+    (isFailedRetryOrFallbackStatus(text) || isRawToolFailureStatus(text)) &&
+    !hasStatusRecoveryGuidance(text)
+  ) {
+    return false;
+  }
+  if (isTransientEnvironmentStatus(text)) return false;
+  if (isConditionalFailureStatus(text)) return false;
+  if (isDocumentationUpdateLesson(text)) return true;
+  if (hasReusableProcedureGuidance(text)) return true;
+  if (isOneOffModalTaskReminder(text)) return false;
+  if (isOneOffPostTaskProgress(text)) return false;
+  if (/\b(?:ran|verified|passed)\b.{0,80}\bvalidate\b.{0,80}\bfix\b/i.test(text)) {
+    return false;
+  }
+  if (isOneOffShouldCorrection(text)) return false;
+  if (isOneOffUserTaskRequest(text)) return false;
+  if (isNegatedKeywordOnlyStatus(text)) return false;
+  if (isRawUserPreferenceCorrection(text)) return true;
+  if (PREFERENCE_PATTERNS.some((pattern) => pattern.test(text))) return true;
+  if (ENVIRONMENT_FACT_PATTERNS.some((pattern) => pattern.test(text))) {
+    return true;
+  }
+  if (
+    /\b(?:when|if)\b.{0,160}\b(?:run|check|use)\b.{0,160}\b(?:before|instead|fallback|workaround|retry|use|giving\s+up)\b/i.test(
+      text,
+    ) ||
+    /\b(?:when|if)\b.{0,160}\buse\b.{0,80}\b(?:gh|npm|pnpm|yarn|run\s+view)\b/i.test(
+      text,
+    ) ||
+    /\b(?:run|check|checks?|use)\b.{0,160}\b(?:when|if)\b/i.test(text)
+  ) {
+    return true;
+  }
+  return (
+    /\b(?:always|avoid|ensure|prefer|require|retry|validate|redact|fallback|workaround)\b/i.test(
+      text,
+    ) &&
+    /\b(?:when|if|before|after|use|run|check|verify|validate|record|save|persist|redact|retry|fallback|workaround|require|ensure|prefer|avoid)\b/i.test(
+      text,
+    )
+  );
+}
+
+function hasReusableGuidanceAfterTaskStateClause(text: string): boolean {
+  return (
+    TASK_STATE_PATTERNS.some((pattern) => pattern.test(text)) &&
+    /(?:;|\n)\s*(?:always\s+)?(?:run|use|check|retry|fallback)\b/i.test(text)
+  );
+}
+
+function hasReusableToolFailureSignal(text: string): boolean {
+  if (
+    isTaskScopedToolFailureReference(text) &&
+    !hasReusableGuidanceAfterTaskStateClause(text)
+  ) {
+    return false;
+  }
+  if (isFailedRetryOrFallbackStatus(text) && !hasStatusRecoveryGuidance(text)) {
+    return false;
+  }
+  if (/\bworkaround\s*:/i.test(text)) return hasActionableWorkaroundLabel(text);
+  const hasInstructionalWorkaround =
+    /\b(?:when|if)\b.{0,160}\b(?:run|check|use|workaround)\b|\b(?:run|check|use|workaround)\b.{0,160}\b(?:when|if|after|before|instead|giving\s+up)\b/i.test(
+      text,
+    ) ||
+    /(?:;|,)\s*(?:use|run|check|retry|fallback)\b/i.test(text) ||
+    /\b(?:returned|failed|error|timed\s*out|timeout|exit(?:ed)?\s+\d+)\b.{0,160}\b(?:use|fallback|workaround)\b|\b(?:use|workaround)\b.{0,160}\b(?:returned|failed|error|timed\s*out|timeout|exit(?:ed)?\s+\d+)\b/i.test(
+      text,
+    );
+  if (hasInstructionalWorkaround) return true;
+  if (isFailedRetryOrFallbackStatus(text)) return false;
+  if (/\b(?:retry|fallback)\s+(?:with|using|via|by)\b/i.test(text)) {
+    return true;
+  }
+  if (isRawToolFailureStatus(text)) return false;
+  return false;
+}
+
+function isFailedRetryOrFallbackStatus(text: string): boolean {
+  return /\b(?:retry|fallback)\s+(?:with|using|via|by)\b.{0,100}\b(?:failed|error|returned\s+\d{3}|timed\s+out|timeout|crashed)\b/i.test(
+    text,
+  ) || /\b(?:when|if)\b.{0,100}\b(?:failed|error|timed\s+out|timeout|crashed)\b.{0,100}\b(?:retry|fallback)\b.{0,60}\b(?:failed|error|timed\s+out|timeout|crashed)\b/i.test(
+    text,
+  );
+}
+
+function hasStatusRecoveryGuidance(text: string): boolean {
+  return (
+    /(?:;|,)\s*(?:use|run|check)\b/i.test(text) ||
+    /(?:;|,)\s*(?:retry|fallback)\s+.{1,80}\binstead\b/i.test(text) ||
+    hasActionableWorkaroundLabel(text)
+  );
+}
+
+function hasActionableWorkaroundLabel(text: string): boolean {
+  const match = /\bworkaround\s*:\s*(.+)$/i.exec(text);
+  if (!match) return false;
+  const detail = match[1]!.trim();
+  if (!detail || /^(?:none|no|n\/a|na|not\s+needed|not\s+available|nothing|-+)$/i.test(detail)) {
+    return false;
+  }
+  return /\b(?:use|run|check|retry|rerun|fallback|switch|install|pin|set|export|disable|enable)\b/i.test(
+    detail,
+  );
+}
+
+function isRawToolFailureStatus(text: string): boolean {
+  return /\b(?:failed|error|returned|timed\s+out|crashed)\b.{0,80}\b(?:after\s+\d+\s+retry\s+attempts?|retry\s+attempts?|returned\s+\d{3}|\d{3})\b|\b(?:fallback|retry)\b.{0,80}\b(?:failed|error|returned\s+\d{3}|timed\s+out|crashed)\b/i.test(
+    text,
+  );
+}
+
+function isConditionalFailureStatus(text: string): boolean {
+  return (
+    /\b(?:when|if)\b.{0,120}\b(?:run|running|ran|check|checking|checked|use|using)\b.{0,120}\b(?:failed|fails|failure|error|errored|timed\s*out|timeout|crashed)\b/i.test(
+      text,
+    ) && !hasStatusRecoveryGuidance(text)
+  );
+}
+
+function isTaskScopedToolFailureReference(text: string): boolean {
+  return (
+    TASK_STATE_PATTERNS.some((pattern) => pattern.test(text)) &&
+    /\b(?:failed|fails|failure|error|errored|timed\s*out|timeout|crashed|checks?)\b/i.test(
+      text,
+    )
+  );
+}
+
+function hasReusableProcedureGuidance(text: string): boolean {
+  if (isConditionalFailureStatus(text)) return false;
+  return /\b(?:always|when|if)\b.{0,160}\b(?:run|running|use|using|check|checks?|verify|retry|fallback|workaround)\b.{0,160}\b(?:before|after|instead|when|if|tests?|giving\s+up)\b|\b(?:when|if)\b.{0,160}\b(?:fails|failed|failure|errors?|errored|timed\s*out|timeout|crashes|crashed)\b.{0,120}\b(?:run|use|check|retry|fallback)\b|\b(?:run|running|use|using|check|checks?|verify|retry|fallback|workaround)\b.{0,160}\b(?:always|when|if|before|after|instead|giving\s+up)\b/i.test(
+    text,
+  );
+}
+
+function isNegatedKeywordOnlyStatus(text: string): boolean {
+  return /^\s*no\s+(?:retry|retries|preference|preferences|fallback|workaround)\b.{0,80}\b(?:needed|required|stated|used|applied|attempted)\b/i.test(
+    text,
+  );
+}
+
+function isPlainNoSignalDiscardCandidate(text: string): boolean {
+  return /^(?:always\s+happy\s+to\s+help|no\s+retry\s+was\s+needed|no\s+preference\s+was\s+stated)$/i.test(
+    text,
+  );
+}
+
+function isTaskReferenceBookkeeping(text: string): boolean {
+  const hasRedactedTaskReference = /\[REDACTED_TASK_REFERENCE\]/i.test(text);
+  const hasSpecificTaskReference = TASK_STATE_PATTERNS.some((pattern) =>
+    pattern.test(text),
+  );
+  if (
+    hasRedactedTaskReference &&
+    /\b(?:check|replying|reply|review|merge|close)\b/i.test(text) &&
+    !/\b(?:when|if)\b/i.test(text) &&
+    !isDocumentationUpdateLesson(text)
+  ) {
+    return true;
+  }
+  if (
+    hasSpecificTaskReference &&
+    /^(?:i\s+prefer|i'd\s+prefer|my\s+preference\s+is|i\s+like|i\s+(?:do\s+not|don'?t)\s+want|(?:please\s+)?(?:keep|avoid|do\s+not|don't|never|prefer|use))\b/i.test(
+      text,
+    ) &&
+    /\b(?:wants?|needs?|requires?|assigned|merged|merge|closed|close|blocked|open|opened|fixed|fix|done|completed|complete|follow-up)\b/i.test(
+      text,
+    ) &&
+    !/^\s*(?:when|if)\b/i.test(text) &&
+    !isDocumentationUpdateLesson(text)
+  ) {
+    return true;
+  }
+  if (
+    hasSpecificTaskReference &&
+    /^\s*(?:please\s+)?use\s+(?:pr|pull\s+request|issue|ticket|task)\s*#?\d+\s*$/i.test(
+      text,
+    ) &&
+    !isDocumentationUpdateLesson(text)
+  ) {
+    return true;
+  }
+  if (hasSpecificTaskReference && !isDocumentationUpdateLesson(text)) {
+    if (
+      /^(?:i\s+prefer|i'd\s+prefer|my\s+preference\s+is|i\s+like|i\s+(?:do\s+not|don'?t)\s+want|(?:please\s+)?(?:keep|avoid|do\s+not|don't|never|prefer|use))\b/i.test(
+        text,
+      ) &&
+      !/\b(?:wants?|needs?|requires?|assigned|merged|merge|closed|close|blocked|open|opened|fixed|fix|done|completed|complete|follow-up|approve|approved|review|reviewed)\b/i.test(
+        text,
+      )
+    ) {
+      return false;
+    }
+    return true;
+  }
+  if (!hasRedactedTaskReference && !hasSpecificTaskReference && hasReusableProcedureGuidance(text)) {
+    return false;
+  }
+  const hasBareBookkeepingReference =
+    /\b(?:pr|pull\s+request|issue|ticket|task)\b/i.test(text) &&
+    /\b(?:wants?|needs?|requires?|assigned|merged|merge|closed|close|blocked|open|opened|fixed|fix|done|completed|complete|follow-up)\b/i.test(
+      text,
+    ) &&
+    !hasReusableProcedureGuidance(text);
+  return (
+    (hasRedactedTaskReference || hasBareBookkeepingReference) &&
+    /\b(?:wants?|needs?|requires?|assigned|merged|merge|closed|close|blocked|open|opened|fixed|fix|done|completed|complete|follow-up|check|replying|reply)\b/i.test(
+      text,
+    ) &&
+    !/\b(?:when|if)\b/i.test(text) &&
+    !isDocumentationUpdateLesson(text)
+  );
+}
+
+function isTransientEnvironmentStatus(text: string): boolean {
+  return (
+    ENVIRONMENT_FACT_PATTERNS.some((pattern) => pattern.test(text)) &&
+    /\b(?:today|yesterday|currently|temporarily|was|were|down|flaky|failing|broken|blocked|green|passing|passed)\b/i.test(
+      text,
+    ) &&
+    !hasReusableProcedureGuidance(text) &&
+    !isDocumentationUpdateLesson(text)
+  );
+}
+
+function isOneOffShouldCorrection(text: string): boolean {
+  return (
+    /\bshould\b/i.test(text) &&
+    /\b(?:failing\s+test|test|file|path|pr|pull\s+request|issue|ticket|task|commit)\b/i.test(
+      text,
+    ) &&
+    !/\b(?:always|never|avoid|prefer|require|validate|verify|retry|redact|fallback|workaround|when|if|docs?|readme|runbook|guide)\b/i.test(
+      text,
+    )
+  );
+}
+
+function isOneOffUserTaskRequest(text: string): boolean {
+  return (
+    /\buser\s+wants?\b/i.test(text) &&
+    /\b(?:fix|fixed|resolve|resolved|repair|repaired|address|addressed)\b/i.test(text) &&
+    /\b(?:bug|issue|problem|failure|failing\s+test|test|error|regression)\b/i.test(text) &&
+    !/\b(?:always|never|avoid|prefer|when|if|before|after|procedure|workflow|docs?|readme|runbook|guide)\b/i.test(
+      text,
+    )
+  );
+}
+
+function isOneOffModalTaskReminder(text: string): boolean {
+  return (
+    /\b(?:must|should)\b/i.test(text) &&
+    /\b(?:resolve|fix|merge|merging|before\s+merging|failing\s+test|test|file|path|pr|pull\s+request|issue|ticket|task|commit)\b/i.test(
+      text,
+    ) &&
+    !hasReusableProcedureGuidance(text) &&
+    !isRawUserPreferenceCorrection(text) &&
+    !isDocumentationUpdateLesson(text)
+  );
+}
+
+function isOneOffPostTaskProgress(text: string): boolean {
+  if (isDocumentationUpdateLesson(text)) {
+    return false;
+  }
+  if (/^(?:updated|implemented|fixed|added|changed|refactored|wrote|created|removed|completed)\b/i.test(text)) {
+    return true;
+  }
+  if (
+    ENVIRONMENT_FACT_PATTERNS.some((pattern) => pattern.test(text)) &&
+    /\b(?:pr|pull\s+request|issue|ticket|task)\s*#?\d+\b/i.test(text)
+  ) {
+    return true;
+  }
+  return (
+    /\b(?:updated|implemented|fixed|merged|reviewed|pushed|opened|addressed|completed|complete|done|blocked|failed)\b/i.test(
+      text,
+    ) &&
+    (/\b(?:pr|pull\s+request|issue|ticket|task|commit|review)\b/i.test(
+      text,
+    ) || ENVIRONMENT_FACT_PATTERNS.some((pattern) => pattern.test(text)))
+  );
+}
+
+interface PostTaskVerificationEvidenceItem {
+  readonly evidence: PostTaskLessonEvidence;
+  readonly privacyFilter: LessonPrivacyFilterDecision;
+}
+
+function createPostTaskVerificationEvidence(
+  verificationSteps: readonly string[],
+): PostTaskVerificationEvidenceItem[] {
+  return verificationSteps.flatMap((step) => {
+    const normalizedStep = step.trim().replace(/\s+/g, ' ');
+    if (!normalizedStep) return [];
+    const decision = createPrivacyDecision(normalizedStep, {
+      flagCustomerData: true,
+    });
+    let sanitizedStep = redactSensitiveText(
+      normalizedStep,
+      decision.redactions,
+    );
+    if (decision.category === 'task-state' && decision.action === 'reject') {
+      sanitizedStep = '[REDACTED_TASK_REFERENCE]';
+    }
+    return [
+      {
+        evidence: {
+          kind: 'verification',
+          summary: summarizePostTaskEvidence('verification', sanitizedStep),
+        },
+        privacyFilter: toPublicPrivacyDecision(decision),
+      },
+    ];
+  });
+}
+
+function attachPostTaskVerificationEvidence(
+  candidates: readonly PostTaskLessonCandidate[],
+  verificationEvidence: readonly PostTaskVerificationEvidenceItem[],
+): readonly PostTaskLessonCandidate[] {
+  if (verificationEvidence.length === 0) return candidates;
+  const reviewableCandidates = candidates.filter(
+    (candidate) => candidate.suggestedDestination !== 'discard',
+  );
+  if (reviewableCandidates.length === 0) return candidates;
+
+  const attachments = new Map<string, PostTaskVerificationEvidenceItem[]>();
+  for (const evidence of verificationEvidence) {
+    const match = chooseVerificationEvidenceCandidate(
+      evidence,
+      reviewableCandidates,
+    );
+    if (!match) continue;
+    attachments.set(match.id, [...(attachments.get(match.id) ?? []), evidence]);
+  }
+
+  return candidates.map((candidate) =>
+    attachVerificationEvidenceToCandidate(
+      candidate,
+      attachments.get(candidate.id) ?? [],
+    ),
+  );
+}
+
+function attachVerificationEvidenceToCandidate(
+  candidate: PostTaskLessonCandidate,
+  verificationEvidence: readonly PostTaskVerificationEvidenceItem[],
+): PostTaskLessonCandidate {
+  if (candidate.suggestedDestination === 'discard' || verificationEvidence.length === 0) {
+    return candidate;
+  }
+  return {
+    ...candidate,
+    evidence: [
+      ...candidate.evidence,
+      ...verificationEvidence.map((item) => item.evidence),
+    ],
+    privacyFilter: mergePostTaskPrivacyFilters(
+      candidate.privacyFilter,
+      verificationEvidence.map((item) => item.privacyFilter),
+    ),
+  };
+}
+
+function chooseVerificationEvidenceCandidate(
+  verificationEvidence: PostTaskVerificationEvidenceItem,
+  candidates: readonly PostTaskLessonCandidate[],
+): PostTaskLessonCandidate | undefined {
+  const ranked = candidates
+    .map((candidate) => ({
+      candidate,
+      score: scoreVerificationEvidenceMatch(
+        verificationEvidence.evidence.summary,
+        candidate,
+      ),
+    }))
+    .filter((entry) => entry.score >= 2)
+    .sort((left, right) => right.score - left.score);
+  if (ranked.length === 0) return undefined;
+  if (ranked.length > 1 && ranked[0]!.score === ranked[1]!.score) {
+    return undefined;
+  }
+  return ranked[0]!.candidate;
+}
+
+function scoreVerificationEvidenceMatch(
+  verificationSummary: string,
+  candidate: PostTaskLessonCandidate,
+): number {
+  const verificationTokens = tokenizePostTaskVerificationText(verificationSummary);
+  const candidateTokens = new Set(
+    tokenizePostTaskVerificationText(candidate.text),
+  );
+  return verificationTokens.filter((token) => candidateTokens.has(token)).length;
+}
+
+function tokenizePostTaskVerificationText(text: string): string[] {
+  const stopWords = new Set([
+    'verification',
+    'evidence',
+    'verified',
+    'confirmed',
+    'against',
+    'after',
+    'before',
+    'with',
+    'that',
+    'this',
+    'the',
+    'and',
+    'for',
+    'was',
+    'were',
+    'ran',
+    'run',
+  ]);
+  return Array.from(
+    new Set(
+      text
+        .toLowerCase()
+        .match(/[a-z0-9][a-z0-9._-]{1,}/g)
+        ?.map((token) =>
+          token.length > 3 && token.endsWith('s') ? token.slice(0, -1) : token,
+        )
+        .filter((token) => !stopWords.has(token)) ?? [],
+    ),
+  );
+}
+
+function mergePostTaskPrivacyFilters(
+  base: LessonPrivacyFilterDecision,
+  attached: readonly LessonPrivacyFilterDecision[],
+): LessonPrivacyFilterDecision {
+  if (attached.length === 0) return base;
+  const redactions = [...base.redactions, ...attached.flatMap((item) => item.redactions)];
+  const flags = Array.from(
+    new Set([...base.flags, ...attached.flatMap((item) => item.flags)]),
+  ).sort();
+  const hasRejectedEvidence = attached.some(
+    (item) => item.action === 'reject' && item.category !== 'task-state',
+  );
+  const sensitive = base.sensitive || attached.some((item) => item.sensitive);
+  return {
+    ...base,
+    action: base.action === 'reject' || hasRejectedEvidence ? 'reject' : 'admit',
+    sensitive,
+    approvalRequired:
+      base.approvalRequired || sensitive || hasRejectedEvidence,
+    flags,
+    redactions,
+    originalHash: stableHash(
+      [base.originalHash, ...attached.map((item) => item.originalHash)].join('\n'),
+    ),
+    reason: hasRejectedEvidence
+      ? 'Attached verification evidence requires reviewer privacy handling before durable learning.'
+      : sensitive
+        ? PRIVACY_FILTER_SENSITIVE_REASON
+        : base.reason,
+  };
+}
+
+function summarizePostTaskEvidence(
+  kind: PostTaskLessonEvidenceKind,
+  text: string,
+): string {
+  const prefix: Record<PostTaskLessonEvidenceKind, string> = {
+    'user-correction': 'User correction',
+    'tool-failure': 'Tool failure workaround',
+    verification: 'Verification evidence',
+    'completion-summary': 'Completion summary',
+    'task-note': 'Task note',
+  };
+  return `${prefix[kind]}: ${text.slice(0, 240)}`;
+}
+
+function dedupePostTaskLessonCandidates(
+  candidates: readonly PostTaskLessonCandidate[],
+): PostTaskLessonCandidate[] {
+  const dedupedById = new Map<string, PostTaskLessonCandidate>();
+  for (const candidate of candidates) {
+    const existing = dedupedById.get(candidate.id);
+    if (!existing) {
+      dedupedById.set(candidate.id, candidate);
+      continue;
+    }
+    const primary =
+      existing.suggestedDestination === 'discard' &&
+      candidate.suggestedDestination !== 'discard'
+        ? candidate
+        : existing;
+    const secondary = primary === existing ? candidate : existing;
+    dedupedById.set(candidate.id, {
+      ...primary,
+      evidence: [...primary.evidence, ...secondary.evidence],
+      privacyFilter: mergePostTaskPrivacyFilters(primary.privacyFilter, [
+        secondary.privacyFilter,
+      ]),
+    });
+  }
+  return [...dedupedById.values()];
 }
 
 export class LessonRecorder {
@@ -1915,7 +2820,7 @@ function isLessonScopeAllowed(
   if (isEmptyLessonInjectionContext(context)) {
     return false;
   }
-  const nowMs = parseScopeTimestamp(context.now ?? new Date().toISOString());
+  const nowMs = parseContextTimestamp(context.now ?? new Date().toISOString());
   if (nowMs === undefined) {
     return false;
   }
@@ -1982,26 +2887,67 @@ function hasValidScopeAuditTrail(
   if (!Array.isArray(scope.auditTrail)) {
     return false;
   }
-  return scope.auditTrail.some((entry) => {
-    if (entry === null || typeof entry !== 'object') {
-      return false;
-    }
-    const candidate = entry as Partial<LessonScopeAuditEntry>;
-    return (
-      typeof candidate.changedAt === 'string' &&
-      parseScopeTimestamp(candidate.changedAt) !== undefined &&
-      candidate.toScope === currentScope &&
-      typeof candidate.actor === 'string' &&
-      candidate.actor.trim().length > 0 &&
-      typeof candidate.reason === 'string' &&
-      candidate.reason.trim().length > 0
-    );
-  });
+  const validEntries = scope.auditTrail.filter(
+    (entry): entry is LessonScopeAuditEntry => isValidScopeAuditEntry(entry),
+  );
+  const latestEntry = validEntries.reduce<LessonScopeAuditEntry | undefined>(
+    (latest, entry) => {
+      if (latest === undefined) {
+        return entry;
+      }
+      return parseScopeTimestamp(entry.changedAt)! >=
+        parseScopeTimestamp(latest.changedAt)!
+        ? entry
+        : latest;
+    },
+    undefined,
+  );
+  return latestEntry?.toScope === currentScope;
+}
+
+function isValidScopeAuditEntry(
+  entry: unknown,
+): entry is LessonScopeAuditEntry {
+  if (entry === null || typeof entry !== 'object') {
+    return false;
+  }
+  const candidate = entry as Partial<LessonScopeAuditEntry>;
+  return (
+    typeof candidate.changedAt === 'string' &&
+    parseScopeTimestamp(candidate.changedAt) !== undefined &&
+    isKnownLessonScopeKind(candidate.toScope) &&
+    (candidate.fromScope === undefined ||
+      isKnownLessonScopeKind(candidate.fromScope)) &&
+    typeof candidate.actor === 'string' &&
+    candidate.actor.trim().length > 0 &&
+    typeof candidate.reason === 'string' &&
+    candidate.reason.trim().length > 0
+  );
 }
 
 function parseScopeTimestamp(timestamp: string): number | undefined {
   const parsed = Date.parse(timestamp);
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+  return new Date(parsed).toISOString() === timestamp ? parsed : undefined;
+}
+
+function parseContextTimestamp(timestamp: string): number | undefined {
+  const parsed = Date.parse(timestamp);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function isKnownLessonScopeKind(
+  scope: unknown,
+): scope is LessonScopeKind {
+  return (
+    scope === 'global' ||
+    scope === 'repo' ||
+    scope === 'role' ||
+    scope === 'profile' ||
+    scope === 'task'
+  );
 }
 
 function isEmptyLessonInjectionContext(
@@ -2027,7 +2973,12 @@ function matchesRequiredAllowlist(
   allowed: readonly string[] | undefined,
   actual: string | undefined,
 ): boolean {
-  return actual !== undefined && allowed?.includes(actual) === true;
+  return (
+    actual !== undefined &&
+    Array.isArray(allowed) &&
+    allowed.every((value) => typeof value === 'string') &&
+    allowed.includes(actual)
+  );
 }
 
 export function detectLessonContradictions(
@@ -3173,6 +4124,7 @@ function createPrivacyDecision(
   }
   const containsCustomerData =
     options.flagCustomerData !== false &&
+    !isGenericCustomerPolicyText(rawText) &&
     CUSTOMER_DATA_PATTERNS.some((pattern) => pattern.test(rawText));
   if (containsCustomerData) {
     flags.add('customer-data');
@@ -3219,11 +4171,48 @@ function createPrivacyDecision(
   };
 }
 
+function isGenericCustomerPolicyText(text: string): boolean {
+  return (
+    /\bcustomer\s+(?:data|identifiers?|records?|information|privacy|pii)\b/i.test(
+      text,
+    ) && !hasConcreteCustomerReference(text)
+  );
+}
+
+function hasConcreteCustomerReference(text: string): boolean {
+  return /\b(?:[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*|[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*|[a-z][A-Za-z0-9_.:-]*\s+(?:data|records?|information|identifiers?))|[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*|[Cc]ustomer\s+(?:account\s+)?(?!(?:data|identifiers?|records?|information|privacy|pii)\b)(?:[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|[A-Za-z0-9][A-Za-z0-9_.:-]*)|[Cc]ustomer\s+(?:data|identifiers?|records?|information|privacy|pii)\s*(?:(?:for|[:=-])\s*|\s+)(?!(?:should|are|is|must|never|not|stay|stays|remain|remains|be|being|was|were)\b)[A-Za-z0-9][A-Za-z0-9_.:-]*)\b/.test(
+    text,
+  );
+}
+
 function extractCustomerSegments(text: string): string[] {
-  const segments =
-    text.match(
-      /\b[Cc]ustomer(?:\s+account)?(?:\s+[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})?(?:\s+[A-Za-z0-9_.:-]+){1,3}\b|\b[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b|\b[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*)(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b|\b[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b/g,
-    ) ?? [];
+  const trailingCustomerToken =
+    '(?:\\s+(?!(?:and|needs?|contains?|before|for|with)\\b)(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}';
+  const patterns = [
+    new RegExp(
+      `\\b[Tt]enant\\s+[A-Za-z0-9][A-Za-z0-9_.:-]*${trailingCustomerToken}\\b`,
+      'g',
+    ),
+    new RegExp(
+      `\\b[Cc]lient\\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*|[a-z][A-Za-z0-9_.:-]*\\s+(?:data|records?|information|identifiers?))${trailingCustomerToken}\\b`,
+      'g',
+    ),
+    new RegExp(
+      `\\b[Aa]ccount\\s+[A-Z0-9][A-Za-z0-9_.:-]*${trailingCustomerToken}\\b`,
+      'g',
+    ),
+    new RegExp(
+      `\\b[Cc]ustomer\\s+account(?:\\s+[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,})?${trailingCustomerToken}\\b|\\b[Cc]ustomer\\s+[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}${trailingCustomerToken}\\b|\\b[Cc]ustomer\\s+(?!(?:data|identifiers?|records?|information|privacy|pii)\\b)[A-Za-z0-9][A-Za-z0-9_.:-]*${trailingCustomerToken}\\b`,
+      'g',
+    ),
+    new RegExp(
+      `\\b[Cc]ustomer\\s+(?:data|identifiers?|records?|information|privacy|pii)\\s*(?:(?:for|[:=-])\\s*|\\s+)(?!(?:should|are|is|must|never|not|stay|stays|remain|remains|be|being|was|were)\\b)[A-Za-z0-9][A-Za-z0-9_.:-]*${trailingCustomerToken}\\b`,
+      'g',
+    ),
+  ];
+  const segments = patterns.flatMap((pattern) =>
+    Array.from(text.matchAll(pattern), (match) => match[1] ?? match[0]),
+  );
   return segments.flatMap((segment) => {
     const emailMatch = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.exec(
       segment,
@@ -3231,10 +4220,13 @@ function extractCustomerSegments(text: string): string[] {
     if (!emailMatch) {
       return [segment];
     }
+    const leadingContext = segment.slice(0, emailMatch.index).trim();
     const trailingIdentifier = segment
       .slice(emailMatch.index + emailMatch[0].length)
       .trim();
-    return trailingIdentifier ? [trailingIdentifier] : [];
+    return [leadingContext, trailingIdentifier].filter(
+      (part): part is string => part.length > 0,
+    );
   });
 }
 

@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.14.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.13.0...franken-types-v0.14.0) (2026-07-18)
+
+
+### Features
+
+* **dr:** add point-in-time incident export ([#2551](https://github.com/djm204/frankenbeast/issues/2551)) ([38197b9](https://github.com/djm204/frankenbeast/commit/38197b9e2c6c14516a38270c3c6d63d31afc880e))
+
+
+### Bug Fixes
+
+* **security:** audit HITL approval replay ([#2576](https://github.com/djm204/frankenbeast/issues/2576)) ([c89ea75](https://github.com/djm204/frankenbeast/commit/c89ea75593d8b75d1c787d978d1aedac15624f7b))
+
+
+### Tests
+
+* **stability:** add stream replay coverage ([#2578](https://github.com/djm204/frankenbeast/issues/2578)) ([92bacf0](https://github.com/djm204/frankenbeast/commit/92bacf068b14e2e6e25d97eca0f543afcad56a41))
+
+## [0.13.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.12.0...franken-types-v0.13.0) (2026-07-16)
+
+
+### Features
+
+* **learning:** add skill evolution review gate ([#2413](https://github.com/djm204/frankenbeast/issues/2413)) ([25cec22](https://github.com/djm204/frankenbeast/commit/25cec22c6512dc810f5a013b91db89242c7c78ce))
+
 ## [0.12.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.11.0...franken-types-v0.12.0) (2026-07-15)
 
 

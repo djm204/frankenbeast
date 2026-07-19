@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.9.2](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.9.1...franken-critique-v0.9.2) (2026-07-18)
+
+
+### Bug Fixes
+
+* **critique:** forward reflection max tokens ([891d990](https://github.com/djm204/frankenbeast/commit/891d990f24fed66da5b51f66052e0a60bc71af89)), closes [#2045](https://github.com/djm204/frankenbeast/issues/2045)
+* **critique:** harden lesson scope metadata validation ([#2613](https://github.com/djm204/frankenbeast/issues/2613)) ([ab0ea47](https://github.com/djm204/frankenbeast/commit/ab0ea4751f2838278ead921367adb088de1597ff))
+* **critique:** return structured 400 for malformed review JSON ([#2595](https://github.com/djm204/frankenbeast/issues/2595)) ([261a482](https://github.com/djm204/frankenbeast/commit/261a48201ed50f104e9c4753beff6d0a66802fa0))
+* **critique:** validate rate limit configuration ([73a44f7](https://github.com/djm204/frankenbeast/commit/73a44f76249b9b07ea4b5435416e103bf6d1be5c)), closes [#2042](https://github.com/djm204/frankenbeast/issues/2042)
+
+
+### Documentation
+
+* remove PM-swarm terminology from Frankenbeast docs ([dcf183d](https://github.com/djm204/frankenbeast/commit/dcf183da6c8c176ecabd5278adbd6d3e6068be17))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.13.0 to 0.14.0
+
+## [0.9.1](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.9.0...franken-critique-v0.9.1) (2026-07-16)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.12.0 to 0.13.0
+
 ## [0.9.0](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.8.3...franken-critique-v0.9.0) (2026-07-16)
 
 

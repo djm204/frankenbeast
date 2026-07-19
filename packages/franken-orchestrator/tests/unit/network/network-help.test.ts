@@ -11,4 +11,11 @@ describe('renderNetworkHelp', () => {
     expect(help).toContain('fails closed');
     expect(help).toContain('FRANKENBEAST_BEAST_OPERATOR_TOKEN');
   });
+
+  it('documents the network health monitor command and JSON mode', () => {
+    const help = renderNetworkHelp();
+
+    expect(help).toContain('frankenbeast network health [--json]');
+    expect(help).toContain('frankenbeast network health --json');
+  });
 });

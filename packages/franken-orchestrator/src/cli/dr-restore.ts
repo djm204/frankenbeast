@@ -4,6 +4,7 @@ import {
   buildRestoreDryRunReport,
   type RestorePreviewManifest,
 } from '../dr/restore-preview.js';
+import { diffStateSnapshotDirectories } from '../dr/state-snapshot-diff.js';
 import {
   createEncryptedStateBackup,
   readStateBackupEnvelope,
@@ -17,15 +18,18 @@ import {
   retireDeadLetterEntry,
   type DeadLetterEntry,
 } from '../dr/dead-letter-queue.js';
-import { redactLogData } from '../logging/redaction.js';
+import { createPointInTimeExport } from '../dr/point-in-time-export.js';
+import { maskOpaqueSecretLiterals, redactLogData } from '../logging/redaction.js';
 
 export interface DrCommandDeps {
   readonly action:
     | 'backup'
+    | 'export'
     | 'list'
     | 'verify'
     | 'restore'
     | 'restore-dry-run'
+    | 'snapshot-diff'
     | 'dead-letter-list'
     | 'dead-letter-inspect'
     | 'dead-letter-replay-dry-run'
@@ -93,20 +97,6 @@ function printRedactedJson(print: (message: string) => void, report: unknown): v
   print(maskOpaqueSecretLiterals(JSON.stringify(redactLogData(report), null, 2)));
 }
 
-function maskOpaqueSecretLiterals(text: string): string {
-  return text
-    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/gu, '<redacted>')
-    .replace(/\bgithub_pat_[A-Za-z0-9_]{12,}\b/gu, '<redacted>')
-    .replace(/\bsk-[A-Za-z0-9_-]{12,}\b/gu, '<redacted>')
-    .replace(/\bxox[baprs]-[A-Za-z0-9-]{10,}\b/gu, '<redacted>')
-    .replace(/\b([A-Za-z][A-Za-z0-9+.-]*:\/\/[^:\s"'/@]+):[^@\s"']+@/gu, '$1:<redacted>@')
-    .replace(/\b((?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/[^:\s"']+):[^@\s"']+@/giu, '$1:<redacted>@')
-    .replace(/\b(?:Bearer|Basic|Bot)\s+[A-Za-z0-9._~+/=-]{8,}\b/giu, (match) => `${match.split(/\s+/u)[0]} <redacted>`)
-    .replace(/((?:^|[\s"'])--(?:api-?key|auth|authorization|bearer|password|secret|token)\s+)[^\s"']+/giu, '$1<redacted>')
-    .replace(/((?:^|[\s"'])--(?:api-?key|auth|authorization|bearer|password|secret|token)=)[^\s"']+/giu, '$1<redacted>')
-    .replace(/("--(?:api-?key|auth|authorization|bearer|password|secret|token)"\s*,\s*")[^"]+/giu, '$1<redacted>');
-}
-
 function summarizeDeadLetterEntry(entry: DeadLetterEntry): Omit<DeadLetterEntry, 'lastError' | 'payload'> {
   return {
     id: entry.id,
@@ -126,6 +116,14 @@ function summarizeDeadLetterEntry(entry: DeadLetterEntry): Omit<DeadLetterEntry,
 
 export async function handleDrCommand(deps: DrCommandDeps): Promise<void> {
   const { action, backupManifestPath, liveManifestPath, keyFilePath, print } = deps;
+  if (action === 'snapshot-diff') {
+    if (!backupManifestPath || !liveManifestPath) {
+      throw new Error('dr snapshot-diff requires two snapshot/export directories: <before-dir> <after-dir>');
+    }
+    printRedactedJson(print, await diffStateSnapshotDirectories(backupManifestPath, liveManifestPath));
+    return;
+  }
+
   if (action === 'dead-letter-list') {
     if (!backupManifestPath) {
       throw new Error('dr dead-letter-list requires <queue-file>');
@@ -213,6 +211,19 @@ export async function handleDrCommand(deps: DrCommandDeps): Promise<void> {
     return;
   }
 
+  if (action === 'export') {
+    if (!backupManifestPath || !liveManifestPath) {
+      throw new Error('dr export requires <state-dir> <export-file>');
+    }
+    printRedactedJson(print, await createPointInTimeExport({
+      stateDir: backupManifestPath,
+      outputPath: liveManifestPath,
+      dryRun: deps.dryRun === true,
+      ...(deps.generatedAt === undefined ? {} : { generatedAt: deps.generatedAt }),
+    }));
+    return;
+  }
+
   if (action === 'list') {
     if (!backupManifestPath) {
       throw new Error('dr list requires <backup-file>');
@@ -252,7 +263,7 @@ export async function handleDrCommand(deps: DrCommandDeps): Promise<void> {
   }
 
   if (action !== 'restore-dry-run') {
-    throw new Error('Usage: frankenbeast dr <backup|list|verify|restore|restore-dry-run|dead-letter-list|dead-letter-inspect|dead-letter-replay-dry-run|dead-letter-retire> ...');
+    throw new Error('Usage: frankenbeast dr <backup|export|list|verify|restore|restore-dry-run|snapshot-diff|dead-letter-list|dead-letter-inspect|dead-letter-replay-dry-run|dead-letter-retire> ...');
   }
   if (!backupManifestPath || !liveManifestPath) {
     throw new Error('dr restore-dry-run requires two manifest JSON files: <backup-manifest.json> <live-manifest.json>');

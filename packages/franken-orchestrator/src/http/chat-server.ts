@@ -1,10 +1,11 @@
 import { createServer, type Server as HttpServer } from 'node:http';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { Hono } from 'hono';
 import type { ILlmClient } from '@franken/types';
 import { FileSessionStore, type ISessionStore } from '../chat/session-store.js';
+import { FileApprovalAuditLog } from '../chat/approval-audit-log.js';
 import type { ChatSession } from '../chat/types.js';
 import { createChatRuntime, type ChatRuntimeBundle } from '../chat/chat-runtime-factory.js';
 import { ChatBeastDispatchAdapter } from '../chat/beast-dispatch-adapter.js';
@@ -277,6 +278,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
   const sessionStore = resolveChatServerSessionStore(options);
   const chatRateLimiter = createChatRateLimiter(options.chatRateLimit ?? options.beastControl?.rateLimit ?? DEFAULT_CHAT_RATE_LIMIT);
   const chatMutationAdmission = new ChatMutationAdmission(chatRateLimiter);
+  const approvalAuditLog = new FileApprovalAuditLog();
   const runtime = createChatRuntime({
     chatLlm: options.llm,
     projectName: options.projectName,
@@ -304,7 +306,18 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     ?? (options.commsConfig
       ? createCommsRuntimeAdapter(runtime.runtime, sessionStore, options.sessionStoreDir, options.projectName, chatRateLimiter)
       : undefined);
-  const chatStreamTicketStore = effectiveOperatorToken ? new SseConnectionTicketStore() : undefined;
+  const chatStreamTicketStore = effectiveOperatorToken
+    ? (() => {
+        const ticketStoreDir = join(options.sessionStoreDir, 'sse-connection-tickets');
+        mkdirSync(ticketStoreDir, { recursive: true, mode: 0o700 });
+        // The directory protects both the database and SQLite WAL sidecars.
+        // Enforce the mode for pre-existing directories as well as new ones.
+        chmodSync(ticketStoreDir, 0o700);
+        return new SseConnectionTicketStore({
+          databasePath: join(ticketStoreDir, 'tickets.sqlite'),
+        });
+      })()
+    : undefined;
   const app = createChatApp({
     sessionStore,
     engine: runtime.engine,
@@ -327,6 +340,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     ...(options.chatRateLimit ? { chatRateLimit: options.chatRateLimit } : {}),
     chatRateLimiter,
     chatMutationAdmission,
+    approvalAuditLog,
   });
   const server = createServer((request, response) => {
     void handleHonoHttpRequest(app, request, response);
@@ -343,6 +357,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     tokenSecret,
     chatRateLimiter,
     chatMutationAdmission,
+    approvalAuditLog,
     ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
     ...(chatMessageRateLimit ? { chatMessageRateLimit } : {}),
     ...(options.chatRateLimit ? { chatRateLimit: options.chatRateLimit } : {}),

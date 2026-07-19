@@ -5,7 +5,7 @@ function printLine(...args: unknown[]): void {
 }
 
 
-import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { accessSync, constants, existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
@@ -36,13 +36,18 @@ import { createDefaultRegistry } from '../skills/providers/cli-provider.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
 import { basename, delimiter, dirname, join, resolve as resolvePath } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { startChatServer } from '../http/chat-server.js';
 import { createSqliteAnalyticsService } from '../analytics/sqlite-analytics-service.js';
+import { buildSloDashboardFromKanban, createSqliteSloDashboardSource } from '../availability/slo-dashboard.js';
 import { parse as parseDotenv } from 'dotenv';
 import { createSecretStore } from '../network/secret-store.js';
 import { filterNetworkServices, resolveNetworkServices, type ResolvedNetworkService } from '../network/network-registry.js';
-import { NetworkStateStore } from '../network/network-state-store.js';
+import {
+  NetworkStateStore,
+  type ManagedNetworkServiceState,
+  type NetworkStateCorruptionDiagnostic,
+} from '../network/network-state-store.js';
 import { NetworkLogStore } from '../network/network-logs.js';
 import { NetworkSupervisor } from '../network/network-supervisor.js';
 import { renderNetworkHelp } from '../network/network-help.js';
@@ -68,10 +73,20 @@ import { loadRunConfigFromEnv, type RunConfig } from './run-config-loader.js';
 import { resolveProviderCatalogEntry, resolveProviderType, type ProviderConfig } from '../providers/provider-config.js';
 import type { ProviderRegistry as LlmProviderRegistry } from '../providers/provider-registry.js';
 import { redactLogData } from '../logging/redaction.js';
+import type { NetworkServiceHealthStatus } from '../network/network-health.js';
+import { resolveServiceHealth } from '../network/network-health.js';
 import {
   type DashboardAvailabilitySnapshot,
+  type DashboardDependencySnapshot,
   type DashboardProviderSnapshot,
 } from '../http/routes/dashboard-status.js';
+import { buildServiceHealthSnapshot } from '../http/routes/service-health.js';
+
+const DEFAULT_SLO_KANBAN_DB = () => join(process.env.HERMES_HOME ?? join(homedir(), '.hermes'), 'kanban.db');
+
+function resolveSloKanbanDbPath(): string {
+  return process.env.HERMES_KANBAN_DB ?? DEFAULT_SLO_KANBAN_DB();
+}
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -1393,6 +1408,11 @@ async function runChatCommandIfRequested(
               skillManager,
               getSecurityConfig: () => resolveConfigSecurity(mutableConfig),
               getProviders: () => buildDashboardProviderSnapshot(mutableConfig, providerRegistry, [resolveSelectedProvider(args, mutableConfig), ...(args.providers ?? [])]),
+              getAvailability: async () => {
+                const supervisor = createDefaultNetworkDeps(root).createSupervisor(paths);
+                const providers = buildDashboardProviderSnapshot(mutableConfig, providerRegistry, [resolveSelectedProvider(args, mutableConfig), ...(args.providers ?? [])]);
+                return buildCliServiceHealthSnapshot(args, mutableConfig, root, paths, supervisor, providers);
+              },
               getMaintenanceMode: () => {
                 if (localBeastServices) return localBeastServices.maintenance.getState();
                 if (beastDaemonUrl && beastOperatorToken) {
@@ -1400,6 +1420,7 @@ async function runChatCommandIfRequested(
                 }
                 return MaintenanceModeService.forProjectRoot(root).getState();
               },
+              getSloDashboard: () => buildSloDashboardFromKanban(createSqliteSloDashboardSource({ kanbanDbPath: resolveSloKanbanDbPath() })),
             },
           }
         : {}),
@@ -1486,7 +1507,8 @@ export async function main(): Promise<void> {
     return;
   }
 
-  const suppressBanner = args.subcommand === 'network' && args.networkAction === 'credentials';
+  const suppressBanner = args.subcommand === 'network'
+    && (args.networkAction === 'credentials' || (args.networkAction === 'health' && args.json));
   if (!suppressBanner && process.env.FRANKENBEAST_NETWORK_MANAGED !== '1') {
     printLine(await renderBanner(root));
   }
@@ -1722,7 +1744,13 @@ export interface NetworkCommandSupervisorLike {
   }): Promise<{ services: Array<{ id: string; status?: string | undefined; url?: string | undefined }> }>;
   down(): Promise<void>;
   stopAll(state: Awaited<ReturnType<NetworkCommandSupervisorLike['up']>>): Promise<void>;
-  status(): Promise<{ mode?: string; secureBackend?: string; services: Array<{ id: string; status: string }>; availability?: DashboardAvailabilitySnapshot }>;
+  status(): Promise<{
+    mode?: string;
+    secureBackend?: string;
+    services: NetworkServiceHealthStatus[];
+    availability?: DashboardAvailabilitySnapshot;
+    stateCorruptions?: NetworkStateCorruptionDiagnostic[] | undefined;
+  }>;
   stop(target: string | 'all'): Promise<void>;
   logs(target: string | 'all'): Promise<string[]>;
 }
@@ -1794,7 +1822,7 @@ async function waitForTerminationSignal(root: string): Promise<void> {
   });
 }
 
-function formatStatus(status: { mode?: string; secureBackend?: string; services: Array<{ id: string; status: string }>; availability?: DashboardAvailabilitySnapshot }): string[] {
+function formatStatus(status: { mode?: string; secureBackend?: string; services: NetworkServiceHealthStatus[]; availability?: DashboardAvailabilitySnapshot }): string[] {
   const lines = [
     `Mode: ${status.mode ?? 'unknown'}`,
   ];
@@ -1808,19 +1836,241 @@ function formatStatus(status: { mode?: string; secureBackend?: string; services:
   }
 
   if (status.availability) {
-    lines.push(`Dependency availability: ${status.availability.status}`);
-    for (const dependency of status.availability.dependencies) {
-      lines.push(`dependency ${dependency.name} (${dependency.type}): ${dependency.status} — ${dependency.summary}`);
-      if (dependency.remediationHint) {
-        lines.push(`  remediation: ${dependency.remediationHint}`);
-      }
-      if (dependency.safeWork.length > 0) {
-        lines.push(`  safe work: ${dependency.safeWork.join(' ')}`);
-      }
-    }
+    lines.push(...formatAvailability(status.availability, 'Dependency availability'));
   }
 
   return lines;
+}
+
+function formatAvailability(availability: DashboardAvailabilitySnapshot, label = 'Service health'): string[] {
+  const lines = [`${label}: ${availability.status}`];
+  for (const dependency of availability.dependencies) {
+    lines.push(`dependency ${dependency.name} (${dependency.type}): ${dependency.status} — ${dependency.summary}`);
+    if (dependency.remediationHint) {
+      lines.push(`  remediation: ${dependency.remediationHint}`);
+    }
+    if (dependency.safeWork.length > 0) {
+      lines.push(`  safe work: ${dependency.safeWork.join(' ')}`);
+    }
+  }
+  return lines;
+}
+
+function buildGithubHealthDependency(): DashboardDependencySnapshot {
+  const hasToken = Boolean(firstNonEmptyEnv('GITHUB_TOKEN', 'GH_TOKEN'));
+  const hasGh = isCommandAvailable('gh');
+  const ghAuthenticated = hasGh && isGhAuthenticated();
+  if (hasToken && hasGh) {
+    return {
+      name: 'github-api',
+      type: 'github',
+      status: 'healthy',
+      summary: 'A GitHub token and the gh CLI are available for issue and PR automation.',
+      remediationHint: 'No remediation needed.',
+      safeWork: ['Issue and PR automation can continue.'],
+    };
+  }
+  if (hasToken) {
+    return {
+      name: 'github-api',
+      type: 'github',
+      status: 'degraded',
+      summary: 'A GitHub token is available, but the gh CLI is missing; repo issue and PR automation uses gh commands.',
+      remediationHint: 'Install gh and verify `gh auth status`, or avoid unattended issue/PR automation on this host.',
+      safeWork: ['Continue local implementation and tests; use GitHub automation only after gh is installed.'],
+    };
+  }
+  if (hasGh) {
+    return {
+      name: 'github-api',
+      type: 'github',
+      status: ghAuthenticated ? 'healthy' : 'degraded',
+      summary: ghAuthenticated
+        ? 'The gh CLI is installed and authenticated for issue and PR automation.'
+        : 'The gh CLI is installed, but this process could not verify GitHub authentication.',
+      remediationHint: ghAuthenticated ? 'No remediation needed.' : 'Run `gh auth status` or export GITHUB_TOKEN before unattended GitHub automation.',
+      safeWork: ghAuthenticated ? ['Issue and PR automation can continue.'] : ['Interactive gh-authenticated workflows may work; verify before unattended automation.'],
+    };
+  }
+  return {
+    name: 'github-api',
+    type: 'github',
+    status: 'unavailable',
+    summary: 'No GitHub token or gh executable was found for issue and PR automation.',
+    remediationHint: 'Install gh and authenticate, or export GITHUB_TOKEN/GH_TOKEN.',
+    safeWork: ['Continue local-only implementation and tests.'],
+  };
+}
+
+let ghAuthCache: { checkedAt: number; cacheKey: string; authenticated: boolean } | undefined;
+
+function isGhAuthenticated(): boolean {
+  const now = Date.now();
+  const cacheKey = `${process.env.PATH ?? ''}\u0000${process.env.GH_TOKEN ?? ''}\u0000${process.env.GITHUB_TOKEN ?? ''}`;
+  if (ghAuthCache && ghAuthCache.cacheKey === cacheKey && now - ghAuthCache.checkedAt < 30_000) {
+    return ghAuthCache.authenticated;
+  }
+  let authenticated = false;
+  try {
+    execFileSync('gh', ['auth', 'status', '--hostname', 'github.com'], { stdio: 'ignore', timeout: 2_000 });
+    authenticated = true;
+  } catch {
+    authenticated = false;
+  }
+  ghAuthCache = { checkedAt: now, cacheKey, authenticated };
+  return authenticated;
+}
+
+function buildStateStoreHealthDependency(
+  paths: Pick<NetworkPaths, 'frankenbeastDir'>,
+  corruptions: readonly NetworkStateCorruptionDiagnostic[] = [],
+): DashboardDependencySnapshot {
+  const corruption = corruptions[0];
+  if (corruption) {
+    return {
+      name: 'state-store',
+      type: 'state-store',
+      status: 'degraded',
+      summary: `Managed network state at ${corruption.path} is malformed and was quarantined${corruption.quarantinePath ? ` at ${corruption.quarantinePath}` : ''}: ${corruption.reason}.`,
+      remediationHint: corruption.repairHint,
+      safeWork: ['Continue read-only inspection; recover or restart affected managed services before trusting persisted network state.'],
+    };
+  }
+  const networkStateDir = join(paths.frankenbeastDir, 'network');
+  const candidate = existsSync(networkStateDir) ? networkStateDir : nearestExistingParent(networkStateDir);
+  try {
+    if (existsSync(paths.frankenbeastDir) && !statSync(paths.frankenbeastDir).isDirectory()) {
+      return {
+        name: 'state-store',
+        type: 'state-store',
+        status: 'unavailable',
+        summary: `State path ${paths.frankenbeastDir} exists but is not a directory.`,
+        remediationHint: 'Move or remove the file at the state path, then create a writable .fbeast directory before running managed services.',
+        safeWork: ['Continue read-only inspection; avoid operations that need persisted state.'],
+      };
+    }
+    if (existsSync(networkStateDir) && !statSync(networkStateDir).isDirectory()) {
+      return {
+        name: 'state-store',
+        type: 'state-store',
+        status: 'unavailable',
+        summary: `Network state path ${networkStateDir} exists but is not a directory.`,
+        remediationHint: 'Move or remove the file at the network state path, then create a writable .fbeast/network directory before running managed services.',
+        safeWork: ['Continue read-only inspection; avoid operations that need persisted state.'],
+      };
+    }
+    accessSync(candidate, constants.W_OK | constants.X_OK);
+    return {
+      name: 'state-store',
+      type: 'state-store',
+      status: 'healthy',
+      summary: `Network state directory ${networkStateDir} is writable or can be created.`,
+      remediationHint: 'No remediation needed.',
+      safeWork: ['Stateful orchestrator, web, and network operations can persist status.'],
+    };
+  } catch {
+    return {
+      name: 'state-store',
+      type: 'state-store',
+      status: 'unavailable',
+      summary: `Network state directory ${networkStateDir} is not writable by this process.`,
+      remediationHint: 'Fix filesystem ownership/permissions or choose a writable --base-dir before running managed services.',
+      safeWork: ['Continue read-only inspection; avoid operations that need persisted state.'],
+    };
+  }
+}
+
+function nearestExistingParent(path: string): string {
+  let candidate = dirname(path);
+  while (!existsSync(candidate)) {
+    const parent = dirname(candidate);
+    if (parent === candidate) {
+      return candidate;
+    }
+    candidate = parent;
+  }
+  return candidate;
+}
+
+async function resolveManagedProcessHealthFromConfig(
+  args: CliArgs,
+  config: OrchestratorConfig,
+  root: string,
+): Promise<NetworkServiceHealthStatus[]> {
+  const configFile = args.config ? resolvePath(args.config) : undefined;
+  const resolvedServices = filterNetworkServices(
+    resolveNetworkServices(config, {
+      repoRoot: root,
+      ...(configFile ? { configFile } : {}),
+      ...(args.networkSet ? { configOverrides: args.networkSet } : {}),
+      allowTrustedProviderCommandOverrides: args.trustProviderCommandOverrides,
+    }),
+    undefined,
+  );
+  const startedAt = new Date().toISOString();
+  const serviceStates: ManagedNetworkServiceState[] = resolvedServices.map((service) => ({
+    id: service.id,
+    pid: 0,
+    detached: false,
+    dependsOn: [...service.dependsOn],
+    startedAt,
+    status: 'already-running',
+    ...(service.runtimeConfig.inProcess ? { inProcess: service.runtimeConfig.inProcess } : {}),
+    ...(service.runtimeConfig.url ? { url: service.runtimeConfig.url } : {}),
+    ...(service.runtimeConfig.healthUrl ? { healthUrl: service.runtimeConfig.healthUrl } : {}),
+    ...(service.runtimeConfig.serviceIdentity ? { serviceIdentity: service.runtimeConfig.serviceIdentity } : {}),
+    ...(service.runtimeConfig.hostServiceId ? { hostServiceId: service.runtimeConfig.hostServiceId } : {}),
+    ...(service.runtimeConfig.channels ? { channels: service.runtimeConfig.channels } : {}),
+  }));
+
+  return Promise.all(
+    serviceStates.map((service) => resolveServiceHealth(service, healthcheckNetworkService, serviceStates)),
+  );
+}
+
+async function buildCliServiceHealthSnapshot(
+  args: CliArgs,
+  config: OrchestratorConfig,
+  root: string,
+  paths: Pick<NetworkPaths, 'frankenbeastDir'>,
+  supervisor: NetworkCommandSupervisorLike,
+  providers = buildDashboardProviderSnapshot(config, undefined, [resolveSelectedProvider(args, config), ...(args.providers ?? [])]),
+): Promise<DashboardAvailabilitySnapshot> {
+  let networkServices: NetworkServiceHealthStatus[] | undefined;
+  let stateStore = buildStateStoreHealthDependency(paths);
+  try {
+    const supervisorStatus = await supervisor.status();
+    stateStore = buildStateStoreHealthDependency(paths, supervisorStatus.stateCorruptions);
+    networkServices = supervisorStatus.services;
+    const configuredServices = await resolveManagedProcessHealthFromConfig(args, config, root);
+    const knownServiceIds = new Set(networkServices.map((service) => service.id));
+    const missingConfiguredServices = configuredServices.filter((service) => !knownServiceIds.has(service.id));
+    if (networkServices.length === 0) {
+      networkServices = configuredServices;
+    } else if (missingConfiguredServices.length > 0) {
+      networkServices = [...networkServices, ...missingConfiguredServices];
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return buildServiceHealthSnapshot({
+      providers,
+      github: buildGithubHealthDependency(),
+      stateStore: {
+        name: 'state-store',
+        type: 'state-store',
+        status: 'unavailable',
+        summary: `Managed network status could not be loaded from ${paths.frankenbeastDir}: ${message}`,
+        remediationHint: 'Fix the .fbeast network state path and permissions, then rerun `frankenbeast network health`.',
+        safeWork: ['Continue read-only inspection; avoid operations that need persisted managed-network state.'],
+      },
+    });
+  }
+  return buildServiceHealthSnapshot({
+    providers,
+    networkServices,
+    github: buildGithubHealthDependency(),
+    stateStore,
+  });
 }
 
 export async function runNetworkCommand(
@@ -1867,6 +2117,18 @@ export async function runNetworkCommand(
   if (action === 'status') {
     const status = await supervisor.status();
     for (const line of formatStatus(status)) {
+      deps.print(line);
+    }
+    return;
+  }
+
+  if (action === 'health') {
+    const health = await buildCliServiceHealthSnapshot(args, config, root, paths, supervisor);
+    if (args.json) {
+      deps.print(JSON.stringify(health, null, 2));
+      return;
+    }
+    for (const line of formatAvailability(health)) {
       deps.print(line);
     }
     return;

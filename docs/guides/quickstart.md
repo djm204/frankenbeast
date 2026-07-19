@@ -20,7 +20,7 @@ For CI-style validation without mutating files or installing dependencies, run:
 ./scripts/bootstrap.sh --dry-run
 ```
 
-If you are not sure which first-run steps apply to your role, generate a guided checklist before mutating the checkout:
+If you are not sure which first-run steps apply to your role, choose the [persona quickstart track](../onboarding/persona-quickstart-tracks.md) for operators, contributors, or agent-developers, then generate a guided checklist before mutating the checkout:
 
 ```bash
 npm run first-run:checklist -- --persona contributor
@@ -31,6 +31,8 @@ npm run local-to-pr:dry-run -- --issue 1700 --title "feat(onboarding): add guide
 ```
 
 The checklist generator is read-only and returns deterministic Markdown or JSON checklist items with commands, docs, required/optional status, and the next action. The workspace tour is also read-only; it prints package responsibilities, key docs, generated files, test commands, runtime state paths, safe first commands, and docs-drift checks in human or JSON form. The local-to-PR dry run checks auth/install/git-state readiness and walks through checkout, branch creation, a no-op change, test selection, PR body generation, and cleanup; Every remote mutation is skipped, including `git push` and `gh pr create`, while local writes are simulated and remediation is printed for failed prerequisites.
+
+If setup fails or an agent needs structured evidence, run `npm run setup:healthcheck` for human output or `npm --silent run setup:healthcheck -- --json` for parseable checks. The healthcheck covers Node/npm, dependency install state, env files, git status, common local ports, optional GitHub auth, and optional service endpoints; it exits non-zero only for required failed checks.
 
 If Corepack is not available yet, install it first with `npm install -g corepack`; the bootstrap script then activates and verifies the root `packageManager` pin.
 
@@ -108,10 +110,10 @@ When a worker or contributor needs a narrower verification command, use the [tes
 ## 5. Try the orchestrator CLI
 
 The repository root is private and does not publish a root `frankenbeast` binary
-for `npx` to resolve. Link the local workspace CLIs first; the `local:link`
-script builds the packages and links both `@franken/orchestrator` and
-`@franken/mcp-suite` so `frankenbeast`, `franken`, `frkn`, and `fbeast` are on
-your PATH.
+for `npx` to resolve. Link the local workspaces first; the `local:link` script
+builds and links every workspace so their current local packages are available,
+including the `frankenbeast`, `franken`, `frkn`, `fbeast`, and
+`fbeast-live-bench` binaries on your PATH.
 
 ```bash
 # Build and link the local workspace binaries once from the repo root
@@ -140,7 +142,7 @@ frankenbeast issues --repo owner/repo --dry-run
 The `fbeast` binary ships from the `@franken/mcp-suite` package (there is no package named `fbeast`). Install it persistently so both `fbeast` and the `fbeast-*` MCP server binaries stay on PATH — `mcp init` registers servers as bare `fbeast-memory`/`fbeast-proxy` commands the AI client spawns later, so a one-shot `npx` would leave those servers unable to start:
 
 ```bash
-# Install once (global), or link both local CLIs from the monorepo with: npm run local:link
+# Install once (global), or link the local workspaces from the monorepo with: npm run local:link
 npm install -g @franken/mcp-suite
 
 # Standard MCP registration

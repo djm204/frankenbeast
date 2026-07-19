@@ -1,13 +1,12 @@
 import type { ConversationEngine } from './conversation-engine.js';
 import type { TurnRunner, TurnEvent, TurnRunResult } from './turn-runner.js';
-import type { ChatBeastContext, ExecuteOutcome, TranscriptMessage, TurnOutcome } from './types.js';
+import type { ChatBeastContext, ExecuteOutcome, ExtendedPendingApproval, TranscriptMessage, TurnOutcome } from './types.js';
 import { sanitizeChatOutput } from './output-sanitizer.js';
 import type { BeastDispatchPort } from './beast-daemon-dispatch-adapter.js';
 import type { BeastExecutionMode } from '../beasts/types.js';
-import type { PendingApproval } from '@franken/types';
 import { isoNow } from '@franken/types';
 
-type PendingApprovalContext = Omit<PendingApproval, 'description' | 'requestedAt'>;
+type PendingApprovalContext = Omit<ExtendedPendingApproval, 'description' | 'requestedAt'>;
 
 const SLASH_COMMANDS = new Set([
   '/plan',
@@ -82,7 +81,7 @@ export interface ChatRuntimeRunOptions {
 }
 
 export function pendingApprovalRuntimeState(
-  pendingApproval: PendingApproval | null | undefined,
+  pendingApproval: ExtendedPendingApproval | null | undefined,
   pendingApprovalState = false,
 ): Pick<ChatRuntimeState, 'pendingApproval' | 'pendingApprovalContext' | 'pendingApprovalDescription' | 'pendingApprovalRequestedAt'> {
   if (!pendingApproval) {
@@ -97,6 +96,10 @@ export function pendingApprovalRuntimeState(
       ...(pendingApproval.risk ? { risk: pendingApproval.risk } : {}),
       ...(pendingApproval.affectedFiles ? { affectedFiles: pendingApproval.affectedFiles } : {}),
       ...(pendingApproval.sessionId ? { sessionId: pendingApproval.sessionId } : {}),
+      ...(pendingApproval.approvalToken ? { approvalToken: pendingApproval.approvalToken } : {}),
+      ...(pendingApproval.requester ? { requester: pendingApproval.requester } : {}),
+      ...(pendingApproval.workerId ? { workerId: pendingApproval.workerId } : {}),
+      ...(pendingApproval.workdir ? { workdir: pendingApproval.workdir } : {}),
     },
     pendingApprovalDescription: pendingApproval.description,
     pendingApprovalRequestedAt: pendingApproval.requestedAt,

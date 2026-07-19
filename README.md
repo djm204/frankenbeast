@@ -15,13 +15,15 @@ Frankenbeast is a safety framework that enforces guardrails *outside* the LLM's 
 
 ## 🚀 One-click onboarding
 
-Starting from a fresh checkout? Use the [Frankenbeast onboarding checklist](ONBOARDING.md) for prerequisites, environment setup, and first-run validation. Coding agents should also read the [coding-agent PR etiquette guide](docs/onboarding/coding-agent-pr-etiquette.md) before opening, updating, or merging PRs. If you are trying to understand the system before changing it, follow the [Architecture reading path](ONBOARDING.md#architecture-reading-path) so you read current implementation docs before historical plans. If a PM-swarm handoff uses runtime coordination terms, read the [PM-swarm runtime glossary](ONBOARDING.md#pm-swarm-runtime-glossary) before acting. Then run the repository bootstrap script:
+Want to make your first change? Follow the [contributor guide](CONTRIBUTING.md) from issue selection through setup, focused verification, and pull-request review. If the issue changes only Markdown, use the [docs-only contribution quickstart](docs/onboarding/docs-only-contribution.md) to skip unrelated runtime setup while preserving link checks and review evidence.
+
+Starting from a fresh checkout? Use the [Frankenbeast onboarding checklist](ONBOARDING.md) for prerequisites, environment setup, and first-run validation. If you need to choose among the repository's setup, contribution, architecture, agent, and release guides, use the [onboarding guide index](docs/onboarding/README.md) instead of reading every document up front. Read the concise [RAMP_UP.md](docs/RAMP_UP.md) guide when you need a quick contributor orientation. If you want a role-specific path first, choose the [persona quickstart track](docs/onboarding/persona-quickstart-tracks.md) for operators, contributors, or agent-developers. If setup fails, use the [setup troubleshooting matrix](docs/onboarding/setup-troubleshooting-matrix.md) to map symptoms to diagnostic commands, safe remediations, and verification checks. Coding agents should also read the [first-PR agent runbook](docs/onboarding/first-pr-agent-runbook.md) for the end-to-end issue-to-PR flow, the [coding-agent PR etiquette guide](docs/onboarding/coding-agent-pr-etiquette.md) before opening, updating, or merging PRs, and the [release and deployment mental model](docs/onboarding/release-deployment-mental-model.md) before owning post-merge or release handoffs. If you are trying to understand the system before changing it, follow the [Architecture reading path](ONBOARDING.md#architecture-reading-path) for current implementation docs before historical plans, then use the [architecture map for new agent contributors](docs/onboarding/architecture-map.md) to route issues to the right package, tests, approval/HITL boundary, and memory surface. If an agent coordination handoff uses runtime coordination terms, read the [agent coordination runtime glossary](ONBOARDING.md#agent-coordination-runtime-glossary) before acting. New agents that need a low-risk edit/test rehearsal can use the [agent practice fixture](fixtures/agent-practice-fixture/README.md), which includes an intentionally failing scoreboard test, reset script, and sample issue body. Then run the repository bootstrap script:
 
 ```bash
 npm run bootstrap -- --no-docker
 ```
 
-The bootstrap command delegates to [`scripts/bootstrap.sh`](scripts/bootstrap.sh), which validates Node.js, npm/Corepack, `.env` defaults, dependencies, and optional Docker services. If you want persona-specific guidance before running setup commands, generate a deterministic first-run checklist with `npm run first-run:checklist -- --persona operator` or `npm --silent run first-run:checklist -- --persona coding-agent --json`. To orient a human or agent inside the repository, run `npm run workspace:tour` or `npm --silent run workspace:tour -- --json` for a package map, key docs, generated files, test commands, runtime state paths, safe first commands, and docs-drift checks. New issue workers can run `npm --silent run new-worker:preflight -- --json` before coding to verify the local Node/npm/git/gh/jq toolchain, GitHub authentication, project git identity, repository root, and worktree cleanliness with parseable structured output for PM handoffs. Pass `--services` when you want bootstrap to start the optional Docker compose stack after dependency installation. To preview the checks without changing files or installing packages, run:
+The bootstrap command delegates to [`scripts/bootstrap.sh`](scripts/bootstrap.sh), which validates Node.js, npm/Corepack, `.env` defaults, dependencies, and optional Docker services. The [persona quickstart tracks](docs/onboarding/persona-quickstart-tracks.md) name the prerequisites, setup commands, validation commands, and first-success output for each supported role. If you want persona-specific generated guidance before running setup commands, use `npm run first-run:checklist -- --persona operator` or `npm --silent run first-run:checklist -- --persona coding-agent --json`. To orient a human or agent inside the repository, run `npm run workspace:tour` or `npm --silent run workspace:tour -- --json` for a package map, key docs, generated files, test commands, runtime state paths, safe first commands, and docs-drift checks. New issue workers can run `npm --silent run new-worker:preflight -- --json` before coding to verify the local Node/npm/git/gh/jq toolchain, GitHub authentication, project git identity, repository root, and worktree cleanliness with parseable structured output for coordination handoffs. For a broader setup healthcheck with actionable remediation and machine-readable output, run `npm --silent run setup:healthcheck -- --json`; it verifies Node/npm, dependency install state, env files, git status, common local ports, optional GitHub auth, and optional service endpoints without failing on warnings. Pass `--services` when you want bootstrap to start the optional Docker compose stack after dependency installation. To preview the checks without changing files or installing packages, run:
 
 ```bash
 ./scripts/bootstrap.sh --dry-run
@@ -54,13 +56,13 @@ LLM-based agents routinely lose safety constraints when context windows compress
 
 ## Security
 
-See [SECURITY.md](SECURITY.md) for vulnerability reporting, dependency update expectations, secret handling, HTTPS guidance, and runtime hardening recommendations. See [docs/agent-tool-execution-threat-model.md](docs/agent-tool-execution-threat-model.md) for the agent tool-execution trust boundaries that cover terminal, filesystem, GitHub, profile state, cron, and PM-swarm approval flows. See [docs/security-json-parsing-limits.md](docs/security-json-parsing-limits.md) for JSON input limits; Beast config, run config, GitHub issue payloads, and LLM issue decomposition payloads are size/depth/fan-out bounded, and YAML is not accepted on those surfaces.
+See [SECURITY.md](SECURITY.md) for vulnerability reporting, dependency update expectations, secret handling, HTTPS guidance, and runtime hardening recommendations. See [docs/agent-tool-execution-threat-model.md](docs/agent-tool-execution-threat-model.md) for the agent tool-execution trust boundaries that cover terminal, filesystem, GitHub, profile state, cron, and agent coordination approval flows. See [docs/security-json-parsing-limits.md](docs/security-json-parsing-limits.md) for JSON input limits; Beast config, run config, GitHub issue payloads, and LLM issue decomposition payloads are size/depth/fan-out bounded, and YAML is not accepted on those surfaces.
 
 ## Architecture
 
 Frankenbeast is currently organized as 10 npm workspace packages under `packages/*`. Several originally separate MOD packages have been consolidated into the orchestrator or MCP suite: firewall/security middleware, skills/provider loading, heartbeat/reflection, external comms, and MCP registration are current implementation surfaces inside `@franken/orchestrator` and `@franken/mcp-suite`, not standalone package directories.
 
-The diagrams below describe the Beast-loop model and still use MOD labels as capability names. For the exact current package map, treat the package inventory table as authoritative.
+The diagrams below use current package names or implementation-surface names, and the package inventory table remains the authoritative workspace map.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full interconnection diagram.
 
@@ -72,23 +74,23 @@ flowchart TD
         direction TB
 
         subgraph P1["Phase 1: Ingestion"]
-            FW["MOD-01 Firewall<br/>Injection scan, PII mask"]
-            MEM["MOD-03 Brain<br/>Context hydration"]
+            FW["@franken/orchestrator firewall<br/>Injection scan, PII mask"]
+            MEM["@franken/brain<br/>Context hydration"]
         end
 
         subgraph P2["Phase 2: Planning"]
-            PL["MOD-04 Planner<br/>DAG task graph"]
-            CR["MOD-06 Critique<br/>8 evaluators, loop"]
+            PL["@franken/planner<br/>DAG task graph"]
+            CR["@franken/critique<br/>8 evaluators, loop"]
         end
 
         subgraph P3["Phase 3: Execution"]
-            SK["MOD-02 Skills<br/>Registry + MCP tools"]
-            GOV["MOD-07 Governor<br/>HITL approval gates"]
+            SK["@franken/orchestrator skills<br/>Registry + MCP tools"]
+            GOV["@franken/governor<br/>HITL approval gates"]
         end
 
         subgraph P4["Phase 4: Closure"]
-            OB["MOD-05 Observer<br/>Traces, cost, evals"]
-            HB["MOD-08 Heartbeat<br/>Reflection + briefs"]
+            OB["@franken/observer<br/>Traces, cost, evals"]
+            HB["@franken/orchestrator heartbeat<br/>Reflection + briefs"]
         end
 
         CB["Circuit Breakers<br/>Injection → halt | Budget → HITL | Spiral → escalate"]
@@ -124,14 +126,14 @@ flowchart TD
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant FW as Firewall (MOD-01)
-    participant MEM as Brain (MOD-03)
-    participant PL as Planner (MOD-04)
-    participant CR as Critique (MOD-06)
-    participant SK as Skills (MOD-02)
-    participant GOV as Governor (MOD-07)
-    participant OB as Observer (MOD-05)
-    participant HB as Heartbeat (MOD-08)
+    participant FW as @franken/orchestrator firewall
+    participant MEM as @franken/brain
+    participant PL as @franken/planner
+    participant CR as @franken/critique
+    participant SK as @franken/orchestrator skills
+    participant GOV as @franken/governor
+    participant OB as @franken/observer
+    participant HB as @franken/orchestrator heartbeat
 
     U->>FW: raw input
 
@@ -188,18 +190,18 @@ sequenceDiagram
 graph TB
     User([User Input])
 
-    subgraph "MOD-01: Firewall"
+    subgraph "@franken/orchestrator firewall"
         FW_IN["Inbound Interceptors<br/>Injection Scanner, PII Masker"]
         FW_ADAPT["Adapter Pipeline<br/>Claude / OpenAI / Ollama"]
         FW_OUT["Outbound Interceptors<br/>Schema Enforcer, Hallucination Scraper"]
         FW_IN --> FW_ADAPT --> FW_OUT
     end
 
-    subgraph "MOD-02: Skills"
+    subgraph "@franken/orchestrator skills"
         SK_REG["Skill Registry<br/>ISkillRegistry"]
     end
 
-    subgraph "MOD-03: Brain"
+    subgraph "@franken/brain"
         MEM_W["Working Memory"]
         MEM_E["Episodic Memory<br/>SQLite"]
         MEM_S["Semantic Memory<br/>ChromaDB"]
@@ -209,12 +211,12 @@ graph TB
         MEM_O --> MEM_S
     end
 
-    subgraph "MOD-04: Planner"
+    subgraph "@franken/planner"
         PL_DAG["DAG Builder<br/>Linear / Parallel / Recursive"]
         PL_COT["CoT Gate<br/>RationaleBlock"]
     end
 
-    subgraph "MOD-05: Observer"
+    subgraph "@franken/observer"
         OB_TRACE["TraceContext + Spans"]
         OB_COST["TokenCounter + CostCalc"]
         OB_CB["Circuit Breaker"]
@@ -223,7 +225,7 @@ graph TB
         OB_COST --> OB_CB
     end
 
-    subgraph "MOD-06: Critique"
+    subgraph "@franken/critique"
         CR_DET["Deterministic Evaluators<br/>Safety, GhostDep, LogicLoop, ADR"]
         CR_HEUR["Heuristic Evaluators<br/>Factuality, Conciseness, Complexity"]
         CR_LOOP["Critique Loop"]
@@ -231,7 +233,7 @@ graph TB
         CR_HEUR --> CR_LOOP
     end
 
-    subgraph "MOD-07: Governor"
+    subgraph "@franken/governor"
         GOV_TRIG["Trigger Evaluators<br/>Budget / Skill / Confidence / Ambiguity"]
         GOV_GW["Approval Gateway<br/>CLI / Slack channels"]
         GOV_SEC["HMAC-SHA256 Signing"]
@@ -239,14 +241,14 @@ graph TB
         GOV_SEC --> GOV_GW
     end
 
-    subgraph "MOD-08: Heartbeat"
+    subgraph "@franken/orchestrator heartbeat"
         HB_DET["Deterministic Check"]
         HB_REFL["Reflection Engine"]
         HB_DISP["Action Dispatcher"]
         HB_DET --> HB_REFL --> HB_DISP
     end
 
-    subgraph "MCP Registry"
+    subgraph "@franken/mcp-suite registry"
         MCP_REG["McpRegistry<br/>Tool routing"]
         MCP_CLI["McpClient<br/>JSON-RPC 2.0"]
         MCP_REG --> MCP_CLI
@@ -334,7 +336,7 @@ graph TB
 | `@franken/web` | React dashboard for chat, tracked Beast agents, network controls, analytics/cost/safety views. |
 | `@franken/live-bench` | Live CLI benchmark tooling. |
 
-Historical docs and ADRs may still mention removed packages such as `frankenfirewall`, `franken-skills`, `franken-heartbeat`, `franken-mcp`, and `franken-comms`. Current code paths for those capabilities live in the packages above.
+Earlier standalone package surfaces have been consolidated into `@franken/orchestrator` and `@franken/mcp-suite`. Treat the current ten-package inventory above as authoritative for available workspace packages.
 
 ### Core Principles
 
@@ -642,7 +644,7 @@ npm run local:verify-setup
 
 `CHROMA_URL` points Frankenbeast's local setup scripts at the ChromaDB HTTP API.
 Both `npm run local:seed` (`scripts/seed.ts`) and `npm run local:verify-setup`
-(`scripts/verify-setup.ts`) read it from the environment or the copied `.env`
+(`scripts/verify-setup.mjs`) read it from the environment or the copied `.env`
 file, falling back to `http://localhost:8000` when it is unset. The default
 matches the root `docker-compose.yml`, which publishes ChromaDB on port 8000
 for local development.
@@ -770,7 +772,8 @@ Required HITL approvals fail closed when a run has no interactive TTY. In truste
 
 - [ADR-018](docs/adr/018-secret-store-architecture.md) — secret store design and backend selection rationale
 - [ADR-017](docs/adr/017-network-operator-control-plane.md) — network operator control plane and token auth
-- [Worker push rollback runbook](docs/runbooks/worker-push-rollback.md) — dry-run planning and approval-cop routing for failed or bad worker branch publishes
+- [Worker push rollback runbook](docs/runbooks/worker-push-rollback.md) — dry-run planning and approval runner routing for failed or bad worker branch publishes
+- [Corrupted worktrees and queues runbook](docs/dr/corrupted-worktrees-and-queues.md) — incident diagnosis, backup-before-repair, queue repair, worker defer/replace, and approval runner routing for automation-state corruption
 
 ## Configuration
 
@@ -783,7 +786,7 @@ Required HITL approvals fail closed when a run has no interactive TTY. In truste
 | `GOOGLE_API_KEY` | MOD-01 | Runtime only | Gemini adapter API key (Google AI Studio name) |
 | `GEMINI_API_KEY` | MOD-01 | Runtime only | Gemini adapter API key (alternative name) |
 | `OLLAMA_BASE_URL` | Provider registry | Not consumed by the current provider schema; legacy/future Ollama-compatible builds only | Ollama daemon base URL, usually `http://localhost:11434`; set a different HTTP(S) endpoint for remote or non-default daemons only in builds that actually support an Ollama provider. It is intentionally absent from `.env.example` because the default local setup, current provider schema, and current `fbeast mcp beast` presets do not consume it. |
-| `CHROMA_URL` | MOD-03 | If using semantic memory | ChromaDB base URL used by `scripts/seed.ts` and `scripts/verify-setup.ts` (default: `http://localhost:8000`) |
+| `CHROMA_URL` | MOD-03 | If using semantic memory | ChromaDB base URL used by `scripts/seed.ts` and `scripts/verify-setup.mjs` (default: `http://localhost:8000`) |
 | `SLACK_WEBHOOK_URL` | MOD-07 | If using Slack approvals | Slack webhook for HITL notifications |
 | `FRANKENBEAST_MODULE_MEMORY` | MOD-03 | Optional | Memory module config fallback and Beast child-env toggle. Only the literal value `false` records it as disabled when the `memory` config key is unset; current local CLI wiring still constructs the real memory adapter. |
 | `FRANKENBEAST_MODULE_PLANNER` | MOD-04 | Optional | Planner module config fallback and Beast child-env toggle. Only literal `false` records it as disabled when the `planner` config key is unset; current local CLI wiring still uses the graph-builder path. |
@@ -830,14 +833,14 @@ The Planner generates a Task DAG. The Critique module audits it with 8 evaluator
 
 #### Lesson rollback workflow
 
-Critique lessons recorded after a recovered failure include a `rollbackWorkflow` object for PM/liveness consumers. Use it when a lesson is later found to be incorrect, stale, over-broad, or harmful:
+Critique lessons recorded after a recovered failure include a `rollbackWorkflow` object for coordination/liveness consumers. Use it when a lesson is later found to be incorrect, stale, over-broad, or harmful:
 
 1. Quarantine the target lesson so it stops being promoted into new worker handoffs.
 2. Attach the rollback reason, evidence URLs, and verifier command to the lesson audit trail.
 3. Either record a replacement lesson with fresh traceability evidence or retire the original lesson with no replacement.
-4. Run the verifier command and include the result in the PM handoff before removing the rollback block.
+4. Run the verifier command and include the result in the coordination handoff before removing the rollback block.
 
-Rollback requests must provide a stable lesson id, a concrete rollback reason, evidence such as a review comment/regression/operator report, and a verification command. If any of that evidence is missing, PM tooling should keep the lesson blocked instead of silently retiring or replacing it.
+Rollback requests must provide a stable lesson id, a concrete rollback reason, evidence such as a review comment/regression/operator report, and a verification command. If any of that evidence is missing, coordination tooling should keep the lesson blocked instead of silently retiring or replacing it.
 
 ### Phase 3: Validated Execution
 
@@ -916,16 +919,29 @@ The `frankenbeast chat-server` exposes the same runtime over HTTP + WebSocket fo
 
 ## Communications Gateway
 
-External communications are implemented in `@franken/orchestrator` under `packages/franken-orchestrator/src/comms`; there is no current standalone `franken-comms` workspace package. The gateway keeps deterministic session mapping for supported channels:
+External communications are implemented in `@franken/orchestrator` under `packages/franken-orchestrator/src/comms`; they are not provided by a separate workspace package. The gateway keeps deterministic session mapping for supported channels:
 
 | Channel | Transport | Security |
 |---------|-----------|----------|
 | Slack | Events API + Interactivity | HMAC-SHA256 signature verification |
 | Discord | Gateway events | ED25519 signature verification |
-| Telegram | Webhook | Token-based authentication |
+| Telegram | Webhook | Telegram `secret_token` header validation |
 | WhatsApp | Cloud API | SHA256 signature verification |
 
 Channels route through the orchestrator comms pipeline. See [ADR-016](docs/adr/016-external-comms-gateway.md) for the original gateway decision and the orchestrator comms source for current implementation details.
+
+### Telegram webhook setup and migration
+
+Telegram updates use the fixed `https://<public-host>/webhooks/telegram` route. Configure a dedicated, randomly generated webhook secret through `comms.telegram.webhookSecretTokenRef`, then pass the resolved value as Telegram's `secret_token` when registering the webhook. The secret must be 1–256 characters using only A-Z, a-z, 0-9, `_`, and `-`, as required by the Telegram Bot API. Telegram sends that value in `X-Telegram-Bot-Api-Secret-Token`; Frankenbeast rejects requests whose header is missing or invalid. Do not append the bot token to the webhook URL.
+
+To migrate an existing token-bearing webhook URL:
+
+1. Generate a new webhook secret that is independent of the Telegram bot token and store it directly in the configured secret backend under the reference named by `comms.telegram.webhookSecretTokenRef`. If the logical reference changes, update `.fbeast/config.json` too. Do not rely on `frankenbeast init --repair` to rotate a complete configuration; it exits without changing secrets when verification already passes.
+2. After storing the secret, re-register the webhook with Telegram using the fixed `/webhooks/telegram` URL and the same new value in the Bot API `secret_token` parameter. Telegram's `setWebhook` call replaces the previous webhook URL.
+3. Send a test update and confirm the fixed route accepts the `X-Telegram-Bot-Api-Secret-Token` header. A legacy token-bearing path returns `404` when sent directly to the chat server. The supported `dashboard-web` reverse proxy instead rewrites legacy token-bearing paths to `/webhooks/telegram` before forwarding, so verify the fixed upstream route and header validation rather than expecting a proxy-level `404`.
+4. If the old URL may have appeared in proxy logs, screenshots, or support tools, rotate the bot token with BotFather and update `comms.telegram.botTokenRef`; then remove or redact retained copies of the old URL.
+
+Never log the resolved bot token or webhook secret. Treat both secret-store references as server-side configuration.
 
 Delivery-channel sensitivity defaults fail-closed: runtime replies marked with `sensitivity: "sensitive"` or metadata `deliverySensitivity: "sensitive"` are withheld from Slack, Discord, Telegram, and WhatsApp unless that channel explicitly sets `allowSensitiveDelivery: true`. Unknown sensitivity labels are treated as sensitive. Withheld messages send a generic operator guidance notice and route metadata only, never the sensitive payload or interactive actions.
 
@@ -1002,7 +1018,7 @@ frankenbeast/
 │   ├── guides/                  # Quickstart, run/deploy, provider, agent, verification, and issue-workflow guides
 │   └── plans/                   # Design docs and implementation plans
 ├── tests/                       # Root-level integration tests
-├── scripts/                     # seed.ts, verify-setup.ts
+├── scripts/                     # seed.ts, verify-setup.mjs
 ├── packages/
 │   ├── franken-brain/           # MOD-03: Memory Systems
 │   ├── franken-planner/         # MOD-04: Planning & Decomposition

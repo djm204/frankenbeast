@@ -1,6 +1,6 @@
 # Local service dependency explainer
 
-Use this guide before telling a newcomer, PM, or worker to start every local service. Frankenbeast has a small core bootstrap path and several optional services. Most onboarding failures are faster to diagnose when the handoff says which service is actually required, how to verify it, and which failures are out of scope.
+Use this guide before telling a newcomer, coordinator, or worker to start every local service. Frankenbeast has a small core bootstrap path and several optional services. Most onboarding failures are faster to diagnose when the handoff says which service is actually required, how to verify it, and which failures are out of scope.
 
 Structured source: `docs/onboarding/local-service-dependencies.manifest.json`.
 
@@ -11,8 +11,8 @@ Structured source: `docs/onboarding/local-service-dependencies.manifest.json`.
 | Repository install, docs checks, root unit tests | None beyond Node.js and npm | No Docker required | `npm run bootstrap -- --no-docker`; `npm run test:root` |
 | Semantic-memory seed scripts | ChromaDB | Yes when using local semantic memory scripts | `curl -fsS "${CHROMA_URL:-http://localhost:8000}/api/v2/heartbeat"` |
 | Local observability dashboards | Grafana | Yes for dashboard viewing only | `curl -fsS http://localhost:3000/api/health` |
-| Distributed trace viewing/export smoke tests | Tempo | Yes for OTLP trace export | `curl -fsS http://localhost:3200/ready` |
-| Local chat, agent execution, dashboard chat turns | CLI-backed provider login | Yes for chat surfaces that use the CLI registry | selected CLI-backed provider smoke call; do not rely on `command -v` alone |
+| Distributed trace viewing/export smoke tests | Tempo | Yes for OTLP trace export | `curl -fsS http://localhost:3200/ready` plus a TCP probe of `localhost:4318` |
+| Local chat, agent execution, dashboard chat turns | CLI-backed provider login | Yes for chat surfaces that use the CLI registry | selected CLI-backed provider (`claude`, `codex`, `gemini`, or legacy `aider`) smoke call; do not rely on `command -v` alone |
 | Low-level API adapter integrations that bypass normal Beast run/chat paths | API-backed provider keys | Yes only for that explicit integration | adapter-specific API smoke call; do not treat normal `frankenbeast run` or chat as API-key-only |
 | Operator token and stored credentials | Configured secret backend | Yes when runtime resolves secret refs | `.fbeast/config.json` names the backend and a backend-specific decrypt/session check succeeds |
 
@@ -54,15 +54,16 @@ Structured source: `docs/onboarding/local-service-dependencies.manifest.json`.
   ```bash
   docker compose up -d tempo
   curl -fsS http://localhost:3200/ready
+  node --input-type=module -e "import net from 'node:net'; await new Promise((resolve,reject)=>{ const socket=net.connect(4318,'127.0.0.1',()=>{ socket.end(); resolve(); }); socket.setTimeout(3000,()=>{ socket.destroy(); reject(new Error('Tempo OTLP/HTTP port 4318 timed out')); }); socket.on('error',reject); });"
   ```
 
 - Required for: OTLP trace export smoke tests and Grafana trace exploration.
 - Not required for: SQLite observer adapters, most package tests, or MCP initialization.
-- Edge case: verify readiness on port `3200` and the OTLP/HTTP target on `4318` when debugging trace export.
+- Edge case: verify readiness on port `3200` and the OTLP/HTTP target on `4318` when debugging trace export. Tempo can be ready for queries while the OTLP/HTTP listener used by `TempoAdapter` is missing or blocked.
 
 ### Provider CLI credentials
 
-- Local chat, normal `frankenbeast run`/agent execution, and dashboard chat surfaces currently resolve providers through the CLI provider registry. Install and authenticate a supported CLI (`claude`, `codex`, or `gemini`) before expecting those paths to start.
+- Local chat, normal `frankenbeast run`/agent execution, and dashboard chat surfaces currently resolve providers through the CLI provider registry. Install and authenticate a supported CLI (`claude`, `codex`, `gemini`, or legacy `aider`) before expecting those paths to start.
 - Do not advertise API-key-only setup for Beast run/chat paths: selecting `anthropic-api`, `openai-api`, or `gemini-api` still fails the CLI-registry preflight before model invocation on those surfaces.
 - Exported keys such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `GEMINI_API_KEY` are sufficient only for low-level code paths that explicitly bypass the CLI registry and construct API-backed provider adapters directly. Name that path in the handoff if you rely on it.
 - Not required for: docs-only tests, static typecheck, and most package unit tests.
@@ -78,7 +79,7 @@ Structured source: `docs/onboarding/local-service-dependencies.manifest.json`.
 
 - Required for: stored operator tokens, stored provider credentials, and runtime paths that resolve secret refs.
 - Not required for: repository bootstrap, docs-only checks, or tests that inject secrets directly.
-- Health check: verify `.fbeast/config.json`, then prove the selected backend is usable: for `local-encrypted`, instantiate the runtime store and run decrypting calls such as `detect()`, `keys()`, and `resolve()` for configured refs with `FRANKENBEAST_PASSPHRASE`; for Bitwarden, require `BW_SESSION`, confirm `bw` is installed, run `detect()`, `keys()`, and resolve each configured secret ref so stale sessions fail; for 1Password, require an authenticated `op` CLI session and resolve configured refs; for OS keychain, instantiate `OsKeychainStore`, run its platform detection, fail when `secret-tool`/`security`/`cmdkey` is unavailable, and resolve configured refs through the same store used at runtime.
+- Health check: verify `.fbeast/config.json`, then prove the selected backend is usable: for `local-encrypted`, instantiate the runtime store and run decrypting calls such as `detect()`, `keys()`, and `resolve()` for configured refs, including Telegram's `comms.telegram.webhookSecretTokenRef` when Telegram is enabled, with `FRANKENBEAST_PASSPHRASE`; for Bitwarden, require `BW_SESSION`, confirm `bw` is installed, run `detect()`, `keys()`, and resolve each configured secret ref so stale sessions fail; for 1Password, require an authenticated `op` CLI session and resolve configured refs; for OS keychain, instantiate `OsKeychainStore`, run its platform detection, fail when `secret-tool`/`security`/`cmdkey` is unavailable, and resolve configured refs through the same store used at runtime.
 - Edge case: changing `network.secureBackend` does not migrate existing secret refs. Re-store or migrate secrets after switching between `local-encrypted`, `os-keychain`, `1password`, and `bitwarden`.
 
 ## Negative guidance
@@ -86,9 +87,9 @@ Structured source: `docs/onboarding/local-service-dependencies.manifest.json`.
 - Do not start the full Docker stack just because a docs test, static typecheck, or CLI help command failed.
 - Do not assume Docker is required for onboarding. `npm run bootstrap -- --no-docker` is the default first-run path.
 - Do not overwrite a remote service URL by starting a local container on the same port. If `CHROMA_URL` or another URL points away from localhost, verify that external dependency instead.
-- Do not mark a PM/worker blocked on "local services" without naming the exact service id, health-check command, observed result, and capability being tested.
+- Do not mark a coordinator/worker blocked on "local services" without naming the exact service id, health-check command, observed result, and capability being tested.
 
-## PM/worker handoff template
+## Coordinator/worker handoff template
 
 ```text
 Local service dependency check:

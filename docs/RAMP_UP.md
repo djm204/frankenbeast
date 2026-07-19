@@ -4,7 +4,7 @@
 
 ## What Is This?
 
-A deterministic guardrails framework for AI agents organized as an **npm workspaces monorepo with Turborepo** for build orchestration. The current workspace contains **10 first-party packages** under `packages/`, matching the canonical inventories in [README.md](../README.md#current-workspace-packages) and [docs/guides/quickstart.md](guides/quickstart.md#project-structure): the consolidated core packages, `franken-mcp-suite` (`@franken/mcp-suite`), and `live-bench` (`@franken/live-bench`). Cross-package dependencies use workspace references (e.g., `@franken/types`). See [ADR-011](adr/011-real-monorepo-migration.md) and ADR-031 for the earlier consolidation history; the historical `franken-mcp` package was removed, while the current `@franken/mcp-suite` workspace remains active.
+A deterministic guardrails framework for AI agents organized as an **npm workspaces monorepo with Turborepo** for build orchestration. The current workspace contains **10 first-party packages** under `packages/`, matching the canonical inventories in [README.md](../README.md#current-workspace-packages) and [docs/guides/quickstart.md](guides/quickstart.md#project-structure): the consolidated core packages, the current MCP suite (`@franken/mcp-suite`), and `live-bench` (`@franken/live-bench`). Cross-package dependencies use workspace references (e.g., `@franken/types`). See [ADR-011](adr/011-real-monorepo-migration.md) and ADR-031 for the earlier consolidation history; pre-consolidation package surfaces were absorbed into the active workspaces listed below.
 
 ## Modules
 
@@ -165,7 +165,7 @@ Most packages build with `tsc`; `franken-web` uses `tsc && vite build`.
 | `docs/PROGRESS.md` | PR-by-PR progress tracking, verified test counts, and Phase 8 CLI gap-closure work |
 | `docs/adr/` | ADRs covering monorepo structure, hex architecture, Hono, shared types, Beast Loop, circuit breakers, CLI execution, Approach C, pluggable CLI providers, multi-pass planning, chat dispatch, external comms, network operator control plane, tracked-agent init workflow, and ADR-036 sandboxed Beast execution |
 | `docs/guides/` | quickstart, run-dashboard-chat, deploy-beasts, add-llm-provider, wrap-external-agent, fix-github-issues |
-| `docs/onboarding/` | contributor onboarding, repository ownership, agent role map, issue complexity rubric, PM-swarm glossary, test-command decision tree |
+| `docs/onboarding/` | contributor onboarding, repository ownership, agent role map, issue complexity rubric, agent coordination glossary, test-command decision tree |
 | `docs/plans/` | Design docs and implementation plans (MCP, beast-runner, approach-c, CLI E2E, pluggable providers, interview UX, etc.) |
 
 ## Secret Store

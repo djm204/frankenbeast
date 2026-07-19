@@ -6,7 +6,7 @@ import { createObserverAdapter, type ObserverAdapter } from '../adapters/observe
 import { createPlannerAdapter, type PlannerAdapter } from '../adapters/planner-adapter.js';
 import { createSkillsAdapter, type SkillsAdapter } from '../adapters/skills-adapter.js';
 import { parseObserverCostArgs } from './observer-cost-validation.js';
-import type { ToolDef, ToolInputSchema, ToolResult } from './server-factory.js';
+import type { ToolDef, ToolExecutionContext, ToolInputSchema, ToolResult } from './server-factory.js';
 
 export interface AdapterSet {
   brain: BrainAdapter;
@@ -28,7 +28,12 @@ interface ToolStub {
 
 interface ToolFull extends ToolStub {
   inputSchema: ToolInputSchema;
-  makeHandler: (adapters: AdapterSet) => (args: Record<string, unknown>) => Promise<ToolResult>;
+  /** Optional execution deadline override for this registry entry. */
+  timeoutMs?: number;
+  makeHandler: (adapters: AdapterSet) => (
+    args: Record<string, unknown>,
+    context?: ToolExecutionContext,
+  ) => Promise<ToolResult>;
 }
 
 export type ServerAdapterDeps = Partial<AdapterSet>;
@@ -39,11 +44,100 @@ function splitCsvArg(value: unknown, fallback?: string[]): string[] | undefined 
   return parsed.length > 0 ? parsed : fallback;
 }
 
+function parseJsonObject(value: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function countRootJsonKey(value: string, key: string): number {
+  let count = 0;
+  let depth = 0;
+  let index = 0;
+
+  const skipWhitespace = (from: number): number => {
+    let next = from;
+    while (next < value.length && /\s/.test(value[next]!)) next++;
+    return next;
+  };
+
+  while (index < value.length) {
+    const char = value[index]!;
+    if (char === '"') {
+      const start = index;
+      index++;
+      let escaped = false;
+      while (index < value.length) {
+        const inner = value[index]!;
+        if (escaped) {
+          escaped = false;
+        } else if (inner === '\\') {
+          escaped = true;
+        } else if (inner === '"') {
+          break;
+        }
+        index++;
+      }
+      if (index >= value.length) return count;
+      const end = index;
+      const after = skipWhitespace(end + 1);
+      if (depth === 1 && value[after] === ':') {
+        try {
+          if (JSON.parse(value.slice(start, end + 1)) === key) count++;
+        } catch {
+          // Malformed JSON is allowed through existing adapter behavior; duplicate
+          // detection is best-effort and should not reject arbitrary log text.
+        }
+      }
+      index++;
+      continue;
+    }
+    if (char === '{' || char === '[') depth++;
+    if (char === '}' || char === ']') depth = Math.max(0, depth - 1);
+    index++;
+  }
+
+  return count;
+}
+
+function hasDuplicateRootJsonKey(value: string, key: string): boolean {
+  return countRootJsonKey(value, key) > 1;
+}
+
+function usesReservedObserverProvenance(metadata: string): boolean {
+  const parsed = parseJsonObject(metadata);
+  return hasDuplicateRootJsonKey(metadata, 'source')
+    || hasDuplicateRootJsonKey(metadata, RESERVED_AUDIT_TRAIL_SOURCE_KEY)
+    || hasDuplicateRootJsonKey(metadata, RESERVED_HOOK_SOURCE_KEY)
+    || parsed?.['source'] === RESERVED_AUDIT_SOURCE
+    || parsed?.[RESERVED_AUDIT_TRAIL_SOURCE_KEY] === RESERVED_AUDIT_SOURCE
+    || parsed?.[RESERVED_AUDIT_TRAIL_SOURCE_KEY] === RESERVED_HOOK_SOURCE
+    || parsed?.[RESERVED_HOOK_SOURCE_KEY] === RESERVED_HOOK_SOURCE;
+}
+
+function usesReservedGovernorProvenance(context: string): boolean {
+  const parsed = parseJsonObject(context);
+  return hasDuplicateRootJsonKey(context, RESERVED_GOVERNANCE_SOURCE_KEY)
+    || hasDuplicateRootJsonKey(context, RESERVED_HOOK_SOURCE_KEY)
+    || parsed?.[RESERVED_GOVERNANCE_SOURCE_KEY] === RESERVED_AUDIT_SOURCE
+    || parsed?.[RESERVED_HOOK_SOURCE_KEY] === RESERVED_HOOK_SOURCE;
+}
+
 const DEFAULT_MEMORY_QUERY_LIMIT = 20;
 const MAX_MEMORY_QUERY_LIMIT = 1000;
 const MEMORY_REVIEW_STATUSES = ['pending', 'approved', 'rejected', 'never_store', 'suppressed'] as const;
 const MEMORY_REVIEW_ACTIONS = ['approve', 'reject', 'never_store', 'resolve_conflict'] as const;
 const MEMORY_CONFLICT_RESOLUTIONS = ['keep_existing', 'replace_existing', 'keep_both_scoped', 'reject_candidate', 'expire_existing'] as const;
+const RESERVED_AUDIT_SOURCE = 'central-dispatch';
+const RESERVED_AUDIT_TRAIL_SOURCE_KEY = '__fbeastAuditTrailSource';
+const RESERVED_GOVERNANCE_SOURCE_KEY = '__fbeastGovernanceSource';
+const RESERVED_HOOK_SOURCE_KEY = '__fbeastHookSource';
+const RESERVED_HOOK_SOURCE = 'fbeast-hook';
 
 type MemoryReviewStatus = (typeof MEMORY_REVIEW_STATUSES)[number];
 type MemoryReviewAction = (typeof MEMORY_REVIEW_ACTIONS)[number];
@@ -57,6 +151,48 @@ function parseMemoryQueryLimit(value: unknown): { ok: true; value: number } | { 
 function parseMemoryExportLimit(value: unknown): { ok: true; value: number } | { ok: false; message: string } {
   if (value === undefined) return { ok: true, value: MAX_MEMORY_QUERY_LIMIT };
   return parsePositiveMemoryLimit(value);
+}
+
+function parseMemoryAccessAuditLimit(value: unknown): { ok: true; value: number } | { ok: false; message: string } {
+  if (value === undefined) return { ok: true, value: MAX_MEMORY_QUERY_LIMIT };
+  return parsePositiveMemoryLimit(value);
+}
+
+function parseMemoryAccessAuditStringFilter(name: string, value: unknown): { ok: true; value?: string } | { ok: false; message: string } {
+  if (value === undefined) return { ok: true };
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return { ok: false, message: `${name} must be a non-empty string when provided` };
+  }
+  const trimmed = value.trim();
+  if ((name === 'since' || name === 'until') && !isValidMemoryAccessAuditTimestamp(trimmed)) {
+    return { ok: false, message: `${name} must be a valid timestamp when provided` };
+  }
+  return { ok: true, value: trimmed };
+}
+
+function isValidMemoryAccessAuditTimestamp(value: string): boolean {
+  const normalized = value.includes('T') ? value : value.replace(' ', 'T');
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})?$/);
+  if (!match) return false;
+  const [, yearRaw, monthRaw, dayRaw, hourRaw, minuteRaw, secondRaw = '00'] = match;
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  const second = Number(secondRaw);
+  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) return false;
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  if (day < 1 || day > daysInMonth) return false;
+  return Number.isFinite(Date.parse(normalized.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(normalized) ? normalized : `${normalized}Z`));
+}
+
+function parseMemoryAccessAuditDecision(value: unknown): { ok: true; value?: string } | { ok: false; message: string } {
+  if (value === undefined) return { ok: true };
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return { ok: false, message: 'decision must be a non-empty string when provided' };
+  }
+  return { ok: true, value: value.trim() };
 }
 
 function parsePositiveMemoryLimit(value: unknown): { ok: true; value: number } | { ok: false; message: string } {
@@ -102,6 +238,40 @@ function parseMemoryExportRedaction(value: unknown): { ok: true; value?: 'safe' 
   return { ok: false, message: 'redaction must be one of: safe, none' };
 }
 
+function parseOptionalPositiveIntegerArg(name: string, value: unknown): { ok: true; value?: number } | { ok: false; message: string } {
+  if (value === undefined) return { ok: true };
+  const raw = typeof value === 'string' ? value.trim() : String(value);
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || !Number.isSafeInteger(parsed) || parsed < 1) {
+    return { ok: false, message: `${name} must be a positive integer` };
+  }
+  return { ok: true, value: parsed };
+}
+
+function parseOptionalNonNegativeNumberArg(name: string, value: unknown): { ok: true; value?: number } | { ok: false; message: string } {
+  if (value === undefined) return { ok: true };
+  if (typeof value !== 'number' && typeof value !== 'string') {
+    return { ok: false, message: `${name} must be a non-negative number` };
+  }
+  const raw = typeof value === 'string' ? value.trim() : value;
+  if (raw === '') {
+    return { ok: false, message: `${name} must be a non-negative number` };
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return { ok: false, message: `${name} must be a non-negative number` };
+  }
+  return { ok: true, value: parsed };
+}
+
+function parseOptionalDateArg(name: string, value: unknown): { ok: true; value?: string } | { ok: false; message: string } {
+  if (value === undefined) return { ok: true };
+  if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) {
+    return { ok: false, message: `${name} must be a valid date string` };
+  }
+  return { ok: true, value };
+}
+
 function parseOptionalAgentIdArg(args: Record<string, unknown>): { ok: true; value?: string } | { ok: false; message: string } {
   if (args['agentId'] === undefined) return { ok: true };
   const agentId = String(args['agentId']).trim();
@@ -120,19 +290,34 @@ function parseStringArg(name: string, value: unknown): { ok: true; value: string
 
 const SENSITIVE_MEMORY_KEY_PATTERNS = [
   /(^|[._:-])(api[-_]?key|apikey)([._:-]|$)/i,
-  /(^|[._:-])(access[-_]?token|refresh[-_]?token|auth[-_]?token|bearer[-_]?token)([._:-]|$)/i,
-  /(^|[._:-])(password|passphrase|secret|credential|credentials)([._:-]|$)/i,
+  /(^|[._:-])(access[-_]?token|refresh[-_]?token|auth[-_]?token|bearer[-_]?token|authorization|proxy[-_]?authorization)([._:-]|$)/i,
+  /(^|[._:-])(password|passphrase|secret|credential|credentials|cookie|session)([._:-]|$)/i,
   /(^|[._:-])private[-_]?key([._:-]|$)/i,
 ];
 
 const SENSITIVE_MEMORY_VALUE_PATTERNS = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
-  /\b(?:sk|gho|ghp|glpat|xox[baprs])-[A-Za-z0-9_\-]{12,}\b/,
-  /\b(?:Bearer|token)\s+[A-Za-z0-9._~+/=-]{20,}\b/i,
+  /\b(?:sk[-_][A-Za-z0-9_\-]{12,}|gh[opusr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{12,}|glpat-[A-Za-z0-9_\-]{12,}|xox[baprs]-[A-Za-z0-9-]{10,})\b/,
+  /\bnpm_[A-Za-z0-9_\-]{12,}\b/,
+  /https:\/\/(?:discord(?:app)?\.com|canary\.discord\.com)\/api\/webhooks\/\d+\/[A-Za-z0-9_\-]+/i,
+  /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/[^\s:@/]*:[^\s@/]+@[^\s]+/i,
+  /\b(?:Bearer|Basic|token)\s+[A-Za-z0-9._~+/=-]{20,}\b/i,
+  /\b(?:Cookie|Set-Cookie):\s*[^\r\n]+/i,
+  /\b(?:Proxy-)?Authorization:\s*(?:Bearer|Basic|token)?\s*[^\r\n]{8,}/i,
 ];
 
+const SENSITIVE_MEMORY_REDACTION = '<redacted>';
+
+function normalizeSensitiveMemoryKey(key: string): string {
+  return key
+    .trim()
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[^a-z0-9]+/giu, '_');
+}
+
 function sensitiveMemoryQuarantineReason(key: string, value: string): string | undefined {
-  const normalizedKey = key.trim();
+  const normalizedKey = normalizeSensitiveMemoryKey(key);
   if (SENSITIVE_MEMORY_KEY_PATTERNS.some((pattern) => pattern.test(normalizedKey))) {
     return 'key-name-indicates-secret';
   }
@@ -231,7 +416,7 @@ const TOOLS: ToolFull[] = [
         }
         const candidate = await brain.proposeMemory({
           key,
-          value,
+          value: SENSITIVE_MEMORY_REDACTION,
           source: 'fbeast_memory_store:quarantine',
           evidenceId: `quarantine:${key}`,
           confidence: 1,
@@ -273,9 +458,9 @@ const TOOLS: ToolFull[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Search query (substring match on key and value)' },
+        query: { type: 'string', description: 'Search query (substring match on key and value)', minLength: 1, maxLength: 4096 },
         type: { type: 'string', description: 'Filter by type: working or episodic', enum: ['working', 'episodic'] },
-        limit: { type: 'string', description: 'Max results (default 20)' },
+        limit: { type: 'string', description: 'Max results as a positive integer from 1 to 1000 (default 20)', minLength: 1, maxLength: 16 },
         readScope: { type: 'string', description: 'Read scope: all (legacy), shared (hide agent-scoped entries), or agent (shared plus entries for agentId)', enum: ['all', 'shared', 'agent'] },
         agentId: { type: 'string', description: 'Agent id required when readScope is agent' },
       },
@@ -363,6 +548,46 @@ const TOOLS: ToolFull[] = [
         limit: parsedLimit.value,
       });
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    },
+  },
+  {
+    name: 'fbeast_memory_retention_report',
+    server: 'memory',
+    description: 'Inspect memory retention and compaction policy status by memory class',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        now: { type: 'string', description: 'Optional report timestamp for deterministic evaluation' },
+        expiryHorizonMs: { type: 'string', description: 'Report TTL entries expiring within this many milliseconds (default seven days)' },
+        maxEntries: { type: 'string', description: 'Optional entry budget used to mark overflow compaction candidates' },
+        readScope: { type: 'string', description: 'Memory visibility scope: all, shared, or agent', enum: ['all', 'shared', 'agent'] },
+        agentId: { type: 'string', description: 'Required when readScope is agent; filters report to shared plus that agent-scoped memory' },
+      },
+    },
+    makeHandler: ({ brain }) => async (args) => {
+      const now = parseOptionalDateArg('now', args['now']);
+      if (!now.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_retention_report ${now.message}` }], isError: true };
+      }
+      const expiryHorizonMs = parseOptionalNonNegativeNumberArg('expiryHorizonMs', args['expiryHorizonMs']);
+      if (!expiryHorizonMs.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_retention_report ${expiryHorizonMs.message}` }], isError: true };
+      }
+      const maxEntries = parseOptionalPositiveIntegerArg('maxEntries', args['maxEntries']);
+      if (!maxEntries.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_retention_report ${maxEntries.message}` }], isError: true };
+      }
+      const scopeArgs = parseMemoryReadScopeArgs(args);
+      if (!scopeArgs.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_retention_report ${scopeArgs.message}` }], isError: true };
+      }
+      const report = await brain.memoryRetentionReport({
+        ...scopeArgs.value,
+        ...(now.value ? { now: now.value } : {}),
+        ...(expiryHorizonMs.value === undefined ? {} : { expiryHorizonMs: expiryHorizonMs.value }),
+        ...(maxEntries.value === undefined ? {} : { maxEntries: maxEntries.value }),
+      });
+      return { content: [{ type: 'text', text: JSON.stringify(report, null, 2) }] };
     },
   },
   {
@@ -634,6 +859,50 @@ const TOOLS: ToolFull[] = [
     },
   },
 
+  {
+    name: 'fbeast_memory_access_audit_report',
+    server: 'memory',
+    description: 'Report redacted memory access by agent, profile, repo, tool, operation, and decision',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agentId: { type: 'string', description: 'Filter by agent id when available' },
+        profile: { type: 'string', description: 'Filter by active/profile name when available' },
+        repo: { type: 'string', description: 'Filter by repository identifier when available' },
+        since: { type: 'string', description: 'Inclusive lower timestamp bound (ISO string or SQLite timestamp)' },
+        until: { type: 'string', description: 'Inclusive upper timestamp bound (ISO string or SQLite timestamp)' },
+        operation: { type: 'string', description: 'Filter by operation, such as read, write, delete, review, or review:approve' },
+        tool: { type: 'string', description: 'Filter by memory tool name, such as fbeast_memory_query or fbeast_memory_store' },
+        decision: { type: 'string', description: 'Filter by any recorded governance/audit decision, such as approved, denied, validation_error, unknown_tool, or error' },
+        limit: { type: ['string', 'number'], description: 'Max audit events returned (default 1000)' },
+      },
+    },
+    makeHandler: ({ brain }) => async (args) => {
+      const limit = parseMemoryAccessAuditLimit(args['limit']);
+      if (!limit.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_access_audit_report ${limit.message}` }], isError: true };
+      }
+      const decision = parseMemoryAccessAuditDecision(args['decision']);
+      if (!decision.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_access_audit_report ${decision.message}` }], isError: true };
+      }
+      const filters: Record<string, string> = {};
+      for (const name of ['agentId', 'profile', 'repo', 'since', 'until', 'operation', 'tool'] as const) {
+        const parsed = parseMemoryAccessAuditStringFilter(name, args[name]);
+        if (!parsed.ok) {
+          return { content: [{ type: 'text', text: `Error: fbeast_memory_access_audit_report ${parsed.message}` }], isError: true };
+        }
+        if (parsed.value !== undefined) filters[name] = parsed.value;
+      }
+      const report = await brain.memoryAccessAuditReport({
+        ...filters,
+        ...(decision.value ? { decision: decision.value } : {}),
+        limit: limit.value,
+      });
+      return { content: [{ type: 'text', text: JSON.stringify(report, null, 2) }] };
+    },
+  },
+
   // --- planner ---
   {
     name: 'fbeast_plan_decompose',
@@ -735,6 +1004,18 @@ const TOOLS: ToolFull[] = [
       const content = String(args['content']);
       const criteria = splitCsvArg(args['criteria']) ?? ['correctness', 'readability', 'security', 'complexity'];
       const evaluators = splitCsvArg(args['evaluators']);
+      const supportedEvaluators = ['logic-loop', 'complexity', 'conciseness'];
+      const unknownEvaluators = evaluators?.filter((name) => !supportedEvaluators.includes(name)) ?? [];
+      if (unknownEvaluators.length > 0) {
+        const noun = unknownEvaluators.length === 1 ? 'evaluator' : 'evaluators';
+        return {
+          content: [{
+            type: 'text',
+            text: `Error: Unknown critique ${noun}: ${unknownEvaluators.join(', ')}. Expected one of: ${supportedEvaluators.join(', ')}`,
+          }],
+          isError: true,
+        };
+      }
       const result = await critique.evaluate(evaluators ? { content, criteria, evaluators } : { content, criteria });
       const findingsText = result.findings.length > 0 ? result.findings.map((f) => `  [${f.severity}] ${f.message}`).join('\n') : '  None';
       const text = [`## Critique Result`, ``, `**verdict:** ${result.verdict}`, `**score:** ${result.score.toFixed(2)}`, `**findings:**`, findingsText].join('\n');
@@ -787,6 +1068,7 @@ const TOOLS: ToolFull[] = [
     name: 'fbeast_firewall_scan_file',
     server: 'firewall',
     description: 'Detect prompt injection in file contents',
+    timeoutMs: 60_000,
     inputSchema: {
       type: 'object',
       properties: {
@@ -816,9 +1098,9 @@ const TOOLS: ToolFull[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        event: { type: 'string', description: 'Event type (e.g., file_edit, tool_call, decision)' },
-        metadata: { type: 'string', description: 'JSON metadata for this event' },
-        sessionId: { type: 'string', description: 'Session identifier' },
+        event: { type: 'string', description: 'Event type (e.g., file_edit, tool_call, decision)', minLength: 1, maxLength: 256 },
+        metadata: { type: 'string', description: 'JSON metadata for this event', maxLength: 1_000_000 },
+        sessionId: { type: 'string', description: 'Session identifier', minLength: 1, maxLength: 256 },
       },
       required: ['event', 'metadata', 'sessionId'],
     },
@@ -830,6 +1112,9 @@ const TOOLS: ToolFull[] = [
       const metadataArg = parseStringArg('metadata', args['metadata']);
       if (!metadataArg.ok) {
         return { content: [{ type: 'text', text: `Error: fbeast_observer_log ${metadataArg.message}` }], isError: true };
+      }
+      if (usesReservedObserverProvenance(metadataArg.value)) {
+        return { content: [{ type: 'text', text: 'Error: fbeast_observer_log reserved audit provenance is internal-only' }], isError: true };
       }
       const sessionIdArg = parseNonEmptyStringArg('sessionId', args['sessionId']);
       if (!sessionIdArg.ok) {
@@ -846,11 +1131,11 @@ const TOOLS: ToolFull[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        sessionId: { type: 'string', description: 'Session identifier' },
-        model: { type: 'string', description: 'Model name (e.g. gpt-4o, claude-opus-4-5)' },
-        promptTokens: { type: 'number', description: 'Input/prompt token count' },
-        completionTokens: { type: 'number', description: 'Output/completion token count' },
-        costUsd: { type: 'number', description: 'Actual cost in USD if known — omit to auto-calculate from pricing table' },
+        sessionId: { type: 'string', description: 'Session identifier', minLength: 1, maxLength: 256 },
+        model: { type: 'string', description: 'Model name (e.g. gpt-4o, claude-opus-4-5)', minLength: 1, maxLength: 256 },
+        promptTokens: { type: 'number', description: 'Input/prompt token count', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+        completionTokens: { type: 'number', description: 'Output/completion token count', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+        costUsd: { type: 'number', description: 'Actual cost in USD if known — omit to auto-calculate from pricing table', minimum: 0 },
       },
       required: ['sessionId', 'model', 'promptTokens', 'completionTokens'],
     },
@@ -859,7 +1144,7 @@ const TOOLS: ToolFull[] = [
       if (!parsedArgs.ok) {
         return { content: [{ type: 'text', text: `Error: fbeast_observer_log_cost ${parsedArgs.message}` }], isError: true };
       }
-      const { sessionId, model, promptTokens, completionTokens } = parsedArgs.value;
+      const { model, promptTokens, completionTokens } = parsedArgs.value;
       const result = await observer.logCost(parsedArgs.value);
       const pricingNote = result.unknownModel ? ' (unknown model — not priced)' : '';
       return { content: [{ type: 'text', text: `Logged cost: ${promptTokens}+${completionTokens} tokens for ${model} = $${result.costUsd.toFixed(4)}${pricingNote}` }] };
@@ -872,7 +1157,7 @@ const TOOLS: ToolFull[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        sessionId: { type: 'string', description: 'Session ID to filter (omit for all sessions)' },
+        sessionId: { type: 'string', description: 'Session ID to filter (omit for all sessions)', minLength: 1, maxLength: 256 },
       },
     },
     makeHandler: ({ observer }) => async (args) => {
@@ -943,6 +1228,9 @@ const TOOLS: ToolFull[] = [
     makeHandler: ({ governor }) => async (args) => {
       const action = String(args['action']);
       const context = String(args['context']);
+      if (usesReservedGovernorProvenance(context)) {
+        return { content: [{ type: 'text', text: 'Error: fbeast_governor_check reserved governance provenance is internal-only' }], isError: true };
+      }
       const { decision, reason } = await governor.check({ action, context });
       return { content: [{ type: 'text', text: `**Decision:** ${decision}\n**Reason:** ${reason}` }] };
     },
@@ -1041,10 +1329,11 @@ export const TOOL_REGISTRY: Map<string, ToolFull> = new Map(TOOLS.map((t) => [t.
 export function createToolDefsForServer(server: ToolServer, adapters: ServerAdapterDeps): ToolDef[] {
   return TOOLS
     .filter((tool) => tool.server === server)
-    .map(({ name, description, inputSchema, makeHandler }) => ({
+    .map(({ name, description, inputSchema, timeoutMs, makeHandler }) => ({
       name,
       description,
       inputSchema,
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       handler: makeHandler(adapters as AdapterSet),
     }));
 }

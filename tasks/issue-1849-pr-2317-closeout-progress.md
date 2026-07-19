@@ -1,0 +1,21 @@
+# Issue #1849 / PR #2317 closeout progress
+
+- [x] Orient on kanban card, PR state, current head, CI, and Codex findings.
+- [x] Audit unresolved Codex review threads via GraphQL.
+- [x] Inspect current implementation and regression tests for each unresolved finding.
+- [x] Fix unresolved audit gaps without broadening beyond memory access audit trail work.
+- [x] Merge/rebase origin/main and resolve conflicts.
+- [x] Run package tests/typecheck/lint/build and targeted regressions.
+  - Targeted rerun after latest fixes: `@franken/brain` memory-access-audit test passed (21 tests); `@franken/orchestrator` memory-snapshot-diff test passed (34 tests).
+  - Full package gates after la...[truncated]
+- [x] Push branch and verify CI.
+  - Pushed `56466bfd`; live GitHub checks passed for latest head.
+- [x] Reply to and resolve Codex threads with concrete evidence.
+  - Replied to and resolved initial Codex comments 3593571502, 3593571509, 3593571517, 3593571523, 3593571530.
+  - Replied to and resolved follow-up Codex comments 3593744785, 3593744792, 3593744801, 3593744813.
+  - Replied to and resolved second follow-up Codex comments 3593888473, 3593888475, 3593888477.
+- [ ] Trigger fresh @codex review within invocation cap and wait for current-head clean.
+  - Triggered latest review with approved cap override at `2026-07-16T08:45:37Z`.
+  - Current unresolved Codex round on head `f6f55fca` has four actionable threads: working.delete rollback, episodic.record atomicity, required backup audit table, and review.propose atomicity. Implemented fixes locally and targeted tests pass; full package gates/push/review still pending.
+  - Verification after local fixes: targeted `@franken/brain` memory-access-audit test passed (33 tests); targeted `@franken/orchestrator` memory-snapshot-diff test passed (34 tests); package `typecheck && lint && build` passed for brain and orchestrator; root `npm run typecheck` and `npm run build` passed; root `npm run test` still fails in unrelated `@franken/live-bench` CLI smoke timeout tests.
+- [ ] Merge PR only after green CI and fresh Codex clean; otherwise block with exact blocker.

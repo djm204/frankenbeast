@@ -49,7 +49,7 @@ export type {
 } from './types.js';
 
 // Issues
-export { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses, detectWorkerHeartbeatMonotonicityAnomalies } from './issues/index.js';
+export { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses, detectWorkerHeartbeatMonotonicityAnomalies, detectStuckRunWatchdogFindings, buildWorkerCrashOnlyRestartContract, planKanbanStateMutation } from './issues/index.js';
 export type {
   IssueRunnerConfig,
   IssueBackpressureConfig,
@@ -69,7 +69,20 @@ export type {
   IssueSchedulerFairnessBucket,
   IssueSchedulerFairnessReport,
   IssueSchedulerFairnessReportOptions,
+  IssueStuckRunBlockerCategory,
+  IssueStuckRunWatchdogFinding,
+  IssueStuckRunWatchdogOptions,
   IssueWorkerCardProcessSnapshot,
+  IssueWorkerCrashOnlyRestartContract,
+  IssueWorkerRestartDisposition,
+  IssueWorkerRestartNextAction,
+  KanbanStateMutationDecision,
+  KanbanStateMutationDecisionAction,
+  KanbanStateMutationOperation,
+  KanbanStateMutationRecord,
+  KanbanStateMutationRequest,
+  KanbanTaskCommentSnapshot,
+  KanbanTaskStateSnapshot,
   WorkerHeartbeatMonotonicityFinding,
   DuplicateWorkerCardProcessFinding,
 } from './issues/index.js';
@@ -143,9 +156,11 @@ export type { RedactionDecision, RedactionDecisionSource, RedactionResult } from
 // LLM helpers
 export { AdapterLlmClient, AdapterLlmError } from './adapters/adapter-llm-client.js';
 export {
+  AGENT_HANDOFF_TEMPLATE_REQUIREMENTS,
   PM_HANDOFF_QUALITY_RUBRIC,
   assessPmHandoffQuality,
   formatHandoff,
+  validateAgentHandoffTemplate,
 } from './providers/format-handoff.js';
 export {
   createModelProviderFailoverAuditPayload,
@@ -157,6 +172,11 @@ export type {
   ProviderSwitchEvent,
 } from './providers/provider-registry.js';
 export type {
+  AgentHandoffTemplateFinding,
+  AgentHandoffTemplateFindingStatus,
+  AgentHandoffTemplateRequirement,
+  AgentHandoffTemplateSectionId,
+  AgentHandoffTemplateValidation,
   PmHandoffQualityAssessment,
   PmHandoffRubricCriterion,
   PmHandoffRubricResult,

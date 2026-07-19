@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build-test-lint:
     runs-on: ubuntu-latest
@@ -43,6 +47,9 @@ jobs:
         env:
           CI_BOOTSTRAP_DRY_RUN: "1"
         run: npm run bootstrap:dry-run
+
+      - name: Disaster recovery restore rehearsal
+        run: npm run ci:dr:restore-rehearsal
 
       - name: Restore dependency vulnerability SLA state
         uses: actions/cache/restore@v6

@@ -72,7 +72,14 @@ export async function readJsonFileOrDefault<T>(
     const targetPath = await resolveExistingOrSymlinkTarget(filePath);
     const quarantinePath = quarantinePathFor(targetPath);
     const targetMode = await stat(targetPath).then((info) => info.mode & 0o777).catch(() => undefined);
-    await rename(targetPath, quarantinePath);
+    try {
+      await rename(targetPath, quarantinePath);
+    } catch (renameError) {
+      if ((renameError as NodeJS.ErrnoException).code === 'ENOENT') {
+        return fallback();
+      }
+      throw renameError;
+    }
     if (targetMode !== undefined) {
       recoveredFileModes.set(filePath, targetMode);
       recoveredFileModes.set(targetPath, targetMode);

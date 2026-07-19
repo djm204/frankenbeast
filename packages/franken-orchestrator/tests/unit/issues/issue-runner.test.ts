@@ -1,7 +1,8 @@
+import { createHash } from 'node:crypto';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses, detectWorkerHeartbeatMonotonicityAnomalies, evaluateIssueSchedulingScore } from '../../../src/issues/issue-runner.js';
+import { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses, detectWorkerHeartbeatMonotonicityAnomalies, detectStuckRunWatchdogFindings, buildWorkerCrashOnlyRestartContract, evaluateIssueSchedulingScore, planKanbanStateMutation } from '../../../src/issues/issue-runner.js';
 import type { IssueBackpressureSignals, IssueBackpressureThresholds, IssueRunnerConfig } from '../../../src/issues/issue-runner.js';
 import type { GithubIssue, TriageResult } from '../../../src/issues/types.js';
 import type { PlanGraph, ICheckpointStore, ILogger, BeastLoopDeps } from '../../../src/deps.js';
@@ -293,6 +294,106 @@ function makeIssueRuntimeSupport(): IssueRuntimeSupport {
 }
 
 
+
+describe('kanban state mutation idempotency planning', () => {
+  it('skips repeated comment, block, unblock, and complete mutations when state already converged', () => {
+    expect(planKanbanStateMutation(
+      { taskId: 't_retry', status: 'running', comments: [{ body: 'doctor note', idempotencyKey: 'comment:t_retry:doctor', createdAt: '2026-07-16T10:00:00Z' }] },
+      { operation: 'comment', idempotencyKey: 'comment:t_retry:doctor', body: 'doctor note' },
+    )).toMatchObject({ action: 'skip', reason: 'comment mutation already converged on an existing matching comment' });
+
+    expect(planKanbanStateMutation(
+      { taskId: 't_retry', status: 'blocked', blockReason: 'usage limit' },
+      { operation: 'block', idempotencyKey: 'block:t_retry:usage-limit', body: 'usage limit' },
+    )).toMatchObject({ action: 'skip', reason: 'task t_retry is already blocked with the requested reason' });
+
+    expect(planKanbanStateMutation(
+      { taskId: 't_retry', status: 'running' },
+      { operation: 'unblock', idempotencyKey: 'unblock:t_retry:doctor' },
+    )).toMatchObject({ action: 'skip', reason: 'task t_retry is already not blocked' });
+
+    expect(planKanbanStateMutation(
+      { taskId: 't_retry', status: 'completed', completionSummary: 'merged PR' },
+      { operation: 'complete', idempotencyKey: 'complete:t_retry:merged', body: 'merged PR' },
+    )).toMatchObject({ action: 'skip', reason: 'task t_retry is already complete with the requested summary' });
+  });
+
+  it('uses idempotency records before comments so retrying a reserved mutation is quiet', () => {
+    expect(planKanbanStateMutation(
+      {
+        taskId: 't_retry',
+        status: 'running',
+        appliedMutations: [{
+          operation: 'comment',
+          idempotencyKey: 'comment:t_retry:liveness',
+          contentHash: 'same-body',
+          appliedAt: '2026-07-16T10:00:00Z',
+        }],
+      },
+      { operation: 'comment', idempotencyKey: 'comment:t_retry:liveness', contentHash: 'same-body' },
+    )).toMatchObject({
+      action: 'skip',
+      reason: 'mutation idempotency key was already applied with matching operation/content',
+      evidence: expect.arrayContaining(['appliedAt=2026-07-16T10:00:00.000Z']),
+    });
+  });
+
+  it('recognizes retries that provide the body when the stored content hash is a digest', () => {
+    const body = 'doctor note\n';
+    const digest = createHash('sha256').update(body).digest('hex');
+
+    expect(planKanbanStateMutation(
+      {
+        taskId: 't_retry',
+        status: 'running',
+        appliedMutations: [{
+          operation: 'comment',
+          idempotencyKey: 'comment:t_retry:liveness',
+          contentHash: digest,
+        }],
+      },
+      { operation: 'comment', idempotencyKey: 'comment:t_retry:liveness', body },
+    )).toMatchObject({ action: 'skip' });
+  });
+
+  it('does not let audit comments prove non-comment state mutations', () => {
+    expect(planKanbanStateMutation(
+      {
+        taskId: 't_retry',
+        status: 'running',
+        revision: 7,
+        comments: [{ body: 'blocked: usage limit', idempotencyKey: 'block:t_retry:usage-limit' }],
+      },
+      { operation: 'block', idempotencyKey: 'block:t_retry:usage-limit', expectedRevision: 7, body: 'usage limit' },
+    )).toMatchObject({ action: 'apply' });
+  });
+
+  it('applies new mutations when numeric and serialized revisions match', () => {
+    expect(planKanbanStateMutation(
+      { taskId: 't_retry', status: 'running', revision: '7' },
+      { operation: 'block', idempotencyKey: 'block:t_retry:new', expectedRevision: 7, body: 'fresh blocker' },
+    )).toMatchObject({ action: 'apply' });
+  });
+
+  it('applies new mutations only when the compare-and-set revision matches', () => {
+    expect(planKanbanStateMutation(
+      { taskId: 't_retry', status: 'running', revision: 7 },
+      { operation: 'block', idempotencyKey: 'block:t_retry:new', expectedRevision: 7, body: 'fresh blocker' },
+    )).toMatchObject({ action: 'apply' });
+  });
+
+  it('returns explicit conflict evidence for stale concurrent updates', () => {
+    expect(planKanbanStateMutation(
+      { taskId: 't_retry', status: 'running', revision: 8 },
+      { operation: 'block', idempotencyKey: 'block:t_retry:stale', expectedRevision: 7, body: 'fresh blocker' },
+    )).toMatchObject({
+      action: 'conflict',
+      reason: 'kanban state revision changed before mutation could be applied',
+      evidence: expect.arrayContaining(['expectedRevision=7', 'actualRevision=8', 'status=running']),
+    });
+  });
+});
+
 describe('duplicate worker-card process detector', () => {
   it('detects duplicate and regressive heartbeat writes with worker diagnostics', () => {
     const findings = detectWorkerHeartbeatMonotonicityAnomalies([
@@ -471,6 +572,1934 @@ describe('duplicate worker-card process detector', () => {
     ]);
 
     expect(findings).toEqual([]);
+  });
+});
+
+describe('stuck-run watchdog', () => {
+  const nowMs = Date.parse('2026-07-16T12:00:00.000Z');
+
+  it('classifies crashed workers and recommends stale PID/current-run cleanup', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_crashed',
+        pid: 7401,
+        runId: 'run-crash',
+        issueNumber: 1678,
+        owner: 'doctor',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:55:00.000Z',
+        lastOutputAt: '2026-07-16T11:55:30.000Z',
+        lastToolActivityAt: '2026-07-16T11:54:00.000Z',
+        lastStateTransitionAt: '2026-07-16T11:50:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([
+      expect.objectContaining({
+        cardId: 't_crashed',
+        pid: 7401,
+        runId: 'run-crash',
+        issueNumber: 1678,
+        blockerCategory: 'process-crash',
+        confidence: 'high',
+        processStatus: 'dead',
+        kanbanState: 'running',
+        heartbeatAgeMs: 5 * 60 * 1000,
+        outputAgeMs: 270_000,
+        exitReason: 'process_not_alive',
+        restartDisposition: 'retryable',
+        nextAction: 'restart-once',
+        recommendedAction: expect.stringContaining('clear the stale PID/current-run pointer'),
+      }),
+    ]);
+  });
+
+  it('records crash-only setup failures as HITL doctor replacement instead of blind respawn', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_setup_crash',
+        pid: 7410,
+        runId: 'run-setup',
+        status: 'failed',
+        alive: false,
+        exitReason: 'spawn_failed',
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_setup_crash',
+      exitReason: 'spawn_failed',
+      pid: 7410,
+      heartbeatAgeMs: 60_000,
+      restartDisposition: 'hitl',
+      nextAction: 'replace-with-doctor',
+    });
+    expect(finding.evidence).toEqual(expect.arrayContaining([
+      'exitReason=spawn_failed',
+      'pid=7410',
+      'heartbeatAgeMs=60000',
+    ]));
+    expect(finding.recommendedAction).toContain('Doctor card');
+    expect(finding.recommendedAction).not.toContain('respawn one focused worker');
+  });
+
+  it('keeps blocked crash cards in HITL instead of auto-respawning them', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_blocked_crash',
+        pid: 7411,
+        runId: 'run-blocked',
+        status: 'blocked',
+        alive: false,
+        exitReason: 'exit_code_1',
+        lastHeartbeatAt: '2026-07-16T11:40:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_blocked_crash',
+      exitReason: 'exit_code_1',
+      restartDisposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      recommendedAction: expect.stringContaining('do not auto-respawn over the blocker'),
+    });
+    expect(finding.recommendedAction).not.toContain('respawn one focused worker');
+  });
+
+  it('defers dead workers when waiting evidence names CI or provider gates', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_ci_dead',
+        pid: 7414,
+        runId: 'run-ci',
+        status: 'running',
+        alive: false,
+        waitingOn: 'CI checks are still queued',
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+      {
+        cardId: 't_provider_dead',
+        pid: 7415,
+        runId: 'run-provider',
+        status: 'running',
+        alive: false,
+        waitingOn: 'Codex rate limit reset',
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([
+      expect.objectContaining({
+        cardId: 't_ci_dead',
+        blockerCategory: 'ci-wait',
+        restartDisposition: 'hitl',
+        nextAction: 'defer-with-evidence',
+        recommendedAction: expect.not.stringContaining('respawn one focused worker'),
+      }),
+      expect.objectContaining({
+        cardId: 't_provider_dead',
+        blockerCategory: 'provider-wait',
+        restartDisposition: 'hitl',
+        nextAction: 'defer-with-evidence',
+        recommendedAction: expect.not.stringContaining('respawn one focused worker'),
+      }),
+    ]);
+  });
+
+  it('normalizes direct restart-contract Kanban state before choosing HITL defer', () => {
+    const contract = buildWorkerCrashOnlyRestartContract(
+      {
+        cardId: 't_direct_blocked',
+        pid: 7418,
+        status: 'running',
+        alive: false,
+      },
+      {
+        category: 'process-crash',
+        processStatus: 'dead',
+        kanbanState: 'Blocked',
+      },
+    );
+
+    expect(contract).toMatchObject({
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      kanbanState: 'blocked',
+    });
+  });
+
+  it('redacts sensitive exit reasons before exposing restart evidence', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_secret_exit',
+        pid: 7416,
+        status: 'failed',
+        alive: false,
+        exitReason: `spawn failed with token=${'github_pat_' + '12345678901234567890abcdef'}`,
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding.exitReason).toBe('spawn failed with token=[REDACTED]');
+    expect(finding.evidence).toContain('exitReason=spawn failed with token=[REDACTED]');
+    expect(finding.evidence.join('\n')).not.toContain('github_pat_');
+  });
+
+  it('redacts key-value and colon-form secrets in exit reasons before exposing restart evidence', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_key_secret_exit',
+        pid: 7416,
+        status: 'failed',
+        alive: false,
+        exitReason: 'supervisor stderr AWS_SECRET_ACCESS_KEY=abc123 DB_PASSWORD: "secret value with spaces"',
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding.exitReason).toBe('supervisor stderr AWS_SECRET_ACCESS_KEY=<redacted> DB_PASSWORD=<redacted>');
+    expect(finding.evidence).toContain('exitReason=supervisor stderr AWS_SECRET_ACCESS_KEY=<redacted> DB_PASSWORD=<redacted>');
+    expect(finding.evidence.join('\n')).not.toContain('abc123');
+    expect(finding.evidence.join('\n')).not.toContain('secret value');
+  });
+
+  it('redacts quoted and space-containing colon-form secret values before exposing restart evidence', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_key_secret_phrase_exit',
+        pid: 7416,
+        status: 'failed',
+        alive: false,
+        exitReason: 'supervisor stderr DB_PASSWORD: "correct horse battery staple" AWS_SECRET_ACCESS_KEY: alpha beta gamma',
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding.exitReason).toBe('supervisor stderr DB_PASSWORD=<redacted> AWS_SECRET_ACCESS_KEY=<redacted>');
+    expect(finding.evidence).toContain('exitReason=supervisor stderr DB_PASSWORD=<redacted> AWS_SECRET_ACCESS_KEY=<redacted>');
+    expect(finding.evidence.join('\n')).not.toContain('correct horse');
+    expect(finding.evidence.join('\n')).not.toContain('alpha beta gamma');
+  });
+
+  it('respects explicit blocker categories before stale waiting text', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_explicit_dispatcher_blocker',
+        pid: 7416,
+        status: 'running',
+        alive: true,
+        blockerCategory: 'dispatcher-bug',
+        waitingOn: 'old note: CI checks are still running',
+        lastHeartbeatAt: '2026-07-16T10:00:00.000Z',
+        lastOutputAt: '2026-07-16T10:00:00.000Z',
+        lastToolActivityAt: '2026-07-16T10:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T10:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_explicit_dispatcher_blocker',
+      blockerCategory: 'dispatcher-bug',
+      restartDisposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+    });
+    expect(finding.recommendedAction).toContain('dispatcher metadata');
+  });
+
+  it('defers dead dispatcher-bug snapshots instead of restarting over repair evidence', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_dead_dispatcher_blocker',
+        pid: 7416,
+        status: 'running',
+        alive: false,
+        blockerCategory: 'dispatcher-bug',
+        exitReason: 'current_run mismatch after dispatcher crash',
+        lastHeartbeatAt: '2026-07-16T10:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_dead_dispatcher_blocker',
+      blockerCategory: 'dispatcher-bug',
+      processStatus: 'dead',
+      restartDisposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+    });
+    expect(finding.recommendedAction).toContain('dispatcher metadata');
+    expect(finding.recommendedAction).not.toContain('respawn one focused worker');
+  });
+
+  it('keeps alive stale nonterminal workers in HITL instead of terminal no-op', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_alive_unknown',
+        pid: 7417,
+        status: 'running',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T10:00:00.000Z',
+        lastOutputAt: '2026-07-16T10:00:00.000Z',
+        lastToolActivityAt: '2026-07-16T10:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T10:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_alive_unknown',
+      processStatus: 'alive',
+      kanbanState: 'running',
+      restartDisposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+    });
+  });
+
+  it('suppresses duplicate respawns when another PID already owns the worker card', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_duplicate_respawn',
+        pid: 7412,
+        runId: 'run-older',
+        status: 'running',
+        alive: false,
+        exitReason: 'unknown_exit',
+        siblingPids: [7413],
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_duplicate_respawn',
+      restartDisposition: 'hitl',
+      nextAction: 'suppress-duplicate-respawn',
+      recommendedAction: expect.stringContaining('Suppress duplicate respawn'),
+    });
+    expect(finding.evidence).toContain('siblingPids=7413');
+  });
+
+  it('derives duplicate respawn siblings from the watchdog snapshot set', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_derived_duplicate',
+        pid: 7412,
+        runId: 'run-dead',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+      {
+        cardId: 't_derived_duplicate',
+        pid: 7413,
+        runId: 'run-live',
+        status: 'running',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      cardId: 't_derived_duplicate',
+      pid: 7412,
+      restartDisposition: 'hitl',
+      nextAction: 'suppress-duplicate-respawn',
+    });
+    expect(findings[0].evidence).toContain('siblingPids=7413');
+  });
+
+  it('does not derive live siblings from older crash-status probes', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_old_crash_probe_not_sibling',
+        pid: 7412,
+        status: 'failed',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+      {
+        cardId: 't_old_crash_probe_not_sibling',
+        pid: 7413,
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+    ], { nowMs });
+
+    const finding = findings.find(candidate => candidate.pid === 7413);
+    expect(finding).toMatchObject({
+      cardId: 't_old_crash_probe_not_sibling',
+      pid: 7413,
+      restartDisposition: 'retryable',
+      nextAction: 'restart-once',
+    });
+    expect(finding.evidence).not.toContain('siblingPids=7412');
+  });
+
+  it('coalesces multiple dead attempts into one restart recommendation', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_repeated_dead_attempts',
+        pid: 7412,
+        runId: 'run-dead-1',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+      {
+        cardId: 't_repeated_dead_attempts',
+        pid: 7413,
+        runId: 'run-dead-2',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:31:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      cardId: 't_repeated_dead_attempts',
+      pid: 7413,
+      restartDisposition: 'retryable',
+      nextAction: 'restart-once',
+    });
+  });
+
+  it('prefers safer HITL contracts over earlier retryable dead attempts for the same card', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_retry_then_hitl',
+        pid: 7412,
+        runId: 'run-dead-1',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+      {
+        cardId: 't_retry_then_hitl',
+        pid: 7413,
+        runId: 'run-spawn-failed-later',
+        status: 'failed',
+        alive: false,
+        exitReason: 'spawn_failed',
+        lastHeartbeatAt: '2026-07-16T11:31:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      cardId: 't_retry_then_hitl',
+      pid: 7413,
+      restartDisposition: 'hitl',
+      nextAction: 'replace-with-doctor',
+    });
+  });
+
+  it('lets newer terminal snapshots clear stale dead restart candidates', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_dead_then_terminal',
+        pid: 7412,
+        runId: 'run-old-dead',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+      {
+        cardId: 't_dead_then_terminal',
+        pid: 7413,
+        runId: 'run-new-complete',
+        status: 'completed',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:31:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([]);
+  });
+
+  it('preserves newer retryable dead attempts when older HITL evidence is cleared by terminal cleanup', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_terminal_between_dead_attempts',
+        pid: 7426,
+        status: 'failed',
+        alive: false,
+        exitReason: 'spawn_failed',
+        lastHeartbeatAt: '2026-07-16T11:50:00.000Z',
+      },
+      {
+        cardId: 't_terminal_between_dead_attempts',
+        pid: 7427,
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+      {
+        cardId: 't_terminal_between_dead_attempts',
+        pid: 7428,
+        status: 'completed',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:55:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      cardId: 't_terminal_between_dead_attempts',
+      pid: 7427,
+      restartDisposition: 'retryable',
+      nextAction: 'restart-once',
+    });
+  });
+
+  it('uses terminal recency watermarks when terminal snapshots arrive before older dead attempts', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_terminal_before_old_dead',
+        pid: 7413,
+        runId: 'run-new-complete',
+        status: 'completed',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:31:00.000Z',
+      },
+      {
+        cardId: 't_terminal_before_old_dead',
+        pid: 7412,
+        runId: 'run-old-dead',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([]);
+  });
+
+  it('ignores future-dated terminal watermarks when evaluating real dead attempts', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_future_terminal_before_dead',
+        pid: 7413,
+        runId: 'run-future-complete',
+        status: 'completed',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T13:00:00.000Z',
+      },
+      {
+        cardId: 't_future_terminal_before_dead',
+        pid: 7412,
+        runId: 'run-real-dead',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      cardId: 't_future_terminal_before_dead',
+      pid: 7412,
+      restartDisposition: 'retryable',
+      nextAction: 'restart-once',
+    });
+  });
+
+  it('lets later undated terminal cleanup clear an earlier undated dead attempt', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_undated_dead_then_terminal',
+        pid: 7412,
+        status: 'running',
+        alive: false,
+      },
+      {
+        cardId: 't_undated_dead_then_terminal',
+        pid: 7413,
+        status: 'completed',
+        alive: false,
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([]);
+  });
+
+  it('does not let omitted-liveness terminal snapshots clear dead restart candidates', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_dead_then_terminal_without_probe',
+        pid: 7412,
+        runId: 'run-old-dead',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+      {
+        cardId: 't_dead_then_terminal_without_probe',
+        pid: 7413,
+        runId: 'run-new-complete-no-probe',
+        status: 'completed',
+        lastHeartbeatAt: '2026-07-16T11:31:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      cardId: 't_dead_then_terminal_without_probe',
+      pid: 7412,
+      restartDisposition: 'retryable',
+      nextAction: 'restart-once',
+    });
+  });
+
+  it('treats dispatcher restart stop reasons as HITL repair evidence before retrying', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_dispatcher_restart_reason',
+        pid: 7414,
+        runId: 'run-dispatcher-stale-pid',
+        status: 'failed',
+        alive: false,
+        exitReason: 'dispatcher_restart_stale_pid',
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_dispatcher_restart_reason',
+      exitReason: 'dispatcher_restart_stale_pid',
+      restartDisposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+    });
+    expect(finding.recommendedAction).toContain('do not auto-respawn over the blocker');
+  });
+
+  it('uses numeric timestamp recency when coalescing dead attempts', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_numeric_recency',
+        pid: 7415,
+        runId: 'run-older',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: Date.parse('2026-07-16T11:30:00.000Z'),
+      },
+      {
+        cardId: 't_numeric_recency',
+        pid: 7416,
+        runId: 'run-newer',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: Date.parse('2026-07-16T11:31:00.000Z'),
+      },
+    ], { nowMs });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      cardId: 't_numeric_recency',
+      pid: 7416,
+      runId: 'run-newer',
+      restartDisposition: 'retryable',
+      nextAction: 'restart-once',
+    });
+  });
+
+  it('prefers a newer retryable dead attempt over an older terminal stop', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_terminal_then_retryable',
+        pid: 7417,
+        runId: 'run-old-stop',
+        status: 'running',
+        alive: false,
+        exitReason: 'operator_stop',
+        lastHeartbeatAt: '2026-07-16T11:20:00.000Z',
+      },
+      {
+        cardId: 't_terminal_then_retryable',
+        pid: 7418,
+        runId: 'run-new-crash',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:31:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      cardId: 't_terminal_then_retryable',
+      pid: 7418,
+      runId: 'run-new-crash',
+      restartDisposition: 'retryable',
+      nextAction: 'restart-once',
+    });
+  });
+
+  it('classifies dead workers as crashes before broad provider wait text', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_dead_with_stale_provider_text',
+        pid: 7419,
+        status: 'running',
+        alive: false,
+        waitingOn: 'Codex process failed before the last heartbeat',
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_dead_with_stale_provider_text',
+      blockerCategory: 'process-crash',
+      restartDisposition: 'retryable',
+      nextAction: 'restart-once',
+    });
+  });
+
+  it('does not emit restart advice after HITL evidence for the same dead card', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_hitl_then_dead',
+        pid: 7412,
+        runId: 'run-spawn-failed',
+        status: 'failed',
+        alive: false,
+        exitReason: 'spawn_failed',
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+      {
+        cardId: 't_hitl_then_dead',
+        pid: 7413,
+        runId: 'run-dead-later',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:31:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      cardId: 't_hitl_then_dead',
+      pid: 7412,
+      restartDisposition: 'hitl',
+      nextAction: 'replace-with-doctor',
+    });
+  });
+
+  it('does not derive duplicate siblings from terminal stale snapshots', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_terminal_sibling',
+        pid: 7412,
+        runId: 'run-dead',
+        status: 'running',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+      {
+        cardId: 't_terminal_sibling',
+        pid: 7413,
+        runId: 'run-old-done',
+        status: 'completed',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      cardId: 't_terminal_sibling',
+      pid: 7412,
+      restartDisposition: 'retryable',
+      nextAction: 'restart-once',
+    });
+    expect(findings[0].evidence).not.toContain('siblingPids=7413');
+  });
+
+  it('normalizes exported restart-contract Kanban state before suppressing blocked respawns', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_direct_blocked',
+      pid: 7418,
+      status: 'Blocked',
+      alive: false,
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'Blocked',
+    });
+
+    expect(contract).toMatchObject({
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      kanbanState: 'blocked',
+    });
+  });
+
+  it('defers pending approval Kanban states before dead-process retry', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_pending_approval',
+      pid: 7418,
+      status: 'pending approval',
+      alive: false,
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'pending approval',
+    });
+
+    expect(contract).toMatchObject({
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      kanbanState: 'pending-approval',
+    });
+  });
+
+  it('defers dead workers with active PR/worktree ownership before restart-once', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_active_owner',
+      pid: 7418,
+      status: 'running',
+      alive: false,
+      exitReason: 'respawn_guarded(active_pr)',
+      activePrUrl: `https://github.com/djm204/frankenbeast/pull/2560?token=${'github_pat_' + '12345678901234567890abcdef'}`,
+      activeWorktreePath: '/tmp/frankenbeast/.worktrees/t_active_owner/DB_PASSWORD:secret-value',
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'running',
+    });
+
+    expect(contract).toMatchObject({
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      kanbanState: 'running',
+    });
+    expect(contract.evidence).toEqual(expect.arrayContaining([
+      'activePr=https://github.com/djm204/frankenbeast/pull/2560?token=[REDACTED]',
+      'activeWorktree=/tmp/frankenbeast/.worktrees/t_active_owner/DB_PASSWORD=<redacted>',
+    ]));
+    expect(contract.evidence.join('\n')).not.toContain('github_pat_');
+    expect(contract.evidence.join('\n')).not.toContain('secret-value');
+  });
+
+  it('defers spawn failures with active ownership before routing to doctor replacement', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_spawn_failed_owned',
+      pid: 7418,
+      status: 'running',
+      alive: false,
+      exitReason: 'spawn_failed',
+      activePrUrl: 'https://github.com/djm204/frankenbeast/pull/2560',
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'running',
+    });
+
+    expect(contract).toMatchObject({
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      kanbanState: 'running',
+    });
+    expect(contract.evidence).toContain('activePr=https://github.com/djm204/frankenbeast/pull/2560');
+  });
+
+  it('keeps direct terminal restart contracts as no-op before dead-process retry', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_direct_completed',
+      pid: 7419,
+      status: 'completed',
+      alive: false,
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'completed',
+    });
+
+    expect(contract).toMatchObject({
+      disposition: 'terminal',
+      nextAction: 'no-op',
+      kanbanState: 'completed',
+    });
+  });
+
+  it('routes setup failures to doctor even after terminal Kanban cleanup', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_completed_spawn_failed',
+      pid: 7422,
+      status: 'completed',
+      alive: false,
+      exitReason: 'spawn_failed',
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'completed',
+    });
+
+    expect(contract).toMatchObject({
+      exitReason: 'spawn_failed',
+      disposition: 'hitl',
+      nextAction: 'replace-with-doctor',
+      kanbanState: 'completed',
+    });
+  });
+
+  it('reports terminal setup failures through watchdog contract evaluation', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_watchdog_completed_spawn_failed',
+        pid: 7422,
+        status: 'completed',
+        alive: false,
+        exitReason: 'spawn_failed',
+        lastHeartbeatAt: '2026-07-16T11:55:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_watchdog_completed_spawn_failed',
+      exitReason: 'spawn_failed',
+      restartDisposition: 'hitl',
+      nextAction: 'replace-with-doctor',
+    });
+  });
+
+  it('treats crash-like terminal statuses as retryable process crashes', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_direct_failed',
+      pid: 7422,
+      status: 'failed',
+      alive: false,
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'failed',
+    });
+
+    expect(contract).toMatchObject({
+      disposition: 'retryable',
+      nextAction: 'restart-once',
+      kanbanState: 'failed',
+    });
+  });
+
+  it('defers dispatcher-bug crashes before considering dead-process restart', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_dispatcher_bug_dead',
+      pid: 7425,
+      status: 'running',
+      alive: false,
+    }, {
+      category: 'dispatcher-bug',
+      processStatus: 'dead',
+      kanbanState: 'running',
+    });
+
+    expect(contract).toMatchObject({
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      processStatus: 'dead',
+    });
+  });
+
+  it('defers crash-like statuses while liveness still reports the process alive', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_failed_but_alive',
+      pid: 7426,
+      status: 'failed',
+      alive: true,
+    }, {
+      category: 'process-crash',
+      processStatus: 'alive',
+      kanbanState: 'failed',
+    });
+
+    expect(contract).toMatchObject({
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+      processStatus: 'alive',
+      kanbanState: 'failed',
+    });
+  });
+
+  it('treats status-only crash snapshots as dead when no live probe contradicts them', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_status_only_failed',
+        pid: 7426,
+        status: 'failed',
+        lastHeartbeatAt: '2026-07-16T11:55:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_status_only_failed',
+      processStatus: 'dead',
+      restartDisposition: 'retryable',
+      nextAction: 'restart-once',
+    });
+  });
+
+  it('honors same-PID live probes before inferring status-only crash snapshots are dead', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_same_pid_probe',
+        pid: 7426,
+        status: 'failed',
+        lastHeartbeatAt: '2026-07-16T11:55:00.000Z',
+      },
+      {
+        cardId: 't_same_pid_probe',
+        pid: 7426,
+        status: 'running',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([
+      expect.objectContaining({
+        cardId: 't_same_pid_probe',
+        pid: 7426,
+        processStatus: 'alive',
+        restartDisposition: 'hitl',
+        nextAction: 'defer-with-evidence',
+      }),
+    ]);
+    expect(findings[0]!.recommendedAction).not.toContain('respawn one focused worker');
+  });
+
+  it('prefers newer same-PID crash snapshots over older live probes', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_same_pid_probe_newer_crash',
+        pid: 7426,
+        status: 'running',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T11:50:00.000Z',
+      },
+      {
+        cardId: 't_same_pid_probe_newer_crash',
+        pid: 7426,
+        status: 'failed',
+        lastHeartbeatAt: '2026-07-16T11:55:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_same_pid_probe_newer_crash',
+      pid: 7426,
+      processStatus: 'dead',
+      restartDisposition: 'retryable',
+      nextAction: 'restart-once',
+    });
+  });
+
+  it('does not let an older dated same-PID live probe mask a later undated crash snapshot', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_dated_live_then_undated_crash',
+        pid: 7426,
+        status: 'running',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+      {
+        cardId: 't_dated_live_then_undated_crash',
+        pid: 7426,
+        status: 'failed',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_dated_live_then_undated_crash',
+      pid: 7426,
+      processStatus: 'dead',
+      restartDisposition: 'retryable',
+      nextAction: 'restart-once',
+    });
+  });
+
+  it('lets a later undated same-PID live probe override an undated crash despite an older dated probe', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_dated_live_then_undated_crash_then_live',
+        pid: 7426,
+        status: 'running',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+      {
+        cardId: 't_dated_live_then_undated_crash_then_live',
+        pid: 7426,
+        status: 'failed',
+      },
+      {
+        cardId: 't_dated_live_then_undated_crash_then_live',
+        pid: 7426,
+        status: 'running',
+        alive: true,
+      },
+    ], { nowMs });
+
+    expect(findings.some(finding => finding.processStatus === 'dead')).toBe(false);
+  });
+
+  it('lets a later undated same-PID live probe override an earlier dated crash', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_dated_crash_then_undated_live',
+        pid: 7426,
+        status: 'failed',
+        lastHeartbeatAt: '2026-07-16T11:55:00.000Z',
+      },
+      {
+        cardId: 't_dated_crash_then_undated_live',
+        pid: 7426,
+        status: 'running',
+        alive: true,
+      },
+    ], { nowMs });
+
+    expect(findings.some(finding => finding.processStatus === 'dead')).toBe(false);
+  });
+
+  it('suppresses same-PID crash warnings after newer terminal cleanup', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_crash_probe_then_terminal_cleanup',
+        pid: 7426,
+        status: 'failed',
+        lastHeartbeatAt: '2026-07-16T11:30:00.000Z',
+      },
+      {
+        cardId: 't_crash_probe_then_terminal_cleanup',
+        pid: 7426,
+        status: 'running',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+      {
+        cardId: 't_crash_probe_then_terminal_cleanup',
+        pid: 7426,
+        status: 'completed',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T11:59:30.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([]);
+  });
+
+  it('counts live crash-status probes as live evidence', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_live_failed_status_probe',
+        pid: 7426,
+        status: 'failed',
+        lastHeartbeatAt: '2026-07-16T11:55:00.000Z',
+      },
+      {
+        cardId: 't_live_failed_status_probe',
+        pid: 7426,
+        status: 'failed',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        cardId: 't_live_failed_status_probe',
+        processStatus: 'alive',
+        restartDisposition: 'hitl',
+        nextAction: 'defer-with-evidence',
+      }),
+    ]));
+    expect(findings.some(finding => finding.processStatus === 'dead')).toBe(false);
+  });
+
+  it('does not treat terminal same-PID records as live crash probes', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_same_pid_terminal_probe',
+        pid: 7426,
+        status: 'failed',
+        lastHeartbeatAt: '2026-07-16T11:55:00.000Z',
+      },
+      {
+        cardId: 't_same_pid_terminal_probe',
+        pid: 7426,
+        status: 'completed',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_same_pid_terminal_probe',
+      processStatus: 'dead',
+      restartDisposition: 'retryable',
+      nextAction: 'restart-once',
+    });
+  });
+
+  it('honors undated same-PID live probes as ambiguous live evidence', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_undated_same_pid_probe',
+        pid: 7426,
+        status: 'failed',
+      },
+      {
+        cardId: 't_undated_same_pid_probe',
+        pid: 7426,
+        status: 'running',
+        alive: true,
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_undated_same_pid_probe',
+      pid: 7426,
+      processStatus: 'alive',
+      restartDisposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+    });
+  });
+
+  it('honors omitted-liveness same-PID live snapshots', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_omitted_liveness_same_pid_probe',
+        pid: 7426,
+        status: 'failed',
+        lastHeartbeatAt: '2026-07-16T11:55:00.000Z',
+      },
+      {
+        cardId: 't_omitted_liveness_same_pid_probe',
+        pid: 7426,
+        status: 'running',
+        lastHeartbeatAt: '2026-07-16T11:59:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_omitted_liveness_same_pid_probe',
+      pid: 7426,
+      processStatus: 'alive',
+      restartDisposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+    });
+  });
+
+  it('lets dated terminal records clear later undated dead restart candidates', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_undated_terminal_then_dead',
+        pid: 7427,
+        status: 'completed',
+        alive: false,
+        lastStateTransitionAt: '2026-07-16T11:59:00.000Z',
+      },
+      {
+        cardId: 't_undated_terminal_then_dead',
+        pid: 7428,
+        status: 'running',
+        alive: false,
+      },
+    ], { nowMs });
+
+    expect(findings).toHaveLength(0);
+  });
+
+  it('keeps intentional operator exits non-retryable in direct restart contracts', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_operator_stop',
+      pid: 7420,
+      status: 'running',
+      alive: false,
+      exitReason: 'operator_stop',
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'running',
+    });
+
+    expect(contract).toMatchObject({
+      exitReason: 'operator_stop',
+      disposition: 'terminal',
+      nextAction: 'no-op',
+    });
+  });
+
+  it('keeps intentional exits terminal even when active ownership evidence is present', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_operator_stop_owned',
+      pid: 7420,
+      status: 'running',
+      alive: false,
+      exitReason: 'operator_stop',
+      activePrUrl: 'https://github.com/djm204/frankenbeast/pull/2560',
+      activeWorktreePath: '/tmp/frankenbeast/.worktrees/t_operator_stop_owned',
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'running',
+    });
+
+    expect(contract).toMatchObject({
+      exitReason: 'operator_stop',
+      disposition: 'terminal',
+      nextAction: 'no-op',
+    });
+    expect(contract.evidence).toEqual(expect.arrayContaining([
+      'activePr=https://github.com/djm204/frankenbeast/pull/2560',
+      'activeWorktree=/tmp/frankenbeast/.worktrees/t_operator_stop_owned',
+    ]));
+  });
+
+  it('keeps terminal card states ahead of active ownership deferral', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_completed_with_pr',
+      pid: 7420,
+      status: 'completed',
+      alive: false,
+      activePrUrl: 'https://github.com/djm204/frankenbeast/pull/2560',
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'completed',
+    });
+
+    expect(contract).toMatchObject({
+      disposition: 'terminal',
+      nextAction: 'no-op',
+    });
+  });
+
+  it('defers external signal exits for operator investigation in direct restart contracts', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_signal_stop',
+      pid: 7423,
+      status: 'running',
+      alive: false,
+      exitReason: 'signal_SIGTERM',
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'running',
+    });
+
+    expect(contract).toMatchObject({
+      exitReason: 'signal_SIGTERM',
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+    });
+  });
+
+  it('preserves operator signal investigation after the Kanban card becomes terminal', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_signal_stop_completed',
+      pid: 7423,
+      status: 'completed',
+      alive: false,
+      exitReason: 'signal_SIGTERM',
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'completed',
+    });
+
+    expect(contract).toMatchObject({
+      exitReason: 'signal_SIGTERM',
+      disposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+    });
+  });
+
+  it('reports terminal operator signals through the watchdog detector', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_signal_stop_completed_watchdog',
+        pid: 7423,
+        status: 'completed',
+        alive: false,
+        exitReason: 'signal_SIGTERM',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_signal_stop_completed_watchdog',
+      exitReason: 'signal_SIGTERM',
+      processStatus: 'dead',
+      restartDisposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+    });
+  });
+
+  it('reports terminal operator signals when liveness is omitted', () => {
+    const [finding] = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_signal_stop_without_liveness',
+        pid: 7423,
+        status: 'completed',
+        exitReason: 'signal_SIGTERM',
+      },
+    ], { nowMs });
+
+    expect(finding).toMatchObject({
+      cardId: 't_signal_stop_without_liveness',
+      exitReason: 'signal_SIGTERM',
+      processStatus: 'dead',
+      restartDisposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+    });
+  });
+
+  it('restarts retryable signal-killed workers without active ownership', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_signal_kill',
+      pid: 7425,
+      status: 'running',
+      alive: false,
+      exitReason: 'signal_SIGKILL',
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'running',
+    });
+
+    expect(contract).toMatchObject({
+      exitReason: 'signal_SIGKILL',
+      disposition: 'retryable',
+      nextAction: 'restart-once',
+    });
+  });
+
+  it('routes start_failed exit reasons to doctor replacement', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_start_failed',
+      pid: 7421,
+      status: 'running',
+      alive: false,
+      exitReason: 'start_failed',
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'running',
+    });
+
+    expect(contract).toMatchObject({
+      exitReason: 'start_failed',
+      disposition: 'hitl',
+      nextAction: 'replace-with-doctor',
+    });
+  });
+
+  it('routes spawn_failure exit reasons to doctor replacement', () => {
+    const contract = buildWorkerCrashOnlyRestartContract({
+      cardId: 't_spawn_failure',
+      pid: 7424,
+      status: 'running',
+      alive: false,
+      exitReason: 'spawn_failure',
+    }, {
+      category: 'process-crash',
+      processStatus: 'dead',
+      kanbanState: 'running',
+    });
+
+    expect(contract).toMatchObject({
+      exitReason: 'spawn_failure',
+      disposition: 'hitl',
+      nextAction: 'replace-with-doctor',
+    });
+  });
+
+  it('uses known blocker hints to report approval gates with concrete remediation', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_approval',
+        pid: 7402,
+        runId: 'run-approval',
+        status: 'running',
+        alive: true,
+        blockerCategory: 'approval-gate',
+        waitingOn: 'approval token for git push --force-with-lease',
+        lastHeartbeatAt: '2026-07-16T10:00:00.000Z',
+        lastOutputAt: '2026-07-16T10:05:00.000Z',
+        lastToolActivityAt: '2026-07-16T10:05:00.000Z',
+        lastStateTransitionAt: '2026-07-16T09:30:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_approval',
+      blockerCategory: 'approval-gate',
+      confidence: 'high',
+      heartbeatAgeMs: 7_200_000,
+      toolActivityAgeMs: 6_900_000,
+      stateTransitionAgeMs: 9_000_000,
+      processStatus: 'alive',
+      recommendedAction: expect.stringContaining('approval-cop'),
+      evidence: expect.arrayContaining([
+        'waitingOn=approval token for git push --force-with-lease',
+        'blockerCategory=approval-gate',
+      ]),
+    });
+  });
+
+  it('guards against false positives for healthy long-running CI/provider waits', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_ci_wait',
+        pid: 7403,
+        status: 'running',
+        alive: true,
+        blockerCategory: 'ci-wait',
+        waitingOn: 'CI checks are still queued',
+        lastHeartbeatAt: '2026-07-16T11:45:00.000Z',
+        lastOutputAt: '2026-07-16T11:40:00.000Z',
+        lastToolActivityAt: '2026-07-16T10:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T10:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([]);
+  });
+
+  it('does not treat missing optional activity signals as stale', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_heartbeat_only',
+        pid: 7405,
+        status: 'running',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T11:55:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([]);
+  });
+
+  it('keeps normally completed dead workers quiet', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_done',
+        pid: 7406,
+        status: 'done',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastOutputAt: '2026-07-16T08:00:00.000Z',
+        lastToolActivityAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([]);
+  });
+
+  it('keeps terminal cards quiet even when stale waitingOn text mentions failures', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_done_with_stale_waiting_on',
+        pid: 7406,
+        status: 'done',
+        alive: true,
+        waitingOn: 'CI checks failed before the card completed',
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([]);
+  });
+
+  it('keeps successful terminal cards quiet even when stale blocker metadata mentions crashes', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_done_with_stale_crash_blocker',
+        pid: 7406,
+        status: 'done',
+        alive: true,
+        blockerCategory: 'process-crash',
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([]);
+  });
+
+  it('reports terminal crash statuses when alive is false without waitingOn hints', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_terminal_crash',
+        pid: 7407,
+        status: 'crashed',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_terminal_crash',
+      blockerCategory: 'process-crash',
+      confidence: 'high',
+      processStatus: 'dead',
+      kanbanState: 'crashed',
+    });
+  });
+
+  it('defers dead workers when explicit wait hints remain', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_dead_ci_wait',
+        pid: 7407,
+        status: 'running',
+        alive: false,
+        blockerCategory: 'ci-wait',
+        waitingOn: 'CI checks were queued before the process exited',
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_dead_ci_wait',
+      blockerCategory: 'ci-wait',
+      confidence: 'high',
+      processStatus: 'dead',
+      restartDisposition: 'hitl',
+      nextAction: 'defer-with-evidence',
+    });
+  });
+
+  it('reports dead workers even when activity timestamps are absent', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_dead_without_activity',
+        pid: 7407,
+        status: 'running',
+        alive: false,
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_dead_without_activity',
+      blockerCategory: 'process-crash',
+      confidence: 'high',
+      processStatus: 'dead',
+    });
+  });
+
+  it('reports terminal crash statuses even when liveness probes are omitted', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_crashed_without_probe',
+        pid: 7407,
+        status: 'failed',
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_crashed_without_probe',
+      blockerCategory: 'process-crash',
+      confidence: 'high',
+      processStatus: 'dead',
+      kanbanState: 'failed',
+    });
+  });
+
+  it('reports crash-only snapshots even when activity timestamps are absent', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_crashed_without_activity',
+        pid: 7407,
+        status: 'failed',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_crashed_without_activity',
+      blockerCategory: 'process-crash',
+      confidence: 'high',
+      processStatus: 'dead',
+      kanbanState: 'failed',
+    });
+  });
+
+  it('lets explicit crash status override stale blocker hints', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_failed_stale_ci_wait',
+        pid: 7407,
+        status: 'failed',
+        waitingOn: 'CI checks were queued before the process exited',
+        lastStateTransitionAt: '2026-07-16T11:58:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_failed_stale_ci_wait',
+      blockerCategory: 'process-crash',
+      confidence: 'high',
+      processStatus: 'dead',
+      kanbanState: 'failed',
+    });
+  });
+
+  it('does not infer crashes from ordinary process wait wording without stale evidence', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_waiting_on_child_process',
+        pid: 7407,
+        status: 'processing',
+        waitingOn: 'waiting on child process',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([]);
+  });
+
+  it('reports stale heartbeat snapshots even when optional activity timestamps are absent', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_stale_heartbeat_only',
+        pid: 7408,
+        status: 'running',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        startedAt: '2026-07-16T07:30:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_stale_heartbeat_only',
+      blockerCategory: 'unknown',
+      confidence: 'low',
+      heartbeatAgeMs: 14_400_000,
+      stateTransitionAgeMs: 16_200_000,
+      processStatus: 'alive',
+    });
+  });
+
+  it('reports stale heartbeat-only snapshots when heartbeat is the only provided activity signal', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_stale_heartbeat_only_no_start',
+        pid: 7408,
+        status: 'running',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_stale_heartbeat_only_no_start',
+      blockerCategory: 'unknown',
+      confidence: 'low',
+      heartbeatAgeMs: 14_400_000,
+      processStatus: 'alive',
+    });
+  });
+
+  it('reports partial stale snapshots when all provided activity signals are stale', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_heartbeat_output_only',
+        pid: 7408,
+        status: 'running',
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastOutputAt: '2026-07-16T08:05:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_heartbeat_output_only',
+      blockerCategory: 'unknown',
+      confidence: 'low',
+      heartbeatAgeMs: 14_400_000,
+      outputAgeMs: 14_100_000,
+      processStatus: 'alive',
+    });
+  });
+
+  it('keeps stale cards visible when the PID is missing or unreadable', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_missing_pid',
+        pid: 0,
+        status: 'running',
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_missing_pid',
+      pid: 0,
+      processStatus: 'unknown',
+      confidence: 'low',
+    });
+  });
+
+  it('does not treat fresh unreadable PID snapshots as dead crashes', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_fresh_missing_pid',
+        pid: 0,
+        status: 'running',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T11:55:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([]);
+  });
+
+  it('redacts token-like values from waitingOn evidence', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_secret_wait',
+        pid: 7411,
+        status: 'running',
+        alive: true,
+        waitingOn: `approval token=${'ghr_'}abcdefghijklmnopqrstuvwx.yz-123456 and api token: ${'sk-'}abcdefghijklmnopqrstuvwxyz123456`,
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastOutputAt: '2026-07-16T08:00:00.000Z',
+        lastToolActivityAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0].evidence).toContain('waitingOn=approval token=[REDACTED] and api token=[REDACTED]');
+    expect(findings[0].evidence.join('\n')).not.toContain('ghr_');
+    expect(findings[0].evidence.join('\n')).not.toContain('sk-abcdefghijklmnopqrstuvwxyz123456');
+  });
+
+  it('keeps provider token and checkpoint text out of approval and CI buckets', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_provider_tokens',
+        pid: 7409,
+        status: 'running',
+        alive: true,
+        waitingOn: 'provider budget remaining 0 tokens',
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastOutputAt: '2026-07-16T08:00:00.000Z',
+        lastToolActivityAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+      {
+        cardId: 't_checkpoint_wait',
+        pid: 7410,
+        status: 'running',
+        alive: true,
+        waitingOn: 'checkpoint handoff is pending',
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastOutputAt: '2026-07-16T08:00:00.000Z',
+        lastToolActivityAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        cardId: 't_provider_tokens',
+        blockerCategory: 'provider-wait',
+      }),
+      expect.objectContaining({
+        cardId: 't_checkpoint_wait',
+        blockerCategory: 'unknown',
+      }),
+    ]));
+  });
+
+  it('prioritizes approval cues over broad provider wording', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_provider_approval',
+        pid: 7412,
+        status: 'running',
+        alive: true,
+        waitingOn: 'Codex model operation needs operator approval',
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastOutputAt: '2026-07-16T08:00:00.000Z',
+        lastToolActivityAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_provider_approval',
+      blockerCategory: 'approval-gate',
+    });
+  });
+
+  it('infers a specific blocker when callers provide unknown with useful waiting text', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_unknown_ci_wait',
+        pid: 7413,
+        status: 'running',
+        alive: true,
+        blockerCategory: 'unknown',
+        waitingOn: 'CI checks are queued',
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastOutputAt: '2026-07-16T08:00:00.000Z',
+        lastToolActivityAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_unknown_ci_wait',
+      blockerCategory: 'ci-wait',
+    });
+  });
+
+  it('suppresses watchdog findings when any provided activity signal is fresh', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_fresh_output',
+        pid: 7414,
+        status: 'running',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastOutputAt: '2026-07-16T11:58:00.000Z',
+        lastToolActivityAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([]);
+  });
+
+  it('escalates stale provider waits after every activity signal exceeds grace', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_provider',
+        pid: 7404,
+        status: 'running',
+        alive: true,
+        waitingOn: 'provider quota reset',
+        lastHeartbeatAt: '2026-07-16T08:30:00.000Z',
+        lastOutputAt: '2026-07-16T08:25:00.000Z',
+        lastToolActivityAt: '2026-07-16T08:20:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:15:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_provider',
+      blockerCategory: 'provider-wait',
+      confidence: 'high',
+      recommendedAction: expect.stringContaining('provider quota'),
+    });
   });
 });
 

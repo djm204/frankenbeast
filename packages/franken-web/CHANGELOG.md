@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.6.0](https://github.com/djm204/frankenbeast/compare/franken-web-v0.5.0...franken-web-v0.6.0) (2026-07-18)
+
+
+### Features
+
+* **availability:** expose SLO dashboard ([#2580](https://github.com/djm204/frankenbeast/issues/2580)) ([6e1918c](https://github.com/djm204/frankenbeast/commit/6e1918cffe5ffb10a0acfc72f08d118836172864))
+
+
+### Tests
+
+* **stability:** add stream replay coverage ([#2578](https://github.com/djm204/frankenbeast/issues/2578)) ([92bacf0](https://github.com/djm204/frankenbeast/commit/92bacf068b14e2e6e25d97eca0f543afcad56a41))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.13.0 to 0.14.0
+
+## [0.5.0](https://github.com/djm204/frankenbeast/compare/franken-web-v0.4.0...franken-web-v0.5.0) (2026-07-16)
+
+
+### Features
+
+* **beasts:** add maintenance dispatch guardrails ([#2400](https://github.com/djm204/frankenbeast/issues/2400)) ([f50e966](https://github.com/djm204/frankenbeast/commit/f50e966246a1a05902fd0054ffa79bb59ffe35e7))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.12.0 to 0.13.0
+
 ## [0.4.0](https://github.com/djm204/frankenbeast/compare/franken-web-v0.3.0...franken-web-v0.4.0) (2026-07-16)
 
 

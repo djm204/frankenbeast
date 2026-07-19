@@ -126,7 +126,7 @@ export interface SamplingAdapterOptions {
  * ```ts
  * const adapter = new SamplingAdapter({
  *   strategy: new ProbabilisticSampler(0.1), // keep 10%
- *   adapter: new SQLiteAdapter({ path: 'traces.db' }),
+ *   adapter: new SQLiteAdapter('traces.db'),
  * })
  * await adapter.flush(trace) // ~90% of calls are silently dropped
  * ```

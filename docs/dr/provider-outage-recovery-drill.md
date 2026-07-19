@@ -6,14 +6,14 @@ Related references:
 
 - [Issue runner backpressure and degraded-mode routing](../guides/fix-github-issues.md#backpressure)
 - [Incident command checklist for automation failures](incident-command-checklist.md)
-- [PM-swarm runtime glossary](../onboarding/pm-swarm-runtime-glossary.md)
+- [agent coordination runtime glossary](../onboarding/agent-coordination-runtime-glossary.md)
 - [Provider failover guidance](../guides/add-llm-provider.md)
 
 ## Drill goals
 
 - Practice the first 15 minutes of a primary model-provider outage.
 - Validate that fallback-only mode preserves in-flight work instead of starving it with fresh tickets.
-- Confirm PM/liveness output is specific enough for an operator to compare actual behavior with expected drill steps.
+- Confirm coordination/liveness output is specific enough for an operator to compare actual behavior with expected drill steps.
 - Rehearse the recovery probe and resume order before broad primary-provider traffic is restored.
 
 ## Preconditions
@@ -32,6 +32,7 @@ The fixture script is safe to run from any checkout because it only prints deter
 
 ```bash
 node scripts/provider-outage-drill-fixture.mjs --scenario provider-outage
+node scripts/provider-outage-drill-fixture.mjs --scenario fallback-paths
 node scripts/provider-outage-drill-fixture.mjs --scenario recovery
 ```
 
@@ -51,7 +52,7 @@ Do not run commands that start, unblock, merge, force-push, delete branches, rep
 
 Trigger condition: the primary provider returns rate-limit, outage, authentication, or repeated transient failure signals.
 
-Expected PM/liveness behavior:
+Expected coordination/liveness behavior:
 
 - Declares `provider_outage_declared` with the provider name, first-failure time, and evidence source.
 - Freezes fresh ticket starts and broad worker refills.
@@ -69,7 +70,7 @@ Failure interpretations:
 
 Fallback-only mode is for bounded, low-risk work while the primary is unavailable. It should preserve already-started backlog and avoid opening a wave of fresh tickets that hides urgent in-flight closeout.
 
-Expected PM/liveness behavior:
+Expected coordination/liveness behavior:
 
 - Routes checkpointed or in-progress issue work to `resume-checkpointed` or `complete-checkpointed` before launching new work.
 - Routes fresh unstarted issues to `defer-fresh-start` unless the lane is explicitly classified as low-risk fallback work.
@@ -96,7 +97,7 @@ Failure interpretations:
 
 Run one small primary-provider probe before resuming broad traffic. The probe should be observable, reversible, and isolated from production mutation.
 
-Expected PM/liveness behavior:
+Expected coordination/liveness behavior:
 
 - Marks `recovery_probe_started` with the primary provider, reset/quota evidence, and one owner.
 - Keeps fallback-only routing active until the probe passes.
@@ -139,6 +140,14 @@ Failure interpretations:
 - backlog routes that include `resume-checkpointed`, `complete-checkpointed`, and `defer-fresh-start`;
 - `failureInterpretations` for fresh-start starvation, duplicate owners, unsafe gate bypass, and missing retry clock.
 
+`node scripts/provider-outage-drill-fixture.mjs --scenario fallback-paths` should print JSON containing:
+
+- `scenario: "fallback-paths"` and `safety.liveProviderCalls: false`;
+- fixtures named `primary-unavailable`, `spark-budget-exhausted`, `ollama-only-continuity`, and `primary-restored`;
+- transitions that park fresh backlog during primary outage, refuse Spark refill after budget exhaustion, keep Ollama Cloud fallback at five low-risk lanes, and resume primary blocked owners before new tickets;
+- `workerCounts` and `summaryLines` that expose primary, Spark, Ollama, and parked worker counts for every route transition;
+- `toolRestrictions` for Ollama-only continuity so fallback lanes cannot perform fresh implementation, production mutation, or live gate substitution.
+
 `node scripts/provider-outage-drill-fixture.mjs --scenario recovery` should print JSON containing:
 
 - `scenario: "recovery"`
@@ -152,9 +161,9 @@ Failure interpretations:
 | Time (UTC) | Decision | Owner | Evidence | Expiry / revisit |
 | --- | --- | --- | --- | --- |
 | `<HH:MM>` | `declare primary outage` | `<incident commander>` | `<provider error, usage-limit text, or fixture event>` | `<retry/probe time>` |
-| `<HH:MM>` | `enter fallback-only mode` | `<PM/liveness owner>` | `<lane width, allowed lanes, parked high-risk work>` | `<health check interval>` |
+| `<HH:MM>` | `enter fallback-only mode` | `<coordination/liveness owner>` | `<lane width, allowed lanes, parked high-risk work>` | `<health check interval>` |
 | `<HH:MM>` | `start recovery probe` | `<gate operator>` | `<quota reset or provider status evidence>` | `<second healthy signal>` |
-| `<HH:MM>` | `resume fresh refill` | `<PM/liveness owner>` | `<probe passed, backlog stable, fallback lanes drained>` | `<next liveness tick>` |
+| `<HH:MM>` | `resume fresh refill` | `<coordination/liveness owner>` | `<probe passed, backlog stable, fallback lanes drained>` | `<next liveness tick>` |
 
 ## Pass/fail criteria
 
@@ -162,10 +171,10 @@ Pass the drill only if all of these are true:
 
 - Primary failure, fallback-only mode, in-flight backlog freeze, recovery probe, and resume order were all exercised.
 - Every default command was read-only or fixture/sandbox-based.
-- PM/liveness output had expected events, owners, route decisions, and retry/resume clocks.
+- coordination/liveness output had expected events, owners, route decisions, and retry/resume clocks.
 - Fresh issue starts did not starve in-flight backlog.
 - High-risk work stayed parked until explicit recovery or human approval.
-- Links to the backpressure, incident-command, PM-swarm, and provider-failover docs were included in the drill record.
+- Links to the backpressure, incident-command, agent coordination, and provider-failover docs were included in the drill record.
 
 Fail and file follow-up work if any of these occur:
 

@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { resolveContainedExistingPath } from '@franken/types/path-containment';
 import { tmpdir } from 'node:os';
+import { ZodError } from 'zod';
 import { BeastLoop } from '../beast-loop.js';
 import { ChunkFileGraphBuilder } from '../planning/chunk-file-graph-builder.js';
 import { LlmGraphBuilder } from '../planning/llm-graph-builder.js';
@@ -18,7 +19,13 @@ import type { ProjectPaths } from './project-root.js';
 import type { ReviewIO } from '../issues/issue-review.js';
 import type { IssueFetchOptions, IssueOutcome } from '../issues/types.js';
 import { createCliDeps, type CliDepOptions } from './dep-factory.js';
-import { PromptConfigSchema, RunConfigSchema, type RunConfig } from './run-config-loader.js';
+import {
+  PromptConfigSchema,
+  RunConfigSchema,
+  loadRunConfigDocumentFromEnv,
+  loadRunConfigFromEnv,
+  type RunConfig,
+} from './run-config-loader.js';
 import { extractDesignSummary, formatDesignCard } from './design-summary.js';
 import { reviewLoop } from './review-loop.js';
 import { isNoOpDesign } from './noop-detector.js';
@@ -41,20 +48,25 @@ function appendPromptContext(value: string, promptText: string | undefined): str
 }
 
 function loadPromptConfigFromEnv(): RunConfig['promptConfig'] | undefined {
-  const filePath = process.env['FRANKENBEAST_RUN_CONFIG'];
-  if (!filePath) return undefined;
-  const raw = readFileSync(filePath, 'utf-8');
-  const parsed = JSON.parse(raw) as { promptConfig?: unknown };
-  if (!parsed.promptConfig) return undefined;
-  return PromptConfigSchema.parse(parsed.promptConfig);
+  const runConfigDocument = loadRunConfigDocumentFromEnv();
+  const promptConfig = typeof runConfigDocument === 'object' && runConfigDocument !== null
+    ? (runConfigDocument as Record<string, unknown>)['promptConfig']
+    : undefined;
+  const result = PromptConfigSchema.optional().safeParse(
+    promptConfig,
+  );
+  return result.success ? result.data : undefined;
 }
 
 function loadCompatibleRunConfigFromEnv(): RunConfig | undefined {
-  const filePath = process.env['FRANKENBEAST_RUN_CONFIG'];
-  if (!filePath) return undefined;
-  const raw = readFileSync(filePath, 'utf-8');
-  const parsed = JSON.parse(raw) as unknown;
-  const result = RunConfigSchema.safeParse(parsed);
+  let runConfig: RunConfig | undefined;
+  try {
+    runConfig = loadRunConfigFromEnv();
+  } catch (error) {
+    if (error instanceof ZodError) return undefined;
+    throw error;
+  }
+  const result = RunConfigSchema.safeParse(runConfig);
   return result.success ? result.data : undefined;
 }
 

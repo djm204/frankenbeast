@@ -35,13 +35,28 @@ export interface WorkingMemoryLimits {
   maxTotalBytes: number;
 }
 
+export interface WorkingMemoryHydrationLimits {
+  /** Maximum persisted rows read into memory during startup hydration. */
+  maxRows: number;
+  /** Maximum combined persisted key/value bytes read during startup hydration. */
+  maxBytes: number;
+}
+
 export const DEFAULT_WORKING_MEMORY_LIMITS: WorkingMemoryLimits = {
   maxEntries: 10_000,
   maxValueBytes: 5 * 1024 * 1024,
   maxTotalBytes: 64 * 1024 * 1024,
 };
 
-export const CURRENT_MEMORY_SCHEMA_VERSION = 1;
+/**
+ * Working-memory keys must be non-empty printable Unicode strings whose UTF-8
+ * representation does not exceed this bound. Spaces and punctuation remain
+ * valid for backwards compatibility, while Unicode "Other" code points are
+ * rejected because they make logs, snapshots, and selectors ambiguous.
+ */
+export const MAX_WORKING_MEMORY_KEY_BYTES = 1024;
+
+export const CURRENT_MEMORY_SCHEMA_VERSION = 2;
 
 export interface MemorySchemaStoreMetadata {
   store: string;
@@ -85,7 +100,66 @@ export interface MemoryEncryptionOptions {
 
 export interface SqliteBrainOptions {
   hydrateWorkingMemoryFromDb?: boolean;
+  workingMemoryHydrationLimits?: Partial<WorkingMemoryHydrationLimits>;
   encryption?: MemoryEncryptionOptions;
+}
+
+export type MemoryRetentionClass =
+  | 'user_preference'
+  | 'environment_fact'
+  | 'project_convention'
+  | 'learned_procedure'
+  | 'audit_record'
+  | 'transient_observation'
+  | 'temporary_operational'
+  | 'uncategorized';
+
+export type MemoryRetentionAction =
+  | 'retain'
+  | 'protect'
+  | 'nearing_expiry'
+  | 'expired'
+  | 'compact';
+
+export interface MemoryRetentionPolicy {
+  class: MemoryRetentionClass;
+  retentionDays: number | null;
+  compactPriority: number;
+  protected: boolean;
+  description: string;
+}
+
+export interface MemoryRetentionEntryReport {
+  store: 'working' | 'episodic';
+  key: string;
+  agentId?: string;
+  class: MemoryRetentionClass;
+  action: MemoryRetentionAction;
+  policy: MemoryRetentionPolicy;
+  protected: boolean;
+  ageDays?: number;
+  expiresAt?: string;
+  reason: string;
+}
+
+export interface MemoryRetentionReportOptions {
+  now?: string | Date;
+  expiryHorizonMs?: number;
+  maxEntries?: number;
+}
+
+export interface MemoryRetentionReport {
+  generatedAt: string;
+  policies: MemoryRetentionPolicy[];
+  counts: {
+    total: number;
+    protected: number;
+    expired: number;
+    nearingExpiry: number;
+    compactionCandidates: number;
+  };
+  entries: MemoryRetentionEntryReport[];
+  compactionCandidates: MemoryRetentionEntryReport[];
 }
 
 export type MemoryCandidateTargetStore = 'working';
@@ -96,15 +170,24 @@ export type MemoryCandidateStatus =
   | 'never_store'
   | 'suppressed';
 export type MemorySuppressionReason = 'rejected' | 'never_store';
+export type MemorySourceType = 'user' | 'inferred' | 'system' | 'tool' | 'operator' | 'unknown';
 
 export interface MemoryCandidateProposal {
   targetStore: MemoryCandidateTargetStore;
   key: string;
   value: unknown;
   source: string;
+  /** High-level source class used by compact memory-injection displays. Defaults from source prefix. */
+  sourceType?: MemorySourceType;
+  /** Non-secret source identifier, e.g. a message id or run id. */
+  sourceId?: string;
   evidenceId?: string;
   confidence: number;
   reason: string;
+  /** Optional ISO expiry; expired memories are hidden from compact agent reads by default. */
+  expiresAt?: string;
+  /** Optional ISO timestamp for when callers should revalidate this fact. */
+  revalidateAt?: string;
 }
 
 export type MemoryDuplicateMatchType = 'exact' | 'semantic';
@@ -156,13 +239,121 @@ type ExistingMemoryMergeCandidate = {
 
 const AGENT_WORKING_KEY_PREFIX = '__fbeast_agent_memory__/';
 
+const MEMORY_RETENTION_POLICIES: Record<MemoryRetentionClass, MemoryRetentionPolicy> = {
+  user_preference: {
+    class: 'user_preference',
+    retentionDays: null,
+    compactPriority: 0,
+    protected: true,
+    description: 'Durable user preferences are protected from automatic compaction.',
+  },
+  learned_procedure: {
+    class: 'learned_procedure',
+    retentionDays: 365,
+    compactPriority: 10,
+    protected: false,
+    description: 'Learned procedures are preserved longer than environment facts.',
+  },
+  audit_record: {
+    class: 'audit_record',
+    retentionDays: null,
+    compactPriority: 0,
+    protected: true,
+    description: 'Audit records preserve deletion and governance trails.',
+  },
+  project_convention: {
+    class: 'project_convention',
+    retentionDays: 365,
+    compactPriority: 20,
+    protected: false,
+    description: 'Project conventions are durable, reviewable facts.',
+  },
+  environment_fact: {
+    class: 'environment_fact',
+    retentionDays: 180,
+    compactPriority: 30,
+    protected: false,
+    description: 'Environment facts expire before durable preferences and procedures.',
+  },
+  uncategorized: {
+    class: 'uncategorized',
+    retentionDays: 30,
+    compactPriority: 60,
+    protected: false,
+    description: 'Unclassified memories receive a conservative short retention window.',
+  },
+  transient_observation: {
+    class: 'transient_observation',
+    retentionDays: 7,
+    compactPriority: 80,
+    protected: false,
+    description: 'Temporary task observations are first-choice compaction candidates.',
+  },
+  temporary_operational: {
+    class: 'temporary_operational',
+    retentionDays: 1,
+    compactPriority: 100,
+    protected: false,
+    description: 'Operational scratch facts should be TTL-backed and expire quickly.',
+  },
+};
+
+const MEMORY_RETENTION_CLASS_ALIASES: Record<string, MemoryRetentionClass> = {
+  'user-preference': 'user_preference',
+  user_preference: 'user_preference',
+  preference: 'user_preference',
+  preferences: 'user_preference',
+  'environment-fact': 'environment_fact',
+  environment_fact: 'environment_fact',
+  environment: 'environment_fact',
+  env: 'environment_fact',
+  'project-convention': 'project_convention',
+  project_convention: 'project_convention',
+  convention: 'project_convention',
+  conventions: 'project_convention',
+  'learned-procedure': 'learned_procedure',
+  learned_procedure: 'learned_procedure',
+  procedure: 'learned_procedure',
+  procedures: 'learned_procedure',
+  workflow: 'learned_procedure',
+  skill: 'learned_procedure',
+  'audit-record': 'audit_record',
+  audit_record: 'audit_record',
+  audit: 'audit_record',
+  'deletion-audit': 'audit_record',
+  'governance-audit': 'audit_record',
+  'transient-observation': 'transient_observation',
+  transient_observation: 'transient_observation',
+  transient: 'transient_observation',
+  observation: 'transient_observation',
+  'task-state': 'transient_observation',
+  'temporary-operational': 'temporary_operational',
+  temporary_operational: 'temporary_operational',
+  'operational-temporary': 'temporary_operational',
+  'temp-operational': 'temporary_operational',
+  'operational-temp': 'temporary_operational',
+  'transient-operational': 'temporary_operational',
+  uncategorized: 'uncategorized',
+  unclassified: 'uncategorized',
+};
+
+const FBEAST_AGENT_MEMORY_SCOPE_MARKER = 'fbeast:agent-memory';
+
+export function memoryRetentionPolicies(): MemoryRetentionPolicy[] {
+  return Object.values(MEMORY_RETENTION_POLICIES).map((policy) => ({ ...policy }));
+}
+
 export interface MemoryCandidateEdit {
   key?: string;
   value?: unknown;
   source?: string;
+  sourceType?: MemorySourceType;
+  sourceId?: string;
   evidenceId?: string;
   confidence?: number;
   reason?: string;
+  expiresAt?: string;
+  revalidateAt?: string;
 }
 
 export interface MemoryReviewDecisionOptions {
@@ -176,12 +367,39 @@ export interface MemoryProvenanceRecord {
   value: unknown;
   candidateId: string;
   source: string;
+  sourceType: MemorySourceType;
+  sourceId?: string;
   evidenceId?: string;
   confidence: number;
   reason: string;
   reviewer?: string;
   note?: string;
+  createdAt: string;
   approvedAt: string;
+  expiresAt?: string;
+  revalidateAt?: string;
+}
+
+export interface MemoryCompactedEntry {
+  targetStore: MemoryCandidateTargetStore;
+  key: string;
+  value: unknown;
+  compact: string;
+  metadata: {
+    sourceType: MemorySourceType;
+    source: string;
+    sourceId?: string;
+    evidenceId?: string;
+    confidence: number;
+    decayedConfidence: number;
+    reason: string;
+    createdAt: string;
+    updatedAt: string;
+    expiresAt?: string;
+    revalidateAt?: string;
+    expired: boolean;
+    needsRevalidation: boolean;
+  };
 }
 
 export interface MemoryAttributionListOptions {
@@ -203,6 +421,14 @@ export interface MemoryAttributionListOptions {
   source?: string;
   /** Maximum attribution records to return. Defaults to 50, max 1000. */
   limit?: number;
+  /** Include expired provenance rows in compact/read views. Defaults to false. */
+  includeExpired?: boolean;
+  /** Evaluation timestamp for expiry/revalidation/decay. Defaults to now. */
+  now?: string | Date;
+  /** Confidence floor used when compacting decayed confidence. */
+  confidenceFloor?: number;
+  /** Confidence half-life override for compacting decayed confidence. */
+  confidenceHalfLifeMs?: number;
 }
 
 export type MemoryConflictResolution =
@@ -306,6 +532,76 @@ export interface MemoryEncryptionMigrationResult {
   backupPath?: string;
   operations: MemorySchemaMigrationOperation[];
 }
+
+export type MemoryAccessAuditStore =
+  | 'working'
+  | 'episodic'
+  | 'recovery'
+  | 'review'
+  | 'privacy';
+
+export type MemoryAccessAuditOutcome = 'success' | 'miss' | 'denied' | 'error';
+
+export type MemoryAccessAuditOperation =
+  | 'working.get'
+  | 'working.set'
+  | 'working.delete'
+  | 'working.has'
+  | 'working.keys'
+  | 'working.snapshot'
+  | 'working.restore'
+  | 'working.clear'
+  | 'working.flush'
+  | 'episodic.record'
+  | 'episodic.recordLearning'
+  | 'episodic.recall'
+  | 'episodic.recent'
+  | 'episodic.recentFailures'
+  | 'episodic.count'
+  | 'recovery.checkpoint'
+  | 'recovery.lastCheckpoint'
+  | 'recovery.listCheckpoints'
+  | 'recovery.clearCheckpoints'
+  | 'review.propose'
+  | 'review.list'
+  | 'review.edit'
+  | 'review.approve'
+  | 'review.reject'
+  | 'review.neverStore'
+  | 'review.resolutionPromptFor'
+  | 'review.provenanceFor'
+  | 'review.listProvenance'
+  | 'review.conflictsFor'
+  | 'privacy.rightToForget';
+
+export interface MemoryAccessAuditEvent {
+  id: number;
+  operation: MemoryAccessAuditOperation;
+  store: MemoryAccessAuditStore;
+  outcome: MemoryAccessAuditOutcome;
+  createdAt: string;
+  keyHash?: string;
+  queryHash?: string;
+  details?: Record<string, unknown>;
+}
+
+export interface MemoryAccessAuditListOptions {
+  limit?: number;
+  store?: MemoryAccessAuditStore;
+  operation?: MemoryAccessAuditOperation;
+}
+
+interface MemoryAccessAuditInput {
+  operation: MemoryAccessAuditOperation;
+  store: MemoryAccessAuditStore;
+  outcome: MemoryAccessAuditOutcome;
+  key?: string;
+  query?: string;
+  details?: Record<string, unknown>;
+  createdAt?: string;
+}
+
+type MemoryAccessAuditRecorder = (event: MemoryAccessAuditInput) => void;
 
 export interface MemoryConfidenceDecayOptions {
   /** Confidence assigned when the memory was written, from 0 to 1. */
@@ -431,11 +727,17 @@ const MEMORY_STORES = [
   'memory_review_suppressions',
   'memory_deletion_guards',
   'memory_deletion_hash_keys',
+  'memory_access_audit_events',
 ] as const;
+
+const ENCRYPTED_MEMORY_STORES = MEMORY_STORES.filter(
+  (store) => store !== 'memory_access_audit_events',
+);
 
 const MEMORY_REVIEW_PAYLOAD_COLUMNS = [
   'value',
   'source',
+  'source_id',
   'evidence_id',
   'reason',
   'reviewer',
@@ -577,6 +879,74 @@ export class WorkingMemoryLimitError extends Error {
   }
 }
 
+export type WorkingMemoryKeyErrorReason =
+  | 'empty'
+  | 'control_character'
+  | 'too_long';
+
+export class WorkingMemoryKeyError extends Error {
+  readonly code = 'INVALID_WORKING_MEMORY_KEY';
+
+  constructor(
+    readonly reason: WorkingMemoryKeyErrorReason,
+    readonly byteLength: number,
+    readonly maxBytes: number = MAX_WORKING_MEMORY_KEY_BYTES,
+  ) {
+    super(
+      reason === 'empty'
+        ? 'Working memory key must not be empty'
+        : reason === 'control_character'
+          ? 'Working memory key must contain only printable Unicode characters'
+          : `Working memory key is ${byteLength} bytes, exceeding the ${maxBytes}-byte limit`,
+    );
+    this.name = 'WorkingMemoryKeyError';
+  }
+}
+
+function validateWorkingMemoryKey(key: string): void {
+  const byteLength = Buffer.byteLength(key, 'utf8');
+  if (key.length === 0) {
+    throw new WorkingMemoryKeyError('empty', byteLength);
+  }
+  if (/\p{C}/u.test(key)) {
+    throw new WorkingMemoryKeyError('control_character', byteLength);
+  }
+  if (byteLength > MAX_WORKING_MEMORY_KEY_BYTES) {
+    throw new WorkingMemoryKeyError('too_long', byteLength);
+  }
+}
+
+export class WorkingMemoryHydrationLimitError extends Error {
+  readonly code = 'WORKING_MEMORY_HYDRATION_LIMIT_EXCEEDED';
+
+  constructor(
+    readonly rowCount: number,
+    readonly byteCount: number | undefined,
+    readonly maxRows: number,
+    readonly maxBytes: number,
+  ) {
+    const rowDiagnostic = byteCount === undefined ? `at least ${rowCount}` : `${rowCount}`;
+    const byteDiagnostic =
+      byteCount === undefined ? 'byte count skipped after row overflow' : `${byteCount} bytes`;
+    super(
+      `Persisted working memory hydration requires ${rowDiagnostic} rows and ${byteDiagnostic}, ` +
+        `exceeding startup limits of ${maxRows} rows and ${maxBytes} bytes`,
+    );
+    this.name = 'WorkingMemoryHydrationLimitError';
+  }
+}
+
+export class CorruptWorkingMemoryRowError extends Error {
+  readonly code = 'CORRUPT_WORKING_MEMORY_ROW';
+
+  constructor(readonly key: string) {
+    super(
+      `Persisted working memory row "${key}" contains invalid JSON and was not hydrated; the row was preserved for recovery`,
+    );
+    this.name = 'CorruptWorkingMemoryRowError';
+  }
+}
+
 export class MemoryDeletionGuardError extends Error {
   constructor(message: string) {
     super(message);
@@ -606,6 +976,140 @@ function stringifyWorkingMemoryValue(key: string, value: unknown): string {
   throw new WorkingMemoryLimitError(
     `Working memory value for "${key}" is not JSON-serializable and could not be persisted`,
   );
+}
+
+function hashMemoryAccessValue(
+  db: Database.Database,
+  value: string,
+  encryption?: MemoryCipher,
+): string {
+  return createHmac('sha256', readOrCreateAuditHashKey(db, encryption))
+    .update(value, 'utf8')
+    .digest('hex');
+}
+
+function sanitizeMemoryAccessDetails(
+  details: Record<string, unknown> | undefined,
+): string | null {
+  if (!details) return null;
+  return JSON.stringify(details, (key, value) => {
+    if (key === '') return value;
+    if (
+      value === null
+      || typeof value === 'string'
+      || typeof value === 'number'
+      || typeof value === 'boolean'
+    ) {
+      return value;
+    }
+    if (Array.isArray(value)) {
+      return value.map((entry) => {
+        if (
+          entry === null
+          || typeof entry === 'string'
+          || typeof entry === 'number'
+          || typeof entry === 'boolean'
+        ) {
+          return entry;
+        }
+        return '[redacted]';
+      });
+    }
+    return '[redacted]';
+  });
+}
+
+function parseMemoryAccessDetails(
+  details: string | null,
+): Record<string, unknown> | undefined {
+  if (!details) return undefined;
+  const parsed = safeJsonParse(details);
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    return parsed as Record<string, unknown>;
+  }
+  return undefined;
+}
+
+function insertMemoryAccessAuditEvent(
+  db: Database.Database,
+  event: MemoryAccessAuditInput,
+  encryption?: MemoryCipher,
+): void {
+  db.prepare(
+    `INSERT INTO memory_access_audit_events (
+      operation, store, key_hash, query_hash, outcome, details, created_at, schema_version
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
+  ).run(
+    event.operation,
+    event.store,
+    event.key === undefined ? null : hashMemoryAccessValue(db, event.key, encryption),
+    event.query === undefined ? null : hashMemoryAccessValue(db, event.query, encryption),
+    event.outcome,
+    sanitizeMemoryAccessDetails(event.details),
+    event.createdAt ?? isoNow(),
+  );
+}
+
+interface MemoryAccessAuditRow {
+  id: number;
+  operation: MemoryAccessAuditOperation;
+  store: MemoryAccessAuditStore;
+  key_hash: string | null;
+  query_hash: string | null;
+  outcome: MemoryAccessAuditOutcome;
+  details: string | null;
+  created_at: string;
+}
+
+function rowToMemoryAccessAuditEvent(
+  row: MemoryAccessAuditRow,
+): MemoryAccessAuditEvent {
+  const event: MemoryAccessAuditEvent = {
+    id: row.id,
+    operation: row.operation,
+    store: row.store,
+    outcome: row.outcome,
+    createdAt: row.created_at,
+  };
+  if (row.key_hash) event.keyHash = row.key_hash;
+  if (row.query_hash) event.queryHash = row.query_hash;
+  const details = parseMemoryAccessDetails(row.details);
+  if (details) event.details = details;
+  return event;
+}
+
+export class SqliteMemoryAccessAuditTrail {
+  constructor(
+    private db: Database.Database,
+    private encryption?: MemoryCipher,
+  ) {}
+
+  list(options: MemoryAccessAuditListOptions = {}): MemoryAccessAuditEvent[] {
+    const clauses: string[] = [];
+    const params: Array<string | number> = [];
+    if (options.store) {
+      clauses.push('store = ?');
+      params.push(options.store);
+    }
+    if (options.operation) {
+      clauses.push('operation = ?');
+      params.push(options.operation);
+    }
+    const limit = options.limit ?? 100;
+    if (!Number.isInteger(limit) || limit < 0) {
+      throw new RangeError('Memory access audit limit must be a non-negative integer');
+    }
+    params.push(limit);
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const rows = this.db.prepare(
+      `SELECT id, operation, store, key_hash, query_hash, outcome, details, created_at
+       FROM memory_access_audit_events
+       ${where}
+       ORDER BY id DESC
+       LIMIT ?`,
+    ).all(...params) as MemoryAccessAuditRow[];
+    return rows.map(rowToMemoryAccessAuditEvent);
+  }
 }
 
 function workingMemoryStringField(value: unknown): string | undefined {
@@ -639,10 +1143,116 @@ function isTemporaryOperationalWorkingMemoryValue(value: unknown): value is { ex
   );
 }
 
+function extractTemporaryOperationalExpiresAt(value: unknown, className: MemoryRetentionClass): string | undefined {
+  if (className !== 'temporary_operational' || !isTemporaryOperationalWorkingMemoryValue(value)) {
+    return undefined;
+  }
+  return value.expiresAt;
+}
+
+function parseAgentScopedEpisodicDetails(details: Record<string, unknown> | undefined): string | undefined {
+  if (!details) return undefined;
+  return details.__fbeastMemoryScope === FBEAST_AGENT_MEMORY_SCOPE_MARKER && typeof details.agentId === 'string'
+    ? details.agentId
+    : undefined;
+}
+
 function isExpiredWorkingMemoryValue(value: unknown, nowMs = Date.now()): boolean {
   if (!isTemporaryOperationalWorkingMemoryValue(value)) return false;
   const expiresAtMs = Date.parse(value.expiresAt);
   return Number.isFinite(expiresAtMs) && expiresAtMs <= nowMs;
+
+}
+
+function normalizeMemoryClassName(value: unknown): MemoryRetentionClass | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, '-');
+  return MEMORY_RETENTION_CLASS_ALIASES[normalized];
+}
+
+function objectStringFields(value: unknown, keys: readonly string[]): string[] {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return [];
+  const record = value as Record<string, unknown>;
+  const values: string[] = [];
+  for (const key of keys) {
+    const field = record[key];
+    if (typeof field === 'string' && field.trim().length > 0) values.push(field);
+  }
+  return values;
+}
+
+function normalizeFirstMemoryClass(values: readonly string[]): MemoryRetentionClass | undefined {
+  for (const value of values) {
+    const className = normalizeMemoryClassName(value);
+    if (className) return className;
+  }
+  return undefined;
+}
+
+function classifyMemoryEntry(input: {
+  store: 'working' | 'episodic';
+  key: string;
+  value: unknown;
+  summary?: string;
+  details?: Record<string, unknown>;
+}): MemoryRetentionClass {
+  if (input.store === 'working' && isTemporaryOperationalWorkingMemoryValue(input.value)) return 'temporary_operational';
+  const classFields = ['memoryClass', 'memory_class', 'class', 'category', 'kind', 'type', 'scope'] as const;
+  const explicitClass = normalizeFirstMemoryClass([
+    ...objectStringFields(input.value, classFields),
+    ...objectStringFields(input.details, classFields),
+  ]);
+  if (explicitClass) return explicitClass;
+  const text = `${input.key} ${input.summary ?? ''} ${valueToSearchText(input.value)} ${input.details ? valueToSearchText(input.details) : ''}`.toLowerCase();
+  if (/\b(user[._:-]?preference|preference|preferences)\b/.test(text)) return 'user_preference';
+  if (/\b(project[._:-]?(convention|rule)|convention|repo[._:-]?convention)\b/.test(text)) return 'project_convention';
+  if (/\b(learned[._:-]?procedure|procedure|workflow|skill|runbook)\b/.test(text)) return 'learned_procedure';
+  if (/\b(environment|env[._:-]?fact|runtime|host|platform|version)\b/.test(text)) return 'environment_fact';
+  if (/\b(transient|temporary|scratch|task[._:-]?state|observation|progress)\b/.test(text)) return 'transient_observation';
+  return input.store === 'episodic' ? 'transient_observation' : 'uncategorized';
+}
+
+function resolveRetentionNow(now: string | Date | undefined): Date {
+  const value = now === undefined ? new Date() : typeof now === 'string' ? new Date(now) : now;
+  if (!Number.isFinite(value.getTime())) {
+    throw new Error('retention report now must be a valid date');
+  }
+  return value;
+}
+
+function ageDays(observedAt: string | undefined, nowMs: number): number | undefined {
+  if (!observedAt) return undefined;
+  const observedMs = Date.parse(observedAt);
+  if (!Number.isFinite(observedMs)) return undefined;
+  return Math.max(0, (nowMs - observedMs) / (24 * 60 * 60 * 1000));
+}
+
+function retentionActionForEntry(input: {
+  className: MemoryRetentionClass;
+  policy: MemoryRetentionPolicy;
+  ageDays?: number;
+  expiresAt?: string;
+  nowMs: number;
+  expiryHorizonMs: number;
+}): { action: MemoryRetentionAction; reason: string } {
+  if (input.policy.protected) {
+    return { action: 'protect', reason: `${input.className} memories are protected from automatic compaction` };
+  }
+  if (input.expiresAt) {
+    const expiresAtMs = Date.parse(input.expiresAt);
+    if (Number.isFinite(expiresAtMs)) {
+      if (expiresAtMs <= input.nowMs) {
+        return { action: 'expired', reason: `TTL expired at ${input.expiresAt}` };
+      }
+      if (expiresAtMs - input.nowMs <= input.expiryHorizonMs) {
+        return { action: 'nearing_expiry', reason: `TTL expires at ${input.expiresAt}` };
+      }
+    }
+  }
+  if (input.policy.retentionDays !== null && input.ageDays !== undefined && input.ageDays >= input.policy.retentionDays) {
+    return { action: 'compact', reason: `${input.className} age ${input.ageDays.toFixed(1)}d exceeds ${input.policy.retentionDays}d retention` };
+  }
+  return { action: 'retain', reason: `${input.className} is within retention policy` };
 }
 
 class SqliteWorkingMemory implements IWorkingMemory {
@@ -654,29 +1264,90 @@ class SqliteWorkingMemory implements IWorkingMemory {
   private deletedKeys = new Set<string>();
   private totalBytes = 0;
 
+  private static readonly persistedRowOrder = (
+    left: { key: string; updatedAt: string },
+    right: { key: string; updatedAt: string },
+  ): number => {
+    const updatedAtComparison = left.updatedAt.localeCompare(right.updatedAt);
+    return updatedAtComparison === 0
+      ? left.key.localeCompare(right.key)
+      : updatedAtComparison;
+  };
+
   constructor(
     private db: Database.Database,
     private limits: WorkingMemoryLimits = DEFAULT_WORKING_MEMORY_LIMITS,
     hydrateFromDb = true,
     private encryption?: MemoryCipher,
+    private audit?: MemoryAccessAuditRecorder,
+    private onPrunedPersistedKeys?: (keys: readonly string[]) => void,
+    hydrationLimits?: WorkingMemoryHydrationLimits,
   ) {
-    this.loadPersistedSerializedFromDb();
     if (hydrateFromDb) {
-      this.loadFromDb();
+      this.loadFromDb(hydrationLimits);
+    } else {
+      this.loadPersistedSerializedFromDb(hydrationLimits);
     }
   }
 
-  private loadPersistedSerializedFromDb(): Array<{
+  private loadPersistedSerializedFromDb(
+    hydrationLimits?: WorkingMemoryHydrationLimits,
+  ): Array<{
     key: string;
     value: string;
+    updatedAt: string;
   }> {
-    const rows = this.db
-      .prepare(`SELECT key, value FROM working_memory ORDER BY key ASC`)
-      .all() as Array<{ key: string; value: string }>;
-    const decryptedRows = rows.map((row) => ({
-      key: row.key,
-      value: this.encryption?.decrypt(row.value) ?? row.value,
-    }));
+    const selectRows = this.db.prepare(
+      `SELECT key, value, updated_at AS updatedAt FROM working_memory ORDER BY key ASC`,
+    );
+    const readRows = () => {
+      if (hydrationLimits) {
+        const rowOverflow = this.db
+          .prepare(`SELECT 1 AS present FROM working_memory LIMIT 1 OFFSET ?`)
+          .get(hydrationLimits.maxRows) as { present: 1 } | undefined;
+        if (rowOverflow) {
+          throw new WorkingMemoryHydrationLimitError(
+            hydrationLimits.maxRows + 1,
+            undefined,
+            hydrationLimits.maxRows,
+            hydrationLimits.maxBytes,
+          );
+        }
+        const stats = this.db
+          .prepare(
+            `SELECT COUNT(*) AS rowCount,
+                    COALESCE(SUM(length(CAST(key AS BLOB)) + length(CAST(value AS BLOB))), 0) AS byteCount
+               FROM (SELECT key, value FROM working_memory LIMIT ?)`,
+          )
+          .get(hydrationLimits.maxRows) as { rowCount: number; byteCount: number };
+        if (stats.byteCount > hydrationLimits.maxBytes) {
+          throw new WorkingMemoryHydrationLimitError(
+            stats.rowCount,
+            stats.byteCount,
+            hydrationLimits.maxRows,
+            hydrationLimits.maxBytes,
+          );
+        }
+      }
+      return selectRows.all() as Array<{ key: string; value: string; updatedAt: string }>;
+    };
+    // Keep the preflight and snapshot read atomic with respect to writers.
+    const rows =
+      hydrationLimits && !this.db.inTransaction
+        ? this.db.transaction(readRows).immediate()
+        : readRows();
+    const decryptedRows = rows.map((row) => {
+      const value = this.encryption?.decrypt(row.value) ?? row.value;
+      // Fail closed without rewriting legacy data. Operators can migrate or
+      // remove the offending row explicitly instead of startup silently
+      // dropping memory whose key no longer satisfies the contract.
+      validateWorkingMemoryKey(row.key);
+      return {
+        key: row.key,
+        value,
+        updatedAt: row.updatedAt,
+      };
+    });
     this.persistedSerialized = new Map(
       decryptedRows.map((row) => [row.key, row.value]),
     );
@@ -684,43 +1355,88 @@ class SqliteWorkingMemory implements IWorkingMemory {
   }
 
   /** Hydrate in-memory state from persisted SQLite working_memory rows. */
-  private loadFromDb(): void {
-    const rows = this.loadPersistedSerializedFromDb();
+  private loadFromDb(hydrationLimits?: WorkingMemoryHydrationLimits): void {
+    const rows = this.loadPersistedSerializedFromDb(hydrationLimits);
 
-    const prepared: Array<[string, unknown, string, number]> = [];
+    let prepared: Array<{
+      key: string;
+      normalized: unknown;
+      serialized: string;
+      persistedSerialized: string;
+      size: number;
+      updatedAt: string;
+      protected: boolean;
+    }> = [];
     const expiredRows: Array<{ key: string; serialized: string }> = [];
     let total = 0;
+    const prepareRow = (row: { key: string; serialized: string; updatedAt: string }) => {
+      const parsed = parseHydratedWorkingMemoryValue(row.key, row.serialized);
+      if (isExpiredWorkingMemoryValue(parsed)) return undefined;
+      const { normalized, serialized, size } = this.prepareEntry(
+        row.key,
+        parsed,
+      );
+      return {
+        key: row.key,
+        normalized,
+        serialized,
+        persistedSerialized: row.serialized,
+        size,
+        updatedAt: row.updatedAt,
+        protected: MEMORY_RETENTION_POLICIES[classifyMemoryEntry({
+          store: 'working',
+          key: row.key,
+          value: normalized,
+        })].protected,
+      };
+    };
     for (const row of rows) {
-      const parsed = parseStoredWorkingMemoryValue(row.value);
+      const parsed = parseHydratedWorkingMemoryValue(row.key, row.value);
       if (isExpiredWorkingMemoryValue(parsed)) {
         expiredRows.push({ key: row.key, serialized: row.value });
         continue;
       }
-      const { normalized, serialized, size } = this.prepareEntry(
-        row.key,
-        parsed,
-      );
-      total += size;
-      prepared.push([row.key, normalized, serialized, size]);
+      const preparedRow = prepareRow({ key: row.key, serialized: row.value, updatedAt: row.updatedAt });
+      if (!preparedRow) continue;
+      total += preparedRow.size;
+      prepared.push(preparedRow);
     }
     const preservedRows = this.deleteExpiredPersistedRows(expiredRows);
-    const preparedKeys = new Set(prepared.map(([key]) => key));
+    const preparedKeys = new Set(prepared.map(({ key }) => key));
     for (const row of preservedRows) {
       if (preparedKeys.has(row.key)) continue;
-      const parsed = parseStoredWorkingMemoryValue(row.serialized);
-      if (isExpiredWorkingMemoryValue(parsed)) continue;
-      const { normalized, serialized, size } = this.prepareEntry(
-        row.key,
-        parsed,
-      );
-      total += size;
-      prepared.push([row.key, normalized, serialized, size]);
+      const preparedRow = prepareRow(row);
+      if (!preparedRow) continue;
+      total += preparedRow.size;
+      prepared.push(preparedRow);
       preparedKeys.add(row.key);
     }
     if (prepared.length > this.limits.maxEntries) {
-      throw new WorkingMemoryLimitError(
-        `Persisted working memory has ${prepared.length} entries after TTL cleanup, exceeding maxEntries (${this.limits.maxEntries})`,
-      );
+      const rowsToDrop = prepared
+        .filter((row) => !row.protected)
+        .sort((left, right) =>
+          SqliteWorkingMemory.persistedRowOrder(
+            { key: left.key, updatedAt: left.updatedAt },
+            { key: right.key, updatedAt: right.updatedAt },
+          ),
+        )
+        .slice(0, prepared.length - this.limits.maxEntries);
+      if (prepared.length - rowsToDrop.length > this.limits.maxEntries) {
+        throw new WorkingMemoryLimitError(
+          `Persisted working memory has ${prepared.length} entries but only ${rowsToDrop.length} unprotected entries are eligible for startup pruning, exceeding maxEntries (${this.limits.maxEntries})`,
+        );
+      }
+      const droppedKeys = new Set(rowsToDrop.map(({ key }) => key));
+      const retainedRows = prepared.filter(({ key }) => !droppedKeys.has(key));
+      const retainedTotal = retainedRows.reduce((sum, { size }) => sum + size, 0);
+      if (!Number.isSafeInteger(retainedTotal) || retainedTotal > this.limits.maxTotalBytes) {
+        throw new WorkingMemoryLimitError(
+          `Persisted working memory is ${retainedTotal} bytes after startup pruning, exceeding maxTotalBytes (${this.limits.maxTotalBytes})`,
+        );
+      }
+      this.prunePersistedRows(rowsToDrop);
+      prepared = retainedRows;
+      total = retainedTotal;
     }
     if (!Number.isSafeInteger(total) || total > this.limits.maxTotalBytes) {
       throw new WorkingMemoryLimitError(
@@ -735,11 +1451,60 @@ class SqliteWorkingMemory implements IWorkingMemory {
     this.deletedKeys.clear();
     this.totalBytes = 0;
 
-    for (const [key, normalized, serialized, size] of prepared) {
+    for (const { key, normalized, serialized, size } of prepared) {
       this.store.set(key, normalized);
       this.sizes.set(key, size);
       this.serialized.set(key, serialized);
       this.totalBytes += size;
+    }
+  }
+
+  private prunePersistedRows(rows: ReadonlyArray<{ key: string; persistedSerialized: string; updatedAt: string }>): void {
+    if (rows.length === 0) return;
+    const selectKey = this.db.prepare(`SELECT value, updated_at AS updatedAt FROM working_memory WHERE key = ?`);
+    const deleteKey = this.db.prepare(`DELETE FROM working_memory WHERE key = ?`);
+    const deleteProvenance = this.db.prepare(
+      `DELETE FROM memory_review_provenance WHERE target_store = 'working' AND memory_key = ?`,
+    );
+    const tx = this.db.transaction(() => {
+      for (const row of rows) {
+        const current = selectKey.get(row.key) as { value: string; updatedAt: string } | undefined;
+        const currentSerialized = current ? (this.encryption?.decrypt(current.value) ?? current.value) : undefined;
+        if (currentSerialized !== row.persistedSerialized || current?.updatedAt !== row.updatedAt) {
+          throw new WorkingMemoryLimitError(
+            `Persisted working memory row ${row.key} changed before startup pruning could delete it`,
+          );
+        }
+      }
+      for (const { key } of rows) {
+        deleteProvenance.run(key);
+        deleteKey.run(key);
+      }
+    });
+    tx.immediate();
+    const keys = rows.map(({ key }) => key);
+    for (const key of keys) {
+      this.persistedSerialized.delete(key);
+      this.dirtyKeys.delete(key);
+      this.deletedKeys.delete(key);
+    }
+    this.onPrunedPersistedKeys?.(keys);
+  }
+
+  expirePrunedRuntimeKeys(keys: readonly string[]): void {
+    for (const key of keys) {
+      if (this.dirtyKeys.has(key) || this.deletedKeys.has(key)) {
+        continue;
+      }
+      if (this.store.has(key)) {
+        this.totalBytes -= this.sizes.get(key) ?? 0;
+      }
+      this.store.delete(key);
+      this.sizes.delete(key);
+      this.serialized.delete(key);
+      this.persistedSerialized.delete(key);
+      this.dirtyKeys.delete(key);
+      this.deletedKeys.delete(key);
     }
   }
 
@@ -762,6 +1527,12 @@ class SqliteWorkingMemory implements IWorkingMemory {
     const applyFlush = (): boolean => {
       this.refreshPreparedStateForFlush();
       if (this.dirtyKeys.size === 0 && this.deletedKeys.size === 0) {
+        this.audit?.({
+          operation: 'working.flush',
+          store: 'working',
+          outcome: 'success',
+          details: { changed: false },
+        });
         return false;
       }
 
@@ -784,10 +1555,27 @@ class SqliteWorkingMemory implements IWorkingMemory {
       }
       flushedDirtyKeys = new Set(this.dirtyKeys);
       flushedDeletedKeys = new Set(this.deletedKeys);
+      this.audit?.({
+        operation: 'working.flush',
+        store: 'working',
+        outcome: 'success',
+        details: { changed: true },
+      });
       return true;
     };
     const tx = this.db.transaction(applyFlush);
-    const hasChanges = this.db.inTransaction ? applyFlush() : tx.immediate();
+    let hasChanges: boolean;
+    try {
+      hasChanges = this.db.inTransaction ? applyFlush() : tx.immediate();
+    } catch (error) {
+      this.audit?.({
+        operation: 'working.flush',
+        store: 'working',
+        outcome: 'error',
+        details: { errorName: error instanceof Error ? error.name : 'Error' },
+      });
+      throw error;
+    }
     if (!hasChanges) {
       return;
     }
@@ -910,20 +1698,18 @@ class SqliteWorkingMemory implements IWorkingMemory {
   }
 
   purgeKey(key: string): (() => void) | void {
-    if (this.store.has(key)) {
-      this.totalBytes -= this.sizes.get(key) ?? 0;
-      this.store.delete(key);
-      this.sizes.delete(key);
-      this.serialized.delete(key);
-    }
-    this.dirtyKeys.delete(key);
-    this.deletedKeys.delete(key);
-    this.db.prepare(`DELETE FROM working_memory WHERE key = ?`).run(key);
     const finalize = (): void => {
+      if (this.store.has(key)) {
+        this.totalBytes -= this.sizes.get(key) ?? 0;
+        this.store.delete(key);
+        this.sizes.delete(key);
+        this.serialized.delete(key);
+      }
       this.persistedSerialized.delete(key);
       this.deletedKeys.delete(key);
       this.dirtyKeys.delete(key);
     };
+    this.db.prepare(`DELETE FROM working_memory WHERE key = ?`).run(key);
     if (!this.db.inTransaction) {
       finalize();
       return;
@@ -1007,7 +1793,24 @@ class SqliteWorkingMemory implements IWorkingMemory {
   }
 
   get(key: string): unknown {
-    if (this.expireRuntimeKeyIfUnavailable(key)) return undefined;
+    if (this.expireRuntimeKeyIfUnavailable(key)) {
+      this.audit?.({
+        operation: 'working.get',
+        store: 'working',
+        key,
+        outcome: 'miss',
+        details: { present: false, unavailable: true },
+      });
+      return undefined;
+    }
+    const present = this.store.has(key);
+    this.audit?.({
+      operation: 'working.get',
+      store: 'working',
+      key,
+      outcome: present ? 'success' : 'miss',
+      details: { present },
+    });
     return cloneStoredWorkingMemoryValue(this.store.get(key));
   }
 
@@ -1082,15 +1885,21 @@ class SqliteWorkingMemory implements IWorkingMemory {
     }
   }
 
+  private expireRuntimeKeysMatchingCurrentDeletionGuards(): void {
+    for (const key of Array.from(this.store.keys())) {
+      this.expireRuntimeKeyIfGuarded(key);
+    }
+  }
+
   private deleteExpiredPersistedRows(
     rows: ReadonlyArray<{ key: string; serialized: string | undefined }>,
-  ): Array<{ key: string; serialized: string }> {
-    const preservedRows: Array<{ key: string; serialized: string }> = [];
+  ): Array<{ key: string; serialized: string; updatedAt: string }> {
+    const preservedRows: Array<{ key: string; serialized: string; updatedAt: string }> = [];
     if (rows.length === 0) return preservedRows;
-    const selectValue = this.db.prepare(`SELECT value FROM working_memory WHERE key = ?`);
+    const selectValue = this.db.prepare(`SELECT value, updated_at AS updatedAt FROM working_memory WHERE key = ?`);
     const deleteKey = this.db.prepare(`DELETE FROM working_memory WHERE key = ?`);
     for (const { key, serialized } of rows) {
-      const row = selectValue.get(key) as { value: string } | undefined;
+      const row = selectValue.get(key) as { value: string; updatedAt: string } | undefined;
       if (row === undefined) {
         this.persistedSerialized.delete(key);
         this.deletedKeys.delete(key);
@@ -1100,13 +1909,13 @@ class SqliteWorkingMemory implements IWorkingMemory {
       const currentSerialized = this.encryption?.decrypt(row.value) ?? row.value;
       if (serialized !== undefined && currentSerialized !== serialized) {
         this.persistedSerialized.set(key, currentSerialized);
-        preservedRows.push({ key, serialized: currentSerialized });
+        preservedRows.push({ key, serialized: currentSerialized, updatedAt: row.updatedAt });
         continue;
       }
       const parsed = parseStoredWorkingMemoryValue(currentSerialized);
       if (!isExpiredWorkingMemoryValue(parsed)) {
         this.persistedSerialized.set(key, currentSerialized);
-        preservedRows.push({ key, serialized: currentSerialized });
+        preservedRows.push({ key, serialized: currentSerialized, updatedAt: row.updatedAt });
         continue;
       }
       deleteKey.run(key);
@@ -1136,6 +1945,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
     key: string,
     value: unknown,
   ): { normalized: unknown; serialized: string; size: number } {
+    validateWorkingMemoryKey(key);
     const serialized = stringifyWorkingMemoryValue(key, value);
     const valueBytes = Buffer.byteLength(serialized, 'utf8');
     if (valueBytes > this.limits.maxValueBytes) {
@@ -1149,52 +1959,205 @@ class SqliteWorkingMemory implements IWorkingMemory {
   }
 
   set(key: string, value: unknown): void {
-    const { normalized, serialized, size } = this.prepareEntry(key, value);
-    assertNotDeletionGuarded(this.db, key, serialized, this.encryption);
-    this.expireRuntimeTtlKeys();
+    let serialized: string | undefined;
+    const previousHadKey = this.store.has(key);
+    const previousValue = this.store.get(key);
+    const previousSize = this.sizes.get(key);
+    const previousSerialized = this.serialized.get(key);
+    const previousWasDirty = this.dirtyKeys.has(key);
+    const previousWasDeleted = this.deletedKeys.has(key);
+    const previousTotalBytes = this.totalBytes;
+    let mutationApplied = false;
+    try {
+      const prepared = this.prepareEntry(key, value);
+      serialized = prepared.serialized;
+      assertNotDeletionGuarded(this.db, key, serialized, this.encryption);
+      this.expireRuntimeTtlKeys();
 
-    if (!this.store.has(key) && this.store.size >= this.limits.maxEntries) {
-      throw new WorkingMemoryLimitError(
-        `Working memory is full: ${this.store.size} entries, maxEntries is ${this.limits.maxEntries}`,
-      );
-    }
-    const newTotal = this.totalBytes - (this.sizes.get(key) ?? 0) + size;
-    if (
-      !Number.isSafeInteger(newTotal) ||
-      newTotal > this.limits.maxTotalBytes
-    ) {
-      throw new WorkingMemoryLimitError(
-        `Working memory byte budget exceeded: ${newTotal} bytes, maxTotalBytes is ${this.limits.maxTotalBytes}`,
-      );
-    }
+      if (!this.store.has(key) && this.store.size >= this.limits.maxEntries) {
+        throw new WorkingMemoryLimitError(
+          `Working memory is full: ${this.store.size} entries, maxEntries is ${this.limits.maxEntries}`,
+        );
+      }
+      const newTotal = this.totalBytes - (this.sizes.get(key) ?? 0) + prepared.size;
+      if (
+        !Number.isSafeInteger(newTotal) ||
+        newTotal > this.limits.maxTotalBytes
+      ) {
+        throw new WorkingMemoryLimitError(
+          `Working memory byte budget exceeded: ${newTotal} bytes, maxTotalBytes is ${this.limits.maxTotalBytes}`,
+        );
+      }
 
-    this.store.set(key, normalized);
-    this.sizes.set(key, size);
-    this.serialized.set(key, serialized);
-    this.totalBytes = newTotal;
-    if (this.persistedSerialized.get(key) === serialized) {
-      this.dirtyKeys.delete(key);
-    } else {
-      this.dirtyKeys.add(key);
+      this.store.set(key, prepared.normalized);
+      this.sizes.set(key, prepared.size);
+      this.serialized.set(key, serialized);
+      this.totalBytes = newTotal;
+      if (this.persistedSerialized.get(key) === serialized) {
+        this.dirtyKeys.delete(key);
+      } else {
+        this.dirtyKeys.add(key);
+      }
+      this.deletedKeys.delete(key);
+      mutationApplied = true;
+      this.audit?.({
+        operation: 'working.set',
+        store: 'working',
+        key,
+        outcome: 'success',
+        details: { valueBytes: Buffer.byteLength(serialized, 'utf8') },
+      });
+    } catch (error) {
+      if (mutationApplied) {
+        if (previousHadKey) {
+          this.store.set(key, previousValue);
+        } else {
+          this.store.delete(key);
+        }
+        if (previousSize === undefined) {
+          this.sizes.delete(key);
+        } else {
+          this.sizes.set(key, previousSize);
+        }
+        if (previousSerialized === undefined) {
+          this.serialized.delete(key);
+        } else {
+          this.serialized.set(key, previousSerialized);
+        }
+        this.totalBytes = previousTotalBytes;
+        if (previousWasDirty) {
+          this.dirtyKeys.add(key);
+        } else {
+          this.dirtyKeys.delete(key);
+        }
+        if (previousWasDeleted) {
+          this.deletedKeys.add(key);
+        } else {
+          this.deletedKeys.delete(key);
+        }
+      }
+      this.audit?.({
+        operation: 'working.set',
+        store: 'working',
+        key,
+        outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
+        details: {
+          errorName: error instanceof Error ? error.name : 'Error',
+          ...(serialized === undefined
+            ? {}
+            : { valueBytes: Buffer.byteLength(serialized, 'utf8') }),
+        },
+      });
+      throw error;
     }
-    this.deletedKeys.delete(key);
   }
 
   delete(key: string): boolean {
     if (!this.store.has(key)) {
+      this.audit?.({
+        operation: 'working.delete',
+        store: 'working',
+        key,
+        outcome: 'miss',
+        details: { deleted: false },
+      });
       return false;
     }
 
-    this.totalBytes -= this.sizes.get(key) ?? 0;
-    this.sizes.delete(key);
-    this.serialized.delete(key);
-    this.dirtyKeys.delete(key);
-    if (this.persistedSerialized.has(key)) {
-      this.deletedKeys.add(key);
-    } else {
-      this.deletedKeys.delete(key);
+    const previousValue = this.store.get(key);
+    const previousSize = this.sizes.get(key);
+    const previousSerialized = this.serialized.get(key);
+    const previousWasDirty = this.dirtyKeys.has(key);
+    const previousWasDeleted = this.deletedKeys.has(key);
+    const previousTotalBytes = this.totalBytes;
+    let mutationApplied = false;
+
+    try {
+      this.totalBytes -= this.sizes.get(key) ?? 0;
+      this.sizes.delete(key);
+      this.serialized.delete(key);
+      this.dirtyKeys.delete(key);
+      if (this.persistedSerialized.has(key)) {
+        this.deletedKeys.add(key);
+      } else {
+        this.deletedKeys.delete(key);
+      }
+      const deleted = this.store.delete(key);
+      mutationApplied = true;
+      this.audit?.({
+        operation: 'working.delete',
+        store: 'working',
+        key,
+        outcome: deleted ? 'success' : 'miss',
+        details: { deleted },
+      });
+      return deleted;
+    } catch (error) {
+      if (mutationApplied) {
+        this.store.set(key, previousValue);
+        if (previousSize === undefined) {
+          this.sizes.delete(key);
+        } else {
+          this.sizes.set(key, previousSize);
+        }
+        if (previousSerialized === undefined) {
+          this.serialized.delete(key);
+        } else {
+          this.serialized.set(key, previousSerialized);
+        }
+        this.totalBytes = previousTotalBytes;
+        if (previousWasDirty) {
+          this.dirtyKeys.add(key);
+        } else {
+          this.dirtyKeys.delete(key);
+        }
+        if (previousWasDeleted) {
+          this.deletedKeys.add(key);
+        } else {
+          this.deletedKeys.delete(key);
+        }
+      }
+      try {
+        this.audit?.({
+          operation: 'working.delete',
+          store: 'working',
+          key,
+          outcome: 'error',
+          details: { errorName: error instanceof Error ? error.name : 'Error' },
+        });
+      } catch {
+        // Preserve the original audit/write failure while keeping the in-memory
+        // delete all-or-nothing.
+      }
+      throw error;
     }
-    return this.store.delete(key);
+  }
+
+  retentionEntries(nowIso = isoNow()): Array<{ key: string; value: unknown; updatedAt: string }> {
+    this.expireRuntimeKeysMatchingCurrentDeletionGuards();
+    const rows = this.db
+      .prepare(`SELECT key, value, updated_at as updatedAt FROM working_memory ORDER BY key ASC`)
+      .all() as Array<{ key: string; value: string; updatedAt: string }>;
+    const entries = new Map<string, { key: string; value: unknown; updatedAt: string }>();
+    for (const row of rows) {
+      const serialized = this.encryption?.decrypt(row.value) ?? row.value;
+      entries.set(row.key, {
+        key: row.key,
+        value: parseStoredWorkingMemoryValue(serialized),
+        updatedAt: row.updatedAt,
+      });
+    }
+    for (const key of this.deletedKeys) {
+      entries.delete(key);
+    }
+    for (const [key, value] of this.store.entries()) {
+      entries.set(key, {
+        key,
+        value,
+        updatedAt: this.dirtyKeys.has(key) ? nowIso : entries.get(key)?.updatedAt ?? nowIso,
+      });
+    }
+    return Array.from(entries.values()).sort((a, b) => a.key.localeCompare(b.key));
   }
 
   snapshotIncludingPersistedEntries(options: { expireRuntimeGuardedEntries?: boolean; expirePersistedTtlEntries?: boolean } = {}): Array<{ key: string; value: unknown; source: 'persisted' | 'runtime' }> {
@@ -1361,13 +2324,37 @@ class SqliteWorkingMemory implements IWorkingMemory {
   }
 
   has(key: string): boolean {
-    if (this.expireRuntimeKeyIfUnavailable(key)) return false;
-    return this.store.has(key);
+    if (this.expireRuntimeKeyIfUnavailable(key)) {
+      this.audit?.({
+        operation: 'working.has',
+        store: 'working',
+        key,
+        outcome: 'miss',
+        details: { present: false, unavailable: true },
+      });
+      return false;
+    }
+    const present = this.store.has(key);
+    this.audit?.({
+      operation: 'working.has',
+      store: 'working',
+      key,
+      outcome: present ? 'success' : 'miss',
+      details: { present },
+    });
+    return present;
   }
 
   keys(): string[] {
     this.expireRuntimeKeysMatchingCurrentGuards();
-    return [...this.store.keys()];
+    const keys = [...this.store.keys()];
+    this.audit?.({
+      operation: 'working.keys',
+      store: 'working',
+      outcome: 'success',
+      details: { count: keys.length },
+    });
+    return keys;
   }
 
   private snapshotEntries(options: { expireGuardedEntries?: boolean } = {}): Record<string, unknown> {
@@ -1387,7 +2374,14 @@ class SqliteWorkingMemory implements IWorkingMemory {
   }
 
   snapshot(): Record<string, unknown> {
-    return this.snapshotEntries();
+    const snapshot = this.snapshotEntries();
+    this.audit?.({
+      operation: 'working.snapshot',
+      store: 'working',
+      outcome: 'success',
+      details: { count: Object.keys(snapshot).length },
+    });
+    return snapshot;
   }
 
   restore(snap: Record<string, unknown>): void {
@@ -1395,45 +2389,149 @@ class SqliteWorkingMemory implements IWorkingMemory {
     // leaves the previous state intact instead of a half-restored one.
     const entries = Object.entries(snap);
     if (entries.length > this.limits.maxEntries) {
-      throw new WorkingMemoryLimitError(
+      const error = new WorkingMemoryLimitError(
         `Snapshot has ${entries.length} entries, exceeding maxEntries (${this.limits.maxEntries})`,
       );
+      this.audit?.({
+        operation: 'working.restore',
+        store: 'working',
+        outcome: 'error',
+        details: {
+          count: entries.length,
+          errorName: error.name,
+        },
+      });
+      throw error;
     }
     let total = 0;
     const prepared: Array<[string, unknown, string, number]> = [];
+    let deniedKey: string | undefined;
     for (const [key, value] of entries) {
-      const { normalized, serialized, size } = this.prepareEntry(key, value);
-      assertNotDeletionGuarded(this.db, key, serialized, this.encryption);
-      total += size;
-      prepared.push([key, normalized, serialized, size]);
-    }
-    if (!Number.isSafeInteger(total) || total > this.limits.maxTotalBytes) {
-      throw new WorkingMemoryLimitError(
-        `Snapshot is ${total} bytes, exceeding maxTotalBytes (${this.limits.maxTotalBytes})`,
-      );
-    }
-
-    this.clear();
-    this.deletedKeys = new Set(this.persistedSerialized.keys());
-    for (const [key, normalized, serialized, size] of prepared) {
-      this.store.set(key, normalized);
-      this.sizes.set(key, size);
-      this.serialized.set(key, serialized);
-      this.deletedKeys.delete(key);
-      if (this.persistedSerialized.get(key) !== serialized) {
-        this.dirtyKeys.add(key);
+      deniedKey = key;
+      try {
+        const { normalized, serialized, size } = this.prepareEntry(key, value);
+        assertNotDeletionGuarded(this.db, key, serialized, this.encryption);
+        total += size;
+        prepared.push([key, normalized, serialized, size]);
+      } catch (error) {
+        this.audit?.({
+          operation: 'working.restore',
+          store: 'working',
+          ...(deniedKey === undefined ? {} : { key: deniedKey }),
+          outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
+          details: {
+            count: entries.length,
+            errorName: error instanceof Error ? error.name : 'Error',
+          },
+        });
+        throw error;
       }
     }
-    this.totalBytes = total;
+    if (!Number.isSafeInteger(total) || total > this.limits.maxTotalBytes) {
+      const error = new WorkingMemoryLimitError(
+        `Snapshot is ${total} bytes, exceeding maxTotalBytes (${this.limits.maxTotalBytes})`,
+      );
+      this.audit?.({
+        operation: 'working.restore',
+        store: 'working',
+        outcome: 'error',
+        details: {
+          count: entries.length,
+          totalBytes: total,
+          errorName: error.name,
+        },
+      });
+      throw error;
+    }
+
+    const previousStore = new Map(this.store);
+    const previousSizes = new Map(this.sizes);
+    const previousSerialized = new Map(this.serialized);
+    const previousDirtyKeys = new Set(this.dirtyKeys);
+    const previousDeletedKeys = new Set(this.deletedKeys);
+    const previousTotalBytes = this.totalBytes;
+    let mutationApplied = false;
+
+    try {
+      this.clear({ audit: false });
+      this.deletedKeys = new Set(this.persistedSerialized.keys());
+      for (const [key, normalized, serialized, size] of prepared) {
+        this.store.set(key, normalized);
+        this.sizes.set(key, size);
+        this.serialized.set(key, serialized);
+        this.deletedKeys.delete(key);
+        if (this.persistedSerialized.get(key) !== serialized) {
+          this.dirtyKeys.add(key);
+        }
+      }
+      this.totalBytes = total;
+      mutationApplied = true;
+      this.audit?.({
+        operation: 'working.restore',
+        store: 'working',
+        outcome: 'success',
+        details: { count: prepared.length, totalBytes: total },
+      });
+    } catch (error) {
+      if (mutationApplied) {
+        this.store = previousStore;
+        this.sizes = previousSizes;
+        this.serialized = previousSerialized;
+        this.dirtyKeys = previousDirtyKeys;
+        this.deletedKeys = previousDeletedKeys;
+        this.totalBytes = previousTotalBytes;
+      }
+      try {
+        this.audit?.({
+          operation: 'working.restore',
+          store: 'working',
+          outcome: 'error',
+          details: {
+            count: entries.length,
+            errorName: error instanceof Error ? error.name : 'Error',
+          },
+        });
+      } catch {
+        // If audit persistence is what failed, preserving restore atomicity is
+        // more important than masking the original error with a second audit
+        // write failure.
+      }
+      throw error;
+    }
   }
 
-  clear(): void {
+  clear(options: { audit?: boolean } = {}): void {
+    const shouldAudit = options.audit ?? true;
+    const previousStore = shouldAudit ? new Map(this.store) : undefined;
+    const previousSizes = shouldAudit ? new Map(this.sizes) : undefined;
+    const previousSerialized = shouldAudit ? new Map(this.serialized) : undefined;
+    const previousDirtyKeys = shouldAudit ? new Set(this.dirtyKeys) : undefined;
+    const previousDeletedKeys = shouldAudit ? new Set(this.deletedKeys) : undefined;
+    const previousTotalBytes = shouldAudit ? this.totalBytes : undefined;
+
     this.store.clear();
     this.sizes.clear();
     this.serialized.clear();
     this.dirtyKeys.clear();
     this.deletedKeys = new Set(this.persistedSerialized.keys());
     this.totalBytes = 0;
+    if (shouldAudit) {
+      try {
+        this.audit?.({
+          operation: 'working.clear',
+          store: 'working',
+          outcome: 'success',
+        });
+      } catch (error) {
+        this.store = previousStore!;
+        this.sizes = previousSizes!;
+        this.serialized = previousSerialized!;
+        this.dirtyKeys = previousDirtyKeys!;
+        this.deletedKeys = previousDeletedKeys!;
+        this.totalBytes = previousTotalBytes!;
+        throw error;
+      }
+    }
   }
 }
 
@@ -1462,11 +2560,35 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
   constructor(
     private db: Database.Database,
     private encryption?: MemoryCipher,
+    private audit?: MemoryAccessAuditRecorder,
   ) {}
 
   record(event: EpisodicEvent): void {
-    assertEpisodicNotDeletionGuarded(this.db, event, this.encryption);
-    this.insertEvent(event);
+    try {
+      const tx = this.db.transaction(() => {
+        assertEpisodicNotDeletionGuarded(this.db, event, this.encryption);
+        this.insertEvent(event);
+        this.audit?.({
+          operation: 'episodic.record',
+          store: 'episodic',
+          outcome: 'success',
+          details: { type: event.type },
+        });
+      });
+      tx.immediate();
+    } catch (error) {
+      try {
+        this.audit?.({
+          operation: 'episodic.record',
+          store: 'episodic',
+          outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
+          details: { errorName: error instanceof Error ? error.name : 'Error' },
+        });
+      } catch {
+        // Avoid masking the mutation/audit failure that rolled back the record.
+      }
+      throw error;
+    }
   }
 
   recordLearning(
@@ -1491,12 +2613,22 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
 
     const normalizedCreatedAt = new Date(eventTimeMs).toISOString();
 
+    let transactionActive = false;
     this.db.exec('BEGIN IMMEDIATE');
+    transactionActive = true;
     try {
       if (cooldownMs > 0) {
         const existingEvent = this.findLearningCooldownEvent(key, eventTimeMs, cooldownMs);
         if (existingEvent) {
           this.db.exec('COMMIT');
+          transactionActive = false;
+          this.audit?.({
+            operation: 'episodic.recordLearning',
+            store: 'episodic',
+            key,
+            outcome: 'success',
+            details: { cooldownMs, recorded: false, reason: 'cooldown' },
+          });
           return {
             recorded: false,
             reason: 'cooldown',
@@ -1521,11 +2653,31 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       };
       assertEpisodicNotDeletionGuarded(this.db, guardedEvent, this.encryption);
       this.insertEvent(guardedEvent);
+      this.audit?.({
+        operation: 'episodic.recordLearning',
+        store: 'episodic',
+        key,
+        outcome: 'success',
+        details: { cooldownMs, recorded: true },
+      });
 
       this.db.exec('COMMIT');
+      transactionActive = false;
       return { recorded: true, key, cooldownMs };
     } catch (error) {
-      this.db.exec('ROLLBACK');
+      if (transactionActive) {
+        this.db.exec('ROLLBACK');
+      }
+      this.audit?.({
+        operation: 'episodic.recordLearning',
+        store: 'episodic',
+        key,
+        outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
+        details: {
+          cooldownMs,
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
       throw error;
     }
   }
@@ -1622,52 +2774,73 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
   }
 
   recall(query: string, limit = 10): EpisodicEvent[] {
-    if (this.encryption) {
-      return this.recallEncrypted(query, limit);
-    }
+    try {
+      let result: EpisodicEvent[];
+      if (this.encryption) {
+        result = this.recallEncrypted(query, limit);
+      } else {
+        const keywords = query
+          .toLowerCase()
+          .split(/\s+/)
+          .filter((w) => w.length > 2)
+          .filter((w) => !STOPWORDS.has(w));
 
-    const keywords = query
-      .toLowerCase()
-      .split(/\s+/)
-      .filter((w) => w.length > 2)
-      .filter((w) => !STOPWORDS.has(w));
-
-    if (keywords.length === 0) {
-      return this.recent(limit);
-    }
-
-    if (keywords.length <= MAX_RECALL_KEYWORDS_PER_QUERY) {
-      return collectRowsToEvents(
-        (batchLimit, offset) =>
-          this.recallKeywordChunk(keywords, batchLimit, offset),
-        limit,
-        this.encryption,
-      );
-    }
-
-    const rowsById = new Map<
-      number,
-      EpisodicRow & { relevance_score: number }
-    >();
-    for (const chunk of chunkArray(keywords, MAX_RECALL_KEYWORDS_PER_QUERY)) {
-      for (const row of this.recallKeywordChunk(chunk)) {
-        const existing = rowsById.get(row.id);
-        if (existing) {
-          existing.relevance_score += row.relevance_score;
+        if (keywords.length === 0) {
+          result = this.recent(limit);
+        } else if (keywords.length <= MAX_RECALL_KEYWORDS_PER_QUERY) {
+          result = collectRowsToEvents(
+            (batchLimit, offset) =>
+              this.recallKeywordChunk(keywords, batchLimit, offset),
+            limit,
+            this.encryption,
+          );
         } else {
-          rowsById.set(row.id, { ...row });
+          const rowsById = new Map<
+            number,
+            EpisodicRow & { relevance_score: number }
+          >();
+          for (const chunk of chunkArray(keywords, MAX_RECALL_KEYWORDS_PER_QUERY)) {
+            for (const row of this.recallKeywordChunk(chunk)) {
+              const existing = rowsById.get(row.id);
+              if (existing) {
+                existing.relevance_score += row.relevance_score;
+              } else {
+                rowsById.set(row.id, { ...row });
+              }
+            }
+          }
+
+          const sortedRows = [...rowsById.values()].sort(
+            (a, b) =>
+              b.relevance_score - a.relevance_score ||
+              b.created_at.localeCompare(a.created_at) ||
+              b.id - a.id,
+          );
+
+          result = rowsToEvents(sortedRows, limit, this.encryption);
         }
       }
+      this.audit?.({
+        operation: 'episodic.recall',
+        store: 'episodic',
+        query,
+        outcome: 'success',
+        details: { limit, count: result.length },
+      });
+      return result;
+    } catch (error) {
+      this.audit?.({
+        operation: 'episodic.recall',
+        store: 'episodic',
+        query,
+        outcome: 'error',
+        details: {
+          limit,
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
+      throw error;
     }
-
-    const sortedRows = [...rowsById.values()].sort(
-      (a, b) =>
-        b.relevance_score - a.relevance_score ||
-        b.created_at.localeCompare(a.created_at) ||
-        b.id - a.id,
-    );
-
-    return rowsToEvents(sortedRows, limit, this.encryption);
   }
 
   private recallEncrypted(query: string, limit = 10): EpisodicEvent[] {
@@ -1756,26 +2929,66 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
   }
 
   recentFailures(n = 10): EpisodicEvent[] {
-    const stmt = this.db.prepare(
-      `SELECT * FROM episodic_events WHERE type = 'failure'
-       ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-    );
-    return collectRowsToEvents(
-      (limit, offset) => stmt.all(limit, offset) as EpisodicRow[],
-      n,
-      this.encryption,
-    );
+    try {
+      const stmt = this.db.prepare(
+        `SELECT * FROM episodic_events WHERE type = 'failure'
+         ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+      );
+      const result = collectRowsToEvents(
+        (limit, offset) => stmt.all(limit, offset) as EpisodicRow[],
+        n,
+        this.encryption,
+      );
+      this.audit?.({
+        operation: 'episodic.recentFailures',
+        store: 'episodic',
+        outcome: 'success',
+        details: { limit: n, count: result.length },
+      });
+      return result;
+    } catch (error) {
+      this.audit?.({
+        operation: 'episodic.recentFailures',
+        store: 'episodic',
+        outcome: 'error',
+        details: {
+          limit: n,
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
+      throw error;
+    }
   }
 
   recent(n = 10): EpisodicEvent[] {
-    const stmt = this.db.prepare(
-      `SELECT * FROM episodic_events ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-    );
-    return collectRowsToEvents(
-      (limit, offset) => stmt.all(limit, offset) as EpisodicRow[],
-      n,
-      this.encryption,
-    );
+    try {
+      const stmt = this.db.prepare(
+        `SELECT * FROM episodic_events ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+      );
+      const result = collectRowsToEvents(
+        (limit, offset) => stmt.all(limit, offset) as EpisodicRow[],
+        n,
+        this.encryption,
+      );
+      this.audit?.({
+        operation: 'episodic.recent',
+        store: 'episodic',
+        outcome: 'success',
+        details: { limit: n, count: result.length },
+      });
+      return result;
+    } catch (error) {
+      this.audit?.({
+        operation: 'episodic.recent',
+        store: 'episodic',
+        outcome: 'error',
+        details: {
+          limit: n,
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
+      throw error;
+    }
   }
 
   snapshotForHandoff(n = 100, nowMs = Date.now()): EpisodicEvent[] {
@@ -1813,10 +3026,26 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
   }
 
   count(): number {
-    const row = this.db
-      .prepare(`SELECT COUNT(*) as cnt FROM episodic_events`)
-      .get() as { cnt: number };
-    return row.cnt;
+    try {
+      const row = this.db
+        .prepare(`SELECT COUNT(*) as cnt FROM episodic_events`)
+        .get() as { cnt: number };
+      this.audit?.({
+        operation: 'episodic.count',
+        store: 'episodic',
+        outcome: 'success',
+        details: { count: row.cnt },
+      });
+      return row.cnt;
+    } catch (error) {
+      this.audit?.({
+        operation: 'episodic.count',
+        store: 'episodic',
+        outcome: 'error',
+        details: { errorName: error instanceof Error ? error.name : 'Error' },
+      });
+      throw error;
+    }
   }
 }
 
@@ -1833,16 +3062,30 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
     private db: Database.Database,
     private flushWorkingMemory?: () => (() => void) | void,
     private encryption?: MemoryCipher,
+    private audit?: MemoryAccessAuditRecorder,
   ) {}
 
   checkpoint(state: ExecutionState): { id: string } {
-    assertCheckpointNotDeletionGuarded(this.db, state, this.encryption);
+    try {
+      assertCheckpointNotDeletionGuarded(this.db, state, this.encryption);
+    } catch (error) {
+      this.audit?.({
+        operation: 'recovery.checkpoint',
+        store: 'recovery',
+        outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
+        details: { errorName: error instanceof Error ? error.name : 'Error' },
+      });
+      throw error;
+    }
     const finalizeWorkingMemoryFlush: { current: (() => void) | undefined } = {
       current: undefined,
     };
+    const flushState = { attempted: false, completed: false };
     const tx = this.db.transaction(() => {
+      flushState.attempted = true;
       finalizeWorkingMemoryFlush.current =
         this.flushWorkingMemory?.() ?? undefined;
+      flushState.completed = true;
       const result = this.db
         .prepare(
           `INSERT INTO checkpoints (state, created_at, schema_version) VALUES (?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
@@ -1852,44 +3095,123 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
             JSON.stringify(state),
           state.timestamp,
         );
-      return { id: String(result.lastInsertRowid) };
+      const checkpoint = { id: String(result.lastInsertRowid) };
+      this.audit?.({
+        operation: 'recovery.checkpoint',
+        store: 'recovery',
+        outcome: 'success',
+        details: { checkpointId: checkpoint.id },
+      });
+      return checkpoint;
     });
 
-    const result = tx() as { id: string };
-    finalizeWorkingMemoryFlush.current?.();
-    return result;
+    try {
+      const result = tx() as { id: string };
+      finalizeWorkingMemoryFlush.current?.();
+      return result;
+    } catch (error) {
+      if (flushState.attempted && !flushState.completed) {
+        this.audit?.({
+          operation: 'working.flush',
+          store: 'working',
+          outcome: 'error',
+          details: { errorName: error instanceof Error ? error.name : 'Error' },
+        });
+      }
+      this.audit?.({
+        operation: 'recovery.checkpoint',
+        store: 'recovery',
+        outcome: 'error',
+        details: { errorName: error instanceof Error ? error.name : 'Error' },
+      });
+      throw error;
+    }
   }
 
   lastCheckpoint(): ExecutionState | null {
-    const stmt = this.db.prepare(
-      `SELECT * FROM checkpoints ORDER BY id DESC LIMIT ? OFFSET ?`,
-    );
-    for (let offset = 0; ; offset += CORRUPT_JSON_SCAN_BATCH_SIZE) {
-      const rows = stmt.all(
-        CORRUPT_JSON_SCAN_BATCH_SIZE,
-        offset,
-      ) as CheckpointRow[];
-      for (const row of rows) {
-        const state = parseCheckpointState(row, this.encryption);
-        if (state !== null) {
-          return state;
+    try {
+      const stmt = this.db.prepare(
+        `SELECT * FROM checkpoints ORDER BY id DESC LIMIT ? OFFSET ?`,
+      );
+      for (let offset = 0; ; offset += CORRUPT_JSON_SCAN_BATCH_SIZE) {
+        const rows = stmt.all(
+          CORRUPT_JSON_SCAN_BATCH_SIZE,
+          offset,
+        ) as CheckpointRow[];
+        for (const row of rows) {
+          const state = parseCheckpointState(row, this.encryption);
+          if (state !== null) {
+            this.audit?.({
+              operation: 'recovery.lastCheckpoint',
+              store: 'recovery',
+              outcome: 'success',
+            });
+            return state;
+          }
+        }
+        if (rows.length < CORRUPT_JSON_SCAN_BATCH_SIZE) {
+          this.audit?.({
+            operation: 'recovery.lastCheckpoint',
+            store: 'recovery',
+            outcome: 'miss',
+          });
+          return null;
         }
       }
-      if (rows.length < CORRUPT_JSON_SCAN_BATCH_SIZE) {
-        return null;
-      }
+    } catch (error) {
+      this.audit?.({
+        operation: 'recovery.lastCheckpoint',
+        store: 'recovery',
+        outcome: 'error',
+        details: { errorName: error instanceof Error ? error.name : 'Error' },
+      });
+      throw error;
     }
   }
 
   listCheckpoints(): Array<{ id: string; timestamp: string }> {
-    const rows = this.db
-      .prepare(`SELECT id, created_at FROM checkpoints ORDER BY id ASC`)
-      .all() as Array<{ id: number; created_at: string }>;
-    return rows.map((r) => ({ id: String(r.id), timestamp: r.created_at }));
+    try {
+      const rows = this.db
+        .prepare(`SELECT id, created_at FROM checkpoints ORDER BY id ASC`)
+        .all() as Array<{ id: number; created_at: string }>;
+      this.audit?.({
+        operation: 'recovery.listCheckpoints',
+        store: 'recovery',
+        outcome: 'success',
+        details: { count: rows.length },
+      });
+      return rows.map((r) => ({ id: String(r.id), timestamp: r.created_at }));
+    } catch (error) {
+      this.audit?.({
+        operation: 'recovery.listCheckpoints',
+        store: 'recovery',
+        outcome: 'error',
+        details: { errorName: error instanceof Error ? error.name : 'Error' },
+      });
+      throw error;
+    }
   }
 
   clearCheckpoints(): void {
-    this.db.prepare(`DELETE FROM checkpoints`).run();
+    try {
+      const tx = this.db.transaction(() => {
+        this.db.prepare(`DELETE FROM checkpoints`).run();
+        this.audit?.({
+          operation: 'recovery.clearCheckpoints',
+          store: 'recovery',
+          outcome: 'success',
+        });
+      });
+      tx.immediate();
+    } catch (error) {
+      this.audit?.({
+        operation: 'recovery.clearCheckpoints',
+        store: 'recovery',
+        outcome: 'error',
+        details: { errorName: error instanceof Error ? error.name : 'Error' },
+      });
+      throw error;
+    }
   }
 }
 
@@ -1901,9 +3223,13 @@ type MemoryCandidateRow = {
   memory_key: string;
   value: string;
   source: string;
+  source_type?: MemorySourceType | null;
+  source_id?: string | null;
   evidence_id: string | null;
   confidence: number;
   reason: string;
+  expires_at?: string | null;
+  revalidate_at?: string | null;
   status: MemoryCandidateStatus;
   suppression_reason: MemorySuppressionReason | null;
   reviewer: string | null;
@@ -1919,12 +3245,17 @@ type MemoryProvenanceRow = {
   value: string;
   candidate_id: string;
   source: string;
+  source_type?: MemorySourceType | null;
+  source_id?: string | null;
   evidence_id: string | null;
   confidence: number;
   reason: string;
   reviewer: string | null;
   note: string | null;
+  created_at?: string | null;
   approved_at: string;
+  expires_at?: string | null;
+  revalidate_at?: string | null;
 };
 
 type ReviewPayloadRow = {
@@ -1934,8 +3265,12 @@ type ReviewPayloadRow = {
   memory_key: string;
   value: string;
   source: string;
+  source_type?: MemorySourceType | null;
+  source_id?: string | null;
   evidence_id: string | null;
   reason: string;
+  expires_at?: string | null;
+  revalidate_at?: string | null;
   reviewer: string | null;
   note: string | null;
 };
@@ -1951,6 +3286,7 @@ export class SqliteMemoryReviewQueue {
     private working: SqliteWorkingMemory,
     private dbPath: string,
     private encryption?: MemoryCipher,
+    private audit?: MemoryAccessAuditRecorder,
   ) {}
 
   propose(proposal: MemoryCandidateProposal): MemoryCandidate {
@@ -1961,11 +3297,23 @@ export class SqliteMemoryReviewQueue {
       const suppression = this.findCandidateSuppression(proposal);
       if (suppression) {
         result = this.suppressedCandidate(proposal, suppression);
+        this.audit?.({
+          operation: 'review.propose',
+          store: 'review',
+          key: result.key,
+          outcome: 'denied',
+          details: { status: result.status },
+        });
         return;
       }
+      assertMemoryCandidateNotDeletionGuarded(this.db, proposal, this.encryption);
       const now = isoNow();
+      const sourceType = normalizeMemorySourceType(proposal.sourceType, proposal.source);
+      const sourceId = proposal.sourceId;
       const candidate: MemoryCandidate = {
         ...proposal,
+        sourceType,
+        ...(sourceId ? { sourceId } : {}),
         id: `memcand_${randomBytes(12).toString('base64url')}`,
         status: 'pending',
         createdAt: now,
@@ -1974,10 +3322,10 @@ export class SqliteMemoryReviewQueue {
       this.db
         .prepare(
           `INSERT INTO memory_review_candidates (
-            id, target_store, memory_key, value, source, evidence_id, confidence,
-            reason, status, suppression_reason, reviewer, note, created_at,
+            id, target_store, memory_key, value, source, source_type, source_id, evidence_id, confidence,
+            reason, expires_at, revalidate_at, status, suppression_reason, reviewer, note, created_at,
             updated_at, decided_at, schema_version
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, NULL, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, NULL, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
         )
         .run(
           candidate.id,
@@ -1985,57 +3333,139 @@ export class SqliteMemoryReviewQueue {
           candidate.key,
           this.encodeValue(candidate.value),
           this.encodeText(candidate.source),
+          normalizeMemorySourceType(candidate.sourceType, candidate.source),
+          this.encodeSourceId(candidate.sourceId, candidate.source),
           candidate.evidenceId ? this.encodeText(candidate.evidenceId) : null,
           candidate.confidence,
           this.encodeText(candidate.reason),
+          candidate.expiresAt ?? null,
+          candidate.revalidateAt ?? null,
           candidate.status,
           candidate.createdAt,
           candidate.updatedAt,
         );
       result = candidate;
+      this.audit?.({
+        operation: 'review.propose',
+        store: 'review',
+        key: result.key,
+        outcome: 'success',
+        details: { status: result.status },
+      });
     });
-    tx.immediate();
+    try {
+      tx.immediate();
+    } catch (error) {
+      try {
+        this.audit?.({
+          operation: 'review.propose',
+          store: 'review',
+          key: proposal.key,
+          outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
+          details: {
+            errorName: error instanceof Error ? error.name : 'Error',
+          },
+        });
+      } catch {
+        // Preserve transaction rollback semantics if audit persistence is what failed.
+      }
+      throw error;
+    }
     return this.withMergeSuggestions(result!);
   }
 
   list(status: MemoryCandidateStatus = 'pending'): MemoryCandidate[] {
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM memory_review_candidates WHERE status = ? ORDER BY created_at ASC, id ASC`,
-      )
-      .all(status) as MemoryCandidateRow[];
-    const mergeCandidates = status === 'pending'
-      ? this.existingMergeCandidatesForTarget('working')
-      : undefined;
-    return rows.map((row) => this.withMergeSuggestions(this.rowToCandidate(row), mergeCandidates));
+    try {
+      const rows = this.db
+        .prepare(
+          `SELECT * FROM memory_review_candidates WHERE status = ? ORDER BY created_at ASC, id ASC`,
+        )
+        .all(status) as MemoryCandidateRow[];
+      const mergeCandidates = status === 'pending'
+        ? this.existingMergeCandidatesForTarget('working')
+        : undefined;
+      this.audit?.({
+        operation: 'review.list',
+        store: 'review',
+        outcome: 'success',
+        details: { status },
+      });
+      return rows.map((row) => this.withMergeSuggestions(this.rowToCandidate(row), mergeCandidates));
+    } catch (error) {
+      this.audit?.({
+        operation: 'review.list',
+        store: 'review',
+        outcome: 'error',
+        details: { status, errorName: error instanceof Error ? error.name : 'Error' },
+      });
+      throw error;
+    }
   }
 
   edit(id: string, edit: MemoryCandidateEdit): MemoryCandidate {
-    const candidate = this.requireCandidate(id, 'pending');
-    const updated: MemoryCandidate = {
-      ...candidate,
-      ...edit,
-      updatedAt: isoNow(),
-    };
-    this.validateProposal(updated);
-    assertMemoryCandidateNotDeletionGuarded(this.db, updated, this.encryption);
-    this.db
-      .prepare(
-        `UPDATE memory_review_candidates
-         SET memory_key = ?, value = ?, source = ?, evidence_id = ?, confidence = ?, reason = ?, updated_at = ?
-         WHERE id = ? AND status = 'pending'`,
-      )
-      .run(
-        updated.key,
-        this.encodeValue(updated.value),
-        this.encodeText(updated.source),
-        updated.evidenceId ? this.encodeText(updated.evidenceId) : null,
-        updated.confidence,
-        this.encodeText(updated.reason),
-        updated.updatedAt,
-        id,
-      );
-    return this.withMergeSuggestions(this.requireCandidate(id, 'pending'));
+    try {
+      let result: MemoryCandidate | undefined;
+      const tx = this.db.transaction(() => {
+        const candidate = this.requireCandidate(id, 'pending');
+        const updated: MemoryCandidate = {
+          ...candidate,
+          ...edit,
+          updatedAt: isoNow(),
+        };
+        if (edit.source !== undefined && edit.sourceType === undefined) {
+          updated.sourceType = normalizeMemorySourceType(undefined, updated.source);
+        }
+        if (edit.source !== undefined && edit.sourceId === undefined) {
+          delete updated.sourceId;
+        }
+        this.validateProposal(updated);
+        assertMemoryCandidateNotDeletionGuarded(this.db, updated, this.encryption);
+        this.db
+          .prepare(
+            `UPDATE memory_review_candidates
+             SET memory_key = ?, value = ?, source = ?, source_type = ?, source_id = ?, evidence_id = ?, confidence = ?, reason = ?, expires_at = ?, revalidate_at = ?, updated_at = ?
+             WHERE id = ? AND status = 'pending'`,
+          )
+          .run(
+            updated.key,
+            this.encodeValue(updated.value),
+            this.encodeText(updated.source),
+            normalizeMemorySourceType(updated.sourceType, updated.source),
+            this.encodeSourceId(updated.sourceId, updated.source),
+            updated.evidenceId ? this.encodeText(updated.evidenceId) : null,
+            updated.confidence,
+            this.encodeText(updated.reason),
+            updated.expiresAt ?? null,
+            updated.revalidateAt ?? null,
+            updated.updatedAt,
+            id,
+          );
+        result = this.requireCandidate(id, 'pending');
+        this.audit?.({
+          operation: 'review.edit',
+          store: 'review',
+          key: result.key,
+          outcome: 'success',
+          details: { id, targetStore: result.targetStore },
+        });
+      });
+      tx.immediate();
+      return this.withMergeSuggestions(result!);
+    } catch (error) {
+      const candidate = this.tryCandidate(id);
+      this.audit?.({
+        operation: 'review.edit',
+        store: 'review',
+        ...(candidate ? { key: candidate.key } : {}),
+        outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
+        details: {
+          id,
+          ...(candidate ? { status: candidate.status, targetStore: candidate.targetStore } : {}),
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
+      throw error;
+    }
   }
 
   approve(
@@ -2057,6 +3487,13 @@ export class SqliteMemoryReviewQueue {
       const candidate = this.requireCandidate(id);
       if (candidate.status === 'suppressed') {
         approvedCandidate = candidate;
+        this.audit?.({
+          operation: 'review.approve',
+          store: 'review',
+          key: candidate.key,
+          outcome: 'denied',
+          details: { id, status: candidate.status, targetStore: candidate.targetStore },
+        });
         return;
       }
       if (candidate.status !== 'pending') {
@@ -2069,6 +3506,13 @@ export class SqliteMemoryReviewQueue {
       if (suppressionReason) {
         this.markSuppressed(id, suppressionReason, now, options);
         approvedCandidate = this.requireCandidate(id);
+        this.audit?.({
+          operation: 'review.approve',
+          store: 'review',
+          key: approvedCandidate.key,
+          outcome: 'denied',
+          details: { id, status: approvedCandidate.status, targetStore: approvedCandidate.targetStore },
+        });
         return;
       }
       const conflicts = this.detectConflicts(candidate);
@@ -2084,19 +3528,24 @@ export class SqliteMemoryReviewQueue {
       this.db
         .prepare(
           `INSERT INTO memory_review_provenance (
-            target_store, memory_key, value, candidate_id, source, evidence_id,
-            confidence, reason, reviewer, note, approved_at, schema_version
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
+            target_store, memory_key, value, candidate_id, source, source_type, source_id, evidence_id,
+            confidence, reason, reviewer, note, created_at, approved_at, expires_at, revalidate_at, schema_version
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
           ON CONFLICT(target_store, memory_key) DO UPDATE SET
             value = excluded.value,
             candidate_id = excluded.candidate_id,
             source = excluded.source,
+            source_type = excluded.source_type,
+            source_id = excluded.source_id,
             evidence_id = excluded.evidence_id,
             confidence = excluded.confidence,
             reason = excluded.reason,
             reviewer = excluded.reviewer,
             note = excluded.note,
+            created_at = excluded.created_at,
             approved_at = excluded.approved_at,
+            expires_at = excluded.expires_at,
+            revalidate_at = excluded.revalidate_at,
             schema_version = excluded.schema_version`,
         )
         .run(
@@ -2105,19 +3554,57 @@ export class SqliteMemoryReviewQueue {
           this.encodeValue(candidate.value),
           candidate.id,
           this.encodeText(candidate.source),
+          normalizeMemorySourceType(candidate.sourceType, candidate.source),
+          this.encodeSourceId(candidate.sourceId, candidate.source),
           candidate.evidenceId ? this.encodeText(candidate.evidenceId) : null,
           candidate.confidence,
           this.encodeText(candidate.reason),
           options.reviewer ? this.encodeText(options.reviewer) : null,
           options.note ? this.encodeText(options.note) : null,
+          candidate.createdAt,
           now,
+          candidate.expiresAt ?? null,
+          candidate.revalidateAt ?? null,
         );
       this.markDecision(id, 'approved', now, options);
       approvedCandidate = this.requireCandidate(id);
+      this.audit?.({
+        operation: 'review.approve',
+        store: 'review',
+        key: approvedCandidate.key,
+        outcome: 'success',
+        details: { id, status: approvedCandidate.status, targetStore: approvedCandidate.targetStore },
+      });
+      if (approvedCandidate.targetStore === 'working') {
+        this.audit?.({
+          operation: 'working.set',
+          store: 'working',
+          key: approvedCandidate.key,
+          outcome: 'success',
+          details: { source: 'review.approve', candidateId: id },
+        });
+      }
     });
-    approveTx.immediate();
+    try {
+      approveTx.immediate();
+    } catch (error) {
+      const candidate = this.tryCandidate(id);
+      this.audit?.({
+        operation: 'review.approve',
+        store: 'review',
+        ...(candidate ? { key: candidate.key } : {}),
+        outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
+        details: {
+          id,
+          ...(candidate ? { status: candidate.status, targetStore: candidate.targetStore } : {}),
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
+      throw error;
+    }
     finalizeWorkingFlush?.();
-    return approvedCandidate ?? this.requireCandidate(id);
+    const result = approvedCandidate ?? this.requireCandidate(id);
+    return result;
   }
 
   reject(
@@ -2134,6 +3621,7 @@ export class SqliteMemoryReviewQueue {
   ): MemoryCandidate {
     const now = isoNow();
     let rejectedCandidate: MemoryCandidate | undefined;
+    let purgeRejectedSecretContent = false;
     const tx = this.db.transaction(() => {
       const candidate = this.requireCandidate(id, 'pending');
       this.assertDecisionOptionsNotDeletionGuarded(options);
@@ -2146,12 +3634,48 @@ export class SqliteMemoryReviewQueue {
           conflictGuard,
         );
       }
+      const rejectedSignature = this.rejectedSignature(candidate);
+      const redactRejected = this.shouldRedactRejectedCandidate(candidate);
+      if (redactRejected) {
+        enableSqliteSecureDelete(this.db, this.dbPath);
+      }
       this.insertSuppression(candidate, 'rejected', now, options);
       this.markDecision(id, 'rejected', now, options);
+      if (redactRejected && rejectedSignature) {
+        this.redactRejectedRows(rejectedSignature, now);
+        purgeRejectedSecretContent = true;
+      }
       rejectedCandidate = this.requireCandidate(id);
+      this.audit?.({
+        operation: 'review.reject',
+        store: 'review',
+        key: rejectedCandidate.key,
+        outcome: 'success',
+        details: { id, status: rejectedCandidate.status, targetStore: rejectedCandidate.targetStore },
+      });
     });
-    tx.immediate();
-    return rejectedCandidate ?? this.requireCandidate(id, 'rejected');
+    try {
+      tx.immediate();
+    } catch (error) {
+      const candidate = this.tryCandidate(id);
+      this.audit?.({
+        operation: 'review.reject',
+        store: 'review',
+        ...(candidate ? { key: candidate.key } : {}),
+        outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
+        details: {
+          id,
+          ...(candidate ? { status: candidate.status, targetStore: candidate.targetStore } : {}),
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
+      throw error;
+    }
+    if (purgeRejectedSecretContent) {
+      purgeDeletedSqliteContent(this.db, this.dbPath);
+    }
+    const result = rejectedCandidate ?? this.requireCandidate(id, 'rejected');
+    return result;
   }
 
   neverStore(
@@ -2161,11 +3685,18 @@ export class SqliteMemoryReviewQueue {
     const now = isoNow();
     let finalizeWorkingFlush: (() => void) | undefined;
     let neverStoredCandidate: MemoryCandidate | undefined;
+    let originalKey: string | undefined;
+    let purgedWorkingKey: string | undefined;
     const tx = this.db.transaction(() => {
       const candidate = this.requireCandidate(id, 'pending');
+      originalKey = candidate.key;
       this.assertDecisionOptionsNotDeletionGuarded(options);
+      const shouldAuditWorkingDelete = candidate.targetStore === 'working' && this.working.has(candidate.key);
       this.insertSuppression(candidate, 'never_store', now, options);
       finalizeWorkingFlush = this.working.purgeKey(candidate.key) ?? undefined;
+      if (shouldAuditWorkingDelete) {
+        purgedWorkingKey = candidate.key;
+      }
       this.db
         .prepare(
           `DELETE FROM memory_review_provenance WHERE target_store = ? AND memory_key = ?`,
@@ -2176,25 +3707,78 @@ export class SqliteMemoryReviewQueue {
       });
       this.redactNeverStoreRows(candidate, now);
       neverStoredCandidate = this.requireCandidate(id);
+      this.audit?.({
+        operation: 'review.neverStore',
+        store: 'review',
+        key: originalKey ?? neverStoredCandidate.key,
+        outcome: 'success',
+        details: { id, status: neverStoredCandidate.status, targetStore: neverStoredCandidate.targetStore },
+      });
+      if (purgedWorkingKey !== undefined) {
+        this.audit?.({
+          operation: 'working.delete',
+          store: 'working',
+          key: purgedWorkingKey,
+          outcome: 'success',
+          details: { source: 'review.neverStore', candidateId: id },
+        });
+      }
     });
-    tx.immediate();
+    try {
+      tx.immediate();
+    } catch (error) {
+      const candidate = this.tryCandidate(id);
+      const auditKey = originalKey ?? candidate?.key;
+      this.audit?.({
+        operation: 'review.neverStore',
+        store: 'review',
+        ...(auditKey !== undefined ? { key: auditKey } : {}),
+        outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
+        details: {
+          id,
+          ...(candidate ? { status: candidate.status, targetStore: candidate.targetStore } : {}),
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
+      throw error;
+    }
     finalizeWorkingFlush?.();
     purgeDeletedSqliteContent(this.db, this.dbPath);
-    return neverStoredCandidate ?? this.requireCandidate(id, 'never_store');
+    const result = neverStoredCandidate ?? this.requireCandidate(id, 'never_store');
+    return result;
   }
 
   provenanceFor(
     targetStore: MemoryCandidateTargetStore,
     key: string,
   ): MemoryProvenanceRecord | null {
-    const row = this.db
-      .prepare(
-        `SELECT * FROM memory_review_provenance WHERE target_store = ? AND memory_key = ?`,
-      )
-      .get(targetStore, key) as MemoryProvenanceRow | undefined;
-    return row && this.provenanceMatchesCurrentWorkingMemory(row)
-      ? this.rowToProvenance(row)
-      : null;
+    try {
+      const row = this.db
+        .prepare(
+          `SELECT * FROM memory_review_provenance WHERE target_store = ? AND memory_key = ?`,
+        )
+        .get(targetStore, key) as MemoryProvenanceRow | undefined;
+      const result = row && this.provenanceMatchesCurrentWorkingMemory(row)
+        ? this.rowToProvenance(row)
+        : null;
+      this.audit?.({
+        operation: 'review.provenanceFor',
+        store: 'review',
+        key,
+        outcome: result ? 'success' : 'miss',
+        details: { targetStore },
+      });
+      return result;
+    } catch (error) {
+      this.audit?.({
+        operation: 'review.provenanceFor',
+        store: 'review',
+        key,
+        outcome: 'error',
+        details: { targetStore, errorName: error instanceof Error ? error.name : 'Error' },
+      });
+      throw error;
+    }
   }
 
   listProvenance(
@@ -2210,9 +3794,6 @@ export class SqliteMemoryReviewQueue {
     if (options.keys !== undefined && options.keys.some(key => key.trim().length === 0)) {
       throw new Error('Memory attribution key filter must not be empty');
     }
-    if (options.keys !== undefined && options.keys.length === 0) {
-      return [];
-    }
     if (options.key !== undefined && options.keys !== undefined) {
       throw new Error('Memory attribution key and keys filters are mutually exclusive');
     }
@@ -2220,57 +3801,204 @@ export class SqliteMemoryReviewQueue {
       throw new Error('Memory attribution source filter must not be empty');
     }
 
-    const conditions: string[] = [];
-    const params: unknown[] = [];
-    if (options.targetStore !== undefined) {
-      conditions.push('target_store = ?');
-      params.push(options.targetStore);
+    const auditQuery = this.provenanceListAuditQuery(options);
+    const auditDetails = this.provenanceListAuditDetails(options, limit);
+    if (options.keys !== undefined && options.keys.length === 0) {
+      this.audit?.({
+        operation: 'review.listProvenance',
+        store: 'review',
+        outcome: 'miss',
+        query: auditQuery,
+        details: { ...auditDetails, count: 0 },
+      });
+      return [];
     }
-    if (options.key !== undefined) {
-      conditions.push('memory_key = ?');
-      params.push(options.key);
-    }
-    if (options.keys !== undefined && options.keys.length > 0) {
-      conditions.push(`memory_key IN (${options.keys.map(() => '?').join(', ')})`);
-      params.push(...options.keys);
-    }
-    const visibleKeyPrefixes = options.visibleKeyPrefixes ?? [];
-    if (visibleKeyPrefixes.length > 0) {
-      const visibleConditions = visibleKeyPrefixes.map(() => "memory_key LIKE ? ESCAPE '\\'");
-      params.push(...visibleKeyPrefixes.map(prefix => `${prefix.replace(/[\\%_]/g, char => `\\${char}`)}%`));
-      if (options.includeUnprefixedKeys) {
-        const unprefixedExclusions = options.unprefixedKeyPrefixExclusions ?? visibleKeyPrefixes;
-        visibleConditions.push(...unprefixedExclusions.map(() => "memory_key NOT LIKE ? ESCAPE '\\'"));
-        params.push(...unprefixedExclusions.map(prefix => `${prefix.replace(/[\\%_]/g, char => `\\${char}`)}%`));
+
+    try {
+      const conditions: string[] = [];
+      const params: unknown[] = [];
+      if (options.targetStore !== undefined) {
+        conditions.push('target_store = ?');
+        params.push(options.targetStore);
       }
-      conditions.push(options.includeUnprefixedKeys
-        ? `(${visibleConditions.slice(0, visibleKeyPrefixes.length).join(' OR ')} OR (${visibleConditions.slice(visibleKeyPrefixes.length).join(' AND ')}))`
-        : `(${visibleConditions.join(' OR ')})`);
-    }
-    for (const prefix of options.excludeKeyPrefixes ?? []) {
-      conditions.push("memory_key NOT LIKE ? ESCAPE '\\'");
-      params.push(`${prefix.replace(/[\\%_]/g, char => `\\${char}`)}%`);
-    }
-    const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM memory_review_provenance${where} ORDER BY approved_at DESC, memory_key ASC`,
-      )
-      .all(...params) as MemoryProvenanceRow[];
-    const sourceFilter = options.source?.trim().toLowerCase();
-    const attributions: MemoryProvenanceRecord[] = [];
-    for (const row of rows) {
-      if (!this.provenanceMatchesCurrentWorkingMemory(row)) {
-        continue;
+      if (options.key !== undefined) {
+        conditions.push('memory_key = ?');
+        params.push(options.key);
       }
-      const provenance = this.rowToProvenance(row);
-      if (sourceFilter && !provenance.source.toLowerCase().includes(sourceFilter)) {
-        continue;
+      if (options.keys !== undefined && options.keys.length > 0) {
+        conditions.push(`memory_key IN (${options.keys.map(() => '?').join(', ')})`);
+        params.push(...options.keys);
       }
-      attributions.push(provenance);
-      if (attributions.length >= limit) break;
+      const visibleKeyPrefixes = options.visibleKeyPrefixes ?? [];
+      if (visibleKeyPrefixes.length > 0) {
+        const visibleConditions = visibleKeyPrefixes.map(() => "memory_key LIKE ? ESCAPE '\\'");
+        params.push(...visibleKeyPrefixes.map(prefix => `${prefix.replace(/[\\%_]/g, char => `\\${char}`)}%`));
+        if (options.includeUnprefixedKeys) {
+          const unprefixedExclusions = options.unprefixedKeyPrefixExclusions ?? visibleKeyPrefixes;
+          visibleConditions.push(...unprefixedExclusions.map(() => "memory_key NOT LIKE ? ESCAPE '\\'"));
+          params.push(...unprefixedExclusions.map(prefix => `${prefix.replace(/[\\%_]/g, char => `\\${char}`)}%`));
+        }
+        conditions.push(options.includeUnprefixedKeys
+          ? `(${visibleConditions.slice(0, visibleKeyPrefixes.length).join(' OR ')} OR (${visibleConditions.slice(visibleKeyPrefixes.length).join(' AND ')}))`
+          : `(${visibleConditions.join(' OR ')})`);
+      }
+      for (const prefix of options.excludeKeyPrefixes ?? []) {
+        conditions.push("memory_key NOT LIKE ? ESCAPE '\\'");
+        params.push(`${prefix.replace(/[\\%_]/g, char => `\\${char}`)}%`);
+      }
+      const nowMs = options.includeExpired === false
+        ? parseDecayTimestamp(options.now ?? new Date(), 'now')
+        : undefined;
+      const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
+      const rows = this.db
+        .prepare(
+          `SELECT * FROM memory_review_provenance${where} ORDER BY approved_at DESC, memory_key ASC`,
+        )
+        .all(...params) as MemoryProvenanceRow[];
+      const sourceFilter = options.source?.trim().toLowerCase();
+      const attributions: MemoryProvenanceRecord[] = [];
+      for (const row of rows) {
+        if (!this.provenanceMatchesCurrentWorkingMemory(row)) {
+          continue;
+        }
+        const provenance = this.rowToProvenance(row);
+        if (nowMs !== undefined && provenance.expiresAt && Date.parse(provenance.expiresAt) <= nowMs) {
+          continue;
+        }
+        if (sourceFilter && !provenance.source.toLowerCase().includes(sourceFilter)) {
+          continue;
+        }
+        attributions.push(provenance);
+        if (attributions.length >= limit) break;
+      }
+      this.audit?.({
+        operation: 'review.listProvenance',
+        store: 'review',
+        outcome: attributions.length > 0 ? 'success' : 'miss',
+        query: auditQuery,
+        details: { ...auditDetails, count: attributions.length },
+      });
+      return attributions;
+    } catch (error) {
+      this.audit?.({
+        operation: 'review.listProvenance',
+        store: 'review',
+        outcome: 'error',
+        query: auditQuery,
+        details: {
+          ...auditDetails,
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
+      throw error;
     }
-    return attributions;
+  }
+
+  private provenanceListAuditQuery(options: MemoryAttributionListOptions): string {
+    return JSON.stringify({
+      targetStore: options.targetStore,
+      key: options.key,
+      keys: options.keys,
+      source: options.source,
+      visibleKeyPrefixes: options.visibleKeyPrefixes,
+      includeUnprefixedKeys: options.includeUnprefixedKeys,
+      unprefixedKeyPrefixExclusions: options.unprefixedKeyPrefixExclusions,
+      excludeKeyPrefixes: options.excludeKeyPrefixes,
+    });
+  }
+
+  private provenanceListAuditDetails(
+    options: MemoryAttributionListOptions,
+    limit: number,
+  ): Record<string, unknown> {
+    return {
+      targetStore: options.targetStore ?? 'all',
+      hasKeyFilter: options.key !== undefined,
+      keyCount: options.keys?.length,
+      hasSourceFilter: options.source !== undefined,
+      visiblePrefixCount: options.visibleKeyPrefixes?.length,
+      excludePrefixCount: options.excludeKeyPrefixes?.length,
+      includeUnprefixedKeys: options.includeUnprefixedKeys,
+      limit,
+    };
+  }
+
+  listForAgent(
+    options: MemoryAttributionListOptions = {},
+  ): MemoryCompactedEntry[] {
+    const now = options.now ?? new Date();
+    const limit = this.resolveAttributionLimit(options.limit);
+    const provenance = this.listProvenance({
+      ...options,
+      includeExpired: options.includeExpired ? true : false,
+      now,
+      limit: 1000,
+    });
+    return provenance
+      .filter(record => this.provenanceMatchesCurrentWorkingState(record))
+      .slice(0, limit)
+      .map((record) => this.provenanceToCompactedEntry(record, options, now));
+  }
+
+  private provenanceMatchesCurrentWorkingState(record: MemoryProvenanceRecord): boolean {
+    if (record.targetStore !== 'working') return true;
+    const state = this.working.reviewValueState(record.key);
+    if (state.state !== 'present') return false;
+    return stableStringify(canonicalMemoryValue(state.value)) ===
+      stableStringify(canonicalMemoryValue(record.value));
+  }
+
+  private provenanceToCompactedEntry(
+    record: MemoryProvenanceRecord,
+    options: MemoryAttributionListOptions,
+    now: string | Date,
+  ): MemoryCompactedEntry {
+    const nowMs = parseDecayTimestamp(now, 'now');
+    const expiresAtMs = record.expiresAt ? Date.parse(record.expiresAt) : NaN;
+    const revalidateAtMs = record.revalidateAt ? Date.parse(record.revalidateAt) : NaN;
+    const decay = calculateMemoryConfidenceDecay({
+      confidence: record.confidence,
+      observedAt: record.approvedAt,
+      now,
+      ...(options.confidenceHalfLifeMs !== undefined ? { halfLifeMs: options.confidenceHalfLifeMs } : {}),
+      ...(options.confidenceFloor !== undefined ? { floor: options.confidenceFloor } : {}),
+    });
+    const expired = Number.isFinite(expiresAtMs) && expiresAtMs <= nowMs;
+    const needsRevalidation = Number.isFinite(revalidateAtMs) && revalidateAtMs <= nowMs;
+    const sourceId = record.sourceId ?? record.evidenceId;
+    const compact = [
+      `${record.key}=${JSON.stringify(record.value)}`,
+      `source=${record.sourceType}${sourceId ? `:${JSON.stringify(sourceId)}` : ''}`,
+      `confidence=${decay.confidence.toFixed(3)}`,
+      `created=${record.createdAt}`,
+      `updated=${record.approvedAt}`,
+      ...(record.expiresAt ? [`expires=${record.expiresAt}`] : []),
+      ...(record.revalidateAt ? [`revalidate=${record.revalidateAt}`] : []),
+      ...(expired ? ['expired=true'] : []),
+      ...(needsRevalidation ? ['revalidate_due=true'] : []),
+      `reason=${JSON.stringify(record.reason)}`,
+    ].join(' | ');
+    return {
+      targetStore: record.targetStore,
+      key: record.key,
+      value: record.value,
+      compact,
+      metadata: {
+        sourceType: record.sourceType,
+        source: record.source,
+        ...(record.sourceId ? { sourceId: record.sourceId } : {}),
+        ...(record.evidenceId ? { evidenceId: record.evidenceId } : {}),
+        confidence: record.confidence,
+        decayedConfidence: decay.confidence,
+        reason: record.reason,
+        createdAt: record.createdAt,
+        updatedAt: record.approvedAt,
+        ...(record.expiresAt ? { expiresAt: record.expiresAt } : {}),
+        ...(record.revalidateAt ? { revalidateAt: record.revalidateAt } : {}),
+        expired,
+        needsRevalidation,
+      },
+    };
   }
 
   private resolveAttributionLimit(limit: number | undefined): number {
@@ -2296,76 +4024,168 @@ export class SqliteMemoryReviewQueue {
   }
 
   conflictsFor(id: string): MemoryConflict[] {
-    if (id.startsWith('memcand_suppressed_')) return [];
-    const candidate = this.requireCandidate(id);
-    if (candidate.status !== 'pending') return [];
-    return this.detectConflicts(candidate);
+    if (id.startsWith('memcand_suppressed_')) {
+      this.audit?.({
+        operation: 'review.conflictsFor',
+        store: 'review',
+        outcome: 'miss',
+        details: { id, status: 'suppressed' },
+      });
+      return [];
+    }
+    try {
+      const candidate = this.requireCandidate(id);
+      if (candidate.status !== 'pending') {
+        this.audit?.({
+          operation: 'review.conflictsFor',
+          store: 'review',
+          key: candidate.key,
+          outcome: 'miss',
+          details: { id, status: candidate.status, targetStore: candidate.targetStore },
+        });
+        return [];
+      }
+      const conflicts = this.detectConflicts(candidate);
+      this.audit?.({
+        operation: 'review.conflictsFor',
+        store: 'review',
+        key: candidate.key,
+        outcome: conflicts.length > 0 ? 'success' : 'miss',
+        details: {
+          id,
+          status: candidate.status,
+          targetStore: candidate.targetStore,
+          count: conflicts.length,
+        },
+      });
+      return conflicts;
+    } catch (error) {
+      this.audit?.({
+        operation: 'review.conflictsFor',
+        store: 'review',
+        outcome: 'error',
+        details: {
+          id,
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
+      throw error;
+    }
   }
 
   resolutionPromptFor(id: string): MemoryResolutionPrompt | null {
-    if (id.startsWith('memcand_suppressed_')) return null;
-    const candidate = this.requireCandidate(id);
-    if (candidate.status !== 'pending') return null;
-    const [conflict] = this.detectConflicts(candidate);
-    if (!conflict) return null;
-    const oldEntry = {
-      value: conflict.existingValue,
-      ...(conflict.existingProvenance?.source
-        ? { source: conflict.existingProvenance.source }
-        : {}),
-      ...(conflict.existingProvenance?.evidenceId
-        ? { evidenceId: conflict.existingProvenance.evidenceId }
-        : {}),
-      ...(conflict.existingProvenance?.confidence !== undefined
-        ? { confidence: conflict.existingProvenance.confidence }
-        : {}),
-      ...(conflict.existingProvenance?.reason
-        ? { reason: conflict.existingProvenance.reason }
-        : {}),
-    };
-    const newCandidate = {
-      value: candidate.value,
-      source: candidate.source,
-      ...(candidate.evidenceId ? { evidenceId: candidate.evidenceId } : {}),
-      confidence: candidate.confidence,
-      reason: candidate.reason,
-    };
-    return {
-      candidateId: candidate.id,
-      targetStore: candidate.targetStore,
-      key: candidate.key,
-      conflictType: conflict.conflictType,
-      oldEntry,
-      newCandidate,
-      sourceEvidence: {
+    try {
+      if (id.startsWith('memcand_suppressed_')) {
+        this.audit?.({
+          operation: 'review.resolutionPromptFor',
+          store: 'review',
+          outcome: 'miss',
+          details: { id, reason: 'suppressed-placeholder' },
+        });
+        return null;
+      }
+      const candidate = this.requireCandidate(id);
+      if (candidate.status !== 'pending') {
+        this.audit?.({
+          operation: 'review.resolutionPromptFor',
+          store: 'review',
+          key: candidate.key,
+          outcome: 'miss',
+          details: { id, status: candidate.status, targetStore: candidate.targetStore },
+        });
+        return null;
+      }
+      const [conflict] = this.detectConflicts(candidate);
+      if (!conflict) {
+        this.audit?.({
+          operation: 'review.resolutionPromptFor',
+          store: 'review',
+          key: candidate.key,
+          outcome: 'miss',
+          details: { id, status: candidate.status, targetStore: candidate.targetStore },
+        });
+        return null;
+      }
+      const oldEntry = {
+        value: conflict.existingValue,
         ...(conflict.existingProvenance?.source
-          ? {
-              old: {
-                source: conflict.existingProvenance.source,
-                ...(conflict.existingProvenance.evidenceId
-                  ? { evidenceId: conflict.existingProvenance.evidenceId }
-                  : {}),
-              },
-            }
+          ? { source: conflict.existingProvenance.source }
           : {}),
-        new: {
-          source: candidate.source,
-          ...(candidate.evidenceId ? { evidenceId: candidate.evidenceId } : {}),
+        ...(conflict.existingProvenance?.evidenceId
+          ? { evidenceId: conflict.existingProvenance.evidenceId }
+          : {}),
+        ...(conflict.existingProvenance?.confidence !== undefined
+          ? { confidence: conflict.existingProvenance.confidence }
+          : {}),
+        ...(conflict.existingProvenance?.reason
+          ? { reason: conflict.existingProvenance.reason }
+          : {}),
+      };
+      const newCandidate = {
+        value: candidate.value,
+        source: candidate.source,
+        ...(candidate.evidenceId ? { evidenceId: candidate.evidenceId } : {}),
+        confidence: candidate.confidence,
+        reason: candidate.reason,
+      };
+      this.audit?.({
+        operation: 'review.resolutionPromptFor',
+        store: 'review',
+        key: candidate.key,
+        outcome: 'success',
+        details: { id, status: candidate.status, targetStore: candidate.targetStore },
+      });
+      return {
+        candidateId: candidate.id,
+        targetStore: candidate.targetStore,
+        key: candidate.key,
+        conflictType: conflict.conflictType,
+        oldEntry,
+        newCandidate,
+        sourceEvidence: {
+          ...(conflict.existingProvenance?.source
+            ? {
+                old: {
+                  source: conflict.existingProvenance.source,
+                  ...(conflict.existingProvenance.evidenceId
+                    ? { evidenceId: conflict.existingProvenance.evidenceId }
+                    : {}),
+                },
+              }
+            : {}),
+          new: {
+            source: candidate.source,
+            ...(candidate.evidenceId ? { evidenceId: candidate.evidenceId } : {}),
+          },
         },
-      },
-      recommendedAction:
-        candidate.confidence >= (conflict.existingProvenance?.confidence ?? 0)
-          ? 'replace_existing'
-          : 'keep_existing',
-      availableActions: [
-        'keep_existing',
-        'replace_existing',
-        'keep_both_scoped',
-        'reject_candidate',
-        'expire_existing',
-      ],
-      guidance: conflict.guidance,
-    };
+        recommendedAction:
+          candidate.confidence >= (conflict.existingProvenance?.confidence ?? 0)
+            ? 'replace_existing'
+            : 'keep_existing',
+        availableActions: [
+          'keep_existing',
+          'replace_existing',
+          'keep_both_scoped',
+          'reject_candidate',
+          'expire_existing',
+        ],
+        guidance: conflict.guidance,
+      };
+    } catch (error) {
+      const candidate = this.tryCandidate(id);
+      this.audit?.({
+        operation: 'review.resolutionPromptFor',
+        store: 'review',
+        ...(candidate ? { key: candidate.key } : {}),
+        outcome: 'error',
+        details: {
+          id,
+          ...(candidate ? { status: candidate.status, targetStore: candidate.targetStore } : {}),
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
+      throw error;
+    }
   }
 
   resolveConflict(
@@ -2460,25 +4280,37 @@ export class SqliteMemoryReviewQueue {
       if (suppressionReason) {
         this.markSuppressed(id, suppressionReason, now, decisionOptions);
         approvedCandidate = this.requireCandidate(id);
+        this.audit?.({
+          operation: 'review.approve',
+          store: 'review',
+          key: approvedCandidate.key,
+          outcome: 'denied',
+          details: { id, status: approvedCandidate.status, targetStore: approvedCandidate.targetStore, resolution: 'keep_both_scoped' },
+        });
         return;
       }
       finalizeWorkingFlush = this.working.persistKeyAfterCommit(scopedKey, updatedCandidate.value) ?? undefined;
       this.db
         .prepare(
           `INSERT INTO memory_review_provenance (
-            target_store, memory_key, value, candidate_id, source, evidence_id,
-            confidence, reason, reviewer, note, approved_at, schema_version
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
+            target_store, memory_key, value, candidate_id, source, source_type, source_id, evidence_id,
+            confidence, reason, reviewer, note, created_at, approved_at, expires_at, revalidate_at, schema_version
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
           ON CONFLICT(target_store, memory_key) DO UPDATE SET
             value = excluded.value,
             candidate_id = excluded.candidate_id,
             source = excluded.source,
+            source_type = excluded.source_type,
+            source_id = excluded.source_id,
             evidence_id = excluded.evidence_id,
             confidence = excluded.confidence,
             reason = excluded.reason,
             reviewer = excluded.reviewer,
             note = excluded.note,
+            created_at = excluded.created_at,
             approved_at = excluded.approved_at,
+            expires_at = excluded.expires_at,
+            revalidate_at = excluded.revalidate_at,
             schema_version = excluded.schema_version`,
         )
         .run(
@@ -2487,22 +4319,61 @@ export class SqliteMemoryReviewQueue {
           this.encodeValue(updatedCandidate.value),
           updatedCandidate.id,
           this.encodeText(updatedCandidate.source),
+          normalizeMemorySourceType(updatedCandidate.sourceType, updatedCandidate.source),
+          this.encodeSourceId(updatedCandidate.sourceId, updatedCandidate.source),
           updatedCandidate.evidenceId ? this.encodeText(updatedCandidate.evidenceId) : null,
           updatedCandidate.confidence,
           this.encodeText(updatedCandidate.reason),
           decisionOptions.reviewer ? this.encodeText(decisionOptions.reviewer) : null,
           this.encodeText(decisionOptions.note ?? 'Memory conflict resolved by keeping both values with explicit scope.'),
+          updatedCandidate.createdAt,
           now,
+          updatedCandidate.expiresAt ?? null,
+          updatedCandidate.revalidateAt ?? null,
         );
       this.markDecision(id, 'approved', now, {
         ...decisionOptions,
         note: decisionOptions.note ?? 'Memory conflict resolved by keeping both values with explicit scope.',
       });
       approvedCandidate = this.requireCandidate(id);
+      this.audit?.({
+        operation: 'review.approve',
+        store: 'review',
+        key: approvedCandidate.key,
+        outcome: 'success',
+        details: { id, status: approvedCandidate.status, targetStore: approvedCandidate.targetStore, resolution: 'keep_both_scoped' },
+      });
+      if (approvedCandidate.targetStore === 'working') {
+        this.audit?.({
+          operation: 'working.set',
+          store: 'working',
+          key: approvedCandidate.key,
+          outcome: 'success',
+          details: { source: 'review.approve', candidateId: id, resolution: 'keep_both_scoped' },
+        });
+      }
     });
-    tx.immediate();
+    try {
+      tx.immediate();
+    } catch (error) {
+      const candidate = this.tryCandidate(id);
+      this.audit?.({
+        operation: 'review.approve',
+        store: 'review',
+        ...(candidate ? { key: scopedKey } : {}),
+        outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
+        details: {
+          id,
+          ...(candidate ? { status: candidate.status, targetStore: candidate.targetStore } : {}),
+          resolution: 'keep_both_scoped',
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
+      throw error;
+    }
     finalizeWorkingFlush?.();
-    return approvedCandidate ?? this.requireCandidate(id, 'approved');
+    const result = approvedCandidate ?? this.requireCandidate(id, 'approved');
+    return result;
   }
 
   private expireExistingAndApprove(
@@ -2522,6 +4393,13 @@ export class SqliteMemoryReviewQueue {
       if (suppressionReason) {
         this.markSuppressed(id, suppressionReason, now, decisionOptions);
         approvedCandidate = this.requireCandidate(id);
+        this.audit?.({
+          operation: 'review.approve',
+          store: 'review',
+          key: approvedCandidate.key,
+          outcome: 'denied',
+          details: { id, status: approvedCandidate.status, targetStore: approvedCandidate.targetStore, resolution: 'expire_existing' },
+        });
         return;
       }
       finalizeWorkingFlush = this.working.persistKeyAfterCommit(candidate.key, candidate.value) ?? undefined;
@@ -2531,9 +4409,9 @@ export class SqliteMemoryReviewQueue {
       this.db
         .prepare(
           `INSERT INTO memory_review_provenance (
-            target_store, memory_key, value, candidate_id, source, evidence_id,
-            confidence, reason, reviewer, note, approved_at, schema_version
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
+            target_store, memory_key, value, candidate_id, source, source_type, source_id, evidence_id,
+            confidence, reason, reviewer, note, created_at, approved_at, expires_at, revalidate_at, schema_version
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
         )
         .run(
           candidate.targetStore,
@@ -2541,22 +4419,61 @@ export class SqliteMemoryReviewQueue {
           this.encodeValue(candidate.value),
           candidate.id,
           this.encodeText(candidate.source),
+          normalizeMemorySourceType(candidate.sourceType, candidate.source),
+          this.encodeSourceId(candidate.sourceId, candidate.source),
           candidate.evidenceId ? this.encodeText(candidate.evidenceId) : null,
           candidate.confidence,
           this.encodeText(candidate.reason),
           decisionOptions.reviewer ? this.encodeText(decisionOptions.reviewer) : null,
           this.encodeText(decisionOptions.note ?? 'Memory conflict resolved by expiring the old value before approving the candidate.'),
+          candidate.createdAt,
           now,
+          candidate.expiresAt ?? null,
+          candidate.revalidateAt ?? null,
         );
       this.markDecision(id, 'approved', now, {
         ...decisionOptions,
         note: decisionOptions.note ?? 'Memory conflict resolved by expiring the old value before approving the candidate.',
       });
       approvedCandidate = this.requireCandidate(id);
+      this.audit?.({
+        operation: 'review.approve',
+        store: 'review',
+        key: approvedCandidate.key,
+        outcome: 'success',
+        details: { id, status: approvedCandidate.status, targetStore: approvedCandidate.targetStore, resolution: 'expire_existing' },
+      });
+      if (approvedCandidate.targetStore === 'working') {
+        this.audit?.({
+          operation: 'working.set',
+          store: 'working',
+          key: approvedCandidate.key,
+          outcome: 'success',
+          details: { source: 'review.approve', candidateId: id, resolution: 'expire_existing' },
+        });
+      }
     });
-    tx.immediate();
+    try {
+      tx.immediate();
+    } catch (error) {
+      const candidate = this.tryCandidate(id);
+      this.audit?.({
+        operation: 'review.approve',
+        store: 'review',
+        ...(candidate ? { key: candidate.key } : {}),
+        outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
+        details: {
+          id,
+          ...(candidate ? { status: candidate.status, targetStore: candidate.targetStore } : {}),
+          resolution: 'expire_existing',
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
+      throw error;
+    }
     finalizeWorkingFlush?.();
-    return approvedCandidate ?? this.requireCandidate(id, 'approved');
+    const result = approvedCandidate ?? this.requireCandidate(id, 'approved');
+    return result;
   }
 
   private assertConflictUnchanged(
@@ -2778,6 +4695,9 @@ export class SqliteMemoryReviewQueue {
     if (proposal.source.trim().length === 0) {
       throw new Error('Memory candidate source must not be empty');
     }
+    normalizeMemorySourceType(proposal.sourceType, proposal.source);
+    validateOptionalIsoTimestamp(proposal.expiresAt, 'expiresAt');
+    validateOptionalIsoTimestamp(proposal.revalidateAt, 'revalidateAt');
     if (proposal.reason.trim().length === 0) {
       throw new Error('Memory candidate reason must not be empty');
     }
@@ -2821,6 +4741,13 @@ export class SqliteMemoryReviewQueue {
       );
     }
     return candidate;
+  }
+
+  private tryCandidate(id: string): MemoryCandidate | undefined {
+    const row = this.db
+      .prepare(`SELECT * FROM memory_review_candidates WHERE id = ?`)
+      .get(id) as MemoryCandidateRow | undefined;
+    return row ? this.rowToCandidate(row) : undefined;
   }
 
   private markDecision(
@@ -2892,8 +4819,8 @@ export class SqliteMemoryReviewQueue {
       .prepare(
         `INSERT INTO memory_review_suppressions (
           signature, suppression_reason, target_store, memory_key, value, source,
-          evidence_id, reason, reviewer, note, created_at, schema_version
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
+          source_id, evidence_id, reason, reviewer, note, created_at, schema_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
         ON CONFLICT(signature) DO UPDATE SET
           suppression_reason = excluded.suppression_reason,
           reviewer = excluded.reviewer,
@@ -2909,6 +4836,7 @@ export class SqliteMemoryReviewQueue {
           reason === 'never_store' ? NEVER_STORE_REDACTED_VALUE : candidate.value,
         ),
         this.encodeText(candidate.source),
+        this.encodeSourceId(candidate.sourceId, candidate.source),
         candidate.evidenceId ? this.encodeText(candidate.evidenceId) : null,
         this.encodeText(candidate.reason),
         options.reviewer ? this.encodeText(options.reviewer) : null,
@@ -2916,6 +4844,10 @@ export class SqliteMemoryReviewQueue {
         createdAt,
       );
     this.markMatchingPendingSuppressed(candidate, reason, createdAt, options);
+  }
+
+  private shouldRedactRejectedCandidate(candidate: MemoryCandidateProposal): boolean {
+    return candidate.source === 'fbeast_memory_store:quarantine';
   }
 
   private markMatchingPendingSuppressed(
@@ -2940,7 +4872,7 @@ export class SqliteMemoryReviewQueue {
     this.db
       .prepare(
         `UPDATE memory_review_candidates
-         SET value = ?, source = ?, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL, updated_at = ?
+         SET value = ?, source = ?, source_id = NULL, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL, updated_at = ?
          WHERE target_store = ? AND memory_key = ?`,
       )
       .run(
@@ -2954,7 +4886,7 @@ export class SqliteMemoryReviewQueue {
     this.db
       .prepare(
         `UPDATE memory_review_suppressions
-         SET value = ?, source = ?, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL
+         SET value = ?, source = ?, source_id = NULL, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL
          WHERE target_store = ? AND memory_key = ?`,
       )
       .run(
@@ -2963,6 +4895,43 @@ export class SqliteMemoryReviewQueue {
         this.encodeText(NEVER_STORE_REDACTED_VALUE),
         candidate.targetStore,
         candidate.key,
+      );
+  }
+
+  private redactRejectedRows(signature: string, redactedAt: string): void {
+    const rows = this.db
+      .prepare(`SELECT * FROM memory_review_candidates WHERE status IN ('rejected', 'suppressed')`)
+      .all() as MemoryCandidateRow[];
+    for (const row of rows) {
+      const candidate = this.rowToCandidate(row);
+      if (this.rejectedSignature(candidate, { createKey: false }) !== signature) {
+        continue;
+      }
+      this.db
+        .prepare(
+          `UPDATE memory_review_candidates
+           SET value = ?, source = ?, source_id = NULL, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL, updated_at = ?
+           WHERE id = ?`,
+        )
+        .run(
+          this.encodeValue(NEVER_STORE_REDACTED_VALUE),
+          this.encodeText(NEVER_STORE_REDACTED_VALUE),
+          this.encodeText(NEVER_STORE_REDACTED_VALUE),
+          redactedAt,
+          row.id,
+        );
+    }
+    this.db
+      .prepare(
+        `UPDATE memory_review_suppressions
+         SET value = ?, source = ?, source_id = NULL, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL
+         WHERE signature = ? AND suppression_reason = 'rejected'`,
+      )
+      .run(
+        this.encodeValue(NEVER_STORE_REDACTED_VALUE),
+        this.encodeText(NEVER_STORE_REDACTED_VALUE),
+        this.encodeText(NEVER_STORE_REDACTED_VALUE),
+        signature,
       );
   }
 
@@ -3001,6 +4970,7 @@ export class SqliteMemoryReviewQueue {
         memory_key: string;
         value: string;
         source: string;
+        source_id: string | null;
         evidence_id: string | null;
       }>;
     for (const row of rows) {
@@ -3008,8 +4978,10 @@ export class SqliteMemoryReviewQueue {
       if (stableStringify(canonicalMemoryValue(this.decodeValue(row.value))) !== candidateValue) {
         continue;
       }
+      const storedSourceId = row.source_id ? this.decodeText(row.source_id) : undefined;
       if (
         this.decodeText(row.source) === candidate.source &&
+        (storedSourceId === undefined || storedSourceId === candidate.sourceId) &&
         (row.evidence_id ? this.decodeText(row.evidence_id) : undefined) ===
           candidate.evidenceId
       ) {
@@ -3034,11 +5006,33 @@ export class SqliteMemoryReviewQueue {
     suppressionReason: MemorySuppressionReason,
   ): MemoryCandidate {
     const now = isoNow();
-    const safeProposal = suppressionReason === 'never_store'
-      ? { ...proposal, value: NEVER_STORE_REDACTED_VALUE }
+    const shouldRedact = suppressionReason === 'never_store' ||
+      (suppressionReason === 'rejected' && this.shouldRedactRejectedCandidate(proposal));
+    const safeProposal: MemoryCandidateProposal = shouldRedact
+      ? {
+          targetStore: proposal.targetStore,
+          key: proposal.key,
+          value: NEVER_STORE_REDACTED_VALUE,
+          source: NEVER_STORE_REDACTED_VALUE,
+          ...(proposal.sourceType ? { sourceType: proposal.sourceType } : {}),
+          confidence: proposal.confidence,
+          reason: NEVER_STORE_REDACTED_VALUE,
+          ...(proposal.expiresAt ? { expiresAt: proposal.expiresAt } : {}),
+          ...(proposal.revalidateAt ? { revalidateAt: proposal.revalidateAt } : {}),
+        }
       : proposal;
     return {
-      ...safeProposal,
+      targetStore: safeProposal.targetStore,
+      key: safeProposal.key,
+      value: safeProposal.value,
+      source: safeProposal.source,
+      sourceType: normalizeMemorySourceType(safeProposal.sourceType, safeProposal.source),
+      ...(safeProposal.sourceId ? { sourceId: safeProposal.sourceId } : {}),
+      ...(safeProposal.evidenceId ? { evidenceId: safeProposal.evidenceId } : {}),
+      confidence: safeProposal.confidence,
+      reason: safeProposal.reason,
+      ...(safeProposal.expiresAt ? { expiresAt: safeProposal.expiresAt } : {}),
+      ...(safeProposal.revalidateAt ? { revalidateAt: safeProposal.revalidateAt } : {}),
       id: `memcand_suppressed_${createHash('sha256')
         .update(this.suppressionSignature(proposal, suppressionReason) ?? '')
         .digest('hex')
@@ -3083,6 +5077,7 @@ export class SqliteMemoryReviewQueue {
             proposal.targetStore,
             proposal.key,
             proposal.source,
+            proposal.sourceId ?? '',
             proposal.evidenceId ?? '',
             stableStringify(normalizedValue),
           ],
@@ -3098,9 +5093,13 @@ export class SqliteMemoryReviewQueue {
       key: row.memory_key,
       value: this.decodeValue(row.value),
       source: this.decodeText(row.source),
+      sourceType: normalizeMemorySourceType(row.source_type ?? undefined, this.decodeText(row.source)),
+      ...(row.source_id ? { sourceId: this.decodeText(row.source_id) } : {}),
       ...(row.evidence_id ? { evidenceId: this.decodeText(row.evidence_id) } : {}),
       confidence: row.confidence,
       reason: this.decodeText(row.reason),
+      ...(row.expires_at ? { expiresAt: row.expires_at } : {}),
+      ...(row.revalidate_at ? { revalidateAt: row.revalidate_at } : {}),
       status: row.status,
       ...(row.suppression_reason
         ? { suppressionReason: row.suppression_reason }
@@ -3120,12 +5119,17 @@ export class SqliteMemoryReviewQueue {
       value: this.decodeValue(row.value),
       candidateId: row.candidate_id,
       source: this.decodeText(row.source),
+      sourceType: normalizeMemorySourceType(row.source_type ?? undefined, this.decodeText(row.source)),
+      ...(row.source_id ? { sourceId: this.decodeText(row.source_id) } : {}),
       ...(row.evidence_id ? { evidenceId: this.decodeText(row.evidence_id) } : {}),
       confidence: row.confidence,
       reason: this.decodeText(row.reason),
       ...(row.reviewer ? { reviewer: this.decodeText(row.reviewer) } : {}),
       ...(row.note ? { note: this.decodeText(row.note) } : {}),
+      createdAt: row.created_at ?? row.approved_at,
       approvedAt: row.approved_at,
+      ...(row.expires_at ? { expiresAt: row.expires_at } : {}),
+      ...(row.revalidate_at ? { revalidateAt: row.revalidate_at } : {}),
     };
   }
 
@@ -3141,8 +5145,46 @@ export class SqliteMemoryReviewQueue {
     return this.encodeText(stringifyWorkingMemoryValue('memory candidate', value));
   }
 
+  private encodeSourceId(sourceId: string | undefined, _source: string): string | null {
+    return sourceId ? this.encodeText(sourceId) : null;
+  }
+
   private decodeValue(value: string): unknown {
     return parseStoredWorkingMemoryValue(this.decodeText(value));
+  }
+}
+
+function normalizeMemorySourceType(
+  sourceType: MemorySourceType | string | undefined | null,
+  source: string,
+): MemorySourceType {
+  if (sourceType !== undefined && sourceType !== null) {
+    if (['user', 'inferred', 'system', 'tool', 'operator', 'unknown'].includes(sourceType)) {
+      return sourceType as MemorySourceType;
+    }
+    throw new Error(`Unsupported memory source type: ${String(sourceType)}`);
+  }
+  const normalized = source.trim().toLowerCase();
+  if (normalized === 'chat' || normalized.startsWith('chat:') || normalized.startsWith('chat-') || normalized.startsWith('user:')) return 'user';
+  if (normalized.startsWith('inferred:') || normalized.includes('inference')) return 'inferred';
+  if (normalized.startsWith('tool:') || normalized === 'terminal' || normalized.startsWith('terminal:') || normalized.startsWith('terminal-')) return 'tool';
+  if (normalized.startsWith('operator:')) return 'operator';
+  if (normalized.startsWith('repo') || normalized.startsWith('system:') || normalized.includes('config')) return 'system';
+  return 'unknown';
+}
+function validateOptionalIsoTimestamp(value: string | undefined, fieldName: string): void {
+  if (value === undefined) return;
+  if (typeof value !== 'string' || value.trim().length === 0 || !Number.isFinite(Date.parse(value))) {
+    throw new Error(`Memory candidate ${fieldName} must be a valid ISO timestamp when provided`);
+  }
+}
+
+function ensureColumns(db: Database.Database, table: string, columns: Record<string, string>): void {
+  const existing = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(row => row.name));
+  for (const [name, definition] of Object.entries(columns)) {
+    if (!existing.has(name)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
+    }
   }
 }
 
@@ -3323,16 +5365,36 @@ export class SqliteBrain implements IBrain {
   readonly episodic: SqliteEpisodicMemory;
   readonly recovery: SqliteRecoveryMemory;
   readonly memoryReview: SqliteMemoryReviewQueue;
+  readonly accessAudit: SqliteMemoryAccessAuditTrail;
 
   private db: Database.Database;
   private readonly dbPath: string;
   private readonly encryption: MemoryCipher | undefined;
+  private readonly auditRecorder: MemoryAccessAuditRecorder;
 
   constructor(
     dbPath: string = ':memory:',
     workingMemoryLimits?: Partial<WorkingMemoryLimits>,
     options: SqliteBrainOptions = {},
   ) {
+    const requestedHydrationLimits = options.workingMemoryHydrationLimits;
+    const hydrationLimits = requestedHydrationLimits
+      ? {
+          maxRows:
+            requestedHydrationLimits.maxRows ?? DEFAULT_WORKING_MEMORY_LIMITS.maxEntries,
+          maxBytes:
+            requestedHydrationLimits.maxBytes ?? DEFAULT_WORKING_MEMORY_LIMITS.maxTotalBytes,
+        }
+      : undefined;
+    if (hydrationLimits) {
+      for (const [name, value] of Object.entries(hydrationLimits)) {
+        if (!Number.isSafeInteger(value) || value < 1) {
+          throw new RangeError(
+            `workingMemoryHydrationLimits.${name} must be a positive safe integer`,
+          );
+        }
+      }
+    }
     this.dbPath = normalizeSqliteDbPath(dbPath);
     this.db = new Database(dbPath);
     this.db.pragma('busy_timeout = 5000');
@@ -3345,26 +5407,42 @@ export class SqliteBrain implements IBrain {
     const encryption = makeMemoryCipher(options.encryption);
     this.encryption = encryption;
     assertMemoryEncryptionState(this.db, dbPath, encryption);
-    this.working = new SqliteWorkingMemory(
+    this.auditRecorder = (event) => insertMemoryAccessAuditEvent(this.db, event, encryption);
+    this.accessAudit = new SqliteMemoryAccessAuditTrail(this.db, encryption);
+    try {
+      this.working = new SqliteWorkingMemory(
+        this.db,
+        {
+          ...DEFAULT_WORKING_MEMORY_LIMITS,
+          ...workingMemoryLimits,
+        },
+        options.hydrateWorkingMemoryFromDb ?? true,
+        encryption,
+        (event) => this.auditRecorder(event),
+        (keys) => SqliteBrain.expireLivePrunedWorkingKeys(this.dbPath, keys),
+        hydrationLimits,
+      );
+    } catch (error) {
+      this.db.close();
+      throw error;
+    }
+    this.episodic = new SqliteEpisodicMemory(
       this.db,
-      {
-        ...DEFAULT_WORKING_MEMORY_LIMITS,
-        ...workingMemoryLimits,
-      },
-      options.hydrateWorkingMemoryFromDb ?? true,
       encryption,
+      (event) => this.auditRecorder(event),
     );
-    this.episodic = new SqliteEpisodicMemory(this.db, encryption);
     this.recovery = new SqliteRecoveryMemory(
       this.db,
       () => this.working.flushToDb(),
       encryption,
+      (event) => this.auditRecorder(event),
     );
     this.memoryReview = new SqliteMemoryReviewQueue(
       this.db,
       this.working,
       this.dbPath,
       encryption,
+      (event) => this.auditRecorder(event),
     );
     SqliteBrain.registerLiveBrain(this.dbPath, this);
   }
@@ -3484,14 +5562,31 @@ export class SqliteBrain implements IBrain {
     }
   }
 
-  private static expireLiveWorkingMatches(dbPath: string, selector: NormalizedRightToForgetSelector): void {
+  private static expireLivePrunedWorkingKeys(dbPath: string, keys: readonly string[]): void {
+    const normalizedDbPath = normalizeSqliteDbPath(dbPath);
+    if (normalizedDbPath === ':memory:' || keys.length === 0) return;
+    const liveBrains = liveSqliteBrainsByPath.get(normalizedDbPath);
+    if (!liveBrains) return;
+    for (const brain of liveBrains) {
+      brain.working.expirePrunedRuntimeKeys(keys);
+    }
+  }
+
+  private static expireLiveWorkingMatches(
+    dbPath: string,
+    selector: NormalizedRightToForgetSelector,
+    keysToExpire: readonly string[] = [],
+  ): void {
     const normalizedDbPath = normalizeSqliteDbPath(dbPath);
     if (normalizedDbPath === ':memory:' || selector.type === 'episodic') return;
     const liveBrains = liveSqliteBrainsByPath.get(normalizedDbPath);
     if (!liveBrains) return;
     for (const brain of liveBrains) {
-      const keys = brain.working.matchingRuntimeKeys(selector);
-      brain.working.expireRuntimeKeys(keys, selector);
+      const keys = new Set([
+        ...brain.working.matchingRuntimeKeys(selector),
+        ...keysToExpire,
+      ]);
+      brain.working.expireRuntimeKeys(Array.from(keys), selector);
     }
   }
 
@@ -3545,9 +5640,13 @@ export class SqliteBrain implements IBrain {
         memory_key TEXT NOT NULL,
         value TEXT NOT NULL,
         source TEXT NOT NULL,
+        source_type TEXT,
+        source_id TEXT,
         evidence_id TEXT,
         confidence REAL NOT NULL,
         reason TEXT NOT NULL,
+        expires_at TEXT,
+        revalidate_at TEXT,
         status TEXT NOT NULL,
         suppression_reason TEXT,
         reviewer TEXT,
@@ -3565,12 +5664,17 @@ export class SqliteBrain implements IBrain {
         value TEXT NOT NULL,
         candidate_id TEXT NOT NULL,
         source TEXT NOT NULL,
+        source_type TEXT,
+        source_id TEXT,
         evidence_id TEXT,
         confidence REAL NOT NULL,
         reason TEXT NOT NULL,
         reviewer TEXT,
         note TEXT,
+        created_at TEXT,
         approved_at TEXT NOT NULL,
+        expires_at TEXT,
+        revalidate_at TEXT,
         schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION},
         PRIMARY KEY (target_store, memory_key)
       );
@@ -3581,6 +5685,7 @@ export class SqliteBrain implements IBrain {
         memory_key TEXT NOT NULL,
         value TEXT NOT NULL,
         source TEXT NOT NULL,
+        source_id TEXT,
         evidence_id TEXT,
         reason TEXT NOT NULL,
         reviewer TEXT,
@@ -3604,7 +5709,39 @@ export class SqliteBrain implements IBrain {
         created_at TEXT NOT NULL,
         schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
       );
+      CREATE TABLE IF NOT EXISTS memory_access_audit_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        operation TEXT NOT NULL,
+        store TEXT NOT NULL,
+        key_hash TEXT,
+        query_hash TEXT,
+        outcome TEXT NOT NULL,
+        details TEXT,
+        created_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_access_audit_created
+        ON memory_access_audit_events(created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_access_audit_operation
+        ON memory_access_audit_events(store, operation, created_at DESC);
     `);
+    this.ensureMemoryReviewMetadataColumns();
+  }
+
+  private ensureMemoryReviewMetadataColumns(): void {
+    ensureColumns(this.db, 'memory_review_candidates', {
+      source_type: 'TEXT',
+      source_id: 'TEXT',
+      expires_at: 'TEXT',
+      revalidate_at: 'TEXT',
+    });
+    ensureColumns(this.db, 'memory_review_provenance', {
+      source_type: 'TEXT',
+      source_id: 'TEXT',
+      created_at: 'TEXT',
+      expires_at: 'TEXT',
+      revalidate_at: 'TEXT',
+    });
   }
 
   getMemorySchemaMetadata(): MemorySchemaMetadata {
@@ -3661,6 +5798,113 @@ export class SqliteBrain implements IBrain {
     }
   }
 
+  memoryRetentionReport(options: MemoryRetentionReportOptions = {}): MemoryRetentionReport {
+    const now = resolveRetentionNow(options.now);
+    const nowMs = now.getTime();
+    const expiryHorizonMs = options.expiryHorizonMs ?? 7 * 24 * 60 * 60 * 1000;
+    if (!Number.isFinite(expiryHorizonMs) || expiryHorizonMs < 0) {
+      throw new Error('expiryHorizonMs must be a non-negative finite number');
+    }
+    const maxEntries = options.maxEntries;
+    if (maxEntries !== undefined && (!Number.isSafeInteger(maxEntries) || maxEntries < 1)) {
+      throw new Error('maxEntries must be a positive safe integer');
+    }
+
+    const entries: MemoryRetentionEntryReport[] = [];
+    for (const { key, value, updatedAt } of this.working.retentionEntries(now.toISOString())) {
+      const className = classifyMemoryEntry({ store: 'working', key, value });
+      const policy = MEMORY_RETENTION_POLICIES[className];
+      const expiresAt = extractTemporaryOperationalExpiresAt(value, className);
+      const observedAgeDays = ageDays(updatedAt, nowMs);
+      const decision = retentionActionForEntry({
+        className,
+        policy,
+        ...(observedAgeDays === undefined ? {} : { ageDays: observedAgeDays }),
+        ...(expiresAt ? { expiresAt } : {}),
+        nowMs,
+        expiryHorizonMs,
+      });
+      const agentId = decodeAgentWorkingKeyScope(key);
+      entries.push({
+        store: 'working',
+        key,
+        ...(agentId === undefined ? {} : { agentId }),
+        class: className,
+        action: decision.action,
+        policy: { ...policy },
+        protected: policy.protected,
+        ...(observedAgeDays === undefined ? {} : { ageDays: observedAgeDays }),
+        ...(expiresAt ? { expiresAt } : {}),
+        reason: decision.reason,
+      });
+    }
+
+    for (const event of this.episodic.recent(-1)) {
+      const key = String(event.id ?? event.summary);
+      const className = isRightToForgetAuditEvent(event)
+        ? 'audit_record'
+        : classifyMemoryEntry({
+          store: 'episodic',
+          key,
+          value: event.summary,
+          summary: event.summary,
+          ...(event.details === undefined ? {} : { details: event.details }),
+        });
+      const policy = MEMORY_RETENTION_POLICIES[className];
+      const observedAgeDays = ageDays(event.createdAt, nowMs);
+      const decision = retentionActionForEntry({
+        className,
+        policy,
+        ...(observedAgeDays === undefined ? {} : { ageDays: observedAgeDays }),
+        nowMs,
+        expiryHorizonMs,
+      });
+      const agentId = parseAgentScopedEpisodicDetails(event.details);
+      entries.push({
+        store: 'episodic',
+        key,
+        ...(agentId === undefined ? {} : { agentId }),
+        class: className,
+        action: decision.action,
+        policy: { ...policy },
+        protected: policy.protected,
+        ...(observedAgeDays === undefined ? {} : { ageDays: observedAgeDays }),
+        reason: decision.reason,
+      });
+    }
+
+    if (maxEntries !== undefined) {
+      const nonProtectedBudgetCandidates = entries
+        .filter((entry) => !entry.protected && (entry.action === 'retain' || entry.action === 'nearing_expiry'))
+        .sort((a, b) => b.policy.compactPriority - a.policy.compactPriority || a.key.localeCompare(b.key));
+      const activeEntries = entries.filter((entry) => entry.action !== 'expired');
+      const existingCompactionCount = activeEntries.filter((entry) => entry.action === 'compact').length;
+      const extraBudgetCompactions = Math.max(0, activeEntries.length - maxEntries - existingCompactionCount);
+      for (const entry of nonProtectedBudgetCandidates.slice(0, extraBudgetCompactions)) {
+        entry.action = 'compact';
+        entry.reason = `Memory store has ${activeEntries.length} active entries, over report budget ${maxEntries}; ${entry.class} has compaction priority ${entry.policy.compactPriority}`;
+      }
+    }
+
+    const compactionCandidates = entries
+      .filter((entry) => entry.action === 'compact')
+      .sort((a, b) => b.policy.compactPriority - a.policy.compactPriority || a.key.localeCompare(b.key));
+
+    return {
+      generatedAt: now.toISOString(),
+      policies: memoryRetentionPolicies(),
+      counts: {
+        total: entries.length,
+        protected: entries.filter((entry) => entry.protected).length,
+        expired: entries.filter((entry) => entry.action === 'expired').length,
+        nearingExpiry: entries.filter((entry) => entry.action === 'nearing_expiry').length,
+        compactionCandidates: compactionCandidates.length,
+      },
+      entries,
+      compactionCandidates,
+    };
+  }
+
   /** Flush working memory to SQLite before serialization or checkpoint. */
   flush(): void {
     this.working.flushToDb();
@@ -3703,8 +5947,38 @@ export class SqliteBrain implements IBrain {
       reviewMatchCount = memoryType === 'episodic'
         ? 0
         : this.matchingReviewPayloads(normalizedSelector).length;
+      const accessEvent: MemoryAccessAuditInput = {
+        operation: 'privacy.rightToForget',
+        store: 'privacy',
+        outcome: 'success',
+        details: {
+          selectorHash,
+          dryRun: true,
+          deletedWorking: deletedWorkingKeys.size,
+          deletedEpisodic: episodicMatchCount,
+          deletedCheckpoints: checkpointMatchCount,
+          deletedReviewPayloads: reviewMatchCount,
+          deletedDerived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
+          deletedTotalDerived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
+        },
+        ...(normalizedSelector.query === undefined ? {} : { query: normalizedSelector.query }),
+        ...(normalizedSelector.key === undefined ? {} : { key: normalizedSelector.key }),
+      };
+      this.auditRecorder(accessEvent);
+
+      return {
+        selectorHash,
+        dryRun,
+        deleted: {
+          working: deletedWorkingKeys.size,
+          episodic: episodicMatchCount,
+          derived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
+        },
+        remainingReferences: this.countRemainingReferences(normalizedSelector, { expireRuntimeGuards: false, expirePersistedTtlEntries: false }),
+      };
     } else {
-      const tx = this.db.transaction(() => {
+      try {
+        const tx = this.db.transaction(() => {
         const workingMatches = memoryType === 'episodic'
           ? []
           : this.matchingWorkingKeys(normalizedSelector, { expireRuntimeGuards: true, expirePersistedTtlEntries: false });
@@ -3766,6 +6040,24 @@ export class SqliteBrain implements IBrain {
           this.encryption?.encrypt(auditDetails) ?? auditDetails,
           isoNow(),
         );
+        const accessEvent: MemoryAccessAuditInput = {
+          operation: 'privacy.rightToForget',
+          store: 'privacy',
+          outcome: 'success',
+          details: {
+            selectorHash,
+            dryRun: false,
+            deletedWorking: deletedWorkingKeys.size,
+            deletedEpisodic: episodicMatchCount,
+            deletedCheckpoints: checkpointMatchCount,
+            deletedReviewPayloads: reviewMatchCount,
+            deletedDerived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
+            deletedTotalDerived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
+          },
+          ...(normalizedSelector.query === undefined ? {} : { query: normalizedSelector.query }),
+          ...(normalizedSelector.key === undefined ? {} : { key: normalizedSelector.key }),
+        };
+        this.auditRecorder(accessEvent);
         return Number(result.lastInsertRowid);
       });
       const auditEventId = tx() as number;
@@ -3774,7 +6066,11 @@ export class SqliteBrain implements IBrain {
         this.working.deleteRuntimeKeys(Array.from(runtimeWorkingKeysToDelete));
         purgeDeletedSqliteContent(this.db, this.dbPath);
       }
-      SqliteBrain.expireLiveWorkingMatches(this.dbPath, normalizedSelector);
+      SqliteBrain.expireLiveWorkingMatches(
+        this.dbPath,
+        normalizedSelector,
+        Array.from(runtimeWorkingKeysToDelete),
+      );
       return {
         selectorHash,
         dryRun,
@@ -3786,18 +6082,23 @@ export class SqliteBrain implements IBrain {
         remainingReferences: this.countRemainingReferences(normalizedSelector, { expireRuntimeGuards: true }),
         auditEventId,
       };
+      } catch (error) {
+        const accessEvent: MemoryAccessAuditInput = {
+          operation: 'privacy.rightToForget',
+          store: 'privacy',
+          outcome: 'error',
+          details: {
+            selectorHash,
+            dryRun: false,
+            errorName: error instanceof Error ? error.name : 'Error',
+          },
+          ...(normalizedSelector.query === undefined ? {} : { query: normalizedSelector.query }),
+          ...(normalizedSelector.key === undefined ? {} : { key: normalizedSelector.key }),
+        };
+        this.auditRecorder(accessEvent);
+        throw error;
+      }
     }
-
-    return {
-      selectorHash,
-      dryRun,
-      deleted: {
-        working: deletedWorkingKeys.size,
-        episodic: episodicMatchCount,
-        derived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
-      },
-      remainingReferences: this.countRemainingReferences(normalizedSelector, { expireRuntimeGuards: false, expirePersistedTtlEntries: false }),
-    };
   }
 
   private matchingWorkingKeys(selector: NormalizedRightToForgetSelector, options: { expireRuntimeGuards?: boolean; expirePersistedTtlEntries?: boolean } = {}): Array<{ key: string; source: 'persisted' | 'runtime' }> {
@@ -3855,21 +6156,21 @@ export class SqliteBrain implements IBrain {
   private matchingReviewPayloads(selector: NormalizedRightToForgetSelector): ReviewPayloadMatch[] {
     const matches: ReviewPayloadMatch[] = [];
     for (const row of this.db.prepare(
-      `SELECT id, target_store, memory_key, value, source, evidence_id, reason, reviewer, note FROM memory_review_candidates`,
+      `SELECT id, target_store, memory_key, value, source, source_id, evidence_id, reason, reviewer, note FROM memory_review_candidates`,
     ).all() as ReviewPayloadRow[]) {
       if (row.id && this.reviewPayloadRowMatchesSelector(row, selector)) {
         matches.push({ table: 'memory_review_candidates', id: row.id, key: row.memory_key });
       }
     }
     for (const row of this.db.prepare(
-      `SELECT target_store, memory_key, value, source, evidence_id, reason, reviewer, note FROM memory_review_provenance`,
+      `SELECT target_store, memory_key, value, source, source_id, evidence_id, reason, reviewer, note FROM memory_review_provenance`,
     ).all() as ReviewPayloadRow[]) {
       if (this.reviewPayloadRowMatchesSelector(row, selector)) {
         matches.push({ table: 'memory_review_provenance', targetStore: row.target_store, key: row.memory_key });
       }
     }
     for (const row of this.db.prepare(
-      `SELECT signature, target_store, memory_key, value, source, evidence_id, reason, reviewer, note FROM memory_review_suppressions`,
+      `SELECT signature, target_store, memory_key, value, source, source_id, evidence_id, reason, reviewer, note FROM memory_review_suppressions`,
     ).all() as ReviewPayloadRow[]) {
       if (row.signature && this.reviewPayloadRowMatchesSelector(row, selector)) {
         matches.push({ table: 'memory_review_suppressions', signature: row.signature, key: row.memory_key });
@@ -3892,6 +6193,7 @@ export class SqliteBrain implements IBrain {
       {
         value: parseStoredWorkingMemoryValue(this.encryption?.decrypt(row.value) ?? row.value),
         source: this.encryption?.decrypt(row.source) ?? row.source,
+        sourceId: row.source_id ? this.encryption?.decrypt(row.source_id) ?? row.source_id : undefined,
         evidenceId: row.evidence_id ? this.encryption?.decrypt(row.evidence_id) ?? row.evidence_id : undefined,
         reason: this.encryption?.decrypt(row.reason) ?? row.reason,
         reviewer: row.reviewer ? this.encryption?.decrypt(row.reviewer) ?? row.reviewer : undefined,
@@ -3905,7 +6207,7 @@ export class SqliteBrain implements IBrain {
     if (matches.length === 0) return;
     const redactCandidates = this.db.prepare(
       `UPDATE memory_review_candidates
-       SET memory_key = ?, value = ?, source = ?, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL,
+       SET memory_key = ?, value = ?, source = ?, source_id = NULL, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL,
            status = CASE WHEN status = 'pending' THEN 'suppressed' ELSE status END,
            suppression_reason = CASE WHEN status = 'pending' THEN 'never_store' ELSE suppression_reason END,
            decided_at = CASE WHEN status = 'pending' THEN ? ELSE decided_at END,
@@ -3914,12 +6216,12 @@ export class SqliteBrain implements IBrain {
     );
     const redactProvenance = this.db.prepare(
       `UPDATE memory_review_provenance
-       SET memory_key = ?, value = ?, source = ?, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL
+       SET memory_key = ?, value = ?, source = ?, source_id = NULL, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL
        WHERE target_store = ? AND memory_key = ?`,
     );
     const redactSuppression = this.db.prepare(
       `UPDATE memory_review_suppressions
-       SET memory_key = ?, value = ?, source = ?, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL
+       SET memory_key = ?, value = ?, source = ?, source_id = NULL, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL
        WHERE signature = ?`,
     );
     const redactedValue = this.encryption?.encrypt(stringifyWorkingMemoryValue('memory candidate', NEVER_STORE_REDACTED_VALUE)) ?? stringifyWorkingMemoryValue('memory candidate', NEVER_STORE_REDACTED_VALUE);
@@ -4166,6 +6468,23 @@ function migrateMemorySchemaDatabase(
       .prepare(`PRAGMA table_info(${store})`)
       .all() as Array<{ name: string }>;
     const columns = new Set(columnRows.map((row) => row.name));
+    if (store === 'memory_review_candidates') {
+      for (const column of ['source_type', 'source_id', 'expires_at', 'revalidate_at']) {
+        if (!columns.has(column)) {
+          operations.push({ table: store, action: `add ${column} column` });
+        }
+      }
+    }
+    if (store === 'memory_review_provenance') {
+      for (const column of ['source_type', 'source_id', 'created_at', 'expires_at', 'revalidate_at']) {
+        if (!columns.has(column)) {
+          operations.push({ table: store, action: `add ${column} column` });
+        }
+      }
+    }
+    if (store === 'memory_review_suppressions' && !columns.has('source_id')) {
+      operations.push({ table: store, action: 'add source_id column' });
+    }
     if (!columns.has('schema_version')) {
       operations.push({
         table: store,
@@ -4240,6 +6559,21 @@ function migrateMemorySchemaDatabase(
         created_at TEXT NOT NULL,
         schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
       );
+      CREATE TABLE IF NOT EXISTS memory_access_audit_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        operation TEXT NOT NULL,
+        store TEXT NOT NULL,
+        key_hash TEXT,
+        query_hash TEXT,
+        outcome TEXT NOT NULL,
+        details TEXT,
+        created_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_access_audit_created
+        ON memory_access_audit_events(created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_access_audit_operation
+        ON memory_access_audit_events(store, operation, created_at DESC);
       CREATE TABLE IF NOT EXISTS working_memory (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL,
@@ -4268,9 +6602,13 @@ function migrateMemorySchemaDatabase(
         memory_key TEXT NOT NULL,
         value TEXT NOT NULL,
         source TEXT NOT NULL,
+        source_type TEXT,
+        source_id TEXT,
         evidence_id TEXT,
         confidence REAL NOT NULL,
         reason TEXT NOT NULL,
+        expires_at TEXT,
+        revalidate_at TEXT,
         status TEXT NOT NULL,
         suppression_reason TEXT,
         reviewer TEXT,
@@ -4288,12 +6626,17 @@ function migrateMemorySchemaDatabase(
         value TEXT NOT NULL,
         candidate_id TEXT NOT NULL,
         source TEXT NOT NULL,
+        source_type TEXT,
+        source_id TEXT,
         evidence_id TEXT,
         confidence REAL NOT NULL,
         reason TEXT NOT NULL,
         reviewer TEXT,
         note TEXT,
+        created_at TEXT,
         approved_at TEXT NOT NULL,
+        expires_at TEXT,
+        revalidate_at TEXT,
         schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION},
         PRIMARY KEY (target_store, memory_key)
       );
@@ -4304,6 +6647,7 @@ function migrateMemorySchemaDatabase(
         memory_key TEXT NOT NULL,
         value TEXT NOT NULL,
         source TEXT NOT NULL,
+        source_id TEXT,
         evidence_id TEXT,
         reason TEXT NOT NULL,
         reviewer TEXT,
@@ -4314,6 +6658,22 @@ function migrateMemorySchemaDatabase(
       CREATE INDEX IF NOT EXISTS idx_memory_review_suppressions_target_key
         ON memory_review_suppressions(target_store, memory_key);
     `);
+    ensureColumns(db, 'memory_review_candidates', {
+      source_type: 'TEXT',
+      source_id: 'TEXT',
+      expires_at: 'TEXT',
+      revalidate_at: 'TEXT',
+    });
+    ensureColumns(db, 'memory_review_provenance', {
+      source_type: 'TEXT',
+      source_id: 'TEXT',
+      created_at: 'TEXT',
+      expires_at: 'TEXT',
+      revalidate_at: 'TEXT',
+    });
+    ensureColumns(db, 'memory_review_suppressions', {
+      source_id: 'TEXT',
+    });
     for (const store of stores) {
       const columnRows = db
         .prepare(`PRAGMA table_info(${store})`)
@@ -4354,7 +6714,7 @@ function migrateMemoryEncryptionDatabase(
   }
   verifyExistingEncryptedStores(db, cipher);
   const operations: MemorySchemaMigrationOperation[] = [];
-  for (const store of MEMORY_STORES) {
+  for (const store of ENCRYPTED_MEMORY_STORES) {
     if (hasPlaintextStoreRows(db, store, cipher)) {
       operations.push({
         table: store,
@@ -4409,9 +6769,10 @@ function assertMemoryEncryptionState(
 
   verifyExistingEncryptedStores(db, cipher);
   const storesWithoutStatus = metadata.stores.filter(
-    (store) => !store.encrypted,
+    (store) => store.store !== 'memory_access_audit_events' && !store.encrypted,
   );
   const plaintextStores = metadata.stores.filter((store) =>
+    store.store !== 'memory_access_audit_events' &&
     hasPlaintextStoreRows(db, store.store as MemoryStoreName, cipher),
   );
   if (plaintextStores.length > 0) {
@@ -4496,7 +6857,9 @@ function readMemoryEncryptionMetadata(
     algorithm: MEMORY_ENCRYPTION_ALGORITHM,
     stores: MEMORY_STORES.map((store) => ({
       store,
-      encrypted: encryptedByStore.get(store) ?? false,
+      encrypted: store === 'memory_access_audit_events'
+        ? false
+        : (encryptedByStore.get(store) ?? false),
     })),
   };
 }
@@ -4510,7 +6873,7 @@ function writeMemoryEncryptionStatus(
     `INSERT INTO memory_encryption_status (store, encrypted, algorithm, verifier, updated_at) VALUES (?, 1, ?, ?, ?)
      ON CONFLICT(store) DO UPDATE SET encrypted = excluded.encrypted, algorithm = excluded.algorithm, verifier = excluded.verifier, updated_at = excluded.updated_at`,
   );
-  for (const store of MEMORY_STORES) {
+  for (const store of ENCRYPTED_MEMORY_STORES) {
     upsert.run(store, cipher.algorithm, cipher.verifier(), now);
   }
 }
@@ -4522,7 +6885,7 @@ function allStoresHaveEncryptionStatus(db: Database.Database): boolean {
   const encrypted = new Set(
     rows.filter((row) => row.encrypted === 1).map((row) => row.store),
   );
-  return MEMORY_STORES.every((store) => encrypted.has(store));
+  return ENCRYPTED_MEMORY_STORES.every((store) => encrypted.has(store));
 }
 
 function hasPlaintextStoreRows(
@@ -4565,20 +6928,11 @@ function readStorePayloads(
         }>
       ).map((row) => row.state);
     case 'memory_review_candidates':
-      return readReviewPayloads(
-        db,
-        `SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_candidates`,
-      );
+      return readReviewPayloads(db, 'memory_review_candidates');
     case 'memory_review_provenance':
-      return readReviewPayloads(
-        db,
-        `SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_provenance`,
-      );
+      return readReviewPayloads(db, 'memory_review_provenance');
     case 'memory_review_suppressions':
-      return readReviewPayloads(
-        db,
-        `SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_suppressions`,
-      );
+      return readReviewPayloads(db, 'memory_review_suppressions');
     case 'memory_deletion_hash_keys':
       return (
         db.prepare(`SELECT key_material FROM memory_deletion_hash_keys`).all() as Array<{
@@ -4589,20 +6943,27 @@ function readStorePayloads(
   return [];
 }
 
-function readReviewPayloads(db: Database.Database, sql: string): string[] {
-  return (
-    db.prepare(sql).all() as Array<{
-      value: string;
-      source: string;
-      evidence_id: string | null;
-      reason: string;
-      reviewer: string | null;
-      note: string | null;
-    }>
-  ).flatMap((row) =>
-    [row.value, row.source, row.evidence_id, row.reason, row.reviewer, row.note].filter(
-      (value): value is string => value !== null,
+function readReviewPayloads(db: Database.Database, table: string): string[] {
+  const desiredColumns = [
+    'value',
+    'source',
+    'source_id',
+    'evidence_id',
+    'reason',
+    'reviewer',
+    'note',
+  ];
+  const existing = new Set(
+    (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(
+      row => row.name,
     ),
+  );
+  const columns = desiredColumns.filter(column => existing.has(column));
+  if (columns.length === 0) return [];
+  const selected = columns.join(', ');
+  const rows = db.prepare(`SELECT ${selected} FROM ${table}`).all() as Array<Record<string, string | null>>;
+  return rows.flatMap((row) =>
+    columns.map(column => row[column]).filter((value): value is string => value !== null),
   );
 }
 
@@ -4688,18 +7049,27 @@ function encryptReviewPayloadRows(
   keyColumns: 'id' | 'signature' | 'target_store, memory_key',
 ): void {
   if (!tableExists(db, table)) return;
+  const tableColumns = new Set(
+    (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(
+      (row) => row.name,
+    ),
+  );
+  const payloadColumns = MEMORY_REVIEW_PAYLOAD_COLUMNS.filter((column) =>
+    tableColumns.has(column),
+  );
+  if (payloadColumns.length === 0) return;
   const rows = db
-    .prepare(`SELECT ${keyColumns}, ${MEMORY_REVIEW_PAYLOAD_COLUMNS.join(', ')} FROM ${table}`)
+    .prepare(`SELECT ${keyColumns}, ${payloadColumns.join(', ')} FROM ${table}`)
     .all() as Array<Record<string, string | null>>;
   for (const row of rows) {
-    const assignments = MEMORY_REVIEW_PAYLOAD_COLUMNS.map(
+    const assignments = payloadColumns.map(
       (column) => `${column} = ?`,
     ).join(', ');
     const where =
       keyColumns === 'target_store, memory_key'
         ? `target_store = ? AND memory_key = ?`
         : `${keyColumns} = ?`;
-    const payloadValues = MEMORY_REVIEW_PAYLOAD_COLUMNS.map((column) => {
+    const payloadValues = payloadColumns.map((column) => {
       const value = row[column];
       return value === null || value === undefined
         ? null
@@ -4800,10 +7170,15 @@ function sqliteStringLiteral(value: string): string {
 }
 
 function purgeDeletedSqliteContent(db: Database.Database, dbPath: string): void {
+  enableSqliteSecureDelete(db, dbPath);
   if (dbPath === ':memory:') return;
-  db.pragma('secure_delete = ON');
   db.pragma('wal_checkpoint(TRUNCATE)');
   db.exec('VACUUM');
+}
+
+function enableSqliteSecureDelete(db: Database.Database, dbPath: string): void {
+  if (dbPath === ':memory:') return;
+  db.pragma('secure_delete = ON');
 }
 
 type NormalizedRightToForgetSelector = Omit<RightToForgetSelector, 'type'> & { type?: RightToForgetMemoryType };
@@ -4848,11 +7223,20 @@ function normalizeRightToForgetSelector(selector: RightToForgetSelector): Normal
 }
 
 const DELETION_HASH_KEY_ID = 'right-to-forget-hmac-v1';
+const ACCESS_AUDIT_HASH_KEY_ID = 'memory-access-audit-hmac-v1';
+
+function readHashKey(
+  db: Database.Database,
+  id: string,
+  encryption?: MemoryCipher,
+): string | undefined {
+  const row = db.prepare(`SELECT key_material FROM memory_deletion_hash_keys WHERE id = ? LIMIT 1`)
+    .get(id) as { key_material: string } | undefined;
+  return row ? encryption?.decrypt(row.key_material) ?? row.key_material : undefined;
+}
 
 function readDeletionHashKey(db: Database.Database, encryption?: MemoryCipher): string | undefined {
-  const row = db.prepare(`SELECT key_material FROM memory_deletion_hash_keys WHERE id = ? LIMIT 1`)
-    .get(DELETION_HASH_KEY_ID) as { key_material: string } | undefined;
-  return row ? encryption?.decrypt(row.key_material) ?? row.key_material : undefined;
+  return readHashKey(db, DELETION_HASH_KEY_ID, encryption);
 }
 
 function countDeletionGuards(db: Database.Database): number {
@@ -4864,9 +7248,18 @@ function countDeletionGuards(db: Database.Database): number {
   ).count;
 }
 
-function writeDeletionHashKey(db: Database.Database, key: string, encryption?: MemoryCipher): void {
+function writeHashKey(
+  db: Database.Database,
+  id: string,
+  key: string,
+  encryption?: MemoryCipher,
+): void {
   db.prepare(`INSERT OR IGNORE INTO memory_deletion_hash_keys (id, key_material, created_at, schema_version) VALUES (?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`)
-    .run(DELETION_HASH_KEY_ID, encryption?.encrypt(key) ?? key, isoNow());
+    .run(id, encryption?.encrypt(key) ?? key, isoNow());
+}
+
+function writeDeletionHashKey(db: Database.Database, key: string, encryption?: MemoryCipher): void {
+  writeHashKey(db, DELETION_HASH_KEY_ID, key, encryption);
 }
 
 function readOrCreateDeletionHashKey(db: Database.Database, encryption?: MemoryCipher): string {
@@ -4880,7 +7273,21 @@ function readOrCreateDeletionHashKey(db: Database.Database, encryption?: MemoryC
   if (existing) return existing;
   const key = randomBytes(32).toString('base64url');
   writeDeletionHashKey(db, key, encryption);
-  return key;
+  return readDeletionHashKey(db, encryption) ?? key;
+}
+
+function readOrCreateAuditHashKey(db: Database.Database, encryption?: MemoryCipher): string {
+  db.exec(`CREATE TABLE IF NOT EXISTS memory_deletion_hash_keys (
+    id TEXT PRIMARY KEY,
+    key_material TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
+  )`);
+  const existing = readHashKey(db, ACCESS_AUDIT_HASH_KEY_ID, encryption);
+  if (existing) return existing;
+  const key = randomBytes(32).toString('base64url');
+  writeHashKey(db, ACCESS_AUDIT_HASH_KEY_ID, key, encryption);
+  return readHashKey(db, ACCESS_AUDIT_HASH_KEY_ID, encryption) ?? key;
 }
 
 function keyedDeletionHash(db: Database.Database, value: string, encryption?: MemoryCipher): string {
@@ -5214,6 +7621,7 @@ function assertMemoryCandidateNotDeletionGuarded(
     stringifyWorkingMemoryValue(proposal.key, {
       value: proposal.value,
       source: proposal.source,
+      sourceId: proposal.sourceId,
       evidenceId: proposal.evidenceId,
       reason: proposal.reason,
     }),
@@ -5227,6 +7635,7 @@ function reviewPayloadMatchesSelector(
   payload: {
     value: unknown;
     source: string;
+    sourceId?: string | undefined;
     evidenceId?: string | undefined;
     reason: string;
     reviewer?: string | undefined;
@@ -5647,6 +8056,18 @@ function parseStoredWorkingMemoryValue(value: string): unknown {
   try {
     return JSON.parse(value) as unknown;
   } catch {
+    return value;
+  }
+}
+
+function parseHydratedWorkingMemoryValue(key: string, value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    const trimmed = value.trimStart();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      throw new CorruptWorkingMemoryRowError(key);
+    }
     return value;
   }
 }

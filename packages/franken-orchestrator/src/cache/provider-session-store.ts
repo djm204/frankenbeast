@@ -1,5 +1,5 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import { readJsonFileOrDefault, warnJsonQuarantined, writeJsonFileAtomic } from '../init/init-json-file.js';
 import type {
   CacheStoreOptions,
   ProviderSessionLookup,
@@ -20,8 +20,7 @@ export class ProviderSessionStore {
       ...record,
       schemaVersion: this.options.schemaVersion,
     };
-    await mkdir(dirname(filePath), { recursive: true });
-    await writeFile(filePath, JSON.stringify(stored, null, 2) + '\n', 'utf8');
+    await writeJsonFileAtomic(filePath, stored);
   }
 
   async load(criteria: ProviderSessionLookup): Promise<StoredProviderSessionRecord | undefined> {
@@ -60,14 +59,9 @@ export class ProviderSessionStore {
   }
 
   private async read(filePath: string): Promise<StoredProviderSessionRecord | undefined> {
-    try {
-      const raw = await readFile(filePath, 'utf8');
-      return JSON.parse(raw) as StoredProviderSessionRecord;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError) {
-        return undefined;
-      }
-      throw error;
-    }
+    return readJsonFileOrDefault<StoredProviderSessionRecord | undefined>(filePath, () => undefined, {
+      description: 'provider session',
+      onCorrupt: warnJsonQuarantined,
+    });
   }
 }

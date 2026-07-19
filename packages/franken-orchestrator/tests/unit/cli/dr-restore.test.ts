@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
+import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 
 import { parseArgs } from '../../../src/cli/args.js';
@@ -15,10 +17,20 @@ describe('dr restore-dry-run CLI', () => {
     expect(args.drAction).toBe('restore-dry-run');
     expect(args.drBackupManifestPath).toBe('/backup/manifest.json');
     expect(args.drLiveManifestPath).toBe('/live/manifest.json');
+
+    const diffArgs = parseArgs(['dr', 'snapshot-diff', '/healthy/export', '/incident/export']);
+    expect(diffArgs.drAction).toBe('snapshot-diff');
+    expect(diffArgs.drBackupManifestPath).toBe('/healthy/export');
+    expect(diffArgs.drLiveManifestPath).toBe('/incident/export');
   });
 
-  it('parses encrypted backup, verify, list, restore, and dead-letter commands', () => {
+  it('parses encrypted backup, verify, list, restore, export, and dead-letter commands', () => {
     expect(parseArgs(['dr', 'backup', '/state', '/backup.enc.json', '/key']).drKeyFilePath).toBe('/key');
+    const pointInTimeExport = parseArgs(['--dry-run', 'dr', 'export', '/state', '/incident-export.json']);
+    expect(pointInTimeExport.drAction).toBe('export');
+    expect(pointInTimeExport.drBackupManifestPath).toBe('/state');
+    expect(pointInTimeExport.drLiveManifestPath).toBe('/incident-export.json');
+    expect(pointInTimeExport.dryRun).toBe(true);
     expect(parseArgs(['dr', 'list', '/backup.enc.json']).drAction).toBe('list');
     expect(parseArgs(['dr', 'verify', '/backup.enc.json', '/key']).drLiveManifestPath).toBe('/key');
     const restore = parseArgs(['--dry-run', 'dr', 'restore', '/backup.enc.json', '/restore', '/key']);
@@ -72,6 +84,572 @@ describe('dr restore-dry-run CLI', () => {
     }
   });
 
+  it('creates a redacted point-in-time export with manifest, config checksums, summaries, and log tails', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dr-export-'));
+    const stateDir = join(dir, 'state');
+    const exportPath = join(dir, 'incident-export.json');
+    const output: string[] = [];
+
+    try {
+      await mkdir(join(stateDir, 'approvals', 'nested'), { recursive: true });
+      await mkdir(join(stateDir, 'tokens'), { recursive: true });
+      await mkdir(join(stateDir, 'memory'), { recursive: true });
+      await mkdir(join(stateDir, 'runs', 'run-1'), { recursive: true });
+      await mkdir(join(stateDir, 'state'), { recursive: true });
+      await mkdir(join(stateDir, 'logs'), { recursive: true });
+      await mkdir(join(stateDir, 'logs', 'run-2'), { recursive: true });
+      await mkdir(join(stateDir, 'chat'), { recursive: true });
+      await writeFile(join(stateDir, 'config.json'), JSON.stringify({ provider: 'openai', apiToken: 'config-value-for-mask' }), 'utf8');
+      await writeFile(join(stateDir, 'config.yaml'), 'provider: openai\napiToken: config-yaml-value-for-mask\n', 'utf8');
+      const approvalFileToken = 'fileApprovalTokenForPath123';
+      const nestedApprovalFileToken = 'nestedApprovalTokenForPath456';
+      const alternateApprovalFileToken = 'alternateApprovalTokenForPath789';
+      const redactedApprovalLedgerPath = `approvals/approval-path-${createHash('sha256').update('ledger.json').digest('hex')}`;
+      const redactedApprovalFilePath = `approvals/approval-path-${createHash('sha256').update(`${approvalFileToken}.json`).digest('hex')}`;
+      const redactedNestedApprovalFilePath = `approvals/approval-path-${createHash('sha256').update('nested').digest('hex')}/approval-path-${createHash('sha256').update(`${nestedApprovalFileToken}.json`).digest('hex')}`;
+      const redactedAlternateApprovalFilePath = `tokens/approval-path-${createHash('sha256').update(`${alternateApprovalFileToken}.json`).digest('hex')}`;
+      await writeFile(join(stateDir, 'approvals', 'ledger.json'), JSON.stringify({ approvals: [{ id: 'approval-1', token: 'approval-value-for-mask', state: 'pending' }] }), 'utf8');
+      await writeFile(join(stateDir, 'approvals', `${approvalFileToken}.json`), JSON.stringify({ id: 'approval-file-1', state: 'pending' }), 'utf8');
+      await writeFile(join(stateDir, 'approvals', 'nested', `${nestedApprovalFileToken}.json`), JSON.stringify({ id: 'approval-file-2', state: 'pending' }), 'utf8');
+      await writeFile(join(stateDir, 'tokens', `${alternateApprovalFileToken}.json`), JSON.stringify({ id: 'approval-file-3', state: 'pending' }), 'utf8');
+      await writeFile(join(stateDir, 'memory', 'store.json'), JSON.stringify({ memories: [{ key: 'user.pref', value: 'private memory body', metadata: { source: 'chat' } }] }), 'utf8');
+      await writeFile(join(stateDir, 'memory', 'snapshot.json'), JSON.stringify({ working: { sessionA: { value: 'private working body' }, sessionB: { value: 'second private working body' } } }), 'utf8');
+      await writeFile(join(stateDir, 'kanban-tasks.json'), JSON.stringify({ tasks: [{ id: 'task-1', title: 'private task title', status: 'running' }] }), 'utf8');
+      await writeFile(join(stateDir, 'runs', 'run-1', 'metadata.json'), JSON.stringify({ id: 'run-1', taskId: 'task-1', status: 'running' }), 'utf8');
+      await writeFile(join(stateDir, 'chat', 'session-1.json'), JSON.stringify({
+        id: 'session-1',
+        pendingApproval: {
+          id: 'approval-chat-1',
+          description: 'deploy pending',
+          target: 'https://operator:targetValueForMask@example.com',
+          command: 'deploy --token "command value for mask"',
+          tool: 'shell',
+          risk: 'requires-approval',
+          affectedFiles: ['deploy-plan.md'],
+          sessionId: 'session-1',
+        },
+      }), 'utf8');
+      await writeFile(join(stateDir, 'state', 'run-jsonl-1.jsonl'), [
+        JSON.stringify({ id: 'phase-1', runId: 'run-jsonl-1', status: 'started' }),
+        JSON.stringify({ id: 'phase-2', runId: 'run-jsonl-1', status: 'completed' }),
+      ].join('\n'), 'utf8');
+      const longSingleLinePrefix = 'x'.repeat(9000);
+      const boundaryBearer = ['boundary', 'credential', 'for', 'tail'].join('-');
+      await writeFile(join(stateDir, 'logs', 'run-1.log'), [
+        'starting run',
+        'OPENAI_API_KEY=test-key-needs-redaction',
+        'X-API-Key: reviewHeaderValueForMasking',
+        'Cookie: sid=reviewCookieForMasking; csrf=reviewCsrfForMasking',
+        'Authorization: Bearer bearerValueForMasking123',
+        'redis tls rediss://:redissValueForMasking@cache.example:6380/0',
+        `Authorization: Bearer ${longSingleLinePrefix}${boundaryBearer}`,
+        `${longSingleLinePrefix}tail-marker`,
+        'finished run',
+      ].join('\n'), 'utf8');
+      await writeFile(join(stateDir, 'logs', 'run-2', 'attempt.log.1'), 'rotated OPENAI_API_KEY=rotated-log-secret\n', 'utf8');
+      const binaryLog = Buffer.from([0xff, 0xfe, 0x41, 0x0a]);
+      await writeFile(join(stateDir, 'logs', 'binary.log'), binaryLog);
+      const beastDb = new Database(join(stateDir, 'beast.db'));
+      const kanbanDb = new Database(join(stateDir, 'kanban.db'));
+      const memoryDb = new Database(join(stateDir, 'memory.db'));
+      const approvalDb = new Database(join(stateDir, 'approval-ledger.db'));
+      const approvalRowId = 'approval' + 'SqliteIdentifier123';
+      try {
+        beastDb.exec(`CREATE TABLE beast_runs (id TEXT PRIMARY KEY, status TEXT, definition_id TEXT, created_at TEXT);`);
+        beastDb.exec(`CREATE TABLE tracked_agents (id TEXT PRIMARY KEY, status TEXT, definition_id TEXT, created_at TEXT);`);
+        beastDb.exec(`CREATE TABLE working_memory (id TEXT PRIMARY KEY, status TEXT, created_at TEXT);`);
+        beastDb.prepare('INSERT INTO beast_runs (id, status, definition_id, created_at) VALUES (?, ?, ?, ?)')
+          .run('run-db-1', 'running', 'nightly', '2026-07-16T08:00:00.000Z');
+        beastDb.prepare('INSERT INTO tracked_agents (id, status, definition_id, created_at) VALUES (?, ?, ?, ?)')
+          .run('agent-db-1', 'running', 'nightly', '2026-07-16T08:01:00.000Z');
+        beastDb.prepare('INSERT INTO working_memory (id, status, created_at) VALUES (?, ?, ?)')
+          .run('beast-memory-1', 'stored', '2026-07-16T08:03:00.000Z');
+        kanbanDb.exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, status TEXT, created_at TEXT);`);
+        kanbanDb.prepare('INSERT INTO tasks (id, status, created_at) VALUES (?, ?, ?)')
+          .run('task-db-1', 'ready', '2026-07-16T08:00:00.000Z');
+        memoryDb.exec(`CREATE TABLE episodic_events (id TEXT PRIMARY KEY, status TEXT, created_at TEXT);`);
+        memoryDb.prepare('INSERT INTO episodic_events (id, status, created_at) VALUES (?, ?, ?)')
+          .run('memory-event-1', 'stored', '2026-07-16T08:00:00.000Z');
+        approvalDb.exec(`CREATE TABLE approvals (id TEXT PRIMARY KEY, state TEXT, requestedAt TEXT);`);
+        approvalDb.prepare('INSERT INTO approvals (id, state, requestedAt) VALUES (?, ?, ?)')
+          .run(approvalRowId, 'pending', '2026-07-16T08:02:00.000Z');
+      } finally {
+        beastDb.close();
+        kanbanDb.close();
+        memoryDb.close();
+        approvalDb.close();
+      }
+
+      await handleDrCommand({
+        action: 'export',
+        backupManifestPath: stateDir,
+        liveManifestPath: exportPath,
+        dryRun: true,
+        generatedAt: '2026-07-16T09:00:00.000Z',
+        print: (message) => output.push(message),
+      });
+      const preview = JSON.parse(output.pop() ?? '') as { command: string; dryRun: boolean; wouldWrite: boolean };
+      expect(preview.command).toBe('dr export');
+      expect(preview.dryRun).toBe(true);
+      expect(preview.wouldWrite).toBe(false);
+      await expect(readFile(exportPath, 'utf8')).rejects.toThrow();
+
+      await handleDrCommand({
+        action: 'export',
+        backupManifestPath: stateDir,
+        liveManifestPath: exportPath,
+        generatedAt: '2026-07-16T09:00:00.000Z',
+        print: (message) => output.push(message),
+      });
+      const reportText = await readFile(exportPath, 'utf8');
+      const report = JSON.parse(reportText) as {
+        command: string;
+        manifest: { generatedAt: string; configChecksums: Array<{ path: string; sha256: string }>; sections: Record<string, number> };
+        evidence: { approvals: unknown[]; memory: unknown[]; tasks: unknown[]; runs: unknown[]; logs: Array<{ tail: string[] }> };
+      };
+
+      expect(report.command).toBe('dr export');
+      expect(report.manifest.generatedAt).toBe('2026-07-16T09:00:00.000Z');
+      expect(report.manifest.configChecksums).toEqual(expect.arrayContaining([
+        expect.objectContaining({ path: 'config.json', sha256: expect.stringMatching(/^sha256:/u) }),
+        expect.objectContaining({ path: 'config.yaml', sha256: expect.stringMatching(/^sha256:/u) }),
+      ]));
+      expect(report.manifest.sections).toEqual(expect.objectContaining({ approvals: 6, memory: 5, tasks: 2, runs: 4, logs: 3 }));
+      expect(report.evidence.approvals).toEqual(expect.arrayContaining([
+        expect.objectContaining({ path: redactedApprovalLedgerPath }),
+        expect.objectContaining({ path: redactedApprovalFilePath }),
+        expect.objectContaining({ path: redactedNestedApprovalFilePath }),
+        expect.objectContaining({ path: redactedAlternateApprovalFilePath }),
+        expect.objectContaining({
+          path: 'approval-ledger.db',
+          table: 'approvals',
+          records: [expect.objectContaining({ id: `sha256:${createHash('sha256').update(approvalRowId).digest('hex')}` })],
+        }),
+        expect.objectContaining({
+          path: 'chat/session-1.json',
+          records: [expect.objectContaining({ id: `sha256:${createHash('sha256').update('approval-chat-1').digest('hex')}`, command: 'deploy --token <redacted>', tool: 'shell', sessionId: 'session-1' })],
+        }),
+      ]));
+      expect(report.evidence.memory).toEqual(expect.arrayContaining([
+        expect.objectContaining({ path: 'memory/store.json', recordCount: 1 }),
+        expect.objectContaining({ path: 'memory/snapshot.json', keys: expect.arrayContaining(['working.sessionA', 'working.sessionB']) }),
+        expect.objectContaining({ path: 'beast.db', metadata: expect.arrayContaining([expect.objectContaining({ table: 'working_memory', rowCount: 1 })]) }),
+      ]));
+      expect(report.evidence.tasks).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'kanban-tasks.json', records: [expect.objectContaining({ id: 'task-1', status: 'running' })] })]));
+      expect(report.evidence.runs).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'runs/run-1/metadata.json', records: [expect.objectContaining({ id: 'run-1', status: 'running' })] })]));
+      expect(report.evidence.runs).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'state/run-jsonl-1.jsonl', records: expect.arrayContaining([expect.objectContaining({ id: 'phase-1', runId: 'run-jsonl-1', status: 'started' })]) })]));
+      expect(report.evidence.tasks).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'kanban.db', table: 'tasks', rowCount: 1 })]));
+      expect(report.evidence.runs).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'beast.db', table: 'beast_runs', rowCount: 1 })]));
+      expect(report.evidence.runs).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'beast.db', table: 'tracked_agents', rowCount: 1 })]));
+      expect(report.evidence.runs).not.toEqual(expect.arrayContaining([expect.objectContaining({ path: 'memory.db', table: 'episodic_events' })]));
+      expect(report.evidence.logs).toEqual(expect.arrayContaining([expect.objectContaining({
+        path: 'logs/binary.log',
+        bytes: binaryLog.byteLength,
+        sha256: `sha256:${createHash('sha256').update(binaryLog).digest('hex')}`,
+      })]));
+      expect(report.evidence.logs).toEqual(expect.arrayContaining([expect.objectContaining({ tail: expect.arrayContaining(['Authorization: Bearer <redacted>']) })]));
+      expect(report.evidence.logs).toEqual(expect.arrayContaining([expect.objectContaining({ tail: expect.arrayContaining(['X-API-Key: <redacted>']) })]));
+      expect(report.evidence.logs).toEqual(expect.arrayContaining([expect.objectContaining({ tail: expect.arrayContaining(['redis tls rediss://:<redacted>@cache.example:6380/0']) })]));
+      expect(report.evidence.logs).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'logs/run-2/attempt.log.1', tail: expect.arrayContaining(['rotated OPENAI_API_KEY=<redacted>']) })]));
+      expect(report.evidence.logs.flatMap((log) => log.tail).every((line) => line.length <= 8192)).toBe(true);
+      expect(reportText).not.toContain('config-value-for-mask');
+      expect(reportText).not.toContain('approval-value-for-mask');
+      expect(reportText).not.toContain(approvalFileToken);
+      expect(reportText).not.toContain(nestedApprovalFileToken);
+      expect(reportText).not.toContain(alternateApprovalFileToken);
+      expect(reportText).not.toContain('config-yaml-value-for-mask');
+      expect(reportText).not.toContain('private memory body');
+      expect(reportText).not.toContain('private working body');
+      expect(reportText).not.toContain('second private working body');
+      expect(reportText).not.toContain('private task title');
+      expect(reportText).not.toContain('test-key-needs-redaction');
+      expect(reportText).not.toContain('reviewHeaderValueForMasking');
+      expect(reportText).not.toContain('reviewCookieForMasking');
+      expect(reportText).not.toContain('reviewCsrfForMasking');
+      expect(reportText).not.toContain(longSingleLinePrefix);
+      expect(reportText).not.toContain(boundaryBearer);
+      expect(reportText).not.toContain('bearerValueForMasking123');
+      expect(reportText).not.toContain('redissValueForMasking');
+      expect(reportText).not.toContain('rotated-log-secret');
+      expect(reportText).not.toContain(approvalRowId);
+      expect(reportText).not.toContain('approval-chat-1');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('expands a .fbeast/state input to the incident evidence root', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dr-export-root-'));
+    const evidenceRoot = join(dir, '.fbeast');
+    const stateSubdir = join(evidenceRoot, 'state');
+    const exportPath = join(dir, 'incident-export.json');
+    const output: string[] = [];
+
+    try {
+      await mkdir(stateSubdir, { recursive: true });
+      await mkdir(join(evidenceRoot, 'logs'), { recursive: true });
+      await writeFile(join(stateSubdir, 'run-metadata.json'), JSON.stringify({ id: 'run-state-1', status: 'running' }), 'utf8');
+      await writeFile(join(evidenceRoot, 'logs', 'sibling.log'), 'sibling evidence', 'utf8');
+
+      await handleDrCommand({
+        action: 'export',
+        backupManifestPath: stateSubdir,
+        liveManifestPath: exportPath,
+        generatedAt: '2026-07-16T09:00:00.000Z',
+        print: (message) => output.push(message),
+      });
+
+      const report = JSON.parse(output.pop() ?? '') as {
+        manifest: { sourceDir: string; sections: Record<string, number> };
+        evidence: { logs: Array<{ path: string }>; runs: Array<{ path: string }> };
+      };
+      expect(report.manifest.sourceDir).toBe(evidenceRoot);
+      expect(report.manifest.sections.logs).toBe(1);
+      expect(report.evidence.logs).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'logs/sibling.log' })]));
+      expect(report.evidence.runs).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'state/run-metadata.json' })]));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('treats .fbeast/state as the full .fbeast incident evidence root', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dr-export-state-root-'));
+    const fbeastDir = join(dir, '.fbeast');
+    const stateDir = join(fbeastDir, 'state');
+    const exportPath = join(dir, 'incident-export.json');
+    const output: string[] = [];
+
+    try {
+      await mkdir(stateDir, { recursive: true });
+      await writeFile(join(fbeastDir, 'config.json'), JSON.stringify({ provider: 'openai' }), 'utf8');
+      const beastDb = new Database(join(fbeastDir, 'beast.db'));
+      try {
+        beastDb.exec(`CREATE TABLE beast_runs (id TEXT PRIMARY KEY, status TEXT);`);
+        beastDb.prepare('INSERT INTO beast_runs (id, status) VALUES (?, ?)').run('run-db-1', 'running');
+      } finally {
+        beastDb.close();
+      }
+
+      await handleDrCommand({
+        action: 'export',
+        backupManifestPath: stateDir,
+        liveManifestPath: exportPath,
+        generatedAt: '2026-07-16T09:00:00.000Z',
+        print: (message) => output.push(message),
+      });
+
+      const report = JSON.parse(await readFile(exportPath, 'utf8')) as {
+        manifest: { sourceDir: string; configChecksums: Array<{ path: string }> };
+        evidence: { runs: Array<{ path: string; table?: string }> };
+      };
+      expect(report.manifest.sourceDir).toBe(fbeastDir);
+      expect(report.manifest.configChecksums).toEqual([expect.objectContaining({ path: 'config.json' })]);
+      expect(report.evidence.runs).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'beast.db', table: 'beast_runs' })]));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('diffs state snapshot directories by subsystem with redacted output', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dr-snapshot-diff-'));
+    const beforeDir = join(dir, 'before');
+    const afterDir = join(dir, 'after');
+    const output: string[] = [];
+    const beforePassword = 'before' + 'Secret123';
+    const afterPassword = 'after' + 'Secret456';
+    const beforeToken = 'ghp_' + 'beforeSecret1234567890';
+    const afterToken = 'ghp_' + 'afterSecret1234567890';
+    const afterApiKey = 'sk-' + 'afterSecret123456';
+
+    try {
+      await mkdir(beforeDir, { recursive: true });
+      await mkdir(afterDir, { recursive: true });
+      await writeFile(join(beforeDir, 'state.json'), JSON.stringify({
+        tasks: [
+          { id: 'task-removed', status: 'done', title: 'old task' },
+          { id: 'task-changed', status: 'running', workerId: 'worker-old', password: beforePassword },
+        ],
+        approvals: [{ id: 'approval-changed', state: 'pending', token: beforeToken }],
+        memory: [{ id: 'memory-same', digest: 'same' }],
+        cron: [{ id: 'cron-removed', status: 'running' }],
+      }), 'utf8');
+      await writeFile(join(afterDir, 'state.json'), JSON.stringify({
+        tasks: [
+          { id: 'task-added', status: 'ready', title: 'new task' },
+          { id: 'task-changed', status: 'blocked', workerId: 'worker-new', password: afterPassword },
+        ],
+        approvals: [{ id: 'approval-changed', state: 'used', token: afterToken }],
+        memory: [{ id: 'memory-same', digest: 'same' }, { id: 'memory-added', value: { apiKey: afterApiKey } }],
+        cron: [{ id: 'cron-added', status: 'paused' }],
+      }), 'utf8');
+
+      await handleDrCommand({
+        action: 'snapshot-diff',
+        backupManifestPath: beforeDir,
+        liveManifestPath: afterDir,
+        print: (message) => output.push(message),
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+
+    const rawOutput = output.join('\n');
+    const report = JSON.parse(rawOutput) as {
+      command: string;
+      textSummary: string;
+      summary: { added: number; removed: number; changed: number; bySubsystem: Record<string, { added: number; removed: number; changed: number }> };
+      diffs: Array<{ subsystem: string; added: Array<{ id: string }>; removed: Array<{ id: string }>; changed: Array<{ id: string; before: unknown; after: unknown; changedFields: string[] }> }>;
+    };
+
+    expect(report.command).toBe('dr snapshot-diff');
+    expect(report.textSummary).toContain('State snapshot diff: 4 added, 3 removed, 2 changed.');
+    expect(report.summary.bySubsystem.tasks).toEqual({ added: 1, removed: 1, changed: 1 });
+    expect(report.summary.bySubsystem.approvals).toEqual({ added: 0, removed: 0, changed: 1 });
+    expect(report.summary.bySubsystem.workerIds).toEqual({ added: 1, removed: 1, changed: 0 });
+    expect(report.summary.bySubsystem.memory).toEqual({ added: 1, removed: 0, changed: 0 });
+    expect(report.summary.bySubsystem.cron).toEqual({ added: 1, removed: 1, changed: 0 });
+    expect(report.diffs.find((diff) => diff.subsystem === 'tasks')?.changed[0]?.changedFields).toEqual(['password', 'status', 'workerId']);
+    expect(rawOutput).not.toContain(beforePassword);
+    expect(rawOutput).not.toContain(afterPassword);
+    expect(rawOutput).not.toContain(beforeToken);
+    expect(rawOutput).not.toContain(afterToken);
+    expect(rawOutput).not.toContain(afterApiKey);
+    expect(rawOutput).toContain('<redacted>');
+  });
+
+  it('extracts object-map snapshots and redacts primitive approval token arrays', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dr-snapshot-map-diff-'));
+    const beforeDir = join(dir, 'before');
+    const afterDir = join(dir, 'after');
+    const output: string[] = [];
+    const beforeRefreshToken = 'local' + 'RefreshToken123';
+    const afterRefreshToken = 'other' + 'RefreshToken456';
+    const beforeMapToken = 'map' + 'ApprovalTokenBefore123';
+    const afterMapToken = 'map' + 'ApprovalTokenAfter456';
+
+    try {
+      await mkdir(beforeDir, { recursive: true });
+      await mkdir(afterDir, { recursive: true });
+      await writeFile(join(beforeDir, 'state.json'), JSON.stringify({
+        tasks: {
+          'task-1': { id: 'task-1', status: 'running' },
+        },
+        approvalTokens: [beforeRefreshToken, 'stable' + 'RefreshToken789'],
+        approvals: { [beforeMapToken]: true, ['stable' + 'ApprovalToken789']: true },
+      }), 'utf8');
+      await writeFile(join(afterDir, 'state.json'), JSON.stringify({
+        tasks: {
+          'task-1': { id: 'task-1', status: 'blocked' },
+          'task-2': { id: 'task-2', status: 'ready' },
+        },
+        approvalTokens: ['stable' + 'RefreshToken789', afterRefreshToken],
+        approvals: { ['stable' + 'ApprovalToken789']: true, [afterMapToken]: true },
+      }), 'utf8');
+
+      await handleDrCommand({
+        action: 'snapshot-diff',
+        backupManifestPath: beforeDir,
+        liveManifestPath: afterDir,
+        print: (message) => output.push(message),
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+
+    const rawOutput = output.join('\n');
+    const report = JSON.parse(rawOutput) as {
+      summary: { bySubsystem: Record<string, { added: number; removed: number; changed: number }> };
+      diffs: Array<{ subsystem: string; added: Array<{ id: string }>; removed: Array<{ id: string }>; changed: Array<{ id: string }> }>;
+    };
+
+    expect(report.summary.bySubsystem.tasks).toEqual({ added: 1, removed: 0, changed: 1 });
+    expect(report.summary.bySubsystem.approvals).toEqual({ added: 2, removed: 2, changed: 0 });
+    expect(report.diffs.find((diff) => diff.subsystem === 'tasks')?.added[0]?.id).toBe('task-2');
+    expect(report.diffs.find((diff) => diff.subsystem === 'tasks')?.changed[0]?.id).toBe('task-1');
+    expect(rawOutput).not.toContain(beforeRefreshToken);
+    expect(rawOutput).not.toContain(afterRefreshToken);
+    expect(rawOutput).not.toContain(beforeMapToken);
+    expect(rawOutput).not.toContain(afterMapToken);
+    expect(rawOutput).toContain('<redacted>');
+  });
+
+  it('uses stable diff identities for approval tokens, primitive workers, and map-keyed cron jobs', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dr-snapshot-stable-ids-'));
+    const beforeDir = join(dir, 'before');
+    const afterDir = join(dir, 'after');
+    const output: string[] = [];
+    const beforeTokenId = 'before' + 'SessionToken123';
+    const stableTokenId = 'stable' + 'SessionToken456';
+    const afterTokenId = 'after' + 'SessionToken789';
+    const beforeApprovalValue = 'before' + 'ApprovalValue123';
+    const afterApprovalValue = 'after' + 'ApprovalValue456';
+
+    try {
+      await mkdir(beforeDir, { recursive: true });
+      await mkdir(afterDir, { recursive: true });
+      await writeFile(join(beforeDir, 'state.json'), JSON.stringify({
+        approvals: [
+          { tokenId: beforeTokenId, approvalId: 'approval-before', state: 'pending' },
+          { tokenId: stableTokenId, approvalId: 'approval-stable', state: 'pending' },
+          { id: 'stable-approval-record', state: 'pending', value: beforeApprovalValue },
+        ],
+        cron: {
+          'job-1': { name: 'nightly', status: 'running' },
+        },
+      }), 'utf8');
+      await writeFile(join(afterDir, 'state.json'), JSON.stringify({
+        approvals: [
+          { tokenId: stableTokenId, approvalId: 'approval-stable', state: 'pending' },
+          { tokenId: afterTokenId, approvalId: 'approval-after', state: 'pending' },
+          { id: 'stable-approval-record', state: 'pending', value: afterApprovalValue },
+        ],
+        cron: {
+          'job-1': { name: 'nightly-v2', status: 'running' },
+        },
+      }), 'utf8');
+      await writeFile(join(beforeDir, 'workers.json'), JSON.stringify(['worker-a', 'worker-stable']), 'utf8');
+      await writeFile(join(afterDir, 'workers.json'), JSON.stringify(['worker-stable', 'worker-b']), 'utf8');
+
+      await handleDrCommand({
+        action: 'snapshot-diff',
+        backupManifestPath: beforeDir,
+        liveManifestPath: afterDir,
+        print: (message) => output.push(message),
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+
+    const rawOutput = output.join('\n');
+    const report = JSON.parse(rawOutput) as {
+      summary: { bySubsystem: Record<string, { added: number; removed: number; changed: number }> };
+      diffs: Array<{
+        subsystem: string;
+        added: Array<{ id: string }>;
+        removed: Array<{ id: string }>;
+        changed: Array<{ id: string; changedFields: string[] }>;
+      }>;
+    };
+    const workerDiff = report.diffs.find((diff) => diff.subsystem === 'workerIds');
+    const cronDiff = report.diffs.find((diff) => diff.subsystem === 'cron');
+    const approvalDiff = report.diffs.find((diff) => diff.subsystem === 'approvals');
+
+    expect(report.summary.bySubsystem.approvals).toEqual({ added: 1, removed: 1, changed: 1 });
+    expect(report.summary.bySubsystem.workerIds).toEqual({ added: 1, removed: 1, changed: 0 });
+    expect(report.summary.bySubsystem.cron).toEqual({ added: 0, removed: 0, changed: 1 });
+    expect(workerDiff?.added.map((entry) => entry.id)).toEqual(['worker-b']);
+    expect(workerDiff?.removed.map((entry) => entry.id)).toEqual(['worker-a']);
+    expect(cronDiff?.changed[0]?.id).toBe('job-1');
+    expect(approvalDiff?.changed[0]?.changedFields).toEqual(['value']);
+    expect(rawOutput).not.toContain(beforeTokenId);
+    expect(rawOutput).not.toContain(afterTokenId);
+    expect(rawOutput).not.toContain(beforeApprovalValue);
+    expect(rawOutput).not.toContain(afterApprovalValue);
+  });
+
+  it('redacts approval sources and handles path-scoped primitive maps without file-level noise', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dr-snapshot-path-edge-'));
+    const beforeDir = join(dir, 'before');
+    const afterDir = join(dir, 'after');
+    const output: string[] = [];
+    const beforeKanbanToken = 'kanban' + 'ApprovalTokenBefore123';
+    const afterKanbanToken = 'kanban' + 'ApprovalTokenAfter456';
+    const beforeFileToken = 'file' + 'ApprovalSecretBefore123';
+    const afterFileToken = 'file' + 'ApprovalSecretAfter456';
+
+    try {
+      await mkdir(join(beforeDir, 'kanban'), { recursive: true });
+      await mkdir(join(afterDir, 'kanban'), { recursive: true });
+      await mkdir(join(beforeDir, 'approvals'), { recursive: true });
+      await mkdir(join(afterDir, 'approvals'), { recursive: true });
+      await writeFile(join(beforeDir, 'kanban', 'approval-tokens.json'), JSON.stringify([beforeKanbanToken]), 'utf8');
+      await writeFile(join(afterDir, 'kanban', 'approval-tokens.json'), JSON.stringify([afterKanbanToken]), 'utf8');
+      await writeFile(join(beforeDir, 'approvals', `${beforeFileToken}.json`), JSON.stringify({ id: 'approval-file-before', state: 'pending' }), 'utf8');
+      await writeFile(join(afterDir, 'approvals', `${afterFileToken}.json`), JSON.stringify({ id: 'approval-file-after', state: 'pending' }), 'utf8');
+      await writeFile(join(beforeDir, 'memory.json'), JSON.stringify({ k1: 'old', k2: 'same' }), 'utf8');
+      await writeFile(join(afterDir, 'memory.json'), JSON.stringify({ k1: 'new', k2: 'same', k3: 'added' }), 'utf8');
+      await writeFile(join(beforeDir, 'workers.json'), JSON.stringify({ workerIds: ['worker-a', 'worker-stable'] }), 'utf8');
+      await writeFile(join(afterDir, 'workers.json'), JSON.stringify({ workerIds: ['worker-stable', 'worker-b'] }), 'utf8');
+
+      await handleDrCommand({
+        action: 'snapshot-diff',
+        backupManifestPath: beforeDir,
+        liveManifestPath: afterDir,
+        print: (message) => output.push(message),
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+
+    const rawOutput = output.join('\n');
+    const report = JSON.parse(rawOutput) as {
+      summary: { bySubsystem: Record<string, { added: number; removed: number; changed: number }> };
+      diffs: Array<{ subsystem: string; added: Array<{ id: string }>; removed: Array<{ id: string }>; changed: Array<{ id: string }> }>;
+    };
+
+    expect(report.summary.bySubsystem.approvals).toEqual({ added: 2, removed: 2, changed: 0 });
+    expect(report.summary.bySubsystem.memory).toEqual({ added: 1, removed: 0, changed: 1 });
+    expect(report.summary.bySubsystem.workerIds).toEqual({ added: 1, removed: 1, changed: 0 });
+    expect(report.diffs.find((diff) => diff.subsystem === 'memory')?.changed[0]?.id).toBe('k1');
+    expect(report.diffs.find((diff) => diff.subsystem === 'memory')?.added[0]?.id).toBe('k3');
+    expect(rawOutput).not.toContain(beforeKanbanToken);
+    expect(rawOutput).not.toContain(afterKanbanToken);
+    expect(rawOutput).not.toContain(beforeFileToken);
+    expect(rawOutput).not.toContain(afterFileToken);
+  });
+
+  it('reads JSONL snapshots and hashes approval record identifiers', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dr-snapshot-jsonl-diff-'));
+    const beforeDir = join(dir, 'before');
+    const afterDir = join(dir, 'after');
+    const output: string[] = [];
+    const rawApprovalId = 'opaque' + 'ApprovalCredential123';
+    const rawApprovalValue = 'opaque' + 'ApprovalValue456';
+    const beforeLineToken = 'line' + 'ApprovalTokenBefore123';
+    const afterLineToken = 'line' + 'ApprovalTokenAfter456';
+
+    try {
+      await mkdir(beforeDir, { recursive: true });
+      await mkdir(afterDir, { recursive: true });
+      await writeFile(join(beforeDir, 'snapshots.jsonl'), [
+        JSON.stringify({ tasks: [{ id: 'jsonl-task', status: 'running' }] }),
+        JSON.stringify({ approvals: [{ id: rawApprovalId, state: 'pending', value: rawApprovalValue }] }),
+      ].join('\n'), 'utf8');
+      await writeFile(join(afterDir, 'snapshots.jsonl'), [
+        JSON.stringify({ tasks: [{ id: 'jsonl-task', status: 'done' }] }),
+        JSON.stringify({ approvals: [{ id: rawApprovalId, state: 'used', value: rawApprovalValue }] }),
+      ].join('\n'), 'utf8');
+      await writeFile(join(beforeDir, 'approval-tokens.jsonl'), [beforeLineToken, 'stable' + 'LineApproval789'].map(JSON.stringify).join('\n'), 'utf8');
+      await writeFile(join(afterDir, 'approval-tokens.jsonl'), ['stable' + 'LineApproval789', afterLineToken].map(JSON.stringify).join('\n'), 'utf8');
+
+      await handleDrCommand({
+        action: 'snapshot-diff',
+        backupManifestPath: beforeDir,
+        liveManifestPath: afterDir,
+        print: (message) => output.push(message),
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+
+    const rawOutput = output.join('\n');
+    const report = JSON.parse(rawOutput) as {
+      summary: { bySubsystem: Record<string, { added: number; removed: number; changed: number }> };
+      diffs: Array<{ subsystem: string; changed: Array<{ id: string; beforeSource?: string; afterSource?: string }> }>;
+    };
+    const approvalChange = report.diffs.find((diff) => diff.subsystem === 'approvals')?.changed[0];
+
+    expect(report.summary.bySubsystem.tasks).toEqual({ added: 0, removed: 0, changed: 1 });
+    expect(report.summary.bySubsystem.approvals).toEqual({ added: 1, removed: 1, changed: 1 });
+    expect(approvalChange?.id).toMatch(/^approval:[a-f0-9]{16}$/u);
+    expect(approvalChange?.beforeSource).toBe('snapshots.jsonl:2:approvals');
+    expect(approvalChange?.afterSource).toBe('snapshots.jsonl:2:approvals');
+    expect(rawOutput).not.toContain(rawApprovalId);
+    expect(rawOutput).not.toContain(rawApprovalValue);
+    expect(rawOutput).not.toContain(beforeLineToken);
+    expect(rawOutput).not.toContain(afterLineToken);
+  });
+
   it('prints dead-letter list, inspect, dry-run replay, and retire JSON', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'franken-dr-'));
     const queuePath = join(dir, 'dead-letter.json');
@@ -94,7 +672,13 @@ describe('dr restore-dry-run CLI', () => {
           status: 'open',
           payload: {
             command: 'curl --password notasecret -H "Authorization: Bearer ***" https://api.github.com/repos/djm204/frankenbeast',
-            argv: ['gh', 'api', '--token', 'abcdefghijklmnopqrstuvwxyz123456', '--password=abcd1234secret5678'],
+            argv: [
+              'gh',
+              'api',
+              '--token',
+              ['abcdefghijklmnop', 'qrstuvwxyz123456'].join(''),
+              `--password=${['abcd1234', 'secret5678'].join('')}`,
+            ],
             databaseUrl: 'postgres://beast:anotherSecret456@db.example/franken',
           },
         }],
@@ -318,4 +902,33 @@ describe('dr restore-dry-run CLI', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it('redacts sensitive snapshot-diff directory paths in CLI output', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dr-token=PathSecret123-'));
+    const beforeDir = join(dir, 'before');
+    const afterDir = join(dir, 'after');
+    const output: string[] = [];
+
+    try {
+      await mkdir(beforeDir, { recursive: true });
+      await mkdir(afterDir, { recursive: true });
+      await writeFile(join(beforeDir, 'tasks.json'), JSON.stringify([{ id: 'task-1', status: 'ready' }]), 'utf8');
+      await writeFile(join(afterDir, 'tasks.json'), JSON.stringify([{ id: 'task-1', status: 'done' }]), 'utf8');
+
+      await handleDrCommand({
+        action: 'snapshot-diff',
+        backupManifestPath: beforeDir,
+        liveManifestPath: afterDir,
+        print: (message) => output.push(message),
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+
+    const rawOutput = output.join('\n');
+    expect(JSON.parse(rawOutput).command).toBe('dr snapshot-diff');
+    expect(rawOutput).not.toContain('token=PathSecret123');
+    expect(rawOutput).toContain('token=<redacted>');
+  });
+
 });

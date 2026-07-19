@@ -19,6 +19,26 @@ export interface HookScriptPaths {
   postTool: string;
 }
 
+const PRE_TOOL_CONTEXT_EXTRACTOR = [
+  "const fs = require('node:fs');",
+  "const unqualify = (name) => { const text = String(name || ''); const marker = '__'; const index = text.lastIndexOf(marker); return index >= 0 ? text.slice(index + marker.length) : text; };",
+  "const memoryTools = new Set(['fbeast_memory_export','fbeast_memory_query','fbeast_memory_frontload','fbeast_memory_access_audit_report','fbeast_memory_store','fbeast_memory_forget','fbeast_memory_right_to_forget','fbeast_memory_source_attribution','fbeast_memory_retention_report','fbeast_memory_review_propose','fbeast_memory_review_list','fbeast_memory_review_decide','fbeast_memory_review_conflicts']);",
+  "const memoryEvidenceKeys = ['key','category','sourceScope','query','agentId','profile','repo','type','operation','tool','decision','readScope','limit','dryRun','redaction','activeProfile','crossProfile','operatorApproval','action','resolution'];",
+  "const redactSelectorKeys = new Set(['key','category','sourceScope','query']);",
+  "const safeMemoryArgs = (tool, args) => { const clone = {}; const normalized = unqualify(tool); for (const key of memoryEvidenceKeys) { if (!Object.prototype.hasOwnProperty.call(args, key)) continue; if (redactSelectorKeys.has(key)) clone[key] = '[right-to-forget-selector-redacted]'; else if (normalized === 'fbeast_memory_access_audit_report' && key === 'operation') clone[key] = '[memory-access-audit-filter-redacted]'; else clone[key] = args[key]; } return clone; };",
+  "try { const d = JSON.parse(fs.readFileSync(0, 'utf8')); const ti = d?.tool_input; const tn = d?.tool_name || ''; const normalizedToolName = unqualify(tn); const keys = ['command', 'cmd', 'commands', 'args', 'argv', 'script']; let out = ''; if (typeof ti === 'string' && normalizedToolName !== 'apply_patch') { out = ti; } else if (ti && typeof ti === 'object' && !Array.isArray(ti) && normalizedToolName !== 'apply_patch') { const targetTool = typeof ti.tool === 'string' ? ti.tool : ''; const normalizedTargetTool = unqualify(targetTool); if (normalizedToolName === 'execute_tool' && memoryTools.has(normalizedTargetTool) && ti.args && typeof ti.args === 'object' && !Array.isArray(ti.args)) { out = JSON.stringify({ tool: targetTool, args: safeMemoryArgs(normalizedTargetTool, ti.args) }); } else if (memoryTools.has(normalizedToolName)) { out = JSON.stringify(safeMemoryArgs(normalizedToolName, ti)); } else { const parts = []; for (const key of keys) { const value = ti[key]; if (typeof value === 'string') parts.push(value); else if (Array.isArray(value)) parts.push(value.map(String).join(' ')); else if (typeof value === 'object' && value !== null) parts.push(JSON.stringify(value)); } out = parts.join('\\n'); } } process.stdout.write(out); } catch { process.stdout.write(''); }",
+].join(' ');
+
+const POST_TOOL_CONTEXT_EXTRACTOR = [
+  "const fs = require('node:fs');",
+  "const unqualify = (name) => { const text = String(name || ''); const marker = '__'; const index = text.lastIndexOf(marker); return index >= 0 ? text.slice(index + marker.length) : text; };",
+  "const memoryTools = new Set(['fbeast_memory_store','fbeast_memory_query','fbeast_memory_frontload','fbeast_memory_export','fbeast_memory_access_audit_report','fbeast_memory_forget','fbeast_memory_right_to_forget','fbeast_memory_source_attribution','fbeast_memory_retention_report','fbeast_memory_review_propose','fbeast_memory_review_list','fbeast_memory_review_decide','fbeast_memory_review_conflicts']);",
+  "const safeKeys = ['agentId','profile','repo','type','operation','decision','readScope','limit','dryRun','redaction','activeProfile','crossProfile','action','resolution'];",
+  "const selectorKeys = new Set(['key','query','category','sourceScope','memoryKey']);",
+  "const sanitize = (tool, args) => { if (!args || typeof args !== 'object' || Array.isArray(args)) return undefined; const normalized = unqualify(tool); const mayBeMemory = memoryTools.has(normalized) || ['agentId','profile','readScope','type'].some((key) => Object.prototype.hasOwnProperty.call(args, key)); if (!mayBeMemory) return undefined; const safe = {}; for (const key of safeKeys) { if (Object.prototype.hasOwnProperty.call(args, key)) safe[key] = args[key]; } for (const key of selectorKeys) { if (Object.prototype.hasOwnProperty.call(args, key)) safe[key] = '[memory-selector-redacted]'; } return safe; };",
+  "try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); const toolName = String(d?.tool_name || ''); const input = d?.tool_input; if (!input || typeof input !== 'object' || Array.isArray(input)) process.exit(0); const normalizedTool = unqualify(toolName); if (normalizedTool === 'execute_tool') { const targetTool = typeof input.tool === 'string' ? input.tool : ''; const args = input.args && typeof input.args === 'object' && !Array.isArray(input.args) ? input.args : {}; const safeArgs = sanitize(targetTool, args); if (safeArgs) process.stdout.write(JSON.stringify({ tool_input: { tool: targetTool, args: safeArgs } })); process.exit(0); } const nestedArgs = input.args && typeof input.args === 'object' && !Array.isArray(input.args) ? input.args : undefined; const safeArgs = sanitize(toolName, nestedArgs || input); if (safeArgs) process.stdout.write(JSON.stringify({ tool_input: nestedArgs ? { args: safeArgs } : safeArgs })); } catch { process.stdout.write(''); }",
+].join(' ');
+
 /**
  * Writes hook scripts for the given client into a client-owned hooks directory.
  * Returns the paths to the generated scripts.
@@ -90,7 +110,7 @@ TOOL_NAME=$(printf '%s' "$INPUT" | "$NODE_BIN" -e "const fs = require('node:fs')
 # string so patterns like 'rm -rf' still match. Path and file-content fields are
 # excluded to avoid false positives and persisting secrets. apply_patch patch
 # bodies (carried in tool_input.command) are also excluded for the same reason.
-TOOL_CONTEXT=$(printf '%s' "$INPUT" | "$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(0, 'utf8')); const ti = d?.tool_input; const tn = d?.tool_name || ''; const normalizedToolName = tn.includes('__') ? tn.slice(tn.lastIndexOf('__') + 2) : tn; const keys = ['command', 'cmd', 'commands', 'args', 'argv', 'script']; const memoryEvidenceKeys = ['key', 'category', 'sourceScope', 'query', 'dryRun', 'profile', 'activeProfile', 'crossProfile', 'redaction', 'operatorApproval']; const safeMemoryArgs = (args) => { const clone = {}; for (const key of memoryEvidenceKeys) { if (!Object.prototype.hasOwnProperty.call(args, key)) continue; clone[key] = ['key', 'category', 'sourceScope', 'query'].includes(key) ? '[right-to-forget-selector-redacted]' : args[key]; } return clone; }; let out = ''; if (typeof ti === 'string') { out = ti; } else if (ti && typeof ti === 'object' && !Array.isArray(ti) && tn !== 'apply_patch') { const targetTool = typeof ti.tool === 'string' ? ti.tool : ''; const normalizedTargetTool = targetTool.includes('__') ? targetTool.slice(targetTool.lastIndexOf('__') + 2) : targetTool; if (normalizedToolName === 'execute_tool' && (normalizedTargetTool === 'fbeast_memory_export' || normalizedTargetTool === 'fbeast_memory_source_attribution') && ti.args && typeof ti.args === 'object' && !Array.isArray(ti.args)) { out = JSON.stringify({ tool: targetTool, args: safeMemoryArgs(ti.args) }); } else if (normalizedToolName === 'fbeast_memory_right_to_forget' || normalizedToolName === 'fbeast_memory_forget' || normalizedToolName === 'fbeast_memory_store' || normalizedToolName === 'fbeast_memory_export') { out = JSON.stringify(safeMemoryArgs(ti)); } else if (normalizedToolName === 'execute_tool' && typeof ti.tool === 'string' && (ti.tool.includes('__') ? ti.tool.slice(ti.tool.lastIndexOf('__') + 2) : ti.tool) === 'fbeast_memory_export' && ti.args && typeof ti.args === 'object' && !Array.isArray(ti.args)) { const clone = {}; for (const key of memoryEvidenceKeys) { if (!Object.prototype.hasOwnProperty.call(ti.args, key)) continue; clone[key] = ['key', 'category', 'sourceScope', 'query'].includes(key) ? '[right-to-forget-selector-redacted]' : ti.args[key]; } out = JSON.stringify({ tool: ti.tool, args: clone }); } else { const parts = []; for (const key of keys) { const value = ti[key]; if (value === undefined) continue; if (Array.isArray(value)) { parts.push(value.map(String).join(' ')); } else if (typeof value === 'string') { parts.push(value); } else { parts.push(JSON.stringify(value)); } } out = parts.join(' '); } } process.stdout.write(tn === 'apply_patch' ? '' : out); } catch { process.stdout.write(''); }" 2>/dev/null || echo "")
+TOOL_CONTEXT=$(printf '%s' "$INPUT" | "$NODE_BIN" -e "${PRE_TOOL_CONTEXT_EXTRACTOR}" 2>/dev/null || echo "")
 
 # Fail closed: a missing/unparseable tool name means we cannot govern the call.
 if [ -z "$TOOL_NAME" ]; then
@@ -149,18 +169,22 @@ HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT_FILE=$(mktemp -t fbeast-hook-input.XXXXXX) || exit 0
 PAYLOAD_FILE=""
-trap 'rm -f "$INPUT_FILE" "$PAYLOAD_FILE"' EXIT
+CONTEXT_FILE=""
+trap 'rm -f "$INPUT_FILE" "$PAYLOAD_FILE" "$CONTEXT_FILE"' EXIT
 PAYLOAD_FILE=$(mktemp -t fbeast-hook-response.XXXXXX) || exit 0
+CONTEXT_FILE=$(mktemp -t fbeast-hook-context.XXXXXX) || exit 0
 cat > "$INPUT_FILE" || exit 0
 TOOL_NAME=$("$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(String(d?.tool_name || '')); } catch { process.stdout.write(''); }" "$INPUT_FILE" 2>/dev/null || echo "")
+TOOL_CONTEXT=$("$NODE_BIN" -e "${POST_TOOL_CONTEXT_EXTRACTOR}" "$INPUT_FILE" 2>/dev/null || echo "")
+printf '%s' "$TOOL_CONTEXT" > "$CONTEXT_FILE" 2>/dev/null || exit 0
 if ! "$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(JSON.stringify(d?.tool_response || {})); } catch { process.exit(1); }" "$INPUT_FILE" > "$PAYLOAD_FILE" 2>/dev/null; then
   printf '{}' > "$PAYLOAD_FILE" 2>/dev/null || exit 0
 fi
 
 if command -v timeout >/dev/null 2>&1; then
-  timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
+  FBEAST_TOOL_CONTEXT= FBEAST_TOOL_CONTEXT_FILE="$CONTEXT_FILE" timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
 else
-  fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
+  FBEAST_TOOL_CONTEXT= FBEAST_TOOL_CONTEXT_FILE="$CONTEXT_FILE" fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
 fi
 exit 0
 `);
@@ -216,7 +240,7 @@ TOOL_NAME=$(printf '%s' "$INPUT" | "$NODE_BIN" -e "const fs = require('node:fs')
 # string so patterns like 'rm -rf' still match. Path and file-content fields are
 # excluded to avoid false positives and persisting secrets. apply_patch patch
 # bodies (carried in tool_input.command) are also excluded for the same reason.
-TOOL_CONTEXT=$(printf '%s' "$INPUT" | "$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(0, 'utf8')); const ti = d?.tool_input; const tn = d?.tool_name || ''; const normalizedToolName = tn.includes('__') ? tn.slice(tn.lastIndexOf('__') + 2) : tn; const keys = ['command', 'cmd', 'commands', 'args', 'argv', 'script']; const memoryEvidenceKeys = ['key', 'category', 'sourceScope', 'query', 'dryRun', 'profile', 'activeProfile', 'crossProfile', 'redaction', 'operatorApproval']; const safeMemoryArgs = (args) => { const clone = {}; for (const key of memoryEvidenceKeys) { if (!Object.prototype.hasOwnProperty.call(args, key)) continue; clone[key] = ['key', 'category', 'sourceScope', 'query'].includes(key) ? '[right-to-forget-selector-redacted]' : args[key]; } return clone; }; let out = ''; if (typeof ti === 'string') { out = ti; } else if (ti && typeof ti === 'object' && !Array.isArray(ti) && tn !== 'apply_patch') { const targetTool = typeof ti.tool === 'string' ? ti.tool : ''; const normalizedTargetTool = targetTool.includes('__') ? targetTool.slice(targetTool.lastIndexOf('__') + 2) : targetTool; if (normalizedToolName === 'execute_tool' && (normalizedTargetTool === 'fbeast_memory_export' || normalizedTargetTool === 'fbeast_memory_source_attribution') && ti.args && typeof ti.args === 'object' && !Array.isArray(ti.args)) { out = JSON.stringify({ tool: targetTool, args: safeMemoryArgs(ti.args) }); } else if (normalizedToolName === 'fbeast_memory_right_to_forget' || normalizedToolName === 'fbeast_memory_forget' || normalizedToolName === 'fbeast_memory_store' || normalizedToolName === 'fbeast_memory_export') { out = JSON.stringify(safeMemoryArgs(ti)); } else if (normalizedToolName === 'execute_tool' && typeof ti.tool === 'string' && (ti.tool.includes('__') ? ti.tool.slice(ti.tool.lastIndexOf('__') + 2) : ti.tool) === 'fbeast_memory_export' && ti.args && typeof ti.args === 'object' && !Array.isArray(ti.args)) { const clone = {}; for (const key of memoryEvidenceKeys) { if (!Object.prototype.hasOwnProperty.call(ti.args, key)) continue; clone[key] = ['key', 'category', 'sourceScope', 'query'].includes(key) ? '[right-to-forget-selector-redacted]' : ti.args[key]; } out = JSON.stringify({ tool: ti.tool, args: clone }); } else { const parts = []; for (const key of keys) { const value = ti[key]; if (value === undefined) continue; if (Array.isArray(value)) { parts.push(value.map(String).join(' ')); } else if (typeof value === 'string') { parts.push(value); } else { parts.push(JSON.stringify(value)); } } out = parts.join(' '); } } process.stdout.write(tn === 'apply_patch' ? '' : out); } catch { process.stdout.write(''); }" 2>/dev/null || echo "")
+TOOL_CONTEXT=$(printf '%s' "$INPUT" | "$NODE_BIN" -e "${PRE_TOOL_CONTEXT_EXTRACTOR}" 2>/dev/null || echo "")
 
 # Fail closed: a missing/unparseable tool name means we cannot govern the call.
 if [ -z "$TOOL_NAME" ]; then
@@ -274,18 +298,22 @@ HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT_FILE=$(mktemp -t fbeast-hook-input.XXXXXX) || exit 0
 PAYLOAD_FILE=""
-trap 'rm -f "$INPUT_FILE" "$PAYLOAD_FILE"' EXIT
+CONTEXT_FILE=""
+trap 'rm -f "$INPUT_FILE" "$PAYLOAD_FILE" "$CONTEXT_FILE"' EXIT
 PAYLOAD_FILE=$(mktemp -t fbeast-hook-response.XXXXXX) || exit 0
+CONTEXT_FILE=$(mktemp -t fbeast-hook-context.XXXXXX) || exit 0
 cat > "$INPUT_FILE" || exit 0
 TOOL_NAME=$("$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(String(d?.tool_name || '')); } catch { process.stdout.write(''); }" "$INPUT_FILE" 2>/dev/null || echo "")
+TOOL_CONTEXT=$("$NODE_BIN" -e "${POST_TOOL_CONTEXT_EXTRACTOR}" "$INPUT_FILE" 2>/dev/null || echo "")
+printf '%s' "$TOOL_CONTEXT" > "$CONTEXT_FILE" 2>/dev/null || exit 0
 if ! "$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(JSON.stringify(d?.tool_response || {})); } catch { process.exit(1); }" "$INPUT_FILE" > "$PAYLOAD_FILE" 2>/dev/null; then
   printf '{}' > "$PAYLOAD_FILE" 2>/dev/null || exit 0
 fi
 
 if command -v timeout >/dev/null 2>&1; then
-  timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
+  FBEAST_TOOL_CONTEXT= FBEAST_TOOL_CONTEXT_FILE="$CONTEXT_FILE" timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
 else
-  fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
+  FBEAST_TOOL_CONTEXT= FBEAST_TOOL_CONTEXT_FILE="$CONTEXT_FILE" fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
 fi
 exit 0
 `);
@@ -341,7 +369,7 @@ TOOL_NAME=$(printf '%s' "$INPUT" | "$NODE_BIN" -e "const fs = require('node:fs')
 # string so patterns like 'rm -rf' still match. Path and file-content fields are
 # excluded to avoid false positives and persisting secrets. apply_patch patch
 # bodies (carried in tool_input.command) are also excluded for the same reason.
-TOOL_CONTEXT=$(printf '%s' "$INPUT" | "$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(0, 'utf8')); const ti = d?.tool_input; const tn = d?.tool_name || ''; const normalizedToolName = tn.includes('__') ? tn.slice(tn.lastIndexOf('__') + 2) : tn; const keys = ['command', 'cmd', 'commands', 'args', 'argv', 'script']; const memoryEvidenceKeys = ['key', 'category', 'sourceScope', 'query', 'dryRun', 'profile', 'activeProfile', 'crossProfile', 'redaction', 'operatorApproval']; const safeMemoryArgs = (args) => { const clone = {}; for (const key of memoryEvidenceKeys) { if (!Object.prototype.hasOwnProperty.call(args, key)) continue; clone[key] = ['key', 'category', 'sourceScope', 'query'].includes(key) ? '[right-to-forget-selector-redacted]' : args[key]; } return clone; }; let out = ''; if (typeof ti === 'string') { out = ti; } else if (ti && typeof ti === 'object' && !Array.isArray(ti) && tn !== 'apply_patch') { const targetTool = typeof ti.tool === 'string' ? ti.tool : ''; const normalizedTargetTool = targetTool.includes('__') ? targetTool.slice(targetTool.lastIndexOf('__') + 2) : targetTool; if (normalizedToolName === 'execute_tool' && (normalizedTargetTool === 'fbeast_memory_export' || normalizedTargetTool === 'fbeast_memory_source_attribution') && ti.args && typeof ti.args === 'object' && !Array.isArray(ti.args)) { out = JSON.stringify({ tool: targetTool, args: safeMemoryArgs(ti.args) }); } else if (normalizedToolName === 'fbeast_memory_right_to_forget' || normalizedToolName === 'fbeast_memory_forget' || normalizedToolName === 'fbeast_memory_store' || normalizedToolName === 'fbeast_memory_export') { out = JSON.stringify(safeMemoryArgs(ti)); } else if (normalizedToolName === 'execute_tool' && typeof ti.tool === 'string' && (ti.tool.includes('__') ? ti.tool.slice(ti.tool.lastIndexOf('__') + 2) : ti.tool) === 'fbeast_memory_export' && ti.args && typeof ti.args === 'object' && !Array.isArray(ti.args)) { const clone = {}; for (const key of memoryEvidenceKeys) { if (!Object.prototype.hasOwnProperty.call(ti.args, key)) continue; clone[key] = ['key', 'category', 'sourceScope', 'query'].includes(key) ? '[right-to-forget-selector-redacted]' : ti.args[key]; } out = JSON.stringify({ tool: ti.tool, args: clone }); } else { const parts = []; for (const key of keys) { const value = ti[key]; if (value === undefined) continue; if (Array.isArray(value)) { parts.push(value.map(String).join(' ')); } else if (typeof value === 'string') { parts.push(value); } else { parts.push(JSON.stringify(value)); } } out = parts.join(' '); } } process.stdout.write(tn === 'apply_patch' ? '' : out); } catch { process.stdout.write(''); }" 2>/dev/null || echo "")
+TOOL_CONTEXT=$(printf '%s' "$INPUT" | "$NODE_BIN" -e "${PRE_TOOL_CONTEXT_EXTRACTOR}" 2>/dev/null || echo "")
 
 # Fail closed: a missing/unparseable tool name means we cannot govern the call.
 if [ -z "$TOOL_NAME" ]; then
@@ -400,18 +428,22 @@ HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT_FILE=$(mktemp -t fbeast-hook-input.XXXXXX) || exit 0
 PAYLOAD_FILE=""
-trap 'rm -f "$INPUT_FILE" "$PAYLOAD_FILE"' EXIT
+CONTEXT_FILE=""
+trap 'rm -f "$INPUT_FILE" "$PAYLOAD_FILE" "$CONTEXT_FILE"' EXIT
 PAYLOAD_FILE=$(mktemp -t fbeast-hook-response.XXXXXX) || exit 0
+CONTEXT_FILE=$(mktemp -t fbeast-hook-context.XXXXXX) || exit 0
 cat > "$INPUT_FILE" || exit 0
 TOOL_NAME=$("$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(String(d?.tool_name || '')); } catch { process.stdout.write(''); }" "$INPUT_FILE" 2>/dev/null || echo "")
+TOOL_CONTEXT=$("$NODE_BIN" -e "${POST_TOOL_CONTEXT_EXTRACTOR}" "$INPUT_FILE" 2>/dev/null || echo "")
+printf '%s' "$TOOL_CONTEXT" > "$CONTEXT_FILE" 2>/dev/null || exit 0
 if ! "$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(JSON.stringify(d?.tool_response || {})); } catch { process.exit(1); }" "$INPUT_FILE" > "$PAYLOAD_FILE" 2>/dev/null; then
   printf '{}' > "$PAYLOAD_FILE" 2>/dev/null || exit 0
 fi
 
 if command -v timeout >/dev/null 2>&1; then
-  timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
+  FBEAST_TOOL_CONTEXT= FBEAST_TOOL_CONTEXT_FILE="$CONTEXT_FILE" timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
 else
-  fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
+  FBEAST_TOOL_CONTEXT= FBEAST_TOOL_CONTEXT_FILE="$CONTEXT_FILE" fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
 fi
 exit 0
 `);

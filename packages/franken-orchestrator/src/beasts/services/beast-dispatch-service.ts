@@ -278,20 +278,29 @@ export class BeastDispatchService {
         return updated;
       } catch (error) {
         const failedAt = new Date(wallClockNow()).toISOString();
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const currentRun = this.repository.getRun(run.id);
+        const executorRecordedSpawnFailure = currentRun?.status === 'failed'
+          && currentRun.stopReason === 'spawn_failed';
+        const errorMessage = executorRecordedSpawnFailure
+          ? 'Worker process could not be spawned.'
+          : error instanceof Error ? error.message : String(error);
         const failedRun = this.repository.transaction(() => {
-          const updatedRun = this.repository.updateRun(run.id, {
-            status: 'failed',
-            finishedAt: failedAt,
-            stopReason: 'start_failed',
-          });
-          this.repository.appendEvent(run.id, {
-            type: 'run.start_failed',
-            payload: {
-              error: errorMessage,
-            },
-            createdAt: failedAt,
-          });
+          const updatedRun = executorRecordedSpawnFailure && currentRun
+            ? currentRun
+            : this.repository.updateRun(run.id, {
+                status: 'failed',
+                finishedAt: failedAt,
+                stopReason: 'start_failed',
+              });
+          if (!executorRecordedSpawnFailure) {
+            this.repository.appendEvent(run.id, {
+              type: 'run.start_failed',
+              payload: {
+                error: errorMessage,
+              },
+              createdAt: failedAt,
+            });
+          }
           if (updatedRun.trackedAgentId) {
             this.repository.updateTrackedAgent(updatedRun.trackedAgentId, {
               status: 'failed',

@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.7.3](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.7.2...franken-governor-v0.7.3) (2026-07-18)
+
+
+### Tests
+
+* **governor:** make integration script config-only ([#2601](https://github.com/djm204/frankenbeast/issues/2601)) ([ee0d289](https://github.com/djm204/frankenbeast/commit/ee0d2891e2c448e116d1a7d8d72aa5b28ec6afb4)), closes [#2022](https://github.com/djm204/frankenbeast/issues/2022)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.13.0 to 0.14.0
+
+## [0.7.2](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.7.1...franken-governor-v0.7.2) (2026-07-16)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.12.0 to 0.13.0
+
 ## [0.7.1](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.7.0...franken-governor-v0.7.1) (2026-07-16)
 
 

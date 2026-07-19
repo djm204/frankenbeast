@@ -1,5 +1,482 @@
 # Changelog
 
+## [0.54.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.53.0...@franken/orchestrator-v0.54.0) (2026-07-18)
+
+
+### Features
+
+* **availability:** add beast daemon drain mode ([#2265](https://github.com/djm204/frankenbeast/issues/2265)) ([6ec5847](https://github.com/djm204/frankenbeast/commit/6ec5847d3cc3d3d2ae66b5c8601133aeec36dae7)), closes [#1826](https://github.com/djm204/frankenbeast/issues/1826)
+* **availability:** add capacity watermark alerts ([#2266](https://github.com/djm204/frankenbeast/issues/2266)) ([219ffd3](https://github.com/djm204/frankenbeast/commit/219ffd34483126e6f09b11c17b86d89226c39280))
+* **availability:** add degraded worker routing policy ([#2272](https://github.com/djm204/frankenbeast/issues/2272)) ([a2d8f80](https://github.com/djm204/frankenbeast/commit/a2d8f800cbc1bddd0bb04b8d6f996984eb939b68))
+* **availability:** add dependency circuit breakers ([#2273](https://github.com/djm204/frankenbeast/issues/2273)) ([08abbea](https://github.com/djm204/frankenbeast/commit/08abbea858c765c4d1d84ecc18c3e809869705a1))
+* **availability:** add issue runner backpressure ([#2223](https://github.com/djm204/frankenbeast/issues/2223)) ([f61855e](https://github.com/djm204/frankenbeast/commit/f61855e62766f812c6f92e2814a4ec51f2b9f2b1))
+* **availability:** add provider outage incident banner ([#2270](https://github.com/djm204/frankenbeast/issues/2270)) ([3d37834](https://github.com/djm204/frankenbeast/commit/3d3783417ea57f9bea4d99c9b49cd62f42a9c160))
+* **availability:** add read-only degraded mode ([#2402](https://github.com/djm204/frankenbeast/issues/2402)) ([4dcd49b](https://github.com/djm204/frankenbeast/commit/4dcd49b14a856330c6ae287124c04eb2928b4c05))
+* **availability:** add scheduler fairness report ([#2268](https://github.com/djm204/frankenbeast/issues/2268)) ([2494097](https://github.com/djm204/frankenbeast/commit/2494097dfdeaabd49848908aa38bb630f93404e7)), closes [#1821](https://github.com/djm204/frankenbeast/issues/1821)
+* **availability:** audit model provider failover ([#2263](https://github.com/djm204/frankenbeast/issues/2263)) ([d3f0ac2](https://github.com/djm204/frankenbeast/commit/d3f0ac209a82a02786c12faf518bb695fae6341e))
+* **availability:** expose SLO dashboard ([#2580](https://github.com/djm204/frankenbeast/issues/2580)) ([6e1918c](https://github.com/djm204/frankenbeast/commit/6e1918cffe5ffb10a0acfc72f08d118836172864))
+* **availability:** reserve urgent agent capacity ([70cd020](https://github.com/djm204/frankenbeast/commit/70cd020b52cd3418fd61d00f0d29c8fe49b319ef))
+* **availability:** reserve urgent agent capacity ([8dc1447](https://github.com/djm204/frankenbeast/commit/8dc1447f90088b69b1ce2f3147ac64fc3f5064d2))
+* **beasts:** add maintenance dispatch guardrails ([#2400](https://github.com/djm204/frankenbeast/issues/2400)) ([f50e966](https://github.com/djm204/frankenbeast/commit/f50e966246a1a05902fd0054ffa79bb59ffe35e7))
+* **comms:** add delivery sensitivity policy ([#2037](https://github.com/djm204/frankenbeast/issues/2037)) ([cf0c945](https://github.com/djm204/frankenbeast/commit/cf0c94552c79bbb2f80ca27f72c2116217eb2f6c))
+* **dashboard:** surface dependency availability ([#2347](https://github.com/djm204/frankenbeast/issues/2347)) ([0298dd5](https://github.com/djm204/frankenbeast/commit/0298dd58133a30015f3487893d64ef0d3d02dbb7))
+* **dr:** add approval ledger recovery report ([#2256](https://github.com/djm204/frankenbeast/issues/2256)) ([c0413fb](https://github.com/djm204/frankenbeast/commit/c0413fbf6a771e84eb126db6417badbf94bf0aaf))
+* **dr:** add backup encryption verification report ([#2252](https://github.com/djm204/frankenbeast/issues/2252)) ([9a9b957](https://github.com/djm204/frankenbeast/commit/9a9b957a3b7b05e8c17be5de4e30cb131f19e9bf))
+* **dr:** add cross-file state consistency checker ([#2260](https://github.com/djm204/frankenbeast/issues/2260)) ([78426d4](https://github.com/djm204/frankenbeast/commit/78426d4e0efe379252f145df3cdfb4512051f877))
+* **dr:** add encrypted state backup restore ([f792f16](https://github.com/djm204/frankenbeast/commit/f792f1678442327422c8daf00ec39f719474adbb))
+* **dr:** add encrypted state backup restore ([c96d585](https://github.com/djm204/frankenbeast/commit/c96d5853be5f54ae463f73feed014e000653685b))
+* **dr:** add point-in-time backup manifest ([#2258](https://github.com/djm204/frankenbeast/issues/2258)) ([bd599d6](https://github.com/djm204/frankenbeast/commit/bd599d64c11bf3233ddfc51937c989f8874ee430)), closes [#1830](https://github.com/djm204/frankenbeast/issues/1830)
+* **dr:** add point-in-time incident export ([#2551](https://github.com/djm204/frankenbeast/issues/2551)) ([38197b9](https://github.com/djm204/frankenbeast/commit/38197b9e2c6c14516a38270c3c6d63d31afc880e))
+* **dr:** add recovery-mode destructive action guard ([#2249](https://github.com/djm204/frankenbeast/issues/2249)) ([f126546](https://github.com/djm204/frankenbeast/commit/f126546a24625d2279cea5fbb4e8abbdf571ec36))
+* **dr:** add restore dry-run JSON output ([#2259](https://github.com/djm204/frankenbeast/issues/2259)) ([d6aac73](https://github.com/djm204/frankenbeast/commit/d6aac73b91ddbf62f6bff5bb1dddd07ad2d3d2f2))
+* **dr:** add restore preview conflict detector ([#2231](https://github.com/djm204/frankenbeast/issues/2231)) ([0d6f9ed](https://github.com/djm204/frankenbeast/commit/0d6f9ed5c4de89b4e3c50bd3db73a34772d81836))
+* **dr:** add state snapshot diff tool ([#2403](https://github.com/djm204/frankenbeast/issues/2403)) ([f80c473](https://github.com/djm204/frankenbeast/commit/f80c4738c55fa0061faf153fa92b81d2cb9939ed))
+* **dr:** block Kanban card resurrection ([#2255](https://github.com/djm204/frankenbeast/issues/2255)) ([3fdb87c](https://github.com/djm204/frankenbeast/commit/3fdb87c7f105951f5fdfc7c9d889cb0057c718dc)), closes [#1834](https://github.com/djm204/frankenbeast/issues/1834)
+* **dr:** verify memory backups ([#2254](https://github.com/djm204/frankenbeast/issues/2254)) ([0be3e69](https://github.com/djm204/frankenbeast/commit/0be3e69e4c97a5126243bab17967bedd4bd898d6))
+* **learning:** add PM handoff quality rubric ([#1990](https://github.com/djm204/frankenbeast/issues/1990)) ([cfa52f2](https://github.com/djm204/frankenbeast/commit/cfa52f24bb9b4f6d467f7ca2388fe972aa09aef8))
+* **memory:** add duplicate memory report ([#2328](https://github.com/djm204/frankenbeast/issues/2328)) ([20325c6](https://github.com/djm204/frankenbeast/commit/20325c65e95de587bfda6440899493b61aaaa885))
+* **memory:** add memory access audit trail ([#2317](https://github.com/djm204/frankenbeast/issues/2317)) ([ef889da](https://github.com/djm204/frankenbeast/commit/ef889dae092d996a6ca463e5abcaf5ed4d296158))
+* **memory:** add project-scoped snapshot builder ([#2343](https://github.com/djm204/frankenbeast/issues/2343)) ([8d1142b](https://github.com/djm204/frankenbeast/commit/8d1142b32eb4c65ea14c5bb41f5ef82eaa0b1a4f)), closes [#1758](https://github.com/djm204/frankenbeast/issues/1758)
+* **memory:** add provenance confidence metadata ([#2552](https://github.com/djm204/frankenbeast/issues/2552)) ([835816b](https://github.com/djm204/frankenbeast/commit/835816bea0ac0149c7874b5b441bb979f8e044f5))
+* **memory:** add redacted project memory export ([#2321](https://github.com/djm204/frankenbeast/issues/2321)) ([6a7b8bb](https://github.com/djm204/frankenbeast/commit/6a7b8bb1dfbbc10282e7cd90ac34936a06943d15))
+* **memory:** add snapshot diff command ([#1890](https://github.com/djm204/frankenbeast/issues/1890)) ([c7ab1a1](https://github.com/djm204/frankenbeast/commit/c7ab1a1ce10f463a05ebd6a1f316ee39915712c0))
+* **onboarding:** add agent handoff template validator ([#2331](https://github.com/djm204/frankenbeast/issues/2331)) ([11bf733](https://github.com/djm204/frankenbeast/commit/11bf733e3a2c93551bcfd720a2b24827525479af))
+* **orchestrator:** add approval readiness health endpoint ([#2262](https://github.com/djm204/frankenbeast/issues/2262)) ([e5ba904](https://github.com/djm204/frankenbeast/commit/e5ba904987618708bacc27731ae6f565d90e02d6))
+* **orchestrator:** add automation dead-letter queue ([#2344](https://github.com/djm204/frankenbeast/issues/2344)) ([3a68010](https://github.com/djm204/frankenbeast/commit/3a680103198cdcb5b7341c61ce362a7f0b18074e))
+* **orchestrator:** add DR process cleanup plan ([#2397](https://github.com/djm204/frankenbeast/issues/2397)) ([105e3fb](https://github.com/djm204/frankenbeast/commit/105e3fb20790dd9855ba735fec1e68a2b9aa23fe))
+* **orchestrator:** add per-lane egress policy ([#2233](https://github.com/djm204/frankenbeast/issues/2233)) ([5d9cdfe](https://github.com/djm204/frankenbeast/commit/5d9cdfeab65394bf5759059d338d2e62963cc77f))
+* **orchestrator:** add provider circuit breakers ([#2298](https://github.com/djm204/frankenbeast/issues/2298)) ([e246807](https://github.com/djm204/frankenbeast/commit/e246807078a376b8abf231a379db9b040fae01df))
+* **orchestrator:** add queue priority aging ([#2351](https://github.com/djm204/frankenbeast/issues/2351)) ([69d30c2](https://github.com/djm204/frankenbeast/commit/69d30c2c37d50675bc1dd23bc29d3e085e896360)), closes [#1748](https://github.com/djm204/frankenbeast/issues/1748)
+* **orchestrator:** add scoped credential inventory ([#2078](https://github.com/djm204/frankenbeast/issues/2078)) ([eb2fa82](https://github.com/djm204/frankenbeast/commit/eb2fa82184efca8a5572f5df2583558e88fc758c))
+* **orchestrator:** add stale dependency cache fallback ([#2267](https://github.com/djm204/frankenbeast/issues/2267)) ([52906fd](https://github.com/djm204/frankenbeast/commit/52906fd55282d97f4101214de82f4dc5bd3a5517))
+* **orchestrator:** track redaction provenance ([#2110](https://github.com/djm204/frankenbeast/issues/2110)) ([2f40524](https://github.com/djm204/frankenbeast/commit/2f40524b54854a5d3402548bd8ae62a3bbe46ccc))
+* **stability:** add stuck-run watchdog hints ([#2550](https://github.com/djm204/frankenbeast/issues/2550)) ([52f064a](https://github.com/djm204/frankenbeast/commit/52f064af0a5dc31b9ceccf3643c79df66094667f))
+
+
+### Bug Fixes
+
+* **availability:** account released reservation overflow ([50378ec](https://github.com/djm204/frankenbeast/commit/50378ec2da13e92ca702258d63876b8a8711c35b))
+* **availability:** address reservation Codex followups ([e107670](https://github.com/djm204/frankenbeast/commit/e10767014fef668e7561a32c357b192f5430d7ac))
+* **availability:** address restart capacity review ([9d30df8](https://github.com/djm204/frankenbeast/commit/9d30df86e7838e4267fd3e434918f30601225e4b))
+* **availability:** close capacity reservation bypasses ([9fa1081](https://github.com/djm204/frankenbeast/commit/9fa10816e885367c58ade4f6f831c4c366f07693))
+* **availability:** complete reservation edge handling ([e268952](https://github.com/djm204/frankenbeast/commit/e268952ead7724785d0a5c4027abf5c854742851))
+* **availability:** count active runs for capacity ([89394f1](https://github.com/djm204/frankenbeast/commit/89394f14d0f51d35caddc0b02ca0fe8872bd102b))
+* **availability:** cover agent capacity resume paths ([2138e56](https://github.com/djm204/frankenbeast/commit/2138e56a47ca83740bca5e535598daa98494f3c1))
+* **availability:** harden capacity reservation edge cases ([98ee4e9](https://github.com/djm204/frankenbeast/commit/98ee4e92ce76567af2329671325d7ec0096cf29c))
+* **availability:** make capacity admission atomic ([950bc33](https://github.com/djm204/frankenbeast/commit/950bc33de3e7b449d9407fbe26ff1c2c4f234a65))
+* **availability:** report released reservation overflow ([d0ab1b7](https://github.com/djm204/frankenbeast/commit/d0ab1b7242d05e389b227ff08612e4f948d41fc5))
+* **availability:** reserve capacity atomically ([bf25840](https://github.com/djm204/frankenbeast/commit/bf258402b6d96285a13a6e87c4327e5adbcf7a1e))
+* **availability:** stabilize reservation accounting ([3988837](https://github.com/djm204/frankenbeast/commit/3988837578580bf944d6a67f19ebcb75bd0ef451))
+* bound provider error body diagnostics ([189e3b0](https://github.com/djm204/frankenbeast/commit/189e3b08b218bd4a6ad76db92c7f297fb0383fe6))
+* **cli:** reject zero port values ([94c26b6](https://github.com/djm204/frankenbeast/commit/94c26b6283c4918490ced9b355840fc0b6f00531))
+* **critique:** forward reflection max tokens ([891d990](https://github.com/djm204/frankenbeast/commit/891d990f24fed66da5b51f66052e0a60bc71af89)), closes [#2045](https://github.com/djm204/frankenbeast/issues/2045)
+* **deps:** bump the npm-security-and-maintenance group with 7 updates ([#2306](https://github.com/djm204/frankenbeast/issues/2306)) ([a2e56b6](https://github.com/djm204/frankenbeast/commit/a2e56b68098ba4916fd6c3ad7b5d1dda212c75a0))
+* **deps:** repair npm security and maintenance update ([4fd8ecc](https://github.com/djm204/frankenbeast/commit/4fd8eccf9b57960572d624aaa18ceac773fddcc0))
+* **dr:** close backup restore edge cases ([bfe8c56](https://github.com/djm204/frankenbeast/commit/bfe8c56412591ee8f0583a34a3faf92550128a67))
+* **dr:** close restore backup codex followups ([#2611](https://github.com/djm204/frankenbeast/issues/2611)) ([739f30d](https://github.com/djm204/frankenbeast/commit/739f30d8a9a3845f0fbbce1e44ea1e3a8bd6f87d))
+* **dr:** exclude keys and quarantine approvals ([4932cb4](https://github.com/djm204/frankenbeast/commit/4932cb4f9c2b726fd70757abe94891d53fe0c099))
+* **dr:** harden encrypted backup restore ([b89c0b6](https://github.com/djm204/frankenbeast/commit/b89c0b69d3a86702d682d9db1e817a2d46e4215a))
+* **dr:** narrow backups and validate dry runs ([8cfae48](https://github.com/djm204/frankenbeast/commit/8cfae482691a6dc7306ecc24110b53034691f957))
+* **dr:** quiesce and isolate restores ([8e1bc4d](https://github.com/djm204/frankenbeast/commit/8e1bc4d2c9bcae599109ec1cba62f59cea9838da))
+* enrich HTTP error context ([681a32d](https://github.com/djm204/frankenbeast/commit/681a32d638c3b818389746cf220b331d57821e37))
+* enrich HTTP error context ([79b5b40](https://github.com/djm204/frankenbeast/commit/79b5b4064d85b7d2037b30a6b90431cf893def94))
+* **governor:** resolve root test suite merge drift ([29270d5](https://github.com/djm204/frankenbeast/commit/29270d533f252535ff122b422d60095a949e6aab))
+* harden HTTP error body handling ([ba89762](https://github.com/djm204/frankenbeast/commit/ba8976259b36f86639c99382bf9da27ce9d12d8b))
+* harden HTTP error redaction ([e244b16](https://github.com/djm204/frankenbeast/commit/e244b16c21faaa562ea52cd2c7c0ef019e9fca6b))
+* **http:** scrub urls and cloned diagnostic streams ([62fb98c](https://github.com/djm204/frankenbeast/commit/62fb98c3d95a5514de2d96c97af14d96504ca0d8))
+* **learning:** resolve privacy lesson closeout conflicts ([c39ec0f](https://github.com/djm204/frankenbeast/commit/c39ec0fc1e3ebb18074e57409ab4077c93714afc))
+* **lint:** require parseInt radix arguments ([023d526](https://github.com/djm204/frankenbeast/commit/023d526a400bc1cd4f2a71bb134b47d750ad7ac0))
+* **memory:** add stale preference injection regression fixtures ([#2319](https://github.com/djm204/frankenbeast/issues/2319)) ([609971f](https://github.com/djm204/frankenbeast/commit/609971f7e9bc4789a5e504e0632ceb426f341211))
+* **orchestrator:** add crash-only worker restart contract ([#2560](https://github.com/djm204/frankenbeast/issues/2560)) ([ed23c8d](https://github.com/djm204/frankenbeast/commit/ed23c8ded62c71ffb79ad73a332644751bf039b6))
+* **orchestrator:** add dispatcher startup integrity checks ([#2271](https://github.com/djm204/frankenbeast/issues/2271)) ([d4c3947](https://github.com/djm204/frankenbeast/commit/d4c3947d2933276ce5ff763d5443ab86b46782d5))
+* **orchestrator:** add heartbeat monotonicity diagnostics ([#2349](https://github.com/djm204/frankenbeast/issues/2349)) ([2abc60e](https://github.com/djm204/frankenbeast/commit/2abc60ed68766cc9e414b94fc3432125a29a5923))
+* **orchestrator:** add state write transaction journal ([5a700b8](https://github.com/djm204/frankenbeast/commit/5a700b8a4d3824782410117a58352213128cdb06))
+* **orchestrator:** align Gemini API key availability ([#2061](https://github.com/djm204/frankenbeast/issues/2061)) ([ceead42](https://github.com/djm204/frankenbeast/commit/ceead4220edd4155c0bf2070875732c70ae79300))
+* **orchestrator:** bound beast run log growth ([#2404](https://github.com/djm204/frankenbeast/issues/2404)) ([c763d97](https://github.com/djm204/frankenbeast/commit/c763d97e31970a699353af6eab7ca47b75cd0f39))
+* **orchestrator:** bound JSON parsing inputs ([#2215](https://github.com/djm204/frankenbeast/issues/2215)) ([48e7556](https://github.com/djm204/frankenbeast/commit/48e7556e6574b620ea3ca460b30b95d1707c008d))
+* **orchestrator:** bound provider failure retries ([33718ea](https://github.com/djm204/frankenbeast/commit/33718ea2484d2fe8a21dc48a1ebfb7e8fdc73ba8)), closes [#1807](https://github.com/djm204/frankenbeast/issues/1807)
+* **orchestrator:** clean abandoned beast worktrees ([fc24446](https://github.com/djm204/frankenbeast/commit/fc2444614a7add519d4edaa0be22ea3744184e76)), closes [#1744](https://github.com/djm204/frankenbeast/issues/1744)
+* **orchestrator:** close beast attempt cleanup issue ([#2003](https://github.com/djm204/frankenbeast/issues/2003)) ([ae34c42](https://github.com/djm204/frankenbeast/commit/ae34c42ecba98db09aa5b43c097d8ecf0819170e))
+* **orchestrator:** cover 1Password keys with symbols ([#1997](https://github.com/djm204/frankenbeast/issues/1997)) ([e3d1ed7](https://github.com/djm204/frankenbeast/commit/e3d1ed7bbff2d78797c5de8ba18caef2b634f4f9)), closes [#1950](https://github.com/djm204/frankenbeast/issues/1950)
+* **orchestrator:** detect duplicate worker-card processes ([#2281](https://github.com/djm204/frankenbeast/issues/2281)) ([0ef8ec6](https://github.com/djm204/frankenbeast/commit/0ef8ec64345bc33f3d5a665a04be21821018385a))
+* **orchestrator:** harden beast event fallback cloning ([#2603](https://github.com/djm204/frankenbeast/issues/2603)) ([afb5e55](https://github.com/djm204/frankenbeast/commit/afb5e551dcbd54a1b924968fd7ab484da5b00292))
+* **orchestrator:** isolate chat runtime continuation by session ([#1996](https://github.com/djm204/frankenbeast/issues/1996)) ([befc35f](https://github.com/djm204/frankenbeast/commit/befc35f3be15887983c738eea2b3e4b0150f3808))
+* **orchestrator:** log CLI process kill failures ([#2214](https://github.com/djm204/frankenbeast/issues/2214)) ([d273e08](https://github.com/djm204/frankenbeast/commit/d273e08c4fa66897a70ce7a9551a0dea1b870691))
+* **orchestrator:** make chunk rewrites non-destructive ([#2592](https://github.com/djm204/frankenbeast/issues/2592)) ([b9cefad](https://github.com/djm204/frankenbeast/commit/b9cefad93e9c7c240d2096638547584bdd844344))
+* **orchestrator:** make kanban updates idempotent ([#2549](https://github.com/djm204/frankenbeast/issues/2549)) ([9523167](https://github.com/djm204/frankenbeast/commit/95231673319fca0ebbd9a94dd3d1b42d3ce715ce))
+* **orchestrator:** normalize workspace root patterns ([6db7a05](https://github.com/djm204/frankenbeast/commit/6db7a0556eaf98be8a0bfbf52d27e53919589611)), closes [#1953](https://github.com/djm204/frankenbeast/issues/1953)
+* **orchestrator:** parse config boolean env vars strictly ([#1403](https://github.com/djm204/frankenbeast/issues/1403)) ([e6086b3](https://github.com/djm204/frankenbeast/commit/e6086b39c7eefed545c300a950626640ee03cb2d))
+* **orchestrator:** parse unnumbered interview questions ([512d61f](https://github.com/djm204/frankenbeast/commit/512d61f42a8f184f3cb5724b5439adc9eefaeaf9)), closes [#1899](https://github.com/djm204/frankenbeast/issues/1899)
+* **orchestrator:** preflight github token capabilities ([#2253](https://github.com/djm204/frankenbeast/issues/2253)) ([d398a9b](https://github.com/djm204/frankenbeast/commit/d398a9be70dd0e793d4d3c87bc36ebc905f1f66b))
+* **orchestrator:** preserve comms transports in secret init ([#2562](https://github.com/djm204/frankenbeast/issues/2562)) ([00f3d12](https://github.com/djm204/frankenbeast/commit/00f3d12d0cbb60972a49f77f4d8f122f88189425))
+* **orchestrator:** preserve daemon interview validation ([a84b88c](https://github.com/djm204/frankenbeast/commit/a84b88c891fff76e9ac4416a6a872a82cd4269ef))
+* **orchestrator:** quarantine malformed init config fallback ([#2606](https://github.com/djm204/frankenbeast/issues/2606)) ([fcc3f5d](https://github.com/djm204/frankenbeast/commit/fcc3f5dbfa2f0d2b8b0f8640d05e95dbbd6b86d7))
+* **orchestrator:** reconcile beast queue on restart ([#2406](https://github.com/djm204/frankenbeast/issues/2406)) ([5f3077c](https://github.com/djm204/frankenbeast/commit/5f3077c6c401d032610fe4cff69fb0a4a888d1e2))
+* **orchestrator:** reject extra CLI positionals ([5e79de8](https://github.com/djm204/frankenbeast/commit/5e79de8bfcf6231a19693495f95dfd0e017fd480))
+* **orchestrator:** reject invalid numeric config env vars ([315c27c](https://github.com/djm204/frankenbeast/commit/315c27c1d608a0f6dd8d0a9d41d79e25cabcec54)), closes [#2063](https://github.com/djm204/frankenbeast/issues/2063)
+* **orchestrator:** reject invalid triage issue numbers ([#2025](https://github.com/djm204/frankenbeast/issues/2025)) ([db32719](https://github.com/djm204/frankenbeast/commit/db32719bfd51c49c26b7b62f60002606a1e08b50))
+* **orchestrator:** reject malformed dashboard static port ([5bae0f5](https://github.com/djm204/frankenbeast/commit/5bae0f56646fae02ac5abb942af0a8e43f71538a)), closes [#2085](https://github.com/djm204/frankenbeast/issues/2085)
+* **orchestrator:** reject stale approval decisions ([d3e85f2](https://github.com/djm204/frankenbeast/commit/d3e85f28dade49ceb3373840859ded2928d80c09))
+* **orchestrator:** reject stale approval responses ([#2148](https://github.com/djm204/frankenbeast/issues/2148)) ([3effbc1](https://github.com/djm204/frankenbeast/commit/3effbc152b40ceb0d5626b2cc73622d8fb57a028))
+* **orchestrator:** reject unknown beast status runs ([f971b4a](https://github.com/djm204/frankenbeast/commit/f971b4a929cb0a22770e30ee22ad81eaf0a6be0d)), closes [#1698](https://github.com/djm204/frankenbeast/issues/1698)
+* **orchestrator:** remove unsafe double casts ([#2243](https://github.com/djm204/frankenbeast/issues/2243)) ([c6494fa](https://github.com/djm204/frankenbeast/commit/c6494fac50fef4ae782de1f347e8c8a36d5bc2ff))
+* **orchestrator:** report partial Kanban write recovery state ([#2283](https://github.com/djm204/frankenbeast/issues/2283)) ([b3e7ad1](https://github.com/djm204/frankenbeast/commit/b3e7ad13dd7902b0c5f16d5e5082622bee2c861f))
+* **orchestrator:** require beasts action for mode flag ([#2000](https://github.com/djm204/frankenbeast/issues/2000)) ([f86a71d](https://github.com/djm204/frankenbeast/commit/f86a71ddb6b27c38486606ab349b36144bdc5783))
+* **orchestrator:** require review for new runtime tools ([50f268b](https://github.com/djm204/frankenbeast/commit/50f268b567b10e53a2cd4ce2903a0c99303508bb))
+* **orchestrator:** serialize chat session writes ([#2617](https://github.com/djm204/frankenbeast/issues/2617)) ([5e234b8](https://github.com/djm204/frankenbeast/commit/5e234b8102a5a1e8bf7215a1e1d29bd0f3e7030c))
+* **orchestrator:** sweep orphaned beast process groups ([#2274](https://github.com/djm204/frankenbeast/issues/2274)) ([878bb9d](https://github.com/djm204/frankenbeast/commit/878bb9dabebf9f9fc71d2a2e638ace1be787b59e))
+* **orchestrator:** treat empty issue filters as no-op ([840690b](https://github.com/djm204/frankenbeast/commit/840690b84ef52b798dd0a2d94064d3cbb8c054f1)), closes [#2020](https://github.com/djm204/frankenbeast/issues/2020)
+* **orchestrator:** validate beast rate limiter options ([e5be73b](https://github.com/djm204/frankenbeast/commit/e5be73b7e5a5c87bbac9cafaffde7d946ea6c0d1))
+* **orchestrator:** validate cached llm entries on read ([38a25ed](https://github.com/djm204/frankenbeast/commit/38a25ed3be5c8f186876f3156bcf89d108fcf0b1))
+* **orchestrator:** validate cached llm entries on read ([fe5ccd0](https://github.com/djm204/frankenbeast/commit/fe5ccd0b865bdb0f36098f00594b72605a8c4585))
+* **orchestrator:** validate chat session ids ([#2149](https://github.com/djm204/frankenbeast/issues/2149)) ([7677999](https://github.com/djm204/frankenbeast/commit/76779997a83d7cdf9063e4c417b8ab832e22456f))
+* **orchestrator:** validate init security mode ([#2190](https://github.com/djm204/frankenbeast/issues/2190)) ([ccb1d41](https://github.com/djm204/frankenbeast/commit/ccb1d414ee85dec182cce3043431e568371e2cd0))
+* **orchestrator:** validate replay content refs ([dbc2084](https://github.com/djm204/frankenbeast/commit/dbc208481fbacc9e76544d2f57d0578ce36a40c4)), closes [#2066](https://github.com/djm204/frankenbeast/issues/2066)
+* **orchestrator:** write cache JSON atomically ([#2559](https://github.com/djm204/frankenbeast/issues/2559)) ([0065ec0](https://github.com/djm204/frankenbeast/commit/0065ec086aeaf491f597695e37bce0794d10fbf1))
+* **orchestrator:** write skill credentials atomically ([022a941](https://github.com/djm204/frankenbeast/commit/022a941abff1d826da05bbcd0fce7384b129a3cc))
+* rate limit websocket chat messages before execution ([#1058](https://github.com/djm204/frankenbeast/issues/1058)) ([c43233b](https://github.com/djm204/frankenbeast/commit/c43233b7ffb95ab961be44e64989088ce4a31fe6))
+* redact auth data in HTTP errors ([69f5f05](https://github.com/djm204/frankenbeast/commit/69f5f0540bccb21ccf11b943ec43e598fa12095a))
+* **security:** audit HITL approval replay ([#2576](https://github.com/djm204/frankenbeast/issues/2576)) ([c89ea75](https://github.com/djm204/frankenbeast/commit/c89ea75593d8b75d1c787d978d1aedac15624f7b))
+* **security:** bound safe archive extraction ([#2299](https://github.com/djm204/frankenbeast/issues/2299)) ([96bbd83](https://github.com/djm204/frankenbeast/commit/96bbd839c846f3ae3ad1c8501c76104a6836efd4))
+* **security:** bound untrusted regex scanner inputs ([#2294](https://github.com/djm204/frankenbeast/issues/2294)) ([512f461](https://github.com/djm204/frankenbeast/commit/512f4615b126ee3c44079013bc9306bae8bee123))
+* **security:** constrain skill installer file writes ([#2309](https://github.com/djm204/frankenbeast/issues/2309)) ([e91e97d](https://github.com/djm204/frankenbeast/commit/e91e97d47fe446edce483a1d522004d3e4aaee75))
+* **security:** deny cross-profile state access by default ([20333ff](https://github.com/djm204/frankenbeast/commit/20333ff4f2c363c63dae976286a59817c5e98ae0)), closes [#1784](https://github.com/djm204/frankenbeast/issues/1784)
+* **security:** harden untrusted prompt context ([#2221](https://github.com/djm204/frankenbeast/issues/2221)) ([5cc5ca3](https://github.com/djm204/frankenbeast/commit/5cc5ca37cac440e33731f3173f3c370377aa2d5b))
+* **security:** protect local web controls ([#2295](https://github.com/djm204/frankenbeast/issues/2295)) ([9a8a914](https://github.com/djm204/frankenbeast/commit/9a8a9148854858be7062b2330f4b9cc168bb9aa8))
+* **security:** validate provider egress endpoints ([#2302](https://github.com/djm204/frankenbeast/issues/2302)) ([b6dde91](https://github.com/djm204/frankenbeast/commit/b6dde918e609bc451e2811f595ff2830f9157d06))
+* **stability:** add stale checkpoint lock detector ([#2275](https://github.com/djm204/frankenbeast/issues/2275)) ([00e9e79](https://github.com/djm204/frankenbeast/commit/00e9e79805ef0b8c9d8db68c596fe72f53dbf1ed))
+* **stability:** classify worker crash outcomes ([#2285](https://github.com/djm204/frankenbeast/issues/2285)) ([1bbbd84](https://github.com/djm204/frankenbeast/commit/1bbbd8461d705a5ef9fc283c7705e46c6aac4175))
+* **web:** preserve wizard launch selections ([#1478](https://github.com/djm204/frankenbeast/issues/1478)) ([002d39b](https://github.com/djm204/frankenbeast/commit/002d39ba6f27ae8a62ee72431aea5ab145be056c))
+
+
+### Refactoring
+
+* **orchestrator:** decompose god functions ([#2244](https://github.com/djm204/frankenbeast/issues/2244)) ([4e26a2d](https://github.com/djm204/frankenbeast/commit/4e26a2dddb27487c2c598f290f40f758ba59240c))
+
+
+### Miscellaneous
+
+* **memory:** merge main into review queue branch ([f3e0a23](https://github.com/djm204/frankenbeast/commit/f3e0a23812418b82591280e03cf803658695495c))
+* release main ([750094b](https://github.com/djm204/frankenbeast/commit/750094bab0859c49829b4abe85013a5007fc272b))
+* release main ([100e3a8](https://github.com/djm204/frankenbeast/commit/100e3a887b6fbd538e8a1b83f4e88ce4caf6c443))
+* release main ([#1892](https://github.com/djm204/frankenbeast/issues/1892)) ([8b3d61b](https://github.com/djm204/frankenbeast/commit/8b3d61ba99827525b5e60b647e1f1b9bb1877ace))
+* release main ([#2216](https://github.com/djm204/frankenbeast/issues/2216)) ([7b2a02d](https://github.com/djm204/frankenbeast/commit/7b2a02d44ce6d09321e7129811c6e81e9d04b35c))
+* release main ([#2217](https://github.com/djm204/frankenbeast/issues/2217)) ([fae513f](https://github.com/djm204/frankenbeast/commit/fae513fdd7115972f36a707db960800c64dd3b3e))
+* release main ([#2219](https://github.com/djm204/frankenbeast/issues/2219)) ([ee6de79](https://github.com/djm204/frankenbeast/commit/ee6de793f48d4d4b93ea86fb8dc36001c01dc09e))
+* release main ([#2222](https://github.com/djm204/frankenbeast/issues/2222)) ([40d3c99](https://github.com/djm204/frankenbeast/commit/40d3c9941e2d08d6d1b4c9994a3615152234b84b))
+* release main ([#2232](https://github.com/djm204/frankenbeast/issues/2232)) ([69fd8f3](https://github.com/djm204/frankenbeast/commit/69fd8f30e0492f56863942c8eac89c9ec285822f))
+* release main ([#2234](https://github.com/djm204/frankenbeast/issues/2234)) ([bdc6c17](https://github.com/djm204/frankenbeast/commit/bdc6c172184beefb391135e1119dee2cc8c42434))
+* release main ([#2236](https://github.com/djm204/frankenbeast/issues/2236)) ([c410dd1](https://github.com/djm204/frankenbeast/commit/c410dd1a54bc1346aad48b47d6d30a56e9a0a499))
+* release main ([#2239](https://github.com/djm204/frankenbeast/issues/2239)) ([dbcd153](https://github.com/djm204/frankenbeast/commit/dbcd1539d40a1f6dda7c7cf54bb39c09b5196eab))
+* release main ([#2241](https://github.com/djm204/frankenbeast/issues/2241)) ([dc95440](https://github.com/djm204/frankenbeast/commit/dc95440e1d5ab59a176760f6a29dd36812f53699))
+* release main ([#2245](https://github.com/djm204/frankenbeast/issues/2245)) ([c501037](https://github.com/djm204/frankenbeast/commit/c501037be1247eccc0a4cea1a25e6d9dcdebb41f))
+* release main ([#2279](https://github.com/djm204/frankenbeast/issues/2279)) ([4c3a8e7](https://github.com/djm204/frankenbeast/commit/4c3a8e7484e691f10ae942252dfaec213848e395))
+* release main ([#2286](https://github.com/djm204/frankenbeast/issues/2286)) ([1cd49cc](https://github.com/djm204/frankenbeast/commit/1cd49ccdc74e960f24e3ab0ec25ef63367ac862b))
+* release main ([#2287](https://github.com/djm204/frankenbeast/issues/2287)) ([dd3f90d](https://github.com/djm204/frankenbeast/commit/dd3f90d59539c685f66ff8619fc66fa00db4006f))
+* release main ([#2408](https://github.com/djm204/frankenbeast/issues/2408)) ([5545389](https://github.com/djm204/frankenbeast/commit/55453895d39a81c081dc9e919ac84f7750bfa2ee))
+* release main ([#2409](https://github.com/djm204/frankenbeast/issues/2409)) ([39306c3](https://github.com/djm204/frankenbeast/commit/39306c3d03ed85ffa3624c8aad9c3b963542533b))
+* release main ([#2553](https://github.com/djm204/frankenbeast/issues/2553)) ([1ca33c2](https://github.com/djm204/frankenbeast/commit/1ca33c2aa6e68792886ef599d1ac35bebcc8e3c9))
+
+
+### Documentation
+
+* **dr:** add corrupted worktree and queue runbook ([#2547](https://github.com/djm204/frankenbeast/issues/2547)) ([b143462](https://github.com/djm204/frankenbeast/commit/b14346247f3193a012db5a636298a4ffe1b44647))
+* remove PM-swarm terminology from Frankenbeast docs ([dcf183d](https://github.com/djm204/frankenbeast/commit/dcf183da6c8c176ecabd5278adbd6d3e6068be17))
+
+
+### Tests
+
+* align HTTP error body mocks with stream readers ([26d7f44](https://github.com/djm204/frankenbeast/commit/26d7f44ae91989d26bdd5c8cfe9fa5adacdbfee6))
+* **availability:** add burst dispatch load fixture ([#2261](https://github.com/djm204/frankenbeast/issues/2261)) ([a64b04c](https://github.com/djm204/frankenbeast/commit/a64b04c68d15b008235d29c33261be04138ad144))
+* **dr:** add corrupt state parser fixtures ([#2218](https://github.com/djm204/frankenbeast/issues/2218)) ([d168a48](https://github.com/djm204/frankenbeast/commit/d168a48fdddb7d838ea0c5ad97b201188efce2f1))
+* **dr:** add missing cron job recovery fixture ([#2246](https://github.com/djm204/frankenbeast/issues/2246)) ([e293d73](https://github.com/djm204/frankenbeast/commit/e293d73e251ae8ff9b4f8891edb078c619cfe834))
+* **memory:** add injection budget coverage ([#2187](https://github.com/djm204/frankenbeast/issues/2187)) ([82f9948](https://github.com/djm204/frankenbeast/commit/82f994855644bedfeda01f82d84c402f5228106e))
+* **memory:** cover cross-profile memory isolation ([#2574](https://github.com/djm204/frankenbeast/issues/2574)) ([daaacec](https://github.com/djm204/frankenbeast/commit/daaacecba86209552eeed73c38d667f36076cce3))
+* **orchestrator:** add deterministic event stream replay ([#2200](https://github.com/djm204/frankenbeast/issues/2200)) ([65ed2d8](https://github.com/djm204/frankenbeast/commit/65ed2d830ab4bd8c7a890a9952d9621db2c21bd0))
+* **orchestrator:** add flaky liveness replay fixture ([#2280](https://github.com/djm204/frankenbeast/issues/2280)) ([6df3e58](https://github.com/djm204/frankenbeast/commit/6df3e586c97be11e5773464e670e0ce5c381f2ed)), closes [#1806](https://github.com/djm204/frankenbeast/issues/1806)
+* **orchestrator:** add LLM chaos stability coverage ([cac1ee2](https://github.com/djm204/frankenbeast/commit/cac1ee2222f9465d99f479290279fc38a5cf280a))
+* **orchestrator:** bound issue scheduler liveness payloads ([#2346](https://github.com/djm204/frankenbeast/issues/2346)) ([fa6f09c](https://github.com/djm204/frankenbeast/commit/fa6f09c0b3c3e51c66a4f82e1bbfa6947fe77754))
+* **orchestrator:** cover cancellation stability ([#2348](https://github.com/djm204/frankenbeast/issues/2348)) ([afefd41](https://github.com/djm204/frankenbeast/commit/afefd4197320d9fac32f1619e605ca6e19142963))
+* **orchestrator:** cover generated command argv boundaries ([#2220](https://github.com/djm204/frankenbeast/issues/2220)) ([9a475cf](https://github.com/djm204/frankenbeast/commit/9a475cf8907353883ac975fd5fc372dda200bfe1))
+* **orchestrator:** cover Windows keychain target escaping ([b3170a3](https://github.com/djm204/frankenbeast/commit/b3170a3033973f8bdf3abd274dcf219e9a410e86)), closes [#1984](https://github.com/djm204/frankenbeast/issues/1984)
+* **orchestrator:** guard e2e zero-test discovery ([#1980](https://github.com/djm204/frankenbeast/issues/1980)) ([f8ca3da](https://github.com/djm204/frankenbeast/commit/f8ca3da95c037ffdd1ad355b254b30abb6235b49))
+* **orchestrator:** make Beast SSE stream tests event-driven ([#2163](https://github.com/djm204/frankenbeast/issues/2163)) ([1be3c82](https://github.com/djm204/frankenbeast/commit/1be3c828125c7819335080fa145b240fd9922adb))
+* **orchestrator:** wait for agent failure events ([#2159](https://github.com/djm204/frankenbeast/issues/2159)) ([6ab7a98](https://github.com/djm204/frankenbeast/commit/6ab7a98a122a5a23730bd56012ffe995cda03612))
+* **orchestrator:** wait for async log persistence ([e978f18](https://github.com/djm204/frankenbeast/commit/e978f18f8fff938be1ce70eb0a6c62cdba81c089))
+* **security:** add secret redaction regression suite ([#2575](https://github.com/djm204/frankenbeast/issues/2575)) ([04a708f](https://github.com/djm204/frankenbeast/commit/04a708fcf324599aab9c490718ecd625090482c8))
+* **security:** avoid gitleaks fixture secrets ([#2607](https://github.com/djm204/frankenbeast/issues/2607)) ([bbb7c87](https://github.com/djm204/frankenbeast/commit/bbb7c87d1621a778f6b521d84678f4009d15dafc)), closes [#2399](https://github.com/djm204/frankenbeast/issues/2399)
+* **stability:** add stream replay coverage ([#2578](https://github.com/djm204/frankenbeast/issues/2578)) ([92bacf0](https://github.com/djm204/frankenbeast/commit/92bacf068b14e2e6e25d97eca0f543afcad56a41))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/critique bumped from 0.9.1 to 0.9.2
+    * @franken/governor bumped from 0.7.2 to 0.7.3
+    * @franken/types bumped from 0.13.0 to 0.14.0
+    * @franken/observer bumped from 0.10.1 to 0.11.0
+    * @franken/planner bumped from 0.4.20 to 0.4.21
+    * @franken/brain bumped from 0.14.0 to 0.15.0
+
+## [0.53.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.52.0...@franken/orchestrator-v0.53.0) (2026-07-17)
+
+
+### Features
+
+* **availability:** add beast daemon drain mode ([#2265](https://github.com/djm204/frankenbeast/issues/2265)) ([6ec5847](https://github.com/djm204/frankenbeast/commit/6ec5847d3cc3d3d2ae66b5c8601133aeec36dae7)), closes [#1826](https://github.com/djm204/frankenbeast/issues/1826)
+* **availability:** add capacity watermark alerts ([#2266](https://github.com/djm204/frankenbeast/issues/2266)) ([219ffd3](https://github.com/djm204/frankenbeast/commit/219ffd34483126e6f09b11c17b86d89226c39280))
+* **availability:** add degraded worker routing policy ([#2272](https://github.com/djm204/frankenbeast/issues/2272)) ([a2d8f80](https://github.com/djm204/frankenbeast/commit/a2d8f800cbc1bddd0bb04b8d6f996984eb939b68))
+* **availability:** add dependency circuit breakers ([#2273](https://github.com/djm204/frankenbeast/issues/2273)) ([08abbea](https://github.com/djm204/frankenbeast/commit/08abbea858c765c4d1d84ecc18c3e809869705a1))
+* **availability:** add issue runner backpressure ([#2223](https://github.com/djm204/frankenbeast/issues/2223)) ([f61855e](https://github.com/djm204/frankenbeast/commit/f61855e62766f812c6f92e2814a4ec51f2b9f2b1))
+* **availability:** add provider outage incident banner ([#2270](https://github.com/djm204/frankenbeast/issues/2270)) ([3d37834](https://github.com/djm204/frankenbeast/commit/3d3783417ea57f9bea4d99c9b49cd62f42a9c160))
+* **availability:** add read-only degraded mode ([#2402](https://github.com/djm204/frankenbeast/issues/2402)) ([4dcd49b](https://github.com/djm204/frankenbeast/commit/4dcd49b14a856330c6ae287124c04eb2928b4c05))
+* **availability:** add scheduler fairness report ([#2268](https://github.com/djm204/frankenbeast/issues/2268)) ([2494097](https://github.com/djm204/frankenbeast/commit/2494097dfdeaabd49848908aa38bb630f93404e7)), closes [#1821](https://github.com/djm204/frankenbeast/issues/1821)
+* **availability:** audit model provider failover ([#2263](https://github.com/djm204/frankenbeast/issues/2263)) ([d3f0ac2](https://github.com/djm204/frankenbeast/commit/d3f0ac209a82a02786c12faf518bb695fae6341e))
+* **availability:** reserve urgent agent capacity ([70cd020](https://github.com/djm204/frankenbeast/commit/70cd020b52cd3418fd61d00f0d29c8fe49b319ef))
+* **availability:** reserve urgent agent capacity ([8dc1447](https://github.com/djm204/frankenbeast/commit/8dc1447f90088b69b1ce2f3147ac64fc3f5064d2))
+* **beasts:** add maintenance dispatch guardrails ([#2400](https://github.com/djm204/frankenbeast/issues/2400)) ([f50e966](https://github.com/djm204/frankenbeast/commit/f50e966246a1a05902fd0054ffa79bb59ffe35e7))
+* **comms:** add delivery sensitivity policy ([#2037](https://github.com/djm204/frankenbeast/issues/2037)) ([cf0c945](https://github.com/djm204/frankenbeast/commit/cf0c94552c79bbb2f80ca27f72c2116217eb2f6c))
+* **dashboard:** surface dependency availability ([#2347](https://github.com/djm204/frankenbeast/issues/2347)) ([0298dd5](https://github.com/djm204/frankenbeast/commit/0298dd58133a30015f3487893d64ef0d3d02dbb7))
+* **dr:** add approval ledger recovery report ([#2256](https://github.com/djm204/frankenbeast/issues/2256)) ([c0413fb](https://github.com/djm204/frankenbeast/commit/c0413fbf6a771e84eb126db6417badbf94bf0aaf))
+* **dr:** add backup encryption verification report ([#2252](https://github.com/djm204/frankenbeast/issues/2252)) ([9a9b957](https://github.com/djm204/frankenbeast/commit/9a9b957a3b7b05e8c17be5de4e30cb131f19e9bf))
+* **dr:** add cross-file state consistency checker ([#2260](https://github.com/djm204/frankenbeast/issues/2260)) ([78426d4](https://github.com/djm204/frankenbeast/commit/78426d4e0efe379252f145df3cdfb4512051f877))
+* **dr:** add encrypted state backup restore ([f792f16](https://github.com/djm204/frankenbeast/commit/f792f1678442327422c8daf00ec39f719474adbb))
+* **dr:** add encrypted state backup restore ([c96d585](https://github.com/djm204/frankenbeast/commit/c96d5853be5f54ae463f73feed014e000653685b))
+* **dr:** add point-in-time backup manifest ([#2258](https://github.com/djm204/frankenbeast/issues/2258)) ([bd599d6](https://github.com/djm204/frankenbeast/commit/bd599d64c11bf3233ddfc51937c989f8874ee430)), closes [#1830](https://github.com/djm204/frankenbeast/issues/1830)
+* **dr:** add recovery-mode destructive action guard ([#2249](https://github.com/djm204/frankenbeast/issues/2249)) ([f126546](https://github.com/djm204/frankenbeast/commit/f126546a24625d2279cea5fbb4e8abbdf571ec36))
+* **dr:** add restore dry-run JSON output ([#2259](https://github.com/djm204/frankenbeast/issues/2259)) ([d6aac73](https://github.com/djm204/frankenbeast/commit/d6aac73b91ddbf62f6bff5bb1dddd07ad2d3d2f2))
+* **dr:** add restore preview conflict detector ([#2231](https://github.com/djm204/frankenbeast/issues/2231)) ([0d6f9ed](https://github.com/djm204/frankenbeast/commit/0d6f9ed5c4de89b4e3c50bd3db73a34772d81836))
+* **dr:** add state snapshot diff tool ([#2403](https://github.com/djm204/frankenbeast/issues/2403)) ([f80c473](https://github.com/djm204/frankenbeast/commit/f80c4738c55fa0061faf153fa92b81d2cb9939ed))
+* **dr:** block Kanban card resurrection ([#2255](https://github.com/djm204/frankenbeast/issues/2255)) ([3fdb87c](https://github.com/djm204/frankenbeast/commit/3fdb87c7f105951f5fdfc7c9d889cb0057c718dc)), closes [#1834](https://github.com/djm204/frankenbeast/issues/1834)
+* **dr:** verify memory backups ([#2254](https://github.com/djm204/frankenbeast/issues/2254)) ([0be3e69](https://github.com/djm204/frankenbeast/commit/0be3e69e4c97a5126243bab17967bedd4bd898d6))
+* **learning:** add PM handoff quality rubric ([#1990](https://github.com/djm204/frankenbeast/issues/1990)) ([cfa52f2](https://github.com/djm204/frankenbeast/commit/cfa52f24bb9b4f6d467f7ca2388fe972aa09aef8))
+* **memory:** add duplicate memory report ([#2328](https://github.com/djm204/frankenbeast/issues/2328)) ([20325c6](https://github.com/djm204/frankenbeast/commit/20325c65e95de587bfda6440899493b61aaaa885))
+* **memory:** add memory access audit trail ([#2317](https://github.com/djm204/frankenbeast/issues/2317)) ([ef889da](https://github.com/djm204/frankenbeast/commit/ef889dae092d996a6ca463e5abcaf5ed4d296158))
+* **memory:** add project-scoped snapshot builder ([#2343](https://github.com/djm204/frankenbeast/issues/2343)) ([8d1142b](https://github.com/djm204/frankenbeast/commit/8d1142b32eb4c65ea14c5bb41f5ef82eaa0b1a4f)), closes [#1758](https://github.com/djm204/frankenbeast/issues/1758)
+* **memory:** add redacted project memory export ([#2321](https://github.com/djm204/frankenbeast/issues/2321)) ([6a7b8bb](https://github.com/djm204/frankenbeast/commit/6a7b8bb1dfbbc10282e7cd90ac34936a06943d15))
+* **memory:** add snapshot diff command ([#1890](https://github.com/djm204/frankenbeast/issues/1890)) ([c7ab1a1](https://github.com/djm204/frankenbeast/commit/c7ab1a1ce10f463a05ebd6a1f316ee39915712c0))
+* **orchestrator:** add approval readiness health endpoint ([#2262](https://github.com/djm204/frankenbeast/issues/2262)) ([e5ba904](https://github.com/djm204/frankenbeast/commit/e5ba904987618708bacc27731ae6f565d90e02d6))
+* **orchestrator:** add automation dead-letter queue ([#2344](https://github.com/djm204/frankenbeast/issues/2344)) ([3a68010](https://github.com/djm204/frankenbeast/commit/3a680103198cdcb5b7341c61ce362a7f0b18074e))
+* **orchestrator:** add DR process cleanup plan ([#2397](https://github.com/djm204/frankenbeast/issues/2397)) ([105e3fb](https://github.com/djm204/frankenbeast/commit/105e3fb20790dd9855ba735fec1e68a2b9aa23fe))
+* **orchestrator:** add per-lane egress policy ([#2233](https://github.com/djm204/frankenbeast/issues/2233)) ([5d9cdfe](https://github.com/djm204/frankenbeast/commit/5d9cdfeab65394bf5759059d338d2e62963cc77f))
+* **orchestrator:** add provider circuit breakers ([#2298](https://github.com/djm204/frankenbeast/issues/2298)) ([e246807](https://github.com/djm204/frankenbeast/commit/e246807078a376b8abf231a379db9b040fae01df))
+* **orchestrator:** add queue priority aging ([#2351](https://github.com/djm204/frankenbeast/issues/2351)) ([69d30c2](https://github.com/djm204/frankenbeast/commit/69d30c2c37d50675bc1dd23bc29d3e085e896360)), closes [#1748](https://github.com/djm204/frankenbeast/issues/1748)
+* **orchestrator:** add scoped credential inventory ([#2078](https://github.com/djm204/frankenbeast/issues/2078)) ([eb2fa82](https://github.com/djm204/frankenbeast/commit/eb2fa82184efca8a5572f5df2583558e88fc758c))
+* **orchestrator:** add stale dependency cache fallback ([#2267](https://github.com/djm204/frankenbeast/issues/2267)) ([52906fd](https://github.com/djm204/frankenbeast/commit/52906fd55282d97f4101214de82f4dc5bd3a5517))
+* **orchestrator:** track redaction provenance ([#2110](https://github.com/djm204/frankenbeast/issues/2110)) ([2f40524](https://github.com/djm204/frankenbeast/commit/2f40524b54854a5d3402548bd8ae62a3bbe46ccc))
+* **stability:** add stuck-run watchdog hints ([#2550](https://github.com/djm204/frankenbeast/issues/2550)) ([52f064a](https://github.com/djm204/frankenbeast/commit/52f064af0a5dc31b9ceccf3643c79df66094667f))
+
+
+### Bug Fixes
+
+* **availability:** account released reservation overflow ([50378ec](https://github.com/djm204/frankenbeast/commit/50378ec2da13e92ca702258d63876b8a8711c35b))
+* **availability:** address reservation Codex followups ([e107670](https://github.com/djm204/frankenbeast/commit/e10767014fef668e7561a32c357b192f5430d7ac))
+* **availability:** address restart capacity review ([9d30df8](https://github.com/djm204/frankenbeast/commit/9d30df86e7838e4267fd3e434918f30601225e4b))
+* **availability:** close capacity reservation bypasses ([9fa1081](https://github.com/djm204/frankenbeast/commit/9fa10816e885367c58ade4f6f831c4c366f07693))
+* **availability:** complete reservation edge handling ([e268952](https://github.com/djm204/frankenbeast/commit/e268952ead7724785d0a5c4027abf5c854742851))
+* **availability:** count active runs for capacity ([89394f1](https://github.com/djm204/frankenbeast/commit/89394f14d0f51d35caddc0b02ca0fe8872bd102b))
+* **availability:** cover agent capacity resume paths ([2138e56](https://github.com/djm204/frankenbeast/commit/2138e56a47ca83740bca5e535598daa98494f3c1))
+* **availability:** harden capacity reservation edge cases ([98ee4e9](https://github.com/djm204/frankenbeast/commit/98ee4e92ce76567af2329671325d7ec0096cf29c))
+* **availability:** make capacity admission atomic ([950bc33](https://github.com/djm204/frankenbeast/commit/950bc33de3e7b449d9407fbe26ff1c2c4f234a65))
+* **availability:** report released reservation overflow ([d0ab1b7](https://github.com/djm204/frankenbeast/commit/d0ab1b7242d05e389b227ff08612e4f948d41fc5))
+* **availability:** reserve capacity atomically ([bf25840](https://github.com/djm204/frankenbeast/commit/bf258402b6d96285a13a6e87c4327e5adbcf7a1e))
+* **availability:** stabilize reservation accounting ([3988837](https://github.com/djm204/frankenbeast/commit/3988837578580bf944d6a67f19ebcb75bd0ef451))
+* bound provider error body diagnostics ([189e3b0](https://github.com/djm204/frankenbeast/commit/189e3b08b218bd4a6ad76db92c7f297fb0383fe6))
+* **deps:** bump the npm-security-and-maintenance group with 7 updates ([#2306](https://github.com/djm204/frankenbeast/issues/2306)) ([a2e56b6](https://github.com/djm204/frankenbeast/commit/a2e56b68098ba4916fd6c3ad7b5d1dda212c75a0))
+* **deps:** repair npm security and maintenance update ([4fd8ecc](https://github.com/djm204/frankenbeast/commit/4fd8eccf9b57960572d624aaa18ceac773fddcc0))
+* **dr:** close backup restore edge cases ([bfe8c56](https://github.com/djm204/frankenbeast/commit/bfe8c56412591ee8f0583a34a3faf92550128a67))
+* **dr:** exclude keys and quarantine approvals ([4932cb4](https://github.com/djm204/frankenbeast/commit/4932cb4f9c2b726fd70757abe94891d53fe0c099))
+* **dr:** harden encrypted backup restore ([b89c0b6](https://github.com/djm204/frankenbeast/commit/b89c0b69d3a86702d682d9db1e817a2d46e4215a))
+* **dr:** narrow backups and validate dry runs ([8cfae48](https://github.com/djm204/frankenbeast/commit/8cfae482691a6dc7306ecc24110b53034691f957))
+* **dr:** quiesce and isolate restores ([8e1bc4d](https://github.com/djm204/frankenbeast/commit/8e1bc4d2c9bcae599109ec1cba62f59cea9838da))
+* enrich HTTP error context ([681a32d](https://github.com/djm204/frankenbeast/commit/681a32d638c3b818389746cf220b331d57821e37))
+* enrich HTTP error context ([79b5b40](https://github.com/djm204/frankenbeast/commit/79b5b4064d85b7d2037b30a6b90431cf893def94))
+* **governor:** resolve root test suite merge drift ([29270d5](https://github.com/djm204/frankenbeast/commit/29270d533f252535ff122b422d60095a949e6aab))
+* harden HTTP error body handling ([ba89762](https://github.com/djm204/frankenbeast/commit/ba8976259b36f86639c99382bf9da27ce9d12d8b))
+* harden HTTP error redaction ([e244b16](https://github.com/djm204/frankenbeast/commit/e244b16c21faaa562ea52cd2c7c0ef019e9fca6b))
+* **http:** scrub urls and cloned diagnostic streams ([62fb98c](https://github.com/djm204/frankenbeast/commit/62fb98c3d95a5514de2d96c97af14d96504ca0d8))
+* **learning:** resolve privacy lesson closeout conflicts ([c39ec0f](https://github.com/djm204/frankenbeast/commit/c39ec0fc1e3ebb18074e57409ab4077c93714afc))
+* **lint:** require parseInt radix arguments ([023d526](https://github.com/djm204/frankenbeast/commit/023d526a400bc1cd4f2a71bb134b47d750ad7ac0))
+* **memory:** add stale preference injection regression fixtures ([#2319](https://github.com/djm204/frankenbeast/issues/2319)) ([609971f](https://github.com/djm204/frankenbeast/commit/609971f7e9bc4789a5e504e0632ceb426f341211))
+* **orchestrator:** accept common interview approvals ([#1918](https://github.com/djm204/frankenbeast/issues/1918)) ([4e2770d](https://github.com/djm204/frankenbeast/commit/4e2770d3d506d1e9313ee5af5b07f30c361a0185))
+* **orchestrator:** add dispatcher startup integrity checks ([#2271](https://github.com/djm204/frankenbeast/issues/2271)) ([d4c3947](https://github.com/djm204/frankenbeast/commit/d4c3947d2933276ce5ff763d5443ab86b46782d5))
+* **orchestrator:** add heartbeat monotonicity diagnostics ([#2349](https://github.com/djm204/frankenbeast/issues/2349)) ([2abc60e](https://github.com/djm204/frankenbeast/commit/2abc60ed68766cc9e414b94fc3432125a29a5923))
+* **orchestrator:** add state write transaction journal ([5a700b8](https://github.com/djm204/frankenbeast/commit/5a700b8a4d3824782410117a58352213128cdb06))
+* **orchestrator:** align Gemini API key availability ([#2061](https://github.com/djm204/frankenbeast/issues/2061)) ([ceead42](https://github.com/djm204/frankenbeast/commit/ceead4220edd4155c0bf2070875732c70ae79300))
+* **orchestrator:** allow global flags before subcommand ([b4a996f](https://github.com/djm204/frankenbeast/commit/b4a996fd231fec667ccdadb2182a5fc94ae5572b)), closes [#1902](https://github.com/djm204/frankenbeast/issues/1902)
+* **orchestrator:** bound beast run log growth ([#2404](https://github.com/djm204/frankenbeast/issues/2404)) ([c763d97](https://github.com/djm204/frankenbeast/commit/c763d97e31970a699353af6eab7ca47b75cd0f39))
+* **orchestrator:** bound JSON parsing inputs ([#2215](https://github.com/djm204/frankenbeast/issues/2215)) ([48e7556](https://github.com/djm204/frankenbeast/commit/48e7556e6574b620ea3ca460b30b95d1707c008d))
+* **orchestrator:** bound provider failure retries ([33718ea](https://github.com/djm204/frankenbeast/commit/33718ea2484d2fe8a21dc48a1ebfb7e8fdc73ba8)), closes [#1807](https://github.com/djm204/frankenbeast/issues/1807)
+* **orchestrator:** cap context snapshot imports ([#1964](https://github.com/djm204/frankenbeast/issues/1964)) ([03f2559](https://github.com/djm204/frankenbeast/commit/03f2559d1cba29b5b690f8e8b9c9992c067ad7c0))
+* **orchestrator:** clean abandoned beast worktrees ([fc24446](https://github.com/djm204/frankenbeast/commit/fc2444614a7add519d4edaa0be22ea3744184e76)), closes [#1744](https://github.com/djm204/frankenbeast/issues/1744)
+* **orchestrator:** clear approval metadata in response ([23c4cd2](https://github.com/djm204/frankenbeast/commit/23c4cd2fcb271654728494f157be6cf8905ef0f9))
+* **orchestrator:** close beast attempt cleanup issue ([#2003](https://github.com/djm204/frankenbeast/issues/2003)) ([ae34c42](https://github.com/djm204/frankenbeast/commit/ae34c42ecba98db09aa5b43c097d8ecf0819170e))
+* **orchestrator:** cover 1Password keys with symbols ([#1997](https://github.com/djm204/frankenbeast/issues/1997)) ([e3d1ed7](https://github.com/djm204/frankenbeast/commit/e3d1ed7bbff2d78797c5de8ba18caef2b634f4f9)), closes [#1950](https://github.com/djm204/frankenbeast/issues/1950)
+* **orchestrator:** detect duplicate worker-card processes ([#2281](https://github.com/djm204/frankenbeast/issues/2281)) ([0ef8ec6](https://github.com/djm204/frankenbeast/commit/0ef8ec64345bc33f3d5a665a04be21821018385a))
+* **orchestrator:** escape Windows keychain targets ([c25ee1d](https://github.com/djm204/frankenbeast/commit/c25ee1d3ed765d8cadf838586e90f8d6c07f6ec9))
+* **orchestrator:** evict expired beast rate-limit counters ([e7cf20c](https://github.com/djm204/frankenbeast/commit/e7cf20c96a95301fa04a69a3ac0ce6b6c140e368)), closes [#1009](https://github.com/djm204/frankenbeast/issues/1009)
+* **orchestrator:** handle invalid init JSON ([#1621](https://github.com/djm204/frankenbeast/issues/1621)) ([b64be91](https://github.com/djm204/frankenbeast/commit/b64be91e667054dbdc6023c155528b681d791716))
+* **orchestrator:** harden analytics filter inputs ([426fb83](https://github.com/djm204/frankenbeast/commit/426fb8327e6bfad859058c730b6f42a9724ff1dd)), closes [#1799](https://github.com/djm204/frankenbeast/issues/1799)
+* **orchestrator:** harden approval command replay ([#1915](https://github.com/djm204/frankenbeast/issues/1915)) ([af07a0d](https://github.com/djm204/frankenbeast/commit/af07a0d973cf7470665186549b49b284b71a397c))
+* **orchestrator:** harden browser control cookie mutations ([#1959](https://github.com/djm204/frankenbeast/issues/1959)) ([e63df06](https://github.com/djm204/frankenbeast/commit/e63df068734089145fb8c9b371899d73599eeb04))
+* **orchestrator:** harden cleanup symlink handling ([#1927](https://github.com/djm204/frankenbeast/issues/1927)) ([de6a322](https://github.com/djm204/frankenbeast/commit/de6a3227a9a41dd134b465e0dc9b710d64a1ae57))
+* **orchestrator:** harden unscoped snapshot restores ([#1565](https://github.com/djm204/frankenbeast/issues/1565)) ([a88f53e](https://github.com/djm204/frankenbeast/commit/a88f53e649e1f7cb803d5a7609b711269eb7a8a6))
+* **orchestrator:** isolate chat runtime continuation by session ([#1996](https://github.com/djm204/frankenbeast/issues/1996)) ([befc35f](https://github.com/djm204/frankenbeast/commit/befc35f3be15887983c738eea2b3e4b0150f3808))
+* **orchestrator:** log CLI process kill failures ([#2214](https://github.com/djm204/frankenbeast/issues/2214)) ([d273e08](https://github.com/djm204/frankenbeast/commit/d273e08c4fa66897a70ce7a9551a0dea1b870691))
+* **orchestrator:** make kanban updates idempotent ([#2549](https://github.com/djm204/frankenbeast/issues/2549)) ([9523167](https://github.com/djm204/frankenbeast/commit/95231673319fca0ebbd9a94dd3d1b42d3ce715ce))
+* **orchestrator:** normalize workspace root patterns ([6db7a05](https://github.com/djm204/frankenbeast/commit/6db7a0556eaf98be8a0bfbf52d27e53919589611)), closes [#1953](https://github.com/djm204/frankenbeast/issues/1953)
+* **orchestrator:** parse config boolean env vars strictly ([#1403](https://github.com/djm204/frankenbeast/issues/1403)) ([e6086b3](https://github.com/djm204/frankenbeast/commit/e6086b39c7eefed545c300a950626640ee03cb2d))
+* **orchestrator:** parse unnumbered interview questions ([512d61f](https://github.com/djm204/frankenbeast/commit/512d61f42a8f184f3cb5724b5439adc9eefaeaf9)), closes [#1899](https://github.com/djm204/frankenbeast/issues/1899)
+* **orchestrator:** preflight github token capabilities ([#2253](https://github.com/djm204/frankenbeast/issues/2253)) ([d398a9b](https://github.com/djm204/frankenbeast/commit/d398a9be70dd0e793d4d3c87bc36ebc905f1f66b))
+* **orchestrator:** preserve comms transports in secret init ([#2562](https://github.com/djm204/frankenbeast/issues/2562)) ([00f3d12](https://github.com/djm204/frankenbeast/commit/00f3d12d0cbb60972a49f77f4d8f122f88189425))
+* **orchestrator:** reconcile beast queue on restart ([#2406](https://github.com/djm204/frankenbeast/issues/2406)) ([5f3077c](https://github.com/djm204/frankenbeast/commit/5f3077c6c401d032610fe4cff69fb0a4a888d1e2))
+* **orchestrator:** redact secret-like logger metadata ([b16ba4a](https://github.com/djm204/frankenbeast/commit/b16ba4ab7c0219267e44eb15ed4350738d4418c2)), closes [#1801](https://github.com/djm204/frankenbeast/issues/1801)
+* **orchestrator:** reject extra CLI positionals ([5e79de8](https://github.com/djm204/frankenbeast/commit/5e79de8bfcf6231a19693495f95dfd0e017fd480))
+* **orchestrator:** reject invalid triage issue numbers ([#2025](https://github.com/djm204/frankenbeast/issues/2025)) ([db32719](https://github.com/djm204/frankenbeast/commit/db32719bfd51c49c26b7b62f60002606a1e08b50))
+* **orchestrator:** reject malformed dashboard static port ([5bae0f5](https://github.com/djm204/frankenbeast/commit/5bae0f56646fae02ac5abb942af0a8e43f71538a)), closes [#2085](https://github.com/djm204/frankenbeast/issues/2085)
+* **orchestrator:** reject stale approval chat input ([#1971](https://github.com/djm204/frankenbeast/issues/1971)) ([9350e11](https://github.com/djm204/frankenbeast/commit/9350e110c3a23b79f96e7de4a1bf23393938baf8))
+* **orchestrator:** reject stale approval decisions ([d3e85f2](https://github.com/djm204/frankenbeast/commit/d3e85f28dade49ceb3373840859ded2928d80c09))
+* **orchestrator:** reject stale approval responses ([#2148](https://github.com/djm204/frankenbeast/issues/2148)) ([3effbc1](https://github.com/djm204/frankenbeast/commit/3effbc152b40ceb0d5626b2cc73622d8fb57a028))
+* **orchestrator:** reject unknown beast status runs ([f971b4a](https://github.com/djm204/frankenbeast/commit/f971b4a929cb0a22770e30ee22ad81eaf0a6be0d)), closes [#1698](https://github.com/djm204/frankenbeast/issues/1698)
+* **orchestrator:** remove unsafe double casts ([#2243](https://github.com/djm204/frankenbeast/issues/2243)) ([c6494fa](https://github.com/djm204/frankenbeast/commit/c6494fac50fef4ae782de1f347e8c8a36d5bc2ff))
+* **orchestrator:** report corrupt Beast JSON hydration ([32a9096](https://github.com/djm204/frankenbeast/commit/32a90967a23fc2b83a69bb6cc20e56a5b071d4bb)), closes [#1008](https://github.com/djm204/frankenbeast/issues/1008)
+* **orchestrator:** report partial Kanban write recovery state ([#2283](https://github.com/djm204/frankenbeast/issues/2283)) ([b3e7ad1](https://github.com/djm204/frankenbeast/commit/b3e7ad13dd7902b0c5f16d5e5082622bee2c861f))
+* **orchestrator:** require beasts action for mode flag ([#2000](https://github.com/djm204/frankenbeast/issues/2000)) ([f86a71d](https://github.com/djm204/frankenbeast/commit/f86a71ddb6b27c38486606ab349b36144bdc5783))
+* **orchestrator:** require review for new runtime tools ([50f268b](https://github.com/djm204/frankenbeast/commit/50f268b567b10e53a2cd4ce2903a0c99303508bb))
+* **orchestrator:** route comms reject actions through slash command ([41a5286](https://github.com/djm204/frankenbeast/commit/41a5286bce985053a43d22bbf170c9289bd42982))
+* **orchestrator:** support managed chat rejection ([#1936](https://github.com/djm204/frankenbeast/issues/1936)) ([0552f23](https://github.com/djm204/frankenbeast/commit/0552f2374303c900f311162b699b99d2002c99b3))
+* **orchestrator:** sweep orphaned beast process groups ([#2274](https://github.com/djm204/frankenbeast/issues/2274)) ([878bb9d](https://github.com/djm204/frankenbeast/commit/878bb9dabebf9f9fc71d2a2e638ace1be787b59e))
+* **orchestrator:** treat empty issue filters as no-op ([840690b](https://github.com/djm204/frankenbeast/commit/840690b84ef52b798dd0a2d94064d3cbb8c054f1)), closes [#2020](https://github.com/djm204/frankenbeast/issues/2020)
+* **orchestrator:** validate cached llm entries on read ([38a25ed](https://github.com/djm204/frankenbeast/commit/38a25ed3be5c8f186876f3156bcf89d108fcf0b1))
+* **orchestrator:** validate cached llm entries on read ([fe5ccd0](https://github.com/djm204/frankenbeast/commit/fe5ccd0b865bdb0f36098f00594b72605a8c4585))
+* **orchestrator:** validate chat session ids ([#2149](https://github.com/djm204/frankenbeast/issues/2149)) ([7677999](https://github.com/djm204/frankenbeast/commit/76779997a83d7cdf9063e4c417b8ab832e22456f))
+* **orchestrator:** validate init security mode ([#2190](https://github.com/djm204/frankenbeast/issues/2190)) ([ccb1d41](https://github.com/djm204/frankenbeast/commit/ccb1d414ee85dec182cce3043431e568371e2cd0))
+* **orchestrator:** validate replay content refs ([dbc2084](https://github.com/djm204/frankenbeast/commit/dbc208481fbacc9e76544d2f57d0578ce36a40c4)), closes [#2066](https://github.com/djm204/frankenbeast/issues/2066)
+* **orchestrator:** wrap malformed run config JSON errors ([#1934](https://github.com/djm204/frankenbeast/issues/1934)) ([fed08f3](https://github.com/djm204/frankenbeast/commit/fed08f386a798eff14a6a7f82535237e013083ba))
+* **orchestrator:** write cache JSON atomically ([#2559](https://github.com/djm204/frankenbeast/issues/2559)) ([0065ec0](https://github.com/djm204/frankenbeast/commit/0065ec086aeaf491f597695e37bce0794d10fbf1))
+* **orchestrator:** write skill credentials atomically ([022a941](https://github.com/djm204/frankenbeast/commit/022a941abff1d826da05bbcd0fce7384b129a3cc))
+* rate limit websocket chat messages before execution ([#1058](https://github.com/djm204/frankenbeast/issues/1058)) ([c43233b](https://github.com/djm204/frankenbeast/commit/c43233b7ffb95ab961be44e64989088ce4a31fe6))
+* redact auth data in HTTP errors ([69f5f05](https://github.com/djm204/frankenbeast/commit/69f5f0540bccb21ccf11b943ec43e598fa12095a))
+* **security:** bound safe archive extraction ([#2299](https://github.com/djm204/frankenbeast/issues/2299)) ([96bbd83](https://github.com/djm204/frankenbeast/commit/96bbd839c846f3ae3ad1c8501c76104a6836efd4))
+* **security:** bound untrusted regex scanner inputs ([#2294](https://github.com/djm204/frankenbeast/issues/2294)) ([512f461](https://github.com/djm204/frankenbeast/commit/512f4615b126ee3c44079013bc9306bae8bee123))
+* **security:** constrain skill installer file writes ([#2309](https://github.com/djm204/frankenbeast/issues/2309)) ([e91e97d](https://github.com/djm204/frankenbeast/commit/e91e97d47fe446edce483a1d522004d3e4aaee75))
+* **security:** deny cross-profile state access by default ([20333ff](https://github.com/djm204/frankenbeast/commit/20333ff4f2c363c63dae976286a59817c5e98ae0)), closes [#1784](https://github.com/djm204/frankenbeast/issues/1784)
+* **security:** harden token comparisons ([#1961](https://github.com/djm204/frankenbeast/issues/1961)) ([82321ea](https://github.com/djm204/frankenbeast/commit/82321eae757df4eb7b78fad07d5752689a5402f8))
+* **security:** harden untrusted prompt context ([#2221](https://github.com/djm204/frankenbeast/issues/2221)) ([5cc5ca3](https://github.com/djm204/frankenbeast/commit/5cc5ca37cac440e33731f3173f3c370377aa2d5b))
+* **security:** protect local web controls ([#2295](https://github.com/djm204/frankenbeast/issues/2295)) ([9a8a914](https://github.com/djm204/frankenbeast/commit/9a8a9148854858be7062b2330f4b9cc168bb9aa8))
+* **security:** validate provider egress endpoints ([#2302](https://github.com/djm204/frankenbeast/issues/2302)) ([b6dde91](https://github.com/djm204/frankenbeast/commit/b6dde918e609bc451e2811f595ff2830f9157d06))
+* **stability:** add stale checkpoint lock detector ([#2275](https://github.com/djm204/frankenbeast/issues/2275)) ([00e9e79](https://github.com/djm204/frankenbeast/commit/00e9e79805ef0b8c9d8db68c596fe72f53dbf1ed))
+* **stability:** classify worker crash outcomes ([#2285](https://github.com/djm204/frankenbeast/issues/2285)) ([1bbbd84](https://github.com/djm204/frankenbeast/commit/1bbbd8461d705a5ef9fc283c7705e46c6aac4175))
+* **web:** preserve wizard launch selections ([#1478](https://github.com/djm204/frankenbeast/issues/1478)) ([002d39b](https://github.com/djm204/frankenbeast/commit/002d39ba6f27ae8a62ee72431aea5ab145be056c))
+
+
+### Refactoring
+
+* **orchestrator:** decompose god functions ([#2244](https://github.com/djm204/frankenbeast/issues/2244)) ([4e26a2d](https://github.com/djm204/frankenbeast/commit/4e26a2dddb27487c2c598f290f40f758ba59240c))
+
+
+### Miscellaneous
+
+* **memory:** merge main into review queue branch ([f3e0a23](https://github.com/djm204/frankenbeast/commit/f3e0a23812418b82591280e03cf803658695495c))
+* release main ([#1764](https://github.com/djm204/frankenbeast/issues/1764)) ([13987c3](https://github.com/djm204/frankenbeast/commit/13987c314de9fff99ee7eaeb47a11c7d097a0834))
+* release main ([#1892](https://github.com/djm204/frankenbeast/issues/1892)) ([8b3d61b](https://github.com/djm204/frankenbeast/commit/8b3d61ba99827525b5e60b647e1f1b9bb1877ace))
+* release main ([#2216](https://github.com/djm204/frankenbeast/issues/2216)) ([7b2a02d](https://github.com/djm204/frankenbeast/commit/7b2a02d44ce6d09321e7129811c6e81e9d04b35c))
+* release main ([#2217](https://github.com/djm204/frankenbeast/issues/2217)) ([fae513f](https://github.com/djm204/frankenbeast/commit/fae513fdd7115972f36a707db960800c64dd3b3e))
+* release main ([#2219](https://github.com/djm204/frankenbeast/issues/2219)) ([ee6de79](https://github.com/djm204/frankenbeast/commit/ee6de793f48d4d4b93ea86fb8dc36001c01dc09e))
+* release main ([#2222](https://github.com/djm204/frankenbeast/issues/2222)) ([40d3c99](https://github.com/djm204/frankenbeast/commit/40d3c9941e2d08d6d1b4c9994a3615152234b84b))
+* release main ([#2232](https://github.com/djm204/frankenbeast/issues/2232)) ([69fd8f3](https://github.com/djm204/frankenbeast/commit/69fd8f30e0492f56863942c8eac89c9ec285822f))
+* release main ([#2234](https://github.com/djm204/frankenbeast/issues/2234)) ([bdc6c17](https://github.com/djm204/frankenbeast/commit/bdc6c172184beefb391135e1119dee2cc8c42434))
+* release main ([#2236](https://github.com/djm204/frankenbeast/issues/2236)) ([c410dd1](https://github.com/djm204/frankenbeast/commit/c410dd1a54bc1346aad48b47d6d30a56e9a0a499))
+* release main ([#2239](https://github.com/djm204/frankenbeast/issues/2239)) ([dbcd153](https://github.com/djm204/frankenbeast/commit/dbcd1539d40a1f6dda7c7cf54bb39c09b5196eab))
+* release main ([#2241](https://github.com/djm204/frankenbeast/issues/2241)) ([dc95440](https://github.com/djm204/frankenbeast/commit/dc95440e1d5ab59a176760f6a29dd36812f53699))
+* release main ([#2245](https://github.com/djm204/frankenbeast/issues/2245)) ([c501037](https://github.com/djm204/frankenbeast/commit/c501037be1247eccc0a4cea1a25e6d9dcdebb41f))
+* release main ([#2279](https://github.com/djm204/frankenbeast/issues/2279)) ([4c3a8e7](https://github.com/djm204/frankenbeast/commit/4c3a8e7484e691f10ae942252dfaec213848e395))
+* release main ([#2286](https://github.com/djm204/frankenbeast/issues/2286)) ([1cd49cc](https://github.com/djm204/frankenbeast/commit/1cd49ccdc74e960f24e3ab0ec25ef63367ac862b))
+* release main ([#2287](https://github.com/djm204/frankenbeast/issues/2287)) ([dd3f90d](https://github.com/djm204/frankenbeast/commit/dd3f90d59539c685f66ff8619fc66fa00db4006f))
+* release main ([#2408](https://github.com/djm204/frankenbeast/issues/2408)) ([5545389](https://github.com/djm204/frankenbeast/commit/55453895d39a81c081dc9e919ac84f7750bfa2ee))
+* release main ([#2409](https://github.com/djm204/frankenbeast/issues/2409)) ([39306c3](https://github.com/djm204/frankenbeast/commit/39306c3d03ed85ffa3624c8aad9c3b963542533b))
+* release main ([#2553](https://github.com/djm204/frankenbeast/issues/2553)) ([1ca33c2](https://github.com/djm204/frankenbeast/commit/1ca33c2aa6e68792886ef599d1ac35bebcc8e3c9))
+
+
+### Documentation
+
+* **dr:** add corrupted worktree and queue runbook ([#2547](https://github.com/djm204/frankenbeast/issues/2547)) ([b143462](https://github.com/djm204/frankenbeast/commit/b14346247f3193a012db5a636298a4ffe1b44647))
+
+
+### Tests
+
+* align HTTP error body mocks with stream readers ([26d7f44](https://github.com/djm204/frankenbeast/commit/26d7f44ae91989d26bdd5c8cfe9fa5adacdbfee6))
+* **availability:** add burst dispatch load fixture ([#2261](https://github.com/djm204/frankenbeast/issues/2261)) ([a64b04c](https://github.com/djm204/frankenbeast/commit/a64b04c68d15b008235d29c33261be04138ad144))
+* **dr:** add corrupt state parser fixtures ([#2218](https://github.com/djm204/frankenbeast/issues/2218)) ([d168a48](https://github.com/djm204/frankenbeast/commit/d168a48fdddb7d838ea0c5ad97b201188efce2f1))
+* **dr:** add missing cron job recovery fixture ([#2246](https://github.com/djm204/frankenbeast/issues/2246)) ([e293d73](https://github.com/djm204/frankenbeast/commit/e293d73e251ae8ff9b4f8891edb078c619cfe834))
+* **memory:** add injection budget coverage ([#2187](https://github.com/djm204/frankenbeast/issues/2187)) ([82f9948](https://github.com/djm204/frankenbeast/commit/82f994855644bedfeda01f82d84c402f5228106e))
+* **orchestrator:** add deterministic event stream replay ([#2200](https://github.com/djm204/frankenbeast/issues/2200)) ([65ed2d8](https://github.com/djm204/frankenbeast/commit/65ed2d830ab4bd8c7a890a9952d9621db2c21bd0))
+* **orchestrator:** add flaky liveness replay fixture ([#2280](https://github.com/djm204/frankenbeast/issues/2280)) ([6df3e58](https://github.com/djm204/frankenbeast/commit/6df3e586c97be11e5773464e670e0ce5c381f2ed)), closes [#1806](https://github.com/djm204/frankenbeast/issues/1806)
+* **orchestrator:** add LLM chaos stability coverage ([cac1ee2](https://github.com/djm204/frankenbeast/commit/cac1ee2222f9465d99f479290279fc38a5cf280a))
+* **orchestrator:** bound issue scheduler liveness payloads ([#2346](https://github.com/djm204/frankenbeast/issues/2346)) ([fa6f09c](https://github.com/djm204/frankenbeast/commit/fa6f09c0b3c3e51c66a4f82e1bbfa6947fe77754))
+* **orchestrator:** cover cancellation stability ([#2348](https://github.com/djm204/frankenbeast/issues/2348)) ([afefd41](https://github.com/djm204/frankenbeast/commit/afefd4197320d9fac32f1619e605ca6e19142963))
+* **orchestrator:** cover generated command argv boundaries ([#2220](https://github.com/djm204/frankenbeast/issues/2220)) ([9a475cf](https://github.com/djm204/frankenbeast/commit/9a475cf8907353883ac975fd5fc372dda200bfe1))
+* **orchestrator:** cover Windows keychain target escaping ([b3170a3](https://github.com/djm204/frankenbeast/commit/b3170a3033973f8bdf3abd274dcf219e9a410e86)), closes [#1984](https://github.com/djm204/frankenbeast/issues/1984)
+* **orchestrator:** guard e2e test discovery ([#1981](https://github.com/djm204/frankenbeast/issues/1981)) ([970cd87](https://github.com/djm204/frankenbeast/commit/970cd876dc35686e666174f664e9cc056d29b239))
+* **orchestrator:** guard e2e zero-test discovery ([#1980](https://github.com/djm204/frankenbeast/issues/1980)) ([f8ca3da](https://github.com/djm204/frankenbeast/commit/f8ca3da95c037ffdd1ad355b254b30abb6235b49))
+* **orchestrator:** lint singular test fixtures ([90279f7](https://github.com/djm204/frankenbeast/commit/90279f7307e948a892c9ac3ee20590946b0e69af)), closes [#1977](https://github.com/djm204/frankenbeast/issues/1977)
+* **orchestrator:** make Beast SSE stream tests event-driven ([#2163](https://github.com/djm204/frankenbeast/issues/2163)) ([1be3c82](https://github.com/djm204/frankenbeast/commit/1be3c828125c7819335080fa145b240fd9922adb))
+* **orchestrator:** stabilize http abort disconnect test ([1b66c04](https://github.com/djm204/frankenbeast/commit/1b66c04a1c1b92e34259521a9824662611cfdf65)), closes [#1932](https://github.com/djm204/frankenbeast/issues/1932)
+* **orchestrator:** wait for agent failure events ([#2159](https://github.com/djm204/frankenbeast/issues/2159)) ([6ab7a98](https://github.com/djm204/frankenbeast/commit/6ab7a98a122a5a23730bd56012ffe995cda03612))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/observer bumped from 0.10.0 to 0.10.1
+    * @franken/brain bumped from 0.13.0 to 0.14.0
+
+## [0.52.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.51.0...@franken/orchestrator-v0.52.0) (2026-07-16)
+
+
+### Features
+
+* **memory:** add memory access audit trail ([#2317](https://github.com/djm204/frankenbeast/issues/2317)) ([ef889da](https://github.com/djm204/frankenbeast/commit/ef889dae092d996a6ca463e5abcaf5ed4d296158))
+
+
+### Bug Fixes
+
+* **orchestrator:** make kanban updates idempotent ([#2549](https://github.com/djm204/frankenbeast/issues/2549)) ([9523167](https://github.com/djm204/frankenbeast/commit/95231673319fca0ebbd9a94dd3d1b42d3ce715ce))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/brain bumped from 0.12.0 to 0.13.0
+
+## [0.51.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.50.0...@franken/orchestrator-v0.51.0) (2026-07-16)
+
+
+### Features
+
+* **beasts:** add maintenance dispatch guardrails ([#2400](https://github.com/djm204/frankenbeast/issues/2400)) ([f50e966](https://github.com/djm204/frankenbeast/commit/f50e966246a1a05902fd0054ffa79bb59ffe35e7))
+
+
+### Bug Fixes
+
+* **orchestrator:** bound beast run log growth ([#2404](https://github.com/djm204/frankenbeast/issues/2404)) ([c763d97](https://github.com/djm204/frankenbeast/commit/c763d97e31970a699353af6eab7ca47b75cd0f39))
+* **orchestrator:** reconcile beast queue on restart ([#2406](https://github.com/djm204/frankenbeast/issues/2406)) ([5f3077c](https://github.com/djm204/frankenbeast/commit/5f3077c6c401d032610fe4cff69fb0a4a888d1e2))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/critique bumped from 0.9.0 to 0.9.1
+    * @franken/governor bumped from 0.7.1 to 0.7.2
+    * @franken/types bumped from 0.12.0 to 0.13.0
+    * @franken/observer bumped from 0.9.0 to 0.10.0
+    * @franken/planner bumped from 0.4.19 to 0.4.20
+    * @franken/brain bumped from 0.11.0 to 0.12.0
+
 ## [0.50.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.49.2...@franken/orchestrator-v0.50.0) (2026-07-16)
 
 

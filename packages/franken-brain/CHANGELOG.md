@@ -1,5 +1,157 @@
 # Changelog
 
+## [0.15.0](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.14.0...@franken/brain-v0.15.0) (2026-07-18)
+
+
+### Features
+
+* **brain:** add memory conflict resolution prompts ([#2396](https://github.com/djm204/frankenbeast/issues/2396)) ([eeb9155](https://github.com/djm204/frankenbeast/commit/eeb9155ccf06a1dd9cf2872685d3ac95b8bee7bf))
+* **brain:** add memory schema migrations ([1b4b494](https://github.com/djm204/frankenbeast/commit/1b4b494f416edddc43520868569b04a19432d0e8)), closes [#1687](https://github.com/djm204/frankenbeast/issues/1687)
+* **brain:** suggest memory candidate merge duplicates ([47d1a70](https://github.com/djm204/frankenbeast/commit/47d1a70064ea7731fc18b6376252c3a23c96524c))
+* **learning:** add episodic learning cooldown ([#1873](https://github.com/djm204/frankenbeast/issues/1873)) ([badbe7c](https://github.com/djm204/frankenbeast/commit/badbe7c61fccb95e4076ddf8e38b11d42120bf3b))
+* **learning:** add skill evolution review gate ([#2413](https://github.com/djm204/frankenbeast/issues/2413)) ([25cec22](https://github.com/djm204/frankenbeast/commit/25cec22c6512dc810f5a013b91db89242c7c78ce))
+* **memory:** add confidence decay model ([#2326](https://github.com/djm204/frankenbeast/issues/2326)) ([3d59a83](https://github.com/djm204/frankenbeast/commit/3d59a83becb8d1e4f318a12f6c8f57216fa6f556))
+* **memory:** add conflict resolver ([#2320](https://github.com/djm204/frankenbeast/issues/2320)) ([6066b86](https://github.com/djm204/frankenbeast/commit/6066b861ca55505c5508f74b905362d68ef54b05))
+* **memory:** add encryption-at-rest option ([dda831d](https://github.com/djm204/frankenbeast/commit/dda831d368fc7a79f23f9ee1338bd0f50bc6d144))
+* **memory:** add encryption-at-rest option ([63e875d](https://github.com/djm204/frankenbeast/commit/63e875dff7415c1afb360d0525e8a14a564e2596))
+* **memory:** add memory access audit trail ([#2317](https://github.com/djm204/frankenbeast/issues/2317)) ([ef889da](https://github.com/djm204/frankenbeast/commit/ef889dae092d996a6ca463e5abcaf5ed4d296158))
+* **memory:** add provenance confidence metadata ([#2552](https://github.com/djm204/frankenbeast/issues/2552)) ([835816b](https://github.com/djm204/frankenbeast/commit/835816bea0ac0149c7874b5b441bb979f8e044f5))
+* **memory:** add retention policy report ([#2554](https://github.com/djm204/frankenbeast/issues/2554)) ([8b564d9](https://github.com/djm204/frankenbeast/commit/8b564d9c794db41af1e7e9e7be7a98bdf46f6ed6))
+* **memory:** add right-to-forget workflow ([#2212](https://github.com/djm204/frankenbeast/issues/2212)) ([229bc0d](https://github.com/djm204/frankenbeast/commit/229bc0d8f69d5243ba8e3703c266ec9466633ab2))
+* **memory:** add source attribution viewer ([#2329](https://github.com/djm204/frankenbeast/issues/2329)) ([9a47d63](https://github.com/djm204/frankenbeast/commit/9a47d63ce4bed21908af873ed7588794ae19d25a))
+* **memory:** add user-visible memory review and consent workflow ([#2240](https://github.com/djm204/frankenbeast/issues/2240)) ([93643ed](https://github.com/djm204/frankenbeast/commit/93643ed64d02b9aa3eabeba687738c97c8b4bdcc))
+* **memory:** expire temporary operational facts ([a5f581a](https://github.com/djm204/frankenbeast/commit/a5f581af955a937416760779dcbaffb64a1abf6d))
+* **memory:** expire temporary operational facts ([5c46ae6](https://github.com/djm204/frankenbeast/commit/5c46ae662bbf52688d3c7afe8f8fbf3a4577fa0e))
+
+
+### Bug Fixes
+
+* **deps:** bump the npm-security-and-maintenance group with 7 updates ([#2306](https://github.com/djm204/frankenbeast/issues/2306)) ([a2e56b6](https://github.com/djm204/frankenbeast/commit/a2e56b68098ba4916fd6c3ad7b5d1dda212c75a0))
+* **deps:** repair npm security and maintenance update ([4fd8ecc](https://github.com/djm204/frankenbeast/commit/4fd8eccf9b57960572d624aaa18ceac773fddcc0))
+* **learning:** resolve privacy lesson closeout conflicts ([c39ec0f](https://github.com/djm204/frankenbeast/commit/c39ec0fc1e3ebb18074e57409ab4077c93714afc))
+* **lint:** require parseInt radix arguments ([023d526](https://github.com/djm204/frankenbeast/commit/023d526a400bc1cd4f2a71bb134b47d750ad7ac0))
+* **memory:** address encryption review findings ([103f106](https://github.com/djm204/frankenbeast/commit/103f1064a73a7541a61d810c2ff5a9724f4943c5))
+* **memory:** address TTL hydration races ([102c710](https://github.com/djm204/frankenbeast/commit/102c7105bafab8afe7fb0786c1901d279c0630a2))
+* **memory:** address TTL review edge cases ([f3c1c5f](https://github.com/djm204/frankenbeast/commit/f3c1c5f9cf0c01b29f69ea2e702ac5dc746941d2))
+* **memory:** close TTL expiry race gaps ([54d3ff4](https://github.com/djm204/frankenbeast/commit/54d3ff428ad0c0370ae3d9ee3aea6caf73f15f01))
+* **memory:** handle TTL review edge cases ([57b15e8](https://github.com/djm204/frankenbeast/commit/57b15e8c9a6309c544a5b43b64438c7f8afaa7f7))
+* **memory:** preserve durable TTL edge cases ([f3bd7cc](https://github.com/djm204/frankenbeast/commit/f3bd7cc5c9b4e961f67749d3495c6b12ed9deb39))
+* **orchestrator:** close beast attempt cleanup issue ([#2003](https://github.com/djm204/frankenbeast/issues/2003)) ([ae34c42](https://github.com/djm204/frankenbeast/commit/ae34c42ecba98db09aa5b43c097d8ecf0819170e))
+
+
+### Miscellaneous
+
+* **memory:** merge main into review queue branch ([f3e0a23](https://github.com/djm204/frankenbeast/commit/f3e0a23812418b82591280e03cf803658695495c))
+* release main ([750094b](https://github.com/djm204/frankenbeast/commit/750094bab0859c49829b4abe85013a5007fc272b))
+* release main ([100e3a8](https://github.com/djm204/frankenbeast/commit/100e3a887b6fbd538e8a1b83f4e88ce4caf6c443))
+* release main ([#1892](https://github.com/djm204/frankenbeast/issues/1892)) ([8b3d61b](https://github.com/djm204/frankenbeast/commit/8b3d61ba99827525b5e60b647e1f1b9bb1877ace))
+* release main ([#2222](https://github.com/djm204/frankenbeast/issues/2222)) ([40d3c99](https://github.com/djm204/frankenbeast/commit/40d3c9941e2d08d6d1b4c9994a3615152234b84b))
+* release main ([#2241](https://github.com/djm204/frankenbeast/issues/2241)) ([dc95440](https://github.com/djm204/frankenbeast/commit/dc95440e1d5ab59a176760f6a29dd36812f53699))
+* release main ([#2245](https://github.com/djm204/frankenbeast/issues/2245)) ([c501037](https://github.com/djm204/frankenbeast/commit/c501037be1247eccc0a4cea1a25e6d9dcdebb41f))
+* release main ([#2279](https://github.com/djm204/frankenbeast/issues/2279)) ([4c3a8e7](https://github.com/djm204/frankenbeast/commit/4c3a8e7484e691f10ae942252dfaec213848e395))
+* release main ([#2408](https://github.com/djm204/frankenbeast/issues/2408)) ([5545389](https://github.com/djm204/frankenbeast/commit/55453895d39a81c081dc9e919ac84f7750bfa2ee))
+* release main ([#2409](https://github.com/djm204/frankenbeast/issues/2409)) ([39306c3](https://github.com/djm204/frankenbeast/commit/39306c3d03ed85ffa3624c8aad9c3b963542533b))
+* release main ([#2553](https://github.com/djm204/frankenbeast/issues/2553)) ([1ca33c2](https://github.com/djm204/frankenbeast/commit/1ca33c2aa6e68792886ef599d1ac35bebcc8e3c9))
+
+
+### Documentation
+
+* **brain:** refresh ramp-up wiring status ([7f4276b](https://github.com/djm204/frankenbeast/commit/7f4276b2738567200bbb7a27978364449e698b92)), closes [#2101](https://github.com/djm204/frankenbeast/issues/2101)
+* remove PM-swarm terminology from Frankenbeast docs ([dcf183d](https://github.com/djm204/frankenbeast/commit/dcf183da6c8c176ecabd5278adbd6d3e6068be17))
+
+
+### Tests
+
+* **brain:** add state schema migration smoke tests ([da53b03](https://github.com/djm204/frankenbeast/commit/da53b03db0cb480db12be4ef6ae9321c357d004a))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.13.0 to 0.14.0
+
+## [0.14.0](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.13.0...@franken/brain-v0.14.0) (2026-07-17)
+
+
+### Features
+
+* **brain:** add memory conflict resolution prompts ([#2396](https://github.com/djm204/frankenbeast/issues/2396)) ([eeb9155](https://github.com/djm204/frankenbeast/commit/eeb9155ccf06a1dd9cf2872685d3ac95b8bee7bf))
+* **brain:** add memory schema migrations ([1b4b494](https://github.com/djm204/frankenbeast/commit/1b4b494f416edddc43520868569b04a19432d0e8)), closes [#1687](https://github.com/djm204/frankenbeast/issues/1687)
+* **brain:** suggest memory candidate merge duplicates ([47d1a70](https://github.com/djm204/frankenbeast/commit/47d1a70064ea7731fc18b6376252c3a23c96524c))
+* **learning:** add episodic learning cooldown ([#1873](https://github.com/djm204/frankenbeast/issues/1873)) ([badbe7c](https://github.com/djm204/frankenbeast/commit/badbe7c61fccb95e4076ddf8e38b11d42120bf3b))
+* **learning:** add skill evolution review gate ([#2413](https://github.com/djm204/frankenbeast/issues/2413)) ([25cec22](https://github.com/djm204/frankenbeast/commit/25cec22c6512dc810f5a013b91db89242c7c78ce))
+* **memory:** add confidence decay model ([#2326](https://github.com/djm204/frankenbeast/issues/2326)) ([3d59a83](https://github.com/djm204/frankenbeast/commit/3d59a83becb8d1e4f318a12f6c8f57216fa6f556))
+* **memory:** add conflict resolver ([#2320](https://github.com/djm204/frankenbeast/issues/2320)) ([6066b86](https://github.com/djm204/frankenbeast/commit/6066b861ca55505c5508f74b905362d68ef54b05))
+* **memory:** add encryption-at-rest option ([dda831d](https://github.com/djm204/frankenbeast/commit/dda831d368fc7a79f23f9ee1338bd0f50bc6d144))
+* **memory:** add encryption-at-rest option ([63e875d](https://github.com/djm204/frankenbeast/commit/63e875dff7415c1afb360d0525e8a14a564e2596))
+* **memory:** add memory access audit trail ([#2317](https://github.com/djm204/frankenbeast/issues/2317)) ([ef889da](https://github.com/djm204/frankenbeast/commit/ef889dae092d996a6ca463e5abcaf5ed4d296158))
+* **memory:** add right-to-forget workflow ([#2212](https://github.com/djm204/frankenbeast/issues/2212)) ([229bc0d](https://github.com/djm204/frankenbeast/commit/229bc0d8f69d5243ba8e3703c266ec9466633ab2))
+* **memory:** add source attribution viewer ([#2329](https://github.com/djm204/frankenbeast/issues/2329)) ([9a47d63](https://github.com/djm204/frankenbeast/commit/9a47d63ce4bed21908af873ed7588794ae19d25a))
+* **memory:** add user-visible memory review and consent workflow ([#2240](https://github.com/djm204/frankenbeast/issues/2240)) ([93643ed](https://github.com/djm204/frankenbeast/commit/93643ed64d02b9aa3eabeba687738c97c8b4bdcc))
+* **memory:** expire temporary operational facts ([a5f581a](https://github.com/djm204/frankenbeast/commit/a5f581af955a937416760779dcbaffb64a1abf6d))
+* **memory:** expire temporary operational facts ([5c46ae6](https://github.com/djm204/frankenbeast/commit/5c46ae662bbf52688d3c7afe8f8fbf3a4577fa0e))
+
+
+### Bug Fixes
+
+* **deps:** bump the npm-security-and-maintenance group with 7 updates ([#2306](https://github.com/djm204/frankenbeast/issues/2306)) ([a2e56b6](https://github.com/djm204/frankenbeast/commit/a2e56b68098ba4916fd6c3ad7b5d1dda212c75a0))
+* **deps:** repair npm security and maintenance update ([4fd8ecc](https://github.com/djm204/frankenbeast/commit/4fd8eccf9b57960572d624aaa18ceac773fddcc0))
+* **learning:** resolve privacy lesson closeout conflicts ([c39ec0f](https://github.com/djm204/frankenbeast/commit/c39ec0fc1e3ebb18074e57409ab4077c93714afc))
+* **lint:** require parseInt radix arguments ([023d526](https://github.com/djm204/frankenbeast/commit/023d526a400bc1cd4f2a71bb134b47d750ad7ac0))
+* **memory:** address encryption review findings ([103f106](https://github.com/djm204/frankenbeast/commit/103f1064a73a7541a61d810c2ff5a9724f4943c5))
+* **memory:** address TTL hydration races ([102c710](https://github.com/djm204/frankenbeast/commit/102c7105bafab8afe7fb0786c1901d279c0630a2))
+* **memory:** address TTL review edge cases ([f3c1c5f](https://github.com/djm204/frankenbeast/commit/f3c1c5f9cf0c01b29f69ea2e702ac5dc746941d2))
+* **memory:** close TTL expiry race gaps ([54d3ff4](https://github.com/djm204/frankenbeast/commit/54d3ff428ad0c0370ae3d9ee3aea6caf73f15f01))
+* **memory:** handle TTL review edge cases ([57b15e8](https://github.com/djm204/frankenbeast/commit/57b15e8c9a6309c544a5b43b64438c7f8afaa7f7))
+* **memory:** preserve durable TTL edge cases ([f3bd7cc](https://github.com/djm204/frankenbeast/commit/f3bd7cc5c9b4e961f67749d3495c6b12ed9deb39))
+* **orchestrator:** close beast attempt cleanup issue ([#2003](https://github.com/djm204/frankenbeast/issues/2003)) ([ae34c42](https://github.com/djm204/frankenbeast/commit/ae34c42ecba98db09aa5b43c097d8ecf0819170e))
+
+
+### Miscellaneous
+
+* **memory:** merge main into review queue branch ([f3e0a23](https://github.com/djm204/frankenbeast/commit/f3e0a23812418b82591280e03cf803658695495c))
+* release main ([#1892](https://github.com/djm204/frankenbeast/issues/1892)) ([8b3d61b](https://github.com/djm204/frankenbeast/commit/8b3d61ba99827525b5e60b647e1f1b9bb1877ace))
+* release main ([#2222](https://github.com/djm204/frankenbeast/issues/2222)) ([40d3c99](https://github.com/djm204/frankenbeast/commit/40d3c9941e2d08d6d1b4c9994a3615152234b84b))
+* release main ([#2241](https://github.com/djm204/frankenbeast/issues/2241)) ([dc95440](https://github.com/djm204/frankenbeast/commit/dc95440e1d5ab59a176760f6a29dd36812f53699))
+* release main ([#2245](https://github.com/djm204/frankenbeast/issues/2245)) ([c501037](https://github.com/djm204/frankenbeast/commit/c501037be1247eccc0a4cea1a25e6d9dcdebb41f))
+* release main ([#2279](https://github.com/djm204/frankenbeast/issues/2279)) ([4c3a8e7](https://github.com/djm204/frankenbeast/commit/4c3a8e7484e691f10ae942252dfaec213848e395))
+* release main ([#2408](https://github.com/djm204/frankenbeast/issues/2408)) ([5545389](https://github.com/djm204/frankenbeast/commit/55453895d39a81c081dc9e919ac84f7750bfa2ee))
+* release main ([#2409](https://github.com/djm204/frankenbeast/issues/2409)) ([39306c3](https://github.com/djm204/frankenbeast/commit/39306c3d03ed85ffa3624c8aad9c3b963542533b))
+* release main ([#2553](https://github.com/djm204/frankenbeast/issues/2553)) ([1ca33c2](https://github.com/djm204/frankenbeast/commit/1ca33c2aa6e68792886ef599d1ac35bebcc8e3c9))
+
+
+### Documentation
+
+* **brain:** refresh ramp-up wiring status ([7f4276b](https://github.com/djm204/frankenbeast/commit/7f4276b2738567200bbb7a27978364449e698b92)), closes [#2101](https://github.com/djm204/frankenbeast/issues/2101)
+
+
+### Tests
+
+* **brain:** add state schema migration smoke tests ([da53b03](https://github.com/djm204/frankenbeast/commit/da53b03db0cb480db12be4ef6ae9321c357d004a))
+
+## [0.13.0](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.12.0...@franken/brain-v0.13.0) (2026-07-16)
+
+
+### Features
+
+* **memory:** add memory access audit trail ([#2317](https://github.com/djm204/frankenbeast/issues/2317)) ([ef889da](https://github.com/djm204/frankenbeast/commit/ef889dae092d996a6ca463e5abcaf5ed4d296158))
+
+## [0.12.0](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.11.0...@franken/brain-v0.12.0) (2026-07-16)
+
+
+### Features
+
+* **learning:** add skill evolution review gate ([#2413](https://github.com/djm204/frankenbeast/issues/2413)) ([25cec22](https://github.com/djm204/frankenbeast/commit/25cec22c6512dc810f5a013b91db89242c7c78ce))
+* **memory:** add source attribution viewer ([#2329](https://github.com/djm204/frankenbeast/issues/2329)) ([9a47d63](https://github.com/djm204/frankenbeast/commit/9a47d63ce4bed21908af873ed7588794ae19d25a))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.12.0 to 0.13.0
+
 ## [0.11.0](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.10.1...@franken/brain-v0.11.0) (2026-07-16)
 
 
