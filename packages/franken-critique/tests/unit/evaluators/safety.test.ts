@@ -854,6 +854,18 @@ describe('SafetyEvaluator', () => {
     expect(evaluator.hasUnsafeRegexShape('^(?s:(.|\\n\\n))+!$')).toBe(true);
   });
 
+  it('skips complete unicodeSets character classes without swallowing legacy literals', () => {
+    const evaluator = new SafetyEvaluator(createMockGuardrailsPort()) as unknown as {
+      skipCharacterClass(pattern: string, start: number): number;
+    };
+    const intersection = '[[a-z]&&[p-z]]+';
+    const subtraction = '[a-z--[aeiou]]+';
+
+    expect(evaluator.skipCharacterClass(intersection, 0)).toBe(intersection.length - 2);
+    expect(evaluator.skipCharacterClass(subtraction, 0)).toBe(subtraction.length - 2);
+    expect(evaluator.skipCharacterClass('[[]x', 0)).toBe(2);
+  });
+
   it('rejects nullable and variable-quantified alternation bypass patterns', async () => {
     const port = createMockGuardrailsPort([
       {

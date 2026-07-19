@@ -1369,14 +1369,56 @@ export class SafetyEvaluator implements Evaluator {
   }
 
   private skipCharacterClass(pattern: string, start: number): number {
+    let depth = 1;
+    let unicodeSets = false;
+
     for (let i = start + 1; i < pattern.length; i += 1) {
       if (pattern[i] === '\\') {
         i += 1;
         continue;
       }
-      if (pattern[i] === ']') return i;
+
+      if (this.isUnicodeSetOperatorAt(pattern, i)) {
+        unicodeSets = true;
+        i += 1;
+        continue;
+      }
+
+      if (
+        pattern[i] === '[' &&
+        (unicodeSets || this.nestedClassStartsUnicodeSetOperation(pattern, i))
+      ) {
+        depth += 1;
+        continue;
+      }
+
+      if (pattern[i] === ']') {
+        depth -= 1;
+        if (depth === 0) return i;
+      }
     }
     return pattern.length - 1;
+  }
+
+  private isUnicodeSetOperatorAt(pattern: string, start: number): boolean {
+    const pair = pattern.slice(start, start + 2);
+    return pair === '&&' || pair === '--';
+  }
+
+  private nestedClassStartsUnicodeSetOperation(
+    pattern: string,
+    start: number,
+  ): boolean {
+    for (let i = start + 1; i < pattern.length; i += 1) {
+      if (pattern[i] === '\\') {
+        i += 1;
+        continue;
+      }
+      if (pattern[i] === ']') {
+        return this.isUnicodeSetOperatorAt(pattern, i + 1);
+      }
+    }
+    return false;
   }
 
   private quantifierAt(
