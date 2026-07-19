@@ -29,6 +29,16 @@ describe('ProviderModelSelect', () => {
     expect(options.length).toBeGreaterThan(1); // includes placeholder
   });
 
+  it('explains how to enable the disabled model select', () => {
+    render(<ProviderModelSelect providers={providers} value={{ provider: '', model: '' }} onChange={vi.fn()} />);
+
+    const modelSelect = screen.getByLabelText(/model/i);
+    const guidance = screen.getByText('Select a provider to choose a model.');
+
+    expect(modelSelect.hasAttribute('disabled')).toBe(true);
+    expect(modelSelect.getAttribute('aria-describedby')).toBe(guidance.id);
+  });
+
   it('calls onChange when provider changes', () => {
     const onChange = vi.fn();
     render(<ProviderModelSelect providers={providers} value={{ provider: '', model: '' }} onChange={onChange} />);
