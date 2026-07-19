@@ -122,6 +122,103 @@ describe('createStreamProgressHandler', () => {
     expect(resultLines[0]).toContain('$0.0523');
   });
 
+  it('normalizes a captured Claude assistant frame without exposing reasoning text', () => {
+    const lines: string[] = [];
+    const events: Array<{ type: string }> = [];
+    const handler = createStreamProgressHandler((t) => lines.push(t), {
+      onEvent: (event) => events.push(event),
+    });
+
+    handler(JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'thinking', thinking: 'private chain of thought' },
+          { type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: '/workspace/src/plan.ts' } },
+          { type: 'text', text: '[{"id":"implement-stream-events"}]' },
+        ],
+        usage: { input_tokens: 120, output_tokens: 30 },
+      },
+    }));
+
+    expect(events.map((event) => event.type)).toEqual(['usage', 'reasoning', 'tool', 'text']);
+    expect(lines.some((line) => line.includes('Reasoning...'))).toBe(true);
+    expect(lines.some((line) => line.includes('Reading') && line.includes('plan.ts'))).toBe(true);
+    expect(lines.some((line) => line.includes('Planned chunk:') && line.includes('implement-stream-events'))).toBe(true);
+    expect(lines.join('')).not.toContain('private chain of thought');
+  });
+
+  it('normalizes captured Codex item and turn frames', () => {
+    const lines: string[] = [];
+    const events: Array<{ type: string }> = [];
+    const handler = createStreamProgressHandler((t) => lines.push(t), {
+      onEvent: (event) => events.push(event),
+    });
+
+    handler(JSON.stringify({ type: 'item.started', item: { type: 'reasoning', text: 'private reasoning' } }));
+    handler(JSON.stringify({
+      type: 'item.completed',
+      item: { type: 'command_execution', command: 'npm test', status: 'completed' },
+    }));
+    handler(JSON.stringify({
+      type: 'item.completed',
+      item: { type: 'agent_message', text: '[{"id":"codex-plan"}]' },
+    }));
+    handler(JSON.stringify({
+      type: 'turn.completed',
+      usage: { input_tokens: 80, output_tokens: 20 },
+    }));
+
+    expect(events.map((event) => event.type)).toEqual(['reasoning', 'tool', 'text', 'usage', 'result']);
+    expect(lines.some((line) => line.includes('Reasoning...'))).toBe(true);
+    expect(lines.some((line) => line.includes('Running'))).toBe(true);
+    expect(lines.some((line) => line.includes('codex-plan'))).toBe(true);
+    expect(lines.join('')).not.toContain('private reasoning');
+    expect(lines.join('')).not.toContain('npm test');
+  });
+
+  it('normalizes captured Gemini message, tool, and result frames', () => {
+    const lines: string[] = [];
+    const events: Array<{ type: string }> = [];
+    const handler = createStreamProgressHandler((t) => lines.push(t), {
+      onEvent: (event) => events.push(event),
+    });
+
+    handler(JSON.stringify({
+      type: 'message',
+      role: 'assistant',
+      content: '[{"id":"gemini-plan"}]',
+      delta: true,
+    }));
+    handler(JSON.stringify({
+      type: 'tool_use',
+      tool_name: 'read_file',
+      tool_id: 'read-1',
+      parameters: { file_path: '/workspace/src/gemini.ts' },
+    }));
+    handler(JSON.stringify({
+      type: 'result',
+      status: 'success',
+      stats: { input_tokens: 45, output_tokens: 15, duration_ms: 2500 },
+    }));
+
+    expect(events.map((event) => event.type)).toEqual(['text', 'tool', 'usage', 'result']);
+    expect(lines.some((line) => line.includes('gemini-plan'))).toBe(true);
+    expect(lines.some((line) => line.includes('Using read_file:') && line.includes('gemini.ts'))).toBe(true);
+    expect(lines.some((line) => line.includes('LLM done') && line.includes('2.5s'))).toBe(true);
+  });
+
+  it('reports unknown event types through redacted verbose diagnostics', () => {
+    const lines: string[] = [];
+    const handler = createStreamProgressHandler((t) => lines.push(t), { verbose: true });
+
+    handler(JSON.stringify({ type: 'provider.secret_frame', content: 'sensitive payload' }));
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('Unknown provider stream event: provider.secret_frame');
+    expect(lines[0]).not.toContain('sensitive payload');
+  });
+
   it('skips hookSpecificOutput objects', () => {
     const lines: string[] = [];
     const handler = createStreamProgressHandler((t) => lines.push(t));
