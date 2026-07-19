@@ -111,7 +111,7 @@ function isForwardedHostLoopback(forwardedHost: string | undefined): boolean {
     .filter(Boolean)
     .every((host) => {
       try {
-        return isLoopbackAddress(new URL(`http://${host}`).hostname);
+        return isLoopbackAddress(new URL(`https://${host}`).hostname);
       } catch {
         return false;
       }
