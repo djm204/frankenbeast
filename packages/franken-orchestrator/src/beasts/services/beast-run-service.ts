@@ -354,7 +354,14 @@ export class BeastRunService {
     const trackedAgent = this.repository.getTrackedAgent(run.trackedAgentId);
     if (!trackedAgent) return undefined;
 
-    const normalized = normalizeBeastRunConfig(definition, trackedAgent.initConfig);
+    let normalized: Readonly<Record<string, unknown>>;
+    try {
+      normalized = normalizeBeastRunConfig(definition, trackedAgent.initConfig);
+    } catch {
+      // Pre-upgrade interview agents may have an empty tracked config while the
+      // original failed run still holds the only valid completed answer set.
+      normalized = normalizeBeastRunConfig(definition, run.configSnapshot);
+    }
     const snapshotModules = run.configSnapshot.modules;
     const modules = snapshotModules && typeof snapshotModules === 'object' && !Array.isArray(snapshotModules)
       ? snapshotModules

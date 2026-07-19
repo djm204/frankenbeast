@@ -246,11 +246,12 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
     try {
       const detail = deps.agents.getAgentDetail(agentId);
       const redactDispatchFailure = deps.agents.hasActiveDispatchFailure(agentId);
+      const hasDispatchFailureHistory = detail.events.some((event) => event.type === 'agent.dispatch.failed');
       return c.json({
         data: {
           ...detail,
           agent: redactDispatchFailure ? redactDispatchFailedAgentResponse(detail.agent) : detail.agent,
-          events: redactDispatchFailedAgentEvents(detail.events),
+          events: redactDispatchFailedAgentEvents(detail.events, hasDispatchFailureHistory),
         },
       });
     } catch (error) {
@@ -699,7 +700,10 @@ function redactAgentIfNeeded(agent: TrackedAgent, deps: AgentRoutesDeps) {
     : agent;
 }
 
-function redactDispatchFailedAgentEvents(events: readonly TrackedAgentEvent[]): TrackedAgentEvent[] {
+function redactDispatchFailedAgentEvents(
+  events: readonly TrackedAgentEvent[],
+  redactLinkedEvents = true,
+): TrackedAgentEvent[] {
   return events.map((event) => {
     if (event.type === 'agent.command.sent') {
       return {
@@ -715,7 +719,7 @@ function redactDispatchFailedAgentEvents(events: readonly TrackedAgentEvent[]): 
         payload: { error: SAFE_DISPATCH_FAILURE_MESSAGE },
       };
     }
-    if (event.type === 'agent.dispatch.linked') {
+    if (redactLinkedEvents && event.type === 'agent.dispatch.linked') {
       return {
         ...event,
         message: 'Linked Beast run',

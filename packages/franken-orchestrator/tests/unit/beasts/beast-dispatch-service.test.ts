@@ -537,7 +537,7 @@ describe('BeastDispatchService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: { provider: 'claude', objective: 'SSE fail test', chunkDirectory: '.' } },
-      initConfig: {},
+      initConfig: { identity: { name: 'Interview agent' } },
     });
 
     const run = await dispatch.createRun({
@@ -560,7 +560,12 @@ describe('BeastDispatchService', () => {
     expect(run.configSnapshot).toEqual({});
     expect(repo.getRun(run.id)?.configSnapshot).toEqual({});
     expect(repo.getTrackedAgent(agent.id)).toMatchObject({
-      initConfig: { provider: 'claude', objective: 'SSE fail test', chunkDirectory: '.' },
+      initConfig: {
+        provider: 'claude',
+        objective: 'SSE fail test',
+        chunkDirectory: '.',
+        identity: { name: 'Interview agent' },
+      },
       moduleConfig: { firewall: true, skills: false, planner: true },
     });
     expect(JSON.stringify(repo.getTrackedAgent(agent.id)?.initConfig)).not.toContain(secret);
