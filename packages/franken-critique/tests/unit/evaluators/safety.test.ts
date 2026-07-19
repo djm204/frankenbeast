@@ -854,16 +854,41 @@ describe('SafetyEvaluator', () => {
     expect(evaluator.hasUnsafeRegexShape('^(?s:(.|\\n\\n))+!$')).toBe(true);
   });
 
-  it('skips complete unicodeSets character classes without swallowing legacy literals', () => {
+  it('skips complete unicodeSets character classes only in v mode', () => {
     const evaluator = new SafetyEvaluator(createMockGuardrailsPort()) as unknown as {
-      skipCharacterClass(pattern: string, start: number): number;
+      skipCharacterClass(pattern: string, start: number, unicodeSets?: boolean): number;
+      hasUnsafeRegexShape(pattern: string, unicodeSets?: boolean): boolean;
     };
     const intersection = '[[a-z]&&[p-z]]+';
-    const subtraction = '[a-z--[aeiou]]+';
+    const subtraction = '[[a-z]--[aeiou]]+';
 
-    expect(evaluator.skipCharacterClass(intersection, 0)).toBe(intersection.length - 2);
-    expect(evaluator.skipCharacterClass(subtraction, 0)).toBe(subtraction.length - 2);
+    expect(evaluator.skipCharacterClass(intersection, 0, true)).toBe(intersection.length - 2);
+    expect(evaluator.skipCharacterClass(subtraction, 0, true)).toBe(subtraction.length - 2);
     expect(evaluator.skipCharacterClass('[[]x', 0)).toBe(2);
+    expect(evaluator.hasUnsafeRegexShape('[[a-z]&&((a+)+)$')).toBe(true);
+  });
+
+  it('evaluates unicodeSets safety rules with the v flag', async () => {
+    const evaluator = new SafetyEvaluator(
+      createMockGuardrailsPort([
+        {
+          id: 'unicode-set-intersection',
+          description: 'unicode set intersection',
+          pattern: '[[a-z]&&[p-z]]+',
+          flags: 'v',
+          severity: 'block',
+        },
+      ]),
+    );
+
+    const result = await evaluator.evaluate(createInput('qrst'));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        message: 'Safety rule violated: unicode set intersection',
+      }),
+    ]);
   });
 
   it('rejects nullable and variable-quantified alternation bypass patterns', async () => {

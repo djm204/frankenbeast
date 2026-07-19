@@ -26,7 +26,7 @@ interface RegexPrefixExpansion {
 }
 
 type RegexWorkerFactory = {
-  (pattern: string, content: string): Worker;
+  (pattern: string, content: string, flags: string): Worker;
 };
 
 export class SafetyEvaluator implements Evaluator {
@@ -35,6 +35,7 @@ export class SafetyEvaluator implements Evaluator {
 
   private readonly guardrails: GuardrailsPort;
   private readonly createRegexWorker: RegexWorkerFactory;
+  private parsingUnicodeSets = false;
 
   constructor(
     guardrails: GuardrailsPort,
@@ -45,18 +46,18 @@ export class SafetyEvaluator implements Evaluator {
     this.guardrails = guardrails;
     this.createRegexWorker =
       options?.createRegexWorker ??
-      ((pattern, content): Worker =>
+      ((pattern, content, flags): Worker =>
         new Worker(
           `
         import { parentPort, workerData } from 'node:worker_threads';
         try {
-          const regex = new RegExp(workerData.pattern, 'g');
+          const regex = new RegExp(workerData.pattern, workerData.flags);
           parentPort.postMessage({ matches: regex.test(workerData.content) });
         } catch (error) {
           parentPort.postMessage({ error: error instanceof Error ? error.message : String(error) });
         }
       `,
-          { eval: true, workerData: { pattern, content } },
+          { eval: true, workerData: { pattern, content, flags } },
         ));
   }
 
@@ -76,6 +77,7 @@ export class SafetyEvaluator implements Evaluator {
       const matchResult = await this.regexMatchesWithTimeout(
         rule.pattern,
         input.content,
+        this.regexFlags(rule.flags),
       );
       if (matchResult === 'timeout') {
         findings.push({
@@ -119,8 +121,9 @@ export class SafetyEvaluator implements Evaluator {
   private async regexMatchesWithTimeout(
     pattern: string,
     content: string,
+    flags = 'g',
   ): Promise<boolean | 'timeout'> {
-    const worker = this.createRegexWorker(pattern, content);
+    const worker = this.createRegexWorker(pattern, content, flags);
 
     return new Promise<boolean | 'timeout'>((resolve, reject) => {
       let settled = false;
@@ -182,6 +185,7 @@ export class SafetyEvaluator implements Evaluator {
 
   private validateRulePattern(rule: {
     pattern: string;
+    flags?: 'v';
     description: string;
     severity: 'block' | 'warn';
   }): EvaluationFinding | null {
@@ -195,7 +199,7 @@ export class SafetyEvaluator implements Evaluator {
       };
     }
 
-    if (this.hasUnsafeRegexShape(rule.pattern)) {
+    if (this.hasUnsafeRegexShape(rule.pattern, rule.flags === 'v')) {
       return {
         message: `Unsafe safety rule regex: ${rule.description}`,
         severity,
@@ -205,7 +209,7 @@ export class SafetyEvaluator implements Evaluator {
     }
 
     try {
-      new RegExp(rule.pattern, 'g');
+      new RegExp(rule.pattern, this.regexFlags(rule.flags));
     } catch {
       return {
         message: `Invalid safety rule regex: ${rule.description}`,
@@ -217,15 +221,25 @@ export class SafetyEvaluator implements Evaluator {
     return null;
   }
 
-  private hasUnsafeRegexShape(pattern: string): boolean {
-    return (
-      this.hasBackreference(pattern) ||
-      this.hasNestedQuantifiedExpression(pattern) ||
-      (this.hasEnabledInlineModifier(pattern, 's') &&
-        this.hasNestedQuantifiedExpression(
-          this.expandScopedDotAllLiterals(pattern),
-        ))
-    );
+  private regexFlags(flags?: 'v'): string {
+    return flags === 'v' ? 'gv' : 'g';
+  }
+
+  private hasUnsafeRegexShape(pattern: string, unicodeSets = false): boolean {
+    const previousParsingMode = this.parsingUnicodeSets;
+    this.parsingUnicodeSets = unicodeSets;
+    try {
+      return (
+        this.hasBackreference(pattern) ||
+        this.hasNestedQuantifiedExpression(pattern) ||
+        (this.hasEnabledInlineModifier(pattern, 's') &&
+          this.hasNestedQuantifiedExpression(
+            this.expandScopedDotAllLiterals(pattern),
+          ))
+      );
+    } finally {
+      this.parsingUnicodeSets = previousParsingMode;
+    }
   }
 
   private hasBackreference(pattern: string): boolean {
@@ -1368,9 +1382,12 @@ export class SafetyEvaluator implements Evaluator {
     return alternatives;
   }
 
-  private skipCharacterClass(pattern: string, start: number): number {
+  private skipCharacterClass(
+    pattern: string,
+    start: number,
+    unicodeSets = this.parsingUnicodeSets,
+  ): number {
     let depth = 1;
-    let unicodeSets = false;
 
     for (let i = start + 1; i < pattern.length; i += 1) {
       if (pattern[i] === '\\') {
@@ -1378,16 +1395,7 @@ export class SafetyEvaluator implements Evaluator {
         continue;
       }
 
-      if (this.isUnicodeSetOperatorAt(pattern, i)) {
-        unicodeSets = true;
-        i += 1;
-        continue;
-      }
-
-      if (
-        pattern[i] === '[' &&
-        (unicodeSets || this.nestedClassStartsUnicodeSetOperation(pattern, i))
-      ) {
+      if (pattern[i] === '[' && unicodeSets) {
         depth += 1;
         continue;
       }
@@ -1398,27 +1406,6 @@ export class SafetyEvaluator implements Evaluator {
       }
     }
     return pattern.length - 1;
-  }
-
-  private isUnicodeSetOperatorAt(pattern: string, start: number): boolean {
-    const pair = pattern.slice(start, start + 2);
-    return pair === '&&' || pair === '--';
-  }
-
-  private nestedClassStartsUnicodeSetOperation(
-    pattern: string,
-    start: number,
-  ): boolean {
-    for (let i = start + 1; i < pattern.length; i += 1) {
-      if (pattern[i] === '\\') {
-        i += 1;
-        continue;
-      }
-      if (pattern[i] === ']') {
-        return this.isUnicodeSetOperatorAt(pattern, i + 1);
-      }
-    }
-    return false;
   }
 
   private quantifierAt(
