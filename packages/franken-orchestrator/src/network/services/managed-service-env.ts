@@ -13,9 +13,64 @@ const PROVIDER_ENV_KEYS = [
   'OPENAI_API_KEY',
   'GOOGLE_API_KEY',
   'GEMINI_API_KEY',
+  'GEMINI_CLI_HOME',
+  'GEMINI_CLI_SYSTEM_DEFAULTS_PATH',
+  'GEMINI_CLI_SYSTEM_SETTINGS_PATH',
+  'GEMINI_CLI_TRUSTED_FOLDERS_PATH',
+  'GEMINI_CLI_TRUST_WORKSPACE',
 ] as const;
 
-const GITHUB_ENV_KEYS = ['GH_TOKEN', 'GITHUB_TOKEN'] as const;
+const GITHUB_ENV_KEYS = [
+  'GH_TOKEN',
+  'GITHUB_TOKEN',
+  'GH_ENTERPRISE_TOKEN',
+  'GITHUB_ENTERPRISE_TOKEN',
+  'GH_HOST',
+  'GH_CONFIG_DIR',
+  'GITHUB_API_URL',
+  'GITHUB_GRAPHQL_URL',
+] as const;
+
+const ORCHESTRATOR_CONFIG_ENV_KEYS = [
+  'FRANKEN_MAX_TOTAL_TOKENS',
+  'FRANKEN_MAX_DURATION_MS',
+  'FRANKEN_MAX_CRITIQUE_ITERATIONS',
+  'FRANKEN_ENABLE_HEARTBEAT',
+  'FRANKEN_ENABLE_TRACING',
+  'FRANKEN_ENABLE_REFLECTION',
+  'FRANKEN_MIN_CRITIQUE_SCORE',
+] as const;
+
+const MANAGED_RUNTIME_ENV_KEYS = [
+  'FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES',
+  'FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL',
+  'FBEAST_ROOT',
+  'FBEAST_RUN_LOG_MAX_BYTES',
+  'FBEAST_RUN_LOG_MAX_ROTATED_FILES',
+  'HERMES_KANBAN_DB',
+  'CHROMA_URL',
+  'SSH_AUTH_SOCK',
+  'SSH_AGENT_PID',
+  'DOCKER_HOST',
+  'DOCKER_TLS_VERIFY',
+  'DOCKER_CERT_PATH',
+] as const;
+
+const CONNECTIVITY_ENV_KEYS = [
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'NO_PROXY',
+  'ALL_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'no_proxy',
+  'all_proxy',
+  'NODE_EXTRA_CA_CERTS',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'CURL_CA_BUNDLE',
+  'REQUESTS_CA_BUNDLE',
+] as const;
 
 const MODULE_ENV_KEYS = [
   'FRANKENBEAST_MODULE_FIREWALL',
@@ -42,8 +97,12 @@ function secretBackendEnvKeys(backend: OrchestratorConfig['network']['secureBack
       'OP_SERVICE_ACCOUNT_TOKEN',
       'OP_CONNECT_HOST',
       'OP_CONNECT_TOKEN',
+      'OP_ACCOUNT',
       ...Object.keys(process.env).filter((key) => /^OP_SESSION_[A-Za-z0-9_]+$/.test(key)),
     ];
+  }
+  if (backend === 'os-keychain') {
+    return ['DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR'];
   }
   return [];
 }
@@ -83,11 +142,19 @@ export function inheritedNetworkServiceEnvKeys(
 ): string[] {
   const keys: string[] = [
     ...OPERATOR_SECRET_ENV_KEYS,
+    ...CONNECTIVITY_ENV_KEYS,
     ...secretBackendEnvKeys(config.network.secureBackend),
   ];
 
   if (serviceId === 'beasts-daemon' || serviceId === 'chat-server') {
-    keys.push(...LEGACY_OPERATOR_SECRET_ENV_KEYS, ...PROVIDER_ENV_KEYS, ...GITHUB_ENV_KEYS, ...MODULE_ENV_KEYS);
+    keys.push(
+      ...LEGACY_OPERATOR_SECRET_ENV_KEYS,
+      ...PROVIDER_ENV_KEYS,
+      ...GITHUB_ENV_KEYS,
+      ...ORCHESTRATOR_CONFIG_ENV_KEYS,
+      ...MANAGED_RUNTIME_ENV_KEYS,
+      ...MODULE_ENV_KEYS,
+    );
   }
   if (serviceId === 'beasts-daemon') {
     keys.push(...CAPACITY_ENV_KEYS);

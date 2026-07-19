@@ -72,22 +72,29 @@ describe('network-registry', () => {
     expect(daemonKeys).toEqual(expect.arrayContaining([
       'BW_SESSION',
       'FBEAST_AGENT_CAPACITY_TOTAL',
+      'FRANKEN_MAX_TOTAL_TOKENS',
+      'FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL',
       'FRANKENBEAST_MODULE_FIREWALL',
       'GITHUB_TOKEN',
+      'HTTPS_PROXY',
     ]));
     expect(chatKeys).toEqual(expect.arrayContaining([
       'BW_SESSION',
       'CUSTOM_SLACK_TOKEN',
       'CUSTOM_SLACK_SIGNING_SECRET',
       'CUSTOM_DISCORD_TOKEN',
+      'FRANKEN_MAX_TOTAL_TOKENS',
+      'FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL',
       'FRANKENBEAST_MODULE_FIREWALL',
       'GITHUB_TOKEN',
+      'HTTPS_PROXY',
     ]));
     expect(chatKeys).not.toContain('a'.repeat(64));
     expect(chatKeys).not.toContain('FBEAST_AGENT_CAPACITY_TOTAL');
     expect(dashboardKeys).toEqual(expect.arrayContaining([
       'BW_SESSION',
       'FRANKENBEAST_BEAST_OPERATOR_TOKEN',
+      'HTTPS_PROXY',
     ]));
     expect(dashboardKeys).not.toContain('GITHUB_TOKEN');
     expect(dashboardKeys).not.toContain('FRANKENBEAST_MODULE_FIREWALL');
@@ -103,7 +110,23 @@ describe('network-registry', () => {
     for (const serviceId of ['beasts-daemon', 'chat-server', 'dashboard-web']) {
       const inheritedEnvKeys = services.find((service) => service.id === serviceId)
         ?.runtimeConfig.process?.inheritedEnvKeys ?? [];
-      expect(inheritedEnvKeys).toContain('OP_SESSION_WORK');
+      expect(inheritedEnvKeys).toEqual(expect.arrayContaining(['OP_ACCOUNT', 'OP_SESSION_WORK']));
+    }
+  });
+
+  it('declares OS keychain session variables only for the OS keychain backend', () => {
+    const config = defaultConfig();
+    config.network.secureBackend = 'os-keychain';
+
+    const services = resolveNetworkServices(config, context);
+
+    for (const serviceId of ['beasts-daemon', 'chat-server', 'dashboard-web']) {
+      const inheritedEnvKeys = services.find((service) => service.id === serviceId)
+        ?.runtimeConfig.process?.inheritedEnvKeys ?? [];
+      expect(inheritedEnvKeys).toEqual(expect.arrayContaining([
+        'DBUS_SESSION_BUS_ADDRESS',
+        'XDG_RUNTIME_DIR',
+      ]));
     }
   });
 
