@@ -53,7 +53,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   const ticketStore = new SseConnectionTicketStore({ databasePath: paths.beastsDb });
   const capacityPolicy = createCapacityReservationPolicyFromEnv();
   const maintenance = MaintenanceModeService.forProjectRoot(projectRoot);
-  const trustedSkillsDir = paths.skillsDir ?? join(projectRoot, '.fbeast', 'skills');
+  const trustedSkillsDir = paths.skillsDir ?? join(projectRoot, 'skills');
   const trustedSkillToolManifests = () => collectTrustedSkillToolManifests(trustedSkillsDir);
 
   // Deferred reference to break circular dep: executor → runService → executors → executor

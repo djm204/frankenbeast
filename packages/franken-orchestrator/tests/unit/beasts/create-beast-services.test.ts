@@ -130,7 +130,7 @@ describe('createBeastServices', () => {
 
   it('loads installed skill tool manifests for tracked-agent validation and dispatch', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-create-beast-services-'));
-    const skillDir = join(tempDir, '.fbeast', 'skills', 'context-only');
+    const skillDir = join(tempDir, 'skills', 'context-only');
     await mkdir(skillDir, { recursive: true });
     await writeFile(
       join(skillDir, 'mcp.json'),
