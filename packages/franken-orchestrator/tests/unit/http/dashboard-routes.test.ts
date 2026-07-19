@@ -322,6 +322,37 @@ describe('dashboard routes', () => {
       expect(res.status).toBe(401);
     });
 
+    it.each([
+      {
+        name: 'external host',
+        url: 'https://dashboard.example.com/events',
+        headers: {},
+      },
+      {
+        name: 'external peer',
+        url: 'http://localhost/events',
+        headers: { 'x-frankenbeast-remote-address': '203.0.113.10' },
+      },
+      {
+        name: 'external forwarded client',
+        url: 'http://localhost/events',
+        headers: {
+          'x-frankenbeast-remote-address': '127.0.0.1',
+          'x-forwarded-for': '203.0.113.10',
+        },
+      },
+    ])('rejects unauthenticated dashboard streams from an $name', async ({ url, headers }) => {
+      const deps = createMockDeps();
+      deps.operatorToken = undefined;
+      deps.ticketStore = undefined;
+      const app = createDashboardRoutes(deps);
+
+      const res = await app.request(url, { headers });
+      if (res.status === 200) await res.body?.cancel();
+
+      expect(res.status).toBe(403);
+    });
+
     it('preserves unauthenticated local-dev streams when no operator token is configured', async () => {
       const deps = createMockDeps();
       deps.operatorToken = undefined;

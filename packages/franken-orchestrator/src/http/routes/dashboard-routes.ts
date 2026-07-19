@@ -17,6 +17,7 @@ import type { SloDashboard } from '../../availability/slo-dashboard.js';
 const DASHBOARD_SNAPSHOT_POLL_MS = 1_000;
 const DASHBOARD_HEARTBEAT_MS = 30_000;
 const DASHBOARD_SSE_TICKET_SCOPE = 'dashboard';
+const TRUSTED_REMOTE_ADDRESS_HEADER = 'x-frankenbeast-remote-address';
 
 export interface DashboardRouteDeps {
   skillManager: SkillManager;
@@ -86,6 +87,40 @@ function safeTokenCompare(a: string, b: string): boolean {
   return timingSafeEqual(bufA, bufB);
 }
 
+function isLoopbackAddress(address: string): boolean {
+  const normalized = address.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  return normalized === 'localhost'
+    || normalized === '127.0.0.1'
+    || normalized === '::1'
+    || normalized === '::ffff:127.0.0.1';
+}
+
+function isForwardedForLoopback(forwardedFor: string | undefined): boolean {
+  if (forwardedFor === undefined) return true;
+  return forwardedFor
+    .split(',')
+    .map((address) => address.trim())
+    .filter(Boolean)
+    .every(isLoopbackAddress);
+}
+
+function isLoopbackDashboardRequest(c: Context): boolean {
+  const hostname = new URL(c.req.url).hostname;
+  const trustedRemoteAddress = c.req.header(TRUSTED_REMOTE_ADDRESS_HEADER);
+  const realIp = c.req.header('x-real-ip');
+
+  if (trustedRemoteAddress !== undefined) {
+    return isLoopbackAddress(trustedRemoteAddress)
+      && isLoopbackAddress(hostname)
+      && isForwardedForLoopback(c.req.header('x-forwarded-for'))
+      && (realIp === undefined || isLoopbackAddress(realIp));
+  }
+
+  // Direct Hono callers do not have a Node socket address. Production Node
+  // requests always receive the trusted peer header in http-server-utils.
+  return isLoopbackAddress(hostname);
+}
+
 function authenticateTicketRequest(c: Context, operatorToken: string): Response | undefined {
   const headerToken = extractOperatorToken(c.req.header('Authorization'))
     ?? c.req.header('x-frankenbeast-operator-token')
@@ -150,6 +185,14 @@ export function createDashboardRoutes(deps: DashboardRouteDeps): Hono {
   // GET /api/dashboard/events — ticket-authenticated SSE stream for real-time dashboard updates
   app.get('/events', (c) => {
     const ticket = c.req.query('ticket');
+    if (!operatorToken && !isLoopbackDashboardRequest(c)) {
+      return c.json({
+        error: {
+          code: 'FORBIDDEN',
+          message: 'Dashboard events require operator authentication or a loopback-only request',
+        },
+      }, 403);
+    }
     if (operatorToken) {
       if (!ticketStore || !ticket) {
         return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);
