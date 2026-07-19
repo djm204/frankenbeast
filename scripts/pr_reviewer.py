@@ -63,9 +63,18 @@ def init_db():
     conn.close()
 
 
+def github_token():
+    return (
+        os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN")
+        or os.environ.get("GH_TOKEN")
+        or os.environ.get("GITHUB_TOKEN")
+        or ""
+    )
+
+
 def gh_environment():
     environment = os.environ.copy()
-    token = environment.get("GITHUB_PERSONAL_ACCESS_TOKEN")
+    token = github_token()
     if token and not environment.get("GH_TOKEN"):
         environment["GH_TOKEN"] = token
     return environment
@@ -73,7 +82,13 @@ def gh_environment():
 
 def agy_environment():
     environment = os.environ.copy()
-    for name in ("GITHUB_PERSONAL_ACCESS_TOKEN", "GITHUB_TOKEN", "GH_TOKEN"):
+    for name in (
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
+        "GH_ENTERPRISE_TOKEN",
+        "GITHUB_ENTERPRISE_TOKEN",
+    ):
         environment.pop(name, None)
     return environment
 
@@ -84,13 +99,16 @@ def limit_review_output_files():
     )
 
 
-def get_open_prs():
+def get_open_prs(repository=None):
+    repository = repository or get_repository()
     try:
         output = subprocess.check_output(
             [
                 "gh",
                 "pr",
                 "list",
+                "--repo",
+                repository,
                 "--state",
                 "open",
                 "--json",
@@ -151,10 +169,10 @@ def read_process_stdout(process, timeout_seconds=GH_DIFF_TIMEOUT_SECONDS):
     return decode_bounded_diff(bytes(payload))
 
 
-def read_gh_diff(pr_number):
+def read_gh_diff(pr_number, repository):
     """Fetch a bounded diff from gh and terminate it once the cap is exceeded."""
     process = subprocess.Popen(
-        ["gh", "pr", "diff", str(pr_number)],
+        ["gh", "pr", "diff", str(pr_number), "--repo", repository],
         cwd=WORKSPACE,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -207,7 +225,7 @@ def get_repository():
 
 
 def get_pr_diff(pr_number):
-    pat = os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN", "")
+    pat = github_token()
     repository = get_repository()
     url = f"https://api.github.com/repos/{repository}/pulls/{pr_number}"
     request = urllib.request.Request(url)
@@ -223,7 +241,7 @@ def get_pr_diff(pr_number):
             file=sys.stderr,
         )
         try:
-            return read_gh_diff(pr_number)
+            return read_gh_diff(pr_number, repository)
         except Exception as fallback_error:
             print(
                 f"Error fetching diff via gh for PR #{pr_number}: {fallback_error}",
@@ -354,7 +372,10 @@ def parse_final_verdict(review_body):
     }[matches[-1]]
 
 
-def post_pr_review(pr_number, review_body, security_warnings, diff_truncated=False):
+def post_pr_review(
+    pr_number, review_body, security_warnings, diff_truncated=False, repository=None
+):
+    repository = repository or get_repository()
     verdict = "comment"
     if security_warnings:
         warning_header = (
@@ -389,7 +410,17 @@ def post_pr_review(pr_number, review_body, security_warnings, diff_truncated=Fal
         temp_file.parent.mkdir(parents=True, exist_ok=True)
         temp_file.write_text(review_body)
         subprocess.check_call(
-            ["gh", "pr", "review", str(pr_number), f"--{verdict}", "-F", str(temp_file)],
+            [
+                "gh",
+                "pr",
+                "review",
+                str(pr_number),
+                "--repo",
+                repository,
+                f"--{verdict}",
+                "-F",
+                str(temp_file),
+            ],
             cwd=WORKSPACE,
             env=gh_environment(),
         )
@@ -405,14 +436,15 @@ def post_pr_review(pr_number, review_body, security_warnings, diff_truncated=Fal
 
 def process_prs():
     init_db()
-    if not os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN"):
+    if not github_token():
         print(
-            "Error: GITHUB_PERSONAL_ACCESS_TOKEN must be set.",
+            "Error: GITHUB_PERSONAL_ACCESS_TOKEN, GH_TOKEN, or GITHUB_TOKEN must be set.",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    open_prs = get_open_prs()
+    repository = get_repository()
+    open_prs = get_open_prs(repository)
     if not open_prs:
         print("No open PRs found.")
         return
@@ -451,7 +483,19 @@ def process_prs():
         )
         conn.commit()
 
-        diff_content = get_pr_diff(pr_number)
+        try:
+            diff_content = get_pr_diff(pr_number)
+        except Exception as error:
+            print(
+                f"Could not fetch diff for PR #{pr_number}: {error}",
+                file=sys.stderr,
+            )
+            cursor.execute(
+                "UPDATE pr_reviews SET status = ? WHERE pr_number = ?",
+                ("failed", pr_number),
+            )
+            conn.commit()
+            continue
         if not diff_content.strip():
             print(f"Empty diff for PR #{pr_number}. Skipping.")
             cursor.execute(
@@ -489,6 +533,7 @@ def process_prs():
             review_body,
             security_warnings,
             diff_truncated=diff_truncated,
+            repository=repository,
         )
         status = "completed" if posted else "failed"
         cursor.execute(
