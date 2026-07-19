@@ -846,7 +846,7 @@ process.stdout.write(`Trace viewer: ${server.url}`)
 await server.stop()
 ```
 
-To opt in to access from another interface, set `host` explicitly. `server.url` reports the configured host. `TraceServer` does not provide authentication, so only use a non-loopback host behind appropriate firewall and access controls.
+To opt in to access from another interface, set `host` explicitly. `server.url` reports the configured bind host; when using the wildcard `0.0.0.0`, open the viewer with the server's reachable hostname or interface IP instead of `0.0.0.0`. `TraceServer` does not provide authentication, so only use a non-loopback host behind appropriate firewall and access controls.
 
 ```ts
 const sharedServer = new TraceServer({
