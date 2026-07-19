@@ -617,6 +617,7 @@ describe('AnalyticsPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'View details for Denied destructive command' }));
 
     expect(await screen.findByText('detail timeout')).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toBe('detail timeout');
     expect(screen.getByText('Partial row data')).toBeTruthy();
     expect(screen.getByText('Full event detail is not loaded; the fields below are only from the selected table row.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Copy JSON' })).toHaveProperty('disabled', true);

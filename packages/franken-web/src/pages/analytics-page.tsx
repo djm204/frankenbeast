@@ -593,7 +593,7 @@ function DetailDrawer({
               </Dialog.Close>
             </div>
 
-            {error && <div className="analytics-alert">{error}</div>}
+            {error && <div className="analytics-alert" role="alert">{error}</div>}
 
             <div className="analytics-detail-status" aria-live="polite">
               <strong>{detailStateLabel}</strong>
