@@ -1041,7 +1041,7 @@ frankenbeast/
 - [Run the Dashboard Chat](docs/guides/run-dashboard-chat.md) — start the WebSocket chat server and dashboard locally
 - [Run the Network Operator](docs/guides/run-network-operator.md) — start Frankenbeast request-serving services through `frankenbeast network`
 - [Add an LLM Provider](docs/guides/add-llm-provider.md) — add CLI execution providers through `ICliProvider` or API-backed clients through the provider registry
-- [Wrap an External Agent](docs/guides/wrap-external-agent.md) — firewall-as-proxy or full orchestration
+- [Wrap an External Agent](docs/guides/wrap-external-agent.md) — MCP tool governance, orchestrator runtime, or BeastLoop dependency integration
 - [Contract Matrix](docs/CONTRACT_MATRIX.md) — all port interfaces documented
 - [ADRs](docs/adr/) — architectural decisions and rationale
 - [Design Plans](docs/plans/) — design docs and implementation plans
