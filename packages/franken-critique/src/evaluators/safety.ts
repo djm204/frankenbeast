@@ -343,9 +343,11 @@ export class SafetyEvaluator implements Evaluator {
 
       if (char === ')' && stack.length > 1) {
         const group = stack.pop()!;
+        const groupContent = pattern.slice(group.startIndex + 1, i);
         if (
-          !this.parsingUnicodeSets &&
-          this.hasOverlappingAlternation(pattern.slice(group.startIndex + 1, i))
+          (!this.parsingUnicodeSets ||
+            !this.hasUnicodeSetSemanticSyntax(groupContent)) &&
+          this.hasOverlappingAlternation(groupContent)
         ) {
           group.containsAmbiguousAlternation = true;
         }
@@ -397,6 +399,14 @@ export class SafetyEvaluator implements Evaluator {
     }
 
     return false;
+  }
+
+  private hasUnicodeSetSemanticSyntax(pattern: string): boolean {
+    return (
+      pattern.includes('&&') ||
+      pattern.includes('--') ||
+      /\\[pPq]\{/.test(pattern)
+    );
   }
 
   private hasOverlappingAlternation(groupContent: string): boolean {

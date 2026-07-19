@@ -898,6 +898,10 @@ describe('SafetyEvaluator', () => {
     expect(
       evaluator.hasUnsafeRegexShape('[[a-z]&&[p-z]]+((a+)+)$', true),
     ).toBe(true);
+    expect(evaluator.hasUnsafeRegexShape('^(?:a|aa)+$', true)).toBe(true);
+    expect(
+      evaluator.hasUnsafeRegexShape('^(?:[[a-z]&&[p-z]]|a)+$', true),
+    ).toBe(false);
   });
 
   it('evaluates unicodeSets safety rules with the v flag', async () => {
