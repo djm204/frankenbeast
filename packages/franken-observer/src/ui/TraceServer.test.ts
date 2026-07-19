@@ -103,6 +103,7 @@ describe('TraceServer', () => {
           })
         }
         return Promise.resolve({
+          ok: true,
           json: () => Promise.resolve({ id: maliciousId, goal: 'g', status: 'completed', spans: [] }),
         })
       }
@@ -127,6 +128,61 @@ describe('TraceServer', () => {
       await context.loadDetail!(maliciousId)
       expect(panel.innerHTML).not.toContain('<img')
       expect(panel.innerHTML).toContain('&lt;img')
+    })
+
+    it('renders an escaped recoverable error when a trace detail request returns 404', async () => {
+      const html = await fetch(server.url + '/').then(r => r.text())
+      const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1]
+      expect(script).toBeDefined()
+
+      const panel = { innerHTML: '' }
+      const context = createContext({
+        document: {
+          getElementById: (id: string) => id === 'panel'
+            ? panel
+            : { innerHTML: '', addEventListener: () => {} },
+          querySelectorAll: () => [] as unknown[],
+        },
+        fetch: () => Promise.resolve({
+          ok: false,
+          status: 404,
+          json: () => Promise.resolve({ error: 'trace not found <img src=x onerror=alert(1)>' }),
+        }),
+        Date,
+      }) as { loadDetail?: (id: string) => Promise<void> }
+      new Script(script!.replace(/loadTraces\(\)\s*$/, '')).runInContext(context)
+
+      await expect(context.loadDetail!('stale-trace')).resolves.toBeUndefined()
+      expect(panel.innerHTML).toContain('trace not found')
+      expect(panel.innerHTML).toContain('&lt;img')
+      expect(panel.innerHTML).not.toContain('<img')
+    })
+
+    it('renders a recoverable error when successful trace JSON has no spans array', async () => {
+      const html = await fetch(server.url + '/').then(r => r.text())
+      const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1]
+      expect(script).toBeDefined()
+
+      const panel = { innerHTML: '' }
+      const context = createContext({
+        document: {
+          getElementById: (id: string) => id === 'panel'
+            ? panel
+            : { innerHTML: '', addEventListener: () => {} },
+          querySelectorAll: () => [] as unknown[],
+        },
+        fetch: () => Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ id: 'malformed-trace', goal: 'incomplete trace' }),
+        }),
+        Date,
+      }) as { loadDetail?: (id: string) => Promise<void> }
+      new Script(script!.replace(/loadTraces\(\)\s*$/, '')).runInContext(context)
+
+      await expect(context.loadDetail!('malformed-trace')).resolves.toBeUndefined()
+      expect(panel.innerHTML).toContain('Trace details are unavailable')
+      expect(panel.innerHTML).toContain('empty')
     })
   })
 

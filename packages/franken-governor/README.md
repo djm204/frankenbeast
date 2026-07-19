@@ -386,6 +386,7 @@ Features:
 - **Signature verification**: Optionally validates HMAC-SHA256 signatures on responses
 - **Session tokens**: Optionally creates scoped, time-limited tokens on APPROVE
 - **Audit**: Records every decision via the `AuditRecorder` interface
+- **Slack approver authorization**: Restricts signed Slack callbacks to configured immutable Slack user IDs
 - **HTTP queue backpressure**: `createGovernorApp({ approvalQueueBackpressure })` can reject new unique approval requests with HTTP 429 when too many approvals are already pending
 
 ### HTTP approval queue backpressure
@@ -444,6 +445,19 @@ interface EpisodicTraceRecord {
 ```
 
 ## Security
+
+### Authorized Slack approvers
+
+Slack request signing authenticates the Slack workspace but does not by itself authorize the person clicking an approval action. Standalone Governor apps must therefore configure the immutable Slack user IDs allowed to resolve pending approvals:
+
+```typescript
+const app = createGovernorApp({
+  slackSigningSecret: process.env.SLACK_SIGNING_SECRET,
+  slackApproverUserIds: ['U0123456789', 'U9876543210'],
+});
+```
+
+Signed callbacks whose `user.id` is absent or not in `slackApproverUserIds` receive a `200` Slack acknowledgement and leave the approval pending. For Slack-generated `https://hooks.slack.com/...` or `https://hooks.slack-gov.com/...` response URLs, the governor also posts an ephemeral denial so the actor sees clear feedback; untrusted response URL hosts are ignored. The transport-level success does not authorize or resolve the action. An omitted or empty allowlist fails closed.
 
 ### Signed Approvals (HMAC-SHA256)
 

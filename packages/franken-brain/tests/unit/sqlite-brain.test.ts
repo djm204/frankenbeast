@@ -13,7 +13,9 @@ import type {
 import {
   SqliteBrain,
   WorkingMemoryLimitError,
+  WorkingMemoryKeyError,
   WorkingMemoryHydrationLimitError,
+  CorruptWorkingMemoryRowError,
   UnsupportedMemorySchemaVersionError,
   MemoryEncryptionKeyUnavailableError,
   MemoryEncryptionMigrationRequiredError,
@@ -21,6 +23,7 @@ import {
   MemoryEncryptionWrongKeyError,
   CURRENT_MEMORY_SCHEMA_VERSION,
   DEFAULT_WORKING_MEMORY_LIMITS,
+  MAX_WORKING_MEMORY_KEY_BYTES,
   DEFAULT_MEMORY_CONFIDENCE_HALF_LIFE_MS,
   MemoryConfidenceDecayError,
   calculateMemoryConfidenceDecay,
@@ -621,6 +624,90 @@ describe('SqliteBrain', () => {
     it('stores and retrieves values', () => {
       brain.working.set('key', 'value');
       expect(brain.working.get('key')).toBe('value');
+    });
+
+    it('accepts bounded printable working-memory keys', () => {
+      const key = 'project:tenant/α β_1-@';
+
+      expect(() => brain.working.set(key, 'value')).not.toThrow();
+      expect(brain.working.get(key)).toBe('value');
+    });
+
+    it.each([
+      { key: '', reason: 'empty', byteLength: 0 },
+      { key: 'line\nbreak', reason: 'control_character', byteLength: 10 },
+      {
+        key: 'k'.repeat(MAX_WORKING_MEMORY_KEY_BYTES + 1),
+        reason: 'too_long',
+        byteLength: MAX_WORKING_MEMORY_KEY_BYTES + 1,
+      },
+    ])('rejects invalid working-memory keys before set mutation ($reason)', ({ key, reason, byteLength }) => {
+      brain.working.set('existing', 'preserved');
+
+      let error: unknown;
+      try {
+        brain.working.set(key, 'invalid');
+      } catch (caught) {
+        error = caught;
+      }
+
+      expect(error).toBeInstanceOf(WorkingMemoryKeyError);
+      expect(error).toMatchObject({
+        code: 'INVALID_WORKING_MEMORY_KEY',
+        reason,
+        byteLength,
+        maxBytes: MAX_WORKING_MEMORY_KEY_BYTES,
+      });
+      expect(brain.working.snapshot()).toEqual({ existing: 'preserved' });
+    });
+
+    it('rejects invalid restore keys atomically before persistence', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-invalid-key-'));
+      const dbPath = join(dir, 'brain.db');
+      const persistent = new SqliteBrain(dbPath);
+
+      try {
+        persistent.working.set('existing', 'preserved');
+        persistent.flush();
+
+        expect(() => persistent.working.restore({ valid: 1, 'bad\u0000key': 2 })).toThrow(
+          WorkingMemoryKeyError,
+        );
+        persistent.flush();
+
+        expect(persistent.working.snapshot()).toEqual({ existing: 'preserved' });
+        const db = new Database(dbPath, { readonly: true });
+        expect(db.prepare(`SELECT key FROM working_memory ORDER BY key`).all()).toEqual([
+          { key: 'existing' },
+        ]);
+        db.close();
+      } finally {
+        persistent.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('fails closed without mutating legacy persisted rows that have invalid keys', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-legacy-invalid-key-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const initialized = new SqliteBrain(dbPath);
+        initialized.close();
+        const db = new Database(dbPath);
+        db.prepare(
+          `INSERT INTO working_memory (key, value, updated_at, schema_version) VALUES (?, ?, ?, ?)`,
+        ).run('legacy\nkey', '"value"', new Date().toISOString(), CURRENT_MEMORY_SCHEMA_VERSION);
+        db.close();
+
+        expect(() => new SqliteBrain(dbPath)).toThrow(WorkingMemoryKeyError);
+
+        const verify = new Database(dbPath, { readonly: true });
+        expect(verify.prepare(`SELECT key FROM working_memory`).pluck().get()).toBe('legacy\nkey');
+        verify.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it('snapshot() returns all key-value pairs', () => {
@@ -1673,6 +1760,60 @@ describe('SqliteBrain', () => {
         ]);
       } finally {
         db?.close();
+        seeded?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('rejects corrupt persisted JSON during hydration without deleting the recoverable row', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-corrupt-hydration-'));
+      const dbPath = join(dir, 'brain.db');
+      let seeded: SqliteBrain | undefined;
+      let reopened: SqliteBrain | undefined;
+      let db: Database.Database | undefined;
+
+      try {
+        seeded = new SqliteBrain(dbPath);
+        seeded.working.set('healthy', { enabled: true });
+        seeded.working.set('corrupt', { recoverable: true });
+        seeded.flush();
+        seeded.close();
+        seeded = undefined;
+
+        db = new Database(dbPath);
+        db.prepare(`UPDATE working_memory SET value = ? WHERE key = ?`).run('{not-json', 'corrupt');
+        db.close();
+        db = undefined;
+
+        let hydrationError: unknown;
+        try {
+          reopened = new SqliteBrain(dbPath);
+        } catch (error) {
+          hydrationError = error;
+        }
+        expect(hydrationError).toBeInstanceOf(CorruptWorkingMemoryRowError);
+        expect(hydrationError).toMatchObject({
+          code: 'CORRUPT_WORKING_MEMORY_ROW',
+          key: 'corrupt',
+        });
+
+        db = new Database(dbPath);
+        expect(
+          db.prepare(`SELECT value FROM working_memory WHERE key = ?`).get('corrupt'),
+        ).toEqual({ value: '{not-json' });
+        db.prepare(`UPDATE working_memory SET value = ? WHERE key = ?`).run(
+          JSON.stringify({ recovered: true }),
+          'corrupt',
+        );
+        db.close();
+        db = undefined;
+
+        reopened = new SqliteBrain(dbPath);
+        expect(reopened.working.get('healthy')).toEqual({ enabled: true });
+        expect(reopened.working.get('corrupt')).toEqual({ recovered: true });
+      } finally {
+        db?.close();
+        reopened?.close();
         seeded?.close();
         rmSync(dir, { recursive: true, force: true });
       }

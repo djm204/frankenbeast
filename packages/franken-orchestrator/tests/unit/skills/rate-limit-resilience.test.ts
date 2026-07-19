@@ -90,9 +90,9 @@ describe('parseResetTime', () => {
     expect(result).toEqual({ sleepSeconds: 18, source: 'retry-after header' });
   });
 
-  it('parses "try again in N minutes"', () => {
+  it('clamps "try again in N minutes" to the safe maximum', () => {
     const result = parseResetTime('Please try again in 5 minutes', '');
-    expect(result).toEqual({ sleepSeconds: 300, source: 'minutes pattern' });
+    expect(result).toEqual({ sleepSeconds: 120, source: 'minutes pattern (clamped to 120s)' });
   });
 
   it('parses "try again in N seconds"', () => {
