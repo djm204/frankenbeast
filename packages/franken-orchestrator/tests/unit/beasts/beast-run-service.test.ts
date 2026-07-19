@@ -627,6 +627,40 @@ describe('BeastRunService', () => {
     expect(repo.getRun(run.id)).toMatchObject({ id: run.id, status: 'queued' });
   });
 
+  it('starts pre-policy direct runs without tracked-agent metadata', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: {
+        start: vi.fn(async (run: { id: string }) => repo.createAttempt(run.id, { status: 'running' })),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const runs = new BeastRunService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const run = repo.createRun({
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {
+        provider: 'claude',
+        objective: 'Resume a run created before policy metadata existed',
+        chunkDirectory: 'docs/chunks',
+      },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-11T00:00:00.000Z',
+    });
+
+    const started = await runs.start(run.id, 'operator');
+
+    expect(started.status).toBe('running');
+    expect(executors.process.start).toHaveBeenCalledOnce();
+  });
+
   it('rejects persisted queued runs that omitted an explicit skills allowlist', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

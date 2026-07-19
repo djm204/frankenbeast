@@ -145,7 +145,7 @@ describe('createBeastServices', () => {
     );
     await writeFile(
       join(brokenSkillDir, 'mcp.json'),
-      JSON.stringify({ mcpServers: { 'broken-unselected': { command: 'broken-unselected' } } }),
+      '{not-json',
     );
     await writeFile(join(brokenSkillDir, 'tools.json'), '{not-json');
     const { createBeastServices } = await import('../../../src/beasts/create-beast-services.js');

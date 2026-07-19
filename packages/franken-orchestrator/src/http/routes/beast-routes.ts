@@ -280,6 +280,24 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
           `Tracked agent '${body.trackedAgentId}' was not found`,
         );
       }
+      if (error instanceof AgentToolPolicyError && body.trackedAgentId) {
+        try {
+          const trackedAgent = deps.agents.getAgent(body.trackedAgentId);
+          if (trackedAgent.status === 'initializing') {
+            deps.agents.updateAgent(body.trackedAgentId, { status: 'stopped' });
+            deps.agents.appendEvent(body.trackedAgentId, {
+              level: 'warning',
+              type: 'agent.dispatch.denied',
+              message: error.message,
+              payload: { denials: error.validation.denials },
+            });
+          }
+        } catch (cleanupError) {
+          if (!(cleanupError instanceof UnknownTrackedAgentError)) {
+            throw cleanupError;
+          }
+        }
+      }
       throwAgentToolPolicyError(error);
       if (error instanceof ZodError) {
         throw new HttpError(

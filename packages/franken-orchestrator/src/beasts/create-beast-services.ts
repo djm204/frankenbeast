@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { BeastEventBus } from './events/beast-event-bus.js';
 import { BeastLogStore } from './events/beast-log-store.js';
@@ -128,16 +128,23 @@ function collectTrustedSkillToolManifests(
   skillsDir: string,
 ): Readonly<Record<string, readonly string[]>> {
   const skillManager = new SkillManager(skillsDir, new Set());
+  let skillNames: string[];
+  try {
+    skillNames = readdirSync(skillsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  } catch {
+    return {};
+  }
   return Object.fromEntries(
-    skillManager.listInstalled()
-      .flatMap((skill) => {
-        if (!existsSync(join(skillsDir, skill.name, 'tools.json'))) return [];
-        try {
-          return [[skill.name, skillManager.readTools(skill.name).map((tool) => tool.name)] as const];
-        } catch {
-          return [];
-        }
-      }),
+    skillNames.flatMap((skillName) => {
+      if (!existsSync(join(skillsDir, skillName, 'tools.json'))) return [];
+      try {
+        return [[skillName, skillManager.readTools(skillName).map((tool) => tool.name)] as const];
+      } catch {
+        return [];
+      }
+    }),
   );
 }
 

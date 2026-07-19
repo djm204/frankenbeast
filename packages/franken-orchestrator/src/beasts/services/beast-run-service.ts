@@ -360,9 +360,10 @@ export class BeastRunService {
     run: BeastRun,
     configSnapshot: Readonly<Record<string, unknown>> = run.configSnapshot,
   ): void {
-    const trackedAgent = run.trackedAgentId
-      ? this.repository.getTrackedAgent(run.trackedAgentId)
-      : undefined;
+    // Policy metadata was introduced for tracked agents. Preserve pre-migration
+    // direct runs, which have no tracked-agent policy context to validate.
+    if (!run.trackedAgentId) return;
+    const trackedAgent = this.repository.getTrackedAgent(run.trackedAgentId);
     const validation = validateAgentRoleTools(configSnapshot, {
       definitionId: run.definitionId,
       initActionConfig: trackedAgent?.initAction.config,

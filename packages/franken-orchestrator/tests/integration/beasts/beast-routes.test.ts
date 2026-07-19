@@ -150,7 +150,7 @@ describe('beast routes', () => {
 
     const response = await app.request('/v1/beasts/catalog', {
       headers: {
-        authorization: `Bearer ${operatorToken}`,
+        authorization: 'Bearer ' + operatorToken,
       },
     });
 
@@ -166,7 +166,7 @@ describe('beast routes', () => {
   it('creates a run, reads it back, and exposes events and logs', async () => {
     const { app, operatorToken } = createBeastApp();
     const headers = {
-      authorization: `Bearer ${operatorToken}`,
+      authorization: 'Bearer ' + operatorToken,
       'content-type': 'application/json',
     };
 
@@ -214,7 +214,14 @@ describe('beast routes', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { provider: 'claude', objective: 'Protect secrets', chunkDirectory: 'docs/chunks' },
+      initConfig: {
+        provider: 'claude',
+        objective: 'Protect secrets',
+        chunkDirectory: 'docs/chunks',
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+        skills: [],
+      },
     });
     repository.updateTrackedAgent(agent.id, {
       status: 'failed',
@@ -365,7 +372,7 @@ describe('beast routes', () => {
   it('stops tracked agents when direct run creation is paused by maintenance mode', async () => {
     const { app, operatorToken, agents } = createBeastApp({ maintenanceEnabled: true });
     const headers = {
-      authorization: `Bearer ${operatorToken}`,
+      authorization: 'Bearer ' + operatorToken,
       'content-type': 'application/json',
     };
     const agent = agents.createAgent({
@@ -404,6 +411,58 @@ describe('beast routes', () => {
     expect(response.status).toBe(423);
     expect(agents.getAgent(agent.id).status).toBe('stopped');
     expect(agents.getAgentDetail(agent.id).events.map((event) => event.type)).toContain('agent.dispatch.paused');
+  });
+
+  it('stops initializing tracked agents when run dispatch is denied by tool policy', async () => {
+    const { app, operatorToken, agents, repository } = createBeastApp();
+    const headers = {
+      authorization: 'Bearer ' + operatorToken,
+      'content-type': 'application/json',
+    };
+    const agent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'chat',
+      createdByUser: 'chat-session:chat-1',
+      chatSessionId: 'chat-1',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: {
+        provider: 'claude',
+        objective: 'ship',
+        chunkDirectory: 'docs/chunks',
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+        skills: [],
+      },
+    });
+    repository.updateTrackedAgent(agent.id, {
+      initConfig: {
+        ...agent.initConfig,
+        requestedTools: ['read_file'],
+        skills: ['unknown-installed-skill'],
+      },
+      updatedAt: '2026-03-10T00:00:01.000Z',
+    });
+
+    const response = await app.request('/v1/beasts/runs', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        trackedAgentId: agent.id,
+        chatSessionId: 'chat-1',
+        config: {
+          provider: 'claude',
+          objective: 'Attempt denied dispatch',
+          chunkDirectory: 'docs/chunks',
+        },
+        executionMode: 'process',
+        startNow: true,
+      }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(agents.getAgent(agent.id).status).toBe('stopped');
+    expect(agents.getAgentDetail(agent.id).events.map((event) => event.type)).toContain('agent.dispatch.denied');
   });
 
   it('returns maintenance response instead of 500 when stale tracked agent cleanup cannot run', async () => {
@@ -503,7 +562,7 @@ describe('beast routes', () => {
   it('dispatches a real container executor through the API and exposes container fields', async () => {
     const { app, operatorToken, fakeContainerSupervisor } = createBeastApp({ realContainer: true });
     const headers = {
-      authorization: `Bearer ${operatorToken}`,
+      authorization: 'Bearer ' + operatorToken,
       'content-type': 'application/json',
     };
 
@@ -603,7 +662,7 @@ describe('beast routes', () => {
   it('exposes container fields in start and restart action responses', async () => {
     const { app, operatorToken } = createBeastApp({ realContainer: true });
     const headers = {
-      authorization: `Bearer ${operatorToken}`,
+      authorization: 'Bearer ' + operatorToken,
       'content-type': 'application/json',
     };
 
@@ -676,7 +735,7 @@ describe('beast routes', () => {
     const startResponse = await app.request('/v1/beasts/interviews/martin-loop/start', {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${operatorToken}`,
+        authorization: 'Bearer ' + operatorToken,
       },
     });
     expect(startResponse.status).toBe(201);
@@ -686,7 +745,7 @@ describe('beast routes', () => {
     const answerResponse = await app.request(`/v1/beasts/interviews/${started.data.id}/answer`, {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${operatorToken}`,
+        authorization: 'Bearer ' + operatorToken,
         'content-type': 'application/json',
       },
       body: JSON.stringify({ answer: 'claude' }),
@@ -700,7 +759,7 @@ describe('beast routes', () => {
   it('returns a structured 400 for invalid option-backed interview answers', async () => {
     const { app, operatorToken } = createBeastApp();
     const headers = {
-      authorization: `Bearer ${operatorToken}`,
+      authorization: 'Bearer ' + operatorToken,
       'content-type': 'application/json',
     };
     const startResponse = await app.request('/v1/beasts/interviews/martin-loop/start', {
@@ -735,7 +794,7 @@ describe('beast routes', () => {
     const response = await app.request('/v1/beasts/interviews/missing-session/answer', {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${operatorToken}`,
+        authorization: 'Bearer ' + operatorToken,
         'content-type': 'application/json',
       },
       body: JSON.stringify({ answer: 'claude' }),
@@ -753,7 +812,7 @@ describe('beast routes', () => {
   it('returns 404 and does not persist a run when trackedAgentId is unknown', async () => {
     const { app, operatorToken } = createBeastApp();
     const headers = {
-      authorization: `Bearer ${operatorToken}`,
+      authorization: 'Bearer ' + operatorToken,
       'content-type': 'application/json',
     };
 
@@ -781,7 +840,7 @@ describe('beast routes', () => {
 
     const runsResponse = await app.request('/v1/beasts/runs', {
       headers: {
-        authorization: `Bearer ${operatorToken}`,
+        authorization: 'Bearer ' + operatorToken,
       },
     });
     const runsBody = await runsResponse.json() as { data: { runs: Array<unknown> } };
@@ -791,7 +850,7 @@ describe('beast routes', () => {
   it('returns 404 and does not persist a run when definitionId is unknown', async () => {
     const { app, operatorToken } = createBeastApp();
     const headers = {
-      authorization: `Bearer ${operatorToken}`,
+      authorization: 'Bearer ' + operatorToken,
       'content-type': 'application/json',
     };
 
@@ -815,7 +874,7 @@ describe('beast routes', () => {
 
     const runsResponse = await app.request('/v1/beasts/runs', {
       headers: {
-        authorization: `Bearer ${operatorToken}`,
+        authorization: 'Bearer ' + operatorToken,
       },
     });
     const runsBody = await runsResponse.json() as { data: { runs: Array<unknown> } };
@@ -825,7 +884,7 @@ describe('beast routes', () => {
   it('returns 422 and does not persist a direct run when required config is invalid', async () => {
     const { app, operatorToken } = createBeastApp();
     const headers = {
-      authorization: `Bearer ${operatorToken}`,
+      authorization: 'Bearer ' + operatorToken,
       'content-type': 'application/json',
     };
 
@@ -855,7 +914,7 @@ describe('beast routes', () => {
 
     const runsResponse = await app.request('/v1/beasts/runs', {
       headers: {
-        authorization: `Bearer ${operatorToken}`,
+        authorization: 'Bearer ' + operatorToken,
       },
     });
     const runsBody = await runsResponse.json() as { data: { runs: Array<unknown> } };
@@ -865,7 +924,7 @@ describe('beast routes', () => {
   it('persists a failed run instead of returning 500 when startNow startup fails', async () => {
     const { app, operatorToken } = createBeastApp({ failStart: true });
     const headers = {
-      authorization: `Bearer ${operatorToken}`,
+      authorization: 'Bearer ' + operatorToken,
       'content-type': 'application/json',
     };
 

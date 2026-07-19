@@ -27,7 +27,7 @@ The handoff should include all required fields from the role manifest: `agentRol
 
 ## Least-privilege tool manifests
 
-Dispatcher startup and agent creation validate requested role tools against the `toolManifests` object in the structured manifest. Use these runtime role ids when assigning lane capabilities:
+Agent creation, dispatch, start, and restart validate requested role tools against the runtime `ROLE_TOOL_MANIFESTS` allowlists in `packages/franken-orchestrator/src/beasts/services/role-tool-manifest.ts`. The structured manifest documents the same role model for operators but does not configure runtime enforcement. Use these runtime role ids when assigning lane capabilities:
 
 | Runtime role | Allowed capability summary | Explicitly excluded examples |
 | --- | --- | --- |
