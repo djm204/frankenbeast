@@ -362,6 +362,50 @@ describe('dispatcher queue reconciliation after restart', () => {
     expect(repo.listEvents(runTwo.id).some(event => event.type === 'run.reconciliation.duplicate_live_agent_run')).toBe(true);
   });
 
+  it('includes runs with corrupt config snapshots in duplicate live-process detection', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-dispatcher-reconcile-'));
+    const dbPath = join(workDir, 'beasts.db');
+    const repo = createRepo(workDir);
+    const agent = createAgent(repo, 'duplicate corrupt-config worker');
+    const runs = ['first', 'second'].map((objective, index) => repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: { objective },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: `2026-03-20T00:00:0${index + 1}.000Z`,
+    }));
+    runs.forEach((run, index) => repo.createAttempt(run.id, {
+      status: 'running',
+      pid: 3000 + index,
+      executorMetadata: {
+        processGroupOwned: true,
+        processGroupLeaderPid: 3000 + index,
+        processStartTimeTicks: `${3000 + index}-start`,
+      },
+    }));
+    const db = new Database(dbPath);
+    db.prepare('UPDATE beast_runs SET config_snapshot = ? WHERE id = ?')
+      .run('{"secret":"must-not-leak"', runs[0]!.id);
+    db.close();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const report = reconcileDispatcherQueueAfterRestart(repo, {
+      now: () => '2026-03-20T00:05:00.000Z',
+      isPidAlive: () => true,
+      getProcessStartTimeTicks: (pid) => `${pid}-start`,
+    });
+
+    expect(report.checkedRuns).toBe(2);
+    expect(report.duplicateLiveAgentRunCount).toBe(2);
+    expect(report.findings.filter(finding => finding.code === 'duplicate-live-agent-run').map(finding => finding.runId))
+      .toEqual(expect.arrayContaining(runs.map(run => run.id)));
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('must-not-leak'));
+    warn.mockRestore();
+  });
+
   it('fails closed when a live PID does not match the attempt process ownership metadata', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-dispatcher-reconcile-'));
     const repo = createRepo(workDir);

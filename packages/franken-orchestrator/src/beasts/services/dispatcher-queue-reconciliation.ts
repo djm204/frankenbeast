@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import type { BeastRun, BeastRunAttempt, BeastRunStatus, TrackedAgentStatus } from '../types.js';
 import {
   BeastRepositoryJsonCorruptionError,
+  type BeastRunProcessReference,
   SQLiteBeastRepository,
 } from '../repository/sqlite-beast-repository.js';
 import { isoNow } from '@franken/types';
@@ -128,7 +129,7 @@ export function reconcileDispatcherQueueAfterRestart(
   });
 
   return {
-    checkedRuns: repository.listRuns({ recoverCorruptJson: true }).length,
+    checkedRuns: repository.listRunProcessReferences().length,
     findings,
     changedRuns,
     duplicateLiveAgentRunCount: findings.filter((finding) => finding.code === 'duplicate-live-agent-run').length,
@@ -304,8 +305,8 @@ function detectDuplicateLiveAgentRuns(
   getProcessStartTimeTicks: (pid: number) => string | undefined,
   isProcessGroupAlive: (pid: number) => boolean,
 ): DispatcherQueueReconciliationFinding[] {
-  const liveRunsByAgent = new Map<string, Array<{ run: BeastRun; attempt: BeastRunAttempt; pid: number }>>();
-  for (const run of repository.listRuns({ recoverCorruptJson: true })) {
+  const liveRunsByAgent = new Map<string, Array<{ run: BeastRunProcessReference; attempt: BeastRunAttempt; pid: number }>>();
+  for (const run of repository.listRunProcessReferences()) {
     if (!run.trackedAgentId || run.status !== 'running' || !run.currentAttemptId) continue;
     const attempt = getAttemptForReconciliation(repository, run.currentAttemptId);
     if (attempt === CORRUPT_ATTEMPT) continue;

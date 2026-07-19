@@ -205,6 +205,13 @@ export interface CorruptJsonRecoveryOptions {
   readonly recoverCorruptJson?: boolean;
 }
 
+export interface BeastRunProcessReference {
+  readonly id: string;
+  readonly trackedAgentId?: string | undefined;
+  readonly status: BeastRunStatus;
+  readonly currentAttemptId?: string | undefined;
+}
+
 export class SQLiteBeastRepository {
   private readonly db: Database.Database;
 
@@ -279,6 +286,18 @@ export class SQLiteBeastRepository {
   listRuns(options: CorruptJsonRecoveryOptions = {}): BeastRun[] {
     const rows = this.db.prepare('SELECT * FROM beast_runs ORDER BY created_at DESC, id DESC').all() as BeastRunRow[];
     return mapRowsRecoveringCorruptJson(rows, mapRun, options);
+  }
+
+  listRunProcessReferences(): BeastRunProcessReference[] {
+    const rows = this.db.prepare(
+      'SELECT id, tracked_agent_id, status, current_attempt_id FROM beast_runs ORDER BY created_at DESC, id DESC',
+    ).all() as Array<Pick<BeastRunRow, 'id' | 'tracked_agent_id' | 'status' | 'current_attempt_id'>>;
+    return rows.map((row) => ({
+      id: row.id,
+      ...(row.tracked_agent_id ? { trackedAgentId: row.tracked_agent_id } : {}),
+      status: row.status,
+      ...(row.current_attempt_id ? { currentAttemptId: row.current_attempt_id } : {}),
+    }));
   }
 
   createAttempt(runId: string, input: CreateAttemptInput): BeastRunAttempt {

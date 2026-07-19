@@ -72,7 +72,7 @@ function attemptsForContainerRun(run: BeastRun | undefined, deps: BeastRoutesDep
   if (!run || run.executionMode !== 'container') {
     return [];
   }
-  return deps.runs.listAttempts(run.id);
+  return deps.runs.listAttemptsForResponse(run.id);
 }
 
 function runResponse(run: BeastRun | undefined, deps: BeastRoutesDeps): BeastRunResponse | undefined {
@@ -284,7 +284,7 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
   app.get('/v1/beasts/runs', (c) => {
     return c.json({
       data: {
-        runs: deps.runs.listRuns().map((run) => (
+        runs: deps.runs.listRunsForResponse().map((run) => (
           runWithContainerFields(run, attemptsForContainerRun(run, deps))
         )),
       },
@@ -297,12 +297,12 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
     if (!run) {
       throw beastRunNotFound(runId);
     }
-    const attempts = deps.runs.listAttempts(runId);
+    const attempts = deps.runs.listAttemptsForResponse(runId);
     return c.json({
       data: {
         run: runWithContainerFields(deps.runs.sanitizeRunForResponse(run), attempts),
         attempts,
-        events: deps.runs.listEvents(runId),
+        events: deps.runs.listEventsForResponse(runId),
       },
     });
   });
@@ -312,7 +312,7 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
     try {
       return c.json({
         data: {
-          events: deps.runs.listEvents(runId),
+          events: deps.runs.listEventsForResponse(runId),
         },
       });
     } catch (error) {

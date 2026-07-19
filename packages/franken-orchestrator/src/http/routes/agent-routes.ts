@@ -246,12 +246,11 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
     try {
       const detail = deps.agents.getAgentDetail(agentId);
       const redactDispatchFailure = deps.agents.hasDispatchFailureHistory(agentId);
-      const hasDispatchFailureHistory = detail.events.some((event) => event.type === 'agent.dispatch.failed');
       return c.json({
         data: {
           ...detail,
           agent: redactDispatchFailure ? redactDispatchFailedAgentResponse(detail.agent) : detail.agent,
-          events: redactDispatchFailedAgentEvents(detail.events, hasDispatchFailureHistory),
+          events: redactDispatchFailedAgentEvents(detail.events, redactDispatchFailure),
         },
       });
     } catch (error) {
