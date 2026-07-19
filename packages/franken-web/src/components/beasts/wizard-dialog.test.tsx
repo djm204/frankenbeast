@@ -71,7 +71,7 @@ describe('WizardDialog validation', () => {
     const nextButton = screen.getByRole('button', { name: 'Next' });
     expect(nextButton).toHaveProperty('disabled', true);
     expect(screen.getByRole('alert').textContent).toContain('Agent name is required');
-    expect(screen.getByLabelText('Identity has validation errors').textContent).toContain('!');
+    expect(screen.getByLabelText(/identity.*validation errors/i).textContent).toContain('!');
 
     fireEvent.change(screen.getByLabelText(/Agent Name/), { target: { value: 'Docs Agent' } });
 

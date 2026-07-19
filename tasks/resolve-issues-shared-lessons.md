@@ -1,5 +1,8 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-19 — Codex-triggered commit re-review on issue #2907
+- When a commit is pushed to an existing PR and there was a prior `@codex review`, always trigger a new review on the new head and collect a fresh `@codex review` clean signal before merging. In this case, a `screen-reader` aria-label update changed, a stale strict assertion in `wizard-dialog.test.tsx` broke once; switching it to a regex was sufficient and CI stayed green on the new commit.
+
 ## 2026-07-19 — Deterministic abort handling regression
 - Prefer deterministic abort fixtures over timing sleeps: for HTTP disconnect behavior, verify both in-band and immediate-abort paths by asserting that `AbortSignal` is already aborted when `request.destroyed`/`request.aborted` is true before app handler execution.
 - Use a pre-aborted request object (or equivalent event-driven signal path) in unit tests when asserting handler abort behavior, and keep timeouts only as a bounded safety net, not as fixture synchronization.
