@@ -10,6 +10,9 @@ permissions:
 jobs:
   validate-release:
     runs-on: ubuntu-latest
+    # The full pre-release build, test, lint, and eval suite is bounded to the
+    # same two-hour ceiling as the main CI validation job.
+    timeout-minutes: 120
     permissions:
       contents: read
     steps:
@@ -41,6 +44,9 @@ jobs:
   release-please:
     needs: validate-release
     runs-on: ubuntu-latest
+    # Release metadata creation is API-bound and should never occupy a runner
+    # beyond this short operational window.
+    timeout-minutes: 15
     permissions:
       contents: write
       pull-requests: write
@@ -93,6 +99,9 @@ jobs:
     needs: release-please
     if: ${{ needs.release-please.outputs.releases_created == 'true' }}
     runs-on: ubuntu-latest
+    # Building and publishing all released workspaces may need cold-cache time,
+    # but must terminate within 45 minutes if npm or GitHub stalls.
+    timeout-minutes: 45
     permissions:
       contents: read
       id-token: write
