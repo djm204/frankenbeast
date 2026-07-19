@@ -53,7 +53,9 @@ export {
   assertNormalizedWorkspaceRelativePath,
   assertSafeBenchmarkTaskPaths,
   isNormalizedWorkspaceRelativePath,
-  resolveWorkspaceArtifactPath,
+  openWorkspaceArtifactFile,
+  readWorkspaceArtifactFile,
+  workspaceArtifactFileExists,
 } from './workspace/artifact-path.js';
 export {
   WorkspaceProvisioner,

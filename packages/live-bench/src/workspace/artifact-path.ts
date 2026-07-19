@@ -1,4 +1,14 @@
-import { existsSync, lstatSync, realpathSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from 'node:fs';
 import { dirname, join, posix, relative, resolve, sep, win32 } from 'node:path';
 import type { BenchmarkTask } from '../types.js';
 
@@ -40,7 +50,7 @@ export function assertSafeBenchmarkTaskPaths(task: BenchmarkTask): void {
   }
 }
 
-export function resolveWorkspaceArtifactPath(workspaceRoot: string, artifactPath: string): string {
+export function openWorkspaceArtifactFile(workspaceRoot: string, artifactPath: string): number {
   assertNormalizedWorkspaceRelativePath(artifactPath);
 
   const root = resolve(workspaceRoot);
@@ -62,7 +72,7 @@ export function resolveWorkspaceArtifactPath(workspaceRoot: string, artifactPath
   for (let index = 0; index < parts.length; index += 1) {
     current = join(current, parts[index]!);
     if (!existsSync(current)) {
-      return candidate;
+      throw new Error(`artifact file does not exist: ${artifactPath}`);
     }
 
     const stat = lstatSync(current);
@@ -75,7 +85,70 @@ export function resolveWorkspaceArtifactPath(workspaceRoot: string, artifactPath
     assertContained(realpathSync(current), rootReal, 'artifact path');
   }
 
-  return candidate;
+  const noFollow = 'O_NOFOLLOW' in constants ? constants.O_NOFOLLOW : 0;
+  const fd = openSync(candidate, constants.O_RDONLY | noFollow);
+  try {
+    // Revalidate after opening. The descriptor pins the file that callers will
+    // inspect, while this identity comparison detects a path-component swap
+    // between the initial validation and openSync().
+    assertSafeOpenedArtifact(root, rootReal, candidate, artifactPath, fd);
+    return fd;
+  } catch (error) {
+    closeSync(fd);
+    throw error;
+  }
+}
+
+export function workspaceArtifactFileExists(workspaceRoot: string, artifactPath: string): boolean {
+  try {
+    const fd = openWorkspaceArtifactFile(workspaceRoot, artifactPath);
+    closeSync(fd);
+    return true;
+  } catch (error) {
+    if (
+      (error instanceof Error && error.message.startsWith('artifact file does not exist:'))
+      || (error as NodeJS.ErrnoException).code === 'ENOENT'
+    ) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+export function readWorkspaceArtifactFile(workspaceRoot: string, artifactPath: string): Buffer {
+  const fd = openWorkspaceArtifactFile(workspaceRoot, artifactPath);
+  try {
+    return readFileSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function assertSafeOpenedArtifact(
+  root: string,
+  rootReal: string,
+  candidate: string,
+  artifactPath: string,
+  fd: number,
+): void {
+  let current = root;
+  for (const part of artifactPath.split('/')) {
+    current = join(current, part);
+    const stat = lstatSync(current);
+    if (stat.isSymbolicLink()) {
+      throw new Error(`artifact path must not contain symlinks: ${artifactPath}`);
+    }
+    assertContained(realpathSync(current), rootReal, 'artifact path');
+  }
+
+  const opened = fstatSync(fd);
+  const currentTarget = statSync(candidate);
+  if (opened.dev !== currentTarget.dev || opened.ino !== currentTarget.ino) {
+    throw new Error(`artifact path changed while it was being opened: ${artifactPath}`);
+  }
+  if (!opened.isFile()) {
+    throw new Error(`artifact path must identify a regular file: ${artifactPath}`);
+  }
 }
 
 function assertContained(child: string, root: string, label: string): void {

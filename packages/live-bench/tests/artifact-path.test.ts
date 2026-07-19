@@ -1,21 +1,26 @@
-import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdtempSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { resolveWorkspaceArtifactPath } from '../src/workspace/artifact-path.js';
+import {
+  openWorkspaceArtifactFile,
+  readWorkspaceArtifactFile,
+  workspaceArtifactFileExists,
+} from '../src/workspace/artifact-path.js';
 
 function tempRoot(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
 }
 
 describe('workspace artifact paths', () => {
-  it('resolves normalized paths beneath the workspace, including missing artifacts', () => {
+  it('opens and reads normalized artifact files beneath the workspace', () => {
     const workspace = tempRoot('live-bench-artifacts-');
     mkdirSync(join(workspace, 'artifacts'));
     writeFileSync(join(workspace, 'artifacts', 'result.txt'), 'ok\n', 'utf8');
 
-    expect(resolveWorkspaceArtifactPath(workspace, 'artifacts/result.txt')).toBe(join(workspace, 'artifacts', 'result.txt'));
-    expect(resolveWorkspaceArtifactPath(workspace, 'artifacts/missing.txt')).toBe(join(workspace, 'artifacts', 'missing.txt'));
+    expect(readWorkspaceArtifactFile(workspace, 'artifacts/result.txt').toString('utf8')).toBe('ok\n');
+    expect(workspaceArtifactFileExists(workspace, 'artifacts/result.txt')).toBe(true);
+    expect(workspaceArtifactFileExists(workspace, 'artifacts/missing.txt')).toBe(false);
   });
 
   it('rejects symlinked path components before an evaluator can inspect an artifact', () => {
@@ -24,7 +29,7 @@ describe('workspace artifact paths', () => {
     writeFileSync(join(outside, 'secret.txt'), 'outside\n', 'utf8');
     symlinkSync(outside, join(workspace, 'linked'), 'dir');
 
-    expect(() => resolveWorkspaceArtifactPath(workspace, 'linked/secret.txt')).toThrow(/must not contain symlinks/);
+    expect(() => openWorkspaceArtifactFile(workspace, 'linked/secret.txt')).toThrow(/must not contain symlinks/);
   });
 
   it('rejects a symlinked workspace root', () => {
@@ -33,7 +38,7 @@ describe('workspace artifact paths', () => {
     const workspaceLink = join(linkParent, 'workspace');
     symlinkSync(workspace, workspaceLink, 'dir');
 
-    expect(() => resolveWorkspaceArtifactPath(workspaceLink, 'result.txt')).toThrow(/workspace root must not be a symlink/);
+    expect(() => openWorkspaceArtifactFile(workspaceLink, 'result.txt')).toThrow(/workspace root must not be a symlink/);
   });
 
   it('rejects symlinked ancestors of the workspace root', () => {
@@ -44,6 +49,25 @@ describe('workspace artifact paths', () => {
     const parentLink = join(linkParent, 'parent');
     symlinkSync(realParent, parentLink, 'dir');
 
-    expect(() => resolveWorkspaceArtifactPath(join(parentLink, 'workspace'), 'result.txt')).toThrow(/workspace root path component must not be a symlink/);
+    expect(() => openWorkspaceArtifactFile(join(parentLink, 'workspace'), 'result.txt')).toThrow(/workspace root path component must not be a symlink/);
+  });
+
+  it('pins the validated file so a later symlink swap cannot redirect the read', () => {
+    const workspace = tempRoot('live-bench-artifacts-');
+    const outside = tempRoot('live-bench-artifacts-outside-');
+    mkdirSync(join(workspace, 'artifacts'));
+    writeFileSync(join(workspace, 'artifacts', 'result.txt'), 'inside\n', 'utf8');
+    writeFileSync(join(outside, 'result.txt'), 'outside\n', 'utf8');
+
+    const fd = openWorkspaceArtifactFile(workspace, 'artifacts/result.txt');
+    try {
+      renameSync(join(workspace, 'artifacts'), join(workspace, 'original-artifacts'));
+      symlinkSync(outside, join(workspace, 'artifacts'), 'dir');
+
+      expect(readFileSync(fd, 'utf8')).toBe('inside\n');
+      expect(() => readWorkspaceArtifactFile(workspace, 'artifacts/result.txt')).toThrow(/must not contain symlinks/);
+    } finally {
+      closeSync(fd);
+    }
   });
 });
