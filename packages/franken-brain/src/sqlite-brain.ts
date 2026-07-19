@@ -891,6 +891,17 @@ export class WorkingMemoryHydrationLimitError extends Error {
   }
 }
 
+export class CorruptWorkingMemoryRowError extends Error {
+  readonly code = 'CORRUPT_WORKING_MEMORY_ROW';
+
+  constructor(readonly key: string) {
+    super(
+      `Persisted working memory row "${key}" contains invalid JSON and was not hydrated; the row was preserved for recovery`,
+    );
+    this.name = 'CorruptWorkingMemoryRowError';
+  }
+}
+
 export class MemoryDeletionGuardError extends Error {
   constructor(message: string) {
     super(message);
@@ -1307,7 +1318,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
     const expiredRows: Array<{ key: string; serialized: string }> = [];
     let total = 0;
     const prepareRow = (row: { key: string; serialized: string; updatedAt: string }) => {
-      const parsed = parseStoredWorkingMemoryValue(row.serialized);
+      const parsed = parseHydratedWorkingMemoryValue(row.key, row.serialized);
       if (isExpiredWorkingMemoryValue(parsed)) return undefined;
       const { normalized, serialized, size } = this.prepareEntry(
         row.key,
@@ -1328,7 +1339,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
       };
     };
     for (const row of rows) {
-      const parsed = parseStoredWorkingMemoryValue(row.value);
+      const parsed = parseHydratedWorkingMemoryValue(row.key, row.value);
       if (isExpiredWorkingMemoryValue(parsed)) {
         expiredRows.push({ key: row.key, serialized: row.value });
         continue;
@@ -7992,6 +8003,18 @@ function parseStoredWorkingMemoryValue(value: string): unknown {
   try {
     return JSON.parse(value) as unknown;
   } catch {
+    return value;
+  }
+}
+
+function parseHydratedWorkingMemoryValue(key: string, value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    const trimmed = value.trimStart();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      throw new CorruptWorkingMemoryRowError(key);
+    }
     return value;
   }
 }

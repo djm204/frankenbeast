@@ -14,6 +14,7 @@ import {
   SqliteBrain,
   WorkingMemoryLimitError,
   WorkingMemoryHydrationLimitError,
+  CorruptWorkingMemoryRowError,
   UnsupportedMemorySchemaVersionError,
   MemoryEncryptionKeyUnavailableError,
   MemoryEncryptionMigrationRequiredError,
@@ -1673,6 +1674,60 @@ describe('SqliteBrain', () => {
         ]);
       } finally {
         db?.close();
+        seeded?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('rejects corrupt persisted JSON during hydration without deleting the recoverable row', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-corrupt-hydration-'));
+      const dbPath = join(dir, 'brain.db');
+      let seeded: SqliteBrain | undefined;
+      let reopened: SqliteBrain | undefined;
+      let db: Database.Database | undefined;
+
+      try {
+        seeded = new SqliteBrain(dbPath);
+        seeded.working.set('healthy', { enabled: true });
+        seeded.working.set('corrupt', { recoverable: true });
+        seeded.flush();
+        seeded.close();
+        seeded = undefined;
+
+        db = new Database(dbPath);
+        db.prepare(`UPDATE working_memory SET value = ? WHERE key = ?`).run('{not-json', 'corrupt');
+        db.close();
+        db = undefined;
+
+        let hydrationError: unknown;
+        try {
+          reopened = new SqliteBrain(dbPath);
+        } catch (error) {
+          hydrationError = error;
+        }
+        expect(hydrationError).toBeInstanceOf(CorruptWorkingMemoryRowError);
+        expect(hydrationError).toMatchObject({
+          code: 'CORRUPT_WORKING_MEMORY_ROW',
+          key: 'corrupt',
+        });
+
+        db = new Database(dbPath);
+        expect(
+          db.prepare(`SELECT value FROM working_memory WHERE key = ?`).get('corrupt'),
+        ).toEqual({ value: '{not-json' });
+        db.prepare(`UPDATE working_memory SET value = ? WHERE key = ?`).run(
+          JSON.stringify({ recovered: true }),
+          'corrupt',
+        );
+        db.close();
+        db = undefined;
+
+        reopened = new SqliteBrain(dbPath);
+        expect(reopened.working.get('healthy')).toEqual({ enabled: true });
+        expect(reopened.working.get('corrupt')).toEqual({ recovered: true });
+      } finally {
+        db?.close();
+        reopened?.close();
         seeded?.close();
         rmSync(dir, { recursive: true, force: true });
       }
