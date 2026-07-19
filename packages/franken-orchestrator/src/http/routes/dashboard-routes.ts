@@ -125,10 +125,12 @@ function isLoopbackDashboardRequest(c: Context): boolean {
   const realIp = c.req.header('x-real-ip');
   const forwardedHost = c.req.header('x-forwarded-host');
   const forwardedFor = c.req.header('x-forwarded-for');
+  const forwardedProto = c.req.header('x-forwarded-proto');
   const forwardedHostIsLoopback = isForwardedHostLoopback(forwardedHost);
   const forwardedForIsLoopback = isForwardedForLoopback(forwardedFor);
   const realIpIsLoopback = realIp === undefined || isLoopbackAddress(realIp);
-  const proxyHasClientAddress = forwardedHost === undefined || forwardedFor !== undefined || realIp !== undefined;
+  const hasProxyMetadata = forwardedHost !== undefined || forwardedProto !== undefined;
+  const proxyHasClientAddress = !hasProxyMetadata || forwardedFor !== undefined || realIp !== undefined;
 
   if (trustedRemoteAddress !== undefined) {
     return isLoopbackAddress(trustedRemoteAddress)

@@ -133,9 +133,11 @@ async function createProxyResponse(
   const targetUrl = resolveProxyTargetUrl(apiTarget, sourceUrl);
   const headers = new Headers(request.headers);
   removeHopByHopHeaders(headers);
+  const hadUpstreamProxyMetadata = headers.has('x-forwarded-host') || headers.has('x-forwarded-proto');
   const trustedRemoteAddress = headers.get(TRUSTED_REMOTE_ADDRESS_HEADER);
   headers.delete(TRUSTED_REMOTE_ADDRESS_HEADER);
-  if (trustedRemoteAddress) {
+  if (trustedRemoteAddress
+    && (headers.has('x-forwarded-for') || headers.has('x-real-ip') || !hadUpstreamProxyMetadata)) {
     const forwardedFor = headers.get('x-forwarded-for');
     headers.set('x-forwarded-for', forwardedFor
       ? `${forwardedFor}, ${trustedRemoteAddress}`

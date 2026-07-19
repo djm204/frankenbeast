@@ -184,6 +184,27 @@ describe('dashboard static server', () => {
     expect(headers.get('authorization')).toBeNull();
   });
 
+  it('does not synthesize a client address when an upstream proxy omits it', async () => {
+    const staticDir = await createDashboardDist();
+    dirs.push(staticDir);
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    globalThis.fetch = fetchMock;
+
+    await createDashboardStaticResponse(
+      new Request('http://localhost/api/dashboard/events', {
+        headers: {
+          'x-forwarded-proto': 'https',
+          'x-frankenbeast-remote-address': '127.0.0.1',
+        },
+      }),
+      staticDir,
+      { apiTarget: 'http://127.0.0.1:4242' },
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
+    expect(new Headers(init.headers).get('x-forwarded-for')).toBeNull();
+  });
+
   it('loads dashboard operator token from network config even when provider trust metadata is unapproved', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'franken-dashboard-config-'));
     dirs.push(projectRoot);
@@ -361,7 +382,8 @@ describe('dashboard static server', () => {
     dirs.push(staticDir);
     let forwardedFor: string | undefined;
     const backend = createServer((req, res) => {
-      forwardedFor = req.headers['x-forwarded-for'];
+      const value = req.headers['x-forwarded-for'];
+      forwardedFor = typeof value === 'string' ? value : value?.join(', ');
       res.setHeader('content-type', 'text/event-stream');
       res.write('data: ready\\n\\n');
       setTimeout(() => res.end(), 25);

@@ -350,6 +350,14 @@ describe('dashboard routes', () => {
         },
       },
       {
+        name: 'proxy with only forwarded protocol',
+        url: 'http://localhost/events',
+        headers: {
+          'x-frankenbeast-remote-address': '127.0.0.1',
+          'x-forwarded-proto': 'https',
+        },
+      },
+      {
         name: 'external forwarded client',
         url: 'http://localhost/events',
         headers: {
