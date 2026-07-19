@@ -322,20 +322,78 @@ describe('dashboard routes', () => {
       expect(res.status).toBe(401);
     });
 
-    it('preserves unauthenticated local-dev streams when no operator token is configured', async () => {
+    it.each<{ name: string; url: string; headers: Record<string, string> }>([
+      {
+        name: 'external host',
+        url: 'https://dashboard.example.com/events',
+        headers: {},
+      },
+      {
+        name: 'external peer',
+        url: 'http://localhost/events',
+        headers: { 'x-frankenbeast-remote-address': '203.0.113.10' },
+      },
+      {
+        name: 'external forwarded host',
+        url: 'http://localhost/events',
+        headers: {
+          'x-frankenbeast-remote-address': '127.0.0.1',
+          'x-forwarded-host': 'dashboard.example.com',
+        },
+      },
+      {
+        name: 'proxy without client address',
+        url: 'http://localhost/events',
+        headers: {
+          'x-frankenbeast-remote-address': '127.0.0.1',
+          'x-forwarded-host': 'localhost',
+        },
+      },
+      {
+        name: 'proxy with only forwarded protocol',
+        url: 'http://localhost/events',
+        headers: {
+          'x-frankenbeast-remote-address': '127.0.0.1',
+          'x-forwarded-proto': 'https',
+        },
+      },
+      {
+        name: 'external forwarded client',
+        url: 'http://localhost/events',
+        headers: {
+          'x-frankenbeast-remote-address': '127.0.0.1',
+          'x-forwarded-for': '203.0.113.10',
+        },
+      },
+    ])('rejects unauthenticated dashboard streams from an $name', async ({ url, headers }) => {
       const deps = createMockDeps();
       deps.operatorToken = undefined;
       deps.ticketStore = undefined;
       const app = createDashboardRoutes(deps);
 
-      const ticketRes = await app.request('/events/ticket', { method: 'POST' });
-      expect(ticketRes.status).toBe(200);
-      expect(await ticketRes.json()).toEqual({ ticket: null });
+      const res = await app.request(url, { headers });
+      if (res.status === 200) await res.body?.cancel();
 
-      const res = await app.request('/events');
-      expect(res.headers.get('content-type')).toContain('text/event-stream');
-      await res.body?.cancel();
+      expect(res.status).toBe(403);
     });
+
+    it.each(['/events', 'http://127.0.0.2/events', 'http://[::ffff:127.0.0.1]/events'])(
+      'preserves unauthenticated local-dev streams when no operator token is configured on %s',
+      async (url) => {
+        const deps = createMockDeps();
+        deps.operatorToken = undefined;
+        deps.ticketStore = undefined;
+        const app = createDashboardRoutes(deps);
+
+        const ticketRes = await app.request('/events/ticket', { method: 'POST' });
+        expect(ticketRes.status).toBe(200);
+        expect(await ticketRes.json()).toEqual({ ticket: null });
+
+        const res = await app.request(url);
+        expect(res.headers.get('content-type')).toContain('text/event-stream');
+        await res.body?.cancel();
+      },
+    );
 
     it('returns SSE content-type with a valid ticket', async () => {
       const deps = createMockDeps();

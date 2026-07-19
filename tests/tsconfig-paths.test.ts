@@ -38,6 +38,8 @@ const EXPECTED_ALIASES: Record<string, string> = {
   "@franken/types/utils": "./packages/franken-types/src/utils/index.ts",
   "@franken/types": "./packages/franken-types/src/index.ts",
   "@franken/orchestrator": "./packages/franken-orchestrator/src/index.ts",
+  "@franken/mcp-suite": "./packages/franken-mcp-suite/src/index.ts",
+  "@franken/live-bench": "./packages/live-bench/src/index.ts",
 };
 
 const ALIASED_WORKSPACE_PACKAGES = new Set(
@@ -53,10 +55,6 @@ const ALIASED_WORKSPACE_PACKAGES = new Set(
 );
 
 const PATH_ALIAS_ALLOWLIST: Record<string, string> = {
-  "@franken/live-bench":
-    "CLI-only benchmark workspace; consumers should use the package build/bin instead of a root source alias.",
-  "@franken/mcp-suite":
-    "CLI/server package with package-level Vitest aliases; no root @franken source alias is exported intentionally.",
   "@franken/web":
     "Vite application workspace, not an importable library entrypoint.",
 };

@@ -23,6 +23,7 @@ import {
 } from '../../../src/http/ws-chat-auth.js';
 import { createChatApp } from '../../../src/http/chat-app.js';
 import { InMemoryRateLimiter } from '../../../src/beasts/http/beast-rate-limit.js';
+import { MAX_CHAT_MESSAGE_CONTENT_LENGTH } from '@franken/types';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/ws-chat');
@@ -442,6 +443,48 @@ describe('ws chat server', () => {
     expect(events.map((event) => event.type)).toContain('assistant.typing.start');
     expect(events.map((event) => event.type)).toContain('assistant.message.delta');
     expect(events.map((event) => event.type)).toContain('assistant.message.complete');
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('enforces the shared chat content limit on websocket message sends', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const runtime = { run: vi.fn().mockResolvedValue(createRuntimeResult(session)) };
+    const controller = new ChatSocketController({
+      runtime: runtime as never,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const { peer, sent } = createPeer();
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    const contentAtLimit = 'x'.repeat(MAX_CHAT_MESSAGE_CONTENT_LENGTH);
+    await controller.receive(peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-at-limit',
+      content: contentAtLimit,
+    }));
+    await controller.receive(peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-over-limit',
+      content: `${contentAtLimit}x`,
+    }));
+
+    expect(runtime.run).toHaveBeenCalledOnce();
+    expect(runtime.run).toHaveBeenCalledWith(contentAtLimit, expect.any(Object));
+    expect(sent.map((raw) => JSON.parse(raw))).toContainEqual(expect.objectContaining({
+      type: 'turn.error',
+      code: 'INVALID_EVENT',
+    }));
 
     rmSync(TMP, { recursive: true, force: true });
   });

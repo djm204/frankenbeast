@@ -5,6 +5,9 @@
 - Distinguish a valid empty enabled-skill list from malformed/unreadable config. For qualified calls, fail closed only when the action matches an installed skill server or directory alias, so stale custom registrations remain gated without changing policy for unrelated built-in MCP servers.
 - MCP action parsing cannot split blindly on the first or last `__`, because both server and tool names may contain double underscores; match configured server-name prefixes and preserve the full remaining tool name.
 
+## 2026-07-19 — MCP integer precision validation
+- JSON-schema `integer` checks at JavaScript transport boundaries must use `Number.isSafeInteger`, not `Number.isInteger`: integral-valued numbers beyond `Number.MAX_SAFE_INTEGER` can no longer represent exact IDs, limits, or pagination values. Cover both accepted safe boundaries and rejected values immediately outside them.
+
 ## 2026-07-19 — Live-bench run cleanup TOCTOU hardening
 - For destructive cleanup in attacker-writable directory trees, preflight `lstat`/`realpath` checks are not enough: on POSIX, open the trusted root and each descendant with `O_DIRECTORY|O_NOFOLLOW`, compare root and quarantined leaf device/inode identities, address rename/removal through stable descriptor paths, and keep the recreated run-leaf descriptor open while populating it.
 - Create quarantine entries beside the anchored leaf parent so rename stays on one filesystem, and avoid followable path mutations such as `chmod(path)` between creation and a no-follow open. Use `lstat`-based existence checks so dangling symlinks fail closed; when a platform lacks searchable Linux `/proc/self/fd` paths and no equivalent safe primitive is available, reject secure provisioning rather than restoring path-based TOCTOU cleanup.
@@ -68,7 +71,7 @@
 
 ## 2026-07-16 — Synthetic availability probe review fixes
 - Availability probes should fail closed for real dependencies: do not default provider checks to `node --version` or dashboard checks to a static UI health URL, require explicit provider/backend health targets, and cover missing-target behavior in tests so cron copies cannot produce false-green uptime.
-- For cron/CI probe JSON logs, redact both `key=value` and whitespace-separated secret forms, including split `Authorization: Bearer *** argv sequences, before serializing command details or error messages.
+- For cron/CI probe JSON logs, redact both `key=value` and whitespace-separated secret forms, including split `Authorization: Bearer ***` argv sequences, before serializing command details or error messages.
 - When Codex reaches the normal five-trigger cap but posts new valid findings, fix/reply/resolve them and stop for explicit approval before issuing another `@codex review`; zero unresolved threads plus green CI is not a substitute for a fresh current-head clean.
 
 ## 2026-07-16 — Snapshot diff Codex closeout

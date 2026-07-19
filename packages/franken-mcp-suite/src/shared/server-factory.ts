@@ -853,7 +853,7 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
 
 function acceptsSchemaType(type: string | readonly string[], value: unknown, actual: string): boolean {
   const allowedTypes = typeof type === 'string' ? [type] : type;
-  return allowedTypes.some((candidate) => (candidate === 'integer' ? Number.isInteger(value) : actual === candidate));
+  return allowedTypes.some((candidate) => (candidate === 'integer' ? Number.isSafeInteger(value) : actual === candidate));
 }
 
 function typeDescription(type: string | readonly string[]): string {

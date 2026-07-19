@@ -2,7 +2,7 @@ import { defineConfig, loadEnv, type ProxyOptions } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { readFileSync } from 'node:fs';
-import type { IncomingMessage } from 'node:http';
+import type { ClientRequest, IncomingMessage } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { parsePackageMetadata } from './src/config/package-metadata';
 import { assertNoBrowserOperatorToken, assertSecureProxyTarget, loadProxyEnv, loadProxyOperatorToken } from './vite-env';
@@ -66,6 +66,26 @@ function requestProtocol(req: IncomingMessage): 'http' | 'https' {
   return (req.socket as { encrypted?: boolean }).encrypted ? 'https' : 'http';
 }
 
+function firstHeaderValue(value: string | string[] | undefined): string | undefined {
+  return typeof value === 'string' ? value : value?.join(', ');
+}
+
+function appendProxyPeerAddress(proxyReq: ClientRequest, req: IncomingMessage): void {
+  const forwardedFor = firstHeaderValue(req.headers['x-forwarded-for']);
+  const hasUpstreamClientAddress = forwardedFor !== undefined || req.headers['x-real-ip'] !== undefined;
+  const hasUpstreamProxyMetadata = req.headers['x-forwarded-host'] !== undefined
+    || req.headers['x-forwarded-proto'] !== undefined;
+  const remoteAddress = req.socket.remoteAddress;
+
+  if (remoteAddress && (hasUpstreamClientAddress || !hasUpstreamProxyMetadata)) {
+    proxyReq.setHeader('x-forwarded-for', forwardedFor
+      ? `${forwardedFor}, ${remoteAddress}`
+      : remoteAddress);
+  } else {
+    proxyReq.removeHeader('x-forwarded-for');
+  }
+}
+
 function withServerSideOperatorAuth(target: string, operatorToken: string, extra: ProxyOptions = {}): ProxyOptions {
   return {
     target,
@@ -80,6 +100,7 @@ function withServerSideOperatorAuth(target: string, operatorToken: string, extra
     },
     configure(proxy) {
       proxy.on('proxyReq', (proxyReq, req) => {
+        appendProxyPeerAddress(proxyReq, req);
         if (operatorToken) {
           proxyReq.setHeader('authorization', `Bearer ${operatorToken}`);
         }
