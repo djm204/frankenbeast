@@ -75,7 +75,11 @@ export function AgentDetailPanel({
 
   return (
     <>
-      <SlideInPanel isOpen={isOpen} onClose={handleClose}>
+      <SlideInPanel
+        isOpen={isOpen}
+        onClose={handleClose}
+        title={`${agent.name?.trim() ? agent.name : agent.id} details`}
+      >
         {/* Header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-beast-border shrink-0">
           <StatusLight status={agent.status} />
