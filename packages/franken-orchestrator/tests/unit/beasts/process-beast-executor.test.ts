@@ -15,6 +15,7 @@ import {
   verifyRunConfigIntegrity,
 } from '../../../src/cli/run-config-integrity.js';
 import type { BeastDefinition } from '../../../src/beasts/types.js';
+import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../../../src/beasts/services/dispatch-failure-message.js';
 
 function createTestRun(repo: SQLiteBeastRepository) {
   return repo.createRun({
@@ -603,11 +604,11 @@ describe('ProcessBeastExecutor', () => {
       createdAt: '2026-03-10T00:00:00.000Z',
     });
 
-    await expect(executor.start(run, createDefinitionWithCwd(workDir))).rejects.toThrow('Worker process could not be spawned.');
+    await expect(executor.start(run, createDefinitionWithCwd(workDir))).rejects.toThrow(SAFE_DISPATCH_FAILURE_MESSAGE);
 
     const spawnFailedEvent = repo.listEvents(run.id).find((event) => event.type === 'run.spawn_failed');
     expect(spawnFailedEvent?.payload).toMatchObject({
-      error: 'Worker process could not be spawned.',
+      error: SAFE_DISPATCH_FAILURE_MESSAGE,
       crashClassification: {
         kind: 'spawn_failure',
         severity: 'error',
@@ -663,7 +664,7 @@ describe('ProcessBeastExecutor', () => {
     const existingWorktreePath = join(workDir, '.frankenbeast', '.worktrees', agent.id);
     mkdirSync(existingWorktreePath, { recursive: true });
 
-    await expect(executor.start(run, createDefinitionWithCwd(workDir))).rejects.toThrow('Worker process could not be spawned.');
+    await expect(executor.start(run, createDefinitionWithCwd(workDir))).rejects.toThrow(SAFE_DISPATCH_FAILURE_MESSAGE);
 
     expect(runGit).not.toHaveBeenCalledWith(['worktree', 'remove', '--force', existingWorktreePath], workDir);
     expect(runGit).not.toHaveBeenCalledWith(['branch', '-D', `beast/${agent.id}`], workDir);
@@ -709,7 +710,7 @@ describe('ProcessBeastExecutor', () => {
       createdAt: '2026-03-10T00:00:00.000Z',
     });
 
-    await expect(executor.start(run, createDefinitionWithCwd(workDir))).rejects.toThrow('Worker process could not be spawned.');
+    await expect(executor.start(run, createDefinitionWithCwd(workDir))).rejects.toThrow(SAFE_DISPATCH_FAILURE_MESSAGE);
 
     const expectedWorktree = join(workDir, '.frankenbeast', '.worktrees', agent.id);
     expect(runGit).toHaveBeenCalledWith(['worktree', 'add', expectedWorktree, `beast/${agent.id}`], workDir);
@@ -1896,7 +1897,7 @@ describe('ProcessBeastExecutor', () => {
       const executor = new ProcessBeastExecutor(repo, logs, supervisor, { eventBus });
       const run = createTestRun(repo);
 
-      await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow('Worker process could not be spawned.');
+      await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow(SAFE_DISPATCH_FAILURE_MESSAGE);
 
       const statusEvents = publishSpy.mock.calls.filter(([e]) => e.type === 'run.status');
       expect(statusEvents).toHaveLength(1);
@@ -1947,7 +1948,7 @@ describe('ProcessBeastExecutor', () => {
       const executor = new ProcessBeastExecutor(repo, logs, supervisor);
       const run = createTestRun(repo);
 
-      await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow('Worker process could not be spawned.');
+      await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow(SAFE_DISPATCH_FAILURE_MESSAGE);
 
       const updatedRun = repo.getRun(run.id);
       expect(updatedRun).toMatchObject({
@@ -1984,7 +1985,7 @@ describe('ProcessBeastExecutor', () => {
       const spawnEvent = repo.listEvents(run.id).find((e) => e.type === 'run.spawn_failed');
       expect(spawnEvent?.payload).toMatchObject({
         code: 'ENOENT',
-        error: 'Worker process could not be spawned.',
+        error: SAFE_DISPATCH_FAILURE_MESSAGE,
         commandSummary: {
           argumentCount: 0,
         },
@@ -2009,13 +2010,13 @@ describe('ProcessBeastExecutor', () => {
       const run = createTestRun(repo);
 
       await expect(executor.start(run, martinLoopDefinition)).rejects.toMatchObject({
-        message: 'Worker process could not be spawned.',
+        message: SAFE_DISPATCH_FAILURE_MESSAGE,
         code: 'E2BIG',
       });
 
       const spawnEvent = repo.listEvents(run.id).find((event) => event.type === 'run.spawn_failed');
       expect(spawnEvent?.payload).toMatchObject({
-        error: 'Worker process could not be spawned.',
+        error: SAFE_DISPATCH_FAILURE_MESSAGE,
         code: 'E2BIG',
       });
       expect(onSpawnFailureDebug).toHaveBeenCalledWith(expect.objectContaining({ code: 'E2BIG' }));
@@ -2061,7 +2062,7 @@ describe('ProcessBeastExecutor', () => {
       } satisfies BeastDefinition;
 
       await expect(executor.start(run, definition)).rejects.toMatchObject({
-        message: 'Worker process could not be spawned.',
+        message: SAFE_DISPATCH_FAILURE_MESSAGE,
         code: 'SPAWN_FAILED',
       });
 
@@ -2069,7 +2070,7 @@ describe('ProcessBeastExecutor', () => {
       const spawnEvent = events.find((e) => e.type === 'run.spawn_failed');
       expect(spawnEvent).toBeDefined();
       expect(spawnEvent!.payload).toMatchObject({
-        error: 'Worker process could not be spawned.',
+        error: SAFE_DISPATCH_FAILURE_MESSAGE,
         code: 'SPAWN_FAILED',
         commandSummary: {
           argumentCount: 5,

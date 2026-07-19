@@ -14,6 +14,7 @@ import {
 import { wallClockNow } from '@franken/types';
 import type { ProcessSupervisorLike } from './process-supervisor.js';
 import { classifyWorkerCrash } from './worker-crash-classification.js';
+import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../services/dispatch-failure-message.js';
 import type { BeastDefinition, BeastProcessSpec, BeastRun, BeastRunAttempt, BeastRunStatus, ModuleConfig } from '../types.js';
 import {
   createRunConfigIntegrityManifest,
@@ -26,7 +27,6 @@ const REDACTED_SECRET = '[REDACTED]';
 const MIN_CONFIGURED_SECRET_LENGTH = 6;
 const RUN_CONFIG_DIR_MODE = 0o700;
 const RUN_CONFIG_FILE_MODE = 0o600;
-const SPAWN_FAILED_ERROR = 'Worker process could not be spawned.';
 const SPAWN_FAILED_CODE = 'SPAWN_FAILED';
 const SAFE_SPAWN_ERROR_CODES = new Set([
   'EACCES',
@@ -552,7 +552,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       const spawnFailedEvent = {
         type: 'run.spawn_failed' as const,
         payload: {
-          error: SPAWN_FAILED_ERROR,
+          error: SAFE_DISPATCH_FAILURE_MESSAGE,
           code: errorCode,
           commandSummary: summarizeSpawnCommand(processSpec),
           crashClassification,
@@ -574,7 +574,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       });
 
       this.options.onRunStatusChange?.(run.id);
-      throw Object.assign(new Error(SPAWN_FAILED_ERROR), { code: errorCode });
+      throw Object.assign(new Error(SAFE_DISPATCH_FAILURE_MESSAGE), { code: errorCode });
     }
     this.pendingSpawnHandles.set(run.id, handle);
 

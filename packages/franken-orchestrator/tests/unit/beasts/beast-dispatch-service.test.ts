@@ -12,6 +12,7 @@ import { AgentService } from '../../../src/beasts/services/agent-service.js';
 import { BeastEventBus } from '../../../src/beasts/events/beast-event-bus.js';
 import { CapacityReservationPolicy } from '../../../src/beasts/services/capacity-reservation-policy.js';
 import { MaintenanceModeError, MaintenanceModeService } from '../../../src/beasts/services/maintenance-mode-service.js';
+import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../../../src/beasts/services/dispatch-failure-message.js';
 
 describe('BeastDispatchService', () => {
   let workDir: string | undefined;
@@ -531,7 +532,7 @@ describe('BeastDispatchService', () => {
           });
           repo.appendEvent(startedRun.id, {
             type: 'run.spawn_failed',
-            payload: { error: 'Worker process could not be spawned.', code: 'ENOENT' },
+            payload: { error: SAFE_DISPATCH_FAILURE_MESSAGE, code: 'ENOENT' },
             createdAt: failedAt,
           });
           throw new Error(`spawn failed for --token=${secret}`);
@@ -547,13 +548,19 @@ describe('BeastDispatchService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: { provider: 'claude', objective: 'SSE fail test', chunkDirectory: '.' } },
-      initConfig: { provider: 'claude', objective: 'SSE fail test', chunkDirectory: '.' },
+      initConfig: { identity: { name: 'Interview agent' } },
     });
 
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
       trackedAgentId: agent.id,
-      config: { provider: 'claude', objective: 'SSE fail test', chunkDirectory: '.' },
+      config: {
+        provider: 'claude',
+        objective: 'SSE fail test',
+        chunkDirectory: '.',
+        identity: { name: secret },
+      },
+      moduleConfig: { firewall: true, skills: false, planner: true },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'operator',
       executionMode: 'process',
@@ -561,6 +568,18 @@ describe('BeastDispatchService', () => {
     });
 
     expect(run).toMatchObject({ status: 'failed', stopReason: 'spawn_failed' });
+    expect(run.configSnapshot).toEqual({});
+    expect(repo.getRun(run.id)?.configSnapshot).toEqual({});
+    expect(repo.getTrackedAgent(agent.id)).toMatchObject({
+      initConfig: {
+        provider: 'claude',
+        objective: 'SSE fail test',
+        chunkDirectory: '.',
+        identity: { name: 'Interview agent' },
+      },
+      moduleConfig: { firewall: true, skills: false, planner: true },
+    });
+    expect(JSON.stringify(repo.getTrackedAgent(agent.id)?.initConfig)).not.toContain(secret);
     const agentStatusEvents = publishSpy.mock.calls.filter(([e]) => e.type === 'agent.status');
     expect(agentStatusEvents).toHaveLength(1);
     expect(agentStatusEvents[0][0].data).toMatchObject({
@@ -574,18 +593,20 @@ describe('BeastDispatchService', () => {
     expect(repo.listTrackedAgentEvents(agent.id)).toEqual(expect.arrayContaining([
       expect.objectContaining({
         type: 'agent.dispatch.failed',
-        payload: { runId: run.id, error: 'Worker process could not be spawned.' },
+        payload: { runId: run.id, error: SAFE_DISPATCH_FAILURE_MESSAGE },
       }),
     ]));
     await expect(logs.read(run.id, 'system')).resolves.toContainEqual(
-      expect.stringContaining('start_failed: Worker process could not be spawned.'),
+      expect.stringContaining(`start_failed: ${SAFE_DISPATCH_FAILURE_MESSAGE}`),
     );
-    expect(JSON.stringify({
-      events: repo.listEvents(run.id),
+    const exposedSurfaces = JSON.stringify({
+      runEvents: repo.listEvents(run.id),
       agentEvents: repo.listTrackedAgentEvents(agent.id),
-      publications: publishSpy.mock.calls,
       logs: await logs.read(run.id, 'system'),
-    })).not.toContain(secret);
+      publications: publishSpy.mock.calls,
+    });
+    expect(exposedSurfaces).not.toContain(secret);
+    expect(exposedSurfaces).not.toContain('spawn failed');
   });
 
   it('does not start a run that was stopped by onRunCreated cleanup', async () => {
