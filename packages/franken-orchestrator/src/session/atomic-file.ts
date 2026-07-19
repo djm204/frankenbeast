@@ -1,6 +1,7 @@
 import {
   closeSync,
   existsSync,
+  fchmodSync,
   fsyncSync,
   openSync,
   readFileSync,
@@ -428,6 +429,12 @@ export function atomicWriteFileSync(
       try {
         writeStateWriteJournal(filePath, { ...journalBase, tempPath: resolve(tmpPath), phase: 'preparing' });
         fd = openSync(tmpPath, 'wx', options.mode);
+        if (options.mode !== undefined) {
+          // open(2) applies the process umask to its mode argument. Reapply the
+          // requested mode before rename so replacement files preserve the
+          // caller's exact permissions without a post-rename exposure window.
+          fchmodSync(fd, options.mode);
+        }
         break;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {

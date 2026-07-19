@@ -1,6 +1,9 @@
 import { existsSync, readFileSync, mkdirSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { atomicWriteFileSync } from '../session/atomic-file.js';
+import {
+  atomicWriteFileSync,
+  recoverStateWriteTransaction,
+} from '../session/atomic-file.js';
 
 /**
  * Persistent store for skill toggle state.
@@ -57,6 +60,10 @@ export class SkillConfigStore {
 
   assertSaveable(): void {
     this.readExistingForSave();
+    const recovery = recoverStateWriteTransaction(this.configPath);
+    if (recovery?.action === 'retained-active-journal') {
+      throw new Error(recovery.reason);
+    }
   }
 
   private readExistingForSave(): Record<string, unknown> {

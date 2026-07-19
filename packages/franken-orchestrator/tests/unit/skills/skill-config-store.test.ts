@@ -153,6 +153,22 @@ describe('SkillConfigStore', () => {
       expect(raw.skills.enabled).toEqual(['github']);
     });
 
+    it('preserves an existing mode even when the process umask would mask it', () => {
+      mkdirSync(configDir, { recursive: true });
+      const configPath = join(configDir, 'config.json');
+      writeFileSync(configPath, JSON.stringify({ skills: { enabled: ['old'] } }));
+      chmodSync(configPath, 0o660);
+      const previousUmask = process.umask(0o077);
+
+      try {
+        store.save(new Set(['github']));
+      } finally {
+        process.umask(previousUmask);
+      }
+
+      expect(statSync(configPath).mode & 0o777).toBe(0o660);
+    });
+
     it('recovers from non-object JSON root on save (e.g. null)', () => {
       mkdirSync(configDir, { recursive: true });
       writeFileSync(join(configDir, 'config.json'), 'null');
@@ -314,20 +330,42 @@ describe('SkillManager + SkillConfigStore integration', () => {
     expect(manager.getEnabledSkills()).toContain('github');
   });
 
-  it('does not persist or mutate toggle state when file removal fails', async () => {
-    store.save(new Set(['github']));
+  it('does not delete skill files while an atomic config write journal is active', async () => {
     const manager = new SkillManager(skillsDir, new Set(['github']), store);
     await installSkill(manager, 'github');
-    chmodSync(skillsDir, 0o500);
+    mkdirSync(configDir, { recursive: true });
+    const configPath = join(configDir, 'config.json');
+    const now = new Date().toISOString();
+    writeFileSync(
+      `${configPath}.journal`,
+      JSON.stringify({
+        schemaVersion: 1,
+        targetPath: configPath,
+        tempPath: `${configPath}.tmp.1.00000000-0000-4000-8000-000000000000`,
+        phase: 'preparing',
+        startedAt: now,
+        updatedAt: now,
+      }),
+    );
 
-    try {
-      expect(() => manager.remove('github')).toThrow();
-      expect(manager.getEnabledSkills()).toContain('github');
-      expect(store.getEnabledSkills()).toContain('github');
-    } finally {
-      chmodSync(skillsDir, 0o700);
+    expect(() => manager.remove('github')).toThrow(/still preparing/i);
+    expect(manager.exists('github')).toBe(true);
+    expect(manager.getEnabledSkills()).toContain('github');
+  });
+
+  it('does not persist or mutate toggle state when file removal fails', async () => {
+    store.save(new Set(['github']));
+    class FailingRemoveSkillManager extends SkillManager {
+      protected override removeSkillPath(): void {
+        throw new Error('injected removal failure');
+      }
     }
+    const manager = new FailingRemoveSkillManager(skillsDir, new Set(['github']), store);
+    await installSkill(manager, 'github');
 
+    expect(() => manager.remove('github')).toThrow(/injected removal failure/);
+    expect(manager.getEnabledSkills()).toContain('github');
+    expect(store.getEnabledSkills()).toContain('github');
     expect(manager.exists('github')).toBe(true);
   });
 

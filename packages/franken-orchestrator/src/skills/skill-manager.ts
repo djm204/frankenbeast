@@ -128,6 +128,13 @@ export class SkillManager {
     }
   }
 
+  protected removeSkillPath(
+    path: string,
+    options?: { recursive?: boolean; force?: boolean },
+  ): void {
+    rmSync(path, options);
+  }
+
   private skillDirectoryPath(name: string): string {
     this.validateName(name);
     const skillDir = resolve(this.skillsDirRoot, name);
@@ -306,10 +313,10 @@ export class SkillManager {
     this.configStore?.assertSaveable();
     if (existsSync(skillDir)) {
       if (lstatSync(skillDir).isSymbolicLink()) {
-        rmSync(skillDir);
+        this.removeSkillPath(skillDir);
       } else {
         assertContainedPath(realpathSync(skillDir), this.skillsDirReal, 'skill directory');
-        rmSync(skillDir, { recursive: true });
+        this.removeSkillPath(skillDir, { recursive: true });
       }
     }
     this.configStore?.save(nextEnabledSkills);
