@@ -6,7 +6,7 @@
 - [x] Add targeted failing regressions for linked and dangling symlink swaps at cleanup time.
 - [x] Implement atomic quarantine plus fail-closed no-follow cleanup hardening.
 - [x] Run focused tests, package tests, typecheck, build, lint, diff checks, and a targeted static scan.
-- [ ] Commit with the required identity and Conventional Commit subject.
-- [ ] Push and open one PR that closes only #2847.
+- [x] Commit with the required identity and Conventional Commit subject.
+- [x] Push and open one PR that closes only #2847.
 - [ ] Reach green CI and a current-head clean GitHub Codex review with zero unresolved Codex threads.
 - [ ] Merge, record any durable lesson, and complete the Kanban card.
