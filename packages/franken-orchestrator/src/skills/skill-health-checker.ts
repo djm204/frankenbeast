@@ -25,11 +25,59 @@ export interface SkillHealthOptions {
 
 const UNTRUSTED_HEALTH_CHECK_MESSAGE =
   'MCP health check command was not executed because the skill is not trusted';
+const SKIPPED_HEALTH_CHECK_MESSAGE =
+  'MCP health probe skipped because the per-check limit of 20 servers was exceeded';
 const INCOMPLETE_HANDSHAKE_MESSAGE =
   'MCP initialize handshake was not completed before the command exited';
 
 const HEALTH_CHECK_TIMEOUT_MS = 2000;
+const HEALTH_CHECK_TERMINATION_GRACE_MS = 250;
+/** Maximum number of MCP child-process health probes running at once. */
+const MAX_CONCURRENT_MCP_HEALTH_PROBES = 4;
+/** Maximum number of child processes spawned by one trusted status check. */
+const MAX_MCP_HEALTH_PROBES_PER_CHECK = 20;
 const MCP_INITIALIZE_ID = 1;
+
+class AsyncSemaphore {
+  private available: number;
+  private readonly waiters: Array<() => void> = [];
+
+  constructor(limit: number) {
+    this.available = limit;
+  }
+
+  async run<Result>(operation: () => Promise<Result>): Promise<Result> {
+    await this.acquire();
+    try {
+      return await operation();
+    } finally {
+      this.release();
+    }
+  }
+
+  private acquire(): Promise<void> {
+    if (this.available > 0) {
+      this.available -= 1;
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      this.waiters.push(resolve);
+    });
+  }
+
+  private release(): void {
+    const next = this.waiters.shift();
+    if (next) {
+      next();
+    } else {
+      this.available += 1;
+    }
+  }
+}
+
+const MCP_HEALTH_PROBE_SEMAPHORE = new AsyncSemaphore(
+  MAX_CONCURRENT_MCP_HEALTH_PROBES,
+);
 
 interface HealthCheckMcpServerConfig {
   command: string;
@@ -53,33 +101,46 @@ export class SkillHealthChecker {
     options: SkillHealthOptions = {},
   ): Promise<SkillHealthResult> {
     const mcpServers = mcpConfig.mcpServers as Record<string, HealthCheckMcpServerConfig>;
-    const serverStatuses = await Promise.all(
-      Object.entries(mcpServers).map(
-        async ([serverName, config]: [string, HealthCheckMcpServerConfig]) => {
-          if (!options.trustMcpServerCommands) {
-            return {
-              serverName,
-              status: 'unknown' as const,
-              error: UNTRUSTED_HEALTH_CHECK_MESSAGE,
-            };
-          }
+    const entries = Object.entries(mcpServers);
+    const entriesToCheck = options.trustMcpServerCommands
+      ? entries.slice(0, MAX_MCP_HEALTH_PROBES_PER_CHECK)
+      : entries;
+    const serverStatuses = await mapWithConcurrency(
+      entriesToCheck,
+      MAX_CONCURRENT_MCP_HEALTH_PROBES,
+      async ([serverName, config]: [string, HealthCheckMcpServerConfig]) => {
+        if (!options.trustMcpServerCommands) {
+          return {
+            serverName,
+            status: 'unknown' as const,
+            error: UNTRUSTED_HEALTH_CHECK_MESSAGE,
+          };
+        }
 
-          try {
-            const outcome = await this.checkServer(
-              config.command,
-              config.args ?? [],
-            );
-            return { serverName, ...outcome };
-          } catch (err) {
-            return {
-              serverName,
-              status: 'error' as const,
-              error: err instanceof Error ? err.message : String(err),
-            };
-          }
-        },
-      ),
+        try {
+          const outcome = await MCP_HEALTH_PROBE_SEMAPHORE.run(() =>
+            this.checkServer(config.command, config.args ?? []),
+          );
+          return { serverName, ...outcome };
+        } catch (err) {
+          return {
+            serverName,
+            status: 'error' as const,
+            error: err instanceof Error ? err.message : String(err),
+          };
+        }
+      },
     );
+
+    if (options.trustMcpServerCommands) {
+      serverStatuses.push(
+        ...entries.slice(MAX_MCP_HEALTH_PROBES_PER_CHECK).map(([serverName]) => ({
+          serverName,
+          status: 'unknown' as const,
+          error: SKIPPED_HEALTH_CHECK_MESSAGE,
+        })),
+      );
+    }
 
     const allConnected = serverStatuses.every(
       (s) => s.status === 'connected',
@@ -115,10 +176,53 @@ export class SkillHealthChecker {
         }
         settled = true;
         clearTimeout(timer);
-        if (killRunningProcess && proc.exitCode === null && !proc.killed) {
-          proc.kill();
+        const outcome = { status, ...(error === undefined ? {} : { error }) };
+
+        if (killRunningProcess && proc.exitCode === null) {
+          let forceKillTimer: NodeJS.Timeout | undefined = undefined;
+          let terminated = false;
+          const finishAfterTermination = () => {
+            if (terminated) {
+              return;
+            }
+            terminated = true;
+            if (forceKillTimer) {
+              clearTimeout(forceKillTimer);
+            }
+            proc.off('exit', finishAfterTermination);
+            proc.off('close', finishAfterTermination);
+            resolve(outcome);
+          };
+
+          proc.once('exit', finishAfterTermination);
+          proc.once('close', finishAfterTermination);
+          try {
+            if (!proc.kill()) {
+              finishAfterTermination();
+              return;
+            }
+          } catch {
+            finishAfterTermination();
+            return;
+          }
+          if (terminated) {
+            return;
+          }
+          forceKillTimer = setTimeout(() => {
+            if (proc.exitCode === null) {
+              try {
+                if (!proc.kill('SIGKILL')) {
+                  finishAfterTermination();
+                }
+              } catch {
+                finishAfterTermination();
+              }
+            }
+          }, HEALTH_CHECK_TERMINATION_GRACE_MS);
+          return;
         }
-        resolve({ status, ...(error === undefined ? {} : { error }) });
+
+        resolve(outcome);
       };
 
       try {
@@ -182,6 +286,31 @@ export class SkillHealthChecker {
       }
     });
   }
+}
+
+async function mapWithConcurrency<Item, Result>(
+  items: readonly Item[],
+  concurrency: number,
+  mapper: (item: Item, index: number) => Promise<Result>,
+): Promise<Result[]> {
+  const results = new Array<Result>(items.length);
+  let nextIndex = 0;
+
+  const worker = async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(items[index] as Item, index);
+    }
+  };
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(concurrency, items.length) },
+      () => worker(),
+    ),
+  );
+  return results;
 }
 
 interface JsonRpcMessage {
