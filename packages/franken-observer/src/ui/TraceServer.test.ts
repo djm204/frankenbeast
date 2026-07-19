@@ -132,6 +132,7 @@ describe('TraceServer', () => {
       }
       new Script(script!.replace(/loadTraces\(\)\s*$/, '')).runInContext(context)
 
+      expect(html).toContain('.trace-goal{display:block;')
       await context.loadTraces!()
       expect(html).toContain('<nav id="sidebar" aria-label="Traces">')
       expect(sidebar.innerHTML).toContain('<button type="button" class="trace-item"')
@@ -139,6 +140,9 @@ describe('TraceServer', () => {
 
       await context.loadDetail!('trace-1')
       expect(attributes.get('aria-current')).toBe('true')
+
+      await context.loadTraces!()
+      expect(sidebar.innerHTML).toContain('data-id="trace-1" aria-current="true"')
     })
 
     it('escapes template-literal metacharacters in trace text before writing innerHTML', async () => {
