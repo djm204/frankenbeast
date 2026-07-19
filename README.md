@@ -56,7 +56,7 @@ Frankenbeast is currently organized as 10 npm workspace packages under `packages
 
 The diagrams below use current package names or implementation-surface names, and the package inventory table remains the authoritative workspace map.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full interconnection diagram.
+Start with the [current workspace package inventory](#current-workspace-packages) for the package-name source of truth, then see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full interconnection diagram.
 
 ```mermaid
 flowchart TD
