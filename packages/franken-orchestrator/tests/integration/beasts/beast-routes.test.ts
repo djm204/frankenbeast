@@ -9,6 +9,7 @@ import { BeastCatalogService } from '../../../src/beasts/services/beast-catalog-
 import { BeastInterviewService } from '../../../src/beasts/services/beast-interview-service.js';
 import { BeastDispatchService } from '../../../src/beasts/services/beast-dispatch-service.js';
 import { BeastRunService } from '../../../src/beasts/services/beast-run-service.js';
+import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../../../src/beasts/services/dispatch-failure-message.js';
 import { AgentService } from '../../../src/beasts/services/agent-service.js';
 import { MaintenanceModeService } from '../../../src/beasts/services/maintenance-mode-service.js';
 import { PrometheusBeastMetrics } from '../../../src/beasts/telemetry/prometheus-beast-metrics.js';
@@ -136,7 +137,7 @@ function createBeastApp(options?: { rateLimitMax?: number; failStart?: boolean; 
     },
   });
 
-  return { app, operatorToken, fakeContainerSupervisor, repository, agents };
+  return { app, operatorToken, fakeContainerSupervisor, repository, agents, logStore };
 }
 
 describe('beast routes', () => {
@@ -206,8 +207,8 @@ describe('beast routes', () => {
     expect(logsBody.data.logs.some((line) => line.includes('started'))).toBe(true);
   });
 
-  it('redacts historical snapshots for tracked runs with active dispatch failures', async () => {
-    const { app, operatorToken, repository, agents } = createBeastApp();
+  it('redacts historical snapshots, events, and logs for tracked runs with active dispatch failures', async () => {
+    const { app, operatorToken, repository, agents, logStore } = createBeastApp();
     const agent = agents.createAgent({
       definitionId: 'martin-loop',
       source: 'dashboard',
@@ -245,17 +246,40 @@ describe('beast routes', () => {
       payload: {},
       createdAt: '2026-03-10T00:00:01.000Z',
     });
+    repository.appendEvent(run.id, {
+      type: 'run.start_failed',
+      payload: { error: 'SECRET_THROWN_ERROR' },
+      createdAt: '2026-03-10T00:00:01.000Z',
+    });
+    await logStore.append(run.id, 'system', 'stderr', 'start_failed: SECRET_THROWN_ERROR');
 
     const headers = { authorization: `Bearer ${operatorToken}` };
     const detailResponse = await app.request(`/v1/beasts/runs/${run.id}`, { headers });
     expect(detailResponse.status).toBe(200);
-    const detail = await detailResponse.json() as { data: { run: { configSnapshot: Record<string, unknown> } } };
+    const detail = await detailResponse.json() as {
+      data: {
+        run: { configSnapshot: Record<string, unknown> };
+        events: Array<{ type: string; payload: Record<string, unknown> }>;
+      };
+    };
     expect(detail.data.run.configSnapshot).toEqual({});
+    expect(detail.data.events.find((event) => event.type === 'run.start_failed')?.payload).toEqual({
+      error: SAFE_DISPATCH_FAILURE_MESSAGE,
+    });
 
     const listResponse = await app.request('/v1/beasts/runs', { headers });
     expect(listResponse.status).toBe(200);
     const list = await listResponse.json() as { data: { runs: Array<{ id: string; configSnapshot: Record<string, unknown> }> } };
     expect(list.data.runs.find((candidate) => candidate.id === run.id)?.configSnapshot).toEqual({});
+
+    const eventsResponse = await app.request(`/v1/beasts/runs/${run.id}/events`, { headers });
+    const eventsBody = await eventsResponse.json() as { data: { events: unknown[] } };
+    expect(JSON.stringify(eventsBody)).not.toContain('SECRET_THROWN_ERROR');
+
+    const logsResponse = await app.request(`/v1/beasts/runs/${run.id}/logs`, { headers });
+    const logsBody = await logsResponse.json() as { data: { logs: string[] } };
+    expect(JSON.stringify(logsBody)).not.toContain('SECRET_THROWN_ERROR');
+    expect(logsBody.data.logs.join('\n')).toContain(SAFE_DISPATCH_FAILURE_MESSAGE);
   });
 
   it('stops tracked agents when direct run creation is paused by maintenance mode', async () => {

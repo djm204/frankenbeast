@@ -1,4 +1,4 @@
-import type { BeastDefinition, BeastRun, ModuleConfig } from '../types.js';
+import type { BeastDefinition, BeastRun, BeastRunEvent, ModuleConfig } from '../types.js';
 import { BeastLogStore } from '../events/beast-log-store.js';
 import type { BeastEventBus, BeastSseEvent } from '../events/beast-event-bus.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
@@ -63,17 +63,18 @@ export class BeastRunService {
   }
 
   listEvents(runId: string) {
-    this.requireRun(runId);
-    return this.repository.listEvents(runId);
+    const run = this.requireRun(runId);
+    const events = this.repository.listEvents(runId);
+    if (!this.hasActiveDispatchFailure(run)) return events;
+    return events.map(redactDispatchFailureEvent);
   }
 
   async readLogs(runId: string): Promise<string[]> {
     const run = this.requireRun(runId);
     const attemptId = run.currentAttemptId;
-    if (!attemptId) {
-      return this.logs.read(run.id, 'system');
-    }
-    return this.logs.read(run.id, attemptId);
+    const lines = await this.logs.read(run.id, attemptId ?? 'system');
+    if (!this.hasActiveDispatchFailure(run)) return lines;
+    return lines.map(redactDispatchFailureLogLine);
   }
 
   async start(runId: string, _actor: string): Promise<BeastRun> {
@@ -350,7 +351,10 @@ export class BeastRunService {
     run: BeastRun,
     definition: BeastDefinition,
   ): Readonly<Record<string, unknown>> | undefined {
-    if (run.status !== 'failed' || !run.trackedAgentId) return undefined;
+    if (!run.trackedAgentId) return undefined;
+    if (run.status !== 'failed' && !(run.status === 'stopped' && this.hasActiveDispatchFailure(run))) {
+      return undefined;
+    }
     const trackedAgent = this.repository.getTrackedAgent(run.trackedAgentId);
     if (!trackedAgent) return undefined;
 
@@ -394,6 +398,10 @@ export class BeastRunService {
       });
       return updatedRun;
     });
+  }
+
+  private hasActiveDispatchFailure(run: BeastRun): boolean {
+    return Boolean(run.trackedAgentId && this.repository.hasActiveDispatchFailure(run.trackedAgentId));
   }
 
   private assertTrackedAgentCapacity(
@@ -540,4 +548,32 @@ export class BeastRunService {
       this.serviceOptions.eventBus?.publish(publication);
     }
   }
+}
+
+function redactDispatchFailureEvent(event: BeastRunEvent): BeastRunEvent {
+  if (event.type !== 'run.start_failed' && event.type !== 'run.spawn_failed') return event;
+  return {
+    ...event,
+    payload: { error: SAFE_DISPATCH_FAILURE_MESSAGE },
+  };
+}
+
+function redactDispatchFailureLogLine(line: string): string {
+  try {
+    const record = JSON.parse(line) as unknown;
+    if (record && typeof record === 'object' && !Array.isArray(record)) {
+      const message = (record as { message?: unknown }).message;
+      if (typeof message === 'string' && message.startsWith('start_failed:')) {
+        return JSON.stringify({
+          ...record,
+          message: `start_failed: ${SAFE_DISPATCH_FAILURE_MESSAGE}`,
+        });
+      }
+    }
+  } catch {
+    // Older stores may contain plain-text lines rather than JSON records.
+  }
+  return line.includes('start_failed:')
+    ? `start_failed: ${SAFE_DISPATCH_FAILURE_MESSAGE}`
+    : line;
 }

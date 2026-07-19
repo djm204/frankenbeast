@@ -1417,6 +1417,68 @@ describe('BeastRunService', () => {
     });
   });
 
+  it('rebuilds a redacted stopped run before restarting an active failed dispatch', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const start = vi.fn(async () => undefined);
+    const executors = {
+      process: { start, stop: vi.fn(), kill: vi.fn() },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const runs = new BeastRunService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const agent = repo.createTrackedAgent({
+      definitionId: 'martin-loop',
+      source: 'dashboard',
+      status: 'stopped',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: {
+        provider: 'claude',
+        objective: 'Recover stopped work',
+        chunkDirectory: 'docs/chunks',
+      },
+      createdAt: '2026-03-11T00:00:00.000Z',
+      updatedAt: '2026-03-11T00:00:00.000Z',
+    });
+    const run = repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-11T00:00:01.000Z',
+    });
+    repo.updateRun(run.id, {
+      status: 'stopped',
+      finishedAt: '2026-03-11T00:00:02.000Z',
+      stopReason: 'operator_stop',
+    });
+    repo.appendTrackedAgentEvent(agent.id, {
+      level: 'error',
+      type: 'agent.dispatch.failed',
+      message: 'Failed to start Beast run',
+      payload: { runId: run.id },
+      createdAt: '2026-03-11T00:00:01.000Z',
+    });
+
+    await runs.start(run.id, 'operator');
+
+    expect(start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        configSnapshot: {
+          provider: 'claude',
+          objective: 'Recover stopped work',
+          chunkDirectory: 'docs/chunks',
+        },
+      }),
+      expect.objectContaining({ id: 'martin-loop' }),
+    );
+  });
+
   it('clears active dispatch redaction when a retry completes before running is observed', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
