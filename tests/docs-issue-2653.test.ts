@@ -12,7 +12,7 @@ describe('issue #2653 README ramp-up onboarding link', () => {
   it('links the concise ramp-up guide from the README onboarding entrypoint', () => {
     const readme = readText('README.md');
 
-    expect(readme).toContain('[RAMP_UP.md](docs/RAMP_UP.md)');
+    expect(readme).toContain('[RAMP_UP.md](docs/onboarding/RAMP_UP.md)');
     expect(readme).toContain('quick contributor orientation');
   });
 });

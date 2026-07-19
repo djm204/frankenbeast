@@ -24,7 +24,7 @@ const currentDocs = [
   'CLAUDE.md',
   'docs/ARCHITECTURE.md',
   'docs/DATA_FLOW.md',
-  'docs/RAMP_UP.md',
+  'docs/onboarding/RAMP_UP.md',
   'docs/project-overview.md',
   'docs/guides/add-llm-provider.md',
   'docs/guides/quickstart.md',

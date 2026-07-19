@@ -33,14 +33,14 @@ Dependency prerequisite: In fresh checkouts without workspace `dist/` outputs, r
 | `packages/franken-critique/` (`@franken/critique`) | `critique-evaluation` | `critique-maintainers` / `core-maintainers` | Critique/evaluation engines, scoring, review rubrics, and lesson recording. | `src/evaluators/`, `src/types/`, critique pipeline tests. | `npm run build --workspace @franken/critique && npm run test --workspace @franken/critique` |
 | `packages/franken-governor/` (`@franken/governor`) | `governor-approval` | `governor-maintainers` / `security-maintainers` | HITL approval gates, policy checks, risky command/tool controls, signed approval endpoints, and approval audit memory. | `src/gateway/`, `src/audit/`, `src/triggers/`, policy tests. | `npm run build --workspace @franken/governor && npm run test --workspace @franken/governor` |
 | `packages/live-bench/` (`@franken/live-bench`) | `live-bench` | `benchmark-maintainers` / `core-maintainers` | Live benchmark fixtures, scoring harnesses, and model/tool evaluation experiments. | benchmark fixtures, scoring scripts, live test harnesses. | `npm run test --workspace @franken/live-bench`; run `npm run test:live:bench` only when the change requires live provider/tooling verification. |
-| `docs/onboarding/`, `docs/guides/` | `onboarding-docs` | `docs-onboarding-maintainers` / `core-maintainers` | Contributor/operator onboarding, runbooks, architectural decisions, and verification guidance. | `ONBOARDING.md`, `docs/RAMP_UP.md`, `docs/ARCHITECTURE.md`, this map, and the focused docs test for the changed file/issue. | Focused root docs test for the touched doc, e.g. `npm run test:root -- tests/docs-issue-1666.test.ts`; add link/script metadata guards when examples reference live commands. |
+| `docs/onboarding/`, `docs/guides/` | `onboarding-docs` | `docs-onboarding-maintainers` / `core-maintainers` | Contributor/operator onboarding, runbooks, architectural decisions, and verification guidance. | `ONBOARDING.md`, `docs/onboarding/RAMP_UP.md`, `docs/ARCHITECTURE.md`, this map, and the focused docs test for the changed file/issue. | Focused root docs test for the touched doc, e.g. `npm run test:root -- tests/docs-issue-1666.test.ts`; add link/script metadata guards when examples reference live commands. |
 
 ## Common change recipes
 
 | Ticket wording or symptom | Start in | Also inspect | Verification pattern |
 | --- | --- | --- | --- |
 | Dashboard, chat UI, accessibility, browser API, visible operator controls | `packages/franken-web/` | `packages/franken-orchestrator/src/http/` when the API response shape changes; `@franken/types` for shared DTOs. | Web typecheck/test/build; add orchestrator route tests if backend contracts changed. |
-| CLI command, `frankenbeast` runtime, provider fallback, chunk sessions, issue runner, chat server | `packages/franken-orchestrator/` | `docs/RAMP_UP.md`, `docs/CONTRACT_MATRIX.md`, and package-local tests for the touched subdirectory. | Orchestrator build/typecheck/tests plus a focused root docs/metadata test when commands are documented. |
+| CLI command, `frankenbeast` runtime, provider fallback, chunk sessions, issue runner, chat server | `packages/franken-orchestrator/` | `docs/onboarding/RAMP_UP.md`, `docs/CONTRACT_MATRIX.md`, and package-local tests for the touched subdirectory. | Orchestrator build/typecheck/tests plus a focused root docs/metadata test when commands are documented. |
 | `fbeast` install/uninstall, MCP hooks, MCP proxy/tool behavior, governance-gate wrapper | `packages/franken-mcp-suite/` | Agent tool threat model and SECURITY docs when tool execution boundaries change. | MCP suite build/tests and any security/docs regression that anchors the behavior. |
 | Planner graph ordering, recovery ingestion, recursive chunk expansion, plan rewrites | `packages/franken-planner/` | Orchestrator graph-builder adapters if the runtime consumes the changed planner shape; DAG sources start at `packages/franken-planner/src/core/dag.ts` and `packages/franken-planner/tests/unit/core/dag.test.ts`. | Planner unit tests plus `npm run test:integration --workspace @franken/planner` for runtime graph flows. |
 | Memory hydration, stale preferences, snapshots, recall, or PII-safe context | `packages/franken-brain/` | Orchestrator `IMemoryModule` adapter and docs about memory boundaries. | Brain build/tests and adapter tests when the port contract changes. |
@@ -85,7 +85,7 @@ When changing memory behavior, prove both mutation isolation and persistence/rel
 
 ## Related maps to read next
 
-- [Agent ramp-up](../RAMP_UP.md) — shortest current package map and Beast Loop notes.
+- [Agent ramp-up](RAMP_UP.md) — shortest current package map and Beast Loop notes.
 - [Architecture overview](../ARCHITECTURE.md) — detailed diagrams and consolidated package inventory.
 - [Data flow](../DATA_FLOW.md) — end-to-end runtime handoff from input to closure artifacts.
 - [Contract matrix](../CONTRACT_MATRIX.md) — port/interface boundaries before changing shared contracts.

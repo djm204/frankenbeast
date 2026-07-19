@@ -110,8 +110,8 @@ describe("issue #1094, #1447, #1791, #2089, and #2104 local docs links", () => {
     expect(readDoc("CLAUDE.md")).toContain(
       "(docs/adr/011-real-monorepo-migration.md)",
     );
-    expect(readDoc("docs/RAMP_UP.md")).toContain(
-      "(adr/011-real-monorepo-migration.md)",
+    expect(readDoc("docs/onboarding/RAMP_UP.md")).toContain(
+      "(../adr/011-real-monorepo-migration.md)",
     );
     expect(readDoc("docs/ARCHITECTURE.md")).toContain(
       "(adr/011-real-monorepo-migration.md)",
@@ -143,8 +143,8 @@ describe("issue #1094, #1447, #1791, #2089, and #2104 local docs links", () => {
     expect(readDoc("CLAUDE.md")).not.toContain(
       "(docs/adr/011-monorepo-migration.md)",
     );
-    expect(readDoc("docs/RAMP_UP.md")).not.toContain(
-      "(adr/011-monorepo-migration.md)",
+    expect(readDoc("docs/onboarding/RAMP_UP.md")).not.toContain(
+      "(../adr/011-monorepo-migration.md)",
     );
     expect(readDoc("docs/ARCHITECTURE.md")).not.toContain(
       "(adr/011-monorepo-migration.md)",

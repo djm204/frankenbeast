@@ -215,7 +215,7 @@ The helper prints structured issue, branch, worktree path, duplicate-PR check, a
 
 Use this path when you are new to Frankenbeast or when an agent handoff says "read the architecture docs first." It is intentionally ordered from current implementation to deeper historical context.
 
-1. **Current implementation before history** — start with [`docs/RAMP_UP.md`](docs/RAMP_UP.md) for the shortest current package map, Beast Loop summary, CLI/runtime wiring notes, known limitations, and build/test commands.
+1. **Current implementation before history** — start with [`docs/onboarding/RAMP_UP.md`](docs/onboarding/RAMP_UP.md) for the shortest current package map, Beast Loop summary, CLI/runtime wiring notes, known limitations, and build/test commands.
 2. **New-contributor routing map** — read the [architecture map for new agent contributors](docs/onboarding/architecture-map.md) to translate issue titles into likely packages, owners, common recipes, test commands, approval/HITL boundaries, and memory boundaries.
 3. **Repository-level model** — read [`README.md#architecture`](README.md#architecture) for the public Beast Loop diagram and current 10-package workspace framing.
 4. **Detailed architecture** — read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), especially the System Overview, package table, Beast Loop, Current Local CLI Path, orchestrator internals, and dashboard/control-plane sections. Use the package inventory tables as authoritative when diagrams still use MOD labels.
@@ -224,7 +224,7 @@ Use this path when you are new to Frankenbeast or when an agent handoff says "re
 7. **Consolidation rationale** — read [ADR-031](docs/adr/031-architecture-consolidation-provider-agnostic.md) to understand why formerly separate MOD packages were consolidated into the orchestrator or MCP suite.
 8. **Topic-specific ADRs/guides** — only after the current path above, branch into relevant ADRs under `docs/adr/` or operational guides under `docs/guides/`.
 
-Edge case: many older diagrams and `docs/plans/` files describe target or historical architecture. Do not start with `docs/plans/` when onboarding, and do not treat a plan diagram as live behavior until you verify it against the current package inventory in `docs/RAMP_UP.md` and `docs/ARCHITECTURE.md`.
+Edge case: many older diagrams and `docs/plans/` files describe target or historical architecture. Do not start with `docs/plans/` when onboarding, and do not treat a plan diagram as live behavior until you verify it against the current package inventory in `docs/onboarding/RAMP_UP.md` and `docs/ARCHITECTURE.md`.
 
 ## Agent handoff template validator
 
