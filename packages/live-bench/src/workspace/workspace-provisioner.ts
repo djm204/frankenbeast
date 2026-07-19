@@ -1,6 +1,20 @@
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { join, parse, relative, resolve, sep } from 'node:path';
+import {
+  chmodSync,
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  rmdirSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { dirname, join, parse, relative, resolve, sep } from 'node:path';
 import { serializeToolCallEvidence } from '../evidence/tool-call-evidence.js';
 import type { BenchmarkMatrixRow, BenchmarkTask } from '../types.js';
 import { LIVE_BENCH_TOOL_CALL_EVIDENCE_ARTIFACT } from '../types.js';
@@ -79,7 +93,7 @@ export class WorkspaceProvisioner {
     ensureContained(runDir, this.runsRoot, 'run directory');
     ensureNoSymlinkPathComponents(dateDir, runDir, 'run directory');
     ensureSafeExistingDirectory(runDir, 'run directory');
-    rmSync(runDir, { recursive: true, force: true });
+    removeRunDirectorySafely(runDir, this.runsRoot, this.runsRootReal);
     mkdirSync(workspaceDir, { recursive: true });
     mkdirSync(evidenceDir, { recursive: true });
 
@@ -108,6 +122,73 @@ export class WorkspaceProvisioner {
     writeFileSync(toolCallEvidencePath, serializeToolCallEvidence([]), 'utf8');
 
     return { runDir, workspaceDir, evidenceDir, environmentPath, toolCallEvidencePath };
+  }
+}
+
+/**
+ * Atomically detaches an existing run directory before recursively removing it.
+ * A symlink observed before or after the rename is unlinked without following it,
+ * and cleanup fails closed so provisioning never continues on a raced path.
+ */
+export function removeRunDirectorySafely(
+  runDir: string,
+  runsRoot: string,
+  expectedRunsRootReal = realpathSync(runsRoot),
+): void {
+  if (!pathExistsNoFollow(runDir)) {
+    return;
+  }
+
+  ensureRunsRootAnchored(runsRoot, expectedRunsRootReal);
+  ensureContained(runDir, runsRoot, 'run directory');
+  const initialStat = lstatSync(runDir);
+  if (initialStat.isSymbolicLink()) {
+    unlinkSync(runDir);
+    throw new Error(`Run directory changed to a symlink during cleanup: ${runDir}`);
+  }
+  if (!initialStat.isDirectory()) {
+    throw new Error(`Run directory changed to a non-directory during cleanup: ${runDir}`);
+  }
+
+  const cleanupRoot = mkdtempSync(join(runsRoot, '.cleanup-'));
+  chmodSync(cleanupRoot, 0o700);
+  const quarantinedRunDir = join(cleanupRoot, 'run');
+  let removeCleanupRoot = true;
+
+  try {
+    renameSync(runDir, quarantinedRunDir);
+    ensureRunsRootAnchored(runsRoot, expectedRunsRootReal);
+    ensureContained(realpathSync(dirname(runDir)), expectedRunsRootReal, 'run directory parent');
+    const quarantinedStat = lstatSync(quarantinedRunDir);
+    if (quarantinedStat.dev !== initialStat.dev || quarantinedStat.ino !== initialStat.ino) {
+      removeCleanupRoot = false;
+      throw new Error(`Run directory identity changed during cleanup: ${runDir}`);
+    }
+    if (quarantinedStat.isSymbolicLink()) {
+      unlinkSync(quarantinedRunDir);
+      throw new Error(`Run directory changed to a symlink during cleanup: ${runDir}`);
+    }
+    if (!quarantinedStat.isDirectory()) {
+      unlinkSync(quarantinedRunDir);
+      throw new Error(`Run directory changed to a non-directory during cleanup: ${runDir}`);
+    }
+
+    ensureContained(realpathSync(quarantinedRunDir), realpathSync(cleanupRoot), 'quarantined run directory');
+    rmSync(quarantinedRunDir, { recursive: true, force: false });
+  } catch (error) {
+    if (pathExistsNoFollow(quarantinedRunDir)) {
+      const quarantinedStat = lstatSync(quarantinedRunDir);
+      if (quarantinedStat.isSymbolicLink() || !quarantinedStat.isDirectory()) {
+        unlinkSync(quarantinedRunDir);
+      } else {
+        removeCleanupRoot = false;
+      }
+    }
+    throw error;
+  } finally {
+    if (removeCleanupRoot && existsSync(cleanupRoot)) {
+      rmdirSync(cleanupRoot);
+    }
   }
 }
 
@@ -190,8 +271,27 @@ function ensureContained(child: string, root: string, label: string): void {
   }
 }
 
+function ensureRunsRootAnchored(runsRoot: string, expectedRunsRootReal: string): void {
+  ensureNoSymlinkPathPrefix(runsRoot, 'runs root');
+  if (realpathSync(runsRoot) !== expectedRunsRootReal) {
+    throw new Error(`Runs root identity changed during cleanup: ${runsRoot}`);
+  }
+}
+
+function pathExistsNoFollow(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return false;
+    }
+    throw error;
+  }
+}
+
 function ensureSafeExistingDirectory(path: string, label: string): void {
-  if (!existsSync(path)) {
+  if (!pathExistsNoFollow(path)) {
     return;
   }
   const stat = lstatSync(path);
@@ -211,7 +311,7 @@ function ensureNoSymlinkPathPrefix(target: string, label: string): void {
 
   for (const part of parts) {
     current = join(current, part);
-    if (!existsSync(current)) {
+    if (!pathExistsNoFollow(current)) {
       return;
     }
     if (lstatSync(current).isSymbolicLink()) {
@@ -227,7 +327,7 @@ function ensureNoSymlinkPathComponents(root: string, target: string, label: stri
 
   for (let index = 0; index < parts.length; index += 1) {
     current = join(current, parts[index]!);
-    if (!existsSync(current)) {
+    if (!pathExistsNoFollow(current)) {
       return;
     }
     const stat = lstatSync(current);
