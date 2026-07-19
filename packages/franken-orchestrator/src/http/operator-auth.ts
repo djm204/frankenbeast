@@ -8,6 +8,32 @@ export interface OperatorAuthOptions {
 }
 
 export const OPERATOR_TOKEN_COOKIE = 'frankenbeast_operator_token';
+export const OPERATOR_TOKEN_HEADER = 'x-frankenbeast-operator-token';
+
+/**
+ * Remove gateway-only operator credentials before a request crosses into a
+ * downstream service. Returns the legacy header token so callers can replace
+ * it with canonical bearer authorization when needed.
+ */
+export function stripOperatorCredentialHeaders(headers: Headers): string | undefined {
+  const headerToken = headers.get(OPERATOR_TOKEN_HEADER)?.trim() || undefined;
+  headers.delete(OPERATOR_TOKEN_HEADER);
+
+  const cookieHeader = headers.get('cookie');
+  if (cookieHeader) {
+    const retainedCookies = cookieHeader
+      .split(';')
+      .map((cookie) => cookie.trim())
+      .filter((cookie) => cookie.length > 0 && cookie.split('=', 1)[0] !== OPERATOR_TOKEN_COOKIE);
+    if (retainedCookies.length > 0) {
+      headers.set('cookie', retainedCookies.join('; '));
+    } else {
+      headers.delete('cookie');
+    }
+  }
+
+  return headerToken;
+}
 
 export function extractOperatorToken(headerValue: string | undefined): string | undefined {
   if (!headerValue) return undefined;
@@ -82,7 +108,7 @@ export function isCookieOperatorAuthAllowed(options: {
 export function requireOperatorAuth(options: OperatorAuthOptions) {
   return createMiddleware(async (c, next) => {
     const headerToken = extractOperatorToken(c.req.header('authorization'))
-      ?? c.req.header('x-frankenbeast-operator-token')
+      ?? c.req.header(OPERATOR_TOKEN_HEADER)
       ?? undefined;
     const cookieToken = extractOperatorTokenCookie(c.req.header('cookie'));
     const provided = headerToken ?? cookieToken;

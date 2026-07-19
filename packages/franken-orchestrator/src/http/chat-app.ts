@@ -28,7 +28,7 @@ import {
 import { CHAT_SOCKET_TOKEN_TTL_MS, createSessionTokenSecret, issueSessionToken } from './ws-chat-auth.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import { TransportSecurityService } from './security/transport-security.js';
-import { requireOperatorAuth } from './operator-auth.js';
+import { requireOperatorAuth, stripOperatorCredentialHeaders } from './operator-auth.js';
 import { ChatBeastDispatchAdapter } from '../chat/beast-dispatch-adapter.js';
 import type { CommsConfig } from '../comms/config/comms-config.js';
 import type { CommsRuntimePort } from '../comms/core/comms-runtime-port.js';
@@ -356,6 +356,7 @@ async function proxyToBeastDaemon(
   const targetUrl = new URL(`${sourceUrl.pathname}${sourceUrl.search}`, daemon.baseUrl);
   const headers = new Headers(request.headers);
   removeHopByHopHeaders(headers);
+  const headerToken = stripOperatorCredentialHeaders(headers);
   const browserOrigin = parseBrowserOrigin(headers.get('origin'));
   if (!headers.has('x-forwarded-host')) {
     headers.set('x-forwarded-host', browserOrigin?.host ?? sourceUrl.host);
@@ -364,7 +365,6 @@ async function proxyToBeastDaemon(
     headers.set('x-forwarded-proto', browserOrigin?.protocol.replace(/:$/, '') ?? sourceUrl.protocol.replace(/:$/, ''));
   }
   if (!headers.has('authorization')) {
-    const headerToken = headers.get('x-frankenbeast-operator-token')?.trim();
     const forwardedToken = operatorToken ?? (headerToken ? headerToken : undefined);
     if (forwardedToken) {
       headers.set('authorization', `Bearer ${forwardedToken}`);
