@@ -9,7 +9,9 @@ import { useDashboardStore } from '../stores/dashboard-store';
 import type { DashboardApiClient, DashboardSnapshot } from '../lib/dashboard-api';
 
 const snapshot: DashboardSnapshot = {
-  skills: [],
+  skills: [
+    { name: 'live-runtime-skill', enabled: true, hasContext: true, mcpServerCount: 1 },
+  ],
   security: {
     profile: 'standard',
     injectionDetection: true,
@@ -64,7 +66,7 @@ describe('BeastsPage', () => {
     useDashboardStore.getState().reset();
   });
 
-  it('loads the dashboard provider snapshot before showing wizard model selectors', async () => {
+  it('loads the dashboard snapshot before showing wizard runtime choices', async () => {
     const dashboardClient = {
       fetchSnapshot: vi.fn().mockResolvedValue(snapshot),
     } as unknown as DashboardApiClient;
@@ -76,6 +78,7 @@ describe('BeastsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Toggle form mode' }));
 
     expect(await screen.findByText('openai')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /live-runtime-skill/i })).toBeTruthy();
     fireEvent.change(screen.getAllByLabelText('Provider')[0]!, { target: { value: 'openai' } });
     expect(screen.getByText('gpt-4.1')).toBeTruthy();
   });
