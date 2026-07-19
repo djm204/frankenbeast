@@ -1,5 +1,10 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-19 — Skill HITL configuration boundaries
+- Keep the active config path and installed skill root as separate inputs: the active config determines which skills are enabled, while manifests remain anchored to the database/project `.fbeast/skills` directory even when operators supply an external `--config` path.
+- Distinguish a valid empty enabled-skill list from malformed/unreadable config. For qualified calls, fail closed only when the action matches an installed skill server or directory alias, so stale custom registrations remain gated without changing policy for unrelated built-in MCP servers.
+- MCP action parsing cannot split blindly on the first or last `__`, because both server and tool names may contain double underscores; match configured server-name prefixes and preserve the full remaining tool name.
+
 ## 2026-07-19 — Live-bench run cleanup TOCTOU hardening
 - For destructive cleanup in attacker-writable directory trees, preflight `lstat`/`realpath` checks are not enough: on POSIX, open the trusted root and each descendant with `O_DIRECTORY|O_NOFOLLOW`, compare root and quarantined leaf device/inode identities, address rename/removal through stable descriptor paths, and keep the recreated run-leaf descriptor open while populating it.
 - Create quarantine entries beside the anchored leaf parent so rename stays on one filesystem, and avoid followable path mutations such as `chmod(path)` between creation and a no-follow open. Use `lstat`-based existence checks so dangling symlinks fail closed; when a platform lacks searchable Linux `/proc/self/fd` paths and no equivalent safe primitive is available, reject secure provisioning rather than restoring path-based TOCTOU cleanup.
