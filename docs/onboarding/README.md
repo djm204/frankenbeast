@@ -17,6 +17,7 @@ For a complete clean-checkout setup, use the root [onboarding checklist](../../O
 | Make a first code or docs contribution | [Persona quickstart tracks](persona-quickstart-tracks.md) — Contributor track | [Test command decision tree](test-command-decision-tree.md) |
 | Make a documentation-only contribution | [Docs-only contribution quickstart](docs-only-contribution.md) | [Contributor guide](../../CONTRIBUTING.md) for the full code-and-docs workflow |
 | Improve the browser dashboard UX | [Dashboard UX contribution checklist](dashboard-ux-contribution.md) | [Architecture map](architecture-map.md) and [test command decision tree](test-command-decision-tree.md) |
+| Recover an outdated fork, wrong branch, or rejected push | [Fork and branch recovery](fork-and-branch-recovery.md) | [Getting help with a first contribution](getting-help.md) before resetting or rewriting shared history |
 | Get help with a first-contribution blocker | [Getting help with a first contribution](getting-help.md) | The setup, testing, security, and review references selected by that guide |
 | Take one issue through a first PR | [First-PR agent runbook](first-pr-agent-runbook.md) | [Coding-agent PR etiquette](coding-agent-pr-etiquette.md) and the [issue complexity rubric](issue-complexity-rubric.md) |
 | Practice before editing production code | [Sample agent practice issue](sample-agent-practice-issue.md) | The linked practice fixture and reset workflow |
@@ -33,6 +34,7 @@ For a complete clean-checkout setup, use the root [onboarding checklist](../../O
 - [Dashboard UX contribution checklist](dashboard-ux-contribution.md) — reproducible UI changes, accessibility checks, package verification, and review evidence.
 - [Docs-only contribution quickstart](docs-only-contribution.md) — low-overhead Markdown editing, preview, link checks, and PR evidence.
 - [First-PR agent runbook](first-pr-agent-runbook.md) — end-to-end issue, branch, verification, PR, Codex, and merge flow.
+- [Fork and branch recovery](fork-and-branch-recovery.md) — safe paths for outdated forks, wrong-branch edits, rejected pushes, and rebase conflicts.
 - [Getting help with a first contribution](getting-help.md) — routes setup, scope, test, CI, review, and security blockers to the right channel with safe evidence.
 - [Issue complexity rubric](issue-complexity-rubric.md) — assigns risk level, worker lane, and verification depth.
 - [Local service dependencies](local-service-dependencies.md) — explains when ChromaDB, Grafana, Tempo, Docker, providers, and secret stores are required.
