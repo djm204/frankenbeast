@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react';
 import { readFileSync } from 'node:fs';
 import type { IncomingMessage } from 'node:http';
 import { fileURLToPath } from 'node:url';
+import { parsePackageMetadata } from './src/config/package-metadata';
 import { assertNoBrowserOperatorToken, assertSecureProxyTarget, loadProxyEnv, loadProxyOperatorToken } from './vite-env';
 
 type ServerSideProxyConfig = Record<string, string | ProxyOptions>;
@@ -15,9 +16,9 @@ const dashboardSecurityHeaders = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'same-origin',
 } as const;
-const rootPackageJson = JSON.parse(
+const rootPackageJson = parsePackageMetadata(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
-) as { version: string };
+);
 
 function isLoopbackRemoteAddress(address: string | undefined): boolean {
   return address === '127.0.0.1'
