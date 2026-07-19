@@ -471,6 +471,45 @@ describe('agent routes integration', () => {
     expect(agents.listAgents()).toEqual([]);
   });
 
+  it('honors policy fields supplied in init action config before applying dashboard defaults', async () => {
+    const { app, operatorToken, agents } = createIntegratedBeastApp();
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        autoDispatch: false,
+        initAction: {
+          kind: 'martin-loop',
+          command: 'ticket-manager',
+          config: {
+            agentRole: 'triage',
+            requestedTools: ['read_file', 'search_files'],
+            skills: [],
+          },
+        },
+        initConfig: {
+          provider: 'claude',
+          objective: 'Do not replace an explicit lower-privilege role',
+          chunkDirectory: 'docs/chunks',
+        },
+      }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'AGENT_TOOL_POLICY_DENIED',
+        details: { validation: { rawRole: 'triage' } },
+      },
+    });
+    expect(agents.listAgents()).toEqual([]);
+  });
+
   it('returns a policy-denied 403 when auto-dispatch rejects the effective run policy', async () => {
     mkdirSync(TMP, { recursive: true });
     const repository = new SQLiteBeastRepository(join(TMP, 'auto-dispatch-policy-denial.db'));

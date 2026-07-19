@@ -313,6 +313,7 @@ export class BeastRunService {
     this.serviceOptions.maintenance?.assertDispatchAllowed();
     const run = this.requireRun(runId);
     if (run.status === 'running') {
+      this.assertRoleToolManifestAllows(run);
       this.assertTrackedAgentCapacity(run);
       await this.stop(runId, actor);
     }

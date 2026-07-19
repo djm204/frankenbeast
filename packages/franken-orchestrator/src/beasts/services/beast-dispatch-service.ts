@@ -286,10 +286,13 @@ export class BeastDispatchService {
         const identity = trackedAgent && isRecord(trackedAgent.initConfig.identity)
           ? trackedAgent.initConfig.identity
           : undefined;
+        const trackedInitConfig = Object.fromEntries(
+          Object.entries(configSnapshot).filter(([key]) => key !== 'modules'),
+        );
         this.repository.updateTrackedAgent(request.trackedAgentId, {
           status: 'dispatching',
           dispatchRunId: createdRun.id,
-          initConfig: identity ? { ...config, identity } : config,
+          initConfig: identity ? { ...trackedInitConfig, identity } : trackedInitConfig,
           ...(moduleConfig ? { moduleConfig } : {}),
           updatedAt: linkedAt,
         });

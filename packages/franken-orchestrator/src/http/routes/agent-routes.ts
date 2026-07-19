@@ -51,6 +51,27 @@ const PatchAgentConfigBody = z.object({
   moduleConfig: ModuleConfigSchema.optional(),
 }).strict();
 
+const AGENT_TOOL_POLICY_CONFIG_KEYS = [
+  'agentRole',
+  'role',
+  'laneRole',
+  'requestedTools',
+  'enabledTools',
+  'toolManifest',
+  'tools',
+  'skills',
+] as const;
+
+function pickAgentToolPolicyConfig(
+  config: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  return Object.fromEntries(
+    AGENT_TOOL_POLICY_CONFIG_KEYS
+      .filter(key => Object.hasOwn(config, key))
+      .map(key => [key, config[key]]),
+  );
+}
+
 export interface AgentRoutesDeps {
   agents: AgentService;
   dispatch?: BeastDispatchService;
@@ -83,10 +104,21 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
 
   app.post('/v1/beasts/agents', async (c) => {
     const body = validateBody(CreateAgentBody, await parseJsonBody(c));
-    const roleAlias = body.initConfig.agentRole ?? body.initConfig.role ?? body.initConfig.laneRole;
-    const initConfig = {
+    const actionPolicyConfig = pickAgentToolPolicyConfig(body.initAction.config);
+    const explicitRoleAlias = body.initConfig.agentRole
+      ?? body.initConfig.role
+      ?? body.initConfig.laneRole
+      ?? actionPolicyConfig.agentRole
+      ?? actionPolicyConfig.role
+      ?? actionPolicyConfig.laneRole;
+    const initConfigWithAliases = {
       ...defaultAgentToolPolicyConfig(body.definitionId, body.initAction.kind),
+      ...actionPolicyConfig,
       ...body.initConfig,
+    };
+    const roleAlias = explicitRoleAlias ?? initConfigWithAliases.agentRole;
+    const initConfig = {
+      ...initConfigWithAliases,
       ...(typeof roleAlias === 'string' ? { agentRole: roleAlias } : {}),
     };
     const shouldAutoDispatch = body.autoDispatch !== false && deps.dispatch && shouldDispatchOnCreate(body.initAction.kind);
