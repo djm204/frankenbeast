@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createStreamProgressHandler, createStreamProgressWithSpinner } from '../../../src/adapters/stream-progress.js';
+import type { NormalizedProviderStreamEvent } from '../../../src/adapters/stream-progress.js';
 
 describe('createStreamProgressHandler', () => {
   it('shows "Reasoning..." on first thinking content_block_start', () => {
@@ -206,6 +207,83 @@ describe('createStreamProgressHandler', () => {
     expect(lines.some((line) => line.includes('gemini-plan'))).toBe(true);
     expect(lines.some((line) => line.includes('Using read_file:') && line.includes('gemini.ts'))).toBe(true);
     expect(lines.some((line) => line.includes('LLM done') && line.includes('2.5s'))).toBe(true);
+  });
+
+  it('redacts tool payloads from normalized events', () => {
+    const events: NormalizedProviderStreamEvent[] = [];
+    const handler = createStreamProgressHandler(() => {}, {
+      onEvent: (event) => events.push(event),
+    });
+
+    handler(JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [{
+          type: 'tool_use',
+          name: 'Write',
+          input: { file_path: '/workspace/safe.ts', content: 'sensitive file contents' },
+        }],
+      },
+    }));
+
+    expect(events).toEqual([{ type: 'tool', name: 'Write', path: '/workspace/safe.ts' }]);
+    expect(JSON.stringify(events)).not.toContain('sensitive file contents');
+  });
+
+  it('normalizes nested Gemini messages, result text, and Gemini token fields', () => {
+    const lines: string[] = [];
+    const events: NormalizedProviderStreamEvent[] = [];
+    const handler = createStreamProgressHandler((line) => lines.push(line), {
+      onEvent: (event) => events.push(event),
+    });
+
+    handler(JSON.stringify({
+      type: 'message',
+      message: { role: 'assistant', content: [{ text: '[{"id":"nested-gemini"}]' }] },
+    }));
+    handler(JSON.stringify({
+      type: 'result',
+      result: '[{"id":"result-gemini"}]',
+      stats: { promptTokenCount: 21, candidatesTokenCount: 8 },
+    }));
+
+    expect(events.map((event) => event.type)).toEqual(['text', 'usage', 'text', 'result']);
+    expect(events[1]).toEqual({ type: 'usage', inputTokens: 21, outputTokens: 8, totalTokens: 29 });
+    expect(lines.some((line) => line.includes('nested-gemini'))).toBe(true);
+    expect(lines.some((line) => line.includes('result-gemini'))).toBe(true);
+  });
+
+  it('preserves message lifecycle usage and untyped text deltas', () => {
+    const lines: string[] = [];
+    const events: NormalizedProviderStreamEvent[] = [];
+    const handler = createStreamProgressHandler((line) => lines.push(line), {
+      onEvent: (event) => events.push(event),
+    });
+
+    handler(JSON.stringify({ type: 'message_start', message: { usage: { input_tokens: 13 } } }));
+    handler(JSON.stringify({ type: 'message_delta', usage: { output_tokens: 5 } }));
+    handler(JSON.stringify({ type: 'content_block_delta', delta: { text: '[{"id":"untyped-delta"}]' } }));
+
+    expect(events.map((event) => event.type)).toEqual(['usage', 'usage', 'text']);
+    expect(lines.some((line) => line.includes('untyped-delta'))).toBe(true);
+  });
+
+  it('extracts safe paths from JSON-string tool arguments', () => {
+    const lines: string[] = [];
+    const events: NormalizedProviderStreamEvent[] = [];
+    const handler = createStreamProgressHandler((line) => lines.push(line), {
+      onEvent: (event) => events.push(event),
+    });
+
+    handler(JSON.stringify({
+      type: 'function_call',
+      name: 'read_file',
+      arguments: JSON.stringify({ path: '/workspace/src/string-args.ts', secret: 'do not emit' }),
+    }));
+
+    expect(events).toEqual([{ type: 'tool', name: 'read_file', path: '/workspace/src/string-args.ts' }]);
+    expect(lines.some((line) => line.includes('string-args.ts'))).toBe(true);
+    expect(JSON.stringify(events)).not.toContain('do not emit');
   });
 
   it('reports unknown event types through redacted verbose diagnostics', () => {

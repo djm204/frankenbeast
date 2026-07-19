@@ -11,7 +11,7 @@ export interface StreamProgressHandle {
 
 export type NormalizedProviderStreamEvent =
   | { type: 'reasoning' }
-  | { type: 'tool'; name?: string; input?: unknown; partialInput?: string }
+  | { type: 'tool'; name?: string; path?: string }
   | { type: 'text'; content: string }
   | { type: 'usage'; inputTokens?: number; outputTokens?: number; totalTokens?: number }
   | { type: 'result'; durationMs?: number; costUsd?: number; turns?: number }
@@ -96,7 +96,8 @@ export function normalizeProviderStreamEvent(
           events.push({ type: 'reasoning' });
         } else if (blockType === 'tool_use' || blockType === 'tool_call') {
           const name = stringValue(block['name']);
-          events.push({ type: 'tool', ...(name ? { name } : {}), input: block['input'] ?? {} });
+          const path = extractToolPath(block['input']);
+          events.push({ type: 'tool', ...(name ? { name } : {}), ...(path ? { path } : {}) });
         } else if (blockType === 'text') {
           const text = stringValue(block['text']);
           if (text !== undefined) events.push({ type: 'text', content: text });
@@ -115,7 +116,8 @@ export function normalizeProviderStreamEvent(
     if (blockType === 'thinking' || blockType === 'reasoning') return [{ type: 'reasoning' }];
     if (blockType === 'tool_use' || blockType === 'tool_call') {
       const name = stringValue(block?.['name']);
-      return [{ type: 'tool', ...(name ? { name } : {}), input: block?.['input'] ?? {} }];
+      const path = extractToolPath(block?.['input']);
+      return [{ type: 'tool', ...(name ? { name } : {}), ...(path ? { path } : {}) }];
     }
     return [];
   }
@@ -123,15 +125,12 @@ export function normalizeProviderStreamEvent(
   if (type === 'content_block_delta') {
     const delta = asRecord(obj['delta']);
     const deltaType = stringValue(delta?.['type']);
-    if (deltaType === 'text_delta') {
+    if (deltaType === 'text_delta' || (deltaType === undefined && typeof delta?.['text'] === 'string')) {
       const text = stringValue(delta?.['text']);
       return text === undefined ? [] : [{ type: 'text', content: text }];
     }
     if (deltaType === 'thinking_delta') return [{ type: 'reasoning' }];
-    if (deltaType === 'input_json_delta') {
-      const partialInput = stringValue(delta?.['partial_json']);
-      return partialInput === undefined ? [] : [{ type: 'tool', partialInput }];
-    }
+    if (deltaType === 'input_json_delta') return [];
     return [];
   }
 
@@ -144,28 +143,39 @@ export function normalizeProviderStreamEvent(
       return text === undefined ? [] : [{ type: 'text', content: text }];
     }
     if (itemType === 'command_execution') {
-      return [{ type: 'tool', name: 'Bash', input: {} }];
+      return [{ type: 'tool', name: 'Bash' }];
     }
     if (itemType === 'mcp_tool_call') {
       const server = stringValue(item?.['server']);
       const tool = stringValue(item?.['tool']) ?? stringValue(item?.['name']);
       const name = [server, tool].filter(Boolean).join('.') || 'MCP tool';
-      return [{ type: 'tool', name, input: item?.['arguments'] ?? {} }];
+      const path = extractToolPath(item?.['arguments']);
+      return [{ type: 'tool', name, ...(path ? { path } : {}) }];
     }
-    if (itemType === 'web_search') return [{ type: 'tool', name: 'Search', input: {} }];
+    if (itemType === 'web_search') return [{ type: 'tool', name: 'Search' }];
     return [{ type: 'unknown', sourceType: `${type}:${itemType ?? 'missing-item-type'}` }];
   }
 
   if (type === 'message' || type === 'content') {
-    if (obj['role'] === 'user') return [];
-    const text = extractText(obj['content'] ?? obj['text']);
+    const message = asRecord(obj['message']);
+    const role = message?.['role'] ?? obj['role'];
+    if (role === 'user') return [];
+    const text = extractText(message?.['content'] ?? obj['content'] ?? obj['parts'] ?? obj['text']);
     return text === undefined ? [] : [{ type: 'text', content: text }];
   }
 
   if (type === 'tool_use' || type === 'tool_call' || type === 'function_call') {
     const name = stringValue(obj['tool_name']) ?? stringValue(obj['name']);
     const input = obj['parameters'] ?? obj['arguments'] ?? obj['input'] ?? {};
-    return [{ type: 'tool', ...(name ? { name } : {}), input }];
+    const path = extractToolPath(input);
+    return [{ type: 'tool', ...(name ? { name } : {}), ...(path ? { path } : {}) }];
+  }
+
+  if (type === 'message_start' || type === 'message_delta') {
+    const message = asRecord(obj['message']);
+    const delta = asRecord(obj['delta']);
+    const usage = normalizeUsage(message?.['usage'] ?? obj['usage'] ?? delta?.['usage']);
+    return usage ? [usage] : [];
   }
 
   if (type === 'turn.completed') {
@@ -186,6 +196,9 @@ export function normalizeProviderStreamEvent(
     const events: NormalizedProviderStreamEvent[] = [];
     const usage = normalizeUsage(stats ?? obj['usage'] ?? obj);
     if (usage) events.push(usage);
+    const message = asRecord(obj['message']);
+    const text = extractText(obj['result'] ?? message?.['content'] ?? obj['content'] ?? obj['text']);
+    if (text !== undefined) events.push({ type: 'text', content: text });
     const durationMs = numberValue(stats?.['duration_ms']) ?? numberValue(obj['duration_ms']);
     const costUsd = numberValue(obj['cost_usd']);
     const turns = numberValue(obj['num_turns']);
@@ -212,8 +225,6 @@ const KNOWN_IGNORED_TYPES = new Set([
   'thread.started',
   'turn.started',
   'content_block_stop',
-  'message_start',
-  'message_delta',
   'message_stop',
   'tool_result',
 ]);
@@ -254,6 +265,22 @@ export function createStreamProgressHandler(
       }
     }
 
+    if (rawType === 'content_block_delta' && lastToolName) {
+      const delta = asRecord(obj['delta']);
+      if (stringValue(delta?.['type']) === 'input_json_delta') {
+        const partialInput = stringValue(delta?.['partial_json']);
+        if (partialInput) {
+          toolInputAccumulator += partialInput;
+          const path = extractToolPathFromPartialJson(toolInputAccumulator);
+          if (path) {
+            renderTool(lastToolName, path, write);
+            lastToolName = '';
+            toolInputAccumulator = '';
+          }
+        }
+      }
+    }
+
     for (const event of normalizeProviderStreamEvent(obj)) {
       options.onEvent?.(event);
 
@@ -266,16 +293,7 @@ export function createStreamProgressHandler(
         if (event.name) {
           lastToolName = event.name;
           toolInputAccumulator = '';
-          if (!isPartialToolStart) renderTool(event.name, event.input, write);
-        }
-        if (event.partialInput && lastToolName) {
-          toolInputAccumulator += event.partialInput;
-          const path = extractToolPathFromPartialJson(toolInputAccumulator);
-          if (path) {
-            renderTool(lastToolName, { file_path: path }, write);
-            lastToolName = '';
-            toolInputAccumulator = '';
-          }
+          if (!isPartialToolStart) renderTool(event.name, event.path, write);
         }
       } else if (event.type === 'text') {
         textAccumulator += event.content;
@@ -308,15 +326,21 @@ function writeUnknown(
   write(`  ${ANSI.dim}Unknown provider stream event: ${sanitizeEventType(sourceType)}${ANSI.reset}\n`);
 }
 
-function renderTool(name: string, input: unknown, write: (text: string) => void): void {
+function renderTool(name: string, path: string | undefined, write: (text: string) => void): void {
   const action = toolAction(name);
-  const path = extractToolPath(input);
   const suffix = path ? ` ${shortenPath(path)}` : '';
   write(`  ${ANSI.dim}${action}${suffix}${ANSI.reset}\n`);
 }
 
 function extractToolPath(input: unknown): string | undefined {
-  const record = asRecord(input);
+  let record = asRecord(input);
+  if (!record && typeof input === 'string') {
+    try {
+      record = asRecord(JSON.parse(input));
+    } catch {
+      return undefined;
+    }
+  }
   return stringValue(record?.['file_path'])
     ?? stringValue(record?.['path'])
     ?? stringValue(record?.['absolute_path']);
@@ -330,9 +354,9 @@ function normalizeUsage(value: unknown): NormalizedProviderStreamEvent | undefin
   const usage = asRecord(value);
   if (!usage) return undefined;
   const inputTokens = numberValue(usage['input_tokens']) ?? numberValue(usage['inputTokens'])
-    ?? numberValue(usage['total_input_tokens']);
+    ?? numberValue(usage['total_input_tokens']) ?? numberValue(usage['promptTokenCount']);
   const outputTokens = numberValue(usage['output_tokens']) ?? numberValue(usage['outputTokens'])
-    ?? numberValue(usage['total_output_tokens']);
+    ?? numberValue(usage['total_output_tokens']) ?? numberValue(usage['candidatesTokenCount']);
   const totalTokens = numberValue(usage['total_tokens']) ?? numberValue(usage['totalTokens'])
     ?? (inputTokens !== undefined && outputTokens !== undefined ? inputTokens + outputTokens : undefined);
   if (inputTokens === undefined && outputTokens === undefined && totalTokens === undefined) return undefined;
