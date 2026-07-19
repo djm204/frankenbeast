@@ -158,6 +158,7 @@ export class LlmGraphBuilder implements GraphBuilder {
           );
 
           if (result.revisedChunks) chunks = result.revisedChunks;
+          validationIssues = result.issues;
 
           if (!result.valid) {
             const remediator = new ChunkRemediator(meteredLlm);
@@ -170,14 +171,15 @@ export class LlmGraphBuilder implements GraphBuilder {
             );
             if (revalidation.revisedChunks) chunks = revalidation.revisedChunks;
             validationIssues = revalidation.issues;
-          } else {
-            validationIssues = result.issues;
           }
         } catch (error) {
           if (!controller.signal.aborted && isTimeoutError(error)) expirePlanningBudget();
           if (!controller.signal.aborted) throw error;
           if (!planningBudgetExceeded) throw error;
-          validationIssues = [this.buildDraftWarning(controller.signal.reason, timeoutMs)];
+          validationIssues = [
+            ...validationIssues,
+            this.buildDraftWarning(controller.signal.reason, timeoutMs),
+          ];
         }
       }
 
@@ -395,12 +397,24 @@ export class LlmGraphBuilder implements GraphBuilder {
 function isTimeoutError(error: unknown): boolean {
   const seen = new Set<unknown>();
   let current = error;
-  while (current instanceof Error && !seen.has(current)) {
+  while (current && (typeof current === 'object' || typeof current === 'function') && !seen.has(current)) {
     seen.add(current);
-    if ((current as NodeJS.ErrnoException).code === 'ETIMEDOUT' || current.name === 'TimeoutError') {
+    const candidate = current as {
+      code?: unknown;
+      name?: unknown;
+      kind?: unknown;
+      timedOut?: unknown;
+      cause?: unknown;
+    };
+    if (
+      candidate.code === 'ETIMEDOUT'
+      || candidate.name === 'TimeoutError'
+      || candidate.kind === 'timeout'
+      || candidate.timedOut === true
+    ) {
       return true;
     }
-    current = current.cause;
+    current = candidate.cause;
   }
   return false;
 }

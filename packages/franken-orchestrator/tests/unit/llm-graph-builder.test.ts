@@ -560,6 +560,61 @@ describe('LlmGraphBuilder', () => {
       expect(complete.mock.calls[1]![1].signal.aborted).toBe(true);
     });
 
+    it('recognizes a CLI timeout represented by a plain-object cause', async () => {
+      const wrappedTimeout = new Error('CLI command failed', {
+        cause: { kind: 'timeout', timedOut: true, summary: 'command timed out' },
+      });
+      const complete = vi.fn()
+        .mockResolvedValueOnce(validChunksJson(threeChunks))
+        .mockRejectedValueOnce(wrappedTimeout);
+      const gatherer = {
+        gather: vi.fn().mockResolvedValue({
+          rampUp: '', relevantSignatures: [], packageDeps: {}, existingPatterns: [],
+        }),
+      };
+      const builder = new LlmGraphBuilder({ complete }, gatherer as any, {
+        validationMode: 'always', timeoutMs: 20,
+      });
+
+      await builder.build(intent);
+
+      expect(builder.lastValidationIssues[0]?.category).toBe('planning_budget_exceeded');
+      expect(complete.mock.calls[1]![1].signal.aborted).toBe(true);
+    });
+
+    it('keeps completed validation findings when remediation times out', async () => {
+      const validationIssue = {
+        severity: 'error', chunkId: '01_setup', category: 'design_gap',
+        description: 'needs repair', suggestion: 'repair it',
+      } as const;
+      const validationResponse = JSON.stringify({
+        valid: false, issues: [validationIssue], revisedChunks: null,
+      });
+      const timeout = Object.assign(new Error('remediation timed out'), { code: 'ETIMEDOUT' });
+      const complete = vi.fn()
+        .mockResolvedValueOnce(validChunksJson(threeChunks))
+        .mockResolvedValueOnce(validationResponse)
+        .mockRejectedValueOnce(timeout);
+      const gatherer = {
+        gather: vi.fn().mockResolvedValue({
+          rampUp: '', relevantSignatures: [], packageDeps: {}, existingPatterns: [],
+        }),
+      };
+      const builder = new LlmGraphBuilder({ complete }, gatherer as any, {
+        validationMode: 'always', timeoutMs: 100,
+      });
+
+      await builder.build(intent);
+
+      expect(builder.lastValidationIssues).toEqual([
+        validationIssue,
+        expect.objectContaining({ category: 'planning_budget_exceeded' }),
+      ]);
+      expect(builder.lastRunMetrics.stages.at(-1)).toEqual(
+        expect.objectContaining({ name: 'remediate', status: 'timed_out' }),
+      );
+    });
+
     it('keeps completed remediation when revalidation times out', async () => {
       const validationResponse = JSON.stringify({
         valid: false,
@@ -589,7 +644,10 @@ describe('LlmGraphBuilder', () => {
       await builder.build(intent);
 
       expect(builder.lastChunks).toEqual(remediatedChunks);
-      expect(builder.lastValidationIssues[0]?.category).toBe('planning_budget_exceeded');
+      expect(builder.lastValidationIssues).toEqual([
+        expect.objectContaining({ category: 'design_gap' }),
+        expect.objectContaining({ category: 'planning_budget_exceeded' }),
+      ]);
       expect(builder.lastRunMetrics.stages.at(-1)).toEqual(
         expect.objectContaining({ name: 'revalidate', status: 'timed_out' }),
       );

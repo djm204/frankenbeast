@@ -85,6 +85,7 @@ export class CachedCliLlmClient implements ILlmClient {
           ) => {
             let response: { content: string; sessionId?: string | undefined };
             let clearSession = false;
+            const resumeStartedAt = Date.now();
             try {
               response = await this.invoke(nextPrompt, workId, completionOptions, sessionId);
             } catch (error) {
@@ -94,7 +95,11 @@ export class CachedCliLlmClient implements ILlmClient {
               this.metrics.recordNativeSessionFallback();
               clearSession = true;
               await this.cached.invalidateProviderSession(this.options.projectId, workId);
-              response = await this.invoke(nextPrompt, workId, completionOptions);
+              response = await this.invoke(
+                nextPrompt,
+                workId,
+                remainingCompletionOptions(completionOptions, resumeStartedAt),
+              );
             }
             return {
               content: response.content,
@@ -206,6 +211,20 @@ function joinNonEmpty(parts: Array<string | undefined>): string | undefined {
     return undefined;
   }
   return normalized.join('\n');
+}
+
+function remainingCompletionOptions(
+  options: LlmCompletionOptions | undefined,
+  startedAt: number,
+): LlmCompletionOptions | undefined {
+  if (options?.timeoutMs === undefined) return options;
+  const remainingMs = options.timeoutMs - (Date.now() - startedAt);
+  if (remainingMs <= 0) {
+    throw Object.assign(new Error('LLM completion deadline exceeded before stale-session retry'), {
+      code: 'ETIMEDOUT',
+    });
+  }
+  return { ...options, timeoutMs: remainingMs };
 }
 
 function isExpectedStaleSessionError(error: unknown): boolean {
