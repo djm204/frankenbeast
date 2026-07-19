@@ -15,9 +15,13 @@ describe('issue #2539 first-time contributor review loop', () => {
     for (const expected of [
       '## Respond to review feedback',
       'gh pr view "$PR_NUMBER" --repo djm204/frankenbeast --comments',
+      'repos/djm204/frankenbeast/pulls/$PR_NUMBER/comments',
       'gh pr checks "$PR_NUMBER" --repo djm204/frankenbeast --watch',
       'git diff --check',
+      'git add -p',
       'git diff --cached --stat',
+      'git diff --cached',
+      'COMMIT_SUBJECT="fix(scope): address review feedback"',
       'git push',
       'Resolve a review conversation only after',
       'CI and review feedback apply to the current head commit',

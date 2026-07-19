@@ -131,8 +131,12 @@ Review is a loop, not a one-time handoff. Set your pull-request number, read the
 ```bash
 PR_NUMBER="123" # replace with your pull-request number
 gh pr view "$PR_NUMBER" --repo djm204/frankenbeast --comments
+gh api --paginate "repos/djm204/frankenbeast/pulls/$PR_NUMBER/comments" \
+  --jq '.[] | "\(.path):\(.line // .original_line): \(.body)"'
 gh pr checks "$PR_NUMBER" --repo djm204/frankenbeast
 ```
+
+`gh pr view --comments` shows the pull request conversation, while the `gh api` command shows inline review comments attached to changed lines. Read both before editing. You can also use the pull request's **Conversation** and **Files changed** tabs on GitHub.
 
 For each comment, decide whether it requests a code or documentation change, asks a question, or refers to an older commit that is already superseded. Ask for clarification when the requested outcome is ambiguous. Otherwise, make the smallest focused update, rerun the affected verification command, and inspect exactly what you will commit:
 
@@ -140,9 +144,11 @@ For each comment, decide whether it requests a code or documentation change, ask
 git status --short
 git diff --check
 git diff --stat
-git add <only-the-files-for-this-feedback>
+git add -p # stage only the feedback-related hunks
 git diff --cached --stat
-git commit -m "docs(onboarding): address review feedback"
+git diff --cached
+COMMIT_SUBJECT="fix(scope): address review feedback" # replace type, scope, and summary
+git commit -m "$COMMIT_SUBJECT"
 git push
 ```
 
