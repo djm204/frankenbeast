@@ -210,6 +210,14 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         self.assertNotIn(token, warnings[0])
         self.assertIn("[REDACTED]", warnings[0])
 
+    def test_secret_warning_redacts_openai_style_keys(self):
+        for token in ("sk-" + "a" * 32, "sk-proj-" + "b" * 32):
+            with self.subTest(token_prefix=token[:8]):
+                warnings = self.reviewer.scan_diff_for_exploits(f"+TOKEN={token}")
+                self.assertEqual(len(warnings), 1)
+                self.assertNotIn(token, warnings[0])
+                self.assertIn("[REDACTED]", warnings[0])
+
     def test_truncated_clean_scan_is_not_reported_as_passed(self):
         posted_bodies = []
 
@@ -426,6 +434,35 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         self.assertEqual(post_review.call_count, 1)
         self.assertTrue(post_review.call_args.kwargs["diff_truncated"])
 
+    def test_clean_diff_posts_blocking_review_when_agy_is_unavailable(self):
+        pull_request = {
+            "number": 44,
+            "author": {"login": "contributor"},
+            "headRefOid": "d" * 40,
+        }
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            self.reviewer, "WORKSPACE", Path(directory)
+        ), mock.patch.object(
+            self.reviewer, "DB_FILE", Path(directory) / "scans.db"
+        ), mock.patch.dict(
+            os.environ,
+            {"GH_TOKEN": "token", "PR_REVIEWER_REPOSITORY": "owner/repository"},
+            clear=True,
+        ), mock.patch.object(
+            self.reviewer, "get_open_prs", return_value=[pull_request]
+        ), mock.patch.object(
+            self.reviewer, "get_pr_diff", return_value="+safe change"
+        ), mock.patch.object(
+            self.reviewer, "run_agy_review", return_value=""
+        ), mock.patch.object(
+            self.reviewer, "post_pr_review", return_value=True
+        ) as post_review:
+            self.reviewer.process_prs()
+
+        self.assertEqual(post_review.call_count, 1)
+        self.assertIn("fails closed", post_review.call_args.args[1])
+        self.assertIn("VERDICT: REQUEST_CHANGES", post_review.call_args.args[1])
+
     def test_file_limit_exit_salvages_truncated_agy_stdout(self):
         payload = b"x" * self.reviewer.MAX_REVIEW_BYTES
         result = self.reviewer.decode_agy_result(-25, payload, b"file too large")
@@ -569,14 +606,46 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
 
     def test_added_line_starting_with_double_plus_is_scanned(self):
         warning = self.reviewer.scan_diff_for_exploits(
-            "+++counter; eval(Buffer.from('payload'))"
+            "@@ -1 +1 @@\n+++counter; eval(Buffer.from('payload'))"
         )
         header_warning = self.reviewer.scan_diff_for_exploits(
+            "diff --git a/old.py b/eval(Buffer.from('header-only')).py\n"
+            "--- a/old.py\n"
             "+++ b/eval(Buffer.from('header-only')).py"
+        )
+        disguised_added_line = self.reviewer.scan_diff_for_exploits(
+            "@@ -1 +1 @@\n+++ b/eval(Buffer.from('payload'))"
         )
 
         self.assertEqual(len(warning), 1)
         self.assertEqual(header_warning, [])
+        self.assertEqual(len(disguised_added_line), 1)
+
+    def test_failed_review_post_makes_the_run_fail(self):
+        pull_request = {
+            "number": 74,
+            "author": {"login": "contributor"},
+            "headRefOid": "a" * 40,
+        }
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            self.reviewer, "WORKSPACE", Path(directory)
+        ), mock.patch.object(
+            self.reviewer, "DB_FILE", Path(directory) / "scans.db"
+        ), mock.patch.dict(
+            os.environ,
+            {"GH_TOKEN": "token", "PR_REVIEWER_REPOSITORY": "owner/repository"},
+            clear=True,
+        ), mock.patch.object(
+            self.reviewer, "get_open_prs", return_value=[pull_request]
+        ), mock.patch.object(
+            self.reviewer, "get_pr_diff", return_value="+safe change"
+        ), mock.patch.object(
+            self.reviewer, "run_agy_review", return_value="VERDICT: APPROVE"
+        ), mock.patch.object(
+            self.reviewer, "post_pr_review", return_value=False
+        ):
+            with self.assertRaisesRegex(RuntimeError, "review could not be posted"):
+                self.reviewer.process_prs()
 
     def test_head_change_before_post_skips_stale_review(self):
         original = {

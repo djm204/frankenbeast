@@ -32,7 +32,8 @@ GH_DIFF_TIMEOUT_SECONDS = 30
 AGY_TIMEOUT_SECONDS = 300
 SECRET_PATTERN = re.compile(
     r"(?:github_pat_[a-zA-Z0-9_]{40,}|gh[opusr]_[a-zA-Z0-9]{36,}|"
-    r"sk-ant-[a-zA-Z0-9_-]{40,}|AIzaSy[a-zA-Z0-9_-]{35})"
+    r"sk-ant-[a-zA-Z0-9_-]{40,}|sk-(?:proj-)?[a-zA-Z0-9_-]{20,}|"
+    r"AIzaSy[a-zA-Z0-9_-]{35})"
 )
 DIFF_TRUNCATION_MARKER = (
     f"\n... [DIFF TRUNCATED AFTER {MAX_DIFF_BYTES} BYTES] ..."
@@ -308,8 +309,17 @@ def scan_diff_for_exploits(diff_content):
     }
 
     lines = diff_content.splitlines()
+    in_hunk = False
     for line_num, line in enumerate(lines, 1):
-        is_file_header = line.startswith("+++ b/") or line.startswith("+++ /dev/null")
+        if line.startswith("diff --git "):
+            in_hunk = False
+            continue
+        if line.startswith("@@"):
+            in_hunk = True
+            continue
+        is_file_header = not in_hunk and (
+            line.startswith("+++ b/") or line.startswith("+++ /dev/null")
+        )
         if line.startswith("+") and not is_file_header:
             stripped = line[1:].strip()
             for label, regex in patterns.items():
@@ -494,6 +504,7 @@ def process_prs():
 
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
+    fatal_failures = []
     for pull_request in open_prs:
         pr_number = pull_request["number"]
         author = pull_request["author"]["login"]
@@ -573,15 +584,13 @@ def process_prs():
                     "VERDICT: REQUEST_CHANGES"
                 )
             else:
-                print(
-                    f"Could not generate review for PR #{pr_number}. Setting status as failed."
+                review_body = (
+                    "### Automated model review unavailable\n\n"
+                    "The model-backed reviewer did not produce a result, so this review "
+                    "fails closed. Restore the reviewer and rerun the full review before "
+                    "merging.\n\n"
+                    "VERDICT: REQUEST_CHANGES"
                 )
-                cursor.execute(
-                    "UPDATE pr_reviews SET status = ? WHERE pr_number = ?",
-                    ("failed", pr_number),
-                )
-                conn.commit()
-                continue
 
         review_body = add_diff_truncation_notice(review_body, diff_content)
         current_prs = get_open_prs(repository)
@@ -611,12 +620,16 @@ def process_prs():
             repository=repository,
         )
         status = "completed" if posted else "failed"
+        if not posted:
+            fatal_failures.append(f"PR #{pr_number}: review could not be posted")
         cursor.execute(
             "UPDATE pr_reviews SET status = ?, reviewed_at = ? WHERE pr_number = ?",
             (status, datetime.now(timezone.utc).isoformat(), pr_number),
         )
         conn.commit()
     conn.close()
+    if fatal_failures:
+        raise RuntimeError("Automated PR reviewer failed: " + "; ".join(fatal_failures))
 
 
 if __name__ == "__main__":
