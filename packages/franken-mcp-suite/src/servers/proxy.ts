@@ -43,7 +43,7 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
   // round-1). This is the Tool wrapper confusion control in
   // docs/agent-tool-execution-threat-model.md. The gate/observer are created
   // lazily, preserving lazy-DB behavior.
-  const governance = deps.governance ?? createGovernanceGate(dbPath);
+  const governance = deps.governance ?? createGovernanceGate(dbPath, deps.configPath);
   const audit = deps.audit ?? createAuditSink(dbPath);
   // The proxy wrapper must outlive the longest registered target deadline; the
   // resolved target is independently bounded below by executeToolWithDeadline.

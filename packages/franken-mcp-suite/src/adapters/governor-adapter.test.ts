@@ -20,8 +20,7 @@ describe('GovernorAdapter', () => {
     return path;
   }
 
-  function installSkill(dbPath: string, name: string, tools?: unknown[], enabled = true): void {
-    const configDir = join(dbPath, '..');
+  function installSkillAtConfigDir(configDir: string, name: string, tools?: unknown[], enabled = true): void {
     const skillDir = join(configDir, 'skills', name);
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(join(skillDir, 'mcp.json'), JSON.stringify({
@@ -33,6 +32,10 @@ describe('GovernorAdapter', () => {
     writeFileSync(join(configDir, 'config.json'), JSON.stringify({
       skills: { enabled: enabled ? [name] : [] },
     }));
+  }
+
+  function installSkill(dbPath: string, name: string, tools?: unknown[], enabled = true): void {
+    installSkillAtConfigDir(join(dbPath, '..'), name, tools, enabled);
   }
 
   afterEach(() => {
@@ -163,6 +166,90 @@ describe('GovernorAdapter', () => {
     } finally {
       process.chdir(originalCwd);
     }
+  });
+
+  it('matches qualified MCP server names that contain double underscores', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'foo__bar', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]);
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__foo__bar__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('preserves high-risk hard denials for tools whose profile requires HITL', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'alerts', [
+      {
+        name: 'send_webhook',
+        description: 'Send a webhook',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]);
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({
+      action: 'mcp__alerts__send_webhook',
+      context: '{"url":"https://hooks.example.test/a","allowlisted":false}',
+    })).resolves.toMatchObject({ decision: 'denied' });
+  });
+
+  it('fails closed when a tool manifest does not satisfy the shared schema', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'reporting', [
+      { name: 'publish_report', requiresHitl: false },
+    ]);
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__reporting__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('uses an explicit active config path for enabled skill profiles', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const alternateConfigDir = join(dbPath, '..', 'alternate');
+    installSkillAtConfigDir(alternateConfigDir, 'reporting', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]);
+
+    const governor = createGovernorAdapter(dbPath, join(alternateConfigDir, 'config.json'));
+
+    await expect(governor.check({ action: 'mcp__reporting__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('fails closed for an enabled directory-name server whose MCP config is unreadable', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'reporting', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: false,
+      },
+    ]);
+    rmSync(join(dbPath, '..', 'skills', 'reporting', 'mcp.json'));
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__reporting__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
   });
 
   it('rejects duplicate reserved provenance keys instead of persisting forgeable JSON', async () => {

@@ -1,6 +1,7 @@
 import { SkillTrigger, TriggerRegistry, evaluateHighRiskActionPolicy } from '@franken/governor';
 import type { HighRiskActionClass, HighRiskActionEvidence, TriggerResult, TriggerSeverity } from '@franken/governor';
 import { CostCalculator, DEFAULT_PRICING } from '@franken/observer';
+import { SkillToolManifestSchema, type ToolDefinition } from '@franken/types';
 import { lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -652,7 +653,7 @@ function extractUrl(text: string): string | undefined {
 function inferHighRiskActionClass(action: string, context: string): HighRiskActionClass | undefined {
   const explicit = HIGH_RISK_ACTIONS[action];
   if (explicit !== undefined) return explicit;
-  const combined = `${action} ${context}`;
+  const combined = `${action.replace(/[_-]+/g, ' ')} ${context}`;
   return HIGH_RISK_ACTION_NAME_PATTERNS.find(([pattern]) => pattern.test(combined))?.[1];
 }
 
@@ -769,9 +770,15 @@ interface QualifiedSkillAction {
 }
 
 function parseQualifiedSkillAction(action: string): QualifiedSkillAction | undefined {
-  const mcpMatch = /^mcp__(.+?)__(.+)$/.exec(action);
-  if (mcpMatch !== null) {
-    return { serverName: mcpMatch[1]!, toolName: mcpMatch[2]! };
+  if (action.startsWith('mcp__')) {
+    const qualified = action.slice('mcp__'.length);
+    const separator = qualified.lastIndexOf('__');
+    if (separator > 0 && separator < qualified.length - 2) {
+      return {
+        serverName: qualified.slice(0, separator),
+        toolName: qualified.slice(separator + 2),
+      };
+    }
   }
   const slash = action.indexOf('/');
   if (slash > 0 && slash < action.length - 1) {
@@ -780,25 +787,19 @@ function parseQualifiedSkillAction(action: string): QualifiedSkillAction | undef
   return undefined;
 }
 
-function readSkillToolProfiles(toolsPath: string): Array<Record<string, unknown>> | undefined {
+function readSkillToolProfiles(toolsPath: string): ToolDefinition[] | undefined {
   try {
     if (!lstatSync(toolsPath).isFile()) return undefined;
-    const tools = JSON.parse(readFileSync(toolsPath, 'utf8')) as unknown;
-    if (!Array.isArray(tools)) return undefined;
-    return tools.filter((tool): tool is Record<string, unknown> => (
-      tool !== null
-      && typeof tool === 'object'
-      && !Array.isArray(tool)
-      && typeof (tool as Record<string, unknown>)['name'] === 'string'
-    ));
+    const parsed = SkillToolManifestSchema.safeParse(JSON.parse(readFileSync(toolsPath, 'utf8')));
+    return parsed.success ? parsed.data : undefined;
   } catch {
     return undefined;
   }
 }
 
-function readEnabledSkills(configDir: string): Set<string> {
+function readEnabledSkills(configPath: string): Set<string> {
   try {
-    const config = JSON.parse(readFileSync(join(configDir, 'config.json'), 'utf8')) as unknown;
+    const config = JSON.parse(readFileSync(configPath, 'utf8')) as unknown;
     if (config === null || typeof config !== 'object' || Array.isArray(config)) return new Set();
     const skills = (config as Record<string, unknown>)['skills'];
     if (skills === null || typeof skills !== 'object' || Array.isArray(skills)) return new Set();
@@ -823,19 +824,20 @@ function readSkillServerNames(skillDir: string): Set<string> {
   }
 }
 
-function profileRequiresHitl(profile: Record<string, unknown>): boolean {
+function profileRequiresHitl(profile: ToolDefinition): boolean {
   // SkillManager normalizes omitted flags to true when installing a profile;
   // preserve that fail-safe default when reading an existing manifest.
-  return profile['requiresHitl'] !== false;
+  return profile.requiresHitl !== false;
 }
 
-function skillRequiresHitl(configDir: string | undefined, action: string): boolean {
-  if (configDir === undefined) return false;
+function skillRequiresHitl(configPath: string | undefined, action: string): boolean {
+  if (configPath === undefined) return false;
   const qualifiedAction = parseQualifiedSkillAction(action);
   if (qualifiedAction === undefined) return false;
 
-  const enabledSkills = readEnabledSkills(configDir);
+  const enabledSkills = readEnabledSkills(configPath);
   if (enabledSkills.size === 0) return false;
+  const configDir = dirname(configPath);
   const skillsDir = join(configDir, 'skills');
   let skillDirectories;
   try {
@@ -847,19 +849,26 @@ function skillRequiresHitl(configDir: string | undefined, action: string): boole
   for (const skillDirectory of skillDirectories) {
     if (!skillDirectory.isDirectory() || !enabledSkills.has(skillDirectory.name)) continue;
     const skillDir = join(skillsDir, skillDirectory.name);
-    if (!readSkillServerNames(skillDir).has(qualifiedAction.serverName)) continue;
+    const serverNames = readSkillServerNames(skillDir);
+    if (!serverNames.has(qualifiedAction.serverName)) {
+      // Installed skills conventionally use their directory name as the MCP
+      // server key. If that registration is stale/unreadable, keep calls to the
+      // known directory-name server fail-closed instead of silently skipping it.
+      if (skillDirectory.name === qualifiedAction.serverName) return true;
+      continue;
+    }
     const profiles = readSkillToolProfiles(join(skillDir, 'tools.json'));
 
     // Unknown or stale runtime tool manifests fail closed for every tool exposed
     // by this enabled MCP server, not only an artificial server-name alias.
     if (profiles === undefined || profiles.length === 0) return true;
 
-    let profile = profiles.find((candidate) => candidate['name'] === qualifiedAction.toolName);
+    let profile = profiles.find((candidate) => candidate.name === qualifiedAction.toolName);
     if (profile === undefined && qualifiedAction.toolName === skillDirectory.name) {
       if (profiles.length === 1) {
         profile = profiles[0];
       } else {
-        profile = profiles.find((candidate) => candidate['name'] === skillDirectory.name);
+        profile = profiles.find((candidate) => candidate.name === skillDirectory.name);
       }
     }
 
@@ -877,6 +886,12 @@ function assessAction(action: string, context: string, requiresHitl: boolean): G
     || matchesDangerousPattern(action, context)
     || matchesDangerousPattern(unqualifiedAction, context);
 
+  const highRiskResult = assessHighRiskAction(unqualifiedAction, context);
+  // Explicit policy-as-code hard denials are never downgraded into a reviewable
+  // HITL decision. Non-deny policy results remain subject to stricter profile
+  // HITL below.
+  if (highRiskResult?.decision === 'denied') return highRiskResult;
+
   // Profile HITL is an explicit policy and must win over built-in exemptions
   // for leaf-name collisions with trusted fbeast tools.
   if (requiresHitl) {
@@ -891,7 +906,6 @@ function assessAction(action: string, context: string, requiresHitl: boolean): G
     };
   }
 
-  const highRiskResult = assessHighRiskAction(unqualifiedAction, context);
   if (highRiskResult !== undefined) return highRiskResult;
 
   if (isTrustedOperatorMemoryExport(unqualifiedAction, context)) {
@@ -998,9 +1012,11 @@ function assessAction(action: string, context: string, requiresHitl: boolean): G
   };
 }
 
-export function createGovernorAdapter(dbPath: string): GovernorAdapter {
+export function createGovernorAdapter(dbPath: string, configPath?: string): GovernorAdapter {
   const store = createSqliteStore(dbPath);
-  const skillConfigDir = dbPath === ':memory:' ? undefined : dirname(dbPath);
+  const skillConfigPath = dbPath === ':memory:'
+    ? undefined
+    : (configPath ?? join(dirname(dbPath), 'config.json'));
   const costCalculator = new CostCalculator(DEFAULT_PRICING, {
     onUnknownModel: (model) => {
       process.stderr.write(`[fbeast-governor] Unknown model "${model}" — budget status will report $0.0000 until pricing is configured.\n`);
@@ -1009,7 +1025,7 @@ export function createGovernorAdapter(dbPath: string): GovernorAdapter {
 
   return {
     async check(input) {
-      const requiresHitl = skillRequiresHitl(skillConfigDir, input.action);
+      const requiresHitl = skillRequiresHitl(skillConfigPath, input.action);
       const isDryRunForget = !requiresHitl && isRightToForgetDryRun(input.action, input.context);
       if (hasDuplicateReservedProvenanceKeys(input.context)) {
         const reason = 'Duplicate reserved fbeast provenance keys are not allowed.';
