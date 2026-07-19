@@ -123,6 +123,32 @@ describe('SkillHealthChecker', () => {
     expect(proc.kill).toHaveBeenCalledTimes(1);
   });
 
+  it('parses a complete initialize response before bounding later stdout', async () => {
+    const { spawn } = await import('node:child_process');
+    const proc = makeMockProcess();
+    proc.stdin.write.mockImplementation(() => {
+      setTimeout(() => {
+        proc.stdout.emit('data', `${formatMcpMessage({
+          jsonrpc: '2.0',
+          id: 1,
+          result: {
+            protocolVersion: '2024-11-05',
+            capabilities: {},
+            serverInfo: { name: 'chatty-server', version: '1.0.0' },
+          },
+        })}${'x'.repeat(1024 * 1024 + 1)}`);
+      }, 10);
+      return true;
+    });
+    (spawn as ReturnType<typeof vi.fn>).mockReturnValueOnce(proc);
+
+    const result = await checker.getStatus('chatty', {
+      mcpServers: { chatty: { command: 'node', args: ['server.js'] } },
+    }, { trustMcpServerCommands: true });
+
+    expect(result.status).toBe('connected');
+  });
+
   it('defers stdin EPIPE to an unknown clean-exit result', async () => {
     const { spawn } = await import('node:child_process');
     const proc = makeMockProcess();
@@ -557,6 +583,28 @@ describe('SkillHealthChecker', () => {
     expect(diagnostic).toContain('API_TOKEN=<redacted>');
     expect(diagnostic).not.toContain('do-not-expose');
     expect(diagnostic).not.toContain('\u001b');
+  });
+
+  it('redacts sensitive assignments obfuscated with non-ANSI controls', async () => {
+    const { spawn } = await import('node:child_process');
+    const proc = makeMockProcess();
+    (spawn as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      setTimeout(() => {
+        proc.stderr.emit('data', 'API_\u0000KEY=do-not-expose');
+        proc.exitCode = 1;
+        proc.emit('close', 1);
+      }, 10);
+      return proc;
+    });
+
+    const result = await checker.getStatus('controls', {
+      mcpServers: { controls: { command: 'controls-server' } },
+    }, { trustMcpServerCommands: true });
+    const diagnostic = result.serverStatuses[0]?.error ?? '';
+
+    expect(diagnostic).toContain('API_KEY=<redacted>');
+    expect(diagnostic).not.toContain('do-not-expose');
+    expect(diagnostic).not.toContain('\u0000');
   });
 
   it('does not retain a sensitive value past the diagnostic bound', async () => {

@@ -289,11 +289,11 @@ export class SkillHealthChecker {
             stdoutBuffer,
             chunkBuffer,
           ]);
+          const messages = readMcpMessages(stdoutBuffer);
+          stdoutBuffer = messages.remaining;
           if (stdoutBuffer.byteLength > MAX_MCP_PROTOCOL_BUFFER_BYTES) {
             stdoutBuffer = stdoutBuffer.subarray(-MAX_MCP_PROTOCOL_BUFFER_BYTES);
           }
-          const messages = readMcpMessages(stdoutBuffer);
-          stdoutBuffer = messages.remaining;
           if (messages.messages.some(isFailedInitializeResponse)) {
             settle('error', {
               error: formatHealthDiagnostic(
@@ -364,7 +364,7 @@ function formatHealthDiagnostic(
   ].join('\n');
   const sanitized = details
     .replace(/\u001B\[[0-?]*[ -/]*[@-~]/gu, '')
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu, '\uFFFD');
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu, '');
   return redactSensitiveText(sanitized);
 }
 
