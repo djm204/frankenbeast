@@ -906,6 +906,7 @@ describe('SafetyEvaluator', () => {
         true,
       ),
     ).toBe(true);
+    expect(evaluator.hasUnsafeRegexShape('^(?:\\p{L}|a|aa)+$', true)).toBe(true);
     expect(
       evaluator.hasUnsafeRegexShape('^(?:[[a-z]&&[p-z]]|a)+$', true),
     ).toBe(false);
