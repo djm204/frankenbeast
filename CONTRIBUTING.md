@@ -189,6 +189,12 @@ Reply with the change and verification evidence, or explain technically why no c
 
 CI and review feedback apply to the current head commit. If you push again, wait for checks and required review on that new head; do not rely on a green check or approval from an older commit. If a merge conflict appears, stop and ask a maintainer for the repository's preferred update strategy rather than force-pushing unfamiliar history.
 
+## After your pull request merges
+
+Follow the [first-PR completion guide](docs/onboarding/after-your-first-pr.md) before deleting anything. It verifies the merged PR and closed issue, preserves uncommitted work, updates local and forked `main` branches without force-pushing, and removes only the merged contribution branch or clean worktree.
+
+Start the next issue from a new branch based on current `main`; do not reuse the merged branch for unrelated work.
+
 ## Getting help
 
 For setup failures, start with the [setup troubleshooting matrix](docs/onboarding/setup-troubleshooting-matrix.md). For test selection, use the [test command decision tree](docs/onboarding/test-command-decision-tree.md). For package ownership and architecture, use the [architecture map](docs/onboarding/architecture-map.md) and [repository ownership manifest](docs/onboarding/repository-ownership.md). When these guides do not resolve the blocker, follow the [first-contribution help guide](docs/onboarding/getting-help.md) to choose the right GitHub thread, collect safe diagnostic evidence, and ask one answerable question.
