@@ -10,6 +10,12 @@ const baseConfig: NetworkConfigResponse = {
   comms: { enabled: false },
 };
 
+function confirmServiceAction(action: 'stop' | 'restart', serviceId: string): void {
+  const label = action === 'stop' ? 'Stop' : 'Restart';
+  fireEvent.click(screen.getByRole('button', { name: `${label} ${serviceId}` }));
+  fireEvent.click(screen.getByRole('button', { name: `Confirm ${action} ${serviceId}` }));
+}
+
 afterEach(cleanup);
 
 describe('NetworkPage', () => {
@@ -106,19 +112,19 @@ describe('NetworkPage', () => {
     expect(onStop).not.toHaveBeenCalledWith('dashboard');
     expect(onRestart).not.toHaveBeenCalledWith('dashboard');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Stop chat-server' }));
+    confirmServiceAction('stop', 'chat-server');
     await waitFor(() => expect(screen.getByText('Stopped chat-server.')).toBeDefined());
-    fireEvent.click(screen.getByRole('button', { name: 'Restart chat-server' }));
+    confirmServiceAction('restart', 'chat-server');
     await waitFor(() => expect(screen.getByText('Restarted chat-server.')).toBeDefined());
     fireEvent.click(screen.getByRole('button', { name: 'Start dashboard' }));
     await waitFor(() => expect(screen.getByText('Started dashboard.')).toBeDefined());
-    fireEvent.click(screen.getByRole('button', { name: 'Stop worker' }));
+    confirmServiceAction('stop', 'worker');
     await waitFor(() => expect(screen.getByText('Stopped worker.')).toBeDefined());
-    fireEvent.click(screen.getByRole('button', { name: 'Restart worker' }));
+    confirmServiceAction('restart', 'worker');
     await waitFor(() => expect(screen.getByText('Restarted worker.')).toBeDefined());
-    fireEvent.click(screen.getByRole('button', { name: 'Stop degraded-worker' }));
+    confirmServiceAction('stop', 'degraded-worker');
     await waitFor(() => expect(screen.getByText('Stopped degraded-worker.')).toBeDefined());
-    fireEvent.click(screen.getByRole('button', { name: 'Restart degraded-worker' }));
+    confirmServiceAction('restart', 'degraded-worker');
     await waitFor(() => expect(screen.getByText('Restarted degraded-worker.')).toBeDefined());
     fireEvent.change(screen.getByLabelText('Network mode'), { target: { value: 'insecure' } });
     fireEvent.change(screen.getByLabelText('Chat model'), { target: { value: 'gpt-5' } });
@@ -164,6 +170,7 @@ describe('NetworkPage', () => {
 
     const stopButton = screen.getByRole('button', { name: 'Stop chat-server' });
     fireEvent.click(stopButton);
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm stop chat-server' }));
     fireEvent.click(stopButton);
 
     await waitFor(() => expect(stopButton).toHaveProperty('disabled', true));
