@@ -891,6 +891,25 @@ describe('SafetyEvaluator', () => {
     ]);
   });
 
+  it('models unicodeSets operands while checking repeated alternatives', () => {
+    const evaluator = new SafetyEvaluator(createMockGuardrailsPort()) as unknown as {
+      hasUnsafeRegexShape(pattern: string, unicodeSets?: boolean): boolean;
+    };
+
+    expect(
+      evaluator.hasUnsafeRegexShape('^(?:[[a-z]&&[p-z]]|a)+$', true),
+    ).toBe(false);
+    expect(
+      evaluator.hasUnsafeRegexShape('^(?:[\\p{Letter}]|a)+$', true),
+    ).toBe(true);
+    expect(
+      evaluator.hasUnsafeRegexShape('^(?:[\\q{ab}]|b)+$', true),
+    ).toBe(false);
+    expect(
+      evaluator.hasUnsafeRegexShape('^(?:[\\q{ab}]|a)+$', true),
+    ).toBe(true);
+  });
+
   it('rejects nullable and variable-quantified alternation bypass patterns', async () => {
     const port = createMockGuardrailsPort([
       {
