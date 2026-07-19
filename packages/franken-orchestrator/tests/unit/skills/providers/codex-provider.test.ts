@@ -48,6 +48,16 @@ describe('CodexProvider', () => {
     expect(args).not.toContain('workspace-write');
   });
 
+  it.each([
+    ['--config=sandbox_mode="read-only"'],
+    ['-c=sandbox_mode="read-only"'],
+    ['--yolo'],
+  ])('recognizes single-token sandbox selection %s', (...extraArgs) => {
+    const args = provider.buildArgs({ extraArgs });
+    expect(args).toEqual(['exec', '--json', '--color', 'never', ...extraArgs]);
+    expect(args).not.toContain('workspace-write');
+  });
+
   it('rejects deprecated or contradictory sandbox arguments', () => {
     expect(() => provider.buildArgs({ extraArgs: ['--full-auto'] })).toThrow(/deprecated/i);
     expect(() => provider.buildArgs({

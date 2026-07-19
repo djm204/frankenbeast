@@ -110,7 +110,8 @@ export class CodexCliAdapter implements ILlmProvider {
   }
 
   buildArgs(request: LlmRequest): string[] {
-    const hasConfiguredSandbox = Object.hasOwn(this.options.configOverrides ?? {}, 'sandbox_mode');
+    const hasConfiguredSandbox = this.options.profile !== undefined
+      || Object.hasOwn(this.options.configOverrides ?? {}, 'sandbox_mode');
     const { sandboxArgs, extraArgs } = resolveCodexSandboxArgs(
       this.options.extraArgs,
       hasConfiguredSandbox,

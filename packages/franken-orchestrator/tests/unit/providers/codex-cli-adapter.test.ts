@@ -96,7 +96,7 @@ describe('CodexCliAdapter', () => {
 
   describe('buildArgs()', () => {
     it('includes the supported workspace-write sandbox', () => {
-      const args = adapter.buildArgs({ systemPrompt: '', messages: [] });
+      const args = new CodexCliAdapter().buildArgs({ systemPrompt: '', messages: [] });
       expect(args[0]).toBe('exec');
       expect(args).toContain('--sandbox');
       expect(args).toContain('workspace-write');
@@ -134,6 +134,15 @@ describe('CodexCliAdapter', () => {
       });
       expect(() => conflicting.buildArgs({ systemPrompt: '', messages: [] }))
         .toThrow(/one Codex sandbox selection/i);
+    });
+
+    it('preserves profile sandbox configuration instead of overriding it', () => {
+      const profiled = new CodexCliAdapter({ profile: 'read-only-profile' });
+      const args = profiled.buildArgs({ systemPrompt: '', messages: [] });
+      expect(args).toContain('-p');
+      expect(args).toContain('read-only-profile');
+      expect(args).not.toContain('--sandbox');
+      expect(args).not.toContain('workspace-write');
     });
 
     it('adds -c for system prompt', () => {

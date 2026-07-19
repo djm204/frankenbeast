@@ -43,7 +43,12 @@ export function resolveCodexSandboxArgs(
       continue;
     }
 
-    if (arg === '--dangerously-bypass-approvals-and-sandbox') {
+    if (arg === '--dangerously-bypass-approvals-and-sandbox' || arg === '--yolo') {
+      sandboxSelections++;
+      continue;
+    }
+
+    if (/^(?:--config|-c)=sandbox_mode\s*=/.test(arg)) {
       sandboxSelections++;
       continue;
     }
