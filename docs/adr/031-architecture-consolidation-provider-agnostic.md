@@ -5,7 +5,7 @@
 - **Deciders:** pfk
 - **Supersedes:** Portions of ADR-011 (monorepo structure)
 
-> **Implementation outcome note:** This ADR records the consolidation decision, but the repository's current post-facto state differs from the original package table: the workspace currently has 10 packages, and `packages/franken-mcp-suite` remains as the shipped `fbeast` CLI/MCP suite package. Treat the package-count/removal table below as historical intent unless a later amendment supersedes it.
+> **Implementation outcome note:** This ADR records the consolidation decision, but the repository's current post-facto state differs from the original package table: the workspace currently has 10 packages, and `packages/franken-mcp-suite` remains as the shipped `fbeast` CLI/MCP suite package. The [README's current workspace package inventory](../../README.md#current-workspace-packages) is authoritative; treat the 13 → 8 count and removal table below as the historical consolidation outcome unless a later amendment supersedes it.
 
 ## Context
 
@@ -251,7 +251,7 @@ The platform should be easily extendable, either through forking or a secure plu
 
 ### Positive
 
-- **13 → 8 packages**: Less surface area, faster builds, simpler onboarding
+- **Historical consolidation (13 → 8 packages at implementation):** Reduced the original package surface for faster builds and simpler onboarding. The workspace later grew to the [current 10-package inventory](../../README.md#current-workspace-packages).
 - **Provider agnostic**: Claude, Codex, and Gemini all work — CLI or API
 - **Crash resilient**: Brain serialization survives provider outages mid-task
 - **Focused scope**: Every remaining package addresses an area where existing frameworks take a different approach or leave gaps — not unique ideas, but a unique combination and depth of implementation
