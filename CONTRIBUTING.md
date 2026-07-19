@@ -10,7 +10,11 @@ Thank you for improving Frankenbeast. This guide is the shortest path from choos
    ```bash
    ISSUE_NUMBER="2542" # replace with the issue you selected
    gh issue view "$ISSUE_NUMBER" --repo djm204/frankenbeast
-   gh pr list --repo djm204/frankenbeast --state open --search "$ISSUE_NUMBER in:body"
+   gh pr list --repo djm204/frankenbeast --state open --limit 100 \
+     --search "$ISSUE_NUMBER OR issue-$ISSUE_NUMBER" --json number,title,headRefName,url
+   gh pr list --repo djm204/frankenbeast --state open --limit 100 \
+     --json number,title,headRefName,url \
+     --jq ".[] | select(.headRefName | contains(\"issue-$ISSUE_NUMBER-\"))"
    ```
 
 3. Comment on the issue when its scope is unclear or another contributor may already be working on it. Keep one issue, one focused branch, and one pull request.
@@ -57,13 +61,16 @@ For package code, run that package's targeted test, typecheck, and build scripts
 
 Review the exact diff, then create a Conventional Commit:
 
+If `git status --short` shows an intentional new file with the `??` prefix, first run `git add --intent-to-add <new-path>` for that path. This lets patch mode present the new file without staging unrelated untracked files.
+
 ```bash
 git status --short
 git diff --check
 git diff --stat
 git add -p # stage only the changes that belong to this issue
 git diff --cached --stat
-git commit -m "docs(onboarding): add first contribution guide"
+COMMIT_SUBJECT="docs(onboarding): describe your issue-specific change" # replace this example
+git commit -m "$COMMIT_SUBJECT"
 git push --set-upstream origin HEAD
 ```
 
