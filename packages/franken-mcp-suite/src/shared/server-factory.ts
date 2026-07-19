@@ -15,9 +15,21 @@ export interface ToolResult {
   isError?: boolean;
 }
 
+export interface ToolPropertySchema {
+  type: string | readonly string[];
+  description: string;
+  enum?: readonly unknown[];
+  minLength?: number;
+  maxLength?: number;
+  minimum?: number;
+  maximum?: number;
+  minItems?: number;
+  maxItems?: number;
+}
+
 export interface ToolInputSchema {
   type: 'object';
-  properties: Record<string, { type: string | readonly string[]; description: string; enum?: readonly unknown[] }>;
+  properties: Record<string, ToolPropertySchema>;
   required?: string[];
 }
 
@@ -353,6 +365,7 @@ const MEMORY_REVIEW_DECIDE_SAFE_ACTIONS = new Set(['approve', 'reject', 'never_s
 const MEMORY_REVIEW_DECIDE_SAFE_RESOLUTIONS = new Set(['keep_existing', 'replace_existing', 'keep_both_scoped', 'reject_candidate', 'expire_existing']);
 const MEMORY_STORE_TOOL = 'fbeast_memory_store';
 const MEMORY_STORE_SAFE_AUDIT_KEYS = new Set(['key', 'type', 'agentId', 'ttlMs']);
+const OBSERVER_LOG_TOOL = 'fbeast_observer_log';
 
 function normalizeAuditDateString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
@@ -660,6 +673,32 @@ function redactMemoryStoreEnvelope(sanitized: Record<string, unknown>, redaction
   return sanitized;
 }
 
+function redactObserverLogArgs(sanitized: Record<string, unknown>, redaction = '[observer-metadata-redacted]'): Record<string, unknown> {
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'metadata')) {
+    sanitized['metadata'] = redaction;
+  }
+  return sanitized;
+}
+
+function redactObserverLogEnvelope(sanitized: Record<string, unknown>, redaction = '[observer-metadata-redacted]'): Record<string, unknown> {
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'metadata')) {
+    sanitized['metadata'] = redaction;
+  }
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'args')) {
+    const args = sanitized['args'];
+    sanitized['args'] = isObjectLike(args) && !Array.isArray(args)
+      ? redactObserverLogArgs(args as Record<string, unknown>, redaction)
+      : redaction;
+  }
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
+    const context = sanitized['context'];
+    sanitized['context'] = isObjectLike(context) && !Array.isArray(context)
+      ? redactObserverLogArgs(context as Record<string, unknown>, redaction)
+      : redaction;
+  }
+  return sanitized;
+}
+
 export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unknown): Record<string, unknown> {
   const sanitized = sanitizeToolArgumentsForAudit(args);
   const unqualifiedToolName = unqualifyMcpToolName(toolName);
@@ -670,8 +709,9 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
   const isDirectMemoryReviewDecide = unqualifiedToolName === MEMORY_REVIEW_DECIDE_TOOL;
   const isDirectMemorySourceAttribution = unqualifiedToolName === MEMORY_SOURCE_ATTRIBUTION_TOOL;
   const isDirectMemoryStore = unqualifiedToolName === MEMORY_STORE_TOOL;
+  const isDirectObserverLog = unqualifiedToolName === OBSERVER_LOG_TOOL;
   const isDirectRightToForget = unqualifiedToolName === 'fbeast_memory_right_to_forget';
-  const auditedTool = isDirectMemoryExport || isDirectMemoryRetentionReport || isDirectMemoryAccessAuditReport || isDirectMemoryReviewDecide || isMemoryReviewPropose || isDirectMemoryStore || isDirectMemorySourceAttribution || isDirectRightToForget
+  const auditedTool = isDirectMemoryExport || isDirectMemoryRetentionReport || isDirectMemoryAccessAuditReport || isDirectMemoryReviewDecide || isMemoryReviewPropose || isDirectMemoryStore || isDirectMemorySourceAttribution || isDirectObserverLog || isDirectRightToForget
     ? unqualifiedToolName
     : typeof sanitized['tool'] === 'string'
       ? unqualifyMcpToolName(sanitized['tool'])
@@ -761,6 +801,12 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
     }
     return sanitized;
   }
+  if (auditedTool === OBSERVER_LOG_TOOL || auditedAction === OBSERVER_LOG_TOOL) {
+    if (unqualifiedToolName === OBSERVER_LOG_TOOL) {
+      return redactObserverLogArgs(sanitized);
+    }
+    return redactObserverLogEnvelope(sanitized);
+  }
   if (auditedTool !== 'fbeast_memory_right_to_forget' && auditedAction !== 'fbeast_memory_right_to_forget') return sanitized;
   if (auditedAction === 'fbeast_memory_right_to_forget' && Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
     sanitized['context'] = '[right-to-forget-args-redacted]';
@@ -802,6 +848,41 @@ function typeDescription(type: string | readonly string[]): string {
   return typeof type === 'string' ? type : type.join(' or ');
 }
 
+function exceedsStringCodePointLimit(value: string, maximum: number): boolean {
+  let length = 0;
+  const codePoints = value[Symbol.iterator]();
+  while (!codePoints.next().done) {
+    length += 1;
+    if (length > maximum) return true;
+  }
+  return false;
+}
+
+export function sanitizeRejectedToolArgumentsForAudit(tool: ToolSchemaDef, args: unknown): Record<string, unknown> {
+  if (!isObjectLike(args)) return sanitizeToolArgumentsForAuditTrail(tool.name, args);
+  if (!isPlainJsonObject(args)) return sanitizeToolArgumentsForAuditTrail(tool.name, args);
+  const bounded: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  const descriptors = Object.getOwnPropertyDescriptors(args);
+  for (const key of Reflect.ownKeys(descriptors)) {
+    if (typeof key !== 'string') continue;
+    const descriptor = descriptors[key];
+    if (!descriptor || 'get' in descriptor || 'set' in descriptor) {
+      bounded[key] = '[accessor]';
+      continue;
+    }
+    const value = descriptor.value;
+    const property = tool.inputSchema.properties[key];
+    if (property?.maxLength !== undefined && typeof value === 'string' && exceedsStringCodePointLimit(value, property.maxLength)) {
+      bounded[key] = '[schema-bound-exceeded]';
+    } else if (property?.maxItems !== undefined && Array.isArray(value) && value.length > property.maxItems) {
+      bounded[key] = '[schema-bound-exceeded]';
+    } else {
+      bounded[key] = value;
+    }
+  }
+  return sanitizeToolArgumentsForAuditTrail(tool.name, bounded);
+}
+
 export function validateToolArguments(
   tool: ToolSchemaDef,
   args: unknown,
@@ -810,6 +891,14 @@ export function validateToolArguments(
     return { ok: false, message: `Tool ${tool.name} expects an object argument` };
   }
   const obj = args as Record<string, unknown>;
+  const schema = tool.inputSchema;
+  const descriptors = Object.getOwnPropertyDescriptors(obj);
+  for (const [key, property] of Object.entries(schema.properties)) {
+    const descriptor = descriptors[key];
+    if (descriptor && 'value' in descriptor && Array.isArray(descriptor.value) && property.maxItems !== undefined && descriptor.value.length > property.maxItems) {
+      return { ok: false, message: `Tool ${tool.name} property ${key} must contain at most ${property.maxItems} items` };
+    }
+  }
   // The proxy wrapper validates only its envelope here. Its nested `args`
   // payload is validated after target resolution so governance/audit can record
   // the real target tool instead of the generic execute_tool wrapper.
@@ -817,8 +906,7 @@ export function validateToolArguments(
   if (!shape.ok) {
     return { ok: false, message: `Tool ${tool.name} rejected unsafe argument shape: ${shape.message}` };
   }
-  const descriptors = Object.getOwnPropertyDescriptors(obj);
-  const schema = tool.inputSchema;
+
   for (const req of schema.required ?? []) {
     const descriptor = descriptors[req];
     if (!descriptor || descriptor.value === undefined) {
@@ -837,6 +925,31 @@ export function validateToolArguments(
     }
     if ((prop.type === 'number' || (Array.isArray(prop.type) && prop.type.includes('number'))) && typeof value === 'number' && !Number.isFinite(value)) {
       return { ok: false, message: `Tool ${tool.name} property ${key} must be a finite number` };
+    }
+    if (typeof value === 'string' && (prop.minLength !== undefined || prop.maxLength !== undefined)) {
+      let length = 0;
+      const codePoints = value[Symbol.iterator]();
+      while (!codePoints.next().done) {
+        length += 1;
+        if (prop.maxLength !== undefined && length > prop.maxLength) {
+          return { ok: false, message: `Tool ${tool.name} property ${key} must be at most ${prop.maxLength} characters` };
+        }
+      }
+      if (prop.minLength !== undefined && length < prop.minLength) {
+        return { ok: false, message: `Tool ${tool.name} property ${key} must be at least ${prop.minLength} characters` };
+      }
+    }
+    if (typeof value === 'number' && prop.minimum !== undefined && value < prop.minimum) {
+      return { ok: false, message: `Tool ${tool.name} property ${key} must be at least ${prop.minimum}` };
+    }
+    if (typeof value === 'number' && prop.maximum !== undefined && value > prop.maximum) {
+      return { ok: false, message: `Tool ${tool.name} property ${key} must be at most ${prop.maximum}` };
+    }
+    if (Array.isArray(value) && prop.minItems !== undefined && value.length < prop.minItems) {
+      return { ok: false, message: `Tool ${tool.name} property ${key} must contain at least ${prop.minItems} items` };
+    }
+    if (Array.isArray(value) && prop.maxItems !== undefined && value.length > prop.maxItems) {
+      return { ok: false, message: `Tool ${tool.name} property ${key} must contain at most ${prop.maxItems} items` };
     }
     if (prop.enum && !prop.enum.includes(value)) {
       return { ok: false, message: `Tool ${tool.name} property ${key} must be one of: ${prop.enum.join(', ')}` };
@@ -869,12 +982,11 @@ async function dispatchTool(
       process.stderr.write(`fbeast audit failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}\n`);
     }
   };
-  // Normalize the raw payload to an object so a malformed (null/array/scalar)
-  // probe is still captured in the audit record rather than dropped.
-  const rawArgs = sanitizeToolArgumentsForAuditTrail(toolName, args);
-
   const tool = toolMap.get(toolName);
   if (!tool) {
+    // Normalize the raw payload to an object so a malformed
+    // (null/array/scalar) unknown-tool probe is still captured.
+    const rawArgs = sanitizeToolArgumentsForAuditTrail(toolName, args);
     await recordAudit({ ok: false, decision: 'unknown_tool', args: rawArgs });
     return { content: [{ type: 'text' as const, text: `Unknown tool: ${toolName}` }], isError: true };
   }
@@ -882,7 +994,7 @@ async function dispatchTool(
   // non-object) on the wire must reach the validator and be rejected.
   const validated = validateToolArguments(tool, args === undefined ? {} : args);
   if (!validated.ok) {
-    await recordAudit({ ok: false, decision: 'validation_error', args: rawArgs });
+    await recordAudit({ ok: false, decision: 'validation_error', args: sanitizeRejectedToolArgumentsForAudit(tool, args) });
     return { content: [{ type: 'text' as const, text: `Error: ${validated.message}` }], isError: true };
   }
   // Central governance gate: enforced server-side regardless of client hooks.

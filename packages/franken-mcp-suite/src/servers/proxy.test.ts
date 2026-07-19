@@ -363,6 +363,26 @@ describe('proxy server', () => {
       expect(fakeHandler).not.toHaveBeenCalled();
     });
 
+    it('redacts over-bound target arguments from proxy validation-error audits', async () => {
+      mockRegistry.set('bounded_tool', {
+        name: 'bounded_tool',
+        server: 'memory',
+        description: 'Bounded test tool',
+        inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Query', maxLength: 3 } }, required: ['query'] },
+        makeHandler: vi.fn(),
+      });
+
+      const result = await executeToolDef.handler({ tool: 'bounded_tool', args: { query: 'oversized' } }) as { isError: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(auditRecord).toHaveBeenCalledWith({
+        tool: 'bounded_tool',
+        ok: false,
+        decision: 'validation_error',
+        args: { query: '[schema-bound-exceeded]' },
+      });
+    });
+
     it('rejects proxied calls with target unknown properties', async () => {
       const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
       const entry = mockRegistry.get('test_tool')!;
