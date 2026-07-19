@@ -66,19 +66,22 @@ describe('chat app beast daemon proxy', () => {
     expect((init.headers as Headers).get('authorization')).toBe(`Bearer ${TEST_DAEMON_TOKEN}`);
   });
 
-  it('lets ticket-authenticated SSE streams reach the daemon proxy without bearer auth', async () => {
+  it('forwards cookie-authenticated SSE streams without putting tickets in the URL', async () => {
     const fetchMock = vi.fn(async () => new Response('event: snapshot\ndata: {}\n\n', {
       headers: { 'content-type': 'text/event-stream' },
     }));
     vi.stubGlobal('fetch', fetchMock);
     const app = createProxyApp();
 
-    const response = await app.request('/v1/beasts/events/stream?ticket=ticket-1');
+    const response = await app.request('/v1/beasts/events/stream', {
+      headers: { cookie: 'frankenbeast_sse_ticket=ticket-1' },
+    });
 
     expect(response.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
-    expect(url.toString()).toBe('http://127.0.0.1:4050/v1/beasts/events/stream?ticket=ticket-1');
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(url.toString()).toBe('http://127.0.0.1:4050/v1/beasts/events/stream');
+    expect((init.headers as Headers).get('cookie')).toBe('frankenbeast_sse_ticket=ticket-1');
   });
 
   it('injects the effective gateway token for daemon SSE ticket requests', async () => {

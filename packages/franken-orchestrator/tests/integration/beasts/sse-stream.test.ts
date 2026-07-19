@@ -28,8 +28,9 @@ async function issueTicket(app: Hono): Promise<string> {
     method: 'POST',
     headers: { Authorization: `Bearer ${OPERATOR_TOKEN}` },
   });
-  const body = await res.json() as { ticket: string };
-  return body.ticket;
+  const cookie = res.headers.get('set-cookie');
+  expect(cookie).toMatch(/^frankenbeast_sse_ticket=[^;]+;/);
+  return cookie!.split(';', 1)[0]!;
 }
 
 /**
@@ -58,6 +59,7 @@ async function readSseEventsUntil(
   until: (events: ParsedSseEvent[]) => boolean,
   options: {
     headers?: HeadersInit;
+    cookie?: string;
     onConnected?: () => void;
     timeoutMs?: number;
     continueAfterMatchMs?: number;
@@ -77,9 +79,11 @@ async function readSseEventsUntil(
 
   timeoutSignal.addEventListener('abort', abortOnTimeout, { once: true });
 
+  const headers = new Headers(options.headers);
+  if (options.cookie) headers.set('cookie', options.cookie);
   const req = new Request(url, {
     signal: controller.signal,
-    headers: options.headers,
+    headers,
   });
   const res = await app.request(req);
   if (!res.body) {
@@ -142,7 +146,7 @@ describe('Beast SSE routes', () => {
     ticketStore = undefined;
   });
 
-  it('POST /v1/beasts/events/ticket returns a ticket', async () => {
+  it('POST /v1/beasts/events/ticket sets a scoped ticket cookie', async () => {
     const ctx = createSseApp();
     ticketStore = ctx.ticketStore;
 
@@ -152,9 +156,9 @@ describe('Beast SSE routes', () => {
     });
 
     expect(res.status).toBe(200);
+    expect(res.headers.get('set-cookie')).toMatch(/^frankenbeast_sse_ticket=[^;]+;/);
     const body = await res.json();
-    expect(body.ticket).toBeDefined();
-    expect(typeof body.ticket).toBe('string');
+    expect(body).toEqual({ issued: true });
   });
 
   it('POST /v1/beasts/events/ticket accepts same-origin operator cookies', async () => {
@@ -171,7 +175,7 @@ describe('Beast SSE routes', () => {
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.ticket).toBeDefined();
+    expect(body).toEqual({ issued: true });
   });
 
   it('POST /v1/beasts/events/ticket accepts proxied HTTPS same-origin operator cookies', async () => {
@@ -190,8 +194,9 @@ describe('Beast SSE routes', () => {
     });
 
     expect(res.status).toBe(200);
+    expect(res.headers.get('set-cookie')).toContain('; Secure');
     const body = await res.json();
-    expect(body.ticket).toBeDefined();
+    expect(body).toEqual({ issued: true });
   });
 
   it('POST /v1/beasts/events/ticket rejects cross-origin operator cookies', async () => {
@@ -225,7 +230,9 @@ describe('Beast SSE routes', () => {
     const ctx = createSseApp();
     ticketStore = ctx.ticketStore;
 
-    const res = await ctx.app.request('/v1/beasts/events/stream?ticket=bogus');
+    const res = await ctx.app.request('/v1/beasts/events/stream', {
+      headers: { cookie: 'frankenbeast_sse_ticket=bogus' },
+    });
 
     expect(res.status).toBe(401);
   });
@@ -238,12 +245,13 @@ describe('Beast SSE routes', () => {
 
     const events = await readSseEventsUntil(
       ctx.app,
-      'http://localhost/v1/beasts/events/stream?ticket=' + ticket,
+      'http://localhost/v1/beasts/events/stream',
       (candidateEvents) => (
         candidateEvents.some((e) => e.event === 'agent.status')
         && candidateEvents.some((e) => e.event === 'run.status')
       ),
       {
+        cookie: ticket,
         onConnected: () => {
           ctx.bus.publish({ type: 'agent.status', data: { agentId: 'a1', status: 'running' } });
           ctx.bus.publish({ type: 'run.status', data: { runId: 'r1', status: 'active' } });
@@ -272,8 +280,9 @@ describe('Beast SSE routes', () => {
 
     const events = await readSseEventsUntil(
       ctx.app,
-      'http://localhost/v1/beasts/events/stream?ticket=' + ticket,
+      'http://localhost/v1/beasts/events/stream',
       (candidateEvents) => candidateEvents.some((e) => e.event === 'snapshot'),
+      { cookie: ticket },
     );
     const snapshot = events.find((e) => e.event === 'snapshot');
 
@@ -296,12 +305,12 @@ describe('Beast SSE routes', () => {
     // Reconnect with Last-Event-ID=1 — should replay events 2 and 3
     const events = await readSseEventsUntil(
       ctx.app,
-      'http://localhost/v1/beasts/events/stream?ticket=' + ticket,
+      'http://localhost/v1/beasts/events/stream',
       (candidateEvents) => (
         candidateEvents.some((e) => e.id === '2')
         && candidateEvents.some((e) => e.id === '3')
       ),
-      { headers: { 'Last-Event-ID': '1' }, continueAfterMatchMs: 25 },
+      { cookie: ticket, headers: { 'Last-Event-ID': '1' }, continueAfterMatchMs: 25 },
     );
 
     // Should NOT contain event id=1 (already seen)
@@ -322,9 +331,9 @@ describe('Beast SSE routes', () => {
 
     const events = await readSseEventsUntil(
       ctx.app,
-      `http://localhost/v1/beasts/events/stream?ticket=${ticket}&lastEventId=1`,
+      'http://localhost/v1/beasts/events/stream?lastEventId=1',
       (candidateEvents) => candidateEvents.some((e) => e.id === '2'),
-      { continueAfterMatchMs: 25 },
+      { cookie: ticket, continueAfterMatchMs: 25 },
     );
 
     expect(events.find((e) => e.id === '1')).toBeUndefined();
@@ -349,9 +358,11 @@ describe('Beast SSE routes', () => {
     ctx.bus.publish({ type: 'agent.status', data: { agentId: 'a1', status: 'running' } });
 
     const ticket = await issueTicket(ctx.app);
-    const query = options.query ? `&${options.query}` : '';
-    const req = new Request(`http://localhost/v1/beasts/events/stream?ticket=${ticket}${query}`, {
-      headers: options.headers,
+    const query = options.query ? '?' + options.query : '';
+    const headers = new Headers(options.headers);
+    headers.set('cookie', ticket);
+    const req = new Request('http://localhost/v1/beasts/events/stream' + query, {
+      headers,
     });
     const res = await ctx.app.request(req);
 
@@ -370,8 +381,8 @@ describe('Beast SSE routes', () => {
     ticketStore = ctx.ticketStore;
 
     const ticket = await issueTicket(ctx.app);
-    const req = new Request(`http://localhost/v1/beasts/events/stream?ticket=${ticket}&lastEventId=1`, {
-      headers: { 'Last-Event-ID': '1abc' },
+    const req = new Request('http://localhost/v1/beasts/events/stream?lastEventId=1', {
+      headers: { 'Last-Event-ID': '1abc', cookie: ticket },
     });
     const res = await ctx.app.request(req);
 
@@ -389,9 +400,9 @@ describe('Beast SSE routes', () => {
 
     const events = await readSseEventsUntil(
       ctx.app,
-      'http://localhost/v1/beasts/events/stream?ticket=' + ticket,
+      'http://localhost/v1/beasts/events/stream',
       () => false,
-      { headers: { 'Last-Event-ID': '0' }, timeoutMs: 50, allowTimeout: true },
+      { cookie: ticket, headers: { 'Last-Event-ID': '0' }, timeoutMs: 50, allowTimeout: true },
     );
     expect(events.find((e) => e.event === 'snapshot')).toBeUndefined();
   });
@@ -404,9 +415,10 @@ describe('Beast SSE routes', () => {
 
     const events = (await readSseEventsUntil(
       ctx.app,
-      'http://localhost/v1/beasts/events/stream?ticket=' + ticket,
+      'http://localhost/v1/beasts/events/stream',
       (candidateEvents) => candidateEvents.filter((e) => e.event === 'run.log').length === 5,
       {
+        cookie: ticket,
         continueAfterMatchMs: 25,
         onConnected: () => {
           for (let i = 0; i < 5; i++) {

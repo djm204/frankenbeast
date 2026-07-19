@@ -24,12 +24,12 @@ describe('issue #3226 dashboard SSE endpoint contract', () => {
 
     const daemonPath = requireMatch(
       daemonRoutes,
-      /app\.get\('([^']*\/events\/stream)'/u,
+      /const SSE_STREAM_PATH = '(\/[^']*\/events\/stream)'/u,
       'daemon SSE route should be declared',
     );
     const dashboardPath = requireMatch(
       dashboardClient,
-      /`\$\{this\.baseUrl\}(\/[^?]*\/events\/stream)\?\$\{query\.toString\(\)\}`/u,
+      /new URL\([^)]*?(\/v1\/beasts\/events\/stream)/u,
       'dashboard EventSource path should be declared',
     );
 
@@ -42,7 +42,7 @@ describe('issue #3226 dashboard SSE endpoint contract', () => {
 
     expect(adr).toContain('Ticket issuance: `POST /v1/beasts/events/ticket`');
     expect(adr).toContain(
-      'Dashboard stream: `GET /v1/beasts/events/stream?ticket=<uuid>`',
+      'Dashboard stream: `GET /v1/beasts/events/stream`',
     );
     expect(adr).not.toContain('`useBeastEventStream`');
   });

@@ -1,9 +1,21 @@
 import { timingSafeEqual } from 'node:crypto';
 import { Hono } from 'hono';
+import { getCookie, setCookie } from 'hono/cookie';
 import { streamSSE } from 'hono/streaming';
 import type { BeastEventBus } from '../../beasts/events/beast-event-bus.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
 import { extractOperatorToken, extractOperatorTokenCookie, isCookieOperatorAuthAllowed } from '../operator-auth.js';
+
+const SSE_TICKET_COOKIE = 'frankenbeast_sse_ticket';
+const SSE_STREAM_PATH = '/v1/beasts/events/stream';
+
+function isHttpsRequest(
+  requestUrl: string,
+  forwardedProto: string | undefined,
+): boolean {
+  const proto = forwardedProto?.split(',')[0]?.trim().toLowerCase();
+  return proto ? proto === 'https' : new URL(requestUrl).protocol === 'https:';
+}
 
 function safeTokenCompare(a: string, b: string): boolean {
   const bufA = Buffer.from(a);
@@ -56,11 +68,17 @@ export function createBeastSseRoutes(deps: BeastSseRouteDeps): Hono {
     }
 
     const ticket = ticketStore.issue(operatorToken);
-    return c.json({ ticket });
+    setCookie(c, SSE_TICKET_COOKIE, ticket, {
+      httpOnly: true,
+      path: SSE_STREAM_PATH,
+      sameSite: 'Strict',
+      secure: isHttpsRequest(c.req.url, c.req.header('x-forwarded-proto')),
+    });
+    return c.json({ issued: true });
   });
 
-  app.get('/v1/beasts/events/stream', (c) => {
-    const ticket = c.req.query('ticket');
+  app.get(SSE_STREAM_PATH, (c) => {
+    const ticket = getCookie(c, SSE_TICKET_COOKIE);
     if (!ticket) {
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);
     }

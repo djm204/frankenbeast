@@ -734,8 +734,11 @@ describe('beast daemon', () => {
       headers: { authorization: `Bearer ${operatorToken}` },
     });
     expect(ticketResponse.status).toBe(200);
-    const ticketBody = await ticketResponse.json() as { ticket: string };
-    const streamResponse = await fetch(`${daemon.url}/v1/beasts/events/stream?ticket=${ticketBody.ticket}`);
+    const ticketCookie = ticketResponse.headers.get('set-cookie')?.split(';', 1)[0];
+    expect(ticketCookie).toBeTruthy();
+    const streamResponse = await fetch(`${daemon.url}/v1/beasts/events/stream`, {
+      headers: { cookie: ticketCookie! },
+    });
     expect(streamResponse.status).toBe(200);
 
     await expect(Promise.race([

@@ -28,21 +28,47 @@ describe('beast SSE routes', () => {
       method: 'POST',
       headers: { authorization: 'Bearer operator-token' },
     });
-    const { ticket } = await ticketRes.json() as { ticket: string };
+    const cookie = ticketRes.headers.get('set-cookie');
+    expect(cookie).toMatch(/^frankenbeast_sse_ticket=[^;]+;/);
+    expect(cookie).toContain('HttpOnly');
+    expect(cookie).toContain('SameSite=Strict');
+    expect(cookie).toContain('Path=/v1/beasts/events/stream');
+    expect(await ticketRes.json()).toEqual({ issued: true });
 
-    const first = await app.request(`/v1/beasts/events/stream?ticket=${ticket}`);
+    const first = await app.request('/v1/beasts/events/stream', {
+      headers: { cookie: cookie!.split(';', 1)[0]! },
+    });
     expect(first.status).toBe(200);
     await first.body?.cancel();
 
-    const second = await app.request(`/v1/beasts/events/stream?ticket=${ticket}`);
+    const second = await app.request('/v1/beasts/events/stream', {
+      headers: { cookie: cookie!.split(';', 1)[0]! },
+    });
     expect(second.status).toBe(204);
     expect(await second.text()).toBe('');
+  });
+
+  it('does not accept stream tickets from query strings', async () => {
+    const app = createRoutes();
+    const ticketRes = await app.request('/v1/beasts/events/ticket', {
+      method: 'POST',
+      headers: { authorization: 'Bearer operator-token' },
+    });
+    const cookie = ticketRes.headers.get('set-cookie');
+    expect(cookie).toMatch(/^frankenbeast_sse_ticket=[^;]+;/);
+    const ticket = cookie!.split(';', 1)[0]!.split('=', 2)[1]!;
+
+    const response = await app.request(`/v1/beasts/events/stream?ticket=${ticket}`);
+
+    expect(response.status).toBe(401);
   });
 
   it('returns unauthorized for invalid stream tickets', async () => {
     const app = createRoutes();
 
-    const res = await app.request('/v1/beasts/events/stream?ticket=bogus');
+    const res = await app.request('/v1/beasts/events/stream', {
+      headers: { cookie: 'frankenbeast_sse_ticket=bogus' },
+    });
 
     expect(res.status).toBe(401);
     const body = await res.json() as { error: { message: string } };
