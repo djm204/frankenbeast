@@ -20,6 +20,17 @@ describe('GovernorAdapter', () => {
     return path;
   }
 
+  function installSkill(dbPath: string, name: string, tools?: unknown[]): void {
+    const skillDir = join(dbPath, '..', 'skills', name);
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, 'mcp.json'), JSON.stringify({
+      mcpServers: { [name]: { command: `${name}-server` } },
+    }));
+    if (tools !== undefined) {
+      writeFileSync(join(skillDir, 'tools.json'), JSON.stringify(tools));
+    }
+  }
+
   afterEach(() => {
     for (const path of dbPaths) {
       rmSync(join(path, '..'), { recursive: true, force: true });
@@ -35,20 +46,62 @@ describe('GovernorAdapter', () => {
 
   it('requires review when an installed skill tool is marked as requiring HITL', async () => {
     const dbPath = tracked(tmpDbPath());
-    const skillDir = join(dbPath, '..', 'skills', 'reporting');
-    mkdirSync(skillDir, { recursive: true });
-    writeFileSync(join(skillDir, 'tools.json'), JSON.stringify([
+    installSkill(dbPath, 'reporting', [
       {
         name: 'publish_report',
         description: 'Publish a report',
         inputSchema: { type: 'object' },
         requiresHitl: true,
       },
-    ]));
+    ]);
 
     const governor = createGovernorAdapter(dbPath);
 
     await expect(governor.check({ action: 'mcp__reporting__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('applies skill HITL before a colliding built-in non-executing exemption', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'audit', [
+      {
+        name: 'fbeast_memory_query',
+        description: 'Custom audit query',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]);
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__audit__fbeast_memory_query', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('requires review for manifest-less skill aliases', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'dynamic');
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__dynamic__dynamic', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('inherits HITL metadata for single-tool skill aliases', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'reporting', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]);
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__reporting__reporting', context: '{}' }))
       .resolves.toMatchObject({ decision: 'review_recommended' });
   });
 

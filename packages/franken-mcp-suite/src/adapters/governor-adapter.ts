@@ -763,6 +763,36 @@ function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; m
   return true;
 }
 
+function readSkillToolProfiles(toolsPath: string): Array<Record<string, unknown>> | undefined {
+  try {
+    if (!lstatSync(toolsPath).isFile()) return undefined;
+    const tools = JSON.parse(readFileSync(toolsPath, 'utf8')) as unknown;
+    if (!Array.isArray(tools)) return undefined;
+    return tools.filter((tool): tool is Record<string, unknown> => (
+      tool !== null
+      && typeof tool === 'object'
+      && !Array.isArray(tool)
+      && typeof (tool as Record<string, unknown>)['name'] === 'string'
+    ));
+  } catch {
+    return undefined;
+  }
+}
+
+function isRegisteredSkill(skillDir: string): boolean {
+  try {
+    return lstatSync(join(skillDir, 'mcp.json')).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function profileRequiresHitl(profile: Record<string, unknown>): boolean {
+  // SkillManager normalizes omitted flags to true when installing a profile;
+  // preserve that fail-safe default when reading an existing manifest.
+  return profile['requiresHitl'] !== false;
+}
+
 function skillRequiresHitl(skillsDir: string, action: string): boolean {
   let skillDirectories;
   try {
@@ -773,33 +803,54 @@ function skillRequiresHitl(skillsDir: string, action: string): boolean {
 
   for (const skillDirectory of skillDirectories) {
     if (!skillDirectory.isDirectory()) continue;
-    const toolsPath = join(skillsDir, skillDirectory.name, 'tools.json');
-    let tools: unknown;
-    try {
-      if (!lstatSync(toolsPath).isFile()) continue;
-      tools = JSON.parse(readFileSync(toolsPath, 'utf8')) as unknown;
-    } catch {
-      continue;
-    }
-    if (!Array.isArray(tools)) continue;
+    const skillDir = join(skillsDir, skillDirectory.name);
+    const profiles = readSkillToolProfiles(join(skillDir, 'tools.json'));
 
-    for (const tool of tools) {
-      if (tool === null || typeof tool !== 'object' || Array.isArray(tool)) continue;
-      const profile = tool as Record<string, unknown>;
-      const toolName = profile['name'];
-      if (typeof toolName !== 'string') continue;
+    if (action === skillDirectory.name) {
+      if (profiles === undefined) {
+        // Skills without a usable tool manifest expose the server alias with
+        // conservative HITL because the concrete runtime tools are unknown.
+        if (isRegisteredSkill(skillDir)) return true;
+      } else if (profiles.length === 0) {
+        if (isRegisteredSkill(skillDir)) return true;
+      } else if (profiles.length === 1) {
+        if (profileRequiresHitl(profiles[0]!)) return true;
+      } else {
+        const aliasProfile = profiles.find((profile) => profile['name'] === skillDirectory.name);
+        if (aliasProfile !== undefined && profileRequiresHitl(aliasProfile)) return true;
+      }
+    }
+
+    for (const profile of profiles ?? []) {
+      const toolName = profile['name'] as string;
       if (toolName !== action && `${skillDirectory.name}/${toolName}` !== action) continue;
-      // SkillManager normalizes omitted flags to true when installing a profile;
-      // preserve that fail-safe default when reading an existing manifest.
-      if (profile['requiresHitl'] !== false) return true;
+      if (profileRequiresHitl(profile)) return true;
     }
   }
 
   return false;
 }
 
-function assessAction(action: string, context: string, skillsDir: string): GovernorCheckResult {
+function assessAction(action: string, context: string, requiresHitl: boolean): GovernorCheckResult {
   const unqualifiedAction = unqualifyMcpActionName(action);
+  const isDestructive = DESTRUCTIVE_ACTIONS.has(unqualifiedAction)
+    || matchesDangerousPattern(action, context)
+    || matchesDangerousPattern(unqualifiedAction, context);
+
+  // Profile HITL is an explicit policy and must win over built-in exemptions
+  // for leaf-name collisions with trusted fbeast tools.
+  if (requiresHitl) {
+    const profileTriggerResult: TriggerResult = triggerRegistry.evaluateAll({
+      skillId: unqualifiedAction,
+      requiresHitl,
+      isDestructive,
+    });
+    return {
+      decision: mapSeverityToDecision(profileTriggerResult.severity),
+      reason: profileTriggerResult.reason ?? `Skill '${unqualifiedAction}' requires HITL.`,
+    };
+  }
+
   const highRiskResult = assessHighRiskAction(unqualifiedAction, context);
   if (highRiskResult !== undefined) return highRiskResult;
 
@@ -887,14 +938,10 @@ function assessAction(action: string, context: string, skillsDir: string): Gover
     };
   }
 
-  const isDestructive = DESTRUCTIVE_ACTIONS.has(unqualifiedAction)
-    || matchesDangerousPattern(action, context)
-    || matchesDangerousPattern(unqualifiedAction, context);
-
   // Evaluate via governor SkillTrigger with pattern-derived destructiveness
   const triggerResult: TriggerResult = triggerRegistry.evaluateAll({
     skillId: unqualifiedAction,
-    requiresHitl: skillRequiresHitl(skillsDir, unqualifiedAction),
+    requiresHitl,
     isDestructive,
   });
 
@@ -922,7 +969,8 @@ export function createGovernorAdapter(dbPath: string): GovernorAdapter {
 
   return {
     async check(input) {
-      const isDryRunForget = isRightToForgetDryRun(input.action, input.context);
+      const requiresHitl = skillRequiresHitl(skillsDir, unqualifyMcpActionName(input.action));
+      const isDryRunForget = !requiresHitl && isRightToForgetDryRun(input.action, input.context);
       if (hasDuplicateReservedProvenanceKeys(input.context)) {
         const reason = 'Duplicate reserved fbeast provenance keys are not allowed.';
         store.db.prepare(`
@@ -937,7 +985,7 @@ export function createGovernorAdapter(dbPath: string): GovernorAdapter {
             decision: 'approved' as const,
             reason: 'Right-to-forget dryRun is non-mutating and allowed so users can inspect deletion counts before approval.',
           }
-        : assessAction(input.action, context, skillsDir);
+        : assessAction(input.action, context, requiresHitl);
 
       store.db.prepare(`
         INSERT INTO governor_log (action, context, decision, reason)
