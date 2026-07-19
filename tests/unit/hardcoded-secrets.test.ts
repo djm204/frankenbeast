@@ -1418,6 +1418,76 @@ describe('hard-coded example secret scanner', () => {
     }
   });
 
+  it('rejects Codex round 28 cron scanner bypasses', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'round-28-cron.mjs'),
+      [
+        'const proc = process;',
+        'const credential = proc.env.GITHUB_TOKEN;',
+        'const aliasEntry = `0 1 * * * agy pr --token ${credential}`;',
+        'const envCopy = Object.assign({}, process.env);',
+        'const copiedEntry = `0 2 * * * agy pr --token ${envCopy.GITHUB_TOKEN}`;',
+        "const jobFile = '/tmp/round-28-jobs';",
+        'const stagedCredential = process.env.GITHUB_TOKEN;',
+        'const stagedEntry = `${process.argv[2]} agy pr --token ${stagedCredential}`;',
+        'writeFileSync(jobFile, stagedEntry);',
+        "execFileSync('crontab', [jobFile]);",
+        'const child = spawn(',
+        "  'crontab',",
+        "  ['-'],",
+        ');',
+        'const stdinEntry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'child.stdin.end(stdinEntry);',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'round-28-cron.py'),
+      [
+        'import os',
+        'env = os.environ',
+        'env_get = env.get',
+        "credential = env_get('GITHUB_TOKEN')",
+        "entry = f'{sys.argv[1]} agy pr --token {credential}'",
+        "os.system(f\"printf '%s\\n' '{entry}' | crontab -\")",
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'round-28-cron.sh'),
+      [
+        'gh_cli=/usr/bin/gh',
+        'auth="$($gh_cli auth token)"',
+        'CRON_CMD="0 3 * * * agy pr --token $auth"',
+        'installer=/usr/bin/crontab',
+        'printf "%s\\n" "agy pr --token $GITHUB_TOKEN" | "$installer" -',
+        "cat <<'EOF' | envsubst | crontab -",
+        '0 4 * * * agy pr --token "$GITHUB_TOKEN"',
+        'EOF',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    for (const location of [
+      'scripts/round-28-cron.mjs:3',
+      'scripts/round-28-cron.mjs:5',
+      'scripts/round-28-cron.mjs:9',
+      'scripts/round-28-cron.mjs:16',
+      'scripts/round-28-cron.py:6',
+      'scripts/round-28-cron.sh:3',
+      'scripts/round-28-cron.sh:5',
+      'scripts/round-28-cron.sh:7',
+    ]) {
+      expect(result.stderr).toContain(location);
+    }
+  });
+
   it('allows direct crontab installs that defer gh auth token lookup until runtime', () => {
     const root = makeFixtureRoot();
     const scriptDir = join(root, 'scripts');

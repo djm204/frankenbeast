@@ -1,9 +1,9 @@
 # PR #3182 current-head Codex closeout progress
 
-- [x] Verify local, remote branch, and PR head all match `89537e6d740fc0ef54fed7f167533edf600732c5`.
-- [x] Verify current-head CI completes successfully.
-- [x] Paginate the complete review-thread set and identify unresolved Codex findings.
-- [x] Reproduce and fix unresolved current-code findings with focused regression coverage.
+- [ ] Verify local, remote branch, and PR head all match after publishing the fix.
+- [x] Verify the pre-fix current-head CI completed successfully.
+- [x] Paginate the complete review-thread set and identify nine unresolved current-code findings.
+- [x] Reproduce and fix all nine scanner bypasses with focused regression coverage.
 - [x] Run targeted security lint/tests, typecheck, and build.
 - [x] Create a Conventional Commit locally.
 - [ ] Publish the local commit through approval-cop only.

@@ -577,20 +577,25 @@ function collectSensitiveEnvAliases(line, aliases, envNameAliases, envContainerA
   const aliasedOsEnviron = [...(options.osModuleAliases ?? [])].some((moduleAlias) => trimmedExpression.replace(/;$/, '') === `${moduleAlias}.environ`);
   const isSpreadEnvCopy = /^\{\s*\.\.\.(?:process\.env|import\.meta\.env|[A-Za-z_$][\w$]*)\s*\}\s*;?$/.test(trimmedExpression)
     && (/\b(?:process\.env|import\.meta\.env)\b/.test(trimmedExpression) || [...envContainerAliases].some((container) => trimmedExpression.includes(`...${container}`)));
+  const assignedEnvContainer = /^Object\.assign\(\s*\{\s*\}\s*,\s*(process\.env|import\.meta\.env|[A-Za-z_$][\w$]*)\s*\)\s*;?$/.exec(trimmedExpression);
+  const isAssignedEnvCopy = Boolean(assignedEnvContainer && (/^(?:process\.env|import\.meta\.env)$/.test(assignedEnvContainer[1]) || envContainerAliases.has(assignedEnvContainer[1])));
   const copiedEnvContainer = /^(?:(?:os\.)?environ|([A-Za-z_$][\w$]*))\.copy\(\)\s*;?$/.exec(trimmedExpression);
-  if (/^(?:\(?process(?:\?\.env|\.env|\?\.\[['"`]env['"`]\]|\[['"`]env['"`]\])\)?|import\.meta\.env|(?:os\.)?environ)\s*;?$/.test(trimmedExpression) || aliasedOsEnviron || isSpreadEnvCopy || (copiedEnvContainer && (!copiedEnvContainer[1] || envContainerAliases.has(copiedEnvContainer[1])))) {
+  if (/^(?:\(?process(?:\?\.env|\.env|\?\.\[['"`]env['"`]\]|\[['"`]env['"`]\])\)?|import\.meta\.env|(?:os\.)?environ)\s*;?$/.test(trimmedExpression) || aliasedOsEnviron || isSpreadEnvCopy || isAssignedEnvCopy || (copiedEnvContainer && (!copiedEnvContainer[1] || envContainerAliases.has(copiedEnvContainer[1])))) {
     envContainerAliases.add(alias);
   } else {
     envContainerAliases.delete(alias);
   }
+  if (/^process\s*;?$/.test(trimmedExpression)) envContainerAliases.add(`${alias}.env`);
+  else envContainerAliases.delete(`${alias}.env`);
   const aliasedOsGetter = [...(options.osModuleAliases ?? [])].some((moduleAlias) => new RegExp(`^${moduleAlias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.(?:getenv|environ\\.get)\\s*;?$`).test(trimmedExpression));
-  if (/^(?:(?:os\.)?getenv|os\.environ\.get)\s*;?$/.test(trimmedExpression) || aliasedOsGetter) {
+  const aliasedEnvGetter = [...envContainerAliases].some((container) => trimmedExpression.replace(/;$/, '') === `${container}.get`);
+  if (/^(?:(?:os\.)?getenv|os\.environ\.get)\s*;?$/.test(trimmedExpression) || aliasedOsGetter || aliasedEnvGetter) {
     envGetterAliases.add(alias);
   } else {
     envGetterAliases.delete(alias);
   }
   const commandLiteral = stringLiterals(expression).map((literal) => literal.value.trim()).find((literal) => /(?:^|\/)gh$/.test(literal));
-  if ((commandLiteral && /^\s*['"`](?:[^'"`]*\/)?gh['"`]\s*;?\s*$/.test(expression)) || (options.shell && /^(?:command\s+)?(?:[^\s/]+\/)*gh\s*;?$/.test(trimmedExpression))) options.ghCommandAliases?.add(alias);
+  if ((commandLiteral && /^\s*['"`](?:[^'"`]*\/)?gh['"`]\s*;?\s*$/.test(expression)) || (options.shell && /^(?:command\s+)?\/?(?:[^\s/]+\/)*gh\s*;?$/.test(trimmedExpression))) options.ghCommandAliases?.add(alias);
   else options.ghCommandAliases?.delete(alias);
   const envNameLiteral = stringLiterals(expression)
     .map((literal) => literal.value.trim())
@@ -623,7 +628,7 @@ function hasCronScheduleLiteral(line) {
 
 function hasCronCommandMarker(line, cronScheduleAliases = new Set()) {
   const outsideStrings = codeOutsideStringLiterals(line);
-  const programmaticCrontabCall = /\b(?:execFileSync|execFile|spawnSync|spawn|execSync|exec|check_output|check_call|Popen|run|call|subprocess\.(?:run|check_output|check_call|Popen|call))\s*\([^\n]*['"`]crontab['"`]/.test(line);
+  const programmaticCrontabCall = /\b(?:execFileSync|execFile|spawnSync|spawn|execSync|exec|check_output|check_call|Popen|run|call|subprocess\.(?:run|check_output|check_call|Popen|call)|(?:os\.)?system)\s*\([^\n]*['"`][^'"`]*\bcrontab\b[^'"`]*['"`]/.test(line);
   if (/(?:\bCRON(?:_CMD|_COMMAND)?\b|\bcrontab\b)/i.test(outsideStrings) || programmaticCrontabCall || hasCronScheduleLiteral(line) || hasCronScheduleText(line)) {
     return true;
   }
@@ -811,17 +816,25 @@ function isCronContinuationLine(line, inCronContext, pendingCronCommand) {
 
 function cronStagingStartLines(lines) {
   const starts = new Set();
+  const pathAliases = new Map();
+  for (const line of lines) {
+    const assignment = line.match(/^\s*(?:(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)\s*=\s*['"`]([^'"`]+)['"`]\s*;?$/);
+    if (assignment) pathAliases.set(assignment[1], assignment[2]);
+  }
   for (const [index, line] of lines.entries()) {
-    const target = (
+    const rawTarget = (
       /(?:^|\s)>{1,2}\s*([^\s;]+)/.exec(line)?.[1]
       ?? /\|\s*tee(?:\s+-a)?\s+([^\s;]+)/.exec(line)?.[1]
-      ?? /\b(?:writeFileSync|writeFile)\s*\(\s*['"`]([^'"`]+)['"`]/.exec(line)?.[1]
+      ?? /\b(?:writeFileSync|writeFile)\s*\(\s*(?:['"`]([^'"`]+)['"`]|([A-Za-z_$][\w$]*))/.exec(line)?.slice(1).find(Boolean)
       ?? /\bPath\s*\(\s*['"`]([^'"`]+)['"`]\s*\)\.write_text\s*\(/.exec(line)?.[1]
       ?? /\bopen\s*\(\s*['"`]([^'"`]+)['"`]/.exec(line)?.[1]
     )?.replace(/^['"]|['"]$/g, '');
+    const target = pathAliases.get(rawTarget) ?? rawTarget;
     if (!target) continue;
     const escapedTarget = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    if (lines.slice(index + 1).some((laterLine) => /\bcrontab\b/.test(laterLine) && new RegExp(escapedTarget).test(laterLine))) {
+    const targetAliases = [...pathAliases].filter(([, value]) => value === target).map(([name]) => name);
+    const targetPattern = [escapedTarget, ...targetAliases.map((name) => `\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`)].join('|');
+    if (lines.slice(index + 1).some((laterLine) => /\bcrontab\b/.test(laterLine) && new RegExp(targetPattern).test(laterLine))) {
       let groupStart = index;
       const groupClose = /([})])\s*>{1,2}/.exec(line)?.[1];
       if (groupClose) {
@@ -847,7 +860,7 @@ function collectProgrammaticCrontabAliases(lines) {
   const callNames = new Set(['execFileSync', 'execFile', 'spawnSync', 'spawn', 'execSync', 'exec', 'check_output', 'check_call', 'Popen', 'run', 'call']);
   const commandNames = new Set();
   const processNames = new Set();
-  for (const line of lines) {
+  for (const [index, line] of lines.entries()) {
     const importLine = line.match(/^\s*from\s+subprocess\s+import\s+(.+)$/);
     if (importLine) {
       for (const part of importLine[1].split(',')) {
@@ -862,12 +875,18 @@ function collectProgrammaticCrontabAliases(lines) {
         if (imported) callNames.add(imported[1] ?? part.trim());
       }
     }
-    const assignment = line.match(/^\s*(?:(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)\s*=\s*(?:['"`](?:[^'"`]*\/)?crontab['"`]|(?:[^\s/]+\/)*crontab)\s*;?$/);
+    const assignment = line.match(/^\s*(?:(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)\s*=\s*(?:['"`](?:[^'"`]*\/)?crontab['"`]|\/?(?:[^\s/]+\/)*crontab)\s*;?$/);
     if (assignment) commandNames.add(assignment[1]);
-    const spawnedProcess = line.match(/^\s*(?:(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)\s*=\s*(?:subprocess\.)?(?:spawn|Popen)\s*\((.+)$/);
+    const spawnedProcess = line.match(/^\s*(?:(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)\s*=\s*(?:subprocess\.)?(?:spawn|Popen)\s*\((.*)$/);
     if (spawnedProcess) {
-      const usesCommandAlias = [...commandNames].some((name) => new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'u').test(spawnedProcess[2]));
-      if (/['"`](?:[^'"`]*\/)?crontab['"`]/.test(spawnedProcess[2]) || usesCommandAlias) processNames.add(spawnedProcess[1]);
+      let callExpression = spawnedProcess[2];
+      let depth = groupingDepthDelta(line);
+      for (let cursor = index + 1; depth > 0 && cursor < Math.min(lines.length, index + 40); cursor += 1) {
+        callExpression += ` ${lines[cursor]}`;
+        depth += groupingDepthDelta(lines[cursor]);
+      }
+      const usesCommandAlias = [...commandNames].some((name) => new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'u').test(callExpression));
+      if (/['"`](?:[^'"`]*\/)?crontab['"`]/.test(callExpression) || usesCommandAlias) processNames.add(spawnedProcess[1]);
     }
   }
   return { callNames, commandNames, processNames };
@@ -1076,7 +1095,7 @@ async function scanSourceFile(file, findings) {
       const heredoc = pendingCronHeredocDelimiter ? null : cronHeredocInfo(code);
       if (heredoc) {
         pendingCronHeredocDelimiter = heredoc.delimiter;
-        pendingCronQuotedHeredoc = heredoc.quoted;
+        pendingCronQuotedHeredoc = heredoc.quoted && !/\benvsubst\b/.test(code);
       }
       pendingCronCommand = Boolean(pendingCronHeredocDelimiter);
       continue;
@@ -1094,7 +1113,7 @@ async function scanSourceFile(file, findings) {
     const heredoc = pendingCronHeredocDelimiter ? null : cronHeredocInfo(code);
     if (heredoc) {
       pendingCronHeredocDelimiter = heredoc.delimiter;
-      pendingCronQuotedHeredoc = heredoc.quoted;
+      pendingCronQuotedHeredoc = heredoc.quoted && !/\benvsubst\b/.test(code);
     }
     pendingCronCommand = isCronContinuationLine(code, inCronContext, pendingCronCommand);
 
