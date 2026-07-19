@@ -30,7 +30,9 @@ describe('@franken/brain package exports', () => {
 
     const rootResolution = resolveFromConsumer('@franken/brain');
     expect(rootResolution.status).toBe(0);
-    expect(rootResolution.stdout).toMatch(/\/@franken\/brain\/dist\/index\.js$/);
+    expect(rootResolution.stdout).toMatch(
+      /\/(?:packages\/franken-brain|node_modules\/@franken\/brain)\/dist\/index\.js$/,
+    );
 
     const deepResolution = resolveFromConsumer('@franken/brain/package.json');
     expect(deepResolution.status).not.toBe(0);
