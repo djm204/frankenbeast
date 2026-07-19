@@ -11,6 +11,7 @@ describe('OrchestratorConfig', () => {
       expect(config.maxCritiqueIterations).toBe(3);
       expect(config.maxTotalTokens).toBe(100_000);
       expect(config.maxDurationMs).toBe(300_000);
+      expect(config.planningTimeoutMs).toBe(120_000);
       expect(config.enableHeartbeat).toBe(false);
       expect(config.enableTracing).toBe(false);
       expect(config.minCritiqueScore).toBe(0.7);

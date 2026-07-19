@@ -590,6 +590,35 @@ describe('createMcpServer', () => {
     expect(calls).toEqual([{ limit: 100 }]);
   });
 
+  it('accepts only safe integers at JavaScript precision boundaries', async () => {
+    const calls: unknown[] = [];
+    const tool: ToolDef = {
+      name: 'identify',
+      description: 'identify',
+      inputSchema: {
+        type: 'object',
+        properties: { id: { type: 'integer', description: 'id' } },
+        required: ['id'],
+      },
+      handler: async (args) => {
+        calls.push(args);
+        return { content: [{ type: 'text' as const, text: 'ok' }] };
+      },
+    };
+    const srv = createMcpServer('t', '1', [tool]);
+
+    expect(await srv.callTool('identify', { id: Number.MAX_SAFE_INTEGER })).not.toHaveProperty('isError');
+    expect(await srv.callTool('identify', { id: Number.MIN_SAFE_INTEGER })).not.toHaveProperty('isError');
+    expect((await srv.callTool('identify', { id: Number.MAX_SAFE_INTEGER + 1 })).content[0]!.text).toContain('must be integer');
+    expect((await srv.callTool('identify', { id: Number.MIN_SAFE_INTEGER - 1 })).content[0]!.text).toContain('must be integer');
+    expect((await srv.callTool('identify', { id: Infinity })).isError).toBe(true);
+    expect((await srv.callTool('identify', { id: Number.NaN })).isError).toBe(true);
+    expect(calls).toEqual([
+      { id: Number.MAX_SAFE_INTEGER },
+      { id: Number.MIN_SAFE_INTEGER },
+    ]);
+  });
+
   it('enforces array item bounds before invoking the handler', async () => {
     const calls: unknown[] = [];
     const tool: ToolDef = {

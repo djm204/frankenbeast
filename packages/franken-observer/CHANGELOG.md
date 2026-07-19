@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.11.1](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.11.0...franken-observer-v0.11.1) (2026-07-19)
+
+
+### Bug Fixes
+
+* **dx:** align workspace TypeScript versions ([#3232](https://github.com/djm204/frankenbeast/issues/3232)) ([5a58ead](https://github.com/djm204/frankenbeast/commit/5a58ead0e541104b41d87e5780419386ea727c26))
+* **observer:** handle missing trace details ([#3274](https://github.com/djm204/frankenbeast/issues/3274)) ([8272ed0](https://github.com/djm204/frankenbeast/commit/8272ed0b44df8f61f85a4a746af7999efb589fc5))
+* **observer:** harden trace server responses ([#3285](https://github.com/djm204/frankenbeast/issues/3285)) ([5399908](https://github.com/djm204/frankenbeast/commit/539990832073b5540134f14ec301311f5fba77c2))
+* **observer:** make trace rows keyboard accessible ([#3394](https://github.com/djm204/frankenbeast/issues/3394)) ([b806101](https://github.com/djm204/frankenbeast/commit/b8061014299210ab688e84a8280612e3227f1c7c))
+
+
+### Documentation
+
+* **observer:** clarify trace server bind security ([#3289](https://github.com/djm204/frankenbeast/issues/3289)) ([f1da921](https://github.com/djm204/frankenbeast/commit/f1da9210a57f8c4c489cf17fb5d63572c4add86a))
+* **observer:** fix SamplingAdapter SQLite example ([df2e92a](https://github.com/djm204/frankenbeast/commit/df2e92a50815a99a1dca64d72facaf52920c2935)), closes [#2628](https://github.com/djm204/frankenbeast/issues/2628)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.14.0 to 0.14.1
+
 ## [0.11.0](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.10.1...franken-observer-v0.11.0) (2026-07-18)
 
 

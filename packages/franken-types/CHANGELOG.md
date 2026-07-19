@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.14.1](https://github.com/djm204/frankenbeast/compare/franken-types-v0.14.0...franken-types-v0.14.1) (2026-07-19)
+
+
+### Bug Fixes
+
+* **chat:** bound message content length ([#3381](https://github.com/djm204/frankenbeast/issues/3381)) ([1d4201b](https://github.com/djm204/frankenbeast/commit/1d4201b37f7ec35c6503f922fad2a0c5de8fb43e))
+* disambiguate critique result type exports ([#3316](https://github.com/djm204/frankenbeast/issues/3316)) ([48756fd](https://github.com/djm204/frankenbeast/commit/48756fd04b2490566ba5e2a28b6f96fa0cb9d153))
+* **dx:** align workspace TypeScript versions ([#3232](https://github.com/djm204/frankenbeast/issues/3232)) ([5a58ead](https://github.com/djm204/frankenbeast/commit/5a58ead0e541104b41d87e5780419386ea727c26))
+
+
+### Performance
+
+* **orchestrator:** bound multi-pass planning latency ([#3373](https://github.com/djm204/frankenbeast/issues/3373)) ([3218426](https://github.com/djm204/frankenbeast/commit/3218426b3f997de65fc3bfeabb09cfe83b44ad87))
+
 ## [0.14.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.13.0...franken-types-v0.14.0) (2026-07-18)
 
 

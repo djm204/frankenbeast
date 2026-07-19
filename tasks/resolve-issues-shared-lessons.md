@@ -10,6 +10,13 @@
 - Separate shell interpolation parsing from JavaScript template interpolation, carry quote/heredoc context across lines, recognize staged crontab files and programmatic crontab sinks, and propagate aliased Python `os.environ`; otherwise a line-oriented scanner both misses persisted credentials and rejects safe runtime `$(gh auth token)` strings.
 - Treat cron-install taint as a language-aware dataflow problem: cover post-processed/backquoted `printenv`, wrapped/incrementally assembled `gh auth token`, aliased env imports/containers/sinks, dot/bracket/destructuring/joined interpolation flows, multiline schedules/assembly/programmatic sinks, and redirect/tee/stdin staging while preserving shell URLs and excluding quoted heredoc/escaped runtime expansion.
 
+## 2026-07-19 — MCP integer precision validation
+- JSON-schema `integer` checks at JavaScript transport boundaries must use `Number.isSafeInteger`, not `Number.isInteger`: integral-valued numbers beyond `Number.MAX_SAFE_INTEGER` can no longer represent exact IDs, limits, or pagination values. Cover both accepted safe boundaries and rejected values immediately outside them.
+
+## 2026-07-19 — Live-bench run cleanup TOCTOU hardening
+- For destructive cleanup in attacker-writable directory trees, preflight `lstat`/`realpath` checks are not enough: on POSIX, open the trusted root and each descendant with `O_DIRECTORY|O_NOFOLLOW`, compare root and quarantined leaf device/inode identities, address rename/removal through stable descriptor paths, and keep the recreated run-leaf descriptor open while populating it.
+- Create quarantine entries beside the anchored leaf parent so rename stays on one filesystem, and avoid followable path mutations such as `chmod(path)` between creation and a no-follow open. Use `lstat`-based existence checks so dangling symlinks fail closed; when a platform lacks searchable Linux `/proc/self/fd` paths and no equivalent safe primitive is available, reject secure provisioning rather than restoring path-based TOCTOU cleanup.
+
 ## 2026-07-19 — Provider-native cache session isolation
 - Never translate an application cache/work key into a provider continuation flag. Start the first native-capable cache call without `--continue`, capture the provider-issued session id, and resume only that exact id when provider and model still match.
 - Treat only classified stale/invalid-session failures as retryable: emit fallback telemetry, invalidate the stale record before retrying, and retry once in a fresh persisted session; propagate all other provider errors so failures cannot silently double expensive calls.
@@ -69,7 +76,7 @@
 
 ## 2026-07-16 — Synthetic availability probe review fixes
 - Availability probes should fail closed for real dependencies: do not default provider checks to `node --version` or dashboard checks to a static UI health URL, require explicit provider/backend health targets, and cover missing-target behavior in tests so cron copies cannot produce false-green uptime.
-- For cron/CI probe JSON logs, redact both `key=value` and whitespace-separated secret forms, including split `Authorization: Bearer *** argv sequences, before serializing command details or error messages.
+- For cron/CI probe JSON logs, redact both `key=value` and whitespace-separated secret forms, including split `Authorization: Bearer ***` argv sequences, before serializing command details or error messages.
 - When Codex reaches the normal five-trigger cap but posts new valid findings, fix/reply/resolve them and stop for explicit approval before issuing another `@codex review`; zero unresolved threads plus green CI is not a substitute for a fresh current-head clean.
 
 ## 2026-07-16 — Snapshot diff Codex closeout
@@ -408,6 +415,7 @@
 
 ## Lessons
 - 2026-07-19 — Docs regression tests should assert exact pinned values from manifest and treat setup commands as gate-narrow/full setup distinctions.
+- 2026-07-19 — Bounded multi-pass LLM flows need one shared deadline propagated through cache/client/adapter layers, explicit subprocess and retry-wait cancellation, and a caller-side abort race for implementations that ignore signals. Preserve the last useful pre-quality artifact on timeout, use deterministic structural confidence for fast paths, avoid resending unchanged repository context, and test 1/2/4-pass paths plus child-process termination.
 
 ## 2026-07-19 — Type export renames and deprecation compatibility
 - When renaming shared public type names for clarity, keep deprecated aliases temporarily (with `@deprecated` JSDoc) for downstream consumers, update docs/tests to use new names, and add targeted tests validating both canonical and deprecated aliases.

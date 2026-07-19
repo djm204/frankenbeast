@@ -205,6 +205,22 @@ describe('ChunkDecomposer', () => {
       ).rejects.toThrow(/parse|JSON/i);
     });
 
+    it('rejects non-array chunk fields before dependency traversal', async () => {
+      const malformed = [{
+        id: 'chunk-a',
+        objective: 'A',
+        files: ['a.ts'],
+        successCriteria: 'A passes',
+        verificationCommand: 'npx vitest run',
+        dependencies: '',
+      }];
+      const decomposer = new ChunkDecomposer(mockLlm(JSON.stringify(malformed)), { maxChunks: 12 });
+
+      await expect(decomposer.decompose(designDoc, emptyContext)).rejects.toThrow(
+        'Chunk field dependencies must be an array of strings',
+      );
+    });
+
     it('validates dependency references exist', async () => {
       const badDeps = [
         {

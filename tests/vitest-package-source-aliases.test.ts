@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { deterministicUuid } from '@franken/types/utils';
+import { FbeastConfig } from '@franken/mcp-suite';
+import { BenchmarkTaskSchema } from '@franken/live-bench';
 import { createFrankenSourceAliases } from '../scripts/vitest-source-aliases.js';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -17,6 +19,8 @@ const EXPECTED_ALIASES = {
   '@franken/types/utils': resolve(ROOT, 'packages/franken-types/src/utils/index.ts'),
   '@franken/types': resolve(ROOT, 'packages/franken-types/src/index.ts'),
   '@franken/orchestrator': resolve(ROOT, 'packages/franken-orchestrator/src/index.ts'),
+  '@franken/mcp-suite': resolve(ROOT, 'packages/franken-mcp-suite/src/index.ts'),
+  '@franken/live-bench': resolve(ROOT, 'packages/live-bench/src/index.ts'),
 };
 
 const PACKAGE_CONFIGS = [
@@ -37,6 +41,11 @@ const PACKAGE_CONFIGS = [
 describe('package Vitest source aliases', () => {
   it('lets root Vitest resolve the @franken/types/utils subpath from source', () => {
     expect(deterministicUuid('root-vitest-alias', 0)).toMatch(/^[0-9a-f-]+$/u);
+  });
+
+  it('lets root Vitest resolve MCP suite and live bench from source', () => {
+    expect(FbeastConfig).toBeDefined();
+    expect(BenchmarkTaskSchema).toBeDefined();
   });
 
   it('maps every first-party package scope to its TypeScript source entrypoint', () => {

@@ -137,8 +137,8 @@ export class PrometheusAdapter implements ExportAdapter {
         if (this.pricingTable?.[model]) {
           const pricing = this.pricingTable[model]
           const cost =
-            (prompt / 1_000_000) * pricing.promptPerMillion +
-            (completion / 1_000_000) * pricing.completionPerMillion
+            (prompt * pricing.promptPerMillion) / 1_000_000 +
+            (completion * pricing.completionPerMillion) / 1_000_000
           this.costCounters.set(model, (this.costCounters.get(model) ?? 0) + cost)
         }
       }

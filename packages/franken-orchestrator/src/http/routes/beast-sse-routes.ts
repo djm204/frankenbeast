@@ -1,9 +1,25 @@
-import { timingSafeEqual } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { Hono } from 'hono';
+import { getCookie, setCookie } from 'hono/cookie';
 import { streamSSE } from 'hono/streaming';
 import type { BeastEventBus } from '../../beasts/events/beast-event-bus.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
 import { extractOperatorToken, extractOperatorTokenCookie, isCookieOperatorAuthAllowed } from '../operator-auth.js';
+
+const SSE_TICKET_COOKIE = 'frankenbeast_sse_ticket';
+const SSE_STREAM_PATH = '/v1/beasts/events/stream';
+
+function connectionStreamPath(connectionId: string): string {
+  return `${SSE_STREAM_PATH}/${connectionId}`;
+}
+
+function isHttpsRequest(
+  requestUrl: string,
+  forwardedProto: string | undefined,
+): boolean {
+  const proto = forwardedProto?.split(',')[0]?.trim().toLowerCase();
+  return proto ? proto === 'https' : new URL(requestUrl).protocol === 'https:';
+}
 
 function safeTokenCompare(a: string, b: string): boolean {
   const bufA = Buffer.from(a);
@@ -55,16 +71,28 @@ export function createBeastSseRoutes(deps: BeastSseRouteDeps): Hono {
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid bearer token' } }, 401);
     }
 
-    const ticket = ticketStore.issue(operatorToken);
-    return c.json({ ticket });
+    const connectionId = randomUUID();
+    const ticket = ticketStore.issue(operatorToken, connectionId);
+    setCookie(c, SSE_TICKET_COOKIE, ticket, {
+      httpOnly: true,
+      maxAge: 30,
+      path: connectionStreamPath(connectionId),
+      sameSite: 'Strict',
+      secure: isHttpsRequest(c.req.url, c.req.header('x-forwarded-proto')),
+    });
+    return c.json({ connectionId });
   });
 
-  app.get('/v1/beasts/events/stream', (c) => {
-    const ticket = c.req.query('ticket');
+  app.get(SSE_STREAM_PATH, (c) => (
+    c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401)
+  ));
+
+  app.get(`${SSE_STREAM_PATH}/:connectionId`, (c) => {
+    const ticket = getCookie(c, SSE_TICKET_COOKIE);
     if (!ticket) {
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);
     }
-    const ticketStatus = ticketStore.consume(ticket, operatorToken);
+    const ticketStatus = ticketStore.consume(ticket, operatorToken, c.req.param('connectionId'));
     if (ticketStatus === 'reused') {
       return c.body(null, 204);
     }

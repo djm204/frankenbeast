@@ -7,7 +7,10 @@ import { DEFAULT_SANDBOX_POLICY, nonRootUserForWorkspace } from './execution/san
 import { ProcessBeastExecutor } from './execution/process-beast-executor.js';
 import { ProcessSupervisor } from './execution/process-supervisor.js';
 import { cleanupAbandonedBeastWorktrees } from './execution/git-worktree-isolation.js';
-import { SQLiteBeastRepository } from './repository/sqlite-beast-repository.js';
+import {
+  BeastRepositoryJsonCorruptionError,
+  SQLiteBeastRepository,
+} from './repository/sqlite-beast-repository.js';
 import { BeastCatalogService } from './services/beast-catalog-service.js';
 import { BeastDispatchService } from './services/beast-dispatch-service.js';
 import { assertDispatcherStartupIntegrity } from './services/dispatcher-startup-integrity.js';
@@ -82,12 +85,19 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
     executors,
   });
   reconcileDispatcherQueueAfterRestart(repository);
-  cleanupAbandonedBeastWorktrees({
-    agents: repository.listTrackedAgents(),
-    dryRun: false,
-    projectRoot,
-    runs: repository.listRuns(),
-  });
+  try {
+    cleanupAbandonedBeastWorktrees({
+      agents: repository.listTrackedAgents(),
+      dryRun: false,
+      projectRoot,
+      runs: repository.listRuns(),
+    });
+  } catch (error) {
+    if (!(error instanceof BeastRepositoryJsonCorruptionError)) throw error;
+    console.warn(
+      `Skipping destructive Beast worktree cleanup because persisted JSON is corrupt in ${error.context.table}.${error.context.column} for row ${error.context.rowId}.`,
+    );
+  }
 
   runService = new BeastRunService(repository, catalog, executors, metrics, logStore, { eventBus, capacityPolicy, maintenance });
 

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import Database from 'better-sqlite3';
 import { BeastCatalogService } from '../../../src/beasts/services/beast-catalog-service.js';
 import { BeastDispatchService } from '../../../src/beasts/services/beast-dispatch-service.js';
 import { BeastRunService } from '../../../src/beasts/services/beast-run-service.js';
@@ -21,6 +22,37 @@ describe('BeastRunService', () => {
     if (workDir) {
       await rm(workDir, { recursive: true, force: true });
     }
+  });
+
+  it('keeps operational attempt reads strict while response reads omit corrupt attempts', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
+    const dbPath = join(workDir, 'beasts.db');
+    const repo = new SQLiteBeastRepository(dbPath);
+    const runs = new BeastRunService(
+      repo,
+      new BeastCatalogService(),
+      {} as never,
+      new PrometheusBeastMetrics(),
+      new BeastLogStore(join(workDir, 'logs')),
+    );
+    const run = repo.createRun({
+      definitionId: 'martin-loop', definitionVersion: 1, executionMode: 'process',
+      configSnapshot: { objective: 'strict attempt existence' }, dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator', createdAt: '2026-07-19T00:00:00.000Z',
+    });
+    const corruptAttempt = repo.createAttempt(run.id, {
+      status: 'running', executorMetadata: { token: 'must-not-leak' },
+    });
+    const db = new Database(dbPath);
+    db.prepare('UPDATE beast_run_attempts SET executor_metadata = ? WHERE id = ?')
+      .run('{"token":"must-not-leak"', corruptAttempt.id);
+    db.close();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    expect(() => runs.listAttempts(run.id)).toThrow();
+    expect(runs.listAttemptsForResponse(run.id)).toEqual([]);
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('must-not-leak'));
+    warn.mockRestore();
   });
 
   it('stops a running beast and preserves the durable run row', async () => {

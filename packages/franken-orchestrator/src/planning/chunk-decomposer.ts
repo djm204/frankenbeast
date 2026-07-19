@@ -1,4 +1,4 @@
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient, LlmCompletionOptions } from '@franken/types';
 import type { ChunkDefinition } from '../cli/file-writer.js';
 import type { PlanContext } from './plan-context-gatherer.js';
 import { cleanLlmJson } from '../skills/providers/stream-json-utils.js';
@@ -16,9 +16,13 @@ export class ChunkDecomposer {
     private readonly options: { maxChunks: number },
   ) {}
 
-  async decompose(designDoc: string, context: PlanContext): Promise<ChunkDefinition[]> {
+  async decompose(
+    designDoc: string,
+    context: PlanContext,
+    completionOptions?: LlmCompletionOptions,
+  ): Promise<ChunkDefinition[]> {
     const prompt = this.buildDecompositionPrompt(designDoc, context);
-    const raw = await this.llm.complete(prompt);
+    const raw = await this.llm.complete(prompt, completionOptions);
     const chunks = this.parseResponse(raw);
     this.validate(chunks);
 
@@ -145,6 +149,17 @@ Each chunk object has the following fields:
     const missing = required.filter((f) => !(f in c));
     if (missing.length > 0) {
       throw new Error(`Chunk missing required fields: ${missing.join(', ')}`);
+    }
+    const stringFields = ['id', 'objective', 'successCriteria', 'verificationCommand'];
+    const invalidStrings = stringFields.filter((field) => typeof c[field] !== 'string');
+    if (invalidStrings.length > 0) {
+      throw new Error(`Chunk fields must be strings: ${invalidStrings.join(', ')}`);
+    }
+    if (!Array.isArray(c.files) || !c.files.every((file) => typeof file === 'string')) {
+      throw new Error('Chunk field files must be an array of strings');
+    }
+    if (!Array.isArray(c.dependencies) || !c.dependencies.every((dependency) => typeof dependency === 'string')) {
+      throw new Error('Chunk field dependencies must be an array of strings');
     }
   }
 

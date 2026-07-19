@@ -184,6 +184,9 @@ const BaseOrchestratorConfigSchema = z.object({
   /** Maximum execution time in milliseconds. */
   maxDurationMs: z.number().int().min(1000).default(300_000),
 
+  /** Maximum end-to-end planning time in milliseconds. */
+  planningTimeoutMs: z.number().int().min(1000).default(120_000),
+
   /** Whether to run a heartbeat pulse after execution. Defaults off so production deployments must opt in. */
   enableHeartbeat: z.boolean().default(false),
 

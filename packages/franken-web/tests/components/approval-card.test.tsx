@@ -42,6 +42,47 @@ describe('ApprovalCard', () => {
     expect(screen.getByText(/Requested/)).toBeTruthy();
   });
 
+  it('announces queue changes without moving keyboard focus', () => {
+    const onApprove = vi.fn();
+    const onReject = vi.fn();
+    const { rerender } = render(
+      <>
+        <button>Keep focus</button>
+        <ApprovalCard
+          pending={false}
+          onApprove={onApprove}
+          onReject={onReject}
+        />
+      </>,
+    );
+
+    const focusTarget = screen.getByRole('button', { name: 'Keep focus' });
+    focusTarget.focus();
+    const queueStatus = screen.getByRole('status');
+
+    expect(queueStatus.getAttribute('aria-live')).toBe('polite');
+    expect(queueStatus.getAttribute('aria-atomic')).toBe('true');
+    expect(queueStatus.textContent).toBe('Queue');
+
+    rerender(
+      <>
+        <button>Keep focus</button>
+        <ApprovalCard
+          pending
+          approval={{ description: 'Approve deploy', requestedAt: '2026-03-09T00:00:02Z' }}
+          onApprove={onApprove}
+          onReject={onReject}
+        />
+      </>,
+    );
+
+    expect(screen.getByRole('status')).toBe(queueStatus);
+    expect(queueStatus.textContent).toBe('Approval Required');
+    expect(document.activeElement).toBe(focusTarget);
+    expect(screen.getByRole('button', { name: /approve/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /reject/i })).toBeTruthy();
+  });
+
   it('disables actions while resolving and exposes inline errors for retry', () => {
     const onApprove = vi.fn();
     const onReject = vi.fn();
@@ -60,7 +101,7 @@ describe('ApprovalCard', () => {
 
     expect(onApprove).not.toHaveBeenCalled();
     expect(onReject).not.toHaveBeenCalled();
-    expect(screen.getByRole('status').textContent).toContain('Waiting for approval response');
+    expect(screen.getByText('Waiting for approval response…').getAttribute('role')).toBe('status');
 
     rerender(
       <ApprovalCard

@@ -1,4 +1,4 @@
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient, LlmCompletionOptions } from '@franken/types';
 import type { ChunkDefinition } from '../cli/file-writer.js';
 import type { PlanContext } from './plan-context-gatherer.js';
 import type { ValidationIssue } from './chunk-validator.js';
@@ -19,9 +19,10 @@ export class ChunkRemediator {
     chunks: ChunkDefinition[],
     issues: ValidationIssue[],
     context: PlanContext,
+    completionOptions?: LlmCompletionOptions,
   ): Promise<ChunkDefinition[]> {
     const prompt = this.buildRemediationPrompt(chunks, issues, context);
-    const raw = await this.llm.complete(prompt);
+    const raw = await this.llm.complete(prompt, completionOptions);
     return this.parseResponse(raw, chunks);
   }
 

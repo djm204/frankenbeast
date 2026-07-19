@@ -148,15 +148,22 @@ describe('CachedCliLlmClient', () => {
 
     await client.complete('first prompt');
     adapter.execute
-      .mockRejectedValueOnce(new Error('Claude CLI failed', {
-        cause: { stdout: 'No conversation found with session ID: stored-session', stderr: '' },
-      }))
+      .mockImplementationOnce(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        throw new Error('Claude CLI failed', {
+          cause: { stdout: 'No conversation found with session ID: stored-session', stderr: '' },
+        });
+      })
       .mockResolvedValueOnce('response:fresh');
 
-    await expect(client.complete('second prompt')).resolves.toBe('response:fresh');
+    await expect(client.complete('second prompt', { timeoutMs: 200 })).resolves.toBe('response:fresh');
 
     expect(adapter.transformRequest.mock.calls[1]?.[0]).toHaveProperty('session_id');
     expect(adapter.transformRequest.mock.calls[2]?.[0]).not.toHaveProperty('session_id');
+    expect(adapter.transformRequest.mock.calls[2]?.[0]).toEqual(expect.objectContaining({
+      timeoutMs: expect.any(Number),
+    }));
+    expect((adapter.transformRequest.mock.calls[2]?.[0] as { timeoutMs: number }).timeoutMs).toBeLessThan(200);
     expect(adapter.execute).toHaveBeenCalledTimes(3);
     expect(metrics.snapshot()).toMatchObject({ nativeSessionFallbacks: 1 });
     await expect(access(join(

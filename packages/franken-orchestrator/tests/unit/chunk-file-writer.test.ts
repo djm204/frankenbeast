@@ -188,6 +188,33 @@ describe('ChunkFileWriter', () => {
     expect(content).not.toContain('Unrelated issue');
   });
 
+  it('renders plan-level draft warnings in every saved chunk', () => {
+    const chunks: ChunkDefinition[] = [
+      {
+        id: 'define-types', objective: 'Define types', files: ['src/types.ts'],
+        successCriteria: 'Types compile', verificationCommand: 'npx tsc --noEmit', dependencies: [],
+      },
+      {
+        id: 'wire-runtime', objective: 'Wire runtime', files: ['src/runtime.ts'],
+        successCriteria: 'Runtime works', verificationCommand: 'npm test', dependencies: ['define-types'],
+      },
+    ];
+    const issues: ValidationIssue[] = [{
+      severity: 'warning',
+      chunkId: null,
+      category: 'planning_budget_exceeded',
+      description: 'Quality pass timed out; saved draft',
+      suggestion: 'Review manually',
+    }];
+
+    const writer = new ChunkFileWriter(fixtureDir);
+    const paths = writer.write(chunks, issues);
+
+    for (const path of paths) {
+      expect(readFileSync(path, 'utf-8')).toContain('planning_budget_exceeded');
+    }
+  });
+
   it('clears existing writer-owned chunk files after preparing replacements', () => {
     const writer = new ChunkFileWriter(fixtureDir);
 

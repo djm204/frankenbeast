@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { relative } from 'node:path';
 import { resolveContainedExistingPath } from '@franken/types/path-containment';
 import { tmpdir } from 'node:os';
 import { ZodError } from 'zod';
@@ -11,8 +12,9 @@ import { ChunkFileWriter } from '../planning/chunk-file-writer.js';
 import { InterviewLoop } from '../planning/interview-loop.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { ProgressLlmClient } from '../adapters/progress-llm-client.js';
-import { ANSI, budgetBar, statusBadge, logHeader } from '../logging/beast-logger.js';
-import { createStreamProgressWithSpinner } from '../adapters/stream-progress.js';
+import { ANSI, budgetBar, statusBadge, logHeader, type BeastLogger } from '../logging/beast-logger.js';
+import { createStreamProgressWithSpinner, type StreamProgressEvent } from '../adapters/stream-progress.js';
+import type { CliLlmLifecycleEvent } from '../adapters/cli-llm-adapter.js';
 import type { InterviewIO } from '../planning/interview-loop.js';
 import type { BeastResult } from '../types.js';
 import type { ProjectPaths } from './project-root.js';
@@ -45,6 +47,10 @@ export type SessionPhase = 'interview' | 'plan' | 'execute';
 function appendPromptContext(value: string, promptText: string | undefined): string {
   if (!promptText || promptText.trim().length === 0) return value;
   return `${value}\n\nAdditional prompt context:\n${promptText.trim()}`;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function loadPromptConfigFromEnv(): RunConfig['promptConfig'] | undefined {
@@ -95,6 +101,8 @@ export interface SessionConfig {
   maxCritiqueIterations?: number | undefined;
   /** Maximum execution time in milliseconds */
   maxDurationMs?: number | undefined;
+  /** Maximum end-to-end planning time in milliseconds */
+  planningTimeoutMs?: number | undefined;
   /** Whether to emit observability spans */
   enableTracing?: boolean | undefined;
   /** Whether to run a heartbeat pulse after execution */
@@ -358,14 +366,102 @@ export class Session {
     // from loading in the spawned CLI. Plugins poison the session by injecting skill
     // instructions that make the CLI explore the codebase instead of returning JSON.
     depOptions.adapterWorkingDir = tmpdir();
-    const progress = createStreamProgressWithSpinner({
+    const planLogSink: { logger?: BeastLogger } = {};
+    const persistProgressEvent = (event: StreamProgressEvent): void => {
+      planLogSink.logger?.debug('Plan progress', event, 'planner');
+    };
+    const persistLifecycleEvent = (event: CliLlmLifecycleEvent): void => {
+      planLogSink.logger?.debug('LLM provider lifecycle', event, 'planner');
+    };
+    const createPlanProgress = () => createStreamProgressWithSpinner({
       label: 'Planning...',
       verbose: this.config.verbose,
+      onProgressEvent: persistProgressEvent,
     });
-    depOptions.onStreamLine = progress.onLine;
-    const { cliLlmAdapter, logger, finalize } = await createCliDeps(depOptions);
+    let progress = createPlanProgress();
+    depOptions.onStreamLine = (line) => progress.onLine(line);
+    depOptions.onLlmLifecycleEvent = persistLifecycleEvent;
+    const { cliLlmAdapter, logger, finalize, artifacts } = await createCliDeps(depOptions);
+    planLogSink.logger = logger;
+    const planStartedAt = Date.now();
+    const elapsed = (): number => Date.now() - planStartedAt;
+    let finalizePromise: Promise<void> | undefined;
+    const finalizePlan = (): Promise<void> => finalizePromise ??= finalize();
+    let activeStage: string | undefined;
+    let activeStageStartedAt: number | undefined;
+    let cancellationSignal: NodeJS.Signals | undefined;
+    const planLogFile = artifacts?.logFile ?? paths.logFile;
+    const projectLogPath = relative(paths.root, planLogFile) || planLogFile;
+
+    const runPlanStage = async <T>(stage: string, operation: () => Promise<T>): Promise<T> => {
+      const stageStartedAt = Date.now();
+      activeStage = stage;
+      activeStageStartedAt = stageStartedAt;
+      logger.info('Plan stage started', { stage, totalElapsedMs: elapsed() }, 'planner');
+      try {
+        const result = await operation();
+        if (cancellationSignal) {
+          const error = new Error(`Plan cancelled by ${cancellationSignal}`);
+          error.name = 'AbortError';
+          throw error;
+        }
+        logger.info('Plan stage completed', {
+          stage,
+          stageElapsedMs: Date.now() - stageStartedAt,
+          totalElapsedMs: elapsed(),
+        }, 'planner');
+        return result;
+      } catch (error) {
+        const cancelled = error instanceof Error
+          && (error.name === 'AbortError' || /cancel(?:led|ed)/i.test(error.message));
+        if (!cancellationSignal) {
+          logger.warn(cancelled ? 'Plan stage cancelled' : 'Plan stage failed', {
+            stage,
+            stageElapsedMs: Date.now() - stageStartedAt,
+            totalElapsedMs: elapsed(),
+          }, 'planner');
+        }
+        throw error;
+      } finally {
+        if (activeStage === stage) {
+          activeStage = undefined;
+          activeStageStartedAt = undefined;
+        }
+      }
+    };
+
+    const removeSignalHandlers = (): void => {
+      process.removeListener('SIGINT', onSigint);
+      process.removeListener('SIGTERM', onSigterm);
+    };
+    const handleSignal = (signal: NodeJS.Signals): void => {
+      if (cancellationSignal) return;
+      cancellationSignal = signal;
+      const cancellation = {
+        ...(activeStage ? { stage: activeStage } : {}),
+        ...(activeStageStartedAt !== undefined ? { stageElapsedMs: Date.now() - activeStageStartedAt } : {}),
+        signal,
+        totalElapsedMs: elapsed(),
+      };
+      if (activeStage) logger.warn('Plan stage cancelled', cancellation, 'planner');
+      logger.warn('Plan cycle cancelled', cancellation, 'planner');
+      progress.stop();
+      removeSignalHandlers();
+      const exitCode = signal === 'SIGINT' ? 130 : 143;
+      void finalizePlan().then(
+        () => process.exit(exitCode),
+        () => process.exit(exitCode),
+      );
+    };
+    const onSigint = (): void => handleSignal('SIGINT');
+    const onSigterm = (): void => handleSignal('SIGTERM');
+    process.on('SIGINT', onSigint);
+    process.on('SIGTERM', onSigterm);
 
     try {
+      io.display(`Build log: ${projectLogPath}\nFollow live: tail -f ${shellQuote(planLogFile)}`);
+      logger.info('Plan cycle started', { logFile: planLogFile }, 'planner');
+
       // Load design doc
     let designContent: string;
     if (designDocPath) {
@@ -412,14 +508,16 @@ export class Session {
       workPrefix: `plan:${planName}`,
     });
     const contextGatherer = new PlanContextGatherer(paths.root);
-    const llmGraphBuilder = new LlmGraphBuilder(cachingLlm, contextGatherer);
+    const llmGraphBuilder = new LlmGraphBuilder(cachingLlm, contextGatherer, {
+      ...(this.config.planningTimeoutMs !== undefined ? { timeoutMs: this.config.planningTimeoutMs } : {}),
+    });
     const chunkWriter = new ChunkFileWriter(paths.plansDir);
 
     logger.info('Decomposing design into chunks...', 'planner');
 
     // Build the plan graph — lastChunks preserves the structured LLM output
     try {
-      await llmGraphBuilder.build({ goal: designContent });
+      await runPlanStage('decompose', () => llmGraphBuilder.build({ goal: designContent }));
     } finally {
       progress.stop();
     }
@@ -427,6 +525,15 @@ export class Session {
     const chunks = llmGraphBuilder.lastChunks;
     const issues = llmGraphBuilder.lastValidationIssues;
     logger.info(`Planned ${chunks.length} chunk(s)`, 'planner');
+    const planningMetrics = llmGraphBuilder.lastRunMetrics;
+    if (planningMetrics) {
+      logger.info('Planning pipeline metrics', {
+        passCount: planningMetrics.passCount,
+        promptBytes: planningMetrics.promptBytes,
+        elapsedMs: planningMetrics.elapsedMs,
+        stages: planningMetrics.stages,
+      });
+    }
 
     if (issues.length > 0) {
       logger.warn(`${issues.length} validation warning(s) attached to chunks`, 'planner');
@@ -442,9 +549,14 @@ export class Session {
       artifactLabel: 'Chunk files',
       io,
       onRevise: async (feedback) => {
-        await llmGraphBuilder.build({
-          goal: `${designContent}\n\nRevision feedback: ${feedback}`,
-        });
+        progress = createPlanProgress();
+        try {
+          await runPlanStage('revise', () => llmGraphBuilder.build({
+            goal: `${designContent}\n\nRevision feedback: ${feedback}`,
+          }));
+        } finally {
+          progress.stop();
+        }
         chunkPaths = chunkWriter.write(
           llmGraphBuilder.lastChunks,
           llmGraphBuilder.lastValidationIssues,
@@ -452,9 +564,24 @@ export class Session {
         return chunkPaths;
       },
     });
+    logger.info('Plan cycle completed', {
+      chunks: llmGraphBuilder.lastChunks.length,
+      validationWarnings: llmGraphBuilder.lastValidationIssues.length,
+      totalElapsedMs: elapsed(),
+    }, 'planner');
+    } catch (error) {
+      const cancelled = error instanceof Error
+        && (error.name === 'AbortError' || /cancel(?:led|ed)/i.test(error.message));
+      if (!cancellationSignal) {
+        logger.warn(cancelled ? 'Plan cycle cancelled' : 'Plan cycle failed', {
+          totalElapsedMs: elapsed(),
+        }, 'planner');
+      }
+      throw error;
     } finally {
+      removeSignalHandlers();
       progress.stop();
-      await finalize();
+      await finalizePlan();
     }
   }
 
