@@ -256,7 +256,7 @@ describe('GovernorAdapter', () => {
   it('uses an explicit active config path for enabled skill profiles', async () => {
     const dbPath = tracked(tmpDbPath());
     const alternateConfigDir = join(dbPath, '..', 'alternate');
-    installSkillAtConfigDir(alternateConfigDir, 'reporting', [
+    installSkill(dbPath, 'reporting', [
       {
         name: 'publish_report',
         description: 'Publish a report',
@@ -264,8 +264,30 @@ describe('GovernorAdapter', () => {
         requiresHitl: true,
       },
     ]);
+    mkdirSync(alternateConfigDir, { recursive: true });
+    writeFileSync(join(alternateConfigDir, 'config.json'), JSON.stringify({
+      skills: { enabled: ['reporting'] },
+    }));
 
     const governor = createGovernorAdapter(dbPath, join(alternateConfigDir, 'config.json'));
+
+    await expect(governor.check({ action: 'mcp__reporting__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('fails closed for qualified skill calls when the active config is unreadable', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'reporting', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]);
+    writeFileSync(join(dbPath, '..', 'config.json'), '{ invalid json');
+
+    const governor = createGovernorAdapter(dbPath);
 
     await expect(governor.check({ action: 'mcp__reporting__publish_report', context: '{}' }))
       .resolves.toMatchObject({ decision: 'review_recommended' });

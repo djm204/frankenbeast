@@ -788,17 +788,19 @@ function readSkillToolProfiles(toolsPath: string): ToolDefinition[] | undefined 
   }
 }
 
-function readEnabledSkills(configPath: string): Set<string> {
+function readEnabledSkills(configPath: string): Set<string> | undefined {
   try {
     const config = JSON.parse(readFileSync(configPath, 'utf8')) as unknown;
-    if (config === null || typeof config !== 'object' || Array.isArray(config)) return new Set();
+    if (config === null || typeof config !== 'object' || Array.isArray(config)) return undefined;
     const skills = (config as Record<string, unknown>)['skills'];
-    if (skills === null || typeof skills !== 'object' || Array.isArray(skills)) return new Set();
+    if (skills === undefined) return new Set();
+    if (skills === null || typeof skills !== 'object' || Array.isArray(skills)) return undefined;
     const enabled = (skills as Record<string, unknown>)['enabled'];
-    if (!Array.isArray(enabled)) return new Set();
-    return new Set(enabled.filter((name): name is string => typeof name === 'string'));
+    if (enabled === undefined) return new Set();
+    if (!Array.isArray(enabled) || enabled.some((name) => typeof name !== 'string')) return undefined;
+    return new Set(enabled as string[]);
   } catch {
-    return new Set();
+    return undefined;
   }
 }
 
@@ -821,25 +823,25 @@ function profileRequiresHitl(profile: ToolDefinition): boolean {
   return profile.requiresHitl !== false;
 }
 
-function skillRequiresHitl(configPath: string | undefined, action: string): boolean {
-  if (configPath === undefined) return false;
+function skillRequiresHitl(configPath: string | undefined, skillsDir: string | undefined, action: string): boolean {
+  if (configPath === undefined || skillsDir === undefined) return false;
   const mcpQualifiedName = action.startsWith('mcp__') ? action.slice('mcp__'.length) : undefined;
   const slashQualifiedAction = parseSlashQualifiedSkillAction(action);
   if (mcpQualifiedName === undefined && slashQualifiedAction === undefined) return false;
 
   const enabledSkills = readEnabledSkills(configPath);
-  if (enabledSkills.size === 0) return false;
-  const configDir = dirname(configPath);
-  const skillsDir = join(configDir, 'skills');
+  const configUnreadable = enabledSkills === undefined;
+  if (!configUnreadable && enabledSkills.size === 0) return false;
   let skillDirectories;
   try {
     skillDirectories = readdirSync(skillsDir, { withFileTypes: true });
   } catch {
-    return false;
+    return !configUnreadable;
   }
 
   for (const skillDirectory of skillDirectories) {
-    if (!skillDirectory.isDirectory() || !enabledSkills.has(skillDirectory.name)) continue;
+    if (!skillDirectory.isDirectory()) continue;
+    if (!configUnreadable && !enabledSkills.has(skillDirectory.name)) continue;
     const skillDir = join(skillsDir, skillDirectory.name);
     const serverNames = readSkillServerNames(skillDir);
     let toolNames: string[] = [];
@@ -865,6 +867,11 @@ function skillRequiresHitl(configPath: string | undefined, action: string): bool
       if (matchesSkillAlias && serverNames.size === 0) return true;
       toolNames = [slashQualifiedAction.toolName];
     }
+
+    // A malformed active config cannot tell us whether an installed matching
+    // skill is enabled. Keep already-exposed or stale client registrations
+    // fail-closed, without changing policy for unrelated built-in MCP servers.
+    if (configUnreadable) return true;
 
     const profiles = readSkillToolProfiles(join(skillDir, 'tools.json'));
 
@@ -1028,6 +1035,7 @@ export function createGovernorAdapter(dbPath: string, configPath?: string): Gove
   const skillConfigPath = dbPath === ':memory:'
     ? undefined
     : (configPath ?? join(dirname(dbPath), 'config.json'));
+  const installedSkillsDir = dbPath === ':memory:' ? undefined : join(dirname(dbPath), 'skills');
   const costCalculator = new CostCalculator(DEFAULT_PRICING, {
     onUnknownModel: (model) => {
       process.stderr.write(`[fbeast-governor] Unknown model "${model}" — budget status will report $0.0000 until pricing is configured.\n`);
@@ -1036,7 +1044,7 @@ export function createGovernorAdapter(dbPath: string, configPath?: string): Gove
 
   return {
     async check(input) {
-      const requiresHitl = skillRequiresHitl(skillConfigPath, input.action);
+      const requiresHitl = skillRequiresHitl(skillConfigPath, installedSkillsDir, input.action);
       const isDryRunForget = !requiresHitl && isRightToForgetDryRun(input.action, input.context);
       if (hasDuplicateReservedProvenanceKeys(input.context)) {
         const reason = 'Duplicate reserved fbeast provenance keys are not allowed.';
