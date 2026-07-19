@@ -5,6 +5,7 @@ import {
   localPlaintextOrSecureWebSocketUrl,
 } from '../network-url.js';
 import type { NetworkServiceDefinition } from '../network-registry.js';
+import { inheritedNetworkServiceEnvKeys } from './managed-service-env.js';
 
 export const chatServerService: NetworkServiceDefinition = {
   id: 'chat-server',
@@ -42,6 +43,7 @@ export const chatServerService: NetworkServiceDefinition = {
         ...(context.configOverrides?.flatMap((override) => ['--set', override]) ?? []),
       ],
       cwd: context.repoRoot,
+      inheritedEnvKeys: inheritedNetworkServiceEnvKeys('chat-server', config),
       env: {
         FRANKENBEAST_NETWORK_MANAGED: '1',
         FRANKENBEAST_BEAST_DAEMON_URL: localPlaintextOrSecureEndpoint(

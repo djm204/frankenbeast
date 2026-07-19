@@ -1,6 +1,7 @@
 import type { OrchestratorConfig } from '../../config/orchestrator-config.js';
 import { localPlaintextOrSecureEndpoint, localPlaintextOrSecureHealthUrl } from '../network-url.js';
 import type { NetworkServiceDefinition } from '../network-registry.js';
+import { inheritedNetworkServiceEnvKeys } from './managed-service-env.js';
 
 export const beastsDaemonService: NetworkServiceDefinition = {
   id: 'beasts-daemon',
@@ -32,6 +33,7 @@ export const beastsDaemonService: NetworkServiceDefinition = {
         String(config.beastsDaemon.port),
       ],
       cwd: context.repoRoot,
+      inheritedEnvKeys: inheritedNetworkServiceEnvKeys('beasts-daemon', config),
       env: {
         FRANKENBEAST_NETWORK_MANAGED: '1',
         FRANKENBEAST_BEAST_DAEMON_URL: localPlaintextOrSecureEndpoint(

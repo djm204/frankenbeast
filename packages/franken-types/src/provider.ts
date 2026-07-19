@@ -150,9 +150,12 @@ export interface ProviderCritiqueFinding {
 }
 
 /**
- * @deprecated Use ProviderCritiqueFinding for provider/evaluator findings.
- * The @franken/critique package uses CritiquePipelineResult for aggregate
- * pipeline outcomes.
+ * A single provider/evaluator finding used by provider/critiquing flows.
+ */
+export type CritiqueFinding = ProviderCritiqueFinding;
+
+/**
+ * @deprecated Use {@link CritiqueFinding}.
  */
 export type CritiqueResult = ProviderCritiqueFinding;
 

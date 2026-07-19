@@ -49,11 +49,10 @@ export interface CritiquePipelineResult {
 }
 
 /**
- * @deprecated Use CritiquePipelineResult for aggregate pipeline outcomes.
- * @franken/types exports ProviderCritiqueFinding for individual provider
- * critique findings.
+ * @deprecated Use {@link CritiquePipelineResult}.
  */
 export type CritiqueResult = CritiquePipelineResult;
+
 
 /** An evaluator that can assess code or plans. */
 export interface Evaluator {

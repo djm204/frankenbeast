@@ -56,6 +56,8 @@ describe('createLlmProvider', () => {
     expect(codex).toBeInstanceOf(CodexCliAdapter);
     expect((codex as CodexCliAdapter).buildArgs(request)).toEqual([
       'exec',
+      '--sandbox',
+      'workspace-write',
       '--json',
       '--ephemeral',
       '-c',
@@ -86,6 +88,8 @@ describe('createLlmProvider', () => {
     expect(codex).toBeInstanceOf(CodexCliAdapter);
     expect((codex as CodexCliAdapter).buildArgs(request)).toEqual([
       'exec',
+      '--sandbox',
+      'workspace-write',
       '--json',
       '--ephemeral',
       '-c',

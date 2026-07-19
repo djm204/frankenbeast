@@ -198,18 +198,69 @@ function resolveNpmCliPath(): string {
   return npmCliPath;
 }
 
-function deleteUnsafeInheritedProcessEnv(env: NodeJS.ProcessEnv): void {
-  const deniedKeys = new Set([
-    'node_options',
-    'npm_config_node_options',
-    'npm_config_script_shell',
-    'npm_config_userconfig',
-  ]);
-  for (const key of Object.keys(env)) {
-    if (deniedKeys.has(key.toLowerCase())) {
-      delete env[key];
+const SAFE_INHERITED_NETWORK_SERVICE_ENV_KEYS = [
+  'HOME',
+  'HERMES_HOME',
+  'HERMES_PROFILE',
+  'LANG',
+  'LC_ALL',
+  'TZ',
+  'CI',
+  'USER',
+  'LOGNAME',
+  'USERNAME',
+  'XDG_CONFIG_HOME',
+  'XDG_CACHE_HOME',
+  'XDG_DATA_HOME',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'TMPDIR',
+  'TMP',
+  'TEMP',
+  'USERPROFILE',
+  'SystemRoot',
+  'COMSPEC',
+  'PATHEXT',
+] as const;
+
+const SAFE_INHERITED_ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+function isUnsafeInheritedEnvKey(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return normalized === 'path'
+    || normalized === 'node_options'
+    || normalized === 'node_path'
+    || normalized === 'ld_preload'
+    || normalized === 'ld_library_path'
+    || normalized === 'bash_env'
+    || normalized.startsWith('dyld_')
+    || normalized.startsWith('npm_config_');
+}
+
+function validateInheritedEnvKey(serviceId: string, key: string): void {
+  if (!SAFE_INHERITED_ENV_KEY_RE.test(key) || isUnsafeInheritedEnvKey(key)) {
+    throw new Error(`Unsafe inherited network service environment key ${key} for ${serviceId}`);
+  }
+}
+
+function allowlistedNetworkProcessEnv(
+  serviceId: ResolvedNetworkService['id'],
+  inheritedEnvKeys: readonly string[] | undefined,
+  env: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const allowedEnv: NodeJS.ProcessEnv = {};
+  const allowedKeys = [
+    ...SAFE_INHERITED_NETWORK_SERVICE_ENV_KEYS,
+    ...(inheritedEnvKeys ?? []),
+  ];
+  for (const key of allowedKeys) {
+    validateInheritedEnvKey(serviceId, key);
+    const value = env[key];
+    if (value !== undefined) {
+      allowedEnv[key] = value;
     }
   }
+  return allowedEnv;
 }
 
 function buildNetworkProcessPath(): string {
@@ -219,11 +270,13 @@ function buildNetworkProcessPath(): string {
   return pathEntries.join(delimiter);
 }
 
-function buildNetworkProcessEnv(processSpecEnv: Record<string, string> | undefined): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  deleteUnsafeInheritedProcessEnv(env);
+function buildNetworkProcessEnv(
+  serviceId: ResolvedNetworkService['id'],
+  processSpecEnv: Record<string, string> | undefined,
+  inheritedEnvKeys: readonly string[] | undefined,
+): NodeJS.ProcessEnv {
   return {
-    ...env,
+    ...allowlistedNetworkProcessEnv(serviceId, inheritedEnvKeys, process.env),
     ...processSpecEnv,
     PATH: buildNetworkProcessPath(),
   };
@@ -235,7 +288,7 @@ function buildValidatedProcessSpec(service: ResolvedNetworkService): ValidatedPr
   if (!processSpec) {
     throw new Error(`Service ${service.id} does not have a runnable entrypoint yet`);
   }
-  const env = buildNetworkProcessEnv(processSpec.env);
+  const env = buildNetworkProcessEnv(service.id, processSpec.env, processSpec.inheritedEnvKeys);
   if (processSpec.command === 'npm' || processSpec.command === 'npm.cmd') {
     return {
       command: process.execPath,

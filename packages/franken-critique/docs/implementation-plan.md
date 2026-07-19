@@ -7,7 +7,7 @@ franken-critique/
 ├── src/
 │   ├── index.ts                    # Public API barrel export
 │   ├── types/
-│   │   ├── evaluation.ts           # EvaluationInput, EvaluationResult, CritiqueResult
+│   │   ├── evaluation.ts           # EvaluationInput, EvaluationResult, CritiquePipelineResult
 │   │   ├── contracts.ts            # Port interfaces for MOD-01, MOD-03, MOD-05, MOD-07
 │   │   ├── loop.ts                 # LoopState, LoopConfig, CritiqueLoopResult, CorrectionRequest
 │   │   └── common.ts               # Shared primitives (Severity, Verdict, etc.)
@@ -165,7 +165,7 @@ Define all core types and port interfaces. No implementation code.
 
 ### Files
 - `src/types/common.ts` — `Severity`, `Verdict`, `Score`
-- `src/types/evaluation.ts` — `EvaluationInput`, `EvaluationResult`, `CritiquePipelineResult`, deprecated compatibility alias `CritiqueResult`, `Evaluator` interface
+- `src/types/evaluation.ts` — `EvaluationInput`, `EvaluationResult`, `CritiquePipelineResult`, `Evaluator` interface
 - `src/types/contracts.ts` — `GuardrailsPort`, `MemoryPort`, `ObservabilityPort`, `EscalationPort`
 - `src/types/loop.ts` — `LoopState`, `LoopConfig`, `CritiqueLoopResult`, `CorrectionRequest`, `CritiqueIteration`, `CircuitBreaker` interface
 
@@ -359,7 +359,7 @@ Implement the three circuit breakers:
 Implement `CritiquePipeline` that orchestrates evaluators:
 - Accepts evaluator list at construction
 - Runs deterministic evaluators first, then heuristic
-- Aggregates results into a single `CritiqueResult`
+- Aggregates results into a single `CritiquePipelineResult`
 - Short-circuits on critical safety failures
 
 ### TDD Approach

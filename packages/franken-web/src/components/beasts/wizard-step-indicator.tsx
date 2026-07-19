@@ -15,6 +15,13 @@ export function WizardStepIndicator({ steps, currentStep, highestCompleted, step
         const isCompleted = i <= highestCompleted && !hasError;
         const isCurrent = i === currentStep;
         const isClickable = isCompleted || isCurrent || hasError;
+        const ariaLabel = hasError
+          ? `${label}, validation errors`
+          : isCurrent
+            ? `${label}, current step`
+            : isCompleted
+              ? `${label}, completed`
+              : `${label}, upcoming step`;
 
         return (
           <button
@@ -23,7 +30,7 @@ export function WizardStepIndicator({ steps, currentStep, highestCompleted, step
             onClick={() => isClickable && onStepClick(i)}
             disabled={!isClickable}
             aria-current={isCurrent ? 'step' : undefined}
-            aria-label={hasError ? `${label} has validation errors` : label}
+            aria-label={ariaLabel}
             className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition-colors
               ${isCurrent && !hasError ? 'text-beast-accent-strong bg-beast-accent-soft' : ''}
               ${hasError ? 'text-beast-danger bg-red-900/20 border border-red-700/60' : ''}

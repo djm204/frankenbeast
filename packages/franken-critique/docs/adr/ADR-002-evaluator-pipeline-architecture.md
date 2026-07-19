@@ -11,7 +11,7 @@ MOD-06 must evaluate agent output across multiple orthogonal dimensions: factual
 We need an architecture that:
 1. Allows evaluators to run independently and in parallel where possible
 2. Makes it easy to add, remove, or reorder evaluators without touching core logic
-3. Produces a unified `CritiqueResult` regardless of which evaluators ran
+3. Produces a unified `CritiquePipelineResult` regardless of which evaluators ran
 4. Supports both deterministic checks (linting, type checking) and heuristic checks (complexity assessment)
 
 ## Decision
@@ -29,7 +29,7 @@ interface Evaluator {
 A `CritiquePipeline` orchestrates evaluators:
 1. Accepts a list of `Evaluator` instances at construction
 2. Runs all evaluators against the input (deterministic first, then heuristic)
-3. Aggregates individual `EvaluationResult`s into a single `CritiqueResult`
+3. Aggregates individual `EvaluationResult`s into a single `CritiquePipelineResult`
 4. Short-circuits on critical failures (e.g., safety violations stop further evaluation)
 
 ```

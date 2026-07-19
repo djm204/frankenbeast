@@ -1036,9 +1036,11 @@ describe('ChatShell', () => {
       />,
     );
 
+    // First lazy mount of the beasts page pays the dynamic-import cost, so
+    // allow more than waitFor's 1s default.
     await waitFor(() => {
       expect(screen.getAllByText('agent-1').length).toBeGreaterThan(0);
-    });
+    }, { timeout: 5000 });
 
     expect(screen.getByRole('heading', { level: 1, name: 'Beasts' })).toBeDefined();
     expect(mockListAgents).toHaveBeenCalled();

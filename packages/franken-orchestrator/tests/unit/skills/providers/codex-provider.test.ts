@@ -23,11 +23,10 @@ describe('CodexProvider', () => {
 
   // -- buildArgs -----------------------------------------------------------
 
-  it('buildArgs includes exec --full-auto --json', () => {
+  it('buildArgs uses the supported workspace-write sandbox', () => {
     const args = provider.buildArgs({});
-    expect(args[0]).toBe('exec');
-    expect(args).toContain('--full-auto');
-    expect(args).toContain('--json');
+    expect(args).toEqual(['exec', '--sandbox', 'workspace-write', '--json', '--color', 'never']);
+    expect(args).not.toContain('--full-auto');
   });
 
   it('buildArgs includes --color never', () => {
@@ -38,9 +37,34 @@ describe('CodexProvider', () => {
   });
 
   it('buildArgs appends extraArgs', () => {
-    const args = provider.buildArgs({ extraArgs: ['--model', 'o3'] });
-    expect(args).toContain('--model');
-    expect(args).toContain('o3');
+    const args = provider.buildArgs({ extraArgs: ['--foo', 'bar'] });
+    expect(args.slice(-2)).toEqual(['--foo', 'bar']);
+  });
+
+  it('lets one explicit sandbox argument replace the default', () => {
+    const args = provider.buildArgs({ extraArgs: ['--sandbox', 'read-only'] });
+    expect(args.filter((arg) => arg === '--sandbox')).toHaveLength(1);
+    expect(args).toContain('read-only');
+    expect(args).not.toContain('workspace-write');
+  });
+
+  it.each([
+    ['--config=sandbox_mode="read-only"'],
+    ['-c=sandbox_mode="read-only"'],
+    ['--config=default_permissions=":read-only"'],
+    ['-c=default_permissions=":read-only"'],
+    ['--yolo'],
+  ])('recognizes single-token sandbox selection %s', (...extraArgs) => {
+    const args = provider.buildArgs({ extraArgs });
+    expect(args).toEqual(['exec', '--json', '--color', 'never', ...extraArgs]);
+    expect(args).not.toContain('workspace-write');
+  });
+
+  it('rejects deprecated or contradictory sandbox arguments', () => {
+    expect(() => provider.buildArgs({ extraArgs: ['--full-auto'] })).toThrow(/deprecated/i);
+    expect(() => provider.buildArgs({
+      extraArgs: ['--sandbox', 'read-only', '-s', 'workspace-write'],
+    })).toThrow(/one Codex sandbox selection/i);
   });
 
   it('buildArgs includes the selected model', () => {
@@ -155,6 +179,25 @@ describe('CodexProvider', () => {
     const result = provider.normalizeOutput(raw);
     expect(result).toContain('from json');
     expect(result).toContain('plain line');
+  });
+
+  it('normalizeOutput extracts Codex JSONL error messages', () => {
+    const raw = JSON.stringify({ type: 'error', error: { message: 'workspace is not trusted' } });
+    expect(provider.normalizeOutput(raw)).toBe('workspace is not trusted');
+  });
+
+  it('normalizeOutput ignores recovered tool errors when final output exists', () => {
+    const raw = [
+      JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'tool_call', error: { message: 'temporary MCP failure' } },
+      }),
+      JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: 'final answer' },
+      }),
+    ].join('\n');
+    expect(provider.normalizeOutput(raw)).toBe('final answer');
   });
 
   it('normalizeOutput extracts assistant text from codex item.completed events', () => {
