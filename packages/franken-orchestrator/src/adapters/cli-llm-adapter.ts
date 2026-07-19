@@ -96,7 +96,7 @@ export class CliLlmAdapter implements IAdapter {
   private readonly _spawn: SpawnFn;
   private readonly registry: ProviderRegistry;
   private readonly responseProviders = new Map<string, string>();
-  private readonly responseSessions = new Map<string, { provider: string; model?: string | undefined; sessionKey: string }>();
+  private readonly responseSessions = new Map<string, { provider: string; model?: string | undefined; sessionId: string }>();
   private readonly chatNativeSessions = new Map<string, string>();
   private chatCallCount = 0;
 
@@ -141,7 +141,7 @@ export class CliLlmAdapter implements IAdapter {
     const cacheCapabilities = resolveProviderCacheCapabilities(this.provider);
     const sessionContinue = this.opts.chatMode
       ? req.sessionContinue ?? this.chatCallCount > 0
-      : Boolean(cacheSession?.key && cacheCapabilities.nativeWorkSessions);
+      : Boolean(cacheSession?.key && req.session_id && cacheCapabilities.nativeWorkSessions);
     const transformed: CliTransformed = {
       prompt: last?.content ?? '',
       maxTurns: 1,
@@ -181,6 +181,7 @@ export class CliLlmAdapter implements IAdapter {
         });
       }
       const activeCommand = this.resolveCommand(activeProvider);
+      const providerSessionContinue = sessionContinue && activeProvider === initialProvider;
       let result: { stdout: string; stderr: string; exitCode: number };
       try {
         result = await this.spawnSingle({
@@ -189,8 +190,11 @@ export class CliLlmAdapter implements IAdapter {
             maxTurns,
             model: activeModel,
             chatMode,
-            sessionContinue,
-            ...(sessionId ? { sessionId: this.resolveProviderSessionId(activeProvider, sessionId, sessionContinue) } : {}),
+            sessionContinue: providerSessionContinue,
+            persistSession: Boolean(cacheSession?.persist),
+            ...(sessionId && activeProvider === initialProvider
+              ? { sessionId: chatMode ? this.resolveProviderSessionId(activeProvider, sessionId, providerSessionContinue) : sessionId }
+              : {}),
             extraArgs: this.resolveExtraArgs(activeProvider),
           }),
           env: provider.filterEnv(this.captureEnv()),
@@ -262,11 +266,14 @@ export class CliLlmAdapter implements IAdapter {
           });
           this.responseProviders.set(requestId, activeProvider);
           if (cacheSession?.persist && resolveProviderCacheCapabilities(provider).persistentAcrossProcesses) {
-            this.responseSessions.set(requestId, {
-              provider: activeProvider,
-              ...(this.resolveModel(activeProvider, model) ? { model: this.resolveModel(activeProvider, model) } : {}),
-              sessionKey: cacheSession.key,
-            });
+            const nativeSessionId = this.extractNativeSessionId(result.stdout);
+            if (nativeSessionId) {
+              this.responseSessions.set(requestId, {
+                provider: activeProvider,
+                ...(this.resolveModel(activeProvider, model) ? { model: this.resolveModel(activeProvider, model) } : {}),
+                sessionId: nativeSessionId,
+              });
+            }
           }
         }
         return result.stdout;
@@ -332,7 +339,7 @@ export class CliLlmAdapter implements IAdapter {
     return feature === 'text-completion';
   }
 
-  consumeSessionMetadata(requestId: string): { provider: string; model?: string | undefined; sessionKey: string } | undefined {
+  consumeSessionMetadata(requestId: string): { provider: string; model?: string | undefined; sessionId: string } | undefined {
     const session = this.responseSessions.get(requestId);
     if (!session) {
       return undefined;

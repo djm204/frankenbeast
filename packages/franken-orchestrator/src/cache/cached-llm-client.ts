@@ -71,29 +71,25 @@ export class CachedLlmClient {
         promptFingerprint: computed.sessionFingerprint,
       });
 
-      try {
-        const resumed = await request.nativeSession.resume(existingSession?.sessionId, computed.fullPrompt);
-        if (resumed) {
-          this.metrics.recordNativeSessionHit();
-          const sessionId = resumed.sessionId ?? existingSession?.sessionId;
-          if (sessionId) {
-            const now = isoNow();
-            await this.deps.providerSessions.save({
-              projectId: request.scope.projectId,
-              workId,
-              provider: request.nativeSession.provider,
-              model: request.nativeSession.model,
-              sessionId,
-              promptFingerprint: computed.sessionFingerprint,
-              createdAt: existingSession?.createdAt ?? now,
-              updatedAt: now,
-            });
-          }
-          await this.persistCacheArtifacts(request, computed, resumed.content);
-          return resumed.content;
+      const resumed = await request.nativeSession.resume(existingSession?.sessionId, computed.fullPrompt);
+      if (resumed) {
+        this.metrics.recordNativeSessionHit();
+        const sessionId = resumed.sessionId ?? existingSession?.sessionId;
+        if (sessionId) {
+          const now = isoNow();
+          await this.deps.providerSessions.save({
+            projectId: request.scope.projectId,
+            workId,
+            provider: request.nativeSession.provider,
+            model: request.nativeSession.model,
+            sessionId,
+            promptFingerprint: computed.sessionFingerprint,
+            createdAt: existingSession?.createdAt ?? now,
+            updatedAt: now,
+          });
         }
-      } catch {
-        // Fall through to backing llm call.
+        await this.persistCacheArtifacts(request, computed, resumed.content);
+        return resumed.content;
       }
 
       this.metrics.recordNativeSessionFallback();

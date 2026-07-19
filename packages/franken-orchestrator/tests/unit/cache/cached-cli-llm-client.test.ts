@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { CachedCliLlmClient } from '../../../src/cache/cached-cli-llm-client.js';
+import { CacheMetrics } from '../../../src/cache/cache-metrics.js';
 
 interface FakeCliAdapter {
   transformRequest: ReturnType<typeof vi.fn>;
@@ -17,7 +18,11 @@ function createAdapter(): FakeCliAdapter {
     execute: vi.fn(async (request: { messages: Array<{ content: string }>; cacheSession?: { key: string } }) =>
       `response:${request.messages[0]?.content ?? ''}`),
     transformResponse: vi.fn((raw: string) => ({ content: raw })),
-    consumeSessionMetadata: vi.fn((requestId: string) => ({ sessionKey: `native:${requestId}` })),
+    consumeSessionMetadata: vi.fn((requestId: string) => ({
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      sessionId: `native:${requestId}`,
+    })),
   };
 }
 
@@ -114,5 +119,38 @@ describe('CachedCliLlmClient', () => {
         persist: true,
       },
     });
+    expect(adapter.transformRequest.mock.calls[0]?.[0]).not.toHaveProperty('session_id');
+    const firstRequestId = (adapter.transformRequest.mock.calls[0]?.[0] as { id?: string }).id;
+    expect(adapter.transformRequest.mock.calls[1]?.[0]).toMatchObject({
+      session_id: `native:${firstRequestId}`,
+    });
+  });
+
+  it('retries once with a fresh isolated session when the stored provider session is stale', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-cached-cli-'));
+    const adapter = createAdapter();
+    const metrics = new CacheMetrics();
+    const client = new CachedCliLlmClient({
+      cacheRootDir: join(workDir, '.fbeast', '.cache', 'llm'),
+      cliAdapter: adapter,
+      projectId: 'frankenbeast',
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      operation: 'plan-build',
+      workId: 'plan:alpha',
+      metrics,
+    });
+
+    await client.complete('first prompt');
+    adapter.execute
+      .mockRejectedValueOnce(new Error('Conversation session not found'))
+      .mockResolvedValueOnce('response:fresh');
+
+    await expect(client.complete('second prompt')).resolves.toBe('response:fresh');
+
+    expect(adapter.transformRequest.mock.calls[1]?.[0]).toHaveProperty('session_id');
+    expect(adapter.transformRequest.mock.calls[2]?.[0]).not.toHaveProperty('session_id');
+    expect(adapter.execute).toHaveBeenCalledTimes(3);
+    expect(metrics.snapshot()).toMatchObject({ nativeSessionFallbacks: 1 });
   });
 });

@@ -34,7 +34,7 @@ export class ClaudeProvider implements ICliProvider {
       } else {
         args.push('--continue');
       }
-    } else if (!opts.chatMode || !opts.sessionId) {
+    } else if (!opts.persistSession && (!opts.chatMode || !opts.sessionId)) {
       args.push('--no-session-persistence');
     }
 

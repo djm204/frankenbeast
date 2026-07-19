@@ -26,6 +26,8 @@ export interface ProviderOpts {
   readonly sessionContinue?: boolean | undefined;
   /** Provider-native session id to resume, when known. */
   readonly sessionId?: string | undefined;
+  /** Keep a newly started provider session so its native id can be captured. */
+  readonly persistSession?: boolean | undefined;
 }
 
 export interface ProviderCacheCapabilities {
