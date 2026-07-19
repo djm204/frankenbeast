@@ -25,6 +25,8 @@ export interface SkillHealthOptions {
 
 const UNTRUSTED_HEALTH_CHECK_MESSAGE =
   'MCP health check command was not executed because the skill is not trusted';
+const INCOMPLETE_HANDSHAKE_MESSAGE =
+  'MCP initialize handshake was not completed before the command exited';
 
 const HEALTH_CHECK_TIMEOUT_MS = 2000;
 const MCP_INITIALIZE_ID = 1;
@@ -32,6 +34,11 @@ const MCP_INITIALIZE_ID = 1;
 interface HealthCheckMcpServerConfig {
   command: string;
   args?: string[] | undefined;
+}
+
+interface HealthCheckOutcome {
+  status: McpHealthStatus;
+  error?: string;
 }
 
 /**
@@ -58,11 +65,11 @@ export class SkillHealthChecker {
           }
 
           try {
-            const status = await this.checkServer(
+            const outcome = await this.checkServer(
               config.command,
               config.args ?? [],
             );
-            return { serverName, status };
+            return { serverName, ...outcome };
           } catch (err) {
             return {
               serverName,
@@ -89,7 +96,7 @@ export class SkillHealthChecker {
   private checkServer(
     command: string,
     args: string[],
-  ): Promise<McpHealthStatus> {
+  ): Promise<HealthCheckOutcome> {
     return new Promise((resolve) => {
       let proc: ChildProcessWithoutNullStreams;
       let settled = false;
@@ -98,7 +105,10 @@ export class SkillHealthChecker {
 
       const settle = (
         status: McpHealthStatus,
-        { killRunningProcess = true }: { killRunningProcess?: boolean } = {},
+        {
+          killRunningProcess = true,
+          error,
+        }: { killRunningProcess?: boolean; error?: string } = {},
       ) => {
         if (settled) {
           return;
@@ -108,7 +118,7 @@ export class SkillHealthChecker {
         if (killRunningProcess && proc.exitCode === null && !proc.killed) {
           proc.kill();
         }
-        resolve(status);
+        resolve({ status, ...(error === undefined ? {} : { error }) });
       };
 
       try {
@@ -127,14 +137,17 @@ export class SkillHealthChecker {
         });
 
         proc.on('close', (code) => {
-          settle(code === 0 ? 'connected' : 'error', { killRunningProcess: false });
+          settle(code === 0 ? 'unknown' : 'error', {
+            killRunningProcess: false,
+            ...(code === 0 ? { error: INCOMPLETE_HANDSHAKE_MESSAGE } : {}),
+          });
         });
 
         proc.stdin.on('error', () => {
           // Defer to the process error/close/timeout paths. Some commands exit
           // successfully before reading the initialize probe; in that case the
-          // stdin stream can emit EPIPE before close(0), and the clean-exit
-          // fallback should remain connected.
+          // stdin stream can emit EPIPE before close(0), which remains unknown
+          // because no MCP handshake completed.
         });
 
         proc.stdout.on('data', (chunk: Buffer | string) => {
@@ -165,7 +178,7 @@ export class SkillHealthChecker {
           },
         }));
       } catch {
-        resolve('error');
+        resolve({ status: 'error' });
       }
     });
   }

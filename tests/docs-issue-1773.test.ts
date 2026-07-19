@@ -70,6 +70,7 @@ describe('issue #1773 repository ownership manifest', () => {
       'packages/live-bench/**',
       'docs/onboarding/**',
       'ONBOARDING.md',
+      'CONTRIBUTING.md',
     ]) {
       expect(allPaths).toContain(requiredPath);
     }
