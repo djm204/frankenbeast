@@ -2,9 +2,38 @@
 
 Thank you for improving Frankenbeast. This guide is the shortest path from choosing one issue to opening a reviewable pull request. For environment details beyond this path, use the [onboarding checklist](ONBOARDING.md) or the [goal-based onboarding index](docs/onboarding/README.md).
 
+## Find a starter issue
+
+List open issues intended for new contributors before choosing work:
+
+```bash
+gh issue list --repo djm204/frankenbeast \
+  --state open \
+  --label "good first issue" \
+  --limit 20 \
+  --json number,title,labels,url
+```
+
+Pick an issue only when all of these are true:
+
+- You understand the requested outcome and acceptance criteria.
+- The change fits one focused pull request.
+- No open pull request already claims the issue.
+- The issue discussion does not show another contributor actively working on it.
+
+After checking for duplicate work in the next section, leave a short claim comment so other contributors can coordinate:
+
+```bash
+ISSUE_NUMBER="2541" # replace with the issue you selected
+gh issue comment "$ISSUE_NUMBER" --repo djm204/frankenbeast \
+  --body "I plan to work on this issue. I will keep the change scoped to its acceptance criteria."
+```
+
+If the scope is unclear, ask one focused question instead of claiming the issue or guessing.
+
 ## Before you start
 
-1. Choose one open issue whose scope you understand. Issues labeled `good first issue` are intended for new contributors.
+1. Read the issue body, acceptance criteria, labels, and discussion end to end before editing.
 2. Check the issue discussion and open pull requests so you do not duplicate active work:
 
    ```bash
