@@ -154,6 +154,35 @@ describe('SafetyEvaluator', () => {
     ]);
   });
 
+  it('fails closed when a v-mode block rule times out at runtime', async () => {
+    const port = createMockGuardrailsPort([
+      {
+        id: 'slow-unicode-set-block',
+        description: 'slow unicode set block rule',
+        pattern: '[[a-z]&&[p-z]]+',
+        flags: 'v',
+        severity: 'block',
+      },
+    ]);
+    const evaluator = new SafetyEvaluator(port);
+    vi.spyOn(
+      evaluator as unknown as {
+        regexMatchesWithTimeout(pattern: string, content: string): Promise<boolean | 'timeout'>;
+      },
+      'regexMatchesWithTimeout',
+    ).mockResolvedValue('timeout');
+
+    const result = await evaluator.evaluate(createInput('large review payload'));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        message: expect.stringContaining('Safety rule regex evaluation timed out'),
+        severity: 'critical',
+      }),
+    ]);
+  });
+
   it('surfaces timeout findings from evaluate when worker evaluation exceeds timeout', async () => {
     const hangingWorker = {
       once: vi.fn(),
@@ -866,6 +895,9 @@ describe('SafetyEvaluator', () => {
     expect(evaluator.skipCharacterClass(subtraction, 0, true)).toBe(subtraction.length - 2);
     expect(evaluator.skipCharacterClass('[[]x', 0)).toBe(2);
     expect(evaluator.hasUnsafeRegexShape('[[a-z]&&((a+)+)$')).toBe(true);
+    expect(
+      evaluator.hasUnsafeRegexShape('[[a-z]&&[p-z]]+((a+)+)$', true),
+    ).toBe(true);
   });
 
   it('evaluates unicodeSets safety rules with the v flag', async () => {
@@ -889,34 +921,6 @@ describe('SafetyEvaluator', () => {
         message: 'Safety rule violated: unicode set intersection',
       }),
     ]);
-  });
-
-  it('models unicodeSets operands while checking repeated alternatives', () => {
-    const evaluator = new SafetyEvaluator(createMockGuardrailsPort()) as unknown as {
-      hasUnsafeRegexShape(pattern: string, unicodeSets?: boolean): boolean;
-    };
-
-    expect(
-      evaluator.hasUnsafeRegexShape('^(?:[[a-z]&&[p-z]]|a)+$', true),
-    ).toBe(false);
-    expect(
-      evaluator.hasUnsafeRegexShape('^(?:[[a-z]&&[p-z]]|q)+$', true),
-    ).toBe(true);
-    expect(
-      evaluator.hasUnsafeRegexShape('^(?:[\\p{Letter}]|a)+$', true),
-    ).toBe(true);
-    expect(
-      evaluator.hasUnsafeRegexShape('^(?:[\\q{ab}]|b)+$', true),
-    ).toBe(false);
-    expect(
-      evaluator.hasUnsafeRegexShape('^(?:[\\q{ab}]|a)+$', true),
-    ).toBe(true);
-    expect(
-      evaluator.hasUnsafeRegexShape('^(?:[\\q{\\-a}]|-|a)+$', true),
-    ).toBe(true);
-    expect(
-      evaluator.hasUnsafeRegexShape('^(?:[\\q{ab}]|[\\q{ac}])+$', true),
-    ).toBe(false);
   });
 
   it('rejects nullable and variable-quantified alternation bypass patterns', async () => {

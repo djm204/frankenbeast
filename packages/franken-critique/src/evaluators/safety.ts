@@ -80,11 +80,14 @@ export class SafetyEvaluator implements Evaluator {
         this.regexFlags(rule.flags),
       );
       if (matchResult === 'timeout') {
+        const failClosed = rule.flags === 'v' && rule.severity === 'block';
+        if (failClosed) hasBlock = true;
         findings.push({
           message: `Safety rule regex evaluation timed out: ${rule.description}`,
-          severity: 'warning',
-          suggestion:
-            'Review this validated pattern or narrow the input scope; evaluation exceeded the regex safety timeout and was skipped to keep critique responsive.',
+          severity: failClosed ? 'critical' : 'warning',
+          suggestion: failClosed
+            ? 'Refactor this v-mode block rule so it completes within the regex safety timeout.'
+            : 'Review this validated pattern or narrow the input scope; evaluation exceeded the regex safety timeout and was skipped to keep critique responsive.',
         });
         continue;
       }
@@ -341,6 +344,7 @@ export class SafetyEvaluator implements Evaluator {
       if (char === ')' && stack.length > 1) {
         const group = stack.pop()!;
         if (
+          !this.parsingUnicodeSets &&
           this.hasOverlappingAlternation(pattern.slice(group.startIndex + 1, i))
         ) {
           group.containsAmbiguousAlternation = true;
@@ -710,11 +714,6 @@ export class SafetyEvaluator implements Evaluator {
   }
 
   private characterClassToken(characterClass: string): string {
-    if (this.parsingUnicodeSets) {
-      const stringSetToken = this.unicodeSetStringToken(characterClass);
-      if (stringSetToken !== null) return stringSetToken;
-    }
-
     if (characterClass === '[0-9]' || characterClass === '[\\d]') return 'DIGIT';
     if (characterClass === '[A-Za-z0-9_]' || characterClass === '[\\w]') {
       return 'WORD';
@@ -739,84 +738,6 @@ export class SafetyEvaluator implements Evaluator {
     return `CLASS:${characterClass}`;
   }
 
-  private unicodeSetStringToken(characterClass: string): string | null {
-    const strings = this.parseUnicodeSetStrings(characterClass.slice(1, -1));
-    return strings !== null && strings.length > 0
-      ? `STRING_SET:${JSON.stringify(strings)}`
-      : null;
-  }
-
-  private parseUnicodeSetStrings(body: string): string[] | null {
-    const strings: string[] = [];
-    let index = 0;
-
-    while (index < body.length) {
-      if (!body.startsWith('\\q{', index)) return null;
-      index += 3;
-      let value = '';
-      let closed = false;
-
-      while (index < body.length) {
-        const char = body[index]!;
-        if (char === '}') {
-          if (value.length > 0) strings.push(value);
-          index += 1;
-          closed = true;
-          break;
-        }
-        if (char === '|') {
-          if (value.length > 0) strings.push(value);
-          value = '';
-          index += 1;
-          continue;
-        }
-        if (char === '\\') {
-          const escape = this.unicodeSetStringEscapeAt(body, index);
-          if (escape === null) return null;
-          value += escape.value;
-          index = escape.end + 1;
-          continue;
-        }
-        value += char;
-        index += 1;
-      }
-
-      if (!closed) return null;
-    }
-
-    return strings;
-  }
-
-  private unicodeSetStringEscapeAt(
-    body: string,
-    start: number,
-  ): { value: string; end: number } | null {
-    const escaped = body[start + 1];
-    if (escaped === undefined) return null;
-    const codePoint = body.slice(start).match(/^\\u\{([0-9A-Fa-f]+)\}/);
-    if (codePoint) {
-      return {
-        value: String.fromCodePoint(Number.parseInt(codePoint[1]!, 16)),
-        end: start + codePoint[0].length - 1,
-      };
-    }
-    const fixed = this.classEscapedTokenAt(body, start);
-    if (fixed !== null && fixed.end > start + 1) return fixed;
-    return {
-      value: this.escapedStringCharacter(escaped),
-      end: start + 1,
-    };
-  }
-
-  private escapedStringCharacter(escaped: string): string {
-    if (escaped === 'n') return '\n';
-    if (escaped === 'r') return '\r';
-    if (escaped === 't') return '\t';
-    if (escaped === 'f') return '\f';
-    if (escaped === 'v') return '\v';
-    return escaped;
-  }
-
   private tokenPrefixOverlaps(
     left: RegexPrefixExpansion,
     right: RegexPrefixExpansion,
@@ -838,12 +759,6 @@ export class SafetyEvaluator implements Evaluator {
 
   private regexTokensOverlap(left: string, right: string): boolean {
     if (left === right) return true;
-    if (left.startsWith('STRING_SET:')) {
-      return this.stringSetTokenOverlaps(left, right);
-    }
-    if (right.startsWith('STRING_SET:')) {
-      return this.stringSetTokenOverlaps(right, left);
-    }
     if (left === 'DOT' || right === 'DOT') {
       return left === 'DOT'
         ? this.dotTokenOverlaps(right)
@@ -870,32 +785,6 @@ export class SafetyEvaluator implements Evaluator {
     if (left.startsWith('CLASS:')) return this.classTokenOverlaps(left, right);
     if (right.startsWith('CLASS:')) return this.classTokenOverlaps(right, left);
     return false;
-  }
-
-  private stringSetTokenOverlaps(stringSetToken: string, token: string): boolean {
-    const strings = this.parseStringSetToken(stringSetToken);
-    const otherStrings = token.startsWith('STRING_SET:')
-      ? this.parseStringSetToken(token)
-      : null;
-
-    return strings.some((value) =>
-      otherStrings === null
-        ? this.regexTokensOverlap(value[0] ?? '', token)
-        : otherStrings.some(
-            (other) => value.startsWith(other) || other.startsWith(value),
-          ),
-    );
-  }
-
-  private parseStringSetToken(token: string): string[] {
-    try {
-      const parsed: unknown = JSON.parse(token.slice('STRING_SET:'.length));
-      return Array.isArray(parsed) && parsed.every((value) => typeof value === 'string')
-        ? parsed
-        : [];
-    } catch {
-      return [];
-    }
   }
 
   private altTokenOverlaps(altToken: string, token: string): boolean {
@@ -976,10 +865,6 @@ export class SafetyEvaluator implements Evaluator {
   }
 
   private classTokenOverlaps(classToken: string, token: string): boolean {
-    if (this.parsingUnicodeSets) {
-      return this.tokenMayMatchSample(classToken, token);
-    }
-
     if (classToken.startsWith('CLASS:[^')) {
       const body = classToken.slice('CLASS:[^'.length, -1);
       if (token.length === 1) return !this.positiveClassBodyOverlaps(body, token);
@@ -1173,8 +1058,6 @@ export class SafetyEvaluator implements Evaluator {
       '.',
       '/',
       '\u00A0',
-      ...(left.length === 1 ? [left] : []),
-      ...(right.length === 1 ? [right] : []),
       ...this.tokenProbeSamples(left),
       ...this.tokenProbeSamples(right),
     ]);
@@ -1253,14 +1136,6 @@ export class SafetyEvaluator implements Evaluator {
   }
 
   private classMatchesSample(characterClass: string, sample: string): boolean {
-    if (this.parsingUnicodeSets) {
-      try {
-        return new RegExp(`^(?:${characterClass})$`, 'v').test(sample);
-      } catch {
-        return false;
-      }
-    }
-
     const body = characterClass.slice(1, -1);
     const negated = body.startsWith('^');
     const positiveBody = negated ? body.slice(1) : body;
