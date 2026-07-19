@@ -115,6 +115,23 @@ describe('GeminiProvider', () => {
     expect(ms).toBe(60_000);
   });
 
+  it('parseRetryAfter parses resets-in messages', () => {
+    expect(provider.parseRetryAfter('quota resets in 30s')).toBe(30_000);
+  });
+
+  it.each([
+    'retry-after: 121',
+    'retry after 121s',
+    'quota resets in 121s',
+    `retry-after: ${'9'.repeat(400)}`,
+  ])('parseRetryAfter caps oversized delay from %s', (stderr) => {
+    expect(provider.parseRetryAfter(stderr)).toBe(120_000);
+  });
+
+  it('parseRetryAfter preserves a delay at the cap', () => {
+    expect(provider.parseRetryAfter('retry-after: 120')).toBe(120_000);
+  });
+
   it('parseRetryAfter returns undefined when no pattern matches', () => {
     expect(provider.parseRetryAfter('unknown error')).toBeUndefined();
   });

@@ -378,6 +378,70 @@ describe('createMcpServer', () => {
     });
   });
 
+  it('redacts observer metadata from direct and proxy audit records', () => {
+    expect(sanitizeToolArgumentsForAuditTrail('fbeast_observer_log', {
+      event: 'tool_call',
+      metadata: 'x'.repeat(1_000_001),
+      sessionId: 'session-1',
+    })).toEqual({
+      event: 'tool_call',
+      metadata: '[observer-metadata-redacted]',
+      sessionId: 'session-1',
+    });
+
+    expect(sanitizeToolArgumentsForAuditTrail('fbeast_observer_log', {
+      event: 'tool_call',
+      metadata: 'x'.repeat(1_000_001),
+      sessionId: 'session-1',
+      tool: 'untrusted-payload-name',
+    })).toEqual({
+      event: 'tool_call',
+      metadata: '[observer-metadata-redacted]',
+      sessionId: 'session-1',
+      tool: 'untrusted-payload-name',
+    });
+
+    expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
+      tool: 'fbeast_observer_log',
+      args: {
+        event: 'tool_call',
+        metadata: 'x'.repeat(1_000_001),
+        sessionId: 'session-1',
+      },
+    })).toEqual({
+      tool: 'fbeast_observer_log',
+      args: {
+        event: 'tool_call',
+        metadata: '[observer-metadata-redacted]',
+        sessionId: 'session-1',
+      },
+    });
+
+    expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
+      tool: 'fbeast_observer_log',
+      args: 'invalid envelope',
+      metadata: 'x'.repeat(1_000_001),
+    })).toEqual({
+      tool: 'fbeast_observer_log',
+      args: '[observer-metadata-redacted]',
+      metadata: '[observer-metadata-redacted]',
+    });
+
+    expect(sanitizeToolArgumentsForAuditTrail('fbeast_governor_check', {
+      action: 'fbeast_observer_log',
+      context: {
+        event: 'tool_call',
+        metadata: 'x'.repeat(1_000_001),
+      },
+    })).toEqual({
+      action: 'fbeast_observer_log',
+      context: {
+        event: 'tool_call',
+        metadata: '[observer-metadata-redacted]',
+      },
+    });
+  });
+
   it('redacts memory access audit report rejected selectors from direct and proxy audit records', () => {
     expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_access_audit_report', {
       operation: 'delete',
@@ -462,6 +526,75 @@ describe('createMcpServer', () => {
     const res = await srv.callTool('cost', { costUsd: Infinity });
     expect(res.isError).toBe(true);
     expect(calls).toHaveLength(0);
+  });
+
+  it('enforces string length bounds before invoking the handler', async () => {
+    const calls: unknown[] = [];
+    const recorded: Array<{ decision?: string; args?: Record<string, unknown> }> = [];
+    const tool: ToolDef = {
+      name: 'search',
+      description: 'search',
+      inputSchema: {
+        type: 'object',
+        properties: { query: { type: 'string', description: 'query', minLength: 2, maxLength: 3 } },
+        required: ['query'],
+      },
+      handler: async (a) => { calls.push(a); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+    };
+    const srv = createMcpServer('t', '1', [tool], { audit: { record: async (entry) => { recorded.push(entry); } } });
+
+    expect((await srv.callTool('search', { query: 'x' })).content[0]!.text).toContain('at least 2 characters');
+    expect((await srv.callTool('search', { query: 'abcd' })).content[0]!.text).toContain('at most 3 characters');
+    expect(await srv.callTool('search', { query: 'abc' })).not.toHaveProperty('isError');
+    expect(await srv.callTool('search', { query: '😀😀' })).not.toHaveProperty('isError');
+    expect(calls).toEqual([{ query: 'abc' }, { query: '😀😀' }]);
+    expect(recorded.find((entry) => entry.decision === 'validation_error' && entry.args?.['query'] === '[schema-bound-exceeded]')).toBeDefined();
+  });
+
+  it('enforces numeric bounds before invoking the handler', async () => {
+    const calls: unknown[] = [];
+    const tool: ToolDef = {
+      name: 'page',
+      description: 'page',
+      inputSchema: {
+        type: 'object',
+        properties: { limit: { type: 'integer', description: 'limit', minimum: 1, maximum: 100 } },
+        required: ['limit'],
+      },
+      handler: async (a) => { calls.push(a); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+    };
+    const srv = createMcpServer('t', '1', [tool]);
+
+    expect((await srv.callTool('page', { limit: 0 })).content[0]!.text).toContain('at least 1');
+    expect((await srv.callTool('page', { limit: 101 })).content[0]!.text).toContain('at most 100');
+    expect(await srv.callTool('page', { limit: 100 })).not.toHaveProperty('isError');
+    expect(calls).toEqual([{ limit: 100 }]);
+  });
+
+  it('enforces array item bounds before invoking the handler', async () => {
+    const calls: unknown[] = [];
+    const tool: ToolDef = {
+      name: 'batch',
+      description: 'batch',
+      inputSchema: {
+        type: 'object',
+        properties: { items: { type: 'array', description: 'items', minItems: 1, maxItems: 2 } },
+        required: ['items'],
+      },
+      handler: async (a) => { calls.push(a); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+    };
+    const srv = createMcpServer('t', '1', [tool]);
+
+    expect((await srv.callTool('batch', { items: [] })).content[0]!.text).toContain('at least 1 items');
+    expect((await srv.callTool('batch', { items: [1, 2, 3] })).content[0]!.text).toContain('at most 2 items');
+    expect(await srv.callTool('batch', { items: [1, 2] })).not.toHaveProperty('isError');
+    expect(calls).toEqual([{ items: [1, 2] }]);
+
+    const oversizedWithAccessor = [1, 2, 3];
+    Object.defineProperty(oversizedWithAccessor, '0', { get: () => { throw new Error('must not be read'); } });
+    const boundedBeforeTraversal = validateToolArguments(tool, { items: oversizedWithAccessor });
+    expect(boundedBeforeTraversal.ok).toBe(false);
+    if (!boundedBeforeTraversal.ok) expect(boundedBeforeTraversal.message).toContain('at most 2 items');
   });
 
   it('accepts arguments matching any listed schema type', async () => {

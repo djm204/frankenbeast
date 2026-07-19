@@ -17,8 +17,8 @@ Adopt Radix UI primitives (`@radix-ui/react-*`) as the component foundation for 
 - `react-tooltip`, `react-alert-dialog`, `react-popover`, `react-scroll-area`
 - `react-separator`
 
-### Not using Radix for:
-- **Slide-in detail panel** — bespoke `<aside>` with CSS transitions (Dialog's modal semantics conflict with non-modal side panels)
+### Non-modal drawer pattern
+- **Slide-in detail panel** — Radix Dialog with `modal={false}` provides dialog semantics, open/close focus management, focus return, and Escape handling without trapping focus or making the rest of the dashboard inert.
 - **Wizard step indicator** — custom component (Tabs allows free navigation, incompatible with validation-gated step progression)
 
 ## Consequences

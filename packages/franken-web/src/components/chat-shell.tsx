@@ -132,10 +132,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     secureBackend: 'local-encrypted',
     services: [],
   });
-  const [networkConfig, setNetworkConfig] = useState<NetworkConfigResponse>({
-    network: { mode: 'secure', secureBackend: 'local-encrypted' },
-    chat: { model: 'claude-sonnet-4-6', enabled: true, host: '127.0.0.1', port: 3737 },
-  });
+  const [networkConfig, setNetworkConfig] = useState<NetworkConfigResponse | null>(null);
   const [networkLogs, setNetworkLogs] = useState<string[]>([]);
   const [selectedNetworkLogServiceId, setSelectedNetworkLogServiceId] = useState<string | undefined>(undefined);
   const [networkLogsLoading, setNetworkLogsLoading] = useState(false);
@@ -207,6 +204,8 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
 
   useEffect(() => {
     const client = new NetworkApiClient(baseUrl);
+    setNetworkConfig(null);
+    setNetworkConfigError(null);
     const statusRequestId = ++networkStatusRequestIdRef.current;
     void client.getStatus()
       .then((nextStatus) => {
@@ -228,9 +227,14 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
       .then((nextConfig) => {
         if (configRequestId === networkConfigRequestIdRef.current) {
           setNetworkConfig(nextConfig);
+          setNetworkConfigError(null);
         }
       })
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        if (configRequestId === networkConfigRequestIdRef.current) {
+          setNetworkConfigError(`Unable to load network config: ${networkErrorMessage(error, 'Request failed.')}`);
+        }
+      });
   }, [baseUrl]);
 
   const composerSessionKey = preserveComposerDraft
@@ -1103,6 +1107,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         ) : route === 'network' ? (
           <NetworkPage
             config={networkConfig}
+            configError={networkConfigError}
             error={networkError ?? networkConfigError}
             logs={networkLogs}
             logsError={networkLogsError}

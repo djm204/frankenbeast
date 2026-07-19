@@ -13,6 +13,18 @@ import { sanitizeRunConfigIntegrityEnv } from '../../cli/run-config-integrity.js
 const RATE_LIMIT_PATTERNS =
   /RESOURCE_EXHAUSTED|rate.?limit|429|too many requests|retry.?after|overloaded|capacity|temporarily unavailable|out of extra usage|usage limit|resets?\s+\d|resets?\s+in\s+\d+\s*s/i;
 
+// Match MartinLoop's safe fallback instead of allowing provider stderr to request a longer pause.
+const MAX_GEMINI_RETRY_AFTER_MS = 120_000;
+
+function parseBoundedRetryAfterMs(secondsText: string): number {
+  const seconds = Number.parseInt(secondsText, 10);
+  const maxSeconds = MAX_GEMINI_RETRY_AFTER_MS / 1000;
+  if (!Number.isFinite(seconds) || seconds >= maxSeconds) {
+    return MAX_GEMINI_RETRY_AFTER_MS;
+  }
+  return seconds * 1000;
+}
+
 export class GeminiProvider implements ICliProvider {
   readonly name = 'gemini';
   readonly command = 'gemini';
@@ -64,19 +76,19 @@ export class GeminiProvider implements ICliProvider {
     // "retry-after: 60"
     const retryAfterMatch = stderr.match(/retry.?after:?\s*(\d+)\s*s?/i);
     if (retryAfterMatch?.[1]) {
-      return parseInt(retryAfterMatch[1], 10) * 1000;
+      return parseBoundedRetryAfterMs(retryAfterMatch[1]);
     }
 
     // "retry after 25s"
     const retryAfterPatternMatch = stderr.match(/retry.?after\s+(\d+)\s*s?/i);
     if (retryAfterPatternMatch?.[1]) {
-      return parseInt(retryAfterPatternMatch[1], 10) * 1000;
+      return parseBoundedRetryAfterMs(retryAfterPatternMatch[1]);
     }
 
     // "resets in 30s"
     const resetsInMatch = stderr.match(/resets?\s+in\s+(\d+)\s*s/i);
     if (resetsInMatch?.[1]) {
-      return parseInt(resetsInMatch[1], 10) * 1000;
+      return parseBoundedRetryAfterMs(resetsInMatch[1]);
     }
 
     return undefined;

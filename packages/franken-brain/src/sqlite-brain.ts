@@ -48,6 +48,14 @@ export const DEFAULT_WORKING_MEMORY_LIMITS: WorkingMemoryLimits = {
   maxTotalBytes: 64 * 1024 * 1024,
 };
 
+/**
+ * Working-memory keys must be non-empty printable Unicode strings whose UTF-8
+ * representation does not exceed this bound. Spaces and punctuation remain
+ * valid for backwards compatibility, while Unicode "Other" code points are
+ * rejected because they make logs, snapshots, and selectors ambiguous.
+ */
+export const MAX_WORKING_MEMORY_KEY_BYTES = 1024;
+
 export const CURRENT_MEMORY_SCHEMA_VERSION = 2;
 
 export interface MemorySchemaStoreMetadata {
@@ -871,6 +879,43 @@ export class WorkingMemoryLimitError extends Error {
   }
 }
 
+export type WorkingMemoryKeyErrorReason =
+  | 'empty'
+  | 'control_character'
+  | 'too_long';
+
+export class WorkingMemoryKeyError extends Error {
+  readonly code = 'INVALID_WORKING_MEMORY_KEY';
+
+  constructor(
+    readonly reason: WorkingMemoryKeyErrorReason,
+    readonly byteLength: number,
+    readonly maxBytes: number = MAX_WORKING_MEMORY_KEY_BYTES,
+  ) {
+    super(
+      reason === 'empty'
+        ? 'Working memory key must not be empty'
+        : reason === 'control_character'
+          ? 'Working memory key must contain only printable Unicode characters'
+          : `Working memory key is ${byteLength} bytes, exceeding the ${maxBytes}-byte limit`,
+    );
+    this.name = 'WorkingMemoryKeyError';
+  }
+}
+
+function validateWorkingMemoryKey(key: string): void {
+  const byteLength = Buffer.byteLength(key, 'utf8');
+  if (key.length === 0) {
+    throw new WorkingMemoryKeyError('empty', byteLength);
+  }
+  if (/\p{C}/u.test(key)) {
+    throw new WorkingMemoryKeyError('control_character', byteLength);
+  }
+  if (byteLength > MAX_WORKING_MEMORY_KEY_BYTES) {
+    throw new WorkingMemoryKeyError('too_long', byteLength);
+  }
+}
+
 export class WorkingMemoryHydrationLimitError extends Error {
   readonly code = 'WORKING_MEMORY_HYDRATION_LIMIT_EXCEEDED';
 
@@ -888,6 +933,17 @@ export class WorkingMemoryHydrationLimitError extends Error {
         `exceeding startup limits of ${maxRows} rows and ${maxBytes} bytes`,
     );
     this.name = 'WorkingMemoryHydrationLimitError';
+  }
+}
+
+export class CorruptWorkingMemoryRowError extends Error {
+  readonly code = 'CORRUPT_WORKING_MEMORY_ROW';
+
+  constructor(readonly key: string) {
+    super(
+      `Persisted working memory row "${key}" contains invalid JSON and was not hydrated; the row was preserved for recovery`,
+    );
+    this.name = 'CorruptWorkingMemoryRowError';
   }
 }
 
@@ -1280,11 +1336,18 @@ class SqliteWorkingMemory implements IWorkingMemory {
       hydrationLimits && !this.db.inTransaction
         ? this.db.transaction(readRows).immediate()
         : readRows();
-    const decryptedRows = rows.map((row) => ({
-      key: row.key,
-      value: this.encryption?.decrypt(row.value) ?? row.value,
-      updatedAt: row.updatedAt,
-    }));
+    const decryptedRows = rows.map((row) => {
+      const value = this.encryption?.decrypt(row.value) ?? row.value;
+      // Fail closed without rewriting legacy data. Operators can migrate or
+      // remove the offending row explicitly instead of startup silently
+      // dropping memory whose key no longer satisfies the contract.
+      validateWorkingMemoryKey(row.key);
+      return {
+        key: row.key,
+        value,
+        updatedAt: row.updatedAt,
+      };
+    });
     this.persistedSerialized = new Map(
       decryptedRows.map((row) => [row.key, row.value]),
     );
@@ -1307,7 +1370,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
     const expiredRows: Array<{ key: string; serialized: string }> = [];
     let total = 0;
     const prepareRow = (row: { key: string; serialized: string; updatedAt: string }) => {
-      const parsed = parseStoredWorkingMemoryValue(row.serialized);
+      const parsed = parseHydratedWorkingMemoryValue(row.key, row.serialized);
       if (isExpiredWorkingMemoryValue(parsed)) return undefined;
       const { normalized, serialized, size } = this.prepareEntry(
         row.key,
@@ -1328,7 +1391,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
       };
     };
     for (const row of rows) {
-      const parsed = parseStoredWorkingMemoryValue(row.value);
+      const parsed = parseHydratedWorkingMemoryValue(row.key, row.value);
       if (isExpiredWorkingMemoryValue(parsed)) {
         expiredRows.push({ key: row.key, serialized: row.value });
         continue;
@@ -1882,6 +1945,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
     key: string,
     value: unknown,
   ): { normalized: unknown; serialized: string; size: number } {
+    validateWorkingMemoryKey(key);
     const serialized = stringifyWorkingMemoryValue(key, value);
     const valueBytes = Buffer.byteLength(serialized, 'utf8');
     if (valueBytes > this.limits.maxValueBytes) {
@@ -7992,6 +8056,18 @@ function parseStoredWorkingMemoryValue(value: string): unknown {
   try {
     return JSON.parse(value) as unknown;
   } catch {
+    return value;
+  }
+}
+
+function parseHydratedWorkingMemoryValue(key: string, value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    const trimmed = value.trimStart();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      throw new CorruptWorkingMemoryRowError(key);
+    }
     return value;
   }
 }

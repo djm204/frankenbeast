@@ -462,6 +462,27 @@ describe('MartinLoop', () => {
     expect(onProviderSwitch).toHaveBeenCalledWith('codex', 'claude', 'post-sleep-reset');
   });
 
+  it('clamps oversized provider retry hints before sleeping and reports the clamp', async () => {
+    const sleepFn = vi.fn(async () => undefined);
+    const onSleep = vi.fn();
+
+    queueMock({ stderr: 'rate limit exceeded retry-after: 999999', exitCode: 1 });
+    queueMock({ error: Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT' }) });
+    queueMock({ stdout: 'Claude recovered!\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    const loop = new MartinLoop();
+    const result = await loop.run(baseConfig({
+      providers: ['claude', 'codex'],
+      maxIterations: 1,
+      _sleepFn: sleepFn,
+      onSleep,
+    }));
+
+    expect(result.completed).toBe(true);
+    expect(onSleep).toHaveBeenCalledWith(120_000, 'claude parseRetryAfter (clamped to 120s)');
+    expect(sleepFn).toHaveBeenCalledWith(120_000);
+  });
+
   // ── 10. Strips CLAUDE* env vars for claude provider ──
 
   it('strips CLAUDE* env vars when spawning claude via provider filterEnv', async () => {
