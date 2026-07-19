@@ -24,106 +24,139 @@ gh issue view "$ISSUE_NUMBER" --repo "$REPO" \
 
 Expect `state` to be `MERGED` for the pull request, a non-null `mergedAt`, and `state` to be `CLOSED` for the issue. If the issue is still open, check that the pull-request body used `Closes #<issue-number>` and ask in the pull request before closing anything manually.
 
-## 2. Save the branch name and inspect local work
+## 2. Save and verify the contribution branch
 
 Run these commands from your Frankenbeast checkout while you are still on the contribution branch:
 
 ```bash
 CONTRIBUTION_BRANCH="$(git branch --show-current)"
-printf 'Contribution branch: %s\n' "$CONTRIBUTION_BRANCH"
+CONTRIBUTION_ROOT="$(git rev-parse --show-toplevel)"
+LOCAL_HEAD="$(git rev-parse HEAD)"
+PR_HEAD="$(gh pr view "$PR_NUMBER" --repo "$REPO" \
+  --json headRefOid --jq '.headRefOid')"
+
+printf 'Contribution branch: %s\nLocal head: %s\nMerged PR head: %s\n' \
+  "$CONTRIBUTION_BRANCH" "$LOCAL_HEAD" "$PR_HEAD"
 git status --short --branch
 git log --oneline --decorate -3
+
+if [ -z "$CONTRIBUTION_BRANCH" ] || [ "$CONTRIBUTION_BRANCH" = "main" ]; then
+  printf 'Stop: expected to be on the merged contribution branch.\n' >&2
+  exit 1
+fi
+
+if [ "$LOCAL_HEAD" != "$PR_HEAD" ]; then
+  printf 'Stop: local head does not match the head GitHub merged.\n' >&2
+  exit 1
+fi
 ```
 
-Stop if `CONTRIBUTION_BRANCH` is empty, equals `main`, or `git status` shows changes you still need. Commit, stash, or move intentional work before switching branches. Never use `git clean -fd` as a first-contribution cleanup shortcut because it permanently removes untracked files.
+Stop if `git status` shows changes you still need. Commit, stash, or move intentional work before continuing. The full commit-ID comparison must happen before any local or remote branch deletion: a later commit on the same branch is not part of the merged pull request. Never use `git clean -fd` as a first-contribution cleanup shortcut because it permanently removes untracked files.
 
-## 3. Update your local main branch
+## 3. Leave or remove the contribution checkout
+
+Choose the path that matches your checkout.
+
+### Ordinary checkout
+
+If `.git` is a directory in `CONTRIBUTION_ROOT`, switch away from the contribution branch before deleting it:
+
+```bash
+PRIMARY_CHECKOUT="$CONTRIBUTION_ROOT"
+git switch main
+```
+
+### Linked issue worktree
+
+If `.git` is a file in `CONTRIBUTION_ROOT`, the branch is checked out by a linked worktree. Git will refuse to delete that branch while the worktree exists. Inspect the list, then set `PRIMARY_CHECKOUT` to the primary checkout shown on its first line:
+
+```bash
+test -f "$CONTRIBUTION_ROOT/.git"
+git worktree list
+PRIMARY_CHECKOUT="/absolute/path/to/your/primary/frankenbeast/checkout"
+
+if [ "$PRIMARY_CHECKOUT" = "$CONTRIBUTION_ROOT" ] || \
+  ! git -C "$PRIMARY_CHECKOUT" rev-parse --show-toplevel >/dev/null 2>&1; then
+  printf 'Stop: PRIMARY_CHECKOUT must name the separate primary checkout.\n' >&2
+  exit 1
+fi
+
+cd "$PRIMARY_CHECKOUT"
+git worktree remove "$CONTRIBUTION_ROOT"
+git worktree prune
+```
+
+Do not add `--force` to worktree removal. A refusal usually means the worktree still contains changes worth reviewing. Resolve those changes from the worktree and repeat the head and status checks before trying again.
+
+## 4. Update your local main branch
 
 Most external contributors have `origin` pointing to their fork and `upstream` pointing to `djm204/frankenbeast`. Verify rather than assume:
 
 ```bash
-git remote -v
-git fetch --prune upstream main
-git switch main
-git merge --ff-only upstream/main
+git -C "$PRIMARY_CHECKOUT" remote -v
+git -C "$PRIMARY_CHECKOUT" fetch --prune upstream main
+git -C "$PRIMARY_CHECKOUT" switch main
+git -C "$PRIMARY_CHECKOUT" merge --ff-only upstream/main
 ```
 
-The `--ff-only` guard stops instead of creating an unexpected merge commit. If it fails because local `main` has commits or `upstream` is missing, use the [fork and branch recovery guide](fork-and-branch-recovery.md) rather than resetting or force-pushing.
+The `--ff-only` guard stops instead of creating an unexpected merge commit. If it fails because local `main` has commits, another worktree owns `main`, or `upstream` is missing, use the [fork and branch recovery guide](fork-and-branch-recovery.md) rather than resetting or force-pushing.
 
 Contributors who intentionally cloned the upstream repository and do not have an `upstream` remote can update from `origin` instead:
 
 ```bash
-git fetch --prune origin main
-git switch main
-git merge --ff-only origin/main
+git -C "$PRIMARY_CHECKOUT" fetch --prune origin main
+git -C "$PRIMARY_CHECKOUT" switch main
+git -C "$PRIMARY_CHECKOUT" merge --ff-only origin/main
 ```
 
-## 4. Synchronize your fork
+## 5. Synchronize your fork
 
 If `origin` is your fork, publish the updated `main` with a normal push:
 
 ```bash
-git push origin main
+git -C "$PRIMARY_CHECKOUT" push origin main
 ```
 
 Do not force-push `main`. If Git rejects the push, stop and inspect the remotes and branch history with the [fork and branch recovery guide](fork-and-branch-recovery.md).
 
-## 5. Delete only the merged contribution branch
+## 6. Delete only the verified merged branch
 
-With the merged state already verified and your saved branch name still set, first try the non-destructive local deletion:
-
-```bash
-git branch -d "$CONTRIBUTION_BRANCH"
-```
-
-The lowercase `-d` refuses to delete a branch Git does not consider merged. This commonly happens after a squash merge because `main` contains a new squash commit instead of the branch's exact commits. Do not immediately change `-d` to uppercase `-D`. First prove that the local branch still matches the head GitHub merged:
+The pull request is confirmed merged, the local branch head was matched to the pull-request head, and no worktree now holds the branch. Try Git's non-destructive deletion first:
 
 ```bash
-PR_NUMBER="123" # replace with your merged pull request
-PR_HEAD="$(gh pr view "$PR_NUMBER" --repo djm204/frankenbeast \
-  --json headRefOid --jq '.headRefOid')"
-LOCAL_HEAD="$(git rev-parse "$CONTRIBUTION_BRANCH")"
-
-if [ "$LOCAL_HEAD" != "$PR_HEAD" ]; then
-  printf 'Stop: local branch %s does not match merged PR head %s.\n' \
-    "$LOCAL_HEAD" "$PR_HEAD" >&2
-  exit 1
+if ! git -C "$PRIMARY_CHECKOUT" branch -d "$CONTRIBUTION_BRANCH"; then
+  printf 'A squash merge can require deletion after the verified head check.\n'
+  git -C "$PRIMARY_CHECKOUT" branch -D "$CONTRIBUTION_BRANCH"
 fi
-
-git branch -D "$CONTRIBUTION_BRANCH"
 ```
 
-Use this uppercase deletion only when the pull request is verified as merged, the issue is closed, the worktree is clean, and the two full commit IDs match. A mismatch means the local branch contains work GitHub did not merge.
+The uppercase fallback is safe here only because the earlier checks proved that the worktree was clean and the local branch's full commit ID was exactly the head GitHub merged. Do not use it if those checks were skipped or failed.
 
-GitHub may already have deleted the remote branch. Check before requesting deletion from your fork:
+GitHub may already have deleted the remote branch. If it remains, compare its current full commit ID with the merged PR head before requesting deletion from your fork:
 
 ```bash
-if git ls-remote --exit-code --heads origin "$CONTRIBUTION_BRANCH" >/dev/null 2>&1; then
-  git push origin --delete "$CONTRIBUTION_BRANCH"
-else
+REMOTE_HEAD="$(git -C "$PRIMARY_CHECKOUT" ls-remote \
+  --heads origin "$CONTRIBUTION_BRANCH" | cut -f1)"
+
+if [ -z "$REMOTE_HEAD" ]; then
   printf 'Remote branch is already absent; nothing to delete.\n'
+elif [ "$REMOTE_HEAD" != "$PR_HEAD" ]; then
+  printf 'Stop: remote branch has commits that were not in the merged PR.\n' >&2
+  exit 1
+else
+  git -C "$PRIMARY_CHECKOUT" push origin --delete "$CONTRIBUTION_BRANCH"
 fi
-git fetch --prune origin
+
+git -C "$PRIMARY_CHECKOUT" fetch --prune origin
 ```
 
-If you used a Git worktree, remove it only after saving any intentional changes and switching to a different directory:
-
-```bash
-WORKTREE_PATH="../frankenbeast-issue-2527" # replace with the actual worktree path
-git worktree list
-git worktree remove "$WORKTREE_PATH"
-git worktree prune
-```
-
-Do not add `--force` to worktree removal. A refusal usually means the worktree still contains changes worth reviewing.
-
-## 6. Start the next contribution from current main
+## 7. Start the next contribution from current main
 
 Before selecting another issue, confirm that the checkout is clean and current:
 
 ```bash
-git status --short --branch
-git log -1 --oneline
+git -C "$PRIMARY_CHECKOUT" status --short --branch
+git -C "$PRIMARY_CHECKOUT" log -1 --oneline
 gh issue list --repo djm204/frankenbeast \
   --state open --label "good first issue" --limit 20
 ```
@@ -135,7 +168,9 @@ Choose one unclaimed issue, recheck its discussion and open pull requests, then 
 - [ ] The pull request is `MERGED`, not merely approved or green.
 - [ ] The linked issue is closed.
 - [ ] Intentional local changes are committed, stashed, or moved.
+- [ ] The local and remote branch heads were compared with the merged PR head before deletion.
+- [ ] A linked worktree was removed before its branch.
 - [ ] Local `main` matches the current upstream `main`.
 - [ ] Your fork's `main` was updated without a force-push.
-- [ ] Only the merged contribution branch (matching the PR's full head commit ID) and its clean worktree were removed.
+- [ ] Only the verified merged contribution branch and its clean worktree were removed.
 - [ ] The next issue starts on a new branch from current `main`.
