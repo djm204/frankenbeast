@@ -17,7 +17,7 @@ from pathlib import Path
 
 WORKSPACE = Path(
     os.environ.get("PR_REVIEWER_WORKSPACE", str(Path(__file__).resolve().parents[1]))
-)
+).resolve()
 DB_FILE = WORKSPACE / ".fbeast/scans.db"
 AGY_PATH = os.environ.get("PR_REVIEWER_AGY_PATH", "agy")
 
@@ -96,7 +96,7 @@ def get_open_prs():
                 "--json",
                 "number,author,headRefOid",
                 "--limit",
-                "50",
+                "10000",
             ],
             cwd=WORKSPACE,
             stderr=subprocess.DEVNULL,
@@ -163,7 +163,7 @@ def read_gh_diff(pr_number):
     if process.stdout is None:
         process.kill()
         process.wait()
-        return ""
+        raise RuntimeError(f"gh pr diff for PR #{pr_number} did not provide stdout")
 
     try:
         diff = read_process_stdout(process)
@@ -177,7 +177,9 @@ def read_gh_diff(pr_number):
             process.kill()
             return_code = process.wait()
         if not truncated and return_code != 0:
-            return ""
+            raise RuntimeError(
+                f"gh pr diff failed for PR #{pr_number} with exit code {return_code}"
+            )
         return diff
     except Exception:
         process.stdout.close()
@@ -227,7 +229,9 @@ def get_pr_diff(pr_number):
                 f"Error fetching diff via gh for PR #{pr_number}: {fallback_error}",
                 file=sys.stderr,
             )
-            return ""
+            raise RuntimeError(
+                f"Unable to fetch diff for PR #{pr_number} through API or gh"
+            ) from fallback_error
 
 
 def add_diff_truncation_notice(review_body, diff_content):
@@ -266,6 +270,24 @@ def scan_diff_for_exploits(diff_content):
                         f"* **Line {line_num}** (`{label}`): `{safe_line}`"
                     )
     return warnings
+
+
+def decode_agy_result(return_code, stdout, stderr):
+    output_was_capped = len(stdout) > MAX_REVIEW_BYTES or (
+        return_code != 0 and len(stdout) >= MAX_REVIEW_BYTES
+    )
+    if output_was_capped:
+        return (
+            stdout[:MAX_REVIEW_BYTES]
+            + b"\n... [REVIEW OUTPUT TRUNCATED] ..."
+        ).decode("utf-8", errors="replace")
+    if return_code == 0:
+        return stdout.decode("utf-8", errors="replace")
+    print(
+        f"Agy review failed: {stderr.decode('utf-8', errors='replace')}",
+        file=sys.stderr,
+    )
+    return ""
 
 
 def run_agy_review(diff_content):
@@ -313,15 +335,7 @@ def run_agy_review(diff_content):
             stdout = stdout_file.read(MAX_REVIEW_BYTES + 1)
             stderr_file.seek(0)
             stderr = stderr_file.read(MAX_REVIEW_BYTES + 1)
-        if return_code == 0:
-            if len(stdout) > MAX_REVIEW_BYTES:
-                stdout = stdout[:MAX_REVIEW_BYTES] + b"\n... [REVIEW OUTPUT TRUNCATED] ..."
-            return stdout.decode("utf-8", errors="replace")
-        print(
-            f"Agy review failed: {stderr.decode('utf-8', errors='replace')}",
-            file=sys.stderr,
-        )
-        return ""
+        return decode_agy_result(return_code, stdout, stderr)
     except Exception as error:
         print(f"Agy execution exception: {error}", file=sys.stderr)
         return ""
