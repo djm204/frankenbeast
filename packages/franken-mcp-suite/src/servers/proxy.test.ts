@@ -128,6 +128,29 @@ describe('proxy server', () => {
       );
     });
 
+    it('resolves project-root placeholders in active config paths', async () => {
+      const placeholderServer = createProxyServer({
+        dbPath: '$FBEAST_ROOT/.fbeast/beast.db',
+        root: '/tmp/placeholder-project',
+        configPath: '$FBEAST_ROOT/.fbeast/config.json',
+        governance: { check: gateCheck },
+        audit: { record: auditRecord },
+      });
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+      vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
+
+      await placeholderServer.tools.find((tool) => tool.name === 'execute_tool')!
+        .handler({ tool: 'test_tool', args: { key: 'val' } });
+
+      expect(mockCreateAdapterSet).toHaveBeenCalledWith(
+        '/tmp/placeholder-project/.fbeast/beast.db',
+        {
+          root: '/tmp/placeholder-project',
+          configPath: '/tmp/placeholder-project/.fbeast/config.json',
+        },
+      );
+    });
+
     it('calls through to handler and returns its result', async () => {
       const fakeResult = { content: [{ type: 'text', text: 'tool executed' }] };
       const fakeHandler = vi.fn().mockResolvedValue(fakeResult);

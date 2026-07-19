@@ -1,7 +1,7 @@
 import { SkillTrigger, TriggerRegistry, evaluateHighRiskActionPolicy } from '@franken/governor';
 import type { HighRiskActionClass, HighRiskActionEvidence, TriggerResult, TriggerSeverity } from '@franken/governor';
 import { CostCalculator, DEFAULT_PRICING } from '@franken/observer';
-import { SkillToolManifestSchema, type ToolDefinition } from '@franken/types';
+import { McpConfigSchema, SkillToolManifestSchema, type ToolDefinition } from '@franken/types';
 import { lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -804,16 +804,22 @@ function readEnabledSkills(configPath: string): Set<string> | undefined {
   }
 }
 
-function readSkillServerNames(skillDir: string): Set<string> {
+function readSkillServerNames(skillDir: string): { names: Set<string>; valid: boolean } {
   try {
-    if (!lstatSync(join(skillDir, 'mcp.json')).isFile()) return new Set();
+    if (!lstatSync(join(skillDir, 'mcp.json')).isFile()) return { names: new Set(), valid: false };
     const config = JSON.parse(readFileSync(join(skillDir, 'mcp.json'), 'utf8')) as unknown;
-    if (config === null || typeof config !== 'object' || Array.isArray(config)) return new Set();
-    const servers = (config as Record<string, unknown>)['mcpServers'];
-    if (servers === null || typeof servers !== 'object' || Array.isArray(servers)) return new Set();
-    return new Set(Object.keys(servers));
+    const rawServers = config !== null && typeof config === 'object' && !Array.isArray(config)
+      ? (config as Record<string, unknown>)['mcpServers']
+      : undefined;
+    const rawNames = rawServers !== null && typeof rawServers === 'object' && !Array.isArray(rawServers)
+      ? new Set(Object.keys(rawServers))
+      : new Set<string>();
+    const parsed = McpConfigSchema.safeParse(config);
+    return parsed.success
+      ? { names: new Set(Object.keys(parsed.data.mcpServers)), valid: true }
+      : { names: rawNames, valid: false };
   } catch {
-    return new Set();
+    return { names: new Set(), valid: false };
   }
 }
 
@@ -841,15 +847,16 @@ function skillRequiresHitl(configPath: string | undefined, skillsDirs: string[],
         }
       }
     } catch {
-      // An explicit active-config skill root may not exist; retain the legacy
-      // database-adjacent root as a fallback for separately stored configs.
+      // An external active-config skill root may not exist; the trusted
+      // database-adjacent root is checked first and external manifests are only
+      // a fallback when the project has no same-named installed skill.
     }
   }
-  if (skillDirectories.size === 0) return !configUnreadable;
+  if (skillDirectories.size === 0) return false;
 
   for (const [skillName, skillDir] of skillDirectories) {
     if (!configUnreadable && !enabledSkills.has(skillName)) continue;
-    const serverNames = readSkillServerNames(skillDir);
+    const { names: serverNames, valid: serverConfigValid } = readSkillServerNames(skillDir);
     let toolNames: string[] = [];
 
     if (mcpQualifiedName !== undefined) {
@@ -874,6 +881,11 @@ function skillRequiresHitl(configPath: string | undefined, skillsDirs: string[],
       if (matchesSkillAlias && serverNames.size === 0) return true;
       toolNames = [slashQualifiedAction.toolName];
     }
+
+    // A declared server from a malformed MCP manifest is not trusted to opt out
+    // of review. Preserve its raw key only to recognize stale client calls and
+    // fail them closed.
+    if (!serverConfigValid) return true;
 
     // A malformed active config cannot tell us whether an installed matching
     // skill is enabled. Keep already-exposed or stale client registrations
@@ -1045,8 +1057,8 @@ export function createGovernorAdapter(dbPath: string, configPath?: string): Gove
   const installedSkillsDirs = dbPath === ':memory:'
     ? []
     : [...new Set([
-        ...(configPath === undefined ? [] : [join(dirname(configPath), 'skills')]),
         join(dirname(dbPath), 'skills'),
+        ...(configPath === undefined ? [] : [join(dirname(configPath), 'skills')]),
       ])];
   const costCalculator = new CostCalculator(DEFAULT_PRICING, {
     onUnknownModel: (model) => {

@@ -316,6 +316,64 @@ describe('GovernorAdapter', () => {
       .resolves.toMatchObject({ decision: 'review_recommended' });
   });
 
+  it('does not let an external config root shadow a project skill manifest', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const alternateConfigDir = join(dbPath, '..', 'alternate');
+    installSkill(dbPath, 'reporting', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]);
+    installSkillAtConfigDir(alternateConfigDir, 'reporting', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: false,
+      },
+    ]);
+
+    const governor = createGovernorAdapter(dbPath, join(alternateConfigDir, 'config.json'));
+
+    await expect(governor.check({ action: 'mcp__reporting__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('does not gate unrelated MCP calls when enabled skill roots are missing', async () => {
+    const dbPath = tracked(tmpDbPath());
+    writeFileSync(join(dbPath, '..', 'config.json'), JSON.stringify({
+      skills: { enabled: ['missing-skill'] },
+    }));
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__fbeast-memory__fbeast_memory_query', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+  });
+
+  it('fails closed when a declared MCP server has an invalid manifest entry', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'reporting', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: false,
+      },
+    ]);
+    writeFileSync(join(dbPath, '..', 'skills', 'reporting', 'mcp.json'), JSON.stringify({
+      mcpServers: { reporting: {} },
+    }));
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__reporting__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
   it('fails closed for qualified skill calls when the active config is unreadable', async () => {
     const dbPath = tracked(tmpDbPath());
     installSkill(dbPath, 'reporting', [
