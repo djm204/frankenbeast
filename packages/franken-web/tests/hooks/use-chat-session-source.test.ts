@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 
 const sourcePath = resolve(process.cwd(), 'src/hooks/use-chat-session.ts');
 const source = readFileSync(sourcePath, 'utf8');
+const stateSourcePath = resolve(process.cwd(), 'src/hooks/chat-session-state.ts');
+const stateSource = readFileSync(stateSourcePath, 'utf8');
 
 describe('useChatSession source hygiene', () => {
   const patchAdditionMarker = new RegExp(`^\\s*${'\\+'}\\s*(?:\\/\\/|const|if|try|catch|socket|set\\w*|return|throw|await|for|function)\\b`, 'm');
@@ -40,5 +42,12 @@ describe('useChatSession source hygiene', () => {
     expect(existsSync(helperModulePath)).toBe(true);
     expect(source.split('\n').length).toBeLessThan(900);
     expect(readFileSync(helperModulePath, 'utf8')).toContain('export function preserveLocalRecoveryMessages');
+  });
+
+  it('types websocket payloads from the shared @franken/types contract', () => {
+    expect(stateSource).toContain("type ServerSocketEvent");
+    expect(stateSource).toContain('from \'@franken/types\'');
+    expect(stateSource).not.toMatch(/type SocketEventBase/);
+    expect(stateSource).not.toMatch(/ServerSocketPayload/);
   });
 });

@@ -7,6 +7,7 @@ import {
 } from '../lib/api';
 import {
   ServerSocketEventSchema,
+  type ServerSocketEvent,
   isoNow,
 } from '@franken/types';
 import {
@@ -28,7 +29,6 @@ import {
   shouldApplySocketEvent,
   updateReceipt,
   type PendingSend,
-  type ServerSocketPayload,
 } from './chat-session-state';
 
 export type SessionStatus = 'idle' | 'connecting' | 'sending' | 'streaming' | 'error';
@@ -420,7 +420,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         return;
       }
 
-      const payload = parsed.data as ServerSocketPayload;
+      const payload = parsed.data as ServerSocketEvent;
       if (!shouldApplySocketEvent(
         payload,
         processedSocketEventIdsRef.current,
