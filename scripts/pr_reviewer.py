@@ -569,6 +569,7 @@ def process_prs():
         security_warnings = scan_diff_for_exploits(diff_content)
         diff_truncated = diff_content.endswith(DIFF_TRUNCATION_MARKER)
         secret_bearing_diff = diff_contains_secret(diff_content)
+        model_review_unavailable = False
         if secret_bearing_diff:
             review_body = (
                 "### Automated model review skipped\n\n"
@@ -579,6 +580,7 @@ def process_prs():
             )
         else:
             review_body = run_agy_review(diff_content)
+            model_review_unavailable = not review_body.strip()
         if not review_body.strip():
             if security_warnings or diff_truncated:
                 review_body = (
@@ -623,8 +625,10 @@ def process_prs():
             diff_truncated=diff_truncated,
             repository=repository,
         )
-        status = "completed" if posted else "failed"
-        if not posted:
+        if posted:
+            status = "incomplete" if model_review_unavailable else "completed"
+        else:
+            status = "failed"
             fatal_failures.append(f"PR #{pr_number}: review could not be posted")
         cursor.execute(
             "UPDATE pr_reviews SET status = ?, reviewed_at = ? WHERE pr_number = ?",

@@ -362,6 +362,39 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
 
         self.assertEqual(get_diff.call_count, 2)
 
+    def test_model_outage_review_is_retried_on_the_same_head(self):
+        pull_request = {
+            "number": 42,
+            "author": {"login": "contributor"},
+            "headRefOid": "a" * 40,
+        }
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            self.reviewer, "WORKSPACE", Path(directory)
+        ), mock.patch.object(
+            self.reviewer, "DB_FILE", Path(directory) / "scans.db"
+        ), mock.patch.dict(
+            os.environ,
+            {
+                "GITHUB_PERSONAL_ACCESS_TOKEN": "token",
+                "PR_REVIEWER_REPOSITORY": "owner/repository",
+            },
+        ), mock.patch.object(
+            self.reviewer, "get_open_prs", return_value=[pull_request]
+        ), mock.patch.object(
+            self.reviewer, "get_pr_diff", return_value="+safe change"
+        ) as get_diff, mock.patch.object(
+            self.reviewer,
+            "run_agy_review",
+            side_effect=["", "VERDICT: APPROVE"],
+        ), mock.patch.object(
+            self.reviewer, "post_pr_review", return_value=True
+        ) as post_review:
+            self.reviewer.process_prs()
+            self.reviewer.process_prs()
+
+        self.assertEqual(get_diff.call_count, 2)
+        self.assertEqual(post_review.call_count, 2)
+
     def test_repository_is_derived_from_origin(self):
         result = mock.Mock(stdout="git@github.com:owner/repository.git\n")
         with mock.patch.object(self.reviewer.subprocess, "run", return_value=result):
