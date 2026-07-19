@@ -181,10 +181,6 @@ function trustedSkillToolManifestFor(context: ToolPolicyValidationContext, skill
     : context.trustedSkillToolManifests;
   if (!manifests) return undefined;
 
-  if (Object.hasOwn(manifests, skill)) {
-    return arrayOfTools(manifests[skill]);
-  }
-
   const separator = skill.indexOf('/');
   if (separator > 0) {
     const parentSkill = skill.slice(0, separator);
@@ -195,9 +191,17 @@ function trustedSkillToolManifestFor(context: ToolPolicyValidationContext, skill
     return parentTools.includes(toolId) ? [toolId] : undefined;
   }
 
-  return Object.values(manifests).some((tools) => arrayOfTools(tools).includes(skill))
-    ? [skill]
+  const exactManifest = Object.hasOwn(manifests, skill)
+    ? arrayOfTools(manifests[skill])
     : undefined;
+  const isToolDescriptor = Object.values(manifests)
+    .some((tools) => arrayOfTools(tools).includes(skill));
+  if (!exactManifest && !isToolDescriptor) return undefined;
+
+  return [...new Set([
+    ...(exactManifest ?? []),
+    ...(isToolDescriptor ? [skill] : []),
+  ])];
 }
 
 export function defaultAgentToolPolicyConfig(

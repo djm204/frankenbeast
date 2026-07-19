@@ -257,6 +257,26 @@ describe('role tool manifest policy', () => {
     }
   });
 
+  it('fails closed when a bare tool descriptor collides with an installed skill id', () => {
+    expect(validateAgentRoleTools({
+      agentRole: 'triage',
+      requestedTools: ['read_file'],
+      skills: ['terminal'],
+    }, {
+      trustedSkillToolManifests: {
+        terminal: [],
+        'ops-tools': ['terminal'],
+      },
+    })).toMatchObject({
+      allowed: false,
+      role: 'triage',
+      denials: expect.arrayContaining([expect.objectContaining({
+        requestedTool: 'terminal',
+        reason: expect.stringContaining("not allowed for role 'triage'"),
+      })]),
+    });
+  });
+
   it('derives explicit policy fields for tracked chat init shells', () => {
     expect(defaultAgentToolPolicyConfig('martin-loop', 'martin-loop')).toEqual({
       agentRole: 'coding',
