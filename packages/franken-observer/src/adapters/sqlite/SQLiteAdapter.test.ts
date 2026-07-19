@@ -45,8 +45,7 @@ describe('SQLiteAdapter', () => {
       'busy_timeout = 5000',
       'journal_mode = WAL',
       'foreign_keys = ON',
-      'user_version',
-      'user_version = 1',
+      "index_list('spans')",
     ])
     expect(execMock).toHaveBeenCalledTimes(1)
 
@@ -54,10 +53,10 @@ describe('SQLiteAdapter', () => {
   })
 
   it('executes schema DDL only once when multiple adapters open the same initialized database', () => {
-    let schemaVersion = 0
     pragmaMock.mockImplementation((statement: string) => {
-      if (statement === 'user_version') return schemaVersion
-      if (statement === 'user_version = 1') schemaVersion = 1
+      if (statement === "index_list('spans')") {
+        return execMock.mock.calls.length === 0 ? [] : [{ name: 'idx_spans_traceId_startedAt' }]
+      }
       return undefined
     })
 
