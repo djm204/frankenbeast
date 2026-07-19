@@ -6,6 +6,7 @@ import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-bea
 import { AgentService } from '../../../src/beasts/services/agent-service.js';
 import { AgentInitService } from '../../../src/beasts/services/agent-init-service.js';
 import { MaintenanceModeError } from '../../../src/beasts/services/maintenance-mode-service.js';
+import { AgentToolPolicyError } from '../../../src/beasts/services/role-tool-manifest.js';
 
 describe('AgentInitService', () => {
   let workDir: string | undefined;
@@ -158,5 +159,44 @@ describe('AgentInitService', () => {
     const detail = agents.getAgentDetail(agent.id);
     expect(detail.agent.status).toBe('stopped');
     expect(detail.events.map((event) => event.type)).toContain('agent.dispatch.paused');
+  });
+
+  it('marks chat-created agents stopped when tool policy blocks dispatch', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-agent-init-'));
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
+    const validation = {
+      allowed: false,
+      role: 'docs' as const,
+      rawRole: 'docs',
+      requestedTools: ['terminal'],
+      denials: [{ role: 'docs' as const, requestedTool: 'terminal', reason: 'not allowed' }],
+    };
+    const init = new AgentInitService(agents, {
+      createRun: vi.fn().mockRejectedValue(new AgentToolPolicyError(validation)),
+    } as never, () => '2026-03-11T00:00:00.000Z');
+    const agent = agents.createAgent({
+      definitionId: 'design-interview',
+      source: 'chat',
+      createdByUser: 'chat-session:sess-policy',
+      initAction: { kind: 'design-interview', command: '/interview', config: {}, chatSessionId: 'sess-policy' },
+      initConfig: { agentRole: 'docs', requestedTools: ['read_file', 'write_file'], skills: [] },
+      chatSessionId: 'sess-policy',
+    });
+
+    await expect(init.dispatchAgent(agent.id, {
+      definitionId: 'design-interview',
+      chatSessionId: 'sess-policy',
+      config: {},
+    })).rejects.toThrow(AgentToolPolicyError);
+
+    const detail = agents.getAgentDetail(agent.id);
+    expect(detail.agent.status).toBe('stopped');
+    expect(detail.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'agent.dispatch.denied',
+        payload: { validation },
+      }),
+    ]));
   });
 });

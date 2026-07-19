@@ -120,9 +120,24 @@ function arrayOfTools(value: unknown): string[] {
     : [];
 }
 
-function requestedToolsFromConfig(config: Readonly<Record<string, unknown>>): string[] {
-  const toolAliases = [config.requestedTools, config.enabledTools, config.toolManifest, config.tools];
-  return [...new Set(toolAliases.flatMap(arrayOfTools))];
+interface RequestedToolsConfig {
+  readonly explicit: boolean;
+  readonly malformed: boolean;
+  readonly tools: readonly string[];
+}
+
+function requestedToolsFromConfig(config: Readonly<Record<string, unknown>>): RequestedToolsConfig {
+  const aliases = ['requestedTools', 'enabledTools', 'toolManifest', 'tools'] as const;
+  const explicitAliases = aliases.filter(alias => Object.hasOwn(config, alias));
+  return {
+    explicit: explicitAliases.length > 0,
+    malformed: explicitAliases.some((alias) => {
+      const value = config[alias];
+      return !Array.isArray(value)
+        || value.some(tool => typeof tool !== 'string' || tool.trim().length === 0);
+    }),
+    tools: [...new Set(explicitAliases.flatMap(alias => arrayOfTools(config[alias])))],
+  };
 }
 
 interface SelectedSkillsConfig {
@@ -154,7 +169,7 @@ function runtimeToolsFromConfig(
   const gitConfig = config.gitConfig;
   if (typeof gitConfig === 'object' && gitConfig !== null && !Array.isArray(gitConfig)) {
     const prCreation = (gitConfig as Readonly<Record<string, unknown>>).prCreation;
-    if (prCreation === 'auto' || prCreation === 'manual') {
+    if (prCreation === true || prCreation === 'auto' || prCreation === 'manual') {
       tools.push('github.pr');
     }
   }
@@ -184,14 +199,14 @@ function skillToolCapability(skill: string, tool: string): string {
     || normalizedTool.startsWith('mcp__github__');
   if (!isGitHubTool) return tool;
 
+  if (/^(?:mcp__github__|github[._])?(?:get|list|read|search|view|check)_/u.test(normalizedTool)) {
+    return 'github.read';
+  }
   if (normalizedTool.includes('comment') || normalizedTool.includes('review')) {
     return 'github.comment';
   }
   if (normalizedTool.includes('pull_request') || /(^|[._])pr([._]|$)/u.test(normalizedTool)) {
     return 'github.pr';
-  }
-  if (/^(?:mcp__github__|github[._])?(?:get|list|read|search|view|check)_/u.test(normalizedTool)) {
-    return 'github.read';
   }
   return tool;
 }
@@ -287,7 +302,8 @@ export function validateAgentRoleTools(
   const policyConfig = { ...context.initActionConfig, ...initConfig };
   const rawRole = rawRoleFromConfig(policyConfig, context);
   const role = normalizeRole(rawRole);
-  const explicitTools = requestedToolsFromConfig(policyConfig);
+  const requestedToolsConfig = requestedToolsFromConfig(policyConfig);
+  const explicitTools = requestedToolsConfig.tools;
   const runtimeTools = runtimeToolsFromConfig(policyConfig, context);
   const workflowTools = workflowRequiredTools(context);
   const selectedSkills = selectedSkillsFromConfig(policyConfig);
@@ -297,6 +313,13 @@ export function validateAgentRoleTools(
       role: role ?? rawRole ?? '<missing-role>',
       requestedTool: '<malformed-skills-allowlist>',
       reason: 'agent creation skills allowlist must be an explicit array of strings; use an empty skills array to disable installed skill tools',
+    }]
+    : [];
+  const malformedToolsDenial = requestedToolsConfig.malformed
+    ? [{
+      role: role ?? rawRole ?? '<missing-role>',
+      requestedTool: '<malformed-tool-manifest>',
+      reason: 'agent creation tool manifest fields must be explicit arrays of non-empty strings',
     }]
     : [];
   const implicitSkillsDenial = selectedSkills.explicit
@@ -323,6 +346,7 @@ export function validateAgentRoleTools(
       : [];
     const denials = [
       ...missingManifestDenial,
+      ...malformedToolsDenial,
       ...malformedSkillsDenial,
       ...implicitSkillsDenial,
       ...explicitTools.map((requestedTool) => ({
@@ -340,13 +364,13 @@ export function validateAgentRoleTools(
   const effectiveTools = [...new Set([...explicitTools, ...runtimeTools, ...workflowTools, ...skillDenials
     .filter((denial) => !denial.requestedTool.startsWith('skill:'))
     .map((denial) => denial.requestedTool)])];
-  if (explicitTools.length === 0) {
+  if (!requestedToolsConfig.explicit || explicitTools.length === 0) {
     return {
       allowed: false,
       role,
       rawRole,
       requestedTools,
-      denials: [...malformedSkillsDenial, {
+      denials: [...malformedToolsDenial, ...malformedSkillsDenial, {
         role,
         requestedTool: '<missing-tool-manifest>',
         reason: `role '${role}' requests must include an explicit least-privilege tool manifest`,
@@ -359,6 +383,7 @@ export function validateAgentRoleTools(
     (tool) => allowedTools.has(tool) && !explicitTools.includes(tool),
   );
   const denials = [
+    ...malformedToolsDenial,
     ...malformedSkillsDenial,
     ...implicitSkillsDenial,
     ...skillDenials.filter((denial) => denial.requestedTool.startsWith('skill:')),

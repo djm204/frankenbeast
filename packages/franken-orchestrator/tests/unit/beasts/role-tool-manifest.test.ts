@@ -225,6 +225,27 @@ describe('role tool manifest policy', () => {
     });
   });
 
+  it('rejects malformed tool manifest aliases instead of silently filtering entries', () => {
+    for (const malformedPolicy of [
+      { requestedTools: ['read_file', 123] },
+      { tools: [null] },
+      { enabledTools: true },
+      { toolManifest: ['read_file', ''] },
+    ]) {
+      expect(validateAgentRoleTools({
+        agentRole: 'triage',
+        ...malformedPolicy,
+        skills: [],
+      })).toMatchObject({
+        allowed: false,
+        denials: expect.arrayContaining([expect.objectContaining({
+          requestedTool: '<malformed-tool-manifest>',
+          reason: expect.stringContaining('arrays of non-empty strings'),
+        })]),
+      });
+    }
+  });
+
   it('accepts trusted prompt-only skill manifests with no runtime tools', () => {
     expect(validateAgentRoleTools({
       agentRole: 'triage',
@@ -266,12 +287,12 @@ describe('role tool manifest policy', () => {
   });
 
   it('maps trusted GitHub read tools to role capability ids', () => {
-    for (const selectedSkill of ['github', 'github/list_repos', 'list_repos']) {
+    for (const selectedSkill of ['github', 'github/list_repos', 'list_repos', 'github/get_pull_request', 'github/list_pull_request_files']) {
       expect(validateAgentRoleTools({
         agentRole: 'triage',
         requestedTools: ['read_file', 'github.read'],
         skills: [selectedSkill],
-      }, { trustedSkillToolManifests: { github: ['list_repos'] } })).toMatchObject({
+      }, { trustedSkillToolManifests: { github: ['list_repos', 'get_pull_request', 'list_pull_request_files'] } })).toMatchObject({
         allowed: true,
         denials: [],
       });
@@ -298,6 +319,16 @@ describe('role tool manifest policy', () => {
       skills: [],
       gitConfig: { prCreation: 'manual' },
     })).toMatchObject({ allowed: true, denials: [] });
+
+    expect(validateAgentRoleTools({
+      agentRole: 'coding',
+      requestedTools: ['read_file'],
+      skills: [],
+      gitConfig: { prCreation: true },
+    })).toMatchObject({
+      allowed: false,
+      denials: expect.arrayContaining([expect.objectContaining({ requestedTool: 'github.pr' })]),
+    });
   });
 
   it('resolves selected runtime descriptor ids to their trusted parent skill manifest', () => {

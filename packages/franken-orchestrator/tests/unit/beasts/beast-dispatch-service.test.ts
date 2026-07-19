@@ -93,6 +93,7 @@ describe('BeastDispatchService', () => {
       executionMode: 'process',
     });
     expect(run.configSnapshot.provider).toBe('prod-claude');
+    expect(run.configSnapshot).not.toHaveProperty('skills');
     expect(executors.process.start).not.toHaveBeenCalled();
     expect(repo.listRuns()).toHaveLength(1);
   });

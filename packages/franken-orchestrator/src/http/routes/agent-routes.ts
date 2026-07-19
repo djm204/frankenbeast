@@ -62,6 +62,13 @@ const AGENT_TOOL_POLICY_CONFIG_KEYS = [
   'skills',
 ] as const;
 
+const AGENT_TOOL_MANIFEST_KEYS = [
+  'requestedTools',
+  'enabledTools',
+  'toolManifest',
+  'tools',
+] as const;
+
 function pickAgentToolPolicyConfig(
   config: Readonly<Record<string, unknown>>,
 ): Readonly<Record<string, unknown>> {
@@ -105,6 +112,15 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
   app.post('/v1/beasts/agents', async (c) => {
     const body = validateBody(CreateAgentBody, await parseJsonBody(c));
     const actionPolicyConfig = pickAgentToolPolicyConfig(body.initAction.config);
+    const hasExplicitToolManifest = AGENT_TOOL_MANIFEST_KEYS.some(
+      key => Object.hasOwn(actionPolicyConfig, key) || Object.hasOwn(body.initConfig, key),
+    );
+    const policyDefaults: Record<string, unknown> = {
+      ...defaultAgentToolPolicyConfig(body.definitionId, body.initAction.kind),
+    };
+    if (hasExplicitToolManifest) {
+      delete policyDefaults.requestedTools;
+    }
     const explicitRoleAlias = body.initConfig.agentRole
       ?? body.initConfig.role
       ?? body.initConfig.laneRole
@@ -112,7 +128,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       ?? actionPolicyConfig.role
       ?? actionPolicyConfig.laneRole;
     const initConfigWithAliases = {
-      ...defaultAgentToolPolicyConfig(body.definitionId, body.initAction.kind),
+      ...policyDefaults,
       ...actionPolicyConfig,
       ...body.initConfig,
     };

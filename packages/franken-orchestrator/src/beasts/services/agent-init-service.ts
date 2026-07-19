@@ -1,7 +1,7 @@
 import type { TrackedAgent, TrackedAgentInitActionKind, BeastExecutionMode, BeastRun } from '../types.js';
 import type { BeastDispatchService } from './beast-dispatch-service.js';
 import { AgentService } from './agent-service.js';
-import { defaultAgentToolPolicyConfig } from './role-tool-manifest.js';
+import { AgentToolPolicyError, defaultAgentToolPolicyConfig } from './role-tool-manifest.js';
 import { MaintenanceModeError } from './maintenance-mode-service.js';
 import { isoNow } from '@franken/types';
 
@@ -95,6 +95,15 @@ export class AgentInitService {
         ...(request.executionMode ? { executionMode: request.executionMode } : {}),
       });
     } catch (error) {
+      if (error instanceof AgentToolPolicyError) {
+        this.agents.updateAgent(agentId, { status: 'stopped' });
+        this.agents.appendEvent(agentId, {
+          level: 'warning',
+          type: 'agent.dispatch.denied',
+          message: error.message,
+          payload: { validation: error.validation },
+        });
+      }
       if (error instanceof MaintenanceModeError) {
         this.agents.updateAgent(agentId, { status: 'stopped' });
         this.agents.appendEvent(agentId, {

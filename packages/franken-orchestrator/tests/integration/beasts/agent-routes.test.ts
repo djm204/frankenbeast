@@ -30,7 +30,10 @@ const TMP = join(__dirname, '__fixtures__/agent-routes');
 
 const CODING_POLICY = {
   agentRole: 'coding',
-  requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+  requestedTools: [
+    'read_file', 'search_files', 'write_file', 'patch', 'terminal',
+    'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment',
+  ],
   skills: [],
 } as const;
 
@@ -471,6 +474,40 @@ describe('agent routes integration', () => {
     expect(agents.listAgents()).toEqual([]);
   });
 
+  it('does not seed default requested tools over an explicit tool manifest alias', async () => {
+    const { app, operatorToken, agents } = createIntegratedBeastApp();
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer ' + operatorToken,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'chunk-plan',
+        autoDispatch: false,
+        initAction: { kind: 'chunk-plan', command: 'chunk-plan', config: {} },
+        initConfig: {
+          agentRole: 'docs',
+          tools: ['read_file'],
+          skills: [],
+        },
+      }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'AGENT_TOOL_POLICY_DENIED',
+        details: { validation: { denials: expect.arrayContaining([
+          expect.objectContaining({ requestedTool: 'search_files' }),
+          expect.objectContaining({ requestedTool: 'write_file' }),
+        ]) } },
+      },
+    });
+    expect(agents.listAgents()).toEqual([]);
+  });
+
   it('honors policy fields supplied in init action config before applying dashboard defaults', async () => {
     const { app, operatorToken, agents } = createIntegratedBeastApp();
 
@@ -603,7 +640,10 @@ describe('agent routes integration', () => {
     const [agent] = agents.listAgents();
     expect(agent.initConfig).toMatchObject({
       agentRole: 'coding',
-      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal'],
+      requestedTools: [
+        'read_file', 'search_files', 'write_file', 'patch', 'terminal',
+        'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment',
+      ],
       skills: [],
     });
   });

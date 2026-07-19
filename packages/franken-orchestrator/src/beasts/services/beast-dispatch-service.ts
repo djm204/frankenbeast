@@ -246,8 +246,11 @@ export class BeastDispatchService {
     const parsedConfigSnapshot: Readonly<Record<string, unknown>> = moduleConfig
       ? { ...defaultAgentToolPolicyConfig(definition.id), ...config, ...directRunPolicyConfig, modules: moduleConfig }
       : { ...defaultAgentToolPolicyConfig(definition.id), ...config, ...directRunPolicyConfig };
-    const configSnapshot = preserveTrackedAgentPolicyConfig(parsedConfigSnapshot, request.config, trackedAgent);
-    this.assertRoleToolManifestAllows(request, configSnapshot);
+    const policyConfigSnapshot = preserveTrackedAgentPolicyConfig(parsedConfigSnapshot, request.config, trackedAgent);
+    this.assertRoleToolManifestAllows(request, policyConfigSnapshot);
+    const configSnapshot = !trackedAgent && !Object.hasOwn(request.config, 'skills')
+      ? Object.fromEntries(Object.entries(policyConfigSnapshot).filter(([key]) => key !== 'skills'))
+      : policyConfigSnapshot;
     const executionMode = request.executionMode ?? definition.executionModeDefault;
     const createdAt = new Date(wallClockNow()).toISOString();
     const linkedAt = new Date(wallClockNow()).toISOString();
