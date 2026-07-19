@@ -344,11 +344,7 @@ export class SafetyEvaluator implements Evaluator {
       if (char === ')' && stack.length > 1) {
         const group = stack.pop()!;
         const groupContent = pattern.slice(group.startIndex + 1, i);
-        if (
-          (!this.parsingUnicodeSets ||
-            !this.hasUnicodeSetSemanticSyntax(groupContent)) &&
-          this.hasOverlappingAlternation(groupContent)
-        ) {
+        if (this.hasOverlappingAlternation(groupContent)) {
           group.containsAmbiguousAlternation = true;
         }
         if (group.containsQuantifiedAtom) {
@@ -402,17 +398,44 @@ export class SafetyEvaluator implements Evaluator {
   }
 
   private hasUnicodeSetSemanticSyntax(pattern: string): boolean {
-    return (
-      pattern.includes('&&') ||
-      pattern.includes('--') ||
-      /\\[pPq]\{/.test(pattern)
-    );
+    for (let i = 0; i < pattern.length; i += 1) {
+      if (pattern[i] === '\\') {
+        if (
+          (pattern[i + 1] === 'p' || pattern[i + 1] === 'P') &&
+          pattern[i + 2] === '{'
+        ) {
+          return true;
+        }
+        i += 1;
+        continue;
+      }
+
+      if (pattern[i] !== '[') continue;
+      const end = this.skipCharacterClass(pattern, i, true);
+      const characterClass = pattern.slice(i, end + 1);
+      if (
+        characterClass.includes('&&') ||
+        characterClass.includes('--') ||
+        /\\[pPq]\{/.test(characterClass)
+      ) {
+        return true;
+      }
+      i = end;
+    }
+
+    return false;
   }
 
   private hasOverlappingAlternation(groupContent: string): boolean {
     const alternatives = this.splitTopLevelAlternatives(
       this.stripGroupPrefix(groupContent),
-    ).map((alternative) => this.expandSimpleAlternativePrefix(alternative));
+    )
+      .filter(
+        (alternative) =>
+          !this.parsingUnicodeSets ||
+          !this.hasUnicodeSetSemanticSyntax(alternative),
+      )
+      .map((alternative) => this.expandSimpleAlternativePrefix(alternative));
     if (alternatives.length < 2) return false;
 
     return alternatives.some((left, leftIndex) =>
