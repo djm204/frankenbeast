@@ -457,7 +457,7 @@ const app = createGovernorApp({
 });
 ```
 
-Signed callbacks whose `user.id` is absent or not in `slackApproverUserIds` receive `403` and leave the approval pending. An omitted or empty allowlist fails closed.
+Signed callbacks whose `user.id` is absent or not in `slackApproverUserIds` receive a `200` Slack acknowledgement with an ephemeral denial message and leave the approval pending. The transport-level success prevents Slack from replacing the denial with a generic interaction error; it does not authorize or resolve the action. An omitted or empty allowlist fails closed.
 
 ### Signed Approvals (HMAC-SHA256)
 

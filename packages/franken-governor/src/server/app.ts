@@ -561,10 +561,10 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
 
     const slackUserId = payload.user?.id;
     if (!slackUserId || !slackApproverUserIds.has(slackUserId)) {
-      return c.json(
-        { error: { message: 'Slack user is not authorized to resolve approvals' } },
-        403,
-      );
+      return c.json({
+        response_type: 'ephemeral',
+        text: 'You are not authorized to resolve this approval.',
+      });
     }
 
     // Look up the pending approval; unknown requests are rejected.

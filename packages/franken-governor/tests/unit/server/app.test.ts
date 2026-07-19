@@ -737,11 +737,27 @@ describe('Governor Hono Server', () => {
         body: rawBody,
       });
 
-      expect(res.status).toBe(403);
-      expect(await res.json()).toEqual({ error: { message: 'Slack user is not authorized to resolve approvals' } });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        response_type: 'ephemeral',
+        text: 'You are not authorized to resolve this approval.',
+      });
 
       const after = await (await app.request('/health')).json();
       expect(after.pendingApprovals).toBe(1);
+
+      const authorizedBody = JSON.stringify({
+        actions: [{ action_id: 'approve', value: 'req-unauthorized-user' }],
+        user: { id: 'U-AUTHORIZED' },
+      });
+      const authorizedRes = await app.request('/v1/webhook/slack', {
+        method: 'POST',
+        headers: { ...slackHeaders(authorizedBody) },
+        body: authorizedBody,
+      });
+      expect(authorizedRes.status).toBe(200);
+      expect((await authorizedRes.json()).status).toBe('resolved');
+      expect((await (await app.request('/health')).json()).pendingApprovals).toBe(0);
     });
 
     it('fails closed when no Slack approver allowlist is configured', async () => {
@@ -761,7 +777,37 @@ describe('Governor Hono Server', () => {
         body: rawBody,
       });
 
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        response_type: 'ephemeral',
+        text: 'You are not authorized to resolve this approval.',
+      });
+      expect((await (await app.request('/health')).json()).pendingApprovals).toBe(1);
+    });
+
+    it('rejects a signed callback without an immutable Slack user ID', async () => {
+      const app = createGovernorApp({
+        slackSigningSecret: SLACK_SECRET,
+        slackApproverUserIds: ['U-AUTHORIZED'],
+        allowUnsignedApprovalsForTests: true,
+      });
+      await seedApproval(app, 'req-missing-user-id');
+
+      const rawBody = JSON.stringify({
+        actions: [{ action_id: 'approve', value: 'req-missing-user-id' }],
+        user: { username: 'authorized-display-name' },
+      });
+      const res = await app.request('/v1/webhook/slack', {
+        method: 'POST',
+        headers: { ...slackHeaders(rawBody) },
+        body: rawBody,
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        response_type: 'ephemeral',
+        text: 'You are not authorized to resolve this approval.',
+      });
       expect((await (await app.request('/health')).json()).pendingApprovals).toBe(1);
     });
 
