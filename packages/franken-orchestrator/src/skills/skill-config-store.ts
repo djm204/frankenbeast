@@ -43,6 +43,23 @@ export class SkillConfigStore {
   save(enabledSkills: Set<string>): void {
     mkdirSync(dirname(this.configPath), { recursive: true });
 
+    const existing = this.readExistingForSave();
+    existing.skills = {
+      ...((existing.skills as Record<string, unknown>) ?? {}),
+      enabled: [...enabledSkills].sort(),
+    };
+
+    const mode = existsSync(this.configPath)
+      ? statSync(this.configPath).mode & 0o777
+      : 0o600;
+    atomicWriteFileSync(this.configPath, JSON.stringify(existing, null, 2) + '\n', { mode });
+  }
+
+  assertSaveable(): void {
+    this.readExistingForSave();
+  }
+
+  private readExistingForSave(): Record<string, unknown> {
     let existing: Record<string, unknown> = {};
     if (existsSync(this.configPath)) {
       try {
@@ -57,15 +74,6 @@ export class SkillConfigStore {
         });
       }
     }
-
-    existing.skills = {
-      ...((existing.skills as Record<string, unknown>) ?? {}),
-      enabled: [...enabledSkills].sort(),
-    };
-
-    const mode = existsSync(this.configPath)
-      ? statSync(this.configPath).mode & 0o777
-      : 0o600;
-    atomicWriteFileSync(this.configPath, JSON.stringify(existing, null, 2) + '\n', { mode });
+    return existing;
   }
 }

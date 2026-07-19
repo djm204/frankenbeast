@@ -314,6 +314,23 @@ describe('SkillManager + SkillConfigStore integration', () => {
     expect(manager.getEnabledSkills()).toContain('github');
   });
 
+  it('does not persist or mutate toggle state when file removal fails', async () => {
+    store.save(new Set(['github']));
+    const manager = new SkillManager(skillsDir, new Set(['github']), store);
+    await installSkill(manager, 'github');
+    chmodSync(skillsDir, 0o500);
+
+    try {
+      expect(() => manager.remove('github')).toThrow();
+      expect(manager.getEnabledSkills()).toContain('github');
+      expect(store.getEnabledSkills()).toContain('github');
+    } finally {
+      chmodSync(skillsDir, 0o700);
+    }
+
+    expect(manager.exists('github')).toBe(true);
+  });
+
   it('works without configStore (backward compatible)', async () => {
     const manager = new SkillManager(skillsDir, new Set());
     await installSkill(manager, 'github');

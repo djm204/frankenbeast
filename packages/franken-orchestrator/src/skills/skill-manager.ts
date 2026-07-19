@@ -303,16 +303,17 @@ export class SkillManager {
     this.assertSkillsRootStable();
     const nextEnabledSkills = new Set(this.enabledSkills);
     nextEnabledSkills.delete(name);
-    this.configStore?.save(nextEnabledSkills);
-    this.enabledSkills.delete(name);
+    this.configStore?.assertSaveable();
     if (existsSync(skillDir)) {
       if (lstatSync(skillDir).isSymbolicLink()) {
         rmSync(skillDir);
-        return;
+      } else {
+        assertContainedPath(realpathSync(skillDir), this.skillsDirReal, 'skill directory');
+        rmSync(skillDir, { recursive: true });
       }
-      assertContainedPath(realpathSync(skillDir), this.skillsDirReal, 'skill directory');
-      rmSync(skillDir, { recursive: true });
     }
+    this.configStore?.save(nextEnabledSkills);
+    this.enabledSkills.delete(name);
   }
 
   exists(name: string): boolean {
