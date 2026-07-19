@@ -189,6 +189,35 @@ on:
       expect(content).not.toContain('npx turbo run build typecheck lint');
     });
 
+    it('runs coverage and publishes all root and workspace reports as an artifact', () => {
+      const steps = expectSteps(expectCiJob(workflow));
+      const packageJson = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8')) as {
+        scripts?: Record<string, string>;
+      };
+      const coverageStep = expectStepByRun(
+        steps,
+        'npm run test:coverage',
+        'the root and workspace coverage suite',
+      );
+      const uploadStep = expectStepByName(
+        steps,
+        'Upload coverage reports',
+        'the coverage artifact upload',
+      );
+      const uploadWith = expectRecord(uploadStep.with, 'coverage upload inputs');
+
+      expect(coverageStep.name).toBe('Run root and workspace coverage suite');
+      expect(coverageStep['continue-on-error']).toBe(true);
+      expect(packageJson.scripts?.['test:coverage']).toContain('--continue');
+      expect(uploadStep.uses).toBe('actions/upload-artifact@v7');
+      expect(uploadStep.if).toBe('always()');
+      expect(uploadWith.name).toBe('coverage-reports');
+      expect(uploadWith.path).toBe('coverage\npackages/*/coverage\n');
+      expect(uploadWith['if-no-files-found']).toBe('error');
+      expect(uploadWith['retention-days']).toBe(30);
+      expect(steps.indexOf(coverageStep)).toBeLessThan(steps.indexOf(uploadStep));
+    });
+
     it('runs the deterministic root Vitest suite through the shared CI test script', () => {
       const packageJson = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8')) as {
         scripts?: Record<string, string>;

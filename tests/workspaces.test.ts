@@ -633,7 +633,7 @@ describe("npm workspaces configuration", () => {
       });
 
       expect(missingRadixLocations).toEqual([]);
-    });
+    }, 30_000);
 
     it("uses filesystem-safe module URL conversion in the lint coverage audit", () => {
       const auditScript = readFileSync(

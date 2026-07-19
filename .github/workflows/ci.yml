@@ -134,6 +134,21 @@ jobs:
       - name: Run root and package CI test suite
         run: npm run test:ci
 
+      - name: Run root and workspace coverage suite
+        continue-on-error: true
+        run: npm run test:coverage
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-reports
+          path: |
+            coverage
+            packages/*/coverage
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Run orchestrator E2E smoke CI suite
         run: npm run ci:test:e2e
 
