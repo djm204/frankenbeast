@@ -379,9 +379,8 @@ export function createStreamProgressHandler(
         if (event.durationMs !== undefined) parts.push(`${(event.durationMs / 1000).toFixed(1)}s`);
         if (event.costUsd !== undefined) parts.push(`$${event.costUsd.toFixed(4)}`);
         if (event.turns !== undefined && event.turns > 1) parts.push(`${event.turns} turns`);
-        const operation = options.operationLabel?.();
-        const completionLabel = operation ? `${operation} provider call complete` : 'LLM done';
-        write(`  ${ANSI.dim}${completionLabel}${parts.length > 0 ? ` (${parts.join(', ')})` : ''}${ANSI.reset}\n`);
+        const operation = options.operationLabel?.() || 'LLM';
+        write(`  ${ANSI.dim}${operation} provider call complete${parts.length > 0 ? ` (${parts.join(', ')})` : ''}${ANSI.reset}\n`);
         options.onProgressEvent?.({
           type: 'complete',
           ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
@@ -389,8 +388,8 @@ export function createStreamProgressHandler(
           ...(event.turns !== undefined ? { turns: event.turns } : {}),
         });
       } else if (event.type === 'retry') {
-        const operation = options.operationLabel?.();
-        write(`  ${ANSI.dim}${operation ? `${operation} provider retrying...` : 'Provider retrying...'}${ANSI.reset}\n`);
+        const operation = options.operationLabel?.() || 'LLM';
+        write(`  ${ANSI.dim}${operation} provider retrying...${ANSI.reset}\n`);
       } else if (event.type === 'error') {
         write(`  ${ANSI.dim}Provider stream error${ANSI.reset}\n`);
       } else if (event.type === 'unknown' && options.verbose) {
