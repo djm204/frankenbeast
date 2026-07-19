@@ -198,18 +198,28 @@ function resolveNpmCliPath(): string {
   return npmCliPath;
 }
 
-function deleteUnsafeInheritedProcessEnv(env: NodeJS.ProcessEnv): void {
-  const deniedKeys = new Set([
-    'node_options',
-    'npm_config_node_options',
-    'npm_config_script_shell',
-    'npm_config_userconfig',
-  ]);
-  for (const key of Object.keys(env)) {
-    if (deniedKeys.has(key.toLowerCase())) {
-      delete env[key];
+const SAFE_INHERITED_NETWORK_SERVICE_ENV_KEYS = [
+  'HOME',
+  'LANG',
+  'LC_ALL',
+  'TMPDIR',
+  'TMP',
+  'TEMP',
+  'USERPROFILE',
+  'SystemRoot',
+  'COMSPEC',
+  'PATHEXT',
+] as const;
+
+function allowlistedNetworkProcessEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const allowedEnv: NodeJS.ProcessEnv = {};
+  for (const key of SAFE_INHERITED_NETWORK_SERVICE_ENV_KEYS) {
+    const value = env[key];
+    if (value !== undefined) {
+      allowedEnv[key] = value;
     }
   }
+  return allowedEnv;
 }
 
 function buildNetworkProcessPath(): string {
@@ -220,10 +230,8 @@ function buildNetworkProcessPath(): string {
 }
 
 function buildNetworkProcessEnv(processSpecEnv: Record<string, string> | undefined): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  deleteUnsafeInheritedProcessEnv(env);
   return {
-    ...env,
+    ...allowlistedNetworkProcessEnv(process.env),
     ...processSpecEnv,
     PATH: buildNetworkProcessPath(),
   };

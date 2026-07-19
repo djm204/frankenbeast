@@ -86,6 +86,7 @@ describe('startNetworkService', () => {
   afterEach(() => {
     errorSpy.mockClear();
     spawnMock.mockClear();
+    vi.unstubAllEnvs();
   });
 
   it('rejects service commands outside the registry allowlist before spawning', async () => {
@@ -134,6 +135,46 @@ describe('startNetworkService', () => {
     })).rejects.toThrow('Unsafe network service environment key NODE_OPTIONS=--require /tmp/hook for chat-server');
 
     expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('Process spawn failed'));
+  });
+
+  it('does not inherit unrelated orchestrator secrets when starting a managed service', async () => {
+    vi.stubEnv('FRANKENBEAST_NETWORK_TEST_SECRET', 'must-not-reach-child');
+    vi.stubEnv('HOME', '/safe-network-home');
+
+    await expect(startNetworkService(makeService('npm', {
+      env: {
+        FRANKENBEAST_NETWORK_MANAGED: '1',
+        FRANKENBEAST_BEAST_DAEMON_URL: 'http://127.0.0.1:4050',
+      },
+    }), {
+      detached: false,
+    })).resolves.toEqual({ pid: 4242 });
+
+    const spawnOptions = spawnMock.mock.calls[0]?.[2] as { env?: NodeJS.ProcessEnv } | undefined;
+    const spawnedEnv = spawnOptions?.env ?? {};
+    expect(spawnedEnv).toEqual(expect.objectContaining({
+      HOME: '/safe-network-home',
+      PATH: expect.any(String),
+      FRANKENBEAST_NETWORK_MANAGED: '1',
+      FRANKENBEAST_BEAST_DAEMON_URL: 'http://127.0.0.1:4050',
+    }));
+    expect(spawnedEnv).not.toHaveProperty('FRANKENBEAST_NETWORK_TEST_SECRET');
+    const permittedKeys = new Set([
+      'HOME',
+      'LANG',
+      'LC_ALL',
+      'TMPDIR',
+      'TMP',
+      'TEMP',
+      'USERPROFILE',
+      'SystemRoot',
+      'COMSPEC',
+      'PATHEXT',
+      'PATH',
+      'FRANKENBEAST_NETWORK_MANAGED',
+      'FRANKENBEAST_BEAST_DAEMON_URL',
+    ]);
+    expect(Object.keys(spawnedEnv).every((key) => permittedKeys.has(key))).toBe(true);
   });
 
   it('rejects process environment overrides that can redirect launcher resolution', async () => {
