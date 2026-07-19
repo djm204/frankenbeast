@@ -721,6 +721,7 @@ describe('CliLlmAdapter', () => {
       });
 
       it('switches to the next provider when the selected provider is rate limited', async () => {
+        const lifecycleEvents: unknown[] = [];
         const { spawnFn, calls } = createQueuedSpawn([
           { stderr: 'rate limit exceeded', exitCode: 1 },
           { stdout: 'codex success', exitCode: 0 },
@@ -730,6 +731,7 @@ describe('CliLlmAdapter', () => {
           {
             ...baseOpts,
             providers: ['codex', 'claude'],
+            onLifecycleEvent: (event: unknown) => lifecycleEvents.push(event),
           } as never,
           spawnFn,
         );
@@ -740,6 +742,13 @@ describe('CliLlmAdapter', () => {
         expect(calls).toHaveLength(2);
         expect(calls[0]!.cmd).toBe('claude');
         expect(calls[1]!.cmd).toBe('codex');
+        expect(lifecycleEvents).toEqual([
+          { type: 'attempt', provider: 'claude', attempt: 1 },
+          { type: 'rate-limit', provider: 'claude' },
+          { type: 'fallback', from: 'claude', to: 'codex' },
+          { type: 'attempt', provider: 'codex', attempt: 2 },
+          { type: 'complete', provider: 'codex', attempt: 2 },
+        ]);
       });
 
       it('switches to the next provider when the selected provider is rate limited via stdout only', async () => {
@@ -807,6 +816,7 @@ describe('CliLlmAdapter', () => {
 
       it('sleeps after all configured providers are exhausted, then retries from the selected provider', async () => {
         const sleepFn = vi.fn(async () => {});
+        const lifecycleEvents: unknown[] = [];
         const { spawnFn, calls } = createQueuedSpawn([
           { stderr: 'retry-after: 5', exitCode: 1 },
           { stderr: 'resets in 3s', exitCode: 1 },
@@ -818,6 +828,7 @@ describe('CliLlmAdapter', () => {
             ...baseOpts,
             providers: ['claude', 'codex'],
             _sleepFn: sleepFn,
+            onLifecycleEvent: (event: unknown) => lifecycleEvents.push(event),
           } as never,
           spawnFn,
         );
@@ -830,6 +841,9 @@ describe('CliLlmAdapter', () => {
         expect(calls[0]!.cmd).toBe('claude');
         expect(calls[1]!.cmd).toBe('codex');
         expect(calls[2]!.cmd).toBe('claude');
+        expect(lifecycleEvents).toContainEqual({ type: 'wait', durationMs: 3_000 });
+        expect(lifecycleEvents).toContainEqual({ type: 'attempt', provider: 'claude', attempt: 3 });
+        expect(lifecycleEvents).toContainEqual({ type: 'complete', provider: 'claude', attempt: 3 });
       });
 
       it('retries a rate-limited provider when later fallback provider CLI is missing', async () => {

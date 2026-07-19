@@ -477,4 +477,33 @@ describe('createStreamProgressWithSpinner', () => {
 
     handle.stop();
   });
+
+  it('emits bounded sanitized lifecycle events without persisting streamed content', () => {
+    const events: Array<{ type: string; [key: string]: unknown }> = [];
+    const handle = createStreamProgressWithSpinner({
+      write: vi.fn(),
+      heartbeatIntervalMs: 30_000,
+      onProgressEvent: (event) => events.push(event),
+    });
+
+    handle.onLine(JSON.stringify({
+      type: 'content_block_delta',
+      delta: { type: 'text_delta', text: 'TOP_SECRET_PROMPT_CONTENT' },
+    }));
+    vi.advanceTimersByTime(30_000);
+    handle.onLine(JSON.stringify({
+      type: 'result',
+      duration_ms: 31_200,
+      cost_usd: 0.04,
+      num_turns: 2,
+    }));
+
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'heartbeat', elapsedMs: 30_000 }),
+      expect.objectContaining({ type: 'complete', durationMs: 31_200, turns: 2 }),
+    ]));
+    expect(JSON.stringify(events)).not.toContain('TOP_SECRET_PROMPT_CONTENT');
+
+    handle.stop();
+  });
 });
