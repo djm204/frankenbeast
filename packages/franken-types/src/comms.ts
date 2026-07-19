@@ -1,10 +1,14 @@
 import { z } from 'zod';
 
+// Keep below the default 16 KiB HTTP body cap so the JSON envelope has
+// headroom while REST and WebSocket enforce one shared content limit.
+export const MAX_CHAT_MESSAGE_CONTENT_LENGTH = 16_000;
+
 export const ClientSocketEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('message.send'),
     clientMessageId: z.string().min(1),
-    content: z.string().min(1).max(16_384),
+    content: z.string().min(1).max(MAX_CHAT_MESSAGE_CONTENT_LENGTH),
     executionMode: z.enum(['process', 'container']).optional(),
   }).strict(),
   z.object({
