@@ -1,5 +1,9 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-19 — Live-bench run cleanup TOCTOU hardening
+- For destructive cleanup in attacker-writable directory trees, preflight `lstat`/`realpath` checks are not enough: on POSIX, open the trusted root and each descendant with `O_DIRECTORY|O_NOFOLLOW`, compare root and quarantined leaf device/inode identities, address rename/removal through stable descriptor paths, and keep the recreated run-leaf descriptor open while populating it.
+- Create quarantine entries beside the anchored leaf parent so rename stays on one filesystem, and avoid followable path mutations such as `chmod(path)` between creation and a no-follow open. Use `lstat`-based existence checks so dangling symlinks fail closed; when a platform lacks searchable Linux `/proc/self/fd` paths and no equivalent safe primitive is available, reject secure provisioning rather than restoring path-based TOCTOU cleanup.
+
 ## 2026-07-19 — Provider-native cache session isolation
 - Never translate an application cache/work key into a provider continuation flag. Start the first native-capable cache call without `--continue`, capture the provider-issued session id, and resume only that exact id when provider and model still match.
 - Treat only classified stale/invalid-session failures as retryable: emit fallback telemetry, invalidate the stale record before retrying, and retry once in a fresh persisted session; propagate all other provider errors so failures cannot silently double expensive calls.

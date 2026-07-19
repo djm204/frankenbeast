@@ -1,11 +1,14 @@
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { BenchmarkMatrixRow, BenchmarkTask } from '../src/types.js';
 import { FixtureStore } from '../src/workspace/fixture-store.js';
-import { WorkspaceProvisioner } from '../src/workspace/workspace-provisioner.js';
+import {
+  prepareRunDirectorySafely,
+  WorkspaceProvisioner,
+} from '../src/workspace/workspace-provisioner.js';
 
 function tempRoot(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -100,6 +103,56 @@ describe('workspace provisioning', () => {
       provisionedAt: expect.any(String),
       runTimestamp: '2026-05-23T12:34:56.000Z',
     });
+  });
+
+  it('detects when a prepared run leaf is moved before population completes', () => {
+    const runsRoot = tempRoot('live-bench-runs-root-');
+    const dateDir = join(runsRoot, '2026-05-23');
+    const runDir = join(dateDir, 'run-d');
+    const movedRunDir = join(runsRoot, 'moved-run-d');
+    mkdirSync(dateDir, { recursive: true });
+
+    const prepared = prepareRunDirectorySafely(runDir, runsRoot);
+    try {
+      renameSync(runDir, movedRunDir);
+      expect(() => prepared.verifyLocation()).toThrow(/moved during provisioning/);
+    } finally {
+      prepared.close();
+    }
+  });
+
+  it('detects when a prepared run ancestor is moved before population completes', () => {
+    const runsRoot = tempRoot('live-bench-runs-root-');
+    const dateDir = join(runsRoot, '2026-05-23');
+    const runDir = join(dateDir, 'run-e');
+    const movedDateDir = join(runsRoot, 'moved-date');
+    mkdirSync(dateDir, { recursive: true });
+
+    const prepared = prepareRunDirectorySafely(runDir, runsRoot);
+    try {
+      renameSync(dateDir, movedDateDir);
+      expect(() => prepared.verifyLocation()).toThrow(/moved during provisioning/);
+    } finally {
+      prepared.close();
+    }
+  });
+
+  it('atomically replaces an existing run directory without leaving cleanup artifacts', () => {
+    const fixturesRoot = tempRoot('live-bench-fixtures-');
+    const runsRoot = tempRoot('live-bench-runs-');
+    createFixture(fixturesRoot);
+    const provisioner = new WorkspaceProvisioner({
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+    });
+    const first = provisioner.provision(row, task);
+    writeFileSync(join(first.runDir, 'stale.txt'), 'remove me\n', 'utf8');
+
+    const second = provisioner.provision(row, task);
+
+    expect(second.runDir).toBe(first.runDir);
+    expect(existsSync(join(second.runDir, 'stale.txt'))).toBe(false);
+    expect(existsSync(second.environmentPath)).toBe(true);
   });
 
   it('uses task, client, mode, topology, and model dimensions to avoid run id collisions', () => {
@@ -319,6 +372,31 @@ describe('workspace provisioning', () => {
     expect(readFileSync(join(runsRoot, '2026-05-23', 'victim', 'sentinel.txt'), 'utf8')).toBe('keep me\n');
   });
 
+  it('rejects a run directory replaced by a symlink at the cleanup boundary without touching its target', () => {
+    const runsRoot = tempRoot('live-bench-runs-');
+    const outsideRoot = tempRoot('live-bench-outside-cleanup-');
+    const dateDir = join(runsRoot, '2026-05-23');
+    const runDir = join(dateDir, 'run-123');
+    mkdirSync(dateDir, { recursive: true });
+    writeFileSync(join(outsideRoot, 'sentinel.txt'), 'keep me\n', 'utf8');
+    symlinkSync(outsideRoot, runDir, 'dir');
+
+    expect(() => prepareRunDirectorySafely(runDir, runsRoot)).toThrow(/symlink during cleanup/);
+    expect(readFileSync(join(outsideRoot, 'sentinel.txt'), 'utf8')).toBe('keep me\n');
+    expect(existsSync(runDir)).toBe(false);
+  });
+
+  it('rejects a dangling symlink swapped into the run path at cleanup time', () => {
+    const runsRoot = tempRoot('live-bench-runs-');
+    const dateDir = join(runsRoot, '2026-05-23');
+    const runDir = join(dateDir, 'run-123');
+    mkdirSync(dateDir, { recursive: true });
+    symlinkSync(join(runsRoot, 'missing-target'), runDir, 'dir');
+
+    expect(() => prepareRunDirectorySafely(runDir, runsRoot)).toThrow(/symlink during cleanup/);
+    expect(existsSync(runDir)).toBe(false);
+  });
+
   it('rejects symlink run date directories before destructive cleanup', () => {
     const fixturesRoot = tempRoot('live-bench-fixtures-');
     const runsRoot = tempRoot('live-bench-runs-');
@@ -346,6 +424,26 @@ describe('workspace provisioning', () => {
       fixtures: new FixtureStore(fixturesRoot),
       runsRoot,
     })).toThrow(/runs root path component must not be a symlink/);
+  });
+
+  it('rejects runs-root directory replacement before mutating the replacement', () => {
+    const fixturesRoot = tempRoot('live-bench-fixtures-');
+    const runsParent = tempRoot('live-bench-runs-parent-');
+    const runsRoot = join(runsParent, 'runs');
+    const originalRunsRoot = join(runsParent, 'runs-original');
+    createFixture(fixturesRoot);
+    mkdirSync(runsRoot);
+    const provisioner = new WorkspaceProvisioner({
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+    });
+    renameSync(runsRoot, originalRunsRoot);
+    mkdirSync(runsRoot);
+    writeFileSync(join(runsRoot, 'sentinel.txt'), 'keep me\n', 'utf8');
+
+    expect(() => provisioner.provision(row, task)).toThrow(/Runs root identity changed/);
+    expect(readFileSync(join(runsRoot, 'sentinel.txt'), 'utf8')).toBe('keep me\n');
+    expect(existsSync(join(runsRoot, '2026-05-23'))).toBe(false);
   });
 
   it('rejects symlink ancestors of runs roots before creating directories', () => {
