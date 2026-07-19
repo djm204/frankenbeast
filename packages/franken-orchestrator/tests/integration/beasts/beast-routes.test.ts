@@ -20,6 +20,7 @@ import { ContainerBeastExecutor } from '../../../src/beasts/execution/container-
 import { DEFAULT_SANDBOX_POLICY } from '../../../src/beasts/execution/sandbox-policy.js';
 import type { BeastProcessSpec } from '../../../src/beasts/types.js';
 import type { ProcessCallbacks, ProcessSupervisorLike } from '../../../src/beasts/execution/process-supervisor.js';
+import Database from 'better-sqlite3';
 
 import { testCredential } from '../../support/test-credentials.js';
 
@@ -563,6 +564,43 @@ describe('beast routes', () => {
       containerImage: 'fbeast/sandbox:test',
       dockerCommand: 'docker',
     });
+  });
+
+  it('does not expose stale container metadata when the current attempt metadata is corrupt', async () => {
+    const { app, operatorToken, repository } = createBeastApp();
+    const run = repository.createRun({
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'container',
+      configSnapshot: { objective: 'avoid stale container metadata' },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-07-19T00:00:00.000Z',
+    });
+    repository.createAttempt(run.id, {
+      status: 'stopped',
+      executorMetadata: { containerId: 'stale-container', containerName: 'stale-name' },
+    });
+    const current = repository.createAttempt(run.id, {
+      status: 'running',
+      executorMetadata: { containerId: 'current-container' },
+    });
+    repository.updateRun(run.id, { status: 'running', currentAttemptId: current.id, attemptCount: 2 });
+    const db = new Database(join(TMP, 'beasts.db'));
+    db.prepare('UPDATE beast_run_attempts SET executor_metadata = ? WHERE id = ?')
+      .run('raw-current-attempt-secret', current.id);
+    db.close();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const response = await app.request(`/v1/beasts/runs/${run.id}`, {
+      headers: { authorization: `Bearer ${operatorToken}` },
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json() as { data: { run: Record<string, unknown> } };
+    expect(body.data.run).not.toHaveProperty('containerId');
+    expect(body.data.run).not.toHaveProperty('containerName');
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('raw-current-attempt-secret'));
+    warn.mockRestore();
   });
 
   it('does not require attempts when listing stale process-mode runs', async () => {
