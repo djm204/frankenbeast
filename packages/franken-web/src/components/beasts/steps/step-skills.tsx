@@ -30,6 +30,15 @@ export function StepSkills() {
     setStepValues(4, { ...values, selectedSkills: selected.filter((s) => s !== id) });
   }
 
+  function toggleSkill(id: string, isSelected: boolean) {
+    if (isSelected) {
+      removeSkill(id);
+      return;
+    }
+
+    addSkill(id);
+  }
+
   return (
     <div className="p-8 space-y-6">
       {/* Selected chips */}
@@ -42,7 +51,18 @@ export function StepSkills() {
               return (
                 <span key={id} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-beast-accent-soft text-beast-accent text-xs font-medium border border-beast-accent/30">
                   {skill?.name ?? id}
-                  <button type="button" onClick={() => removeSkill(id)} className="hover:text-beast-danger p-0.5" aria-label={`Remove ${skill?.name ?? id}`}>
+                  <button
+                    type="button"
+                    onClick={() => removeSkill(id)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        removeSkill(id);
+                      }
+                    }}
+                    className="hover:text-beast-danger p-0.5"
+                    aria-label={`Remove ${skill?.name ?? id}`}
+                  >
                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
@@ -74,7 +94,13 @@ export function StepSkills() {
               key={skill.id}
               type="button"
               aria-pressed={isSelected}
-              onClick={() => isSelected ? removeSkill(skill.id) : addSkill(skill.id)}
+              onClick={() => toggleSkill(skill.id, isSelected)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  toggleSkill(skill.id, isSelected);
+                }
+              }}
               className={`p-4 rounded-xl border-2 text-left transition-all min-h-[5rem]
                 ${isSelected
                   ? 'border-beast-accent bg-beast-accent-soft ring-1 ring-beast-accent/30'
