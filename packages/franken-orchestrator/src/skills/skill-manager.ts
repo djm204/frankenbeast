@@ -284,31 +284,35 @@ export class SkillManager {
     this.validateName(name);
     if (!this.exists(name))
       throw new Error(`Skill '${name}' is not installed`);
+    const nextEnabledSkills = new Set(this.enabledSkills);
+    nextEnabledSkills.add(name);
+    this.configStore?.save(nextEnabledSkills);
     this.enabledSkills.add(name);
-    this.configStore?.save(this.enabledSkills);
   }
 
   disable(name: string): void {
+    const nextEnabledSkills = new Set(this.enabledSkills);
+    nextEnabledSkills.delete(name);
+    this.configStore?.save(nextEnabledSkills);
     this.enabledSkills.delete(name);
-    this.configStore?.save(this.enabledSkills);
   }
 
   remove(name: string): void {
     this.validateName(name);
     const skillDir = this.skillDirectoryPath(name);
     this.assertSkillsRootStable();
+    const nextEnabledSkills = new Set(this.enabledSkills);
+    nextEnabledSkills.delete(name);
+    this.configStore?.save(nextEnabledSkills);
+    this.enabledSkills.delete(name);
     if (existsSync(skillDir)) {
       if (lstatSync(skillDir).isSymbolicLink()) {
         rmSync(skillDir);
-        this.enabledSkills.delete(name);
-        this.configStore?.save(this.enabledSkills);
         return;
       }
       assertContainedPath(realpathSync(skillDir), this.skillsDirReal, 'skill directory');
       rmSync(skillDir, { recursive: true });
     }
-    this.enabledSkills.delete(name);
-    this.configStore?.save(this.enabledSkills);
   }
 
   exists(name: string): boolean {

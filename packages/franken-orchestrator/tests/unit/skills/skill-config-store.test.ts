@@ -8,6 +8,8 @@ import {
   existsSync,
   lstatSync,
   symlinkSync,
+  chmodSync,
+  statSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -84,12 +86,14 @@ describe('SkillConfigStore', () => {
         linkedConfigPath,
         JSON.stringify({ theme: 'dark', skills: { enabled: ['old'] } }, null, 2) + '\n',
       );
+      chmodSync(linkedConfigPath, 0o600);
       const configPath = join(configDir, 'config.json');
       symlinkSync(linkedConfigPath, configPath);
 
       store.save(new Set(['github']));
 
       expect(lstatSync(configPath).isSymbolicLink()).toBe(false);
+      expect(statSync(configPath).mode & 0o777).toBe(0o600);
       expect(JSON.parse(readFileSync(configPath, 'utf-8'))).toEqual({
         theme: 'dark',
         skills: { enabled: ['github'] },
@@ -268,6 +272,23 @@ describe('SkillManager + SkillConfigStore integration', () => {
     expect(persisted).not.toContain('github');
   });
 
+  it('keeps in-memory toggle state unchanged when persistence fails', async () => {
+    const manager = new SkillManager(skillsDir, new Set(), store);
+    await installSkill(manager, 'github');
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), '{"skills":');
+
+    expect(() => manager.enable('github')).toThrow(/corrupt/i);
+    expect(manager.getEnabledSkills()).not.toContain('github');
+
+    rmSync(join(configDir, 'config.json'));
+    manager.enable('github');
+    writeFileSync(join(configDir, 'config.json'), '{"skills":');
+
+    expect(() => manager.disable('github')).toThrow(/corrupt/i);
+    expect(manager.getEnabledSkills()).toContain('github');
+  });
+
   it('remove() persists via configStore', async () => {
     const manager = new SkillManager(skillsDir, new Set(), store);
     await installSkill(manager, 'github');
@@ -280,6 +301,17 @@ describe('SkillManager + SkillConfigStore integration', () => {
     // Removal should also persist — 'github' no longer in config
     const persisted = store.getEnabledSkills();
     expect(persisted).not.toContain('github');
+  });
+
+  it('does not delete skill files when persistence fails', async () => {
+    const manager = new SkillManager(skillsDir, new Set(['github']), store);
+    await installSkill(manager, 'github');
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), '{"skills":');
+
+    expect(() => manager.remove('github')).toThrow(/corrupt/i);
+    expect(manager.exists('github')).toBe(true);
+    expect(manager.getEnabledSkills()).toContain('github');
   });
 
   it('works without configStore (backward compatible)', async () => {

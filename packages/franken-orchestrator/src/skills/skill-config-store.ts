@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { atomicWriteFileSync } from '../session/atomic-file.js';
 
@@ -63,6 +63,9 @@ export class SkillConfigStore {
       enabled: [...enabledSkills].sort(),
     };
 
-    atomicWriteFileSync(this.configPath, JSON.stringify(existing, null, 2) + '\n');
+    const mode = existsSync(this.configPath)
+      ? statSync(this.configPath).mode & 0o777
+      : 0o600;
+    atomicWriteFileSync(this.configPath, JSON.stringify(existing, null, 2) + '\n', { mode });
   }
 }
