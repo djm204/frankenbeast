@@ -104,8 +104,10 @@ export type {
   CritiqueContext,
   ProviderCritiqueFinding,
   CritiqueFinding,
+  CritiqueResult,
   ProviderSkillConfig,
 } from './provider.js';
+
 export {
   ToolDefinitionSchema,
   TokenUsageSchema,

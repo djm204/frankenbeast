@@ -48,6 +48,11 @@ export interface CritiquePipelineResult {
   readonly shortCircuited: boolean;
 }
 
+/**
+ * @deprecated Use {@link CritiquePipelineResult}.
+ */
+export type CritiqueResult = CritiquePipelineResult;
+
 
 /** An evaluator that can assess code or plans. */
 export interface Evaluator {

@@ -5,6 +5,7 @@ import {
 import type { ProviderCritiqueFinding } from '@franken/types';
 import type {
   CritiquePipelineResult,
+  CritiqueResult,
   LessonRollbackWorkflow,
   AgentImprovementScorecard,
   LessonFeedbackWeighting,
@@ -38,8 +39,12 @@ describe('public critique type contracts', () => {
       shortCircuited: false,
     };
     const alias: CritiquePipelineResult = pipelineResult;
+    const legacyAlias: CritiqueResult = pipelineResult;
 
     expect(alias.results[0]?.findings[0]?.message).toBe(
+      providerFinding.message,
+    );
+    expect(legacyAlias.results[0]?.findings[0]?.message).toBe(
       providerFinding.message,
     );
   });

@@ -21,6 +21,7 @@ import {
   type CritiqueContext,
   type ProviderCritiqueFinding,
   type CritiqueFinding,
+  type CritiqueResult,
   type ProviderSkillConfig,
 } from '../src/index.js';
 
@@ -58,6 +59,17 @@ describe('TokenUsageSchema', () => {
     expect(() =>
       TokenUsageSchema.parse({ inputTokens: 1, outputTokens: 1, totalTokens: 2.5 }),
     ).toThrow();
+  });
+
+  it('retains deprecated compatibility alias CritiqueResult', () => {
+    const deprecatedAlias: CritiqueResult = {
+      evaluator: 'legacy-alias-check',
+      severity: 6,
+      message: 'Compatibility layer stays available.',
+    };
+    const canonical: CritiqueFinding = deprecatedAlias;
+
+    expect(canonical.message).toBe('Compatibility layer stays available.');
   });
 
   it('rejects non-finite token counts', () => {
