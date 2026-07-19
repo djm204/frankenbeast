@@ -25,8 +25,11 @@ export class PlanContextGatherer {
   }
 
   private readRampUp(): string {
-    const rampUpPath = join(this.repoRoot, 'docs', 'onboarding', 'RAMP_UP.md');
-    if (!existsSync(rampUpPath)) {
+    const rampUpPath = [
+      join(this.repoRoot, 'docs', 'onboarding', 'RAMP_UP.md'),
+      join(this.repoRoot, 'docs', 'RAMP_UP.md'),
+    ].find((candidate) => existsSync(candidate));
+    if (rampUpPath === undefined) {
       return '';
     }
     return readFileSync(rampUpPath, 'utf-8');
