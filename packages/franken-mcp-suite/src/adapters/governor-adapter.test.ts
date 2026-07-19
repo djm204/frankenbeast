@@ -128,7 +128,7 @@ describe('GovernorAdapter', () => {
     expect(row.context).toBe('{}');
   });
 
-  it('redacts explicitly targeted proxy source-attribution filters without inferring stripped execute_tool targets', async () => {
+  it('fails closed on stripped attribution-shaped contexts while redacting their durable log selectors', async () => {
     const dbPath = tracked(tmpDbPath());
     const governor = createGovernorAdapter(dbPath);
 
@@ -169,12 +169,12 @@ describe('GovernorAdapter', () => {
     const rows = db.prepare(`SELECT context FROM governor_log WHERE action = ? ORDER BY id ASC`).all('mcp__fbeast-proxy__execute_tool') as Array<{ context: string }>;
     db.close();
     expect(rows[0]?.context).toBe('{}');
-    expect(rows[1]?.context).toContain('profile.delete-policy');
-    expect(rows[2]?.context).toContain('profile.delete-policy');
-    expect(rows[3]?.context).toContain('profile.delete-policy');
-    expect(rows[4]?.context).toContain('profile.delete-policy');
+    expect(rows[1]?.context).toBe('{}');
+    expect(rows[2]?.context).toBe('{}');
+    expect(rows[3]?.context).toBe('{}');
+    expect(rows[4]?.context).toBe('{}');
     expect(rows[5]?.context).toContain('readScope');
-    expect(rows[6]?.context).toContain('profile.delete-policy');
+    expect(rows[6]?.context).toBe('{}');
     expect(rows[7]?.context).toContain('profile.delete-policy');
   });
 

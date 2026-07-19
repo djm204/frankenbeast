@@ -360,6 +360,28 @@ function redactMemorySourceAttributionGovernanceContext(action: string, context:
   return context;
 }
 
+function redactGovernorLogContext(action: string, assessedContext: string): string {
+  if (unqualifyMcpActionName(action) !== 'execute_tool'
+    || contextTargetsTool(assessedContext, 'fbeast_memory_source_attribution')) {
+    return assessedContext;
+  }
+  try {
+    const parsed = JSON.parse(assessedContext) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return assessedContext;
+    const record = parsed as Record<string, unknown>;
+    const keys = Object.keys(record);
+    const attributionKeys = new Set(['key', 'source', 'limit', 'readScope', 'agentId', 'targetStore']);
+    const hasSelector = Object.prototype.hasOwnProperty.call(record, 'key')
+      || Object.prototype.hasOwnProperty.call(record, 'source');
+    if (hasSelector && keys.every(key => attributionKeys.has(key))) {
+      return JSON.stringify(mergeTrustedGovernanceProvenance(assessedContext, {}));
+    }
+  } catch {
+    // Keep malformed and non-object contexts unchanged for safety/auditability.
+  }
+  return assessedContext;
+}
+
 function sanitizeMemoryExportGovernanceArgs(args: Record<string, unknown>): Record<string, unknown> {
   const safe: Record<string, unknown> = {};
   if (args['__fbeastGovernanceSource'] === 'central-dispatch') {
@@ -873,7 +895,7 @@ export function createGovernorAdapter(dbPath: string): GovernorAdapter {
       store.db.prepare(`
         INSERT INTO governor_log (action, context, decision, reason)
         VALUES (?, ?, ?, ?)
-      `).run(input.action, context, result.decision, result.reason);
+      `).run(input.action, redactGovernorLogContext(input.action, context), result.decision, result.reason);
 
       return result;
     },
