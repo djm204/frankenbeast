@@ -12,6 +12,7 @@ import { BeastDispatchService } from '../../../src/beasts/services/beast-dispatc
 import { BeastRunService } from '../../../src/beasts/services/beast-run-service.js';
 import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../../../src/beasts/services/dispatch-failure-message.js';
 import { AgentService } from '../../../src/beasts/services/agent-service.js';
+import { AgentToolPolicyError } from '../../../src/beasts/services/role-tool-manifest.js';
 import { MaintenanceModeError } from '../../../src/beasts/services/maintenance-mode-service.js';
 import { CapacityReservationError, CapacityReservationPolicy } from '../../../src/beasts/services/capacity-reservation-policy.js';
 import { PrometheusBeastMetrics } from '../../../src/beasts/telemetry/prometheus-beast-metrics.js';
@@ -433,6 +434,105 @@ describe('agent routes integration', () => {
       },
     });
     expect(agents.listAgents()).toEqual([]);
+  });
+
+  it('canonicalizes role aliases before applying dashboard policy defaults', async () => {
+    const { app, operatorToken, agents } = createIntegratedBeastApp();
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        autoDispatch: false,
+        initAction: { kind: 'martin-loop', command: 'ticket-manager', config: {} },
+        initConfig: {
+          role: 'ticket-manager',
+          requestedTools: ['read_file', 'patch'],
+        },
+      }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'AGENT_TOOL_POLICY_DENIED',
+        details: {
+          validation: {
+            role: 'ticket-manager',
+            denials: expect.arrayContaining([expect.objectContaining({ requestedTool: 'patch' })]),
+          },
+        },
+      },
+    });
+    expect(agents.listAgents()).toEqual([]);
+  });
+
+  it('returns a policy-denied 403 when auto-dispatch rejects the effective run policy', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const repository = new SQLiteBeastRepository(join(TMP, 'auto-dispatch-policy-denial.db'));
+    const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
+    const denial = {
+      role: 'coding' as const,
+      requestedTool: 'skill:changed-manifest',
+      reason: 'selected skill manifest changed before dispatch',
+    };
+    const dispatch = {
+      createRun: vi.fn(async () => {
+        throw new AgentToolPolicyError({
+          allowed: false,
+          role: 'coding',
+          rawRole: 'coding',
+          requestedTools: ['skill:changed-manifest'],
+          denials: [denial],
+        });
+      }),
+    };
+    const app = new Hono();
+    app.onError(errorHandler);
+    app.route('/', agentRoutes({
+      agents,
+      dispatch: dispatch as never,
+      runs: { getRun: vi.fn(), start: vi.fn(), stop: vi.fn(), kill: vi.fn(), restart: vi.fn() } as never,
+      operatorToken: TEST_SUPER_SECRET_OPERATOR_TOKEN,
+      security: new TransportSecurityService(),
+    }));
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${TEST_SUPER_SECRET_OPERATOR_TOKEN}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+        initConfig: {
+          provider: 'claude',
+          objective: 'Reject after effective dispatch policy changes',
+          chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
+        },
+      }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'AGENT_TOOL_POLICY_DENIED',
+        details: {
+          validation: { denials: [denial] },
+        },
+      },
+    });
+    const [agent] = agents.listAgents();
+    expect(agent).toMatchObject({ status: 'stopped' });
+    expect(agents.getAgentDetail(agent.id).events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'agent.dispatch.denied' }),
+    ]));
   });
 
   it('derives policy defaults for dashboard wizard agent launches', async () => {

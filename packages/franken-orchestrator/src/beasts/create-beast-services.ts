@@ -53,7 +53,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   const ticketStore = new SseConnectionTicketStore({ databasePath: paths.beastsDb });
   const capacityPolicy = createCapacityReservationPolicyFromEnv();
   const maintenance = MaintenanceModeService.forProjectRoot(projectRoot);
-  const trustedSkillsDir = paths.skillsDir ?? join(projectRoot, 'skills');
+  const trustedSkillsDir = paths.skillsDir ?? join(projectRoot, '.fbeast', 'skills');
   const trustedSkillToolManifests = () => collectTrustedSkillToolManifests(trustedSkillsDir);
 
   // Deferred reference to break circular dep: executor → runService → executors → executor
@@ -130,11 +130,14 @@ function collectTrustedSkillToolManifests(
   const skillManager = new SkillManager(skillsDir, new Set());
   return Object.fromEntries(
     skillManager.listInstalled()
-      .filter((skill) => existsSync(join(skillsDir, skill.name, 'tools.json')))
-      .map((skill) => [
-        skill.name,
-        skillManager.readTools(skill.name).map((tool) => tool.name),
-      ]),
+      .flatMap((skill) => {
+        if (!existsSync(join(skillsDir, skill.name, 'tools.json'))) return [];
+        try {
+          return [[skill.name, skillManager.readTools(skill.name).map((tool) => tool.name)] as const];
+        } catch {
+          return [];
+        }
+      }),
   );
 }
 

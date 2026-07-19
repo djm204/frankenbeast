@@ -83,9 +83,11 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
 
   app.post('/v1/beasts/agents', async (c) => {
     const body = validateBody(CreateAgentBody, await parseJsonBody(c));
+    const roleAlias = body.initConfig.agentRole ?? body.initConfig.role ?? body.initConfig.laneRole;
     const initConfig = {
       ...defaultAgentToolPolicyConfig(body.definitionId, body.initAction.kind),
       ...body.initConfig,
+      ...(typeof roleAlias === 'string' ? { agentRole: roleAlias } : {}),
     };
     const shouldAutoDispatch = body.autoDispatch !== false && deps.dispatch && shouldDispatchOnCreate(body.initAction.kind);
     if (shouldAutoDispatch) {
@@ -188,6 +190,22 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
         ...(body.moduleConfig ? { moduleConfig: body.moduleConfig } : {}),
       });
     } catch (error) {
+      if (error instanceof AgentToolPolicyError) {
+        deps.agents.updateAgent(agent.id, { status: 'stopped' });
+        deps.agents.appendEvent(agent.id, {
+          level: 'warning',
+          type: 'agent.dispatch.denied',
+          message: error.message,
+          payload: { validation: error.validation },
+        });
+        return c.json({
+          error: {
+            code: 'AGENT_TOOL_POLICY_DENIED',
+            message: error.message,
+            details: { agentId: agent.id, validation: error.validation },
+          },
+        }, 403);
+      }
       if (error instanceof MaintenanceModeError) {
         deps.agents.updateAgent(agent.id, { status: 'stopped' });
         deps.agents.appendEvent(agent.id, {

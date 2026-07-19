@@ -312,7 +312,6 @@ export class BeastRunService {
   async restart(runId: string, actor: string): Promise<BeastRun> {
     this.serviceOptions.maintenance?.assertDispatchAllowed();
     const run = this.requireRun(runId);
-    this.assertRoleToolManifestAllows(run);
     if (run.status === 'running') {
       this.assertTrackedAgentCapacity(run);
       await this.stop(runId, actor);

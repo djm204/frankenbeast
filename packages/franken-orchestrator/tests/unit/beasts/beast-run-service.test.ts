@@ -1633,7 +1633,7 @@ describe('BeastRunService', () => {
       createdAt: '2026-03-11T00:00:01.000Z',
     });
 
-    await runs.start(run.id, 'operator');
+    await runs.restart(run.id, 'operator');
 
     expect(start).toHaveBeenCalledWith(
       expect.objectContaining({

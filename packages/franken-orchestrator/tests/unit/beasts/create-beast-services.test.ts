@@ -128,10 +128,13 @@ describe('createBeastServices', () => {
     }
   });
 
-  it('loads installed skill tool manifests for tracked-agent validation and dispatch', async () => {
+  it('loads default .fbeast skill manifests while ignoring an unrelated malformed manifest', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-create-beast-services-'));
-    const skillDir = join(tempDir, 'skills', 'context-only');
+    const skillsDir = join(tempDir, '.fbeast', 'skills');
+    const skillDir = join(skillsDir, 'context-only');
+    const brokenSkillDir = join(skillsDir, 'broken-unselected');
     await mkdir(skillDir, { recursive: true });
+    await mkdir(brokenSkillDir, { recursive: true });
     await writeFile(
       join(skillDir, 'mcp.json'),
       JSON.stringify({ mcpServers: { 'context-only': { command: 'context-only' } } }),
@@ -140,6 +143,11 @@ describe('createBeastServices', () => {
       join(skillDir, 'tools.json'),
       JSON.stringify([{ name: 'read_file', description: 'Read context', inputSchema: {} }]),
     );
+    await writeFile(
+      join(brokenSkillDir, 'mcp.json'),
+      JSON.stringify({ mcpServers: { 'broken-unselected': { command: 'broken-unselected' } } }),
+    );
+    await writeFile(join(brokenSkillDir, 'tools.json'), '{not-json');
     const { createBeastServices } = await import('../../../src/beasts/create-beast-services.js');
     const services = createBeastServices({
       beastsDb: join(tempDir, 'beast.db'),
