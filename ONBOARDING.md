@@ -348,12 +348,15 @@ It maps ChromaDB, Grafana, Tempo, provider credentials, and secret backends to t
     node packages/franken-orchestrator/dist/cli/run.js run --config .fbeast/config.json
     ```
 
-- [ ] For `os-keychain`, set the backend in `.fbeast/config.json`, then run `frankenbeast init`; no passphrase prompt is required.
+- [ ] For `os-keychain` on Linux, install `secret-tool` for Linux Secret Service, set the backend in `.fbeast/config.json`, then run `frankenbeast init`; no passphrase prompt is required and secret values are supplied over stdin.
+  - macOS and Windows writes fail closed because their built-in noninteractive keychain CLIs require secret values in process arguments. Use `local-encrypted`, `1password`, or `bitwarden` on those platforms.
 - [ ] For `1password`:
+  - Install 1Password CLI 2.23.0 or newer so writes can use stdin instead of command-line arguments.
   - Create or use a vault literally named `frankenbeast`.
   - Authenticate the `op` CLI before init.
   - Init-created items use titles like `frankenbeast/network.operatorTokenRef`.
 - [ ] For `bitwarden`:
+  - Install the Bitwarden CLI; credential payloads are supplied over stdin instead of command-line arguments.
   - Run `bw login` / `bw unlock`.
   - Export `BW_SESSION` before init.
   - Init-created secure notes use the `frankenbeast/` title prefix.

@@ -692,7 +692,7 @@ Frankenbeast stores secrets outside the config file. The config references secre
 | Backend | Key | Best for |
 |---------|-----|----------|
 | Local encrypted file | `local-encrypted` | Default backend; zero-install local dev, CI/CD, offline, or minimal environments |
-| OS keychain (Keychain/GNOME/DPAPI) | `os-keychain` | Explicit opt-in for single-machine local dev when you want OS-managed storage and no passphrase prompt |
+| OS keychain (Linux Secret Service) | `os-keychain` | Explicit opt-in for Linux single-machine local dev when you want OS-managed storage and no passphrase prompt |
 | 1Password | `1password` | Teams using 1Password vaults |
 | Bitwarden | `bitwarden` | Teams using Bitwarden |
 
@@ -710,7 +710,7 @@ When `network.secureBackend` is unset, init defaults to `local-encrypted`: the p
 ```json
 { "network": { "secureBackend": "os-keychain" } }
 ```
-Set this in `.fbeast/config.json` before running `frankenbeast init` when you want local secrets in the native macOS Keychain, GNOME Secret Service, or Windows Credential Manager instead of the default encrypted file. The token is generated and stored in the OS keychain automatically (no passphrase prompt). Use `os-keychain` only when you explicitly select it; it is convenient for single-machine local development, but it is not the default backend.
+Set this in `.fbeast/config.json` before running `frankenbeast init` when you want local secrets in Linux Secret Service instead of the default encrypted file. The token is generated and stored through `secret-tool` stdin (no passphrase prompt), so secret values never enter process arguments. macOS and Windows writes fail closed because their built-in noninteractive CLIs require secret values in process arguments; use `local-encrypted`, `1password`, or `bitwarden` on those platforms. Use `os-keychain` only when you explicitly select it; it is convenient for Linux single-machine local development, but it is not the default backend.
 
 **1Password / Bitwarden:**
 ```json
@@ -721,7 +721,7 @@ Set this in `.fbeast/config.json` before running `frankenbeast init` when you wa
 ```
 Set one of those values in `.fbeast/config.json`, then run `frankenbeast init`. You can also use the current CLI shortcut `frankenbeast init --backend 1password` or `frankenbeast init --backend bitwarden`; it applies the same `network.secureBackend` choice before the wizard writes `.fbeast/config.json`.
 
-For 1Password, create or use a vault literally named `frankenbeast`; init-created items use titles like `frankenbeast/network.operatorTokenRef`. For Bitwarden, run `bw login`/`bw unlock` and export `BW_SESSION` first; init-created secure notes use the same `frankenbeast/` title prefix. The CLI uses the official 1Password/Bitwarden CLI under the hood.
+For 1Password, install 1Password CLI 2.23.0 or newer, create or use a vault literally named `frankenbeast`, and authenticate `op`; init-created items use titles like `frankenbeast/network.operatorTokenRef`. For Bitwarden, install the Bitwarden CLI, run `bw login`/`bw unlock`, and export `BW_SESSION` first; init-created secure notes use the same `frankenbeast/` title prefix. Both backends send credential payloads through stdin instead of command-line arguments and fail closed when a stdin-capable runner is unavailable.
 
 ### Operator token setup
 
