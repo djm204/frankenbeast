@@ -89,6 +89,7 @@ export class CachedCliLlmClient implements ILlmClient {
               }
               this.metrics.recordNativeSessionFallback();
               clearSession = true;
+              await this.cached.invalidateProviderSession(this.options.projectId, workId);
               response = await this.invoke(nextPrompt, workId);
             }
             return {

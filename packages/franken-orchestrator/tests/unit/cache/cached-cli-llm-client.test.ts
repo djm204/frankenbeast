@@ -171,6 +171,44 @@ describe('CachedCliLlmClient', () => {
     ))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('clears a stale stored session even when the fresh isolated retry fails', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-cached-cli-'));
+    const adapter = createAdapter();
+    adapter.consumeSessionMetadata.mockReturnValueOnce({
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      sessionId: 'stored-session',
+    });
+    const client = new CachedCliLlmClient({
+      cacheRootDir: join(workDir, '.fbeast', '.cache', 'llm'),
+      cliAdapter: adapter as never,
+      projectId: 'frankenbeast',
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      operation: 'plan-build',
+      workId: 'plan:alpha',
+    });
+
+    await client.complete('first prompt');
+    adapter.execute
+      .mockRejectedValueOnce(new Error('Claude CLI failed', {
+        cause: { stdout: 'No conversation found with session ID: stored-session', stderr: '' },
+      }))
+      .mockRejectedValueOnce(new Error('Claude CLI rate limited'));
+
+    await expect(client.complete('second prompt')).rejects.toThrow('Claude CLI rate limited');
+    await expect(access(join(
+      workDir,
+      '.fbeast',
+      '.cache',
+      'llm',
+      'work',
+      'frankenbeast',
+      'plan%3Aalpha',
+      'provider-session.json',
+    ))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('ignores legacy provider-session records that contain application work keys', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-cached-cli-'));
     const sessionDir = join(

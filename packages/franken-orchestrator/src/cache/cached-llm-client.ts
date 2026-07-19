@@ -152,4 +152,8 @@ export class CachedLlmClient {
       });
     }
   }
+
+  async invalidateProviderSession(projectId: string, workId: string): Promise<void> {
+    await this.deps.providerSessions.remove(projectId, workId);
+  }
 }
