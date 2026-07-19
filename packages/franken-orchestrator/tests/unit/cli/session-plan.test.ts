@@ -15,6 +15,7 @@ let progressInstance: unknown = undefined;
 let llmGraphBuilderCtorArg: unknown = undefined;
 let llmGraphBuilderCtorOptions: unknown = undefined;
 let lastCreateCliDepsOptions: import('../../../src/cli/dep-factory.js').CliDepOptions | undefined;
+let streamProgressOptions: { onProgressEvent?: (event: { type: string; [key: string]: unknown }) => void } | undefined;
 const mockFinalize = vi.fn(async () => {});
 
 // ── Mock heavy deps ──
@@ -64,6 +65,11 @@ vi.mock('../../../src/cli/dep-factory.js', () => ({
       logger: mockDeps.logger,
       finalize: mockFinalize,
       cliLlmAdapter: mockCliLlmAdapter,
+      artifacts: {
+        planName: 'session',
+        checkpointFile: resolve(options.paths.buildDir, 'session.checkpoint'),
+        logFile: resolve(options.paths.buildDir, 'session-build.log'),
+      },
     };
   }),
 }));
@@ -147,10 +153,10 @@ vi.mock('../../../src/planning/chunk-file-writer.js', () => {
 
 // Mock stream-progress to prevent real timers/stderr writes
 vi.mock('../../../src/adapters/stream-progress.js', () => ({
-  createStreamProgressWithSpinner: vi.fn(() => ({
-    onLine: vi.fn(),
-    stop: vi.fn(),
-  })),
+  createStreamProgressWithSpinner: vi.fn((options: typeof streamProgressOptions) => {
+    streamProgressOptions = options;
+    return { onLine: vi.fn(), stop: vi.fn() };
+  }),
   createStreamProgressHandler: vi.fn(() => vi.fn()),
 }));
 
@@ -256,6 +262,7 @@ describe('Session plan phase — CliLlmAdapter wiring', () => {
     llmGraphBuilderCtorArg = undefined;
     llmGraphBuilderCtorOptions = undefined;
     lastCreateCliDepsOptions = undefined;
+    streamProgressOptions = undefined;
     console.info = vi.fn();
   });
 
@@ -305,6 +312,128 @@ describe('Session plan phase — CliLlmAdapter wiring', () => {
 
     expect(llmGraphBuilderCtorOptions).toEqual({ timeoutMs: 75_000 });
   });
+
+  it('runPlan() persists sanitized live progress and discloses the build log path', async () => {
+    const { Session } = await import('../../../src/cli/session.js');
+    const config = makeConfig();
+    const expectedLogFile = resolve(config.paths.buildDir, 'session-build.log');
+
+    await new Session(config).start();
+    streamProgressOptions?.onProgressEvent?.({ type: 'chunk-detected', count: 2 });
+    lastCreateCliDepsOptions?.onLlmLifecycleEvent?.({
+      type: 'fallback',
+      from: 'claude',
+      to: 'codex',
+    });
+
+    expect(mockDeps.logger.debug).toHaveBeenCalledWith(
+      'Plan progress',
+      { type: 'chunk-detected', count: 2 },
+      'planner',
+    );
+    expect(mockDeps.logger.debug).toHaveBeenCalledWith(
+      'LLM provider lifecycle',
+      { type: 'fallback', from: 'claude', to: 'codex' },
+      'planner',
+    );
+    expect(mockDeps.logger.info).not.toHaveBeenCalledWith(
+      expect.stringMatching(/^(Plan progress|LLM provider lifecycle)$/),
+      expect.anything(),
+      'planner',
+    );
+    expect(mockDeps.logger.info).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ prompt: expect.anything() }),
+      expect.anything(),
+    );
+    expect(config.io.display).toHaveBeenCalledWith(expect.stringContaining('Build log:'));
+    expect(config.io.display).toHaveBeenCalledWith(expect.stringContaining(expectedLogFile));
+    expect(config.io.display).toHaveBeenCalledWith(expect.stringContaining(`tail -f '${expectedLogFile}'`));
+    expect(mockDeps.logger.info).toHaveBeenCalledWith(
+      'Plan stage completed',
+      expect.objectContaining({ stage: 'decompose', stageElapsedMs: expect.any(Number), totalElapsedMs: expect.any(Number) }),
+      'planner',
+    );
+  });
+
+  it('runPlan() restarts stream progress while applying review revisions', async () => {
+    const { reviewLoop } = await import('../../../src/cli/review-loop.js');
+    vi.mocked(reviewLoop).mockImplementationOnce(async ({ onRevise }) => {
+      await onRevise('Split the plan into smaller chunks');
+    });
+    const { createStreamProgressWithSpinner } = await import('../../../src/adapters/stream-progress.js');
+    const { Session } = await import('../../../src/cli/session.js');
+
+    await new Session(makeConfig()).start();
+
+    expect(createStreamProgressWithSpinner).toHaveBeenCalledTimes(2);
+    expect(mockLlmGraphBuild).toHaveBeenCalledTimes(2);
+    for (const result of vi.mocked(createStreamProgressWithSpinner).mock.results) {
+      expect(result.value.stop).toHaveBeenCalled();
+    }
+  });
+
+  it('runPlan() finalizes when build-log disclosure fails', async () => {
+    const io = mockIO();
+    vi.mocked(io.display).mockImplementationOnce(() => {
+      throw new Error('output closed');
+    });
+    const { createStreamProgressWithSpinner } = await import('../../../src/adapters/stream-progress.js');
+    const { Session } = await import('../../../src/cli/session.js');
+
+    await expect(new Session(makeConfig({ io })).start()).rejects.toThrow('output closed');
+
+    expect(mockFinalize).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(createStreamProgressWithSpinner).mock.results.at(-1)?.value.stop).toHaveBeenCalled();
+  });
+
+  it.each(['SIGINT', 'SIGTERM'] as const)(
+    'runPlan() flushes one active-stage cancellation record on %s and removes signal handlers',
+    async (signal) => {
+      const signalHandlers = new Map<NodeJS.Signals, () => void>();
+      const onSpy = vi.spyOn(process, 'on').mockImplementation(((event: string, listener: () => void) => {
+        if (event === 'SIGINT' || event === 'SIGTERM') {
+          signalHandlers.set(event, listener);
+        }
+        return process;
+      }) as typeof process.on);
+      const removeSpy = vi.spyOn(process, 'removeListener').mockImplementation((() => process) as typeof process.removeListener);
+      const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+      let resolveBuild!: () => void;
+      mockLlmGraphBuild.mockImplementationOnce(() => new Promise((resolveBuildPromise) => {
+        resolveBuild = () => resolveBuildPromise({ tasks: [] });
+      }));
+      const { Session } = await import('../../../src/cli/session.js');
+
+      const startPromise = new Session(makeConfig()).start();
+      await vi.waitFor(() => expect(signalHandlers.size).toBe(2));
+      signalHandlers.get(signal)!();
+      await vi.waitFor(() => expect(mockFinalize).toHaveBeenCalledTimes(1));
+      resolveBuild();
+
+      await expect(startPromise).rejects.toThrow(`Plan cancelled by ${signal}`);
+      expect(mockDeps.logger.warn).toHaveBeenCalledWith(
+        'Plan stage cancelled',
+        expect.objectContaining({ stage: 'decompose', signal }),
+        'planner',
+      );
+      expect(mockDeps.logger.warn).toHaveBeenCalledWith(
+        'Plan cycle cancelled',
+        expect.objectContaining({ signal }),
+        'planner',
+      );
+      expect(mockDeps.logger.warn.mock.calls.filter(([message]) => message === 'Plan stage cancelled')).toHaveLength(1);
+      expect(mockDeps.logger.warn.mock.calls.filter(([message]) => message === 'Plan cycle cancelled')).toHaveLength(1);
+      expect(mockFinalize).toHaveBeenCalledTimes(1);
+      expect(exitSpy).toHaveBeenCalledWith(signal === 'SIGINT' ? 130 : 143);
+      expect(removeSpy).toHaveBeenCalledWith('SIGINT', signalHandlers.get('SIGINT'));
+      expect(removeSpy).toHaveBeenCalledWith('SIGTERM', signalHandlers.get('SIGTERM'));
+
+      onSpy.mockRestore();
+      removeSpy.mockRestore();
+      exitSpy.mockRestore();
+    },
+  );
 
   it('runPlan() finalizes CLI dependencies so replay records are persisted', async () => {
     const { Session } = await import('../../../src/cli/session.js');
