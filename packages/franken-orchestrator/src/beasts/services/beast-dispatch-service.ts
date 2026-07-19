@@ -236,9 +236,15 @@ export class BeastDispatchService {
       ? this.repository.requireTrackedAgent(request.trackedAgentId)
       : undefined;
     const moduleConfig = request.moduleConfig ?? trackedAgent?.moduleConfig;
+    const directRunPolicyConfig = trackedAgent
+      ? {}
+      : {
+          ...pickToolPolicyConfig(request.config),
+          ...pickSkillsPolicyConfig(request.config),
+        };
     const parsedConfigSnapshot: Readonly<Record<string, unknown>> = moduleConfig
-      ? { ...defaultAgentToolPolicyConfig(definition.id), ...config, modules: moduleConfig }
-      : { ...defaultAgentToolPolicyConfig(definition.id), ...config };
+      ? { ...defaultAgentToolPolicyConfig(definition.id), ...config, ...directRunPolicyConfig, modules: moduleConfig }
+      : { ...defaultAgentToolPolicyConfig(definition.id), ...config, ...directRunPolicyConfig };
     const configSnapshot = preserveTrackedAgentPolicyConfig(parsedConfigSnapshot, trackedAgent);
     this.assertRoleToolManifestAllows(request, configSnapshot);
     const executionMode = request.executionMode ?? definition.executionModeDefault;

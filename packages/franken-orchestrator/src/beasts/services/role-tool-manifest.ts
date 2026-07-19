@@ -135,7 +135,9 @@ function selectedSkillsFromConfig(config: Readonly<Record<string, unknown>>): Se
   const explicit = Object.hasOwn(config, 'skills');
   return {
     explicit,
-    malformed: explicit && !Array.isArray(config.skills),
+    malformed: explicit && (
+      !Array.isArray(config.skills) || config.skills.some((skill) => typeof skill !== 'string')
+    ),
     skills: [...new Set(arrayOfTools(config.skills))],
   };
 }
@@ -177,11 +179,25 @@ function trustedSkillToolManifestFor(context: ToolPolicyValidationContext, skill
   const manifests = typeof context.trustedSkillToolManifests === 'function'
     ? context.trustedSkillToolManifests()
     : context.trustedSkillToolManifests;
-  if (!manifests || !Object.hasOwn(manifests, skill)) {
-    return undefined;
+  if (!manifests) return undefined;
+
+  if (Object.hasOwn(manifests, skill)) {
+    return arrayOfTools(manifests[skill]);
   }
-  const raw = manifests[skill];
-  return arrayOfTools(raw);
+
+  const separator = skill.indexOf('/');
+  if (separator > 0) {
+    const parentSkill = skill.slice(0, separator);
+    const toolId = skill.slice(separator + 1);
+    const parentTools = Object.hasOwn(manifests, parentSkill)
+      ? arrayOfTools(manifests[parentSkill])
+      : [];
+    return parentTools.includes(toolId) ? [toolId] : undefined;
+  }
+
+  return Object.values(manifests).some((tools) => arrayOfTools(tools).includes(skill))
+    ? [skill]
+    : undefined;
 }
 
 export function defaultAgentToolPolicyConfig(
@@ -249,7 +265,7 @@ export function validateAgentRoleTools(
     ? [{
       role: role ?? rawRole ?? '<missing-role>',
       requestedTool: '<malformed-skills-allowlist>',
-      reason: 'agent creation skills allowlist must be an explicit array; use an empty skills array to disable installed skill tools',
+      reason: 'agent creation skills allowlist must be an explicit array of strings; use an empty skills array to disable installed skill tools',
     }]
     : [];
   const implicitSkillsDenial = selectedSkills.explicit

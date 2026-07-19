@@ -334,6 +334,14 @@ export class SkillManager {
     return [...this.enabledSkills].filter((name) => this.exists(name));
   }
 
+  getSkillsDir(): string {
+    return this.skillsDirRoot;
+  }
+
+  hasToolManifest(name: string): boolean {
+    return existsSync(this.resolveSkillFilePath(name, 'tools.json'));
+  }
+
   readMcpConfig(name: string): McpConfig | null {
     const configPath = this.resolveSkillFilePath(name, 'mcp.json');
     assertNoSymlink(configPath, 'skill file');

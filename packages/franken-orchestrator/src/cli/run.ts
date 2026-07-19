@@ -1346,7 +1346,9 @@ async function runChatCommandIfRequested(
         beastsDb: join(paths.frankenbeastDir, 'beast.db'),
         beastLogsDir: paths.beastLogsDir,
         root,
-        skillsDir: join(paths.frankenbeastDir, 'skills'),
+        skillsDir: typeof skillManager?.getSkillsDir === 'function'
+          ? skillManager.getSkillsDir()
+          : join(root, 'skills'),
       })
       : undefined;
     const allowedOrigins = Array.from(new Set([

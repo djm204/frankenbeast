@@ -96,6 +96,39 @@ describe('BeastDispatchService', () => {
     expect(repo.listRuns()).toHaveLength(1);
   });
 
+  it('validates explicit direct-run tool policy instead of replacing it with workflow defaults', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+
+    await expect(dispatch.createRun({
+      definitionId: 'chunk-plan',
+      config: {
+        designDocPath: 'docs/design.md',
+        outputDir: 'docs/chunks',
+        agentRole: 'ticket-manager',
+        requestedTools: ['read_file', 'search_files'],
+        skills: [],
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+    })).rejects.toMatchObject({
+      name: 'AgentToolPolicyError',
+      validation: {
+        rawRole: 'ticket-manager',
+        denials: [expect.objectContaining({ requestedTool: 'write_file' })],
+      },
+    });
+    expect(repo.listRuns()).toEqual([]);
+  });
+
   it('fails closed when a persisted maintenance state file is not an object', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

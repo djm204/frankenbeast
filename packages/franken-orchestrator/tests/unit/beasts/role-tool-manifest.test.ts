@@ -210,6 +210,19 @@ describe('role tool manifest policy', () => {
         reason: expect.stringContaining('must be an explicit array'),
       })],
     });
+
+    expect(validateAgentRoleTools({
+      agentRole: 'triage',
+      requestedTools: ['read_file'],
+      skills: ['valid-skill', 123],
+    })).toMatchObject({
+      allowed: false,
+      role: 'triage',
+      denials: expect.arrayContaining([expect.objectContaining({
+        requestedTool: '<malformed-skills-allowlist>',
+        reason: expect.stringContaining('array of strings'),
+      })]),
+    });
   });
 
   it('accepts trusted prompt-only skill manifests with no runtime tools', () => {
@@ -224,6 +237,24 @@ describe('role tool manifest policy', () => {
       role: 'triage',
       denials: [],
     });
+  });
+
+  it('resolves selected runtime descriptor ids to their trusted parent skill manifest', () => {
+    const context = {
+      trustedSkillToolManifests: { 'repo-tools': ['read_file', 'patch'] },
+    };
+
+    for (const selectedSkill of ['repo-tools/read_file', 'read_file']) {
+      expect(validateAgentRoleTools({
+        agentRole: 'triage',
+        requestedTools: ['read_file'],
+        skills: [selectedSkill],
+      }, context)).toMatchObject({
+        allowed: true,
+        role: 'triage',
+        denials: [],
+      });
+    }
   });
 
   it('derives explicit policy fields for tracked chat init shells', () => {
