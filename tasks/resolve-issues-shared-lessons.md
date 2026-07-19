@@ -11,6 +11,9 @@
 - Separate shell interpolation parsing from JavaScript template interpolation, carry quote/heredoc context across lines, recognize staged crontab files and programmatic crontab sinks, and propagate aliased Python `os.environ`; otherwise a line-oriented scanner both misses persisted credentials and rejects safe runtime `$(gh auth token)` strings.
 - Treat cron-install taint as a language-aware dataflow problem: cover post-processed/backquoted `printenv`, wrapped/incrementally assembled `gh auth token`, aliased env imports/containers/sinks, dot/bracket/destructuring/joined interpolation flows, multiline schedules/assembly/programmatic sinks, and redirect/tee/stdin staging while preserving shell URLs and excluding quoted heredoc/escaped runtime expansion.
 
+## 2026-07-18 — Kanban reviewer isolation
+- Independent review workers must receive a distinct child card or explicitly review-only context; never let a delegated reviewer inherit and complete the implementation parent card, because completion can garbage-collect its workspace before the verified diff is committed and shipped.
+
 ## 2026-07-18 — Working-memory hydration corruption
 - Fail closed on malformed persisted values that are shaped like structured JSON (`{` or `[` after leading whitespace), while retaining the documented plain-text fallback for genuinely legacy rows. Typed hydration errors should identify the affected key without deleting the row, so operators can repair it and reopen the store.
 
@@ -376,6 +379,9 @@
 
 ## 2026-07-18 — Durable SSE ticket wiring
 - A persistent store implementation is not durable unless every daemon construction path supplies a stable database path; add a restart-level wiring test, and contain best-effort timer cleanup failures so transient SQLite errors cannot escape callbacks and terminate the process.
+
+## 2026-07-18 — Tracked dispatch-failure response redaction
+- Treat a failed run response as a bundle: sanitize the run snapshot, stored attempts, historical events, and logs. Event/log redaction must remain effective after dispatch recovery, and restarting a stopped run whose snapshot was cleared must rebuild validated config from the tracked agent before executor start.
 
 ## 2026-07-18 — First-contribution help documentation
 - For broad onboarding-documentation issues, close a concrete workflow gap rather than adding another general quickstart. Make the new path discoverable from README, CONTRIBUTING, and the onboarding index, include safe copyable evidence/templates, and add a focused test that locks those entrypoints and redaction guidance together.

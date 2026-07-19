@@ -118,6 +118,18 @@ export class AgentService {
     };
   }
 
+  listDispatchFailureRedactedAgentIds(): Set<string> {
+    return new Set(this.repository.listDispatchFailureHistoryAgentIds());
+  }
+
+  hasActiveDispatchFailure(agentId: string): boolean {
+    return this.repository.hasActiveDispatchFailure(agentId);
+  }
+
+  hasDispatchFailureHistory(agentId: string): boolean {
+    return this.repository.hasDispatchFailureHistory(agentId);
+  }
+
   appendEvent(agentId: string, request: AppendTrackedAgentEventRequest): TrackedAgentEvent {
     return this.repository.appendTrackedAgentEvent(agentId, {
       ...request,

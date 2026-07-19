@@ -5,6 +5,10 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { BeastLogStore } from '../../../src/beasts/events/beast-log-store.js';
 
+const SAFE_RUN_ID = 'run_123e4567-e89b-42d3-a456-426614174000';
+const SAFE_ATTEMPT_ID = 'attempt_123e4567-e89b-42d3-a456-426614174001';
+const SAFE_OTHER_ATTEMPT_ID = 'attempt_123e4567-e89b-42d3-a456-426614174002';
+
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = await mkdtemp(join(tmpdir(), 'franken-beast-log-store-'));
   try {
@@ -15,14 +19,44 @@ async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
 }
 
 describe('BeastLogStore', () => {
+  it('rejects path traversal identifiers before appending or reading logs', async () => {
+    await withTempDir(async (dir) => {
+      const logDir = join(dir, 'logs');
+      const outsidePath = join(dir, 'outside.log');
+      const store = new BeastLogStore(logDir);
+
+      await expect(
+        store.append('../outside', '../outside', 'stdout', 'escaped'),
+      ).rejects.toThrow('Invalid Beast run identifier');
+      await expect(store.read(SAFE_RUN_ID, '../outside')).rejects.toThrow(
+        'Invalid Beast attempt identifier',
+      );
+      expect(existsSync(outsidePath)).toBe(false);
+    });
+  });
+
+  it('accepts the persisted prefixed UUID identifiers for normal log access', async () => {
+    await withTempDir(async (dir) => {
+      const store = new BeastLogStore(dir);
+      const runId = SAFE_RUN_ID;
+      const attemptId = SAFE_ATTEMPT_ID;
+
+      await store.append(runId, attemptId, 'stdout', 'hello');
+
+      await expect(store.read(runId, attemptId)).resolves.toEqual([
+        expect.stringContaining('"message":"hello"'),
+      ]);
+    });
+  });
+
   it('appends line-oriented stream records and reads them back', async () => {
     await withTempDir(async (dir) => {
       const store = new BeastLogStore(dir);
 
-      await store.append('run-1', 'attempt-1', 'stdout', 'hello');
-      await store.append('run-1', 'attempt-1', 'stderr', 'boom');
+      await store.append(SAFE_RUN_ID, SAFE_ATTEMPT_ID, 'stdout', 'hello');
+      await store.append(SAFE_RUN_ID, SAFE_ATTEMPT_ID, 'stderr', 'boom');
 
-      await expect(store.read('run-1', 'attempt-1')).resolves.toEqual([
+      await expect(store.read(SAFE_RUN_ID, SAFE_ATTEMPT_ID)).resolves.toEqual([
         expect.stringContaining('"stream":"stdout"'),
         expect.stringContaining('"stream":"stderr"'),
       ]);
@@ -33,17 +67,17 @@ describe('BeastLogStore', () => {
     await withTempDir(async (dir) => {
       const store = new BeastLogStore(dir);
 
-      await expect(store.read('run-1', 'attempt-404')).resolves.toEqual([]);
+      await expect(store.read(SAFE_RUN_ID, SAFE_OTHER_ATTEMPT_ID)).resolves.toEqual([]);
     });
   });
 
   it('rotates run output logs before appending past the configured active size cap', async () => {
     await withTempDir(async (dir) => {
       const logs = new BeastLogStore(dir, { maxLogFileBytes: 180, maxRotatedLogFiles: 2 });
-      await logs.append('run-1', 'attempt-1', 'stdout', 'first'.repeat(12), '2026-03-11T00:00:00.000Z');
-      await logs.append('run-1', 'attempt-1', 'stderr', 'second'.repeat(12), '2026-03-11T00:00:01.000Z');
+      await logs.append(SAFE_RUN_ID, SAFE_ATTEMPT_ID, 'stdout', 'first'.repeat(12), '2026-03-11T00:00:00.000Z');
+      await logs.append(SAFE_RUN_ID, SAFE_ATTEMPT_ID, 'stderr', 'second'.repeat(12), '2026-03-11T00:00:01.000Z');
 
-      const activePath = join(dir, 'run-1', 'attempt-1.log');
+      const activePath = join(dir, SAFE_RUN_ID, `${SAFE_ATTEMPT_ID}.log`);
       const rotatedPath = `${activePath}.1`;
       expect(existsSync(rotatedPath)).toBe(true);
       expect(await readFile(rotatedPath, 'utf-8')).toContain('firstfirst');
@@ -55,11 +89,11 @@ describe('BeastLogStore', () => {
   it('reads retained rotated logs oldest-first before the active log', async () => {
     await withTempDir(async (dir) => {
       const logs = new BeastLogStore(dir, { maxLogFileBytes: 180, maxRotatedLogFiles: 2 });
-      await logs.append('run-rotated', 'attempt-1', 'stdout', 'first'.repeat(12), '2026-03-11T00:00:00.000Z');
-      await logs.append('run-rotated', 'attempt-1', 'stdout', 'second'.repeat(12), '2026-03-11T00:00:01.000Z');
-      await logs.append('run-rotated', 'attempt-1', 'stdout', 'third'.repeat(12), '2026-03-11T00:00:02.000Z');
+      await logs.append(SAFE_RUN_ID, SAFE_ATTEMPT_ID, 'stdout', 'first'.repeat(12), '2026-03-11T00:00:00.000Z');
+      await logs.append(SAFE_RUN_ID, SAFE_ATTEMPT_ID, 'stdout', 'second'.repeat(12), '2026-03-11T00:00:01.000Z');
+      await logs.append(SAFE_RUN_ID, SAFE_ATTEMPT_ID, 'stdout', 'third'.repeat(12), '2026-03-11T00:00:02.000Z');
 
-      const records = await logs.read('run-rotated', 'attempt-1');
+      const records = await logs.read(SAFE_RUN_ID, SAFE_ATTEMPT_ID);
       expect(records).toHaveLength(3);
       expect(records[0]).toContain('firstfirst');
       expect(records[1]).toContain('secondsecond');
@@ -69,13 +103,13 @@ describe('BeastLogStore', () => {
 
   it('reads all existing rotations even when the reader uses default retention', async () => {
     await withTempDir(async (dir) => {
-      const activePath = join(dir, 'run-reader-retention', 'attempt-1.log');
-      await mkdir(join(dir, 'run-reader-retention'), { recursive: true });
+      const activePath = join(dir, SAFE_RUN_ID, `${SAFE_ATTEMPT_ID}.log`);
+      await mkdir(join(dir, SAFE_RUN_ID), { recursive: true });
       await writeFile(`${activePath}.4`, 'old-4\n');
       await writeFile(`${activePath}.10`, 'old-10\n');
       await writeFile(activePath, 'active\n');
 
-      await expect(new BeastLogStore(dir).read('run-reader-retention', 'attempt-1')).resolves.toEqual([
+      await expect(new BeastLogStore(dir).read(SAFE_RUN_ID, SAFE_ATTEMPT_ID)).resolves.toEqual([
         'old-10',
         'old-4',
         'active',
@@ -86,9 +120,9 @@ describe('BeastLogStore', () => {
   it('truncates oversized process-output messages so one noisy line cannot break the cap', async () => {
     await withTempDir(async (dir) => {
       const logs = new BeastLogStore(dir, { maxLogFileBytes: 260, maxRotatedLogFiles: 1 });
-      await logs.append('run-2', 'attempt-1', 'stdout', 'x'.repeat(5_000), '2026-03-11T00:00:00.000Z');
+      await logs.append(SAFE_RUN_ID, SAFE_ATTEMPT_ID, 'stdout', 'x'.repeat(5_000), '2026-03-11T00:00:00.000Z');
 
-      const activePath = join(dir, 'run-2', 'attempt-1.log');
+      const activePath = join(dir, SAFE_RUN_ID, `${SAFE_ATTEMPT_ID}.log`);
       const contents = await readFile(activePath, 'utf-8');
       const parsed = JSON.parse(contents.trim()) as { message: string; truncatedBytes: number };
       expect((await stat(activePath)).size).toBeLessThanOrEqual(260);
@@ -100,9 +134,9 @@ describe('BeastLogStore', () => {
   it('caps escaped oversized messages without an iterative event-loop stall', async () => {
     await withTempDir(async (dir) => {
       const logs = new BeastLogStore(dir, { maxLogFileBytes: 320, maxRotatedLogFiles: 1 });
-      await logs.append('run-escaped', 'attempt-1', 'stderr', '\\'.repeat(20_000), '2026-03-11T00:00:00.000Z');
+      await logs.append(SAFE_RUN_ID, SAFE_ATTEMPT_ID, 'stderr', '\\'.repeat(20_000), '2026-03-11T00:00:00.000Z');
 
-      const activePath = join(dir, 'run-escaped', 'attempt-1.log');
+      const activePath = join(dir, SAFE_RUN_ID, `${SAFE_ATTEMPT_ID}.log`);
       const contents = await readFile(activePath, 'utf-8');
       const parsed = JSON.parse(contents.trim()) as { message: string; truncatedBytes: number };
       expect((await stat(activePath)).size).toBeLessThanOrEqual(320);
@@ -114,9 +148,9 @@ describe('BeastLogStore', () => {
   it('keeps the oversized-record fallback within the minimum cap', async () => {
     await withTempDir(async (dir) => {
       const logs = new BeastLogStore(dir, { maxLogFileBytes: 128, maxRotatedLogFiles: 1 });
-      await logs.append('run-minimum', 'attempt-1', 'stderr', '\u0000'.repeat(10_000), '2026-03-11T00:00:00.000Z');
+      await logs.append(SAFE_RUN_ID, SAFE_ATTEMPT_ID, 'stderr', '\u0000'.repeat(10_000), '2026-03-11T00:00:00.000Z');
 
-      const activePath = join(dir, 'run-minimum', 'attempt-1.log');
+      const activePath = join(dir, SAFE_RUN_ID, `${SAFE_ATTEMPT_ID}.log`);
       const contents = await readFile(activePath, 'utf-8');
       const parsed = JSON.parse(contents.trim()) as { createdAt?: string; message: string };
       expect((await stat(activePath)).size).toBeLessThanOrEqual(128);
@@ -134,8 +168,8 @@ describe('BeastLogStore', () => {
       await Promise.all(
         Array.from({ length: 12 }, (_, i) =>
           logs.append(
-            'run-concurrent',
-            'attempt-1',
+            SAFE_RUN_ID,
+            SAFE_ATTEMPT_ID,
             'stdout',
             `message-${i}-${'x'.repeat(80)}`,
             `2026-03-11T00:00:${String(i).padStart(2, '0')}.000Z`,
@@ -143,7 +177,7 @@ describe('BeastLogStore', () => {
         ),
       );
 
-      const activePath = join(dir, 'run-concurrent', 'attempt-1.log');
+      const activePath = join(dir, SAFE_RUN_ID, `${SAFE_ATTEMPT_ID}.log`);
       expect((await stat(activePath)).size).toBeLessThanOrEqual(260);
     });
   });
@@ -152,10 +186,10 @@ describe('BeastLogStore', () => {
     await withTempDir(async (dir) => {
       const logs = new BeastLogStore(dir, { maxLogFileBytes: 160, maxRotatedLogFiles: 1 });
       for (let i = 0; i < 5; i += 1) {
-        await logs.append('run-3', 'attempt-1', 'stdout', `message-${i}-${'z'.repeat(60)}`, `2026-03-11T00:00:0${i}.000Z`);
+        await logs.append(SAFE_RUN_ID, SAFE_ATTEMPT_ID, 'stdout', `message-${i}-${'z'.repeat(60)}`, `2026-03-11T00:00:0${i}.000Z`);
       }
 
-      const activePath = join(dir, 'run-3', 'attempt-1.log');
+      const activePath = join(dir, SAFE_RUN_ID, `${SAFE_ATTEMPT_ID}.log`);
       expect(existsSync(`${activePath}.1`)).toBe(true);
       expect(existsSync(`${activePath}.2`)).toBe(false);
       expect((await stat(activePath)).size).toBeLessThanOrEqual(160);
@@ -164,15 +198,15 @@ describe('BeastLogStore', () => {
 
   it('removes stale rotations above a lowered retention count', async () => {
     await withTempDir(async (dir) => {
-      const activePath = join(dir, 'run-stale', 'attempt-1.log');
-      await mkdir(join(dir, 'run-stale'), { recursive: true });
+      const activePath = join(dir, SAFE_RUN_ID, `${SAFE_ATTEMPT_ID}.log`);
+      await mkdir(join(dir, SAFE_RUN_ID), { recursive: true });
       await writeFile(activePath, `${JSON.stringify({ stream: 'stdout', message: 'active', createdAt: '2026-03-11T00:00:00.000Z' })}\n`);
       await writeFile(`${activePath}.1`, 'old-1\n');
       await writeFile(`${activePath}.2`, 'old-2\n');
       await writeFile(`${activePath}.3`, 'old-3\n');
 
       const logs = new BeastLogStore(dir, { maxLogFileBytes: 160, maxRotatedLogFiles: 1 });
-      await logs.append('run-stale', 'attempt-1', 'stdout', `new-${'z'.repeat(80)}`, '2026-03-11T00:00:01.000Z');
+      await logs.append(SAFE_RUN_ID, SAFE_ATTEMPT_ID, 'stdout', `new-${'z'.repeat(80)}`, '2026-03-11T00:00:01.000Z');
 
       expect(existsSync(`${activePath}.1`)).toBe(true);
       expect(existsSync(`${activePath}.2`)).toBe(false);
@@ -182,14 +216,14 @@ describe('BeastLogStore', () => {
 
   it('removes stale rotations when retention is disabled', async () => {
     await withTempDir(async (dir) => {
-      const activePath = join(dir, 'run-no-retention', 'attempt-1.log');
-      await mkdir(join(dir, 'run-no-retention'), { recursive: true });
+      const activePath = join(dir, SAFE_RUN_ID, `${SAFE_ATTEMPT_ID}.log`);
+      await mkdir(join(dir, SAFE_RUN_ID), { recursive: true });
       await writeFile(activePath, `${JSON.stringify({ stream: 'stdout', message: 'active', createdAt: '2026-03-11T00:00:00.000Z' })}\n`);
       await writeFile(`${activePath}.1`, 'old-1\n');
       await writeFile(`${activePath}.2`, 'old-2\n');
 
       const logs = new BeastLogStore(dir, { maxLogFileBytes: 160, maxRotatedLogFiles: 0 });
-      await logs.append('run-no-retention', 'attempt-1', 'stdout', `new-${'z'.repeat(80)}`, '2026-03-11T00:00:01.000Z');
+      await logs.append(SAFE_RUN_ID, SAFE_ATTEMPT_ID, 'stdout', `new-${'z'.repeat(80)}`, '2026-03-11T00:00:01.000Z');
 
       expect(existsSync(`${activePath}.1`)).toBe(false);
       expect(existsSync(`${activePath}.2`)).toBe(false);
@@ -199,15 +233,15 @@ describe('BeastLogStore', () => {
 
   it('clamps negative rotated-file retention without deleting active or sibling logs', async () => {
     await withTempDir(async (dir) => {
-      const activePath = join(dir, 'run-negative-retention', 'attempt-1.log');
-      const siblingPath = join(dir, 'run-negative-retention', 'attempt-2.log');
-      await mkdir(join(dir, 'run-negative-retention'), { recursive: true });
+      const activePath = join(dir, SAFE_RUN_ID, `${SAFE_ATTEMPT_ID}.log`);
+      const siblingPath = join(dir, SAFE_RUN_ID, `${SAFE_OTHER_ATTEMPT_ID}.log`);
+      await mkdir(join(dir, SAFE_RUN_ID), { recursive: true });
       await writeFile(activePath, `${JSON.stringify({ stream: 'stdout', message: 'active', createdAt: '2026-03-11T00:00:00.000Z' })}\n`);
       await writeFile(siblingPath, 'sibling\n');
       await writeFile(`${activePath}.1`, 'old-1\n');
 
       const logs = new BeastLogStore(dir, { maxLogFileBytes: 1_000, maxRotatedLogFiles: -1 });
-      await logs.append('run-negative-retention', 'attempt-1', 'stdout', 'small', '2026-03-11T00:00:01.000Z');
+      await logs.append(SAFE_RUN_ID, SAFE_ATTEMPT_ID, 'stdout', 'small', '2026-03-11T00:00:01.000Z');
 
       expect(existsSync(activePath)).toBe(true);
       expect(await readFile(activePath, 'utf-8')).toContain('small');
@@ -218,12 +252,12 @@ describe('BeastLogStore', () => {
 
   it('truncates an already oversized active log instead of rotating it into retained evidence', async () => {
     await withTempDir(async (dir) => {
-      const activePath = join(dir, 'run-oversized-existing', 'attempt-1.log');
-      await mkdir(join(dir, 'run-oversized-existing'), { recursive: true });
+      const activePath = join(dir, SAFE_RUN_ID, `${SAFE_ATTEMPT_ID}.log`);
+      await mkdir(join(dir, SAFE_RUN_ID), { recursive: true });
       await writeFile(activePath, 'legacy-unbounded-log\n'.repeat(50));
 
       const logs = new BeastLogStore(dir, { maxLogFileBytes: 160, maxRotatedLogFiles: 2 });
-      await logs.append('run-oversized-existing', 'attempt-1', 'stdout', 'new-small-record', '2026-03-11T00:00:01.000Z');
+      await logs.append(SAFE_RUN_ID, SAFE_ATTEMPT_ID, 'stdout', 'new-small-record', '2026-03-11T00:00:01.000Z');
 
       expect(existsSync(`${activePath}.1`)).toBe(false);
       expect(await readFile(activePath, 'utf-8')).toContain('new-small-record');
@@ -233,14 +267,14 @@ describe('BeastLogStore', () => {
 
   it('prunes stale rotations even when the active log stays below the size cap', async () => {
     await withTempDir(async (dir) => {
-      const activePath = join(dir, 'run-prune-without-rotation', 'attempt-1.log');
-      await mkdir(join(dir, 'run-prune-without-rotation'), { recursive: true });
+      const activePath = join(dir, SAFE_RUN_ID, `${SAFE_ATTEMPT_ID}.log`);
+      await mkdir(join(dir, SAFE_RUN_ID), { recursive: true });
       await writeFile(activePath, `${JSON.stringify({ stream: 'stdout', message: 'active', createdAt: '2026-03-11T00:00:00.000Z' })}\n`);
       await writeFile(`${activePath}.1`, 'old-1\n');
       await writeFile(`${activePath}.2`, 'old-2\n');
 
       const logs = new BeastLogStore(dir, { maxLogFileBytes: 1_000, maxRotatedLogFiles: 0 });
-      await logs.append('run-prune-without-rotation', 'attempt-1', 'stdout', 'small', '2026-03-11T00:00:01.000Z');
+      await logs.append(SAFE_RUN_ID, SAFE_ATTEMPT_ID, 'stdout', 'small', '2026-03-11T00:00:01.000Z');
 
       expect(existsSync(`${activePath}.1`)).toBe(false);
       expect(existsSync(`${activePath}.2`)).toBe(false);
@@ -250,17 +284,17 @@ describe('BeastLogStore', () => {
 
   it('does not scan and prune stale rotations on every below-cap append', async () => {
     await withTempDir(async (dir) => {
-      const activePath = join(dir, 'run-prune-once', 'attempt-1.log');
-      await mkdir(join(dir, 'run-prune-once'), { recursive: true });
+      const activePath = join(dir, SAFE_RUN_ID, `${SAFE_ATTEMPT_ID}.log`);
+      await mkdir(join(dir, SAFE_RUN_ID), { recursive: true });
       await writeFile(activePath, `${JSON.stringify({ stream: 'stdout', message: 'active', createdAt: '2026-03-11T00:00:00.000Z' })}\n`);
       await writeFile(`${activePath}.2`, 'old-2\n');
 
       const logs = new BeastLogStore(dir, { maxLogFileBytes: 1_000, maxRotatedLogFiles: 1 });
-      await logs.append('run-prune-once', 'attempt-1', 'stdout', 'first-small', '2026-03-11T00:00:01.000Z');
+      await logs.append(SAFE_RUN_ID, SAFE_ATTEMPT_ID, 'stdout', 'first-small', '2026-03-11T00:00:01.000Z');
       expect(existsSync(`${activePath}.2`)).toBe(false);
 
       await writeFile(`${activePath}.2`, 'externally-recreated-stale-rotation\n');
-      await logs.append('run-prune-once', 'attempt-1', 'stdout', 'second-small', '2026-03-11T00:00:02.000Z');
+      await logs.append(SAFE_RUN_ID, SAFE_ATTEMPT_ID, 'stdout', 'second-small', '2026-03-11T00:00:02.000Z');
 
       expect(existsSync(`${activePath}.2`)).toBe(true);
     });
@@ -268,15 +302,15 @@ describe('BeastLogStore', () => {
 
   it('caps configured rotated-file retention to avoid unbounded rotation loops', async () => {
     await withTempDir(async (dir) => {
-      const activePath = join(dir, 'run-capped-retention', 'attempt-1.log');
-      await mkdir(join(dir, 'run-capped-retention'), { recursive: true });
+      const activePath = join(dir, SAFE_RUN_ID, `${SAFE_ATTEMPT_ID}.log`);
+      await mkdir(join(dir, SAFE_RUN_ID), { recursive: true });
       await writeFile(activePath, `${JSON.stringify({ stream: 'stdout', message: 'active'.repeat(8), createdAt: '2026-03-11T00:00:00.000Z' })}\n`);
       await writeFile(`${activePath}.99`, 'old-99\n');
       await writeFile(`${activePath}.100`, 'old-100\n');
       await writeFile(`${activePath}.101`, 'old-101\n');
 
       const logs = new BeastLogStore(dir, { maxLogFileBytes: 160, maxRotatedLogFiles: Number.MAX_SAFE_INTEGER });
-      await logs.append('run-capped-retention', 'attempt-1', 'stdout', 'new'.repeat(30), '2026-03-11T00:00:01.000Z');
+      await logs.append(SAFE_RUN_ID, SAFE_ATTEMPT_ID, 'stdout', 'new'.repeat(30), '2026-03-11T00:00:01.000Z');
 
       expect(await readFile(`${activePath}.100`, 'utf-8')).toBe('old-99\n');
       expect(existsSync(`${activePath}.101`)).toBe(false);

@@ -21,9 +21,14 @@ describe('StepModules', () => {
     expect(screen.getByText('Heartbeat')).toBeTruthy();
   });
 
-  it('toggling a module stores state in Zustand', () => {
+  it('announces module toggle state and stores it in Zustand', () => {
     render(<StepModules />);
-    fireEvent.click(screen.getByText('Firewall'));
+    const firewallButton = screen.getByRole('button', { name: /firewall/i });
+
+    expect(firewallButton.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(firewallButton);
+    expect(firewallButton.getAttribute('aria-pressed')).toBe('true');
+
     const modules = useBeastStore.getState().stepValues[3] as Record<string, boolean>;
     expect(modules?.firewall).toBe(true);
   });

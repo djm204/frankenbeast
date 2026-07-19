@@ -1,11 +1,14 @@
 import { appendFile, mkdir, readFile, readdir, rename, stat, truncate, unlink } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { isoNow } from '@franken/types';
 
 const DEFAULT_MAX_LOG_FILE_BYTES = 10 * 1024 * 1024;
 const DEFAULT_MAX_ROTATED_LOG_FILES = 3;
 const MAX_ROTATED_LOG_FILES = 100;
 const MIN_LOG_FILE_BYTES = 128;
+const UUID_PATTERN = '[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
+const RUN_ID_PATTERN = new RegExp(`^run_${UUID_PATTERN}$`, 'iu');
+const ATTEMPT_ID_PATTERN = new RegExp(`^attempt_${UUID_PATTERN}$`, 'iu');
 
 export interface BeastLogStoreOptions {
   /** Maximum active per-attempt log size before rotation. Defaults to 10 MiB. */
@@ -226,7 +229,20 @@ export class BeastLogStore {
   }
 
   private resolvePath(runId: string, attemptId: string): string {
-    return join(this.logDir, runId, `${attemptId}.log`);
+    if (!RUN_ID_PATTERN.test(runId)) {
+      throw new Error('Invalid Beast run identifier');
+    }
+    if (attemptId !== 'system' && !ATTEMPT_ID_PATTERN.test(attemptId)) {
+      throw new Error('Invalid Beast attempt identifier');
+    }
+
+    const root = resolve(this.logDir);
+    const filePath = resolve(root, runId, `${attemptId}.log`);
+    const relativePath = relative(root, filePath);
+    if (relativePath === '..' || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)) {
+      throw new Error('Beast log path escapes the configured log directory');
+    }
+    return filePath;
   }
 }
 

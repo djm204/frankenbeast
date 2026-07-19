@@ -12,6 +12,7 @@ import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-bea
 import { AgentService } from '../../../src/beasts/services/agent-service.js';
 import { CapacityReservationPolicy } from '../../../src/beasts/services/capacity-reservation-policy.js';
 import { MaintenanceModeError, MaintenanceModeService } from '../../../src/beasts/services/maintenance-mode-service.js';
+import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../../../src/beasts/services/dispatch-failure-message.js';
 
 describe('BeastRunService', () => {
   let workDir: string | undefined;
@@ -669,15 +670,17 @@ describe('BeastRunService', () => {
       id: run.id,
       status: 'failed',
       stopReason: 'start_failed',
+      configSnapshot: {},
     });
+    expect(repo.getRun(run.id)?.configSnapshot).toEqual({});
     expect(repo.listEvents(run.id)).toEqual(expect.arrayContaining([
       expect.objectContaining({
         type: 'run.start_failed',
-        payload: { error: 'spawn ENOENT' },
+        payload: { error: SAFE_DISPATCH_FAILURE_MESSAGE },
       }),
     ]));
-    await expect(logs.read(run.id, 'system')).resolves.toContainEqual(expect.stringContaining('start_failed: spawn ENOENT'));
-    await expect(runs.readLogs(run.id)).resolves.toContainEqual(expect.stringContaining('start_failed: spawn ENOENT'));
+    await expect(logs.read(run.id, 'system')).resolves.toContainEqual(expect.stringContaining(`start_failed: ${SAFE_DISPATCH_FAILURE_MESSAGE}`));
+    await expect(runs.readLogs(run.id)).resolves.toContainEqual(expect.stringContaining(`start_failed: ${SAFE_DISPATCH_FAILURE_MESSAGE}`));
     expect(repo.getTrackedAgent(agent.id)).toMatchObject({
       status: 'failed',
       dispatchRunId: run.id,
@@ -687,7 +690,7 @@ describe('BeastRunService', () => {
         level: 'error',
         type: 'agent.dispatch.failed',
         message: `Failed to start Beast run ${run.id}`,
-        payload: { runId: run.id, error: 'spawn ENOENT' },
+        payload: { runId: run.id, error: SAFE_DISPATCH_FAILURE_MESSAGE },
       }),
     ]));
     expect(publish).toHaveBeenCalledWith(expect.objectContaining({
@@ -764,10 +767,10 @@ describe('BeastRunService', () => {
     expect(failed.currentAttemptId).toBeUndefined();
     expect(failed.latestExitCode).toBeUndefined();
     expect(failed.startedAt).toBeUndefined();
-    await expect(runs.readLogs(run.id)).resolves.toContainEqual(expect.stringContaining('start_failed: config invalid'));
+    await expect(runs.readLogs(run.id)).resolves.toContainEqual(expect.stringContaining(`start_failed: ${SAFE_DISPATCH_FAILURE_MESSAGE}`));
     expect(repo.listEvents(run.id).at(-1)).toMatchObject({
       type: 'run.start_failed',
-      payload: { error: 'config invalid' },
+      payload: { error: SAFE_DISPATCH_FAILURE_MESSAGE },
     });
   });
 
@@ -791,7 +794,7 @@ describe('BeastRunService', () => {
           });
           repo.appendEvent(run.id, {
             type: 'run.spawn_failed',
-            payload: { error: 'Worker process could not be spawned.', code: 'ENOENT' },
+            payload: { error: SAFE_DISPATCH_FAILURE_MESSAGE, code: 'ENOENT' },
             createdAt: failedAt,
           });
           throw new Error(`spawn failed for --token=${secret}`);
@@ -849,16 +852,14 @@ describe('BeastRunService', () => {
       status: 'failed',
       stopReason: 'spawn_failed',
     });
-    await expect(runs.readLogs(run.id)).resolves.toContainEqual(
-      expect.stringContaining('start_failed: Worker process could not be spawned.'),
-    );
+    await expect(runs.readLogs(run.id)).resolves.toContainEqual(expect.stringContaining(`start_failed: ${SAFE_DISPATCH_FAILURE_MESSAGE}`));
     expect(repo.listEvents(run.id).map((event) => event.type)).toEqual(['run.created', 'run.spawn_failed']);
     expect(repo.listTrackedAgentEvents(agent.id)).toEqual(expect.arrayContaining([
       expect.objectContaining({
         level: 'error',
         type: 'agent.dispatch.failed',
         message: `Failed to start Beast run ${run.id}`,
-        payload: { runId: run.id, error: 'Worker process could not be spawned.' },
+        payload: { runId: run.id, error: SAFE_DISPATCH_FAILURE_MESSAGE },
       }),
     ]));
     expect(publish).toHaveBeenCalledWith(expect.objectContaining({
@@ -876,7 +877,7 @@ describe('BeastRunService', () => {
     })).not.toContain(secret);
   });
 
-  it('does not duplicate tracked-agent failure notifications already emitted by the executor callback', async () => {
+  it('records dispatch failure redaction after an executor callback marks the agent failed', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const logs = new BeastLogStore(join(workDir, 'logs'));
@@ -954,10 +955,11 @@ describe('BeastRunService', () => {
 
     expect(failed.status).toBe('failed');
     expect(repo.getTrackedAgent(agent.id)?.status).toBe('failed');
-    expect(repo.listTrackedAgentEvents(agent.id).filter((event) => event.level === 'error')).toHaveLength(1);
-    expect(repo.listTrackedAgentEvents(agent.id).filter((event) => event.type === 'agent.dispatch.failed')).toHaveLength(0);
+    expect(repo.listTrackedAgentEvents(agent.id).filter((event) => event.level === 'error')).toHaveLength(2);
+    expect(repo.listTrackedAgentEvents(agent.id).filter((event) => event.type === 'agent.dispatch.failed')).toHaveLength(1);
+    expect(repo.hasActiveDispatchFailure(agent.id)).toBe(true);
     expect(publish.mock.calls.filter(([event]) => event.type === 'agent.status')).toHaveLength(1);
-    expect(publish.mock.calls.filter(([event]) => event.type === 'agent.event')).toHaveLength(1);
+    expect(publish.mock.calls.filter(([event]) => event.type === 'agent.event')).toHaveLength(2);
   });
 
   it('clears stale attempt metadata when preserving executor-recorded retry failures', async () => {
@@ -1025,9 +1027,7 @@ describe('BeastRunService', () => {
     expect(failed.currentAttemptId).toBeUndefined();
     expect(failed.latestExitCode).toBeUndefined();
     expect(failed.startedAt).toBeUndefined();
-    await expect(runs.readLogs(run.id)).resolves.toContainEqual(
-      expect.stringContaining('start_failed: Worker process could not be spawned.'),
-    );
+    await expect(runs.readLogs(run.id)).resolves.toContainEqual(expect.stringContaining(`start_failed: ${SAFE_DISPATCH_FAILURE_MESSAGE}`));
 
     executors.process.start.mockImplementationOnce(async () => {
       throw new Error('config invalid on retry');
@@ -1037,11 +1037,11 @@ describe('BeastRunService', () => {
 
     expect(preStartFailed).toMatchObject({ status: 'failed', stopReason: 'start_failed' });
     await expect(runs.readLogs(run.id)).resolves.toContainEqual(
-      expect.stringContaining('start_failed: config invalid on retry'),
+      expect.stringContaining(`start_failed: ${SAFE_DISPATCH_FAILURE_MESSAGE}`),
     );
     expect(repo.listEvents(run.id)).toContainEqual(expect.objectContaining({
       type: 'run.start_failed',
-      payload: { error: 'config invalid on retry' },
+      payload: { error: SAFE_DISPATCH_FAILURE_MESSAGE },
     }));
 
     executors.process.start.mockImplementationOnce(async (retryRun: { id: string }) => {
@@ -1109,7 +1109,7 @@ describe('BeastRunService', () => {
       startedAt: attempt.startedAt,
     });
 
-    await expect(runs.start(run.id, 'operator')).rejects.toThrow('duplicate start failed');
+    await expect(runs.start(run.id, 'operator')).rejects.toThrow(SAFE_DISPATCH_FAILURE_MESSAGE);
 
     expect(repo.getRun(run.id)).toMatchObject({
       id: run.id,
@@ -1155,7 +1155,7 @@ describe('BeastRunService', () => {
       startNow: false,
     });
 
-    await expect(runs.start(run.id, 'operator')).rejects.toThrow('post-start tracking failed');
+    await expect(runs.start(run.id, 'operator')).rejects.toThrow(SAFE_DISPATCH_FAILURE_MESSAGE);
 
     expect(repo.getRun(run.id)).toMatchObject({
       id: run.id,
@@ -1207,7 +1207,7 @@ describe('BeastRunService', () => {
       executorMetadata: { backend: 'process' },
     });
 
-    await expect(runs.start(run.id, 'operator')).rejects.toThrow('post-start tracking failed');
+    await expect(runs.start(run.id, 'operator')).rejects.toThrow(SAFE_DISPATCH_FAILURE_MESSAGE);
 
     const attempts = repo.listAttempts(run.id);
     expect(attempts).toHaveLength(2);
@@ -1261,7 +1261,7 @@ describe('BeastRunService', () => {
       startedAt: attempt.startedAt,
     });
 
-    await expect(runs.start(run.id, 'operator')).rejects.toThrow('transient config write failed');
+    await expect(runs.start(run.id, 'operator')).rejects.toThrow(SAFE_DISPATCH_FAILURE_MESSAGE);
 
     expect(repo.getRun(run.id)).toMatchObject({
       id: run.id,
@@ -1357,6 +1357,192 @@ describe('BeastRunService', () => {
       type: 'run.status',
       data: expect.objectContaining({ runId: run.id, status: 'failed' }),
     }));
+  });
+
+  it('persists rebuilt legacy retry config before a repeated failure clears the run snapshot', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: {
+        start: vi.fn(async () => { throw new Error('retry failed'); }),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const runs = new BeastRunService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const agent = repo.createTrackedAgent({
+      definitionId: 'martin-loop',
+      source: 'dashboard',
+      status: 'failed',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: {},
+      createdAt: '2026-03-11T00:00:00.000Z',
+      updatedAt: '2026-03-11T00:00:00.000Z',
+    });
+    const run = repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {
+        provider: 'claude',
+        objective: 'Retry legacy work',
+        chunkDirectory: 'docs/chunks',
+        modules: { firewall: true, planner: true },
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-11T00:00:01.000Z',
+    });
+    repo.updateRun(run.id, {
+      status: 'failed',
+      finishedAt: '2026-03-11T00:00:02.000Z',
+      stopReason: 'start_failed',
+    });
+
+    const failed = await runs.start(run.id, 'operator');
+
+    expect(failed).toMatchObject({ status: 'failed', stopReason: 'start_failed', configSnapshot: {} });
+    expect(repo.getTrackedAgent(agent.id)).toMatchObject({
+      initConfig: {
+        provider: 'claude',
+        objective: 'Retry legacy work',
+        chunkDirectory: 'docs/chunks',
+      },
+      moduleConfig: { firewall: true, planner: true },
+    });
+  });
+
+  it('rebuilds a redacted stopped run before restarting an active failed dispatch', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const start = vi.fn(async () => undefined);
+    const executors = {
+      process: { start, stop: vi.fn(), kill: vi.fn() },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const runs = new BeastRunService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const agent = repo.createTrackedAgent({
+      definitionId: 'martin-loop',
+      source: 'dashboard',
+      status: 'stopped',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: {
+        provider: 'claude',
+        objective: 'Recover stopped work',
+        chunkDirectory: 'docs/chunks',
+      },
+      createdAt: '2026-03-11T00:00:00.000Z',
+      updatedAt: '2026-03-11T00:00:00.000Z',
+    });
+    const run = repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-11T00:00:01.000Z',
+    });
+    repo.updateRun(run.id, {
+      status: 'stopped',
+      finishedAt: '2026-03-11T00:00:02.000Z',
+      stopReason: 'operator_stop',
+    });
+    repo.appendTrackedAgentEvent(agent.id, {
+      level: 'error',
+      type: 'agent.dispatch.failed',
+      message: 'Failed to start Beast run',
+      payload: { runId: run.id },
+      createdAt: '2026-03-11T00:00:01.000Z',
+    });
+
+    await runs.start(run.id, 'operator');
+
+    expect(start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        configSnapshot: {
+          provider: 'claude',
+          objective: 'Recover stopped work',
+          chunkDirectory: 'docs/chunks',
+        },
+      }),
+      expect.objectContaining({ id: 'martin-loop' }),
+    );
+  });
+
+  it('clears active dispatch redaction when a retry completes before running is observed', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const eventBus = new BeastEventBus();
+    const executors = {
+      process: {
+        start: vi.fn(async (run: { id: string }) => {
+          repo.updateRun(run.id, {
+            status: 'completed',
+            finishedAt: '2026-03-11T00:00:03.000Z',
+            latestExitCode: 0,
+          });
+        }),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const runs = new BeastRunService(repo, new BeastCatalogService(), executors, metrics, logs, { eventBus });
+    const agent = repo.createTrackedAgent({
+      definitionId: 'martin-loop',
+      source: 'dashboard',
+      status: 'failed',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: {
+        provider: 'claude',
+        objective: 'Finish immediately',
+        chunkDirectory: 'docs/chunks',
+      },
+      createdAt: '2026-03-11T00:00:00.000Z',
+      updatedAt: '2026-03-11T00:00:00.000Z',
+    });
+    const run = repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: agent.initConfig,
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-11T00:00:01.000Z',
+    });
+    repo.updateRun(run.id, {
+      status: 'failed',
+      finishedAt: '2026-03-11T00:00:02.000Z',
+      stopReason: 'start_failed',
+    });
+    repo.appendTrackedAgentEvent(agent.id, {
+      level: 'error',
+      type: 'agent.dispatch.failed',
+      message: 'Failed to start tracked agent',
+      payload: { runId: run.id, error: SAFE_DISPATCH_FAILURE_MESSAGE },
+      createdAt: '2026-03-11T00:00:02.000Z',
+    });
+
+    const completed = await runs.start(run.id, 'operator');
+
+    expect(completed.status).toBe('completed');
+    expect(repo.getTrackedAgent(agent.id)?.status).toBe('completed');
+    expect(repo.hasActiveDispatchFailure(agent.id)).toBe(false);
+    expect(repo.listTrackedAgentEvents(agent.id).filter((event) => event.type === 'agent.dispatch.recovered')).toHaveLength(1);
   });
 
   it('rolls back tracked-agent status sync when persisting its terminal event fails', async () => {

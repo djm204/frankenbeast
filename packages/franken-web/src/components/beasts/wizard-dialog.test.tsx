@@ -89,7 +89,7 @@ describe('WizardDialog validation', () => {
     expect(screen.getByRole('button', { name: 'Next' })).toHaveProperty('disabled', true);
     expect(screen.getByRole('alert').textContent).toContain('Workflow type is required');
 
-    fireEvent.click(screen.getByRole('button', { name: /Design Doc -> Chunk Creation/ }));
+    fireEvent.click(screen.getByRole('radio', { name: /Design Doc -> Chunk Creation/ }));
     expect(screen.getByRole('alert').textContent).toContain('Design doc path is required');
     expect(screen.getByRole('alert').textContent).toContain('Output directory is required');
 
@@ -148,7 +148,7 @@ describe('WizardDialog validation', () => {
     useBeastStore.getState().nextStep();
     renderWizard();
 
-    fireEvent.click(screen.getByRole('button', { name: /Martin Loop/ }));
+    fireEvent.click(screen.getByRole('radio', { name: /Martin Loop/ }));
     expect(screen.getByText(/Browser directory pickers cannot provide server paths/i)).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText(/Which provider should run the martin loop/i), { target: { value: 'codex' } });

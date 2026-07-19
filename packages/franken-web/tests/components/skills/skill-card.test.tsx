@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import type { FormEvent } from 'react';
 import { SkillCard } from '../../../src/components/skills/skill-card';
 
 afterEach(cleanup);
@@ -29,6 +30,20 @@ describe('SkillCard', () => {
     render(<SkillCard name="github" enabled={true} hasContext={false} mcpServerCount={1} onToggle={onToggle} />);
     fireEvent.click(screen.getByRole('switch', { name: /github/i }));
     expect(onToggle).toHaveBeenCalledWith('github', false);
+  });
+
+  it('does not submit a parent form when toggled', () => {
+    const onSubmit = vi.fn((event: FormEvent) => event.preventDefault());
+    render(
+      <form onSubmit={onSubmit}>
+        <SkillCard name="github" enabled={true} hasContext={false} mcpServerCount={1} onToggle={vi.fn()} />
+      </form>,
+    );
+
+    const toggle = screen.getByRole('switch', { name: /github/i });
+    expect(toggle.getAttribute('type')).toBe('button');
+    fireEvent.click(toggle);
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it('shows MCP server count when > 0', () => {

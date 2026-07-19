@@ -76,6 +76,10 @@ interface TrackedAgentAnalyticsRow {
   chat_session_id: string | null;
 }
 
+interface DispatchFailureAgentRow {
+  agent_id: string;
+}
+
 type AnalyticsAgentLink = Pick<TrackedAgent, 'id' | 'chatSessionId'>;
 
 export interface SqliteAnalyticsServiceOptions {
@@ -284,6 +288,14 @@ class SqliteAnalyticsService implements AnalyticsService {
       });
     }
 
+    const dispatchFailureAgentIds = new Set(
+      this.readRows<DispatchFailureAgentRow>('tracked_agent_events', `
+        SELECT DISTINCT agent_id
+          FROM tracked_agent_events
+         WHERE type = 'agent.dispatch.failed'
+      `).map((row) => row.agent_id),
+    );
+
     return this.readRows<BeastRunAnalyticsRow>('beast_runs', `
       SELECT id,
              tracked_agent_id,
@@ -304,7 +316,10 @@ class SqliteAnalyticsService implements AnalyticsService {
              latest_exit_code
       FROM beast_runs
       WHERE status = 'failed'
-    `).map((row) => beastRunToEvent(beastRunFromRow(row), row.tracked_agent_id ? agents.get(row.tracked_agent_id) : undefined));
+    `).map((row) => beastRunToEvent(
+      beastRunFromRow(row, Boolean(row.tracked_agent_id && dispatchFailureAgentIds.has(row.tracked_agent_id))),
+      row.tracked_agent_id ? agents.get(row.tracked_agent_id) : undefined,
+    ));
   }
 }
 
@@ -415,7 +430,7 @@ function firewallRowToEvent(row: FirewallRow): AnalyticsEvent {
   };
 }
 
-function beastRunFromRow(row: BeastRunAnalyticsRow): BeastRun {
+function beastRunFromRow(row: BeastRunAnalyticsRow, redactConfigSnapshot = false): BeastRun {
   return {
     id: row.id,
     ...(row.tracked_agent_id ? { trackedAgentId: row.tracked_agent_id } : {}),
@@ -423,7 +438,9 @@ function beastRunFromRow(row: BeastRunAnalyticsRow): BeastRun {
     definitionVersion: row.definition_version,
     status: row.status as BeastRun['status'],
     executionMode: row.execution_mode as BeastRun['executionMode'],
-    configSnapshot: parseJson(row.config_snapshot) as Readonly<Record<string, unknown>>,
+    configSnapshot: redactConfigSnapshot
+      ? {}
+      : parseJson(row.config_snapshot) as Readonly<Record<string, unknown>>,
     dispatchedBy: row.dispatched_by as BeastRun['dispatchedBy'],
     dispatchedByUser: row.dispatched_by_user,
     createdAt: row.created_at,

@@ -15,7 +15,7 @@ Frankenbeast is a safety framework that enforces guardrails *outside* the LLM's 
 
 ## 🚀 One-click onboarding
 
-Want to make your first change? Follow the [contributor guide](CONTRIBUTING.md) from issue selection through setup, focused verification, and pull-request review. If the issue changes only Markdown, use the [docs-only contribution quickstart](docs/onboarding/docs-only-contribution.md) to skip unrelated runtime setup while preserving link checks and review evidence. If you get blocked, use the [first-contribution help guide](docs/onboarding/getting-help.md) to choose the right discussion and share safe, actionable evidence.
+Want to make your first change? Follow the [contributor guide](CONTRIBUTING.md) from issue selection through setup, focused verification, and pull-request review. If the issue changes only Markdown, use the [docs-only contribution quickstart](docs/onboarding/docs-only-contribution.md) to skip unrelated runtime setup while preserving link checks and review evidence. If your fork is behind, you edited the wrong branch, or a push is rejected, use the [fork and branch recovery guide](docs/onboarding/fork-and-branch-recovery.md) before resetting or rewriting history. If you get blocked, use the [first-contribution help guide](docs/onboarding/getting-help.md) to choose the right discussion and share safe, actionable evidence.
 
 Starting from a fresh checkout? Use the [Frankenbeast onboarding checklist](ONBOARDING.md) for prerequisites, environment setup, and first-run validation. If you need to choose among the repository's setup, contribution, architecture, agent, and release guides, use the [onboarding guide index](docs/onboarding/README.md) instead of reading every document up front. Dashboard contributors can use the [dashboard UX contribution checklist](docs/onboarding/dashboard-ux-contribution.md) to reproduce, implement, and verify accessible UI changes with reviewable evidence. Read the concise [RAMP_UP.md](docs/RAMP_UP.md) guide when you need a quick contributor orientation. If you want a role-specific path first, choose the [persona quickstart track](docs/onboarding/persona-quickstart-tracks.md) for operators, contributors, or agent-developers. If setup fails, use the [setup troubleshooting matrix](docs/onboarding/setup-troubleshooting-matrix.md) to map symptoms to diagnostic commands, safe remediations, and verification checks. Coding agents should also read the [first-PR agent runbook](docs/onboarding/first-pr-agent-runbook.md) for the end-to-end issue-to-PR flow, the [coding-agent PR etiquette guide](docs/onboarding/coding-agent-pr-etiquette.md) before opening, updating, or merging PRs, and the [release and deployment mental model](docs/onboarding/release-deployment-mental-model.md) before owning post-merge or release handoffs. If you are trying to understand the system before changing it, follow the [Architecture reading path](ONBOARDING.md#architecture-reading-path) for current implementation docs before historical plans, then use the [architecture map for new agent contributors](docs/onboarding/architecture-map.md) to route issues to the right package, tests, approval/HITL boundary, and memory surface. If an agent coordination handoff uses runtime coordination terms, read the [agent coordination runtime glossary](ONBOARDING.md#agent-coordination-runtime-glossary) before acting. New agents that need a low-risk edit/test rehearsal can use the [agent practice fixture](fixtures/agent-practice-fixture/README.md), which includes an intentionally failing scoreboard test, reset script, and sample issue body. Then run the repository bootstrap script:
 
@@ -692,7 +692,7 @@ Frankenbeast stores secrets outside the config file. The config references secre
 | Backend | Key | Best for |
 |---------|-----|----------|
 | Local encrypted file | `local-encrypted` | Default backend; zero-install local dev, CI/CD, offline, or minimal environments |
-| OS keychain (Keychain/GNOME/DPAPI) | `os-keychain` | Explicit opt-in for single-machine local dev when you want OS-managed storage and no passphrase prompt |
+| OS keychain (Linux Secret Service) | `os-keychain` | Explicit opt-in for Linux single-machine local dev when you want OS-managed storage and no passphrase prompt |
 | 1Password | `1password` | Teams using 1Password vaults |
 | Bitwarden | `bitwarden` | Teams using Bitwarden |
 
@@ -710,7 +710,7 @@ When `network.secureBackend` is unset, init defaults to `local-encrypted`: the p
 ```json
 { "network": { "secureBackend": "os-keychain" } }
 ```
-Set this in `.fbeast/config.json` before running `frankenbeast init` when you want local secrets in the native macOS Keychain, GNOME Secret Service, or Windows Credential Manager instead of the default encrypted file. The token is generated and stored in the OS keychain automatically (no passphrase prompt). Use `os-keychain` only when you explicitly select it; it is convenient for single-machine local development, but it is not the default backend.
+Set this in `.fbeast/config.json` before running `frankenbeast init` when you want local secrets in Linux Secret Service instead of the default encrypted file. The token is generated and stored through `secret-tool` stdin (no passphrase prompt), so secret values never enter process arguments. macOS and Windows writes fail closed because their built-in noninteractive CLIs require secret values in process arguments; use `local-encrypted`, `1password`, or `bitwarden` on those platforms. Use `os-keychain` only when you explicitly select it; it is convenient for Linux single-machine local development, but it is not the default backend.
 
 **1Password / Bitwarden:**
 ```json
@@ -721,7 +721,7 @@ Set this in `.fbeast/config.json` before running `frankenbeast init` when you wa
 ```
 Set one of those values in `.fbeast/config.json`, then run `frankenbeast init`. You can also use the current CLI shortcut `frankenbeast init --backend 1password` or `frankenbeast init --backend bitwarden`; it applies the same `network.secureBackend` choice before the wizard writes `.fbeast/config.json`.
 
-For 1Password, create or use a vault literally named `frankenbeast`; init-created items use titles like `frankenbeast/network.operatorTokenRef`. For Bitwarden, run `bw login`/`bw unlock` and export `BW_SESSION` first; init-created secure notes use the same `frankenbeast/` title prefix. The CLI uses the official 1Password/Bitwarden CLI under the hood.
+For 1Password, install 1Password CLI 2.23.0 or newer, create or use a vault literally named `frankenbeast`, and authenticate `op`; init-created items use titles like `frankenbeast/network.operatorTokenRef`. For Bitwarden, install the Bitwarden CLI, run `bw login`/`bw unlock`, and export `BW_SESSION` first; init-created secure notes use the same `frankenbeast/` title prefix. Both backends send credential payloads through stdin instead of command-line arguments and fail closed when a stdin-capable runner is unavailable.
 
 ### Operator token setup
 

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createHmac } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -719,15 +719,129 @@ describe('Governor Hono Server', () => {
       expect(res.status).toBe(401);
     });
 
+    it('posts an unauthorized denial without delaying the Slack acknowledgement', async () => {
+      const postSlackResponse = vi.fn().mockReturnValue(new Promise<void>(() => undefined));
+      const app = createGovernorApp({
+        slackSigningSecret: SLACK_SECRET,
+        slackApproverUserIds: ['U-AUTHORIZED'],
+        slackResponsePoster: { post: postSlackResponse },
+        allowUnsignedApprovalsForTests: true,
+      });
+      await seedApproval(app, 'req-unauthorized-user');
+
+      const rawBody = JSON.stringify({
+        actions: [{ action_id: 'approve', value: 'req-unauthorized-user' }],
+        user: { id: 'U-UNAUTHORIZED' },
+        response_url: 'https://hooks.slack.com/actions/T123/B123/secret',
+      });
+      const res = await app.request('/v1/webhook/slack', {
+        method: 'POST',
+        headers: { ...slackHeaders(rawBody) },
+        body: rawBody,
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        response_type: 'ephemeral',
+        text: 'You are not authorized to resolve this approval.',
+      });
+      expect(postSlackResponse).toHaveBeenCalledWith(
+        'https://hooks.slack.com/actions/T123/B123/secret',
+        {
+          response_type: 'ephemeral',
+          replace_original: false,
+          text: 'You are not authorized to resolve this approval.',
+        },
+      );
+
+      const after = await (await app.request('/health')).json();
+      expect(after.pendingApprovals).toBe(1);
+
+      const authorizedBody = JSON.stringify({
+        actions: [{ action_id: 'approve', value: 'req-unauthorized-user' }],
+        user: { id: 'U-AUTHORIZED' },
+      });
+      const authorizedRes = await app.request('/v1/webhook/slack', {
+        method: 'POST',
+        headers: { ...slackHeaders(authorizedBody) },
+        body: authorizedBody,
+      });
+      expect(authorizedRes.status).toBe(200);
+      expect((await authorizedRes.json()).status).toBe('resolved');
+      expect((await (await app.request('/health')).json()).pendingApprovals).toBe(0);
+    });
+
+    it('fails closed when no Slack approver allowlist is configured', async () => {
+      const app = createGovernorApp({
+        slackSigningSecret: SLACK_SECRET,
+        allowUnsignedApprovalsForTests: true,
+      });
+      await seedApproval(app, 'req-no-allowlist');
+
+      const rawBody = JSON.stringify({
+        actions: [{ action_id: 'approve', value: 'req-no-allowlist' }],
+        user: { id: 'U-ANY' },
+      });
+      const res = await app.request('/v1/webhook/slack', {
+        method: 'POST',
+        headers: { ...slackHeaders(rawBody) },
+        body: rawBody,
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        response_type: 'ephemeral',
+        text: 'You are not authorized to resolve this approval.',
+      });
+      expect((await (await app.request('/health')).json()).pendingApprovals).toBe(1);
+    });
+
+    it('rejects a signed callback without an immutable Slack user ID', async () => {
+      const postSlackResponse = vi.fn().mockResolvedValue(undefined);
+      const app = createGovernorApp({
+        slackSigningSecret: SLACK_SECRET,
+        slackApproverUserIds: ['U-AUTHORIZED'],
+        slackResponsePoster: { post: postSlackResponse },
+        allowUnsignedApprovalsForTests: true,
+      });
+      await seedApproval(app, 'req-missing-user-id');
+
+      const rawBody = JSON.stringify({
+        actions: [{ action_id: 'approve', value: 'req-missing-user-id' }],
+        user: { username: 'authorized-display-name' },
+        response_url: 'https://attacker.example/internal',
+      });
+      const res = await app.request('/v1/webhook/slack', {
+        method: 'POST',
+        headers: { ...slackHeaders(rawBody) },
+        body: rawBody,
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        response_type: 'ephemeral',
+        text: 'You are not authorized to resolve this approval.',
+      });
+      expect(postSlackResponse).not.toHaveBeenCalled();
+      expect((await (await app.request('/health')).json()).pendingApprovals).toBe(1);
+    });
+
     it('resolves the pending approval on a valid signed callback', async () => {
-      const app = createGovernorApp({ slackSigningSecret: SLACK_SECRET, allowUnsignedApprovalsForTests: true });
+      const app = createGovernorApp({
+        slackSigningSecret: SLACK_SECRET,
+        slackApproverUserIds: ['U-AUTHORIZED'],
+        allowUnsignedApprovalsForTests: true,
+      });
       await seedApproval(app, 'req-1');
 
       // Health shows one pending approval before the callback
       const before = await (await app.request('/health')).json();
       expect(before.pendingApprovals).toBe(1);
 
-      const rawBody = JSON.stringify({ actions: [{ action_id: 'approve', value: 'req-1' }] });
+      const rawBody = JSON.stringify({
+        actions: [{ action_id: 'approve', value: 'req-1' }],
+        user: { id: 'U-AUTHORIZED' },
+      });
       const res = await app.request('/v1/webhook/slack', {
         method: 'POST',
         headers: { ...slackHeaders(rawBody) },
@@ -749,6 +863,7 @@ describe('Governor Hono Server', () => {
       const registry = new ApprovalWaiterRegistry();
       const app = createGovernorApp({
         slackSigningSecret: SLACK_SECRET,
+        slackApproverUserIds: ['U-AUTHORIZED'],
         allowUnsignedApprovalsForTests: true,
         registry,
       });
@@ -757,6 +872,7 @@ describe('Governor Hono Server', () => {
 
       const rawBody = JSON.stringify({
         actions: [{ action_id: 'approve:ACK-APPROVAL-ANOMALY-req-ack', value: 'req-ack' }],
+        user: { id: 'U-AUTHORIZED' },
       });
       const res = await app.request('/v1/webhook/slack', {
         method: 'POST',
@@ -772,9 +888,16 @@ describe('Governor Hono Server', () => {
     });
 
     it('returns 404 for a signed callback referencing an unknown request', async () => {
-      const app = createGovernorApp({ slackSigningSecret: SLACK_SECRET, allowUnsignedApprovalsForTests: true });
+      const app = createGovernorApp({
+        slackSigningSecret: SLACK_SECRET,
+        slackApproverUserIds: ['U-AUTHORIZED'],
+        allowUnsignedApprovalsForTests: true,
+      });
 
-      const rawBody = JSON.stringify({ actions: [{ action_id: 'approve', value: 'nope' }] });
+      const rawBody = JSON.stringify({
+        actions: [{ action_id: 'approve', value: 'nope' }],
+        user: { id: 'U-AUTHORIZED' },
+      });
       const res = await app.request('/v1/webhook/slack', {
         method: 'POST',
         headers: { ...slackHeaders(rawBody) },
@@ -817,10 +940,17 @@ describe('Governor Hono Server', () => {
     });
 
     it('parses Slack form-encoded payloads and normalizes reject', async () => {
-      const app = createGovernorApp({ slackSigningSecret: SLACK_SECRET, allowUnsignedApprovalsForTests: true });
+      const app = createGovernorApp({
+        slackSigningSecret: SLACK_SECRET,
+        slackApproverUserIds: ['U-AUTHORIZED'],
+        allowUnsignedApprovalsForTests: true,
+      });
       await seedApproval(app, 'req-9');
 
-      const payloadJson = JSON.stringify({ actions: [{ action_id: 'reject', value: 'req-9' }] });
+      const payloadJson = JSON.stringify({
+        actions: [{ action_id: 'reject', value: 'req-9' }],
+        user: { id: 'U-AUTHORIZED' },
+      });
       const rawBody = `payload=${encodeURIComponent(payloadJson)}`;
       const ts = Math.floor(Date.now() / 1000).toString();
       const base = `v0:${ts}:${rawBody}`;
@@ -843,11 +973,16 @@ describe('Governor Hono Server', () => {
     });
 
     it('accepts signed Slack form payloads containing emoji text', async () => {
-      const app = createGovernorApp({ slackSigningSecret: SLACK_SECRET, allowUnsignedApprovalsForTests: true });
+      const app = createGovernorApp({
+        slackSigningSecret: SLACK_SECRET,
+        slackApproverUserIds: ['U-AUTHORIZED'],
+        allowUnsignedApprovalsForTests: true,
+      });
       await seedApproval(app, 'req-emoji');
 
       const payloadJson = JSON.stringify({
         actions: [{ action_id: 'approve', value: 'req-emoji' }],
+        user: { id: 'U-AUTHORIZED' },
         message: { text: 'Ship it 🚀' },
       });
       const rawBody = `payload=${encodeURIComponent(payloadJson)}`;
