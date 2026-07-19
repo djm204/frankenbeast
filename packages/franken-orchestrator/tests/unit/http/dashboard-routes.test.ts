@@ -1,6 +1,10 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { SseConnectionTicketStore } from '../../../src/beasts/events/sse-connection-ticket.js';
-import { createDashboardRoutes, type DashboardRouteDeps } from '../../../src/http/routes/dashboard-routes.js';
+import {
+  createDashboardRoutes,
+  runDashboardEventStream,
+  type DashboardRouteDeps,
+} from '../../../src/http/routes/dashboard-routes.js';
 
 import { testCredential } from '../../support/test-credentials.js';
 
@@ -532,6 +536,65 @@ describe('dashboard routes', () => {
         reader.cancel();
 
         expect(text).toContain('"name":"ollama"');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('terminates the stream and clears timers when a heartbeat write fails', async () => {
+      vi.useFakeTimers();
+      try {
+        const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
+        const bodies: string[] = [];
+        const pipe = vi.fn(async (body: ReadableStream) => {
+          bodies.push(await new Response(body).text());
+          if (bodies.length === 2) {
+            throw new Error('client disconnected');
+          }
+        });
+        const stream = {
+          pipe,
+          onAbort: vi.fn(),
+        };
+
+        const streamDone = runDashboardEventStream(
+          createMockDeps(),
+          stream as never,
+          () => 'dashboard:test:1',
+        );
+        await vi.advanceTimersByTimeAsync(30_000);
+
+        await expect(streamDone).resolves.toBeUndefined();
+        expect(pipe).toHaveBeenCalledTimes(2);
+        expect(bodies[1]).toBe('event: heartbeat\ndata: \n\n');
+        expect(clearIntervalSpy).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('terminates the stream and clears timers when the client aborts', async () => {
+      vi.useFakeTimers();
+      try {
+        const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
+        let abort: (() => void) | undefined;
+        const stream = {
+          pipe: vi.fn().mockResolvedValue(undefined),
+          onAbort: vi.fn((callback: () => void) => {
+            abort = callback;
+          }),
+        };
+
+        const streamDone = runDashboardEventStream(
+          createMockDeps(),
+          stream as never,
+          () => 'dashboard:test:1',
+        );
+        await vi.waitFor(() => expect(abort).toBeDefined());
+        abort!();
+
+        await expect(streamDone).resolves.toBeUndefined();
+        expect(clearIntervalSpy).toHaveBeenCalledTimes(2);
       } finally {
         vi.useRealTimers();
       }
