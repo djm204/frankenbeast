@@ -366,17 +366,18 @@ export class Session {
     depOptions.adapterWorkingDir = tmpdir();
     const planLogSink: { logger?: BeastLogger } = {};
     const persistProgressEvent = (event: StreamProgressEvent): void => {
-      planLogSink.logger?.info('Plan progress', event, 'planner');
+      planLogSink.logger?.debug('Plan progress', event, 'planner');
     };
     const persistLifecycleEvent = (event: CliLlmLifecycleEvent): void => {
-      planLogSink.logger?.info('LLM provider lifecycle', event, 'planner');
+      planLogSink.logger?.debug('LLM provider lifecycle', event, 'planner');
     };
-    const progress = createStreamProgressWithSpinner({
+    const createPlanProgress = () => createStreamProgressWithSpinner({
       label: 'Planning...',
       verbose: this.config.verbose,
       onProgressEvent: persistProgressEvent,
     });
-    depOptions.onStreamLine = progress.onLine;
+    let progress = createPlanProgress();
+    depOptions.onStreamLine = (line) => progress.onLine(line);
     depOptions.onLlmLifecycleEvent = persistLifecycleEvent;
     const { cliLlmAdapter, logger, finalize, artifacts } = await createCliDeps(depOptions);
     planLogSink.logger = logger;
@@ -389,8 +390,6 @@ export class Session {
     let cancellationSignal: NodeJS.Signals | undefined;
     const planLogFile = artifacts?.logFile ?? paths.logFile;
     const projectLogPath = relative(paths.root, planLogFile) || planLogFile;
-    io.display(`Build log: ${projectLogPath}\nFollow live: tail -f ${shellQuote(planLogFile)}`);
-    logger.info('Plan cycle started', { logFile: planLogFile }, 'planner');
 
     const runPlanStage = async <T>(stage: string, operation: () => Promise<T>): Promise<T> => {
       const stageStartedAt = Date.now();
@@ -458,6 +457,9 @@ export class Session {
     process.on('SIGTERM', onSigterm);
 
     try {
+      io.display(`Build log: ${projectLogPath}\nFollow live: tail -f ${shellQuote(planLogFile)}`);
+      logger.info('Plan cycle started', { logFile: planLogFile }, 'planner');
+
       // Load design doc
     let designContent: string;
     if (designDocPath) {
@@ -534,9 +536,14 @@ export class Session {
       artifactLabel: 'Chunk files',
       io,
       onRevise: async (feedback) => {
-        await runPlanStage('revise', () => llmGraphBuilder.build({
-          goal: `${designContent}\n\nRevision feedback: ${feedback}`,
-        }));
+        progress = createPlanProgress();
+        try {
+          await runPlanStage('revise', () => llmGraphBuilder.build({
+            goal: `${designContent}\n\nRevision feedback: ${feedback}`,
+          }));
+        } finally {
+          progress.stop();
+        }
         chunkPaths = chunkWriter.write(
           llmGraphBuilder.lastChunks,
           llmGraphBuilder.lastValidationIssues,

@@ -313,14 +313,19 @@ describe('Session plan phase — CliLlmAdapter wiring', () => {
       to: 'codex',
     });
 
-    expect(mockDeps.logger.info).toHaveBeenCalledWith(
+    expect(mockDeps.logger.debug).toHaveBeenCalledWith(
       'Plan progress',
       { type: 'chunk-detected', count: 2 },
       'planner',
     );
-    expect(mockDeps.logger.info).toHaveBeenCalledWith(
+    expect(mockDeps.logger.debug).toHaveBeenCalledWith(
       'LLM provider lifecycle',
       { type: 'fallback', from: 'claude', to: 'codex' },
+      'planner',
+    );
+    expect(mockDeps.logger.info).not.toHaveBeenCalledWith(
+      expect.stringMatching(/^(Plan progress|LLM provider lifecycle)$/),
+      expect.anything(),
       'planner',
     );
     expect(mockDeps.logger.info).not.toHaveBeenCalledWith(
@@ -336,6 +341,37 @@ describe('Session plan phase — CliLlmAdapter wiring', () => {
       expect.objectContaining({ stage: 'decompose', stageElapsedMs: expect.any(Number), totalElapsedMs: expect.any(Number) }),
       'planner',
     );
+  });
+
+  it('runPlan() restarts stream progress while applying review revisions', async () => {
+    const { reviewLoop } = await import('../../../src/cli/review-loop.js');
+    vi.mocked(reviewLoop).mockImplementationOnce(async ({ onRevise }) => {
+      await onRevise('Split the plan into smaller chunks');
+    });
+    const { createStreamProgressWithSpinner } = await import('../../../src/adapters/stream-progress.js');
+    const { Session } = await import('../../../src/cli/session.js');
+
+    await new Session(makeConfig()).start();
+
+    expect(createStreamProgressWithSpinner).toHaveBeenCalledTimes(2);
+    expect(mockLlmGraphBuild).toHaveBeenCalledTimes(2);
+    for (const result of vi.mocked(createStreamProgressWithSpinner).mock.results) {
+      expect(result.value.stop).toHaveBeenCalled();
+    }
+  });
+
+  it('runPlan() finalizes when build-log disclosure fails', async () => {
+    const io = mockIO();
+    vi.mocked(io.display).mockImplementationOnce(() => {
+      throw new Error('output closed');
+    });
+    const { createStreamProgressWithSpinner } = await import('../../../src/adapters/stream-progress.js');
+    const { Session } = await import('../../../src/cli/session.js');
+
+    await expect(new Session(makeConfig({ io })).start()).rejects.toThrow('output closed');
+
+    expect(mockFinalize).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(createStreamProgressWithSpinner).mock.results.at(-1)?.value.stop).toHaveBeenCalled();
   });
 
   it.each(['SIGINT', 'SIGTERM'] as const)(
