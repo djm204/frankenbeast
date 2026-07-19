@@ -26,6 +26,7 @@ describe("issue #2526 pull-request self-review path", () => {
       "## 1. Confirm the issue and branch scope",
       'gh issue view "$ISSUE_NUMBER"',
       'gh pr list --repo "$REPO" --state open',
+      '--jq ".[] | select(.headRefName | contains(\\"issue-$ISSUE_NUMBER-\\"))"',
       "## 2. Review every local change",
       "git status --short",
       "git diff --check",

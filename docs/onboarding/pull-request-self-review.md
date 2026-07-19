@@ -19,6 +19,9 @@ gh issue view "$ISSUE_NUMBER" --repo "$REPO"
 gh pr list --repo "$REPO" --state open --limit 100 \
   --search "$ISSUE_NUMBER OR issue-$ISSUE_NUMBER" \
   --json number,title,headRefName,url
+gh pr list --repo "$REPO" --state open --limit 100 \
+  --json number,title,headRefName,url \
+  --jq ".[] | select(.headRefName | contains(\"issue-$ISSUE_NUMBER-\"))"
 git branch --show-current
 git status --short --branch
 ```
