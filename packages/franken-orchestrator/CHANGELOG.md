@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.55.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.55.0...@franken/orchestrator-v0.55.1) (2026-07-19)
+
+
+### Bug Fixes
+
+* **orchestrator:** skip malformed skill manifests ([#3397](https://github.com/djm204/frankenbeast/issues/3397)) ([013f998](https://github.com/djm204/frankenbeast/commit/013f99884835a9831e2de5f999a9935fbaa28fc7))
+* **orchestrator:** surface skill health probe diagnostics ([#3398](https://github.com/djm204/frankenbeast/issues/3398)) ([513351f](https://github.com/djm204/frankenbeast/commit/513351f9e8a9dd63ffff27d37b05fd8a4202d9e7))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/brain bumped from 0.15.1 to 0.15.2
+
 ## [0.55.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.54.0...@franken/orchestrator-v0.55.0) (2026-07-19)
 
 
