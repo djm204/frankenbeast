@@ -830,7 +830,7 @@ const discordNotifier = new WebhookNotifier({
 
 ## Local trace viewer
 
-`TraceServer` serves a self-contained HTML trace viewer over a local HTTP server (Node built-ins only, no external dependencies).
+`TraceServer` serves a self-contained HTML trace viewer over a local HTTP server (Node built-ins only, no external dependencies). It binds to `127.0.0.1` by default so prompts, goals, errors, and trace metadata are not exposed on other network interfaces.
 
 ```ts
 import { TraceServer, SQLiteAdapter } from '@franken/observer'
@@ -840,10 +840,20 @@ const server  = new TraceServer({ adapter, port: 4040 })
 
 await server.start()
 process.stdout.write(`Trace viewer: ${server.url}`)
-// → http://localhost:4040
+// → http://127.0.0.1:4040
 
 // Later:
 await server.stop()
+```
+
+To opt in to access from another interface, set `host` explicitly. `server.url` reports the configured host. `TraceServer` does not provide authentication, so only use a non-loopback host behind appropriate firewall and access controls.
+
+```ts
+const sharedServer = new TraceServer({
+  adapter,
+  port: 4040,
+  host: '0.0.0.0',
+})
 ```
 
 **Routes:**
