@@ -7,9 +7,9 @@ Frankenbeast is a deterministic guardrails framework for AI agents, organized as
 This document mixes two views:
 
 - **Current implementation**: what is actually wired in `@franken/orchestrator`, `@franken/mcp-suite`, and the current workspaces today
-- **Target / historical architecture**: broader MOD diagrams and pre-consolidation service boundaries that remain useful as design vocabulary, but are not necessarily current package names
+- **Target / historical architecture**: broader conceptual diagrams and pre-consolidation service boundaries that remain useful as design vocabulary, but are not necessarily current package names
 
-Unless a section explicitly says otherwise, diagrams should be read as target architecture and the prose should call out current local limitations where they matter.
+Unless a section explicitly says otherwise, diagrams should use current package or implementation-surface names, and the prose should call out current local limitations where they matter.
 
 | Package | Role |
 |---------|------|
@@ -24,7 +24,7 @@ Unless a section explicitly says otherwise, diagrams should be read as target ar
 | `@franken/web` | React dashboard for chat, tracked Beast agents, network controls, analytics/cost/safety views. |
 | `@franken/live-bench` | Live CLI benchmark tooling. |
 
-Removed package directories from the pre-consolidation architecture include `frankenfirewall`, `franken-skills`, `franken-heartbeat`, `franken-mcp`, and `franken-comms`. Their capabilities now live mostly inside `@franken/orchestrator` or `@franken/mcp-suite`.
+Earlier standalone package surfaces from the pre-consolidation architecture have been absorbed mostly into `@franken/orchestrator` or `@franken/mcp-suite`. The ten-package table above is the authoritative current workspace inventory.
 
 ## The Beast Loop (@franken/orchestrator)
 
@@ -471,13 +471,13 @@ Canonical type definitions shared across all modules:
 
 ## Module Interconnections
 
-This diagram shows the logical/target module topology. The `franken-mcp` subgraph depicts the pre-consolidation MCP design; the current implementation is `@franken/mcp-suite` (see the [@franken/mcp-suite](#fbeastmcp-suite) section for what does and does not exist today).
+This diagram shows the logical/target module topology using current package or implementation-surface names. The `pre-consolidation MCP surface` subgraph depicts the pre-consolidation MCP design; the current implementation is `@franken/mcp-suite` (see the [@franken/mcp-suite](#fbeastmcp-suite) section for what does and does not exist today).
 
 ```mermaid
     graph TB
         User([User Input])
 
-        subgraph "MOD-01: Frankenfirewall"
+        subgraph "@franken/orchestrator firewall"
             direction TB
             FW_IN["Inbound Interceptors<br/>• Injection Scanner<br/>• PII Masker<br/>• Project Alignment"]
             FW_ADAPT["Adapter Pipeline<br/>• ClaudeAdapter<br/>• OpenAIAdapter<br/>• OllamaAdapter<br/>• (Extensible)"]
@@ -485,7 +485,7 @@ This diagram shows the logical/target module topology. The `franken-mcp` subgrap
             FW_IN --> FW_ADAPT --> FW_OUT
         end
 
-        subgraph "MOD-02: Franken Skills"
+        subgraph "@franken/orchestrator skills"
             direction TB
             SK_REG["Skill Registry<br/>ISkillRegistry"]
             SK_DISC["Discovery Service<br/>Global + Local"]
@@ -494,7 +494,7 @@ This diagram shows the logical/target module topology. The `franken-mcp` subgrap
             SK_VAL --> SK_REG
         end
 
-        subgraph "MOD-03: Franken Brain"
+        subgraph "@franken/brain"
             direction TB
             MEM_ADAPT["Memory adapter ports<br/>Not package exports"]
             MEM_BRAIN["SqliteBrain<br/>Current public API"]
@@ -507,7 +507,7 @@ This diagram shows the logical/target module topology. The `franken-mcp` subgrap
             MEM_BRAIN --> MEM_RECOV
         end
 
-        subgraph "MOD-04: Franken Planner"
+        subgraph "@franken/planner"
             direction TB
             PL_INTENT["Intent Parser"]
             PL_DAG["DAG Builder<br/>Graph + Cycle Detection"]
@@ -522,7 +522,7 @@ This diagram shows the logical/target module topology. The `franken-mcp` subgrap
             PL_EXEC --> PL_RECOV
         end
 
-        subgraph "MOD-05: Franken Observer"
+        subgraph "@franken/observer"
             direction TB
             OB_TRACE["Trace Context<br/>Spans + Lifecycle"]
             OB_COST["Cost Tracking<br/>TokenCounter + CostCalc"]
@@ -534,7 +534,7 @@ This diagram shows the logical/target module topology. The `franken-mcp` subgrap
             OB_COST --> OB_CB
         end
 
-        subgraph "MOD-06: Franken Critique"
+        subgraph "@franken/critique"
             direction TB
             CR_PIPE["Critique Pipeline"]
             CR_DET["Deterministic Evaluators<br/>• Safety • GhostDep<br/>• LogicLoop • ADR"]
@@ -548,7 +548,7 @@ This diagram shows the logical/target module topology. The `franken-mcp` subgrap
             CR_BREAK --> CR_LOOP
         end
 
-        subgraph "MOD-07: Franken Governor"
+        subgraph "@franken/governor"
             direction TB
             GOV_TRIG["Trigger Evaluators<br/>• Budget • Skill<br/>• Confidence • Ambiguity"]
             GOV_GW["Approval Gateway"]
@@ -560,7 +560,7 @@ This diagram shows the logical/target module topology. The `franken-mcp` subgrap
             GOV_SEC --> GOV_GW
         end
 
-        subgraph "MOD-08: Franken Heartbeat"
+        subgraph "@franken/orchestrator heartbeat"
             direction TB
             HB_DET["Phase 1: Deterministic Check<br/>Watchlist, Git, Tokens"]
             HB_REFL["Phase 2: Reflection Engine<br/>LLM-powered analysis"]
@@ -569,7 +569,7 @@ This diagram shows the logical/target module topology. The `franken-mcp` subgrap
             HB_DET --> HB_REFL --> HB_DISP --> HB_BRIEF
         end
 
-        subgraph "franken-mcp (target design — current: @franken/mcp-suite)"
+        subgraph "pre-consolidation MCP surface (target design — current: @franken/mcp-suite)"
             direction TB
             MCP_CFG["Config Loader<br/>Zod-validated mcp-servers.json"]
             MCP_REG["McpRegistry<br/>IMcpRegistry<br/>Tool → Client routing"]
@@ -614,66 +614,66 @@ This diagram shows the logical/target module topology. The `franken-mcp` subgrap
         FW_ADAPT --> LLM
         LLM --> FW_ADAPT
 
-        %% === MOD-01 → MOD-04: Sanitized Intent ===
+        %% === Orchestrator firewall → planner: Sanitized Intent ===
         FW_OUT -- "getSanitizedIntent()<br/>→ Intent" --> PL_INTENT
 
-        %% === MOD-01 ↔ MOD-02: Tool call grounding ===
+        %% === Orchestrator firewall ↔ orchestrator skills: Tool call grounding ===
         FW_OUT -- "validateToolCalls()<br/>against registry" --> SK_REG
 
-        %% === MOD-04 → MOD-02: Skill discovery ===
+        %% === Planner → orchestrator skills: Skill discovery ===
         PL_DAG -- "getAvailableSkills()<br/>hasSkill()" --> SK_REG
 
-        %% === MOD-04 → MOD-03: Context loading ===
+        %% === Planner → brain: Context loading ===
         PL_DAG -- "IMemoryModule.getContext()" --> MEM_ADAPT
         PL_EXEC -- "IMemoryModule.recordTrace()" --> MEM_ADAPT
 
-        %% === MOD-04 → MOD-07: CoT verification ===
+        %% === Planner → governor: CoT verification ===
         PL_COT -- "verifyRationale()<br/>RationaleBlock" --> GOV_TRIG
 
-        %% === MOD-06 → MOD-01: Safety rules ===
+        %% === Critique → orchestrator firewall: Safety rules ===
         CR_DET -- "getSafetyRules()<br/>executeSandbox()" --> FW_IN
 
-        %% === MOD-06 → MOD-03: ADRs + lessons ===
+        %% === Critique → brain: ADRs + lessons ===
         CR_DET -- "MemoryPort.searchADRs()" --> MEM_ADAPT
         CR_LESSON -- "MemoryPort.recordLesson()" --> MEM_ADAPT
 
-        %% === MOD-06 → MOD-05: Token spend ===
+        %% === Critique → observer: Token spend ===
         CR_BREAK -- "getTokenSpend()" --> OB_COST
 
-        %% === MOD-06 → MOD-07: Escalation ===
+        %% === Critique → governor: Escalation ===
         CR_LOOP -- "requestHumanReview()<br/>on escalation" --> GOV_GW
 
-        %% === MOD-07 → MOD-03: Audit trail ===
+        %% === Governor → brain: Audit trail ===
         GOV_AUDIT -- "record audit<br/>EpisodicTrace" --> MEM_EPIS
 
-        %% === MOD-07 → MOD-02: HITL skill check ===
+        %% === Governor → orchestrator skills: HITL skill check ===
         GOV_TRIG -- "requires_hitl?" --> SK_REG
 
-        %% === MOD-07 → MOD-05: Budget trigger ===
+        %% === Governor → observer: Budget trigger ===
         GOV_TRIG -- "budget check" --> OB_CB
 
-        %% === MOD-08: Reflection pulse ===
+        %% === Orchestrator heartbeat: Reflection pulse ===
         BL_CLOSE -- "optional pulse()" --> HB_REFL
 
-        %% === MOD-08 → MOD-05: Observability ===
+        %% === Orchestrator heartbeat → observer: Observability ===
         HB_DET -- "getTraces()<br/>getTokenSpend()" --> OB_TRACE
 
-        %% === MOD-08 → MOD-04: Task injection ===
+        %% === Orchestrator heartbeat → planner: Task injection ===
         HB_DISP -- "injectTask()<br/>self-improvement" --> PL_EXEC
 
-        %% === MOD-08 → MOD-06: Audit conclusions ===
+        %% === Orchestrator heartbeat → critique: Audit conclusions ===
         HB_REFL -- "auditConclusions()" --> CR_LOOP
 
-        %% === MOD-08 → MOD-07: Alerts + brief ===
+        %% === Orchestrator heartbeat → governor: Alerts + brief ===
         HB_BRIEF -- "sendMorningBrief()<br/>notifyAlert()" --> GOV_GW
 
-        %% === MOD-05 ← All: Span emission ===
+        %% === Observer ← All: Span emission ===
         PL_EXEC -. "emit spans" .-> OB_TRACE
         FW_ADAPT -. "emit spans" .-> OB_TRACE
         CR_LOOP -. "emit spans" .-> OB_TRACE
         GOV_GW -. "emit spans" .-> OB_TRACE
 
-        %% === franken-mcp connections ===
+        %% === pre-consolidation MCP surface connections ===
         MCP_TRANS -- "stdin/stdout<br/>JSON-RPC 2.0" --> MCP_SERVERS
         BL_EXEC -- "callTool()" --> MCP_REG
         MCP_REG -- "tool definitions<br/>as skills" --> SK_REG
@@ -787,7 +787,7 @@ See [ADR-036](adr/036-sandboxed-beast-execution.md) and [Deploy Beasts from the 
 
 ## @franken/mcp-suite
 
-The current MCP implementation is `@franken/mcp-suite`, not a standalone `franken-mcp` workspace. It provides the `fbeast` CLI, individual MCP servers, the combined/proxy server modes, generated hooks, and shared `.fbeast/beast.db` adapters.
+The current MCP implementation is `@franken/mcp-suite`, not a standalone pre-consolidation MCP workspace. It provides the `fbeast` CLI, individual MCP servers, the combined/proxy server modes, generated hooks, and shared `.fbeast/beast.db` adapters.
 
 The current exact MCP tool names are defined in `packages/franken-mcp-suite/src/shared/tool-registry.ts`; docs should use those names rather than shorthand aliases.
 
@@ -815,7 +815,7 @@ fbeast mcp init / client config
 
 ### Tool registry
 
-`packages/franken-mcp-suite/src/shared/tool-registry.ts` is the source of truth. It stores tool names, JSON schemas, and handlers, plus lightweight proxy/search metadata and shared `.fbeast/beast.db` adapters. The pre-consolidation `franken-mcp` constraint knobs (`McpToolConstraints`, `toolOverrides`, a three-level server/tool override cascade, and per-server `initTimeoutMs`/`callTimeoutMs`) are **not** part of the current suite; governance (HITL, destructive-action gating) is enforced through the governor/firewall adapters in `createAdapterSet(dbPath)` and the generated tool hooks, not registry-level overrides.
+`packages/franken-mcp-suite/src/shared/tool-registry.ts` is the source of truth. It stores tool names, JSON schemas, and handlers, plus lightweight proxy/search metadata and shared `.fbeast/beast.db` adapters. The pre-consolidation MCP constraint knobs (`McpToolConstraints`, `toolOverrides`, a three-level server/tool override cascade, and per-server `initTimeoutMs`/`callTimeoutMs`) are **not** part of the current suite; governance (HITL, destructive-action gating) is enforced through the governor/firewall adapters in `createAdapterSet(dbPath)` and the generated tool hooks, not registry-level overrides.
 
 ### Key Types
 
@@ -918,7 +918,7 @@ When the daemon dispatches a Beast run, it spawns a subprocess managed by `Proce
 
 2. **Process lifecycle**: `ProcessSupervisor` manages the child process with a three-way exit gate (`stdout closed + stderr closed + exit event`) to ensure all buffered output is captured before `onExit` fires. Early stdout/stderr arriving before attempt creation are buffered and flushed (to both logs and SSE) once the attempt ID is set.
 
-3. **SSE event bus**: `BeastEventBus` publishes real-time events (`run.status`, `run.log`, `agent.status`) to SSE subscribers. Events flow from executor → run service → SSE routes. `SseConnectionTicketStore` implements single-use connection tickets (ADR-030) for authenticating EventSource connections without exposing bearer tokens in URLs. Tests and diagnostics that need deterministic worker-event replay can import `BeastEventBus` from `@franken/orchestrator`, call `exportReplaySnapshot()` on a populated bus, then hydrate an isolated fixture with `BeastEventBus.fromReplaySnapshot(snapshot)`; malformed snapshots fail fast unless event ids are strictly increasing safe integers and payloads are objects.
+3. **SSE event bus**: `BeastEventBus` publishes real-time events (`run.status`, `run.log`, `agent.status`) to SSE subscribers. Events flow from executor → run service → SSE routes. `SseConnectionTicketStore` implements single-use connection tickets (ADR-030) for authenticating EventSource connections without exposing bearer tokens in URLs; production stores ticket digests and consumption state in the shared Beast SQLite database so tickets survive daemon restarts and coordinate across processes. Tests and diagnostics that need deterministic worker-event replay can import `BeastEventBus` from `@franken/orchestrator`, call `exportReplaySnapshot()` on a populated bus, then hydrate an isolated fixture with `BeastEventBus.fromReplaySnapshot(snapshot)`; malformed snapshots fail fast unless event ids are strictly increasing safe integers and payloads are objects.
 
 4. **Status sync**: `BeastRunService.syncTrackedAgent()` propagates run status changes to tracked agents with full idempotency (no-op when status unchanged). `BeastDispatchService.createRun(startNow=true)` publishes initial `agent.status` events for both success and failure paths.
 
@@ -939,7 +939,7 @@ Current beast-control routes:
 | `POST /v1/beasts/events/ticket` | Issue a single-use SSE connection ticket (bearer token required) |
 | `GET /v1/beasts/events/stream` | SSE event stream (ticket-authenticated) |
 
-## Communications Gateway (franken-comms)
+## Communications Gateway (orchestrator comms surface)
 
 Multi-channel external communications with deterministic session mapping (SHA256-based). See [ADR-016](adr/016-external-comms-gateway.md).
 
@@ -954,7 +954,7 @@ flowchart TD
         WA["WhatsApp<br/>Cloud API"]
     end
 
-    subgraph "franken-comms"
+    subgraph "orchestrator comms surface"
         direction TB
         SR["Channel Routers<br/>slack-router, discord-router,<br/>telegram-router, whatsapp-router"]
         SIG["Signature Verification<br/>HMAC-SHA256 (Slack)<br/>ED25519 (Discord)<br/>SHA256 (WhatsApp)"]

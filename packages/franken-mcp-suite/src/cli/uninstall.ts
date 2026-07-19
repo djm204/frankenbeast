@@ -4,14 +4,14 @@ function printLine(...args: unknown[]): void {
   console.info(...args);
 }
 
-import { existsSync, readFileSync, writeFileSync, rmSync, unlinkSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient } from './mcp-client-paths.js';
 import { confirmYesNo } from './prompt.js';
 import { codexProjectIds, codexServerNamesForProjectIds } from './codex-server-names.js';
-import { readJsonObjectFileOrRecover, writeJsonFileAtomic } from './settings-json.js';
+import { readJsonObjectFileOrRecover, writeJsonFileAtomic, writeTextFileAtomic, backupFileBeforeMutation } from './settings-json.js';
 import type { FbeastServer } from '../shared/config.js';
 
 export interface UninstallOptions {
@@ -161,9 +161,10 @@ function uninstallCodex(options: {
       content = content.slice(0, startIdx).trimEnd() + content.slice(endIdx + AGENTS_MD_END.length);
       const trimmed = content.trimEnd();
       if (trimmed.length === 0) {
+        backupFileBeforeMutation(agentsPath);
         unlinkSync(agentsPath);
       } else {
-        writeFileSync(agentsPath, trimmed + '\n');
+        writeTextFileAtomic(agentsPath, trimmed + '\n');
       }
     }
   }
@@ -184,7 +185,7 @@ function uninstallCodex(options: {
         }
         existing['hooks'] = hooks;
       }
-      writeFileSync(hooksPath, JSON.stringify(existing, null, 2) + '\n');
+      writeTextFileAtomic(hooksPath, JSON.stringify(existing, null, 2) + '\n');
     } catch { /* ignore parse errors */ }
   }
 
@@ -230,9 +231,10 @@ function removeCodexProjectConfigEntries(root: string): void {
   const existing = readFileSync(configPath, 'utf-8');
   const cleaned = removeFbeastMcpServerTables(existing).trimEnd();
   if (cleaned.length === 0) {
+    backupFileBeforeMutation(configPath);
     unlinkSync(configPath);
   } else {
-    writeFileSync(configPath, `${cleaned}\n`);
+    writeTextFileAtomic(configPath, `${cleaned}\n`);
   }
 }
 

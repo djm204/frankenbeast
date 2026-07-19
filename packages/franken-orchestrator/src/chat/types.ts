@@ -55,11 +55,13 @@ export const ChatSessionSchema = ChatSessionResponseSchema.extend({
     workdir: PendingApprovalSchema.shape.description.optional(),
   }).nullable().optional(),
 });
+export type ExtendedPendingApproval = PendingApproval & {
+  approvalToken?: string | undefined;
+  requester?: string | undefined;
+  workerId?: string | undefined;
+  workdir?: string | undefined;
+};
+
 export type ChatSession = Omit<ChatSessionResponse, 'pendingApproval'> & {
-  pendingApproval?: (PendingApproval & {
-    approvalToken?: string | undefined;
-    requester?: string | undefined;
-    workerId?: string | undefined;
-    workdir?: string | undefined;
-  }) | null | undefined;
+  pendingApproval?: ExtendedPendingApproval | null | undefined;
 };

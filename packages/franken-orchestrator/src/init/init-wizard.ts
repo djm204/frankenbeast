@@ -229,6 +229,10 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
       if (detection.setupInstructions) {
         options.io.display(detection.setupInstructions);
       }
+      completedSteps.add('secret-backend-selection');
+      if (!secretBackendOnly) {
+        throw new Error(`Secret backend '${options.secretStore.id}' is not available: ${detection.reason ?? 'unknown reason'}`);
+      }
     }
     completedSteps.add('secret-backend-selection');
   }

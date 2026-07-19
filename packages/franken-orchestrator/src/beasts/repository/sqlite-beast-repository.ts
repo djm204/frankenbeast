@@ -626,6 +626,68 @@ export class SQLiteBeastRepository {
     return rows.map(mapTrackedAgentEvent);
   }
 
+  listActiveDispatchFailureAgentIds(): string[] {
+    const rows = this.db.prepare(
+      `SELECT event.agent_id
+         FROM tracked_agent_events AS event
+         JOIN tracked_agents AS agent ON agent.id = event.agent_id
+        WHERE event.type = 'agent.dispatch.failed'
+          AND agent.status NOT IN ('running', 'awaiting_approval', 'completed')
+          AND event.sequence = (
+            SELECT MAX(marker.sequence)
+              FROM tracked_agent_events AS marker
+             WHERE marker.agent_id = event.agent_id
+               AND marker.type IN ('agent.dispatch.failed', 'agent.dispatch.recovered')
+          )`,
+    ).all() as Array<{ agent_id: string }>;
+    return rows.map((row) => row.agent_id);
+  }
+
+  listDispatchFailureHistoryAgentIds(): string[] {
+    const rows = this.db.prepare(
+      `SELECT DISTINCT agent_id
+         FROM tracked_agent_events
+        WHERE type = 'agent.dispatch.failed'`,
+    ).all() as Array<{ agent_id: string }>;
+    return rows.map((row) => row.agent_id);
+  }
+
+  hasDispatchFailureHistory(agentId: string): boolean {
+    const row = this.db.prepare(
+      `SELECT 1
+         FROM tracked_agent_events
+        WHERE agent_id = ?
+          AND type = 'agent.dispatch.failed'
+        LIMIT 1`,
+    ).get(agentId);
+    return row !== undefined;
+  }
+
+  hasActiveDispatchFailure(agentId: string): boolean {
+    const agent = this.getTrackedAgent(agentId);
+    if (agent && (agent.status === 'running' || agent.status === 'awaiting_approval' || agent.status === 'completed')) {
+      return false;
+    }
+    return this.hasUnrecoveredDispatchFailure(agentId);
+  }
+
+  hasUnrecoveredDispatchFailure(agentId: string): boolean {
+    const row = this.db.prepare(
+      `SELECT 1
+         FROM tracked_agent_events AS event
+        WHERE event.agent_id = ?
+          AND event.type = 'agent.dispatch.failed'
+          AND event.sequence = (
+            SELECT MAX(marker.sequence)
+              FROM tracked_agent_events AS marker
+             WHERE marker.agent_id = event.agent_id
+               AND marker.type IN ('agent.dispatch.failed', 'agent.dispatch.recovered')
+          )
+        LIMIT 1`,
+    ).get(agentId);
+    return row !== undefined;
+  }
+
   createInterviewSession(input: Omit<BeastInterviewSession, 'id'>): BeastInterviewSession {
     const session: BeastInterviewSession = {
       id: prefixedId('interview'),

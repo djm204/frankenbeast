@@ -1,6 +1,8 @@
 import { wallClockNow } from '@franken/types';
 export type CommandFailureKind = 'rate_limit' | 'timeout' | 'spawn_error' | 'command_failed';
 
+export const MAX_RATE_LIMIT_SLEEP_MS = 120_000;
+
 export interface CommandFailure {
   readonly kind: CommandFailureKind;
   readonly tool: string;
@@ -11,6 +13,7 @@ export interface CommandFailure {
   readonly retryable: boolean;
   readonly rateLimited: boolean;
   readonly retryAfterMs?: number | undefined;
+  readonly retryAfterClamped?: boolean | undefined;
   readonly stdout: string;
   readonly stderr: string;
   readonly summary: string;
@@ -45,25 +48,25 @@ export interface CommandFailureFromExecErrorOptions {
 export function parseResetTimeText(text: string): { sleepSeconds: number; source: string } {
   const retryAfterHeaderMatch = text.match(/retry.?after:?\s*(\d+)\s*s?/i);
   if (retryAfterHeaderMatch?.[1]) {
-    return { sleepSeconds: parseInt(retryAfterHeaderMatch[1], 10), source: 'retry-after header' };
+    return boundedSleepSeconds(parseInt(retryAfterHeaderMatch[1], 10), 'retry-after header');
   }
 
   const retryAfterPatternMatch = text.match(/retry.?after\s+(\d+)\s*s?/i);
   if (retryAfterPatternMatch?.[1]) {
-    return { sleepSeconds: parseInt(retryAfterPatternMatch[1], 10), source: 'retry-after header' };
+    return boundedSleepSeconds(parseInt(retryAfterPatternMatch[1], 10), 'retry-after header');
   }
 
   const minutesMatch = text.match(/try again in (\d+) minute/i);
-  if (minutesMatch?.[1]) return { sleepSeconds: parseInt(minutesMatch[1], 10) * 60, source: 'minutes pattern' };
+  if (minutesMatch?.[1]) return boundedSleepSeconds(parseInt(minutesMatch[1], 10) * 60, 'minutes pattern');
 
   const secondsMatch = text.match(/try again in (\d+) second/i);
-  if (secondsMatch?.[1]) return { sleepSeconds: parseInt(secondsMatch[1], 10), source: 'seconds pattern' };
+  if (secondsMatch?.[1]) return boundedSleepSeconds(parseInt(secondsMatch[1], 10), 'seconds pattern');
 
   const isoMatch = text.match(/resets?\s+(?:at\s+)?(\d{4}-\d{2}-\d{2}T[\d:.]+Z)/i);
   if (isoMatch?.[1]) {
     const resetAt = new Date(isoMatch[1]).getTime();
     const now = wallClockNow();
-    if (resetAt > now) return { sleepSeconds: Math.ceil((resetAt - now) / 1000), source: 'reset-at timestamp' };
+    if (resetAt > now) return boundedSleepSeconds(Math.ceil((resetAt - now) / 1000), 'reset-at timestamp');
   }
 
   const epochMatch = text.match(/x-ratelimit-reset:\s*(\d{10,13})/i);
@@ -71,13 +74,24 @@ export function parseResetTimeText(text: string): { sleepSeconds: number; source
     const epoch = parseInt(epochMatch[1], 10);
     const resetMs = epoch > 1e12 ? epoch : epoch * 1000;
     const now = wallClockNow();
-    if (resetMs > now) return { sleepSeconds: Math.ceil((resetMs - now) / 1000), source: 'x-ratelimit-reset epoch' };
+    if (resetMs > now) return boundedSleepSeconds(Math.ceil((resetMs - now) / 1000), 'x-ratelimit-reset epoch');
   }
 
   const resetsInMatch = text.match(/resets?\s+in\s+(\d+)\s*s/i);
-  if (resetsInMatch?.[1]) return { sleepSeconds: parseInt(resetsInMatch[1], 10), source: 'resets-in pattern' };
+  if (resetsInMatch?.[1]) return boundedSleepSeconds(parseInt(resetsInMatch[1], 10), 'resets-in pattern');
 
   return { sleepSeconds: -1, source: 'unknown' };
+}
+
+function boundedSleepSeconds(sleepSeconds: number, source: string): { sleepSeconds: number; source: string } {
+  if (!Number.isFinite(sleepSeconds) || sleepSeconds < 0) {
+    return { sleepSeconds: -1, source: 'unknown' };
+  }
+  const maxSeconds = MAX_RATE_LIMIT_SLEEP_MS / 1000;
+  if (sleepSeconds > maxSeconds) {
+    return { sleepSeconds: maxSeconds, source: `${source} (clamped to ${maxSeconds}s)` };
+  }
+  return { sleepSeconds, source };
 }
 
 export function classifyCommandFailure(options: ClassifyCommandFailureOptions): CommandFailure {
@@ -86,7 +100,16 @@ export function classifyCommandFailure(options: ClassifyCommandFailureOptions): 
   const timedOut = options.timedOut ?? false;
   const combined = normalizedFailureText(stderr, stdout, options.normalizedOutput);
   const rateLimited = !timedOut && (options.detectRateLimit?.(combined) ?? false);
-  const retryAfterMs = rateLimited ? options.parseRetryAfterMs?.(combined) : undefined;
+  const parsedRetryAfterMs = rateLimited ? options.parseRetryAfterMs?.(combined) : undefined;
+  const retryAfterMs = parsedRetryAfterMs !== undefined && Number.isFinite(parsedRetryAfterMs) && parsedRetryAfterMs >= 0
+    ? Math.min(parsedRetryAfterMs, MAX_RATE_LIMIT_SLEEP_MS)
+    : undefined;
+  const genericReset = rateLimited ? parseResetTimeText(combined) : { sleepSeconds: -1, source: 'unknown' };
+  const genericResetWasClamped = genericReset.sleepSeconds >= 0
+    && genericReset.source.includes('(clamped to ')
+    && parsedRetryAfterMs === genericReset.sleepSeconds * 1000;
+  const retryAfterClamped = retryAfterMs !== undefined && parsedRetryAfterMs !== undefined
+    && (retryAfterMs < parsedRetryAfterMs || genericResetWasClamped);
   const kind: CommandFailureKind = timedOut ? 'timeout' : rateLimited ? 'rate_limit' : 'command_failed';
 
   return {
@@ -99,6 +122,7 @@ export function classifyCommandFailure(options: ClassifyCommandFailureOptions): 
     retryable: kind === 'rate_limit',
     rateLimited,
     ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+    ...(retryAfterClamped ? { retryAfterClamped: true } : {}),
     stdout,
     stderr,
     summary: buildSummary({

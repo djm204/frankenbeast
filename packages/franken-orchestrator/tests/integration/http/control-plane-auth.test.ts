@@ -115,6 +115,46 @@ describe('control-plane operator auth', () => {
     }
   });
 
+  describe('rejects invalid operator tokens with 401', () => {
+    const cases: Array<{ name: string; path: string; body: unknown }> = [
+      {
+        name: 'comms inbound',
+        path: '/v1/comms/inbound',
+        body: {
+          channelType: 'slack',
+          externalUserId: 'U1',
+          externalChannelId: 'C1',
+          externalMessageId: 'M1',
+          text: 'hello',
+          receivedAt: new Date().toISOString(),
+          rawEvent: {},
+        },
+      },
+      {
+        name: 'comms action',
+        path: '/v1/comms/action',
+        body: { channelType: 'slack', sessionId: 's', actionId: 'a' },
+      },
+    ];
+
+    for (const { name, path, body } of cases) {
+      it(`${name} -> 401 with an invalid operator token`, async () => {
+        const app = buildApp();
+        const res = await app.request(path, {
+          method: 'POST',
+          headers: {
+            'x-frankenbeast-operator-token': INVALID_OPERATOR_TOKEN,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        });
+
+        expect(res.status).toBe(401);
+        await expect(res.json()).resolves.toMatchObject({ error: { code: 'UNAUTHORIZED' } });
+      });
+    }
+  });
+
   describe('rejects browser cookie mutations without same-origin proof', () => {
     it('denies network mutations when cookie auth lacks an Origin header', async () => {
       const app = buildApp();

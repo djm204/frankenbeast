@@ -14,39 +14,48 @@ The operator token must be validated before establishing the SSE stream, but it 
 
 Use a **connection ticket** pattern — an industry-standard approach for authenticating SSE and WebSocket connections.
 
+**Canonical endpoints:**
+
+- Ticket issuance: `POST /v1/beasts/events/ticket`
+- Dashboard stream: `GET /v1/beasts/events/stream?ticket=<uuid>`
+
+These paths are shared by the daemon routes in `packages/franken-orchestrator/src/http/routes/beast-sse-routes.ts` and the dashboard client in `packages/franken-web/src/lib/beast-api.ts`. Older per-agent `/api/beasts/:id/events` examples are not the dashboard stream contract.
+
 **Flow:**
 
 1. Dashboard calls `POST /v1/beasts/events/ticket` with `Authorization: Bearer <operator-token>`
-2. Daemon validates the bearer token, generates a single-use UUID ticket, stores it in an in-memory map with a 30-second TTL
+2. Daemon validates the bearer token, generates a single-use UUID ticket, and stores its token digest in the shared Beast SQLite database with a 30-second TTL
 3. Response: `{ ticket: "<uuid>" }`
-4. Dashboard opens `EventSource` to `/v1/beasts/events/stream?ticket=<uuid>`
+4. Dashboard opens `EventSource` to the canonical `/v1/beasts/events/stream?ticket=<uuid>` endpoint
 5. Daemon validates the ticket: must exist, not expired, not already used
-6. Ticket is burned (deleted from map) on first use
+6. Ticket is atomically marked consumed on first use; the short-lived consumed marker prevents native EventSource retries from looping
 7. SSE stream is established and authenticated for the lifetime of the connection
 
 **Server-side implementation:**
 
-- `Map<string, { token: string, expiresAt: number }>` in memory
-- Cleanup interval (every 60s) removes expired tickets
-- No persistence needed — tickets are ephemeral by design
+- The `sse_connection_tickets` table lives in the project Beast SQLite database shared by daemon processes using the same project root
+- Only a SHA-256 digest of the operator token is persisted; consumed rows discard that digest
+- An immediate SQLite transaction makes ticket consumption single-use across processes
+- Cleanup interval (every 60s) removes expired issue and consumed-marker rows
+- Ticket state survives daemon restarts while remaining bounded by the 30-second issue TTL and consumed-marker retention window
 
 **Reconnection:**
 
-When `EventSource` auto-reconnects (network interruption), it opens a new HTTP request. The client must obtain a fresh ticket before reconnecting. The `useBeastEventStream` React hook handles this: on connection error, request a new ticket, then reconnect.
+When `EventSource` reconnects after a network interruption, it opens a new HTTP request. The client must obtain a fresh ticket before reconnecting. The dashboard client's `BeastApiClient.subscribeToEvents` method handles this by requesting a new ticket and creating a new `EventSource` for the canonical stream endpoint.
 
 ## Consequences
 
 ### Positive
 - Operator token never appears in URLs, logs, or browser history
 - Tickets are single-use and short-lived — no replay risk
-- Stateless on the daemon side (in-memory map, no persistence)
+- Restart-safe and shared across daemon processes that use the same Beast database
 - Works with existing bearer token auth model
 - Industry standard pattern (used by Slack, GitHub Copilot, Stripe, Firebase)
 - Recommended by OWASP WebSocket Security Cheat Sheet
 
 ### Negative
 - Extra HTTP round-trip before SSE connection (one `POST` per connect/reconnect)
-- In-memory ticket store is lost on daemon restart (acceptable — clients reconnect and get new tickets)
+- Multi-host deployments must place the Beast database on shared storage or provide an equivalent shared ticket-store backend
 
 ### Risks
 - If ticket cleanup interval is too slow, expired tickets accumulate (mitigated by 60s cleanup + 30s TTL)

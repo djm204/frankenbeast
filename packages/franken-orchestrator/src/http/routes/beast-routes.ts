@@ -77,7 +77,10 @@ function attemptsForContainerRun(run: BeastRun | undefined, deps: BeastRoutesDep
 }
 
 function runResponse(run: BeastRun | undefined, deps: BeastRoutesDeps): BeastRunResponse | undefined {
-  return runWithContainerFields(run, attemptsForContainerRun(run, deps));
+  return runWithContainerFields(
+    deps.runs.sanitizeRunForResponse(run),
+    attemptsForContainerRun(run, deps),
+  );
 }
 
 function beastRunNotFound(runId: string): HttpError {
@@ -295,7 +298,9 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
   app.get('/v1/beasts/runs', (c) => {
     return c.json({
       data: {
-        runs: deps.runs.listRuns().map((run) => runResponse(run, deps)),
+        runs: deps.runs.listRuns().map((run) => (
+          runWithContainerFields(run, attemptsForContainerRun(run, deps))
+        )),
       },
     });
   });
@@ -309,7 +314,7 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
     const attempts = deps.runs.listAttempts(runId);
     return c.json({
       data: {
-        run: runWithContainerFields(run, attempts),
+        run: runWithContainerFields(deps.runs.sanitizeRunForResponse(run), attempts),
         attempts,
         events: deps.runs.listEvents(runId),
       },

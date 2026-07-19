@@ -18,8 +18,19 @@ describe('PresetCardGroup', () => {
 
   it('highlights selected card', () => {
     render(<PresetCardGroup presets={presets} selected="one-shot" onSelect={vi.fn()} />);
-    const card = screen.getByText('One-shot').closest('button');
+    const card = screen.getByText('One-shot').closest('label');
     expect(card?.className).toContain('border-beast-accent');
+  });
+
+  it('exposes the mutually exclusive selection as native grouped radios', () => {
+    render(<PresetCardGroup presets={presets} selected="one-shot" onSelect={vi.fn()} />);
+
+    expect(screen.getByRole('group', { name: /preset options/i })).toBeTruthy();
+    const selected = screen.getByRole('radio', { name: /one-shot/i }) as HTMLInputElement;
+    const unselected = screen.getByRole('radio', { name: /feature branch/i }) as HTMLInputElement;
+    expect(selected.checked).toBe(true);
+    expect(unselected.checked).toBe(false);
+    expect(selected.name).toBe(unselected.name);
   });
 
   it('calls onSelect when card is clicked', () => {

@@ -9,6 +9,7 @@ vi.mock('../shared/tool-registry.js', () => ({
         name: 'test_tool',
         server: 'memory',
         description: 'A test tool',
+        timeoutMs: 10,
         inputSchema: { type: 'object', properties: { key: { type: 'string', description: 'Key' } }, required: ['key'] },
         makeHandler: vi.fn(),
       },
@@ -43,7 +44,7 @@ const FAKE_STUBS = [
 describe('proxy server', () => {
   let server: ReturnType<typeof createProxyServer>;
   let searchToolsDef: { handler: (args: Record<string, unknown>) => Promise<unknown> };
-  let executeToolDef: { handler: (args: Record<string, unknown>) => Promise<unknown> };
+  let executeToolDef: { timeoutMs?: number; handler: (args: Record<string, unknown>) => Promise<unknown> };
   let gateCheck: ReturnType<typeof vi.fn>;
   let auditRecord: ReturnType<typeof vi.fn>;
 
@@ -96,6 +97,10 @@ describe('proxy server', () => {
   });
 
   describe('execute_tool', () => {
+    it('keeps the proxy wrapper deadline longer than every target deadline', () => {
+      expect(executeToolDef.timeoutMs).toBe(60_000);
+    });
+
     it('calls through to handler and returns its result', async () => {
       const fakeResult = { content: [{ type: 'text', text: 'tool executed' }] };
       const fakeHandler = vi.fn().mockResolvedValue(fakeResult);
@@ -171,7 +176,33 @@ describe('proxy server', () => {
 
       const toolArgs = { key: 'bar' };
       await executeToolDef.handler({ tool: 'test_tool', args: toolArgs });
-      expect(fakeHandler).toHaveBeenCalledWith(toolArgs);
+      expect(fakeHandler).toHaveBeenCalledWith(toolArgs, expect.objectContaining({
+        signal: expect.any(AbortSignal),
+        timeoutMs: 10,
+      }));
+    });
+
+    it('times out proxied registry handlers and audits the timeout', async () => {
+      const entry = mockRegistry.get('test_tool')!;
+      vi.mocked(entry.makeHandler).mockReturnValue(vi.fn(async () => {
+        await new Promise<void>(() => undefined);
+        return { content: [{ type: 'text', text: 'unreachable' }] };
+      }));
+
+      const result = await executeToolDef.handler({ tool: 'test_tool', args: { key: 'value' } }) as {
+        content: Array<{ type: string; text: string }>;
+        isError: boolean;
+      };
+
+      expect(result).toEqual({
+        content: [{ type: 'text', text: 'Error: Tool execution timed out after 10ms [MCP_TOOL_TIMEOUT]' }],
+        isError: true,
+      });
+      expect(auditRecord).toHaveBeenCalledWith(expect.objectContaining({
+        tool: 'test_tool',
+        ok: false,
+        decision: 'timeout',
+      }));
     });
 
     it('validates proxied target tool args before calling the target handler', async () => {
@@ -289,6 +320,22 @@ describe('proxy server', () => {
       });
     });
 
+    it('audits an execute_tool wrapper timeout with its sanitized target envelope', async () => {
+      executeToolDef.timeoutMs = 10;
+      gateCheck.mockImplementationOnce(() => new Promise(() => {}));
+      const envelope = { tool: 'test_tool', args: { key: 'v' } };
+
+      const res = await server.callTool('execute_tool', envelope) as { isError?: boolean };
+
+      expect(res.isError).toBe(true);
+      expect(auditRecord).toHaveBeenCalledWith({
+        tool: 'execute_tool',
+        ok: false,
+        decision: 'timeout',
+        args: envelope,
+      });
+    });
+
     it('does NOT double-audit a successful execute_tool call at the wrapper level', async () => {
       const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
       vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
@@ -314,6 +361,26 @@ describe('proxy server', () => {
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('missing required property: key');
       expect(fakeHandler).not.toHaveBeenCalled();
+    });
+
+    it('redacts over-bound target arguments from proxy validation-error audits', async () => {
+      mockRegistry.set('bounded_tool', {
+        name: 'bounded_tool',
+        server: 'memory',
+        description: 'Bounded test tool',
+        inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Query', maxLength: 3 } }, required: ['query'] },
+        makeHandler: vi.fn(),
+      });
+
+      const result = await executeToolDef.handler({ tool: 'bounded_tool', args: { query: 'oversized' } }) as { isError: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(auditRecord).toHaveBeenCalledWith({
+        tool: 'bounded_tool',
+        ok: false,
+        decision: 'validation_error',
+        args: { query: '[schema-bound-exceeded]' },
+      });
     });
 
     it('rejects proxied calls with target unknown properties', async () => {

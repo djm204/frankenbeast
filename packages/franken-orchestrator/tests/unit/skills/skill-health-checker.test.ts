@@ -64,7 +64,7 @@ describe('SkillHealthChecker', () => {
     ]);
   });
 
-  it('returns connected when a trusted server exits cleanly', async () => {
+  it('returns unknown with a diagnostic when a trusted command exits cleanly without an MCP handshake', async () => {
     const config: McpConfig = {
       mcpServers: {
         github: { command: 'echo', args: ['ok'] },
@@ -72,8 +72,14 @@ describe('SkillHealthChecker', () => {
     };
     const result = await checker.getStatus('github', config, { trustMcpServerCommands: true });
     expect(result.name).toBe('github');
-    expect(result.status).toBe('connected');
-    expect(result.serverStatuses).toHaveLength(1);
+    expect(result.status).toBe('unknown');
+    expect(result.serverStatuses).toEqual([
+      {
+        serverName: 'github',
+        status: 'unknown',
+        error: 'MCP initialize handshake was not completed before the command exited',
+      },
+    ]);
   });
 
   it('returns connected when a long-running trusted MCP server responds to initialize', async () => {
@@ -117,7 +123,7 @@ describe('SkillHealthChecker', () => {
     expect(proc.kill).toHaveBeenCalledTimes(1);
   });
 
-  it('defers stdin EPIPE to the process close status', async () => {
+  it('defers stdin EPIPE to an unknown clean-exit result', async () => {
     const { spawn } = await import('node:child_process');
     const proc = makeMockProcess();
     proc.stdin.write.mockImplementation(() => {
@@ -137,7 +143,11 @@ describe('SkillHealthChecker', () => {
 
     const result = await checker.getStatus('epipe', config, { trustMcpServerCommands: true });
 
-    expect(result.status).toBe('connected');
+    expect(result.status).toBe('unknown');
+    expect(result.serverStatuses[0]).toMatchObject({
+      status: 'unknown',
+      error: 'MCP initialize handshake was not completed before the command exited',
+    });
   });
 
   it('parses framed initialize responses by UTF-8 byte length', async () => {

@@ -90,7 +90,7 @@ For Beast controls, run the orchestrator/backend setup flow with `frankenbeast i
 
 | Server | Tools | Description |
 |--------|-------|-------------|
-| `fbeast-memory` | `fbeast_memory_store`, `fbeast_memory_query`, `fbeast_memory_frontload`, `fbeast_memory_export`, `fbeast_memory_retention_report`, `fbeast_memory_forget`, `fbeast_memory_right_to_forget`, `fbeast_memory_review_propose`, `fbeast_memory_review_list`, `fbeast_memory_source_attribution`, `fbeast_memory_review_conflicts`, `fbeast_memory_review_decide` | Key-value, episodic, redacted project export, retention/compaction reports, review-queued promotion, source attribution, and auditable deletion memory via SqliteBrain |
+| `fbeast-memory` | `fbeast_memory_store`, `fbeast_memory_query`, `fbeast_memory_frontload`, `fbeast_memory_export`, `fbeast_memory_retention_report`, `fbeast_memory_forget`, `fbeast_memory_right_to_forget`, `fbeast_memory_review_propose`, `fbeast_memory_review_list`, `fbeast_memory_source_attribution`, `fbeast_memory_review_conflicts`, `fbeast_memory_review_decide`, `fbeast_memory_access_audit_report` | Key-value, episodic, redacted project export, retention/compaction reports, review-queued promotion, source attribution, auditable deletion, and redacted access reporting memory via SqliteBrain |
 | `fbeast-observer` | `fbeast_observer_log`, `fbeast_observer_log_cost`, `fbeast_observer_cost`, `fbeast_observer_trail`, `fbeast_observer_verify` | Audit trail with chained hashes, token/cost logging and summaries |
 | `fbeast-governor` | `fbeast_governor_check`, `fbeast_governor_budget` | Action safety assessment and budget status |
 | `fbeast-planner` | `fbeast_plan_decompose`, `fbeast_plan_status`, `fbeast_plan_validate` | Task DAG planning, status visualization, and validation |
@@ -99,6 +99,24 @@ For Beast controls, run the orchestrator/backend setup flow with `frankenbeast i
 | `fbeast-skills` | `fbeast_skills_list`, `fbeast_skills_discover`, `fbeast_skills_load` | Skill registry discovery and loading |
 
 All servers share `.fbeast/beast.db` (SQLite, WAL mode). Memory frontload is scoped to that database: use a separate database per project when project isolation is required.
+
+### Programmatic lifecycle
+
+Programmatic callers that create an observer adapter or MCP server should close the owner during shutdown. `close()` is idempotent and releases the observer's SQLite handle; MCP server shutdown also closes its owned audit/observer resources.
+
+```ts
+const observer = createObserverAdapter('.fbeast/beast.db');
+try {
+  await observer.log({ event: 'tool_call', metadata: '{}', sessionId: 'session-1' });
+} finally {
+  observer.close?.();
+}
+
+const serverObserver = createObserverAdapter('.fbeast/beast.db');
+const server = createObserverServer({ observer: serverObserver });
+await server.start();
+await server.close();
+```
 
 Memory reads support explicit per-agent scope controls on `fbeast_memory_query` and `fbeast_memory_frontload`:
 
@@ -115,6 +133,8 @@ To create agent-scoped entries through `fbeast_memory_store`, pass `agentId`; wo
 `fbeast_memory_retention_report` returns the configured retention taxonomy and a structured report of entries that are protected, expired, nearing expiry, or eligible for compaction. User preferences are protected from automatic compaction; learned procedures and project conventions out-rank environment facts; transient observations and temporary operational facts are first-choice compaction candidates. Pass `maxEntries` to preview budget-pressure compaction ordering and `expiryHorizonMs` to tune the nearing-expiry window.
 
 `fbeast_memory_right_to_forget` performs user-directed memory deletion by exact key, category metadata, source scope, or sensitive query text. The report returns only a selector hash, deleted counts, remaining-reference count, and optional audit event id; it does not echo the deleted content. Non-dry-run deletions also install hashed reinference guards so future working-memory writes matching forgotten keys, categories, source scopes, or query tokens are rejected.
+
+`fbeast_memory_access_audit_report` returns a redacted memory access report from the database audit logs. Use it to inspect read/write/review/delete/export activity by time window, agent, profile, repo, operation, decision, and tool without exposing stored memory contents. Report entries include metadata such as event timestamp, source audit table, tool, operation, target memory class, agent/card/profile/repo context when available, decision, and a redacted reason; summary counts are grouped by operation, tool, agent, profile, repo, and decision.
 
 `fbeast_memory_source_attribution` is the operator-facing viewer for approved working-memory provenance. It returns structured JSON with `count` and `attributions[]`; each attribution includes the memory key, approved value, source, optional evidence id, candidate id, confidence, reason, reviewer/note when present, and approval timestamp. Use `key` for an exact memory-key lookup, `source` for a case-insensitive source substring filter, and `limit` to cap results. Empty lookups return `{ "count": 0, "attributions": [] }` so automation can distinguish “no attribution found” from a tool failure.
 
@@ -193,7 +213,7 @@ sensitive payloads into logs or issue comments.
 
 ## Combined server
 
-`fbeast-mcp` runs all 29 tools in a single MCP server process.
+`fbeast-mcp` runs all 30 tools in a single MCP server process.
 
 ## Tool argument shape hardening
 

@@ -367,6 +367,40 @@ describe('AgentService', () => {
     expect(detail.events).toEqual([event]);
   });
 
+  it('queries dispatch-failure redaction history in one batch while clearing active state after recovery', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-agent-service-'));
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const service = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
+    const createAgent = (definitionId: string) => service.createAgent({
+      definitionId,
+      source: 'dashboard',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: {},
+    });
+    const recovered = createAgent('recovered-agent');
+    const stillFailed = createAgent('failed-agent');
+
+    for (const agent of [recovered, stillFailed]) {
+      service.appendEvent(agent.id, {
+        level: 'error',
+        type: 'agent.dispatch.failed',
+        message: 'Run failed to start',
+        payload: {},
+      });
+    }
+    service.appendEvent(recovered.id, {
+      level: 'info',
+      type: 'agent.dispatch.recovered',
+      message: 'Tracked agent dispatch recovered',
+      payload: {},
+    });
+
+    expect(service.listDispatchFailureRedactedAgentIds()).toEqual(new Set([recovered.id, stillFailed.id]));
+    expect(service.hasActiveDispatchFailure(recovered.id)).toBe(false);
+    expect(service.hasActiveDispatchFailure(stillFailed.id)).toBe(true);
+  });
+
   it('preserves tracked worktree state when soft-deleting a stopped agent', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-agent-service-'));
     const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

@@ -24,6 +24,7 @@ const bearerToken = ['Bearer ', 'f'.repeat(48)].join('');
 const passwordOnlyRedisUrl = ['redis://:', 'g'.repeat(24), '@cache.internal:6379/0'].join('');
 const bareCookieValue = ['session=', 'h'.repeat(32), '; csrf=', 'i'.repeat(32)].join('');
 const authorizationHeader = ['Authorization: Basic ', 'j'.repeat(32)].join('');
+const lowercaseBasicAuthorizationHeader = ['authorization: Basic ', 'k'.repeat(32)].join('');
 
 const fixtures = [
   { name: 'github-token', value: githubToken },
@@ -35,6 +36,7 @@ const fixtures = [
   { name: 'bare-cookie-value', value: bareCookieValue },
   { name: 'bearer-token', value: bearerToken },
   { name: 'authorization-header', value: authorizationHeader },
+  { name: 'lowercase-basic-authorization-header', value: lowercaseBasicAuthorizationHeader },
 ] as const;
 
 const camelCaseSecretMetadata = {
@@ -127,8 +129,8 @@ describe('secret redaction regression harness', () => {
 
       expect(brain.store, fixture.name).not.toHaveBeenCalled();
       expect(brain.proposeMemory, fixture.name).toHaveBeenCalled();
-      expect(brain.proposeMemory, fixture.name).not.toHaveBeenCalledWith(expect.objectContaining({ value: fixture.value }));
       expect(brain.proposeMemory, fixture.name).toHaveBeenCalledWith(expect.objectContaining({ value: '<redacted>' }));
+      expect(JSON.stringify((brain.proposeMemory as ReturnType<typeof vi.fn>).mock.calls)).not.toContain(fixture.value);
       assertNoFixtureLeak(`memory ${fixture.name}`, result.content[0]?.text ?? '');
     }
   });

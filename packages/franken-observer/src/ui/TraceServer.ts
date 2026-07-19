@@ -225,7 +225,26 @@ sidebar.addEventListener('click', e=>{
 
 async function loadDetail(id){
   document.querySelectorAll('.trace-item').forEach(el=>el.classList.toggle('active',el.dataset.id===id))
-  const t = await fetch('/api/traces/'+encodeURIComponent(id)).then(r=>r.json())
+  let response
+  let t
+  try {
+    response = await fetch('/api/traces/'+encodeURIComponent(id))
+    t = await response.json()
+  } catch {
+    panel.innerHTML = '<p class="empty" role="alert">Trace details are unavailable.</p>'
+    return
+  }
+  if(!response.ok){
+    const message = t && typeof t.error==='string'
+      ? t.error
+      : 'Unable to load trace details ('+response.status+').'
+    panel.innerHTML = '<p class="empty" role="alert">'+esc(message)+'</p>'
+    return
+  }
+  if(!t || !Array.isArray(t.spans)){
+    panel.innerHTML = '<p class="empty" role="alert">Trace details are unavailable.</p>'
+    return
+  }
   const totalTokens = t.spans.reduce((n,s)=>(n+(s.metadata.totalTokens??0)),0)
   panel.innerHTML = \`
     <h2>\${esc(t.goal)}</h2>

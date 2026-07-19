@@ -57,11 +57,11 @@ function createLocalEncryptedStore(options: SecretStoreOptions): ISecretStore {
 }
 
 function createOnePasswordStore(): ISecretStore {
-  return new OnePasswordStore(runCli);
+  return new OnePasswordStore(runCli, runCliWithStdin);
 }
 
 function createBitwardenStore(): ISecretStore {
-  return new BitwardenStore(runCli);
+  return new BitwardenStore(runCli, runCliWithStdin);
 }
 
 function createOsKeychainStore(): ISecretStore {

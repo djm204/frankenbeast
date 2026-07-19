@@ -1,9 +1,10 @@
-import type { BeastDefinition, BeastRun } from '../types.js';
+import type { BeastDefinition, BeastRun, BeastRunEvent, ModuleConfig } from '../types.js';
 import { BeastLogStore } from '../events/beast-log-store.js';
 import type { BeastEventBus, BeastSseEvent } from '../events/beast-event-bus.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import type { BeastMetrics } from '../telemetry/beast-metrics.js';
-import type { BeastExecutors } from './beast-dispatch-service.js';
+import { normalizeBeastRunConfig, type BeastExecutors } from './beast-dispatch-service.js';
+import { SAFE_DISPATCH_FAILURE_MESSAGE } from './dispatch-failure-message.js';
 import { BeastCatalogService } from './beast-catalog-service.js';
 import { isoNow } from '@franken/types';
 import {
@@ -15,6 +16,7 @@ import {
 import type { MaintenanceModeService } from './maintenance-mode-service.js';
 import {
   AgentToolPolicyError,
+  defaultAgentToolPolicyConfig,
   validateAgentRoleTools,
   type ToolPolicyDenial,
   type ToolPolicyValidationContext,
@@ -45,11 +47,23 @@ export class BeastRunService {
   ) {}
 
   listRuns(): BeastRun[] {
-    return this.repository.listRuns();
+    const redactedAgentIds = new Set(this.repository.listDispatchFailureHistoryAgentIds());
+    return this.repository.listRuns().map((run) => (
+      run.trackedAgentId && redactedAgentIds.has(run.trackedAgentId)
+        ? { ...run, configSnapshot: {} }
+        : run
+    ));
   }
 
   getRun(runId: string): BeastRun | undefined {
     return this.repository.getRun(runId);
+  }
+
+  sanitizeRunForResponse(run: BeastRun | undefined): BeastRun | undefined {
+    if (!run?.trackedAgentId || !this.repository.hasDispatchFailureHistory(run.trackedAgentId)) {
+      return run;
+    }
+    return { ...run, configSnapshot: {} };
   }
 
   updateConfigSnapshot(runId: string, configSnapshot: Readonly<Record<string, unknown>>): BeastRun {
@@ -57,34 +71,38 @@ export class BeastRunService {
   }
 
   listAttempts(runId: string) {
-    this.requireRun(runId);
-    return this.repository.listAttempts(runId);
+    const run = this.requireRun(runId);
+    const attempts = this.repository.listAttempts(runId);
+    if (!this.hasDispatchFailureHistory(run)) return attempts;
+    return attempts.map((attempt) => ({ ...attempt, executorMetadata: undefined }));
   }
 
   listEvents(runId: string) {
-    this.requireRun(runId);
-    return this.repository.listEvents(runId);
+    const run = this.requireRun(runId);
+    if (!this.hasDispatchFailureHistory(run)) return this.repository.listEvents(runId);
+    return this.repository.listEvents(runId).map(redactDispatchFailureEvent);
   }
 
   async readLogs(runId: string): Promise<string[]> {
     const run = this.requireRun(runId);
     const attemptId = run.currentAttemptId;
-    if (!attemptId) {
-      return this.logs.read(run.id, 'system');
-    }
-    return this.logs.read(run.id, attemptId);
+    const lines = await this.logs.read(run.id, attemptId ?? 'system');
+    if (!this.hasDispatchFailureHistory(run)) return lines;
+    return lines.map(redactDispatchFailureLogLine);
   }
 
   async start(runId: string, _actor: string): Promise<BeastRun> {
     this.serviceOptions.maintenance?.assertDispatchAllowed();
-    this.assertRoleToolManifestAllows(this.requireRun(runId));
-    const run = this.reserveTrackedAgentCapacityForStart(this.requireRun(runId));
+    let run = this.requireRun(runId);
     const definition = this.getDefinitionOrThrow(run.definitionId);
+    const rebuiltConfig = this.rebuildFailedTrackedRunConfig(run, definition);
+    this.assertRoleToolManifestAllows(run, rebuiltConfig ?? run.configSnapshot);
+    run = this.reserveTrackedAgentCapacityForStart(run, rebuiltConfig);
+    if (rebuiltConfig) {
+      run = this.persistRebuiltTrackedRunConfig(run, rebuiltConfig);
+    }
     const priorAttemptId = run.currentAttemptId;
     const priorAttemptCount = run.attemptCount;
-    const trackedAgentStatusBeforeStart = run.trackedAgentId
-      ? this.repository.getTrackedAgent(run.trackedAgentId)?.status
-      : undefined;
     try {
       await this.executorFor(run).start(run, definition);
       let updated = this.requireRun(runId);
@@ -100,8 +118,8 @@ export class BeastRunService {
       }
       this.syncTrackedAgent(updated);
       return updated;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+    } catch {
+      const errorMessage = SAFE_DISPATCH_FAILURE_MESSAGE;
       const currentRun = this.repository.getRun(run.id);
       if (
         currentRun
@@ -110,7 +128,10 @@ export class BeastRunService {
           || currentRun.attemptCount > priorAttemptCount
         )
       ) {
-        throw error;
+        if (currentRun.status === 'failed' && currentRun.trackedAgentId) {
+          this.repository.updateRun(currentRun.id, { configSnapshot: {} });
+        }
+        throw new Error(SAFE_DISPATCH_FAILURE_MESSAGE);
       }
       const priorAttempt = priorAttemptId ? this.repository.getAttempt(priorAttemptId) : undefined;
       if (priorAttempt?.status === 'running') {
@@ -123,13 +144,14 @@ export class BeastRunService {
           stopReason: run.stopReason ?? null,
         });
         this.syncTrackedAgent(restoredRun);
-        throw error;
+        throw new Error(SAFE_DISPATCH_FAILURE_MESSAGE);
       }
       if (currentRun?.status === 'failed' && currentRun.finishedAt && currentRun.finishedAt !== run.finishedAt) {
         const failedAt = currentRun.finishedAt;
         await this.appendLogSafely(run.id, 'system', 'stderr', `start_failed: ${errorMessage}`);
         const { failedRun, publications } = this.repository.transaction(() => {
           const normalizedRun = this.repository.updateRun(run.id, {
+            ...(run.trackedAgentId ? { configSnapshot: {} } : {}),
             startedAt: null,
             currentAttemptId: null,
             latestExitCode: null,
@@ -155,12 +177,8 @@ export class BeastRunService {
                   type: 'agent.status',
                   data: { agentId: normalizedRun.trackedAgentId, status: 'failed', updatedAt: failedAt },
                 });
-                this.repository.appendTrackedAgentEvent(normalizedRun.trackedAgentId, failedEvent);
-                pendingPublications.push({
-                  type: 'agent.event',
-                  data: { agentId: normalizedRun.trackedAgentId, event: failedEvent },
-                });
-              } else if (trackedAgentStatusBeforeStart === 'failed') {
+              }
+              if (!this.repository.hasActiveDispatchFailure(normalizedRun.trackedAgentId)) {
                 this.repository.appendTrackedAgentEvent(normalizedRun.trackedAgentId, failedEvent);
                 pendingPublications.push({
                   type: 'agent.event',
@@ -181,6 +199,7 @@ export class BeastRunService {
       const { failedRun, publications } = this.repository.transaction(() => {
         const updatedRun = this.repository.updateRun(run.id, {
           status: 'failed',
+          ...(run.trackedAgentId ? { configSnapshot: {} } : {}),
           startedAt: null,
           finishedAt: failedAt,
           currentAttemptId: null,
@@ -337,14 +356,15 @@ export class BeastRunService {
     return definition;
   }
 
-  private assertRoleToolManifestAllows(run: BeastRun): void {
+  private assertRoleToolManifestAllows(
+    run: BeastRun,
+    configSnapshot: Readonly<Record<string, unknown>> = run.configSnapshot,
+  ): void {
     const trackedAgent = run.trackedAgentId
       ? this.repository.getTrackedAgent(run.trackedAgentId)
       : undefined;
-    const initActionKind = trackedAgent?.initAction.kind;
-    const validation = validateAgentRoleTools(run.configSnapshot, {
+    const validation = validateAgentRoleTools(configSnapshot, {
       definitionId: run.definitionId,
-      initActionKind,
       initActionConfig: trackedAgent?.initAction.config,
       trustedSkillToolManifests: this.serviceOptions.trustedSkillToolManifests,
     });
@@ -363,14 +383,88 @@ export class BeastRunService {
     }
   }
 
-  private assertTrackedAgentCapacity(run: BeastRun): void {
+  private rebuildFailedTrackedRunConfig(
+    run: BeastRun,
+    definition: BeastDefinition,
+  ): Readonly<Record<string, unknown>> | undefined {
+    if (!run.trackedAgentId) return undefined;
+    if (run.status !== 'failed' && !(run.status === 'stopped' && this.hasActiveDispatchFailure(run))) {
+      return undefined;
+    }
+    const trackedAgent = this.repository.getTrackedAgent(run.trackedAgentId);
+    if (!trackedAgent) return undefined;
+
+    let normalized: Readonly<Record<string, unknown>>;
+    try {
+      normalized = normalizeBeastRunConfig(definition, trackedAgent.initConfig);
+    } catch {
+      // Pre-upgrade interview agents may have an empty tracked config while the
+      // original failed run still holds the only valid completed answer set.
+      normalized = normalizeBeastRunConfig(definition, run.configSnapshot);
+    }
+    const storedPolicy = Object.fromEntries(
+      ['agentRole', 'requestedTools', 'skills']
+        .filter(key => Object.prototype.hasOwnProperty.call(trackedAgent.initConfig, key))
+        .map(key => [key, trackedAgent.initConfig[key]]),
+    );
+    const rebuiltPolicyConfig = {
+      ...defaultAgentToolPolicyConfig(definition.id),
+      ...storedPolicy,
+      ...normalized,
+    };
+    const snapshotModules = run.configSnapshot.modules;
+    const modules = snapshotModules && typeof snapshotModules === 'object' && !Array.isArray(snapshotModules)
+      ? snapshotModules
+      : trackedAgent.moduleConfig;
+    return modules ? { ...rebuiltPolicyConfig, modules } : rebuiltPolicyConfig;
+  }
+
+  private persistRebuiltTrackedRunConfig(
+    run: BeastRun,
+    rebuiltConfig: Readonly<Record<string, unknown>>,
+  ): BeastRun {
+    return this.repository.transaction(() => {
+      const updatedRun = this.repository.updateRun(run.id, { configSnapshot: rebuiltConfig });
+      if (!run.trackedAgentId) return updatedRun;
+
+      const trackedAgent = this.repository.getTrackedAgent(run.trackedAgentId);
+      if (!trackedAgent || trackedAgent.status === 'deleted') return updatedRun;
+
+      const { modules, ...normalizedInitConfig } = rebuiltConfig;
+      const identity = trackedAgent.initConfig.identity;
+      const initConfig = identity && typeof identity === 'object' && !Array.isArray(identity)
+        ? { ...normalizedInitConfig, identity }
+        : normalizedInitConfig;
+      const moduleConfig = modules && typeof modules === 'object' && !Array.isArray(modules)
+        ? modules as ModuleConfig
+        : undefined;
+      this.repository.updateTrackedAgent(run.trackedAgentId, {
+        initConfig,
+        ...(moduleConfig ? { moduleConfig } : {}),
+      });
+      return updatedRun;
+    });
+  }
+
+  private hasActiveDispatchFailure(run: BeastRun): boolean {
+    return Boolean(run.trackedAgentId && this.repository.hasActiveDispatchFailure(run.trackedAgentId));
+  }
+
+  private hasDispatchFailureHistory(run: BeastRun): boolean {
+    return Boolean(run.trackedAgentId && this.repository.hasDispatchFailureHistory(run.trackedAgentId));
+  }
+
+  private assertTrackedAgentCapacity(
+    run: BeastRun,
+    configSnapshot: Readonly<Record<string, unknown>> = run.configSnapshot,
+  ): void {
     if (!run.trackedAgentId || !this.serviceOptions.capacityPolicy) return;
     const trackedAgent = this.repository.getTrackedAgent(run.trackedAgentId);
     if (!trackedAgent || trackedAgent.status === 'deleted') return;
 
     const activeItems = this.activeCapacityItems(run.id);
     const decision = this.serviceOptions.capacityPolicy.canStart(
-      capacityItemFromConfig(trackedAgent.id, run.configSnapshot),
+      capacityItemFromConfig(trackedAgent.id, configSnapshot),
       activeItems,
     );
     if (!decision.allowed) {
@@ -378,7 +472,10 @@ export class BeastRunService {
     }
   }
 
-  private reserveTrackedAgentCapacityForStart(run: BeastRun): BeastRun {
+  private reserveTrackedAgentCapacityForStart(
+    run: BeastRun,
+    configSnapshot: Readonly<Record<string, unknown>> | undefined,
+  ): BeastRun {
     if (!run.trackedAgentId || !this.serviceOptions.capacityPolicy) return run;
     const trackedAgent = this.repository.getTrackedAgent(run.trackedAgentId);
     if (!trackedAgent || trackedAgent.status === 'deleted') return run;
@@ -389,7 +486,7 @@ export class BeastRunService {
       const currentTrackedAgent = this.repository.getTrackedAgent(run.trackedAgentId!);
       if (!currentTrackedAgent || currentTrackedAgent.status === 'deleted') return currentRun;
 
-      this.assertTrackedAgentCapacity(currentRun);
+      this.assertTrackedAgentCapacity(currentRun, configSnapshot ?? currentRun.configSnapshot);
       if (currentTrackedAgent.status === 'dispatching' && currentTrackedAgent.dispatchRunId === currentRun.id) {
         return currentRun;
       }
@@ -452,6 +549,22 @@ export class BeastRunService {
         data: { agentId: trackedAgentId, status, updatedAt },
       }];
 
+      if ((status === 'running' || status === 'awaiting_approval' || status === 'completed')
+        && this.repository.hasUnrecoveredDispatchFailure(trackedAgentId)) {
+        const recoveredEvent = {
+          level: 'info' as const,
+          type: 'agent.dispatch.recovered',
+          message: `Tracked agent dispatch recovered for run ${run.id}`,
+          payload: { runId: run.id },
+          createdAt: updatedAt,
+        };
+        this.repository.appendTrackedAgentEvent(trackedAgentId, recoveredEvent);
+        pendingPublications.push({
+          type: 'agent.event',
+          data: { agentId: trackedAgentId, event: recoveredEvent },
+        });
+      }
+
       if ((run.status === 'failed' || run.status === 'completed' || run.status === 'stopped')) {
         const level: 'error' | 'info' = run.status === 'failed' ? 'error' : 'info';
         const type = `agent.run.${run.status}`;
@@ -489,4 +602,32 @@ export class BeastRunService {
 
 function defaultToolPolicyLogger(entry: ToolPolicyDenial): void {
   console.warn('[agent-tool-policy-denial]', JSON.stringify(entry));
+}
+
+function redactDispatchFailureEvent(event: BeastRunEvent): BeastRunEvent {
+  if (event.type !== 'run.start_failed' && event.type !== 'run.spawn_failed') return event;
+  return {
+    ...event,
+    payload: { error: SAFE_DISPATCH_FAILURE_MESSAGE },
+  };
+}
+
+function redactDispatchFailureLogLine(line: string): string {
+  try {
+    const record = JSON.parse(line) as unknown;
+    if (record && typeof record === 'object' && !Array.isArray(record)) {
+      const message = (record as { message?: unknown }).message;
+      if (typeof message === 'string' && message.startsWith('start_failed:')) {
+        return JSON.stringify({
+          ...record,
+          message: `start_failed: ${SAFE_DISPATCH_FAILURE_MESSAGE}`,
+        });
+      }
+    }
+  } catch {
+    // Older stores may contain plain-text lines rather than JSON records.
+  }
+  return line.includes('start_failed:')
+    ? `start_failed: ${SAFE_DISPATCH_FAILURE_MESSAGE}`
+    : line;
 }

@@ -9,48 +9,119 @@
 export const BASE_RATE_LIMIT_PATTERNS =
   /rate.?limit|429|too many requests|retry.?after|overloaded|capacity|temporarily unavailable|out of extra usage|usage limit|resets?\s+\d|resets?\s+in\s+\d+\s*s/i;
 
-/** Recursively extract text from a stream-json node. */
+/**
+ * Return whether the quote at `index` is escaped by an odd backslash run.
+ */
+function isEscapedQuote(text: string, index: number): boolean {
+  let backslashes = 0;
+  for (let i = index - 1; i >= 0 && text[i] === '\\'; i--) backslashes++;
+  return backslashes % 2 === 1;
+}
+
+/** Find the JSON object containing a marker whose opening quote is at `index`. */
+function findContainingObjectStart(text: string, index: number): number {
+  let depth = 0;
+  let inStr = false;
+
+  for (let i = index - 1; i >= 0; i--) {
+    const ch = text[i]!;
+    if (ch === '"' && !isEscapedQuote(text, i)) {
+      inStr = !inStr;
+      continue;
+    }
+    if (inStr) continue;
+    if (ch === '}') {
+      depth++;
+    } else if (ch === '{') {
+      if (depth === 0) return i;
+      depth--;
+    }
+  }
+  return -1;
+}
+
+/** Find the exclusive end of a JSON object, respecting quoted braces. */
+function findObjectEnd(text: string, start: number): number {
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]!;
+    if (esc) {
+      esc = false;
+      continue;
+    }
+    if (ch === '\\' && inStr) {
+      esc = true;
+      continue;
+    }
+    if (ch === '"') {
+      inStr = !inStr;
+      continue;
+    }
+    if (inStr) continue;
+    if (ch === '{') {
+      depth++;
+    } else if (ch === '}' && --depth === 0) {
+      return i + 1;
+    }
+  }
+  return -1;
+}
+
 /**
  * Strip JSON objects containing "hookSpecificOutput" from text.
  * Hook output leaks from spawned CLI processes when project-scoped hooks fire
- * despite FRANKENBEAST_SPAWNED=1. Uses brace-depth matching to handle
- * multi-line pretty-printed JSON with nested braces in string values.
+ * despite FRANKENBEAST_SPAWNED=1. Marker searches advance monotonically and
+ * only scan the matching object boundaries; retained output is rebuilt once.
  */
 export function stripHookJson(text: string): string {
   const MARKER = '"hookSpecificOutput"';
-  let result = text;
+  const removalRanges: Array<{ start: number; end: number }> = [];
+  let searchFrom = 0;
 
-  while (true) {
-    const idx = result.indexOf(MARKER);
-    if (idx === -1) break;
+  while (searchFrom < text.length) {
+    const markerIndex = text.indexOf(MARKER, searchFrom);
+    if (markerIndex === -1) break;
+    searchFrom = markerIndex + MARKER.length;
 
-    // Walk backward to find opening '{'
-    let start = -1;
-    for (let i = idx - 1; i >= 0; i--) {
-      if (result[i] === '{') { start = i; break; }
-    }
-    if (start === -1) break;
+    // Only treat an unescaped marker followed by a colon as a property key.
+    if (isEscapedQuote(text, markerIndex)) continue;
+    let colonIndex = searchFrom;
+    while (/\s/.test(text[colonIndex] ?? '')) colonIndex++;
+    if (text[colonIndex] !== ':') continue;
 
-    // Walk forward with brace-depth to find closing '}'
-    let depth = 0;
-    let inStr = false;
-    let esc = false;
-    let end = -1;
-    for (let i = start; i < result.length; i++) {
-      const ch = result[i]!;
-      if (esc) { esc = false; continue; }
-      if (ch === '\\' && inStr) { esc = true; continue; }
-      if (ch === '"') { inStr = !inStr; continue; }
-      if (inStr) continue;
-      if (ch === '{') depth++;
-      else if (ch === '}') { depth--; if (depth === 0) { end = i; break; } }
-    }
-    if (end === -1) break;
+    const start = findContainingObjectStart(text, markerIndex);
+    if (start === -1) continue;
+    const end = findObjectEnd(text, start);
+    if (end === -1) continue;
 
-    result = result.slice(0, start) + result.slice(end + 1);
+    removalRanges.push({ start, end });
+    searchFrom = end;
   }
 
-  return result.trim();
+  if (removalRanges.length === 0) return text.trim();
+
+  removalRanges.sort((a, b) => a.start - b.start || b.end - a.end);
+  const mergedRanges: Array<{ start: number; end: number }> = [];
+  for (const range of removalRanges) {
+    const previous = mergedRanges.at(-1);
+    if (previous !== undefined && range.start <= previous.end) {
+      previous.end = Math.max(previous.end, range.end);
+    } else {
+      mergedRanges.push({ ...range });
+    }
+  }
+
+  const retained: string[] = [];
+  let cursor = 0;
+  for (const range of mergedRanges) {
+    retained.push(text.slice(cursor, range.start));
+    cursor = range.end;
+  }
+  retained.push(text.slice(cursor));
+  return retained.join('').trim();
 }
 
 export interface CleanLlmJsonOptions {

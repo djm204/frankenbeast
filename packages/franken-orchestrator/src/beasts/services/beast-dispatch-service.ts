@@ -6,6 +6,7 @@ import type { BeastExecutor } from '../execution/beast-executor.js';
 import type { BeastMetrics } from '../telemetry/beast-metrics.js';
 import { BeastCatalogService } from './beast-catalog-service.js';
 import { wallClockNow } from '@franken/types';
+import { SAFE_DISPATCH_FAILURE_MESSAGE } from './dispatch-failure-message.js';
 import { UnknownBeastDefinitionError } from '../errors.js';
 import { GitConfigSchema, LlmConfigSchema, PromptConfigSchema } from '../../cli/run-config-loader.js';
 import {
@@ -182,6 +183,28 @@ function preserveTrackedAgentPolicyConfig(
   };
 }
 
+export function normalizeBeastRunConfig(
+  definition: BeastDefinition,
+  requestedConfig: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  const firstAttempt = definition.configSchema.safeParse(requestedConfig);
+  if (firstAttempt.success) return firstAttempt.data;
+
+  const hasUnrecognizedKeys = firstAttempt.error.issues.some(
+    (issue) => issue.code === 'unrecognized_keys',
+  );
+  if (!hasUnrecognizedKeys) throw firstAttempt.error;
+
+  const shape = (definition.configSchema as { shape?: Record<string, unknown> }).shape;
+  const stripped = shape
+    ? Object.fromEntries(Object.entries(requestedConfig).filter(([key]) => key in shape))
+    : requestedConfig;
+  return {
+    ...definition.configSchema.parse(stripped),
+    ...pickSharedRuntimeConfig(requestedConfig),
+  };
+}
+
 export interface CreateBeastRunRequest {
   readonly definitionId: string;
   readonly config: Readonly<Record<string, unknown>>;
@@ -207,37 +230,13 @@ export class BeastDispatchService {
   async createRun(request: CreateBeastRunRequest): Promise<BeastRun> {
     this.options.maintenance?.assertDispatchAllowed();
     const definition = this.getDefinitionOrThrow(request.definitionId);
-    // Try parsing as-is first. If it fails with unrecognized_keys (strict schema
-    // rejecting extra fields from agent init config), strip to only known keys.
-    let config: Readonly<Record<string, unknown>>;
-    const firstAttempt = definition.configSchema.safeParse(request.config);
-    if (firstAttempt.success) {
-      config = firstAttempt.data;
-    } else {
-      const hasUnrecognizedKeys = firstAttempt.error.issues.some(
-        (issue) => issue.code === 'unrecognized_keys',
-      );
-      if (!hasUnrecognizedKeys) {
-        // Real validation error — surface it
-        throw firstAttempt.error;
-      }
-      // Extract only the keys the schema knows about, then restore shared runtime
-      // config accepted by the spawned process contract (for example dashboard
-      // selected skills and git workflow policy). Wizard review metadata remains
-      // stripped so strict definition schemas are still protected from unknowns.
-      const shape = (definition.configSchema as { shape?: Record<string, unknown> }).shape;
-      const stripped = shape
-        ? Object.fromEntries(Object.entries(request.config).filter(([k]) => k in shape))
-        : request.config;
-      config = {
-        ...definition.configSchema.parse(stripped),
-        ...pickSharedRuntimeConfig(request.config),
-      };
-    }
+    // Normalize strict definition fields while preserving approved shared runtime
+    // keys; retry paths reuse this same contract when rebuilding redacted snapshots.
+    const config = normalizeBeastRunConfig(definition, request.config);
     const trackedAgent = request.trackedAgentId
       ? this.repository.requireTrackedAgent(request.trackedAgentId)
       : undefined;
-    const moduleConfig = request.moduleConfig ?? trackedAgent?.moduleConfig;
+    const moduleConfig = request.moduleConfig ?? this.resolveAgentModuleConfig(request.trackedAgentId);
     const directRunPolicyConfig = trackedAgent
       ? {}
       : {
@@ -283,9 +282,15 @@ export class BeastDispatchService {
       });
 
       if (request.trackedAgentId) {
+        const trackedAgent = this.repository.getTrackedAgent(request.trackedAgentId);
+        const identity = trackedAgent && isRecord(trackedAgent.initConfig.identity)
+          ? trackedAgent.initConfig.identity
+          : undefined;
         this.repository.updateTrackedAgent(request.trackedAgentId, {
           status: 'dispatching',
           dispatchRunId: createdRun.id,
+          initConfig: identity ? { ...config, identity } : config,
+          ...(moduleConfig ? { moduleConfig } : {}),
           updatedAt: linkedAt,
         });
         const linkedEvent = {
@@ -330,34 +335,60 @@ export class BeastDispatchService {
             ? 'running'
             : updated.status === 'pending_approval'
               ? 'awaiting_approval'
-              : 'dispatching';
+              : updated.status === 'completed'
+                ? 'completed'
+                : 'dispatching';
           const updatedAt = new Date(wallClockNow()).toISOString();
           this.repository.updateTrackedAgent(updated.trackedAgentId, {
             status: agentStatus,
             updatedAt,
           });
+          if ((agentStatus === 'running' || agentStatus === 'awaiting_approval' || agentStatus === 'completed')
+            && this.repository.hasUnrecoveredDispatchFailure(updated.trackedAgentId)) {
+            const recoveredEvent = {
+              level: 'info' as const,
+              type: 'agent.dispatch.recovered',
+              message: `Tracked agent dispatch recovered for run ${updated.id}`,
+              payload: { runId: updated.id },
+              createdAt: updatedAt,
+            };
+            this.repository.appendTrackedAgentEvent(updated.trackedAgentId, recoveredEvent);
+            this.options.eventBus?.publish({
+              type: 'agent.event',
+              data: { agentId: updated.trackedAgentId, event: recoveredEvent },
+            });
+          }
           this.options.eventBus?.publish({
             type: 'agent.status',
             data: { agentId: updated.trackedAgentId, status: agentStatus, updatedAt },
           });
         }
         return updated;
-      } catch (error) {
+      } catch {
         const failedAt = new Date(wallClockNow()).toISOString();
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const currentRun = this.repository.getRun(run.id);
+        const executorRecordedSpawnFailure = currentRun?.status === 'failed'
+          && currentRun.stopReason === 'spawn_failed';
         const failedRun = this.repository.transaction(() => {
-          const updatedRun = this.repository.updateRun(run.id, {
-            status: 'failed',
-            finishedAt: failedAt,
-            stopReason: 'start_failed',
-          });
-          this.repository.appendEvent(run.id, {
-            type: 'run.start_failed',
-            payload: {
-              error: errorMessage,
-            },
-            createdAt: failedAt,
-          });
+          const updatedRun = executorRecordedSpawnFailure && currentRun
+            ? (currentRun.trackedAgentId
+                ? this.repository.updateRun(currentRun.id, { configSnapshot: {} })
+                : currentRun)
+            : this.repository.updateRun(run.id, {
+                status: 'failed',
+                ...(run.trackedAgentId ? { configSnapshot: {} } : {}),
+                finishedAt: failedAt,
+                stopReason: 'start_failed',
+              });
+          if (!executorRecordedSpawnFailure) {
+            this.repository.appendEvent(run.id, {
+              type: 'run.start_failed',
+              payload: {
+                error: SAFE_DISPATCH_FAILURE_MESSAGE,
+              },
+              createdAt: failedAt,
+            });
+          }
           if (updatedRun.trackedAgentId) {
             this.repository.updateTrackedAgent(updatedRun.trackedAgentId, {
               status: 'failed',
@@ -371,7 +402,7 @@ export class BeastDispatchService {
               level: 'error' as const,
               type: 'agent.dispatch.failed',
               message: `Failed to start Beast run ${updatedRun.id}`,
-              payload: { runId: updatedRun.id, error: errorMessage },
+              payload: { runId: updatedRun.id, error: SAFE_DISPATCH_FAILURE_MESSAGE },
               createdAt: failedAt,
             };
             this.repository.appendTrackedAgentEvent(updatedRun.trackedAgentId, failedEvent);
@@ -382,7 +413,7 @@ export class BeastDispatchService {
           }
           return updatedRun;
         });
-        await this.appendLogSafely(run.id, 'system', 'stderr', `start_failed: ${errorMessage}`);
+        await this.appendLogSafely(run.id, 'system', 'stderr', `start_failed: ${SAFE_DISPATCH_FAILURE_MESSAGE}`);
         return failedRun;
       }
     }
@@ -430,6 +461,11 @@ export class BeastDispatchService {
         || run.status === 'pending_approval'
         || run.status === 'running')
       .map(run => capacityItemFromConfig(run.trackedAgentId!, run.configSnapshot));
+  }
+
+  private resolveAgentModuleConfig(trackedAgentId?: string): ModuleConfig | undefined {
+    if (!trackedAgentId) return undefined;
+    return this.repository.getTrackedAgent(trackedAgentId)?.moduleConfig;
   }
 
   private assertRoleToolManifestAllows(

@@ -8,6 +8,7 @@ import { MaintenanceModeError, type MaintenanceModeService } from '../../beasts/
 import type { AgentService } from '../../beasts/services/agent-service.js';
 import { AgentToolPolicyError, defaultAgentToolPolicyConfig } from '../../beasts/services/role-tool-manifest.js';
 import type { BeastDispatchService } from '../../beasts/services/beast-dispatch-service.js';
+import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../../beasts/services/dispatch-failure-message.js';
 import type { BeastRunService } from '../../beasts/services/beast-run-service.js';
 import {
   BEAST_CONTROL_MAX_BODY_SIZE,
@@ -17,7 +18,7 @@ import {
   validateBody,
 } from '../middleware.js';
 import { TransportSecurityService } from '../security/transport-security.js';
-import type { BeastRun, TrackedAgent } from '../../beasts/types.js';
+import type { BeastRun, TrackedAgent, TrackedAgentEvent } from '../../beasts/types.js';
 
 const ModuleConfigSchema = z.object({
   firewall: z.boolean().optional(),
@@ -77,7 +78,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       limiter,
       (authHeader, path) => `${authHeader ?? 'anonymous'}:${path}`,
     );
-    app.use('/v1/beasts/agents', rateLimit);
+    app.use('/v1/beasts/agents/*', rateLimit);
   }
 
   app.post('/v1/beasts/agents', async (c) => {
@@ -162,9 +163,9 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
     deps.agents.appendEvent(agent.id, {
       level: 'info',
       type: 'agent.command.sent',
-      message: `Sent init command ${body.initAction.command}`,
+      message: 'Sent init command',
       payload: {
-        command: body.initAction.command,
+        kind: body.initAction.kind,
       },
     });
 
@@ -216,39 +217,44 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
           },
         }, 409);
       }
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error(`[agent-routes] Dispatch failed for ${agent.id}: ${errorMessage}`);
-      if (error instanceof Error && error.stack) {
-        console.error(error.stack);
-      }
+      console.error(`[agent-routes] ${SAFE_DISPATCH_FAILURE_MESSAGE} for ${agent.id}`);
       deps.agents.updateAgent(agent.id, { status: 'failed' });
       deps.agents.appendEvent(agent.id, {
         level: 'error',
         type: 'agent.dispatch.failed',
-        message: `Dispatch failed: ${errorMessage}`,
-        payload: { error: errorMessage },
+        message: SAFE_DISPATCH_FAILURE_MESSAGE,
+        payload: { error: SAFE_DISPATCH_FAILURE_MESSAGE },
       });
       const failedAgent = deps.agents.getAgent(agent.id);
       return c.json({
         error: {
           code: 'AGENT_DISPATCH_FAILED',
-          message: `Dispatch failed for tracked agent '${agent.id}': ${errorMessage}`,
+          message: `Dispatch failed for tracked agent '${agent.id}'`,
           details: {
             agentId: agent.id,
-            dispatchError: errorMessage,
-            agent: failedAgent,
+            dispatchError: SAFE_DISPATCH_FAILURE_MESSAGE,
+            agent: {
+              id: failedAgent.id,
+              status: failedAgent.status,
+              dispatchRunId: failedAgent.dispatchRunId,
+            },
           },
         },
       }, 409);
     }
 
-    return c.json({ data: deps.agents.getAgent(agent.id) }, 201);
+    return c.json({
+      data: redactAgentIfNeeded(deps.agents.getAgent(agent.id), deps),
+    }, 201);
   });
 
   app.get('/v1/beasts/agents', (c) => {
+    const redactedAgentIds = deps.agents.listDispatchFailureRedactedAgentIds();
     return c.json({
       data: {
-        agents: deps.agents.listAgents(),
+        agents: deps.agents.listAgents().map((agent) => redactedAgentIds.has(agent.id)
+          ? redactDispatchFailedAgentResponse(agent)
+          : agent),
         capacityReservation: deps.agents.getCapacityReservationState(),
       },
     });
@@ -257,8 +263,15 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
   app.get('/v1/beasts/agents/:agentId', (c) => {
     const agentId = c.req.param('agentId');
     try {
+      const detail = deps.agents.getAgentDetail(agentId);
+      const redactDispatchFailure = deps.agents.hasDispatchFailureHistory(agentId);
+      const hasDispatchFailureHistory = detail.events.some((event) => event.type === 'agent.dispatch.failed');
       return c.json({
-        data: deps.agents.getAgentDetail(agentId),
+        data: {
+          ...detail,
+          agent: redactDispatchFailure ? redactDispatchFailedAgentResponse(detail.agent) : detail.agent,
+          events: redactDispatchFailedAgentEvents(detail.events, hasDispatchFailureHistory),
+        },
       });
     } catch (error) {
       if (error instanceof UnknownTrackedAgentError) {
@@ -302,7 +315,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
           ],
         },
       });
-      return c.json({ data: updated });
+      return c.json({ data: redactAgentIfNeeded(updated, deps) });
     } catch (error) {
       if (error instanceof UnknownTrackedAgentError) {
         throw new HttpError(
@@ -340,7 +353,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
             runId: run.id,
           },
         });
-        return c.json({ data: run });
+        return c.json({ data: deps.runs.sanitizeRunForResponse(run) });
       }
 
       const run = await dispatchDetachedAgent(deps, agentId);
@@ -352,7 +365,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
           runId: run.id,
         },
       });
-      return c.json({ data: run });
+      return c.json({ data: deps.runs.sanitizeRunForResponse(run) });
     } catch (error) {
       if (error instanceof UnknownTrackedAgentError) {
         throw new HttpError(
@@ -382,7 +395,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
             runId: agent.dispatchRunId,
           },
         });
-        return c.json({ data: run });
+        return c.json({ data: deps.runs.sanitizeRunForResponse(run) });
       }
 
       const updated = deps.agents.updateAgent(agentId, { status: 'stopped' });
@@ -392,7 +405,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
         message: 'Stop requested before a linked run was created',
         payload: {},
       });
-      return c.json({ data: updated });
+      return c.json({ data: redactAgentIfNeeded(updated, deps) });
     } catch (error) {
       if (error instanceof UnknownTrackedAgentError) {
         throw new HttpError(
@@ -422,7 +435,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
             runId: run.id,
           },
         });
-        return c.json({ data: run });
+        return c.json({ data: deps.runs.sanitizeRunForResponse(run) });
       }
 
       if (agent.status !== 'stopped') {
@@ -442,7 +455,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
           runId: run.id,
         },
       });
-      return c.json({ data: run });
+      return c.json({ data: deps.runs.sanitizeRunForResponse(run) });
     } catch (error) {
       if (error instanceof UnknownTrackedAgentError) {
         throw new HttpError(
@@ -485,7 +498,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
           runId: agent.dispatchRunId,
         },
       });
-      return c.json({ data: run });
+      return c.json({ data: deps.runs.sanitizeRunForResponse(run) });
     } catch (error) {
       if (error instanceof UnknownTrackedAgentError) {
         throw new HttpError(
@@ -528,7 +541,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
           runId: run.id,
         },
       });
-      return c.json({ data: run });
+      return c.json({ data: deps.runs.sanitizeRunForResponse(run) });
     } catch (error) {
       if (error instanceof UnknownTrackedAgentError) {
         throw new HttpError(
@@ -698,6 +711,56 @@ function assertAgentCapacityAvailable(deps: AgentRoutesDeps, agent: TrackedAgent
       },
     );
   }
+}
+
+function redactDispatchFailedAgentResponse(agent: TrackedAgent) {
+  return {
+    ...agent,
+    name: undefined,
+    initAction: {
+      ...agent.initAction,
+      command: '[REDACTED]',
+      config: {},
+    },
+    initConfig: {},
+    dispatchRunId: undefined,
+  };
+}
+
+function redactAgentIfNeeded(agent: TrackedAgent, deps: AgentRoutesDeps) {
+  return deps.agents.hasDispatchFailureHistory(agent.id)
+    ? redactDispatchFailedAgentResponse(agent)
+    : agent;
+}
+
+function redactDispatchFailedAgentEvents(
+  events: readonly TrackedAgentEvent[],
+  redactLinkedEvents = true,
+): TrackedAgentEvent[] {
+  return events.map((event) => {
+    if (event.type === 'agent.command.sent') {
+      return {
+        ...event,
+        message: 'Sent init command',
+        payload: {},
+      };
+    }
+    if (event.type === 'agent.dispatch.failed') {
+      return {
+        ...event,
+        message: SAFE_DISPATCH_FAILURE_MESSAGE,
+        payload: { error: SAFE_DISPATCH_FAILURE_MESSAGE },
+      };
+    }
+    if (redactLinkedEvents && event.type === 'agent.dispatch.linked') {
+      return {
+        ...event,
+        message: 'Linked Beast run',
+        payload: {},
+      };
+    }
+    return event;
+  });
 }
 
 async function dispatchDetachedAgent(

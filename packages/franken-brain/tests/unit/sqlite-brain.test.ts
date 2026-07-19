@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
@@ -13,6 +13,9 @@ import type {
 import {
   SqliteBrain,
   WorkingMemoryLimitError,
+  WorkingMemoryKeyError,
+  WorkingMemoryHydrationLimitError,
+  CorruptWorkingMemoryRowError,
   UnsupportedMemorySchemaVersionError,
   MemoryEncryptionKeyUnavailableError,
   MemoryEncryptionMigrationRequiredError,
@@ -20,6 +23,7 @@ import {
   MemoryEncryptionWrongKeyError,
   CURRENT_MEMORY_SCHEMA_VERSION,
   DEFAULT_WORKING_MEMORY_LIMITS,
+  MAX_WORKING_MEMORY_KEY_BYTES,
   DEFAULT_MEMORY_CONFIDENCE_HALF_LIFE_MS,
   MemoryConfidenceDecayError,
   calculateMemoryConfidenceDecay,
@@ -620,6 +624,90 @@ describe('SqliteBrain', () => {
     it('stores and retrieves values', () => {
       brain.working.set('key', 'value');
       expect(brain.working.get('key')).toBe('value');
+    });
+
+    it('accepts bounded printable working-memory keys', () => {
+      const key = 'project:tenant/α β_1-@';
+
+      expect(() => brain.working.set(key, 'value')).not.toThrow();
+      expect(brain.working.get(key)).toBe('value');
+    });
+
+    it.each([
+      { key: '', reason: 'empty', byteLength: 0 },
+      { key: 'line\nbreak', reason: 'control_character', byteLength: 10 },
+      {
+        key: 'k'.repeat(MAX_WORKING_MEMORY_KEY_BYTES + 1),
+        reason: 'too_long',
+        byteLength: MAX_WORKING_MEMORY_KEY_BYTES + 1,
+      },
+    ])('rejects invalid working-memory keys before set mutation ($reason)', ({ key, reason, byteLength }) => {
+      brain.working.set('existing', 'preserved');
+
+      let error: unknown;
+      try {
+        brain.working.set(key, 'invalid');
+      } catch (caught) {
+        error = caught;
+      }
+
+      expect(error).toBeInstanceOf(WorkingMemoryKeyError);
+      expect(error).toMatchObject({
+        code: 'INVALID_WORKING_MEMORY_KEY',
+        reason,
+        byteLength,
+        maxBytes: MAX_WORKING_MEMORY_KEY_BYTES,
+      });
+      expect(brain.working.snapshot()).toEqual({ existing: 'preserved' });
+    });
+
+    it('rejects invalid restore keys atomically before persistence', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-invalid-key-'));
+      const dbPath = join(dir, 'brain.db');
+      const persistent = new SqliteBrain(dbPath);
+
+      try {
+        persistent.working.set('existing', 'preserved');
+        persistent.flush();
+
+        expect(() => persistent.working.restore({ valid: 1, 'bad\u0000key': 2 })).toThrow(
+          WorkingMemoryKeyError,
+        );
+        persistent.flush();
+
+        expect(persistent.working.snapshot()).toEqual({ existing: 'preserved' });
+        const db = new Database(dbPath, { readonly: true });
+        expect(db.prepare(`SELECT key FROM working_memory ORDER BY key`).all()).toEqual([
+          { key: 'existing' },
+        ]);
+        db.close();
+      } finally {
+        persistent.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('fails closed without mutating legacy persisted rows that have invalid keys', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-legacy-invalid-key-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const initialized = new SqliteBrain(dbPath);
+        initialized.close();
+        const db = new Database(dbPath);
+        db.prepare(
+          `INSERT INTO working_memory (key, value, updated_at, schema_version) VALUES (?, ?, ?, ?)`,
+        ).run('legacy\nkey', '"value"', new Date().toISOString(), CURRENT_MEMORY_SCHEMA_VERSION);
+        db.close();
+
+        expect(() => new SqliteBrain(dbPath)).toThrow(WorkingMemoryKeyError);
+
+        const verify = new Database(dbPath, { readonly: true });
+        expect(verify.prepare(`SELECT key FROM working_memory`).pluck().get()).toBe('legacy\nkey');
+        verify.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it('snapshot() returns all key-value pairs', () => {
@@ -1614,6 +1702,369 @@ describe('SqliteBrain', () => {
       bounded.close();
     });
 
+    it('fails before hydrating persisted rows beyond startup row or byte budgets', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-hydration-limit-'));
+      const dbPath = join(dir, 'brain.db');
+      let seeded: SqliteBrain | undefined;
+      let db: Database.Database | undefined;
+
+      try {
+        seeded = new SqliteBrain(dbPath);
+        seeded.working.set('first', 'x'.repeat(32));
+        seeded.working.set('second', 'y'.repeat(32));
+        seeded.flush();
+        seeded.close();
+        seeded = undefined;
+
+        let rowError: unknown;
+        try {
+          new SqliteBrain(dbPath, undefined, {
+            workingMemoryHydrationLimits: { maxRows: 1, maxBytes: 10_000 },
+          });
+        } catch (error) {
+          rowError = error;
+        }
+        expect(rowError).toMatchObject({
+          code: 'WORKING_MEMORY_HYDRATION_LIMIT_EXCEEDED',
+          rowCount: 2,
+          byteCount: undefined,
+          maxRows: 1,
+        });
+
+        expect(() =>
+          new SqliteBrain(dbPath, undefined, {
+            hydrateWorkingMemoryFromDb: false,
+            workingMemoryHydrationLimits: { maxRows: 1, maxBytes: 10_000 },
+          }),
+        ).toThrow(WorkingMemoryHydrationLimitError);
+
+        let byteError: unknown;
+        try {
+          new SqliteBrain(dbPath, undefined, {
+            workingMemoryHydrationLimits: { maxRows: 10, maxBytes: 1 },
+          });
+        } catch (error) {
+          byteError = error;
+        }
+        expect(byteError).toBeInstanceOf(WorkingMemoryHydrationLimitError);
+        expect(byteError).toMatchObject({
+          code: 'WORKING_MEMORY_HYDRATION_LIMIT_EXCEEDED',
+          rowCount: 2,
+          maxBytes: 1,
+        });
+
+        db = new Database(dbPath);
+        expect(db.prepare(`SELECT key FROM working_memory ORDER BY key ASC`).all()).toEqual([
+          { key: 'first' },
+          { key: 'second' },
+        ]);
+      } finally {
+        db?.close();
+        seeded?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('rejects corrupt persisted JSON during hydration without deleting the recoverable row', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-corrupt-hydration-'));
+      const dbPath = join(dir, 'brain.db');
+      let seeded: SqliteBrain | undefined;
+      let reopened: SqliteBrain | undefined;
+      let db: Database.Database | undefined;
+
+      try {
+        seeded = new SqliteBrain(dbPath);
+        seeded.working.set('healthy', { enabled: true });
+        seeded.working.set('corrupt', { recoverable: true });
+        seeded.flush();
+        seeded.close();
+        seeded = undefined;
+
+        db = new Database(dbPath);
+        db.prepare(`UPDATE working_memory SET value = ? WHERE key = ?`).run('{not-json', 'corrupt');
+        db.close();
+        db = undefined;
+
+        let hydrationError: unknown;
+        try {
+          reopened = new SqliteBrain(dbPath);
+        } catch (error) {
+          hydrationError = error;
+        }
+        expect(hydrationError).toBeInstanceOf(CorruptWorkingMemoryRowError);
+        expect(hydrationError).toMatchObject({
+          code: 'CORRUPT_WORKING_MEMORY_ROW',
+          key: 'corrupt',
+        });
+
+        db = new Database(dbPath);
+        expect(
+          db.prepare(`SELECT value FROM working_memory WHERE key = ?`).get('corrupt'),
+        ).toEqual({ value: '{not-json' });
+        db.prepare(`UPDATE working_memory SET value = ? WHERE key = ?`).run(
+          JSON.stringify({ recovered: true }),
+          'corrupt',
+        );
+        db.close();
+        db = undefined;
+
+        reopened = new SqliteBrain(dbPath);
+        expect(reopened.working.get('healthy')).toEqual({ enabled: true });
+        expect(reopened.working.get('corrupt')).toEqual({ recovered: true });
+      } finally {
+        db?.close();
+        reopened?.close();
+        seeded?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('keeps startup hydration budgets separate from working-memory write limits', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-hydration-write-limit-'));
+      const dbPath = join(dir, 'brain.db');
+      let seeded: SqliteBrain | undefined;
+      let reopened: SqliteBrain | undefined;
+
+      try {
+        seeded = new SqliteBrain(dbPath);
+        seeded.working.set('first', 1);
+        seeded.working.set('second', 2);
+        seeded.flush();
+        seeded.close();
+        seeded = undefined;
+
+        reopened = new SqliteBrain(dbPath, undefined, {
+          workingMemoryHydrationLimits: { maxRows: 2, maxBytes: 10_000 },
+        });
+        expect(() => reopened?.working.set('third', 3)).not.toThrow();
+        expect(reopened.working.keys().sort()).toEqual(['first', 'second', 'third']);
+      } finally {
+        reopened?.close();
+        seeded?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('prunes oldest persisted rows on startup when maxEntries is reduced', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-reduced-limit-'));
+      const dbPath = join(dir, 'brain.db');
+      let seeded: SqliteBrain | undefined;
+      let reopened: SqliteBrain | undefined;
+      let db: Database.Database | undefined;
+
+      try {
+        seeded = new SqliteBrain(dbPath, { maxEntries: 3 });
+        seeded.working.set('oldest', { value: 1 });
+        seeded.working.set('middle', { value: 2 });
+        seeded.working.set('newest', { value: 3 });
+        seeded.flush();
+        seeded.close();
+        seeded = undefined;
+
+        db = new Database(dbPath);
+        db.prepare(`UPDATE working_memory SET updated_at = ? WHERE key = ?`).run('2026-07-01T00:00:00.000Z', 'oldest');
+        db.prepare(`UPDATE working_memory SET updated_at = ? WHERE key = ?`).run('2026-07-02T00:00:00.000Z', 'middle');
+        db.prepare(`UPDATE working_memory SET updated_at = ? WHERE key = ?`).run('2026-07-03T00:00:00.000Z', 'newest');
+        db.close();
+        db = undefined;
+
+        expect(() => {
+          reopened = new SqliteBrain(dbPath, { maxEntries: 2 });
+        }).not.toThrow();
+        expect(reopened?.working.keys().sort()).toEqual(['middle', 'newest']);
+        expect(reopened?.working.get('oldest')).toBeUndefined();
+
+        db = new Database(dbPath);
+        expect(
+          db.prepare(`SELECT key FROM working_memory ORDER BY key ASC`).all(),
+        ).toEqual([{ key: 'middle' }, { key: 'newest' }]);
+      } finally {
+        db?.close();
+        reopened?.close();
+        seeded?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('does not prune protected persisted rows when startup entry limits are reduced', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-protected-limit-'));
+      const dbPath = join(dir, 'brain.db');
+      let seeded: SqliteBrain | undefined;
+      let reopened: SqliteBrain | undefined;
+      let db: Database.Database | undefined;
+
+      try {
+        seeded = new SqliteBrain(dbPath, { maxEntries: 3 });
+        seeded.working.set('preference', { memoryClass: 'user_preference', value: 'keep' });
+        seeded.working.set('middle', { value: 2 });
+        seeded.working.set('newest', { value: 3 });
+        seeded.flush();
+        seeded.close();
+        seeded = undefined;
+
+        db = new Database(dbPath);
+        db.prepare(`UPDATE working_memory SET updated_at = ? WHERE key = ?`).run('2026-07-01T00:00:00.000Z', 'preference');
+        db.prepare(`UPDATE working_memory SET updated_at = ? WHERE key = ?`).run('2026-07-02T00:00:00.000Z', 'middle');
+        db.prepare(`UPDATE working_memory SET updated_at = ? WHERE key = ?`).run('2026-07-03T00:00:00.000Z', 'newest');
+        db.close();
+        db = undefined;
+
+        reopened = new SqliteBrain(dbPath, { maxEntries: 2 });
+        expect(reopened.working.keys().sort()).toEqual(['newest', 'preference']);
+        expect(reopened.working.get('preference')).toEqual({ memoryClass: 'user_preference', value: 'keep' });
+      } finally {
+        db?.close();
+        reopened?.close();
+        seeded?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('leaves persisted rows intact when retained startup rows exceed byte limits', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-byte-limit-'));
+      const dbPath = join(dir, 'brain.db');
+      let seeded: SqliteBrain | undefined;
+      let db: Database.Database | undefined;
+
+      try {
+        seeded = new SqliteBrain(dbPath, { maxEntries: 2, maxTotalBytes: 10_000 });
+        seeded.working.set('drop', 'x');
+        seeded.working.set('keep', 'retained value is still too large');
+        seeded.flush();
+        seeded.close();
+        seeded = undefined;
+
+        expect(() => new SqliteBrain(dbPath, { maxEntries: 1, maxTotalBytes: 10 })).toThrow(
+          WorkingMemoryLimitError,
+        );
+
+        db = new Database(dbPath);
+        expect(
+          db.prepare(`SELECT key FROM working_memory ORDER BY key ASC`).all(),
+        ).toEqual([{ key: 'drop' }, { key: 'keep' }]);
+      } finally {
+        db?.close();
+        seeded?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('expires pruned keys from other live brain instances sharing the database', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-live-prune-'));
+      const dbPath = join(dir, 'brain.db');
+      let live: SqliteBrain | undefined;
+      let reopened: SqliteBrain | undefined;
+      let db: Database.Database | undefined;
+
+      try {
+        live = new SqliteBrain(dbPath, { maxEntries: 3 });
+        live.working.set('oldest', { value: 1 });
+        live.working.set('middle', { value: 2 });
+        live.working.set('newest', { value: 3 });
+        live.flush();
+
+        db = new Database(dbPath);
+        db.prepare(`UPDATE working_memory SET updated_at = ? WHERE key = ?`).run('2026-07-01T00:00:00.000Z', 'oldest');
+        db.prepare(`UPDATE working_memory SET updated_at = ? WHERE key = ?`).run('2026-07-02T00:00:00.000Z', 'middle');
+        db.prepare(`UPDATE working_memory SET updated_at = ? WHERE key = ?`).run('2026-07-03T00:00:00.000Z', 'newest');
+        db.close();
+        db = undefined;
+
+        reopened = new SqliteBrain(dbPath, { maxEntries: 2 });
+        expect(live.working.get('oldest')).toBeUndefined();
+        live.flush();
+
+        db = new Database(dbPath);
+        expect(
+          db.prepare(`SELECT key FROM working_memory ORDER BY key ASC`).all(),
+        ).toEqual([{ key: 'middle' }, { key: 'newest' }]);
+      } finally {
+        db?.close();
+        reopened?.close();
+        live?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('preserves dirty live updates when another startup prunes the persisted row', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-dirty-prune-'));
+      const dbPath = join(dir, 'brain.db');
+      let live: SqliteBrain | undefined;
+      let reopened: SqliteBrain | undefined;
+      let db: Database.Database | undefined;
+
+      try {
+        live = new SqliteBrain(dbPath, { maxEntries: 3 });
+        live.working.set('oldest', { value: 1 });
+        live.working.set('middle', { value: 2 });
+        live.working.set('newest', { value: 3 });
+        live.flush();
+        live.working.set('oldest', { value: 'dirty' });
+
+        db = new Database(dbPath);
+        db.prepare(`UPDATE working_memory SET updated_at = ? WHERE key = ?`).run('2026-07-01T00:00:00.000Z', 'oldest');
+        db.prepare(`UPDATE working_memory SET updated_at = ? WHERE key = ?`).run('2026-07-02T00:00:00.000Z', 'middle');
+        db.prepare(`UPDATE working_memory SET updated_at = ? WHERE key = ?`).run('2026-07-03T00:00:00.000Z', 'newest');
+        db.close();
+        db = undefined;
+
+        reopened = new SqliteBrain(dbPath, { maxEntries: 2 });
+        expect(live.working.get('oldest')).toEqual({ value: 'dirty' });
+        live.flush();
+
+        db = new Database(dbPath);
+        expect(
+          db.prepare(`SELECT key FROM working_memory ORDER BY key ASC`).all(),
+        ).toEqual([{ key: 'middle' }, { key: 'newest' }, { key: 'oldest' }]);
+      } finally {
+        db?.close();
+        reopened?.close();
+        live?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('prunes legacy plain-text persisted rows when startup entry limits are reduced', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-legacy-prune-'));
+      const dbPath = join(dir, 'brain.db');
+      let seeded: SqliteBrain | undefined;
+      let reopened: SqliteBrain | undefined;
+      let db: Database.Database | undefined;
+
+      try {
+        seeded = new SqliteBrain(dbPath, { maxEntries: 3 });
+        seeded.close();
+        seeded = undefined;
+
+        db = new Database(dbPath);
+        db.prepare(`INSERT INTO working_memory (key, value, updated_at) VALUES (?, ?, ?)`).run(
+          'legacy',
+          'plain text value',
+          '2026-07-01T00:00:00.000Z',
+        );
+        db.prepare(`INSERT INTO working_memory (key, value, updated_at) VALUES (?, ?, ?)`).run(
+          'middle',
+          JSON.stringify({ value: 2 }),
+          '2026-07-02T00:00:00.000Z',
+        );
+        db.prepare(`INSERT INTO working_memory (key, value, updated_at) VALUES (?, ?, ?)`).run(
+          'newest',
+          JSON.stringify({ value: 3 }),
+          '2026-07-03T00:00:00.000Z',
+        );
+        db.close();
+        db = undefined;
+
+        reopened = new SqliteBrain(dbPath, { maxEntries: 2 });
+        expect(reopened.working.keys().sort()).toEqual(['middle', 'newest']);
+      } finally {
+        db?.close();
+        reopened?.close();
+        seeded?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('tracks usage as entries are added, counting key and value bytes', () => {
       brain.working.set('a', 'hello');
       const usage = brain.working.usage();
@@ -1760,9 +2211,10 @@ describe('SqliteBrain', () => {
       expect(() => brain.working.set('large-token', largeToken)).toThrow(/cannot be safely evaluated/);
     });
 
-    it('constructor hydration honors stricter custom working memory limits', () => {
+    it('constructor hydration prunes persisted rows to honor stricter custom entry limits', () => {
       const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-'));
       const dbPath = join(dir, 'brain.db');
+      let reopened: SqliteBrain | undefined;
 
       try {
         const roomy = new SqliteBrain(dbPath, { maxEntries: 3 });
@@ -1771,10 +2223,11 @@ describe('SqliteBrain', () => {
         roomy.flush();
         roomy.close();
 
-        expect(() => new SqliteBrain(dbPath, { maxEntries: 1 })).toThrow(
-          WorkingMemoryLimitError,
-        );
+        reopened = new SqliteBrain(dbPath, { maxEntries: 1 });
+        expect(reopened.working.keys()).toHaveLength(1);
+        expect(reopened.working.usage().limits.maxEntries).toBe(1);
       } finally {
+        reopened?.close();
         rmSync(dir, { recursive: true, force: true });
       }
     });
@@ -3029,6 +3482,131 @@ describe('SqliteBrain', () => {
         source: 'chat:turn-9',
         evidenceId: 'msg-9',
       });
+    });
+
+    it('redacts quarantined secret values on reject and suppressed duplicates', () => {
+      const secret = 'fake-secret-for-redaction-test';
+      const proposal = {
+        targetStore: 'working' as const,
+        key: 'OPENAI_API_KEY',
+        value: secret,
+        source: 'fbeast_memory_store:quarantine',
+        evidenceId: 'quarantine:OPENAI_API_KEY',
+        confidence: 1,
+        reason: 'Sensitive memory quarantined for operator review (value-shape-indicates-secret).',
+      };
+      const candidate = brain.memoryReview.propose(proposal);
+
+      const rejected = brain.memoryReview.reject(candidate.id, {
+        reviewer: 'operator',
+        note: 'Discard leaked secret.',
+      });
+
+      expect(rejected).toMatchObject({
+        status: 'rejected',
+        value: '[never-store-redacted]',
+        source: '[never-store-redacted]',
+        reason: '[never-store-redacted]',
+      });
+      expect(rejected.evidenceId).toBeUndefined();
+      expect(brain.memoryReview.list('rejected')).toEqual([
+        expect.objectContaining({
+          id: candidate.id,
+          value: '[never-store-redacted]',
+          source: '[never-store-redacted]',
+        }),
+      ]);
+      const suppressed = brain.memoryReview.propose(proposal);
+      expect(suppressed).toMatchObject({
+        status: 'suppressed',
+        suppressionReason: 'rejected',
+        value: '[never-store-redacted]',
+        source: '[never-store-redacted]',
+        reason: '[never-store-redacted]',
+      });
+      expect(suppressed.evidenceId).toBeUndefined();
+
+      const db = (brain as unknown as { db: Database.Database }).db;
+      const persisted = [
+        ...db.prepare(`SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_candidates`).all(),
+        ...db.prepare(`SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_suppressions`).all(),
+      ];
+      expect(JSON.stringify(persisted)).not.toContain(secret);
+      for (const row of persisted as Array<{ value: string; source: string; evidence_id: string | null; reason: string; reviewer: string | null; note: string | null }>) {
+        expect(row.value).toBe(JSON.stringify('[never-store-redacted]'));
+        expect(row.source).toBe('[never-store-redacted]');
+        expect(row.evidence_id).toBeNull();
+        expect(row.reason).toBe('[never-store-redacted]');
+        expect(row.reviewer).toBeNull();
+        expect(row.note).toBeNull();
+      }
+    });
+
+    it('enables SQLite secure deletion before redacting rejected quarantined secrets', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-reject-redact-secure-delete-'));
+      const dbPath = join(dir, 'brain.db');
+      const secret = 'fake-secret-for-secure-delete-test';
+      const fileBrain = new SqliteBrain(dbPath);
+
+      try {
+        const candidate = fileBrain.memoryReview.propose({
+          targetStore: 'working',
+          key: 'OPENAI_API_KEY',
+          value: secret,
+          source: 'fbeast_memory_store:quarantine',
+          evidenceId: 'quarantine:OPENAI_API_KEY',
+          confidence: 1,
+          reason: 'Sensitive memory quarantined for operator review (value-shape-indicates-secret).',
+        });
+
+        fileBrain.memoryReview.reject(candidate.id, { reviewer: 'operator' });
+
+        const db = (fileBrain as unknown as { db: Database.Database }).db;
+        expect(db.pragma('secure_delete', { simple: true })).toBe(1);
+        const persisted = [
+          ...db.prepare(`SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_candidates`).all(),
+          ...db.prepare(`SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_suppressions`).all(),
+        ];
+        expect(JSON.stringify(persisted)).not.toContain(secret);
+      } finally {
+        fileBrain.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('purges rejected quarantined secrets from file-backed SQLite pages and WAL', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-reject-purge-pages-'));
+      const dbPath = join(dir, 'brain.db');
+      const secret = 'fake-secret-for-rejected-page-purge-test';
+      const fileBrain = new SqliteBrain(dbPath);
+
+      try {
+        const candidate = fileBrain.memoryReview.propose({
+          targetStore: 'working',
+          key: 'OPENAI_API_KEY',
+          value: secret,
+          source: 'fbeast_memory_store:quarantine',
+          evidenceId: 'quarantine:OPENAI_API_KEY',
+          confidence: 1,
+          reason: 'Sensitive memory quarantined for operator review (value-shape-indicates-secret).',
+        });
+
+        fileBrain.memoryReview.reject(candidate.id, { reviewer: 'operator' });
+        fileBrain.close();
+
+        for (const suffix of ['', '-wal', '-shm']) {
+          const path = `${dbPath}${suffix}`;
+          if (!existsSync(path)) continue;
+          expect(readFileSync(path).toString('utf8')).not.toContain(secret);
+        }
+      } finally {
+        try {
+          fileBrain.close();
+        } catch {
+          // Already closed by the assertion path.
+        }
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it('marks a candidate as never-store and suppresses future matching proposals', () => {

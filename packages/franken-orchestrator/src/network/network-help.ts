@@ -11,6 +11,7 @@ SYNOPSIS
   frankenbeast network stop <service|all>
   frankenbeast network restart <service|all>
   frankenbeast network logs <service|all>
+  frankenbeast network health [--json]
   frankenbeast network config [--set path=value]
   frankenbeast network credentials
   frankenbeast network help
@@ -47,6 +48,7 @@ EXAMPLES
   frankenbeast network start chat-server
   frankenbeast network stop all
   frankenbeast network logs dashboard-web
+  frankenbeast network health --json
   frankenbeast network config --set chat.model=claude-sonnet-4-6
   frankenbeast network credentials
 `.trim();

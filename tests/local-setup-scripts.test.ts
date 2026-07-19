@@ -50,6 +50,12 @@ function makePreflightFixture(options: { includeJq?: boolean; npmVersion?: strin
 
 describe('local setup scripts', () => {
   it('enforces a coherent Node.js minimum across workspace packages and local tooling', () => {
+    const rootManifest = JSON.parse(read('package.json')) as {
+      engines?: { node?: string };
+      packageManager?: string;
+    };
+    const nodeRange = rootManifest.engines?.node;
+    const packageManager = rootManifest.packageManager;
     const packagePaths = [
       'package.json',
       ...readdirSync(join(ROOT, 'packages'), { withFileTypes: true })
@@ -57,7 +63,10 @@ describe('local setup scripts', () => {
         .map((entry) => `packages/${entry.name}/package.json`)
         .filter((rel) => existsSync(join(ROOT, rel))),
     ];
+    const quickstart = read('docs/guides/quickstart.md');
 
+    expect(nodeRange).toBe('>=22.13.0 <23 || >=24.0.0 <26');
+    expect(packageManager).toBe('npm@11.5.1');
     expect(read('.nvmrc').trim()).toBe('22.13.0');
     expect(read('.npmrc')).toContain('engine-strict=true');
     expect(read('README.md')).toContain('Node.js** `>=22.13.0 <23 || >=24.0.0 <26`');
@@ -67,15 +76,17 @@ describe('local setup scripts', () => {
     expect(read('docs/guides/run-dashboard-chat.md')).toContain('Corepack-enabled npm matching the root `packageManager` pin (`npm@11.5.1`)');
     expect(read('docs/guides/deploy-beasts.md')).toContain('Corepack-enabled npm matching the root `packageManager` pin (`npm@11.5.1`)');
     expect(read('packages/franken-brain/README.md')).toContain('npm 11.5.1 via the repository `packageManager` setting');
-    expect(read('docs/guides/quickstart.md')).toContain('npm run bootstrap -- --no-docker');
-    expect(read('docs/guides/quickstart.md')).toContain('npm install -g corepack');
+    expect(quickstart).toContain(`- Node.js \`${nodeRange}\``);
+    expect(quickstart).toContain(`root \`packageManager\` pin (\`${packageManager}\``);
+    expect(quickstart).toContain('npm run bootstrap -- --no-docker');
+    expect(quickstart).toContain('npm install -g corepack');
     expect(read('scripts/bootstrap.sh')).toContain('command -v corepack');
     expect(read('scripts/bootstrap.sh')).toContain('corepack enable npm');
     expect(read('scripts/bootstrap.sh')).toContain('corepack prepare "$expected_pm" --activate');
 
     for (const packagePath of packagePaths) {
       const manifest = JSON.parse(read(packagePath)) as { engines?: { node?: string } };
-      expect(manifest.engines?.node).toBe('>=22.13.0 <23 || >=24.0.0 <26');
+      expect(manifest.engines?.node).toBe(nodeRange);
     }
 
     expect(read('scripts/verify-setup.mjs')).toContain('Node.js >=22.13.0 <23 || >=24.0.0 <26');

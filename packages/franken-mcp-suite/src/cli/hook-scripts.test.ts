@@ -47,6 +47,9 @@ function installFakeHook(root: string): string {
     'if [ "$PHASE" = "pre-tool" ]; then',
     '  # Context arrives via env; the tool name is the positional after "--".',
     '  CONTEXT="${FBEAST_TOOL_CONTEXT:-}"',
+    '  if [ -n "${FBEAST_TOOL_CONTEXT_FILE:-}" ] && [ -f "${FBEAST_TOOL_CONTEXT_FILE:-}" ]; then',
+    '    CONTEXT=$(cat "$FBEAST_TOOL_CONTEXT_FILE")',
+    '  fi',
     '  if [ -n "${FBEAST_CAPTURE_CONTEXT_FILE:-}" ]; then',
     '    printf "%s" "$CONTEXT" > "$FBEAST_CAPTURE_CONTEXT_FILE"',
     '  fi',
@@ -71,6 +74,13 @@ function installFakeHook(root: string): string {
     'fi',
     '',
     'if [ "$PHASE" = "post-tool" ]; then',
+    '  CONTEXT="${FBEAST_TOOL_CONTEXT:-}"',
+    '  if [ -n "${FBEAST_TOOL_CONTEXT_FILE:-}" ]; then',
+    '    CONTEXT=$(cat "$FBEAST_TOOL_CONTEXT_FILE")',
+    '  fi',
+    '  if [ -n "${FBEAST_CAPTURE_CONTEXT_FILE:-}" ]; then',
+    '    printf "%s" "$CONTEXT" > "$FBEAST_CAPTURE_CONTEXT_FILE"',
+    '  fi',
     '  TOOL_NAME="${5:-}"',
     '  PAYLOAD=$(cat)',
     '  if [ "${FBEAST_EXPECT_STDIN_PAYLOAD:-}" = "1" ]; then',
@@ -387,10 +397,11 @@ describe('Codex hook scripts', () => {
     expect(result.status, result.stderr).toBe(0);
     const context = readFileSync(contextFile, 'utf8');
     expect(JSON.parse(context)).toEqual({
+      agentId: 'alice@example.test',
+      readScope: 'agent',
       redaction: 'none',
       operatorApproval: 'trusted-operator-approved',
     });
-    expect(context).not.toContain('alice@example.test');
     expect(context).not.toContain('SECRET_TOKEN_SHOULD_NOT_LEAK');
   });
 
@@ -446,11 +457,120 @@ describe('Codex hook scripts', () => {
     expect(JSON.parse(context)).toEqual({
       tool: 'fbeast_memory_export',
       args: {
+        agentId: 'alice@example.test',
         redaction: 'none',
         operatorApproval: 'trusted-operator-approved',
       },
     });
+    expect(context).not.toContain('SECRET_TOKEN_SHOULD_NOT_LEAK');
+  });
+
+  it('forwards memory review actions so hook audit reports retain approve/reject operations', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const contextFile = join(root, 'context.txt');
+    const { postTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(postTool, {
+      tool_name: 'execute_tool',
+      tool_input: {
+        tool: 'fbeast_memory_review_decide',
+        args: {
+          id: 'memcand_1',
+          action: 'approve',
+          resolution: 'keep_both_scoped',
+          profile: 'default',
+          note: 'SECRET_TOKEN_SHOULD_NOT_LEAK',
+        },
+      },
+      tool_response: { ok: true },
+      session_id: 'sess-1',
+    }, binDir, { FBEAST_CAPTURE_CONTEXT_FILE: contextFile });
+
+    expect(result.status, result.stderr).toBe(0);
+    const context = readFileSync(contextFile, 'utf8');
+    expect(JSON.parse(context)).toEqual({
+      tool_input: {
+        tool: 'fbeast_memory_review_decide',
+        args: {
+          action: 'approve',
+          resolution: 'keep_both_scoped',
+          profile: 'default',
+        },
+      },
+    });
+    expect(context).not.toContain('SECRET_TOKEN_SHOULD_NOT_LEAK');
+  });
+
+  it('forwards proxied memory access audit report evidence without raw selectors or destructive filter values', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const contextFile = join(root, 'context.txt');
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'execute_tool',
+      tool_input: {
+        tool: 'fbeast_memory_access_audit_report',
+        args: {
+          operation: 'delete',
+          tool: 'fbeast_memory_store',
+          key: 'OPENAI_API_KEY',
+          query: 'alice@example.test',
+          value: 'SECRET_TOKEN_SHOULD_NOT_LEAK',
+          limit: 50,
+        },
+      },
+      session_id: 'sess-1',
+    }, binDir, { FBEAST_CAPTURE_CONTEXT_FILE: contextFile });
+
+    expect(result.status, result.stderr).toBe(0);
+    const context = readFileSync(contextFile, 'utf8');
+    expect(JSON.parse(context)).toEqual({
+      tool: 'fbeast_memory_access_audit_report',
+      args: {
+        operation: '[memory-access-audit-filter-redacted]',
+        tool: 'fbeast_memory_store',
+        key: '[right-to-forget-selector-redacted]',
+        query: '[right-to-forget-selector-redacted]',
+        limit: 50,
+      },
+    });
+    expect(context).not.toContain('delete');
     expect(context).not.toContain('alice@example.test');
+    expect(context).not.toContain('SECRET_TOKEN_SHOULD_NOT_LEAK');
+  });
+
+  it('preserves proxied source-attribution targets for key-only hook contexts without raw filters', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const contextFile = join(root, 'context.txt');
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'execute_tool',
+      tool_input: {
+        tool: 'fbeast_memory_source_attribution',
+        args: {
+          key: 'profile.delete-policy',
+          value: 'SECRET_TOKEN_SHOULD_NOT_LEAK',
+        },
+      },
+      session_id: 'sess-1',
+    }, binDir, { FBEAST_CAPTURE_CONTEXT_FILE: contextFile });
+
+    expect(result.status, result.stderr).toBe(0);
+    const context = readFileSync(contextFile, 'utf8');
+    expect(JSON.parse(context)).toEqual({
+      tool: 'fbeast_memory_source_attribution',
+      args: {
+        key: '[right-to-forget-selector-redacted]',
+      },
+    });
+    expect(context).not.toContain('profile.delete-policy');
     expect(context).not.toContain('SECRET_TOKEN_SHOULD_NOT_LEAK');
   });
 
@@ -481,6 +601,22 @@ describe('Codex hook scripts', () => {
     const result = runScript(preTool, {
       tool_name: 'apply_patch',
       tool_input: { command: '*** Begin Patch\n rm -rf / and SECRET_TOKEN=abc\n*** End Patch' },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it('does not forward apply_patch patch bodies carried as string tool_input', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'apply_patch',
+      tool_input: '*** Begin Patch\n rm -rf / and SECRET_TOKEN=abc\n*** End Patch',
       session_id: 'sess-1',
     }, binDir);
 
@@ -547,6 +683,27 @@ describe('Codex hook scripts', () => {
     const result = runScript(preTool, {
       tool_name: 'shell',
       tool_input: { args: ['rm', '-rf', '/tmp/x'] },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"permissionDecision":"deny"');
+    expect(result.stdout).toContain('destructive payload blocked');
+  });
+
+  it('serializes object-valued command args so nested destructive tokens are matched', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'shell_wrapper',
+      tool_input: {
+        args: {
+          command: 'echo safe && rm -rf /tmp/nested',
+        },
+      },
       session_id: 'sess-1',
     }, binDir);
 
@@ -634,6 +791,40 @@ describe('Codex hook scripts', () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe('');
+  });
+
+  it('passes post-tool input context through the hook environment', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const contextFile = join(root, 'post-context.txt');
+    const { postTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(postTool, {
+      tool_name: 'fbeast_memory_query',
+      tool_input: {
+        args: {
+          agentId: 'agent-post',
+          profile: 'default',
+          query: 'sensitive selector',
+        },
+      },
+      tool_response: { ok: true },
+      session_id: 'sess-1',
+    }, binDir, {
+      FBEAST_CAPTURE_CONTEXT_FILE: contextFile,
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(contextFile, 'utf8'))).toEqual({
+      tool_input: {
+        args: {
+          agentId: 'agent-post',
+          profile: 'default',
+          query: '[memory-selector-redacted]',
+        },
+      },
+    });
   });
 
   it('keeps leading-dash post-tool responses from being parsed as fbeast-hook options', () => {
@@ -872,6 +1063,42 @@ describe('Codex hook scripts', () => {
     expect(Date.now() - startedAt).toBeLessThan(3_000);
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe('');
+  });
+
+  it('passes only sanitized post-tool memory context to fbeast-hook', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const contextFile = join(root, 'post-context.txt');
+    const { postTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(postTool, {
+      tool_name: 'fbeast_memory_access_audit_report',
+      tool_input: {
+        profile: 'default',
+        repo: 'djm204/frankenbeast',
+        query: 'private search text',
+        value: 'sensitive memory payload',
+        large: 'x'.repeat(300_000),
+      },
+      tool_response: { rows: [{ decision: 'approved' }] },
+      session_id: 'sess-1',
+    }, binDir, {
+      FBEAST_CAPTURE_CONTEXT_FILE: contextFile,
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    const context = readFileSync(contextFile, 'utf8');
+    expect(JSON.parse(context)).toEqual({
+      tool_input: {
+        profile: 'default',
+        repo: 'djm204/frankenbeast',
+        query: '[memory-selector-redacted]',
+      },
+    });
+    expect(context).not.toContain('sensitive memory payload');
+    expect(context).not.toContain('private search text');
+    expect(context).not.toContain('xxx');
   });
 
   it('runs post-tool fbeast-hook directly when timeout is unavailable', () => {

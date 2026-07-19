@@ -135,7 +135,6 @@ The orchestrator is designed to fail closed when safety or correctness checks ca
   `@franken/planner`, `@franken/observer`, `@franken/critique`,
   `@franken/governor`, `@franken/types`, `@franken/web`, and
   `@franken/live-bench` as the current package surfaces.
-- Treat references to removed packages such as `frankenfirewall`,
-  `franken-skills`, `franken-heartbeat`, `franken-mcp`, or `franken-comms` as
+- Treat references to pre-consolidation standalone package surfaces as
   historical architecture vocabulary unless a current README or source file says
-  otherwise.
+  otherwise; the ten active packages listed above are authoritative.

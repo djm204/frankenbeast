@@ -10,6 +10,8 @@ const { databaseInstances, brainInstances, workingMemoryRowsByPath } = vi.hoiste
     options: unknown;
   }> = [];
   const brainInstances: Array<{
+    dbPath: string;
+    limits: { maxRows?: number; maxBytes?: number } | undefined;
     working: {
       restore: ReturnType<typeof vi.fn>;
       snapshot: ReturnType<typeof vi.fn>;
@@ -23,6 +25,7 @@ const { databaseInstances, brainInstances, workingMemoryRowsByPath } = vi.hoiste
       record: ReturnType<typeof vi.fn>;
     };
     rightToForget: ReturnType<typeof vi.fn>;
+    memoryRetentionReport: ReturnType<typeof vi.fn>;
     memoryReview: {
       propose: ReturnType<typeof vi.fn>;
       approve: ReturnType<typeof vi.fn>;
@@ -45,7 +48,367 @@ vi.mock("better-sqlite3", () => ({
   ) {
     const db = {
       pragma: vi.fn(),
-      prepare: vi.fn(() => ({ all: vi.fn(() => workingMemoryRowsByPath.get(_dbPath) ?? []) })),
+      prepare: vi.fn((sql: string) => ({
+        get: vi.fn((tableName?: string) => {
+          if (sql.includes("sqlite_master") && (tableName === "governor_log" || tableName === "audit_trail")) {
+            return { name: tableName };
+          }
+          return undefined;
+        }),
+        all: vi.fn(() => {
+          if (sql.includes("FROM governor_log")) {
+            return [
+              {
+                action: "fbeast_memory_query",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "agent-a", profile: "default", repo: "djm204/frankenbeast", type: "working" }),
+                decision: "approved",
+                reason: "allowed",
+                createdAt: "2026-07-16T10:00:00.000Z",
+              },
+              {
+                action: "fbeast_memory_review_decide",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "agent-b", action: "approve" }),
+                decision: "approved",
+                reason: "reviewed",
+                createdAt: "2026-07-16T11:00:00.000Z",
+              },
+              {
+                action: "fbeast_memory_store",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "agent-c", cardId: "t_abc123", profile: "default", repo: "djm204/frankenbeast", type: "working", value: "ghp_secretvalue123456" }),
+                decision: "denied",
+                reason: "blocked token ghp_secretvalue123456",
+                createdAt: "2026-07-16T10:30:00.000Z",
+              },
+              {
+                action: "shell_command",
+                context: "rm -rf tmp",
+                decision: "review_recommended",
+                reason: "dangerous",
+                createdAt: "2026-07-16T12:00:00.000Z",
+              },
+              {
+                action: "fbeast_memory_query",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "agent-secret", profile: "security-test", operation: "sk-secretvalue123456", type: "ghp_secretvalue123456" }),
+                decision: "validation_error",
+                reason: "invalid args",
+                createdAt: "2026-07-16T12:10:00.000Z",
+              },
+              {
+                action: "fbeast_memory_right_to_forget",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "agent-dry", profile: "dry-run-test", dryRun: true }),
+                decision: "approved",
+                reason: "dry run",
+                createdAt: "2026-07-16T12:20:00.000Z",
+              },
+              {
+                action: "fbeast_memory_store",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "«redacted:agent…»", profile: "duplicate-test", repo: "djm204/frankenbeast", type: "working" }),
+                decision: "approved",
+                reason: "allowed",
+                createdAt: "2026-07-16T12:30:00.000Z",
+              },
+              {
+                action: "fbeast_memory_store",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", profile: "sparse-duplicate-test", repo: "djm204/frankenbeast", type: "working" }),
+                decision: "approved",
+                reason: "allowed",
+                createdAt: "2026-07-16T12:50:00.000Z",
+              },
+              {
+                action: "fbeast_memory_store",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "[right-to-forget-selector-redacted]", profile: "placeholder-duplicate-test", repo: "djm204/frankenbeast", type: "working" }),
+                decision: "approved",
+                reason: "allowed",
+                createdAt: "2026-07-16T13:00:00.000Z",
+              },
+              {
+                action: "fbeast_memory_right_to_forget",
+                context: "[right-to-forget-context-redacted]",
+                decision: "approved",
+                reason: "dry-run approval",
+                createdAt: "2026-07-16T13:10:00.000Z",
+              },
+              {
+                action: "fbeast_memory_query",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "agent-rapid", profile: "rapid-repeat-test", type: "working" }),
+                decision: "approved",
+                reason: "allowed first",
+                createdAt: "2026-07-16T13:20:00.000Z",
+              },
+              {
+                action: "fbeast_memory_query",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "agent-rapid", profile: "rapid-repeat-test", type: "working" }),
+                decision: "approved",
+                reason: "allowed second",
+                createdAt: "2026-07-16T13:20:02.000Z",
+              },
+              {
+                action: "fbeast_memory_query",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "agent-error-merge", profile: "error-merge-test", type: "working" }),
+                decision: "approved",
+                reason: "allowed before handler failure",
+                createdAt: "2026-07-16T13:30:00.000Z",
+              },
+              {
+                action: "fbeast_memory_store",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "agent-specific", profile: "target-specific-test", repo: "djm204/frankenbeast" }),
+                decision: "approved",
+                reason: "allowed write",
+                createdAt: "2026-07-16T13:50:00.000Z",
+              },
+              {
+                action: "fbeast_memory_store",
+                context: JSON.stringify({ agentId: "agent-forged-governor", profile: "forgery-test", type: "working" }),
+                decision: "approved",
+                reason: "public governor probe",
+                createdAt: "2026-07-16T13:55:00.000Z",
+              },
+              {
+                action: "fbeast_memory_query",
+                context: JSON.stringify({ __fbeastAuditTrailSource: "fbeast-hook", __fbeastHookSource: "fbeast-hook", agentId: "agent-hook-pre", profile: "hook-test", type: "working" }),
+                decision: "approved",
+                reason: "hook pre-tool approval",
+                createdAt: "2026-07-16T14:00:00.000Z",
+              },
+              {
+                action: "fbeast_memory_right_to_forget",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", dryRun: false, context: "[right-to-forget-context-redacted]" }),
+                decision: "approved",
+                reason: "redacted central deletion approval",
+                createdAt: "2026-07-16T14:05:00.000Z",
+              },
+              {
+                action: "fbeast_memory_store",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "agent-governor-dedupe", profile: "governor-source-dedupe-test", type: "working" }),
+                decision: "approved",
+                reason: "central approval",
+                createdAt: "2026-07-16T14:15:00.000Z",
+              },
+              {
+                action: "fbeast_memory_store",
+                context: JSON.stringify({ __fbeastAuditTrailSource: "fbeast-hook", __fbeastHookSource: "fbeast-hook", agentId: "agent-governor-dedupe", profile: "governor-source-dedupe-test", type: "working" }),
+                decision: "approved",
+                reason: "hook approval",
+                createdAt: "2026-07-16T14:15:05.000Z",
+              },
+              {
+                action: "fbeast_memory_store",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "[redacted]", profile: "source-detail-sync-test", type: "working" }),
+                decision: "approved",
+                reason: "central approval before hook metadata",
+                createdAt: "2026-07-16T14:18:00.000Z",
+              },
+              {
+                action: "fbeast_memory_store",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "agent-target-dedupe", profile: "target-dedupe-test", type: "working", cardId: "card-a" }),
+                decision: "approved",
+                reason: "working write",
+                createdAt: "2026-07-16T14:30:00.000Z",
+              },
+              {
+                action: "fbeast_memory_store",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "agent-card-dedupe", profile: "card-dedupe-test", type: "working", cardId: "card-a" }),
+                decision: "approved",
+                reason: "card a write",
+                createdAt: "2026-07-16T14:35:00.000Z",
+              },
+              {
+                action: "fbeast_memory_delete_all",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "agent-unknown-tool", profile: "unknown-tool-test" }),
+                decision: "unknown_tool",
+                reason: "unknown memory tool probe",
+                createdAt: "2026-07-16T14:36:00.000Z",
+              },
+              {
+                action: "fbeast_memory_query",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "__proto__", profile: "toString", repo: "constructor", type: "working" }),
+                decision: "approved",
+                reason: "prototype-name audit subject",
+                createdAt: "2026-07-16T14:40:00.000Z",
+              },
+              {
+                action: "fbeast_memory_access_audit_report",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "agent-a", profile: "default", repo: "djm204/frankenbeast" }),
+                decision: "approved",
+                reason: "report query",
+                createdAt: "2026-07-16T14:45:00.000Z",
+              },
+              {
+                action: "fbeast_memory_store",
+                context: JSON.stringify({ __fbeastGovernanceSource: "central-dispatch", agentId: "agent-denied-merge", profile: "denied-merge-test", type: "working" }),
+                decision: "denied",
+                reason: "blocked before tool",
+                createdAt: "2026-07-16T14:50:00.000Z",
+              },
+            ];
+          }
+          if (sql.includes("FROM audit_trail")) {
+            return [
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "central-dispatch", source: "central-dispatch", toolName: "fbeast_memory_export", ok: true, profile: "default", repo: "djm204/frankenbeast" }),
+                createdAt: "2026-07-16T09:00:00.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "central-dispatch", source: "central-dispatch", toolName: "fbeast_memory_store", ok: true, profile: "duplicate-test", repo: "djm204/frankenbeast", agentId: "agent-actual" }),
+                createdAt: "2026-07-16T12:30:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "central-dispatch", source: "central-dispatch", toolName: "fbeast_memory_query", ok: false, profile: "error-test", error: "limit must be numeric" }),
+                createdAt: "2026-07-16T12:40:00.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "central-dispatch", source: "central-dispatch", toolName: "fbeast_memory_store", ok: true, args: { agentId: "agent-sparse", profile: "sparse-duplicate-test", repo: "djm204/frankenbeast", type: "working" } }),
+                createdAt: "2026-07-16T12:50:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "central-dispatch", source: "central-dispatch", toolName: "fbeast_memory_store", ok: true, args: { agentId: "agent-placeholder", profile: "placeholder-duplicate-test", repo: "djm204/frankenbeast", type: "working" } }),
+                createdAt: "2026-07-16T13:00:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "central-dispatch", source: "central-dispatch", toolName: "fbeast_memory_right_to_forget", ok: true, args: { agentId: "agent-dry-redacted", profile: "rtf-redacted-test", dryRun: true } }),
+                createdAt: "2026-07-16T13:10:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "central-dispatch", source: "central-dispatch", toolName: "fbeast_memory_right_to_forget", ok: true, args: { agentId: "agent-dry-redacted", profile: "rtf-redacted-test", dryRun: false } }),
+                createdAt: "2026-07-16T13:10:06.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "central-dispatch", source: "central-dispatch", toolName: "fbeast_memory_query", ok: true, args: { agentId: "agent-rapid", profile: "rapid-repeat-test", type: "working" } }),
+                createdAt: "2026-07-16T13:20:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "central-dispatch", source: "central-dispatch", toolName: "fbeast_memory_query", ok: true, args: { agentId: "agent-rapid", profile: "rapid-repeat-test", type: "working" } }),
+                createdAt: "2026-07-16T13:20:07.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "central-dispatch", source: "central-dispatch", toolName: "fbeast_memory_query", ok: false, args: { agentId: "agent-error-merge", profile: "error-merge-test", type: "working" }, error: "handler failed" }),
+                createdAt: "2026-07-16T13:30:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "central-dispatch", source: "central-dispatch", toolName: "fbeast_memory_query", decision: "sk-secret-decision", args: { agentId: "agent-decision", profile: "decision-secret-test", type: "working" } }),
+                createdAt: "2026-07-16T13:40:00.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "central-dispatch", source: "central-dispatch", toolName: "fbeast_memory_store", ok: true, args: { agentId: "agent-specific", profile: "target-specific-test", repo: "djm204/frankenbeast", type: "episodic" } }),
+                createdAt: "2026-07-16T13:50:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ source: "observer-user", toolName: "fbeast_memory_store", ok: true, args: { agentId: "agent-forged-observer", profile: "forgery-test", type: "working" } }),
+                createdAt: "2026-07-16T13:55:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ toolName: "fbeast_memory_query", phase: "post-tool", ok: true, args: { agentId: "agent-forged-phase", profile: "forgery-test", type: "working" } }),
+                createdAt: "2026-07-16T13:55:06.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "central-dispatch", source: "central-dispatch", toolName: "execute_tool", ok: true, args: { toolName: "execute_tool", agentId: "agent-self-execute", profile: "execute-self-test" } }),
+                createdAt: "2026-07-16T13:58:00.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "central-dispatch", source: "central-dispatch", toolName: "execute_tool", ok: false, args: { tool: "fbeast_memory_store", agentId: "agent-proxied", profile: "proxied-args-test", type: "working" }, error: "validation failed" }),
+                createdAt: "2026-07-16T13:58:30.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "central-dispatch", source: "central-dispatch", toolName: "execute_tool", ok: false, args: { tool: "fbeast_memory_store", args: { agentId: "agent-nested-proxied", profile: "nested-proxied-args-test", type: "working" } }, error: "nested validation failed" }),
+                createdAt: "2026-07-16T13:58:40.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "central-dispatch", source: "central-dispatch", toolName: "execute_tool", ok: true, args: { tool: "execute_tool", args: { tool: "fbeast_memory_store", args: { agentId: "agent-deep-proxied", profile: "deep-proxied-tool-filter-test", type: "working" } } } }),
+                createdAt: "2026-07-16T13:58:45.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "fbeast-hook", __fbeastHookSource: "fbeast-hook", toolName: "fbeast_memory_store", phase: "post-tool", ok: true, args: { agentId: "agent-hook-post", profile: "hook-test", type: "working" } }),
+                createdAt: "2026-07-16T14:00:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "central-dispatch", source: "central-dispatch", toolName: "fbeast_memory_store", ok: true, args: { agentId: "agent-source-dedupe", profile: "source-dedupe-test", type: "working" } }),
+                createdAt: "2026-07-16T14:10:00.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "fbeast-hook", __fbeastHookSource: "fbeast-hook", toolName: "fbeast_memory_store", phase: "post-tool", ok: true, args: { agentId: "agent-source-dedupe", profile: "source-dedupe-test", type: "working" } }),
+                createdAt: "2026-07-16T14:10:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "fbeast-hook", __fbeastHookSource: "fbeast-hook", toolName: "fbeast_memory_store", phase: "post-tool", ok: true, args: { agentId: "agent-source-detail", profile: "source-detail-sync-test", type: "working" } }),
+                createdAt: "2026-07-16T14:18:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "central-dispatch", source: "central-dispatch", toolName: "fbeast_memory_store", ok: true, args: { agentId: "agent-source-detail", profile: "source-detail-sync-test", type: "working" } }),
+                createdAt: "2026-07-16T14:18:08.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "central-dispatch", source: "central-dispatch", toolName: "fbeast_memory_source_attribution", ok: true, args: { profile: "source-attribution-test", readScope: "shared" } }),
+                createdAt: "2026-07-16T14:20:00.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "fbeast-hook", __fbeastHookSource: "fbeast-hook", toolName: "fbeast_memory_retention_report", phase: "post-tool", ok: true, args: { agentId: "agent-retention", profile: "retention-audit-test", readScope: "agent" } }),
+                createdAt: "2026-07-16T14:25:00.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "central-dispatch", source: "central-dispatch", toolName: "fbeast_memory_store", ok: true, args: { agentId: "agent-target-dedupe", profile: "target-dedupe-test", type: "episodic", cardId: "card-a" } }),
+                createdAt: "2026-07-16T14:30:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "central-dispatch", source: "central-dispatch", toolName: "fbeast_memory_store", ok: true, args: { agentId: "agent-card-dedupe", profile: "card-dedupe-test", type: "working", cardId: "card-b" } }),
+                createdAt: "2026-07-16T14:35:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "central-dispatch", source: "central-dispatch", toolName: "fbeast_memory_access_audit_report", ok: true, args: { agentId: "agent-a", profile: "default", repo: "djm204/frankenbeast" } }),
+                createdAt: "2026-07-16T14:45:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "central-dispatch", source: "central-dispatch", toolName: "fbeast_memory_store", ok: true, args: { agentId: "agent-denied-merge", profile: "denied-merge-test", type: "working" } }),
+                createdAt: "2026-07-16T14:50:05.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "central-dispatch", source: "central-dispatch", toolName: "mcp__fbeast-memory__fbeast_memory_store", ok: true, args: { agentId: "agent-qualified", profile: "qualified-tool-test", type: "working" } }),
+                createdAt: "2026-07-16T15:00:00.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "central-dispatch", source: "central-dispatch", toolName: "fbeast_memory_query", ok: true, args: { agentId: "agent-active-profile", activeProfile: "active-profile-test", type: "working" } }),
+                createdAt: "2026-07-16T15:05:00.000Z",
+              },
+              {
+                eventType: "tool_call",
+                payload: JSON.stringify({ __fbeastAuditTrailSource: "fbeast-hook", __fbeastHookSource: "fbeast-hook", toolName: "fbeast_memory_query", args: { agentId: "agent-derived-unknown", profile: "derived-unknown-test", type: "working" } }),
+                createdAt: "2026-07-16T15:10:00.000Z",
+              },
+            ];
+          }
+          return workingMemoryRowsByPath.get(_dbPath) ?? [];
+        }),
+      })),
       close: vi.fn(),
       dbPath: _dbPath,
       options,
@@ -56,7 +419,19 @@ vi.mock("better-sqlite3", () => ({
 }));
 
 vi.mock("@franken/brain", () => ({
-  SqliteBrain: vi.fn(function MockSqliteBrain(this: unknown) {
+  DEFAULT_WORKING_MEMORY_LIMITS: {
+    maxEntries: 10_000,
+    maxValueBytes: 5 * 1024 * 1024,
+    maxTotalBytes: 64 * 1024 * 1024,
+  },
+  SqliteBrain: vi.fn(function MockSqliteBrain(
+    this: unknown,
+    dbPath: string,
+    _workingMemoryLimits?: unknown,
+    options?: {
+      workingMemoryHydrationLimits?: { maxRows?: number; maxBytes?: number };
+    },
+  ) {
     let workingSnapshot: Record<string, unknown> = {
       "task-1": "working entry",
       "agents/oncall/runbook": "shared runbook",
@@ -106,6 +481,18 @@ vi.mock("@franken/brain", () => ({
         value: "beta entry",
       },
     };
+    const persistedRows = workingMemoryRowsByPath.get(dbPath);
+    if (persistedRows !== undefined) {
+      workingSnapshot = Object.fromEntries(
+        persistedRows.map((row) => {
+          try {
+            return [row.key, JSON.parse(row.value)];
+          } catch {
+            return [row.key, row.value];
+          }
+        }),
+      );
+    }
     const brain = {
       working: {
         restore: vi.fn((snapshot: Record<string, unknown>) => {
@@ -306,7 +693,11 @@ vi.mock("@franken/brain", () => ({
       },
       flush: vi.fn(),
     };
-    brainInstances.push(brain);
+    brainInstances.push({
+      ...brain,
+      dbPath,
+      limits: options?.workingMemoryHydrationLimits,
+    });
     Object.assign(this as object, brain);
   }),
 }));
@@ -321,18 +712,37 @@ describe("createBrainAdapter", () => {
     vi.clearAllMocks();
   });
 
-  it("configures WAL and a busy timeout on the adapter read connection before rehydrating memory", () => {
+  it("delegates startup hydration to SqliteBrain with its bounded defaults", () => {
     createBrainAdapter("/tmp/beast.db");
 
-    expect(databaseInstances).toHaveLength(1);
-    const readDb = databaseInstances[0];
-    expect(readDb.options).toBeUndefined();
-    expect(readDb.pragma).toHaveBeenNthCalledWith(1, "journal_mode = WAL");
-    expect(readDb.pragma).toHaveBeenNthCalledWith(2, "busy_timeout = 5000");
-    expect(readDb.prepare).toHaveBeenCalledWith(
-      "SELECT key, value FROM working_memory",
-    );
-    expect(readDb.close).toHaveBeenCalledOnce();
+    expect(databaseInstances).toHaveLength(0);
+    expect(brainInstances).toHaveLength(1);
+    expect(brainInstances[0]).toMatchObject({
+      dbPath: "/tmp/beast.db",
+      limits: { maxRows: 10_000, maxBytes: 64 * 1024 * 1024 },
+    });
+    expect(brainInstances[0]!.working.restore).not.toHaveBeenCalled();
+  });
+
+  it("passes configurable hydration budgets to SqliteBrain's bounded startup path", () => {
+    createBrainAdapter("/tmp/bounded.db", {
+      hydration: { maxRows: 2, maxBytes: 1_000 },
+    });
+
+    expect(brainInstances[0]).toMatchObject({
+      dbPath: "/tmp/bounded.db",
+      limits: { maxRows: 2, maxBytes: 1_000 },
+    });
+  });
+
+  it("rejects invalid hydration budgets before opening the database", () => {
+    expect(() =>
+      createBrainAdapter("/tmp/beast.db", {
+        hydration: { maxRows: 0 },
+      }),
+    ).toThrow("hydration.maxRows must be a positive safe integer");
+    expect(databaseInstances).toHaveLength(0);
+    expect(brainInstances).toHaveLength(0);
   });
 
   it("keeps direct API memory reads isolated by profile database path", async () => {
@@ -365,16 +775,10 @@ describe("createBrainAdapter", () => {
     expect(doctorRows).toEqual([
       { key: "profile-note", value: "doctor profile memory", type: "working" },
     ]);
-    expect(databaseInstances.map((db) => db.dbPath)).toEqual([
+    expect(brainInstances.map((brain) => brain.dbPath)).toEqual([
       "/tmp/profiles/default/beast.db",
       "/tmp/profiles/doctor/beast.db",
     ]);
-    expect(brainInstances[0]!.working.restore).toHaveBeenCalledWith({
-      "profile-note": "default profile memory",
-    });
-    expect(brainInstances[1]!.working.restore).toHaveBeenCalledWith({
-      "profile-note": "doctor profile memory",
-    });
     expect(JSON.stringify(defaultRows)).not.toContain("doctor profile memory");
     expect(JSON.stringify(doctorRows)).not.toContain("default profile memory");
   });
@@ -826,6 +1230,590 @@ describe("createBrainAdapter", () => {
     expect(brainInstances[0].rightToForget).toHaveBeenCalledWith({
       key: "__fbeast_agent_memory__/Alpha%20Team!/profile",
     });
+  });
+
+  it("builds a redacted memory access audit report from governance and observer logs", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "default", limit: 20 });
+    const serialized = JSON.stringify(report);
+
+    expect(report.count).toBe(3);
+    expect(report.events.map((event) => event.tool)).toEqual([
+      "fbeast_memory_store",
+      "fbeast_memory_query",
+      "fbeast_memory_export",
+    ]);
+    expect(report.summary.byOperation).toEqual({ write: 1, read: 2 });
+    expect(report.summary.byDecision).toEqual({ denied: 1, approved: 2 });
+    expect(report.events[0]).toMatchObject({
+      agentId: "agent-c",
+      cardId: "t_abc123",
+      operation: "write",
+      targetStore: "working",
+      decision: "denied",
+    });
+    expect(serialized).not.toContain("rm -rf");
+    expect(serialized).not.toContain("ghp_secretvalue123456");
+  });
+
+  it("filters memory access audit reports by agent, operation, and decision", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({
+      agentId: "agent-b",
+      operation: "review:approve",
+      decision: "approved",
+      limit: 20,
+    });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      agentId: "agent-b",
+      tool: "fbeast_memory_review_decide",
+      operation: "review:approve",
+      targetClass: "memory-review-candidate",
+      decision: "approved",
+    });
+  });
+
+  it("does not echo unvalidated operation or type fields in memory access audit reports", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "security-test", limit: 20 });
+    const serialized = JSON.stringify(report);
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      tool: "fbeast_memory_query",
+      operation: "read",
+      targetStore: "working|episodic",
+      decision: "validation_error",
+    });
+    expect(serialized).not.toContain("sk-secretvalue123456");
+    expect(serialized).not.toContain("ghp_secretvalue123456");
+  });
+
+  it("classifies wrapper-level execute_tool audit rows from args.tool", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "proxied-args-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      tool: "fbeast_memory_store",
+      operation: "write",
+      targetStore: "working",
+      decision: "error",
+      agentId: "agent-proxied",
+    });
+  });
+
+  it("reads nested execute_tool args for audit metadata", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "nested-proxied-args-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      tool: "fbeast_memory_store",
+      operation: "write",
+      targetStore: "working",
+      decision: "error",
+      agentId: "agent-nested-proxied",
+    });
+  });
+
+  it("distinguishes right-to-forget dry runs from deletion activity", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "dry-run-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      tool: "fbeast_memory_right_to_forget",
+      operation: "delete:dry_run",
+      decision: "approved",
+    });
+    expect(report.summary.byOperation).toEqual({ "delete:dry_run": 1 });
+  });
+
+  it("deduplicates governed and observed memory access events with redacted metadata", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "duplicate-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      source: "audit_trail",
+      tool: "fbeast_memory_store",
+      operation: "write",
+    });
+
+    const agentReport = await brain.memoryAccessAuditReport({ agentId: "agent-actual", profile: "duplicate-test", limit: 20 });
+    expect(agentReport.count).toBe(1);
+    expect(agentReport.events[0]).toMatchObject({
+      agentId: "agent-actual",
+      tool: "fbeast_memory_store",
+    });
+  });
+
+  it("does not dedupe sparse governed rows with unrelated richer observer metadata", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "sparse-duplicate-test", limit: 20 });
+
+    expect(report.count).toBe(2);
+    expect(report.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        tool: "fbeast_memory_store",
+        operation: "write",
+        agentId: "agent-sparse",
+        profile: "sparse-duplicate-test",
+      }),
+      expect.objectContaining({
+        tool: "fbeast_memory_store",
+        operation: "write",
+        profile: "sparse-duplicate-test",
+      }),
+    ]));
+    expect(report.summary.byAgent).toEqual({ "agent-sparse": 1 });
+  });
+
+  it("deduplicates nonstandard redaction placeholders with observer metadata", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "placeholder-duplicate-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      tool: "fbeast_memory_store",
+      agentId: "agent-placeholder",
+      profile: "placeholder-duplicate-test",
+    });
+  });
+
+  it("keeps dry-run classification when deduping redacted right-to-forget rows", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ tool: "fbeast_memory_right_to_forget", limit: 20 });
+
+    expect(report.count).toBe(4);
+    expect(report.summary.byOperation).toEqual({ "delete:dry_run": 2, delete: 2 });
+  });
+
+  it("bounds memory access audit source scans in SQL", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    await brain.memoryAccessAuditReport({ limit: 5 });
+
+    const prepareSql = databaseInstances.flatMap((db) => db.prepare.mock.calls.map(([sql]) => String(sql)));
+    const governorSql = prepareSql.find((sql) => sql.includes("FROM governor_log"));
+    expect(governorSql).toContain("json_extract");
+    expect(governorSql).toContain("__fbeastGovernanceSource");
+    expect(governorSql).toContain("__fbeastHookSource");
+    expect(governorSql).toContain("LIMIT ?");
+    expect(prepareSql.find((sql) => sql.includes("FROM audit_trail"))).toContain("LIMIT ?");
+  });
+
+  it("keeps memory access audit source scans bounded when metadata filters are present", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    await brain.memoryAccessAuditReport({ profile: "sparse-duplicate-test", limit: 5 });
+
+    const prepareSql = databaseInstances.at(-1)!.prepare.mock.calls.map(([sql]) => String(sql));
+    const governorSql = prepareSql.find((sql) => sql.includes("FROM governor_log"));
+    const auditSql = prepareSql.find((sql) => sql.includes("FROM audit_trail"));
+    expect(governorSql).toContain("$.profile");
+    expect(governorSql).toContain("LIMIT ?");
+    expect(auditSql).toContain("$.args.profile");
+    expect(auditSql).toContain("LIMIT ?");
+  });
+
+  it("normalizes qualified tool names in audit SQL prefilters", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ tool: "fbeast_memory_store", profile: "qualified-tool-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      tool: "fbeast_memory_store",
+      agentId: "agent-qualified",
+    });
+    const prepareSql = databaseInstances.at(-1)!.prepare.mock.calls.map(([sql]) => String(sql));
+    const governorSql = prepareSql.find((sql) => sql.includes("FROM governor_log"));
+    const auditSql = prepareSql.find((sql) => sql.includes("FROM audit_trail"));
+    expect(governorSql).toContain("LIKE ('%__' || ?)");
+    expect(auditSql).toContain("LIKE ('%__' || ?)");
+  });
+
+  it("includes ok-derived decisions in audit-trail SQL filters and activeProfile extraction", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ decision: "approved", profile: "active-profile-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      agentId: "agent-active-profile",
+      profile: "active-profile-test",
+      decision: "approved",
+    });
+    const prepareSql = databaseInstances.at(-1)!.prepare.mock.calls.map(([sql]) => String(sql));
+    const auditSql = prepareSql.find((sql) => sql.includes("FROM audit_trail"));
+    expect(auditSql).toContain("$.ok");
+  });
+
+  it("includes derived unknown decisions in audit-trail SQL filters", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ decision: "unknown", profile: "derived-unknown-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      agentId: "agent-derived-unknown",
+      profile: "derived-unknown-test",
+      decision: "unknown",
+    });
+    const prepareSql = databaseInstances.at(-1)!.prepare.mock.calls.map(([sql]) => String(sql));
+    const auditSql = prepareSql.find((sql) => sql.includes("FROM audit_trail"));
+    expect(auditSql).toContain("json_type");
+    expect(auditSql).toContain("$.decision");
+    expect(auditSql).toContain("$.ok");
+  });
+
+  it("includes unsafe explicit decisions when filtering for unknown", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ decision: "unknown", profile: "decision-secret-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      agentId: "agent-decision",
+      decision: "unknown",
+    });
+    const prepareSql = databaseInstances.at(-1)!.prepare.mock.calls.map(([sql]) => String(sql));
+    const auditSql = prepareSql.find((sql) => sql.includes("FROM audit_trail"));
+    expect(auditSql).toContain("NOT IN");
+  });
+
+  it("includes nested proxy tools in audit SQL tool filters", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ tool: "fbeast_memory_store", profile: "deep-proxied-tool-filter-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      agentId: "agent-deep-proxied",
+      tool: "fbeast_memory_store",
+    });
+    const prepareSql = databaseInstances.at(-1)!.prepare.mock.calls.map(([sql]) => String(sql));
+    const auditSql = prepareSql.find((sql) => sql.includes("FROM audit_trail"));
+    expect(auditSql).toContain("$.args.args.tool");
+    expect(auditSql).toContain("$.args.args.toolName");
+    expect(auditSql).toContain("$.args.args.args.tool");
+    expect(auditSql).toContain("$.args.args.args.toolName");
+  });
+
+  it("does not cap source scans before operation filtering", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    await brain.memoryAccessAuditReport({ operation: "read", limit: 5 });
+
+    const prepareSql = databaseInstances.at(-1)!.prepare.mock.calls.map(([sql]) => String(sql));
+    expect(prepareSql.find((sql) => sql.includes("FROM governor_log"))).not.toContain("LIMIT ?");
+    expect(prepareSql.find((sql) => sql.includes("FROM audit_trail"))).not.toContain("LIMIT ?");
+  });
+
+  it("does not attribute access audit report filters to acting agents", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ tool: "fbeast_memory_access_audit_report", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      tool: "fbeast_memory_access_audit_report",
+      operation: "read",
+      decision: "approved",
+    });
+    expect(report.events[0]).not.toHaveProperty("agentId");
+    expect(report.events[0]).not.toHaveProperty("profile");
+    expect(report.summary.byAgent).toEqual({});
+    expect(report.summary.byProfile).toEqual({});
+  });
+
+  it("does not merge denied governor rows into later successful accesses", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "denied-merge-test", limit: 20 });
+
+    expect(report.count).toBe(2);
+    expect(report.summary.byDecision).toEqual({ approved: 1, denied: 1 });
+  });
+
+  it("keeps rapid repeated memory accesses as separate audit events", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "rapid-repeat-test", limit: 20 });
+
+    expect(report.count).toBe(2);
+    expect(report.summary.byTool).toEqual({ fbeast_memory_query: 2 });
+    expect(report.summary.byAgent).toEqual({ "agent-rapid": 2 });
+  });
+
+  it("preserves handler failure decisions when merging governed and observed rows", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "error-merge-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      decision: "error",
+      reason: "handler failed",
+    });
+    expect(report.summary.byDecision).toEqual({ error: 1 });
+  });
+
+  it("prefers specific target stores over broad governed defaults", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "target-specific-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      targetStore: "episodic",
+    });
+  });
+
+  it("does not echo untrusted audit decision strings", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "decision-secret-test", limit: 20 });
+    const serialized = JSON.stringify(report);
+
+    expect(report.events[0]).toMatchObject({ decision: "unknown" });
+    expect(report.summary.byDecision).toEqual({ unknown: 1 });
+    expect(serialized).not.toContain("«redacted:sk-…»");
+  });
+
+  it("treats timezone-less ISO audit filters as UTC", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const utcReport = await brain.memoryAccessAuditReport({ since: "2026-07-16T10:30:00Z", until: "2026-07-16T10:30:00Z", limit: 20 });
+    const timezoneLessReport = await brain.memoryAccessAuditReport({ since: "2026-07-16T10:30:00", until: "2026-07-16T10:30:00", limit: 20 });
+
+    expect(timezoneLessReport.events).toEqual(utcReport.events);
+    expect(timezoneLessReport.events.map((event) => event.timestamp)).toEqual(["2026-07-16T10:30:00.000Z"]);
+  });
+
+  it("keeps filtered memory access audit scans bounded before dedupe", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    await brain.memoryAccessAuditReport({ profile: "default", limit: 50 });
+
+    const reportDb = databaseInstances.at(-1);
+    expect(reportDb).toBeDefined();
+    const auditQueries = reportDb!.prepare.mock.calls
+      .map(([sql]) => String(sql))
+      .filter((sql) => sql.includes("FROM governor_log") || sql.includes("FROM audit_trail"));
+    expect(auditQueries).toHaveLength(2);
+    expect(auditQueries.every((sql) => sql.includes("LIMIT ?"))).toBe(true);
+  });
+
+  it("excludes access-audit report invocations before audit-trail scan limits", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    await brain.memoryAccessAuditReport({ profile: "default", limit: 50 });
+
+    const reportDb = databaseInstances.at(-1);
+    const auditQuery = reportDb!.prepare.mock.calls
+      .map(([sql]) => String(sql))
+      .find((sql) => sql.includes("FROM audit_trail"));
+    expect(auditQuery).toContain("NOT");
+    expect(auditQuery!.indexOf("NOT")).toBeLessThan(auditQuery!.indexOf("ORDER BY id DESC"));
+  });
+
+  it("counts audit summary keys that collide with Object prototype properties", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "toString", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.summary.byAgent["__proto__"]).toBe(1);
+    expect(report.summary.byProfile.toString).toBe(1);
+    expect(report.summary.byRepo.constructor).toBe(1);
+  });
+
+  it("includes unknown memory-tool probes in audit reports", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ decision: "unknown_tool", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      tool: "fbeast_memory_unknown",
+      operation: "unknown",
+      targetStore: "memory",
+      targetClass: "memory-access",
+      decision: "unknown_tool",
+      reason: "unknown memory tool probe",
+    });
+  });
+
+  it("includes unknown memory-tool probes when filtering by the unknown sentinel", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ tool: "fbeast_memory_unknown", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      tool: "fbeast_memory_unknown",
+      operation: "unknown",
+      decision: "unknown_tool",
+    });
+  });
+
+  it("ignores caller-forged observer and public governor memory probes", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "forgery-test", limit: 20 });
+
+    expect(report.count).toBe(0);
+    expect(report.events).toEqual([]);
+  });
+
+  it("ignores self-recursive execute_tool audit wrappers", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "execute-self-test", limit: 20 });
+
+    expect(report.count).toBe(0);
+    expect(report.events).toEqual([]);
+  });
+
+  it("keeps redacted central governor provenance for memory deletions", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ tool: "fbeast_memory_right_to_forget", decision: "approved", limit: 20 });
+
+    expect(report.events.some((event) => event.operation === "delete" && event.reason === "redacted central deletion approval")).toBe(true);
+  });
+
+  it("deduplicates central dispatch and hook audit-trail rows without merging repeated hook rows", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "source-dedupe-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      source: "audit_trail",
+      tool: "fbeast_memory_store",
+      agentId: "agent-source-dedupe",
+      operation: "write",
+    });
+  });
+
+  it("deduplicates central and hook governor rows for the same memory access", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "governor-source-dedupe-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      source: "governor_log",
+      tool: "fbeast_memory_store",
+      agentId: "agent-governor-dedupe",
+      operation: "write",
+    });
+    expect(report.summary.byTool).toEqual({ fbeast_memory_store: 1 });
+  });
+
+  it("keeps source detail aligned when richer hook rows merge with central rows", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "source-detail-sync-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      source: "audit_trail",
+      tool: "fbeast_memory_store",
+      agentId: "agent-source-detail",
+      operation: "write",
+    });
+    expect(report.summary.byTool).toEqual({ fbeast_memory_store: 1 });
+  });
+
+  it("includes source attribution reads in memory access audit reports", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "source-attribution-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      source: "audit_trail",
+      tool: "fbeast_memory_source_attribution",
+      operation: "read",
+      targetStore: "working",
+      targetClass: "memory-source-attribution",
+      decision: "approved",
+    });
+  });
+
+  it("includes retention reports in memory access audit reports", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "retention-audit-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      agentId: "agent-retention",
+      tool: "fbeast_memory_retention_report",
+      operation: "read",
+      targetStore: "working|episodic",
+      targetClass: "memory-retention-report",
+      decision: "approved",
+    });
+  });
+
+  it("keeps distinct target stores and card ids as separate audit events", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const targetReport = await brain.memoryAccessAuditReport({ profile: "target-dedupe-test", limit: 20 });
+    expect(targetReport.count).toBe(2);
+    expect(targetReport.events.map((event) => event.targetStore).sort()).toEqual(["episodic", "working"]);
+
+    const cardReport = await brain.memoryAccessAuditReport({ profile: "card-dedupe-test", limit: 20 });
+    expect(cardReport.count).toBe(2);
+    expect(cardReport.events.map((event) => event.cardId).sort()).toEqual(["card-a", "card-b"]);
+  });
+
+  it("includes trusted hook-based memory access records", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "hook-test", limit: 20 });
+
+    expect(report.count).toBe(2);
+    expect(report.events.map((event) => event.tool)).toEqual([
+      "fbeast_memory_store",
+      "fbeast_memory_query",
+    ]);
+    expect(report.events.map((event) => event.source)).toEqual([
+      "audit_trail",
+      "governor_log",
+    ]);
+    expect(report.summary.byOperation).toEqual({ write: 1, read: 1 });
+  });
+
+  it("classifies failed handler audit events as errors", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const report = await brain.memoryAccessAuditReport({ profile: "error-test", limit: 20 });
+
+    expect(report.count).toBe(1);
+    expect(report.events[0]).toMatchObject({
+      tool: "fbeast_memory_query",
+      decision: "error",
+    });
+    expect(report.summary.byDecision).toEqual({ error: 1 });
   });
 
   it("translates memory review proposals for agent-scoped working memory", async () => {

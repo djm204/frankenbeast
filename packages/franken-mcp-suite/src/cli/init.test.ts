@@ -26,6 +26,10 @@ function hooksBackups(dir: string): string[] {
   return readdirSync(dir).filter((name) => name.startsWith('hooks.json.invalid-'));
 }
 
+function mutationBackups(dir: string, fileName: string): string[] {
+  return readdirSync(dir).filter((name) => name.startsWith(`${fileName}.backup-`) && name.endsWith('.bak'));
+}
+
 describe('fbeast init', () => {
   const dirs: string[] = [];
 
@@ -214,6 +218,12 @@ describe('fbeast init', () => {
     const settings = JSON.parse(readFileSync(join(claudeDir, 'settings.json'), 'utf-8'));
     expect(settings.mcpServers['fbeast-memory']).toBeUndefined();
     expect(settings.mcpServers['other-settings-server']).toBeDefined();
+    const mcpBackups = mutationBackups(root, '.mcp.json');
+    expect(mcpBackups).toHaveLength(1);
+    expect(readFileSync(join(root, mcpBackups[0]!), 'utf-8')).toContain('legacy-planner');
+    const settingsBackups = mutationBackups(claudeDir, 'settings.json');
+    expect(settingsBackups).toHaveLength(1);
+    expect(readFileSync(join(claudeDir, settingsBackups[0]!), 'utf-8')).toContain('legacy-memory');
   });
 
   it('respects pick list', () => {

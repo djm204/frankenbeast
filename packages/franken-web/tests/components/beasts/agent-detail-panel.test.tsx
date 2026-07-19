@@ -42,6 +42,12 @@ describe('AgentDetailPanel', () => {
     expect(screen.getByText('Overview')).toBeTruthy();
   });
 
+  it('names the non-modal detail drawer for screen readers', () => {
+    render(<AgentDetailPanel isOpen={true} detail={detail} logs={[]} {...handlers} />);
+    const drawer = screen.getByRole('dialog', { name: 'agent-1 details' });
+    expect(drawer.getAttribute('aria-modal')).not.toBe('true');
+  });
+
   it('shows agent id in header', () => {
     render(<AgentDetailPanel isOpen={true} detail={detail} logs={[]} {...handlers} />);
     expect(screen.getByText('agent-1')).toBeTruthy();
@@ -56,6 +62,17 @@ describe('AgentDetailPanel', () => {
   it('shows action bar with status-appropriate buttons', () => {
     render(<AgentDetailPanel isOpen={true} detail={detail} logs={[]} {...handlers} />);
     expect(screen.getByText('Stop')).toBeTruthy();
+  });
+
+  it('keeps the drawer open when the portaled log viewer takes focus', async () => {
+    render(<AgentDetailPanel isOpen={true} detail={detail} logs={['hello']} {...handlers} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
+
+    await waitFor(() => expect(screen.getByRole('dialog', { name: 'Events & Logs' })).toBeTruthy());
+    expect(handlers.onClose).not.toHaveBeenCalled();
+    const drawer = document.querySelector('[role="dialog"][aria-labelledby]');
+    expect(drawer?.textContent).toContain('agent-1 details');
   });
 
   it('keeps portaled action confirmations from closing the slide-in panel before confirm click', () => {
@@ -178,6 +195,30 @@ describe('AgentDetailPanel', () => {
     expect(screen.queryByDisplayValue('Unsaved old agent')).toBeNull();
   });
 
+  it('resets Force Restart state when the selected running agent changes', () => {
+    const { rerender } = render(<AgentDetailPanel isOpen={true} detail={detail} logs={[]} {...handlers} />);
+
+    const forceCheckbox = screen.getByLabelText('Force') as HTMLInputElement;
+    fireEvent.click(forceCheckbox);
+    expect(forceCheckbox.checked).toBe(true);
+
+    rerender(<AgentDetailPanel
+      isOpen={true}
+      detail={{
+        ...detail,
+        agent: {
+          ...detail.agent,
+          id: 'agent-2',
+          name: 'Second agent',
+        },
+      }}
+      logs={[]}
+      {...handlers}
+    />);
+
+    expect((screen.getByLabelText('Force') as HTMLInputElement).checked).toBe(false);
+  });
+
   it('keeps edit mode open and surfaces save errors', async () => {
     handlers.onSaveConfig.mockRejectedValueOnce(new Error('HTTP 500'));
     render(<AgentDetailPanel isOpen={true} detail={detail} logs={[]} {...handlers} />);
@@ -256,6 +297,6 @@ describe('AgentDetailPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
 
-    expect(screen.getByText(/agent-blank-name/)).toBeTruthy();
+    expect(screen.getByText(/Delete agent-blank-name\?/)).toBeTruthy();
   });
 });

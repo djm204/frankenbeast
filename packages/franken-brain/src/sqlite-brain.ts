@@ -35,11 +35,26 @@ export interface WorkingMemoryLimits {
   maxTotalBytes: number;
 }
 
+export interface WorkingMemoryHydrationLimits {
+  /** Maximum persisted rows read into memory during startup hydration. */
+  maxRows: number;
+  /** Maximum combined persisted key/value bytes read during startup hydration. */
+  maxBytes: number;
+}
+
 export const DEFAULT_WORKING_MEMORY_LIMITS: WorkingMemoryLimits = {
   maxEntries: 10_000,
   maxValueBytes: 5 * 1024 * 1024,
   maxTotalBytes: 64 * 1024 * 1024,
 };
+
+/**
+ * Working-memory keys must be non-empty printable Unicode strings whose UTF-8
+ * representation does not exceed this bound. Spaces and punctuation remain
+ * valid for backwards compatibility, while Unicode "Other" code points are
+ * rejected because they make logs, snapshots, and selectors ambiguous.
+ */
+export const MAX_WORKING_MEMORY_KEY_BYTES = 1024;
 
 export const CURRENT_MEMORY_SCHEMA_VERSION = 2;
 
@@ -85,6 +100,7 @@ export interface MemoryEncryptionOptions {
 
 export interface SqliteBrainOptions {
   hydrateWorkingMemoryFromDb?: boolean;
+  workingMemoryHydrationLimits?: Partial<WorkingMemoryHydrationLimits>;
   encryption?: MemoryEncryptionOptions;
 }
 
@@ -863,6 +879,74 @@ export class WorkingMemoryLimitError extends Error {
   }
 }
 
+export type WorkingMemoryKeyErrorReason =
+  | 'empty'
+  | 'control_character'
+  | 'too_long';
+
+export class WorkingMemoryKeyError extends Error {
+  readonly code = 'INVALID_WORKING_MEMORY_KEY';
+
+  constructor(
+    readonly reason: WorkingMemoryKeyErrorReason,
+    readonly byteLength: number,
+    readonly maxBytes: number = MAX_WORKING_MEMORY_KEY_BYTES,
+  ) {
+    super(
+      reason === 'empty'
+        ? 'Working memory key must not be empty'
+        : reason === 'control_character'
+          ? 'Working memory key must contain only printable Unicode characters'
+          : `Working memory key is ${byteLength} bytes, exceeding the ${maxBytes}-byte limit`,
+    );
+    this.name = 'WorkingMemoryKeyError';
+  }
+}
+
+function validateWorkingMemoryKey(key: string): void {
+  const byteLength = Buffer.byteLength(key, 'utf8');
+  if (key.length === 0) {
+    throw new WorkingMemoryKeyError('empty', byteLength);
+  }
+  if (/\p{C}/u.test(key)) {
+    throw new WorkingMemoryKeyError('control_character', byteLength);
+  }
+  if (byteLength > MAX_WORKING_MEMORY_KEY_BYTES) {
+    throw new WorkingMemoryKeyError('too_long', byteLength);
+  }
+}
+
+export class WorkingMemoryHydrationLimitError extends Error {
+  readonly code = 'WORKING_MEMORY_HYDRATION_LIMIT_EXCEEDED';
+
+  constructor(
+    readonly rowCount: number,
+    readonly byteCount: number | undefined,
+    readonly maxRows: number,
+    readonly maxBytes: number,
+  ) {
+    const rowDiagnostic = byteCount === undefined ? `at least ${rowCount}` : `${rowCount}`;
+    const byteDiagnostic =
+      byteCount === undefined ? 'byte count skipped after row overflow' : `${byteCount} bytes`;
+    super(
+      `Persisted working memory hydration requires ${rowDiagnostic} rows and ${byteDiagnostic}, ` +
+        `exceeding startup limits of ${maxRows} rows and ${maxBytes} bytes`,
+    );
+    this.name = 'WorkingMemoryHydrationLimitError';
+  }
+}
+
+export class CorruptWorkingMemoryRowError extends Error {
+  readonly code = 'CORRUPT_WORKING_MEMORY_ROW';
+
+  constructor(readonly key: string) {
+    super(
+      `Persisted working memory row "${key}" contains invalid JSON and was not hydrated; the row was preserved for recovery`,
+    );
+    this.name = 'CorruptWorkingMemoryRowError';
+  }
+}
+
 export class MemoryDeletionGuardError extends Error {
   constructor(message: string) {
     super(message);
@@ -1180,30 +1264,90 @@ class SqliteWorkingMemory implements IWorkingMemory {
   private deletedKeys = new Set<string>();
   private totalBytes = 0;
 
+  private static readonly persistedRowOrder = (
+    left: { key: string; updatedAt: string },
+    right: { key: string; updatedAt: string },
+  ): number => {
+    const updatedAtComparison = left.updatedAt.localeCompare(right.updatedAt);
+    return updatedAtComparison === 0
+      ? left.key.localeCompare(right.key)
+      : updatedAtComparison;
+  };
+
   constructor(
     private db: Database.Database,
     private limits: WorkingMemoryLimits = DEFAULT_WORKING_MEMORY_LIMITS,
     hydrateFromDb = true,
     private encryption?: MemoryCipher,
     private audit?: MemoryAccessAuditRecorder,
+    private onPrunedPersistedKeys?: (keys: readonly string[]) => void,
+    hydrationLimits?: WorkingMemoryHydrationLimits,
   ) {
-    this.loadPersistedSerializedFromDb();
     if (hydrateFromDb) {
-      this.loadFromDb();
+      this.loadFromDb(hydrationLimits);
+    } else {
+      this.loadPersistedSerializedFromDb(hydrationLimits);
     }
   }
 
-  private loadPersistedSerializedFromDb(): Array<{
+  private loadPersistedSerializedFromDb(
+    hydrationLimits?: WorkingMemoryHydrationLimits,
+  ): Array<{
     key: string;
     value: string;
+    updatedAt: string;
   }> {
-    const rows = this.db
-      .prepare(`SELECT key, value FROM working_memory ORDER BY key ASC`)
-      .all() as Array<{ key: string; value: string }>;
-    const decryptedRows = rows.map((row) => ({
-      key: row.key,
-      value: this.encryption?.decrypt(row.value) ?? row.value,
-    }));
+    const selectRows = this.db.prepare(
+      `SELECT key, value, updated_at AS updatedAt FROM working_memory ORDER BY key ASC`,
+    );
+    const readRows = () => {
+      if (hydrationLimits) {
+        const rowOverflow = this.db
+          .prepare(`SELECT 1 AS present FROM working_memory LIMIT 1 OFFSET ?`)
+          .get(hydrationLimits.maxRows) as { present: 1 } | undefined;
+        if (rowOverflow) {
+          throw new WorkingMemoryHydrationLimitError(
+            hydrationLimits.maxRows + 1,
+            undefined,
+            hydrationLimits.maxRows,
+            hydrationLimits.maxBytes,
+          );
+        }
+        const stats = this.db
+          .prepare(
+            `SELECT COUNT(*) AS rowCount,
+                    COALESCE(SUM(length(CAST(key AS BLOB)) + length(CAST(value AS BLOB))), 0) AS byteCount
+               FROM (SELECT key, value FROM working_memory LIMIT ?)`,
+          )
+          .get(hydrationLimits.maxRows) as { rowCount: number; byteCount: number };
+        if (stats.byteCount > hydrationLimits.maxBytes) {
+          throw new WorkingMemoryHydrationLimitError(
+            stats.rowCount,
+            stats.byteCount,
+            hydrationLimits.maxRows,
+            hydrationLimits.maxBytes,
+          );
+        }
+      }
+      return selectRows.all() as Array<{ key: string; value: string; updatedAt: string }>;
+    };
+    // Keep the preflight and snapshot read atomic with respect to writers.
+    const rows =
+      hydrationLimits && !this.db.inTransaction
+        ? this.db.transaction(readRows).immediate()
+        : readRows();
+    const decryptedRows = rows.map((row) => {
+      const value = this.encryption?.decrypt(row.value) ?? row.value;
+      // Fail closed without rewriting legacy data. Operators can migrate or
+      // remove the offending row explicitly instead of startup silently
+      // dropping memory whose key no longer satisfies the contract.
+      validateWorkingMemoryKey(row.key);
+      return {
+        key: row.key,
+        value,
+        updatedAt: row.updatedAt,
+      };
+    });
     this.persistedSerialized = new Map(
       decryptedRows.map((row) => [row.key, row.value]),
     );
@@ -1211,43 +1355,88 @@ class SqliteWorkingMemory implements IWorkingMemory {
   }
 
   /** Hydrate in-memory state from persisted SQLite working_memory rows. */
-  private loadFromDb(): void {
-    const rows = this.loadPersistedSerializedFromDb();
+  private loadFromDb(hydrationLimits?: WorkingMemoryHydrationLimits): void {
+    const rows = this.loadPersistedSerializedFromDb(hydrationLimits);
 
-    const prepared: Array<[string, unknown, string, number]> = [];
+    let prepared: Array<{
+      key: string;
+      normalized: unknown;
+      serialized: string;
+      persistedSerialized: string;
+      size: number;
+      updatedAt: string;
+      protected: boolean;
+    }> = [];
     const expiredRows: Array<{ key: string; serialized: string }> = [];
     let total = 0;
+    const prepareRow = (row: { key: string; serialized: string; updatedAt: string }) => {
+      const parsed = parseHydratedWorkingMemoryValue(row.key, row.serialized);
+      if (isExpiredWorkingMemoryValue(parsed)) return undefined;
+      const { normalized, serialized, size } = this.prepareEntry(
+        row.key,
+        parsed,
+      );
+      return {
+        key: row.key,
+        normalized,
+        serialized,
+        persistedSerialized: row.serialized,
+        size,
+        updatedAt: row.updatedAt,
+        protected: MEMORY_RETENTION_POLICIES[classifyMemoryEntry({
+          store: 'working',
+          key: row.key,
+          value: normalized,
+        })].protected,
+      };
+    };
     for (const row of rows) {
-      const parsed = parseStoredWorkingMemoryValue(row.value);
+      const parsed = parseHydratedWorkingMemoryValue(row.key, row.value);
       if (isExpiredWorkingMemoryValue(parsed)) {
         expiredRows.push({ key: row.key, serialized: row.value });
         continue;
       }
-      const { normalized, serialized, size } = this.prepareEntry(
-        row.key,
-        parsed,
-      );
-      total += size;
-      prepared.push([row.key, normalized, serialized, size]);
+      const preparedRow = prepareRow({ key: row.key, serialized: row.value, updatedAt: row.updatedAt });
+      if (!preparedRow) continue;
+      total += preparedRow.size;
+      prepared.push(preparedRow);
     }
     const preservedRows = this.deleteExpiredPersistedRows(expiredRows);
-    const preparedKeys = new Set(prepared.map(([key]) => key));
+    const preparedKeys = new Set(prepared.map(({ key }) => key));
     for (const row of preservedRows) {
       if (preparedKeys.has(row.key)) continue;
-      const parsed = parseStoredWorkingMemoryValue(row.serialized);
-      if (isExpiredWorkingMemoryValue(parsed)) continue;
-      const { normalized, serialized, size } = this.prepareEntry(
-        row.key,
-        parsed,
-      );
-      total += size;
-      prepared.push([row.key, normalized, serialized, size]);
+      const preparedRow = prepareRow(row);
+      if (!preparedRow) continue;
+      total += preparedRow.size;
+      prepared.push(preparedRow);
       preparedKeys.add(row.key);
     }
     if (prepared.length > this.limits.maxEntries) {
-      throw new WorkingMemoryLimitError(
-        `Persisted working memory has ${prepared.length} entries after TTL cleanup, exceeding maxEntries (${this.limits.maxEntries})`,
-      );
+      const rowsToDrop = prepared
+        .filter((row) => !row.protected)
+        .sort((left, right) =>
+          SqliteWorkingMemory.persistedRowOrder(
+            { key: left.key, updatedAt: left.updatedAt },
+            { key: right.key, updatedAt: right.updatedAt },
+          ),
+        )
+        .slice(0, prepared.length - this.limits.maxEntries);
+      if (prepared.length - rowsToDrop.length > this.limits.maxEntries) {
+        throw new WorkingMemoryLimitError(
+          `Persisted working memory has ${prepared.length} entries but only ${rowsToDrop.length} unprotected entries are eligible for startup pruning, exceeding maxEntries (${this.limits.maxEntries})`,
+        );
+      }
+      const droppedKeys = new Set(rowsToDrop.map(({ key }) => key));
+      const retainedRows = prepared.filter(({ key }) => !droppedKeys.has(key));
+      const retainedTotal = retainedRows.reduce((sum, { size }) => sum + size, 0);
+      if (!Number.isSafeInteger(retainedTotal) || retainedTotal > this.limits.maxTotalBytes) {
+        throw new WorkingMemoryLimitError(
+          `Persisted working memory is ${retainedTotal} bytes after startup pruning, exceeding maxTotalBytes (${this.limits.maxTotalBytes})`,
+        );
+      }
+      this.prunePersistedRows(rowsToDrop);
+      prepared = retainedRows;
+      total = retainedTotal;
     }
     if (!Number.isSafeInteger(total) || total > this.limits.maxTotalBytes) {
       throw new WorkingMemoryLimitError(
@@ -1262,11 +1451,60 @@ class SqliteWorkingMemory implements IWorkingMemory {
     this.deletedKeys.clear();
     this.totalBytes = 0;
 
-    for (const [key, normalized, serialized, size] of prepared) {
+    for (const { key, normalized, serialized, size } of prepared) {
       this.store.set(key, normalized);
       this.sizes.set(key, size);
       this.serialized.set(key, serialized);
       this.totalBytes += size;
+    }
+  }
+
+  private prunePersistedRows(rows: ReadonlyArray<{ key: string; persistedSerialized: string; updatedAt: string }>): void {
+    if (rows.length === 0) return;
+    const selectKey = this.db.prepare(`SELECT value, updated_at AS updatedAt FROM working_memory WHERE key = ?`);
+    const deleteKey = this.db.prepare(`DELETE FROM working_memory WHERE key = ?`);
+    const deleteProvenance = this.db.prepare(
+      `DELETE FROM memory_review_provenance WHERE target_store = 'working' AND memory_key = ?`,
+    );
+    const tx = this.db.transaction(() => {
+      for (const row of rows) {
+        const current = selectKey.get(row.key) as { value: string; updatedAt: string } | undefined;
+        const currentSerialized = current ? (this.encryption?.decrypt(current.value) ?? current.value) : undefined;
+        if (currentSerialized !== row.persistedSerialized || current?.updatedAt !== row.updatedAt) {
+          throw new WorkingMemoryLimitError(
+            `Persisted working memory row ${row.key} changed before startup pruning could delete it`,
+          );
+        }
+      }
+      for (const { key } of rows) {
+        deleteProvenance.run(key);
+        deleteKey.run(key);
+      }
+    });
+    tx.immediate();
+    const keys = rows.map(({ key }) => key);
+    for (const key of keys) {
+      this.persistedSerialized.delete(key);
+      this.dirtyKeys.delete(key);
+      this.deletedKeys.delete(key);
+    }
+    this.onPrunedPersistedKeys?.(keys);
+  }
+
+  expirePrunedRuntimeKeys(keys: readonly string[]): void {
+    for (const key of keys) {
+      if (this.dirtyKeys.has(key) || this.deletedKeys.has(key)) {
+        continue;
+      }
+      if (this.store.has(key)) {
+        this.totalBytes -= this.sizes.get(key) ?? 0;
+      }
+      this.store.delete(key);
+      this.sizes.delete(key);
+      this.serialized.delete(key);
+      this.persistedSerialized.delete(key);
+      this.dirtyKeys.delete(key);
+      this.deletedKeys.delete(key);
     }
   }
 
@@ -1655,13 +1893,13 @@ class SqliteWorkingMemory implements IWorkingMemory {
 
   private deleteExpiredPersistedRows(
     rows: ReadonlyArray<{ key: string; serialized: string | undefined }>,
-  ): Array<{ key: string; serialized: string }> {
-    const preservedRows: Array<{ key: string; serialized: string }> = [];
+  ): Array<{ key: string; serialized: string; updatedAt: string }> {
+    const preservedRows: Array<{ key: string; serialized: string; updatedAt: string }> = [];
     if (rows.length === 0) return preservedRows;
-    const selectValue = this.db.prepare(`SELECT value FROM working_memory WHERE key = ?`);
+    const selectValue = this.db.prepare(`SELECT value, updated_at AS updatedAt FROM working_memory WHERE key = ?`);
     const deleteKey = this.db.prepare(`DELETE FROM working_memory WHERE key = ?`);
     for (const { key, serialized } of rows) {
-      const row = selectValue.get(key) as { value: string } | undefined;
+      const row = selectValue.get(key) as { value: string; updatedAt: string } | undefined;
       if (row === undefined) {
         this.persistedSerialized.delete(key);
         this.deletedKeys.delete(key);
@@ -1671,13 +1909,13 @@ class SqliteWorkingMemory implements IWorkingMemory {
       const currentSerialized = this.encryption?.decrypt(row.value) ?? row.value;
       if (serialized !== undefined && currentSerialized !== serialized) {
         this.persistedSerialized.set(key, currentSerialized);
-        preservedRows.push({ key, serialized: currentSerialized });
+        preservedRows.push({ key, serialized: currentSerialized, updatedAt: row.updatedAt });
         continue;
       }
       const parsed = parseStoredWorkingMemoryValue(currentSerialized);
       if (!isExpiredWorkingMemoryValue(parsed)) {
         this.persistedSerialized.set(key, currentSerialized);
-        preservedRows.push({ key, serialized: currentSerialized });
+        preservedRows.push({ key, serialized: currentSerialized, updatedAt: row.updatedAt });
         continue;
       }
       deleteKey.run(key);
@@ -1707,6 +1945,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
     key: string,
     value: unknown,
   ): { normalized: unknown; serialized: string; size: number } {
+    validateWorkingMemoryKey(key);
     const serialized = stringifyWorkingMemoryValue(key, value);
     const valueBytes = Buffer.byteLength(serialized, 'utf8');
     if (valueBytes > this.limits.maxValueBytes) {
@@ -3382,6 +3621,7 @@ export class SqliteMemoryReviewQueue {
   ): MemoryCandidate {
     const now = isoNow();
     let rejectedCandidate: MemoryCandidate | undefined;
+    let purgeRejectedSecretContent = false;
     const tx = this.db.transaction(() => {
       const candidate = this.requireCandidate(id, 'pending');
       this.assertDecisionOptionsNotDeletionGuarded(options);
@@ -3394,8 +3634,17 @@ export class SqliteMemoryReviewQueue {
           conflictGuard,
         );
       }
+      const rejectedSignature = this.rejectedSignature(candidate);
+      const redactRejected = this.shouldRedactRejectedCandidate(candidate);
+      if (redactRejected) {
+        enableSqliteSecureDelete(this.db, this.dbPath);
+      }
       this.insertSuppression(candidate, 'rejected', now, options);
       this.markDecision(id, 'rejected', now, options);
+      if (redactRejected && rejectedSignature) {
+        this.redactRejectedRows(rejectedSignature, now);
+        purgeRejectedSecretContent = true;
+      }
       rejectedCandidate = this.requireCandidate(id);
       this.audit?.({
         operation: 'review.reject',
@@ -3421,6 +3670,9 @@ export class SqliteMemoryReviewQueue {
         },
       });
       throw error;
+    }
+    if (purgeRejectedSecretContent) {
+      purgeDeletedSqliteContent(this.db, this.dbPath);
     }
     const result = rejectedCandidate ?? this.requireCandidate(id, 'rejected');
     return result;
@@ -4594,6 +4846,10 @@ export class SqliteMemoryReviewQueue {
     this.markMatchingPendingSuppressed(candidate, reason, createdAt, options);
   }
 
+  private shouldRedactRejectedCandidate(candidate: MemoryCandidateProposal): boolean {
+    return candidate.source === 'fbeast_memory_store:quarantine';
+  }
+
   private markMatchingPendingSuppressed(
     candidate: MemoryCandidate,
     suppressionReason: MemorySuppressionReason,
@@ -4639,6 +4895,43 @@ export class SqliteMemoryReviewQueue {
         this.encodeText(NEVER_STORE_REDACTED_VALUE),
         candidate.targetStore,
         candidate.key,
+      );
+  }
+
+  private redactRejectedRows(signature: string, redactedAt: string): void {
+    const rows = this.db
+      .prepare(`SELECT * FROM memory_review_candidates WHERE status IN ('rejected', 'suppressed')`)
+      .all() as MemoryCandidateRow[];
+    for (const row of rows) {
+      const candidate = this.rowToCandidate(row);
+      if (this.rejectedSignature(candidate, { createKey: false }) !== signature) {
+        continue;
+      }
+      this.db
+        .prepare(
+          `UPDATE memory_review_candidates
+           SET value = ?, source = ?, source_id = NULL, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL, updated_at = ?
+           WHERE id = ?`,
+        )
+        .run(
+          this.encodeValue(NEVER_STORE_REDACTED_VALUE),
+          this.encodeText(NEVER_STORE_REDACTED_VALUE),
+          this.encodeText(NEVER_STORE_REDACTED_VALUE),
+          redactedAt,
+          row.id,
+        );
+    }
+    this.db
+      .prepare(
+        `UPDATE memory_review_suppressions
+         SET value = ?, source = ?, source_id = NULL, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL
+         WHERE signature = ? AND suppression_reason = 'rejected'`,
+      )
+      .run(
+        this.encodeValue(NEVER_STORE_REDACTED_VALUE),
+        this.encodeText(NEVER_STORE_REDACTED_VALUE),
+        this.encodeText(NEVER_STORE_REDACTED_VALUE),
+        signature,
       );
   }
 
@@ -4713,11 +5006,33 @@ export class SqliteMemoryReviewQueue {
     suppressionReason: MemorySuppressionReason,
   ): MemoryCandidate {
     const now = isoNow();
-    const safeProposal = suppressionReason === 'never_store'
-      ? { ...proposal, value: NEVER_STORE_REDACTED_VALUE }
+    const shouldRedact = suppressionReason === 'never_store' ||
+      (suppressionReason === 'rejected' && this.shouldRedactRejectedCandidate(proposal));
+    const safeProposal: MemoryCandidateProposal = shouldRedact
+      ? {
+          targetStore: proposal.targetStore,
+          key: proposal.key,
+          value: NEVER_STORE_REDACTED_VALUE,
+          source: NEVER_STORE_REDACTED_VALUE,
+          ...(proposal.sourceType ? { sourceType: proposal.sourceType } : {}),
+          confidence: proposal.confidence,
+          reason: NEVER_STORE_REDACTED_VALUE,
+          ...(proposal.expiresAt ? { expiresAt: proposal.expiresAt } : {}),
+          ...(proposal.revalidateAt ? { revalidateAt: proposal.revalidateAt } : {}),
+        }
       : proposal;
     return {
-      ...safeProposal,
+      targetStore: safeProposal.targetStore,
+      key: safeProposal.key,
+      value: safeProposal.value,
+      source: safeProposal.source,
+      sourceType: normalizeMemorySourceType(safeProposal.sourceType, safeProposal.source),
+      ...(safeProposal.sourceId ? { sourceId: safeProposal.sourceId } : {}),
+      ...(safeProposal.evidenceId ? { evidenceId: safeProposal.evidenceId } : {}),
+      confidence: safeProposal.confidence,
+      reason: safeProposal.reason,
+      ...(safeProposal.expiresAt ? { expiresAt: safeProposal.expiresAt } : {}),
+      ...(safeProposal.revalidateAt ? { revalidateAt: safeProposal.revalidateAt } : {}),
       id: `memcand_suppressed_${createHash('sha256')
         .update(this.suppressionSignature(proposal, suppressionReason) ?? '')
         .digest('hex')
@@ -4857,12 +5172,6 @@ function normalizeMemorySourceType(
   if (normalized.startsWith('repo') || normalized.startsWith('system:') || normalized.includes('config')) return 'system';
   return 'unknown';
 }
-
-
-function optionalTextMatches(stored: string | undefined, incoming: string | undefined): boolean {
-  return stored === undefined || incoming === undefined || stored === incoming;
-}
-
 function validateOptionalIsoTimestamp(value: string | undefined, fieldName: string): void {
   if (value === undefined) return;
   if (typeof value !== 'string' || value.trim().length === 0 || !Number.isFinite(Date.parse(value))) {
@@ -5068,6 +5377,24 @@ export class SqliteBrain implements IBrain {
     workingMemoryLimits?: Partial<WorkingMemoryLimits>,
     options: SqliteBrainOptions = {},
   ) {
+    const requestedHydrationLimits = options.workingMemoryHydrationLimits;
+    const hydrationLimits = requestedHydrationLimits
+      ? {
+          maxRows:
+            requestedHydrationLimits.maxRows ?? DEFAULT_WORKING_MEMORY_LIMITS.maxEntries,
+          maxBytes:
+            requestedHydrationLimits.maxBytes ?? DEFAULT_WORKING_MEMORY_LIMITS.maxTotalBytes,
+        }
+      : undefined;
+    if (hydrationLimits) {
+      for (const [name, value] of Object.entries(hydrationLimits)) {
+        if (!Number.isSafeInteger(value) || value < 1) {
+          throw new RangeError(
+            `workingMemoryHydrationLimits.${name} must be a positive safe integer`,
+          );
+        }
+      }
+    }
     this.dbPath = normalizeSqliteDbPath(dbPath);
     this.db = new Database(dbPath);
     this.db.pragma('busy_timeout = 5000');
@@ -5082,16 +5409,23 @@ export class SqliteBrain implements IBrain {
     assertMemoryEncryptionState(this.db, dbPath, encryption);
     this.auditRecorder = (event) => insertMemoryAccessAuditEvent(this.db, event, encryption);
     this.accessAudit = new SqliteMemoryAccessAuditTrail(this.db, encryption);
-    this.working = new SqliteWorkingMemory(
-      this.db,
-      {
-        ...DEFAULT_WORKING_MEMORY_LIMITS,
-        ...workingMemoryLimits,
-      },
-      options.hydrateWorkingMemoryFromDb ?? true,
-      encryption,
-      (event) => this.auditRecorder(event),
-    );
+    try {
+      this.working = new SqliteWorkingMemory(
+        this.db,
+        {
+          ...DEFAULT_WORKING_MEMORY_LIMITS,
+          ...workingMemoryLimits,
+        },
+        options.hydrateWorkingMemoryFromDb ?? true,
+        encryption,
+        (event) => this.auditRecorder(event),
+        (keys) => SqliteBrain.expireLivePrunedWorkingKeys(this.dbPath, keys),
+        hydrationLimits,
+      );
+    } catch (error) {
+      this.db.close();
+      throw error;
+    }
     this.episodic = new SqliteEpisodicMemory(
       this.db,
       encryption,
@@ -5225,6 +5559,16 @@ export class SqliteBrain implements IBrain {
     liveBrains.delete(brain);
     if (liveBrains.size === 0) {
       liveSqliteBrainsByPath.delete(dbPath);
+    }
+  }
+
+  private static expireLivePrunedWorkingKeys(dbPath: string, keys: readonly string[]): void {
+    const normalizedDbPath = normalizeSqliteDbPath(dbPath);
+    if (normalizedDbPath === ':memory:' || keys.length === 0) return;
+    const liveBrains = liveSqliteBrainsByPath.get(normalizedDbPath);
+    if (!liveBrains) return;
+    for (const brain of liveBrains) {
+      brain.working.expirePrunedRuntimeKeys(keys);
     }
   }
 
@@ -6826,10 +7170,15 @@ function sqliteStringLiteral(value: string): string {
 }
 
 function purgeDeletedSqliteContent(db: Database.Database, dbPath: string): void {
+  enableSqliteSecureDelete(db, dbPath);
   if (dbPath === ':memory:') return;
-  db.pragma('secure_delete = ON');
   db.pragma('wal_checkpoint(TRUNCATE)');
   db.exec('VACUUM');
+}
+
+function enableSqliteSecureDelete(db: Database.Database, dbPath: string): void {
+  if (dbPath === ':memory:') return;
+  db.pragma('secure_delete = ON');
 }
 
 type NormalizedRightToForgetSelector = Omit<RightToForgetSelector, 'type'> & { type?: RightToForgetMemoryType };
@@ -7707,6 +8056,18 @@ function parseStoredWorkingMemoryValue(value: string): unknown {
   try {
     return JSON.parse(value) as unknown;
   } catch {
+    return value;
+  }
+}
+
+function parseHydratedWorkingMemoryValue(key: string, value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    const trimmed = value.trimStart();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      throw new CorruptWorkingMemoryRowError(key);
+    }
     return value;
   }
 }

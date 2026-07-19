@@ -63,6 +63,27 @@ describe('createBeastServices', () => {
     }
   });
 
+  it('persists SSE tickets in the Beast database across service restarts', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-create-beast-services-'));
+    const beastsDb = join(tempDir, 'beast.db');
+    const paths = {
+      beastsDb,
+      beastLogsDir: join(tempDir, 'logs'),
+      root: tempDir,
+    };
+    const { createBeastServices } = await import('../../../src/beasts/create-beast-services.js');
+    const firstServices = createBeastServices(paths);
+    const ticket = firstServices.ticketStore.issue('operator-token-123');
+    firstServices.dispose();
+
+    const restartedServices = createBeastServices(paths);
+    try {
+      expect(restartedServices.ticketStore.consume(ticket, 'operator-token-123')).toBe('valid');
+    } finally {
+      restartedServices.dispose();
+    }
+  });
+
   it('fails fast when reservation rules are configured without total capacity', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-create-beast-services-'));
     process.env.FBEAST_AGENT_CAPACITY_RESERVATIONS = JSON.stringify([

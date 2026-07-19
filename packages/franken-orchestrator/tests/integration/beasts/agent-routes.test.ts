@@ -10,6 +10,7 @@ import { BeastCatalogService } from '../../../src/beasts/services/beast-catalog-
 import { BeastInterviewService } from '../../../src/beasts/services/beast-interview-service.js';
 import { BeastDispatchService } from '../../../src/beasts/services/beast-dispatch-service.js';
 import { BeastRunService } from '../../../src/beasts/services/beast-run-service.js';
+import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../../../src/beasts/services/dispatch-failure-message.js';
 import { AgentService } from '../../../src/beasts/services/agent-service.js';
 import { MaintenanceModeError } from '../../../src/beasts/services/maintenance-mode-service.js';
 import { CapacityReservationError, CapacityReservationPolicy } from '../../../src/beasts/services/capacity-reservation-policy.js';
@@ -184,6 +185,7 @@ function createStandaloneAgentApp() {
 
 describe('agent routes integration', () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     rmSync(TMP, { recursive: true, force: true });
   });
 
@@ -1605,6 +1607,55 @@ describe('agent routes integration', () => {
     expect(r3.status).toBe(429);
   });
 
+  it('rate-limits tracked-agent lifecycle action requests', async () => {
+    const { app, operatorToken } = createIntegratedBeastApp({ rateLimitMax: 1 });
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    const createResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'design-interview',
+        initAction: {
+          kind: 'design-interview',
+          command: '/interview',
+          config: {
+            goal: 'Rate-limit lifecycle action',
+            outputPath: 'docs/design.md',
+          },
+        },
+        initConfig: {
+          goal: 'Rate-limit lifecycle action',
+          outputPath: 'docs/design.md',
+        },
+        autoDispatch: false,
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json() as { data: { id: string } };
+
+    const firstStart = await app.request(`/v1/beasts/agents/${created.data.id}/start`, {
+      method: 'POST',
+      headers,
+    });
+    const secondStart = await app.request(`/v1/beasts/agents/${created.data.id}/start`, {
+      method: 'POST',
+      headers,
+    });
+
+    expect(firstStart.status).toBe(200);
+    expect(secondStart.status).toBe(429);
+    expect(await secondStart.json()).toEqual({
+      error: {
+        code: 'RATE_LIMITED',
+        message: 'Rate limit exceeded',
+      },
+    });
+  });
+
   it('returns an explicit error when dispatch throws after creating the tracked agent', async () => {
     const { app, operatorToken } = createIntegratedBeastApp();
     const headers = {
@@ -1645,7 +1696,8 @@ describe('agent routes integration', () => {
     expect(created.error.code).toBe('AGENT_DISPATCH_FAILED');
     expect(created.error.message).toContain('Dispatch failed for tracked agent');
     expect(created.error.details.agentId).toBeTruthy();
-    expect(created.error.details.dispatchError).toContain('outputDir');
+    expect(created.error.details.dispatchError).toBe(SAFE_DISPATCH_FAILURE_MESSAGE);
+    expect(created.error.message).not.toContain('outputDir');
     expect(created.error.details.agent.status).toBe('failed');
 
     const detailResponse = await app.request(`/v1/beasts/agents/${created.error.details.agentId}`, {
@@ -1659,6 +1711,232 @@ describe('agent routes integration', () => {
     };
     expect(detail.data.agent.status).toBe('failed');
     expectEventsToIncludeTypes(detail.data.events, ['agent.dispatch.failed']);
+  });
+
+  it('does not expose unexpected dispatch exception details in logs, events, or responses', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const repository = new SQLiteBeastRepository(join(TMP, 'redacted-dispatch-errors.db'));
+    const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
+    const exceptionSecret = 'dispatch-secret-value-1234567890';
+    const requestSecret = 'request-secret-value-0987654321';
+    const sensitiveCommand = '/opt/private/bin/provider --token super-secret';
+    const rawLinkedRun = repository.createRun({
+      definitionId: 'design-interview',
+      definitionVersion: 1,
+      status: 'running',
+      executionMode: 'process',
+      configSnapshot: { token: requestSecret },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-11T00:00:00.000Z',
+      attemptCount: 0,
+    });
+    const runs = {
+      getRun: vi.fn(() => rawLinkedRun),
+      start: vi.fn(),
+      stop: vi.fn(async () => ({ ...rawLinkedRun, status: 'stopped' })),
+      kill: vi.fn(),
+      restart: vi.fn(),
+      sanitizeRunForResponse: vi.fn((run: typeof rawLinkedRun) => ({ ...run, configSnapshot: {} })),
+    };
+    const dispatch = {
+      createRun: vi.fn(async () => {
+        throw new Error(`Provider spawn failed: token=${exceptionSecret}`);
+      }),
+    };
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const app = new Hono();
+    app.onError(errorHandler);
+    app.route('/', agentRoutes({
+      agents,
+      dispatch: dispatch as never,
+      runs: runs as never,
+      operatorToken: TEST_SUPER_SECRET_OPERATOR_TOKEN,
+      security: new TransportSecurityService(),
+    }));
+    const headers = new Headers({ 'content-type': 'application/json' });
+    headers.set('authorization', ['Bearer', TEST_SUPER_SECRET_OPERATOR_TOKEN].join(' '));
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        initAction: {
+          kind: 'martin-loop',
+          command: sensitiveCommand,
+          config: {
+            provider: 'claude',
+            objective: 'Redact dispatch failure',
+            chunkDirectory: 'docs/chunks',
+            token: requestSecret,
+          },
+        },
+        initConfig: {
+          provider: 'claude',
+          objective: 'Redact dispatch failure',
+          chunkDirectory: 'docs/chunks',
+          token: requestSecret,
+          identity: { name: requestSecret },
+        },
+      }),
+    });
+
+    expect(response.status).toBe(409);
+    const responseBody = await response.json() as {
+      error: { message: string; details: { agentId: string; dispatchError: string } };
+    };
+    agents.updateAgent(responseBody.error.details.agentId, {
+      status: 'stopped',
+    });
+    agents.appendEvent(responseBody.error.details.agentId, {
+      level: 'error',
+      type: 'agent.command.sent',
+      message: sensitiveCommand,
+      payload: { command: sensitiveCommand },
+    });
+    agents.appendEvent(responseBody.error.details.agentId, {
+      level: 'error',
+      type: 'agent.dispatch.failed',
+      message: `Provider spawn failed: token=${exceptionSecret}`,
+      payload: { error: exceptionSecret, runId: 'run_historical-secret-link' },
+    });
+    agents.appendEvent(responseBody.error.details.agentId, {
+      level: 'info',
+      type: 'agent.dispatch.linked',
+      message: 'Linked Beast run run_historical-secret-link',
+      payload: { runId: 'run_historical-secret-link' },
+    });
+    const detailResponse = await app.request(`/v1/beasts/agents/${responseBody.error.details.agentId}`, { headers });
+    expect(detailResponse.status).toBe(200);
+    const detail = await detailResponse.json() as {
+      data: { agent: Record<string, unknown>; events: AgentEvent[] };
+    };
+    expect(detail.data.agent).not.toHaveProperty('dispatchRunId');
+    expect(detail.data.agent).not.toHaveProperty('name');
+    expect(JSON.stringify(detail.data.events)).not.toContain('run_historical-secret-link');
+
+    const patchResponse = await app.request(`/v1/beasts/agents/${responseBody.error.details.agentId}/config`, {
+      method: 'PATCH',
+      headers,
+      body: '{}',
+    });
+    expect(patchResponse.status).toBe(200);
+    const patchedAgent = await patchResponse.json() as { data: Record<string, unknown> };
+    const stopResponse = await app.request(`/v1/beasts/agents/${responseBody.error.details.agentId}/stop`, {
+      method: 'POST',
+      headers,
+    });
+    expect(stopResponse.status).toBe(200);
+    const stoppedAgent = await stopResponse.json() as { data: Record<string, unknown> };
+    agents.appendEvent(responseBody.error.details.agentId, {
+      level: 'info',
+      type: 'agent.dispatch.recovered',
+      message: 'Tracked agent dispatch recovered',
+      payload: {},
+    });
+    const recoveredDetailResponse = await app.request(
+      `/v1/beasts/agents/${responseBody.error.details.agentId}`,
+      { headers },
+    );
+    const recoveredDetail = await recoveredDetailResponse.json() as {
+      data: { events: AgentEvent[] };
+    };
+    expect(JSON.stringify(recoveredDetail.data.events)).not.toContain(exceptionSecret);
+    expect(JSON.stringify(recoveredDetail.data.events)).not.toContain(sensitiveCommand);
+    expect(JSON.stringify(recoveredDetail.data.events)).not.toContain('run_historical-secret-link');
+    agents.updateAgent(responseBody.error.details.agentId, {
+      status: 'running',
+      dispatchRunId: rawLinkedRun.id,
+    });
+    const linkedStopResponse = await app.request(`/v1/beasts/agents/${responseBody.error.details.agentId}/stop`, {
+      method: 'POST',
+      headers,
+    });
+    expect(linkedStopResponse.status).toBe(200);
+    const linkedStoppedRun = await linkedStopResponse.json() as { data: Record<string, unknown> };
+    expect(linkedStoppedRun.data).toMatchObject({ configSnapshot: {} });
+    expect(runs.sanitizeRunForResponse).toHaveBeenCalled();
+    const exposedSurfaces = JSON.stringify({
+      responseBody,
+      agent: detail.data.agent,
+      events: detail.data.events,
+      mutationResponses: [patchedAgent, stoppedAgent, linkedStoppedRun],
+      logs: consoleError.mock.calls,
+    });
+    expect(responseBody.error.details.dispatchError).toBe(SAFE_DISPATCH_FAILURE_MESSAGE);
+    expect(detail.data.agent).toMatchObject({
+      initAction: { kind: 'martin-loop', command: '[REDACTED]', config: {} },
+      initConfig: {},
+    });
+    expect(detail.data.agent).not.toHaveProperty('dispatchRunId');
+    expect(exposedSurfaces).not.toContain(exceptionSecret);
+    expect(exposedSurfaces).not.toContain('Provider spawn failed');
+    expect(exposedSurfaces).not.toContain(requestSecret);
+    expect(exposedSurfaces).not.toContain(sensitiveCommand);
+    expect(exposedSurfaces).not.toContain('/opt/private/bin/provider');
+    expect(exposedSurfaces).not.toContain('super-secret');
+    consoleError.mockRestore();
+  });
+
+  it('redacts a failed tracked agent when auto-dispatch resolves instead of throwing', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const repository = new SQLiteBeastRepository(join(TMP, 'redacted-resolved-dispatch-failure.db'));
+    const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
+    const runs = { getRun: vi.fn(), start: vi.fn(), stop: vi.fn(), kill: vi.fn(), restart: vi.fn() };
+    const requestSecret = 'resolved-dispatch-secret-1234567890';
+    const sensitiveCommand = '/opt/private/bin/provider --token resolved-secret';
+    const dispatch = {
+      createRun: vi.fn(async () => {
+        const agent = agents.listAgents()[0];
+        if (!agent) throw new Error('Expected the route to create a tracked agent before dispatch');
+        agents.updateAgent(agent.id, { status: 'failed' });
+        agents.appendEvent(agent.id, {
+          level: 'error',
+          type: 'agent.dispatch.failed',
+          message: SAFE_DISPATCH_FAILURE_MESSAGE,
+          payload: { error: SAFE_DISPATCH_FAILURE_MESSAGE },
+        });
+        return { id: 'run_failed', status: 'failed' };
+      }),
+    };
+    const app = new Hono();
+    app.onError(errorHandler);
+    app.route('/', agentRoutes({
+      agents,
+      dispatch: dispatch as never,
+      runs: runs as never,
+      operatorToken: TEST_SUPER_SECRET_OPERATOR_TOKEN,
+      security: new TransportSecurityService(),
+    }));
+    const headers = new Headers({ 'content-type': 'application/json' });
+    headers.set('authorization', ['Bearer', TEST_SUPER_SECRET_OPERATOR_TOKEN].join(' '));
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        initAction: {
+          kind: 'martin-loop',
+          command: sensitiveCommand,
+          config: { provider: 'claude', token: requestSecret },
+        },
+        initConfig: { provider: 'claude', token: requestSecret },
+      }),
+    });
+
+    expect(response.status).toBe(201);
+    const responseBody = await response.json() as { data: Record<string, unknown> };
+    expect(responseBody.data).toMatchObject({
+      status: 'failed',
+      initAction: { kind: 'martin-loop', command: '[REDACTED]', config: {} },
+      initConfig: {},
+    });
+    expect(responseBody.data).not.toHaveProperty('dispatchRunId');
+    const exposedResponse = JSON.stringify(responseBody);
+    expect(exposedResponse).not.toContain(requestSecret);
+    expect(exposedResponse).not.toContain(sensitiveCommand);
   });
 
   it('allows starting failed tracked agents via the start endpoint', async () => {

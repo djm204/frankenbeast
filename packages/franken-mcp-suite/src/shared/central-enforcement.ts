@@ -54,12 +54,16 @@ export function createAuditSink(source: string | ObserverAdapter): AuditSink {
         metadata: JSON.stringify({
           tool,
           ok,
+          __fbeastAuditTrailSource: 'central-dispatch',
           source: 'central-dispatch',
           ...(decision !== undefined ? { decision } : {}),
           ...(args !== undefined ? { args } : {}),
         }),
         sessionId: resolveSessionId(),
       });
+    },
+    close() {
+      observer?.close?.();
     },
   };
 }

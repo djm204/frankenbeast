@@ -85,7 +85,7 @@ Use this checklist for a first local checkout or when rebuilding a development e
   npm --silent run first-run:checklist -- --persona coding-agent --json
   ```
 
-  Start with the [persona quickstart tracks](docs/onboarding/persona-quickstart-tracks.md) when you want the human-readable chooser first. It defines operator, contributor, and agent-developer outcomes with prerequisites, setup commands, validation commands, and expected success output. The generator prints deterministic Markdown by default, or JSON with `persona`, `root`, `items`, `docs`, and `nextAction` for coordination/liveness tooling. It never mutates files or runs setup commands; it points each checklist item at the command and docs to run next. Valid personas are `operator`, `coding-agent`, and `contributor`; unknown personas fail closed with an explicit error instead of falling back to a misleading generic checklist.
+  Start with the [persona quickstart tracks](docs/onboarding/persona-quickstart-tracks.md) when you want the human-readable chooser first. It defines operator, contributor, and agent-developer outcomes with prerequisites, setup commands, validation commands, and expected success output. When you are ready to make a first change, follow the [contributor guide](CONTRIBUTING.md) for the complete issue-selection, checkout, verification, and pull-request path. The generator prints deterministic Markdown by default, or JSON with `persona`, `root`, `items`, `docs`, and `nextAction` for coordination/liveness tooling. It never mutates files or runs setup commands; it points each checklist item at the command and docs to run next. Valid personas are `operator`, `coding-agent`, and `contributor`; unknown personas fail closed with an explicit error instead of falling back to a misleading generic checklist.
 
 - [ ] Rehearse the full local-to-PR path before publishing anything:
 
@@ -348,12 +348,15 @@ It maps ChromaDB, Grafana, Tempo, provider credentials, and secret backends to t
     node packages/franken-orchestrator/dist/cli/run.js run --config .fbeast/config.json
     ```
 
-- [ ] For `os-keychain`, set the backend in `.fbeast/config.json`, then run `frankenbeast init`; no passphrase prompt is required.
+- [ ] For `os-keychain` on Linux, install `secret-tool` for Linux Secret Service, set the backend in `.fbeast/config.json`, then run `frankenbeast init`; no passphrase prompt is required and secret values are supplied over stdin.
+  - macOS and Windows writes fail closed because their built-in noninteractive keychain CLIs require secret values in process arguments. Use `local-encrypted`, `1password`, or `bitwarden` on those platforms.
 - [ ] For `1password`:
+  - Install 1Password CLI 2.23.0 or newer so writes can use stdin instead of command-line arguments.
   - Create or use a vault literally named `frankenbeast`.
   - Authenticate the `op` CLI before init.
   - Init-created items use titles like `frankenbeast/network.operatorTokenRef`.
 - [ ] For `bitwarden`:
+  - Install the Bitwarden CLI; credential payloads are supplied over stdin instead of command-line arguments.
   - Run `bw login` / `bw unlock`.
   - Export `BW_SESSION` before init.
   - Init-created secure notes use the `frankenbeast/` title prefix.
@@ -398,6 +401,7 @@ If a coordinator, liveness monitor, or operator reports a stalled worker after s
 
 ## Further reading
 
+- [Onboarding guide index](docs/onboarding/README.md) — choose a focused path by goal and find every onboarding reference in one place.
 - [Quickstart](docs/guides/quickstart.md)
 - [Run the Dashboard Chat](docs/guides/run-dashboard-chat.md)
 - [Run the CLI Beast Harness](docs/guides/run-cli-beast.md)

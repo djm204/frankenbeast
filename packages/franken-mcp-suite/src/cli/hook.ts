@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createGovernorAdapter, type GovernorAdapter } from '../adapters/governor-adapter.js';
@@ -6,6 +7,10 @@ import { createObserverAdapter, type ObserverAdapter } from '../adapters/observe
 
 /** Env var carrying the governor context (policy-relevant command text). */
 export const TOOL_CONTEXT_ENV = 'FBEAST_TOOL_CONTEXT';
+export const TOOL_CONTEXT_FILE_ENV = 'FBEAST_TOOL_CONTEXT_FILE';
+const CENTRAL_GOVERNANCE_SOURCE_KEY = '__fbeastGovernanceSource';
+export const HOOK_GOVERNANCE_SOURCE_KEY = '__fbeastHookSource';
+export const HOOK_GOVERNANCE_SOURCE = 'fbeast-hook';
 
 export interface HookDeps {
   governor: GovernorAdapter;
@@ -35,7 +40,17 @@ export function defaultHookDeps(dbPath?: string): HookDeps {
       process.env['FBEAST_SESSION_ID']
       ?? process.env['CLAUDE_SESSION_ID']
       ?? randomUUID(),
-    readContext: () => process.env[TOOL_CONTEXT_ENV] ?? '',
+    readContext: () => {
+      const contextFile = process.env[TOOL_CONTEXT_FILE_ENV];
+      if (contextFile) {
+        try {
+          return readFileSync(contextFile, 'utf8');
+        } catch {
+          return '';
+        }
+      }
+      return process.env[TOOL_CONTEXT_ENV] ?? '';
+    },
   };
 }
 
@@ -69,7 +84,9 @@ async function readStdinPayload(): Promise<string> {
 }
 
 const MEMORY_RESULT_PAYLOAD_REDACTION_TOOLS = new Set([
+  'fbeast_memory_store',
   'fbeast_memory_export',
+  'fbeast_memory_access_audit_report',
   'fbeast_memory_retention_report',
   'fbeast_memory_review_propose',
   'fbeast_memory_review_list',
@@ -82,10 +99,133 @@ const MEMORY_RESULT_PAYLOAD_REDACTION_TOOLS = new Set([
   'execute_tool',
 ]);
 
+const MEMORY_RESULT_IMPLICIT_SUCCESS_TOOLS = new Set([
+  'fbeast_memory_store',
+  'fbeast_memory_query',
+  'fbeast_memory_frontload',
+  'fbeast_memory_export',
+  'fbeast_memory_access_audit_report',
+  'fbeast_memory_forget',
+  'fbeast_memory_right_to_forget',
+  'fbeast_memory_source_attribution',
+  'fbeast_memory_review_propose',
+  'fbeast_memory_retention_report',
+  'fbeast_memory_review_list',
+  'fbeast_memory_review_decide',
+  'fbeast_memory_review_conflicts',
+]);
+
+const MEMORY_AUDIT_ARG_TOOLS = new Set([
+  'fbeast_memory_store',
+  'fbeast_memory_query',
+  'fbeast_memory_frontload',
+  'fbeast_memory_export',
+  'fbeast_memory_access_audit_report',
+  'fbeast_memory_right_to_forget',
+  'fbeast_memory_forget',
+  'fbeast_memory_source_attribution',
+  'fbeast_memory_retention_report',
+  'fbeast_memory_review_propose',
+  'fbeast_memory_review_list',
+  'fbeast_memory_review_decide',
+  'fbeast_memory_review_conflicts',
+]);
+
 function unqualifyMcpToolName(toolName: string): string {
   const marker = '__';
   const index = toolName.lastIndexOf(marker);
   return index >= 0 ? toolName.slice(index + marker.length) : toolName;
+}
+
+function markHookGovernanceContext(context: string): string {
+  try {
+    const parsed = JSON.parse(context) as unknown;
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const sanitized = { ...(parsed as Record<string, unknown>) };
+      delete sanitized[CENTRAL_GOVERNANCE_SOURCE_KEY];
+      delete sanitized[HOOK_GOVERNANCE_SOURCE_KEY];
+      return JSON.stringify({
+        ...sanitized,
+        [HOOK_GOVERNANCE_SOURCE_KEY]: HOOK_GOVERNANCE_SOURCE,
+      });
+    }
+  } catch {
+    // Non-JSON legacy hook contexts are still governed as raw command text so
+    // policy regexes see executable whitespace such as tabs and newlines.
+  }
+  return context;
+}
+
+function parseJsonRecord(text: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function hookArgsFromContext(context: string, toolName: string): Record<string, unknown> | undefined {
+  const parsed = parseJsonRecord(redactSecrets(context));
+  if (!parsed) return undefined;
+  const toolInput = parsed['tool_input'];
+  if (toolInput !== null && typeof toolInput === 'object' && !Array.isArray(toolInput)) {
+    const input = toolInput as Record<string, unknown>;
+    const nestedTool = typeof input['tool'] === 'string' ? input['tool'] : toolName;
+    const args = input['args'];
+    const sanitized = args !== null && typeof args === 'object' && !Array.isArray(args)
+      ? sanitizeHookAuditArgs(nestedTool, args as Record<string, unknown>)
+      : sanitizeHookAuditArgs(nestedTool, input);
+    if (!sanitized) return undefined;
+    return unqualifyMcpToolName(toolName) === 'execute_tool'
+      ? { tool: nestedTool, args: sanitized }
+      : sanitized;
+  }
+  const args = parsed['args'];
+  return args !== null && typeof args === 'object' && !Array.isArray(args)
+    ? sanitizeHookAuditArgs(toolName, args as Record<string, unknown>)
+    : sanitizeHookAuditArgs(toolName, parsed);
+}
+
+function sanitizeHookAuditArgs(toolName: string | undefined, args: Record<string, unknown>): Record<string, unknown> | undefined {
+  const normalized = unqualifyMcpToolName(toolName ?? '');
+  const mayBeMemory = normalized.startsWith('fbeast_memory_') || MEMORY_AUDIT_ARG_TOOLS.has(normalized) || 'agentId' in args || 'profile' in args || 'readScope' in args || 'type' in args;
+  if (!mayBeMemory) return undefined;
+  const safe: Record<string, unknown> = {};
+  for (const key of ['agentId', 'profile', 'repo', 'type', 'operation', 'decision', 'readScope', 'limit', 'dryRun', 'redaction', 'activeProfile', 'crossProfile', 'action', 'resolution']) {
+    if (Object.prototype.hasOwnProperty.call(args, key)) safe[key] = args[key];
+  }
+  for (const key of ['key', 'query', 'category', 'sourceScope', 'memoryKey']) {
+    if (Object.prototype.hasOwnProperty.call(args, key)) safe[key] = '[memory-selector-redacted]';
+  }
+  return safe;
+}
+
+const HOOK_AUDIT_DECISIONS = new Set(['approved', 'denied', 'review_recommended', 'unknown_tool', 'validation_error', 'protected_mode', 'error']);
+
+function effectiveHookAuditTool(toolName: string, hookArgs: Record<string, unknown> | undefined): string {
+  const nestedTool = hookArgs && typeof hookArgs['tool'] === 'string' ? hookArgs['tool'] : undefined;
+  return nestedTool ?? toolName;
+}
+
+function hookAuditOutcomeFromPayload(toolName: string, payload: string): { ok?: boolean; decision?: string } {
+  const normalizedToolName = unqualifyMcpToolName(toolName);
+  const parsed = parseJsonRecord(payload);
+  if (!parsed) {
+    return MEMORY_RESULT_IMPLICIT_SUCCESS_TOOLS.has(normalizedToolName) ? { ok: true } : {};
+  }
+  if (typeof parsed['ok'] === 'boolean') return { ok: parsed['ok'] };
+  if (typeof parsed['isError'] === 'boolean') return { ok: !parsed['isError'] };
+  if (typeof parsed['decision'] === 'string' && parsed['decision'].trim().length > 0) {
+    const decision = parsed['decision'].trim();
+    return { decision: HOOK_AUDIT_DECISIONS.has(decision) ? decision : 'unknown' };
+  }
+  if (MEMORY_RESULT_IMPLICIT_SUCCESS_TOOLS.has(normalizedToolName)) {
+    return { ok: true };
+  }
+  return {};
 }
 
 function redactPostToolPayload(toolName: string, payload: string): string {
@@ -131,7 +271,7 @@ export async function runHook(
     // (`fbeast-hook pre-tool <tool> <payload>`) so they keep governance coverage
     // when the env var is unset.
     // Redact inline credentials before the governor sees/logs the context.
-    const context = redactSecrets(resolvedDeps.readContext() || payload);
+    const context = markHookGovernanceContext(redactSecrets(resolvedDeps.readContext() || payload));
     const decision = await resolvedDeps.governor.check({ action: toolName, context });
     if (decision.decision !== 'approved') {
       process.stderr.write(`${decision.reason}\n`);
@@ -151,9 +291,20 @@ export async function runHook(
       ? await (resolvedDeps.readPostToolPayload?.() ?? readStdinPayload())
       : '';
     const rawPostPayload = payload || streamedPayload;
+    const hookArgs = hookArgsFromContext(resolvedDeps.readContext(), toolName);
+    const auditToolName = effectiveHookAuditTool(toolName, hookArgs);
+    const outcome = hookAuditOutcomeFromPayload(auditToolName, rawPostPayload);
     await resolvedDeps.observer.log({
       event: 'tool_call',
-      metadata: JSON.stringify({ toolName, payload: redactPostToolPayload(toolName, rawPostPayload), phase }),
+      metadata: JSON.stringify({
+        __fbeastAuditTrailSource: HOOK_GOVERNANCE_SOURCE,
+        [HOOK_GOVERNANCE_SOURCE_KEY]: HOOK_GOVERNANCE_SOURCE,
+        toolName,
+        ...(hookArgs ? { args: hookArgs } : {}),
+        ...outcome,
+        payload: redactPostToolPayload(toolName, rawPostPayload),
+        phase,
+      }),
       sessionId: resolvedDeps.sessionId(),
     });
     process.stdout.write(JSON.stringify({ logged: true }) + '\n');

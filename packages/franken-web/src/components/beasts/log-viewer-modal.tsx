@@ -66,7 +66,10 @@ export function LogViewerModal({ isOpen, onClose, logs, events }: LogViewerModal
     <Dialog.Root open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 bg-black/60 z-[70]" />
-        <Dialog.Content className="fixed top-[5vh] left-[5vw] w-[90vw] h-[90vh] bg-beast-panel border border-beast-border rounded-xl z-[70] flex flex-col">
+        <Dialog.Content
+          data-beast-dialog-layer="content"
+          className="fixed top-[5vh] left-[5vw] w-[90vw] h-[90vh] bg-beast-panel border border-beast-border rounded-xl z-[70] flex flex-col"
+        >
           <div className="flex items-center gap-3 p-4 border-b border-beast-border">
             <Dialog.Title className="text-beast-text font-semibold flex-1">Events & Logs</Dialog.Title>
             <input
