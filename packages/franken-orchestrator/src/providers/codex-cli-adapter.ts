@@ -110,6 +110,10 @@ export class CodexCliAdapter implements ILlmProvider {
   }
 
   buildArgs(request: LlmRequest): string[] {
+    // A profile is not itself a sandbox selection: profiles commonly contain
+    // only model/reasoning settings. Callers that need profile-specific
+    // permissions must pass the explicit config override so workspace-write is
+    // omitted deterministically instead of silently falling back to read-only.
     const hasConfiguredSandbox = Object.hasOwn(this.options.configOverrides ?? {}, 'sandbox_mode')
       || Object.hasOwn(this.options.configOverrides ?? {}, 'default_permissions');
     const { sandboxArgs, extraArgs } = resolveCodexSandboxArgs(
