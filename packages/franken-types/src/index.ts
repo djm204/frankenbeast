@@ -103,7 +103,7 @@ export type {
   AuthField,
   CritiqueContext,
   ProviderCritiqueFinding,
-  CritiqueResult,
+  CritiqueFinding,
   ProviderSkillConfig,
 } from './provider.js';
 export {

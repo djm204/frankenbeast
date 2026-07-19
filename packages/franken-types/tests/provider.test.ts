@@ -20,7 +20,7 @@ import {
   type ImageSource,
   type CritiqueContext,
   type ProviderCritiqueFinding,
-  type CritiqueResult,
+  type CritiqueFinding,
   type ProviderSkillConfig,
 } from '../src/index.js';
 
@@ -300,9 +300,9 @@ describe('Provider interfaces (type-level)', () => {
       message: 'Missing error handling',
       suggestion: 'Add try/catch around API calls',
     };
-    const deprecatedAlias: CritiqueResult = result;
+    const finding: CritiqueFinding = result;
     expect(ctx.phase).toBe('execution');
-    expect(deprecatedAlias.severity).toBe(7);
+    expect(finding.severity).toBe(7);
   });
 
   it('ProviderSkillConfig has required shape', () => {

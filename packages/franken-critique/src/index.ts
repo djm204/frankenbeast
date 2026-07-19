@@ -17,7 +17,6 @@ export type {
   EvaluationFinding,
   EvaluationResult,
   CritiquePipelineResult,
-  CritiqueResult,
   Evaluator,
 } from './types/evaluation.js';
 

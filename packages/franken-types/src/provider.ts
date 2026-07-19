@@ -150,11 +150,9 @@ export interface ProviderCritiqueFinding {
 }
 
 /**
- * @deprecated Use ProviderCritiqueFinding for provider/evaluator findings.
- * The @franken/critique package uses CritiquePipelineResult for aggregate
- * pipeline outcomes.
+ * A single provider/evaluator finding used by provider/critiquing flows.
  */
-export type CritiqueResult = ProviderCritiqueFinding;
+export type CritiqueFinding = ProviderCritiqueFinding;
 
 // --- Skill Loading Types (used by SkillManager provider translation + Beast Loop spawn wiring) ---
 

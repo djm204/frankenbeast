@@ -48,12 +48,6 @@ export interface CritiquePipelineResult {
   readonly shortCircuited: boolean;
 }
 
-/**
- * @deprecated Use CritiquePipelineResult for aggregate pipeline outcomes.
- * @franken/types exports ProviderCritiqueFinding for individual provider
- * critique findings.
- */
-export type CritiqueResult = CritiquePipelineResult;
 
 /** An evaluator that can assess code or plans. */
 export interface Evaluator {
