@@ -66,6 +66,8 @@ If you have direct write access and intentionally clone the upstream repository 
 
 The bootstrap command checks the supported Node.js and npm versions, prepares `.env` when needed, and installs dependencies. If it fails, follow the [setup troubleshooting matrix](docs/onboarding/setup-troubleshooting-matrix.md) before changing source files.
 
+If your fork is behind, work started on the wrong branch, or Git rejects a push, follow the [fork and branch recovery guide](docs/onboarding/fork-and-branch-recovery.md). It preserves uncommitted and committed work, verifies both remotes, and names the cases where a first-time contributor should stop instead of resetting or force-pushing.
+
 ## Make one focused change
 
 - Read the nearest package `README.md`, tests, and repository instructions before editing.
