@@ -97,6 +97,55 @@ describe('TraceServer', () => {
       expect(html).not.toMatch(/<link\s[^>]*rel=["']stylesheet["']/i)
     })
 
+    it('renders trace rows as keyboard-operable buttons and exposes selection state', async () => {
+      const html = await fetch(server.url + '/').then(r => r.text())
+      const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1]
+      expect(script).toBeDefined()
+
+      const sidebar = { innerHTML: '', addEventListener: () => {} }
+      const panel = { innerHTML: '' }
+      const attributes = new Map<string, string>()
+      const traceItem = {
+        dataset: { id: 'trace-1' },
+        classList: { toggle: () => {} },
+        setAttribute: (name: string, value: string) => attributes.set(name, value),
+      }
+      const context = createContext({
+        document: {
+          getElementById: (id: string) => id === 'sidebar' ? sidebar : panel,
+          querySelectorAll: () => [traceItem],
+        },
+        fetch: (url: string) => Promise.resolve(url === '/api/traces'
+          ? {
+              json: () => Promise.resolve({
+                traces: [{ id: 'trace-1', goal: 'Inspect me', status: 'completed', spanCount: 0, startedAt: 0 }],
+              }),
+            }
+          : {
+              ok: true,
+              json: () => Promise.resolve({ id: 'trace-1', goal: 'Inspect me', status: 'completed', spans: [] }),
+            }),
+        Date,
+      }) as {
+        loadTraces?: () => Promise<void>
+        loadDetail?: (id: string) => Promise<void>
+      }
+      new Script(script!.replace(/loadTraces\(\)\s*$/, '')).runInContext(context)
+
+      expect(html).toContain('.trace-item:hover,.trace-item.active,.trace-item[aria-current="true"]{')
+      expect(html).toContain('.trace-goal{display:block;')
+      await context.loadTraces!()
+      expect(html).toContain('<nav id="sidebar" aria-label="Traces">')
+      expect(sidebar.innerHTML).toContain('<button type="button" class="trace-item"')
+      expect(sidebar.innerHTML).toContain('aria-current="false"')
+
+      await context.loadDetail!('trace-1')
+      expect(attributes.get('aria-current')).toBe('true')
+
+      await context.loadTraces!()
+      expect(sidebar.innerHTML).toContain('data-id="trace-1" aria-current="true"')
+    })
+
     it('escapes template-literal metacharacters in trace text before writing innerHTML', async () => {
       const html = await fetch(server.url + '/').then(r => r.text())
       const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1]
