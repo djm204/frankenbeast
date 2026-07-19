@@ -272,6 +272,80 @@ describe('SkillHealthChecker', () => {
     expect(result.serverStatuses).toHaveLength(2);
   });
 
+  it('runs at most four trusted MCP probes concurrently', async () => {
+    vi.useFakeTimers();
+    const { spawn } = await import('node:child_process');
+    let activeProbes = 0;
+    let maxActiveProbes = 0;
+
+    (spawn as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      const proc = makeMockProcess();
+      activeProbes += 1;
+      maxActiveProbes = Math.max(maxActiveProbes, activeProbes);
+      setTimeout(() => {
+        activeProbes -= 1;
+        proc.exitCode = 0;
+        proc.emit('close', 0);
+      }, 100);
+      return proc;
+    });
+
+    const config: McpConfig = {
+      mcpServers: Object.fromEntries(
+        Array.from({ length: 12 }, (_, index) => [
+          `server-${index}`,
+          { command: 'echo' },
+        ]),
+      ),
+    };
+
+    const resultPromise = checker.getStatus('bounded', config, {
+      trustMcpServerCommands: true,
+    });
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.serverStatuses).toHaveLength(12);
+    expect(maxActiveProbes).toBeLessThanOrEqual(4);
+  });
+
+  it('skips trusted MCP probes beyond the aggregate limit', async () => {
+    vi.useFakeTimers();
+    const { spawn } = await import('node:child_process');
+    (spawn as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      const proc = makeMockProcess();
+      setTimeout(() => {
+        proc.exitCode = 0;
+        proc.emit('close', 0);
+      }, 10);
+      return proc;
+    });
+    const config: McpConfig = {
+      mcpServers: Object.fromEntries(
+        Array.from({ length: 25 }, (_, index) => [
+          `server-${index}`,
+          { command: 'echo' },
+        ]),
+      ),
+    };
+
+    const resultPromise = checker.getStatus('budgeted', config, {
+      trustMcpServerCommands: true,
+    });
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(spawn).toHaveBeenCalledTimes(20);
+    expect(result.serverStatuses).toHaveLength(25);
+    expect(result.serverStatuses.slice(20)).toEqual(
+      Array.from({ length: 5 }, (_, index) => ({
+        serverName: `server-${index + 20}`,
+        status: 'unknown',
+        error: 'MCP health probe skipped because the per-check limit of 20 servers was exceeded',
+      })),
+    );
+  });
+
   it('returns error when trusted spawn fails', async () => {
     const { spawn } = await import('node:child_process');
     const proc = makeMockProcess();
