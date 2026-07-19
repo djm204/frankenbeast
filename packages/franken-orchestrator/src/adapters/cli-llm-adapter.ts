@@ -45,6 +45,15 @@ type LlmReplayRecorder = (record: {
 
 type ReplayRunId = string | (() => string | undefined);
 
+export type CliLlmLifecycleEvent =
+  | { type: 'attempt'; provider: string; attempt: number }
+  | { type: 'complete'; provider: string; attempt: number }
+  | { type: 'rate-limit'; provider: string }
+  | { type: 'failure'; provider: string }
+  | { type: 'fallback'; from: string; to: string }
+  | { type: 'wait'; durationMs: number }
+  | { type: 'timeout'; provider: string; durationMs: number };
+
 type SpawnFn = (
   command: string,
   args: readonly string[],
@@ -61,6 +70,8 @@ export interface CliLlmAdapterOpts {
   chatMode?: boolean;
   /** Called with each complete line of stdout as it arrives (for streaming progress). */
   onStreamLine?: (line: string) => void;
+  /** Called with bounded provider lifecycle metadata; never includes prompt or output. */
+  onLifecycleEvent?: (event: CliLlmLifecycleEvent) => void;
   /** Capture replayable LLM request/response content. */
   replayRecorder?: LlmReplayRecorder | undefined;
   /** Stable run/session id for replay records. Defaults to per-request id. */
@@ -86,6 +97,7 @@ export class CliLlmAdapter implements IAdapter {
     model?: string;
     chatMode: boolean;
     onStreamLine?: (line: string) => void;
+    onLifecycleEvent?: (event: CliLlmLifecycleEvent) => void;
     replayRecorder?: LlmReplayRecorder | undefined;
     replayRunId?: ReplayRunId | undefined;
     providers?: readonly string[] | undefined;
@@ -113,6 +125,7 @@ export class CliLlmAdapter implements IAdapter {
       ...(opts.commandOverride !== undefined ? { commandOverride: opts.commandOverride } : {}),
       ...(opts.model !== undefined ? { model: opts.model } : {}),
       ...(opts.onStreamLine !== undefined ? { onStreamLine: opts.onStreamLine } : {}),
+      ...(opts.onLifecycleEvent !== undefined ? { onLifecycleEvent: opts.onLifecycleEvent } : {}),
       ...(opts.replayRecorder !== undefined ? { replayRecorder: opts.replayRecorder } : {}),
       ...(opts.replayRunId !== undefined ? { replayRunId: opts.replayRunId } : {}),
       ...(opts.providers !== undefined ? { providers: opts.providers } : {}),
@@ -166,10 +179,13 @@ export class CliLlmAdapter implements IAdapter {
     const initialProvider = this.provider.name;
     let activeProvider = initialProvider;
     let rateLimitRetryCycles = 0;
+    let attempt = 0;
 
     while (true) {
+      attempt++;
       const provider = this.resolveProvider(activeProvider);
       const activeModel = this.resolveModel(activeProvider, model);
+      this.opts.onLifecycleEvent?.({ type: 'attempt', provider: activeProvider, attempt });
       if (requestId) {
         const replayRunId = this.resolveReplayRunId(requestId);
         this.opts.replayRecorder?.({
@@ -221,10 +237,23 @@ export class CliLlmAdapter implements IAdapter {
           },
         });
 
+        if (failure.rateLimited) {
+          this.opts.onLifecycleEvent?.({ type: 'rate-limit', provider: activeProvider });
+        } else if (error instanceof Error && /timeout/i.test(error.message)) {
+          this.opts.onLifecycleEvent?.({
+            type: 'timeout',
+            provider: activeProvider,
+            durationMs: this.opts.timeoutMs,
+          });
+        } else {
+          this.opts.onLifecycleEvent?.({ type: 'failure', provider: activeProvider });
+        }
+
         if (failure.kind === 'spawn_error') {
           exhaustedProviders.set(activeProvider, failure);
           const nextProvider = providers.find((name) => !exhaustedProviders.has(name));
           if (nextProvider) {
+            this.opts.onLifecycleEvent?.({ type: 'fallback', from: activeProvider, to: nextProvider });
             activeProvider = nextProvider;
             continue;
           }
@@ -235,6 +264,7 @@ export class CliLlmAdapter implements IAdapter {
               });
             }
             const sleepMs = this.resolveSleepMs(exhaustedProviders);
+            this.opts.onLifecycleEvent?.({ type: 'wait', durationMs: sleepMs });
             await sleepFn(sleepMs);
             rateLimitRetryCycles++;
             exhaustedProviders.clear();
@@ -248,6 +278,7 @@ export class CliLlmAdapter implements IAdapter {
       }
 
       if (result.exitCode === 0) {
+        this.opts.onLifecycleEvent?.({ type: 'complete', provider: activeProvider, attempt });
       if (chatMode && sessionId) {
         const nativeSessionId = this.extractNativeSessionId(result.stdout);
         if (nativeSessionId) {
@@ -303,13 +334,16 @@ export class CliLlmAdapter implements IAdapter {
       });
 
       if (!failure.rateLimited) {
+        this.opts.onLifecycleEvent?.({ type: 'failure', provider: activeProvider });
         throw new Error(failure.summary, { cause: failure });
       }
 
+      this.opts.onLifecycleEvent?.({ type: 'rate-limit', provider: activeProvider });
       exhaustedProviders.set(activeProvider, failure);
 
       const nextProvider = providers.find((name) => !exhaustedProviders.has(name));
       if (nextProvider) {
+        this.opts.onLifecycleEvent?.({ type: 'fallback', from: activeProvider, to: nextProvider });
         activeProvider = nextProvider;
         continue;
       }
@@ -320,6 +354,7 @@ export class CliLlmAdapter implements IAdapter {
           cause: lastRateLimitedFailure(exhaustedProviders),
         });
       }
+      this.opts.onLifecycleEvent?.({ type: 'wait', durationMs: sleepMs });
       await sleepFn(sleepMs);
       rateLimitRetryCycles++;
       exhaustedProviders.clear();

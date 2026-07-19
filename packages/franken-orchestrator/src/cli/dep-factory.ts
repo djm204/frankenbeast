@@ -5,7 +5,7 @@ import { BeastLogger } from '../logging/beast-logger.js';
 import { MartinLoop } from '../skills/martin-loop.js';
 import { GitBranchIsolator } from '../skills/git-branch-isolator.js';
 import { CliSkillExecutor, type ObserverDeps } from '../skills/cli-skill-executor.js';
-import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
+import { CliLlmAdapter, type CliLlmLifecycleEvent } from '../adapters/cli-llm-adapter.js';
 import { createDefaultRegistry } from '../skills/providers/cli-provider.js';
 import { CliObserverBridge } from '../adapters/cli-observer-bridge.js';
 import { FileCheckpointStore } from '../checkpoint/file-checkpoint-store.js';
@@ -60,6 +60,8 @@ export interface CliDepOptions {
   dryRun?: boolean | undefined;
   /** Stream line callback for real-time progress during LLM calls. */
   onStreamLine?: ((line: string) => void) | undefined;
+  /** Sanitized LLM provider lifecycle callback for persistent diagnostics. */
+  onLlmLifecycleEvent?: ((event: CliLlmLifecycleEvent) => void) | undefined;
   /**
    * Override working directory for the LLM adapter.
    * Use os.tmpdir() for planning calls to prevent project-scoped plugins
@@ -109,6 +111,7 @@ export interface CliDeps {
   observerBridge: CliObserverBridge;
   logger: BeastLogger;
   finalize: () => Promise<void>;
+  artifacts: SessionArtifacts;
   issueDeps?: IssueCliDeps | undefined;
   skillManager?: import('../skills/skill-manager.js').SkillManager | undefined;
   providerRegistry?: import('../providers/provider-registry.js').ProviderRegistry | undefined;
@@ -204,7 +207,7 @@ interface EffectiveCliConfig {
   };
 }
 
-interface SessionArtifacts {
+export interface SessionArtifacts {
   planName: string;
   checkpointFile: string;
   logFile: string;
@@ -594,6 +597,7 @@ function createCachedCliLlmClient(
     ...((model ?? override?.model ?? options.adapterModel) != null ? { model: (model ?? override?.model ?? options.adapterModel)! } : {}),
     ...(options.chatMode ? { chatMode: true } : {}),
     ...(options.onStreamLine ? { onStreamLine: options.onStreamLine } : {}),
+    ...(options.onLlmLifecycleEvent ? { onLifecycleEvent: options.onLlmLifecycleEvent } : {}),
     replayRunId: () => observer.observerBridge.getActiveSessionId() ?? observer.runSessionId,
     replayRecorder: (record) => observer.observerBridge.recordReplay(record),
     ...(resolveCliRegistryNames(options, options.providers) ? { providers: resolveCliRegistryNames(options, options.providers) } : {}),
@@ -1144,6 +1148,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
       observerBridge: observer.observerBridge,
       logger: observer.logger,
       finalize,
+      artifacts,
       issueDeps,
       ...(consolidated.skillManager ? { skillManager: consolidated.skillManager } : {}),
       ...(consolidated.providerRegistry ? { providerRegistry: consolidated.providerRegistry } : {}),
