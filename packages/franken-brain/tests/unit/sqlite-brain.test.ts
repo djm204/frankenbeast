@@ -13,6 +13,7 @@ import type {
 import {
   SqliteBrain,
   WorkingMemoryLimitError,
+  WorkingMemoryHydrationLimitError,
   UnsupportedMemorySchemaVersionError,
   MemoryEncryptionKeyUnavailableError,
   MemoryEncryptionMigrationRequiredError,
@@ -1612,6 +1613,95 @@ describe('SqliteBrain', () => {
         WorkingMemoryLimitError,
       );
       bounded.close();
+    });
+
+    it('fails before hydrating persisted rows beyond startup row or byte budgets', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-hydration-limit-'));
+      const dbPath = join(dir, 'brain.db');
+      let seeded: SqliteBrain | undefined;
+      let db: Database.Database | undefined;
+
+      try {
+        seeded = new SqliteBrain(dbPath);
+        seeded.working.set('first', 'x'.repeat(32));
+        seeded.working.set('second', 'y'.repeat(32));
+        seeded.flush();
+        seeded.close();
+        seeded = undefined;
+
+        let rowError: unknown;
+        try {
+          new SqliteBrain(dbPath, undefined, {
+            workingMemoryHydrationLimits: { maxRows: 1, maxBytes: 10_000 },
+          });
+        } catch (error) {
+          rowError = error;
+        }
+        expect(rowError).toMatchObject({
+          code: 'WORKING_MEMORY_HYDRATION_LIMIT_EXCEEDED',
+          rowCount: 2,
+          byteCount: undefined,
+          maxRows: 1,
+        });
+
+        expect(() =>
+          new SqliteBrain(dbPath, undefined, {
+            hydrateWorkingMemoryFromDb: false,
+            workingMemoryHydrationLimits: { maxRows: 1, maxBytes: 10_000 },
+          }),
+        ).toThrow(WorkingMemoryHydrationLimitError);
+
+        let byteError: unknown;
+        try {
+          new SqliteBrain(dbPath, undefined, {
+            workingMemoryHydrationLimits: { maxRows: 10, maxBytes: 1 },
+          });
+        } catch (error) {
+          byteError = error;
+        }
+        expect(byteError).toBeInstanceOf(WorkingMemoryHydrationLimitError);
+        expect(byteError).toMatchObject({
+          code: 'WORKING_MEMORY_HYDRATION_LIMIT_EXCEEDED',
+          rowCount: 2,
+          maxBytes: 1,
+        });
+
+        db = new Database(dbPath);
+        expect(db.prepare(`SELECT key FROM working_memory ORDER BY key ASC`).all()).toEqual([
+          { key: 'first' },
+          { key: 'second' },
+        ]);
+      } finally {
+        db?.close();
+        seeded?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('keeps startup hydration budgets separate from working-memory write limits', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-hydration-write-limit-'));
+      const dbPath = join(dir, 'brain.db');
+      let seeded: SqliteBrain | undefined;
+      let reopened: SqliteBrain | undefined;
+
+      try {
+        seeded = new SqliteBrain(dbPath);
+        seeded.working.set('first', 1);
+        seeded.working.set('second', 2);
+        seeded.flush();
+        seeded.close();
+        seeded = undefined;
+
+        reopened = new SqliteBrain(dbPath, undefined, {
+          workingMemoryHydrationLimits: { maxRows: 2, maxBytes: 10_000 },
+        });
+        expect(() => reopened?.working.set('third', 3)).not.toThrow();
+        expect(reopened.working.keys().sort()).toEqual(['first', 'second', 'third']);
+      } finally {
+        reopened?.close();
+        seeded?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it('prunes oldest persisted rows on startup when maxEntries is reduced', () => {

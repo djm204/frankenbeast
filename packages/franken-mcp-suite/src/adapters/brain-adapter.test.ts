@@ -10,6 +10,8 @@ const { databaseInstances, brainInstances, workingMemoryRowsByPath } = vi.hoiste
     options: unknown;
   }> = [];
   const brainInstances: Array<{
+    dbPath: string;
+    limits: { maxRows?: number; maxBytes?: number } | undefined;
     working: {
       restore: ReturnType<typeof vi.fn>;
       snapshot: ReturnType<typeof vi.fn>;
@@ -23,6 +25,7 @@ const { databaseInstances, brainInstances, workingMemoryRowsByPath } = vi.hoiste
       record: ReturnType<typeof vi.fn>;
     };
     rightToForget: ReturnType<typeof vi.fn>;
+    memoryRetentionReport: ReturnType<typeof vi.fn>;
     memoryReview: {
       propose: ReturnType<typeof vi.fn>;
       approve: ReturnType<typeof vi.fn>;
@@ -416,7 +419,19 @@ vi.mock("better-sqlite3", () => ({
 }));
 
 vi.mock("@franken/brain", () => ({
-  SqliteBrain: vi.fn(function MockSqliteBrain(this: unknown) {
+  DEFAULT_WORKING_MEMORY_LIMITS: {
+    maxEntries: 10_000,
+    maxValueBytes: 5 * 1024 * 1024,
+    maxTotalBytes: 64 * 1024 * 1024,
+  },
+  SqliteBrain: vi.fn(function MockSqliteBrain(
+    this: unknown,
+    dbPath: string,
+    _workingMemoryLimits?: unknown,
+    options?: {
+      workingMemoryHydrationLimits?: { maxRows?: number; maxBytes?: number };
+    },
+  ) {
     let workingSnapshot: Record<string, unknown> = {
       "task-1": "working entry",
       "agents/oncall/runbook": "shared runbook",
@@ -466,6 +481,18 @@ vi.mock("@franken/brain", () => ({
         value: "beta entry",
       },
     };
+    const persistedRows = workingMemoryRowsByPath.get(dbPath);
+    if (persistedRows !== undefined) {
+      workingSnapshot = Object.fromEntries(
+        persistedRows.map((row) => {
+          try {
+            return [row.key, JSON.parse(row.value)];
+          } catch {
+            return [row.key, row.value];
+          }
+        }),
+      );
+    }
     const brain = {
       working: {
         restore: vi.fn((snapshot: Record<string, unknown>) => {
@@ -666,7 +693,11 @@ vi.mock("@franken/brain", () => ({
       },
       flush: vi.fn(),
     };
-    brainInstances.push(brain);
+    brainInstances.push({
+      ...brain,
+      dbPath,
+      limits: options?.workingMemoryHydrationLimits,
+    });
     Object.assign(this as object, brain);
   }),
 }));
@@ -681,18 +712,37 @@ describe("createBrainAdapter", () => {
     vi.clearAllMocks();
   });
 
-  it("configures WAL and a busy timeout on the adapter read connection before rehydrating memory", () => {
+  it("delegates startup hydration to SqliteBrain with its bounded defaults", () => {
     createBrainAdapter("/tmp/beast.db");
 
-    expect(databaseInstances).toHaveLength(1);
-    const readDb = databaseInstances[0];
-    expect(readDb.options).toBeUndefined();
-    expect(readDb.pragma).toHaveBeenNthCalledWith(1, "journal_mode = WAL");
-    expect(readDb.pragma).toHaveBeenNthCalledWith(2, "busy_timeout = 5000");
-    expect(readDb.prepare).toHaveBeenCalledWith(
-      "SELECT key, value FROM working_memory",
-    );
-    expect(readDb.close).toHaveBeenCalledOnce();
+    expect(databaseInstances).toHaveLength(0);
+    expect(brainInstances).toHaveLength(1);
+    expect(brainInstances[0]).toMatchObject({
+      dbPath: "/tmp/beast.db",
+      limits: { maxRows: 10_000, maxBytes: 64 * 1024 * 1024 },
+    });
+    expect(brainInstances[0]!.working.restore).not.toHaveBeenCalled();
+  });
+
+  it("passes configurable hydration budgets to SqliteBrain's bounded startup path", () => {
+    createBrainAdapter("/tmp/bounded.db", {
+      hydration: { maxRows: 2, maxBytes: 1_000 },
+    });
+
+    expect(brainInstances[0]).toMatchObject({
+      dbPath: "/tmp/bounded.db",
+      limits: { maxRows: 2, maxBytes: 1_000 },
+    });
+  });
+
+  it("rejects invalid hydration budgets before opening the database", () => {
+    expect(() =>
+      createBrainAdapter("/tmp/beast.db", {
+        hydration: { maxRows: 0 },
+      }),
+    ).toThrow("hydration.maxRows must be a positive safe integer");
+    expect(databaseInstances).toHaveLength(0);
+    expect(brainInstances).toHaveLength(0);
   });
 
   it("keeps direct API memory reads isolated by profile database path", async () => {
@@ -725,16 +775,10 @@ describe("createBrainAdapter", () => {
     expect(doctorRows).toEqual([
       { key: "profile-note", value: "doctor profile memory", type: "working" },
     ]);
-    expect(databaseInstances.map((db) => db.dbPath)).toEqual([
+    expect(brainInstances.map((brain) => brain.dbPath)).toEqual([
       "/tmp/profiles/default/beast.db",
       "/tmp/profiles/doctor/beast.db",
     ]);
-    expect(brainInstances[0]!.working.restore).toHaveBeenCalledWith({
-      "profile-note": "default profile memory",
-    });
-    expect(brainInstances[1]!.working.restore).toHaveBeenCalledWith({
-      "profile-note": "doctor profile memory",
-    });
     expect(JSON.stringify(defaultRows)).not.toContain("doctor profile memory");
     expect(JSON.stringify(doctorRows)).not.toContain("default profile memory");
   });

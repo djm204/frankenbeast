@@ -15,7 +15,12 @@ export { createGovernanceGate } from './shared/governance-gate.js';
 export { createAuditSink, createCentralOptions } from './shared/central-enforcement.js';
 
 // Adapters
-export { createBrainAdapter, type BrainAdapter } from './adapters/brain-adapter.js';
+export {
+  createBrainAdapter,
+  type BrainAdapter,
+  type BrainAdapterOptions,
+} from './adapters/brain-adapter.js';
+export { WorkingMemoryHydrationLimitError } from '@franken/brain';
 export { createObserverAdapter, type ObserverAdapter } from './adapters/observer-adapter.js';
 export { createGovernorAdapter, type GovernorAdapter } from './adapters/governor-adapter.js';
 export { createPlannerAdapter, type PlannerAdapter } from './adapters/planner-adapter.js';
