@@ -339,6 +339,10 @@ export class CliLlmAdapter implements IAdapter {
     return feature === 'text-completion';
   }
 
+  getProviderName(): string {
+    return this.provider.name;
+  }
+
   consumeSessionMetadata(requestId: string): { provider: string; model?: string | undefined; sessionId: string } | undefined {
     const session = this.responseSessions.get(requestId);
     if (!session) {

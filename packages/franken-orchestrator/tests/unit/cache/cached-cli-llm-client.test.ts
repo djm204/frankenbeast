@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { access, mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { CachedCliLlmClient } from '../../../src/cache/cached-cli-llm-client.js';
@@ -10,6 +10,7 @@ interface FakeCliAdapter {
   execute: ReturnType<typeof vi.fn>;
   transformResponse: ReturnType<typeof vi.fn>;
   consumeSessionMetadata: ReturnType<typeof vi.fn>;
+  getProviderName: ReturnType<typeof vi.fn>;
 }
 
 function createAdapter(): FakeCliAdapter {
@@ -23,6 +24,7 @@ function createAdapter(): FakeCliAdapter {
       model: 'claude-sonnet-4-6',
       sessionId: `native:${requestId}`,
     })),
+    getProviderName: vi.fn(() => 'claude'),
   };
 }
 
@@ -129,10 +131,13 @@ describe('CachedCliLlmClient', () => {
   it('retries once with a fresh isolated session when the stored provider session is stale', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-cached-cli-'));
     const adapter = createAdapter();
+    adapter.consumeSessionMetadata
+      .mockReturnValueOnce({ provider: 'claude', model: 'claude-sonnet-4-6', sessionId: 'stored-session' })
+      .mockReturnValue(undefined);
     const metrics = new CacheMetrics();
     const client = new CachedCliLlmClient({
       cacheRootDir: join(workDir, '.fbeast', '.cache', 'llm'),
-      cliAdapter: adapter,
+      cliAdapter: adapter as never,
       projectId: 'frankenbeast',
       provider: 'claude',
       model: 'claude-sonnet-4-6',
@@ -143,7 +148,9 @@ describe('CachedCliLlmClient', () => {
 
     await client.complete('first prompt');
     adapter.execute
-      .mockRejectedValueOnce(new Error('Conversation session not found'))
+      .mockRejectedValueOnce(new Error('Claude CLI failed', {
+        cause: { stdout: 'Conversation session not found', stderr: '' },
+      }))
       .mockResolvedValueOnce('response:fresh');
 
     await expect(client.complete('second prompt')).resolves.toBe('response:fresh');
@@ -152,5 +159,42 @@ describe('CachedCliLlmClient', () => {
     expect(adapter.transformRequest.mock.calls[2]?.[0]).not.toHaveProperty('session_id');
     expect(adapter.execute).toHaveBeenCalledTimes(3);
     expect(metrics.snapshot()).toMatchObject({ nativeSessionFallbacks: 1 });
+    await expect(access(join(
+      workDir,
+      '.fbeast',
+      '.cache',
+      'llm',
+      'work',
+      'frankenbeast',
+      'plan%3Aalpha',
+      'provider-session.json',
+    ))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('keeps provider-issued sessions for aliases when the CLI model is implicit', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-cached-cli-'));
+    const adapter = createAdapter();
+    adapter.consumeSessionMetadata.mockImplementation((requestId: string) => ({
+      provider: 'claude',
+      model: undefined,
+      sessionId: `native:${requestId}`,
+    }));
+    const client = new CachedCliLlmClient({
+      cacheRootDir: join(workDir, '.fbeast', '.cache', 'llm'),
+      cliAdapter: adapter as never,
+      projectId: 'frankenbeast',
+      provider: 'prod-claude',
+      model: 'prod-claude',
+      operation: 'plan-build',
+      workId: 'plan:alias',
+    });
+
+    await client.complete('first prompt');
+    await client.complete('second prompt');
+
+    const firstRequestId = (adapter.transformRequest.mock.calls[0]?.[0] as { id?: string }).id;
+    expect(adapter.transformRequest.mock.calls[1]?.[0]).toMatchObject({
+      session_id: `native:${firstRequestId}`,
+    });
   });
 });

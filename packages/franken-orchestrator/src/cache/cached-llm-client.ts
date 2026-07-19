@@ -7,6 +7,7 @@ import { isoNow } from '@franken/types';
 export interface NativeSessionResult {
   content: string;
   sessionId?: string | undefined;
+  clearSession?: boolean | undefined;
 }
 
 export interface NativeSessionController {
@@ -74,7 +75,10 @@ export class CachedLlmClient {
       const resumed = await request.nativeSession.resume(existingSession?.sessionId, computed.fullPrompt);
       if (resumed) {
         this.metrics.recordNativeSessionHit();
-        const sessionId = resumed.sessionId ?? existingSession?.sessionId;
+        if (resumed.clearSession) {
+          await this.deps.providerSessions.remove(request.scope.projectId, workId);
+        }
+        const sessionId = resumed.sessionId ?? (resumed.clearSession ? undefined : existingSession?.sessionId);
         if (sessionId) {
           const now = isoNow();
           await this.deps.providerSessions.save({

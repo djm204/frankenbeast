@@ -18,6 +18,7 @@ interface CliAdapterLike {
   execute(providerRequest: unknown): Promise<unknown>;
   transformResponse(providerResponse: unknown, requestId: string): { content: string | null };
   consumeSessionMetadata?(requestId: string): CliSessionMetadata | undefined;
+  getProviderName?(): string;
 }
 
 export interface LlmCacheHint {
@@ -75,6 +76,7 @@ export class CachedCliLlmClient implements ILlmClient {
           model: this.options.model,
           resume: async (sessionId: string | undefined, nextPrompt: string) => {
             let response: { content: string; sessionId?: string | undefined };
+            let clearSession = false;
             try {
               response = await this.invoke(nextPrompt, workId, sessionId);
             } catch (error) {
@@ -82,11 +84,13 @@ export class CachedCliLlmClient implements ILlmClient {
                 throw error;
               }
               this.metrics.recordNativeSessionFallback();
+              clearSession = true;
               response = await this.invoke(nextPrompt, workId);
             }
             return {
               content: response.content,
               ...(response.sessionId ? { sessionId: response.sessionId } : {}),
+              ...(clearSession && !response.sessionId ? { clearSession: true } : {}),
             };
           },
         }
@@ -138,8 +142,11 @@ export class CachedCliLlmClient implements ILlmClient {
       const response = this.options.cliAdapter.transformResponse(providerResponse, requestId);
       const content = response.content ?? '';
       const sessionMetadata = this.options.cliAdapter.consumeSessionMetadata?.(requestId);
-      const matchingSessionId = sessionMetadata?.provider === this.options.provider
-        && sessionMetadata.model === this.options.model
+      const configuredProvider = this.options.cliAdapter.getProviderName?.() ?? this.options.provider;
+      const matchingSessionId = sessionMetadata?.provider === configuredProvider
+        && (sessionMetadata.model === undefined
+          || this.options.model === undefined
+          || sessionMetadata.model === this.options.model)
         ? sessionMetadata.sessionId
         : undefined;
 
@@ -198,6 +205,25 @@ function isExpectedStaleSessionError(error: unknown): boolean {
     }
     if (typeof current === 'string') {
       messages.push(current);
+      break;
+    }
+    if (typeof current === 'object') {
+      const record = current as Record<string, unknown>;
+      for (const key of ['message', 'stdout', 'stderr', 'normalizedOutput']) {
+        try {
+          if (typeof record[key] === 'string') {
+            messages.push(record[key]);
+          }
+        } catch {
+          // Ignore hostile getters while classifying an error payload.
+        }
+      }
+      try {
+        current = record['cause'];
+        continue;
+      } catch {
+        break;
+      }
     }
     break;
   }
