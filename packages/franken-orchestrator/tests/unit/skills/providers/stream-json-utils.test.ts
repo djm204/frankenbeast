@@ -82,6 +82,11 @@ describe('stripHookJson', () => {
     expect(stripHookJson(input)).toBe('[{"id":"chunk1"}]');
   });
 
+  it('strips hook output when an earlier property contains braces in a string', () => {
+    const input = '{ "message": "value with { braces }", "hookSpecificOutput": {} }[{"id":"a"}]';
+    expect(stripHookJson(input)).toBe('[{"id":"a"}]');
+  });
+
   it('strips hook output with nested braces in string values', () => {
     const input = '{ "hookSpecificOutput": { "data": "value with { braces }" } }[{"id":"a"}]';
     expect(stripHookJson(input)).toBe('[{"id":"a"}]');
@@ -90,6 +95,19 @@ describe('stripHookJson', () => {
   it('strips multiple hook objects', () => {
     const input = '{ "hookSpecificOutput": {} }{ "hookSpecificOutput": {} }[1,2,3]';
     expect(stripHookJson(input)).toBe('[1,2,3]');
+  });
+
+  it('strips many hook blocks from large provider output within a bounded time', () => {
+    const hook = '{ "hookSpecificOutput": { "hookEventName": "SessionStart" } }';
+    const retained = 'x'.repeat(1_000_000) + '[{"id":"chunk1"}]';
+    const input = retained.slice(0, 1_000_000) + hook.repeat(2_000) + retained.slice(1_000_000);
+
+    const startedAt = performance.now();
+    const result = stripHookJson(input);
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(result).toBe(retained);
+    expect(elapsedMs).toBeLessThan(750);
   });
 
   it('returns text unchanged when no hook output present', () => {

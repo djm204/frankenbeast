@@ -9,48 +9,70 @@
 export const BASE_RATE_LIMIT_PATTERNS =
   /rate.?limit|429|too many requests|retry.?after|overloaded|capacity|temporarily unavailable|out of extra usage|usage limit|resets?\s+\d|resets?\s+in\s+\d+\s*s/i;
 
-/** Recursively extract text from a stream-json node. */
 /**
  * Strip JSON objects containing "hookSpecificOutput" from text.
  * Hook output leaks from spawned CLI processes when project-scoped hooks fire
- * despite FRANKENBEAST_SPAWNED=1. Uses brace-depth matching to handle
- * multi-line pretty-printed JSON with nested braces in string values.
+ * despite FRANKENBEAST_SPAWNED=1. Scans the provider output once, records the
+ * matching object ranges, then rebuilds the retained text once so many hook
+ * blocks cannot cause quadratic full-string slicing.
  */
 export function stripHookJson(text: string): string {
   const MARKER = '"hookSpecificOutput"';
-  let result = text;
+  const objectStarts: number[] = [];
+  const markedObjects = new Set<number>();
+  const removalRanges: Array<{ start: number; end: number }> = [];
+  let inStr = false;
+  let esc = false;
 
-  while (true) {
-    const idx = result.indexOf(MARKER);
-    if (idx === -1) break;
-
-    // Walk backward to find opening '{'
-    let start = -1;
-    for (let i = idx - 1; i >= 0; i--) {
-      if (result[i] === '{') { start = i; break; }
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (esc) {
+      esc = false;
+      continue;
     }
-    if (start === -1) break;
-
-    // Walk forward with brace-depth to find closing '}'
-    let depth = 0;
-    let inStr = false;
-    let esc = false;
-    let end = -1;
-    for (let i = start; i < result.length; i++) {
-      const ch = result[i]!;
-      if (esc) { esc = false; continue; }
-      if (ch === '\\' && inStr) { esc = true; continue; }
-      if (ch === '"') { inStr = !inStr; continue; }
-      if (inStr) continue;
-      if (ch === '{') depth++;
-      else if (ch === '}') { depth--; if (depth === 0) { end = i; break; } }
+    if (ch === '\\' && inStr) {
+      esc = true;
+      continue;
     }
-    if (end === -1) break;
+    if (ch === '"') {
+      if (!inStr && text.startsWith(MARKER, i)) {
+        const objectStart = objectStarts.at(-1);
+        if (objectStart !== undefined) markedObjects.add(objectStart);
+      }
+      inStr = !inStr;
+      continue;
+    }
+    if (inStr) continue;
 
-    result = result.slice(0, start) + result.slice(end + 1);
+    if (ch === '{') {
+      objectStarts.push(i);
+      continue;
+    }
+    if (ch !== '}') continue;
+
+    const objectStart = objectStarts.pop();
+    if (objectStart === undefined || !markedObjects.delete(objectStart)) continue;
+
+    // A later-marked ancestor can contain ranges already recorded for nested
+    // hook objects. Collapse those ranges now to keep the final pass ordered.
+    while (true) {
+      const previousRange = removalRanges.at(-1);
+      if (previousRange === undefined || previousRange.start < objectStart) break;
+      removalRanges.pop();
+    }
+    removalRanges.push({ start: objectStart, end: i + 1 });
   }
 
-  return result.trim();
+  if (removalRanges.length === 0) return text.trim();
+
+  const retained: string[] = [];
+  let cursor = 0;
+  for (const range of removalRanges) {
+    retained.push(text.slice(cursor, range.start));
+    cursor = range.end;
+  }
+  retained.push(text.slice(cursor));
+  return retained.join('').trim();
 }
 
 export interface CleanLlmJsonOptions {
