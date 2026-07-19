@@ -25,7 +25,7 @@ export class PlanContextGatherer {
   }
 
   private readRampUp(): string {
-    const rampUpPath = join(this.repoRoot, 'docs', 'RAMP_UP.md');
+    const rampUpPath = join(this.repoRoot, 'docs', 'onboarding', 'RAMP_UP.md');
     if (!existsSync(rampUpPath)) {
       return '';
     }

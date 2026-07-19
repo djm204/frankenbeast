@@ -18,8 +18,8 @@ describe('PlanContextGatherer', () => {
     rmSync(FIXTURES_DIR, { recursive: true, force: true });
   });
 
-  it('gathers RAMP_UP.md content', async () => {
-    const docsDir = join(FIXTURES_DIR, 'docs');
+  it('gathers the canonical onboarding RAMP_UP.md content', async () => {
+    const docsDir = join(FIXTURES_DIR, 'docs', 'onboarding');
     ensureDir(docsDir);
     writeFileSync(join(docsDir, 'RAMP_UP.md'), '# Ramp Up\n\nThis is the ramp-up doc.');
 
