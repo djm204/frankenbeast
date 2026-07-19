@@ -20,8 +20,9 @@ describe('GovernorAdapter', () => {
     return path;
   }
 
-  function installSkill(dbPath: string, name: string, tools?: unknown[]): void {
-    const skillDir = join(dbPath, '..', 'skills', name);
+  function installSkill(dbPath: string, name: string, tools?: unknown[], enabled = true): void {
+    const configDir = join(dbPath, '..');
+    const skillDir = join(configDir, 'skills', name);
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(join(skillDir, 'mcp.json'), JSON.stringify({
       mcpServers: { [name]: { command: `${name}-server` } },
@@ -29,6 +30,9 @@ describe('GovernorAdapter', () => {
     if (tools !== undefined) {
       writeFileSync(join(skillDir, 'tools.json'), JSON.stringify(tools));
     }
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      skills: { enabled: enabled ? [name] : [] },
+    }));
   }
 
   afterEach(() => {
@@ -84,7 +88,7 @@ describe('GovernorAdapter', () => {
 
     const governor = createGovernorAdapter(dbPath);
 
-    await expect(governor.check({ action: 'mcp__dynamic__dynamic', context: '{}' }))
+    await expect(governor.check({ action: 'mcp__dynamic__publish_report', context: '{}' }))
       .resolves.toMatchObject({ decision: 'review_recommended' });
   });
 
@@ -103,6 +107,62 @@ describe('GovernorAdapter', () => {
 
     await expect(governor.check({ action: 'mcp__reporting__reporting', context: '{}' }))
       .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('does not apply a custom profile to an unqualified built-in tool with the same leaf name', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'audit', [
+      {
+        name: 'fbeast_memory_query',
+        description: 'Custom audit query',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]);
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'fbeast_memory_query', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+  });
+
+  it('ignores installed skill profiles that are disabled in project config', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'reporting', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ], false);
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__reporting__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+  });
+
+  it('does not load project skill profiles for an in-memory governor', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'reporting', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]);
+    const originalCwd = process.cwd();
+    process.chdir(join(dbPath, '..'));
+
+    try {
+      const governor = createGovernorAdapter(':memory:');
+      await expect(governor.check({ action: 'mcp__reporting__publish_report', context: '{}' }))
+        .resolves.toMatchObject({ decision: 'approved' });
+    } finally {
+      process.chdir(originalCwd);
+    }
   });
 
   it('rejects duplicate reserved provenance keys instead of persisting forgeable JSON', async () => {

@@ -763,6 +763,23 @@ function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; m
   return true;
 }
 
+interface QualifiedSkillAction {
+  serverName: string;
+  toolName: string;
+}
+
+function parseQualifiedSkillAction(action: string): QualifiedSkillAction | undefined {
+  const mcpMatch = /^mcp__(.+?)__(.+)$/.exec(action);
+  if (mcpMatch !== null) {
+    return { serverName: mcpMatch[1]!, toolName: mcpMatch[2]! };
+  }
+  const slash = action.indexOf('/');
+  if (slash > 0 && slash < action.length - 1) {
+    return { serverName: action.slice(0, slash), toolName: action.slice(slash + 1) };
+  }
+  return undefined;
+}
+
 function readSkillToolProfiles(toolsPath: string): Array<Record<string, unknown>> | undefined {
   try {
     if (!lstatSync(toolsPath).isFile()) return undefined;
@@ -779,11 +796,30 @@ function readSkillToolProfiles(toolsPath: string): Array<Record<string, unknown>
   }
 }
 
-function isRegisteredSkill(skillDir: string): boolean {
+function readEnabledSkills(configDir: string): Set<string> {
   try {
-    return lstatSync(join(skillDir, 'mcp.json')).isFile();
+    const config = JSON.parse(readFileSync(join(configDir, 'config.json'), 'utf8')) as unknown;
+    if (config === null || typeof config !== 'object' || Array.isArray(config)) return new Set();
+    const skills = (config as Record<string, unknown>)['skills'];
+    if (skills === null || typeof skills !== 'object' || Array.isArray(skills)) return new Set();
+    const enabled = (skills as Record<string, unknown>)['enabled'];
+    if (!Array.isArray(enabled)) return new Set();
+    return new Set(enabled.filter((name): name is string => typeof name === 'string'));
   } catch {
-    return false;
+    return new Set();
+  }
+}
+
+function readSkillServerNames(skillDir: string): Set<string> {
+  try {
+    if (!lstatSync(join(skillDir, 'mcp.json')).isFile()) return new Set();
+    const config = JSON.parse(readFileSync(join(skillDir, 'mcp.json'), 'utf8')) as unknown;
+    if (config === null || typeof config !== 'object' || Array.isArray(config)) return new Set();
+    const servers = (config as Record<string, unknown>)['mcpServers'];
+    if (servers === null || typeof servers !== 'object' || Array.isArray(servers)) return new Set();
+    return new Set(Object.keys(servers));
+  } catch {
+    return new Set();
   }
 }
 
@@ -793,7 +829,14 @@ function profileRequiresHitl(profile: Record<string, unknown>): boolean {
   return profile['requiresHitl'] !== false;
 }
 
-function skillRequiresHitl(skillsDir: string, action: string): boolean {
+function skillRequiresHitl(configDir: string | undefined, action: string): boolean {
+  if (configDir === undefined) return false;
+  const qualifiedAction = parseQualifiedSkillAction(action);
+  if (qualifiedAction === undefined) return false;
+
+  const enabledSkills = readEnabledSkills(configDir);
+  if (enabledSkills.size === 0) return false;
+  const skillsDir = join(configDir, 'skills');
   let skillDirectories;
   try {
     skillDirectories = readdirSync(skillsDir, { withFileTypes: true });
@@ -802,30 +845,27 @@ function skillRequiresHitl(skillsDir: string, action: string): boolean {
   }
 
   for (const skillDirectory of skillDirectories) {
-    if (!skillDirectory.isDirectory()) continue;
+    if (!skillDirectory.isDirectory() || !enabledSkills.has(skillDirectory.name)) continue;
     const skillDir = join(skillsDir, skillDirectory.name);
+    if (!readSkillServerNames(skillDir).has(qualifiedAction.serverName)) continue;
     const profiles = readSkillToolProfiles(join(skillDir, 'tools.json'));
 
-    if (action === skillDirectory.name) {
-      if (profiles === undefined) {
-        // Skills without a usable tool manifest expose the server alias with
-        // conservative HITL because the concrete runtime tools are unknown.
-        if (isRegisteredSkill(skillDir)) return true;
-      } else if (profiles.length === 0) {
-        if (isRegisteredSkill(skillDir)) return true;
-      } else if (profiles.length === 1) {
-        if (profileRequiresHitl(profiles[0]!)) return true;
+    // Unknown or stale runtime tool manifests fail closed for every tool exposed
+    // by this enabled MCP server, not only an artificial server-name alias.
+    if (profiles === undefined || profiles.length === 0) return true;
+
+    let profile = profiles.find((candidate) => candidate['name'] === qualifiedAction.toolName);
+    if (profile === undefined && qualifiedAction.toolName === skillDirectory.name) {
+      if (profiles.length === 1) {
+        profile = profiles[0];
       } else {
-        const aliasProfile = profiles.find((profile) => profile['name'] === skillDirectory.name);
-        if (aliasProfile !== undefined && profileRequiresHitl(aliasProfile)) return true;
+        profile = profiles.find((candidate) => candidate['name'] === skillDirectory.name);
       }
     }
 
-    for (const profile of profiles ?? []) {
-      const toolName = profile['name'] as string;
-      if (toolName !== action && `${skillDirectory.name}/${toolName}` !== action) continue;
-      if (profileRequiresHitl(profile)) return true;
-    }
+    // A runtime tool omitted from the installed profile is unknown and therefore
+    // keeps the same conservative HITL default as a manifest-less skill.
+    if (profile === undefined || profileRequiresHitl(profile)) return true;
   }
 
   return false;
@@ -960,7 +1000,7 @@ function assessAction(action: string, context: string, requiresHitl: boolean): G
 
 export function createGovernorAdapter(dbPath: string): GovernorAdapter {
   const store = createSqliteStore(dbPath);
-  const skillsDir = join(dirname(dbPath), 'skills');
+  const skillConfigDir = dbPath === ':memory:' ? undefined : dirname(dbPath);
   const costCalculator = new CostCalculator(DEFAULT_PRICING, {
     onUnknownModel: (model) => {
       process.stderr.write(`[fbeast-governor] Unknown model "${model}" — budget status will report $0.0000 until pricing is configured.\n`);
@@ -969,7 +1009,7 @@ export function createGovernorAdapter(dbPath: string): GovernorAdapter {
 
   return {
     async check(input) {
-      const requiresHitl = skillRequiresHitl(skillsDir, unqualifyMcpActionName(input.action));
+      const requiresHitl = skillRequiresHitl(skillConfigDir, input.action);
       const isDryRunForget = !requiresHitl && isRightToForgetDryRun(input.action, input.context);
       if (hasDuplicateReservedProvenanceKeys(input.context)) {
         const reason = 'Duplicate reserved fbeast provenance keys are not allowed.';
