@@ -269,13 +269,15 @@ export class BeastDispatchService {
             ? 'running'
             : updated.status === 'pending_approval'
               ? 'awaiting_approval'
-              : 'dispatching';
+              : updated.status === 'completed'
+                ? 'completed'
+                : 'dispatching';
           const updatedAt = new Date(wallClockNow()).toISOString();
           this.repository.updateTrackedAgent(updated.trackedAgentId, {
             status: agentStatus,
             updatedAt,
           });
-          if ((agentStatus === 'running' || agentStatus === 'awaiting_approval')
+          if ((agentStatus === 'running' || agentStatus === 'awaiting_approval' || agentStatus === 'completed')
             && this.repository.hasActiveDispatchFailure(updated.trackedAgentId)) {
             const recoveredEvent = {
               level: 'info' as const,
