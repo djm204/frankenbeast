@@ -18,9 +18,11 @@ services:
           '-ec',
           'exec 3<>/dev/tcp/127.0.0.1/8000 && printf "GET /api/v2/heartbeat HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3 && grep -q "200 OK" <&3',
         ]
+      # ChromaDB can take longer to initialize on slow or resource-constrained hosts.
       interval: 10s
-      timeout: 5s
-      retries: 3
+      timeout: 15s
+      retries: 5
+      start_period: 30s
 
   # Grafana — dashboards for observability
   grafana:

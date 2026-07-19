@@ -8,6 +8,7 @@
 import type { ICliProvider, ProviderOpts } from './cli-provider.js';
 import { tryExtractTextFromNode, BASE_RATE_LIMIT_PATTERNS } from './stream-json-utils.js';
 import { sanitizeRunConfigIntegrityEnv } from '../../cli/run-config-integrity.js';
+import { resolveCodexSandboxArgs } from '../../providers/codex-args.js';
 
 const RATE_LIMIT_PATTERNS = BASE_RATE_LIMIT_PATTERNS;
 
@@ -17,13 +18,12 @@ export class CodexProvider implements ICliProvider {
   readonly chatModel = 'codex-mini';
 
   buildArgs(opts: ProviderOpts): string[] {
-    const args: string[] = ['exec', '--full-auto', '--json', '--color', 'never'];
+    const { sandboxArgs, extraArgs } = resolveCodexSandboxArgs(opts.extraArgs);
+    const args: string[] = ['exec', ...sandboxArgs, '--json', '--color', 'never'];
     if (opts.model) {
       args.push('--model', opts.model);
     }
-    if (opts.extraArgs) {
-      args.push(...opts.extraArgs);
-    }
+    args.push(...extraArgs);
     return args;
   }
 
@@ -34,16 +34,20 @@ export class CodexProvider implements ICliProvider {
       .filter((line) => line.length > 0);
 
     const extracted: string[] = [];
+    const errors: string[] = [];
     for (const line of lines) {
       try {
         const parsed = JSON.parse(line) as unknown;
         tryExtractTextFromNode(parsed, extracted);
+        if (typeof parsed === 'object' && parsed !== null && 'error' in parsed) {
+          tryExtractTextFromNode((parsed as { error: unknown }).error, errors);
+        }
       } catch {
         extracted.push(line);
       }
     }
 
-    return extracted.join('\n').trim();
+    return (extracted.length > 0 ? extracted : errors).join('\n').trim();
   }
 
   estimateTokens(text: string): number {

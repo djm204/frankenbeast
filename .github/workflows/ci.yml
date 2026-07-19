@@ -16,6 +16,9 @@ concurrency:
 jobs:
   build-test-lint:
     runs-on: ubuntu-latest
+    # Full monorepo build, tests, coverage, and E2E smoke checks may be slow,
+    # but a stalled run must release its runner within two hours.
+    timeout-minutes: 120
     strategy:
       matrix:
         deterministic-seed: ['1337']
@@ -161,9 +164,34 @@ jobs:
       - name: Phantom dependency check (every runtime import is declared)
         run: node scripts/check-phantom-deps.mjs
 
+  codex-cli-compatibility:
+    name: Codex CLI compatibility (${{ matrix.codex-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # 0.143.0 is the oldest Codex release Frankenbeast supports.
+        codex-version: ['0.143.0', 'latest']
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install Codex CLI
+        run: npm install --global "@openai/codex@${{ matrix.codex-version }}"
+
+      - name: Validate workspace-write invocation arguments
+        run: node scripts/check-codex-cli-compat.mjs
+
   publish-smoke:
     name: publish smoke (pack + offline install + run)
     runs-on: ubuntu-latest
+    # Packing and installing every publishable workspace should finish well
+    # inside this bound, including cold npm downloads.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
 

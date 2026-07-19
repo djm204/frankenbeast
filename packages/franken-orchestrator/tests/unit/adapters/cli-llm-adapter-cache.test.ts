@@ -12,8 +12,11 @@ function createMockSpawn(result: {
   exitCode?: number;
 }): {
   spawnFn: (cmd: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
+  calls: Array<{ cmd: string; args: readonly string[]; options: SpawnOptions }>;
 } {
-  const spawnFn = (_cmd: string, _args: readonly string[], _options: SpawnOptions): ChildProcess => {
+  const calls: Array<{ cmd: string; args: readonly string[]; options: SpawnOptions }> = [];
+  const spawnFn = (cmd: string, args: readonly string[], options: SpawnOptions): ChildProcess => {
+    calls.push({ cmd, args, options });
     const proc = new EventEmitter() as ChildProcess;
     const stdinStream = new PassThrough();
     const stdoutStream = new PassThrough();
@@ -36,12 +39,16 @@ function createMockSpawn(result: {
     return proc;
   };
 
-  return { spawnFn };
+  return { spawnFn, calls };
 }
 
 describe('CliLlmAdapter cache session support', () => {
-  it('enables sessionContinue from a cache-session hint for providers with native work sessions', () => {
-    const adapter = new CliLlmAdapter(new ClaudeProvider(), { workingDir: '/tmp/test' });
+  it('starts a persisted cache session without ambient continuation when no provider session id exists', async () => {
+    const { spawnFn, calls } = createMockSpawn({
+      stdout: '{"type":"result","session_id":"provider-session-123","result":"ok"}\n',
+      exitCode: 0,
+    });
+    const adapter = new CliLlmAdapter(new ClaudeProvider(), { workingDir: '/tmp/test' }, spawnFn);
 
     const transformed = adapter.transformRequest({
       id: 'req-native',
@@ -53,11 +60,33 @@ describe('CliLlmAdapter cache session support', () => {
     });
 
     expect(transformed).toMatchObject({
-      sessionContinue: true,
+      sessionContinue: false,
       cacheSession: {
         key: 'issue:99',
         persist: true,
       },
+    });
+    await adapter.execute(transformed);
+    expect(calls[0]?.args).not.toContain('--continue');
+    expect(calls[0]?.args).not.toContain('--no-session-persistence');
+  });
+
+  it('continues a cache session only with an explicit provider session id', () => {
+    const adapter = new CliLlmAdapter(new ClaudeProvider(), { workingDir: '/tmp/test' });
+
+    const transformed = adapter.transformRequest({
+      id: 'req-native',
+      messages: [{ role: 'user', content: 'continue work' }],
+      session_id: 'provider-session-123',
+      cacheSession: {
+        key: 'issue:99',
+        persist: true,
+      },
+    });
+
+    expect(transformed).toMatchObject({
+      sessionContinue: true,
+      sessionId: 'provider-session-123',
     });
   });
 
@@ -82,8 +111,11 @@ describe('CliLlmAdapter cache session support', () => {
     });
   });
 
-  it('persists cache session metadata for successful native-capable executions', async () => {
-    const { spawnFn } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+  it('persists the provider-issued session id for successful native-capable executions', async () => {
+    const { spawnFn } = createMockSpawn({
+      stdout: '{"type":"result","session_id":"provider-session-123","result":"ok"}\n',
+      exitCode: 0,
+    });
     const adapter = new CliLlmAdapter(new ClaudeProvider(), { workingDir: '/tmp/test' }, spawnFn);
 
     const transformed = adapter.transformRequest({
@@ -99,7 +131,7 @@ describe('CliLlmAdapter cache session support', () => {
 
     expect(adapter.consumeSessionMetadata('req-native')).toMatchObject({
       provider: 'claude',
-      sessionKey: 'issue:99',
+      sessionId: 'provider-session-123',
     });
   });
 

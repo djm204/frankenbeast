@@ -21,16 +21,25 @@ describe('StepModules', () => {
     expect(screen.getByText('Heartbeat')).toBeTruthy();
   });
 
-  it('announces module toggle state and stores it in Zustand', () => {
+  it('announces module toggle state for each module button', () => {
     render(<StepModules />);
-    const firewallButton = screen.getByRole('button', { name: /firewall/i });
 
-    expect(firewallButton.getAttribute('aria-pressed')).toBe('false');
-    fireEvent.click(firewallButton);
-    expect(firewallButton.getAttribute('aria-pressed')).toBe('true');
+    const moduleNames = ['Firewall', 'Skills', 'Memory', 'Planner', 'Critique', 'Governor', 'Heartbeat'];
+    moduleNames.forEach((name) => {
+      const moduleButton = screen.getByRole('button', { name: new RegExp(name, 'i') });
+      expect(moduleButton.getAttribute('aria-pressed')).toBe('false');
+      fireEvent.click(moduleButton);
+      expect(moduleButton.getAttribute('aria-pressed')).toBe('true');
+    });
 
     const modules = useBeastStore.getState().stepValues[3] as Record<string, boolean>;
     expect(modules?.firewall).toBe(true);
+    expect(modules?.skills).toBe(true);
+    expect(modules?.memory).toBe(true);
+    expect(modules?.planner).toBe(true);
+    expect(modules?.critique).toBe(true);
+    expect(modules?.governor).toBe(true);
+    expect(modules?.heartbeat).toBe(true);
   });
 
   it('does not save zero when positive planner numeric fields are cleared', () => {

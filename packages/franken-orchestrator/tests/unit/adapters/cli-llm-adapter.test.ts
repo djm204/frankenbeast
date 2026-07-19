@@ -424,7 +424,9 @@ describe('CliLlmAdapter', () => {
 
         const args = calls[0]!.args;
         expect(args).toContain('exec');
-        expect(args).toContain('--full-auto');
+        expect(args).toContain('--sandbox');
+        expect(args).toContain('workspace-write');
+        expect(args).not.toContain('--full-auto');
         expect(args).toContain('--json');
         expect(args).toContain('--color');
         // prompt piped via stdin, not in args
@@ -497,6 +499,19 @@ describe('CliLlmAdapter', () => {
             rateLimited: false,
           }));
         }
+      });
+
+      it('reports normalized Codex JSONL failures alongside redacted stderr warnings', async () => {
+        const { spawnFn } = createMockSpawn({
+          stdout: JSON.stringify({ type: 'error', error: { message: 'workspace is not trusted' } }),
+          stderr: 'warning: deprecated option; API_KEY=super-secret-value',
+          exitCode: 1,
+        });
+        const adapter = new CliLlmAdapter(codexProvider, baseOpts, spawnFn);
+
+        await expect(adapter.execute({ prompt: 'test', maxTurns: 1 })).rejects.toThrow(
+          /workspace is not trusted.*warning: deprecated option; API_KEY=<redacted>/,
+        );
       });
 
       it('kills child process on timeout and rejects', async () => {
@@ -891,6 +906,7 @@ describe('CliLlmAdapter', () => {
           provider: 'adapter',
           model: 'adapter',
           messages: [{ role: 'user', content: 'hello' }],
+          session_id: 'chat-app-1',
         });
 
         expect(request.model).toBe('codex-mini');
@@ -900,6 +916,7 @@ describe('CliLlmAdapter', () => {
         expect(calls[0]!.cmd).toBe('codex');
         expect(calls[1]!.cmd).toBe('claude');
         expect(calls[1]!.args).not.toContain('codex-mini');
+        expect(calls[1]!.args).not.toContain('--no-session-persistence');
       });
 
       it('normalizes successful fallback output with the provider that produced it', async () => {

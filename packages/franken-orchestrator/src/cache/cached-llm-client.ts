@@ -7,6 +7,7 @@ import { isoNow } from '@franken/types';
 export interface NativeSessionResult {
   content: string;
   sessionId?: string | undefined;
+  clearSession?: boolean | undefined;
 }
 
 export interface NativeSessionController {
@@ -71,29 +72,28 @@ export class CachedLlmClient {
         promptFingerprint: computed.sessionFingerprint,
       });
 
-      try {
-        const resumed = await request.nativeSession.resume(existingSession?.sessionId, computed.fullPrompt);
-        if (resumed) {
-          this.metrics.recordNativeSessionHit();
-          const sessionId = resumed.sessionId ?? existingSession?.sessionId;
-          if (sessionId) {
-            const now = isoNow();
-            await this.deps.providerSessions.save({
-              projectId: request.scope.projectId,
-              workId,
-              provider: request.nativeSession.provider,
-              model: request.nativeSession.model,
-              sessionId,
-              promptFingerprint: computed.sessionFingerprint,
-              createdAt: existingSession?.createdAt ?? now,
-              updatedAt: now,
-            });
-          }
-          await this.persistCacheArtifacts(request, computed, resumed.content);
-          return resumed.content;
+      const resumed = await request.nativeSession.resume(existingSession?.sessionId, computed.fullPrompt);
+      if (resumed) {
+        this.metrics.recordNativeSessionHit();
+        if (resumed.clearSession) {
+          await this.deps.providerSessions.remove(request.scope.projectId, workId);
         }
-      } catch {
-        // Fall through to backing llm call.
+        const sessionId = resumed.sessionId ?? (resumed.clearSession ? undefined : existingSession?.sessionId);
+        if (sessionId) {
+          const now = isoNow();
+          await this.deps.providerSessions.save({
+            projectId: request.scope.projectId,
+            workId,
+            provider: request.nativeSession.provider,
+            model: request.nativeSession.model,
+            sessionId,
+            promptFingerprint: computed.sessionFingerprint,
+            createdAt: existingSession?.createdAt ?? now,
+            updatedAt: now,
+          });
+        }
+        await this.persistCacheArtifacts(request, computed, resumed.content);
+        return resumed.content;
       }
 
       this.metrics.recordNativeSessionFallback();
@@ -151,5 +151,9 @@ export class CachedLlmClient {
         },
       });
     }
+  }
+
+  async invalidateProviderSession(projectId: string, workId: string): Promise<void> {
+    await this.deps.providerSessions.remove(projectId, workId);
   }
 }

@@ -39,7 +39,7 @@ The `run()` method follows this algorithm:
 1. Initialize `LoopState` with iteration count = 0 and empty history
 2. **Pre-check**: Run all circuit breakers. If any trip, return immediately.
 3. Run the `CritiquePipeline` against the current input
-4. Record the `CritiqueResult` in iteration history
+4. Record the `CritiquePipelineResult` in iteration history
 5. If the result is a **pass**, return success with all iteration data
 6. If the result is a **fail**, update failure history and iteration count.
 7. If this was the final allowed iteration (`iterationCount >= config.maxIterations`), construct and return a `CorrectionRequest` from the failed evaluations.

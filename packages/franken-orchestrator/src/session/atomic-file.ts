@@ -1,6 +1,7 @@
 import {
   closeSync,
   existsSync,
+  fchmodSync,
   fsyncSync,
   openSync,
   readFileSync,
@@ -437,6 +438,14 @@ export function atomicWriteFileSync(
       }
     }
     try {
+      if (options.mode !== undefined) {
+        // open(2) applies the process umask to its mode argument. Reapply the
+        // requested mode before rename so replacement files preserve the
+        // caller's exact permissions without a post-rename exposure window.
+        // Keep this inside the descriptor finally so chmod failures cannot
+        // leak the newly opened temp-file descriptor.
+        fchmodSync(fd, options.mode);
+      }
       const writingJournal = { ...journalBase, tempPath: resolve(tmpPath), phase: 'writing-temp' as const };
       let lastJournalRefreshMs = Date.now();
       const refreshWritingJournal = (): void => {

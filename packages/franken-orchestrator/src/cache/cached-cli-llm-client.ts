@@ -4,10 +4,15 @@ import { CachedLlmClient } from './cached-llm-client.js';
 import { LlmCacheStore } from './llm-cache-store.js';
 import { LlmCachePolicy } from './llm-cache-policy.js';
 import { ProviderSessionStore } from './provider-session-store.js';
+import { CacheMetrics } from './cache-metrics.js';
 import { now as deterministicNow, seededRandom } from '@franken/types';
 
+const PROVIDER_SESSION_SCHEMA_VERSION = 2;
+
 interface CliSessionMetadata {
-  sessionKey: string;
+  provider: string;
+  model?: string | undefined;
+  sessionId: string;
 }
 
 interface CliAdapterLike {
@@ -15,6 +20,7 @@ interface CliAdapterLike {
   execute(providerRequest: unknown): Promise<unknown>;
   transformResponse(providerResponse: unknown, requestId: string): { content: string | null };
   consumeSessionMetadata?(requestId: string): CliSessionMetadata | undefined;
+  getProviderName?(): string;
 }
 
 export interface LlmCacheHint {
@@ -37,14 +43,17 @@ export interface CachedCliLlmClientOptions {
   workPrefix?: string | undefined;
   schemaVersion?: number | undefined;
   observer?: ILlmObserver | undefined;
+  metrics?: CacheMetrics | undefined;
 }
 
 export class CachedCliLlmClient implements ILlmClient {
   private readonly cached: CachedLlmClient;
   private readonly schemaVersion: number;
+  private readonly metrics: CacheMetrics;
 
   constructor(private readonly options: CachedCliLlmClientOptions) {
     this.schemaVersion = options.schemaVersion ?? 1;
+    this.metrics = options.metrics ?? new CacheMetrics();
     this.cached = new CachedLlmClient({
       llm: {
         complete: async (prompt: string) => {
@@ -54,7 +63,10 @@ export class CachedCliLlmClient implements ILlmClient {
       },
       cacheStore: new LlmCacheStore(options.cacheRootDir, { schemaVersion: this.schemaVersion }),
       policy: new LlmCachePolicy(),
-      providerSessions: new ProviderSessionStore(options.cacheRootDir, { schemaVersion: this.schemaVersion }),
+      providerSessions: new ProviderSessionStore(options.cacheRootDir, {
+        schemaVersion: Math.max(PROVIDER_SESSION_SCHEMA_VERSION, this.schemaVersion),
+      }),
+      metrics: this.metrics,
     });
   }
 
@@ -66,11 +78,24 @@ export class CachedCliLlmClient implements ILlmClient {
       ? {
           provider: this.options.provider,
           model: this.options.model,
-          resume: async (_sessionId: string | undefined, nextPrompt: string) => {
-            const response = await this.invoke(nextPrompt, workId);
+          resume: async (sessionId: string | undefined, nextPrompt: string) => {
+            let response: { content: string; sessionId?: string | undefined };
+            let clearSession = false;
+            try {
+              response = await this.invoke(nextPrompt, workId, sessionId);
+            } catch (error) {
+              if (!sessionId || !isExpectedStaleSessionError(error)) {
+                throw error;
+              }
+              this.metrics.recordNativeSessionFallback();
+              clearSession = true;
+              await this.cached.invalidateProviderSession(this.options.projectId, workId);
+              response = await this.invoke(nextPrompt, workId);
+            }
             return {
               content: response.content,
-              sessionId: response.sessionId ?? workId,
+              ...(response.sessionId ? { sessionId: response.sessionId } : {}),
+              ...(clearSession && !response.sessionId ? { clearSession: true } : {}),
             };
           },
         }
@@ -89,13 +114,18 @@ export class CachedCliLlmClient implements ILlmClient {
     });
   }
 
-  private async invoke(prompt: string, cacheSessionKey?: string): Promise<{ content: string; sessionId?: string | undefined }> {
+  private async invoke(
+    prompt: string,
+    cacheSessionKey?: string,
+    providerSessionId?: string,
+  ): Promise<{ content: string; sessionId?: string | undefined }> {
     const requestId = `llm-${deterministicNow()}-${seededRandom.random().toString(16).slice(2)}`;
     const request = {
       id: requestId,
       provider: 'adapter',
       model: this.options.model,
       messages: [{ role: 'user', content: prompt }],
+      ...(providerSessionId ? { session_id: providerSessionId } : {}),
       ...(cacheSessionKey
         ? {
             cacheSession: {
@@ -117,6 +147,13 @@ export class CachedCliLlmClient implements ILlmClient {
       const response = this.options.cliAdapter.transformResponse(providerResponse, requestId);
       const content = response.content ?? '';
       const sessionMetadata = this.options.cliAdapter.consumeSessionMetadata?.(requestId);
+      const configuredProvider = this.options.cliAdapter.getProviderName?.() ?? this.options.provider;
+      const matchingSessionId = sessionMetadata?.provider === configuredProvider
+        && (sessionMetadata.model === undefined
+          || this.options.model === undefined
+          || sessionMetadata.model === this.options.model)
+        ? sessionMetadata.sessionId
+        : undefined;
 
       if (this.options.observer && span) {
         this.options.observer.recordTokenUsage(
@@ -132,7 +169,7 @@ export class CachedCliLlmClient implements ILlmClient {
 
       return {
         content,
-        ...(sessionMetadata?.sessionKey ? { sessionId: sessionMetadata.sessionKey } : {}),
+        ...(matchingSessionId ? { sessionId: matchingSessionId } : {}),
       };
     } finally {
       if (this.options.observer && span) {
@@ -158,4 +195,43 @@ function joinNonEmpty(parts: Array<string | undefined>): string | undefined {
     return undefined;
   }
   return normalized.join('\n');
+}
+
+function isExpectedStaleSessionError(error: unknown): boolean {
+  const messages: string[] = [];
+  const seen = new Set<unknown>();
+  let current = error;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof Error) {
+      messages.push(current.message);
+      current = current.cause;
+      continue;
+    }
+    if (typeof current === 'string') {
+      messages.push(current);
+      break;
+    }
+    if (typeof current === 'object') {
+      const record = current as Record<string, unknown>;
+      for (const key of ['message', 'stdout', 'stderr', 'normalizedOutput']) {
+        try {
+          if (typeof record[key] === 'string') {
+            messages.push(record[key]);
+          }
+        } catch {
+          // Ignore hostile getters while classifying an error payload.
+        }
+      }
+      try {
+        current = record['cause'];
+        continue;
+      } catch {
+        break;
+      }
+    }
+    break;
+  }
+  const text = messages.join('\n');
+  return /(?:session|conversation).*(?:expired|invalid|not found|no longer exists|stale)|(?:expired|invalid|stale).*(?:session|conversation)|no\s+(?:session|conversation)\s+found/i.test(text);
 }

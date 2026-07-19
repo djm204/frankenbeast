@@ -1,9 +1,62 @@
-import { createServer } from 'node:http';
+import { createServer, get } from 'node:http';
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
 import { closeHttpServer, handleHonoHttpRequest } from '../../../src/http/http-server-utils.js';
 
 describe('http-server-utils', () => {
+  it('uses an already-aborted request as an immediate abort signal', async () => {
+    const app = new Hono();
+    let resolveAbort!: () => void;
+    const aborted = new Promise<void>((resolve) => {
+      resolveAbort = resolve;
+    });
+
+    app.get('/stream', (c) => {
+      if (c.req.raw.signal.aborted) {
+        resolveAbort();
+      } else {
+        c.req.raw.signal.addEventListener('abort', () => {
+          resolveAbort();
+        }, { once: true });
+      }
+      return new Response(null, { status: 204 });
+    });
+
+    const fakeRequest = {
+      headers: {},
+      method: 'GET',
+      url: '/stream',
+      socket: { remoteAddress: '127.0.0.1' },
+      aborted: true,
+      destroyed: true,
+      on: () => undefined,
+    } as Parameters<typeof handleHonoHttpRequest>[0];
+
+    let statusCode = 0;
+    const fakeResponse = {
+      setHeader: () => undefined,
+      set: () => undefined,
+      end: () => undefined,
+    } as unknown as Parameters<typeof handleHonoHttpRequest>[1] & { statusCode: number; statusMessage: string };
+
+    Object.defineProperties(fakeResponse, {
+      statusCode: {
+        get: () => statusCode,
+        set: (value: number) => {
+          statusCode = value;
+        },
+      },
+    });
+
+    await handleHonoHttpRequest(app, fakeRequest, fakeResponse);
+
+    await expect(Promise.race([
+      aborted.then(() => 'aborted'),
+      new Promise((resolve) => setTimeout(() => resolve('timeout'), 500)),
+    ])).resolves.toBe('aborted');
+    expect(statusCode).toBe(204);
+  });
+
   it('aborts the Hono request signal when the client disconnects', async () => {
     const app = new Hono();
     let resolveAbort!: () => void;
@@ -33,7 +86,7 @@ describe('http-server-utils', () => {
     }
 
     try {
-      const request = await import('node:http').then(({ get }) => get(`http://127.0.0.1:${address.port}/stream`));
+      const request = get(`http://127.0.0.1:${address.port}/stream`);
       request.on('error', () => {
         // Expected after destroying the client side of the long-lived request.
       });
