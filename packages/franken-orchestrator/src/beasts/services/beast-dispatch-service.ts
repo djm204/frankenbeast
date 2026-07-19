@@ -168,13 +168,15 @@ function pickSkillsPolicyConfig(config: Readonly<Record<string, unknown>>): Read
 
 function preserveTrackedAgentPolicyConfig(
   config: Readonly<Record<string, unknown>>,
+  requestConfig: Readonly<Record<string, unknown>>,
   trackedAgent?: TrackedAgent | undefined,
 ): Readonly<Record<string, unknown>> {
   if (!trackedAgent) return config;
   return {
+    ...config,
     ...pickSkillsPolicyConfig(trackedAgent.initAction.config),
     ...pickSkillsPolicyConfig(trackedAgent.initConfig),
-    ...config,
+    ...pickSkillsPolicyConfig(requestConfig),
     ...canonicalTrackedAgentToolPolicyConfig(trackedAgent.initAction.config),
     ...canonicalTrackedAgentToolPolicyConfig(trackedAgent.initConfig),
   };
@@ -239,13 +241,13 @@ export class BeastDispatchService {
     const directRunPolicyConfig = trackedAgent
       ? {}
       : {
-          ...pickToolPolicyConfig(request.config),
+          ...canonicalTrackedAgentToolPolicyConfig(request.config),
           ...pickSkillsPolicyConfig(request.config),
         };
     const parsedConfigSnapshot: Readonly<Record<string, unknown>> = moduleConfig
       ? { ...defaultAgentToolPolicyConfig(definition.id), ...config, ...directRunPolicyConfig, modules: moduleConfig }
       : { ...defaultAgentToolPolicyConfig(definition.id), ...config, ...directRunPolicyConfig };
-    const configSnapshot = preserveTrackedAgentPolicyConfig(parsedConfigSnapshot, trackedAgent);
+    const configSnapshot = preserveTrackedAgentPolicyConfig(parsedConfigSnapshot, request.config, trackedAgent);
     this.assertRoleToolManifestAllows(request, configSnapshot);
     const executionMode = request.executionMode ?? definition.executionModeDefault;
     const createdAt = new Date(wallClockNow()).toISOString();
@@ -461,7 +463,6 @@ export class BeastDispatchService {
       : { ...request.config, ...configSnapshot };
     const validation = validateAgentRoleTools(policyConfig, {
       definitionId: request.definitionId,
-      initActionKind: trackedAgent?.initAction.kind,
       initActionConfig: trackedAgent?.initAction.config,
       trustedSkillToolManifests: this.options.trustedSkillToolManifests,
     });
