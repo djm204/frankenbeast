@@ -136,13 +136,13 @@ describe('CodexCliAdapter', () => {
         .toThrow(/one Codex sandbox selection/i);
     });
 
-    it('preserves profile sandbox configuration instead of overriding it', () => {
-      const profiled = new CodexCliAdapter({ profile: 'read-only-profile' });
+    it('keeps workspace-write for profiles without an explicit sandbox override', () => {
+      const profiled = new CodexCliAdapter({ profile: 'model-only-profile' });
       const args = profiled.buildArgs({ systemPrompt: '', messages: [] });
       expect(args).toContain('-p');
-      expect(args).toContain('read-only-profile');
-      expect(args).not.toContain('--sandbox');
-      expect(args).not.toContain('workspace-write');
+      expect(args).toContain('model-only-profile');
+      expect(args).toContain('--sandbox');
+      expect(args).toContain('workspace-write');
     });
 
     it('adds -c for system prompt', () => {

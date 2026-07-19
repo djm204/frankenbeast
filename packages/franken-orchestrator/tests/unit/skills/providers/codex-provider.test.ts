@@ -51,6 +51,8 @@ describe('CodexProvider', () => {
   it.each([
     ['--config=sandbox_mode="read-only"'],
     ['-c=sandbox_mode="read-only"'],
+    ['--config=default_permissions=":read-only"'],
+    ['-c=default_permissions=":read-only"'],
     ['--yolo'],
   ])('recognizes single-token sandbox selection %s', (...extraArgs) => {
     const args = provider.buildArgs({ extraArgs });
@@ -182,6 +184,20 @@ describe('CodexProvider', () => {
   it('normalizeOutput extracts Codex JSONL error messages', () => {
     const raw = JSON.stringify({ type: 'error', error: { message: 'workspace is not trusted' } });
     expect(provider.normalizeOutput(raw)).toBe('workspace is not trusted');
+  });
+
+  it('normalizeOutput ignores recovered tool errors when final output exists', () => {
+    const raw = [
+      JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'tool_call', error: { message: 'temporary MCP failure' } },
+      }),
+      JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: 'final answer' },
+      }),
+    ].join('\n');
+    expect(provider.normalizeOutput(raw)).toBe('final answer');
   });
 
   it('normalizeOutput extracts assistant text from codex item.completed events', () => {

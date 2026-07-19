@@ -34,16 +34,20 @@ export class CodexProvider implements ICliProvider {
       .filter((line) => line.length > 0);
 
     const extracted: string[] = [];
+    const errors: string[] = [];
     for (const line of lines) {
       try {
         const parsed = JSON.parse(line) as unknown;
         tryExtractTextFromNode(parsed, extracted);
+        if (typeof parsed === 'object' && parsed !== null && 'error' in parsed) {
+          tryExtractTextFromNode((parsed as { error: unknown }).error, errors);
+        }
       } catch {
         extracted.push(line);
       }
     }
 
-    return extracted.join('\n').trim();
+    return (extracted.length > 0 ? extracted : errors).join('\n').trim();
   }
 
   estimateTokens(text: string): number {

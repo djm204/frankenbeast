@@ -264,7 +264,6 @@ export function tryExtractTextFromNode(node: unknown, out: string[]): void {
     'result',
     'response',
     'message',
-    'error',
     'content_block',
     'item',
     'items',

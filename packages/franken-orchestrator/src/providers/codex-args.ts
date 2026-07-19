@@ -48,12 +48,15 @@ export function resolveCodexSandboxArgs(
       continue;
     }
 
-    if (/^(?:--config|-c)=sandbox_mode\s*=/.test(arg)) {
+    if (/^(?:--config|-c)=(?:sandbox_mode|default_permissions)\s*=/.test(arg)) {
       sandboxSelections++;
       continue;
     }
 
-    if ((arg === '-c' || arg === '--config') && /^sandbox_mode\s*=/.test(extras[index + 1] ?? '')) {
+    if (
+      (arg === '-c' || arg === '--config')
+      && /^(?:sandbox_mode|default_permissions)\s*=/.test(extras[index + 1] ?? '')
+    ) {
       sandboxSelections++;
       index++;
     }
