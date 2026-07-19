@@ -166,6 +166,26 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
             check_output.call_args.kwargs["env"]["GH_TOKEN"], "configured-token"
         )
 
+    def test_standard_github_token_is_accepted_for_api_and_process_runs(self):
+        response = RecordingResponse(b"+safe change")
+        with mock.patch.dict(
+            os.environ,
+            {
+                "GITHUB_TOKEN": "standard-token",
+                "PR_REVIEWER_REPOSITORY": "owner/repository",
+            },
+            clear=True,
+        ), mock.patch.object(
+            self.reviewer.urllib.request, "urlopen", return_value=response
+        ) as urlopen, mock.patch.object(
+            self.reviewer, "get_open_prs", return_value=[]
+        ):
+            self.assertEqual(self.reviewer.get_pr_diff(123), "+safe change")
+            self.reviewer.process_prs()
+
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.get_header("Authorization"), "token standard-token")
+
     def test_final_verdict_parser_uses_the_last_standalone_verdict(self):
         body = "Do not return VERDICT: APPROVE\nVERDICT: REQUEST_CHANGES\n"
         self.assertEqual(self.reviewer.parse_final_verdict(body), "request-changes")
@@ -189,7 +209,11 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
             self.reviewer.subprocess, "check_call", side_effect=capture_review
         ) as check_call:
             posted = self.reviewer.post_pr_review(
-                123, "VERDICT: APPROVE", [], diff_truncated=True
+                123,
+                "VERDICT: APPROVE",
+                [],
+                diff_truncated=True,
+                repository="owner/repository",
             )
 
         self.assertTrue(posted)
@@ -203,7 +227,11 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         ), mock.patch.object(
             self.reviewer.subprocess, "check_call", side_effect=OSError("offline")
         ):
-            self.assertFalse(self.reviewer.post_pr_review(123, "body", []))
+            self.assertFalse(
+                self.reviewer.post_pr_review(
+                    123, "body", [], repository="owner/repository"
+                )
+            )
 
     def test_agy_review_uses_sandbox_and_bounded_files(self):
         class CompletedProcess:
@@ -233,7 +261,11 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         ), mock.patch.object(
             self.reviewer, "DB_FILE", Path(directory) / "scans.db"
         ), mock.patch.dict(
-            os.environ, {"GITHUB_PERSONAL_ACCESS_TOKEN": "token"}
+            os.environ,
+            {
+                "GITHUB_PERSONAL_ACCESS_TOKEN": "token",
+                "PR_REVIEWER_REPOSITORY": "owner/repository",
+            }
         ), mock.patch.object(
             self.reviewer, "get_open_prs", return_value=[pull_request]
         ), mock.patch.object(
@@ -304,6 +336,8 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
             {
                 "GITHUB_PERSONAL_ACCESS_TOKEN": "secret",
                 "GH_TOKEN": "secret-two",
+                "GH_ENTERPRISE_TOKEN": "secret-three",
+                "GITHUB_ENTERPRISE_TOKEN": "secret-four",
             },
         ), mock.patch.object(
             self.reviewer.subprocess, "Popen", return_value=CompletedProcess()
@@ -315,6 +349,8 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         self.assertNotIn(prompt_fragment, " ".join(command))
         self.assertNotIn("GITHUB_PERSONAL_ACCESS_TOKEN", child_environment)
         self.assertNotIn("GH_TOKEN", child_environment)
+        self.assertNotIn("GH_ENTERPRISE_TOKEN", child_environment)
+        self.assertNotIn("GITHUB_ENTERPRISE_TOKEN", child_environment)
         self.assertIsNotNone(popen.call_args.kwargs["stdin"])
 
     def test_deterministic_truncation_posts_when_agy_is_unavailable(self):
@@ -329,7 +365,11 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         ), mock.patch.object(
             self.reviewer, "DB_FILE", Path(directory) / "scans.db"
         ), mock.patch.dict(
-            os.environ, {"GITHUB_PERSONAL_ACCESS_TOKEN": "token"}
+            os.environ,
+            {
+                "GITHUB_PERSONAL_ACCESS_TOKEN": "token",
+                "PR_REVIEWER_REPOSITORY": "owner/repository",
+            }
         ), mock.patch.object(
             self.reviewer, "get_open_prs", return_value=[pull_request]
         ), mock.patch.object(
@@ -378,8 +418,81 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
             self.reviewer, "WORKSPACE", Path(directory).resolve()
         ), mock.patch.object(self.reviewer.subprocess, "check_call", side_effect=capture):
-            self.assertTrue(self.reviewer.post_pr_review(55, "VERDICT: COMMENT", []))
+            self.assertTrue(
+                self.reviewer.post_pr_review(
+                    55, "VERDICT: COMMENT", [], repository="owner/repository"
+                )
+            )
         self.assertTrue(Path(captured[0]).is_absolute())
+
+    def test_configured_repository_is_passed_to_all_gh_pr_commands(self):
+        repository = "other-owner/other-repository"
+        process = FakeProcess(b"+safe")
+        captured_review = []
+
+        def capture_review(command, **_kwargs):
+            captured_review.append(command)
+
+        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(
+            os.environ, {"PR_REVIEWER_REPOSITORY": repository}
+        ), mock.patch.object(
+            self.reviewer, "WORKSPACE", Path(directory)
+        ), mock.patch.object(
+            self.reviewer.subprocess, "check_output", return_value=b"[]"
+        ) as check_output, mock.patch.object(
+            self.reviewer.subprocess, "Popen", return_value=process
+        ) as popen, mock.patch.object(
+            self.reviewer.subprocess, "check_call", side_effect=capture_review
+        ):
+            self.reviewer.get_open_prs()
+            self.reviewer.read_gh_diff(7, repository)
+            self.assertTrue(self.reviewer.post_pr_review(7, "VERDICT: COMMENT", []))
+
+        for command in (
+            check_output.call_args.args[0],
+            popen.call_args.args[0],
+            captured_review[0],
+        ):
+            self.assertEqual(command[command.index("--repo") + 1], repository)
+
+    def test_diff_failure_isolated_and_later_prs_are_processed(self):
+        pull_requests = [
+            {"number": 10, "author": {"login": "first"}, "headRefOid": "a" * 40},
+            {"number": 11, "author": {"login": "second"}, "headRefOid": "b" * 40},
+        ]
+
+        def fetch_diff(pr_number):
+            if pr_number == 10:
+                raise RuntimeError("unavailable")
+            return "+safe change"
+
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            self.reviewer, "WORKSPACE", Path(directory)
+        ), mock.patch.object(
+            self.reviewer, "DB_FILE", Path(directory) / "scans.db"
+        ), mock.patch.dict(
+            os.environ,
+            {
+                "GH_TOKEN": "token",
+                "PR_REVIEWER_REPOSITORY": "owner/repository",
+            },
+            clear=True
+        ), mock.patch.object(
+            self.reviewer, "get_open_prs", return_value=pull_requests
+        ), mock.patch.object(
+            self.reviewer, "get_pr_diff", side_effect=fetch_diff
+        ), mock.patch.object(
+            self.reviewer, "run_agy_review", return_value="VERDICT: APPROVE"
+        ), mock.patch.object(
+            self.reviewer, "post_pr_review", return_value=True
+        ) as post_review:
+            self.reviewer.process_prs()
+            connection = self.reviewer.sqlite3.connect(self.reviewer.DB_FILE)
+            statuses = dict(connection.execute("SELECT pr_number, status FROM pr_reviews"))
+            connection.close()
+
+        self.assertEqual(statuses, {10: "failed", 11: "completed"})
+        post_review.assert_called_once()
 
 
 if __name__ == "__main__":
