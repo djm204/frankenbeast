@@ -92,6 +92,8 @@ npm run test:root -- "tests/docs-issue-${ISSUE_NUMBER}.test.ts"
 
 For package code, run that package's targeted test, typecheck, and build scripts when available. Before opening the pull request, record every command you ran and its real result; do not claim a skipped check passed.
 
+If a pull-request check fails, follow the [first-PR CI failure triage guide](docs/onboarding/ci-failure-triage.md). It shows how to confirm the failing head, inspect the exact workflow run, reproduce the narrow command locally, distinguish product failures from transient infrastructure, and request at most one evidence-based rerun.
+
 ## Commit and open a pull request
 
 Review the exact diff, then create a Conventional Commit:
@@ -197,4 +199,4 @@ Start the next issue from a new branch based on current `main`; do not reuse the
 
 ## Getting help
 
-For setup failures, start with the [setup troubleshooting matrix](docs/onboarding/setup-troubleshooting-matrix.md). For test selection, use the [test command decision tree](docs/onboarding/test-command-decision-tree.md). For package ownership and architecture, use the [architecture map](docs/onboarding/architecture-map.md) and [repository ownership manifest](docs/onboarding/repository-ownership.md). When these guides do not resolve the blocker, follow the [first-contribution help guide](docs/onboarding/getting-help.md) to choose the right GitHub thread, collect safe diagnostic evidence, and ask one answerable question.
+For setup failures, start with the [setup troubleshooting matrix](docs/onboarding/setup-troubleshooting-matrix.md). For test selection, use the [test command decision tree](docs/onboarding/test-command-decision-tree.md). For failing pull-request checks, use the [first-PR CI failure triage guide](docs/onboarding/ci-failure-triage.md). For package ownership and architecture, use the [architecture map](docs/onboarding/architecture-map.md) and [repository ownership manifest](docs/onboarding/repository-ownership.md). When these guides do not resolve the blocker, follow the [first-contribution help guide](docs/onboarding/getting-help.md) to choose the right GitHub thread, collect safe diagnostic evidence, and ask one answerable question.
