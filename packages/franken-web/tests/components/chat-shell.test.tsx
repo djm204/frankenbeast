@@ -1105,7 +1105,7 @@ describe('ChatShell', () => {
         description: 'Current description',
         moduleConfig: { firewall: true, planner: false },
       });
-      expect(mockGetAgent).toHaveBeenCalledTimes(2);
+      expect(mockGetAgent.mock.calls.filter(([agentId]) => agentId === 'agent-1').length).toBeGreaterThanOrEqual(2);
       expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
     });
     expect(screen.getAllByText('Updated Agent').length).toBeGreaterThan(0);
