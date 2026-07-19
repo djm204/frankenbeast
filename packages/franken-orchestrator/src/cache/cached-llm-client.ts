@@ -68,7 +68,9 @@ export class CachedLlmClient {
     }
     this.metrics.recordManagedResponseMiss();
 
+    let completionOptions = request.completionOptions;
     if (request.nativeSession && workId) {
+      const nativeStartedAt = Date.now();
       this.metrics.recordNativeSessionAttempt();
       const existingSession = await this.deps.providerSessions.load({
         projectId: request.scope.projectId,
@@ -78,11 +80,11 @@ export class CachedLlmClient {
         promptFingerprint: computed.sessionFingerprint,
       });
 
-      const resumed = request.completionOptions
+      const resumed = completionOptions
         ? await request.nativeSession.resume(
             existingSession?.sessionId,
             computed.fullPrompt,
-            request.completionOptions,
+            completionOptions,
           )
         : await request.nativeSession.resume(existingSession?.sessionId, computed.fullPrompt);
       if (resumed) {
@@ -109,11 +111,12 @@ export class CachedLlmClient {
       }
 
       this.metrics.recordNativeSessionFallback();
+      completionOptions = remainingCompletionOptions(completionOptions, nativeStartedAt);
     }
 
     this.metrics.recordInnerCall();
-    const response = request.completionOptions
-      ? await this.deps.llm.complete(computed.fullPrompt, request.completionOptions)
+    const response = completionOptions
+      ? await this.deps.llm.complete(computed.fullPrompt, completionOptions)
       : await this.deps.llm.complete(computed.fullPrompt);
     await this.persistCacheArtifacts(request, computed, response);
     return response;
@@ -170,4 +173,18 @@ export class CachedLlmClient {
   async invalidateProviderSession(projectId: string, workId: string): Promise<void> {
     await this.deps.providerSessions.remove(projectId, workId);
   }
+}
+
+function remainingCompletionOptions(
+  options: LlmCompletionOptions | undefined,
+  startedAt: number,
+): LlmCompletionOptions | undefined {
+  if (options?.timeoutMs === undefined) return options;
+  const remainingMs = options.timeoutMs - (Date.now() - startedAt);
+  if (remainingMs <= 0) {
+    throw Object.assign(new Error('LLM completion deadline exceeded before native fallback'), {
+      code: 'ETIMEDOUT',
+    });
+  }
+  return { ...options, timeoutMs: remainingMs };
 }

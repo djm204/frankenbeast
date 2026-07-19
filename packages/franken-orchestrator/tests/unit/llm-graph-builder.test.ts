@@ -505,11 +505,17 @@ describe('LlmGraphBuilder', () => {
       expect(complete.mock.calls[1]![1].signal.aborted).toBe(true);
     });
 
-    it('preserves the decomposition draft when the LLM client rejects on its own timeout', async () => {
+    it('preserves the decomposition draft when the LLM timeout arrives after the planner deadline', async () => {
       const timeout = Object.assign(new Error('CLI timeout after 20ms'), { code: 'ETIMEDOUT' });
       const complete = vi.fn()
         .mockResolvedValueOnce(validChunksJson(threeChunks))
-        .mockRejectedValueOnce(timeout);
+        .mockImplementationOnce(() => {
+          const blockedUntil = Date.now() + 25;
+          while (Date.now() < blockedUntil) {
+            // Simulate a CLI timeout delivered after the configured planner deadline.
+          }
+          return Promise.reject(timeout);
+        });
       const gatherer = {
         gather: vi.fn().mockResolvedValue({
           rampUp: '',
@@ -544,7 +550,13 @@ describe('LlmGraphBuilder', () => {
       const wrappedTimeout = new Error('adapter failed', { cause: providerTimeout });
       const complete = vi.fn()
         .mockResolvedValueOnce(validChunksJson(threeChunks))
-        .mockRejectedValueOnce(wrappedTimeout);
+        .mockImplementationOnce(() => {
+          const blockedUntil = Date.now() + 25;
+          while (Date.now() < blockedUntil) {
+            // Simulate a provider timeout reported after the planner deadline.
+          }
+          return Promise.reject(wrappedTimeout);
+        });
       const gatherer = {
         gather: vi.fn().mockResolvedValue({
           rampUp: '', relevantSignatures: [], packageDeps: {}, existingPatterns: [],
@@ -566,7 +578,13 @@ describe('LlmGraphBuilder', () => {
       });
       const complete = vi.fn()
         .mockResolvedValueOnce(validChunksJson(threeChunks))
-        .mockRejectedValueOnce(wrappedTimeout);
+        .mockImplementationOnce(() => {
+          const blockedUntil = Date.now() + 25;
+          while (Date.now() < blockedUntil) {
+            // Keep the event loop occupied until the planner deadline is exceeded.
+          }
+          return Promise.reject(wrappedTimeout);
+        });
       const gatherer = {
         gather: vi.fn().mockResolvedValue({
           rampUp: '', relevantSignatures: [], packageDeps: {}, existingPatterns: [],
@@ -582,6 +600,39 @@ describe('LlmGraphBuilder', () => {
       expect(complete.mock.calls[1]![1].signal.aborted).toBe(true);
     });
 
+    it('propagates a provider timeout that occurs before the planning deadline', async () => {
+      const providerTimeout = Object.assign(new Error('provider timeout'), { code: 'ETIMEDOUT' });
+      const complete = vi.fn()
+        .mockResolvedValueOnce(validChunksJson(threeChunks))
+        .mockRejectedValueOnce(providerTimeout);
+      const gatherer = {
+        gather: vi.fn().mockResolvedValue({
+          rampUp: '', relevantSignatures: [], packageDeps: {}, existingPatterns: [],
+        }),
+      };
+      const builder = new LlmGraphBuilder({ complete }, gatherer as any, {
+        validationMode: 'always', timeoutMs: 1_000,
+      });
+
+      await expect(builder.build(intent)).rejects.toThrow('provider timeout');
+      expect(builder.lastValidationIssues).toEqual([]);
+    });
+
+    it('checks the deadline after synchronous stage parsing completes', async () => {
+      const largeChunk = {
+        ...twoChunks[0]!,
+        objective: `Implement setup ${'x'.repeat(2_000_000)}`,
+        dependencies: [],
+      };
+      const llm = mockLlm(validChunksJson([largeChunk]));
+      const builder = new LlmGraphBuilder(llm, undefined, { timeoutMs: 1 });
+
+      await expect(builder.build(intent)).rejects.toThrow('Planning deadline exceeded after 1ms');
+      expect(builder.lastRunMetrics.stages[0]).toEqual(
+        expect.objectContaining({ name: 'decompose', status: 'timed_out' }),
+      );
+    });
+
     it('keeps completed validation findings when remediation times out', async () => {
       const validationIssue = {
         severity: 'error', chunkId: '01_setup', category: 'design_gap',
@@ -594,14 +645,20 @@ describe('LlmGraphBuilder', () => {
       const complete = vi.fn()
         .mockResolvedValueOnce(validChunksJson(threeChunks))
         .mockResolvedValueOnce(validationResponse)
-        .mockRejectedValueOnce(timeout);
+        .mockImplementationOnce(() => {
+          const blockedUntil = Date.now() + 25;
+          while (Date.now() < blockedUntil) {
+            // Simulate remediation finishing with a timeout after the planner deadline.
+          }
+          return Promise.reject(timeout);
+        });
       const gatherer = {
         gather: vi.fn().mockResolvedValue({
           rampUp: '', relevantSignatures: [], packageDeps: {}, existingPatterns: [],
         }),
       };
       const builder = new LlmGraphBuilder({ complete }, gatherer as any, {
-        validationMode: 'always', timeoutMs: 100,
+        validationMode: 'always', timeoutMs: 20,
       });
 
       await builder.build(intent);
@@ -631,14 +688,20 @@ describe('LlmGraphBuilder', () => {
         .mockResolvedValueOnce(validChunksJson(threeChunks))
         .mockResolvedValueOnce(validationResponse)
         .mockResolvedValueOnce(validChunksJson(remediatedChunks))
-        .mockRejectedValueOnce(timeout);
+        .mockImplementationOnce(() => {
+          const blockedUntil = Date.now() + 25;
+          while (Date.now() < blockedUntil) {
+            // Simulate revalidation finishing with a timeout after the planner deadline.
+          }
+          return Promise.reject(timeout);
+        });
       const gatherer = {
         gather: vi.fn().mockResolvedValue({
           rampUp: '', relevantSignatures: [], packageDeps: {}, existingPatterns: [],
         }),
       };
       const builder = new LlmGraphBuilder({ complete }, gatherer as any, {
-        validationMode: 'always', timeoutMs: 100,
+        validationMode: 'always', timeoutMs: 20,
       });
 
       await builder.build(intent);

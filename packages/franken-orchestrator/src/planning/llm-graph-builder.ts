@@ -90,6 +90,10 @@ export class LlmGraphBuilder implements GraphBuilder {
       planningBudgetExceeded = true;
       controller.abort(new PlanBudgetExceededError(timeoutMs));
     };
+    const checkPlanningDeadline = (): void => {
+      if (Date.now() - startedAt >= timeoutMs) expirePlanningBudget();
+      this.throwIfAborted(controller.signal);
+    };
     const timeout = setTimeout(expirePlanningBudget, timeoutMs);
 
     const abortFromCaller = (): void => {
@@ -133,12 +137,14 @@ export class LlmGraphBuilder implements GraphBuilder {
       const context = this.contextGatherer
         ? await this.awaitWithAbort(this.contextGatherer.gather(intent.goal), controller.signal)
         : emptyContext;
-      if (Date.now() - startedAt >= timeoutMs) expirePlanningBudget();
-      this.throwIfAborted(controller.signal);
+      checkPlanningDeadline();
 
       const decomposer = new ChunkDecomposer(meteredLlm, { maxChunks: this.maxChunks });
-      let chunks = await this.runStage('decompose', controller.signal, () =>
-        decomposer.decompose(intent.goal, context, { signal: controller.signal }),
+      let chunks = await this.runStage(
+        'decompose',
+        controller.signal,
+        () => decomposer.decompose(intent.goal, context, { signal: controller.signal }),
+        checkPlanningDeadline,
       );
       let validationIssues: ValidationIssue[] = [];
 
@@ -153,8 +159,11 @@ export class LlmGraphBuilder implements GraphBuilder {
         const validator = new ChunkValidator(meteredLlm);
 
         try {
-          const result = await this.runStage('validate', controller.signal, () =>
-            validator.validate(chunks, intent.goal, qualityContext, { signal: controller.signal }),
+          const result = await this.runStage(
+            'validate',
+            controller.signal,
+            () => validator.validate(chunks, intent.goal, qualityContext, { signal: controller.signal }),
+            checkPlanningDeadline,
           );
 
           if (result.revisedChunks) chunks = result.revisedChunks;
@@ -162,18 +171,30 @@ export class LlmGraphBuilder implements GraphBuilder {
 
           if (!result.valid) {
             const remediator = new ChunkRemediator(meteredLlm);
-            chunks = await this.runStage('remediate', controller.signal, () =>
-              remediator.remediate(chunks, result.issues, qualityContext, { signal: controller.signal }),
+            chunks = await this.runStage(
+              'remediate',
+              controller.signal,
+              () => remediator.remediate(chunks, result.issues, qualityContext, { signal: controller.signal }),
+              checkPlanningDeadline,
             );
 
-            const revalidation = await this.runStage('revalidate', controller.signal, () =>
-              validator.validate(chunks, intent.goal, qualityContext, { signal: controller.signal }),
+            const revalidation = await this.runStage(
+              'revalidate',
+              controller.signal,
+              () => validator.validate(chunks, intent.goal, qualityContext, { signal: controller.signal }),
+              checkPlanningDeadline,
             );
             if (revalidation.revisedChunks) chunks = revalidation.revisedChunks;
             validationIssues = revalidation.issues;
           }
         } catch (error) {
-          if (!controller.signal.aborted && isTimeoutError(error)) expirePlanningBudget();
+          if (
+            !controller.signal.aborted
+            && isTimeoutError(error)
+            && Date.now() - startedAt >= timeoutMs
+          ) {
+            expirePlanningBudget();
+          }
           if (!controller.signal.aborted) throw error;
           if (!planningBudgetExceeded) throw error;
           validationIssues = [
@@ -198,6 +219,7 @@ export class LlmGraphBuilder implements GraphBuilder {
     name: PlanStageName,
     signal: AbortSignal,
     run: () => Promise<T>,
+    checkDeadline?: () => void,
   ): Promise<T> {
     const startedAt = Date.now();
     const stage: PlanStageMetrics = { name, promptBytes: 0, elapsedMs: 0, status: 'completed' };
@@ -206,7 +228,9 @@ export class LlmGraphBuilder implements GraphBuilder {
     this.activeStage = stage;
     try {
       this.throwIfAborted(signal);
-      return await this.awaitWithAbort(run(), signal);
+      const value = await this.awaitWithAbort(run(), signal);
+      checkDeadline?.();
+      return value;
     } catch (error) {
       stage.status = signal.aborted || isTimeoutError(error) ? 'timed_out' : 'failed';
       throw error;
