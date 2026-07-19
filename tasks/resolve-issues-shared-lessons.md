@@ -362,3 +362,6 @@
 
 ## 2026-07-18 — Durable SSE ticket wiring
 - A persistent store implementation is not durable unless every daemon construction path supplies a stable database path; add a restart-level wiring test, and contain best-effort timer cleanup failures so transient SQLite errors cannot escape callbacks and terminate the process.
+
+## 2026-07-18 — Tracked dispatch-failure response redaction
+- Treat a failed run response as a bundle: sanitize the run snapshot, stored attempts, historical events, and logs. Event/log redaction must remain effective after dispatch recovery, and restarting a stopped run whose snapshot was cleared must rebuild validated config from the tracked agent before executor start.
