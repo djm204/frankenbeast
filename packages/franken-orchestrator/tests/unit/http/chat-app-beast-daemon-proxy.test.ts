@@ -94,7 +94,28 @@ describe('chat app beast daemon proxy', () => {
     expect(response.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [, init] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
-    expect((init.headers as Headers).get('authorization')).toBe(`Bearer ${TEST_GATEWAY_TOKEN}`);
+    const forwardedHeaders = init.headers as Headers;
+    expect(forwardedHeaders.get('authorization')).toBe(`Bearer ${TEST_GATEWAY_TOKEN}`);
+    expect(forwardedHeaders.has('x-frankenbeast-operator-token')).toBe(false);
+  });
+
+  it('strips the operator token cookie while preserving unrelated cookies', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ data: 'ok' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createProxyApp();
+
+    const response = await app.request('/v1/beasts/catalog', {
+      headers: {
+        cookie: `theme=dark; frankenbeast_operator_token=${encodeURIComponent(TEST_DAEMON_TOKEN)}; session=abc`,
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
+    const forwardedHeaders = init.headers as Headers;
+    expect(forwardedHeaders.get('authorization')).toBe(`Bearer ${TEST_DAEMON_TOKEN}`);
+    expect(forwardedHeaders.get('cookie')).toBe('theme=dark; session=abc');
   });
 
   it('strips hop-by-hop headers before forwarding daemon requests', async () => {
