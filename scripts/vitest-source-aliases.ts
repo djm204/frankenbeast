@@ -13,6 +13,8 @@ const FRANKEN_SOURCE_ENTRYPOINTS = {
   '@franken/types/utils': 'packages/franken-types/src/utils/index.ts',
   '@franken/types': 'packages/franken-types/src/index.ts',
   '@franken/orchestrator': 'packages/franken-orchestrator/src/index.ts',
+  '@franken/mcp-suite': 'packages/franken-mcp-suite/src/index.ts',
+  '@franken/live-bench': 'packages/live-bench/src/index.ts',
 } as const;
 
 export type FrankenSourceAlias = keyof typeof FRANKEN_SOURCE_ENTRYPOINTS;
