@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.22](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.21...@franken/planner-v0.4.22) (2026-07-19)
+
+
+### Bug Fixes
+
+* **dx:** align workspace TypeScript versions ([#3232](https://github.com/djm204/frankenbeast/issues/3232)) ([5a58ead](https://github.com/djm204/frankenbeast/commit/5a58ead0e541104b41d87e5780419386ea727c26))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.14.0 to 0.14.1
+
 ## [0.4.21](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.20...@franken/planner-v0.4.21) (2026-07-18)
 
 
