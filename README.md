@@ -451,8 +451,8 @@ The CLI is available as `frankenbeast`, `franken`, or `frkn` — all are identic
 # Start from scratch — interview, design, plan, execute
 frankenbeast
 
-# Start from an existing design document
-frankenbeast --design-doc docs/my-feature-design.md
+# Plan from an existing design document
+frankenbeast plan --design-doc docs/my-feature-design.md
 
 # Start from existing chunk files
 frankenbeast --plan-dir ./my-chunks/
