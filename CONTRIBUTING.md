@@ -116,6 +116,8 @@ Keep the pull request title in Conventional Commit form, for example `docs(onboa
 For a copyable, non-interactive first-PR handoff, set a title and list only checks you actually ran:
 
 ```bash
+ISSUE_NUMBER="2530" # replace with the issue you are closing
+: "${ISSUE_NUMBER:?set ISSUE_NUMBER to the issue you are closing}"
 PR_TITLE="docs(onboarding): describe your issue-specific change" # replace this example
 PR_URL=$(gh pr create \
   --repo djm204/frankenbeast \
@@ -132,7 +134,7 @@ printf 'Opened %s\n' "$PR_URL"
 gh pr view "$PR_URL" --json number,title,body,baseRefName,headRefName,url
 ```
 
-Read the displayed title, body, base branch, and head branch before requesting review. If anything is wrong, correct it with `gh pr edit "$PR_URL"` rather than closing and recreating the pull request. Never list a test that you skipped or that failed.
+Read the displayed title, body, base branch, and head branch before requesting review. If the title, body, or base branch is wrong, correct it with `gh pr edit "$PR_URL"`. GitHub cannot change an existing pull request's head branch: if the displayed head is wrong, close the pull request, switch to and push the intended branch, then create a new pull request. Never list a test that you skipped or that failed.
 
 ## Before requesting review
 

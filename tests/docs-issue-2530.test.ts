@@ -22,6 +22,8 @@ describe('issue #2530 first pull request handoff', () => {
 
     for (const expected of [
       'For a copyable, non-interactive first-PR handoff',
+      'ISSUE_NUMBER="2530" # replace with the issue you are closing',
+      ': "${ISSUE_NUMBER:?set ISSUE_NUMBER to the issue you are closing}"',
       'PR_URL=$(gh pr create',
       '--repo djm204/frankenbeast',
       '--base main',
@@ -29,6 +31,8 @@ describe('issue #2530 first pull request handoff', () => {
       'Closes #${ISSUE_NUMBER}',
       'gh pr view "$PR_URL" --json number,title,body,baseRefName,headRefName,url',
       'gh pr edit "$PR_URL"',
+      "GitHub cannot change an existing pull request's head branch",
+      'close the pull request, switch to and push the intended branch',
       'Never list a test that you skipped or that failed',
     ]) {
       expect(guide).toContain(expected);
