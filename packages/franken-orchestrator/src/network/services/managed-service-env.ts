@@ -10,7 +10,9 @@ const LEGACY_OPERATOR_SECRET_ENV_KEYS = ['VITE_BEAST_OPERATOR_TOKEN'] as const;
 
 const PROVIDER_ENV_KEYS = [
   'ANTHROPIC_API_KEY',
+  'CODEX_HOME',
   'OPENAI_API_KEY',
+  'OPENAI_BASE_URL',
   'GOOGLE_API_KEY',
   'GEMINI_API_KEY',
   'GEMINI_CLI_HOME',
@@ -19,6 +21,8 @@ const PROVIDER_ENV_KEYS = [
   'GEMINI_CLI_TRUSTED_FOLDERS_PATH',
   'GEMINI_CLI_TRUST_WORKSPACE',
 ] as const;
+
+const DASHBOARD_BUILD_ENV_KEYS = ['VITE_PROJECT_ID'] as const;
 
 const GITHUB_ENV_KEYS = [
   'GH_TOKEN',
@@ -161,6 +165,9 @@ export function inheritedNetworkServiceEnvKeys(
   }
   if (serviceId === 'chat-server') {
     keys.push(...configuredCommsEnvRefs(config));
+  }
+  if (serviceId === 'dashboard-web') {
+    keys.push(...DASHBOARD_BUILD_ENV_KEYS);
   }
 
   return [...new Set(keys)];

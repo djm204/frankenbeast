@@ -100,6 +100,26 @@ describe('network-registry', () => {
     expect(dashboardKeys).not.toContain('FRANKENBEAST_MODULE_FIREWALL');
   });
 
+  it('preserves Codex CLI runtime configuration for managed provider services', () => {
+    const services = resolveNetworkServices(defaultConfig(), context);
+
+    for (const serviceId of ['beasts-daemon', 'chat-server']) {
+      const inheritedEnvKeys = services.find((service) => service.id === serviceId)
+        ?.runtimeConfig.process?.inheritedEnvKeys ?? [];
+      expect(inheritedEnvKeys).toEqual(expect.arrayContaining([
+        'CODEX_HOME',
+        'OPENAI_BASE_URL',
+      ]));
+    }
+  });
+
+  it('preserves the dashboard project-id build override', () => {
+    const dashboard = resolveNetworkServices(defaultConfig(), context)
+      .find((service) => service.id === 'dashboard-web');
+
+    expect(dashboard?.runtimeConfig.process?.inheritedEnvKeys).toContain('VITE_PROJECT_ID');
+  });
+
   it('declares active 1Password session variables only for the 1Password backend', () => {
     vi.stubEnv('OP_SESSION_WORK', 'session-for-test');
     const config = defaultConfig();
