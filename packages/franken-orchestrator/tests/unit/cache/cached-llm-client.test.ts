@@ -247,4 +247,34 @@ describe('CachedLlmClient', () => {
       innerCalls: 1,
     });
   });
+
+  it('propagates native-session timeouts without starting a backing LLM call', async () => {
+    const { llm, client, metrics } = await createHarness();
+    const timeout = Object.assign(new Error('CLI timeout after 25ms'), { code: 'ETIMEDOUT' });
+    const resume = vi.fn().mockRejectedValue(timeout);
+
+    await expect(client.complete({
+      scope: {
+        projectId: 'frankenbeast',
+        workId: 'issue:99',
+      },
+      operation: 'issue-triage',
+      stablePrefix: 'skill injection',
+      workPrefix: 'issue 99 summary',
+      volatileSuffix: 'new comment text',
+      nativeSession: {
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+        resume,
+      },
+      completionOptions: { timeoutMs: 25 },
+    })).rejects.toBe(timeout);
+
+    expect(llm.callCount).toBe(0);
+    expect(metrics.snapshot()).toMatchObject({
+      nativeSessionAttempts: 1,
+      nativeSessionFallbacks: 0,
+      innerCalls: 0,
+    });
+  });
 });

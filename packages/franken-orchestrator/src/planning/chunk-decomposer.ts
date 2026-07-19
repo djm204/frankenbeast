@@ -1,4 +1,4 @@
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient, LlmCompletionOptions } from '@franken/types';
 import type { ChunkDefinition } from '../cli/file-writer.js';
 import type { PlanContext } from './plan-context-gatherer.js';
 import { cleanLlmJson } from '../skills/providers/stream-json-utils.js';
@@ -16,9 +16,13 @@ export class ChunkDecomposer {
     private readonly options: { maxChunks: number },
   ) {}
 
-  async decompose(designDoc: string, context: PlanContext): Promise<ChunkDefinition[]> {
+  async decompose(
+    designDoc: string,
+    context: PlanContext,
+    completionOptions?: LlmCompletionOptions,
+  ): Promise<ChunkDefinition[]> {
     const prompt = this.buildDecompositionPrompt(designDoc, context);
-    const raw = await this.llm.complete(prompt);
+    const raw = await this.llm.complete(prompt, completionOptions);
     const chunks = this.parseResponse(raw);
     this.validate(chunks);
 

@@ -36,6 +36,18 @@ const twoChunks = [
   },
 ];
 
+const threeChunks = [
+  ...twoChunks,
+  {
+    id: '03_integration',
+    objective: 'Integrate and document the widget system',
+    files: ['src/integration.ts', 'README.md'],
+    successCriteria: 'Integration tests pass',
+    verificationCommand: 'npx vitest run tests/integration',
+    dependencies: ['02_feature'],
+  },
+];
+
 const intent = { goal: 'Build a new widget system with React components' };
 
 describe('LlmGraphBuilder', () => {
@@ -367,6 +379,162 @@ describe('LlmGraphBuilder', () => {
   });
 
   describe('multi-pass pipeline', () => {
+    it('uses a one-pass fast path for a simple decomposition', async () => {
+      const llm = mockLlm(validChunksJson(twoChunks));
+      const gatherer = {
+        gather: vi.fn().mockResolvedValue({
+          rampUp: 'Large unchanged codebase context',
+          relevantSignatures: [],
+          packageDeps: {},
+          existingPatterns: [],
+        }),
+      };
+
+      const builder = new LlmGraphBuilder(llm, gatherer as any);
+      await builder.build(intent);
+
+      expect(llm.complete).toHaveBeenCalledOnce();
+      expect(builder.lastRunMetrics.passCount).toBe(1);
+    });
+
+    it('uses validation when a short decomposition has low-confidence file overlap', async () => {
+      const overlapping = [
+        twoChunks[0]!,
+        { ...twoChunks[1]!, files: ['src/index.ts'] },
+      ];
+      const validationResponse = JSON.stringify({ valid: true, issues: [], revisedChunks: null });
+      const llm = {
+        complete: vi.fn()
+          .mockResolvedValueOnce(validChunksJson(overlapping))
+          .mockResolvedValueOnce(validationResponse),
+      };
+      const gatherer = {
+        gather: vi.fn().mockResolvedValue({
+          rampUp: '',
+          relevantSignatures: [],
+          packageDeps: {},
+          existingPatterns: [],
+        }),
+      };
+
+      const builder = new LlmGraphBuilder(llm, gatherer as any);
+      await builder.build(intent);
+
+      expect(llm.complete).toHaveBeenCalledTimes(2);
+      expect(builder.lastRunMetrics.passCount).toBe(2);
+    });
+
+    it('uses two passes for a complex decomposition that validates cleanly', async () => {
+      const validationResponse = JSON.stringify({ valid: true, issues: [], revisedChunks: null });
+      const llm = {
+        complete: vi.fn()
+          .mockResolvedValueOnce(validChunksJson(threeChunks))
+          .mockResolvedValueOnce(validationResponse),
+      };
+      const gatherer = {
+        gather: vi.fn().mockResolvedValue({
+          rampUp: 'Large unchanged codebase context',
+          relevantSignatures: [],
+          packageDeps: {},
+          existingPatterns: [],
+        }),
+      };
+
+      const builder = new LlmGraphBuilder(llm, gatherer as any);
+      await builder.build(intent);
+
+      expect(llm.complete).toHaveBeenCalledTimes(2);
+      expect(builder.lastRunMetrics.passCount).toBe(2);
+      expect((llm.complete as ReturnType<typeof vi.fn>).mock.calls[0]![0]).toContain('Large unchanged codebase context');
+      expect((llm.complete as ReturnType<typeof vi.fn>).mock.calls[1]![0]).not.toContain('Large unchanged codebase context');
+    });
+
+    it('records pass count, prompt bytes, stage timing, and elapsed time', async () => {
+      const llm = mockLlm(validChunksJson(twoChunks));
+      const builder = new LlmGraphBuilder(llm);
+
+      await builder.build(intent);
+
+      expect(builder.lastRunMetrics.passCount).toBe(1);
+      expect(builder.lastRunMetrics.promptBytes).toBeGreaterThan(0);
+      expect(builder.lastRunMetrics.elapsedMs).toBeGreaterThanOrEqual(0);
+      expect(builder.lastRunMetrics.stages).toEqual([
+        expect.objectContaining({ name: 'decompose', status: 'completed' }),
+      ]);
+    });
+
+    it('preserves decomposition as a warning-marked draft when the quality budget expires', async () => {
+      const complete = vi.fn().mockImplementation((_: string, options?: { signal?: AbortSignal }) => {
+        if (complete.mock.calls.length === 1) {
+          return Promise.resolve(validChunksJson(threeChunks));
+        }
+        return new Promise<string>((_resolve, reject) => {
+          options?.signal?.addEventListener('abort', () => reject(options.signal?.reason), { once: true });
+        });
+      });
+      const llm = { complete };
+      const gatherer = {
+        gather: vi.fn().mockResolvedValue({
+          rampUp: '',
+          relevantSignatures: [],
+          packageDeps: {},
+          existingPatterns: [],
+        }),
+      };
+      const builder = new LlmGraphBuilder(llm, gatherer as any, {
+        validationMode: 'always',
+        timeoutMs: 20,
+      });
+
+      const graph = await builder.build(intent);
+
+      expect(graph.tasks).toHaveLength(6);
+      expect(builder.lastChunks).toEqual(threeChunks);
+      expect(builder.lastValidationIssues).toEqual([
+        expect.objectContaining({
+          severity: 'warning',
+          category: 'planning_budget_exceeded',
+        }),
+      ]);
+      expect(builder.lastRunMetrics.stages.at(-1)).toEqual(
+        expect.objectContaining({ name: 'validate', status: 'timed_out' }),
+      );
+      expect(complete.mock.calls[1]![1].signal.aborted).toBe(true);
+    });
+
+    it('propagates caller cancellation during a quality pass instead of saving a draft', async () => {
+      const complete = vi.fn().mockImplementation((_: string, options?: { signal?: AbortSignal }) => {
+        if (complete.mock.calls.length === 1) {
+          return Promise.resolve(validChunksJson(threeChunks));
+        }
+        return new Promise<string>((_resolve, reject) => {
+          options?.signal?.addEventListener('abort', () => reject(options.signal?.reason), { once: true });
+        });
+      });
+      const gatherer = {
+        gather: vi.fn().mockResolvedValue({
+          rampUp: '',
+          relevantSignatures: [],
+          packageDeps: {},
+          existingPatterns: [],
+        }),
+      };
+      const controller = new AbortController();
+      const builder = new LlmGraphBuilder({ complete }, gatherer as any, {
+        validationMode: 'always',
+        timeoutMs: 60_000,
+        signal: controller.signal,
+      });
+
+      const result = builder.build(intent);
+      await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(2));
+      controller.abort(new Error('operator cancelled planning'));
+
+      await expect(result).rejects.toThrow('operator cancelled planning');
+      expect(builder.lastChunks).toEqual([]);
+      expect(builder.lastValidationIssues).toEqual([]);
+    });
+
     it('uses contextGatherer when provided', async () => {
       const llm = mockLlm(validChunksJson(twoChunks));
       const gatherer = {
@@ -464,7 +632,7 @@ describe('LlmGraphBuilder', () => {
         }),
       };
 
-      const builder = new LlmGraphBuilder(llm, gatherer as any);
+      const builder = new LlmGraphBuilder(llm, gatherer as any, { validationMode: 'always' });
       const graph = await builder.build(intent);
 
       expect(llm.complete).toHaveBeenCalledTimes(4);
@@ -496,7 +664,7 @@ describe('LlmGraphBuilder', () => {
         }),
       };
 
-      const builder = new LlmGraphBuilder(llm, gatherer as any);
+      const builder = new LlmGraphBuilder(llm, gatherer as any, { validationMode: 'always' });
       await builder.build(intent);
 
       // Only 2 LLM calls: decompose + validate
@@ -536,7 +704,7 @@ describe('LlmGraphBuilder', () => {
         }),
       };
 
-      const builder = new LlmGraphBuilder(llm, gatherer as any);
+      const builder = new LlmGraphBuilder(llm, gatherer as any, { validationMode: 'always' });
       const graph = await builder.build(intent);
 
       // Should use the revised chunks (1 chunk = 2 tasks)

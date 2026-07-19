@@ -1,4 +1,4 @@
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient, LlmCompletionOptions } from '@franken/types';
 import type { ILlmObserver } from '../adapters/adapter-llm-client.js';
 import { CachedLlmClient } from './cached-llm-client.js';
 import { LlmCacheStore } from './llm-cache-store.js';
@@ -17,7 +17,7 @@ interface CliAdapterLike {
   consumeSessionMetadata?(requestId: string): CliSessionMetadata | undefined;
 }
 
-export interface LlmCacheHint {
+export interface LlmCacheHint extends LlmCompletionOptions {
   operation?: string | undefined;
   workId?: string | undefined;
   stablePrefix?: string | undefined;
@@ -47,8 +47,8 @@ export class CachedCliLlmClient implements ILlmClient {
     this.schemaVersion = options.schemaVersion ?? 1;
     this.cached = new CachedLlmClient({
       llm: {
-        complete: async (prompt: string) => {
-          const response = await this.invoke(prompt);
+        complete: async (prompt: string, completionOptions?: LlmCompletionOptions) => {
+          const response = await this.invoke(prompt, undefined, completionOptions);
           return response.content;
         },
       },
@@ -66,8 +66,8 @@ export class CachedCliLlmClient implements ILlmClient {
       ? {
           provider: this.options.provider,
           model: this.options.model,
-          resume: async (_sessionId: string | undefined, nextPrompt: string) => {
-            const response = await this.invoke(nextPrompt, workId);
+          resume: async (_sessionId: string | undefined, nextPrompt: string, completionOptions?: LlmCompletionOptions) => {
+            const response = await this.invoke(nextPrompt, workId, completionOptions);
             return {
               content: response.content,
               sessionId: response.sessionId ?? workId,
@@ -86,16 +86,26 @@ export class CachedCliLlmClient implements ILlmClient {
       ...(workPrefix ? { workPrefix } : {}),
       volatileSuffix: prompt,
       ...(nativeSession ? { nativeSession } : {}),
+      completionOptions: {
+        ...(hint?.signal ? { signal: hint.signal } : {}),
+        ...(hint?.timeoutMs !== undefined ? { timeoutMs: hint.timeoutMs } : {}),
+      },
     });
   }
 
-  private async invoke(prompt: string, cacheSessionKey?: string): Promise<{ content: string; sessionId?: string | undefined }> {
+  private async invoke(
+    prompt: string,
+    cacheSessionKey?: string,
+    completionOptions?: LlmCompletionOptions,
+  ): Promise<{ content: string; sessionId?: string | undefined }> {
     const requestId = `llm-${deterministicNow()}-${seededRandom.random().toString(16).slice(2)}`;
     const request = {
       id: requestId,
       provider: 'adapter',
       model: this.options.model,
       messages: [{ role: 'user', content: prompt }],
+      ...(completionOptions?.signal ? { signal: completionOptions.signal } : {}),
+      ...(completionOptions?.timeoutMs !== undefined ? { timeoutMs: completionOptions.timeoutMs } : {}),
       ...(cacheSessionKey
         ? {
             cacheSession: {

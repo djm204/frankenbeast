@@ -391,3 +391,4 @@
 
 ## Lessons
 - 2026-07-19 — Docs regression tests should assert exact pinned values from manifest and treat setup commands as gate-narrow/full setup distinctions.
+- 2026-07-19 — Bounded multi-pass LLM flows need one shared deadline propagated through cache/client/adapter layers, explicit subprocess and retry-wait cancellation, and a caller-side abort race for implementations that ignore signals. Preserve the last useful pre-quality artifact on timeout, use deterministic structural confidence for fast paths, avoid resending unchanged repository context, and test 1/2/4-pass paths plus child-process termination.

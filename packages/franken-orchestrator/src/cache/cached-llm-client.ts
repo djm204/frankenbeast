@@ -3,6 +3,7 @@ import { LlmCacheStore } from './llm-cache-store.js';
 import { LlmCachePolicy, type CacheablePromptRequest } from './llm-cache-policy.js';
 import { ProviderSessionStore } from './provider-session-store.js';
 import { isoNow } from '@franken/types';
+import type { LlmCompletionOptions } from '@franken/types';
 
 export interface NativeSessionResult {
   content: string;
@@ -12,15 +13,20 @@ export interface NativeSessionResult {
 export interface NativeSessionController {
   provider: string;
   model: string;
-  resume(sessionId: string | undefined, prompt: string): Promise<NativeSessionResult | undefined>;
+  resume(
+    sessionId: string | undefined,
+    prompt: string,
+    options?: LlmCompletionOptions,
+  ): Promise<NativeSessionResult | undefined>;
 }
 
 export interface CachedPromptRequest extends CacheablePromptRequest {
   nativeSession?: NativeSessionController | undefined;
+  completionOptions?: LlmCompletionOptions | undefined;
 }
 
 export interface CachedLlmClientDeps {
-  llm: { complete(prompt: string): Promise<string> };
+  llm: { complete(prompt: string, options?: LlmCompletionOptions): Promise<string> };
   cacheStore: LlmCacheStore;
   policy: LlmCachePolicy;
   providerSessions: ProviderSessionStore;
@@ -72,7 +78,13 @@ export class CachedLlmClient {
       });
 
       try {
-        const resumed = await request.nativeSession.resume(existingSession?.sessionId, computed.fullPrompt);
+        const resumed = request.completionOptions
+          ? await request.nativeSession.resume(
+              existingSession?.sessionId,
+              computed.fullPrompt,
+              request.completionOptions,
+            )
+          : await request.nativeSession.resume(existingSession?.sessionId, computed.fullPrompt);
         if (resumed) {
           this.metrics.recordNativeSessionHit();
           const sessionId = resumed.sessionId ?? existingSession?.sessionId;
@@ -92,7 +104,8 @@ export class CachedLlmClient {
           await this.persistCacheArtifacts(request, computed, resumed.content);
           return resumed.content;
         }
-      } catch {
+      } catch (error) {
+        if (request.completionOptions?.signal?.aborted || isTimeoutError(error)) throw error;
         // Fall through to backing llm call.
       }
 
@@ -100,7 +113,9 @@ export class CachedLlmClient {
     }
 
     this.metrics.recordInnerCall();
-    const response = await this.deps.llm.complete(computed.fullPrompt);
+    const response = request.completionOptions
+      ? await this.deps.llm.complete(computed.fullPrompt, request.completionOptions)
+      : await this.deps.llm.complete(computed.fullPrompt);
     await this.persistCacheArtifacts(request, computed, response);
     return response;
   }
@@ -152,4 +167,9 @@ export class CachedLlmClient {
       });
     }
   }
+}
+
+function isTimeoutError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return (error as NodeJS.ErrnoException).code === 'ETIMEDOUT' || error.name === 'TimeoutError';
 }
