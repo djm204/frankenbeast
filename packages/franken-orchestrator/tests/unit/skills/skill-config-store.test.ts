@@ -6,6 +6,8 @@ import {
   readFileSync,
   mkdirSync,
   existsSync,
+  lstatSync,
+  symlinkSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -75,6 +77,39 @@ describe('SkillConfigStore', () => {
   });
 
   describe('save()', () => {
+    it('atomically replaces config.json instead of writing through it', () => {
+      mkdirSync(configDir, { recursive: true });
+      const linkedConfigPath = join(tempDir, 'linked-config.json');
+      writeFileSync(
+        linkedConfigPath,
+        JSON.stringify({ theme: 'dark', skills: { enabled: ['old'] } }, null, 2) + '\n',
+      );
+      const configPath = join(configDir, 'config.json');
+      symlinkSync(linkedConfigPath, configPath);
+
+      store.save(new Set(['github']));
+
+      expect(lstatSync(configPath).isSymbolicLink()).toBe(false);
+      expect(JSON.parse(readFileSync(configPath, 'utf-8'))).toEqual({
+        theme: 'dark',
+        skills: { enabled: ['github'] },
+      });
+      expect(JSON.parse(readFileSync(linkedConfigPath, 'utf-8'))).toEqual({
+        theme: 'dark',
+        skills: { enabled: ['old'] },
+      });
+    });
+
+    it('refuses to overwrite a corrupt existing config', () => {
+      mkdirSync(configDir, { recursive: true });
+      const configPath = join(configDir, 'config.json');
+      const truncatedConfig = '{"theme":"dark","skills":{"enabled":["github"]';
+      writeFileSync(configPath, truncatedConfig);
+
+      expect(() => store.save(new Set(['linear']))).toThrow(/corrupt/i);
+      expect(readFileSync(configPath, 'utf-8')).toBe(truncatedConfig);
+    });
+
     it('creates config.json with skills.enabled array', () => {
       store.save(new Set(['github', 'linear']));
       const configPath = join(configDir, 'config.json');

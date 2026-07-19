@@ -1,5 +1,6 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+import { atomicWriteFileSync } from '../session/atomic-file.js';
 
 /**
  * Persistent store for skill toggle state.
@@ -43,16 +44,18 @@ export class SkillConfigStore {
     mkdirSync(dirname(this.configPath), { recursive: true });
 
     let existing: Record<string, unknown> = {};
-    try {
-      if (existsSync(this.configPath)) {
+    if (existsSync(this.configPath)) {
+      try {
         const parsed = JSON.parse(readFileSync(this.configPath, 'utf-8'));
         // Normalize: only use parsed value if it's a plain object
         if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
           existing = parsed as Record<string, unknown>;
         }
+      } catch (error) {
+        throw new Error('Cannot save skill toggles because the existing config is corrupt or unreadable', {
+          cause: error,
+        });
       }
-    } catch {
-      /* start fresh if corrupt */
     }
 
     existing.skills = {
@@ -60,6 +63,6 @@ export class SkillConfigStore {
       enabled: [...enabledSkills].sort(),
     };
 
-    writeFileSync(this.configPath, JSON.stringify(existing, null, 2) + '\n');
+    atomicWriteFileSync(this.configPath, JSON.stringify(existing, null, 2) + '\n');
   }
 }
