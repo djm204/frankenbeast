@@ -58,32 +58,19 @@ export function cleanupBuild(buildDir: string, options: CleanupBuildOptions = {}
   }
 
   let removed = 0;
-  const removeRecursive = (target: string): void => {
-    const stat = lstatOptional(target);
-    if (!stat) return;
-
-    if (stat.isSymbolicLink()) {
-      rmSync(target, { force: true });
-      removed++;
-      return;
-    }
-
-    if (stat.isDirectory()) {
-      for (const entry of readdirSync(target)) {
-        removeRecursive(join(target, entry));
-      }
-      rmSync(target, { recursive: true, force: true });
-      removed++;
-      return;
-    }
-
-    rmSync(target, { force: true });
-    removed++;
-  };
 
   for (const entry of readdirSync(buildDir)) {
+    const target = join(buildDir, entry);
     try {
-      removeRecursive(join(buildDir, entry));
+      const stat = lstatOptional(target);
+      if (!stat) continue;
+
+      if (stat.isDirectory()) {
+        rmSync(target, { recursive: true, force: true });
+      } else {
+        rmSync(target, { force: true });
+      }
+      removed++;
     } catch {
       // skip entries that can't be removed
     }

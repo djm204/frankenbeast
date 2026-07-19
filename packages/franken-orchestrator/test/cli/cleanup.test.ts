@@ -57,6 +57,18 @@ describe('cleanupBuild', () => {
     expect(removed).toBe(3);
   });
 
+  it('counts top-level build artifacts only, not nested file entries', () => {
+    writeFileSync(join(buildDir, 'plan-abc-2026-03-08T02-31-09-build.log'), 'log');
+    mkdirSync(join(buildDir, 'nested-session'), { recursive: true });
+    writeFileSync(join(buildDir, 'nested-session', 'payload.json'), '{}');
+    writeFileSync(join(buildDir, 'build-traces.db'), 'db');
+
+    const removed = cleanupBuild(buildDir);
+
+    expect(readdirSync(buildDir)).toEqual([]);
+    expect(removed).toBe(3);
+  });
+
   it('returns 0 when .build/ is empty', () => {
     const removed = cleanupBuild(buildDir);
     expect(removed).toBe(0);
