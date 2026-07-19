@@ -29,6 +29,20 @@ describe('CostCalculator', () => {
       expect(cost).toBeCloseTo(expected, 8)
     })
 
+    it('multiplies small token counts by the rate before scaling to millions', () => {
+      const calc = new CostCalculator({
+        'small-usage-model': { promptPerMillion: 15, completionPerMillion: 0 },
+      })
+
+      const cost = calc.calculate({
+        model: 'small-usage-model',
+        promptTokens: 1,
+        completionTokens: 0,
+      })
+
+      expect(cost).toBe((1 * 15) / 1_000_000)
+    })
+
     it('returns 0 for an unknown model', () => {
       const quietCalc = new CostCalculator(DEFAULT_PRICING, {
         onUnknownModel: () => {},

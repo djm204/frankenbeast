@@ -39,8 +39,8 @@ export class CostCalculator {
       return 0
     }
     return (
-      (entry.promptTokens / 1_000_000) * model.promptPerMillion +
-      (entry.completionTokens / 1_000_000) * model.completionPerMillion
+      (entry.promptTokens * model.promptPerMillion) / 1_000_000 +
+      (entry.completionTokens * model.completionPerMillion) / 1_000_000
     )
   }
 
