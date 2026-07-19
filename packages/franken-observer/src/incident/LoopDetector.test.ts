@@ -188,6 +188,37 @@ describe('LoopDetector', () => {
     })
   })
 
+  describe('comparison caching', () => {
+    it('normalizes each span once and reuses pairwise fuzzy-match results across scans', () => {
+      const internals = LoopDetector as unknown as {
+        normalizeSpanName(spanName: string): string
+        levenshteinDistance(left: string, right: string): number
+      }
+      const normalizeSpy = vi.spyOn(internals, 'normalizeSpanName')
+      const distanceSpy = vi.spyOn(internals, 'levenshteinDistance')
+      const detector = new LoopDetector({
+        windowSize: 1,
+        repeatThreshold: 3,
+        similarityThreshold: 1,
+        maxGapBetweenRepetitions: 100,
+      })
+
+      detector.check('alpha-aaaa')
+      detector.check('bravo-bbbb')
+      detector.check('charlie-cccc')
+
+      expect(normalizeSpy).toHaveBeenCalledTimes(3)
+      expect(distanceSpy).toHaveBeenCalledTimes(3)
+
+      detector.check('delta-dddd')
+
+      expect(normalizeSpy).toHaveBeenCalledTimes(4)
+      // The fourth scan adds only the three pairs involving the new span;
+      // comparisons among prior history entries are served from the cache.
+      expect(distanceSpy).toHaveBeenCalledTimes(6)
+    })
+  })
+
   describe('event emission', () => {
     it('emits a loop-detected event when a loop is found', () => {
       const detector = new LoopDetector({ windowSize: 2, repeatThreshold: 2 })
