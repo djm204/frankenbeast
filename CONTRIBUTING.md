@@ -96,7 +96,7 @@ If a pull-request check fails, follow the [first-PR CI failure triage guide](doc
 
 ## Commit and open a pull request
 
-Review the exact diff, then create a Conventional Commit:
+Review the exact diff, then create a Conventional Commit. First-time contributors can follow the [pull request self-review checklist](docs/onboarding/pull-request-self-review.md) to inspect the complete base-to-head patch, accidental or sensitive files, verification evidence, and the GitHub pull request before requesting review.
 
 If `git status --short` shows an intentional new file with the `??` prefix, first run `git add --intent-to-add <new-path>` for that path. This lets patch mode present the new file without staging unrelated untracked files.
 
@@ -144,6 +144,7 @@ Read the displayed title, body, base branch, and head branch before requesting r
 
 ## Before requesting review
 
+- [ ] The complete base-to-head diff was checked with the [pull request self-review checklist](docs/onboarding/pull-request-self-review.md).
 - [ ] The pull request addresses one issue and contains no unrelated files.
 - [ ] Documentation and commands match the current repository state.
 - [ ] Relevant tests, typechecks, lint, and builds pass, or the pull request explicitly explains why a gate could not run.
