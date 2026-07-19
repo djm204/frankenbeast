@@ -29,17 +29,9 @@ The bootstrap command delegates to [`scripts/bootstrap.sh`](scripts/bootstrap.sh
 ./scripts/bootstrap.sh --dry-run
 ```
 
-## Latest release announcement
+## Releases
 
-[Release v0.45.0](https://github.com/djm204/frankenbeast/releases/tag/v0.45.0) is the latest Frankenbeast release line. It packages the recent one-click onboarding cleanup, security hardening across MCP, observer, orchestrator, governor, and web surfaces, plus deterministic mode improvements for repeatable validation, recovery, and release gates.
-
-Highlights:
-
-- **One-click onboarding:** refreshed init, MCP setup, dashboard, provider, and quickstart guidance so operators can choose the right setup path without mixing local-checkout and published-package commands.
-- **Security hardening:** tightened path containment, webhook/token handling, approval signing, chat/dashboard auth, config validation, and persisted-state hydration safeguards.
-- **Deterministic mode:** expanded root/package verification, release checks, replay validation, and schema guards so CI and operators catch drift before runtime.
-
-Community announcement target: share this release summary in the Frankenbeast Discord once the v0.45.0 GitHub release is published.
+See [GitHub Releases](https://github.com/djm204/frankenbeast/releases) for the latest published release and [CHANGELOG.md](CHANGELOG.md) for the complete release history.
 
 ## Modes
 
