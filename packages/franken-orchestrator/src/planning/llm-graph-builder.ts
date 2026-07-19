@@ -82,10 +82,12 @@ export class LlmGraphBuilder implements GraphBuilder {
     const timeoutMs = this.normalizeTimeout(this.options.timeoutMs);
     const controller = new AbortController();
     let planningBudgetExceeded = false;
-    const timeout = setTimeout(() => {
+    const expirePlanningBudget = (): void => {
+      if (controller.signal.aborted) return;
       planningBudgetExceeded = true;
       controller.abort(new PlanBudgetExceededError(timeoutMs));
-    }, timeoutMs);
+    };
+    const timeout = setTimeout(expirePlanningBudget, timeoutMs);
 
     const abortFromCaller = (): void => {
       controller.abort(this.options.signal?.reason ?? new Error('Planning cancelled'));
@@ -128,6 +130,7 @@ export class LlmGraphBuilder implements GraphBuilder {
       const context = this.contextGatherer
         ? await this.awaitWithAbort(this.contextGatherer.gather(intent.goal), controller.signal)
         : emptyContext;
+      if (Date.now() - startedAt >= timeoutMs) expirePlanningBudget();
       this.throwIfAborted(controller.signal);
 
       const decomposer = new ChunkDecomposer(meteredLlm, { maxChunks: this.maxChunks });
@@ -169,6 +172,7 @@ export class LlmGraphBuilder implements GraphBuilder {
             validationIssues = result.issues;
           }
         } catch (error) {
+          if (!controller.signal.aborted && isTimeoutError(error)) expirePlanningBudget();
           if (!controller.signal.aborted) throw error;
           if (!planningBudgetExceeded) throw error;
           chunks = decompositionDraft;
@@ -201,7 +205,7 @@ export class LlmGraphBuilder implements GraphBuilder {
       this.throwIfAborted(signal);
       return await this.awaitWithAbort(run(), signal);
     } catch (error) {
-      stage.status = signal.aborted ? 'timed_out' : 'failed';
+      stage.status = signal.aborted || isTimeoutError(error) ? 'timed_out' : 'failed';
       throw error;
     } finally {
       stage.elapsedMs = Date.now() - startedAt;
@@ -366,4 +370,9 @@ export class LlmGraphBuilder implements GraphBuilder {
 
     return parts.join('\n');
   }
+}
+
+function isTimeoutError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return (error as NodeJS.ErrnoException).code === 'ETIMEDOUT' || error.name === 'TimeoutError';
 }

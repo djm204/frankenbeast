@@ -502,6 +502,62 @@ describe('LlmGraphBuilder', () => {
       expect(complete.mock.calls[1]![1].signal.aborted).toBe(true);
     });
 
+    it('preserves the decomposition draft when the LLM client rejects on its own timeout', async () => {
+      const timeout = Object.assign(new Error('CLI timeout after 20ms'), { code: 'ETIMEDOUT' });
+      const complete = vi.fn()
+        .mockResolvedValueOnce(validChunksJson(threeChunks))
+        .mockRejectedValueOnce(timeout);
+      const gatherer = {
+        gather: vi.fn().mockResolvedValue({
+          rampUp: '',
+          relevantSignatures: [],
+          packageDeps: {},
+          existingPatterns: [],
+        }),
+      };
+      const builder = new LlmGraphBuilder({ complete }, gatherer as any, {
+        validationMode: 'always',
+        timeoutMs: 20,
+      });
+
+      const graph = await builder.build(intent);
+
+      expect(graph.tasks).toHaveLength(6);
+      expect(builder.lastChunks).toEqual(threeChunks);
+      expect(builder.lastValidationIssues).toEqual([
+        expect.objectContaining({
+          severity: 'warning',
+          category: 'planning_budget_exceeded',
+        }),
+      ]);
+      expect(builder.lastRunMetrics.stages.at(-1)).toEqual(
+        expect.objectContaining({ name: 'validate', status: 'timed_out' }),
+      );
+      expect(complete.mock.calls[1]![1].signal.aborted).toBe(true);
+    });
+
+    it('re-checks the wall-clock budget after synchronous context gathering', async () => {
+      const llm = mockLlm(validChunksJson(twoChunks));
+      const gatherer = {
+        gather: vi.fn(() => {
+          const blockedUntil = Date.now() + 10;
+          while (Date.now() < blockedUntil) {
+            // Simulate synchronous context-file reads blocking the event loop.
+          }
+          return Promise.resolve({
+            rampUp: '',
+            relevantSignatures: [],
+            packageDeps: {},
+            existingPatterns: [],
+          });
+        }),
+      };
+      const builder = new LlmGraphBuilder(llm, gatherer as any, { timeoutMs: 1 });
+
+      await expect(builder.build(intent)).rejects.toThrow('Planning deadline exceeded after 1ms');
+      expect(llm.complete).not.toHaveBeenCalled();
+    });
+
     it('propagates caller cancellation during a quality pass instead of saving a draft', async () => {
       const complete = vi.fn().mockImplementation((_: string, options?: { signal?: AbortSignal }) => {
         if (complete.mock.calls.length === 1) {
