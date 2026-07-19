@@ -3,6 +3,8 @@ import {
   classifyCommandFailure,
   commandFailureFromExecError,
   isCommandFailure,
+  MAX_RATE_LIMIT_SLEEP_MS,
+  parseResetTimeText,
 } from '../../../src/errors/command-failure.js';
 
 describe('classifyCommandFailure', () => {
@@ -61,6 +63,76 @@ describe('classifyCommandFailure', () => {
     expect(failure.rateLimited).toBe(false);
     expect(failure.retryable).toBe(false);
     expect(failure.summary).toContain('git checkout main');
+  });
+
+  it('clamps finite provider retry hints and rejects non-finite values', () => {
+    const base = {
+      tool: 'llm',
+      provider: 'custom',
+      command: 'custom',
+      exitCode: 1,
+      stderr: 'rate limit exceeded',
+      detectRateLimit: () => true,
+    } as const;
+
+    const clamped = classifyCommandFailure({
+      ...base,
+      parseRetryAfterMs: () => MAX_RATE_LIMIT_SLEEP_MS * 100,
+    });
+    const rejected = classifyCommandFailure({
+      ...base,
+      parseRetryAfterMs: () => Number.POSITIVE_INFINITY,
+    });
+
+    expect(clamped.retryAfterMs).toBe(MAX_RATE_LIMIT_SLEEP_MS);
+    expect(clamped.retryAfterClamped).toBe(true);
+    expect(rejected.retryAfterMs).toBeUndefined();
+    expect(rejected.retryAfterClamped).toBeUndefined();
+  });
+
+  it('preserves clamp state when the generic reset parser already bounded the hint', () => {
+    const failure = classifyCommandFailure({
+      tool: 'llm',
+      provider: 'custom',
+      command: 'custom',
+      exitCode: 1,
+      stderr: 'rate limit exceeded; resets at 2999-01-01T00:00:00Z',
+      detectRateLimit: () => true,
+      parseRetryAfterMs: (text) => {
+        const parsed = parseResetTimeText(text);
+        return parsed.sleepSeconds >= 0 ? parsed.sleepSeconds * 1000 : undefined;
+      },
+    });
+
+    expect(failure.retryAfterMs).toBe(MAX_RATE_LIMIT_SLEEP_MS);
+    expect(failure.retryAfterClamped).toBe(true);
+  });
+});
+
+describe('parseResetTimeText', () => {
+  it.each([
+    ['retry-after: 999999', 'retry-after header'],
+    ['x-ratelimit-reset: 9999999999', 'x-ratelimit-reset epoch'],
+    ['resets at 2999-01-01T00:00:00Z', 'reset-at timestamp'],
+  ])('clamps far-future provider reset hints from %s', (text, source) => {
+    expect(parseResetTimeText(text)).toEqual({
+      sleepSeconds: MAX_RATE_LIMIT_SLEEP_MS / 1000,
+      source: `${source} (clamped to 120s)`,
+    });
+  });
+
+  it('preserves legitimate short retry hints', () => {
+    expect(parseResetTimeText('retry-after: 7')).toEqual({
+      sleepSeconds: 7,
+      source: 'retry-after header',
+    });
+  });
+
+  it('rejects overflowing retry hints', () => {
+    expect(parseResetTimeText(`retry-after: ${'9'.repeat(400)}`)).toEqual({
+      sleepSeconds: -1,
+      source: 'unknown',
+    });
   });
 });
 
