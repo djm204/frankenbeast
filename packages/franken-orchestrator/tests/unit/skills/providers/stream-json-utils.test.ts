@@ -87,6 +87,11 @@ describe('stripHookJson', () => {
     expect(stripHookJson(input)).toBe('[{"id":"a"}]');
   });
 
+  it('ignores unmatched quotes in raw text before hook output', () => {
+    const input = 'warning: "foo\n{ "hookSpecificOutput": {} }[{"id":"a"}]';
+    expect(stripHookJson(input)).toBe('warning: "foo\n[{"id":"a"}]');
+  });
+
   it('strips hook output with nested braces in string values', () => {
     const input = '{ "hookSpecificOutput": { "data": "value with { braces }" } }[{"id":"a"}]';
     expect(stripHookJson(input)).toBe('[{"id":"a"}]');

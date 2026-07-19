@@ -26,6 +26,14 @@ export function stripHookJson(text: string): string {
 
   for (let i = 0; i < text.length; i++) {
     const ch = text[i]!;
+
+    // Provider output can include arbitrary diagnostics around JSON. Quotes in
+    // that raw text must not affect quote state for the next JSON object.
+    if (objectStarts.length === 0) {
+      if (ch === '{') objectStarts.push(i);
+      continue;
+    }
+
     if (esc) {
       esc = false;
       continue;
