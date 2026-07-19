@@ -14,6 +14,7 @@ import { deterministicUuid } from '@franken/types';
 import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
 import { sanitizeRunConfigIntegrityEnv } from '../cli/run-config-integrity.js';
+import { resolveCodexSandboxArgs } from './codex-args.js';
 
 function terminateRunningProcess(proc: ChildProcess): void {
   if (proc.exitCode === null && proc.signalCode === null) {
@@ -109,7 +110,17 @@ export class CodexCliAdapter implements ILlmProvider {
   }
 
   buildArgs(request: LlmRequest): string[] {
-    const args = ['exec', '--json', '--ephemeral'];
+    const hasConfiguredSandbox = Object.hasOwn(this.options.configOverrides ?? {}, 'sandbox_mode');
+    const { sandboxArgs, extraArgs } = resolveCodexSandboxArgs(
+      this.options.extraArgs,
+      hasConfiguredSandbox,
+    );
+    const args = [
+      'exec',
+      ...sandboxArgs,
+      '--json',
+      '--ephemeral',
+    ];
     if (request.systemPrompt) {
       args.push('-c', `instructions=${request.systemPrompt}`);
     }
@@ -126,9 +137,7 @@ export class CodexCliAdapter implements ILlmProvider {
         args.push('-c', `${key}=${value}`);
       }
     }
-    if (this.options.extraArgs?.length) {
-      args.push(...this.options.extraArgs);
-    }
+    args.push(...extraArgs);
     return args;
   }
 

@@ -234,7 +234,7 @@ describe('MartinLoop', () => {
 
     expect(mockSpawn).toHaveBeenCalledWith(
       '/usr/bin/codex',
-      ['exec', '--full-auto', '--json', '--color', 'never', expect.stringContaining('Implement feature X')],
+      ['exec', '--sandbox', 'workspace-write', '--json', '--color', 'never', expect.stringContaining('Implement feature X')],
       expect.objectContaining({
         stdio: ['ignore', 'pipe', 'pipe'],
         cwd: '/tmp/test-project',

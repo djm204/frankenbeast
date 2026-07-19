@@ -8,6 +8,7 @@
 import type { ICliProvider, ProviderOpts } from './cli-provider.js';
 import { tryExtractTextFromNode, BASE_RATE_LIMIT_PATTERNS } from './stream-json-utils.js';
 import { sanitizeRunConfigIntegrityEnv } from '../../cli/run-config-integrity.js';
+import { resolveCodexSandboxArgs } from '../../providers/codex-args.js';
 
 const RATE_LIMIT_PATTERNS = BASE_RATE_LIMIT_PATTERNS;
 
@@ -17,13 +18,12 @@ export class CodexProvider implements ICliProvider {
   readonly chatModel = 'codex-mini';
 
   buildArgs(opts: ProviderOpts): string[] {
-    const args: string[] = ['exec', '--full-auto', '--json', '--color', 'never'];
+    const { sandboxArgs, extraArgs } = resolveCodexSandboxArgs(opts.extraArgs);
+    const args: string[] = ['exec', ...sandboxArgs, '--json', '--color', 'never'];
     if (opts.model) {
       args.push('--model', opts.model);
     }
-    if (opts.extraArgs) {
-      args.push(...opts.extraArgs);
-    }
+    args.push(...extraArgs);
     return args;
   }
 

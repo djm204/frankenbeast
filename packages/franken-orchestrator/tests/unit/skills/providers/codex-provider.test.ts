@@ -23,11 +23,10 @@ describe('CodexProvider', () => {
 
   // -- buildArgs -----------------------------------------------------------
 
-  it('buildArgs includes exec --full-auto --json', () => {
+  it('buildArgs uses the supported workspace-write sandbox', () => {
     const args = provider.buildArgs({});
-    expect(args[0]).toBe('exec');
-    expect(args).toContain('--full-auto');
-    expect(args).toContain('--json');
+    expect(args).toEqual(['exec', '--sandbox', 'workspace-write', '--json', '--color', 'never']);
+    expect(args).not.toContain('--full-auto');
   });
 
   it('buildArgs includes --color never', () => {
@@ -38,9 +37,22 @@ describe('CodexProvider', () => {
   });
 
   it('buildArgs appends extraArgs', () => {
-    const args = provider.buildArgs({ extraArgs: ['--model', 'o3'] });
-    expect(args).toContain('--model');
-    expect(args).toContain('o3');
+    const args = provider.buildArgs({ extraArgs: ['--foo', 'bar'] });
+    expect(args.slice(-2)).toEqual(['--foo', 'bar']);
+  });
+
+  it('lets one explicit sandbox argument replace the default', () => {
+    const args = provider.buildArgs({ extraArgs: ['--sandbox', 'read-only'] });
+    expect(args.filter((arg) => arg === '--sandbox')).toHaveLength(1);
+    expect(args).toContain('read-only');
+    expect(args).not.toContain('workspace-write');
+  });
+
+  it('rejects deprecated or contradictory sandbox arguments', () => {
+    expect(() => provider.buildArgs({ extraArgs: ['--full-auto'] })).toThrow(/deprecated/i);
+    expect(() => provider.buildArgs({
+      extraArgs: ['--sandbox', 'read-only', '-s', 'workspace-write'],
+    })).toThrow(/one Codex sandbox selection/i);
   });
 
   it('buildArgs includes the selected model', () => {
@@ -155,6 +167,11 @@ describe('CodexProvider', () => {
     const result = provider.normalizeOutput(raw);
     expect(result).toContain('from json');
     expect(result).toContain('plain line');
+  });
+
+  it('normalizeOutput extracts Codex JSONL error messages', () => {
+    const raw = JSON.stringify({ type: 'error', error: { message: 'workspace is not trusted' } });
+    expect(provider.normalizeOutput(raw)).toBe('workspace is not trusted');
   });
 
   it('normalizeOutput extracts assistant text from codex item.completed events', () => {

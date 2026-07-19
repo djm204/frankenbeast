@@ -95,11 +95,45 @@ describe('CodexCliAdapter', () => {
   });
 
   describe('buildArgs()', () => {
-    it('includes exec --json --ephemeral', () => {
+    it('includes the supported workspace-write sandbox', () => {
       const args = adapter.buildArgs({ systemPrompt: '', messages: [] });
       expect(args[0]).toBe('exec');
+      expect(args).toContain('--sandbox');
+      expect(args).toContain('workspace-write');
       expect(args).toContain('--json');
       expect(args).toContain('--ephemeral');
+      expect(args).not.toContain('--full-auto');
+    });
+
+    it('uses one explicit sandbox selection and rejects conflicts', () => {
+      const readOnly = new CodexCliAdapter({ extraArgs: ['--sandbox', 'read-only'] });
+      const args = readOnly.buildArgs({ systemPrompt: '', messages: [] });
+      expect(args.filter((arg) => arg === '--sandbox')).toHaveLength(1);
+      expect(args).toContain('read-only');
+      expect(args).not.toContain('workspace-write');
+
+      const conflicting = new CodexCliAdapter({
+        extraArgs: ['--sandbox', 'read-only', '--sandbox=workspace-write'],
+      });
+      expect(() => conflicting.buildArgs({ systemPrompt: '', messages: [] }))
+        .toThrow(/one Codex sandbox selection/i);
+    });
+
+    it('treats sandbox_mode config as the single sandbox selection', () => {
+      const configured = new CodexCliAdapter({
+        configOverrides: { sandbox_mode: 'read-only' },
+      });
+      const args = configured.buildArgs({ systemPrompt: '', messages: [] });
+      expect(args).toContain('sandbox_mode=read-only');
+      expect(args).not.toContain('--sandbox');
+      expect(args).not.toContain('workspace-write');
+
+      const conflicting = new CodexCliAdapter({
+        configOverrides: { sandbox_mode: 'read-only' },
+        extraArgs: ['--sandbox', 'workspace-write'],
+      });
+      expect(() => conflicting.buildArgs({ systemPrompt: '', messages: [] }))
+        .toThrow(/one Codex sandbox selection/i);
     });
 
     it('adds -c for system prompt', () => {
