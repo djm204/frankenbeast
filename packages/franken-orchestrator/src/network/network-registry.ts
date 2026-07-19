@@ -36,6 +36,7 @@ export interface NetworkServiceRuntimeConfig {
     args: string[];
     cwd: string;
     env?: Record<string, string>;
+    inheritedEnvKeys?: string[];
   };
 }
 

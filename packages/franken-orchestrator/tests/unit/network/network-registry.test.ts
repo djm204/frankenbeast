@@ -1,10 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { defaultConfig } from '../../../src/config/orchestrator-config.js';
 import { NetworkConfigSchema } from '../../../src/network/network-config.js';
 import { createNetworkRegistry, filterNetworkServices, resolveNetworkServices } from '../../../src/network/network-registry.js';
 
 describe('network-registry', () => {
   const context = { repoRoot: '/repo/frankenbeast' };
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
 
   it('selects default services from config', () => {
     const services = resolveNetworkServices(defaultConfig(), context);
@@ -45,6 +49,105 @@ describe('network-registry', () => {
     expect(dashboard?.runtimeConfig.process?.env).toMatchObject({
       FRANKENBEAST_TRUST_PROVIDER_COMMAND_OVERRIDES: '1',
     });
+  });
+
+  it('declares only the runtime environment required by each managed service', () => {
+    const config = defaultConfig();
+    config.network.secureBackend = 'bitwarden';
+    config.comms.slack.enabled = true;
+    config.comms.slack.botTokenRef = 'CUSTOM_SLACK_TOKEN';
+    config.comms.slack.signingSecretRef = 'CUSTOM_SLACK_SIGNING_SECRET';
+    config.comms.discord.enabled = true;
+    config.comms.discord.botTokenRef = 'CUSTOM_DISCORD_TOKEN';
+    config.comms.discord.publicKeyRef = 'a'.repeat(64);
+
+    const services = resolveNetworkServices(config, context);
+    const daemonKeys = services.find((service) => service.id === 'beasts-daemon')
+      ?.runtimeConfig.process?.inheritedEnvKeys ?? [];
+    const chatKeys = services.find((service) => service.id === 'chat-server')
+      ?.runtimeConfig.process?.inheritedEnvKeys ?? [];
+    const dashboardKeys = services.find((service) => service.id === 'dashboard-web')
+      ?.runtimeConfig.process?.inheritedEnvKeys ?? [];
+
+    expect(daemonKeys).toEqual(expect.arrayContaining([
+      'BW_SESSION',
+      'FBEAST_AGENT_CAPACITY_TOTAL',
+      'FRANKEN_MAX_TOTAL_TOKENS',
+      'FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL',
+      'FRANKENBEAST_MODULE_FIREWALL',
+      'GITHUB_TOKEN',
+      'HTTPS_PROXY',
+    ]));
+    expect(chatKeys).toEqual(expect.arrayContaining([
+      'BW_SESSION',
+      'CUSTOM_SLACK_TOKEN',
+      'CUSTOM_SLACK_SIGNING_SECRET',
+      'CUSTOM_DISCORD_TOKEN',
+      'FRANKEN_MAX_TOTAL_TOKENS',
+      'FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL',
+      'FRANKENBEAST_MODULE_FIREWALL',
+      'GITHUB_TOKEN',
+      'HTTPS_PROXY',
+    ]));
+    expect(chatKeys).not.toContain('a'.repeat(64));
+    expect(chatKeys).not.toContain('FBEAST_AGENT_CAPACITY_TOTAL');
+    expect(dashboardKeys).toEqual(expect.arrayContaining([
+      'BW_SESSION',
+      'FRANKENBEAST_BEAST_OPERATOR_TOKEN',
+      'HTTPS_PROXY',
+    ]));
+    expect(dashboardKeys).not.toContain('GITHUB_TOKEN');
+    expect(dashboardKeys).not.toContain('FRANKENBEAST_MODULE_FIREWALL');
+  });
+
+  it('preserves Codex CLI runtime configuration for managed provider services', () => {
+    const services = resolveNetworkServices(defaultConfig(), context);
+
+    for (const serviceId of ['beasts-daemon', 'chat-server']) {
+      const inheritedEnvKeys = services.find((service) => service.id === serviceId)
+        ?.runtimeConfig.process?.inheritedEnvKeys ?? [];
+      expect(inheritedEnvKeys).toEqual(expect.arrayContaining([
+        'CODEX_HOME',
+        'OPENAI_BASE_URL',
+      ]));
+    }
+  });
+
+  it('preserves the dashboard project-id build override', () => {
+    const dashboard = resolveNetworkServices(defaultConfig(), context)
+      .find((service) => service.id === 'dashboard-web');
+
+    expect(dashboard?.runtimeConfig.process?.inheritedEnvKeys).toContain('VITE_PROJECT_ID');
+  });
+
+  it('declares active 1Password session variables only for the 1Password backend', () => {
+    vi.stubEnv('OP_SESSION_WORK', 'session-for-test');
+    const config = defaultConfig();
+    config.network.secureBackend = '1password';
+
+    const services = resolveNetworkServices(config, context);
+
+    for (const serviceId of ['beasts-daemon', 'chat-server', 'dashboard-web']) {
+      const inheritedEnvKeys = services.find((service) => service.id === serviceId)
+        ?.runtimeConfig.process?.inheritedEnvKeys ?? [];
+      expect(inheritedEnvKeys).toEqual(expect.arrayContaining(['OP_ACCOUNT', 'OP_SESSION_WORK']));
+    }
+  });
+
+  it('declares OS keychain session variables only for the OS keychain backend', () => {
+    const config = defaultConfig();
+    config.network.secureBackend = 'os-keychain';
+
+    const services = resolveNetworkServices(config, context);
+
+    for (const serviceId of ['beasts-daemon', 'chat-server', 'dashboard-web']) {
+      const inheritedEnvKeys = services.find((service) => service.id === serviceId)
+        ?.runtimeConfig.process?.inheritedEnvKeys ?? [];
+      expect(inheritedEnvKeys).toEqual(expect.arrayContaining([
+        'DBUS_SESSION_BUS_ADDRESS',
+        'XDG_RUNTIME_DIR',
+      ]));
+    }
   });
 
   it('orders dependencies before dependents', () => {
