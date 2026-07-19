@@ -125,8 +125,11 @@ jobs:
       - name: Dependabot supply-chain guard
         run: npm run check:dependabot-supply-chain
 
-      - name: Run package build and typecheck
-        run: npx turbo run build typecheck
+      - name: Run package build
+        run: npm run build
+
+      - name: Run root typecheck
+        run: npm run typecheck
 
       - name: Run workspace lint gate
         run: npm run lint
