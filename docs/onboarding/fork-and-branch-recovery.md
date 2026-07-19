@@ -53,10 +53,18 @@ git status --short --branch
 Restore saved edits only after you are on the issue branch:
 
 ```bash
-git stash pop
+git stash apply
 ```
 
-If the issue branch already contains your commits, update that branch without merging unrelated work:
+Verify the expected files are present before removing the recovery checkpoint. If anything is missing, keep the stash and use the [help guide](getting-help.md).
+
+```bash
+git status --short
+git diff --stat
+git stash drop
+```
+
+If the issue branch contains local commits but has never been pushed, rebase it onto current upstream `main`:
 
 ```bash
 git fetch upstream main
@@ -65,6 +73,15 @@ git rebase upstream/main
 ```
 
 When a rebase reports conflicts, edit only the named files, then run `git add <resolved-files>` and `git rebase --continue`. Use `git rebase --abort` to return to the pre-rebase state when you are unsure how to resolve a conflict.
+
+Do not rebase a branch that is already on your fork or attached to a pull request. Update published work without rewriting its commits:
+
+```bash
+git fetch upstream main
+git switch "$BRANCH_NAME"
+git merge upstream/main
+git push
+```
 
 ## Recover work made on the wrong branch
 
@@ -86,6 +103,7 @@ git switch -c "$BRANCH_NAME"
 Verify that the issue branch contains only the intended commits and files:
 
 ```bash
+git fetch upstream main
 git log --oneline upstream/main..HEAD
 git diff --stat upstream/main...HEAD
 git diff --check upstream/main...HEAD
@@ -113,7 +131,7 @@ If the remote commits are yours and belong to the same issue, replay your local 
 
 ```bash
 git pull --rebase origin "$BRANCH_NAME"
-git push
+git push --set-upstream origin HEAD
 ```
 
 Do not use `git push --force`. Do not use `--force-with-lease` unless a maintainer explicitly asks you to rewrite that issue branch after reviewing the exact commits that would be replaced. A rejected push can mean another contributor owns the remote branch; check the issue and open pull requests before proceeding.
