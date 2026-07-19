@@ -1,5 +1,9 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-19 — Artifact-path TOCTOU hardening
+- Returning a validated pathname is not a secure file-inspection API: pin both the workspace directory and artifact as file descriptors, traverse through `/proc/self/fd` or `/dev/fd` where available, and compare descriptor/path identities after opening so rename/symlink swaps fail closed.
+- Use `lstat` rather than `existsSync` when dangling symlinks must be rejected, translate only candidate-component `ENOENT` into an ordinary missing artifact, and open untrusted artifact targets with nonblocking/no-follow flags before requiring a regular file.
+
 ## 2026-07-18 — Kanban reviewer isolation
 - Independent review workers must receive a distinct child card or explicitly review-only context; never let a delegated reviewer inherit and complete the implementation parent card, because completion can garbage-collect its workspace before the verified diff is committed and shipped.
 

@@ -225,6 +225,23 @@ describe('workspace provisioning', () => {
     expect(() => provisioner.provision({ ...row, taskId: 'other-task' }, task)).toThrow(/does not match task/);
   });
 
+  it.each([
+    ['expected artifact', { ...task, expectedArtifacts: ['../outside.txt'] }],
+    ['file check', { ...task, requiredChecks: [{ type: 'file-exists' as const, path: '/tmp/outside.txt' }] }],
+  ])('rejects an unsafe %s on programmatically constructed tasks before provisioning', (_description, unsafeTask) => {
+    const fixturesRoot = tempRoot('live-bench-fixtures-');
+    const runsRoot = tempRoot('live-bench-runs-');
+    createFixture(fixturesRoot);
+
+    const provisioner = new WorkspaceProvisioner({
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+    });
+
+    expect(() => provisioner.provision(row, unsafeTask)).toThrow(/normalized relative path/);
+    expect(existsSync(join(runsRoot, '2026-05-23'))).toBe(false);
+  });
+
   it('refuses fixture names containing path traversal or separators', () => {
     const fixtures = new FixtureStore(tempRoot('live-bench-fixtures-'));
 

@@ -4,6 +4,7 @@ import { join, parse, relative, resolve, sep } from 'node:path';
 import { serializeToolCallEvidence } from '../evidence/tool-call-evidence.js';
 import type { BenchmarkMatrixRow, BenchmarkTask } from '../types.js';
 import { LIVE_BENCH_TOOL_CALL_EVIDENCE_ARTIFACT } from '../types.js';
+import { assertSafeBenchmarkTaskPaths } from './artifact-path.js';
 import type { FixtureStore } from './fixture-store.js';
 import { isoNow } from '@franken/types';
 
@@ -60,6 +61,7 @@ export class WorkspaceProvisioner {
     if (row.taskId !== task.taskId) {
       throw new Error(`Benchmark row taskId ${row.taskId} does not match task ${task.taskId}`);
     }
+    assertSafeBenchmarkTaskPaths(task);
 
     const fixtureDir = this.fixtures.resolveFixture(task.projectFixture);
     const runDate = dateSegment(row.runTimestamp);
