@@ -22,6 +22,13 @@ describe('PresetCardGroup', () => {
     expect(card?.className).toContain('border-beast-accent');
   });
 
+  it('exposes each card selected state to assistive technology', () => {
+    render(<PresetCardGroup presets={presets} selected="one-shot" onSelect={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: /one-shot/i }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: /feature branch/i }).getAttribute('aria-pressed')).toBe('false');
+  });
+
   it('calls onSelect when card is clicked', () => {
     const onSelect = vi.fn();
     render(<PresetCardGroup presets={presets} selected="" onSelect={onSelect} />);

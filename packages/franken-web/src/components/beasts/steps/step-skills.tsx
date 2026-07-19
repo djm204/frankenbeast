@@ -73,6 +73,7 @@ export function StepSkills() {
             <button
               key={skill.id}
               type="button"
+              aria-pressed={isSelected}
               onClick={() => isSelected ? removeSkill(skill.id) : addSkill(skill.id)}
               className={`p-4 rounded-xl border-2 text-left transition-all min-h-[5rem]
                 ${isSelected

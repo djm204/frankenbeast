@@ -20,6 +20,7 @@ export function PresetCardGroup({ presets, selected, onSelect }: PresetCardGroup
         <button
           key={preset.id}
           type="button"
+          aria-pressed={preset.id === selected}
           onClick={() => onSelect(preset.id)}
           className={`p-4 rounded-xl border-2 text-left transition-all min-h-[5rem]
             ${preset.id === selected
