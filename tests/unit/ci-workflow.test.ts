@@ -131,6 +131,12 @@ on:
       expect(workflow).toHaveProperty('jobs');
     });
 
+    it('grants the workflow token read-only repository contents access', () => {
+      expect(expectRecord(workflow.permissions, 'workflow.permissions')).toEqual({
+        contents: 'read',
+      });
+    });
+
     it('has a workflow name', () => {
       expect(workflow.name).toBe('CI');
     });
