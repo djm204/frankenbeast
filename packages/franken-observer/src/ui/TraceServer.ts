@@ -170,7 +170,7 @@ header button:hover{background:#2a2a2a}
 main{display:flex;flex:1;overflow:hidden}
 #sidebar{width:280px;border-right:1px solid #2a2a2a;overflow-y:auto;flex-shrink:0}
 .trace-item{display:block;width:100%;padding:.65rem 1rem;cursor:pointer;border:0;border-bottom:1px solid #1c1c1c;background:transparent;color:inherit;font:inherit;text-align:left}
-.trace-item:hover,.trace-item.active{background:#161616}
+.trace-item:hover,.trace-item.active,.trace-item[aria-current="true"]{background:#161616}
 .trace-item:focus-visible{outline:2px solid #60a5fa;outline-offset:-2px}
 .trace-goal{display:block;font-size:.825rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .trace-meta{font-size:.7rem;color:#555;margin-top:.2rem;display:flex;gap:.4rem}

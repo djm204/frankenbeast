@@ -132,6 +132,7 @@ describe('TraceServer', () => {
       }
       new Script(script!.replace(/loadTraces\(\)\s*$/, '')).runInContext(context)
 
+      expect(html).toContain('.trace-item:hover,.trace-item.active,.trace-item[aria-current="true"]{')
       expect(html).toContain('.trace-goal{display:block;')
       await context.loadTraces!()
       expect(html).toContain('<nav id="sidebar" aria-label="Traces">')
