@@ -160,7 +160,7 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         ), mock.patch.object(
             self.reviewer.subprocess, "check_output", return_value=b"[]"
         ) as check_output:
-            self.reviewer.get_open_prs()
+            self.reviewer.get_open_prs("owner/repository")
 
         self.assertEqual(
             check_output.call_args.kwargs["env"]["GH_TOKEN"], "configured-token"
@@ -189,6 +189,19 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
     def test_final_verdict_parser_uses_the_last_standalone_verdict(self):
         body = "Do not return VERDICT: APPROVE\nVERDICT: REQUEST_CHANGES\n"
         self.assertEqual(self.reviewer.parse_final_verdict(body), "request-changes")
+
+    def test_final_verdict_parser_accepts_common_formatting(self):
+        formatted_verdicts = (
+            "**VERDICT: REQUEST_CHANGES**",
+            "VERDICT: REQUEST_CHANGES.",
+            "verdict: request_changes",
+            "_Verdict: request-changes!_",
+        )
+        for verdict in formatted_verdicts:
+            with self.subTest(verdict=verdict):
+                self.assertEqual(
+                    self.reviewer.parse_final_verdict(verdict), "request-changes"
+                )
 
     def test_secret_warning_redacts_classic_github_pat(self):
         token = "ghp_" + "a" * 40
@@ -219,6 +232,31 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         self.assertTrue(posted)
         self.assertNotIn("Security Scan: PASSED", posted_bodies[0])
         self.assertIn("Security Scan: INCOMPLETE", posted_bodies[0])
+        self.assertIn("--request-changes", check_call.call_args.args[0])
+
+    def test_posted_review_body_stays_below_github_limit(self):
+        posted_bodies = []
+
+        def capture_review(command, **_kwargs):
+            posted_bodies.append(Path(command[-1]).read_text())
+
+        model_body = "finding\n" * 10_000 + "**VERDICT: REQUEST_CHANGES**"
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            self.reviewer, "WORKSPACE", Path(directory)
+        ), mock.patch.object(
+            self.reviewer.subprocess, "check_call", side_effect=capture_review
+        ) as check_call:
+            posted = self.reviewer.post_pr_review(
+                124, model_body, [], repository="owner/repository"
+            )
+
+        self.assertTrue(posted)
+        self.assertLessEqual(
+            len(posted_bodies[0]), self.reviewer.MAX_REVIEW_BODY_CHARS
+        )
+        self.assertTrue(
+            posted_bodies[0].endswith(self.reviewer.REVIEW_BODY_TRUNCATION_NOTICE)
+        )
         self.assertIn("--request-changes", check_call.call_args.args[0])
 
     def test_failed_review_post_is_reported_to_the_caller(self):
@@ -321,7 +359,7 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
             side_effect=subprocess.CalledProcessError(1, "gh"),
         ):
             with self.assertRaises(subprocess.CalledProcessError):
-                self.reviewer.get_open_prs()
+                self.reviewer.get_open_prs("owner/repository")
 
     def test_agy_does_not_receive_prompt_in_argv_or_github_tokens(self):
         class CompletedProcess:
@@ -338,6 +376,8 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
                 "GH_TOKEN": "secret-two",
                 "GH_ENTERPRISE_TOKEN": "secret-three",
                 "GITHUB_ENTERPRISE_TOKEN": "secret-four",
+                "DEPLOY_TOKEN": "unrelated-secret",
+                "OPENAI_API_KEY": "provider-secret",
             },
         ), mock.patch.object(
             self.reviewer.subprocess, "Popen", return_value=CompletedProcess()
@@ -351,6 +391,8 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         self.assertNotIn("GH_TOKEN", child_environment)
         self.assertNotIn("GH_ENTERPRISE_TOKEN", child_environment)
         self.assertNotIn("GITHUB_ENTERPRISE_TOKEN", child_environment)
+        self.assertNotIn("DEPLOY_TOKEN", child_environment)
+        self.assertEqual(child_environment["OPENAI_API_KEY"], "provider-secret")
         self.assertIsNotNone(popen.call_args.kwargs["stdin"])
 
     def test_deterministic_truncation_posts_when_agy_is_unavailable(self):
@@ -404,7 +446,7 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         with mock.patch.object(
             self.reviewer.subprocess, "check_output", return_value=b"[]"
         ) as check_output:
-            self.reviewer.get_open_prs()
+            self.reviewer.get_open_prs("owner/repository")
         command = check_output.call_args.args[0]
         limit = int(command[command.index("--limit") + 1])
         self.assertGreaterEqual(limit, 1000)
@@ -444,7 +486,7 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         ) as popen, mock.patch.object(
             self.reviewer.subprocess, "check_call", side_effect=capture_review
         ):
-            self.reviewer.get_open_prs()
+            self.reviewer.get_open_prs(repository)
             self.reviewer.read_gh_diff(7, repository)
             self.assertTrue(self.reviewer.post_pr_review(7, "VERDICT: COMMENT", []))
 

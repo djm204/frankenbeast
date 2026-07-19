@@ -25,6 +25,8 @@ AGY_PATH = os.environ.get("PR_REVIEWER_AGY_PATH", "agy")
 # without buffering the complete PR diff. Both fetch paths share this byte cap.
 MAX_DIFF_BYTES = 60_000
 MAX_REVIEW_BYTES = 120_000
+MAX_REVIEW_BODY_CHARS = 60_000
+REVIEW_BODY_TRUNCATION_NOTICE = "\n\n... [REVIEW BODY TRUNCATED BEFORE POSTING] ..."
 HTTP_TIMEOUT_SECONDS = 30
 GH_DIFF_TIMEOUT_SECONDS = 30
 AGY_TIMEOUT_SECONDS = 300
@@ -81,16 +83,45 @@ def gh_environment():
 
 
 def agy_environment():
-    environment = os.environ.copy()
-    for name in (
-        "GITHUB_PERSONAL_ACCESS_TOKEN",
-        "GITHUB_TOKEN",
-        "GH_TOKEN",
-        "GH_ENTERPRISE_TOKEN",
-        "GITHUB_ENTERPRISE_TOKEN",
-    ):
-        environment.pop(name, None)
-    return environment
+    # The reviewer consumes attacker-controlled PR content. Give the model runner
+    # only process essentials and explicitly supported provider credentials.
+    allowed_names = {
+        "PATH",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "TMPDIR",
+        "TEMP",
+        "TMP",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "XDG_CONFIG_HOME",
+        "XDG_CACHE_HOME",
+        "XDG_DATA_HOME",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "OPENROUTER_API_KEY",
+        "GOOGLE_API_KEY",
+        "GEMINI_API_KEY",
+        "GROQ_API_KEY",
+        "MISTRAL_API_KEY",
+        "XAI_API_KEY",
+        "CEREBRAS_API_KEY",
+        "TOGETHER_API_KEY",
+        "FIREWORKS_API_KEY",
+        "COHERE_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "OLLAMA_API_KEY",
+    }
+    return {name: value for name, value in os.environ.items() if name in allowed_names}
 
 
 def limit_review_output_files():
@@ -361,15 +392,25 @@ def run_agy_review(diff_content):
 
 def parse_final_verdict(review_body):
     matches = re.findall(
-        r"(?m)^VERDICT:\s*(APPROVE|REQUEST_CHANGES|COMMENT)\s*$", review_body
+        r"(?im)^\s*[*_`~]*\s*VERDICT:\s*"
+        r"(APPROVE|REQUEST[_ -]CHANGES|COMMENT)\s*[.!]?\s*[*_`~]*\s*$",
+        review_body,
     )
     if not matches:
         return "comment"
+    normalized = re.sub(r"[ -]", "_", matches[-1].upper())
     return {
         "APPROVE": "approve",
         "REQUEST_CHANGES": "request-changes",
         "COMMENT": "comment",
-    }[matches[-1]]
+    }[normalized]
+
+
+def bound_review_body(review_body):
+    if len(review_body) <= MAX_REVIEW_BODY_CHARS:
+        return review_body
+    available = MAX_REVIEW_BODY_CHARS - len(REVIEW_BODY_TRUNCATION_NOTICE)
+    return review_body[:available] + REVIEW_BODY_TRUNCATION_NOTICE
 
 
 def post_pr_review(
@@ -405,6 +446,7 @@ def post_pr_review(
         review_body = success_header + review_body
         verdict = parse_final_verdict(review_body)
 
+    review_body = bound_review_body(review_body)
     temp_file = WORKSPACE / f".fbeast/pr_review_{pr_number}.md"
     try:
         temp_file.parent.mkdir(parents=True, exist_ok=True)
