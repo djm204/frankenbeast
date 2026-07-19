@@ -19,9 +19,9 @@ describe('issue #2881 onboarding npm prereqs', () => {
     const rampUp = readDoc('docs/RAMP_UP.md');
 
     expect(rampUp).toContain('## Prerequisites');
-    expect(rampUp).toContain(`root \`packageManager\` field (\`${manifest.packageManager}\`)`);
-    expect(rampUp).toContain(`root \`package.json\` \`engines.node\` field (\`${manifest.engines?.node ?? ''}\`)`);
-    expect(rampUp).toContain('corepack prepare "$(node -p "require(\'./package.json\').packageManager")" --activate');
+    expect(rampUp).toContain('root `package.json` `packageManager` field (`' + manifest.packageManager + ')');
+    expect(rampUp).toContain('root `package.json` `engines.node` field (`' + `${manifest.engines?.node ?? ''}` + ')');
+    expect(rampUp).toContain("corepack prepare \"$(node -p \"require('./package.json').packageManager\")\" --activate");
     expect(rampUp).toContain('npm run check:package-manager');
     expect(rampUp).toContain('npm run setup:healthcheck');
   });
