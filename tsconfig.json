@@ -45,6 +45,12 @@
       ],
       "@franken/orchestrator": [
         "./packages/franken-orchestrator/src/index.ts"
+      ],
+      "@franken/mcp-suite": [
+        "./packages/franken-mcp-suite/src/index.ts"
+      ],
+      "@franken/live-bench": [
+        "./packages/live-bench/src/index.ts"
       ]
     }
   },
