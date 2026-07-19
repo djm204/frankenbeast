@@ -48,7 +48,9 @@ function runWithContainerFields(run: BeastRun | undefined, attempts: BeastRunAtt
   if (!run || run.executionMode !== 'container') {
     return run;
   }
-  const currentAttempt = attempts.find((attempt) => attempt.id === run.currentAttemptId) ?? attempts.at(-1);
+  const currentAttempt = run.currentAttemptId
+    ? attempts.find((attempt) => attempt.id === run.currentAttemptId)
+    : attempts.at(-1);
   const metadata = currentAttempt?.executorMetadata;
   if (!metadata) {
     return run;

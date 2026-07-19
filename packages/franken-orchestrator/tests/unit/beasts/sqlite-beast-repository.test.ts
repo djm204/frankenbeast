@@ -617,7 +617,7 @@ describe('SQLiteBeastRepository', () => {
     const dbPath = join(workDir, 'beasts.db');
     const repo = new SQLiteBeastRepository(dbPath);
     const ids = seedCorruptJsonFixture(repo);
-    const corruptValue = '{"token":"super-secret-token"';
+    const corruptValue = 'super-secret-token';
     corruptJsonColumn(dbPath, 'beast_runs', 'config_snapshot', ids.runId, corruptValue);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -642,6 +642,8 @@ describe('SQLiteBeastRepository', () => {
     } catch (error) {
       const corruption = error as BeastRepositoryJsonCorruptionError;
       expect(corruption.context.valueSnippet).not.toContain('super-secret-token');
+      expect(corruption.message).not.toContain('super-secret-token');
+      expect((corruption as Error & { cause?: unknown }).cause).toBeUndefined();
     }
 
     warn.mockRestore();

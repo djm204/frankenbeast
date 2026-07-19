@@ -191,12 +191,8 @@ export interface BeastRepositoryJsonCorruptionContext {
 }
 
 export class BeastRepositoryJsonCorruptionError extends Error {
-  constructor(
-    public readonly context: BeastRepositoryJsonCorruptionContext,
-    public override readonly cause: unknown,
-  ) {
-    const causeMessage = cause instanceof Error ? cause.message : String(cause);
-    super(`Corrupt Beast JSON in ${context.table}.${context.column} for row ${context.rowId}: ${causeMessage}`);
+  constructor(public readonly context: BeastRepositoryJsonCorruptionContext) {
+    super(`Corrupt Beast JSON in ${context.table}.${context.column} for row ${context.rowId}`);
     this.name = 'BeastRepositoryJsonCorruptionError';
   }
 }
@@ -1009,11 +1005,11 @@ function parseJsonColumn(
 ): unknown {
   try {
     return JSON.parse(value) as unknown;
-  } catch (error) {
+  } catch {
     throw new BeastRepositoryJsonCorruptionError({
       ...context,
       valueSnippet: '[redacted]',
-    }, error);
+    });
   }
 }
 
