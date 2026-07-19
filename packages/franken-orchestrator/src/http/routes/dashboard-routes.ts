@@ -13,6 +13,7 @@ import {
 } from './dashboard-status.js';
 import type { MaintenanceModeState } from '../../beasts/services/maintenance-mode-service.js';
 import type { SloDashboard } from '../../availability/slo-dashboard.js';
+import { isLoopbackHost } from '../../network/network-config.js';
 
 const DASHBOARD_SNAPSHOT_POLL_MS = 1_000;
 const DASHBOARD_HEARTBEAT_MS = 30_000;
@@ -89,10 +90,8 @@ function safeTokenCompare(a: string, b: string): boolean {
 
 function isLoopbackAddress(address: string): boolean {
   const normalized = address.trim().toLowerCase().replace(/^\[|\]$/g, '');
-  return normalized === 'localhost'
-    || normalized === '127.0.0.1'
-    || normalized === '::1'
-    || normalized === '::ffff:127.0.0.1';
+  const ipv4MappedAddress = normalized.match(/^::ffff:(127(?:\.\d{1,3}){3})$/)?.[1];
+  return isLoopbackHost(ipv4MappedAddress ?? normalized);
 }
 
 function isForwardedForLoopback(forwardedFor: string | undefined): boolean {
@@ -104,21 +103,43 @@ function isForwardedForLoopback(forwardedFor: string | undefined): boolean {
     .every(isLoopbackAddress);
 }
 
+function isForwardedHostLoopback(forwardedHost: string | undefined): boolean {
+  if (forwardedHost === undefined) return true;
+  return forwardedHost
+    .split(',')
+    .map((host) => host.trim())
+    .filter(Boolean)
+    .every((host) => {
+      try {
+        return isLoopbackAddress(new URL(`http://${host}`).hostname);
+      } catch {
+        return false;
+      }
+    });
+}
+
 function isLoopbackDashboardRequest(c: Context): boolean {
   const hostname = new URL(c.req.url).hostname;
   const trustedRemoteAddress = c.req.header(TRUSTED_REMOTE_ADDRESS_HEADER);
   const realIp = c.req.header('x-real-ip');
+  const forwardedHostIsLoopback = isForwardedHostLoopback(c.req.header('x-forwarded-host'));
+  const forwardedForIsLoopback = isForwardedForLoopback(c.req.header('x-forwarded-for'));
+  const realIpIsLoopback = realIp === undefined || isLoopbackAddress(realIp);
 
   if (trustedRemoteAddress !== undefined) {
     return isLoopbackAddress(trustedRemoteAddress)
       && isLoopbackAddress(hostname)
-      && isForwardedForLoopback(c.req.header('x-forwarded-for'))
-      && (realIp === undefined || isLoopbackAddress(realIp));
+      && forwardedHostIsLoopback
+      && forwardedForIsLoopback
+      && realIpIsLoopback;
   }
 
   // Direct Hono callers do not have a Node socket address. Production Node
   // requests always receive the trusted peer header in http-server-utils.
-  return isLoopbackAddress(hostname);
+  return isLoopbackAddress(hostname)
+    && forwardedHostIsLoopback
+    && forwardedForIsLoopback
+    && realIpIsLoopback;
 }
 
 function authenticateTicketRequest(c: Context, operatorToken: string): Response | undefined {
