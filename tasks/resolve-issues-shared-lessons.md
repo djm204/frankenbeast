@@ -1,5 +1,9 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-19 — Provider-native cache session isolation
+- Never translate an application cache/work key into a provider continuation flag. Start the first native-capable cache call without `--continue`, capture the provider-issued session id, and resume only that exact id when provider and model still match.
+- Treat only classified stale/invalid-session failures as retryable: emit fallback telemetry, invalidate the stale record before retrying, and retry once in a fresh persisted session; propagate all other provider errors so failures cannot silently double expensive calls.
+
 ## 2026-07-19 — Codex-triggered commit re-review on issue #2907
 - When a commit is pushed to an existing PR and there was a prior `@codex review`, always trigger a new review on the new head and collect a fresh `@codex review` clean signal before merging. In this case, a `screen-reader` aria-label update changed, a stale strict assertion in `wizard-dialog.test.tsx` broke once; switching it to a regex was sufficient and CI stayed green on the new commit.
 
