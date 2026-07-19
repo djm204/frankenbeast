@@ -88,6 +88,14 @@ if [ "$PRIMARY_CHECKOUT" = "$CONTRIBUTION_ROOT" ] || \
   exit 1
 fi
 
+printf 'Review ignored files that worktree removal would also delete:\n'
+git -C "$CONTRIBUTION_ROOT" status --short --ignored
+git -C "$CONTRIBUTION_ROOT" clean -ndX
+```
+
+The dry run commonly lists disposable build output and dependencies, but it can also reveal ignored local state such as `.env`, `.fbeast/`, `dist/`, or `coverage/`. Copy any ignored secrets, configuration, evidence, or state you still need to a safe directory outside the worktree. Do not share their contents in an issue or pull request. After reviewing and preserving both tracked and ignored files, continue from outside the issue worktree:
+
+```bash
 cd "$PRIMARY_CHECKOUT"
 git worktree remove "$CONTRIBUTION_ROOT"
 git worktree prune
@@ -133,6 +141,13 @@ Do not force-push `main`. If Git rejects the push, stop and inspect the remotes 
 The pull request is confirmed merged, the local branch head was matched to the pull-request head, and no worktree now holds the branch. Try Git's non-destructive deletion first:
 
 ```bash
+DELETE_HEAD="$(git -C "$PRIMARY_CHECKOUT" rev-parse \
+  "refs/heads/$CONTRIBUTION_BRANCH")"
+if [ "$DELETE_HEAD" != "$PR_HEAD" ]; then
+  printf 'Stop: contribution branch changed after the earlier head check.\n' >&2
+  exit 1
+fi
+
 if ! git -C "$PRIMARY_CHECKOUT" branch -d "$CONTRIBUTION_BRANCH"; then
   printf 'A squash merge can require deletion after the verified head check.\n'
   git -C "$PRIMARY_CHECKOUT" branch -D "$CONTRIBUTION_BRANCH"
@@ -145,9 +160,9 @@ GitHub may already have deleted the remote branch. If it remains, compare its cu
 
 ```bash
 REMOTE_OUTPUT=""
-if REMOTE_OUTPUT="$(git -C "$PRIMARY_CHECKOUT" ls-remote --exit-code \
-  --heads origin "$CONTRIBUTION_BRANCH" 2>&1)"; then
-  REMOTE_HEAD="${REMOTE_OUTPUT%%[[:space:]]*}"
+EXPECTED_REMOTE_REF="refs/heads/$CONTRIBUTION_BRANCH"
+if REMOTE_OUTPUT="$(git -C "$PRIMARY_CHECKOUT" ls-remote --exit-code --refs \
+  origin "$EXPECTED_REMOTE_REF" 2>&1)"; then
   REMOTE_LOOKUP_STATUS=0
 else
   REMOTE_LOOKUP_STATUS=$?
@@ -158,10 +173,15 @@ if [ "$REMOTE_LOOKUP_STATUS" -eq 2 ]; then
 elif [ "$REMOTE_LOOKUP_STATUS" -ne 0 ]; then
   printf 'Stop: remote branch lookup failed: %s\n' "$REMOTE_OUTPUT" >&2
   exit "$REMOTE_LOOKUP_STATUS"
-elif [ "$REMOTE_HEAD" != "$PR_HEAD" ]; then
-  printf 'Stop: remote branch has commits that were not in the merged PR.\n' >&2
-  exit 1
 else
+  REMOTE_MATCHES="$(printf '%s\n' "$REMOTE_OUTPUT" | \
+    awk -v expected="$EXPECTED_REMOTE_REF" '$2 == expected { print $1 }')"
+  REMOTE_MATCH_COUNT="$(printf '%s\n' "$REMOTE_MATCHES" | \
+    awk 'NF { count++ } END { print count + 0 }')"
+  if [ "$REMOTE_MATCH_COUNT" -ne 1 ] || [ "$REMOTE_MATCHES" != "$PR_HEAD" ]; then
+    printf 'Stop: exact remote branch does not uniquely match the merged PR head.\n' >&2
+    exit 1
+  fi
   git -C "$PRIMARY_CHECKOUT" push origin --delete "$CONTRIBUTION_BRANCH"
 fi
 
