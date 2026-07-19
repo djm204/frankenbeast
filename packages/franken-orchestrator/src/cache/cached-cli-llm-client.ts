@@ -64,7 +64,7 @@ export class CachedCliLlmClient implements ILlmClient {
       cacheStore: new LlmCacheStore(options.cacheRootDir, { schemaVersion: this.schemaVersion }),
       policy: new LlmCachePolicy(),
       providerSessions: new ProviderSessionStore(options.cacheRootDir, {
-        schemaVersion: PROVIDER_SESSION_SCHEMA_VERSION,
+        schemaVersion: Math.max(PROVIDER_SESSION_SCHEMA_VERSION, this.schemaVersion),
       }),
       metrics: this.metrics,
     });

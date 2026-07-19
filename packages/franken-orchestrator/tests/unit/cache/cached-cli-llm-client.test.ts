@@ -208,6 +208,19 @@ describe('CachedCliLlmClient', () => {
     await client.complete('first prompt');
 
     expect(adapter.transformRequest.mock.calls[0]?.[0]).not.toHaveProperty('session_id');
+
+    const bumpedClient = new CachedCliLlmClient({
+      cacheRootDir: join(workDir, '.fbeast', '.cache', 'llm'),
+      cliAdapter: adapter as never,
+      projectId: 'frankenbeast',
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      operation: 'plan-build',
+      workId: 'plan:legacy',
+      schemaVersion: 3,
+    });
+    await bumpedClient.complete('second prompt');
+    expect(adapter.transformRequest.mock.calls[1]?.[0]).not.toHaveProperty('session_id');
   });
 
   it('keeps provider-issued sessions for aliases when the CLI model is implicit', async () => {
