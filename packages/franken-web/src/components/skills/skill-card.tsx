@@ -12,6 +12,7 @@ export function SkillCard({ name, enabled, hasContext, mcpServerCount, onToggle 
       <div className="skill-card__header">
         <span className="skill-card__name">{name}</span>
         <button
+          type="button"
           role="switch"
           aria-checked={enabled}
           className={`skill-card__toggle ${enabled ? 'skill-card__toggle--on' : ''}`}
