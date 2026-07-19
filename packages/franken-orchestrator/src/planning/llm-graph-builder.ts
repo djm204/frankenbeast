@@ -1,4 +1,4 @@
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient, LlmCompletionOptions } from '@franken/types';
 import type { PlanGraph, PlanTask, PlanIntent } from '../deps.js';
 import type { GraphBuilder } from './chunk-file-graph-builder.js';
 import type { ChunkDefinition } from '../cli/file-writer.js';
@@ -8,32 +8,107 @@ import { ChunkRemediator } from './chunk-remediator.js';
 import type { PlanContextGatherer, PlanContext } from './plan-context-gatherer.js';
 import { CHUNK_GUARDRAILS } from './chunk-guardrails.js';
 
+const DEFAULT_PLAN_TIMEOUT_MS = 120_000;
+const QUALITY_RAMP_UP_MAX_CHARS = 2_000;
+const QUALITY_SIGNATURE_MAX_CHARS = 500;
+const QUALITY_PATTERN_MAX_CHARS = 500;
+
+type PlanStageName = 'decompose' | 'validate' | 'remediate' | 'revalidate';
+type PlanStageStatus = 'completed' | 'timed_out' | 'failed';
+
+export interface PlanStageMetrics {
+  name: PlanStageName;
+  promptBytes: number;
+  elapsedMs: number;
+  status: PlanStageStatus;
+}
+
+export interface PlanRunMetrics {
+  passCount: number;
+  promptBytes: number;
+  elapsedMs: number;
+  stages: PlanStageMetrics[];
+}
+
+export interface LlmGraphBuilderOptions {
+  maxChunks?: number;
+  skipValidation?: boolean;
+  /** Adaptive skips quality passes for structurally simple one/two-chunk plans. */
+  validationMode?: 'adaptive' | 'always';
+  /** Total deadline shared by context gathering, all LLM passes, retries, and fallbacks. */
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+class PlanBudgetExceededError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Planning deadline exceeded after ${timeoutMs}ms`);
+    this.name = 'PlanBudgetExceededError';
+  }
+}
+
 /**
  * GraphBuilder implementation that uses ILlmClient.complete() to decompose
  * a design document into a PlanGraph with ordered impl+harden task pairs.
  *
- * Uses a multi-pass pipeline:
- *   Pass 1: Decompose (ChunkDecomposer)
- *   Pass 2: Validate (ChunkValidator) — optional
- *   Pass 3: Remediate (ChunkRemediator) — conditional on validation errors
- *   Pass 4: Re-validate (ChunkValidator) — conditional on remediation
+ * Uses an adaptive, bounded pipeline:
+ *   Pass 1: Decompose (always)
+ *   Pass 2: Validate (complex plans only by default)
+ *   Pass 3: Remediate (conditional on validation errors)
+ *   Pass 4: Re-validate (conditional on remediation)
  */
 export class LlmGraphBuilder implements GraphBuilder {
   private readonly maxChunks: number;
+  private activeStage: PlanStageMetrics | undefined;
   /** The parsed chunk definitions from the last build() call. */
   public lastChunks: ChunkDefinition[] = [];
   /** Validation issues from the last build() call (warnings after remediation). */
   public lastValidationIssues: ValidationIssue[] = [];
+  /** Per-stage performance evidence from the last build() call. */
+  public lastRunMetrics: PlanRunMetrics = {
+    passCount: 0,
+    promptBytes: 0,
+    elapsedMs: 0,
+    stages: [],
+  };
 
   constructor(
     private readonly llm: ILlmClient,
     private readonly contextGatherer?: PlanContextGatherer,
-    private readonly options?: { maxChunks?: number; skipValidation?: boolean },
+    private readonly options: LlmGraphBuilderOptions = {},
   ) {
-    this.maxChunks = options?.maxChunks ?? 12;
+    this.maxChunks = options.maxChunks ?? 12;
   }
 
   async build(intent: PlanIntent): Promise<PlanGraph> {
+    const startedAt = Date.now();
+    const timeoutMs = this.normalizeTimeout(this.options.timeoutMs);
+    const controller = new AbortController();
+    let planningBudgetExceeded = false;
+    const expirePlanningBudget = (): void => {
+      if (controller.signal.aborted) return;
+      planningBudgetExceeded = true;
+      controller.abort(new PlanBudgetExceededError(timeoutMs));
+    };
+    const checkPlanningDeadline = (): void => {
+      if (Date.now() - startedAt >= timeoutMs) expirePlanningBudget();
+      this.throwIfAborted(controller.signal);
+    };
+    const timeout = setTimeout(expirePlanningBudget, timeoutMs);
+
+    const abortFromCaller = (): void => {
+      controller.abort(this.options.signal?.reason ?? new Error('Planning cancelled'));
+    };
+    if (this.options.signal?.aborted) {
+      abortFromCaller();
+    } else {
+      this.options.signal?.addEventListener('abort', abortFromCaller, { once: true });
+    }
+
+    this.lastChunks = [];
+    this.lastValidationIssues = [];
+    this.lastRunMetrics = { passCount: 0, promptBytes: 0, elapsedMs: 0, stages: [] };
+
     const emptyContext: PlanContext = {
       rampUp: '',
       relevantSignatures: [],
@@ -41,46 +116,214 @@ export class LlmGraphBuilder implements GraphBuilder {
       existingPatterns: [],
     };
 
-    // Gather codebase context (or use empty if no gatherer provided)
-    const context = this.contextGatherer
-      ? await this.contextGatherer.gather(intent.goal)
-      : emptyContext;
+    const meteredLlm: ILlmClient = {
+      complete: async (prompt: string, completionOptions?: LlmCompletionOptions) => {
+        const promptBytes = Buffer.byteLength(prompt, 'utf8');
+        this.lastRunMetrics.promptBytes += promptBytes;
+        if (this.activeStage) this.activeStage.promptBytes += promptBytes;
+        const remainingMs = Math.max(1, timeoutMs - (Date.now() - startedAt));
+        const response = await this.llm.complete(prompt, {
+          ...completionOptions,
+          signal: controller.signal,
+          timeoutMs: Math.min(completionOptions?.timeoutMs ?? remainingMs, remainingMs),
+        });
+        this.throwIfAborted(controller.signal);
+        return response;
+      },
+    };
 
-    // Pass 1: Decompose
-    const decomposer = new ChunkDecomposer(this.llm, { maxChunks: this.maxChunks });
-    let chunks = await decomposer.decompose(intent.goal, context);
+    try {
+      this.throwIfAborted(controller.signal);
+      const context = this.contextGatherer
+        ? await this.awaitWithAbort(this.contextGatherer.gather(intent.goal), controller.signal)
+        : emptyContext;
+      checkPlanningDeadline();
 
-    let validationIssues: ValidationIssue[] = [];
+      const decomposer = new ChunkDecomposer(meteredLlm, { maxChunks: this.maxChunks });
+      let chunks = await this.runStage(
+        'decompose',
+        controller.signal,
+        () => decomposer.decompose(intent.goal, context, { signal: controller.signal }),
+        checkPlanningDeadline,
+      );
+      let validationIssues: ValidationIssue[] = [];
 
-    // Pass 2-4: Validate → Remediate → Re-validate (unless skipped)
-    if (!this.options?.skipValidation && this.contextGatherer) {
-      const validator = new ChunkValidator(this.llm);
-      const result = await validator.validate(chunks, intent.goal, context);
+      const shouldValidate = !this.options.skipValidation
+        && Boolean(this.contextGatherer)
+        && (this.options.validationMode === 'always' || !this.isSimplePlan(chunks));
 
-      if (result.revisedChunks) {
-        chunks = result.revisedChunks;
-      }
+      if (shouldValidate) {
+        // Standalone providers still need codebase facts, but quality passes should
+        // not resend the full unchanged context gathered for decomposition.
+        const qualityContext = this.compactContext(context);
+        const validator = new ChunkValidator(meteredLlm);
 
-      if (!result.valid) {
-        // Pass 3: Remediate (max 1 attempt)
-        const remediator = new ChunkRemediator(this.llm);
-        chunks = await remediator.remediate(chunks, result.issues, context);
+        try {
+          const result = await this.runStage(
+            'validate',
+            controller.signal,
+            () => validator.validate(chunks, intent.goal, qualityContext, { signal: controller.signal }),
+            checkPlanningDeadline,
+          );
 
-        // Pass 4: Re-validate
-        const revalidation = await validator.validate(chunks, intent.goal, context);
-        if (revalidation.revisedChunks) {
-          chunks = revalidation.revisedChunks;
+          if (result.revisedChunks) chunks = result.revisedChunks;
+          validationIssues = result.issues;
+
+          if (!result.valid) {
+            const remediator = new ChunkRemediator(meteredLlm);
+            chunks = await this.runStage(
+              'remediate',
+              controller.signal,
+              () => remediator.remediate(chunks, result.issues, qualityContext, { signal: controller.signal }),
+              checkPlanningDeadline,
+            );
+
+            const revalidation = await this.runStage(
+              'revalidate',
+              controller.signal,
+              () => validator.validate(chunks, intent.goal, qualityContext, { signal: controller.signal }),
+              checkPlanningDeadline,
+            );
+            if (revalidation.revisedChunks) chunks = revalidation.revisedChunks;
+            validationIssues = revalidation.issues;
+          }
+        } catch (error) {
+          if (
+            !controller.signal.aborted
+            && isTimeoutError(error)
+            && Date.now() - startedAt >= timeoutMs
+          ) {
+            expirePlanningBudget();
+          }
+          if (!controller.signal.aborted) throw error;
+          if (!planningBudgetExceeded) throw error;
+          validationIssues = [
+            ...validationIssues,
+            this.buildDraftWarning(controller.signal.reason, timeoutMs),
+          ];
         }
-        // Remaining issues become warnings
-        validationIssues = revalidation.issues;
-      } else {
-        validationIssues = result.issues; // warnings only
       }
+
+      this.lastChunks = chunks;
+      this.lastValidationIssues = validationIssues;
+      return this.buildGraph(chunks);
+    } finally {
+      clearTimeout(timeout);
+      this.options.signal?.removeEventListener('abort', abortFromCaller);
+      this.lastRunMetrics.elapsedMs = Date.now() - startedAt;
+      this.activeStage = undefined;
+    }
+  }
+
+  private async runStage<T>(
+    name: PlanStageName,
+    signal: AbortSignal,
+    run: () => Promise<T>,
+    checkDeadline?: () => void,
+  ): Promise<T> {
+    const startedAt = Date.now();
+    const stage: PlanStageMetrics = { name, promptBytes: 0, elapsedMs: 0, status: 'completed' };
+    this.lastRunMetrics.passCount += 1;
+    this.lastRunMetrics.stages.push(stage);
+    this.activeStage = stage;
+    try {
+      this.throwIfAborted(signal);
+      const value = await this.awaitWithAbort(run(), signal);
+      checkDeadline?.();
+      return value;
+    } catch (error) {
+      stage.status = signal.aborted || isTimeoutError(error) ? 'timed_out' : 'failed';
+      throw error;
+    } finally {
+      stage.elapsedMs = Date.now() - startedAt;
+      this.activeStage = undefined;
+    }
+  }
+
+  private isSimplePlan(chunks: ChunkDefinition[]): boolean {
+    if (chunks.length === 0 || chunks.length > 2) return false;
+
+    const seenChunkIds = new Set<string>();
+    const claimedFiles = new Set<string>();
+    for (const chunk of chunks) {
+      if (seenChunkIds.has(chunk.id) || chunk.files.length === 0 || chunk.files.length > 4) return false;
+      if (chunk.dependencies.length > 1 || chunk.dependencies.some((dependency) => !seenChunkIds.has(dependency))) {
+        return false;
+      }
+      for (const file of chunk.files) {
+        if (claimedFiles.has(file)) return false;
+        claimedFiles.add(file);
+      }
+      seenChunkIds.add(chunk.id);
+    }
+    return true;
+  }
+
+  private compactContext(context: PlanContext): PlanContext {
+    return {
+      rampUp: truncateContext(context.rampUp, QUALITY_RAMP_UP_MAX_CHARS),
+      relevantSignatures: context.relevantSignatures.slice(0, 8).map((entry) => ({
+        path: entry.path,
+        signatures: truncateContext(entry.signatures, QUALITY_SIGNATURE_MAX_CHARS),
+      })),
+      packageDeps: Object.fromEntries(
+        Object.entries(context.packageDeps)
+          .slice(0, 12)
+          .map(([name, dependencies]) => [name, dependencies.slice(0, 20)]),
+      ),
+      existingPatterns: context.existingPatterns.slice(0, 8).map((pattern) => ({
+        description: truncateContext(pattern.description, 200),
+        example: truncateContext(pattern.example, QUALITY_PATTERN_MAX_CHARS),
+      })),
+    };
+  }
+
+  private normalizeTimeout(timeoutMs: number | undefined): number {
+    if (timeoutMs === undefined) return DEFAULT_PLAN_TIMEOUT_MS;
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      throw new Error('Planning timeoutMs must be a positive finite number');
+    }
+    return Math.floor(timeoutMs);
+  }
+
+  private throwIfAborted(signal: AbortSignal): void {
+    if (!signal.aborted) return;
+    throw signal.reason instanceof Error ? signal.reason : new Error('Planning cancelled');
+  }
+
+  private awaitWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+    if (signal.aborted) {
+      return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error('Planning cancelled'));
     }
 
-    this.lastChunks = chunks;
-    this.lastValidationIssues = validationIssues;
-    return this.buildGraph(chunks);
+    return new Promise<T>((resolve, reject) => {
+      const abort = (): void => {
+        signal.removeEventListener('abort', abort);
+        reject(signal.reason instanceof Error ? signal.reason : new Error('Planning cancelled'));
+      };
+      signal.addEventListener('abort', abort, { once: true });
+      promise.then(
+        (value) => {
+          signal.removeEventListener('abort', abort);
+          resolve(value);
+        },
+        (error) => {
+          signal.removeEventListener('abort', abort);
+          reject(error);
+        },
+      );
+    });
+  }
+
+  private buildDraftWarning(reason: unknown, timeoutMs: number): ValidationIssue {
+    const description = reason instanceof Error ? reason.message : 'Planning quality pass was cancelled';
+    return {
+      severity: 'warning',
+      chunkId: null,
+      category: 'planning_budget_exceeded',
+      description: `${description}; saved the completed decomposition as a draft`,
+      suggestion: `Review the draft manually or retry with a plan timeout above ${timeoutMs}ms`,
+    };
   }
 
   /** Sanitize chunk ID: only alphanumeric, underscores, hyphens. */
@@ -173,4 +416,34 @@ export class LlmGraphBuilder implements GraphBuilder {
 
     return parts.join('\n');
   }
+}
+
+function isTimeoutError(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current = error;
+  while (current && (typeof current === 'object' || typeof current === 'function') && !seen.has(current)) {
+    seen.add(current);
+    const candidate = current as {
+      code?: unknown;
+      name?: unknown;
+      kind?: unknown;
+      timedOut?: unknown;
+      cause?: unknown;
+    };
+    if (
+      candidate.code === 'ETIMEDOUT'
+      || candidate.name === 'TimeoutError'
+      || candidate.kind === 'timeout'
+      || candidate.timedOut === true
+    ) {
+      return true;
+    }
+    current = candidate.cause;
+  }
+  return false;
+}
+
+function truncateContext(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars)}\n[context truncated]`;
 }

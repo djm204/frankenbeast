@@ -101,6 +101,8 @@ export interface SessionConfig {
   maxCritiqueIterations?: number | undefined;
   /** Maximum execution time in milliseconds */
   maxDurationMs?: number | undefined;
+  /** Maximum end-to-end planning time in milliseconds */
+  planningTimeoutMs?: number | undefined;
   /** Whether to emit observability spans */
   enableTracing?: boolean | undefined;
   /** Whether to run a heartbeat pulse after execution */
@@ -506,7 +508,9 @@ export class Session {
       workPrefix: `plan:${planName}`,
     });
     const contextGatherer = new PlanContextGatherer(paths.root);
-    const llmGraphBuilder = new LlmGraphBuilder(cachingLlm, contextGatherer);
+    const llmGraphBuilder = new LlmGraphBuilder(cachingLlm, contextGatherer, {
+      ...(this.config.planningTimeoutMs !== undefined ? { timeoutMs: this.config.planningTimeoutMs } : {}),
+    });
     const chunkWriter = new ChunkFileWriter(paths.plansDir);
 
     logger.info('Decomposing design into chunks...', 'planner');
@@ -521,6 +525,15 @@ export class Session {
     const chunks = llmGraphBuilder.lastChunks;
     const issues = llmGraphBuilder.lastValidationIssues;
     logger.info(`Planned ${chunks.length} chunk(s)`, 'planner');
+    const planningMetrics = llmGraphBuilder.lastRunMetrics;
+    if (planningMetrics) {
+      logger.info('Planning pipeline metrics', {
+        passCount: planningMetrics.passCount,
+        promptBytes: planningMetrics.promptBytes,
+        elapsedMs: planningMetrics.elapsedMs,
+        stages: planningMetrics.stages,
+      });
+    }
 
     if (issues.length > 0) {
       logger.warn(`${issues.length} validation warning(s) attached to chunks`, 'planner');

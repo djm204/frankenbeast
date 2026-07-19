@@ -1,4 +1,4 @@
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient, LlmCompletionOptions } from '@franken/types';
 import { now as deterministicNow, seededRandom } from '@franken/types';
 
 type UnifiedRequest = {
@@ -15,6 +15,8 @@ type UnifiedRequest = {
   max_tokens?: number;
   session_id?: string;
   sessionContinue?: boolean;
+  signal?: AbortSignal;
+  timeoutMs?: number;
 };
 
 type UnifiedResponse = {
@@ -60,7 +62,10 @@ export class AdapterLlmClient implements ILlmClient {
     this.defaultModel = defaultModel;
   }
 
-  async complete(prompt: string, options?: { sessionContinue?: boolean; sessionId?: string }): Promise<string> {
+  async complete(
+    prompt: string,
+    options?: LlmCompletionOptions & { sessionContinue?: boolean; sessionId?: string },
+  ): Promise<string> {
     const requestId = `llm-${deterministicNow()}-${seededRandom.random().toString(16).slice(2)}`;
     const model = this.defaultModel;
     
@@ -71,6 +76,8 @@ export class AdapterLlmClient implements ILlmClient {
       messages: [{ role: 'user', content: prompt }],
       ...(options?.sessionId ? { session_id: options.sessionId } : {}),
       ...(options?.sessionContinue !== undefined ? { sessionContinue: options.sessionContinue } : {}),
+      ...(options?.signal ? { signal: options.signal } : {}),
+      ...(options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
     };
 
     let span: any;

@@ -1,4 +1,4 @@
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient, LlmCompletionOptions } from '@franken/types';
 import type { ChunkDefinition } from '../cli/file-writer.js';
 import type { PlanContext } from './plan-context-gatherer.js';
 import { cleanLlmJson } from '../skills/providers/stream-json-utils.js';
@@ -13,7 +13,8 @@ export interface ValidationIssue {
     | 'missing_interface'
     | 'design_gap'
     | 'chunk_too_large'
-    | 'chunk_too_thin';
+    | 'chunk_too_thin'
+    | 'planning_budget_exceeded';
   description: string;
   suggestion: string;
 }
@@ -39,9 +40,10 @@ export class ChunkValidator {
     chunks: ChunkDefinition[],
     designDoc: string,
     context: PlanContext,
+    completionOptions?: LlmCompletionOptions,
   ): Promise<ValidationResult> {
     const prompt = this.buildValidationPrompt(chunks, designDoc, context);
-    const raw = await this.llm.complete(prompt);
+    const raw = await this.llm.complete(prompt, completionOptions);
     return this.parseResponse(raw);
   }
 

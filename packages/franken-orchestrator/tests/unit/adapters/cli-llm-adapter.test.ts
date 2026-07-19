@@ -528,6 +528,63 @@ describe('CliLlmAdapter', () => {
           .rejects.toThrow(/timeout/i);
       });
 
+      it('allows a per-request timeout to extend beyond the adapter default', async () => {
+        vi.useFakeTimers();
+        try {
+          const { spawnFn } = createMockSpawn({ neverExit: true });
+          const adapter = new CliLlmAdapter(
+            claudeProvider,
+            { ...baseOpts, timeoutMs: 50 },
+            spawnFn,
+          );
+
+          const result = adapter.execute({ prompt: 'test', maxTurns: 1, timeoutMs: 100 });
+          let state: 'pending' | 'resolved' | 'rejected' = 'pending';
+          void result.then(
+            () => { state = 'resolved'; },
+            () => { state = 'rejected'; },
+          );
+
+          await vi.advanceTimersByTimeAsync(50);
+          expect(state).toBe('pending');
+          await vi.advanceTimersByTimeAsync(50);
+          await expect(result).rejects.toThrow('CLI timeout after 100ms');
+          expect(state).toBe('rejected');
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('kills the active child process when the request aborts', async () => {
+        const kill = vi.fn(() => true);
+        const spawnFn = (): ChildProcess => {
+          const proc = new EventEmitter() as ChildProcess;
+          Object.defineProperty(proc, 'stdin', { value: new PassThrough(), writable: false });
+          Object.defineProperty(proc, 'stdout', { value: new PassThrough(), writable: false });
+          Object.defineProperty(proc, 'stderr', { value: new PassThrough(), writable: false });
+          Object.defineProperty(proc, 'pid', { value: 24680, writable: false });
+          Object.defineProperty(proc, 'kill', { value: kill, writable: false });
+          return proc;
+        };
+        const adapter = new CliLlmAdapter(
+          claudeProvider,
+          { ...baseOpts, timeoutMs: 60_000 },
+          spawnFn,
+        );
+        const controller = new AbortController();
+
+        const result = adapter.execute({
+          prompt: 'test',
+          maxTurns: 1,
+          signal: controller.signal,
+          timeoutMs: 30_000,
+        });
+        controller.abort(new Error('plan deadline exceeded'));
+
+        await expect(result).rejects.toThrow('plan deadline exceeded');
+        expect(kill).toHaveBeenCalledWith('SIGTERM');
+      });
+
       it('warns and still rejects when the timeout SIGTERM fails', async () => {
         vi.useFakeTimers();
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -844,6 +901,62 @@ describe('CliLlmAdapter', () => {
         expect(lifecycleEvents).toContainEqual({ type: 'wait', durationMs: 3_000 });
         expect(lifecycleEvents).toContainEqual({ type: 'attempt', provider: 'claude', attempt: 3 });
         expect(lifecycleEvents).toContainEqual({ type: 'complete', provider: 'claude', attempt: 3 });
+      });
+
+      it('aborts an in-flight provider retry wait without starting another process', async () => {
+        const sleepFn = vi.fn(() => new Promise<void>(() => {}));
+        const { spawnFn, calls } = createQueuedSpawn([
+          { stderr: 'retry-after: 5', exitCode: 1 },
+          { stderr: 'resets in 3s', exitCode: 1 },
+          { stdout: 'must not run after cancellation', exitCode: 0 },
+        ]);
+        const adapter = new CliLlmAdapter(
+          claudeProvider,
+          {
+            ...baseOpts,
+            providers: ['claude', 'codex'],
+            _sleepFn: sleepFn,
+          } as never,
+          spawnFn,
+        );
+        const controller = new AbortController();
+
+        const result = adapter.execute({
+          prompt: 'test',
+          maxTurns: 1,
+          signal: controller.signal,
+        });
+        await vi.waitFor(() => expect(sleepFn).toHaveBeenCalledWith(3_000));
+        controller.abort(new Error('plan deadline exceeded'));
+
+        await expect(result).rejects.toThrow('plan deadline exceeded');
+        expect(calls).toHaveLength(2);
+      });
+
+      it('enforces the logical completion timeout while waiting to retry providers', async () => {
+        const sleepFn = vi.fn(() => new Promise<void>(() => {}));
+        const { spawnFn, calls } = createQueuedSpawn([
+          { stderr: 'retry-after: 5', exitCode: 1 },
+          { stderr: 'resets in 3s', exitCode: 1 },
+          { stdout: 'must not run after timeout', exitCode: 0 },
+        ]);
+        const adapter = new CliLlmAdapter(
+          claudeProvider,
+          {
+            ...baseOpts,
+            providers: ['claude', 'codex'],
+            _sleepFn: sleepFn,
+          } as never,
+          spawnFn,
+        );
+
+        await expect(adapter.execute({
+          prompt: 'test',
+          maxTurns: 1,
+          timeoutMs: 25,
+        })).rejects.toThrow('CLI timeout after 25ms');
+        expect(sleepFn).toHaveBeenCalled();
+        expect(calls).toHaveLength(2);
       });
 
       it('retries a rate-limited provider when later fallback provider CLI is missing', async () => {

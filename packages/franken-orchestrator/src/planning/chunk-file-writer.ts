@@ -196,7 +196,7 @@ export class ChunkFileWriter {
 
     // Warnings (only if there are validation issues for this chunk)
     if (validationIssues) {
-      const chunkIssues = validationIssues.filter((i) => i.chunkId === chunk.id);
+      const chunkIssues = validationIssues.filter((i) => i.chunkId === null || i.chunkId === chunk.id);
       if (chunkIssues.length > 0) {
         const issueLines = chunkIssues.map(
           (i) =>

@@ -13,6 +13,7 @@ let progressCtorInner: unknown = undefined;
 let progressCtorOptions: unknown = undefined;
 let progressInstance: unknown = undefined;
 let llmGraphBuilderCtorArg: unknown = undefined;
+let llmGraphBuilderCtorOptions: unknown = undefined;
 let lastCreateCliDepsOptions: import('../../../src/cli/dep-factory.js').CliDepOptions | undefined;
 let streamProgressOptions: { onProgressEvent?: (event: { type: string; [key: string]: unknown }) => void } | undefined;
 const mockFinalize = vi.fn(async () => {});
@@ -122,8 +123,11 @@ vi.mock('../../../src/planning/llm-graph-builder.js', () => {
   const MockLlmGraphBuilder = vi.fn(function (
     this: { build: typeof mockLlmGraphBuild; lastChunks: unknown[]; lastValidationIssues: unknown[] },
     llm: unknown,
+    _contextGatherer: unknown,
+    options: unknown,
   ) {
     llmGraphBuilderCtorArg = llm;
+    llmGraphBuilderCtorOptions = options;
     this.lastChunks = [{ id: 'chunk-a', objective: 'Build A', files: ['src/a.ts'], successCriteria: 'Tests pass', verificationCommand: 'npx vitest run', dependencies: [] }];
     this.lastValidationIssues = [];
     this.build = mockLlmGraphBuild;
@@ -256,6 +260,7 @@ describe('Session plan phase — CliLlmAdapter wiring', () => {
     progressCtorOptions = undefined;
     progressInstance = undefined;
     llmGraphBuilderCtorArg = undefined;
+    llmGraphBuilderCtorOptions = undefined;
     lastCreateCliDepsOptions = undefined;
     streamProgressOptions = undefined;
     console.info = vi.fn();
@@ -298,6 +303,14 @@ describe('Session plan phase — CliLlmAdapter wiring', () => {
     await new Session(config).start();
 
     expect(mockLlmGraphBuild).toHaveBeenCalled();
+  });
+
+  it('runPlan() uses the dedicated planning deadline instead of the execution deadline', async () => {
+    const { Session } = await import('../../../src/cli/session.js');
+    const config = makeConfig({ maxDurationMs: 300_000, planningTimeoutMs: 75_000 });
+    await new Session(config).start();
+
+    expect(llmGraphBuilderCtorOptions).toEqual({ timeoutMs: 75_000 });
   });
 
   it('runPlan() persists sanitized live progress and discloses the build log path', async () => {

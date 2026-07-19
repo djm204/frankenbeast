@@ -1,4 +1,4 @@
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient, LlmCompletionOptions } from '@franken/types';
 import { Spinner } from '../cli/spinner.js';
 
 export interface ProgressLlmClientOptions {
@@ -20,7 +20,7 @@ export class ProgressLlmClient implements ILlmClient {
     this.write = options.write ?? ((text: string) => process.stderr.write(text));
   }
 
-  async complete(prompt: string): Promise<string> {
+  async complete(prompt: string, options?: LlmCompletionOptions): Promise<string> {
     const spinner = new Spinner({
       silent: this.silent,
       write: (text: string) => {
@@ -35,7 +35,9 @@ export class ProgressLlmClient implements ILlmClient {
     spinner.start(this.label);
 
     try {
-      const result = await this.inner.complete(prompt);
+      const result = options
+        ? await this.inner.complete(prompt, options)
+        : await this.inner.complete(prompt);
       const elapsedSeconds = (spinner.elapsed() / 1000).toFixed(1);
       const tokenCount = estimateTokens(result);
 

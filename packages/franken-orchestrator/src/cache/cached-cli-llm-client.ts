@@ -1,4 +1,4 @@
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient, LlmCompletionOptions } from '@franken/types';
 import type { ILlmObserver } from '../adapters/adapter-llm-client.js';
 import { CachedLlmClient } from './cached-llm-client.js';
 import { LlmCacheStore } from './llm-cache-store.js';
@@ -23,7 +23,7 @@ interface CliAdapterLike {
   getProviderName?(): string;
 }
 
-export interface LlmCacheHint {
+export interface LlmCacheHint extends LlmCompletionOptions {
   operation?: string | undefined;
   workId?: string | undefined;
   stablePrefix?: string | undefined;
@@ -56,8 +56,8 @@ export class CachedCliLlmClient implements ILlmClient {
     this.metrics = options.metrics ?? new CacheMetrics();
     this.cached = new CachedLlmClient({
       llm: {
-        complete: async (prompt: string) => {
-          const response = await this.invoke(prompt);
+        complete: async (prompt: string, completionOptions?: LlmCompletionOptions) => {
+          const response = await this.invoke(prompt, undefined, completionOptions);
           return response.content;
         },
       },
@@ -78,11 +78,16 @@ export class CachedCliLlmClient implements ILlmClient {
       ? {
           provider: this.options.provider,
           model: this.options.model,
-          resume: async (sessionId: string | undefined, nextPrompt: string) => {
+          resume: async (
+            sessionId: string | undefined,
+            nextPrompt: string,
+            completionOptions?: LlmCompletionOptions,
+          ) => {
             let response: { content: string; sessionId?: string | undefined };
             let clearSession = false;
+            const resumeStartedAt = Date.now();
             try {
-              response = await this.invoke(nextPrompt, workId, sessionId);
+              response = await this.invoke(nextPrompt, workId, completionOptions, sessionId);
             } catch (error) {
               if (!sessionId || !isExpectedStaleSessionError(error)) {
                 throw error;
@@ -90,7 +95,11 @@ export class CachedCliLlmClient implements ILlmClient {
               this.metrics.recordNativeSessionFallback();
               clearSession = true;
               await this.cached.invalidateProviderSession(this.options.projectId, workId);
-              response = await this.invoke(nextPrompt, workId);
+              response = await this.invoke(
+                nextPrompt,
+                workId,
+                remainingCompletionOptions(completionOptions, resumeStartedAt),
+              );
             }
             return {
               content: response.content,
@@ -111,12 +120,17 @@ export class CachedCliLlmClient implements ILlmClient {
       ...(workPrefix ? { workPrefix } : {}),
       volatileSuffix: prompt,
       ...(nativeSession ? { nativeSession } : {}),
+      completionOptions: {
+        ...(hint?.signal ? { signal: hint.signal } : {}),
+        ...(hint?.timeoutMs !== undefined ? { timeoutMs: hint.timeoutMs } : {}),
+      },
     });
   }
 
   private async invoke(
     prompt: string,
     cacheSessionKey?: string,
+    completionOptions?: LlmCompletionOptions,
     providerSessionId?: string,
   ): Promise<{ content: string; sessionId?: string | undefined }> {
     const requestId = `llm-${deterministicNow()}-${seededRandom.random().toString(16).slice(2)}`;
@@ -125,6 +139,8 @@ export class CachedCliLlmClient implements ILlmClient {
       provider: 'adapter',
       model: this.options.model,
       messages: [{ role: 'user', content: prompt }],
+      ...(completionOptions?.signal ? { signal: completionOptions.signal } : {}),
+      ...(completionOptions?.timeoutMs !== undefined ? { timeoutMs: completionOptions.timeoutMs } : {}),
       ...(providerSessionId ? { session_id: providerSessionId } : {}),
       ...(cacheSessionKey
         ? {
@@ -195,6 +211,20 @@ function joinNonEmpty(parts: Array<string | undefined>): string | undefined {
     return undefined;
   }
   return normalized.join('\n');
+}
+
+function remainingCompletionOptions(
+  options: LlmCompletionOptions | undefined,
+  startedAt: number,
+): LlmCompletionOptions | undefined {
+  if (options?.timeoutMs === undefined) return options;
+  const remainingMs = options.timeoutMs - (Date.now() - startedAt);
+  if (remainingMs <= 0) {
+    throw Object.assign(new Error('LLM completion deadline exceeded before stale-session retry'), {
+      code: 'ETIMEDOUT',
+    });
+  }
+  return { ...options, timeoutMs: remainingMs };
 }
 
 function isExpectedStaleSessionError(error: unknown): boolean {

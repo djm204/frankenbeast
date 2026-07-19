@@ -27,6 +27,19 @@ describe('AdapterLlmClient', () => {
     await expect(client.complete('prompt')).resolves.toBe('hello');
   });
 
+  it('forwards cancellation and deadline options to the adapter request', async () => {
+    const adapter = makeAdapter();
+    const client = new AdapterLlmClient(adapter);
+    const controller = new AbortController();
+
+    await client.complete('prompt', { signal: controller.signal, timeoutMs: 42 });
+
+    expect(adapter.transformRequest).toHaveBeenCalledWith(expect.objectContaining({
+      signal: controller.signal,
+      timeoutMs: 42,
+    }));
+  });
+
   it('wraps adapter execute() failures in AdapterLlmError with the cause attached', async () => {
     const boom = new Error('socket hang up');
     const client = new AdapterLlmClient(
