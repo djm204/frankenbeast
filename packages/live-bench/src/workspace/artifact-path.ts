@@ -86,7 +86,7 @@ export function openWorkspaceArtifactFile(workspaceRoot: string, artifactPath: s
   }
 
   const noFollow = 'O_NOFOLLOW' in constants ? constants.O_NOFOLLOW : 0;
-  const fd = openSync(candidate, constants.O_RDONLY | noFollow);
+  const fd = openSync(candidate, constants.O_RDONLY | constants.O_NONBLOCK | noFollow);
   try {
     // Revalidate after opening. The descriptor pins the file that callers will
     // inspect, while this identity comparison detects a path-component swap
