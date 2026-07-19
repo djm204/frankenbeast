@@ -97,10 +97,18 @@ export class SkillConfigStore {
 
   private readExistingForSave(): Record<string, unknown> {
     let existing: Record<string, unknown> = {};
-    if (existsSync(this.configPath)) {
-      if (lstatSync(this.configPath).isSymbolicLink()) {
+    let configExists = false;
+    try {
+      const configStat = lstatSync(this.configPath);
+      if (configStat.isSymbolicLink()) {
         throw new Error('Cannot save skill toggles because symlinked config files are not supported');
       }
+      configExists = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+
+    if (configExists) {
       try {
         const parsed = JSON.parse(readFileSync(this.configPath, 'utf-8'));
         // Normalize: only use parsed value if it's a plain object

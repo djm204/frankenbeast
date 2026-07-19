@@ -100,6 +100,18 @@ describe('SkillConfigStore', () => {
       });
     });
 
+    it('refuses to replace a dangling symlink with a local config', () => {
+      mkdirSync(configDir, { recursive: true });
+      const configPath = join(configDir, 'config.json');
+      const missingTargetPath = join(tempDir, 'missing-config.json');
+      symlinkSync(missingTargetPath, configPath);
+
+      expect(() => store.save(new Set(['github']))).toThrow(/symlinked config/i);
+
+      expect(lstatSync(configPath).isSymbolicLink()).toBe(true);
+      expect(existsSync(missingTargetPath)).toBe(false);
+    });
+
     it('refuses to overwrite a corrupt existing config', () => {
       mkdirSync(configDir, { recursive: true });
       const configPath = join(configDir, 'config.json');
