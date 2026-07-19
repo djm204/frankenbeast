@@ -104,7 +104,12 @@ export function classifyCommandFailure(options: ClassifyCommandFailureOptions): 
   const retryAfterMs = parsedRetryAfterMs !== undefined && Number.isFinite(parsedRetryAfterMs) && parsedRetryAfterMs >= 0
     ? Math.min(parsedRetryAfterMs, MAX_RATE_LIMIT_SLEEP_MS)
     : undefined;
-  const retryAfterClamped = retryAfterMs !== undefined && parsedRetryAfterMs !== undefined && retryAfterMs < parsedRetryAfterMs;
+  const genericReset = rateLimited ? parseResetTimeText(combined) : { sleepSeconds: -1, source: 'unknown' };
+  const genericResetWasClamped = genericReset.sleepSeconds >= 0
+    && genericReset.source.includes('(clamped to ')
+    && parsedRetryAfterMs === genericReset.sleepSeconds * 1000;
+  const retryAfterClamped = retryAfterMs !== undefined && parsedRetryAfterMs !== undefined
+    && (retryAfterMs < parsedRetryAfterMs || genericResetWasClamped);
   const kind: CommandFailureKind = timedOut ? 'timeout' : rateLimited ? 'rate_limit' : 'command_failed';
 
   return {

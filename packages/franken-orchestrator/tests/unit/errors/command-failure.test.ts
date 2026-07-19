@@ -89,6 +89,24 @@ describe('classifyCommandFailure', () => {
     expect(rejected.retryAfterMs).toBeUndefined();
     expect(rejected.retryAfterClamped).toBeUndefined();
   });
+
+  it('preserves clamp state when the generic reset parser already bounded the hint', () => {
+    const failure = classifyCommandFailure({
+      tool: 'llm',
+      provider: 'custom',
+      command: 'custom',
+      exitCode: 1,
+      stderr: 'rate limit exceeded; resets at 2999-01-01T00:00:00Z',
+      detectRateLimit: () => true,
+      parseRetryAfterMs: (text) => {
+        const parsed = parseResetTimeText(text);
+        return parsed.sleepSeconds >= 0 ? parsed.sleepSeconds * 1000 : undefined;
+      },
+    });
+
+    expect(failure.retryAfterMs).toBe(MAX_RATE_LIMIT_SLEEP_MS);
+    expect(failure.retryAfterClamped).toBe(true);
+  });
 });
 
 describe('parseResetTimeText', () => {
