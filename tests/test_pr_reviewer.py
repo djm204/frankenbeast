@@ -78,7 +78,13 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
 
     def test_api_diff_read_is_bounded_before_decode(self):
         response = RecordingResponse(self.payload)
-        with mock.patch.dict(os.environ, {"GITHUB_PERSONAL_ACCESS_TOKEN": "test-token"}), mock.patch.object(
+        with mock.patch.dict(
+            os.environ,
+            {
+                "PR_REVIEWER_REPOSITORY": "djm204/frankenbeast",
+                "GITHUB_PERSONAL_ACCESS_TOKEN": "test-token",
+            },
+        ), mock.patch.object(
             self.reviewer.urllib.request, "urlopen", return_value=response
         ):
             diff = self.reviewer.get_pr_diff(123)
@@ -267,6 +273,76 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         with mock.patch.object(self.reviewer.subprocess, "Popen", return_value=process):
             self.assertEqual(self.reviewer.run_agy_review("diff"), "")
         self.assertTrue(process.killed)
+
+    def test_overlapping_warning_redacts_secret_for_every_label(self):
+        token = "ghp_" + "a" * 40
+        warnings = self.reviewer.scan_diff_for_exploits(
+            f"+eval(Buffer.from('payload')); TOKEN='{token}'"
+        )
+        self.assertGreaterEqual(len(warnings), 2)
+        self.assertTrue(all(token not in warning for warning in warnings))
+
+    def test_pr_enumeration_failure_is_not_an_empty_success(self):
+        with mock.patch.object(
+            self.reviewer.subprocess,
+            "check_output",
+            side_effect=subprocess.CalledProcessError(1, "gh"),
+        ):
+            with self.assertRaises(subprocess.CalledProcessError):
+                self.reviewer.get_open_prs()
+
+    def test_agy_does_not_receive_prompt_in_argv_or_github_tokens(self):
+        class CompletedProcess:
+            returncode = 0
+
+            def wait(self, timeout=None):
+                return 0
+
+        prompt_fragment = "sensitive-diff-fragment"
+        with mock.patch.dict(
+            os.environ,
+            {
+                "GITHUB_PERSONAL_ACCESS_TOKEN": "secret",
+                "GH_TOKEN": "secret-two",
+            },
+        ), mock.patch.object(
+            self.reviewer.subprocess, "Popen", return_value=CompletedProcess()
+        ) as popen:
+            self.reviewer.run_agy_review(prompt_fragment)
+
+        command = popen.call_args.args[0]
+        child_environment = popen.call_args.kwargs["env"]
+        self.assertNotIn(prompt_fragment, " ".join(command))
+        self.assertNotIn("GITHUB_PERSONAL_ACCESS_TOKEN", child_environment)
+        self.assertNotIn("GH_TOKEN", child_environment)
+        self.assertIsNotNone(popen.call_args.kwargs["stdin"])
+
+    def test_deterministic_truncation_posts_when_agy_is_unavailable(self):
+        pull_request = {
+            "number": 43,
+            "author": {"login": "contributor"},
+            "headRefOid": "c" * 40,
+        }
+        truncated_diff = "+safe" + self.reviewer.DIFF_TRUNCATION_MARKER
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            self.reviewer, "WORKSPACE", Path(directory)
+        ), mock.patch.object(
+            self.reviewer, "DB_FILE", Path(directory) / "scans.db"
+        ), mock.patch.dict(
+            os.environ, {"GITHUB_PERSONAL_ACCESS_TOKEN": "token"}
+        ), mock.patch.object(
+            self.reviewer, "get_open_prs", return_value=[pull_request]
+        ), mock.patch.object(
+            self.reviewer, "get_pr_diff", return_value=truncated_diff
+        ), mock.patch.object(
+            self.reviewer, "run_agy_review", return_value=""
+        ), mock.patch.object(
+            self.reviewer, "post_pr_review", return_value=True
+        ) as post_review:
+            self.reviewer.process_prs()
+
+        self.assertEqual(post_review.call_count, 1)
+        self.assertTrue(post_review.call_args.kwargs["diff_truncated"])
 
 
 if __name__ == "__main__":
