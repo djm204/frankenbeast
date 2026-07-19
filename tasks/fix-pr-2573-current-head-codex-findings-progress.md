@@ -10,6 +10,12 @@
 - [x] Run focused regression tests.
 - [x] Run typecheck, build, and lint.
 - [x] Review the final diff and working tree.
-- [ ] Commit and push the branch.
-- [ ] Reply to and resolve all five listed Codex threads.
-- [ ] Verify remote head and unresolved-thread state.
+- [x] Commit and push the branch.
+- [x] Reply to and resolve all five listed Codex threads.
+- [x] Verify remote head and unresolved-thread state.
+
+Evidence:
+- Affected-package validation: typecheck, build, lint (warnings only), and 3919/3919 tests passed.
+- Independent review found and prompted a fail-closed bare descriptor/skill ID collision regression; a follow-up Codex CLI review reported no actionable issue.
+- GitHub CI passed `build-test-lint (1337)` and `publish smoke (pack + offline install + run)` for code head `16be07954dec518883b2ce6f4e285b9b841950e7`.
+- All five target Codex findings were answered; unresolved Codex-authored thread count is zero.
