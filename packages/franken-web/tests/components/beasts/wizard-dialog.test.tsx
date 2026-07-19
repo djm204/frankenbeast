@@ -15,6 +15,19 @@ describe('WizardDialog', () => {
     expect(screen.getByText('Identity')).toBeTruthy(); // First step label in indicator
   });
 
+  it('describes the creation flow and step navigation to assistive technology', () => {
+    render(<WizardDialog isOpen={true} onClose={vi.fn()} onLaunch={vi.fn()} />);
+
+    const dialog = screen.getByRole('dialog');
+    const descriptionId = dialog.getAttribute('aria-describedby');
+    const description = descriptionId ? document.getElementById(descriptionId) : null;
+
+    expect(description).toBeTruthy();
+    expect(description?.textContent).toContain('Configure and launch a new agent');
+    expect(description?.textContent).toContain('Next and Back');
+    expect(description?.textContent).toContain('review your settings');
+  });
+
   it('has Back and Next buttons', () => {
     render(<WizardDialog isOpen={true} onClose={vi.fn()} onLaunch={vi.fn()} />);
     expect(screen.getByText('Next')).toBeTruthy();
