@@ -286,6 +286,44 @@ describe('createStreamProgressHandler', () => {
     expect(JSON.stringify(events)).not.toContain('do not emit');
   });
 
+  it('redacts error result details and reports an error instead of completion', () => {
+    const lines: string[] = [];
+    const events: NormalizedProviderStreamEvent[] = [];
+    const handler = createStreamProgressHandler((line) => lines.push(line), {
+      onEvent: (event) => events.push(event),
+    });
+
+    handler(JSON.stringify({
+      type: 'result',
+      is_error: true,
+      result: 'sensitive provider error details',
+    }));
+
+    expect(events).toEqual([{ type: 'error' }]);
+    expect(lines.some((line) => line.includes('Provider stream error'))).toBe(true);
+    expect(lines.some((line) => line.includes('LLM done'))).toBe(false);
+    expect(JSON.stringify(events)).not.toContain('sensitive provider error details');
+  });
+
+  it('normalizes Codex event content and Claude total cost', () => {
+    const lines: string[] = [];
+    const events: NormalizedProviderStreamEvent[] = [];
+    const handler = createStreamProgressHandler((line) => lines.push(line), {
+      onEvent: (event) => events.push(event),
+    });
+
+    handler(JSON.stringify({
+      type: 'event',
+      content: [{ type: 'output_text', text: '[{"id":"codex-event"}]' }],
+    }));
+    handler(JSON.stringify({ type: 'result', total_cost_usd: 0.079 }));
+
+    expect(events.map((event) => event.type)).toEqual(['text', 'result']);
+    expect(events[1]).toEqual({ type: 'result', costUsd: 0.079 });
+    expect(lines.some((line) => line.includes('codex-event'))).toBe(true);
+    expect(lines.some((line) => line.includes('$0.0790'))).toBe(true);
+  });
+
   it('reports unknown event types through redacted verbose diagnostics', () => {
     const lines: string[] = [];
     const handler = createStreamProgressHandler((t) => lines.push(t), { verbose: true });

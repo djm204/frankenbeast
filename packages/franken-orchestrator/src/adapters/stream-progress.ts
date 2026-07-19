@@ -156,7 +156,7 @@ export function normalizeProviderStreamEvent(
     return [{ type: 'unknown', sourceType: `${type}:${itemType ?? 'missing-item-type'}` }];
   }
 
-  if (type === 'message' || type === 'content') {
+  if (type === 'message' || type === 'content' || type === 'event') {
     const message = asRecord(obj['message']);
     const role = message?.['role'] ?? obj['role'];
     if (role === 'user') return [];
@@ -196,11 +196,17 @@ export function normalizeProviderStreamEvent(
     const events: NormalizedProviderStreamEvent[] = [];
     const usage = normalizeUsage(stats ?? obj['usage'] ?? obj);
     if (usage) events.push(usage);
+    const subtype = stringValue(obj['subtype']);
+    const status = stringValue(obj['status']);
+    if (obj['is_error'] === true || subtype === 'error' || status === 'error' || status === 'failed') {
+      events.push({ type: 'error' });
+      return events;
+    }
     const message = asRecord(obj['message']);
     const text = extractText(obj['result'] ?? message?.['content'] ?? obj['content'] ?? obj['text']);
     if (text !== undefined) events.push({ type: 'text', content: text });
     const durationMs = numberValue(stats?.['duration_ms']) ?? numberValue(obj['duration_ms']);
-    const costUsd = numberValue(obj['cost_usd']);
+    const costUsd = numberValue(obj['cost_usd']) ?? numberValue(obj['total_cost_usd']);
     const turns = numberValue(obj['num_turns']);
     events.push({
       type: 'result',
