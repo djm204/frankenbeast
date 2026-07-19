@@ -740,21 +740,81 @@ export class SafetyEvaluator implements Evaluator {
   }
 
   private unicodeSetStringToken(characterClass: string): string | null {
-    const body = characterClass.slice(1, -1);
-    const operands = [...body.matchAll(/\\q\{([^}]*)\}/g)];
-    if (
-      operands.length === 0 ||
-      operands.map((operand) => operand[0]).join('') !== body
-    ) {
-      return null;
-    }
-
-    const strings = operands.flatMap((operand) =>
-      (operand[1] ?? '').split('|').filter((value) => value.length > 0),
-    );
-    return strings.length > 0
+    const strings = this.parseUnicodeSetStrings(characterClass.slice(1, -1));
+    return strings !== null && strings.length > 0
       ? `STRING_SET:${JSON.stringify(strings)}`
       : null;
+  }
+
+  private parseUnicodeSetStrings(body: string): string[] | null {
+    const strings: string[] = [];
+    let index = 0;
+
+    while (index < body.length) {
+      if (!body.startsWith('\\q{', index)) return null;
+      index += 3;
+      let value = '';
+      let closed = false;
+
+      while (index < body.length) {
+        const char = body[index]!;
+        if (char === '}') {
+          if (value.length > 0) strings.push(value);
+          index += 1;
+          closed = true;
+          break;
+        }
+        if (char === '|') {
+          if (value.length > 0) strings.push(value);
+          value = '';
+          index += 1;
+          continue;
+        }
+        if (char === '\\') {
+          const escape = this.unicodeSetStringEscapeAt(body, index);
+          if (escape === null) return null;
+          value += escape.value;
+          index = escape.end + 1;
+          continue;
+        }
+        value += char;
+        index += 1;
+      }
+
+      if (!closed) return null;
+    }
+
+    return strings;
+  }
+
+  private unicodeSetStringEscapeAt(
+    body: string,
+    start: number,
+  ): { value: string; end: number } | null {
+    const escaped = body[start + 1];
+    if (escaped === undefined) return null;
+    const codePoint = body.slice(start).match(/^\\u\{([0-9A-Fa-f]+)\}/);
+    if (codePoint) {
+      return {
+        value: String.fromCodePoint(Number.parseInt(codePoint[1]!, 16)),
+        end: start + codePoint[0].length - 1,
+      };
+    }
+    const fixed = this.classEscapedTokenAt(body, start);
+    if (fixed !== null && fixed.end > start + 1) return fixed;
+    return {
+      value: this.escapedStringCharacter(escaped),
+      end: start + 1,
+    };
+  }
+
+  private escapedStringCharacter(escaped: string): string {
+    if (escaped === 'n') return '\n';
+    if (escaped === 'r') return '\r';
+    if (escaped === 't') return '\t';
+    if (escaped === 'f') return '\f';
+    if (escaped === 'v') return '\v';
+    return escaped;
   }
 
   private tokenPrefixOverlaps(
@@ -821,7 +881,9 @@ export class SafetyEvaluator implements Evaluator {
     return strings.some((value) =>
       otherStrings === null
         ? this.regexTokensOverlap(value[0] ?? '', token)
-        : otherStrings.some((other) => value[0] === other[0]),
+        : otherStrings.some(
+            (other) => value.startsWith(other) || other.startsWith(value),
+          ),
     );
   }
 
@@ -1111,6 +1173,8 @@ export class SafetyEvaluator implements Evaluator {
       '.',
       '/',
       '\u00A0',
+      ...(left.length === 1 ? [left] : []),
+      ...(right.length === 1 ? [right] : []),
       ...this.tokenProbeSamples(left),
       ...this.tokenProbeSamples(right),
     ]);

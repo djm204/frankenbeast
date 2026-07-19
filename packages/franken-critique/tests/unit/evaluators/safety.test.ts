@@ -900,6 +900,9 @@ describe('SafetyEvaluator', () => {
       evaluator.hasUnsafeRegexShape('^(?:[[a-z]&&[p-z]]|a)+$', true),
     ).toBe(false);
     expect(
+      evaluator.hasUnsafeRegexShape('^(?:[[a-z]&&[p-z]]|q)+$', true),
+    ).toBe(true);
+    expect(
       evaluator.hasUnsafeRegexShape('^(?:[\\p{Letter}]|a)+$', true),
     ).toBe(true);
     expect(
@@ -908,6 +911,12 @@ describe('SafetyEvaluator', () => {
     expect(
       evaluator.hasUnsafeRegexShape('^(?:[\\q{ab}]|a)+$', true),
     ).toBe(true);
+    expect(
+      evaluator.hasUnsafeRegexShape('^(?:[\\q{\\-a}]|-|a)+$', true),
+    ).toBe(true);
+    expect(
+      evaluator.hasUnsafeRegexShape('^(?:[\\q{ab}]|[\\q{ac}])+$', true),
+    ).toBe(false);
   });
 
   it('rejects nullable and variable-quantified alternation bypass patterns', async () => {
