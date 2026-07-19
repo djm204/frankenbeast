@@ -17,7 +17,7 @@ import type {
   MessageResult,
   TurnOutcome,
 } from '@franken/types';
-import { isoNow } from '@franken/types';
+import { isoNow, MAX_CHAT_MESSAGE_CONTENT_LENGTH } from '@franken/types';
 import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { createSseHandler } from '../sse.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
@@ -30,7 +30,7 @@ const CreateSessionBody = z.object({
 }).strict();
 
 const SubmitMessageBody = z.object({
-  content: z.string().min(1),
+  content: z.string().min(1).max(MAX_CHAT_MESSAGE_CONTENT_LENGTH),
   executionMode: z.enum(['process', 'container']).optional(),
 }).strict();
 

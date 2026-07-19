@@ -21,6 +21,7 @@ import { ContainerBeastExecutor } from '../../../src/beasts/execution/container-
 import { DEFAULT_SANDBOX_POLICY } from '../../../src/beasts/execution/sandbox-policy.js';
 import type { BeastProcessSpec } from '../../../src/beasts/types.js';
 import type { ProcessCallbacks, ProcessSupervisorLike } from '../../../src/beasts/execution/process-supervisor.js';
+import { MAX_CHAT_MESSAGE_CONTENT_LENGTH } from '@franken/types';
 
 import { testCredential } from '../../support/test-credentials.js';
 
@@ -263,6 +264,50 @@ describe('Chat HTTP Routes', () => {
     const sessionBody = await sessionRes.json();
     expect(sessionBody.data.transcript).toHaveLength(2);
     expect(sessionBody.data.state).toBe('active');
+  });
+
+  it('accepts chat message content at the 16,000-character limit', async () => {
+    const createRes = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    const { data: created } = await createRes.json();
+    const content = 'x'.repeat(MAX_CHAT_MESSAGE_CONTENT_LENGTH);
+
+    const res = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(llmComplete).toHaveBeenCalledOnce();
+    expect(llmComplete.mock.calls[0]?.[0]).toContain(content);
+  });
+
+  it('rejects chat message content above the 16,000-character limit before runtime execution', async () => {
+    const createRes = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    const { data: created } = await createRes.json();
+
+    const res = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'x'.repeat(MAX_CHAT_MESSAGE_CONTENT_LENGTH + 1) }),
+    });
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toMatchObject({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Request validation failed',
+      },
+    });
+    expect(llmComplete).not.toHaveBeenCalled();
   });
 
   it('POST /v1/chat/sessions/:id/messages rejects sends while approval is pending', async () => {
