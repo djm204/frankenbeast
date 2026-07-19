@@ -735,8 +735,9 @@ describe('beast daemon', () => {
     });
     expect(ticketResponse.status).toBe(200);
     const ticketCookie = ticketResponse.headers.get('set-cookie')?.split(';', 1)[0];
+    const ticketBody = await ticketResponse.json() as { connectionId: string };
     expect(ticketCookie).toBeTruthy();
-    const streamResponse = await fetch(`${daemon.url}/v1/beasts/events/stream`, {
+    const streamResponse = await fetch(`${daemon.url}/v1/beasts/events/stream/${ticketBody.connectionId}`, {
       headers: { cookie: ticketCookie! },
     });
     expect(streamResponse.status).toBe(200);

@@ -42,7 +42,7 @@ describe('issue #3226 dashboard SSE endpoint contract', () => {
 
     expect(adr).toContain('Ticket issuance: `POST /v1/beasts/events/ticket`');
     expect(adr).toContain(
-      'Dashboard stream: `GET /v1/beasts/events/stream`',
+      'Dashboard stream: `GET /v1/beasts/events/stream/{connectionId}`',
     );
     expect(adr).not.toContain('`useBeastEventStream`');
   });

@@ -351,7 +351,7 @@ describe('BeastApiClient', () => {
 
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: () => Promise.resolve({ ticket: 'sse-ticket' }),
+      json: () => Promise.resolve({ connectionId: 'sse-ticket' }),
     });
 
     try {
@@ -368,7 +368,7 @@ describe('BeastApiClient', () => {
       expect(new Headers(init.headers).has('authorization')).toBe(false);
       expect(init.credentials).toBe('include');
       expect(MockEventSource).toHaveBeenCalledWith(
-        'http://localhost:3000/v1/beasts/events/stream',
+        'http://localhost:3000/v1/beasts/events/stream/sse-ticket',
         { withCredentials: true },
       );
 
@@ -404,7 +404,7 @@ describe('BeastApiClient', () => {
 
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: () => Promise.resolve({ ticket: 'sse-ticket' }),
+      json: () => Promise.resolve({ connectionId: 'sse-ticket' }),
     });
 
     try {
@@ -453,8 +453,8 @@ describe('BeastApiClient', () => {
     (globalThis as any).EventSource = MockEventSource;
 
     mockFetch
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-1' }) })
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-2' }) });
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ connectionId: 'ticket-1' }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ connectionId: 'ticket-2' }) });
 
     try {
       const onError = vi.fn();
@@ -469,7 +469,7 @@ describe('BeastApiClient', () => {
       expect(mockFetch).toHaveBeenCalledTimes(2);
       expect(MockEventSource).toHaveBeenNthCalledWith(
         2,
-        'http://localhost:3000/v1/beasts/events/stream',
+        'http://localhost:3000/v1/beasts/events/stream/ticket-2',
         { withCredentials: true },
       );
 
@@ -504,8 +504,8 @@ describe('BeastApiClient', () => {
     (globalThis as any).EventSource = MockEventSource;
 
     mockFetch
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-1' }) })
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-2' }) });
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ connectionId: 'ticket-1' }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ connectionId: 'ticket-2' }) });
 
     try {
       const onConnected = vi.fn();
@@ -552,8 +552,8 @@ describe('BeastApiClient', () => {
     (globalThis as any).EventSource = MockEventSource;
 
     mockFetch
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-1' }) })
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-2' }) });
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ connectionId: 'ticket-1' }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ connectionId: 'ticket-2' }) });
 
     try {
       const onError = vi.fn();
@@ -577,7 +577,7 @@ describe('BeastApiClient', () => {
       expect(onError).toHaveBeenCalledWith(expect.any(SyntaxError));
       expect(MockEventSource).toHaveBeenNthCalledWith(
         2,
-        'http://localhost:3000/v1/beasts/events/stream?lastEventId=42',
+        'http://localhost:3000/v1/beasts/events/stream/ticket-2?lastEventId=42',
         { withCredentials: true },
       );
 
@@ -613,8 +613,8 @@ describe('BeastApiClient', () => {
     (globalThis as any).EventSource = MockEventSource;
 
     mockFetch
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-1' }) })
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-2' }) });
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ connectionId: 'ticket-1' }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ connectionId: 'ticket-2' }) });
 
     try {
       const onRunStatus = vi.fn();
@@ -642,7 +642,7 @@ describe('BeastApiClient', () => {
 
       expect(MockEventSource).toHaveBeenNthCalledWith(
         2,
-        'http://localhost:3000/v1/beasts/events/stream?lastEventId=42',
+        'http://localhost:3000/v1/beasts/events/stream/ticket-2?lastEventId=42',
         { withCredentials: true },
       );
 
@@ -677,8 +677,8 @@ describe('BeastApiClient', () => {
     (globalThis as any).EventSource = MockEventSource;
 
     mockFetch
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-1' }) })
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-2' }) });
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ connectionId: 'ticket-1' }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ connectionId: 'ticket-2' }) });
 
     try {
       const onError = vi.fn();
@@ -694,7 +694,7 @@ describe('BeastApiClient', () => {
       expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('reconnecting') }));
       expect(MockEventSource).toHaveBeenNthCalledWith(
         2,
-        'http://localhost:3000/v1/beasts/events/stream?lastEventId=45',
+        'http://localhost:3000/v1/beasts/events/stream/ticket-2?lastEventId=45',
         { withCredentials: true },
       );
 
@@ -728,8 +728,8 @@ describe('BeastApiClient', () => {
     (globalThis as any).EventSource = MockEventSource;
 
     mockFetch
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-1' }) })
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-2' }) });
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ connectionId: 'ticket-1' }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ connectionId: 'ticket-2' }) });
 
     try {
       const handlerError = new Error('consumer failed');
@@ -749,7 +749,7 @@ describe('BeastApiClient', () => {
       expect(onError).toHaveBeenCalledWith(handlerError);
       expect(MockEventSource).toHaveBeenNthCalledWith(
         2,
-        'http://localhost:3000/v1/beasts/events/stream?lastEventId=44',
+        'http://localhost:3000/v1/beasts/events/stream/ticket-2?lastEventId=44',
         { withCredentials: true },
       );
 
@@ -783,9 +783,9 @@ describe('BeastApiClient', () => {
     (globalThis as any).EventSource = MockEventSource;
 
     mockFetch
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-1' }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ connectionId: 'ticket-1' }) })
       .mockResolvedValueOnce({ ok: false, status: 500, json: () => Promise.resolve({ error: { code: 'UNAVAILABLE' } }) })
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-3' }) });
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ connectionId: 'ticket-3' }) });
 
     try {
       const onError = vi.fn();
@@ -799,7 +799,7 @@ describe('BeastApiClient', () => {
       expect(mockFetch).toHaveBeenCalledTimes(3);
       expect(MockEventSource).toHaveBeenNthCalledWith(
         2,
-        'http://localhost:3000/v1/beasts/events/stream',
+        'http://localhost:3000/v1/beasts/events/stream/ticket-3',
         { withCredentials: true },
       );
 
@@ -829,7 +829,7 @@ describe('BeastApiClient', () => {
 
     mockFetch
       .mockResolvedValueOnce({ ok: false, status: 503, json: () => Promise.resolve({ error: { code: 'UNAVAILABLE' } }) })
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-2' }) });
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ connectionId: 'ticket-2' }) });
 
     try {
       const onError = vi.fn();
@@ -842,7 +842,7 @@ describe('BeastApiClient', () => {
 
       expect(mockFetch).toHaveBeenCalledTimes(2);
       expect(MockEventSource).toHaveBeenCalledWith(
-        'http://localhost:3000/v1/beasts/events/stream',
+        'http://localhost:3000/v1/beasts/events/stream/ticket-2',
         { withCredentials: true },
       );
 

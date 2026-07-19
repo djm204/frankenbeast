@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import { streamSSE } from 'hono/streaming';
@@ -8,6 +8,10 @@ import { extractOperatorToken, extractOperatorTokenCookie, isCookieOperatorAuthA
 
 const SSE_TICKET_COOKIE = 'frankenbeast_sse_ticket';
 const SSE_STREAM_PATH = '/v1/beasts/events/stream';
+
+function connectionStreamPath(connectionId: string): string {
+  return `${SSE_STREAM_PATH}/${connectionId}`;
+}
 
 function isHttpsRequest(
   requestUrl: string,
@@ -67,22 +71,28 @@ export function createBeastSseRoutes(deps: BeastSseRouteDeps): Hono {
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid bearer token' } }, 401);
     }
 
-    const ticket = ticketStore.issue(operatorToken);
+    const connectionId = randomUUID();
+    const ticket = ticketStore.issue(operatorToken, connectionId);
     setCookie(c, SSE_TICKET_COOKIE, ticket, {
       httpOnly: true,
-      path: SSE_STREAM_PATH,
+      maxAge: 30,
+      path: connectionStreamPath(connectionId),
       sameSite: 'Strict',
       secure: isHttpsRequest(c.req.url, c.req.header('x-forwarded-proto')),
     });
-    return c.json({ issued: true });
+    return c.json({ connectionId });
   });
 
-  app.get(SSE_STREAM_PATH, (c) => {
+  app.get(SSE_STREAM_PATH, (c) => (
+    c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401)
+  ));
+
+  app.get(`${SSE_STREAM_PATH}/:connectionId`, (c) => {
     const ticket = getCookie(c, SSE_TICKET_COOKIE);
     if (!ticket) {
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);
     }
-    const ticketStatus = ticketStore.consume(ticket, operatorToken);
+    const ticketStatus = ticketStore.consume(ticket, operatorToken, c.req.param('connectionId'));
     if (ticketStatus === 'reused') {
       return c.body(null, 204);
     }
