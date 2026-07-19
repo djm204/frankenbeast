@@ -376,7 +376,11 @@ describe('AgentService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: {},
+      initConfig: {
+        agentRole: 'coding',
+        requestedTools: ['read_file'],
+        skills: [],
+      },
     });
     const recovered = createAgent('recovered-agent');
     const stillFailed = createAgent('failed-agent');
