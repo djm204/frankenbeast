@@ -362,13 +362,18 @@ function formatHealthDiagnostic(
     ...(stderr.byteLength > 0 ? [`stderr: ${stderr.toString('utf8').trim()}`] : []),
     ...(stdout.byteLength > 0 ? [`stdout: ${stdout.toString('utf8').trim()}`] : []),
   ].join('\n');
-  return redactSensitiveText(sanitizeTerminalText(details));
+  const sanitized = sanitizeTerminalText(details);
+  const assignmentValuesRedacted = sanitized.replace(
+    /(=\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)/gu,
+    '$1<redacted>',
+  );
+  return redactSensitiveText(assignmentValuesRedacted);
 }
 
 function sanitizeTerminalText(text: string): string {
   const withoutEscapes = text
     .replace(/\u001B\][^\u0007]*(?:\u0007|\u001B\\)/gu, '')
-    .replace(/\u001B\[[0-?]*[ -/]*[@-~]/gu, '');
+    .replace(/(?:\u001B\[|\u009B)[0-?]*[ -/]*[@-~]/gu, '');
   const normalized: string[] = [];
   for (const character of withoutEscapes) {
     if (character === '\b') {
@@ -381,7 +386,7 @@ function sanitizeTerminalText(text: string): string {
       normalized.push('\n');
       continue;
     }
-    if (/^[\u0000-\u0007\u000B\u000C\u000E-\u001F\u007F]$/u.test(character)) {
+    if (/^[\u0000-\u0007\u000B\u000C\u000E-\u001F\u007F-\u009F]$/u.test(character)) {
       continue;
     }
     normalized.push(character);

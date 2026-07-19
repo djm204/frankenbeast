@@ -629,6 +629,31 @@ describe('SkillHealthChecker', () => {
     expect(diagnostic).not.toContain('\b');
   });
 
+  it('redacts assignment values despite malformed and C1 terminal sequences', async () => {
+    const { spawn } = await import('node:child_process');
+    const proc = makeMockProcess();
+    (spawn as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      setTimeout(() => {
+        proc.stderr.emit(
+          'data',
+          'API_\u001b[31TOKEN=first-secret C1_\u009B31mTOKEN=second-secret',
+        );
+        proc.exitCode = 1;
+        proc.emit('close', 1);
+      }, 10);
+      return proc;
+    });
+
+    const result = await checker.getStatus('malformed-controls', {
+      mcpServers: { malformed: { command: 'malformed-controls-server' } },
+    }, { trustMcpServerCommands: true });
+    const diagnostic = result.serverStatuses[0]?.error ?? '';
+
+    expect(diagnostic).not.toContain('first-secret');
+    expect(diagnostic).not.toContain('second-secret');
+    expect(diagnostic.match(/<redacted>/gu)).toHaveLength(2);
+  });
+
   it('does not retain a sensitive value past the diagnostic bound', async () => {
     const { spawn } = await import('node:child_process');
     const proc = makeMockProcess();
