@@ -20,6 +20,7 @@ For a complete clean-checkout setup, use the root [onboarding checklist](../../O
 | Recover an outdated fork, wrong branch, or rejected push | [Fork and branch recovery](fork-and-branch-recovery.md) | [Getting help with a first contribution](getting-help.md) before resetting or rewriting shared history |
 | Get help with a first-contribution blocker | [Getting help with a first contribution](getting-help.md) | The setup, testing, security, and review references selected by that guide |
 | Take one issue through a first PR | [First-PR agent runbook](first-pr-agent-runbook.md) | [Coding-agent PR etiquette](coding-agent-pr-etiquette.md) and the [issue complexity rubric](issue-complexity-rubric.md) |
+| Clean up after a first PR merges | [After your first pull request](after-your-first-pr.md) | [Contributor guide](../../CONTRIBUTING.md) when you are ready to select the next issue |
 | Practice before editing production code | [Sample agent practice issue](sample-agent-practice-issue.md) | The linked practice fixture and reset workflow |
 | Find the package that owns a change | [Architecture map](architecture-map.md) | [Repository ownership](repository-ownership.md) |
 | Assign or recover agent work | [Agent role responsibility map](agent-role-responsibility-map.md) | [Agent coordination runtime glossary](agent-coordination-runtime-glossary.md) |
@@ -27,6 +28,7 @@ For a complete clean-checkout setup, use the root [onboarding checklist](../../O
 
 ## All onboarding references
 
+- [After your first pull request](after-your-first-pr.md) — verifies merge and issue state, updates a fork, and safely removes the merged branch or worktree.
 - [Agent coordination runtime glossary](agent-coordination-runtime-glossary.md) — terms used in Kanban, liveness, approval, and PR handoffs.
 - [Agent role responsibility map](agent-role-responsibility-map.md) — boundaries and required evidence for coordinators, workers, reviewers, and repair owners.
 - [Architecture map](architecture-map.md) — routes issue topics to current packages, tests, and safety boundaries.
