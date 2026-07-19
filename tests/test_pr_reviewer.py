@@ -166,6 +166,17 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
             check_output.call_args.kwargs["env"]["GH_TOKEN"], "configured-token"
         )
 
+    def test_selected_personal_access_token_replaces_stale_gh_token(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "GITHUB_PERSONAL_ACCESS_TOKEN": "selected-token",
+                "GH_TOKEN": "stale-token",
+            },
+            clear=True,
+        ):
+            self.assertEqual(self.reviewer.gh_environment()["GH_TOKEN"], "selected-token")
+
     def test_standard_github_token_is_accepted_for_api_and_process_runs(self):
         response = RecordingResponse(b"+safe change")
         with mock.patch.dict(
@@ -217,6 +228,13 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
                 self.assertEqual(len(warnings), 1)
                 self.assertNotIn(token, warnings[0])
                 self.assertIn("[REDACTED]", warnings[0])
+
+    def test_secret_warning_redacts_standard_google_api_key(self):
+        token = "AIza" + "a" * 35
+        warnings = self.reviewer.scan_diff_for_exploits(f"+TOKEN={token}")
+        self.assertEqual(len(warnings), 1)
+        self.assertNotIn(token, warnings[0])
+        self.assertIn("[REDACTED]", warnings[0])
 
     def test_truncated_clean_scan_is_not_reported_as_passed(self):
         posted_bodies = []
@@ -278,6 +296,22 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
                     123, "body", [], repository="owner/repository"
                 )
             )
+
+    def test_review_file_is_written_as_utf8(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            self.reviewer, "WORKSPACE", Path(directory)
+        ), mock.patch.object(
+            Path, "write_text", autospec=True
+        ) as write_text, mock.patch.object(
+            self.reviewer.subprocess, "check_call"
+        ):
+            self.assertTrue(
+                self.reviewer.post_pr_review(
+                    123, "VERDICT: COMMENT", [], repository="owner/repository"
+                )
+            )
+
+        self.assertEqual(write_text.call_args.kwargs["encoding"], "utf-8")
 
     def test_agy_review_uses_sandbox_and_bounded_files(self):
         class CompletedProcess:
@@ -565,7 +599,8 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         ), mock.patch.object(
             self.reviewer, "post_pr_review", return_value=True
         ) as post_review:
-            self.reviewer.process_prs()
+            with self.assertRaisesRegex(RuntimeError, "PR #10: diff could not be fetched"):
+                self.reviewer.process_prs()
             connection = self.reviewer.sqlite3.connect(self.reviewer.DB_FILE)
             statuses = dict(connection.execute("SELECT pr_number, status FROM pr_reviews"))
             connection.close()

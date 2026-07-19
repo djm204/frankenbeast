@@ -7,6 +7,16 @@
 ## 2026-07-18 — Kanban reviewer isolation
 - Independent review workers must receive a distinct child card or explicitly review-only context; never let a delegated reviewer inherit and complete the implementation parent card, because completion can garbage-collect its workspace before the verified diff is committed and shipped.
 
+## 2026-07-19 — PR #3270 reviewer fail-closed follow-up
+- Symptom: the reviewer could pass raw 39-character Google API keys to the model, let `gh` subprocesses use a stale lower-precedence token, depend on the host locale for emoji-bearing review files, and exit successfully after diff-fetch failures.
+- Treatment: match published `AIza` plus 35-character keys before model invocation, force every `gh` subprocess to use the token selected for API calls, write review files explicitly as UTF-8, and accumulate diff-fetch failures while continuing later PRs before failing the run.
+- Reusable lesson: security/reliability reviewers must keep credential selection, text encoding, and exit status deterministic across API and subprocess paths; add regressions for mixed token environments, non-default locales, standard secret formats, and partial-batch fetch failures.
+
+## 2026-07-19 — PR #3270 over-cap Codex closeout
+- Symptom: each approved current-head Codex round produced actionable findings, so the repaired head advanced after the approved trigger and required another fresh review; green CI and zero unresolved Codex threads did not satisfy the current-head gate.
+- Treatment: preserve the existing closeout worker as the sole owner, verify local/upstream/PR head equality, green required checks, CLEAN merge state, zero unresolved Codex threads, and exact trigger count before requesting one bounded additional invocation. Do not retrigger or merge until that explicit approval is recorded.
+- Reusable lesson: an over-cap approval is scoped to one trigger and the head it reviews, not to the whole PR. If valid findings move the head, request a new exact-command approval for the next invocation rather than treating the prior approval or resolved threads as transferable.
+
 ## 2026-07-18 — Working-memory hydration corruption
 - Fail closed on malformed persisted values that are shaped like structured JSON (`{` or `[` after leading whitespace), while retaining the documented plain-text fallback for genuinely legacy rows. Typed hydration errors should identify the affected key without deleting the row, so operators can repair it and reopen the store.
 
