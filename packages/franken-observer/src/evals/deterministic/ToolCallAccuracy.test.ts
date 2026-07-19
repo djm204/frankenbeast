@@ -73,6 +73,24 @@ describe('ToolCallAccuracyEval', () => {
       )
     })
 
+    it('pre-indexes large allowed lists before checking actual params', async () => {
+      const allowed = Array.from({ length: 10_000 }, (_, index) => `param${index}`)
+      allowed.includes = () => {
+        throw new Error('allowed parameters must not be scanned for every actual param')
+      }
+
+      const result = await runner.run(ev, {
+        actual: {
+          tool: 'large_tool',
+          params: { param0: true, param9999: true, hallucinated: true },
+        },
+        schema: { tool: 'large_tool', required: [], allowed },
+      })
+
+      expect(result.status).toBe('fail')
+      expect(result.details?.['ghostParams']).toEqual(['hallucinated'])
+    })
+
     it('reports both missing required and ghost params when both are present', async () => {
       const result = await runner.run(ev, {
         actual: { tool: 'search_web', params: { ghost1: 'a' } },
