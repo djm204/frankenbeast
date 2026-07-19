@@ -1,5 +1,8 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-19 — Codex-triggered commit re-review on issue #2907
+- When a commit is pushed to an existing PR and there was a prior `@codex review`, always trigger a new review on the new head and collect a fresh `@codex review` clean signal before merging. In this case, a `screen-reader` aria-label update changed, a stale strict assertion in `wizard-dialog.test.tsx` broke once; switching it to a regex was sufficient and CI stayed green on the new commit.
+
 ## 2026-07-19 — Artifact-path TOCTOU hardening
 - Returning a validated pathname is not a secure file-inspection API: pin both the workspace directory and artifact as file descriptors, traverse through `/proc/self/fd` or `/dev/fd` where available, and compare descriptor/path identities after opening so rename/symlink swaps fail closed.
 - Use `lstat` rather than `existsSync` when dangling symlinks must be rejected, translate only candidate-component `ENOENT` into an ordinary missing artifact, and open untrusted artifact targets with nonblocking/no-follow flags before requiring a regular file.
