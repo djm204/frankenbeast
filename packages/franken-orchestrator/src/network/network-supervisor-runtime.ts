@@ -200,6 +200,8 @@ function resolveNpmCliPath(): string {
 
 const SAFE_INHERITED_NETWORK_SERVICE_ENV_KEYS = [
   'HOME',
+  'HERMES_HOME',
+  'HERMES_PROFILE',
   'LANG',
   'LC_ALL',
   'TMPDIR',
@@ -211,9 +213,43 @@ const SAFE_INHERITED_NETWORK_SERVICE_ENV_KEYS = [
   'PATHEXT',
 ] as const;
 
-function allowlistedNetworkProcessEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+const REQUIRED_NETWORK_SERVICE_ENV_KEYS: Partial<Record<ResolvedNetworkService['id'], readonly string[]>> = {
+  'beasts-daemon': [
+    'FRANKENBEAST_BEAST_OPERATOR_TOKEN',
+    'VITE_BEAST_OPERATOR_TOKEN',
+    'FRANKENBEAST_PASSPHRASE',
+    'ANTHROPIC_API_KEY',
+    'OPENAI_API_KEY',
+    'GOOGLE_API_KEY',
+    'GEMINI_API_KEY',
+    'GH_TOKEN',
+    'GITHUB_TOKEN',
+  ],
+  'chat-server': [
+    'FRANKENBEAST_BEAST_OPERATOR_TOKEN',
+    'VITE_BEAST_OPERATOR_TOKEN',
+    'FRANKENBEAST_PASSPHRASE',
+    'ANTHROPIC_API_KEY',
+    'OPENAI_API_KEY',
+    'GOOGLE_API_KEY',
+    'GEMINI_API_KEY',
+  ],
+  'dashboard-web': [
+    'FRANKENBEAST_BEAST_OPERATOR_TOKEN',
+    'FRANKENBEAST_PASSPHRASE',
+  ],
+};
+
+function allowlistedNetworkProcessEnv(
+  serviceId: ResolvedNetworkService['id'],
+  env: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
   const allowedEnv: NodeJS.ProcessEnv = {};
-  for (const key of SAFE_INHERITED_NETWORK_SERVICE_ENV_KEYS) {
+  const allowedKeys = [
+    ...SAFE_INHERITED_NETWORK_SERVICE_ENV_KEYS,
+    ...(REQUIRED_NETWORK_SERVICE_ENV_KEYS[serviceId] ?? []),
+  ];
+  for (const key of allowedKeys) {
     const value = env[key];
     if (value !== undefined) {
       allowedEnv[key] = value;
@@ -229,9 +265,12 @@ function buildNetworkProcessPath(): string {
   return pathEntries.join(delimiter);
 }
 
-function buildNetworkProcessEnv(processSpecEnv: Record<string, string> | undefined): NodeJS.ProcessEnv {
+function buildNetworkProcessEnv(
+  serviceId: ResolvedNetworkService['id'],
+  processSpecEnv: Record<string, string> | undefined,
+): NodeJS.ProcessEnv {
   return {
-    ...allowlistedNetworkProcessEnv(process.env),
+    ...allowlistedNetworkProcessEnv(serviceId, process.env),
     ...processSpecEnv,
     PATH: buildNetworkProcessPath(),
   };
@@ -243,7 +282,7 @@ function buildValidatedProcessSpec(service: ResolvedNetworkService): ValidatedPr
   if (!processSpec) {
     throw new Error(`Service ${service.id} does not have a runnable entrypoint yet`);
   }
-  const env = buildNetworkProcessEnv(processSpec.env);
+  const env = buildNetworkProcessEnv(service.id, processSpec.env);
   if (processSpec.command === 'npm' || processSpec.command === 'npm.cmd') {
     return {
       command: process.execPath,

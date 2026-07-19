@@ -34,6 +34,19 @@ const CHAT_SERVER_ARGS = [
   '4567',
 ];
 
+const BEASTS_DAEMON_ARGS = [
+  '--silent',
+  '--workspace',
+  '@franken/orchestrator',
+  'run',
+  'beasts-daemon',
+  '--',
+  '--host',
+  '127.0.0.1',
+  '--port',
+  '4050',
+];
+
 const DASHBOARD_ARGS = [
   'packages/franken-orchestrator/dist/http/dashboard-static-server.js',
   '--host',
@@ -140,6 +153,8 @@ describe('startNetworkService', () => {
   it('does not inherit unrelated orchestrator secrets when starting a managed service', async () => {
     vi.stubEnv('FRANKENBEAST_NETWORK_TEST_SECRET', 'must-not-reach-child');
     vi.stubEnv('HOME', '/safe-network-home');
+    vi.stubEnv('HERMES_HOME', '/safe-hermes-home');
+    vi.stubEnv('HERMES_PROFILE', 'network-test');
 
     await expect(startNetworkService(makeService('npm', {
       env: {
@@ -154,6 +169,8 @@ describe('startNetworkService', () => {
     const spawnedEnv = spawnOptions?.env ?? {};
     expect(spawnedEnv).toEqual(expect.objectContaining({
       HOME: '/safe-network-home',
+      HERMES_HOME: '/safe-hermes-home',
+      HERMES_PROFILE: 'network-test',
       PATH: expect.any(String),
       FRANKENBEAST_NETWORK_MANAGED: '1',
       FRANKENBEAST_BEAST_DAEMON_URL: 'http://127.0.0.1:4050',
@@ -161,6 +178,8 @@ describe('startNetworkService', () => {
     expect(spawnedEnv).not.toHaveProperty('FRANKENBEAST_NETWORK_TEST_SECRET');
     const permittedKeys = new Set([
       'HOME',
+      'HERMES_HOME',
+      'HERMES_PROFILE',
       'LANG',
       'LC_ALL',
       'TMPDIR',
@@ -175,6 +194,33 @@ describe('startNetworkService', () => {
       'FRANKENBEAST_BEAST_DAEMON_URL',
     ]);
     expect(Object.keys(spawnedEnv).every((key) => permittedKeys.has(key))).toBe(true);
+  });
+
+  it('inherits only credentials required by the managed service', async () => {
+    vi.stubEnv('FRANKENBEAST_BEAST_OPERATOR_TOKEN', 'operator-token-for-test');
+    vi.stubEnv('FRANKENBEAST_PASSPHRASE', 'vault-passphrase-for-test');
+    vi.stubEnv('OPENAI_API_KEY', 'provider-key-for-test');
+    vi.stubEnv('FRANKENBEAST_NETWORK_TEST_SECRET', 'unrelated-secret-for-test');
+
+    await expect(startNetworkService(makeService('npm', {
+      args: BEASTS_DAEMON_ARGS,
+      env: {
+        FRANKENBEAST_NETWORK_MANAGED: '1',
+        FRANKENBEAST_BEAST_DAEMON_URL: 'http://127.0.0.1:4050',
+      },
+    }, {
+      id: 'beasts-daemon',
+    }), {
+      detached: false,
+    })).resolves.toEqual({ pid: 4242 });
+
+    const spawnOptions = spawnMock.mock.calls[0]?.[2] as { env?: NodeJS.ProcessEnv } | undefined;
+    expect(spawnOptions?.env).toEqual(expect.objectContaining({
+      FRANKENBEAST_BEAST_OPERATOR_TOKEN: 'operator-token-for-test',
+      FRANKENBEAST_PASSPHRASE: 'vault-passphrase-for-test',
+      OPENAI_API_KEY: 'provider-key-for-test',
+    }));
+    expect(spawnOptions?.env).not.toHaveProperty('FRANKENBEAST_NETWORK_TEST_SECRET');
   });
 
   it('rejects process environment overrides that can redirect launcher resolution', async () => {
