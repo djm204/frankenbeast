@@ -100,6 +100,18 @@ describe('SkillManager', () => {
 
       warn.mockRestore();
     });
+
+    it('reports a persistently invalid skill only once', () => {
+      mkdirSync(join(skillsDir, 'broken'), { recursive: true });
+      writeFileSync(join(skillsDir, 'broken', 'mcp.json'), '{"mcpServers":');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+      manager.listInstalled();
+      manager.listInstalled();
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      warn.mockRestore();
+    });
   });
 
   describe('loadForProvider()', () => {
@@ -122,6 +134,23 @@ describe('SkillManager', () => {
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("Skipping invalid skill 'broken'"));
 
       warn.mockRestore();
+    });
+
+    it('keeps CLI MCP skills loadable when their unused tools manifest is malformed', async () => {
+      manager = new SkillManager(skillsDir, new Set(['github']));
+      await manager.install({
+        name: 'github',
+        description: 'GH',
+        provider: 'cli',
+        installConfig: { command: 'npx' },
+        authFields: [],
+      });
+      writeFileSync(join(skillsDir, 'github', 'tools.json'), '{"broken":');
+
+      const result = manager.loadForProvider({ type: 'claude-cli' } as ILlmProvider);
+      const translated = JSON.parse(result.filesToWrite![0]!.content);
+
+      expect(Object.keys(translated.mcpServers)).toEqual(['github']);
     });
   });
 

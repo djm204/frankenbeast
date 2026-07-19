@@ -47,7 +47,9 @@ function isInvalidSkillManifestError(err: unknown): err is Error {
   return err instanceof SyntaxError || err instanceof ZodError;
 }
 
-function reportInvalidSkill(name: string, err: Error): void {
+function reportInvalidSkill(name: string, err: Error, reportedSkills: Set<string>): void {
+  if (reportedSkills.has(name)) return;
+  reportedSkills.add(name);
   const reason = err instanceof SyntaxError
     ? 'manifest contains malformed JSON'
     : 'manifest failed schema validation';
@@ -108,6 +110,7 @@ function requireSecurityReviewByDefault(
 
 export class SkillManager {
   private readonly enabledSkills: Set<string>;
+  private readonly reportedInvalidSkills = new Set<string>();
   private readonly skillsDirRoot: string;
   private readonly skillsDirReal: string;
 
@@ -241,7 +244,7 @@ export class SkillManager {
         } catch (err) {
           if (isUnsafeSkillPathError(err)) return null;
           if (isInvalidSkillManifestError(err)) {
-            reportInvalidSkill(e.name, err);
+            reportInvalidSkill(e.name, err, this.reportedInvalidSkills);
             return null;
           }
           throw err;
@@ -395,19 +398,22 @@ export class SkillManager {
   loadForProvider(provider: ILlmProvider): ProviderSkillConfig {
     const translator = new ProviderSkillTranslator();
     const enabledNames = this.getEnabledSkills();
+    const usesCliMcpConfig = provider.type === 'claude-cli'
+      || provider.type === 'codex-cli'
+      || provider.type === 'gemini-cli';
     const inputs = enabledNames.flatMap((name) => {
       try {
         const context = this.readContext(name);
         return [{
           name,
           mcpConfig: this.readMcpConfig(name) ?? { mcpServers: {} },
-          tools: this.readTools(name),
+          tools: usesCliMcpConfig ? [] : this.readTools(name),
           ...(context !== null ? { context } : {}),
         }];
       } catch (err) {
         if (isUnsafeSkillPathError(err)) return [];
         if (isInvalidSkillManifestError(err)) {
-          reportInvalidSkill(name, err);
+          reportInvalidSkill(name, err, this.reportedInvalidSkills);
           return [];
         }
         throw err;
