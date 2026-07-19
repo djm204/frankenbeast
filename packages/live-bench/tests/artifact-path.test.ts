@@ -32,6 +32,19 @@ describe('workspace artifact paths', () => {
     expect(() => openWorkspaceArtifactFile(workspace, 'linked/secret.txt')).toThrow(/must not contain symlinks/);
   });
 
+  it('rejects dangling symlinks instead of reporting an ordinary missing artifact', () => {
+    const workspace = tempRoot('live-bench-artifacts-');
+    symlinkSync(join(workspace, 'missing-target'), join(workspace, 'dangling'));
+
+    expect(() => workspaceArtifactFileExists(workspace, 'dangling')).toThrow(/must not contain symlinks/);
+  });
+
+  it('does not disguise a missing workspace as a missing artifact', () => {
+    const parent = tempRoot('live-bench-artifacts-');
+
+    expect(() => workspaceArtifactFileExists(join(parent, 'missing-workspace'), 'result.txt')).toThrow(/ENOENT/);
+  });
+
   it('rejects a symlinked workspace root', () => {
     const workspace = tempRoot('live-bench-artifacts-');
     const linkParent = tempRoot('live-bench-artifacts-link-');

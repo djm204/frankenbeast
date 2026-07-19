@@ -1,7 +1,6 @@
 import {
   closeSync,
   constants,
-  existsSync,
   fstatSync,
   lstatSync,
   openSync,
@@ -63,39 +62,59 @@ export function openWorkspaceArtifactFile(workspaceRoot: string, artifactPath: s
   }
   assertNoSymlinkAncestors(root);
 
-  const rootReal = realpathSync(root);
-  const candidate = resolve(root, artifactPath);
-  assertContained(candidate, root, 'artifact path');
-
-  let current = root;
-  const parts = artifactPath.split('/');
-  for (let index = 0; index < parts.length; index += 1) {
-    current = join(current, parts[index]!);
-    if (!existsSync(current)) {
-      throw new Error(`artifact file does not exist: ${artifactPath}`);
-    }
-
-    const stat = lstatSync(current);
-    if (stat.isSymbolicLink()) {
-      throw new Error(`artifact path must not contain symlinks: ${artifactPath}`);
-    }
-    if (index < parts.length - 1 && !stat.isDirectory()) {
-      throw new Error(`artifact path component must be a directory: ${artifactPath}`);
-    }
-    assertContained(realpathSync(current), rootReal, 'artifact path');
-  }
-
   const noFollow = 'O_NOFOLLOW' in constants ? constants.O_NOFOLLOW : 0;
-  const fd = openSync(candidate, constants.O_RDONLY | constants.O_NONBLOCK | noFollow);
+  const directoryOnly = 'O_DIRECTORY' in constants ? constants.O_DIRECTORY : 0;
+  const rootFd = openSync(root, constants.O_RDONLY | constants.O_NONBLOCK | noFollow | directoryOnly);
   try {
-    // Revalidate after opening. The descriptor pins the file that callers will
-    // inspect, while this identity comparison detects a path-component swap
-    // between the initial validation and openSync().
-    assertSafeOpenedArtifact(root, rootReal, candidate, artifactPath, fd);
-    return fd;
-  } catch (error) {
-    closeSync(fd);
-    throw error;
+    if (!fstatSync(rootFd).isDirectory()) {
+      throw new Error(`workspace root must be a directory: ${workspaceRoot}`);
+    }
+
+    // On POSIX, traversing through the descriptor path makes artifact lookup
+    // relative to the pinned directory even if workspaceRoot is later replaced.
+    // Other platforms retain the before/after root identity checks below.
+    const pinnedRoot = descriptorPath(rootFd) ?? root;
+    const rootReal = realpathSync(pinnedRoot);
+    assertSameFile(rootFd, root, 'workspace root changed while it was being opened');
+    const candidate = resolve(pinnedRoot, artifactPath);
+    assertContained(candidate, pinnedRoot, 'artifact path');
+
+    let current = pinnedRoot;
+    const parts = artifactPath.split('/');
+    for (let index = 0; index < parts.length; index += 1) {
+      current = join(current, parts[index]!);
+      let stat;
+      try {
+        stat = lstatSync(current);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          throw new Error(`artifact file does not exist: ${artifactPath}`);
+        }
+        throw error;
+      }
+
+      if (stat.isSymbolicLink()) {
+        throw new Error(`artifact path must not contain symlinks: ${artifactPath}`);
+      }
+      if (index < parts.length - 1 && !stat.isDirectory()) {
+        throw new Error(`artifact path component must be a directory: ${artifactPath}`);
+      }
+      assertContained(realpathSync(current), rootReal, 'artifact path');
+    }
+
+    const fd = openSync(candidate, constants.O_RDONLY | constants.O_NONBLOCK | noFollow);
+    try {
+      // Revalidate after opening. The descriptor pins the file that callers
+      // inspect, while identity checks detect path-component swaps.
+      assertSameFile(rootFd, root, 'workspace root changed while opening an artifact');
+      assertSafeOpenedArtifact(pinnedRoot, rootReal, candidate, artifactPath, fd);
+      return fd;
+    } catch (error) {
+      closeSync(fd);
+      throw error;
+    }
+  } finally {
+    closeSync(rootFd);
   }
 }
 
@@ -105,10 +124,7 @@ export function workspaceArtifactFileExists(workspaceRoot: string, artifactPath:
     closeSync(fd);
     return true;
   } catch (error) {
-    if (
-      (error instanceof Error && error.message.startsWith('artifact file does not exist:'))
-      || (error as NodeJS.ErrnoException).code === 'ENOENT'
-    ) {
+    if (error instanceof Error && error.message.startsWith('artifact file does not exist:')) {
       return false;
     }
     throw error;
@@ -121,6 +137,28 @@ export function readWorkspaceArtifactFile(workspaceRoot: string, artifactPath: s
     return readFileSync(fd);
   } finally {
     closeSync(fd);
+  }
+}
+
+function descriptorPath(fd: number): string | undefined {
+  for (const path of [`/proc/self/fd/${fd}`, `/dev/fd/${fd}`]) {
+    try {
+      lstatSync(path);
+      return path;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+    }
+  }
+  return undefined;
+}
+
+function assertSameFile(fd: number, path: string, message: string): void {
+  const opened = fstatSync(fd);
+  const current = statSync(path);
+  if (opened.dev !== current.dev || opened.ino !== current.ino) {
+    throw new Error(message);
   }
 }
 
