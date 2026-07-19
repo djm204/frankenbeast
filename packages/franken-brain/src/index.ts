@@ -2,6 +2,7 @@ export {
   SqliteBrain,
   WorkingMemoryLimitError,
   WorkingMemoryHydrationLimitError,
+  CorruptWorkingMemoryRowError,
   MemoryDeletionGuardError,
   UnsupportedMemorySchemaVersionError,
   MemoryEncryptionKeyUnavailableError,
