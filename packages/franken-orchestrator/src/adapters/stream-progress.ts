@@ -19,11 +19,22 @@ export type NormalizedProviderStreamEvent =
   | { type: 'error' }
   | { type: 'unknown'; sourceType: string };
 
+export type StreamProgressEvent =
+  | { type: 'heartbeat'; elapsedMs: number }
+  | { type: 'reasoning' }
+  | { type: 'chunk-detected'; count: number }
+  | { type: 'complete'; durationMs?: number; costUsd?: number; turns?: number };
+
 export interface StreamProgressOptions {
   /** Emit redacted diagnostics for unrecognized provider frames. */
   verbose?: boolean;
-  /** Receive provider-neutral, redacted events for terminal or persistent sinks. */
+  /** Receive provider-neutral normalized events for terminal-only consumers. */
   onEvent?: (event: NormalizedProviderStreamEvent) => void;
+  write?: (text: string) => void;
+  label?: string;
+  /** Receives derived metadata only; raw provider output is never forwarded. */
+  onProgressEvent?: (event: StreamProgressEvent) => void;
+  heartbeatIntervalMs?: number;
 }
 
 /**
@@ -33,19 +44,26 @@ export interface StreamProgressOptions {
  * Call `stop()` after the LLM call resolves to clear the spinner.
  */
 export function createStreamProgressWithSpinner(
-  options: StreamProgressOptions & { write?: (text: string) => void; label?: string } = {},
+  options: StreamProgressOptions = {},
 ): StreamProgressHandle {
   const write = options.write ?? ((t: string) => process.stderr.write(t));
   const label = options.label ?? 'LLM working...';
 
   let frameIdx = 0;
   const startMs = wallClockNow();
+  const heartbeatIntervalMs = options.heartbeatIntervalMs ?? 30_000;
+  let lastHeartbeatMs = 0;
 
   const renderSpinner = (): void => {
     const frame = FRAMES[frameIdx % FRAMES.length]!;
     const secs = ((wallClockNow() - startMs) / 1000).toFixed(1);
     write(`\r\x1b[K${frame} ${label} (${secs}s)`);
     frameIdx++;
+    const elapsedMs = wallClockNow() - startMs;
+    if (heartbeatIntervalMs > 0 && elapsedMs - lastHeartbeatMs >= heartbeatIntervalMs) {
+      lastHeartbeatMs = elapsedMs;
+      options.onProgressEvent?.({ type: 'heartbeat', elapsedMs });
+    }
   };
 
   const interval = setInterval(renderSpinner, SPINNER_INTERVAL_MS);
@@ -294,6 +312,7 @@ export function createStreamProgressHandler(
         if (!showedThinking) {
           showedThinking = true;
           write(`  ${ANSI.dim}Reasoning...${ANSI.reset}\n`);
+          options.onProgressEvent?.({ type: 'reasoning' });
         }
       } else if (event.type === 'tool') {
         if (event.name) {
@@ -303,13 +322,19 @@ export function createStreamProgressHandler(
         }
       } else if (event.type === 'text') {
         textAccumulator += event.content;
-        detectChunkIds(textAccumulator, seenChunkIds, write);
+        detectChunkIds(textAccumulator, seenChunkIds, write, options.onProgressEvent);
       } else if (event.type === 'result') {
         const parts: string[] = [];
         if (event.durationMs !== undefined) parts.push(`${(event.durationMs / 1000).toFixed(1)}s`);
         if (event.costUsd !== undefined) parts.push(`$${event.costUsd.toFixed(4)}`);
         if (event.turns !== undefined && event.turns > 1) parts.push(`${event.turns} turns`);
         write(`  ${ANSI.dim}LLM done${parts.length > 0 ? ` (${parts.join(', ')})` : ''}${ANSI.reset}\n`);
+        options.onProgressEvent?.({
+          type: 'complete',
+          ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
+          ...(event.costUsd !== undefined ? { costUsd: event.costUsd } : {}),
+          ...(event.turns !== undefined ? { turns: event.turns } : {}),
+        });
       } else if (event.type === 'retry') {
         write(`  ${ANSI.dim}Provider retrying...${ANSI.reset}\n`);
       } else if (event.type === 'error') {
@@ -409,6 +434,7 @@ function detectChunkIds(
   text: string,
   seen: Set<string>,
   write: (text: string) => void,
+  onEvent?: (event: StreamProgressEvent) => void,
 ): void {
   const pattern = /"id"\s*:\s*"([^"]+)"/g;
   let match: RegExpExecArray | null;
@@ -417,6 +443,7 @@ function detectChunkIds(
     if (!seen.has(id)) {
       seen.add(id);
       write(`  ${ANSI.dim}Planned chunk:${ANSI.reset} ${id}\n`);
+      onEvent?.({ type: 'chunk-detected', count: seen.size });
     }
   }
 }

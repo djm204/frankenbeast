@@ -14,6 +14,7 @@ let progressCtorOptions: unknown = undefined;
 let progressInstance: unknown = undefined;
 let llmGraphBuilderCtorArg: unknown = undefined;
 let lastCreateCliDepsOptions: import('../../../src/cli/dep-factory.js').CliDepOptions | undefined;
+let streamProgressOptions: { onEvent?: (event: { type: string; [key: string]: unknown }) => void } | undefined;
 const mockFinalize = vi.fn(async () => {});
 
 // ── Mock heavy deps ──
@@ -63,6 +64,11 @@ vi.mock('../../../src/cli/dep-factory.js', () => ({
       logger: mockDeps.logger,
       finalize: mockFinalize,
       cliLlmAdapter: mockCliLlmAdapter,
+      artifacts: {
+        planName: 'session',
+        checkpointFile: resolve(options.paths.buildDir, 'session.checkpoint'),
+        logFile: resolve(options.paths.buildDir, 'session-build.log'),
+      },
     };
   }),
 }));
@@ -143,10 +149,10 @@ vi.mock('../../../src/planning/chunk-file-writer.js', () => {
 
 // Mock stream-progress to prevent real timers/stderr writes
 vi.mock('../../../src/adapters/stream-progress.js', () => ({
-  createStreamProgressWithSpinner: vi.fn(() => ({
-    onLine: vi.fn(),
-    stop: vi.fn(),
-  })),
+  createStreamProgressWithSpinner: vi.fn((options: typeof streamProgressOptions) => {
+    streamProgressOptions = options;
+    return { onLine: vi.fn(), stop: vi.fn() };
+  }),
   createStreamProgressHandler: vi.fn(() => vi.fn()),
 }));
 
@@ -251,6 +257,7 @@ describe('Session plan phase — CliLlmAdapter wiring', () => {
     progressInstance = undefined;
     llmGraphBuilderCtorArg = undefined;
     lastCreateCliDepsOptions = undefined;
+    streamProgressOptions = undefined;
     console.info = vi.fn();
   });
 
@@ -291,6 +298,39 @@ describe('Session plan phase — CliLlmAdapter wiring', () => {
     await new Session(config).start();
 
     expect(mockLlmGraphBuild).toHaveBeenCalled();
+  });
+
+  it('runPlan() persists sanitized live progress and discloses the build log path', async () => {
+    const { Session } = await import('../../../src/cli/session.js');
+    const config = makeConfig();
+    const expectedLogFile = resolve(config.paths.buildDir, 'session-build.log');
+
+    await new Session(config).start();
+    streamProgressOptions?.onEvent?.({ type: 'chunk-detected', count: 2 });
+    lastCreateCliDepsOptions?.onLlmLifecycleEvent?.({
+      type: 'fallback',
+      from: 'claude',
+      to: 'codex',
+    });
+
+    expect(mockDeps.logger.info).toHaveBeenCalledWith(
+      'Plan progress',
+      { type: 'chunk-detected', count: 2 },
+      'planner',
+    );
+    expect(mockDeps.logger.info).toHaveBeenCalledWith(
+      'LLM provider lifecycle',
+      { type: 'fallback', from: 'claude', to: 'codex' },
+      'planner',
+    );
+    expect(mockDeps.logger.info).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ prompt: expect.anything() }),
+      expect.anything(),
+    );
+    expect(config.io.display).toHaveBeenCalledWith(expect.stringContaining('Build log:'));
+    expect(config.io.display).toHaveBeenCalledWith(expect.stringContaining(expectedLogFile));
+    expect(config.io.display).toHaveBeenCalledWith(expect.stringContaining('tail -f'));
   });
 
   it('runPlan() finalizes CLI dependencies so replay records are persisted', async () => {

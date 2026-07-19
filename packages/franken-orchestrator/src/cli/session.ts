@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { relative } from 'node:path';
 import { resolveContainedExistingPath } from '@franken/types/path-containment';
 import { tmpdir } from 'node:os';
 import { ZodError } from 'zod';
@@ -11,8 +12,9 @@ import { ChunkFileWriter } from '../planning/chunk-file-writer.js';
 import { InterviewLoop } from '../planning/interview-loop.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { ProgressLlmClient } from '../adapters/progress-llm-client.js';
-import { ANSI, budgetBar, statusBadge, logHeader } from '../logging/beast-logger.js';
-import { createStreamProgressWithSpinner } from '../adapters/stream-progress.js';
+import { ANSI, budgetBar, statusBadge, logHeader, type BeastLogger } from '../logging/beast-logger.js';
+import { createStreamProgressWithSpinner, type StreamProgressEvent } from '../adapters/stream-progress.js';
+import type { CliLlmLifecycleEvent } from '../adapters/cli-llm-adapter.js';
 import type { InterviewIO } from '../planning/interview-loop.js';
 import type { BeastResult } from '../types.js';
 import type { ProjectPaths } from './project-root.js';
@@ -358,12 +360,45 @@ export class Session {
     // from loading in the spawned CLI. Plugins poison the session by injecting skill
     // instructions that make the CLI explore the codebase instead of returning JSON.
     depOptions.adapterWorkingDir = tmpdir();
+    let planLogger: BeastLogger | undefined;
+    const persistProgressEvent = (event: StreamProgressEvent): void => {
+      planLogger?.info('Plan progress', event, 'planner');
+    };
+    const persistLifecycleEvent = (event: CliLlmLifecycleEvent): void => {
+      planLogger?.info('LLM provider lifecycle', event, 'planner');
+    };
     const progress = createStreamProgressWithSpinner({
       label: 'Planning...',
       verbose: this.config.verbose,
+      onProgressEvent: persistProgressEvent,
     });
     depOptions.onStreamLine = progress.onLine;
-    const { cliLlmAdapter, logger, finalize } = await createCliDeps(depOptions);
+    depOptions.onLlmLifecycleEvent = persistLifecycleEvent;
+    const { cliLlmAdapter, logger, finalize, artifacts } = await createCliDeps(depOptions);
+    planLogger = logger;
+    const planStartedAt = Date.now();
+    const elapsed = (): number => Date.now() - planStartedAt;
+    const planLogFile = artifacts?.logFile ?? paths.logFile;
+    const projectLogPath = relative(paths.root, planLogFile) || planLogFile;
+    io.display(`Build log: ${projectLogPath}\nFollow live: tail -f ${JSON.stringify(planLogFile)}`);
+    logger.info('Plan cycle started', { logFile: planLogFile }, 'planner');
+
+    const runPlanStage = async <T>(stage: string, operation: () => Promise<T>): Promise<T> => {
+      logger.info('Plan stage started', { stage, totalElapsedMs: elapsed() }, 'planner');
+      try {
+        const result = await operation();
+        logger.info('Plan stage completed', { stage, totalElapsedMs: elapsed() }, 'planner');
+        return result;
+      } catch (error) {
+        const cancelled = error instanceof Error
+          && (error.name === 'AbortError' || /cancel(?:led|ed)/i.test(error.message));
+        logger.warn(cancelled ? 'Plan stage cancelled' : 'Plan stage failed', {
+          stage,
+          totalElapsedMs: elapsed(),
+        }, 'planner');
+        throw error;
+      }
+    };
 
     try {
       // Load design doc
@@ -419,7 +454,7 @@ export class Session {
 
     // Build the plan graph — lastChunks preserves the structured LLM output
     try {
-      await llmGraphBuilder.build({ goal: designContent });
+      await runPlanStage('decompose', () => llmGraphBuilder.build({ goal: designContent }));
     } finally {
       progress.stop();
     }
@@ -442,9 +477,9 @@ export class Session {
       artifactLabel: 'Chunk files',
       io,
       onRevise: async (feedback) => {
-        await llmGraphBuilder.build({
+        await runPlanStage('revise', () => llmGraphBuilder.build({
           goal: `${designContent}\n\nRevision feedback: ${feedback}`,
-        });
+        }));
         chunkPaths = chunkWriter.write(
           llmGraphBuilder.lastChunks,
           llmGraphBuilder.lastValidationIssues,
@@ -452,6 +487,17 @@ export class Session {
         return chunkPaths;
       },
     });
+    logger.info('Plan cycle completed', {
+      chunks: llmGraphBuilder.lastChunks.length,
+      totalElapsedMs: elapsed(),
+    }, 'planner');
+    } catch (error) {
+      const cancelled = error instanceof Error
+        && (error.name === 'AbortError' || /cancel(?:led|ed)/i.test(error.message));
+      logger.warn(cancelled ? 'Plan cycle cancelled' : 'Plan cycle failed', {
+        totalElapsedMs: elapsed(),
+      }, 'planner');
+      throw error;
     } finally {
       progress.stop();
       await finalize();
