@@ -431,9 +431,10 @@ describe('LlmGraphBuilder', () => {
           .mockResolvedValueOnce(validChunksJson(threeChunks))
           .mockResolvedValueOnce(validationResponse),
       };
+      const largeContext = `Important planner architecture facts.\n${'unchanged detail '.repeat(300)}`;
       const gatherer = {
         gather: vi.fn().mockResolvedValue({
-          rampUp: 'Large unchanged codebase context',
+          rampUp: largeContext,
           relevantSignatures: [],
           packageDeps: {},
           existingPatterns: [],
@@ -445,8 +446,10 @@ describe('LlmGraphBuilder', () => {
 
       expect(llm.complete).toHaveBeenCalledTimes(2);
       expect(builder.lastRunMetrics.passCount).toBe(2);
-      expect((llm.complete as ReturnType<typeof vi.fn>).mock.calls[0]![0]).toContain('Large unchanged codebase context');
-      expect((llm.complete as ReturnType<typeof vi.fn>).mock.calls[1]![0]).not.toContain('Large unchanged codebase context');
+      expect((llm.complete as ReturnType<typeof vi.fn>).mock.calls[0]![0]).toContain(largeContext);
+      expect((llm.complete as ReturnType<typeof vi.fn>).mock.calls[1]![0]).toContain('Important planner architecture facts');
+      expect((llm.complete as ReturnType<typeof vi.fn>).mock.calls[1]![0]).toContain('[context truncated]');
+      expect((llm.complete as ReturnType<typeof vi.fn>).mock.calls[1]![0]).not.toContain(largeContext);
     });
 
     it('records pass count, prompt bytes, stage timing, and elapsed time', async () => {
@@ -534,6 +537,62 @@ describe('LlmGraphBuilder', () => {
         expect.objectContaining({ name: 'validate', status: 'timed_out' }),
       );
       expect(complete.mock.calls[1]![1].signal.aborted).toBe(true);
+    });
+
+    it('recognizes a provider timeout wrapped in an error cause', async () => {
+      const providerTimeout = Object.assign(new Error('provider deadline'), { code: 'ETIMEDOUT' });
+      const wrappedTimeout = new Error('adapter failed', { cause: providerTimeout });
+      const complete = vi.fn()
+        .mockResolvedValueOnce(validChunksJson(threeChunks))
+        .mockRejectedValueOnce(wrappedTimeout);
+      const gatherer = {
+        gather: vi.fn().mockResolvedValue({
+          rampUp: '', relevantSignatures: [], packageDeps: {}, existingPatterns: [],
+        }),
+      };
+      const builder = new LlmGraphBuilder({ complete }, gatherer as any, {
+        validationMode: 'always', timeoutMs: 20,
+      });
+
+      await expect(builder.build(intent)).resolves.toEqual(expect.objectContaining({ tasks: expect.any(Array) }));
+      expect(builder.lastChunks).toEqual(threeChunks);
+      expect(builder.lastValidationIssues[0]?.category).toBe('planning_budget_exceeded');
+      expect(complete.mock.calls[1]![1].signal.aborted).toBe(true);
+    });
+
+    it('keeps completed remediation when revalidation times out', async () => {
+      const validationResponse = JSON.stringify({
+        valid: false,
+        issues: [{
+          severity: 'error', chunkId: '01_setup', category: 'design_gap',
+          description: 'needs repair', suggestion: 'repair it',
+        }],
+        revisedChunks: null,
+      });
+      const remediatedChunks = threeChunks.map((chunk, index) =>
+        index === 0 ? { ...chunk, objective: 'Remediated objective' } : chunk);
+      const timeout = Object.assign(new Error('revalidation timed out'), { code: 'ETIMEDOUT' });
+      const complete = vi.fn()
+        .mockResolvedValueOnce(validChunksJson(threeChunks))
+        .mockResolvedValueOnce(validationResponse)
+        .mockResolvedValueOnce(validChunksJson(remediatedChunks))
+        .mockRejectedValueOnce(timeout);
+      const gatherer = {
+        gather: vi.fn().mockResolvedValue({
+          rampUp: '', relevantSignatures: [], packageDeps: {}, existingPatterns: [],
+        }),
+      };
+      const builder = new LlmGraphBuilder({ complete }, gatherer as any, {
+        validationMode: 'always', timeoutMs: 100,
+      });
+
+      await builder.build(intent);
+
+      expect(builder.lastChunks).toEqual(remediatedChunks);
+      expect(builder.lastValidationIssues[0]?.category).toBe('planning_budget_exceeded');
+      expect(builder.lastRunMetrics.stages.at(-1)).toEqual(
+        expect.objectContaining({ name: 'revalidate', status: 'timed_out' }),
+      );
     });
 
     it('re-checks the wall-clock budget after synchronous context gathering', async () => {

@@ -9,6 +9,9 @@ import type { PlanContextGatherer, PlanContext } from './plan-context-gatherer.j
 import { CHUNK_GUARDRAILS } from './chunk-guardrails.js';
 
 const DEFAULT_PLAN_TIMEOUT_MS = 120_000;
+const QUALITY_RAMP_UP_MAX_CHARS = 2_000;
+const QUALITY_SIGNATURE_MAX_CHARS = 500;
+const QUALITY_PATTERN_MAX_CHARS = 500;
 
 type PlanStageName = 'decompose' | 'validate' | 'remediate' | 'revalidate';
 type PlanStageStatus = 'completed' | 'timed_out' | 'failed';
@@ -137,7 +140,6 @@ export class LlmGraphBuilder implements GraphBuilder {
       let chunks = await this.runStage('decompose', controller.signal, () =>
         decomposer.decompose(intent.goal, context, { signal: controller.signal }),
       );
-      const decompositionDraft = chunks;
       let validationIssues: ValidationIssue[] = [];
 
       const shouldValidate = !this.options.skipValidation
@@ -145,9 +147,9 @@ export class LlmGraphBuilder implements GraphBuilder {
         && (this.options.validationMode === 'always' || !this.isSimplePlan(chunks));
 
       if (shouldValidate) {
-        // Decomposition already contains the relevant context. Avoid resending the
-        // unchanged RAMP_UP/signature payload during every quality pass.
-        const qualityContext = emptyContext;
+        // Standalone providers still need codebase facts, but quality passes should
+        // not resend the full unchanged context gathered for decomposition.
+        const qualityContext = this.compactContext(context);
         const validator = new ChunkValidator(meteredLlm);
 
         try {
@@ -175,7 +177,6 @@ export class LlmGraphBuilder implements GraphBuilder {
           if (!controller.signal.aborted && isTimeoutError(error)) expirePlanningBudget();
           if (!controller.signal.aborted) throw error;
           if (!planningBudgetExceeded) throw error;
-          chunks = decompositionDraft;
           validationIssues = [this.buildDraftWarning(controller.signal.reason, timeoutMs)];
         }
       }
@@ -230,6 +231,25 @@ export class LlmGraphBuilder implements GraphBuilder {
       seenChunkIds.add(chunk.id);
     }
     return true;
+  }
+
+  private compactContext(context: PlanContext): PlanContext {
+    return {
+      rampUp: truncateContext(context.rampUp, QUALITY_RAMP_UP_MAX_CHARS),
+      relevantSignatures: context.relevantSignatures.slice(0, 8).map((entry) => ({
+        path: entry.path,
+        signatures: truncateContext(entry.signatures, QUALITY_SIGNATURE_MAX_CHARS),
+      })),
+      packageDeps: Object.fromEntries(
+        Object.entries(context.packageDeps)
+          .slice(0, 12)
+          .map(([name, dependencies]) => [name, dependencies.slice(0, 20)]),
+      ),
+      existingPatterns: context.existingPatterns.slice(0, 8).map((pattern) => ({
+        description: truncateContext(pattern.description, 200),
+        example: truncateContext(pattern.example, QUALITY_PATTERN_MAX_CHARS),
+      })),
+    };
   }
 
   private normalizeTimeout(timeoutMs: number | undefined): number {
@@ -373,6 +393,19 @@ export class LlmGraphBuilder implements GraphBuilder {
 }
 
 function isTimeoutError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  return (error as NodeJS.ErrnoException).code === 'ETIMEDOUT' || error.name === 'TimeoutError';
+  const seen = new Set<unknown>();
+  let current = error;
+  while (current instanceof Error && !seen.has(current)) {
+    seen.add(current);
+    if ((current as NodeJS.ErrnoException).code === 'ETIMEDOUT' || current.name === 'TimeoutError') {
+      return true;
+    }
+    current = current.cause;
+  }
+  return false;
+}
+
+function truncateContext(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars)}\n[context truncated]`;
 }
