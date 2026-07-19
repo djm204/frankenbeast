@@ -839,6 +839,7 @@ describe('ChatShell', () => {
     render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Restart chat-server' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm restart chat-server' }));
 
     await waitFor(() => {
       expect(mockNetworkRestart).toHaveBeenCalledWith('chat-server');
@@ -863,6 +864,7 @@ describe('ChatShell', () => {
     render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Restart chat-server' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm restart chat-server' }));
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
 
     await waitFor(() => {
@@ -908,6 +910,7 @@ describe('ChatShell', () => {
     render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Restart chat-server' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm restart chat-server' }));
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
 
     act(() => {

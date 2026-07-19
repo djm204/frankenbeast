@@ -477,6 +477,7 @@ describe('ChatShell route heading', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
     fireEvent.click(screen.getByRole('button', { name: 'Restart chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm restart chat' }));
 
     expect(await screen.findByText('insecure')).toBeTruthy();
 
@@ -509,6 +510,7 @@ describe('ChatShell route heading', () => {
     expect(await screen.findByText('chat')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Restart chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm restart chat' }));
     await waitFor(() => expect(networkApiMocks.getStatus).toHaveBeenCalledTimes(2));
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
 
@@ -539,6 +541,7 @@ describe('ChatShell route heading', () => {
     expect(await screen.findByText('chat')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Restart chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm restart chat' }));
     await waitFor(() => expect(networkApiMocks.getStatus).toHaveBeenCalledTimes(2));
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
 
@@ -570,6 +573,7 @@ describe('ChatShell route heading', () => {
     expect(await screen.findByText('chat')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Restart chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm restart chat' }));
 
     expect((await screen.findByRole('alert')).textContent).toContain('Unable to restart chat: HTTP 502');
   });
