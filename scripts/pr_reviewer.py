@@ -309,7 +309,8 @@ def scan_diff_for_exploits(diff_content):
 
     lines = diff_content.splitlines()
     for line_num, line in enumerate(lines, 1):
-        if line.startswith("+") and not line.startswith("+++"):
+        is_file_header = line.startswith("+++ b/") or line.startswith("+++ /dev/null")
+        if line.startswith("+") and not is_file_header:
             stripped = line[1:].strip()
             for label, regex in patterns.items():
                 match = regex.search(stripped)
@@ -392,7 +393,7 @@ def run_agy_review(diff_content):
 
 def parse_final_verdict(review_body):
     matches = re.findall(
-        r"(?im)^\s*[*_`~]*\s*VERDICT:\s*"
+        r"(?im)^\s*(?:(?:[-+>]|#{1,6})\s+)?[*_`~]*\s*VERDICT:\s*"
         r"(APPROVE|REQUEST[_ -]CHANGES|COMMENT)\s*[.!]?\s*[*_`~]*\s*$",
         review_body,
     )
@@ -549,7 +550,20 @@ def process_prs():
 
         security_warnings = scan_diff_for_exploits(diff_content)
         diff_truncated = diff_content.endswith(DIFF_TRUNCATION_MARKER)
-        review_body = run_agy_review(diff_content)
+        secret_bearing_diff = any(
+            "Hardcoded Secret / API Key leak" in warning
+            for warning in security_warnings
+        )
+        if secret_bearing_diff:
+            review_body = (
+                "### Automated model review skipped\n\n"
+                "The diff contains a value matching a secret pattern, so raw PR content "
+                "was not sent to the model-backed reviewer. Remove or rotate the exposed "
+                "credential, then rerun the full review.\n\n"
+                "VERDICT: REQUEST_CHANGES"
+            )
+        else:
+            review_body = run_agy_review(diff_content)
         if not review_body.strip():
             if security_warnings or diff_truncated:
                 review_body = (
@@ -570,6 +584,25 @@ def process_prs():
                 continue
 
         review_body = add_diff_truncation_notice(review_body, diff_content)
+        current_prs = get_open_prs(repository)
+        current_head_sha = next(
+            (
+                item["headRefOid"]
+                for item in current_prs
+                if item["number"] == pr_number
+            ),
+            None,
+        )
+        if current_head_sha != head_sha:
+            print(
+                f"PR #{pr_number} head changed before posting; skipping stale review."
+            )
+            cursor.execute(
+                "UPDATE pr_reviews SET status = ? WHERE pr_number = ?",
+                ("superseded", pr_number),
+            )
+            conn.commit()
+            continue
         posted = post_pr_review(
             pr_number,
             review_body,

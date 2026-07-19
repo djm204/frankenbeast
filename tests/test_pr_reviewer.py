@@ -536,6 +536,94 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         self.assertEqual(statuses, {10: "failed", 11: "completed"})
         post_review.assert_called_once()
 
+    def test_secret_bearing_diff_is_not_sent_to_agy(self):
+        token = "ghp_" + "a" * 40
+        pull_request = {
+            "number": 72,
+            "author": {"login": "contributor"},
+            "headRefOid": "a" * 40,
+        }
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            self.reviewer, "WORKSPACE", Path(directory)
+        ), mock.patch.object(
+            self.reviewer, "DB_FILE", Path(directory) / "scans.db"
+        ), mock.patch.dict(
+            os.environ,
+            {"GH_TOKEN": "token", "PR_REVIEWER_REPOSITORY": "owner/repository"},
+            clear=True,
+        ), mock.patch.object(
+            self.reviewer, "get_open_prs", return_value=[pull_request]
+        ), mock.patch.object(
+            self.reviewer, "get_pr_diff", return_value=f"+TOKEN={token}"
+        ), mock.patch.object(
+            self.reviewer, "run_agy_review"
+        ) as run_agy, mock.patch.object(
+            self.reviewer, "post_pr_review", return_value=True
+        ) as post_review:
+            self.reviewer.process_prs()
+
+        run_agy.assert_not_called()
+        review_body = post_review.call_args.args[1]
+        self.assertNotIn(token, review_body)
+        self.assertIn("model review skipped", review_body.lower())
+
+    def test_added_line_starting_with_double_plus_is_scanned(self):
+        warning = self.reviewer.scan_diff_for_exploits(
+            "+++counter; eval(Buffer.from('payload'))"
+        )
+        header_warning = self.reviewer.scan_diff_for_exploits(
+            "+++ b/eval(Buffer.from('header-only')).py"
+        )
+
+        self.assertEqual(len(warning), 1)
+        self.assertEqual(header_warning, [])
+
+    def test_head_change_before_post_skips_stale_review(self):
+        original = {
+            "number": 73,
+            "author": {"login": "contributor"},
+            "headRefOid": "a" * 40,
+        }
+        changed = {**original, "headRefOid": "b" * 40}
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            self.reviewer, "WORKSPACE", Path(directory)
+        ), mock.patch.object(
+            self.reviewer, "DB_FILE", Path(directory) / "scans.db"
+        ), mock.patch.dict(
+            os.environ,
+            {"GH_TOKEN": "token", "PR_REVIEWER_REPOSITORY": "owner/repository"},
+            clear=True,
+        ), mock.patch.object(
+            self.reviewer, "get_open_prs", side_effect=[[original], [changed]]
+        ), mock.patch.object(
+            self.reviewer, "get_pr_diff", return_value="+safe change"
+        ), mock.patch.object(
+            self.reviewer, "run_agy_review", return_value="VERDICT: APPROVE"
+        ), mock.patch.object(
+            self.reviewer, "post_pr_review"
+        ) as post_review:
+            self.reviewer.process_prs()
+            connection = self.reviewer.sqlite3.connect(self.reviewer.DB_FILE)
+            status = connection.execute(
+                "SELECT status FROM pr_reviews WHERE pr_number = 73"
+            ).fetchone()[0]
+            connection.close()
+
+        post_review.assert_not_called()
+        self.assertEqual(status, "superseded")
+
+    def test_final_verdict_parser_accepts_markdown_line_prefixes(self):
+        for verdict in (
+            "- VERDICT: REQUEST_CHANGES",
+            "* VERDICT: REQUEST_CHANGES",
+            "> VERDICT: REQUEST_CHANGES",
+            "### VERDICT: REQUEST_CHANGES",
+        ):
+            with self.subTest(verdict=verdict):
+                self.assertEqual(
+                    self.reviewer.parse_final_verdict(verdict), "request-changes"
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
