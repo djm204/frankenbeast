@@ -15,6 +15,8 @@ export interface GovernorAppOptions {
   signingSecret?: string;
   /** Slack signing secret used to verify `X-Slack-Signature` on inbound callbacks. */
   slackSigningSecret?: string;
+  /** Slack user IDs authorized to resolve pending approvals. Empty or omitted fails closed. */
+  slackApproverUserIds?: readonly string[];
   slackWebhookUrl?: string;
   allowUnsignedApprovalsForTests?: boolean;
   /**
@@ -216,6 +218,7 @@ function extractSlackActionFeedback(actionId: unknown): string | undefined {
 export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
   const app = new Hono();
   const registry = options.registry ?? new ApprovalWaiterRegistry();
+  const slackApproverUserIds = new Set(options.slackApproverUserIds ?? []);
   const approvalQueueBackpressure = normalizeApprovalQueueBackpressure(options.approvalQueueBackpressure);
   let sessionTokenStore: SessionTokenStore | undefined = options.sessionTokenStore;
   if (!sessionTokenStore && options.sessionTokenStorePath) {
@@ -556,6 +559,14 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
     }
     const feedback = extractSlackActionFeedback(action.action_id);
 
+    const slackUserId = payload.user?.id;
+    if (!slackUserId || !slackApproverUserIds.has(slackUserId)) {
+      return c.json(
+        { error: { message: 'Slack user is not authorized to resolve approvals' } },
+        403,
+      );
+    }
+
     // Look up the pending approval; unknown requests are rejected.
     if (!registry.has(requestId)) {
       return c.json({ error: { message: 'Approval request not found' } }, 404);
@@ -571,7 +582,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       ? signApprovalResponse(
         requestId,
         decision,
-        payload.user?.id ?? payload.user?.username ?? 'slack',
+        slackUserId,
         feedback,
         options.signingSecret,
       )
@@ -580,7 +591,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
     registry.resolve(requestId, {
       requestId,
       decision,
-      respondedBy: payload.user?.id ?? payload.user?.username ?? 'slack',
+      respondedBy: slackUserId,
       respondedAt: new Date(deterministicNow()),
       ...(feedback !== undefined ? { feedback } : {}),
       ...(slackSignature !== undefined ? { signature: slackSignature } : {}),
