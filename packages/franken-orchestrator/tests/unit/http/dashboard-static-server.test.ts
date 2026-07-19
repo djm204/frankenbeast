@@ -164,7 +164,11 @@ describe('dashboard static server', () => {
     const proxied = await createDashboardStaticResponse(
       new Request('https://dashboard.example.com/v1/chat/sessions', {
         method: 'POST',
-        headers: { origin: 'https://dashboard.example.com' },
+        headers: {
+          origin: 'https://dashboard.example.com',
+          'x-forwarded-for': '127.0.0.1',
+          'x-frankenbeast-remote-address': '203.0.113.10',
+        },
       }),
       staticDir,
       { apiTarget: 'http://127.0.0.1:4242' },
@@ -175,6 +179,8 @@ describe('dashboard static server', () => {
     const headers = new Headers(init.headers);
     expect(headers.get('x-forwarded-host')).toBe('dashboard.example.com');
     expect(headers.get('x-forwarded-proto')).toBe('https');
+    expect(headers.get('x-forwarded-for')).toBe('127.0.0.1, 203.0.113.10');
+    expect(headers.get('x-frankenbeast-remote-address')).toBeNull();
     expect(headers.get('authorization')).toBeNull();
   });
 
@@ -353,7 +359,9 @@ describe('dashboard static server', () => {
   it('streams proxied event responses without buffering until the backend closes', async () => {
     const staticDir = await createDashboardDist();
     dirs.push(staticDir);
-    const backend = createServer((_req, res) => {
+    let forwardedFor: string | undefined;
+    const backend = createServer((req, res) => {
+      forwardedFor = req.headers['x-forwarded-for'];
       res.setHeader('content-type', 'text/event-stream');
       res.write('data: ready\\n\\n');
       setTimeout(() => res.end(), 25);
@@ -378,6 +386,7 @@ describe('dashboard static server', () => {
       const body = await response.text();
 
       expect(body).toContain('data: ready');
+      expect(forwardedFor).toMatch(/^(?:::ffff:)?127\.0\.0\.1$/);
     } finally {
       await new Promise<void>((resolveClose) => dashboard.close(() => resolveClose()));
       await new Promise<void>((resolveClose) => backend.close(() => resolveClose()));

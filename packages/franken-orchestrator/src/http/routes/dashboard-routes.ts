@@ -91,7 +91,8 @@ function safeTokenCompare(a: string, b: string): boolean {
 function isLoopbackAddress(address: string): boolean {
   const normalized = address.trim().toLowerCase().replace(/^\[|\]$/g, '');
   const ipv4MappedAddress = normalized.match(/^::ffff:(127(?:\.\d{1,3}){3})$/)?.[1];
-  return isLoopbackHost(ipv4MappedAddress ?? normalized);
+  const canonicalIpv4MappedLoopback = /^(?:::ffff:|0:0:0:0:0:ffff:)7f[0-9a-f]{2}:[0-9a-f]{1,4}$/.test(normalized);
+  return canonicalIpv4MappedLoopback || isLoopbackHost(ipv4MappedAddress ?? normalized);
 }
 
 function isForwardedForLoopback(forwardedFor: string | undefined): boolean {
@@ -122,16 +123,20 @@ function isLoopbackDashboardRequest(c: Context): boolean {
   const hostname = new URL(c.req.url).hostname;
   const trustedRemoteAddress = c.req.header(TRUSTED_REMOTE_ADDRESS_HEADER);
   const realIp = c.req.header('x-real-ip');
-  const forwardedHostIsLoopback = isForwardedHostLoopback(c.req.header('x-forwarded-host'));
-  const forwardedForIsLoopback = isForwardedForLoopback(c.req.header('x-forwarded-for'));
+  const forwardedHost = c.req.header('x-forwarded-host');
+  const forwardedFor = c.req.header('x-forwarded-for');
+  const forwardedHostIsLoopback = isForwardedHostLoopback(forwardedHost);
+  const forwardedForIsLoopback = isForwardedForLoopback(forwardedFor);
   const realIpIsLoopback = realIp === undefined || isLoopbackAddress(realIp);
+  const proxyHasClientAddress = forwardedHost === undefined || forwardedFor !== undefined || realIp !== undefined;
 
   if (trustedRemoteAddress !== undefined) {
     return isLoopbackAddress(trustedRemoteAddress)
       && isLoopbackAddress(hostname)
       && forwardedHostIsLoopback
       && forwardedForIsLoopback
-      && realIpIsLoopback;
+      && realIpIsLoopback
+      && proxyHasClientAddress;
   }
 
   // Direct Hono callers do not have a Node socket address. Production Node
@@ -139,7 +144,8 @@ function isLoopbackDashboardRequest(c: Context): boolean {
   return isLoopbackAddress(hostname)
     && forwardedHostIsLoopback
     && forwardedForIsLoopback
-    && realIpIsLoopback;
+    && realIpIsLoopback
+    && proxyHasClientAddress;
 }
 
 function authenticateTicketRequest(c: Context, operatorToken: string): Response | undefined {

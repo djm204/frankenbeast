@@ -322,7 +322,7 @@ describe('dashboard routes', () => {
       expect(res.status).toBe(401);
     });
 
-    it.each([
+    it.each<{ name: string; url: string; headers: Record<string, string> }>([
       {
         name: 'external host',
         url: 'https://dashboard.example.com/events',
@@ -342,6 +342,14 @@ describe('dashboard routes', () => {
         },
       },
       {
+        name: 'proxy without client address',
+        url: 'http://localhost/events',
+        headers: {
+          'x-frankenbeast-remote-address': '127.0.0.1',
+          'x-forwarded-host': 'localhost',
+        },
+      },
+      {
         name: 'external forwarded client',
         url: 'http://localhost/events',
         headers: {
@@ -349,7 +357,7 @@ describe('dashboard routes', () => {
           'x-forwarded-for': '203.0.113.10',
         },
       },
-    ] satisfies Array<{ name: string; url: string; headers: Record<string, string> }>)('rejects unauthenticated dashboard streams from an $name', async ({ url, headers }) => {
+    ])('rejects unauthenticated dashboard streams from an $name', async ({ url, headers }) => {
       const deps = createMockDeps();
       deps.operatorToken = undefined;
       deps.ticketStore = undefined;
@@ -361,7 +369,7 @@ describe('dashboard routes', () => {
       expect(res.status).toBe(403);
     });
 
-    it.each(['/events', 'http://127.0.0.2/events'])(
+    it.each(['/events', 'http://127.0.0.2/events', 'http://[::ffff:127.0.0.1]/events'])(
       'preserves unauthenticated local-dev streams when no operator token is configured on %s',
       async (url) => {
         const deps = createMockDeps();
