@@ -185,6 +185,43 @@ describe('GovernorAdapter', () => {
       .resolves.toMatchObject({ decision: 'review_recommended' });
   });
 
+  it('preserves double underscores in MCP tool names when matching profiles', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'github', [
+      {
+        name: 'create__issue',
+        description: 'Create an issue',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]);
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__github__create__issue', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('honors safe tool metadata for slash aliases when the MCP server was renamed', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'memory-skill', [
+      {
+        name: 'query',
+        description: 'Query memory',
+        inputSchema: { type: 'object' },
+        requiresHitl: false,
+      },
+    ]);
+    writeFileSync(join(dbPath, '..', 'skills', 'memory-skill', 'mcp.json'), JSON.stringify({
+      mcpServers: { 'renamed-memory': { command: 'memory-server' } },
+    }));
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'memory-skill/query', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+  });
+
   it('preserves high-risk hard denials for tools whose profile requires HITL', async () => {
     const dbPath = tracked(tmpDbPath());
     installSkill(dbPath, 'alerts', [

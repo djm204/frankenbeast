@@ -28,11 +28,17 @@ vi.mock('../shared/tool-registry.js', () => ({
   createAdapterSet: vi.fn(() => ({})),
 }));
 
+vi.mock('../shared/governance-gate.js', () => ({
+  createGovernanceGate: vi.fn(() => ({ check: vi.fn() })),
+}));
+
 import { createProxyServer, deriveProxyRoot } from './proxy.js';
 import * as registry from '../shared/tool-registry.js';
+import * as governanceGate from '../shared/governance-gate.js';
 
 const mockSearchTools = vi.mocked(registry.searchTools);
 const mockCreateAdapterSet = vi.mocked(registry.createAdapterSet);
+const mockCreateGovernanceGate = vi.mocked(governanceGate.createGovernanceGate);
 const mockRegistry = registry.TOOL_REGISTRY;
 
 const FAKE_STUBS = [
@@ -99,6 +105,20 @@ describe('proxy server', () => {
   describe('execute_tool', () => {
     it('keeps the proxy wrapper deadline longer than every target deadline', () => {
       expect(executeToolDef.timeoutMs).toBe(60_000);
+    });
+
+    it('resolves a relative active config path against the proxy project root', () => {
+      createProxyServer({
+        dbPath: '/tmp/configured-project/.fbeast/beast.db',
+        root: '/tmp/configured-project',
+        configPath: '.fbeast/config.json',
+        audit: { record: auditRecord },
+      });
+
+      expect(mockCreateGovernanceGate).toHaveBeenCalledWith(
+        '/tmp/configured-project/.fbeast/beast.db',
+        '/tmp/configured-project/.fbeast/config.json',
+      );
     });
 
     it('calls through to handler and returns its result', async () => {

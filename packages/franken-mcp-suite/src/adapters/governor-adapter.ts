@@ -769,17 +769,8 @@ interface QualifiedSkillAction {
   toolName: string;
 }
 
-function parseQualifiedSkillAction(action: string): QualifiedSkillAction | undefined {
-  if (action.startsWith('mcp__')) {
-    const qualified = action.slice('mcp__'.length);
-    const separator = qualified.lastIndexOf('__');
-    if (separator > 0 && separator < qualified.length - 2) {
-      return {
-        serverName: qualified.slice(0, separator),
-        toolName: qualified.slice(separator + 2),
-      };
-    }
-  }
+function parseSlashQualifiedSkillAction(action: string): QualifiedSkillAction | undefined {
+  if (action.startsWith('mcp__')) return undefined;
   const slash = action.indexOf('/');
   if (slash > 0 && slash < action.length - 1) {
     return { serverName: action.slice(0, slash), toolName: action.slice(slash + 1) };
@@ -832,8 +823,9 @@ function profileRequiresHitl(profile: ToolDefinition): boolean {
 
 function skillRequiresHitl(configPath: string | undefined, action: string): boolean {
   if (configPath === undefined) return false;
-  const qualifiedAction = parseQualifiedSkillAction(action);
-  if (qualifiedAction === undefined) return false;
+  const mcpQualifiedName = action.startsWith('mcp__') ? action.slice('mcp__'.length) : undefined;
+  const slashQualifiedAction = parseSlashQualifiedSkillAction(action);
+  if (mcpQualifiedName === undefined && slashQualifiedAction === undefined) return false;
 
   const enabledSkills = readEnabledSkills(configPath);
   if (enabledSkills.size === 0) return false;
@@ -850,31 +842,50 @@ function skillRequiresHitl(configPath: string | undefined, action: string): bool
     if (!skillDirectory.isDirectory() || !enabledSkills.has(skillDirectory.name)) continue;
     const skillDir = join(skillsDir, skillDirectory.name);
     const serverNames = readSkillServerNames(skillDir);
-    if (!serverNames.has(qualifiedAction.serverName)) {
-      // Installed skills conventionally use their directory name as the MCP
-      // server key. If that registration is stale/unreadable, keep calls to the
-      // known directory-name server fail-closed instead of silently skipping it.
-      if (skillDirectory.name === qualifiedAction.serverName) return true;
-      continue;
+    let toolNames: string[] = [];
+
+    if (mcpQualifiedName !== undefined) {
+      toolNames = [...serverNames]
+        .map((serverName) => mcpQualifiedName.startsWith(`${serverName}__`)
+          ? mcpQualifiedName.slice(serverName.length + 2)
+          : '')
+        .filter((toolName) => toolName.length > 0);
+
+      if (toolNames.length === 0) {
+        // Installed skills conventionally use their directory name as the MCP
+        // server key. If that registration is stale/unreadable, keep calls to the
+        // known directory-name server fail-closed instead of silently skipping it.
+        if (mcpQualifiedName.startsWith(`${skillDirectory.name}__`)) return true;
+        continue;
+      }
+    } else if (slashQualifiedAction !== undefined) {
+      const matchesRegisteredServer = serverNames.has(slashQualifiedAction.serverName);
+      const matchesSkillAlias = slashQualifiedAction.serverName === skillDirectory.name;
+      if (!matchesRegisteredServer && !matchesSkillAlias) continue;
+      if (matchesSkillAlias && serverNames.size === 0) return true;
+      toolNames = [slashQualifiedAction.toolName];
     }
+
     const profiles = readSkillToolProfiles(join(skillDir, 'tools.json'));
 
     // Unknown or stale runtime tool manifests fail closed for every tool exposed
     // by this enabled MCP server, not only an artificial server-name alias.
     if (profiles === undefined || profiles.length === 0) return true;
 
-    let profile = profiles.find((candidate) => candidate.name === qualifiedAction.toolName);
-    if (profile === undefined && qualifiedAction.toolName === skillDirectory.name) {
-      if (profiles.length === 1) {
-        profile = profiles[0];
-      } else {
-        profile = profiles.find((candidate) => candidate.name === skillDirectory.name);
+    for (const toolName of toolNames) {
+      let profile = profiles.find((candidate) => candidate.name === toolName);
+      if (profile === undefined && toolName === skillDirectory.name) {
+        if (profiles.length === 1) {
+          profile = profiles[0];
+        } else {
+          profile = profiles.find((candidate) => candidate.name === skillDirectory.name);
+        }
       }
-    }
 
-    // A runtime tool omitted from the installed profile is unknown and therefore
-    // keeps the same conservative HITL default as a manifest-less skill.
-    if (profile === undefined || profileRequiresHitl(profile)) return true;
+      // A runtime tool omitted from the installed profile is unknown and therefore
+      // keeps the same conservative HITL default as a manifest-less skill.
+      if (profile === undefined || profileRequiresHitl(profile)) return true;
+    }
   }
 
   return false;
