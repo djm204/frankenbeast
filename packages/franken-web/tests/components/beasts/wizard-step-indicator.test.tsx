@@ -24,7 +24,7 @@ describe('WizardStepIndicator', () => {
     expect(current.getAttribute('aria-current')).toBe('step');
   });
 
-  it('announces completed and upcoming states in accessible labels', () => {
+  it('explains the prerequisite for locked steps to sighted and screen reader users', () => {
     render(
       <WizardStepIndicator
         steps={STEPS}
@@ -35,7 +35,11 @@ describe('WizardStepIndicator', () => {
     );
 
     expect(screen.getByRole('button', { name: /Identity, completed/i })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /Modules, upcoming step/i })).toBeTruthy();
+    const lockedStep = screen.getByRole('button', { name: /Modules, locked/i });
+    const reason = screen.getByText('Complete LLM Targets to unlock later steps.');
+
+    expect(lockedStep.getAttribute('aria-describedby')).toBe(reason.id);
+    expect(lockedStep.hasAttribute('disabled')).toBe(true);
   });
 
   it('completed steps are clickable', () => {
