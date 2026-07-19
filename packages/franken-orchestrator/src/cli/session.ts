@@ -372,6 +372,21 @@ export class Session {
     };
     const persistLifecycleEvent = (event: CliLlmLifecycleEvent): void => {
       planLogSink.logger?.debug('LLM provider lifecycle', event, 'planner');
+      if (event.type === 'fallback') {
+        progress.onLine(JSON.stringify({
+          type: 'franken_progress', status: 'fallback', provider: event.from, nextProvider: event.to,
+        }));
+      } else if (event.type === 'wait') {
+        progress.onLine(JSON.stringify({
+          type: 'franken_progress', status: 'rate_limit_wait', retryAfterMs: event.durationMs,
+        }));
+      } else if (event.type === 'timeout') {
+        progress.onLine(JSON.stringify({ type: 'franken_progress', status: 'timeout' }));
+      } else if (event.type === 'attempt' && event.attempt > 1) {
+        progress.onLine(JSON.stringify({
+          type: 'franken_progress', status: 'retry', provider: event.provider,
+        }));
+      }
     };
     const createPlanProgress = () => createStreamProgressWithSpinner({
       label: 'Planning...',
@@ -510,17 +525,14 @@ export class Session {
     const contextGatherer = new PlanContextGatherer(paths.root);
     const llmGraphBuilder = new LlmGraphBuilder(cachingLlm, contextGatherer, {
       ...(this.config.planningTimeoutMs !== undefined ? { timeoutMs: this.config.planningTimeoutMs } : {}),
+      onProgress: (event) => progress.update(event),
     });
     const chunkWriter = new ChunkFileWriter(paths.plansDir);
 
     logger.info('Decomposing design into chunks...', 'planner');
 
     // Build the plan graph — lastChunks preserves the structured LLM output
-    try {
-      await runPlanStage('decompose', () => llmGraphBuilder.build({ goal: designContent }));
-    } finally {
-      progress.stop();
-    }
+    await runPlanStage('decompose', () => llmGraphBuilder.build({ goal: designContent }));
 
     const chunks = llmGraphBuilder.lastChunks;
     const issues = llmGraphBuilder.lastValidationIssues;
@@ -540,8 +552,19 @@ export class Session {
     }
 
     // Write chunk files using ChunkFileWriter
+    progress.update?.({
+      stage: 'writing-chunks', status: 'started', position: 6, total: 6,
+      message: 'Writing chunk files',
+    });
     let chunkPaths = chunkWriter.write(chunks, issues);
+    progress.update?.({
+      stage: 'writing-chunks', status: 'completed', position: 6, total: 6,
+      message: `Chunk writing complete — ${chunkPaths.length} file${chunkPaths.length === 1 ? '' : 's'}`,
+      chunks: chunkPaths.length,
+      nextStage: 'Reviewing plan',
+    });
     logger.info(`Wrote chunk files to ${paths.plansDir}`, 'planner');
+    progress.stop();
 
     // Review loop
     await reviewLoop({
@@ -554,14 +577,24 @@ export class Session {
           await runPlanStage('revise', () => llmGraphBuilder.build({
             goal: `${designContent}\n\nRevision feedback: ${feedback}`,
           }));
+          progress.update?.({
+            stage: 'writing-chunks', status: 'started', position: 6, total: 6,
+            message: 'Writing revised chunk files',
+          });
+          chunkPaths = chunkWriter.write(
+            llmGraphBuilder.lastChunks,
+            llmGraphBuilder.lastValidationIssues,
+          );
+          progress.update?.({
+            stage: 'writing-chunks', status: 'completed', position: 6, total: 6,
+            message: `Revised chunk writing complete — ${chunkPaths.length} file${chunkPaths.length === 1 ? '' : 's'}`,
+            chunks: chunkPaths.length,
+            nextStage: 'Reviewing plan',
+          });
+          return chunkPaths;
         } finally {
           progress.stop();
         }
-        chunkPaths = chunkWriter.write(
-          llmGraphBuilder.lastChunks,
-          llmGraphBuilder.lastValidationIssues,
-        );
-        return chunkPaths;
       },
     });
     logger.info('Plan cycle completed', {

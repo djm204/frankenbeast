@@ -1,11 +1,15 @@
 import { ANSI } from '../logging/beast-logger.js';
 import { wallClockNow } from '@franken/types';
+import type { PlanningProgressEvent } from '../planning/planning-progress.js';
+import { PLANNING_STAGE_LABELS } from '../planning/planning-progress.js';
 
 const FRAMES = ['|', '/', '-', '\\'];
 const SPINNER_INTERVAL_MS = 100;
 
 export interface StreamProgressHandle {
   onLine: (line: string) => void;
+  update: (event: PlanningProgressEvent) => void;
+  currentStage: () => PlanningProgressEvent | undefined;
   stop: () => void;
 }
 
@@ -35,38 +39,51 @@ export interface StreamProgressOptions {
   /** Receives derived metadata only; raw provider output is never forwarded. */
   onProgressEvent?: (event: StreamProgressEvent) => void;
   heartbeatIntervalMs?: number;
+  /** Supply stage context for provider result and retry messages. */
+  operationLabel?: () => string;
 }
 
-/**
- * Creates a stream progress handler with an integrated spinner.
- * The spinner shows elapsed time from the start; progress lines
- * (thinking, tool use, chunk IDs) appear above the spinner line.
- * Call `stop()` after the LLM call resolves to clear the spinner.
- */
+function formatDuration(ms: number): string {
+  const seconds = ms / 1000;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${Math.round(seconds % 60)}s`;
+}
+
+/** Combines sanitized persistent progress with stage-aware terminal status. */
 export function createStreamProgressWithSpinner(
   options: StreamProgressOptions = {},
 ): StreamProgressHandle {
-  const write = options.write ?? ((t: string) => process.stderr.write(t));
-  const label = options.label ?? 'LLM working...';
-
-  let frameIdx = 0;
-  const startMs = wallClockNow();
-  const heartbeatIntervalMs = options.heartbeatIntervalMs ?? 30_000;
+  const write = options.write ?? ((text: string) => process.stderr.write(text));
+  const fallbackLabel = options.label ?? 'Planning';
+  const totalStartedAt = wallClockNow();
+  let stageStartedAt = totalStartedAt;
+  let frameIndex = 0;
+  let stopped = false;
+  let activeEvent: PlanningProgressEvent | undefined;
+  const heartbeatIntervalMs = options.heartbeatIntervalMs ?? 15_000;
   let lastHeartbeatMs = 0;
 
   const renderSpinner = (): void => {
-    const frame = FRAMES[frameIdx % FRAMES.length]!;
-    const secs = ((wallClockNow() - startMs) / 1000).toFixed(1);
-    write(`\r\x1b[K${frame} ${label} (${secs}s)`);
-    frameIdx++;
-    const elapsedMs = wallClockNow() - startMs;
+    if (stopped) return;
+    const now = wallClockNow();
+    const frame = FRAMES[frameIndex % FRAMES.length]!;
+    const label = activeEvent?.message ?? fallbackLabel;
+    const position = activeEvent ? ` [${activeEvent.position}/${activeEvent.total}]` : '';
+    write(`\r\x1b[K${frame} ${label}${position} ${ANSI.dim}(stage ${formatDuration(now - stageStartedAt)} · total ${formatDuration(now - totalStartedAt)})${ANSI.reset}`);
+    frameIndex++;
+    const elapsedMs = now - totalStartedAt;
     if (heartbeatIntervalMs > 0 && elapsedMs - lastHeartbeatMs >= heartbeatIntervalMs) {
       lastHeartbeatMs = elapsedMs;
       options.onProgressEvent?.({ type: 'heartbeat', elapsedMs });
+      if (activeEvent?.status === 'started') {
+        write(`\r\x1b[K${ANSI.dim}Still ${activeEvent.message.toLowerCase()} — ${formatDuration(now - stageStartedAt)} in stage, ${formatDuration(elapsedMs)} total${ANSI.reset}\n`);
+      }
     }
   };
 
   const interval = setInterval(renderSpinner, SPINNER_INTERVAL_MS);
+  interval.unref?.();
   renderSpinner();
 
   const writeProgress = (text: string): void => {
@@ -74,11 +91,30 @@ export function createStreamProgressWithSpinner(
     write(text);
   };
 
-  const handler = createStreamProgressHandler(writeProgress, options);
+  const operationLabel = (): string => activeEvent
+    ? PLANNING_STAGE_LABELS[activeEvent.stage]
+    : (options.operationLabel?.() ?? '');
+  const handler = createStreamProgressHandler(writeProgress, { ...options, operationLabel });
 
   return {
     onLine: handler,
+    update: (event): void => {
+      if (stopped) return;
+      const now = wallClockNow();
+      if (event.status === 'started') {
+        activeEvent = event;
+        stageStartedAt = now;
+        renderSpinner();
+        return;
+      }
+      const next = event.nextStage ? ` Next: ${event.nextStage}.` : '';
+      writeProgress(`  ${ANSI.dim}${event.status === 'skipped' ? '↷' : '✓'} ${event.message} (stage ${formatDuration(now - stageStartedAt)} · total ${formatDuration(now - totalStartedAt)}).${next}${ANSI.reset}\n`);
+      activeEvent = event;
+    },
+    currentStage: () => activeEvent,
     stop: () => {
+      if (stopped) return;
+      stopped = true;
       clearInterval(interval);
       write('\r\x1b[K');
     },
@@ -279,6 +315,21 @@ export function createStreamProgressHandler(
     if ('hookSpecificOutput' in obj) return;
 
     const rawType = stringValue(obj['type']);
+    const rawStatus = stringValue(obj['status']);
+    if (rawType === 'franken_progress') {
+      let message: string | undefined;
+      if (rawStatus === 'fallback') {
+        message = `Provider ${String(obj['provider'] ?? 'unknown')} unavailable; falling back to ${String(obj['nextProvider'] ?? 'next provider')}`;
+      } else if (rawStatus === 'rate_limit_wait') {
+        message = `Providers rate-limited; retrying in ${formatDuration(Number(obj['retryAfterMs'] ?? 0))}`;
+      } else if (rawStatus === 'timeout') {
+        message = 'Provider timed out; checking fallback options';
+      } else if (rawStatus === 'retry') {
+        message = `Retrying provider ${String(obj['provider'] ?? '')}`.trim();
+      }
+      if (message) write(`  ${ANSI.dim}↻ ${message}${ANSI.reset}\n`);
+      return;
+    }
     const isPartialToolStart = rawType === 'content_block_start';
     if (rawType === 'content_block_start') {
       const blockType = stringValue(asRecord(obj['content_block'])?.['type']);
@@ -328,7 +379,9 @@ export function createStreamProgressHandler(
         if (event.durationMs !== undefined) parts.push(`${(event.durationMs / 1000).toFixed(1)}s`);
         if (event.costUsd !== undefined) parts.push(`$${event.costUsd.toFixed(4)}`);
         if (event.turns !== undefined && event.turns > 1) parts.push(`${event.turns} turns`);
-        write(`  ${ANSI.dim}LLM done${parts.length > 0 ? ` (${parts.join(', ')})` : ''}${ANSI.reset}\n`);
+        const operation = options.operationLabel?.();
+        const completionLabel = operation ? `${operation} provider call complete` : 'LLM done';
+        write(`  ${ANSI.dim}${completionLabel}${parts.length > 0 ? ` (${parts.join(', ')})` : ''}${ANSI.reset}\n`);
         options.onProgressEvent?.({
           type: 'complete',
           ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
@@ -336,7 +389,8 @@ export function createStreamProgressHandler(
           ...(event.turns !== undefined ? { turns: event.turns } : {}),
         });
       } else if (event.type === 'retry') {
-        write(`  ${ANSI.dim}Provider retrying...${ANSI.reset}\n`);
+        const operation = options.operationLabel?.();
+        write(`  ${ANSI.dim}${operation ? `${operation} provider retrying...` : 'Provider retrying...'}${ANSI.reset}\n`);
       } else if (event.type === 'error') {
         write(`  ${ANSI.dim}Provider stream error${ANSI.reset}\n`);
       } else if (event.type === 'unknown' && options.verbose) {
