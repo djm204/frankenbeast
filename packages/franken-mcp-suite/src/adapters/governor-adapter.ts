@@ -273,20 +273,6 @@ function contextTargetsTool(context: string, toolName: string): boolean {
   return false;
 }
 
-function contextLooksLikeStrippedMemorySourceAttributionArgs(context: string): boolean {
-  try {
-    const parsed = JSON.parse(context) as unknown;
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
-    const record = parsed as Record<string, unknown>;
-    const keys = Object.keys(record);
-    return keys.length > 0
-      && keys.every(key => ['key', 'source', 'limit', 'readScope', 'agentId', 'targetStore'].includes(key))
-      && Object.prototype.hasOwnProperty.call(record, 'source');
-  } catch {
-    return false;
-  }
-}
-
 function memoryReviewDecisionArgsFromContext(context: string, options: { requireExplicitTarget?: boolean } = {}): Record<string, unknown> | undefined {
   try {
     const parsed = JSON.parse(context) as unknown;
@@ -368,8 +354,7 @@ function redactMemorySourceAttributionGovernanceContext(action: string, context:
   const unqualified = unqualifyMcpActionName(action);
   if (unqualified === 'fbeast_memory_source_attribution'
     || (unqualified === 'execute_tool'
-      && (contextTargetsTool(context, 'fbeast_memory_source_attribution')
-        || contextLooksLikeStrippedMemorySourceAttributionArgs(context)))) {
+      && contextTargetsTool(context, 'fbeast_memory_source_attribution'))) {
     return JSON.stringify(mergeTrustedGovernanceProvenance(context, {}));
   }
   return context;

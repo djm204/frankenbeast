@@ -128,7 +128,7 @@ describe('GovernorAdapter', () => {
     expect(row.context).toBe('{}');
   });
 
-  it('redacts proxy memory source attribution filters without hiding non-attribution stripped execute_tool payloads', async () => {
+  it('redacts explicitly targeted proxy source-attribution filters without inferring stripped execute_tool targets', async () => {
     const dbPath = tracked(tmpDbPath());
     const governor = createGovernorAdapter(dbPath);
 
@@ -139,7 +139,7 @@ describe('GovernorAdapter', () => {
     await expect(governor.check({
       action: 'mcp__fbeast-proxy__execute_tool',
       context: '{"key":"profile.delete-policy","source":"chat:turn-42 secret","readScope":"agent","agentId":"agent-1"}',
-    })).resolves.toMatchObject({ decision: 'approved' });
+    })).resolves.toMatchObject({ decision: 'denied' });
     await expect(governor.check({
       action: 'mcp__fbeast-proxy__execute_tool',
       context: '{"key":"profile.delete-policy","readScope":"agent","agentId":"agent-1"}',
@@ -147,7 +147,7 @@ describe('GovernorAdapter', () => {
     await expect(governor.check({
       action: 'mcp__fbeast-proxy__execute_tool',
       context: '{"key":"profile.delete-policy","source":"chat:turn-42 secret","targetStore":"working"}',
-    })).resolves.toMatchObject({ decision: 'approved' });
+    })).resolves.toMatchObject({ decision: 'denied' });
     await expect(governor.check({
       action: 'mcp__fbeast-proxy__execute_tool',
       context: '{"key":"profile.delete-policy"}',
@@ -169,9 +169,9 @@ describe('GovernorAdapter', () => {
     const rows = db.prepare(`SELECT context FROM governor_log WHERE action = ? ORDER BY id ASC`).all('mcp__fbeast-proxy__execute_tool') as Array<{ context: string }>;
     db.close();
     expect(rows[0]?.context).toBe('{}');
-    expect(rows[1]?.context).toBe('{}');
+    expect(rows[1]?.context).toContain('profile.delete-policy');
     expect(rows[2]?.context).toContain('profile.delete-policy');
-    expect(rows[3]?.context).toBe('{}');
+    expect(rows[3]?.context).toContain('profile.delete-policy');
     expect(rows[4]?.context).toContain('profile.delete-policy');
     expect(rows[5]?.context).toContain('readScope');
     expect(rows[6]?.context).toContain('profile.delete-policy');
