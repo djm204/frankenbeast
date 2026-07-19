@@ -358,7 +358,7 @@ describe('SQLiteBeastRepository', () => {
     expect(repo.listTrackedAgents()).toEqual([agent]);
   });
 
-  it('treats healthy legacy agents with old dispatch-failure markers as recovered', async () => {
+  it('treats healthy legacy agents as operationally recovered while retaining redaction history', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const agent = repo.createTrackedAgent({
@@ -381,6 +381,8 @@ describe('SQLiteBeastRepository', () => {
 
     expect(repo.hasActiveDispatchFailure(agent.id)).toBe(true);
     expect(repo.listActiveDispatchFailureAgentIds()).toEqual([agent.id]);
+    expect(repo.hasDispatchFailureHistory(agent.id)).toBe(true);
+    expect(repo.listDispatchFailureHistoryAgentIds()).toEqual([agent.id]);
 
     repo.updateTrackedAgent(agent.id, {
       status: 'completed',
@@ -389,6 +391,8 @@ describe('SQLiteBeastRepository', () => {
 
     expect(repo.hasActiveDispatchFailure(agent.id)).toBe(false);
     expect(repo.listActiveDispatchFailureAgentIds()).toEqual([]);
+    expect(repo.hasDispatchFailureHistory(agent.id)).toBe(true);
+    expect(repo.listDispatchFailureHistoryAgentIds()).toEqual([agent.id]);
   });
 
   it('appends tracked agent events and links tracked agents to beast runs', async () => {

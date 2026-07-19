@@ -310,6 +310,56 @@ describe('beast routes', () => {
     expect(JSON.stringify(await recoveredEventsResponse.json())).not.toContain('SECRET_THROWN_ERROR');
     const recoveredLogsResponse = await app.request(`/v1/beasts/runs/${run.id}/logs`, { headers });
     expect(JSON.stringify(await recoveredLogsResponse.json())).not.toContain('SECRET_THROWN_ERROR');
+
+    const listHistorySpy = vi.spyOn(repository, 'listDispatchFailureHistoryAgentIds');
+    const perRunHistorySpy = vi.spyOn(repository, 'hasDispatchFailureHistory');
+    const recoveredRunsResponse = await app.request('/v1/beasts/runs', { headers });
+    const recoveredRuns = await recoveredRunsResponse.json() as {
+      data: { runs: Array<{ id: string; configSnapshot: Record<string, unknown> }> };
+    };
+    expect(recoveredRuns.data.runs.find((candidate) => candidate.id === run.id)?.configSnapshot).toEqual({});
+    expect(listHistorySpy).toHaveBeenCalledTimes(1);
+    expect(perRunHistorySpy).not.toHaveBeenCalled();
+
+    const recoveredAgentResponse = await app.request(`/v1/beasts/agents/${agent.id}`, { headers });
+    const recoveredAgent = await recoveredAgentResponse.json() as {
+      data: { agent: { initAction: { command: string }; initConfig: Record<string, unknown> } };
+    };
+    expect(recoveredAgent.data.agent.initAction.command).toBe('[REDACTED]');
+    expect(recoveredAgent.data.agent.initConfig).toEqual({});
+
+    const directRun = repository.createRun({
+      definitionId: 'design-interview',
+      definitionVersion: 1,
+      status: 'failed',
+      executionMode: 'process',
+      configSnapshot: { prompt: 'ordinary direct run' },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-10T00:01:00.000Z',
+      attemptCount: 0,
+    });
+    repository.appendEvent(directRun.id, {
+      level: 'error',
+      type: 'run.spawn_failed',
+      message: 'Unable to spawn Beast process',
+      payload: {
+        error: SAFE_DISPATCH_FAILURE_MESSAGE,
+        code: 'ENOENT',
+        commandSummary: 'missing-safe-command',
+        crashClassification: 'spawn_error',
+      },
+      createdAt: '2026-03-10T00:01:01.000Z',
+    });
+    const directEventsResponse = await app.request(`/v1/beasts/runs/${directRun.id}/events`, { headers });
+    const directEvents = await directEventsResponse.json() as {
+      data: { events: Array<{ payload: Record<string, unknown> }> };
+    };
+    expect(directEvents.data.events[0]?.payload).toMatchObject({
+      code: 'ENOENT',
+      commandSummary: 'missing-safe-command',
+      crashClassification: 'spawn_error',
+    });
   });
 
   it('stops tracked agents when direct run creation is paused by maintenance mode', async () => {

@@ -39,7 +39,12 @@ export class BeastRunService {
   ) {}
 
   listRuns(): BeastRun[] {
-    return this.repository.listRuns();
+    const redactedAgentIds = new Set(this.repository.listDispatchFailureHistoryAgentIds());
+    return this.repository.listRuns().map((run) => (
+      run.trackedAgentId && redactedAgentIds.has(run.trackedAgentId)
+        ? { ...run, configSnapshot: {} }
+        : run
+    ));
   }
 
   getRun(runId: string): BeastRun | undefined {
@@ -47,7 +52,7 @@ export class BeastRunService {
   }
 
   sanitizeRunForResponse(run: BeastRun | undefined): BeastRun | undefined {
-    if (!run?.trackedAgentId || !this.repository.hasActiveDispatchFailure(run.trackedAgentId)) {
+    if (!run?.trackedAgentId || !this.repository.hasDispatchFailureHistory(run.trackedAgentId)) {
       return run;
     }
     return { ...run, configSnapshot: {} };
@@ -60,12 +65,13 @@ export class BeastRunService {
   listAttempts(runId: string) {
     const run = this.requireRun(runId);
     const attempts = this.repository.listAttempts(runId);
-    if (!this.hasActiveDispatchFailure(run)) return attempts;
+    if (!this.hasDispatchFailureHistory(run)) return attempts;
     return attempts.map((attempt) => ({ ...attempt, executorMetadata: undefined }));
   }
 
   listEvents(runId: string) {
-    this.requireRun(runId);
+    const run = this.requireRun(runId);
+    if (!this.hasDispatchFailureHistory(run)) return this.repository.listEvents(runId);
     return this.repository.listEvents(runId).map(redactDispatchFailureEvent);
   }
 
@@ -73,6 +79,7 @@ export class BeastRunService {
     const run = this.requireRun(runId);
     const attemptId = run.currentAttemptId;
     const lines = await this.logs.read(run.id, attemptId ?? 'system');
+    if (!this.hasDispatchFailureHistory(run)) return lines;
     return lines.map(redactDispatchFailureLogLine);
   }
 
@@ -401,6 +408,10 @@ export class BeastRunService {
 
   private hasActiveDispatchFailure(run: BeastRun): boolean {
     return Boolean(run.trackedAgentId && this.repository.hasActiveDispatchFailure(run.trackedAgentId));
+  }
+
+  private hasDispatchFailureHistory(run: BeastRun): boolean {
+    return Boolean(run.trackedAgentId && this.repository.hasDispatchFailureHistory(run.trackedAgentId));
   }
 
   private assertTrackedAgentCapacity(

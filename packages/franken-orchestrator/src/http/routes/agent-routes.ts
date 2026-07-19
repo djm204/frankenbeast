@@ -245,7 +245,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
     const agentId = c.req.param('agentId');
     try {
       const detail = deps.agents.getAgentDetail(agentId);
-      const redactDispatchFailure = deps.agents.hasActiveDispatchFailure(agentId);
+      const redactDispatchFailure = deps.agents.hasDispatchFailureHistory(agentId);
       const hasDispatchFailureHistory = detail.events.some((event) => event.type === 'agent.dispatch.failed');
       return c.json({
         data: {
@@ -334,7 +334,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
             runId: run.id,
           },
         });
-        return c.json({ data: run });
+        return c.json({ data: deps.runs.sanitizeRunForResponse(run) });
       }
 
       const run = await dispatchDetachedAgent(deps, agentId);
@@ -346,7 +346,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
           runId: run.id,
         },
       });
-      return c.json({ data: run });
+      return c.json({ data: deps.runs.sanitizeRunForResponse(run) });
     } catch (error) {
       if (error instanceof UnknownTrackedAgentError) {
         throw new HttpError(
@@ -375,7 +375,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
             runId: agent.dispatchRunId,
           },
         });
-        return c.json({ data: run });
+        return c.json({ data: deps.runs.sanitizeRunForResponse(run) });
       }
 
       const updated = deps.agents.updateAgent(agentId, { status: 'stopped' });
@@ -415,7 +415,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
             runId: run.id,
           },
         });
-        return c.json({ data: run });
+        return c.json({ data: deps.runs.sanitizeRunForResponse(run) });
       }
 
       if (agent.status !== 'stopped') {
@@ -435,7 +435,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
           runId: run.id,
         },
       });
-      return c.json({ data: run });
+      return c.json({ data: deps.runs.sanitizeRunForResponse(run) });
     } catch (error) {
       if (error instanceof UnknownTrackedAgentError) {
         throw new HttpError(
@@ -477,7 +477,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
           runId: agent.dispatchRunId,
         },
       });
-      return c.json({ data: run });
+      return c.json({ data: deps.runs.sanitizeRunForResponse(run) });
     } catch (error) {
       if (error instanceof UnknownTrackedAgentError) {
         throw new HttpError(
@@ -520,7 +520,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
           runId: run.id,
         },
       });
-      return c.json({ data: run });
+      return c.json({ data: deps.runs.sanitizeRunForResponse(run) });
     } catch (error) {
       if (error instanceof UnknownTrackedAgentError) {
         throw new HttpError(
@@ -695,7 +695,7 @@ function redactDispatchFailedAgentResponse(agent: TrackedAgent) {
 }
 
 function redactAgentIfNeeded(agent: TrackedAgent, deps: AgentRoutesDeps) {
-  return deps.agents.hasActiveDispatchFailure(agent.id)
+  return deps.agents.hasDispatchFailureHistory(agent.id)
     ? redactDispatchFailedAgentResponse(agent)
     : agent;
 }

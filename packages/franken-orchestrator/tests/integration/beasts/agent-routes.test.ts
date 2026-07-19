@@ -1553,10 +1553,28 @@ describe('agent routes integration', () => {
     mkdirSync(TMP, { recursive: true });
     const repository = new SQLiteBeastRepository(join(TMP, 'redacted-dispatch-errors.db'));
     const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
-    const runs = { getRun: vi.fn(), start: vi.fn(), stop: vi.fn(), kill: vi.fn(), restart: vi.fn() };
     const exceptionSecret = 'dispatch-secret-value-1234567890';
     const requestSecret = 'request-secret-value-0987654321';
     const sensitiveCommand = '/opt/private/bin/provider --token super-secret';
+    const rawLinkedRun = repository.createRun({
+      definitionId: 'design-interview',
+      definitionVersion: 1,
+      status: 'running',
+      executionMode: 'process',
+      configSnapshot: { token: requestSecret },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-11T00:00:00.000Z',
+      attemptCount: 0,
+    });
+    const runs = {
+      getRun: vi.fn(() => rawLinkedRun),
+      start: vi.fn(),
+      stop: vi.fn(async () => ({ ...rawLinkedRun, status: 'stopped' })),
+      kill: vi.fn(),
+      restart: vi.fn(),
+      sanitizeRunForResponse: vi.fn((run: typeof rawLinkedRun) => ({ ...run, configSnapshot: {} })),
+    };
     const dispatch = {
       createRun: vi.fn(async () => {
         throw new Error(`Provider spawn failed: token=${exceptionSecret}`);
@@ -1663,11 +1681,23 @@ describe('agent routes integration', () => {
     expect(JSON.stringify(recoveredDetail.data.events)).not.toContain(exceptionSecret);
     expect(JSON.stringify(recoveredDetail.data.events)).not.toContain(sensitiveCommand);
     expect(JSON.stringify(recoveredDetail.data.events)).not.toContain('run_historical-secret-link');
+    agents.updateAgent(responseBody.error.details.agentId, {
+      status: 'running',
+      dispatchRunId: rawLinkedRun.id,
+    });
+    const linkedStopResponse = await app.request(`/v1/beasts/agents/${responseBody.error.details.agentId}/stop`, {
+      method: 'POST',
+      headers,
+    });
+    expect(linkedStopResponse.status).toBe(200);
+    const linkedStoppedRun = await linkedStopResponse.json() as { data: Record<string, unknown> };
+    expect(linkedStoppedRun.data).toMatchObject({ configSnapshot: {} });
+    expect(runs.sanitizeRunForResponse).toHaveBeenCalled();
     const exposedSurfaces = JSON.stringify({
       responseBody,
       agent: detail.data.agent,
       events: detail.data.events,
-      mutationResponses: [patchedAgent, stoppedAgent],
+      mutationResponses: [patchedAgent, stoppedAgent, linkedStoppedRun],
       logs: consoleError.mock.calls,
     });
     expect(responseBody.error.details.dispatchError).toBe(SAFE_DISPATCH_FAILURE_MESSAGE);

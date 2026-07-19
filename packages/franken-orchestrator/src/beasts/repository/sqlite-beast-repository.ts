@@ -643,6 +643,26 @@ export class SQLiteBeastRepository {
     return rows.map((row) => row.agent_id);
   }
 
+  listDispatchFailureHistoryAgentIds(): string[] {
+    const rows = this.db.prepare(
+      `SELECT DISTINCT agent_id
+         FROM tracked_agent_events
+        WHERE type = 'agent.dispatch.failed'`,
+    ).all() as Array<{ agent_id: string }>;
+    return rows.map((row) => row.agent_id);
+  }
+
+  hasDispatchFailureHistory(agentId: string): boolean {
+    const row = this.db.prepare(
+      `SELECT 1
+         FROM tracked_agent_events
+        WHERE agent_id = ?
+          AND type = 'agent.dispatch.failed'
+        LIMIT 1`,
+    ).get(agentId);
+    return row !== undefined;
+  }
+
   hasActiveDispatchFailure(agentId: string): boolean {
     const agent = this.getTrackedAgent(agentId);
     if (agent && (agent.status === 'running' || agent.status === 'awaiting_approval' || agent.status === 'completed')) {

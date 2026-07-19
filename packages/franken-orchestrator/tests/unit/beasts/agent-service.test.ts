@@ -99,7 +99,7 @@ describe('AgentService', () => {
     expect(detail.events).toEqual([event]);
   });
 
-  it('queries active dispatch-failure redaction state in one batch and clears it after recovery', async () => {
+  it('queries dispatch-failure redaction history in one batch while clearing active state after recovery', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-agent-service-'));
     const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const service = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
@@ -128,7 +128,7 @@ describe('AgentService', () => {
       payload: {},
     });
 
-    expect(service.listDispatchFailureRedactedAgentIds()).toEqual(new Set([stillFailed.id]));
+    expect(service.listDispatchFailureRedactedAgentIds()).toEqual(new Set([recovered.id, stillFailed.id]));
     expect(service.hasActiveDispatchFailure(recovered.id)).toBe(false);
     expect(service.hasActiveDispatchFailure(stillFailed.id)).toBe(true);
   });

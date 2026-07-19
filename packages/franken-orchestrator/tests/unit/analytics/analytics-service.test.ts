@@ -330,6 +330,16 @@ describe('createSqliteAnalyticsService', () => {
         stop_reason TEXT,
         latest_exit_code INTEGER
       );
+      CREATE TABLE tracked_agent_events (
+        id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        level TEXT NOT NULL,
+        type TEXT NOT NULL,
+        message TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
     `);
     db.prepare(`
       INSERT INTO tracked_agents (
@@ -361,13 +371,27 @@ describe('createSqliteAnalyticsService', () => {
       1,
       'failed',
       'container',
-      JSON.stringify({ objective: 'ship' }),
+      JSON.stringify({ objective: 'ship', token: 'SECRET_ANALYTICS_TOKEN' }),
       'chat',
       'chat-session:session-beast',
       '2026-04-28T12:00:00.000Z',
       '2026-04-28T12:01:00.000Z',
       1,
       99,
+    );
+    db.prepare(`
+      INSERT INTO tracked_agent_events (
+        id, agent_id, sequence, level, type, message, payload, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      'event-dispatch-failed',
+      'agent-1',
+      1,
+      'error',
+      'agent.dispatch.failed',
+      'Run failed to start',
+      '{}',
+      '2026-04-28T12:00:30.000Z',
     );
     db.close();
 
@@ -382,6 +406,8 @@ describe('createSqliteAnalyticsService', () => {
         summary: 'Beast run run-failed failed with exit code 99',
       }),
     ]);
+    expect(result.events[0]?.raw).toMatchObject({ configSnapshot: {} });
+    expect(JSON.stringify(result.events[0]?.raw)).not.toContain('SECRET_ANALYTICS_TOKEN');
   });
 
   it('ignores legacy Beast run tables that do not have tracked-agent columns yet', async () => {

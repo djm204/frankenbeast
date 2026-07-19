@@ -284,7 +284,9 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
   app.get('/v1/beasts/runs', (c) => {
     return c.json({
       data: {
-        runs: deps.runs.listRuns().map((run) => runResponse(run, deps)),
+        runs: deps.runs.listRuns().map((run) => (
+          runWithContainerFields(run, attemptsForContainerRun(run, deps))
+        )),
       },
     });
   });
