@@ -24,6 +24,7 @@ import type {
   ProviderSkillConfig,
 } from '@franken/types';
 import { McpConfigSchema, SkillToolManifestSchema } from '@franken/types';
+import { ZodError } from 'zod';
 import type { SkillConfigStore } from './skill-config-store.js';
 import { ProviderSkillTranslator } from './provider-skill-translator.js';
 
@@ -40,6 +41,17 @@ function unsafePathError(path: string, reason: string): Error {
 
 export function isUnsafeSkillPathError(err: unknown): boolean {
   return err instanceof Error && err.message.startsWith('Unsafe skill path ');
+}
+
+function isInvalidSkillManifestError(err: unknown): err is Error {
+  return err instanceof SyntaxError || err instanceof ZodError;
+}
+
+function reportInvalidSkill(name: string, err: Error): void {
+  const reason = err instanceof SyntaxError
+    ? 'manifest contains malformed JSON'
+    : 'manifest failed schema validation';
+  console.warn(`[SkillManager] Skipping invalid skill '${name}': ${reason}`);
 }
 
 function assertContainedPath(candidate: string, root: string, label: string): void {
@@ -228,6 +240,10 @@ export class SkillManager {
           return this.readSkillInfo(e.name);
         } catch (err) {
           if (isUnsafeSkillPathError(err)) return null;
+          if (isInvalidSkillManifestError(err)) {
+            reportInvalidSkill(e.name, err);
+            return null;
+          }
           throw err;
         }
       })
@@ -379,14 +395,23 @@ export class SkillManager {
   loadForProvider(provider: ILlmProvider): ProviderSkillConfig {
     const translator = new ProviderSkillTranslator();
     const enabledNames = this.getEnabledSkills();
-    const inputs = enabledNames.map((name) => {
-      const context = this.readContext(name);
-      return {
-        name,
-        mcpConfig: this.readMcpConfig(name) ?? { mcpServers: {} },
-        tools: this.readTools(name),
-        ...(context !== null ? { context } : {}),
-      };
+    const inputs = enabledNames.flatMap((name) => {
+      try {
+        const context = this.readContext(name);
+        return [{
+          name,
+          mcpConfig: this.readMcpConfig(name) ?? { mcpServers: {} },
+          tools: this.readTools(name),
+          ...(context !== null ? { context } : {}),
+        }];
+      } catch (err) {
+        if (isUnsafeSkillPathError(err)) return [];
+        if (isInvalidSkillManifestError(err)) {
+          reportInvalidSkill(name, err);
+          return [];
+        }
+        throw err;
+      }
     });
     return translator.translate(provider, inputs);
   }

@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, symlinkSync, linkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { McpConfigSchema } from '@franken/types';
+import { McpConfigSchema, type ILlmProvider } from '@franken/types';
 import { SkillManager } from '../../../src/skills/skill-manager.js';
 
 describe('SkillManager', () => {
@@ -72,6 +72,56 @@ describe('SkillManager', () => {
       symlinkSync(join(tempDir, 'outside-mcp.json'), join(skillsDir, 'poisoned', 'mcp.json'));
 
       expect(manager.listInstalled().map((skill) => skill.name)).toEqual(['github']);
+    });
+
+    it.each([
+      ['malformed JSON', '{"mcpServers":', 'manifest contains malformed JSON'],
+      [
+        'schema-invalid JSON',
+        JSON.stringify({ mcpServers: { broken: { command: '' } } }),
+        'manifest failed schema validation',
+      ],
+    ])('skips a skill with %s and reports it without hiding valid skills', async (_case, manifest, reason) => {
+      await manager.install({
+        name: 'github',
+        description: 'GH',
+        provider: 'cli',
+        installConfig: { command: 'npx' },
+        authFields: [],
+      });
+      mkdirSync(join(skillsDir, 'broken'), { recursive: true });
+      writeFileSync(join(skillsDir, 'broken', 'mcp.json'), manifest);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+      expect(manager.listInstalled().map((skill) => skill.name)).toEqual(['github']);
+      expect(warn).toHaveBeenCalledWith(
+        `[SkillManager] Skipping invalid skill 'broken': ${reason}`,
+      );
+
+      warn.mockRestore();
+    });
+  });
+
+  describe('loadForProvider()', () => {
+    it('loads valid enabled skills when another enabled MCP manifest is malformed', async () => {
+      manager = new SkillManager(skillsDir, new Set(['github', 'broken']));
+      await manager.install({
+        name: 'github',
+        description: 'GH',
+        provider: 'cli',
+        installConfig: { command: 'npx' },
+        authFields: [],
+      });
+      mkdirSync(join(skillsDir, 'broken'), { recursive: true });
+      writeFileSync(join(skillsDir, 'broken', 'mcp.json'), '{"mcpServers":');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+      const result = manager.loadForProvider({ type: 'claude-cli' } as ILlmProvider);
+      const translated = JSON.parse(result.filesToWrite![0]!.content);
+      expect(Object.keys(translated.mcpServers)).toEqual(['github']);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("Skipping invalid skill 'broken'"));
+
+      warn.mockRestore();
     });
   });
 
