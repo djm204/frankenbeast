@@ -14,6 +14,7 @@ A deterministic guardrails framework for AI agents organized as an **npm workspa
 To align your local toolchain with these pins, run:
 
 ```bash
+corepack --version  # if this command fails, install Corepack first, e.g. npm i -g corepack
 corepack enable npm
 corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
 npm --version  # should match the pinned version above
@@ -23,7 +24,11 @@ For a full setup gate before making changes, run:
 
 ```bash
 npm run setup:healthcheck
-# or
+```
+
+For a narrower npm-only validation, run:
+
+```bash
 npm run check:package-manager
 ```
 
