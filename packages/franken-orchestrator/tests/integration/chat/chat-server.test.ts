@@ -397,10 +397,14 @@ describe('chat server bootstrap', () => {
 
     });
     expect(ticketResponse.status).toBe(200);
-    const ticketBody = await ticketResponse.json() as { ticket: string };
-    const streamResponse = await fetch(`${server.url}/v1/beasts/events/stream?ticket=${ticketBody.ticket}`, {
+    const ticketCookie = ticketResponse.headers.get('set-cookie')?.split(';', 1)[0];
+    expect(ticketCookie).toBeTruthy();
+    const streamResponse = await fetch(`${server.url}/v1/beasts/events/stream`, {
 
-      headers: { authorization: `Bearer ${TEST_SHARED_TOKEN}` },
+      headers: {
+        authorization: `Bearer ${TEST_SHARED_TOKEN}`,
+        cookie: ticketCookie!,
+      },
 
     });
     expect(streamResponse.status).toBe(200);

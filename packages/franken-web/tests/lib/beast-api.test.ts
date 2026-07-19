@@ -366,8 +366,10 @@ describe('BeastApiClient', () => {
       );
       const init = mockFetch.mock.calls[0]![1] as RequestInit;
       expect(new Headers(init.headers).has('authorization')).toBe(false);
+      expect(init.credentials).toBe('include');
       expect(MockEventSource).toHaveBeenCalledWith(
-        'http://localhost:3000/v1/beasts/events/stream?ticket=sse-ticket',
+        'http://localhost:3000/v1/beasts/events/stream',
+        { withCredentials: true },
       );
 
       listeners['run.log']?.({ data: JSON.stringify({ runId: 'run-1', stream: 'stdout', line: 'one' }) });
@@ -467,7 +469,8 @@ describe('BeastApiClient', () => {
       expect(mockFetch).toHaveBeenCalledTimes(2);
       expect(MockEventSource).toHaveBeenNthCalledWith(
         2,
-        'http://localhost:3000/v1/beasts/events/stream?ticket=ticket-2',
+        'http://localhost:3000/v1/beasts/events/stream',
+        { withCredentials: true },
       );
 
       unsubscribe();
@@ -574,7 +577,8 @@ describe('BeastApiClient', () => {
       expect(onError).toHaveBeenCalledWith(expect.any(SyntaxError));
       expect(MockEventSource).toHaveBeenNthCalledWith(
         2,
-        'http://localhost:3000/v1/beasts/events/stream?ticket=ticket-2&lastEventId=42',
+        'http://localhost:3000/v1/beasts/events/stream?lastEventId=42',
+        { withCredentials: true },
       );
 
       unsubscribe();
@@ -638,7 +642,8 @@ describe('BeastApiClient', () => {
 
       expect(MockEventSource).toHaveBeenNthCalledWith(
         2,
-        'http://localhost:3000/v1/beasts/events/stream?ticket=ticket-2&lastEventId=42',
+        'http://localhost:3000/v1/beasts/events/stream?lastEventId=42',
+        { withCredentials: true },
       );
 
       unsubscribe();
@@ -689,7 +694,8 @@ describe('BeastApiClient', () => {
       expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('reconnecting') }));
       expect(MockEventSource).toHaveBeenNthCalledWith(
         2,
-        'http://localhost:3000/v1/beasts/events/stream?ticket=ticket-2&lastEventId=45',
+        'http://localhost:3000/v1/beasts/events/stream?lastEventId=45',
+        { withCredentials: true },
       );
 
       unsubscribe();
@@ -743,7 +749,8 @@ describe('BeastApiClient', () => {
       expect(onError).toHaveBeenCalledWith(handlerError);
       expect(MockEventSource).toHaveBeenNthCalledWith(
         2,
-        'http://localhost:3000/v1/beasts/events/stream?ticket=ticket-2&lastEventId=44',
+        'http://localhost:3000/v1/beasts/events/stream?lastEventId=44',
+        { withCredentials: true },
       );
 
       unsubscribe();
@@ -792,7 +799,8 @@ describe('BeastApiClient', () => {
       expect(mockFetch).toHaveBeenCalledTimes(3);
       expect(MockEventSource).toHaveBeenNthCalledWith(
         2,
-        'http://localhost:3000/v1/beasts/events/stream?ticket=ticket-3',
+        'http://localhost:3000/v1/beasts/events/stream',
+        { withCredentials: true },
       );
 
       unsubscribe();
@@ -834,7 +842,8 @@ describe('BeastApiClient', () => {
 
       expect(mockFetch).toHaveBeenCalledTimes(2);
       expect(MockEventSource).toHaveBeenCalledWith(
-        'http://localhost:3000/v1/beasts/events/stream?ticket=ticket-2',
+        'http://localhost:3000/v1/beasts/events/stream',
+        { withCredentials: true },
       );
 
       unsubscribe();

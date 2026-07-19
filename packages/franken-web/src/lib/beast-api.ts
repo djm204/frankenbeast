@@ -248,14 +248,15 @@ export class BeastApiClient {
     };
 
     const connect = async () => {
-      const body = await this.requestRaw<{ ticket: string }>('/v1/beasts/events/ticket', { method: 'POST' });
+      await this.requestRaw<{ issued: boolean }>('/v1/beasts/events/ticket', {
+        method: 'POST',
+        credentials: 'include',
+      });
       if (closed) return;
       eventSource?.close();
-      const query = new URLSearchParams({ ticket: body.ticket });
-      if (lastEventId) query.set('lastEventId', lastEventId);
-      const nextSource = new EventSource(
-        `${this.baseUrl}/v1/beasts/events/stream?${query.toString()}`,
-      );
+      const streamUrl = new URL(`${this.baseUrl}/v1/beasts/events/stream`);
+      if (lastEventId) streamUrl.searchParams.set('lastEventId', lastEventId);
+      const nextSource = new EventSource(streamUrl.toString(), { withCredentials: true });
       eventSource = nextSource;
 
       nextSource.addEventListener('open', () => {
