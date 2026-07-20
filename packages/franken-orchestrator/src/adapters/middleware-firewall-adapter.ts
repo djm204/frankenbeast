@@ -70,8 +70,9 @@ export class MiddlewareChainFirewallAdapter implements IFirewallModule {
         content: input,
         usage: { inputTokens: 0, outputTokens: 0 },
       });
+      const inspected = this.chain.inspectUntrustedResponse(processed);
       return {
-        sanitizedText: processed.content,
+        sanitizedText: inspected.content,
         violations: [],
         blocked: false,
       };

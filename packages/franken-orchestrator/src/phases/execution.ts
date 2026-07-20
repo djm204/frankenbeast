@@ -275,23 +275,34 @@ export async function runExecution(
 
     // Accept a wave atomically: no outputs, checkpoints, or traces are committed
     // until every untrusted response in the wave has passed the firewall.
-    for (const { task, outcome, fromCheckpoint, hasCheckpointOutput } of waveResults) {
+    const acceptanceFailureTaskIds = new Set<string>();
+    for (let index = 0; index < waveResults.length; index += 1) {
+      const result = waveResults[index]!;
+      const { task, outcome, fromCheckpoint, hasCheckpointOutput } = result;
       if (outcome.status === 'success') {
         if (!fromCheckpoint) {
-          checkpoint?.writeTaskOutput?.(task.id, outcome.output);
-        }
-        if (!fromCheckpoint) {
-          await memory.recordTrace({
-            taskId: task.id,
-            summary: task.objective,
-            outcome: 'success',
-            timestamp: isoNow(),
-          });
+          try {
+            await memory.recordTrace({
+              taskId: task.id,
+              summary: task.objective,
+              outcome: 'success',
+              timestamp: isoNow(),
+            });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            waveResults[index] = {
+              ...result,
+              outcome: { taskId: task.id, status: 'failure', error: message },
+            };
+            acceptanceFailureTaskIds.add(task.id);
+            continue;
+          }
           ctx.addAudit('executor', 'task:complete', {
             taskId: task.id,
             tokensUsed: taskTokenUsage.get(task.id) ?? 0,
             output: outcome.output,
           });
+          checkpoint?.writeTaskOutput?.(task.id, outcome.output);
           checkpoint?.write(`${task.id}:done`);
         }
         completed.add(task.id);
@@ -318,6 +329,11 @@ export async function runExecution(
       if (outcome.status === 'success' || outcome.status === 'skipped') {
         outcomes.push(outcome);
       } else if (outcome.status === 'failure') {
+        if (acceptanceFailureTaskIds.has(task.id)) {
+          terminalFailures.add(task.id);
+          outcomes.push(outcome);
+          continue;
+        }
         const recovered = await recoverFailedTask({
           ctx,
           governor,
@@ -1067,6 +1083,9 @@ async function scanAndSanitizeResponse(
     const aggregateResult = await firewall.scanResponse(sanitizedSerialized.text);
     if (aggregateResult.blocked) {
       throw new InjectionDetectedError(aggregateResult.violations, source);
+    }
+    if (aggregateResult.sanitizedText !== sanitizedSerialized.text) {
+      throw responseSerializationError(source, 'aggregate structured response exceeded response policy limits');
     }
     const combinedTexts = [
       collectStructuredText(sanitized, false).join(' '),

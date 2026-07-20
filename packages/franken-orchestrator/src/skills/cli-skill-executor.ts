@@ -373,6 +373,7 @@ export class CliSkillExecutor {
       throw new Error(`${errorMessage}: ${preMartinTrackedChanges.join(', ')}`);
     }
     const preMartinUntrackedFiles = this.untrackedFilesFromStatus(preMartinStatus);
+    const preMartinHead = sanitizeResponse ? this.git.getCurrentHead() : undefined;
 
     const staleMateState: StaleMateState = { lastSignature: '', stalledIterations: 0 };
     const wrappedConfig = this.buildMartinConfig({
@@ -476,6 +477,7 @@ export class CliSkillExecutor {
       try {
         acceptedOutput = await sanitizeResponse(martinResult.output);
       } catch (error) {
+        this.resetRejectedWorktree(preMartinHead!, preMartinUntrackedFiles);
         this.observer.endSpan(chunkSpan, {
           status: 'error',
           errorMessage: error instanceof Error ? error.message : String(error),
@@ -893,6 +895,16 @@ export class CliSkillExecutor {
       promptTokens: Math.ceil(prompt.length / 4),
       completionTokens: Math.max(config.maxTurns, 1) * 1_000,
     }]);
+  }
+
+  private resetRejectedWorktree(preRunHead: string, preExistingUntrackedFiles: readonly string[]): void {
+    const status = this.git.getStatus();
+    this.git.resetHard(preRunHead);
+    const preExisting = new Set(preExistingUntrackedFiles);
+    const newUntracked = this.untrackedFilesFromStatus(status).filter(file => !preExisting.has(file));
+    if (newUntracked.length > 0) {
+      this.git.cleanUntracked(newUntracked);
+    }
   }
 
   private resetBudgetAbortedWorktree(preExistingUntrackedFiles: readonly string[] = []): void {
