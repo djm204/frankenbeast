@@ -88,23 +88,27 @@ describe('ParallelPlanner — happy path', () => {
     expect(executor).toHaveBeenCalledWith(task);
   });
 
-  it('executes independent tasks concurrently in the same wave', async () => {
+  it('starts every ready task before waiting for same-wave work to finish', async () => {
     const a = makeTask('a');
     const b = makeTask('b');
     const graph = PlanGraph.empty().addTask(a).addTask(b);
-
-    const callOrder: string[] = [];
-    const executor = vi.fn().mockImplementation((task: Task) => {
-      callOrder.push(task.id);
-      return Promise.resolve(success(task.id));
+    let releaseWave: (() => void) | undefined;
+    const waveBarrier = new Promise<void>((resolve) => {
+      releaseWave = resolve;
+    });
+    const executor = vi.fn().mockImplementation(async (task: Task) => {
+      await waveBarrier;
+      return success(task.id);
     });
 
-    const result = await new ParallelPlanner().execute(graph, { executor });
+    const execution = new ParallelPlanner().execute(graph, { executor });
+    try {
+      expect(executor).toHaveBeenCalledTimes(2);
+    } finally {
+      releaseWave?.();
+    }
 
-    expect(result.status).toBe('completed');
-    expect(executor).toHaveBeenCalledTimes(2);
-    expect(callOrder).toContain(createTaskId('a'));
-    expect(callOrder).toContain(createTaskId('b'));
+    await expect(execution).resolves.toMatchObject({ status: 'completed' });
   });
 
   it('limits same-wave task execution to the configured concurrency', async () => {
