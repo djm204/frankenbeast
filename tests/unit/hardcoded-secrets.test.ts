@@ -1636,6 +1636,82 @@ describe('hard-coded example secret scanner', () => {
     expect(allowed.status, allowed.stderr).toBe(0);
   });
 
+  it('rejects Codex round 33 cron scanner bypasses without flagging shell-string crontab reads', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    const fixtures: Record<string, string[]> = {
+      'namespace-process.mjs': [
+        "import * as proc from 'node:process';",
+        'const entry = `${process.argv[2]} agy pr --token ${proc.env.GITHUB_TOKEN}`;',
+        "spawnSync('crontab', ['-'], { input: entry });",
+      ],
+      'optional-process.mjs': [
+        "const proc = require('node:process');",
+        'const entry = `${process.argv[2]} agy pr --token ${proc?.env?.GITHUB_TOKEN}`;',
+        "spawnSync('crontab', ['-'], { input: entry });",
+      ],
+      'crontab-command.sh': [
+        'installer=$(command -v crontab)',
+        'entry="$1 agy pr --token $GITHUB_TOKEN"',
+        'printf "%s\\n" "$entry" | "$installer" -',
+      ],
+      'crontab-array.mjs': [
+        "const command = ['env', 'crontab', '-'];",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'spawnSync(command[0], command.slice(1), { input: entry });',
+      ],
+      'quoted-stage.sh': [
+        "cat <<'EOF' >/tmp/jobs-envsubst",
+        '$1 agy pr --token $GITHUB_TOKEN',
+        'EOF',
+        'envsubst < /tmp/jobs-envsubst | crontab -',
+      ],
+      'file-handle.py': [
+        'entry = f"{sys.argv[1]} agy pr --token {os.environ[\'GITHUB_TOKEN\']}"',
+        "with open('/tmp/jobs-handle', 'w') as jobs:",
+        '    jobs.write(entry)',
+        "subprocess.run(['crontab', '/tmp/jobs-handle'])",
+      ],
+      'promisified-exec.mjs': [
+        'const execFileAsync = promisify(execFile);',
+        "const { stdout } = await execFileAsync('gh', ['auth', 'token']);",
+        'const entry = `${process.argv[2]} agy pr --token ${stdout}`;',
+        "spawnSync('crontab', ['-'], { input: entry });",
+      ],
+    };
+    for (const [name, lines] of Object.entries(fixtures)) {
+      writeFileSync(join(scriptDir, name), lines.join('\n'), 'utf8');
+    }
+
+    const rejected = runScanner(root);
+
+    expect(rejected.status).toBe(1);
+    for (const location of [
+      'scripts/namespace-process.mjs:3',
+      'scripts/optional-process.mjs:3',
+      'scripts/crontab-command.sh:3',
+      'scripts/crontab-array.mjs:3',
+      'scripts/quoted-stage.sh:2',
+      'scripts/file-handle.py:3',
+      'scripts/promisified-exec.mjs:4',
+    ]) {
+      expect(rejected.stderr).toContain(location);
+    }
+
+    const allowedRoot = makeFixtureRoot();
+    const allowedScriptDir = join(allowedRoot, 'scripts');
+    mkdirSync(allowedScriptDir, { recursive: true });
+    writeFileSync(
+      join(allowedScriptDir, 'list-crontab.js'),
+      "execSync('crontab -l', { env: { ...process.env, GITHUB_TOKEN: process.env.GITHUB_TOKEN } });\n",
+      'utf8',
+    );
+
+    const allowed = runScanner(allowedRoot);
+    expect(allowed.status, allowed.stderr).toBe(0);
+  });
+
   it('allows direct crontab installs that defer gh auth token lookup until runtime', () => {
     const root = makeFixtureRoot();
     const scriptDir = join(root, 'scripts');
