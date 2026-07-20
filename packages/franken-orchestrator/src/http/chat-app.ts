@@ -289,15 +289,19 @@ export function createChatApp(opts: ChatAppOptions): Hono {
       bus: bc.eventBus,
       ticketStore: bc.ticketStore,
       operatorToken: bc.operatorToken,
-      getSnapshot: () => ({
-        agents: bc.agents.listAgentPage({ limit: DEFAULT_TRACKED_AGENT_PAGE_LIMIT }).agents.map((a) => ({
-          id: a.id,
-          definitionId: a.definitionId,
-          status: a.status,
-          createdAt: a.createdAt,
-          updatedAt: a.updatedAt,
-        })),
-      }),
+      getSnapshot: () => {
+        const page = bc.agents.listAgentPage({ limit: DEFAULT_TRACKED_AGENT_PAGE_LIMIT });
+        return {
+          agents: page.agents.map((a) => ({
+            id: a.id,
+            definitionId: a.definitionId,
+            status: a.status,
+            createdAt: a.createdAt,
+            updatedAt: a.updatedAt,
+          })),
+          ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+        };
+      },
     }));
   } else if (opts.beastDaemon) {
     const proxyOperatorToken = opts.beastDaemon.operatorToken ?? effectiveOperatorToken;

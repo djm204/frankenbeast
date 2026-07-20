@@ -217,15 +217,19 @@ export function createBeastDaemonApp(options: BeastDaemonAppOptions): Hono {
     bus: services.eventBus,
     ticketStore: services.ticketStore,
     operatorToken: options.operatorToken,
-    getSnapshot: () => ({
-      agents: services.agents.listAgentPage({ limit: DEFAULT_TRACKED_AGENT_PAGE_LIMIT }).agents.map((agent) => ({
-        id: agent.id,
-        definitionId: agent.definitionId,
-        status: agent.status,
-        createdAt: agent.createdAt,
-        updatedAt: agent.updatedAt,
-      })),
-    }),
+    getSnapshot: () => {
+      const page = services.agents.listAgentPage({ limit: DEFAULT_TRACKED_AGENT_PAGE_LIMIT });
+      return {
+        agents: page.agents.map((agent) => ({
+          id: agent.id,
+          definitionId: agent.definitionId,
+          status: agent.status,
+          createdAt: agent.createdAt,
+          updatedAt: agent.updatedAt,
+        })),
+        ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+      };
+    },
   }));
   app.route('/', beastRoutes(routeDeps));
   app.route('/', agentRoutes({

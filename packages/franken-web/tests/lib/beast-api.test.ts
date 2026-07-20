@@ -61,7 +61,7 @@ describe('BeastApiClient', () => {
       chatSessionId: 'sess-1',
       moduleConfig: { planner: true, skills: true },
     });
-    await client.listAgents();
+    await client.listAgentPage();
     await client.getAgent('agent-1');
 
     expect(mockFetch).toHaveBeenNthCalledWith(

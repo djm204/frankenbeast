@@ -110,11 +110,6 @@ export class BeastApiClient {
     );
   }
 
-  async listAgents(): Promise<TrackedAgentSummary[]> {
-    const page = await this.listAgentPage();
-    return page.agents;
-  }
-
   async getRun(runId: string): Promise<Omit<BeastRunDetail, 'logs'> & { run: BeastRunSummary }> {
     return this.request(`/v1/beasts/runs/${encodeURIComponent(runId)}`, { method: 'GET' });
   }

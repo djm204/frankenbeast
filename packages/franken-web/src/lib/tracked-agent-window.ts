@@ -32,12 +32,9 @@ export async function loadTrackedAgentWindow(
   requestedPages: number,
   selectedAgentId: string | null,
 ): Promise<TrackedAgentWindow> {
-  const listPage = (cursor?: string): Promise<TrackedAgentPage> => {
-    if (typeof client.listAgentPage === 'function') {
-      return cursor ? client.listAgentPage({ cursor }) : client.listAgentPage();
-    }
-    return client.listAgents().then((agents) => ({ agents }));
-  };
+  const listPage = (cursor?: string): Promise<TrackedAgentPage> => (
+    cursor ? client.listAgentPage({ cursor }) : client.listAgentPage()
+  );
   const firstPage = await listPage();
   const agents = [...firstPage.agents];
   const seenIds = new Set(agents.map((agent) => agent.id));

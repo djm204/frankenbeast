@@ -18,7 +18,7 @@ import {
   type TrackedAgentInitAction,
   type TrackedAgentSummary,
 } from '../lib/beast-api';
-import { isTrackedAgentSortKeyNewer, loadTrackedAgentWindow, sortTrackedAgentsNewestFirst, type TrackedAgentWindow } from '../lib/tracked-agent-window';
+import { loadTrackedAgentWindow, sortTrackedAgentsNewestFirst, type TrackedAgentWindow } from '../lib/tracked-agent-window';
 import { ChatApiClient, type ChatSessionSummary, type CorruptChatSessionFile } from '../lib/api';
 import { NetworkApiClient, type NetworkConfigResponse, type NetworkStatusResponse } from '../lib/network-api';
 import type { AgentLifecycleAction } from './beasts/agent-action-bar';
@@ -464,9 +464,6 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         const currentAgents = beastAgentsRef.current;
         const currentDetail = beastAgentDetailRef.current;
         const sawUnknownAgent = snapshot.agents.some((candidate) => !currentAgents.some((agent) => agent.id === candidate.id));
-        const newestLoadedAgent = currentAgents.length === 0 ? undefined : currentAgents.reduce((newest, agent) => (isTrackedAgentSortKeyNewer(agent, newest) ? agent : newest));
-        const sawNewerUnknownAgent = snapshot.agents.some((candidate) => newestLoadedAgent && isTrackedAgentSortKeyNewer(candidate, newestLoadedAgent)
-          && !currentAgents.some((agent) => agent.id === candidate.id));
         const selectedSnapshotAgent = currentDetail
           ? snapshot.agents.find((candidate) => candidate.id === currentDetail.agent.id)
           : undefined;
@@ -482,7 +479,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
           const next = snapshot.agents?.find((candidate) => candidate.id === current.agent.id);
           return next ? { ...current, agent: { ...current.agent, ...next } } : current;
         });
-        if ((sawUnknownAgent && (!beastAgentNextCursorRef.current || sawNewerUnknownAgent)) || selectedAgentLinkedRun) requestBeastRefresh();
+        if (sawUnknownAgent || selectedAgentLinkedRun) requestBeastRefresh();
       },
       agentStatus: (event) => {
         if (cancelled) return;

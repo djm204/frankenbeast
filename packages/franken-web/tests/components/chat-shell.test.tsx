@@ -1527,7 +1527,7 @@ describe('ChatShell', () => {
     await act(async () => {
       latestBeastEventHandlers?.snapshot?.({
         agents: [{
-          id: 'z-new-agent-on-first-page',
+          id: 'agent-0-inside-first-page',
           definitionId: 'chunk-plan',
           status: 'dispatching',
           createdAt: '2026-03-11T00:00:00.000Z',
