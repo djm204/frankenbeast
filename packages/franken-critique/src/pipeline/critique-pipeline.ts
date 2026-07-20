@@ -1,5 +1,6 @@
 import { EVALUATOR_EXCEPTION_LOCATION } from '../types/evaluation.js';
 import type { Evaluator, EvaluationInput, EvaluationResult, CritiquePipelineResult } from '../types/evaluation.js';
+import { createScore } from '../types/common.js';
 
 const SAFETY_EVALUATOR_NAME = 'safety';
 
@@ -18,7 +19,7 @@ function createEvaluatorExceptionResult(evaluator: Evaluator): EvaluationResult 
   return {
     evaluatorName: evaluator.name,
     verdict: 'fail',
-    score: 0,
+    score: createScore(0),
     findings: [
       {
         message: `Evaluator "${evaluator.name}" failed because an internal evaluator error occurred.`,
@@ -43,7 +44,7 @@ export class CritiquePipeline {
 
   async run(input: EvaluationInput): Promise<CritiquePipelineResult> {
     if (this.evaluators.length === 0) {
-      return { verdict: 'pass', overallScore: 1, results: [], shortCircuited: false };
+      return { verdict: 'pass', overallScore: createScore(1), results: [], shortCircuited: false };
     }
 
     const results: EvaluationResult[] = [];
@@ -73,7 +74,9 @@ export class CritiquePipeline {
       }
     }
 
-    const overallScore = results.reduce((sum, r) => sum + r.score, 0) / results.length;
+    const overallScore = createScore(
+      results.reduce((sum, r) => sum + r.score, 0) / results.length,
+    );
     const hasFailure = results.some((r) => r.verdict === 'fail');
     const hasWarning = results.some(
       (r) => r.verdict === 'warn' || (r.verdict === 'pass' && hasWarningFinding(r)),

@@ -1,14 +1,14 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
-import {
-  createSessionId,
-} from '@franken/types';
-import type { ProviderCritiqueFinding } from '@franken/types';
+import { createSessionId } from '@franken/types';
+import type { ProviderCritiqueFinding, Score as SharedScore } from '@franken/types';
+import { createScore } from '@franken/critique';
 import type {
   CritiquePipelineResult,
   CritiqueResult,
   LessonRollbackWorkflow,
   AgentImprovementScorecard,
   LessonFeedbackWeighting,
+  Score,
   SessionId,
 } from '@franken/critique';
 
@@ -19,15 +19,16 @@ describe('public critique type contracts', () => {
       severity: 7,
       message: 'Missing error handling',
     };
+    const score = createScore(0.75);
 
     const pipelineResult: CritiquePipelineResult = {
       verdict: 'warn',
-      overallScore: 0.75,
+      overallScore: score,
       results: [
         {
           evaluatorName: providerFinding.evaluator,
           verdict: 'warn',
-          score: 0.75,
+          score,
           findings: [
             {
               message: providerFinding.message,
@@ -47,6 +48,16 @@ describe('public critique type contracts', () => {
     expect(legacyAlias.results[0]?.findings[0]?.message).toBe(
       providerFinding.message,
     );
+  });
+
+  it('uses the shared branded score contract for critique results', () => {
+    const score = createScore(0.75);
+
+    expectTypeOf(score).toEqualTypeOf<Score>();
+    expectTypeOf<Score>().toEqualTypeOf<SharedScore>();
+    // @ts-expect-error Score must be constructed through the shared constructor.
+    const unbrandedScore: Score = 0.75;
+    expect(unbrandedScore).toBe(0.75);
   });
 
   it('uses the branded @franken/types SessionId contract for critique sessions', () => {

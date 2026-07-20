@@ -1,4 +1,4 @@
-import type { EvaluationInput, EvaluationFinding } from '../types/evaluation.js';
+import type { EvaluationInput, CritiquePipelineResult } from '../types/evaluation.js';
 import type {
   CircuitBreaker,
   LoopConfig,
@@ -121,7 +121,7 @@ export class CritiqueLoop {
   }
 
   private buildCorrection(
-    critiqueResult: { readonly overallScore: number; readonly results: readonly { readonly findings: readonly EvaluationFinding[] }[] },
+    critiqueResult: CritiquePipelineResult,
     iterationCount: number,
   ): CorrectionRequest {
     const allFindings = critiqueResult.results.flatMap((r) => r.findings);

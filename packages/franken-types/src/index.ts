@@ -16,6 +16,10 @@ export {
   createTraceId,
 } from './ids.js';
 
+// Normalized score
+export type { Score } from './score.js';
+export { createScore } from './score.js';
+
 export type { SeededRandom } from './deterministic.js';
 export {
   deterministicUuid,
