@@ -1728,23 +1728,24 @@ class SqliteWorkingMemory implements IWorkingMemory {
     // stale cache.
     const requestedDeletedKeys = new Set(this.deletedKeys);
     this.loadPersistedSerializedFromDb();
+    const preparedStore = new Map(this.store);
 
     // Incremental writers must absorb rows committed by other connections
     // after this instance was hydrated. Only clear()/restore() intentionally
     // make this instance's complete in-memory state authoritative.
     if (!this.replacePersistedState) {
       for (const [key, serialized] of this.persistedSerialized) {
-        if (this.store.has(key) || requestedDeletedKeys.has(key)) continue;
-        const value = parseStoredWorkingMemoryValue(serialized);
+        if (preparedStore.has(key) || requestedDeletedKeys.has(key)) continue;
+        const value = parseHydratedWorkingMemoryValue(key, serialized);
         if (!isExpiredWorkingMemoryValue(value)) {
-          this.store.set(key, value);
+          preparedStore.set(key, value);
         }
       }
     }
 
     const prepared: Array<[string, unknown, string, number]> = [];
     let total = 0;
-    for (const [key, value] of this.store) {
+    for (const [key, value] of preparedStore) {
       if (isExpiredWorkingMemoryValue(value)) {
         const runtimeSerialized = this.serialized.get(key);
         const persistedSerialized = this.persistedSerialized.get(key);

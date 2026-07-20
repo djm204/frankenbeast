@@ -1664,6 +1664,8 @@ describe('SqliteBrain', () => {
         second.flush();
 
         expect(() => first!.flush()).toThrow(WorkingMemoryLimitError);
+        expect(first.working.snapshot()).toEqual({ first: 1 });
+        expect(first.working.usage()).toMatchObject({ entries: 1 });
       } finally {
         first?.close();
         second?.close();
@@ -6614,6 +6616,41 @@ describe('SqliteBrain', () => {
   });
 
   describe('concurrent file-backed stores', () => {
+    it('fails closed without mutating runtime state when an external row is corrupt', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-concurrent-corrupt-'));
+      const dbPath = join(dir, 'brain.db');
+      let instance: SqliteBrain | undefined;
+      let db: Database.Database | undefined;
+
+      try {
+        instance = new SqliteBrain(dbPath);
+        instance.working.set('safe', { preserved: true });
+        instance.flush();
+
+        db = new Database(dbPath);
+        db.prepare(
+          `INSERT INTO working_memory (key, value, updated_at, schema_version) VALUES (?, ?, ?, ?)`,
+        ).run(
+          'external-corrupt',
+          '{not-json',
+          new Date().toISOString(),
+          CURRENT_MEMORY_SCHEMA_VERSION,
+        );
+
+        expect(() => instance!.flush()).toThrow(CorruptWorkingMemoryRowError);
+        expect(instance.working.snapshot()).toEqual({ safe: { preserved: true } });
+        expect(
+          db.prepare(`SELECT value FROM working_memory WHERE key = ?`).get(
+            'external-corrupt',
+          ),
+        ).toEqual({ value: '{not-json' });
+      } finally {
+        db?.close();
+        instance?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('preserves simultaneous working, episodic, and recovery writes while snapshots are read', async () => {
       const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-concurrent-'));
       const dbPath = join(dir, 'brain.db');
