@@ -699,13 +699,13 @@ describe('SQLiteBeastRepository', () => {
 
     expect(migrated.listEvents(run.id).map((event) => [event.sequence, event.type])).toEqual([
       [1, 'run.first'],
+      [2, 'run.second'],
       [1_000, 'run.later'],
-      [1_001, 'run.second'],
     ]);
     expect(migrated.listTrackedAgentEvents(agent.id).map((event) => [event.sequence, event.type])).toEqual([
       [1, 'agent.dispatch.failed'],
       [2, 'agent.dispatch.recovered'],
-      [3, 'agent.dispatch.failed'],
+      [1_000, 'agent.dispatch.failed'],
     ]);
     expect(migrated.hasUnrecoveredDispatchFailure(agent.id)).toBe(true);
     const migratedDatabase = new Database(databasePath);

@@ -861,15 +861,15 @@ export class SQLiteBeastRepository {
       );
       for (const { run_id: runId } of duplicateRunIds) {
         const rows = selectRunEvents.all(runId) as Array<{ id: string; sequence: number }>;
-        const seenSequences = new Set<number>();
-        let nextSequence = rows.reduce((maximum, row) => Math.max(maximum, row.sequence), 0);
+        let previousSequence: number | undefined;
         for (const row of rows) {
-          if (seenSequences.has(row.sequence)) {
-            nextSequence += 1;
-            updateRunEventSequence.run(nextSequence, row.id);
-          } else {
-            seenSequences.add(row.sequence);
+          const repairedSequence = previousSequence === undefined
+            ? row.sequence
+            : Math.max(row.sequence, previousSequence + 1);
+          if (repairedSequence !== row.sequence) {
+            updateRunEventSequence.run(repairedSequence, row.id);
           }
+          previousSequence = repairedSequence;
         }
       }
 
@@ -890,11 +890,15 @@ export class SQLiteBeastRepository {
       );
       for (const { agent_id: agentId } of duplicateAgentIds) {
         const rows = selectAgentEvents.all(agentId) as Array<{ id: string; sequence: number }>;
-        for (const [index, row] of rows.entries()) {
-          updateAgentEventSequence.run(-(index + 1), row.id);
-        }
-        for (const [index, row] of rows.entries()) {
-          updateAgentEventSequence.run(index + 1, row.id);
+        let previousSequence: number | undefined;
+        for (const row of rows) {
+          const repairedSequence = previousSequence === undefined
+            ? row.sequence
+            : Math.max(row.sequence, previousSequence + 1);
+          if (repairedSequence !== row.sequence) {
+            updateAgentEventSequence.run(repairedSequence, row.id);
+          }
+          previousSequence = repairedSequence;
         }
       }
 
