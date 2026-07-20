@@ -13,6 +13,7 @@ import { BeastEventBus } from '../../../src/beasts/events/beast-event-bus.js';
 import { CapacityReservationPolicy } from '../../../src/beasts/services/capacity-reservation-policy.js';
 import { MaintenanceModeError, MaintenanceModeService } from '../../../src/beasts/services/maintenance-mode-service.js';
 import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../../../src/beasts/services/dispatch-failure-message.js';
+import { AgentToolPolicyError } from '../../../src/beasts/services/role-tool-manifest.js';
 
 describe('BeastDispatchService', () => {
   let workDir: string | undefined;
@@ -888,6 +889,49 @@ describe('BeastDispatchService', () => {
       requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
       skills: [],
     });
+  });
+
+  it('does not seed workflow defaults over a tracked-agent manifest alias', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const agents = new AgentService(repo, () => '2026-03-17T00:00:00.000Z');
+    const executors = {
+      process: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const policy = {
+      agentRole: 'coding',
+      enabledTools: ['read_file', 'search_files', 'write_file'],
+      skills: [],
+    };
+    const agent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'chat',
+      createdByUser: 'operator',
+      initAction: { kind: 'chunk-plan', command: 'chunk-plan', config: policy },
+      initConfig: {
+        designDocPath: 'docs/design.md',
+        outputDir: 'docs/chunks',
+        ...policy,
+      },
+    });
+
+    await expect(dispatch.createRun({
+      definitionId: 'martin-loop',
+      trackedAgentId: agent.id,
+      config: {
+        provider: 'claude',
+        objective: 'Run with the stored restricted manifest',
+        chunkDirectory: 'docs/chunks',
+      },
+      dispatchedBy: 'chat',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+    })).rejects.toBeInstanceOf(AgentToolPolicyError);
+    expect(repo.listRuns()).toEqual([]);
   });
 
   it('preserves tracked-agent skill allowlists when final dispatch config omits skills', async () => {

@@ -72,6 +72,31 @@ describe('AgentInitService', () => {
     expect(agents.getAgent(agent.id).status).toBe('initializing');
   });
 
+  it('includes trusted selected-skill capabilities in chat init defaults', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-agent-init-'));
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z', {
+      trustedSkillToolManifests: { github: ['get_issue'] },
+    });
+    const init = new AgentInitService(agents, {
+      createRun: vi.fn(),
+    } as never, () => '2026-03-11T00:00:00.000Z');
+
+    const agent = init.createChatInitAgent({
+      definitionId: 'chunk-plan',
+      chatSessionId: 'sess-skilled',
+      command: 'chunk-plan',
+      initActionKind: 'chunk-plan',
+      config: { skills: ['github'] },
+    });
+
+    expect(agent.initConfig).toMatchObject({
+      agentRole: 'docs',
+      requestedTools: ['read_file', 'search_files', 'write_file', 'github.read'],
+      skills: ['github'],
+    });
+  });
+
   it('dispatches tracked agents after init completes and links the resulting run', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-agent-init-'));
     const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
