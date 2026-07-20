@@ -471,6 +471,19 @@ export class CliSkillExecutor {
       throw new Error(errorMsg);
     }
 
+    let acceptedOutput: unknown = martinResult.output;
+    if (sanitizeResponse) {
+      try {
+        acceptedOutput = await sanitizeResponse(martinResult.output);
+      } catch (error) {
+        this.observer.endSpan(chunkSpan, {
+          status: 'error',
+          errorMessage: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+    }
+
     // Generate commit message for squash merge (if available)
     let commitMessage: string | undefined;
     if (this.commitMessageFn) {
@@ -500,7 +513,7 @@ export class CliSkillExecutor {
       });
       const postTokens = this.observer.counter.grandTotal();
       return {
-        output: martinResult.output,
+        output: acceptedOutput,
         tokensUsed: postTokens.totalTokens - preTokens.totalTokens,
       };
     }
@@ -521,9 +534,6 @@ export class CliSkillExecutor {
       commits: mergeResult.commits,
     });
 
-    const acceptedOutput = sanitizeResponse
-      ? await sanitizeResponse(martinResult.output)
-      : martinResult.output;
     this.observer.endSpan(chunkSpan, { status: 'completed' });
     this.observer.recordReplay?.({
       kind: 'tool.result',

@@ -1068,15 +1068,18 @@ async function scanAndSanitizeResponse(
     if (aggregateResult.blocked) {
       throw new InjectionDetectedError(aggregateResult.violations, source);
     }
-    const accepted = sanitizedSerialized.restore(aggregateResult.sanitizedText);
-    const combinedText = collectStructuredText(accepted).join(' ');
-    if (combinedText.length > 0) {
+    const combinedTexts = [
+      collectStructuredText(sanitized, false).join(' '),
+      collectStructuredText(sanitized, true).join(' '),
+    ];
+    for (const combinedText of new Set(combinedTexts)) {
+      if (combinedText.length === 0) continue;
       const combinedResult = await firewall.scanResponse(combinedText);
       if (combinedResult.blocked) {
         throw new InjectionDetectedError(combinedResult.violations, source);
       }
     }
-    return accepted;
+    return sanitized;
   }
   const firewallResult = await firewall.scanResponse(serialized.text);
   if (firewallResult.blocked) {
@@ -1122,11 +1125,16 @@ async function sanitizeStructuredResponse(
   return value;
 }
 
-function collectStructuredText(value: unknown): string[] {
+function collectStructuredText(value: unknown, includeKeys: boolean): string[] {
   if (typeof value === 'string') return [value];
-  if (Array.isArray(value)) return value.flatMap(collectStructuredText);
+  if (Array.isArray(value)) {
+    return value.flatMap(item => collectStructuredText(item, includeKeys));
+  }
   if (value !== null && typeof value === 'object') {
-    return Object.values(value).flatMap(collectStructuredText);
+    return Object.entries(value).flatMap(([key, item]) => [
+      ...(includeKeys ? [key] : []),
+      ...collectStructuredText(item, includeKeys),
+    ]);
   }
   return [];
 }

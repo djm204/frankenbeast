@@ -364,6 +364,9 @@ describe('CliSkillExecutor', () => {
       expect(JSON.parse(toolResultRecord.content).output).toBe('result for [REDACTED]');
       expect(toolResultRecord.content).not.toContain('user@example.com');
       expect(result.output).toBe('result for [REDACTED]');
+      expect(sanitizeResponse.mock.invocationCallOrder[0]).toBeLessThan(
+        git.merge.mock.invocationCallOrder[0]!,
+      );
     });
 
     it('serializes dependency output maps in replayable tool.call content', async () => {
