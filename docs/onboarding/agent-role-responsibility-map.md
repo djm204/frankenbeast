@@ -25,6 +25,21 @@ Notes: docs/onboarding guidance plus root doc verifier; no package runtime owner
 
 The handoff should include all required fields from the role manifest: `agentRole`, `ownershipEntries`, `primaryOwners`, `escalationOwner`, `verification`, and `handoffNotes`.
 
+## Least-privilege tool manifests
+
+Agent creation, dispatch, start, and restart validate requested role tools against the runtime `ROLE_TOOL_MANIFESTS` allowlists in `packages/franken-orchestrator/src/beasts/services/role-tool-manifest.ts`. The structured manifest documents the same role model for operators but does not configure runtime enforcement. Use these runtime role ids when assigning lane capabilities:
+
+| Runtime role | Allowed capability summary | Explicitly excluded examples |
+| --- | --- | --- |
+| `coding` | Repo read/write, patch, foreground/background terminal, GitHub PR/comment tools, and Kanban comments. | Broader operator or cross-profile tools not listed in the manifest. |
+| `review` | Repo read/search, foreground terminal verification, GitHub PR/comment tools, and Kanban comments. | File write/patch and background shell. |
+| `docs` | Repo read/search/write for documentation, GitHub PR/comment tools, and Kanban comments. | Patch and background shell. |
+| `triage` | Repo read/search, GitHub read/comment, and Kanban comments. | File write, patch, shell execution, and PR mutation. |
+| `doctor` | Repo read/search, foreground terminal diagnostics, GitHub PR/comment tools, and Kanban comments. | File write/patch and background shell unless promoted to a coding worker. |
+| `ticket-manager` | Repo read/search, GitHub read/comment, and Kanban comments for fallback issue hygiene. | File write, patch, shell execution, background shell, and PR mutation. |
+
+Violation logs must include the role, requested tool, and denial reason so operators can inspect least-privilege enforcement without reading prompts.
+
 ## Current agent role responsibilities
 
 | Agent role | Owns | Repository owner entries to consider first | Must not own |

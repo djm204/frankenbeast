@@ -13,7 +13,14 @@ import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-bea
 import { AgentService } from '../../../src/beasts/services/agent-service.js';
 import { CapacityReservationPolicy } from '../../../src/beasts/services/capacity-reservation-policy.js';
 import { MaintenanceModeError, MaintenanceModeService } from '../../../src/beasts/services/maintenance-mode-service.js';
+import { AgentToolPolicyError } from '../../../src/beasts/services/role-tool-manifest.js';
 import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../../../src/beasts/services/dispatch-failure-message.js';
+
+const CODING_POLICY = {
+  agentRole: 'coding',
+  requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
+  skills: [],
+};
 
 describe('BeastRunService', () => {
   let workDir: string | undefined;
@@ -145,6 +152,7 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Implement the stop control',
         chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
       },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'pfk',
@@ -216,13 +224,17 @@ describe('BeastRunService', () => {
           provider: 'claude',
           objective: 'Keep lifecycle in sync',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
         },
       },
       initConfig: {
         provider: 'claude',
         objective: 'Keep lifecycle in sync',
         chunkDirectory: 'docs/chunks',
-      },
+        ...CODING_POLICY,
+        agentRole: 'coding',
+        skills: [],
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],},
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -231,6 +243,7 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Keep lifecycle in sync',
         chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
       },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'operator',
@@ -279,13 +292,17 @@ describe('BeastRunService', () => {
           provider: 'claude',
           objective: 'Stop queued work',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
         },
       },
       initConfig: {
         provider: 'claude',
         objective: 'Stop queued work',
         chunkDirectory: 'docs/chunks',
-      },
+        ...CODING_POLICY,
+        agentRole: 'coding',
+        skills: [],
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],},
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -294,6 +311,7 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Stop queued work',
         chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
       },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'operator',
@@ -335,6 +353,7 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Preserve failed spawn status',
         chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
       },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'pfk',
@@ -412,13 +431,17 @@ describe('BeastRunService', () => {
           provider: 'claude',
           objective: 'Resume the stopped run',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
         },
       },
       initConfig: {
         provider: 'claude',
         objective: 'Resume the stopped run',
         chunkDirectory: 'docs/chunks',
-      },
+        ...CODING_POLICY,
+        agentRole: 'coding',
+        skills: [],
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],},
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -427,6 +450,7 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Resume the stopped run',
         chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
       },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'operator',
@@ -483,7 +507,7 @@ describe('BeastRunService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { labels: ['feature'] },
+      initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -492,6 +516,7 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Restart safely',
         chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
         labels: ['feature'],
       },
       dispatchedBy: 'dashboard',
@@ -542,6 +567,7 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Restart safely',
         chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
       },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'operator',
@@ -585,14 +611,14 @@ describe('BeastRunService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { labels: ['feature'] },
+      initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
     });
     const urgentAgent = agents.createAgent({
       definitionId: 'martin-loop',
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: {},
+      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -601,6 +627,7 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Resume urgent security work',
         chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
         labels: ['security'],
       },
       dispatchedBy: 'dashboard',
@@ -612,6 +639,154 @@ describe('BeastRunService', () => {
 
     expect(started.status).toBe('running');
     expect(executors.process.start).toHaveBeenCalledOnce();
+  });
+
+  it('validates persisted queued run tool policy before starting an attempt', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: {
+        start: vi.fn(async (run: { id: string }) => repo.createAttempt(run.id, { status: 'running' })),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+      container: {
+        start: vi.fn(),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+    };
+    const runs = new BeastRunService(repo, new BeastCatalogService(), executors, metrics, logs, {
+      trustedSkillToolManifests: { 'safe-docs': ['read_file'] },
+    });
+    const agents = new AgentService(repo, () => '2026-03-11T00:00:00.000Z');
+    const agent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'dashboard',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: {
+        provider: 'claude',
+        objective: 'Queued run should fail closed on start',
+        chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
+      },
+    });
+    const run = repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {
+        provider: 'claude',
+        objective: 'Queued run should fail closed on start',
+        chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
+        skills: ['manifestless-after-creation'],
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-11T00:00:00.000Z',
+    });
+    agents.linkRun(agent.id, run.id);
+
+    await expect(runs.start(run.id, 'operator')).rejects.toBeInstanceOf(AgentToolPolicyError);
+
+    expect(executors.process.start).not.toHaveBeenCalled();
+    expect(repo.getRun(run.id)).toMatchObject({ id: run.id, status: 'queued' });
+  });
+
+  it('starts pre-policy direct runs without tracked-agent metadata', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: {
+        start: vi.fn(async (run: { id: string }) => repo.createAttempt(run.id, { status: 'running' })),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const runs = new BeastRunService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const run = repo.createRun({
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {
+        provider: 'claude',
+        objective: 'Resume a run created before policy metadata existed',
+        chunkDirectory: 'docs/chunks',
+      },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-11T00:00:00.000Z',
+    });
+
+    const started = await runs.start(run.id, 'operator');
+
+    expect(started.status).toBe('running');
+    expect(executors.process.start).toHaveBeenCalledOnce();
+  });
+
+  it('rejects persisted queued runs that omitted an explicit skills allowlist', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: {
+        start: vi.fn(async (run: { id: string }) => repo.createAttempt(run.id, { status: 'running' })),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const runs = new BeastRunService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const agents = new AgentService(repo, () => '2026-03-11T00:00:00.000Z');
+    const agent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'dashboard',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: {
+        provider: 'claude',
+        objective: 'Queued run should require explicit skills',
+        chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
+      },
+    });
+    const run = repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {
+        provider: 'claude',
+        objective: 'Queued run should require explicit skills',
+        chunkDirectory: 'docs/chunks',
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-11T00:00:00.000Z',
+    });
+    agents.linkRun(agent.id, run.id);
+
+    await expect(runs.start(run.id, 'operator')).rejects.toMatchObject({
+      validation: expect.objectContaining({
+        denials: expect.arrayContaining([
+          expect.objectContaining({ requestedTool: '<implicit-enabled-skills>' }),
+        ]),
+      }),
+    });
+
+    expect(executors.process.start).not.toHaveBeenCalled();
+    expect(repo.getRun(run.id)).toMatchObject({ id: run.id, status: 'queued' });
   });
 
   it('reserves linked-agent capacity before awaiting executor start', async () => {
@@ -642,7 +817,7 @@ describe('BeastRunService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { labels: ['feature'] },
+      initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
     });
     const run = repo.createRun({
       trackedAgentId: agent.id,
@@ -653,6 +828,7 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Reserve before await',
         chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
         labels: ['feature'],
       },
       dispatchedBy: 'dashboard',
@@ -713,13 +889,17 @@ describe('BeastRunService', () => {
           provider: 'claude',
           objective: 'Start queued work',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
         },
       },
       initConfig: {
         provider: 'claude',
         objective: 'Start queued work',
         chunkDirectory: 'docs/chunks',
-      },
+        ...CODING_POLICY,
+        agentRole: 'coding',
+        skills: [],
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],},
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -728,6 +908,7 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Start queued work',
         chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
       },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'operator',
@@ -811,6 +992,7 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Retry failed work',
         chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
       },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'operator',
@@ -895,13 +1077,17 @@ describe('BeastRunService', () => {
           provider: 'claude',
           objective: 'Spawn work',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
         },
       },
       initConfig: {
         provider: 'claude',
         objective: 'Spawn work',
         chunkDirectory: 'docs/chunks',
-      },
+        ...CODING_POLICY,
+        agentRole: 'coding',
+        skills: [],
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],},
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -910,6 +1096,7 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Spawn work',
         chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
       },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'operator',
@@ -1000,13 +1187,17 @@ describe('BeastRunService', () => {
           provider: 'claude',
           objective: 'Spawn work',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
         },
       },
       initConfig: {
         provider: 'claude',
         objective: 'Spawn work',
         chunkDirectory: 'docs/chunks',
-      },
+        ...CODING_POLICY,
+        agentRole: 'coding',
+        skills: [],
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],},
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -1015,6 +1206,7 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Spawn work',
         chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
       },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'operator',
@@ -1067,6 +1259,7 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Retry failed work',
         chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
       },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'operator',
@@ -1163,6 +1356,7 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Already running work',
         chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
       },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'operator',
@@ -1219,6 +1413,7 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Start queued work',
         chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
       },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'operator',
@@ -1265,6 +1460,7 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Start queued work',
         chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
       },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'operator',
@@ -1315,6 +1511,7 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Already running work',
         chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
       },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'operator',
@@ -1381,13 +1578,17 @@ describe('BeastRunService', () => {
           provider: 'claude',
           objective: 'Start deleted linked work',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
         },
       },
       initConfig: {
         provider: 'claude',
         objective: 'Start deleted linked work',
         chunkDirectory: 'docs/chunks',
-      },
+        ...CODING_POLICY,
+        agentRole: 'coding',
+        skills: [],
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],},
     });
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -1396,6 +1597,7 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Start deleted linked work',
         chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
       },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'operator',
@@ -1430,7 +1632,7 @@ describe('BeastRunService', () => {
     }));
   });
 
-  it('persists rebuilt legacy retry config before a repeated failure clears the run snapshot', async () => {
+  it('fails closed instead of synthesizing policy for legacy tracked retries', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const logs = new BeastLogStore(join(workDir, 'logs'));
@@ -1475,17 +1677,16 @@ describe('BeastRunService', () => {
       stopReason: 'start_failed',
     });
 
-    const failed = await runs.start(run.id, 'operator');
-
-    expect(failed).toMatchObject({ status: 'failed', stopReason: 'start_failed', configSnapshot: {} });
-    expect(repo.getTrackedAgent(agent.id)).toMatchObject({
-      initConfig: {
-        provider: 'claude',
-        objective: 'Retry legacy work',
-        chunkDirectory: 'docs/chunks',
+    await expect(runs.start(run.id, 'operator')).rejects.toMatchObject({
+      name: 'AgentToolPolicyError',
+      validation: {
+        denials: expect.arrayContaining([
+          expect.objectContaining({ requestedTool: '<missing-tool-manifest>' }),
+        ]),
       },
-      moduleConfig: { firewall: true, planner: true },
     });
+    expect(executors.process.start).not.toHaveBeenCalled();
+    expect(repo.getTrackedAgent(agent.id)).toMatchObject({ initConfig: {} });
   });
 
   it('rebuilds a redacted stopped run before restarting an active failed dispatch', async () => {
@@ -1509,6 +1710,9 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Recover stopped work',
         chunkDirectory: 'docs/chunks',
+        agentRole: 'coding',
+        enabledTools: CODING_POLICY.requestedTools,
+        skills: [],
       },
       createdAt: '2026-03-11T00:00:00.000Z',
       updatedAt: '2026-03-11T00:00:00.000Z',
@@ -1536,18 +1740,26 @@ describe('BeastRunService', () => {
       createdAt: '2026-03-11T00:00:01.000Z',
     });
 
-    await runs.start(run.id, 'operator');
+    await runs.restart(run.id, 'operator');
 
     expect(start).toHaveBeenCalledWith(
       expect.objectContaining({
-        configSnapshot: {
+        configSnapshot: expect.objectContaining({
           provider: 'claude',
           objective: 'Recover stopped work',
           chunkDirectory: 'docs/chunks',
-        },
+          agentRole: 'coding',
+          skills: [],
+        }),
       }),
       expect.objectContaining({ id: 'martin-loop' }),
     );
+    const rebuiltSnapshot = start.mock.calls[0]?.[0].configSnapshot;
+    expect(rebuiltSnapshot).toMatchObject({
+      enabledTools: CODING_POLICY.requestedTools,
+      skills: [],
+    });
+    expect(rebuiltSnapshot).not.toHaveProperty('requestedTools');
   });
 
   it('clears active dispatch redaction when a retry completes before running is observed', async () => {
@@ -1581,6 +1793,7 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Finish immediately',
         chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
       },
       createdAt: '2026-03-11T00:00:00.000Z',
       updatedAt: '2026-03-11T00:00:00.000Z',
@@ -1646,13 +1859,17 @@ describe('BeastRunService', () => {
           provider: 'claude',
           objective: 'Finish atomically',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
         },
       },
       initConfig: {
         provider: 'claude',
         objective: 'Finish atomically',
         chunkDirectory: 'docs/chunks',
-      },
+        ...CODING_POLICY,
+        agentRole: 'coding',
+        skills: [],
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],},
       createdAt: '2026-03-11T00:00:00.000Z',
       updatedAt: '2026-03-11T00:00:00.000Z',
     });
@@ -1665,6 +1882,7 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Finish atomically',
         chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
       },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'operator',

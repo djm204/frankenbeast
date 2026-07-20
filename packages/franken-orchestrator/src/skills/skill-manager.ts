@@ -260,7 +260,7 @@ export class SkillManager {
         [catalogEntry.name]: catalogEntry.installConfig,
       },
     });
-    const tools = catalogEntry.toolDefinitions?.length
+    const tools = catalogEntry.toolDefinitions !== undefined
       ? requireSecurityReviewByDefault(
         SkillToolManifestSchema.parse(catalogEntry.toolDefinitions),
       )
@@ -363,6 +363,14 @@ export class SkillManager {
 
   getEnabledSkills(): string[] {
     return [...this.enabledSkills].filter((name) => this.exists(name));
+  }
+
+  getSkillsDir(): string {
+    return this.skillsDirRoot;
+  }
+
+  hasToolManifest(name: string): boolean {
+    return existsSync(this.resolveSkillFilePath(name, 'tools.json'));
   }
 
   readMcpConfig(name: string): McpConfig | null {

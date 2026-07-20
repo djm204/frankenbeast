@@ -13,6 +13,7 @@ import { BeastEventBus } from '../../../src/beasts/events/beast-event-bus.js';
 import { CapacityReservationPolicy } from '../../../src/beasts/services/capacity-reservation-policy.js';
 import { MaintenanceModeError, MaintenanceModeService } from '../../../src/beasts/services/maintenance-mode-service.js';
 import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../../../src/beasts/services/dispatch-failure-message.js';
+import { AgentToolPolicyError } from '../../../src/beasts/services/role-tool-manifest.js';
 
 describe('BeastDispatchService', () => {
   let workDir: string | undefined;
@@ -50,6 +51,9 @@ describe('BeastDispatchService', () => {
         provider: 'claude',
         objective: 'Implement the dispatch panel',
         chunkDirectory: 'docs/chunks',
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
+        skills: [],
       },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'pfk',
@@ -90,8 +94,142 @@ describe('BeastDispatchService', () => {
       executionMode: 'process',
     });
     expect(run.configSnapshot.provider).toBe('prod-claude');
+    expect(run.configSnapshot.skills).toEqual([]);
     expect(executors.process.start).not.toHaveBeenCalled();
     expect(repo.listRuns()).toHaveLength(1);
+  });
+
+  it('does not widen explicit direct-run manifest aliases with workflow defaults', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+
+    await expect(dispatch.createRun({
+      definitionId: 'martin-loop',
+      config: {
+        provider: 'claude',
+        objective: 'Keep this direct run read-only',
+        chunkDirectory: 'docs/chunks',
+        agentRole: 'coding',
+        enabledTools: ['read_file'],
+        skills: [],
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+    })).rejects.toMatchObject({
+      name: 'AgentToolPolicyError',
+      validation: {
+        denials: expect.arrayContaining([
+          expect.objectContaining({ requestedTool: 'search_files' }),
+          expect.objectContaining({ requestedTool: 'write_file' }),
+        ]),
+      },
+    });
+    expect(repo.listRuns()).toEqual([]);
+  });
+
+  it('derives direct-run defaults from runtime config and trusted skill manifests', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs, {
+      trustedSkillToolManifests: { github: ['get_issue'] },
+    });
+
+    const run = await dispatch.createRun({
+      definitionId: 'chunk-plan',
+      config: {
+        designDocPath: 'docs/design.md',
+        outputDir: 'docs/chunks',
+        skills: ['github'],
+        gitConfig: { prCreation: 'manual' },
+      },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+    });
+
+    expect(run.configSnapshot).toMatchObject({
+      agentRole: 'docs',
+      requestedTools: ['read_file', 'search_files', 'write_file', 'github.pr', 'github.read'],
+      skills: ['github'],
+    });
+  });
+
+  it('validates explicit direct-run tool policy instead of replacing it with workflow defaults', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+
+    await expect(dispatch.createRun({
+      definitionId: 'chunk-plan',
+      config: {
+        designDocPath: 'docs/design.md',
+        outputDir: 'docs/chunks',
+        agentRole: 'ticket-manager',
+        requestedTools: ['read_file', 'search_files'],
+        skills: [],
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+    })).rejects.toMatchObject({
+      name: 'AgentToolPolicyError',
+      validation: {
+        rawRole: 'ticket-manager',
+        denials: [expect.objectContaining({ requestedTool: 'write_file' })],
+      },
+    });
+    expect(repo.listRuns()).toEqual([]);
+  });
+
+  it('canonicalizes direct-run role aliases before merging workflow defaults', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+
+    await expect(dispatch.createRun({
+      definitionId: 'martin-loop',
+      config: {
+        provider: 'claude',
+        objective: 'Do not let role aliases inherit coding privileges',
+        chunkDirectory: 'docs/chunks',
+        role: 'triage',
+        requestedTools: ['read_file', 'search_files'],
+        skills: [],
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+    })).rejects.toMatchObject({
+      name: 'AgentToolPolicyError',
+      validation: { rawRole: 'triage' },
+    });
+    expect(repo.listRuns()).toEqual([]);
   });
 
   it('fails closed when a persisted maintenance state file is not an object', async () => {
@@ -160,6 +298,9 @@ describe('BeastDispatchService', () => {
         provider: 'claude',
         objective: 'Implement the dispatch panel',
         chunkDirectory: 'docs/chunks',
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
+        skills: [],
       },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'pfk',
@@ -168,9 +309,12 @@ describe('BeastDispatchService', () => {
 
     expect(run.dispatchedBy).toBe('dashboard');
     expect(run.configSnapshot).toEqual({
+      agentRole: 'coding',
       provider: 'claude',
       objective: 'Implement the dispatch panel',
       chunkDirectory: 'docs/chunks',
+      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
+      skills: [],
     });
     expect(metrics.render()).toContain('beast_runs_created_total{definition_id="martin-loop",source="dashboard"} 1');
   });
@@ -201,7 +345,9 @@ describe('BeastDispatchService', () => {
         provider: 'claude',
         objective: 'Implement the dispatch panel',
         chunkDirectory: 'docs/chunks',
-        skills: ['code-review', 'testing'],
+        skills: [],
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
         promptConfig: { text: 'Launch with this context.' },
         gitConfig: { preset: 'feature-branch', baseBranch: 'develop', branchPattern: '', prCreation: true, mergeStrategy: 'squash', commitConvention: 'conventional' },
         llmConfig: { default: { provider: 'openai', model: 'gpt-5.3-codex-spark' } },
@@ -213,10 +359,12 @@ describe('BeastDispatchService', () => {
     });
 
     expect(run.configSnapshot).toEqual({
+      agentRole: 'coding',
       provider: 'claude',
       objective: 'Implement the dispatch panel',
       chunkDirectory: 'docs/chunks',
-      skills: ['code-review', 'testing'],
+      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
+      skills: [],
       promptConfig: { text: 'Launch with this context.' },
       gitConfig: { preset: 'feature-branch', baseBranch: 'develop', branchPattern: '', prCreation: 'auto', mergeStrategy: 'squash', commitConvention: 'conventional' },
       llmConfig: { default: { provider: 'openai', model: 'gpt-5.3-codex-spark' } },
@@ -250,6 +398,9 @@ describe('BeastDispatchService', () => {
         provider: 'claude',
         objective: 'Implement the dispatch panel',
         chunkDirectory: 'docs/chunks',
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
+        skills: [],
         llmConfig: { default: { provider: 1 } },
         promptConfig: { text: 'Launch with this context.' },
       },
@@ -259,10 +410,13 @@ describe('BeastDispatchService', () => {
     });
 
     expect(run.configSnapshot).toEqual({
+      agentRole: 'coding',
       provider: 'claude',
       objective: 'Implement the dispatch panel',
       chunkDirectory: 'docs/chunks',
+      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
       promptConfig: { text: 'Launch with this context.' },
+      skills: [],
     });
   });
 
@@ -302,7 +456,8 @@ describe('BeastDispatchService', () => {
         provider: 'claude',
         objective: 'Implement linkage',
         chunkDirectory: 'docs/chunks',
-      },
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
     });
 
     const run = await dispatch.createRun({
@@ -351,7 +506,7 @@ describe('BeastDispatchService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { labels: ['availability'] },
+      initConfig: { labels: ['availability'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
     });
     const firstRun = await dispatch.createRun({
       definitionId: 'martin-loop',
@@ -445,7 +600,7 @@ describe('BeastDispatchService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: { provider: 'claude', objective: 'SSE test', chunkDirectory: '.' } },
-      initConfig: { provider: 'claude', objective: 'SSE test', chunkDirectory: '.' },
+      initConfig: { provider: 'claude', objective: 'SSE test', chunkDirectory: '.', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
     });
 
     await dispatch.createRun({
@@ -490,7 +645,7 @@ describe('BeastDispatchService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: { provider: 'claude', objective: 'Approval test', chunkDirectory: '.' } },
-      initConfig: { provider: 'claude', objective: 'Approval test', chunkDirectory: '.' },
+      initConfig: { provider: 'claude', objective: 'Approval test', chunkDirectory: '.', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
     });
 
     const run = await dispatch.createRun({
@@ -548,7 +703,15 @@ describe('BeastDispatchService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: { provider: 'claude', objective: 'SSE fail test', chunkDirectory: '.' } },
-      initConfig: { identity: { name: 'Interview agent' } },
+      initConfig: {
+        provider: 'claude',
+        objective: 'SSE fail test',
+        chunkDirectory: '.',
+        identity: { name: 'Interview agent' },
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
+        skills: [],
+      },
     });
 
     const run = await dispatch.createRun({
@@ -626,7 +789,14 @@ describe('BeastDispatchService', () => {
 
     const run = await dispatch.createRun({
       definitionId: 'martin-loop',
-      config: { provider: 'claude', objective: 'Stop before start', chunkDirectory: '.' },
+      config: {
+        provider: 'claude',
+        objective: 'Stop before start',
+        chunkDirectory: '.',
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
+        skills: [],
+      },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'operator',
       executionMode: 'process',
@@ -643,5 +813,305 @@ describe('BeastDispatchService', () => {
     expect(run.status).toBe('stopped');
     expect(executors.process.start).not.toHaveBeenCalled();
     expect(repo.getRun(run.id)?.attemptCount).toBe(0);
+  });
+
+  it('does not apply tracked-agent tool policy to direct non-agent dispatches', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+
+    const run = await dispatch.createRun({
+      definitionId: 'martin-loop',
+      config: {
+        provider: 'claude',
+        objective: 'Legacy direct dispatch without tracked agent policy metadata',
+        chunkDirectory: '.',
+      },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+    });
+
+    expect(run.trackedAgentId).toBeUndefined();
+    expect(run.configSnapshot).toMatchObject({ objective: 'Legacy direct dispatch without tracked agent policy metadata' });
+  });
+
+  it('keeps persisted tracked-agent skill policy when dispatch requests broader skills', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const agents = new AgentService(repo, () => '2026-03-17T00:00:00.000Z');
+    const executors = {
+      process: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs, {
+      trustedSkillToolManifests: { 'context-only': [] },
+    });
+    const agent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'chat',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: {
+        provider: 'claude',
+        objective: 'Collect interview config',
+        chunkDirectory: 'docs/chunks',
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
+        skills: [],
+      },
+    });
+
+    const run = await dispatch.createRun({
+      definitionId: 'martin-loop',
+      trackedAgentId: agent.id,
+      config: {
+        provider: 'claude',
+        objective: 'Run final interview config',
+        chunkDirectory: 'docs/chunks',
+        skills: ['context-only'],
+      },
+      dispatchedBy: 'chat',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+    });
+
+    expect(run.configSnapshot).toMatchObject({
+      agentRole: 'coding',
+      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
+      skills: [],
+    });
+  });
+
+  it('does not seed workflow defaults over a tracked-agent manifest alias', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const agents = new AgentService(repo, () => '2026-03-17T00:00:00.000Z');
+    const executors = {
+      process: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const policy = {
+      agentRole: 'coding',
+      enabledTools: ['read_file', 'search_files', 'write_file'],
+      skills: [],
+    };
+    const agent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'chat',
+      createdByUser: 'operator',
+      initAction: { kind: 'chunk-plan', command: 'chunk-plan', config: policy },
+      initConfig: {
+        designDocPath: 'docs/design.md',
+        outputDir: 'docs/chunks',
+        ...policy,
+      },
+    });
+
+    const run = await dispatch.createRun({
+      definitionId: 'martin-loop',
+      trackedAgentId: agent.id,
+      config: {
+        provider: 'claude',
+        objective: 'Run with the stored restricted manifest',
+        chunkDirectory: 'docs/chunks',
+      },
+      dispatchedBy: 'chat',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+    });
+    expect(run.configSnapshot).toMatchObject(policy);
+    expect(run.configSnapshot).not.toHaveProperty('requestedTools');
+  });
+
+  it('fails closed for legacy tracked agents without a stored tool manifest', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const agent = repo.createTrackedAgent({
+      definitionId: 'martin-loop',
+      source: 'chat',
+      status: 'initializing',
+      createdByUser: 'legacy-operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: {
+        provider: 'claude',
+        objective: 'Legacy tracked agent without policy metadata',
+        chunkDirectory: 'docs/chunks',
+      },
+      createdAt: '2026-03-17T00:00:00.000Z',
+      updatedAt: '2026-03-17T00:00:00.000Z',
+    });
+
+    await expect(dispatch.createRun({
+      definitionId: 'martin-loop',
+      trackedAgentId: agent.id,
+      config: {
+        provider: 'claude',
+        objective: 'Start the legacy tracked agent',
+        chunkDirectory: 'docs/chunks',
+      },
+      dispatchedBy: 'chat',
+      dispatchedByUser: 'legacy-operator',
+      executionMode: 'process',
+    })).rejects.toMatchObject({
+      name: 'AgentToolPolicyError',
+      validation: {
+        denials: expect.arrayContaining([
+          expect.objectContaining({ requestedTool: '<missing-tool-manifest>' }),
+        ]),
+      },
+    });
+    expect(repo.listRuns()).toEqual([]);
+  });
+
+  it('preserves tracked-agent skill allowlists when final dispatch config omits skills', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const agents = new AgentService(repo, () => '2026-03-17T00:00:00.000Z', {
+      trustedSkillToolManifests: { 'context-only': [] },
+    });
+    const executors = {
+      process: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs, {
+      trustedSkillToolManifests: { 'context-only': [] },
+    });
+    const agent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'chat',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: {
+        provider: 'claude',
+        objective: 'Collect interview config',
+        chunkDirectory: 'docs/chunks',
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
+        skills: ['context-only'],
+      },
+    });
+
+    const run = await dispatch.createRun({
+      definitionId: 'martin-loop',
+      trackedAgentId: agent.id,
+      config: {
+        provider: 'claude',
+        objective: 'Run final interview config',
+        chunkDirectory: 'docs/chunks',
+      },
+      dispatchedBy: 'chat',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+    });
+
+    expect(run.configSnapshot).toMatchObject({
+      agentRole: 'coding',
+      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
+      skills: ['context-only'],
+    });
+  });
+
+  it('validates tracked-agent dispatches against the stored init action workflow', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const agents = new AgentService(repo, () => '2026-03-17T00:00:00.000Z');
+    const executors = {
+      process: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const agent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'chat',
+      createdByUser: 'operator',
+      initAction: { kind: 'design-interview', command: 'design-interview', config: {} },
+      initConfig: {
+        agentRole: 'docs',
+        requestedTools: ['read_file', 'search_files', 'write_file'],
+        skills: [],
+      },
+    });
+
+    const run = await dispatch.createRun({
+      definitionId: 'martin-loop',
+      trackedAgentId: agent.id,
+      config: {
+        provider: 'claude',
+        objective: 'Run Martin Loop after design interview',
+        chunkDirectory: 'docs/chunks',
+      },
+      dispatchedBy: 'chat',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+    });
+    expect(run.configSnapshot).toMatchObject({
+      agentRole: 'docs',
+      requestedTools: ['read_file', 'search_files', 'write_file'],
+      skills: [],
+    });
+  });
+
+  it('canonicalizes stored role aliases before merging request policy during dispatch', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const agents = new AgentService(repo, () => '2026-03-17T00:00:00.000Z');
+    const executors = {
+      process: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const agent = agents.createAgent({
+      definitionId: 'docs-lane',
+      source: 'api',
+      createdByUser: 'operator',
+      initAction: { kind: 'chunk-plan', command: 'docs', config: {} },
+      initConfig: {
+        role: 'docs',
+        requestedTools: ['read_file', 'search_files', 'write_file'],
+        skills: [],
+      },
+    });
+
+    await expect(dispatch.createRun({
+      definitionId: 'martin-loop',
+      trackedAgentId: agent.id,
+      config: {
+        provider: 'claude',
+        objective: 'Escalate privileges during dispatch',
+        chunkDirectory: 'docs/chunks',
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'patch'],
+      },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+    })).rejects.toThrow(/least-privilege tool manifest denied/i);
+
+    expect(repo.listRuns()).toHaveLength(0);
   });
 });

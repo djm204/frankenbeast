@@ -14,12 +14,28 @@ import {
   capacityItemFromConfig,
 } from './capacity-reservation-policy.js';
 import type { MaintenanceModeService } from './maintenance-mode-service.js';
+import {
+  AgentToolPolicyError,
+  validateAgentRoleTools,
+  type ToolPolicyDenial,
+  type ToolPolicyValidationContext,
+} from './role-tool-manifest.js';
 
 export interface BeastRunServiceOptions {
   eventBus?: BeastEventBus;
   capacityPolicy?: CapacityReservationPolicy | undefined;
   maintenance?: MaintenanceModeService | undefined;
+  trustedSkillToolManifests?: ToolPolicyValidationContext['trustedSkillToolManifests'] | undefined;
 }
+
+const STORED_AGENT_POLICY_KEYS = [
+  'agentRole',
+  'requestedTools',
+  'enabledTools',
+  'toolManifest',
+  'tools',
+  'skills',
+] as const;
 
 export class UnknownBeastRunError extends Error {
   constructor(public readonly runId: string) {
@@ -159,6 +175,7 @@ export class BeastRunService {
     let run = this.requireRun(runId);
     const definition = this.getDefinitionOrThrow(run.definitionId);
     const rebuiltConfig = this.rebuildFailedTrackedRunConfig(run, definition);
+    this.assertRoleToolManifestAllows(run, rebuiltConfig ?? run.configSnapshot);
     run = this.reserveTrackedAgentCapacityForStart(run, rebuiltConfig);
     if (rebuiltConfig) {
       run = this.persistRebuiltTrackedRunConfig(run, rebuiltConfig);
@@ -375,6 +392,7 @@ export class BeastRunService {
     this.serviceOptions.maintenance?.assertDispatchAllowed();
     const run = this.requireRun(runId);
     if (run.status === 'running') {
+      this.assertRoleToolManifestAllows(run);
       this.assertTrackedAgentCapacity(run);
       await this.stop(runId, actor);
     }
@@ -417,6 +435,28 @@ export class BeastRunService {
     return definition;
   }
 
+  private assertRoleToolManifestAllows(
+    run: BeastRun,
+    configSnapshot: Readonly<Record<string, unknown>> = run.configSnapshot,
+  ): void {
+    // Policy metadata was introduced for tracked agents. Preserve pre-migration
+    // direct runs, which have no tracked-agent policy context to validate.
+    if (!run.trackedAgentId) return;
+    const trackedAgent = this.repository.getTrackedAgent(run.trackedAgentId);
+    const validation = validateAgentRoleTools(configSnapshot, {
+      definitionId: run.definitionId,
+      initActionKind: trackedAgent?.initAction.kind,
+      initActionConfig: trackedAgent?.initAction.config,
+      trustedSkillToolManifests: this.serviceOptions.trustedSkillToolManifests,
+    });
+    if (validation.allowed) return;
+
+    for (const denial of validation.denials) {
+      defaultToolPolicyLogger(denial);
+    }
+    throw new AgentToolPolicyError(validation);
+  }
+
   notifyRunStatusChange(runId: string): void {
     const run = this.repository.getRun(runId);
     if (run) {
@@ -443,11 +483,20 @@ export class BeastRunService {
       // original failed run still holds the only valid completed answer set.
       normalized = normalizeBeastRunConfig(definition, run.configSnapshot);
     }
+    const storedPolicy = Object.fromEntries(
+      STORED_AGENT_POLICY_KEYS
+        .filter(key => Object.prototype.hasOwnProperty.call(trackedAgent.initConfig, key))
+        .map(key => [key, trackedAgent.initConfig[key]]),
+    );
+    const rebuiltPolicyConfig = {
+      ...storedPolicy,
+      ...normalized,
+    };
     const snapshotModules = run.configSnapshot.modules;
     const modules = snapshotModules && typeof snapshotModules === 'object' && !Array.isArray(snapshotModules)
       ? snapshotModules
       : trackedAgent.moduleConfig;
-    return modules ? { ...normalized, modules } : normalized;
+    return modules ? { ...rebuiltPolicyConfig, modules } : rebuiltPolicyConfig;
   }
 
   private persistRebuiltTrackedRunConfig(
@@ -629,6 +678,10 @@ export class BeastRunService {
       this.serviceOptions.eventBus?.publish(publication);
     }
   }
+}
+
+function defaultToolPolicyLogger(entry: ToolPolicyDenial): void {
+  console.warn('[agent-tool-policy-denial]', JSON.stringify(entry));
 }
 
 function redactDispatchFailureEvent(event: BeastRunEvent): BeastRunEvent {

@@ -9,6 +9,14 @@
     "verification",
     "handoffNotes"
   ],
+  "toolManifests": {
+    "coding": ["read_file", "search_files", "write_file", "patch", "terminal", "terminal.background", "github.read", "github.comment", "github.pr", "kanban.comment"],
+    "review": ["read_file", "search_files", "terminal", "github.read", "github.comment", "github.pr", "kanban.comment"],
+    "docs": ["read_file", "search_files", "write_file", "github.read", "github.comment", "github.pr", "kanban.comment"],
+    "triage": ["read_file", "search_files", "github.read", "github.comment", "kanban.comment"],
+    "doctor": ["read_file", "search_files", "terminal", "github.read", "github.comment", "github.pr", "kanban.comment"],
+    "ticket-manager": ["read_file", "search_files", "github.read", "github.comment", "kanban.comment"]
+  },
   "roleMappings": [
     {
       "roleId": "pm-shard",

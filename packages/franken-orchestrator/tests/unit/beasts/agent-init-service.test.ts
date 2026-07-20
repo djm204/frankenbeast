@@ -6,6 +6,7 @@ import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-bea
 import { AgentService } from '../../../src/beasts/services/agent-service.js';
 import { AgentInitService } from '../../../src/beasts/services/agent-init-service.js';
 import { MaintenanceModeError } from '../../../src/beasts/services/maintenance-mode-service.js';
+import { AgentToolPolicyError } from '../../../src/beasts/services/role-tool-manifest.js';
 
 describe('AgentInitService', () => {
   let workDir: string | undefined;
@@ -29,17 +30,89 @@ describe('AgentInitService', () => {
       chatSessionId: 'sess-1',
       command: '/interview',
       initActionKind: 'design-interview',
-      config: { goal: 'Map the lifecycle' },
+      config: { goal: 'Map the lifecycle', agentRole: 'docs', requestedTools: ['read_file', 'search_files', 'write_file'], skills: [] },
     });
     const detail = agents.getAgentDetail(agent.id);
 
     expect(agent.chatSessionId).toBe('sess-1');
     expect(agent.initAction.command).toBe('/interview');
+    expect(agent.initConfig).toMatchObject({
+      agentRole: 'docs',
+      requestedTools: ['read_file', 'search_files', 'write_file'],
+      skills: [],
+    });
     expect(detail.events.map((event) => event.type)).toEqual([
       'agent.created',
       'agent.chat.bound',
       'agent.command.sent',
     ]);
+  });
+
+  it('derives explicit policy fields for empty chat init shells while interviews collect config', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-agent-init-'));
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
+    const init = new AgentInitService(agents, {
+      createRun: vi.fn(),
+    } as never, () => '2026-03-11T00:00:00.000Z');
+
+    const agent = init.createChatInitAgent({
+      definitionId: 'martin-loop',
+      chatSessionId: 'sess-empty',
+      command: 'martin-loop',
+      initActionKind: 'martin-loop',
+      config: {},
+    });
+
+    expect(agent.initConfig).toMatchObject({
+      agentRole: 'coding',
+      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
+      skills: [],
+    });
+    expect(agents.getAgent(agent.id).status).toBe('initializing');
+  });
+
+  it('includes trusted selected-skill capabilities in chat init defaults', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-agent-init-'));
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z', {
+      trustedSkillToolManifests: { github: ['get_issue'] },
+    });
+    const init = new AgentInitService(agents, {
+      createRun: vi.fn(),
+    } as never, () => '2026-03-11T00:00:00.000Z');
+
+    const agent = init.createChatInitAgent({
+      definitionId: 'chunk-plan',
+      chatSessionId: 'sess-skilled',
+      command: 'chunk-plan',
+      initActionKind: 'chunk-plan',
+      config: { skills: ['github'] },
+    });
+
+    expect(agent.initConfig).toMatchObject({
+      agentRole: 'docs',
+      requestedTools: ['read_file', 'search_files', 'write_file', 'github.read'],
+      skills: ['github'],
+    });
+  });
+
+  it('does not widen explicit chat init manifest aliases with workflow defaults', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-agent-init-'));
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
+    const init = new AgentInitService(agents, {
+      createRun: vi.fn(),
+    } as never, () => '2026-03-11T00:00:00.000Z');
+
+    expect(() => init.createChatInitAgent({
+      definitionId: 'chunk-plan',
+      chatSessionId: 'sess-restricted',
+      command: 'chunk-plan',
+      initActionKind: 'chunk-plan',
+      config: { agentRole: 'docs', tools: ['read_file'], skills: [] },
+    })).toThrow(AgentToolPolicyError);
+    expect(agents.listAgents()).toEqual([]);
   });
 
   it('dispatches tracked agents after init completes and links the resulting run', async () => {
@@ -66,7 +139,7 @@ describe('AgentInitService', () => {
         config: { designDocPath: 'docs/plans/design.md' },
         chatSessionId: 'sess-1',
       },
-      initConfig: { designDocPath: 'docs/plans/design.md' },
+      initConfig: { designDocPath: 'docs/plans/design.md', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
       chatSessionId: 'sess-1',
     });
 
@@ -115,7 +188,7 @@ describe('AgentInitService', () => {
       source: 'chat',
       createdByUser: 'chat-session:sess-1',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {}, chatSessionId: 'sess-1' },
-      initConfig: { provider: 'claude', objective: 'ship' },
+      initConfig: { provider: 'claude', objective: 'ship', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
       chatSessionId: 'sess-1',
     });
 
@@ -129,5 +202,44 @@ describe('AgentInitService', () => {
     const detail = agents.getAgentDetail(agent.id);
     expect(detail.agent.status).toBe('stopped');
     expect(detail.events.map((event) => event.type)).toContain('agent.dispatch.paused');
+  });
+
+  it('marks chat-created agents stopped when tool policy blocks dispatch', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-agent-init-'));
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
+    const validation = {
+      allowed: false,
+      role: 'docs' as const,
+      rawRole: 'docs',
+      requestedTools: ['terminal'],
+      denials: [{ role: 'docs' as const, requestedTool: 'terminal', reason: 'not allowed' }],
+    };
+    const init = new AgentInitService(agents, {
+      createRun: vi.fn().mockRejectedValue(new AgentToolPolicyError(validation)),
+    } as never, () => '2026-03-11T00:00:00.000Z');
+    const agent = agents.createAgent({
+      definitionId: 'design-interview',
+      source: 'chat',
+      createdByUser: 'chat-session:sess-policy',
+      initAction: { kind: 'design-interview', command: '/interview', config: {}, chatSessionId: 'sess-policy' },
+      initConfig: { agentRole: 'docs', requestedTools: ['read_file', 'write_file'], skills: [] },
+      chatSessionId: 'sess-policy',
+    });
+
+    await expect(init.dispatchAgent(agent.id, {
+      definitionId: 'design-interview',
+      chatSessionId: 'sess-policy',
+      config: {},
+    })).rejects.toThrow(AgentToolPolicyError);
+
+    const detail = agents.getAgentDetail(agent.id);
+    expect(detail.agent.status).toBe('stopped');
+    expect(detail.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'agent.dispatch.denied',
+        payload: { validation },
+      }),
+    ]));
   });
 });

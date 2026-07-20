@@ -2119,6 +2119,7 @@ describe('main() execution', () => {
 
   it('prefers the root .env beast operator token for chat-server', async () => {
     const root = join(tmpdir(), `frankenbeast-run-test-${Date.now()}`);
+    const skillsDir = join(root, 'skills');
     tempDirs.push(root);
     mkdirSync(join(root, 'packages', 'franken-web'), { recursive: true });
     writeFileSync(
@@ -2132,6 +2133,15 @@ describe('main() execution', () => {
 
     delete process.env.VITE_BEAST_OPERATOR_TOKEN;
     delete process.env.FRANKENBEAST_BEAST_OPERATOR_TOKEN;
+    mockCreateCliDeps.mockResolvedValueOnce({
+      deps: {},
+      cliLlmAdapter: { name: 'chat-adapter' },
+      observerBridge: {},
+      logger: {},
+      finalize: mockFinalize,
+      skillManager: { getSkillsDir: () => skillsDir },
+      providerRegistry: { getProviders: vi.fn(() => []) },
+    } as any);
 
     mockParseArgs.mockReturnValue({
       subcommand: 'chat-server',
@@ -2167,6 +2177,7 @@ describe('main() execution', () => {
 
     await main();
 
+    expect(mockCreateBeastServices).toHaveBeenCalledWith(expect.objectContaining({ skillsDir }));
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
       operatorToken: TEST_ROOT_ENV_TOKEN,
       beastControl: expect.objectContaining({

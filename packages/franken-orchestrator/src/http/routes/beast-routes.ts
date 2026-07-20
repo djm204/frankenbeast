@@ -14,6 +14,7 @@ import {
 } from '../../beasts/services/beast-interview-service.js';
 import { BeastRunService, UnknownBeastRunError } from '../../beasts/services/beast-run-service.js';
 import { CapacityReservationError } from '../../beasts/services/capacity-reservation-policy.js';
+import { AgentToolPolicyError } from '../../beasts/services/role-tool-manifest.js';
 import type { MaintenanceModeService } from '../../beasts/services/maintenance-mode-service.js';
 import { MaintenanceModeError } from '../../beasts/services/maintenance-mode-service.js';
 import type { AgentService } from '../../beasts/services/agent-service.js';
@@ -122,6 +123,17 @@ function throwCapacityReservationError(error: unknown): void {
   }
 }
 
+function throwAgentToolPolicyError(error: unknown): void {
+  if (error instanceof AgentToolPolicyError) {
+    throw new HttpError(
+      403,
+      'AGENT_TOOL_POLICY_DENIED',
+      error.message,
+      { validation: error.validation },
+    );
+  }
+}
+
 class InterviewSessionNotFoundHttpError extends HttpError {
   constructor(sessionId: string) {
     super(404, 'INTERVIEW_SESSION_NOT_FOUND', `Beast interview session '${sessionId}' was not found`);
@@ -132,6 +144,7 @@ function throwKnownRunError(runId: string, error: unknown): never {
   if (error instanceof MaintenanceModeError) {
     throw new HttpError(423, 'MAINTENANCE_MODE_ACTIVE', error.message, { maintenance: error.state });
   }
+  throwAgentToolPolicyError(error);
   throwCapacityReservationError(error);
   if (error instanceof UnknownBeastRunError) {
     throw beastRunNotFound(runId);
@@ -365,6 +378,25 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
           `Tracked agent '${body.trackedAgentId}' was not found`,
         );
       }
+      if (error instanceof AgentToolPolicyError && body.trackedAgentId) {
+        try {
+          const trackedAgent = deps.agents.getAgent(body.trackedAgentId);
+          if (trackedAgent.status === 'initializing') {
+            deps.agents.updateAgent(body.trackedAgentId, { status: 'stopped' });
+            deps.agents.appendEvent(body.trackedAgentId, {
+              level: 'warning',
+              type: 'agent.dispatch.denied',
+              message: error.message,
+              payload: { denials: error.validation.denials },
+            });
+          }
+        } catch (cleanupError) {
+          if (!(cleanupError instanceof UnknownTrackedAgentError)) {
+            throw cleanupError;
+          }
+        }
+      }
+      throwAgentToolPolicyError(error);
       if (error instanceof ZodError) {
         throw new HttpError(
           422,

@@ -6,6 +6,7 @@ import { DeletedTrackedAgentError, UnknownTrackedAgentError } from '../../beasts
 import { CapacityReservationError } from '../../beasts/services/capacity-reservation-policy.js';
 import { MaintenanceModeError, type MaintenanceModeService } from '../../beasts/services/maintenance-mode-service.js';
 import type { AgentService } from '../../beasts/services/agent-service.js';
+import { AgentToolPolicyError } from '../../beasts/services/role-tool-manifest.js';
 import type { BeastDispatchService } from '../../beasts/services/beast-dispatch-service.js';
 import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../../beasts/services/dispatch-failure-message.js';
 import type { BeastRunService } from '../../beasts/services/beast-run-service.js';
@@ -50,6 +51,34 @@ const PatchAgentConfigBody = z.object({
   moduleConfig: ModuleConfigSchema.optional(),
 }).strict();
 
+const AGENT_TOOL_POLICY_CONFIG_KEYS = [
+  'agentRole',
+  'role',
+  'laneRole',
+  'requestedTools',
+  'enabledTools',
+  'toolManifest',
+  'tools',
+  'skills',
+] as const;
+
+const AGENT_TOOL_MANIFEST_KEYS = [
+  'requestedTools',
+  'enabledTools',
+  'toolManifest',
+  'tools',
+] as const;
+
+function pickAgentToolPolicyConfig(
+  config: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  return Object.fromEntries(
+    AGENT_TOOL_POLICY_CONFIG_KEYS
+      .filter(key => Object.hasOwn(config, key))
+      .map(key => [key, config[key]]),
+  );
+}
+
 export interface AgentRoutesDeps {
   agents: AgentService;
   dispatch?: BeastDispatchService;
@@ -82,6 +111,36 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
 
   app.post('/v1/beasts/agents', async (c) => {
     const body = validateBody(CreateAgentBody, await parseJsonBody(c));
+    const actionPolicyConfig = pickAgentToolPolicyConfig(body.initAction.config);
+    const hasExplicitToolManifest = AGENT_TOOL_MANIFEST_KEYS.some(
+      key => Object.hasOwn(actionPolicyConfig, key) || Object.hasOwn(body.initConfig, key),
+    );
+    const policyDefaults: Record<string, unknown> = {
+      ...deps.agents.defaultToolPolicyConfig(
+        body.definitionId,
+        body.initAction.kind,
+        { ...body.initAction.config, ...body.initConfig },
+      ),
+    };
+    if (hasExplicitToolManifest) {
+      delete policyDefaults.requestedTools;
+    }
+    const explicitRoleAlias = body.initConfig.agentRole
+      ?? body.initConfig.role
+      ?? body.initConfig.laneRole
+      ?? actionPolicyConfig.agentRole
+      ?? actionPolicyConfig.role
+      ?? actionPolicyConfig.laneRole;
+    const initConfigWithAliases = {
+      ...policyDefaults,
+      ...actionPolicyConfig,
+      ...body.initConfig,
+    };
+    const roleAlias = explicitRoleAlias ?? initConfigWithAliases.agentRole;
+    const initConfig = {
+      ...initConfigWithAliases,
+      ...(typeof roleAlias === 'string' ? { agentRole: roleAlias } : {}),
+    };
     const shouldAutoDispatch = body.autoDispatch !== false && deps.dispatch && shouldDispatchOnCreate(body.initAction.kind);
     if (shouldAutoDispatch) {
       try {
@@ -98,7 +157,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
         }
         throw error;
       }
-      const capacityDecision = deps.agents.canStartInitConfig(body.initConfig);
+      const capacityDecision = deps.agents.canStartInitConfig(initConfig);
       if (!capacityDecision.allowed) {
         return c.json({
           error: {
@@ -112,16 +171,30 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
         }, 409);
       }
     }
-    const agent = deps.agents.createAgent({
-      definitionId: body.definitionId,
-      source: body.chatSessionId ? 'chat' : 'dashboard',
-      createdByUser: body.chatSessionId ? `chat-session:${body.chatSessionId}` : 'operator',
-      initAction: body.initAction,
-      initConfig: body.initConfig,
-      ...(body.chatSessionId ? { chatSessionId: body.chatSessionId } : {}),
-      ...(body.executionMode ? { executionMode: body.executionMode } : {}),
-      ...(body.moduleConfig ? { moduleConfig: body.moduleConfig } : {}),
-    });
+    let agent: TrackedAgent;
+    try {
+      agent = deps.agents.createAgent({
+        definitionId: body.definitionId,
+        source: body.chatSessionId ? 'chat' : 'dashboard',
+        createdByUser: body.chatSessionId ? `chat-session:${body.chatSessionId}` : 'operator',
+        initAction: body.initAction,
+        initConfig,
+        ...(body.chatSessionId ? { chatSessionId: body.chatSessionId } : {}),
+        ...(body.executionMode ? { executionMode: body.executionMode } : {}),
+        ...(body.moduleConfig ? { moduleConfig: body.moduleConfig } : {}),
+      });
+    } catch (error) {
+      if (error instanceof AgentToolPolicyError) {
+        return c.json({
+          error: {
+            code: 'AGENT_TOOL_POLICY_DENIED',
+            message: error.message,
+            details: { validation: error.validation },
+          },
+        }, 403);
+      }
+      throw error;
+    }
     deps.agents.appendEvent(agent.id, {
       level: 'info',
       type: 'agent.created',
@@ -160,7 +233,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
     try {
       await deps.dispatch.createRun({
         definitionId: body.definitionId,
-        config: body.initConfig,
+        config: initConfig,
         dispatchedBy: body.chatSessionId ? 'chat' : 'api',
         dispatchedByUser: body.chatSessionId ? `chat-session:${body.chatSessionId}` : 'operator',
         trackedAgentId: agent.id,
@@ -169,6 +242,22 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
         ...(body.moduleConfig ? { moduleConfig: body.moduleConfig } : {}),
       });
     } catch (error) {
+      if (error instanceof AgentToolPolicyError) {
+        deps.agents.updateAgent(agent.id, { status: 'stopped' });
+        deps.agents.appendEvent(agent.id, {
+          level: 'warning',
+          type: 'agent.dispatch.denied',
+          message: error.message,
+          payload: { validation: error.validation },
+        });
+        return c.json({
+          error: {
+            code: 'AGENT_TOOL_POLICY_DENIED',
+            message: error.message,
+            details: { agentId: agent.id, validation: error.validation },
+          },
+        }, 403);
+      }
       if (error instanceof MaintenanceModeError) {
         deps.agents.updateAgent(agent.id, { status: 'stopped' });
         deps.agents.appendEvent(agent.id, {
@@ -356,6 +445,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       }
       throwMaintenanceModeError(error);
       throwCapacityReservationError(error);
+      throwAgentToolPolicyError(error);
       throw error;
     }
   });
@@ -445,6 +535,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       }
       throwMaintenanceModeError(error);
       throwCapacityReservationError(error);
+      throwAgentToolPolicyError(error);
       throw error;
     }
   });
@@ -530,6 +621,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       }
       throwMaintenanceModeError(error);
       throwCapacityReservationError(error);
+      throwAgentToolPolicyError(error);
       throw error;
     }
   });
@@ -633,6 +725,17 @@ function throwCapacityReservationError(error: unknown): void {
         decision: error.decision,
         capacity: error.state,
       },
+    );
+  }
+}
+
+function throwAgentToolPolicyError(error: unknown): void {
+  if (error instanceof AgentToolPolicyError) {
+    throw new HttpError(
+      403,
+      'AGENT_TOOL_POLICY_DENIED',
+      error.message,
+      { validation: error.validation },
     );
   }
 }
