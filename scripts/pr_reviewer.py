@@ -28,6 +28,7 @@ MAX_REVIEW_BYTES = 120_000
 MAX_REVIEW_BODY_CHARS = 60_000
 REVIEW_BODY_TRUNCATION_NOTICE = "\n\n... [REVIEW BODY TRUNCATED BEFORE POSTING] ..."
 HTTP_TIMEOUT_SECONDS = 30
+GH_LIST_TIMEOUT_SECONDS = 30
 GH_DIFF_TIMEOUT_SECONDS = 30
 AGY_TIMEOUT_SECONDS = 300
 SECRET_PATTERN = re.compile(
@@ -151,6 +152,7 @@ def get_open_prs(repository=None):
             cwd=WORKSPACE,
             stderr=subprocess.DEVNULL,
             env=gh_environment(),
+            timeout=GH_LIST_TIMEOUT_SECONDS,
         ).decode("utf-8")
         return json.loads(output)
     except Exception as error:
@@ -408,10 +410,25 @@ def run_agy_review(diff_content):
 
 
 def parse_final_verdict(review_body):
+    outside_code = []
+    fence = None
+    for line in review_body.splitlines():
+        stripped = line.lstrip()
+        fence_match = re.match(r"(`{3,}|~{3,})", stripped)
+        if fence_match:
+            marker = fence_match.group(1)[0]
+            if fence is None:
+                fence = marker
+            elif fence == marker:
+                fence = None
+            continue
+        if fence is not None or line.startswith(("    ", "\t")):
+            continue
+        outside_code.append(line)
     matches = re.findall(
-        r"(?im)^\s*(?:(?:[-+>]|#{1,6})\s+)?[*_`~]*\s*VERDICT:\s*"
+        r"(?im)^\s*(?:(?:-|#{1,6})\s+)?[*_`~]*\s*VERDICT:\s*"
         r"(APPROVE|REQUEST[_ -]CHANGES|COMMENT)\s*[.!]?\s*[*_`~]*\s*$",
-        review_body,
+        "\n".join(outside_code),
     )
     if not matches:
         return "comment"
@@ -431,7 +448,12 @@ def bound_review_body(review_body):
 
 
 def post_pr_review(
-    pr_number, review_body, security_warnings, diff_truncated=False, repository=None
+    pr_number,
+    review_body,
+    security_warnings,
+    head_sha,
+    diff_truncated=False,
+    repository=None,
 ):
     repository = repository or get_repository()
     verdict = "comment"
@@ -464,20 +486,27 @@ def post_pr_review(
         verdict = parse_final_verdict(review_body)
 
     review_body = bound_review_body(review_body)
-    temp_file = WORKSPACE / f".fbeast/pr_review_{pr_number}.md"
+    temp_file = WORKSPACE / f".fbeast/pr_review_{pr_number}.json"
     try:
         temp_file.parent.mkdir(parents=True, exist_ok=True)
-        temp_file.write_text(review_body, encoding="utf-8")
+        payload = {
+            "body": review_body,
+            "commit_id": head_sha,
+            "event": {
+                "approve": "APPROVE",
+                "request-changes": "REQUEST_CHANGES",
+                "comment": "COMMENT",
+            }[verdict],
+        }
+        temp_file.write_text(json.dumps(payload), encoding="utf-8")
         subprocess.check_call(
             [
                 "gh",
-                "pr",
-                "review",
-                str(pr_number),
-                "--repo",
-                repository,
-                f"--{verdict}",
-                "-F",
+                "api",
+                "--method",
+                "POST",
+                f"repos/{repository}/pulls/{pr_number}/reviews",
+                "--input",
                 str(temp_file),
             ],
             cwd=WORKSPACE,
@@ -622,6 +651,7 @@ def process_prs():
             pr_number,
             review_body,
             security_warnings,
+            head_sha,
             diff_truncated=diff_truncated,
             repository=repository,
         )
