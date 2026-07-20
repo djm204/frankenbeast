@@ -58,9 +58,8 @@ describe('CliChannel', () => {
 
     channel.cancel('req-001');
     expect(cancel).toHaveBeenCalledTimes(1);
-
-    answer?.('a');
-    await pending;
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(answer).toBeTypeOf('function');
   });
 
   it('serializes approvals and drops a queued request cancelled by its own timeout', async () => {
