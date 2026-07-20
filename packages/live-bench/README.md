@@ -31,6 +31,7 @@ Key exports:
 | --- | --- |
 | `loadCorpus`, `loadTaskFile` | Strictly load benchmark task definitions from a corpus root. |
 | `loadCorpusWithDiagnostics` | Load valid tasks while quarantining malformed candidate-tier files in a structured diagnostics result. Core and stress task errors remain fatal. |
+| `CorpusLoadOptions` | Override corpus traversal limits passed as the third loader argument (`maxDepth`, default 32; `maxFiles`, default 10,000). |
 | `BenchmarkTaskSchema` | Validate benchmark task JSON with Zod. |
 | `ToolCallEvidenceSchema` | Validate a single tool-call evidence record. |
 | `ToolCallEvidenceManifestSchema`, `serializeToolCallEvidence` | Validate and serialize the full tool-call evidence artifact array. |

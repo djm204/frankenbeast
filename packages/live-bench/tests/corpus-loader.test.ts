@@ -79,6 +79,38 @@ describe('corpus loader', () => {
     expect(() => loadCorpus(root)).toThrow(/Invalid benchmark task/);
   });
 
+  it('rejects corpus directories deeper than the configured limit', () => {
+    const root = tempCorpus();
+    const taskPath = writeTask(root, 'core/one/two/deep.task.json', validTask);
+
+    expect(() => loadCorpus(root, undefined, { maxDepth: 2 })).toThrow(
+      `Corpus directory depth limit of 2 exceeded at ${join(taskPath, '..')}`,
+    );
+  });
+
+  it('rejects corpora with more files than the configured limit', () => {
+    const root = tempCorpus();
+    writeTask(root, 'core/a.task.json', { ...validTask, taskId: 'a-task' });
+    writeTask(root, 'core/b.task.json', { ...validTask, taskId: 'b-task' });
+    writeTask(root, 'core/c.task.json', { ...validTask, taskId: 'c-task' });
+
+    expect(() => loadCorpusWithDiagnostics(root, undefined, { maxFiles: 2 })).toThrow(
+      /Corpus file count limit of 2 exceeded/,
+    );
+  });
+
+  it.each([
+    ['maxDepth', -1],
+    ['maxFiles', Number.NaN],
+  ] as const)('rejects invalid corpus traversal option %s=%s', (name, value) => {
+    const root = tempCorpus();
+    writeTask(root, 'core/a.task.json', validTask);
+
+    expect(() => loadCorpus(root, undefined, { [name]: value })).toThrow(
+      `Corpus load option ${name} must be a non-negative safe integer`,
+    );
+  });
+
   it('loads matching tiers sorted by task id without validating unselected tiers', () => {
     const root = tempCorpus();
     writeTask(root, 'candidate/z.task.json', { ...validTask, taskId: 'z-task', tier: 'candidate' });
