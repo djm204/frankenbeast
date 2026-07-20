@@ -31,7 +31,6 @@ import { formatSessionOptionLabel } from './chat-shell/session-labels';
 import { getSidebarFocusableElements } from './chat-shell/sidebar-focus';
 import { appendUniqueLogLine, formatStreamedLogLine, getAgentEventRunId } from './chat-shell/beast-log-utils';
 import { networkErrorMessage } from './chat-shell/network-error';
-
 // Route pages are lazy so each becomes its own chunk; they carry route-specific
 // UI the initial chat view never needs, keeping the entry bundle small.
 const DashboardPage = lazy(() =>
@@ -124,6 +123,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const [beastAgentNextCursor, setBeastAgentNextCursor] = useState<string | undefined>(undefined);
   const beastAgentNextCursorRef = useRef<string | undefined>(undefined);
   const beastAgentPagesLoadedRef = useRef(1);
+  const beastAgentWindowVersionRef = useRef(0);
   const [beastAgentsLoadingMore, setBeastAgentsLoadingMore] = useState(false);
   const [beastRuns, setBeastRuns] = useState<BeastRunSummary[]>([]);
   const [beastContainerRuntime, setBeastContainerRuntime] = useState<BeastContainerRuntimeStatus | undefined>(undefined);
@@ -394,6 +394,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
       setBeastError(null);
       setBeastCreationUnavailableReason(null);
       setBeastCatalog(catalog);
+      beastAgentWindowVersionRef.current += 1;
       setBeastAgents(agentWindow.agents);
       beastAgentNextCursorRef.current = agentWindow.nextCursor;
       setBeastAgentNextCursor(agentWindow.nextCursor);
@@ -543,8 +544,8 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             events: [...current.events, nextEvent],
           };
         });
-        const isAgentCreation = event.event.type === 'agent.created';
-        if ((!sawKnownAgent && (!beastAgentNextCursorRef.current || isAgentCreation)) || selectedAgentLinkedRun) requestBeastRefresh();
+        const isAgentCreationSignal = event.event.type === 'agent.created' || event.event.type === 'agent.dispatch.linked';
+        if ((!sawKnownAgent && (!beastAgentNextCursorRef.current || isAgentCreationSignal)) || selectedAgentLinkedRun) requestBeastRefresh();
       },
       runStatus: (event) => {
         if (cancelled) return;
@@ -1056,9 +1057,11 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             onLoadMoreAgents={async () => {
               const cursor = beastAgentNextCursor;
               if (!cursor || beastAgentsLoadingMore) return;
+              const windowVersion = beastAgentWindowVersionRef.current;
               setBeastAgentsLoadingMore(true);
               try {
                 const page = await beastClient.listAgentPage({ cursor });
+                if (windowVersion !== beastAgentWindowVersionRef.current) return;
                 setBeastAgents((current) => {
                   const knownIds = new Set(current.map((agent) => agent.id));
                   return [...current, ...page.agents.filter((agent) => !knownIds.has(agent.id))];
@@ -1067,9 +1070,13 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                 setBeastAgentNextCursor(page.nextCursor);
                 beastAgentPagesLoadedRef.current += 1;
               } catch (error) {
-                setBeastError(error instanceof Error ? error.message : 'Unable to load more tracked agents.');
+                if (windowVersion === beastAgentWindowVersionRef.current) {
+                  setBeastError(error instanceof Error ? error.message : 'Unable to load more tracked agents.');
+                }
               } finally {
-                setBeastAgentsLoadingMore(false);
+                if (windowVersion === beastAgentWindowVersionRef.current) {
+                  setBeastAgentsLoadingMore(false);
+                }
               }
             }}
             onDelete={(agentId) => {

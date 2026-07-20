@@ -1123,6 +1123,51 @@ describe('ChatShell', () => {
     expect(mockListAgentPage).toHaveBeenCalledTimes(4);
   });
 
+  it('discards an in-flight load-more page when a fleet refresh replaces its cursor snapshot', async () => {
+    window.location.hash = '#/beasts';
+    const firstAgent = {
+      id: 'agent-page-1', definitionId: 'chunk-plan', status: 'stopped', source: 'dashboard',
+      createdByUser: 'operator', initAction: { kind: 'chunk-plan', command: '/plan', config: {} },
+      initConfig: {}, createdAt: '2026-03-11T00:00:00.000Z', updatedAt: '2026-03-11T00:00:01.000Z',
+    };
+    const newAgent = { ...firstAgent, id: 'agent-new', createdAt: '2026-03-12T00:00:00.000Z' };
+    const staleSecondPageAgent = { ...firstAgent, id: 'agent-stale-page-2', createdAt: '2026-03-10T00:00:00.000Z' };
+    let resolveStalePage!: (page: { agents: typeof firstAgent[]; nextCursor?: string }) => void;
+    const stalePage = new Promise<{ agents: typeof firstAgent[]; nextCursor?: string }>((resolve) => {
+      resolveStalePage = resolve;
+    });
+    mockListAgentPage
+      .mockResolvedValueOnce({ agents: [firstAgent], nextCursor: 'old-page-2' })
+      .mockReturnValueOnce(stalePage)
+      .mockResolvedValueOnce({ agents: [newAgent, firstAgent], nextCursor: 'fresh-page-2' })
+      .mockResolvedValueOnce({ agents: [], nextCursor: undefined });
+
+    render(
+      <ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.1.0" />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more agents' }, { timeout: 5000 }));
+    await act(async () => {
+      latestBeastEventHandlers?.agentEvent?.({
+        agentId: 'agent-new',
+        event: {
+          id: 'dispatch-linked', sequence: 1, level: 'info', type: 'agent.dispatch.linked',
+          message: 'Dispatch run linked', payload: { runId: 'run-new' }, createdAt: newAgent.createdAt,
+        },
+      });
+    });
+    await waitFor(() => expect(screen.getByText('agent-new')).toBeTruthy());
+
+    await act(async () => {
+      resolveStalePage({ agents: [staleSecondPageAgent], nextCursor: 'stale-page-3' });
+      await stalePage;
+    });
+
+    expect(screen.queryByText('agent-stale-page-2')).toBeNull();
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more agents' }));
+    await waitFor(() => expect(mockListAgentPage).toHaveBeenNthCalledWith(4, { cursor: 'fresh-page-2' }));
+  });
+
   it('persists Beast drawer edits and refreshes the selected agent detail', async () => {
     window.location.hash = '#/beasts';
     const currentAgent = {
@@ -1488,6 +1533,33 @@ describe('ChatShell', () => {
         },
       });
     });
+    await waitFor(() => expect(mockListAgentPage).toHaveBeenCalledTimes(2));
+  });
+
+  it('refreshes a paginated fleet for an unknown agent dispatch-link event', async () => {
+    window.location.hash = '#/beasts';
+    mockListAgentPage.mockImplementation(async () => ({
+      agents: await mockListAgents(),
+      nextCursor: 'cursor-page-2',
+    }));
+
+    render(
+      <ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />,
+    );
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Load more agents' })).toBeTruthy());
+    expect(mockListAgentPage).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      latestBeastEventHandlers?.agentEvent?.({
+        agentId: 'new-auto-dispatched-agent',
+        event: {
+          id: 'dispatch-linked', sequence: 1, level: 'info', type: 'agent.dispatch.linked',
+          message: 'Dispatch run linked', payload: { runId: 'run-new' }, createdAt: '2026-03-12T00:00:00.000Z',
+        },
+      });
+    });
+
     await waitFor(() => expect(mockListAgentPage).toHaveBeenCalledTimes(2));
   });
 
