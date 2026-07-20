@@ -277,16 +277,32 @@ describe('SQLiteAdapter', () => {
       ])
     })
 
-    it('creates a composite index for trace detail span ordering', () => {
+    it('creates indexes for ordered trace and span queries', () => {
       const raw = new Database(dbPath)
-      const indexes = raw.prepare("PRAGMA index_list('spans')").all() as Array<{ name: string }>
-      const columns = indexes.map(index => ({
+      const traceIndexes = raw.prepare("PRAGMA index_list('traces')").all() as Array<{ name: string }>
+      const spanIndexes = raw.prepare("PRAGMA index_list('spans')").all() as Array<{ name: string }>
+      const indexColumns = (tableIndexes: Array<{ name: string }>) => tableIndexes.map(index => ({
         name: index.name,
         columns: (raw.prepare(`PRAGMA index_info('${index.name}')`).all() as Array<{ name: string }>).map(row => row.name),
       }))
+
+      expect(indexColumns(traceIndexes)).toContainEqual({ name: 'idx_traces_startedAt', columns: ['startedAt'] })
+      expect(indexColumns(spanIndexes)).toContainEqual({ name: 'idx_spans_traceId_startedAt', columns: ['traceId', 'startedAt'] })
+      raw.close()
+    })
+
+    it('adds the ordered trace index when opening an existing database', () => {
+      adapter.close()
+      const raw = new Database(dbPath)
+      raw.exec('DROP INDEX IF EXISTS idx_traces_startedAt')
       raw.close()
 
-      expect(columns).toContainEqual({ name: 'idx_spans_traceId_startedAt', columns: ['traceId', 'startedAt'] })
+      adapter = new SQLiteAdapter(dbPath)
+
+      const reopened = new Database(dbPath)
+      const indexes = reopened.prepare("PRAGMA index_list('traces')").all() as Array<{ name: string }>
+      reopened.close()
+      expect(indexes.map(index => index.name)).toContain('idx_traces_startedAt')
     })
   })
 

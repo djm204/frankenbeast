@@ -24,6 +24,7 @@ export const CREATE_TABLES = `
 
   CREATE INDEX IF NOT EXISTS idx_spans_traceId ON spans(traceId);
   CREATE INDEX IF NOT EXISTS idx_spans_traceId_startedAt ON spans(traceId, startedAt);
+  CREATE INDEX IF NOT EXISTS idx_traces_startedAt ON traces(startedAt);
 `
 
 export const UPSERT_TRACE = `
