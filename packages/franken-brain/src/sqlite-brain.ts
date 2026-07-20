@@ -5659,6 +5659,10 @@ export class SqliteBrain implements IBrain {
         created_at TEXT NOT NULL,
         schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
       );
+      CREATE INDEX IF NOT EXISTS idx_episodic_events_type_created_at
+        ON episodic_events(type, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_episodic_events_created_at
+        ON episodic_events(created_at DESC);
       CREATE TABLE IF NOT EXISTS checkpoints (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         state TEXT NOT NULL,
@@ -6628,6 +6632,10 @@ function migrateMemorySchemaDatabase(
         created_at TEXT NOT NULL,
         schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
       );
+      CREATE INDEX IF NOT EXISTS idx_episodic_events_type_created_at
+        ON episodic_events(type, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_episodic_events_created_at
+        ON episodic_events(created_at DESC);
       CREATE TABLE IF NOT EXISTS checkpoints (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         state TEXT NOT NULL,
