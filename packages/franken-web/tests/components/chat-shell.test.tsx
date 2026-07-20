@@ -1098,6 +1098,27 @@ describe('ChatShell', () => {
     expect(screen.getByText('agent-page-1')).toBeTruthy();
     expect(screen.getByText('agent-page-2')).toBeTruthy();
     expect(mockListAgentPage).toHaveBeenCalledTimes(2);
+
+    const newlyCreatedAgent = {
+      ...firstAgent,
+      id: 'agent-new',
+      createdAt: '2026-03-12T00:00:00.000Z',
+    };
+    mockListAgentPage.mockResolvedValueOnce({ agents: [newlyCreatedAgent], nextCursor: 'cursor-page-2' });
+    await act(async () => {
+      latestBeastEventHandlers?.agentEvent?.({
+        agentId: 'agent-new',
+        event: {
+          id: 'created-event', sequence: 1, level: 'info', type: 'agent.created',
+          message: 'Tracked agent created', payload: {}, createdAt: newlyCreatedAgent.createdAt,
+        },
+      });
+    });
+
+    await waitFor(() => expect(screen.getByText('agent-new')).toBeTruthy());
+    expect(screen.getByText('agent-page-1')).toBeTruthy();
+    expect(screen.getByText('agent-page-2')).toBeTruthy();
+    expect(mockListAgentPage).toHaveBeenCalledTimes(3);
   });
 
   it('persists Beast drawer edits and refreshes the selected agent detail', async () => {
@@ -1455,6 +1476,17 @@ describe('ChatShell', () => {
     });
 
     expect(mockListAgentPage).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      latestBeastEventHandlers?.agentEvent?.({
+        agentId: 'new-agent-on-first-page',
+        event: {
+          id: 'created-event', sequence: 1, level: 'info', type: 'agent.created',
+          message: 'Tracked agent created', payload: {}, createdAt: '2026-03-12T00:00:00.000Z',
+        },
+      });
+    });
+    await waitFor(() => expect(mockListAgentPage).toHaveBeenCalledTimes(2));
   });
 
   it('refreshes selected agent details when a newly linked run emits logs', async () => {

@@ -395,9 +395,16 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
       setBeastError(null);
       setBeastCreationUnavailableReason(null);
       setBeastCatalog(catalog);
-      setBeastAgents(agentPage.agents);
-      beastAgentNextCursorRef.current = agentPage.nextCursor;
-      setBeastAgentNextCursor(agentPage.nextCursor);
+      const hadLoadedAgents = beastAgentsRef.current.length > 0;
+      setBeastAgents((current) => {
+        if (!hadLoadedAgents) return agentPage.agents;
+        const firstPageIds = new Set(agentPage.agents.map((agent) => agent.id));
+        return [...agentPage.agents, ...current.filter((agent) => !firstPageIds.has(agent.id))];
+      });
+      if (!hadLoadedAgents) {
+        beastAgentNextCursorRef.current = agentPage.nextCursor;
+        setBeastAgentNextCursor(agentPage.nextCursor);
+      }
       setBeastAgentsLoadingMore(false);
       setBeastRuns(runs);
       setBeastContainerRuntime(containerRuntime);
@@ -405,23 +412,16 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
       const currentAgentId = selectedBeastAgentIdRef.current ?? (shouldAutoSelectBeastAgentRef.current ? autoSelectedAgentId : null);
       setSelectedBeastAgentId(currentAgentId);
     }
-
     void refreshBeasts();
-
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [route, beastClient, beastRefreshNonce]);
-
   useEffect(() => {
     if (route !== 'beasts') return;
-
     const agentId = selectedBeastAgentId;
     if (!agentId) {
       setBeastAgentDetail(null);
       return;
     }
-
     let cancelled = false;
     void (async () => {
       try {
@@ -429,8 +429,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         if (cancelled) return;
         if (detail.agent.dispatchRunId) {
           const [run, logs] = await Promise.all([
-            beastClient.getRun(detail.agent.dispatchRunId),
-            beastClient.getLogs(detail.agent.dispatchRunId),
+            beastClient.getRun(detail.agent.dispatchRunId), beastClient.getLogs(detail.agent.dispatchRunId),
           ]);
           if (!cancelled && selectedBeastAgentIdRef.current === agentId) {
             setBeastAgentDetail({ ...detail, run: { ...run, logs } });
@@ -446,15 +445,10 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         }
       }
     })();
-
     return () => { cancelled = true; };
   }, [route, beastClient, selectedBeastAgentId, beastRefreshNonce]);
-
   useEffect(() => {
-    if (route !== 'beasts') {
-      return;
-    }
-
+    if (route !== 'beasts') return;
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
     const requestBeastRefresh = () => setBeastRefreshNonce((current) => current + 1);
@@ -476,6 +470,11 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         const currentAgents = beastAgentsRef.current;
         const currentDetail = beastAgentDetailRef.current;
         const sawUnknownAgent = snapshot.agents.some((candidate) => !currentAgents.some((agent) => agent.id === candidate.id));
+        const newestLoadedCreatedAt = currentAgents.reduce((latest, agent) => (
+          agent.createdAt > latest ? agent.createdAt : latest
+        ), '');
+        const sawNewerUnknownAgent = snapshot.agents.some((candidate) => (candidate.createdAt ?? '') > newestLoadedCreatedAt
+          && !currentAgents.some((agent) => agent.id === candidate.id));
         const selectedSnapshotAgent = currentDetail
           ? snapshot.agents.find((candidate) => candidate.id === currentDetail.agent.id)
           : undefined;
@@ -491,7 +490,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
           const next = snapshot.agents?.find((candidate) => candidate.id === current.agent.id);
           return next ? { ...current, agent: { ...current.agent, ...next } } : current;
         });
-        if ((sawUnknownAgent && !beastAgentNextCursorRef.current) || selectedAgentLinkedRun) requestBeastRefresh();
+        if ((sawUnknownAgent && (!beastAgentNextCursorRef.current || sawNewerUnknownAgent)) || selectedAgentLinkedRun) requestBeastRefresh();
       },
       agentStatus: (event) => {
         if (cancelled) return;
@@ -551,7 +550,8 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             events: [...current.events, nextEvent],
           };
         });
-        if ((!sawKnownAgent && !beastAgentNextCursorRef.current) || selectedAgentLinkedRun) requestBeastRefresh();
+        const isAgentCreation = event.event.type === 'agent.created';
+        if ((!sawKnownAgent && (!beastAgentNextCursorRef.current || isAgentCreation)) || selectedAgentLinkedRun) requestBeastRefresh();
       },
       runStatus: (event) => {
         if (cancelled) return;
