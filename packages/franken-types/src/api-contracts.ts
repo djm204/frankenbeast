@@ -126,6 +126,7 @@ export type ApprovalReadinessResult = z.infer<typeof ApprovalReadinessResultSche
 export interface BeastInterviewPrompt {
   key: string;
   prompt: string;
+  description?: string;
   kind: 'string' | 'boolean' | 'file' | 'directory';
   required?: boolean;
   options?: readonly string[];

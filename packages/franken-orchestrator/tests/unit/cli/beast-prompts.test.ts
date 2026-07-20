@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { collectBeastConfig } from '../../../src/cli/beast-prompts.js';
 import { martinLoopDefinition } from '../../../src/beasts/definitions/martin-loop-definition.js';
+import { chunkPlanDefinition } from '../../../src/beasts/definitions/chunk-plan-definition.js';
 
 describe('collectBeastConfig', () => {
   it('asks prompts in definition order and returns config answers', async () => {
@@ -34,4 +35,19 @@ describe('collectBeastConfig', () => {
     expect(io.ask).toHaveBeenCalledTimes(1);
   });
 
+  it('displays accessible file guidance before asking for a design document path', async () => {
+    const io = {
+      ask: vi.fn()
+        .mockResolvedValueOnce('docs/design.md')
+        .mockResolvedValueOnce('tasks/chunks'),
+      display: vi.fn(),
+    };
+
+    await collectBeastConfig(io, chunkPlanDefinition);
+
+    expect(io.display).toHaveBeenCalledWith(
+      'Enter a repo-relative path to the Markdown design document (.md, .mdx, or .markdown) that will be split into implementation chunks.',
+    );
+    expect(io.display.mock.invocationCallOrder[0]).toBeLessThan(io.ask.mock.invocationCallOrder[0]);
+  });
 });

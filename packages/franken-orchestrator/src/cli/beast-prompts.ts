@@ -9,6 +9,9 @@ export async function collectBeastConfig(
   const answers: Record<string, unknown> = {};
 
   for (const prompt of definition.interviewPrompts) {
+    if (prompt.description) {
+      io.display(prompt.description);
+    }
     const answer = await io.ask(prompt.prompt);
     answers[prompt.key] = coerceInterviewAnswer(prompt, answer);
   }
