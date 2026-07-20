@@ -6,10 +6,21 @@ import { searchTools, TOOL_REGISTRY, createAdapterSet, type AdapterSet } from '.
 import { createGovernanceGate } from '../shared/governance-gate.js';
 import { createAuditSink } from '../shared/central-enforcement.js';
 import { parseArgs } from 'node:util';
+import { isAbsolute, resolve } from 'node:path';
 import { deriveProjectRootFromDbPath, resolveProjectDbPath } from '../shared/resolve-db-path.js';
+
+const PROJECT_ROOT_PLACEHOLDER = /^\$(?:\{(?:CLAUDE_PROJECT_DIR|GEMINI_PROJECT_ROOT|FBEAST_ROOT)\}|(?:CLAUDE_PROJECT_DIR|GEMINI_PROJECT_ROOT|FBEAST_ROOT))(?:[\\/]|$)/;
 
 export function deriveProxyRoot(dbPath: string, explicitRoot?: string | undefined): string | undefined {
   return deriveProjectRootFromDbPath(dbPath, explicitRoot);
+}
+
+function resolveProxyConfigPath(configPath: string, root: string | undefined): string {
+  if (root !== undefined && PROJECT_ROOT_PLACEHOLDER.test(configPath)) {
+    return resolve(root, configPath.replace(PROJECT_ROOT_PLACEHOLDER, ''));
+  }
+  if (isAbsolute(configPath)) return configPath;
+  return resolve(root ?? process.cwd(), configPath);
 }
 
 const WORKSPACE_ROOT_REQUIRED_TOOLS = new Set(['fbeast_firewall_scan_file']);
@@ -36,6 +47,9 @@ export interface ProxyServerDeps {
 export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
   const root = deriveProxyRoot(deps.dbPath, deps.root);
   const dbPath = resolveProjectDbPath(deps.dbPath, root);
+  const configPath = deps.configPath === undefined
+    ? undefined
+    : resolveProxyConfigPath(deps.configPath, root);
   const protectedMode = root === undefined;
   let cachedAdapters: AdapterSet | undefined;
   // Govern/audit the *resolved* target tool, not the `execute_tool` wrapper, so
@@ -43,7 +57,7 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
   // round-1). This is the Tool wrapper confusion control in
   // docs/agent-tool-execution-threat-model.md. The gate/observer are created
   // lazily, preserving lazy-DB behavior.
-  const governance = deps.governance ?? createGovernanceGate(dbPath);
+  const governance = deps.governance ?? createGovernanceGate(dbPath, configPath);
   const audit = deps.audit ?? createAuditSink(dbPath);
   // The proxy wrapper must outlive the longest registered target deadline; the
   // resolved target is independently bounded below by executeToolWithDeadline.
@@ -58,7 +72,7 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
 
   function getAdapters(): AdapterSet {
     if (!cachedAdapters) {
-      cachedAdapters = createAdapterSet(dbPath, { root, configPath: deps.configPath });
+      cachedAdapters = createAdapterSet(dbPath, { root, configPath });
     }
     return cachedAdapters;
   }

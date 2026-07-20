@@ -4,6 +4,11 @@
 - Recovery pagination must bound raw rows scanned, not only healthy rows returned. Return the last scanned raw sequence plus an indexed `hasMore` probe so a short or empty page can advance past corrupt rows without turning one request into a full-history scan.
 - Before wiring a new paginated endpoint into dashboard hydration, trace which detail field the UI actually renders. Do not eagerly collect every page for an unused compatibility field; keep the bounded endpoint available for intentional consumers and preserve fast detail loading.
 
+## 2026-07-19 — Skill HITL configuration boundaries
+- Keep the active config path and installed skill root as separate inputs: the active config determines which skills are enabled, while manifests remain anchored to the database/project `.fbeast/skills` directory even when operators supply an external `--config` path.
+- Distinguish a valid empty enabled-skill list from malformed/unreadable config. For qualified calls, fail closed only when the action matches an installed skill server or directory alias, so stale custom registrations remain gated without changing policy for unrelated built-in MCP servers.
+- MCP action parsing cannot split blindly on the first or last `__`, because both server and tool names may contain double underscores; match configured server-name prefixes and preserve the full remaining tool name.
+
 ## 2026-07-19 — Bounded Beast log paging
 - A tail endpoint is not operationally bounded if it collects a bounded result after scanning all retained history. Read newest rotations in reverse chunks and stop as soon as the line or byte budget is full; also restrict page reads to configured retention so stale extra rotations cannot re-expand request I/O.
 - Treat oversized individual records as consumed pagination entries even when replacing or omitting their payload, or offset clients can become stuck on the same line. For HTTP byte limits, measure the final post-redaction JSON envelope (logs plus page metadata), not only the serialized logs array.
