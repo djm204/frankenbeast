@@ -101,7 +101,11 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
 
   const slack = config.channels.slack;
   if (slack?.enabled && slack.token && slack.signingSecret) {
-    const adapter = new SlackAdapter({ token: slack.token, egressPolicy: options.egressPolicy });
+    const adapter = new SlackAdapter({
+      token: slack.token,
+      egressPolicy: options.egressPolicy,
+      timeoutMs: config.channels.outboundTimeoutMs,
+    });
     gateway.registerAdapter(adapter);
     app.route('/webhooks/slack', slackRouter({
       gateway,
@@ -113,7 +117,11 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
 
   const discord = config.channels.discord;
   if (discord?.enabled && discord.token && discord.publicKey) {
-    const adapter = new DiscordAdapter({ token: discord.token, egressPolicy: options.egressPolicy });
+    const adapter = new DiscordAdapter({
+      token: discord.token,
+      egressPolicy: options.egressPolicy,
+      timeoutMs: config.channels.outboundTimeoutMs,
+    });
     gateway.registerAdapter(adapter);
     app.route('/webhooks/discord', discordRouter({
       gateway,
@@ -125,7 +133,11 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
 
   const telegram = config.channels.telegram;
   if (telegram?.enabled && telegram.botToken && telegram.webhookSecretToken) {
-    const adapter = new TelegramAdapter({ token: telegram.botToken, egressPolicy: options.egressPolicy });
+    const adapter = new TelegramAdapter({
+      token: telegram.botToken,
+      egressPolicy: options.egressPolicy,
+      timeoutMs: config.channels.outboundTimeoutMs,
+    });
     gateway.registerAdapter(adapter);
     app.route('/webhooks/telegram', telegramRouter({
       gateway,
@@ -141,6 +153,7 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
       accessToken: whatsapp.accessToken,
       phoneNumberId: whatsapp.phoneNumberId,
       egressPolicy: options.egressPolicy,
+      timeoutMs: config.channels.outboundTimeoutMs,
     });
     gateway.registerAdapter(adapter);
     app.route('/webhooks/whatsapp', whatsappRouter({

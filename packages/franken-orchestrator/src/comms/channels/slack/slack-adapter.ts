@@ -6,10 +6,12 @@ import type {
 } from '../../core/types.js';
 import { formatHttpErrorMessage } from '../http-error-context.js';
 import { createEgressGuardedFetch, type EgressPolicyConfig } from '../../../network/egress-policy.js';
+import { createBoundedFetch, type BoundedFetch } from '../bounded-fetch.js';
 
 export interface SlackAdapterOptions {
   egressPolicy?: EgressPolicyConfig | undefined;
   fetchImpl?: typeof fetch | undefined;
+  timeoutMs?: number | undefined;
   token: string;
 }
 
@@ -26,11 +28,12 @@ export class SlackAdapter implements ChannelAdapter {
 
   private readonly token: string;
 
-  private readonly fetchImpl: typeof fetch;
+  private readonly fetchImpl: BoundedFetch;
 
   constructor(options: SlackAdapterOptions) {
     this.token = options.token;
-    this.fetchImpl = options.fetchImpl ?? createEgressGuardedFetch({ lane: 'operator', policy: options.egressPolicy });
+    const fetchImpl = options.fetchImpl ?? createEgressGuardedFetch({ lane: 'operator', policy: options.egressPolicy });
+    this.fetchImpl = createBoundedFetch(fetchImpl, { channel: 'Slack', timeoutMs: options.timeoutMs });
   }
 
   async send(sessionId: string, message: ChannelOutboundMessage): Promise<void> {
@@ -45,7 +48,7 @@ export class SlackAdapter implements ChannelAdapter {
     const blocks = this.formatBlocks(message);
 
     const targetUrl = 'https://slack.com/api/chat.postMessage';
-    const response = await this.fetchImpl(targetUrl, {
+    await this.fetchImpl(targetUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -57,16 +60,16 @@ export class SlackAdapter implements ChannelAdapter {
         text: message.text, // Fallback text
         blocks,
       }),
+    }, async response => {
+      if (!response.ok) {
+        throw new Error(await formatHttpErrorMessage('Slack API error', response, targetUrl));
+      }
+
+      const result = await response.json() as { ok: boolean; error?: string };
+      if (!result.ok) {
+        throw new Error(`Slack API error: ${result.error}`);
+      }
     });
-
-    if (!response.ok) {
-      throw new Error(await formatHttpErrorMessage('Slack API error', response, targetUrl));
-    }
-
-    const result = await response.json() as { ok: boolean; error?: string };
-    if (!result.ok) {
-      throw new Error(`Slack API error: ${result.error}`);
-    }
   }
 
   private formatBlocks(message: ChannelOutboundMessage): Record<string, unknown>[] {

@@ -393,5 +393,5 @@ export interface NetworkConfigResponse {
   network: { mode: string; secureBackend?: string };
   chat: { model?: string | undefined; enabled: boolean; host?: string; port?: number };
   dashboard?: { enabled?: boolean; host?: string; port?: number; apiUrl?: string };
-  comms?: { enabled?: boolean };
+  comms?: { enabled?: boolean; outboundTimeoutMs?: number };
 }

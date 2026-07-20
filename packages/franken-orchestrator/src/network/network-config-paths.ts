@@ -46,6 +46,7 @@ const NETWORK_CONFIG_PATH_DEFINITIONS = {
   'comms.enabled': { type: 'boolean' },
   'comms.host': { type: 'string' },
   'comms.port': { type: 'number' },
+  'comms.outboundTimeoutMs': { type: 'number' },
   'comms.orchestratorWsUrl': { type: 'string' },
   'comms.orchestratorTokenRef': { type: 'string', sensitive: true },
   'comms.slack.enabled': { type: 'boolean' },
