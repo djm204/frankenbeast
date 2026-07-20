@@ -23,6 +23,7 @@ export {
   loadCorpusWithDiagnostics,
   loadTaskFile,
   type CorpusLoadDiagnostics,
+  type CorpusLoadOptions,
   type QuarantinedCorpusTask,
 } from './corpus/loader.js';
 export {
