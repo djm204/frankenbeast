@@ -43,8 +43,8 @@ export async function loadMissingAgentRuns(
     return typeof runId === 'string' && !knownRunIds.has(runId) ? [runId] : [];
   }))];
   if (missingRunIds.length === 0) return [];
-  const details = await Promise.all(missingRunIds.map((runId) => client.getRun(runId)));
-  return details.map((detail) => detail.run);
+  const details = await Promise.all(missingRunIds.map((runId) => client.getRun(runId).catch(() => null)));
+  return details.flatMap((detail) => detail ? [detail.run] : []);
 }
 
 export async function loadTrackedAgentWindow(

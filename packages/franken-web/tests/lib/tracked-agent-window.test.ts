@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { TrackedAgentSummary } from '@franken/types';
 import type { BeastApiClient } from '../../src/lib/beast-api';
-import { loadTrackedAgentWindow, sortTrackedAgentsNewestFirst } from '../../src/lib/tracked-agent-window';
+import { loadMissingAgentRuns, loadTrackedAgentWindow, sortTrackedAgentsNewestFirst } from '../../src/lib/tracked-agent-window';
 
 function agent(id: string, createdAt = '2026-03-11T00:00:00.000Z'): TrackedAgentSummary {
   return {
@@ -56,6 +56,20 @@ describe('loadTrackedAgentWindow', () => {
 
     expect(client.getAgent).toHaveBeenCalledWith(selected.id);
     expect(window.agents).toEqual([agent('first'), selected]);
+  });
+
+  it('keeps linked-run hydration best-effort when a historical run is unavailable', async () => {
+    const getRun = vi.fn()
+      .mockRejectedValueOnce(new Error('corrupt historical run'))
+      .mockResolvedValueOnce({ run: { id: 'run-ok' } });
+    const client = { getRun } as unknown as BeastApiClient;
+    const agents = [
+      { ...agent('first'), dispatchRunId: 'run-bad' },
+      { ...agent('second'), dispatchRunId: 'run-ok' },
+    ];
+
+    await expect(loadMissingAgentRuns(client, agents, [])).resolves.toEqual([{ id: 'run-ok' }]);
+    expect(getRun).toHaveBeenCalledTimes(2);
   });
 
   it('restores server keyset ordering when retained selections are merged with later pages', () => {
