@@ -8,6 +8,11 @@ interface PendingApproval {
   resolve: (response: ApprovalResponse) => void;
 }
 
+interface EarlyApprovalResponse {
+  readonly response: ApprovalResponse;
+  readonly expiry: ReturnType<typeof setTimeout>;
+}
+
 export interface PendingApprovalSnapshot {
   readonly requestId: string;
   readonly taskId: string;
@@ -33,13 +38,14 @@ export interface PendingApprovalSnapshot {
  * in-process waiter (see issue #411).
  */
 export class ApprovalWaiterRegistry {
+  private static readonly EARLY_RESPONSE_TTL_MS = 30_000;
   private readonly pending = new Map<string, PendingApproval>();
   /**
    * Responses accepted for placeholder-only registrations before the
    * in-process channel attaches its real waiter. Entries are one-shot: the
    * matching waiter consumes them, while cancellation removes them.
    */
-  private readonly resolvedBeforeWaiter = new Map<string, ApprovalResponse>();
+  private readonly resolvedBeforeWaiter = new Map<string, EarlyApprovalResponse>();
 
   get size(): number {
     return this.pending.size;
@@ -106,7 +112,8 @@ export class ApprovalWaiterRegistry {
     const earlyResponse = this.resolvedBeforeWaiter.get(requestId);
     if (earlyResponse) {
       this.resolvedBeforeWaiter.delete(requestId);
-      return Promise.resolve(earlyResponse);
+      clearTimeout(earlyResponse.expiry);
+      return Promise.resolve(earlyResponse.response);
     }
 
     const existing = this.pending.get(requestId);
@@ -140,14 +147,23 @@ export class ApprovalWaiterRegistry {
     if (pending.hasRealWaiter) {
       pending.resolve(response);
     } else {
-      this.resolvedBeforeWaiter.set(requestId, response);
+      const expiry = setTimeout(() => {
+        const cached = this.resolvedBeforeWaiter.get(requestId);
+        if (cached?.expiry === expiry) {
+          this.resolvedBeforeWaiter.delete(requestId);
+        }
+      }, ApprovalWaiterRegistry.EARLY_RESPONSE_TTL_MS);
+      expiry.unref?.();
+      this.resolvedBeforeWaiter.set(requestId, { response, expiry });
     }
     return true;
   }
 
   delete(requestId: string): boolean {
     const deletedPending = this.pending.delete(requestId);
+    const earlyResponse = this.resolvedBeforeWaiter.get(requestId);
     const deletedEarlyResponse = this.resolvedBeforeWaiter.delete(requestId);
+    if (earlyResponse) clearTimeout(earlyResponse.expiry);
     return deletedPending || deletedEarlyResponse;
   }
 }

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createHmac } from 'node:crypto';
 import { createGovernorApp } from '../../../src/server/app.js';
 import { ApprovalGateway } from '../../../src/gateway/approval-gateway.js';
@@ -253,6 +253,29 @@ describe('standalone governor HTTP app wired to real approval waiters', () => {
       respondedBy: 'http-operator',
     });
     expect(registry.size).toBe(0);
+  });
+
+  it('expires an early response when no real waiter ever attaches', () => {
+    vi.useFakeTimers();
+    try {
+      const registry = new ApprovalWaiterRegistry();
+      const response = {
+        requestId: 'req-http-only-1',
+        decision: 'APPROVE' as const,
+        respondedBy: 'operator',
+        respondedAt: new Date('2026-01-01T00:00:00Z'),
+      };
+
+      registry.register('req-http-only-1', 'task-1', 'HTTP-only approval');
+      expect(registry.resolve('req-http-only-1', response)).toBe(true);
+      vi.advanceTimersByTime(30_000);
+
+      expect(registry.delete('req-http-only-1')).toBe(false);
+      registry.register('req-http-only-1', 'task-2', 'Reused request ID');
+      expect(registry.has('req-http-only-1')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   /**
