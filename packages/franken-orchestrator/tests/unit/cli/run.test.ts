@@ -209,6 +209,7 @@ vi.mock('../../../src/adapters/cli-llm-adapter.js', () => ({
 }));
 
 vi.mock('../../../src/logging/beast-logger.js', () => ({
+  ANSI: { cyan: '', reset: '', bold: '', dim: '', green: '', yellow: '', blue: '', red: '' },
   BANNER: '[BANNER]',
   renderBanner: vi.fn(async () => '[BANNER]'),
   BeastLogger: vi.fn(function (this: Record<string, unknown>) {
@@ -248,19 +249,26 @@ vi.mock('../../../src/cli/config-loader.js', () => ({
 // Mock readline to prevent stdin hanging
 vi.mock('node:readline', () => ({
   createInterface: vi.fn(() => ({
-    question: vi.fn((_q: string, cb: (a: string) => void) => cb('mock-answer')),
+    question: vi.fn((
+      _q: string,
+      optionsOrCallback: { signal?: AbortSignal } | ((answer: string) => void),
+      callback?: (answer: string) => void,
+    ) => (callback ?? optionsOrCallback as (answer: string) => void)('mock-answer')),
     close: vi.fn(),
+    pause: vi.fn(),
+    resume: vi.fn(),
   })),
 }));
 
 // ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
-import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, resolveEffectivePreflightProvider, resolveEffectivePreflightProviders, buildDashboardProviderSnapshot, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance, validateStateDirBeforeScaffold, resolveScaffoldStateDir, runNetworkCommand, handleBeastDaemonShutdown } from '../../../src/cli/run.js';
+import { resolvePhases, createStdinIO, createChatSurfaceDeps, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, resolveEffectivePreflightProvider, resolveEffectivePreflightProviders, buildDashboardProviderSnapshot, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance, validateStateDirBeforeScaffold, resolveScaffoldStateDir, runNetworkCommand, handleBeastDaemonShutdown } from '../../../src/cli/run.js';
 import { loadConfig } from '../../../src/cli/config-loader.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths, readActivePlanName, writeActivePlanName } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
 import { defaultConfig } from '../../../src/config/orchestrator-config.js';
 import { createInterface } from 'node:readline';
+import { createReadlineIO } from '../../../src/cli/chat-repl.js';
 
 // ── Tests ──
 
@@ -315,6 +323,73 @@ describe('resolvePhases', () => {
       designDoc: '/some/doc.md',
     });
     expect(result).toEqual({ entryPhase: 'execute' });
+  });
+});
+
+describe('chat terminal ownership', () => {
+  it('uses one readline interface for chat and governor questions', async () => {
+    const io = createReadlineIO();
+
+    expect(createInterface).not.toHaveBeenCalled();
+
+    await expect(io.prompt()).resolves.toBe('mock-answer');
+    await expect(io.ask?.('Approve?')).resolves.toBe('mock-answer');
+
+    expect(createInterface).toHaveBeenCalledTimes(1);
+    const readline = vi.mocked(createInterface).mock.results[0]?.value as {
+      question: ReturnType<typeof vi.fn>;
+    };
+    expect(readline.question).toHaveBeenNthCalledWith(
+      2,
+      'Approve?',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      expect.any(Function),
+    );
+  });
+
+  it('cancels an expired shared question and keeps the terminal owner reusable', async () => {
+    let questionCount = 0;
+    vi.mocked(createInterface).mockReturnValueOnce({
+      question: vi.fn((
+        _question: string,
+        _options: { signal: AbortSignal },
+        callback: (answer: string) => void,
+      ) => {
+        questionCount += 1;
+        if (questionCount === 2) callback('next-answer');
+      }),
+      close: vi.fn(),
+      pause: vi.fn(),
+      resume: vi.fn(),
+    } as never);
+    const io = createReadlineIO();
+
+    const expired = io.ask?.('Expired approval?');
+    io.cancelQuestion?.();
+
+    await expect(expired).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(io.prompt()).resolves.toBe('next-answer');
+  });
+
+  it('passes the chat readline owner into governor dependency wiring', async () => {
+    const governorQuestion = vi.fn(async () => 'APPROVE');
+    const governorCancel = vi.fn();
+    const paths = getProjectPaths('/mock/project');
+
+    await createChatSurfaceDeps({
+      budget: 10,
+      provider: 'claude',
+      providerSpecified: true,
+      providers: [],
+      trustProviderCommandOverrides: false,
+      verbose: false,
+    } as any, defaultConfig(), paths, governorQuestion, governorCancel);
+
+    expect(mockCreateCliDeps).toHaveBeenCalledWith(expect.objectContaining({
+      governorQuestion,
+      governorCancel,
+      chatMode: true,
+    }));
   });
 });
 
@@ -1958,6 +2033,18 @@ describe('main() execution', () => {
     expect(MockSession).toHaveBeenCalledWith(expect.objectContaining({
       provider: 'claude',
     }));
+  });
+
+  it('does not open the lazy chat terminal owner when dependency creation fails', async () => {
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as Record<string, unknown>),
+      subcommand: 'chat',
+    } as ReturnType<typeof mockParseArgs>);
+    mockCreateCliDeps.mockRejectedValueOnce(new Error('dependency setup failed'));
+
+    await expect(main()).rejects.toThrow('dependency setup failed');
+
+    expect(createInterface).not.toHaveBeenCalled();
   });
 
   it('dispatches chat-server without creating a Session or REPL', async () => {

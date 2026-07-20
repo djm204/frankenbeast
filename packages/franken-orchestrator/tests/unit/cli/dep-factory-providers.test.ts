@@ -1127,4 +1127,62 @@ describe('dep-factory provider wiring', () => {
 
     expect(traceViewerMocks.stop).toHaveBeenCalledTimes(1);
   });
+
+  it('reuses the session question function for governor approvals instead of opening another terminal reader', async () => {
+    const originalIsTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: true });
+    const question = vi.fn(async (prompt: string) => `answered: ${prompt}`);
+    const cancel = vi.fn();
+    vi.resetModules();
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+
+    try {
+      const result = await createCliDeps(makeOpts({
+        enabledModules: { critique: false, governor: true },
+        governorQuestion: question,
+        governorCancel: cancel,
+      }));
+
+      expect(optionalModuleMocks.CliChannel).toHaveBeenCalledTimes(1);
+      const channelCalls = optionalModuleMocks.CliChannel.mock.calls as unknown as Array<[{
+        readline: {
+          question(prompt: string): Promise<string>;
+          cancel?(): void;
+        };
+      }]>;
+      const channelOptions = channelCalls[0]?.[0];
+      expect(channelOptions).toBeDefined();
+      await expect(channelOptions?.readline.question('Approve?')).resolves.toBe('answered: Approve?');
+      channelOptions?.readline.cancel?.();
+      expect(question).toHaveBeenCalledWith('Approve?');
+      expect(cancel).toHaveBeenCalledTimes(1);
+
+      await result.finalize();
+    } finally {
+      if (originalIsTTY === undefined) delete (process.stdin as { isTTY?: boolean }).isTTY;
+      else Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: originalIsTTY });
+    }
+  });
+
+  it('preserves non-interactive governor behavior when a session question function exists', async () => {
+    const originalIsTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: false });
+    const question = vi.fn(async () => 'APPROVE');
+    vi.resetModules();
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+
+    try {
+      const result = await createCliDeps(makeOpts({
+        enabledModules: { critique: false, governor: true },
+        governorQuestion: question,
+      }));
+
+      expect(optionalModuleMocks.CliChannel).not.toHaveBeenCalled();
+      expect(question).not.toHaveBeenCalled();
+      await result.finalize();
+    } finally {
+      if (originalIsTTY === undefined) delete (process.stdin as { isTTY?: boolean }).isTTY;
+      else Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: originalIsTTY });
+    }
+  });
 });

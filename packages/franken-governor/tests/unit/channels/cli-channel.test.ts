@@ -31,6 +31,18 @@ function makeFakeReadline(inputs: string[]): ReadlineAdapter {
 }
 
 describe('CliChannel', () => {
+  it('forwards gateway cancellation to the active readline question', () => {
+    const cancel = vi.fn();
+    const channel = new CliChannel({
+      readline: { ...makeFakeReadline([]), cancel },
+      operatorName: 'dev',
+    });
+
+    channel.cancel('req-001');
+
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
   it('implements ApprovalChannel with channelId "cli"', () => {
     const channel = new CliChannel({ readline: makeFakeReadline([]), operatorName: 'dev' });
     expect(channel.channelId).toBe('cli');

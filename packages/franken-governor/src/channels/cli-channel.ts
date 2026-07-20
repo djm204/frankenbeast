@@ -5,6 +5,7 @@ import { formatApprovalPromptWithBoundaries } from '../gateway/approval-prompt-m
 
 export interface ReadlineAdapter {
   question(prompt: string): Promise<string>;
+  cancel?(): void;
 }
 
 export interface CliChannelDeps {
@@ -38,6 +39,10 @@ export class CliChannel implements ApprovalChannel {
   constructor(deps: CliChannelDeps) {
     this.readline = deps.readline;
     this.operatorName = deps.operatorName;
+  }
+
+  cancel(_requestId: string): void {
+    this.readline.cancel?.();
   }
 
   async requestApproval(request: ApprovalRequest): Promise<ApprovalResponse> {

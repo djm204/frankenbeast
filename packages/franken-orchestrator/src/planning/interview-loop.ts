@@ -8,6 +8,8 @@ import type { GraphBuilder } from './chunk-file-graph-builder.js';
  */
 export interface InterviewIO {
   ask(question: string): Promise<string>;
+  /** Cancel the currently pending question without closing the shared terminal owner. */
+  cancelQuestion?(): void;
   display(message: string): void;
 }
 
