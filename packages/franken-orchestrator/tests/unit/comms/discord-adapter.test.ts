@@ -168,4 +168,25 @@ describe('DiscordAdapter', () => {
       `Discord API error: 502 Bad Gateway for https://discord.com/api/v10/channels/C1/messages: ${'x'.repeat(2048)}…`,
     );
   });
+
+  it('times out a never-resolving outbound request with a redacted error', async () => {
+    vi.useFakeTimers();
+    const mockFetch = vi.fn<typeof fetch>(() => new Promise<Response>(() => undefined));
+    const adapter = new DiscordAdapter({ token: 'bot-token', fetchImpl: mockFetch, timeoutMs: 25 });
+
+    const sendPromise = adapter.send('session-123', {
+      text: 'hello',
+      metadata: { channelId: 'C1' },
+    });
+    const outcomePromise = sendPromise.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(25);
+
+    const error = await outcomePromise;
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe('Discord outbound request timed out after 25ms');
+    expect((error as { code?: string }).code).toBe('OUTBOUND_COMMS_TIMEOUT');
+    expect((error as Error).message).not.toContain('bot-token');
+    expect(mockFetch.mock.calls[0]![1]!.signal!.aborted).toBe(true);
+    vi.useRealTimers();
+  });
 });

@@ -15,6 +15,7 @@ export const CommsConfigSchema = z.object({
     token: z.string().optional(),
   }).default({}),
   channels: z.object({
+    outboundTimeoutMs: z.number().int().positive().max(300_000).optional(),
     slack: z.object({
       enabled: z.boolean().default(false),
       token: z.string().optional(),

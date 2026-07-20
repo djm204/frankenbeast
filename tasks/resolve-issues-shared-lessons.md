@@ -1,5 +1,9 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-20 — Outbound request deadlines must include response consumption
+- JavaScript `fetch()` resolves when response headers arrive, not when the body has been consumed. A hard outbound-delivery deadline must wrap both the fetch and all body/error parsing under the same abort signal and timer; otherwise a provider can send headers and stall forever during `json()` or `text()`.
+- In fresh monorepo worktrees, run the root build before package-local TypeScript checks so internal workspace declaration outputs exist and unrelated module-resolution errors do not mask the feature result.
+
 ## 2026-07-18 — Cron credential scanner closeout
 - For cron credential scanners, taint propagation must cover neutral alias names, exported declarations, destructured env containers, env-name variables, multiline assignments, shell indirect expansions, printenv/getenv aliases, and programmatic CLI calls; otherwise hardening that only matches direct `process.env`/`$TOKEN` reads leaves easy PAT-persistence bypasses.
 - Cron-context detection should inspect code outside string literals plus actual schedule literals, not diagnostic text that merely says `crontab`; credential assignment parsing must handle quoted values while preserving runtime `$(gh auth token)` as safe.

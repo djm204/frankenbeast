@@ -179,4 +179,56 @@ describe('SlackAdapter', () => {
       'Slack API error: 503 Service Unavailable for https://slack.com/api/chat.postMessage: temporarily unavailable',
     );
   });
+
+  it('times out a never-resolving outbound request with a redacted error', async () => {
+    vi.useFakeTimers();
+    const mockFetch = vi.fn<typeof fetch>(() => new Promise<Response>(() => undefined));
+    const adapter = new SlackAdapter({
+      token: TEST_SLACK_BOT_TOKEN,
+      fetchImpl: mockFetch,
+      timeoutMs: 25,
+    });
+
+    const sendPromise = adapter.send('session-123', {
+      text: 'hello',
+      metadata: { channelId: 'C1' },
+    });
+    const outcomePromise = sendPromise.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(25);
+
+    const error = await outcomePromise;
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe('Slack outbound request timed out after 25ms');
+    expect((error as { code?: string }).code).toBe('OUTBOUND_COMMS_TIMEOUT');
+    expect((error as Error).message).not.toContain(TEST_SLACK_BOT_TOKEN);
+    expect(mockFetch.mock.calls[0]![1]!.signal).toBeInstanceOf(AbortSignal);
+    expect(mockFetch.mock.calls[0]![1]!.signal!.aborted).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('keeps the outbound deadline active while reading a successful response body', async () => {
+    vi.useFakeTimers();
+    const mockFetch = vi.fn<typeof fetch>(async () => ({
+      ok: true,
+      json: () => new Promise<never>(() => undefined),
+    }) as Response);
+    const adapter = new SlackAdapter({
+      token: TEST_SLACK_BOT_TOKEN,
+      fetchImpl: mockFetch,
+      timeoutMs: 25,
+    });
+
+    const outcomePromise = adapter.send('session-123', {
+      text: 'hello',
+      metadata: { channelId: 'C1' },
+    }).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(25);
+
+    const error = await outcomePromise;
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe('Slack outbound request timed out after 25ms');
+    expect((error as { code?: string }).code).toBe('OUTBOUND_COMMS_TIMEOUT');
+    expect(mockFetch.mock.calls[0]![1]!.signal!.aborted).toBe(true);
+    vi.useRealTimers();
+  });
 });

@@ -6,10 +6,12 @@ import type {
 } from '../../core/types.js';
 import { formatHttpErrorMessage } from '../http-error-context.js';
 import { createEgressGuardedFetch, type EgressPolicyConfig } from '../../../network/egress-policy.js';
+import { createBoundedFetch, type BoundedFetch } from '../bounded-fetch.js';
 
 export interface WhatsAppAdapterOptions {
   egressPolicy?: EgressPolicyConfig | undefined;
   fetchImpl?: typeof fetch | undefined;
+  timeoutMs?: number | undefined;
   accessToken: string;
   phoneNumberId: string;
 }
@@ -28,12 +30,13 @@ export class WhatsAppAdapter implements ChannelAdapter {
   private readonly accessToken: string;
   private readonly phoneNumberId: string;
 
-  private readonly fetchImpl: typeof fetch;
+  private readonly fetchImpl: BoundedFetch;
 
   constructor(options: WhatsAppAdapterOptions) {
     this.accessToken = options.accessToken;
     this.phoneNumberId = options.phoneNumberId;
-    this.fetchImpl = options.fetchImpl ?? createEgressGuardedFetch({ lane: 'operator', policy: options.egressPolicy });
+    const fetchImpl = options.fetchImpl ?? createEgressGuardedFetch({ lane: 'operator', policy: options.egressPolicy });
+    this.fetchImpl = createBoundedFetch(fetchImpl, { channel: 'WhatsApp', timeoutMs: options.timeoutMs });
   }
 
   async send(sessionId: string, message: ChannelOutboundMessage): Promise<void> {
@@ -45,18 +48,18 @@ export class WhatsAppAdapter implements ChannelAdapter {
     const body = this.formatPayload(phoneNumber.trim(), message);
 
     const targetUrl = `https://graph.facebook.com/v21.0/${this.phoneNumberId}/messages`;
-    const response = await this.fetchImpl(targetUrl, {
+    await this.fetchImpl(targetUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.accessToken}`,
       },
       body: JSON.stringify(body),
+    }, async response => {
+      if (!response.ok) {
+        throw new Error(await formatHttpErrorMessage('WhatsApp API error', response, targetUrl));
+      }
     });
-
-    if (!response.ok) {
-      throw new Error(await formatHttpErrorMessage('WhatsApp API error', response, targetUrl));
-    }
   }
 
   private appendProviderFooter(text: string, message: ChannelOutboundMessage): string {

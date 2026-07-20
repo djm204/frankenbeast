@@ -98,4 +98,30 @@ describe('WhatsAppAdapter', () => {
       'WhatsApp API error: 401 Unauthorized for https://graph.facebook.com/v21.0/123/messages: {"error":"invalid token"}',
     );
   });
+
+  it('times out a never-resolving outbound request with a redacted error', async () => {
+    vi.useFakeTimers();
+    const mockFetch = vi.fn<typeof fetch>(() => new Promise<Response>(() => undefined));
+    const adapter = new WhatsAppAdapter({
+      accessToken: 'access-token',
+      phoneNumberId: '123',
+      fetchImpl: mockFetch,
+      timeoutMs: 25,
+    });
+
+    const sendPromise = adapter.send('session-123', {
+      text: 'hello',
+      metadata: { phoneNumber: '123456789' },
+    });
+    const outcomePromise = sendPromise.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(25);
+
+    const error = await outcomePromise;
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe('WhatsApp outbound request timed out after 25ms');
+    expect((error as { code?: string }).code).toBe('OUTBOUND_COMMS_TIMEOUT');
+    expect((error as Error).message).not.toContain('access-token');
+    expect(mockFetch.mock.calls[0]![1]!.signal!.aborted).toBe(true);
+    vi.useRealTimers();
+  });
 });

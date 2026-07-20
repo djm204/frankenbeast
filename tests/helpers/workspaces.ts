@@ -3,10 +3,21 @@ import { join, posix } from "node:path";
 
 export const ROOT = join(import.meta.dirname, "..", "..");
 
+export type PackageExportTarget =
+  | string
+  | {
+      import?: string;
+      types?: string;
+      default?: string;
+    };
+
 export type PackageJson = {
   name?: string;
   version?: string;
   workspaces?: string[];
+  main?: string;
+  types?: string;
+  exports?: PackageExportTarget | Record<string, PackageExportTarget>;
   scripts?: Record<string, string>;
   license?: string;
   description?: string;
@@ -90,6 +101,79 @@ export const getWorkspacePackages = (): WorkspacePackage[] => {
       packageJson,
     };
   });
+};
+
+const sourcePathFromPublishedEntry = (publishedEntry: string): string | null => {
+  const normalizedEntry = publishedEntry.replace(/^\.\//u, "");
+  if (!normalizedEntry.startsWith("dist/")) return null;
+
+  if (normalizedEntry.endsWith(".d.ts")) {
+    return `src/${normalizedEntry.slice("dist/".length, -".d.ts".length)}.ts`;
+  }
+  if (normalizedEntry.endsWith(".js")) {
+    return `src/${normalizedEntry.slice("dist/".length, -".js".length)}.ts`;
+  }
+  return null;
+};
+
+const getPublishedEntry = (
+  target: PackageExportTarget,
+): string | undefined =>
+  typeof target === "string"
+    ? target
+    : (target.types ?? target.import ?? target.default);
+
+export const getPackageExportEntries = (
+  packageJson: PackageJson,
+): Array<[string, PackageExportTarget]> => {
+  const packageExports = packageJson.exports;
+  if (typeof packageExports === "string") {
+    return [[".", packageExports]];
+  }
+  if (packageExports !== undefined) {
+    const exportNames = Object.keys(packageExports);
+    return exportNames.some((exportName) => exportName.startsWith("."))
+      ? Object.entries(packageExports)
+      : [[".", packageExports]];
+  }
+
+  const fallbackEntry = packageJson.types ?? packageJson.main;
+  return fallbackEntry === undefined ? [] : [[".", fallbackEntry]];
+};
+
+export const getWorkspaceSourceAliases = (): Record<string, string> => {
+  const aliases: Array<[string, string]> = [];
+
+  for (const workspacePackage of getWorkspacePackages()) {
+    const entries = getPackageExportEntries(workspacePackage.packageJson);
+
+    for (const [exportName, target] of entries) {
+      const publishedEntry = getPublishedEntry(target);
+      if (publishedEntry === undefined) continue;
+      const sourcePath = sourcePathFromPublishedEntry(publishedEntry);
+      if (sourcePath === null) {
+        throw new Error(
+          `${workspacePackage.name} export ${exportName} has unsupported entry ${publishedEntry}`,
+        );
+      }
+
+      const alias =
+        exportName === "."
+          ? workspacePackage.name
+          : `${workspacePackage.name}/${exportName.replace(/^\.\//u, "")}`;
+      const targetPath = `./${workspacePackage.dir}/${sourcePath}`;
+      if (!existsSync(join(ROOT, workspacePackage.dir, sourcePath))) {
+        throw new Error(
+          `${alias} maps from ${publishedEntry} to missing source entry ${targetPath}`,
+        );
+      }
+      aliases.push([alias, targetPath]);
+    }
+  }
+
+  return Object.fromEntries(
+    aliases.sort(([left], [right]) => left.localeCompare(right)),
+  );
 };
 
 export const getWorkspacePackageDirNames = (): string[] =>
