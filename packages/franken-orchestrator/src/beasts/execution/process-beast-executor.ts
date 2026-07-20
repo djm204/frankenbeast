@@ -12,7 +12,7 @@ import {
   type GitWorktreeIsolationConfig,
 } from './git-worktree-isolation.js';
 import { wallClockNow } from '@franken/types';
-import type { ProcessSupervisorLike } from './process-supervisor.js';
+import type { ProcessSignalOptions, ProcessSupervisorLike } from './process-supervisor.js';
 import { classifyWorkerCrash } from './worker-crash-classification.js';
 import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../services/dispatch-failure-message.js';
 import type { BeastDefinition, BeastProcessSpec, BeastRun, BeastRunAttempt, BeastRunStatus, ModuleConfig } from '../types.js';
@@ -363,40 +363,17 @@ function readProcessStartTimeTicks(pid: number): ProcessStartTimeReadResult {
   }
 }
 
-function processGroupExists(pid: number): boolean {
-  if (pid <= 0 || process.platform === 'win32') {
-    return false;
-  }
-  try {
-    process.kill(-pid, 0);
-    return true;
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    return code === 'EPERM';
-  }
-}
-
-function attemptOwnsProcessGroup(attempt: BeastRunAttempt): boolean {
-  const expectedStartTime = attempt.executorMetadata?.processStartTimeTicks;
+function processSignalOptions(attempt: BeastRunAttempt): ProcessSignalOptions {
   const pid = attempt.pid;
-  if (
-    typeof pid !== 'number'
-    || attempt.executorMetadata?.processGroupOwned !== true
-    || attempt.executorMetadata?.processGroupLeaderPid !== pid
-  ) {
-    return false;
-  }
-  if (typeof expectedStartTime !== 'string') {
-    return false;
-  }
-  const actualStartTime = readProcessStartTimeTicks(pid);
-  if (actualStartTime.status === 'matched') {
-    return actualStartTime.ticks === expectedStartTime;
-  }
-  if (actualStartTime.status === 'leader_absent') {
-    return processGroupExists(pid);
-  }
-  return false;
+  const expectedStartTimeTicks = attempt.executorMetadata?.processStartTimeTicks;
+  const processGroupOwned = typeof pid === 'number'
+    && attempt.executorMetadata?.processGroupOwned === true
+    && attempt.executorMetadata?.processGroupLeaderPid === pid;
+
+  return {
+    processGroupOwned,
+    ...(typeof expectedStartTimeTicks === 'string' ? { expectedStartTimeTicks } : {}),
+  };
 }
 
 function ensureSecureRunConfigDirectory(configDir: string, owner: RunConfigSnapshotOwner | undefined, rootDir: string): void {
@@ -887,7 +864,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
 
       this.stoppingAttempts.add(attemptId);
       try {
-        await this.supervisor.stop(attempt.pid, { processGroupOwned: attemptOwnsProcessGroup(attempt) });
+        await this.supervisor.stop(attempt.pid, processSignalOptions(attempt));
       } catch (error) {
         this.exitPromises.delete(attemptId);
         this.stoppingAttempts.delete(attemptId);
@@ -906,7 +883,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
         if (!exited && this.exitPromises.has(attemptId)) {
           this.exitPromises.delete(attemptId);
           this.stoppingAttempts.delete(attemptId);
-          await this.supervisor.kill(pid, { processGroupOwned: attemptOwnsProcessGroup(attempt) });
+          await this.supervisor.kill(pid, processSignalOptions(attempt));
         }
 
         // If process exited after an operator stop, handleProcessExit already updated status — don't overwrite
@@ -922,7 +899,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
   async kill(runId: string, attemptId: string): Promise<BeastRunAttempt> {
     const attempt = this.requireAttempt(attemptId);
     if (attempt.pid !== undefined) {
-      await this.supervisor.kill(attempt.pid, { processGroupOwned: attemptOwnsProcessGroup(attempt) });
+      await this.supervisor.kill(attempt.pid, processSignalOptions(attempt));
     }
     return this.finishAttempt(runId, attempt, 'stopped', 'operator_kill');
   }
