@@ -50,7 +50,7 @@ def wait_for(token):
                 output.extend(os.read(fd, 4096))
             except OSError:
                 break
-wait_for(b'>')
+wait_for('❯'.encode())
 os.write(fd, b'unique-chat-input\n')
 wait_for(b'Approve?')
 os.write(fd, b'APPROVE\n')
