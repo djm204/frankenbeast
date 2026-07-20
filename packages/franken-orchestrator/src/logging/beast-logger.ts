@@ -188,7 +188,7 @@ export class BeastLogger implements ILogger {
 
   constructor(options: BeastLoggerOptions) {
     this.verbose = options.verbose;
-    this.plain = options.plain ?? isPlainOutput();
+    this.plain = Boolean(options.plain) || isPlainOutput();
     this.captureForFile = options.captureForFile ?? false;
     this.redactSecrets = options.redactSecrets ?? true;
     this.logFile = options.logFile;

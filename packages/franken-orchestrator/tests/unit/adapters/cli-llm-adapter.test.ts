@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { CliLlmAdapter } from '../../../src/adapters/cli-llm-adapter.js';
+import { setPlainOutput } from '../../../src/logging/beast-logger.js';
 import { AiderProvider } from '../../../src/skills/providers/aider-provider.js';
 import { ClaudeProvider } from '../../../src/skills/providers/claude-provider.js';
 import { CodexProvider } from '../../../src/skills/providers/codex-provider.js';
@@ -462,6 +463,22 @@ describe('CliLlmAdapter', () => {
         const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
         const result = await adapter.execute({ prompt: 'test', maxTurns: 1 });
         expect(result).toBe('response text');
+      });
+
+      it('propagates explicit plain mode to provider subprocesses', async () => {
+        const { spawnFn, calls } = createMockSpawn({ stdout: 'response text', exitCode: 0 });
+        setPlainOutput(true);
+
+        try {
+          const adapter = new CliLlmAdapter(aiderProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env.NO_COLOR).toBe('1');
+          expect(env.FORCE_COLOR).toBe('0');
+        } finally {
+          setPlainOutput(false);
+        }
       });
 
       it('rejects on non-zero exit code with stderr in error message', async () => {

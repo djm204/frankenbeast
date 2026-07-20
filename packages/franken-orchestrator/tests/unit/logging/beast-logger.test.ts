@@ -179,17 +179,17 @@ describe('BeastLogger', () => {
       expect(output).not.toMatch(/\x1b\[/);
     });
 
-    it('honors the NO_COLOR environment convention', () => {
+    it('honors the NO_COLOR environment convention even when plain is explicitly false', () => {
       vi.stubEnv('NO_COLOR', '1');
-      const logger = new BeastLogger({ verbose: true });
+      const logger = new BeastLogger({ verbose: true, plain: false });
 
-      logger.debug('calling [codex] api', 'observer');
+      logger.debug('\x1b[31mcalling [codex] api\x1b[0m\x1b[K', 'observer');
 
       const output = consoleLogSpy.mock.calls[0]![0] as string;
       expect(output).toContain('DEBUG');
       expect(output).toContain('[observer]');
       expect(output).toContain('[codex]');
-      expect(output).not.toMatch(/\x1b\[/);
+      expect(output).not.toMatch(/\x1b/);
     });
 
     it('honors FORCE_COLOR=0 for logs, badges, and banners', async () => {

@@ -12,6 +12,7 @@ import {
   parseResetTimeText,
   type CommandFailure,
 } from '../errors/command-failure.js';
+import { isPlainOutput } from '../logging/beast-logger.js';
 
 type CliCacheSessionHint = {
   key: string;
@@ -508,6 +509,10 @@ export class CliLlmAdapter implements IAdapter {
     const rawEnv: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) {
       if (value !== undefined) rawEnv[key] = value;
+    }
+    if (isPlainOutput()) {
+      rawEnv.NO_COLOR = rawEnv.NO_COLOR ?? '1';
+      rawEnv.FORCE_COLOR = '0';
     }
     return rawEnv;
   }
