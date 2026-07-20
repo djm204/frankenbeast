@@ -216,6 +216,7 @@ vi.mock('../../../src/logging/beast-logger.js', () => ({
   BANNER: '[BANNER]',
   renderBanner: vi.fn(async () => '[BANNER]'),
   setPlainOutput: mockSetPlainOutput,
+  isPlainOutput: vi.fn(() => false),
   BeastLogger: vi.fn(function (this: Record<string, unknown>) {
     this.info = vi.fn();
     this.warn = vi.fn();
