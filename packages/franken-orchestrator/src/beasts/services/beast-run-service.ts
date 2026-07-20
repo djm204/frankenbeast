@@ -1,5 +1,5 @@
 import type { BeastDefinition, BeastRun, BeastRunEvent, ModuleConfig } from '../types.js';
-import { BeastLogStore } from '../events/beast-log-store.js';
+import { BeastLogStore, type BeastLogPage, type BeastLogPageOptions } from '../events/beast-log-store.js';
 import type { BeastEventBus, BeastSseEvent } from '../events/beast-event-bus.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import type { BeastMetrics } from '../telemetry/beast-metrics.js';
@@ -106,6 +106,22 @@ export class BeastRunService {
     const lines = await this.logs.read(run.id, attemptId ?? 'system');
     if (!this.hasDispatchFailureHistory(run)) return lines;
     return lines.map(redactDispatchFailureLogLine);
+  }
+
+  async readLogsPage(runId: string, options: BeastLogPageOptions): Promise<BeastLogPage> {
+    const run = this.requireRun(runId);
+    const page = await this.logs.readPage(run.id, run.currentAttemptId ?? 'system', options);
+    if (!this.hasDispatchFailureHistory(run)) return page;
+
+    const redacted = page.lines.map(redactDispatchFailureLogLine);
+    const bounded = boundSerializedLogLines(redacted, options.maxBytes, page.tail);
+    return {
+      ...page,
+      lines: bounded.lines,
+      nextOffset: page.offset + bounded.lines.length,
+      hasMore: page.hasMore || bounded.lines.length < redacted.length,
+      bytes: bounded.bytes,
+    };
   }
 
   async start(runId: string, _actor: string): Promise<BeastRun> {
@@ -611,4 +627,22 @@ function redactDispatchFailureLogLine(line: string): string {
   return line.includes('start_failed:')
     ? `start_failed: ${SAFE_DISPATCH_FAILURE_MESSAGE}`
     : line;
+}
+
+function boundSerializedLogLines(
+  lines: readonly string[],
+  maxBytes: number,
+  tail: boolean,
+): { lines: string[]; bytes: number } {
+  const selected: string[] = [];
+  let bytes = 2;
+  const candidates = tail ? [...lines].reverse() : lines;
+  for (const line of candidates) {
+    const nextBytes = bytes + Buffer.byteLength(JSON.stringify(line)) + (selected.length > 0 ? 1 : 0);
+    if (nextBytes > maxBytes) break;
+    selected.push(line);
+    bytes = nextBytes;
+  }
+  if (tail) selected.reverse();
+  return { lines: selected, bytes };
 }

@@ -1,5 +1,7 @@
-import { appendFile, mkdir, readFile, readdir, rename, stat, truncate, unlink } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { appendFile, mkdir, open, readFile, readdir, rename, stat, truncate, unlink } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { createInterface } from 'node:readline';
 import { isoNow } from '@franken/types';
 
 const DEFAULT_MAX_LOG_FILE_BYTES = 10 * 1024 * 1024;
@@ -15,6 +17,23 @@ export interface BeastLogStoreOptions {
   readonly maxLogFileBytes?: number | undefined;
   /** Number of rotated per-attempt logs to retain. Defaults to 3; values < 1 truncate in place. */
   readonly maxRotatedLogFiles?: number | undefined;
+}
+
+export interface BeastLogPageOptions {
+  readonly offset?: number | undefined;
+  readonly limit: number;
+  readonly tail?: boolean | undefined;
+  /** Maximum serialized JSON byte size of the returned lines array. */
+  readonly maxBytes: number;
+}
+
+export interface BeastLogPage {
+  readonly lines: string[];
+  readonly offset: number;
+  readonly nextOffset: number;
+  readonly hasMore: boolean;
+  readonly tail: boolean;
+  readonly bytes: number;
 }
 
 interface LogRecord {
@@ -81,6 +100,73 @@ export class BeastLogStore {
     }
 
     return lines;
+  }
+
+  async readPage(runId: string, attemptId: string, options: BeastLogPageOptions): Promise<BeastLogPage> {
+    const filePath = this.resolvePath(runId, attemptId);
+    const paths = await this.listReadableLogPaths(filePath, true);
+    const tail = options.tail ?? false;
+    const offset = tail ? 0 : (options.offset ?? 0);
+    const selected: string[] = [];
+    let bytes = 2;
+    let hasMore = false;
+
+    if (tail) {
+      outer: for (const path of [...paths].reverse()) {
+        try {
+          for await (const line of readLinesReverse(path)) {
+            if (selected.length >= options.limit) {
+              hasMore = true;
+              break outer;
+            }
+            const nextBytes = serializedArrayBytesAfterAppend(bytes, selected.length, line);
+            if (nextBytes > options.maxBytes) {
+              hasMore = true;
+              break outer;
+            }
+            selected.push(line);
+            bytes = nextBytes;
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        }
+      }
+      selected.reverse();
+    } else {
+      let seen = 0;
+      outer: for (const path of paths) {
+        try {
+          for await (const line of readLinesForward(path)) {
+            if (seen < offset) {
+              seen += 1;
+              continue;
+            }
+            if (selected.length >= options.limit) {
+              hasMore = true;
+              break outer;
+            }
+            const nextBytes = serializedArrayBytesAfterAppend(bytes, selected.length, line);
+            if (nextBytes > options.maxBytes) {
+              hasMore = true;
+              break outer;
+            }
+            selected.push(line);
+            bytes = nextBytes;
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        }
+      }
+    }
+
+    return {
+      lines: selected,
+      offset,
+      nextOffset: offset + selected.length,
+      hasMore,
+      tail,
+      bytes,
+    };
   }
 
   private async appendSerialized(
@@ -203,14 +289,14 @@ export class BeastLogStore {
     this.retentionPrunedLogPaths.add(filePath);
   }
 
-  private async listReadableLogPaths(filePath: string): Promise<string[]> {
+  private async listReadableLogPaths(filePath: string, boundedToRetention = false): Promise<string[]> {
     const dir = dirname(filePath);
     const prefix = `${basename(filePath)}.`;
     try {
       const entries = await readdir(dir);
       const rotatedPaths = entries
         .map((entry) => ({ entry, index: parseRotationIndex(entry, prefix) }))
-        .filter(({ index }) => index >= 1)
+        .filter(({ index }) => index >= 1 && (!boundedToRetention || index <= this.maxRotatedLogFiles))
         .sort((left, right) => right.index - left.index)
         .map(({ entry }) => join(dir, entry));
       return [...rotatedPaths, filePath];
@@ -283,4 +369,53 @@ function parseRotationIndex(entry: string, prefix: string): number {
   const suffix = entry.slice(prefix.length);
   if (!/^\d+$/u.test(suffix)) return 0;
   return Number(suffix);
+}
+
+function serializedArrayBytesAfterAppend(currentBytes: number, currentLength: number, line: string): number {
+  return currentBytes + Buffer.byteLength(JSON.stringify(line)) + (currentLength > 0 ? 1 : 0);
+}
+
+async function* readLinesForward(path: string): AsyncGenerator<string> {
+  const input = createReadStream(path, { encoding: 'utf8' });
+  const lines = createInterface({ input, crlfDelay: Infinity });
+  try {
+    for await (const raw of lines) {
+      const line = raw.trim();
+      if (line) yield line;
+    }
+  } finally {
+    lines.close();
+    input.destroy();
+  }
+}
+
+async function* readLinesReverse(path: string): AsyncGenerator<string> {
+  const handle = await open(path, 'r');
+  const chunkSize = 64 * 1024;
+  try {
+    let position = (await handle.stat()).size;
+    let carry = Buffer.alloc(0);
+    while (position > 0) {
+      const start = Math.max(0, position - chunkSize);
+      const chunk = Buffer.allocUnsafe(position - start);
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, start);
+      const data = Buffer.concat([chunk.subarray(0, bytesRead), carry]);
+      let end = data.length;
+      for (
+        let index = data.lastIndexOf(0x0a, end - 1);
+        index >= 0;
+        index = data.lastIndexOf(0x0a, end - 1)
+      ) {
+        const line = data.subarray(index + 1, end).toString('utf8').trim();
+        if (line) yield line;
+        end = index;
+      }
+      carry = data.subarray(0, end);
+      position = start;
+    }
+    const line = carry.toString('utf8').trim();
+    if (line) yield line;
+  } finally {
+    await handle.close();
+  }
 }

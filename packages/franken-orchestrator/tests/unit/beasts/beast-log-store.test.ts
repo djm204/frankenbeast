@@ -300,6 +300,103 @@ describe('BeastLogStore', () => {
     });
   });
 
+  it('pages retained logs by offset across rotations in oldest-to-newest order', async () => {
+    await withTempDir(async (dir) => {
+      const activePath = join(dir, SAFE_RUN_ID, `${SAFE_ATTEMPT_ID}.log`);
+      await mkdir(join(dir, SAFE_RUN_ID), { recursive: true });
+      await writeFile(`${activePath}.2`, 'oldest\nolder\n');
+      await writeFile(`${activePath}.1`, 'newer\n');
+      await writeFile(activePath, 'newest\n');
+
+      await expect(new BeastLogStore(dir).readPage(SAFE_RUN_ID, SAFE_ATTEMPT_ID, {
+        offset: 1,
+        limit: 2,
+        maxBytes: 1_024,
+      })).resolves.toEqual({
+        lines: ['older', 'newer'],
+        offset: 1,
+        nextOffset: 3,
+        hasMore: true,
+        tail: false,
+        bytes: Buffer.byteLength(JSON.stringify(['older', 'newer'])),
+      });
+    });
+  });
+
+  it('returns a bounded newest-first-selected tail in chronological order', async () => {
+    await withTempDir(async (dir) => {
+      const activePath = join(dir, SAFE_RUN_ID, `${SAFE_ATTEMPT_ID}.log`);
+      await mkdir(join(dir, SAFE_RUN_ID), { recursive: true });
+      await writeFile(`${activePath}.1`, 'oldest\nolder\n');
+      await writeFile(activePath, 'newer\nnewest\n');
+
+      await expect(new BeastLogStore(dir).readPage(SAFE_RUN_ID, SAFE_ATTEMPT_ID, {
+        tail: true,
+        limit: 2,
+        maxBytes: 1_024,
+      })).resolves.toEqual({
+        lines: ['newer', 'newest'],
+        offset: 0,
+        nextOffset: 2,
+        hasMore: true,
+        tail: true,
+        bytes: Buffer.byteLength(JSON.stringify(['newer', 'newest'])),
+      });
+    });
+  });
+
+  it('stops reverse-tail I/O before opening older files once bounds are satisfied', async () => {
+    await withTempDir(async (dir) => {
+      const activePath = join(dir, SAFE_RUN_ID, `${SAFE_ATTEMPT_ID}.log`);
+      await mkdir(join(dir, SAFE_RUN_ID), { recursive: true });
+      await mkdir(`${activePath}.1`);
+      await writeFile(activePath, 'enough\nnewest\n');
+
+      const page = await new BeastLogStore(dir).readPage(SAFE_RUN_ID, SAFE_ATTEMPT_ID, {
+        tail: true,
+        limit: 1,
+        maxBytes: 1_024,
+      });
+
+      expect(page.lines).toEqual(['newest']);
+      expect(page.hasMore).toBe(true);
+    });
+  });
+
+  it('enforces the serialized logs-array budget', async () => {
+    await withTempDir(async (dir) => {
+      const activePath = join(dir, SAFE_RUN_ID, `${SAFE_ATTEMPT_ID}.log`);
+      await mkdir(join(dir, SAFE_RUN_ID), { recursive: true });
+      await writeFile(activePath, `${'x'.repeat(700)}\n${'y'.repeat(700)}\n`);
+
+      const page = await new BeastLogStore(dir).readPage(SAFE_RUN_ID, SAFE_ATTEMPT_ID, {
+        limit: 2,
+        maxBytes: 1_024,
+      });
+
+      expect(page.lines).toHaveLength(1);
+      expect(page.bytes).toBeLessThanOrEqual(1_024);
+      expect(page.hasMore).toBe(true);
+    });
+  });
+
+  it('returns stable empty page metadata', async () => {
+    await withTempDir(async (dir) => {
+      await expect(new BeastLogStore(dir).readPage(SAFE_RUN_ID, SAFE_ATTEMPT_ID, {
+        offset: 5,
+        limit: 20,
+        maxBytes: 1_024,
+      })).resolves.toEqual({
+        lines: [],
+        offset: 5,
+        nextOffset: 5,
+        hasMore: false,
+        tail: false,
+        bytes: 2,
+      });
+    });
+  });
+
   it('caps configured rotated-file retention to avoid unbounded rotation loops', async () => {
     await withTempDir(async (dir) => {
       const activePath = join(dir, SAFE_RUN_ID, `${SAFE_ATTEMPT_ID}.log`);
