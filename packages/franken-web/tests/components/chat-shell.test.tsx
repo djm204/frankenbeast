@@ -1527,11 +1527,11 @@ describe('ChatShell', () => {
     await act(async () => {
       latestBeastEventHandlers?.snapshot?.({
         agents: [{
-          id: 'new-agent-on-first-page',
+          id: 'z-new-agent-on-first-page',
           definitionId: 'chunk-plan',
           status: 'dispatching',
-          createdAt: '2026-03-12T00:00:00.000Z',
-          updatedAt: '2026-03-12T00:00:00.000Z',
+          createdAt: '2026-03-11T00:00:00.000Z',
+          updatedAt: '2026-03-11T00:00:00.000Z',
         }],
       });
     });

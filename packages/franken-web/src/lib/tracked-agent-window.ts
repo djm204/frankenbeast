@@ -10,6 +10,23 @@ export interface TrackedAgentWindow extends TrackedAgentPage {
   pagesLoaded: number;
 }
 
+export function isTrackedAgentSortKeyNewer(
+  candidate: { id: string; createdAt?: string },
+  reference: { id: string; createdAt?: string } | undefined,
+): boolean {
+  if (!candidate.createdAt || !reference?.createdAt) return false;
+  return candidate.createdAt > reference.createdAt
+    || (candidate.createdAt === reference.createdAt && candidate.id > reference.id);
+}
+
+export function sortTrackedAgentsNewestFirst(agents: TrackedAgentSummary[]): TrackedAgentSummary[] {
+  return agents.sort((a, b) => {
+    if (isTrackedAgentSortKeyNewer(a, b)) return -1;
+    if (isTrackedAgentSortKeyNewer(b, a)) return 1;
+    return 0;
+  });
+}
+
 export async function loadTrackedAgentWindow(
   client: BeastApiClient,
   requestedPages: number,
@@ -44,5 +61,5 @@ export async function loadTrackedAgentWindow(
     if (selected) agents.push(selected.agent);
   }
 
-  return { agents, nextCursor, pagesLoaded };
+  return { agents: sortTrackedAgentsNewestFirst(agents), nextCursor, pagesLoaded };
 }

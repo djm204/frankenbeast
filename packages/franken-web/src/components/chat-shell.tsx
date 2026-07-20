@@ -18,7 +18,7 @@ import {
   type TrackedAgentInitAction,
   type TrackedAgentSummary,
 } from '../lib/beast-api';
-import { loadTrackedAgentWindow, type TrackedAgentWindow } from '../lib/tracked-agent-window';
+import { isTrackedAgentSortKeyNewer, loadTrackedAgentWindow, sortTrackedAgentsNewestFirst, type TrackedAgentWindow } from '../lib/tracked-agent-window';
 import { ChatApiClient, type ChatSessionSummary, type CorruptChatSessionFile } from '../lib/api';
 import { NetworkApiClient, type NetworkConfigResponse, type NetworkStatusResponse } from '../lib/network-api';
 import type { AgentLifecycleAction } from './beasts/agent-action-bar';
@@ -464,10 +464,8 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         const currentAgents = beastAgentsRef.current;
         const currentDetail = beastAgentDetailRef.current;
         const sawUnknownAgent = snapshot.agents.some((candidate) => !currentAgents.some((agent) => agent.id === candidate.id));
-        const newestLoadedCreatedAt = currentAgents.reduce((latest, agent) => (
-          agent.createdAt > latest ? agent.createdAt : latest
-        ), '');
-        const sawNewerUnknownAgent = snapshot.agents.some((candidate) => (candidate.createdAt ?? '') > newestLoadedCreatedAt
+        const newestLoadedAgent = currentAgents.length === 0 ? undefined : currentAgents.reduce((newest, agent) => (isTrackedAgentSortKeyNewer(agent, newest) ? agent : newest));
+        const sawNewerUnknownAgent = snapshot.agents.some((candidate) => newestLoadedAgent && isTrackedAgentSortKeyNewer(candidate, newestLoadedAgent)
           && !currentAgents.some((agent) => agent.id === candidate.id));
         const selectedSnapshotAgent = currentDetail
           ? snapshot.agents.find((candidate) => candidate.id === currentDetail.agent.id)
@@ -1064,7 +1062,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                 if (windowVersion !== beastAgentWindowVersionRef.current) return;
                 setBeastAgents((current) => {
                   const knownIds = new Set(current.map((agent) => agent.id));
-                  return [...current, ...page.agents.filter((agent) => !knownIds.has(agent.id))];
+                  return sortTrackedAgentsNewestFirst([...current, ...page.agents.filter((agent) => !knownIds.has(agent.id))]);
                 });
                 beastAgentNextCursorRef.current = page.nextCursor;
                 setBeastAgentNextCursor(page.nextCursor);
