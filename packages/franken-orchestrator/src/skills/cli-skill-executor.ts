@@ -313,7 +313,14 @@ export class CliSkillExecutor {
     return 'committed';
   }
 
-  async execute(skillId: string, input: SkillInput, config: Partial<CliSkillConfig>, checkpoint?: ICheckpointStore, taskId?: string): Promise<SkillResult> {
+  async execute(
+    skillId: string,
+    input: SkillInput,
+    config: Partial<CliSkillConfig>,
+    checkpoint?: ICheckpointStore,
+    taskId?: string,
+    sanitizeResponse?: (output: unknown) => Promise<unknown>,
+  ): Promise<SkillResult> {
     if (!skillId || skillId.trim().length === 0) {
       throw new Error('skillId must not be empty');
     }
@@ -514,15 +521,18 @@ export class CliSkillExecutor {
       commits: mergeResult.commits,
     });
 
+    const acceptedOutput = sanitizeResponse
+      ? await sanitizeResponse(martinResult.output)
+      : martinResult.output;
     this.observer.endSpan(chunkSpan, { status: 'completed' });
     this.observer.recordReplay?.({
       kind: 'tool.result',
       runId: input.sessionId,
       toolName: skillId,
-      content: JSON.stringify({ output: martinResult.output, tokensUsed: chunkTokensUsed, iterations: martinResult.iterations }),
+      content: JSON.stringify({ output: acceptedOutput, tokensUsed: chunkTokensUsed, iterations: martinResult.iterations }),
     });
     return {
-      output: martinResult.output,
+      output: acceptedOutput,
       tokensUsed: chunkTokensUsed,
     };
   }

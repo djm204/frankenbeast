@@ -222,7 +222,9 @@ export async function runExecution(
           });
         }
         logger.info('Execution: Skipping checkpointed task', { taskId: task.id });
-        const acceptedOutput = checkpointedOutput?.found && firewall
+        const acceptedOutput = checkpointedOutput?.found
+          && firewall && firewall.enabled !== false
+          && task.requiredSkills.length > 0
           ? await scanAndSanitizeResponse(
               firewall,
               checkpointedOutput.output,
@@ -976,15 +978,28 @@ async function executeTask(
         if (!cliExecutor) {
           throw new Error(`CLI skill '${skillId}' requires a CliSkillExecutor but none was provided`);
         }
-        result = await cliExecutor.execute(skillId, baseInput, {} as never, checkpoint, task.id);
+        result = firewall && firewall.enabled !== false
+          ? await cliExecutor.execute(
+              skillId,
+              baseInput,
+              {} as never,
+              checkpoint,
+              task.id,
+              response => scanAndSanitizeResponse(
+                firewall,
+                response,
+                `CLI skill '${skillId}' response`,
+              ),
+            )
+          : await cliExecutor.execute(skillId, baseInput, {} as never, checkpoint, task.id);
       } else if (isMcp) {
         result = await executeMcpSkill(skillId, baseInput, mcp);
       } else {
         result = await skills.execute(skillId, baseInput);
       }
 
-      const acceptedOutput = firewall
-        ? await scanAndSanitizeResponse(firewall, result.output, `Skill response from '${skillId}'`)
+      const acceptedOutput = firewall && firewall.enabled !== false
+        ? await scanAndSanitizeResponse(firewall, result.output, `Skill '${skillId}' response`)
         : result.output;
       logger.info('Execution: skill response accepted', {
         taskId: task.id,
@@ -1047,7 +1062,21 @@ async function scanAndSanitizeResponse(
 ): Promise<unknown> {
   const serialized = serializeUntrustedResponse(output, source);
   if (typeof output !== 'string' && output !== null && typeof output === 'object') {
-    return sanitizeStructuredResponse(firewall, output, source);
+    const sanitized = await sanitizeStructuredResponse(firewall, output, source);
+    const sanitizedSerialized = serializeUntrustedResponse(sanitized, source);
+    const aggregateResult = await firewall.scanResponse(sanitizedSerialized.text);
+    if (aggregateResult.blocked) {
+      throw new InjectionDetectedError(aggregateResult.violations, source);
+    }
+    const accepted = sanitizedSerialized.restore(aggregateResult.sanitizedText);
+    const combinedText = collectStructuredText(accepted).join(' ');
+    if (combinedText.length > 0) {
+      const combinedResult = await firewall.scanResponse(combinedText);
+      if (combinedResult.blocked) {
+        throw new InjectionDetectedError(combinedResult.violations, source);
+      }
+    }
+    return accepted;
   }
   const firewallResult = await firewall.scanResponse(serialized.text);
   if (firewallResult.blocked) {
@@ -1091,6 +1120,15 @@ async function sanitizeStructuredResponse(
     return Object.fromEntries(entries);
   }
   return value;
+}
+
+function collectStructuredText(value: unknown): string[] {
+  if (typeof value === 'string') return [value];
+  if (Array.isArray(value)) return value.flatMap(collectStructuredText);
+  if (value !== null && typeof value === 'object') {
+    return Object.values(value).flatMap(collectStructuredText);
+  }
+  return [];
 }
 
 function serializeUntrustedResponse(

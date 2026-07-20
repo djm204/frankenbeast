@@ -130,6 +130,7 @@ const stubGovernor: IGovernorModule = {
   requestApproval: async () => ({ decision: 'approved' as const }),
 };
 const stubFirewall: IFirewallModule = {
+  enabled: false,
   runPipeline: async (input: string) => ({ sanitizedText: input, violations: [], blocked: false }),
   scanResponse: async (input: string) => ({ sanitizedText: input, violations: [], blocked: false }),
 };
