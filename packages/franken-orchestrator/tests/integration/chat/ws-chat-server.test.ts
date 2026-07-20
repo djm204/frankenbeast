@@ -1431,8 +1431,9 @@ describe('ws chat server', () => {
       sessionId: session.id,
     };
     store.save(session);
-    const auditLog = new FileApprovalAuditLog(join(TMP, 'hitl-approval-audit.jsonl'));
-    vi.spyOn(auditLog, 'hasConsumedApproval').mockRejectedValue(new Error('audit log unavailable'));
+    const auditPath = join(TMP, 'unreadable-audit-path');
+    mkdirSync(auditPath, { recursive: true });
+    const auditLog = new FileApprovalAuditLog(auditPath);
     const secret = createSessionTokenSecret();
     const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
     const execute = vi.fn();
