@@ -120,6 +120,8 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const [chatSessionsRefreshNonce, setChatSessionsRefreshNonce] = useState(0);
   const [beastCatalog, setBeastCatalog] = useState<BeastCatalogEntry[]>([]);
   const [beastAgents, setBeastAgents] = useState<TrackedAgentSummary[]>([]);
+  const [beastAgentNextCursor, setBeastAgentNextCursor] = useState<string | undefined>(undefined);
+  const [beastAgentsLoadingMore, setBeastAgentsLoadingMore] = useState(false);
   const [beastRuns, setBeastRuns] = useState<BeastRunSummary[]>([]);
   const [beastContainerRuntime, setBeastContainerRuntime] = useState<BeastContainerRuntimeStatus | undefined>(undefined);
   const [selectedBeastAgentId, setSelectedBeastAgentId] = useState<string | null>(null);
@@ -393,6 +395,8 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
       setBeastCreationUnavailableReason(null);
       setBeastCatalog(catalog);
       setBeastAgents(agentPage.agents);
+      setBeastAgentNextCursor(agentPage.nextCursor);
+      setBeastAgentsLoadingMore(false);
       setBeastRuns(runs);
       setBeastContainerRuntime(containerRuntime);
       const autoSelectedAgentId = agentPage.agents.find((agent) => agent.status !== 'deleted')?.id ?? null;
@@ -1010,6 +1014,8 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             pendingAgentActions={pendingBeastAgentActions}
             selectedAgentId={selectedBeastAgentId}
             dashboardClient={dashboardClient}
+            hasMoreAgents={Boolean(beastAgentNextCursor)}
+            loadingMoreAgents={beastAgentsLoadingMore}
             onClose={() => {
               shouldAutoSelectBeastAgentRef.current = false;
               selectedBeastAgentIdRef.current = null;
@@ -1039,6 +1045,23 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                   setBeastRefreshNonce((current) => current + 1);
                 }
                 throw error;
+              }
+            }}
+            onLoadMoreAgents={async () => {
+              const cursor = beastAgentNextCursor;
+              if (!cursor || beastAgentsLoadingMore) return;
+              setBeastAgentsLoadingMore(true);
+              try {
+                const page = await beastClient.listAgentPage({ cursor });
+                setBeastAgents((current) => {
+                  const knownIds = new Set(current.map((agent) => agent.id));
+                  return [...current, ...page.agents.filter((agent) => !knownIds.has(agent.id))];
+                });
+                setBeastAgentNextCursor(page.nextCursor);
+              } catch (error) {
+                setBeastError(error instanceof Error ? error.message : 'Unable to load more tracked agents.');
+              } finally {
+                setBeastAgentsLoadingMore(false);
               }
             }}
             onDelete={(agentId) => {

@@ -33,6 +33,41 @@ const agents: TrackedAgentSummary[] = [
 ];
 
 describe('AgentList', () => {
+  it('offers access to later tracked-agent pages', () => {
+    const onLoadMore = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AgentList
+        agents={agents}
+        runs={[]}
+        selectedAgentId={null}
+        onSelectAgent={vi.fn()}
+        onCreateAgent={vi.fn()}
+        hasMore={true}
+        onLoadMore={onLoadMore}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load more agents' }));
+    expect(onLoadMore).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables the later-page action while loading', () => {
+    render(
+      <AgentList
+        agents={agents}
+        runs={[]}
+        selectedAgentId={null}
+        onSelectAgent={vi.fn()}
+        onCreateAgent={vi.fn()}
+        hasMore={true}
+        loadingMore={true}
+        onLoadMore={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect((screen.getByRole('button', { name: 'Loading agents…' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('renders all agents', () => {
     render(<AgentList agents={agents} runs={[]} selectedAgentId={null} onSelectAgent={vi.fn()} onCreateAgent={vi.fn()} />);
     expect(screen.getByText('agent-1')).toBeTruthy();

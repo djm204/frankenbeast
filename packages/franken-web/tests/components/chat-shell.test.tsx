@@ -63,6 +63,10 @@ const mockListAgents = vi.fn().mockResolvedValue([
   },
 ]);
 
+const mockListAgentPage = vi.fn().mockImplementation(async () => ({
+  agents: await mockListAgents(),
+}));
+
 const mockListRuns = vi.fn().mockResolvedValue([
   {
     id: 'run-1',
@@ -282,6 +286,7 @@ vi.mock('../../src/lib/beast-api.js', () => ({
   ],
   BeastApiClient: vi.fn(function (this: {
     getCatalog: typeof mockGetCatalog;
+    listAgentPage: typeof mockListAgentPage;
     listAgents: typeof mockListAgents;
     listRuns: typeof mockListRuns;
     getContainerRuntimeStatus: typeof mockGetContainerRuntimeStatus;
@@ -303,6 +308,7 @@ vi.mock('../../src/lib/beast-api.js', () => ({
     subscribeToEvents: typeof mockSubscribeToEvents;
   }) {
     this.getCatalog = mockGetCatalog;
+    this.listAgentPage = mockListAgentPage;
     this.listAgents = mockListAgents;
     this.listRuns = mockListRuns;
     this.getContainerRuntimeStatus = mockGetContainerRuntimeStatus;
@@ -424,6 +430,8 @@ afterEach(() => {
       updatedAt: '2026-03-11T00:00:01.000Z',
     },
   ]);
+  mockListAgentPage.mockReset();
+  mockListAgentPage.mockImplementation(async () => ({ agents: await mockListAgents() }));
   mockListRuns.mockResolvedValue([
     {
       id: 'run-1',
@@ -1046,7 +1054,44 @@ describe('ChatShell', () => {
     }, { timeout: 5000 });
 
     expect(screen.getByRole('heading', { level: 1, name: 'Beasts' })).toBeDefined();
-    expect(mockListAgents).toHaveBeenCalled();
+    expect(mockListAgentPage).toHaveBeenCalledWith();
+  });
+
+  it('loads subsequent tracked-agent pages from the returned cursor', async () => {
+    window.location.hash = '#/beasts';
+    const firstAgent = {
+      id: 'agent-page-1',
+      definitionId: 'chunk-plan',
+      status: 'deleted',
+      source: 'dashboard',
+      createdByUser: 'operator',
+      initAction: { kind: 'chunk-plan', command: '/plan', config: {} },
+      initConfig: {},
+      createdAt: '2026-03-11T00:00:00.000Z',
+      updatedAt: '2026-03-11T00:00:01.000Z',
+    };
+    const secondAgent = {
+      ...firstAgent,
+      id: 'agent-page-2',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    };
+    mockListAgentPage
+      .mockResolvedValueOnce({ agents: [firstAgent], nextCursor: 'cursor-page-2' })
+      .mockResolvedValueOnce({ agents: [secondAgent] });
+
+    render(
+      <ChatShell
+        baseUrl="http://localhost:3000"
+        projectId="test-project"
+        sessionId="sess-1"
+        version="0.1.0"
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more agents' }, { timeout: 5000 }));
+    await waitFor(() => expect(screen.getByText('agent-page-2')).toBeTruthy());
+    expect(mockListAgentPage).toHaveBeenNthCalledWith(2, { cursor: 'cursor-page-2' });
+    expect(screen.queryByRole('button', { name: 'Load more agents' })).toBeNull();
   });
 
   it('persists Beast drawer edits and refreshes the selected agent detail', async () => {
