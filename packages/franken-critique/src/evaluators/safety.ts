@@ -401,7 +401,9 @@ export class SafetyEvaluator implements Evaluator {
     for (let i = 0; i < pattern.length; i += 1) {
       if (pattern[i] === '\\') {
         if (
-          (pattern[i + 1] === 'p' || pattern[i + 1] === 'P') &&
+          (pattern[i + 1] === 'p' ||
+            pattern[i + 1] === 'P' ||
+            pattern[i + 1] === 'u') &&
           pattern[i + 2] === '{'
         ) {
           return true;
@@ -427,14 +429,21 @@ export class SafetyEvaluator implements Evaluator {
   }
 
   private hasOverlappingAlternation(groupContent: string): boolean {
-    const alternatives = this.splitTopLevelAlternatives(
+    const alternativeTexts = this.splitTopLevelAlternatives(
       this.stripGroupPrefix(groupContent),
-    )
+    );
+    if (
+      this.parsingUnicodeSets &&
+      this.hasUnicodeSetAlternationRisk(alternativeTexts)
+    ) {
+      return true;
+    }
+
+    const alternatives = alternativeTexts
       .filter(
         (alternative) =>
           !this.parsingUnicodeSets ||
-          !this.hasUnicodeSetSemanticSyntax(alternative) ||
-          this.hasAnalyzableUnicodeSetPrefix(alternative),
+          !this.hasUnicodeSetSemanticSyntax(alternative),
       )
       .map((alternative) => this.expandSimpleAlternativePrefix(alternative));
     if (alternatives.length < 2) return false;
@@ -448,11 +457,33 @@ export class SafetyEvaluator implements Evaluator {
     );
   }
 
-  private hasAnalyzableUnicodeSetPrefix(alternative: string): boolean {
-    if (alternative[0] !== '[') return false;
-    const end = this.skipCharacterClass(alternative, 0, true);
-    if (alternative[end] !== ']') return false;
-    return !alternative.slice(0, end + 1).includes('\\q{');
+  private hasUnicodeSetAlternationRisk(alternatives: string[]): boolean {
+    const semanticAlternatives = alternatives.filter((alternative) =>
+      this.hasUnicodeSetSemanticSyntax(alternative),
+    );
+    if (semanticAlternatives.length === 0) return false;
+    if (semanticAlternatives.length > 1) return true;
+
+    const semantic = semanticAlternatives[0]!;
+    if (/\\[pPq]\{|\\u\{|--/.test(semantic) || semantic[0] !== '[') {
+      return true;
+    }
+
+    const end = this.skipCharacterClass(semantic, 0, true);
+    if (semantic[end] !== ']') return true;
+    const characterClass = semantic.slice(0, end + 1);
+
+    return alternatives
+      .filter((alternative) => alternative !== semantic)
+      .some((alternative) => {
+        const firstToken = this.expandSimpleAlternativePrefix(alternative).tokens[0];
+        if (firstToken === undefined || firstToken.length !== 1) return true;
+        try {
+          return new RegExp(`^(?:${characterClass})$`, 'v').test(firstToken);
+        } catch {
+          return true;
+        }
+      });
   }
 
   private hasDeterministicTopLevelAlternation(groupContent: string): boolean {
@@ -906,10 +937,6 @@ export class SafetyEvaluator implements Evaluator {
   }
 
   private classTokenOverlaps(classToken: string, token: string): boolean {
-    if (this.parsingUnicodeSets) {
-      return this.tokenMayMatchSample(classToken, token);
-    }
-
     if (classToken.startsWith('CLASS:[^')) {
       const body = classToken.slice('CLASS:[^'.length, -1);
       if (token.length === 1) return !this.positiveClassBodyOverlaps(body, token);
@@ -1103,8 +1130,6 @@ export class SafetyEvaluator implements Evaluator {
       '.',
       '/',
       '\u00A0',
-      ...(left.length === 1 ? [left] : []),
-      ...(right.length === 1 ? [right] : []),
       ...this.tokenProbeSamples(left),
       ...this.tokenProbeSamples(right),
     ]);
@@ -1183,14 +1208,6 @@ export class SafetyEvaluator implements Evaluator {
   }
 
   private classMatchesSample(characterClass: string, sample: string): boolean {
-    if (this.parsingUnicodeSets) {
-      try {
-        return new RegExp(`^(?:${characterClass})$`, 'v').test(sample);
-      } catch {
-        return false;
-      }
-    }
-
     const body = characterClass.slice(1, -1);
     const negated = body.startsWith('^');
     const positiveBody = negated ? body.slice(1) : body;
