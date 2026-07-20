@@ -97,6 +97,24 @@ describe('AgentInitService', () => {
     });
   });
 
+  it('does not widen explicit chat init manifest aliases with workflow defaults', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-agent-init-'));
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
+    const init = new AgentInitService(agents, {
+      createRun: vi.fn(),
+    } as never, () => '2026-03-11T00:00:00.000Z');
+
+    expect(() => init.createChatInitAgent({
+      definitionId: 'chunk-plan',
+      chatSessionId: 'sess-restricted',
+      command: 'chunk-plan',
+      initActionKind: 'chunk-plan',
+      config: { agentRole: 'docs', tools: ['read_file'], skills: [] },
+    })).toThrow(AgentToolPolicyError);
+    expect(agents.listAgents()).toEqual([]);
+  });
+
   it('dispatches tracked agents after init completes and links the resulting run', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-agent-init-'));
     const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

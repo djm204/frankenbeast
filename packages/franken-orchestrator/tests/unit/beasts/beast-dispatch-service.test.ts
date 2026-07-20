@@ -934,6 +934,53 @@ describe('BeastDispatchService', () => {
     expect(repo.listRuns()).toEqual([]);
   });
 
+  it('fails closed for legacy tracked agents without a stored tool manifest', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const agent = repo.createTrackedAgent({
+      definitionId: 'martin-loop',
+      source: 'chat',
+      status: 'initializing',
+      createdByUser: 'legacy-operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: {
+        provider: 'claude',
+        objective: 'Legacy tracked agent without policy metadata',
+        chunkDirectory: 'docs/chunks',
+      },
+      createdAt: '2026-03-17T00:00:00.000Z',
+      updatedAt: '2026-03-17T00:00:00.000Z',
+    });
+
+    await expect(dispatch.createRun({
+      definitionId: 'martin-loop',
+      trackedAgentId: agent.id,
+      config: {
+        provider: 'claude',
+        objective: 'Start the legacy tracked agent',
+        chunkDirectory: 'docs/chunks',
+      },
+      dispatchedBy: 'chat',
+      dispatchedByUser: 'legacy-operator',
+      executionMode: 'process',
+    })).rejects.toMatchObject({
+      name: 'AgentToolPolicyError',
+      validation: {
+        denials: expect.arrayContaining([
+          expect.objectContaining({ requestedTool: '<missing-tool-manifest>' }),
+        ]),
+      },
+    });
+    expect(repo.listRuns()).toEqual([]);
+  });
+
   it('preserves tracked-agent skill allowlists when final dispatch config omits skills', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

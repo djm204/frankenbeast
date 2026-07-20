@@ -261,7 +261,7 @@ export class BeastDispatchService {
           Object.hasOwn(trackedAgent.initAction.config, key)
           || Object.hasOwn(trackedAgent.initConfig, key))
       : TOOL_MANIFEST_CONFIG_KEYS.some(key => Object.hasOwn(request.config, key));
-    if (hasExplicitManifest) {
+    if (trackedAgent || hasExplicitManifest) {
       delete policyDefaults.requestedTools;
     }
     const parsedConfigSnapshot: Readonly<Record<string, unknown>> = moduleConfig

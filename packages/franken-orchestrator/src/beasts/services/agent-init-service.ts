@@ -5,6 +5,13 @@ import { AgentToolPolicyError } from './role-tool-manifest.js';
 import { MaintenanceModeError } from './maintenance-mode-service.js';
 import { isoNow } from '@franken/types';
 
+const TOOL_MANIFEST_CONFIG_KEYS = [
+  'requestedTools',
+  'enabledTools',
+  'toolManifest',
+  'tools',
+] as const;
+
 export interface CreateChatInitAgentRequest {
   readonly definitionId: string;
   readonly chatSessionId: string;
@@ -28,8 +35,14 @@ export class AgentInitService {
   ) {}
 
   createChatInitAgent(request: CreateChatInitAgentRequest): TrackedAgent {
-    const initConfig = {
+    const policyDefaults: Record<string, unknown> = {
       ...this.agents.defaultToolPolicyConfig(request.definitionId, request.initActionKind, request.config),
+    };
+    if (TOOL_MANIFEST_CONFIG_KEYS.some(key => Object.hasOwn(request.config, key))) {
+      delete policyDefaults.requestedTools;
+    }
+    const initConfig = {
+      ...policyDefaults,
       ...request.config,
     };
     const agent = this.agents.createAgent({
