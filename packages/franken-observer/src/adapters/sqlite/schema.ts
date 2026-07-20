@@ -24,6 +24,7 @@ export const CREATE_TABLES = `
 
   CREATE INDEX IF NOT EXISTS idx_spans_traceId ON spans(traceId);
   CREATE INDEX IF NOT EXISTS idx_spans_traceId_startedAt ON spans(traceId, startedAt);
+  CREATE INDEX IF NOT EXISTS idx_traces_startedAt ON traces(startedAt);
 `
 
 export const UPSERT_TRACE = `
@@ -61,10 +62,8 @@ export const SELECT_TRACE_SUMMARIES = `
     traces.goal,
     traces.status,
     traces.startedAt,
-    COUNT(spans.traceId) AS spanCount
+    (SELECT COUNT(*) FROM spans WHERE spans.traceId = traces.id) AS spanCount
   FROM traces
-  LEFT JOIN spans ON spans.traceId = traces.id
-  GROUP BY traces.id
   ORDER BY traces.startedAt ASC
 `
 
