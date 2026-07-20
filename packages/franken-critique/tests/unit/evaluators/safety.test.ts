@@ -932,6 +932,15 @@ describe('SafetyEvaluator', () => {
     );
     expect(
       evaluator.hasUnsafeRegexShape(
+        '^[[\\q{a}\\q{aa}]--[\\q{aa}]]+$',
+        true,
+      ),
+    ).toBe(false);
+    expect(
+      evaluator.hasUnsafeRegexShape('^(?i:[\\q{a}\\q{Aa}])+$', true),
+    ).toBe(true);
+    expect(
+      evaluator.hasUnsafeRegexShape(
         '^(?:[[b-d]--[b]]|[[b-d]--[d]])+$',
         true,
       ),

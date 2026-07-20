@@ -273,6 +273,7 @@ export class SafetyEvaluator implements Evaluator {
 
   private hasAmbiguousUnicodeStringSetQuantifier(pattern: string): boolean {
     const groupAmbiguity = [false];
+    const ignoreCase = [false];
     for (let i = 0; i < pattern.length; i += 1) {
       if (pattern[i] === '\\') {
         i += 1;
@@ -280,10 +281,22 @@ export class SafetyEvaluator implements Evaluator {
       }
       if (pattern[i] === '(') {
         groupAmbiguity.push(false);
+        const modifier = /^\(\?([ims]*)(?:-([ims]*))?:/.exec(
+          pattern.slice(i),
+        );
+        const inherited = ignoreCase.at(-1) ?? false;
+        ignoreCase.push(
+          modifier?.[1]?.includes('i')
+            ? true
+            : modifier?.[2]?.includes('i')
+              ? false
+              : inherited,
+        );
         continue;
       }
       if (pattern[i] === ')' && groupAmbiguity.length > 1) {
         const ambiguous = groupAmbiguity.pop()!;
+        ignoreCase.pop();
         if (ambiguous && this.quantifierAt(pattern, i + 1)?.repeatsGroup) {
           return true;
         }
@@ -294,7 +307,12 @@ export class SafetyEvaluator implements Evaluator {
 
       const end = this.skipCharacterClass(pattern, i, true);
       const characterClass = pattern.slice(i, end + 1);
-      if (this.hasAmbiguousUnicodeStringSet(characterClass)) {
+      if (
+        this.hasAmbiguousUnicodeStringSet(
+          characterClass,
+          ignoreCase.at(-1) ?? false,
+        )
+      ) {
         if (this.quantifierAt(pattern, end + 1)?.repeatsGroup) return true;
         groupAmbiguity[groupAmbiguity.length - 1] = true;
       }
@@ -303,16 +321,22 @@ export class SafetyEvaluator implements Evaluator {
     return false;
   }
 
-  private hasAmbiguousUnicodeStringSet(characterClass: string): boolean {
+  private hasAmbiguousUnicodeStringSet(
+    characterClass: string,
+    ignoreCase: boolean,
+  ): boolean {
     if (!characterClass.includes('\\q{')) return false;
     const values = this.unicodeStringSetValues(characterClass);
     if (values === null) return true;
-    const distinct = [...new Set(values)];
+    const distinct = [...new Set(values)].filter((value) =>
+      this.unicodeClassMatchesValue(characterClass, value, ignoreCase),
+    );
     if (
       distinct.some((left, leftIndex) =>
         distinct.some(
           (right, rightIndex) =>
-            leftIndex !== rightIndex && right.startsWith(left),
+            leftIndex !== rightIndex &&
+            this.unicodeStringsHavePrefixOverlap(left, right, ignoreCase),
         ),
       )
     ) {
@@ -320,18 +344,47 @@ export class SafetyEvaluator implements Evaluator {
     }
 
     try {
-      const matcher = new RegExp(`^(?:${characterClass})$`, 'v');
       return distinct.some((value) => {
         const firstCodePoint = Array.from(value)[0];
         return (
           value.length > (firstCodePoint?.length ?? 0) &&
           firstCodePoint !== undefined &&
-          matcher.test(firstCodePoint)
+          this.unicodeClassMatchesValue(
+            characterClass,
+            firstCodePoint,
+            ignoreCase,
+          )
         );
       });
     } catch {
       return true;
     }
+  }
+
+  private unicodeClassMatchesValue(
+    characterClass: string,
+    value: string,
+    ignoreCase: boolean,
+  ): boolean {
+    return new RegExp(
+      `^(?:${characterClass})$`,
+      ignoreCase ? 'iv' : 'v',
+    ).test(value);
+  }
+
+  private unicodeStringsHavePrefixOverlap(
+    left: string,
+    right: string,
+    ignoreCase: boolean,
+  ): boolean {
+    const flags = ignoreCase ? 'iu' : 'u';
+    const matchesPrefix = (prefix: string, value: string): boolean =>
+      new RegExp(`^(?:${this.escapeRegexLiteral(prefix)})`, flags).test(value);
+    return matchesPrefix(left, right) || matchesPrefix(right, left);
+  }
+
+  private escapeRegexLiteral(value: string): string {
+    return value.replace(/[\\^$.*+?()[\]{}|/]/g, '\\$&');
   }
 
   private unicodeStringSetValues(characterClass: string): string[] | null {
