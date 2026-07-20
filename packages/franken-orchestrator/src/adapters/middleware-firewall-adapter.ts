@@ -65,44 +65,41 @@ export class MiddlewareChainFirewallAdapter implements IFirewallModule {
   }
 
   async scanResponse(input: string): Promise<FirewallResult> {
-    const requestResult = await this.runPipeline(input);
-    if (requestResult.blocked) return requestResult;
-
     try {
       const processed = this.chain.processResponse({
-        content: requestResult.sanitizedText,
+        content: input,
         usage: { inputTokens: 0, outputTokens: 0 },
       });
       return {
         sanitizedText: processed.content,
-        violations: requestResult.violations,
+        violations: [],
         blocked: false,
       };
     } catch (err) {
       if (err instanceof InjectionDetectedError) {
         return {
-          sanitizedText: requestResult.sanitizedText,
+          sanitizedText: input,
           violations: [{ rule: 'injection-detection', severity: 'block', detail: err.message }],
           blocked: true,
         };
       }
       if (err instanceof DomainBlockedError) {
         return {
-          sanitizedText: requestResult.sanitizedText,
+          sanitizedText: input,
           violations: [{ rule: 'domain-allowlist', severity: 'block', detail: err.message }],
           blocked: true,
         };
       }
       if (err instanceof CustomRuleError) {
         return {
-          sanitizedText: requestResult.sanitizedText,
+          sanitizedText: input,
           violations: [{ rule: `custom:${err.ruleName}`, severity: 'block', detail: err.message }],
           blocked: true,
         };
       }
       const message = err instanceof Error ? err.message : String(err);
       return {
-        sanitizedText: requestResult.sanitizedText,
+        sanitizedText: input,
         violations: [{ rule: 'middleware-error', severity: 'block', detail: message }],
         blocked: true,
       };

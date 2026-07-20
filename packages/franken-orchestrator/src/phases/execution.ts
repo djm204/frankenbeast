@@ -50,6 +50,7 @@ type WaveExecutionResult = {
   readonly task: PlanTask;
   readonly outcome: TaskOutcome;
   readonly fromCheckpoint?: boolean;
+  readonly hasCheckpointOutput?: boolean;
 };
 
 function selectExecutableWave(
@@ -229,7 +230,13 @@ export async function runExecution(
             )
           : checkpointedOutput?.output;
         const outcome = { taskId: task.id, status: 'success' as const, output: acceptedOutput };
-        return { taskId, task, outcome, fromCheckpoint: true };
+        return {
+          taskId,
+          task,
+          outcome,
+          fromCheckpoint: true,
+          hasCheckpointOutput: checkpointedOutput?.found === true,
+        };
       }
 
       const outcome = await executeTask(
@@ -266,14 +273,11 @@ export async function runExecution(
 
     // Accept a wave atomically: no outputs, checkpoints, or traces are committed
     // until every untrusted response in the wave has passed the firewall.
-    for (const { task, outcome, fromCheckpoint } of waveResults) {
+    for (const { task, outcome, fromCheckpoint, hasCheckpointOutput } of waveResults) {
       if (outcome.status === 'success') {
         if (!fromCheckpoint) {
           checkpoint?.writeTaskOutput?.(task.id, outcome.output);
-          checkpoint?.write(`${task.id}:done`);
         }
-        completed.add(task.id);
-        completedOutputs.set(task.id, outcome.output);
         if (!fromCheckpoint) {
           await memory.recordTrace({
             taskId: task.id,
@@ -286,6 +290,11 @@ export async function runExecution(
             tokensUsed: taskTokenUsage.get(task.id) ?? 0,
             output: outcome.output,
           });
+          checkpoint?.write(`${task.id}:done`);
+        }
+        completed.add(task.id);
+        if (!fromCheckpoint || hasCheckpointOutput) {
+          completedOutputs.set(task.id, outcome.output);
         }
       } else if (outcome.status === 'skipped') {
         terminalSkipped.add(task.id);
@@ -982,7 +991,10 @@ async function executeTask(
         skillId,
       });
       if ('isError' in result && result.isError === true) {
-        throw new Error(`MCP tool '${skillId}' failed after its response passed the firewall`);
+        const detail = typeof acceptedOutput === 'string'
+          ? acceptedOutput
+          : JSON.stringify(acceptedOutput);
+        throw new Error(`MCP tool '${skillId}' failed: ${detail ?? 'unknown error'}`);
       }
 
       output = acceptedOutput;
@@ -1034,11 +1046,41 @@ async function scanAndSanitizeResponse(
   source: string,
 ): Promise<unknown> {
   const serialized = serializeUntrustedResponse(output, source);
+  if (typeof output !== 'string' && output !== null && typeof output === 'object') {
+    return sanitizeStructuredResponse(firewall, output, source);
+  }
   const firewallResult = await firewall.scanResponse(serialized.text);
   if (firewallResult.blocked) {
     throw new InjectionDetectedError(firewallResult.violations, source);
   }
   return serialized.restore(firewallResult.sanitizedText);
+}
+
+async function sanitizeStructuredResponse(
+  firewall: IFirewallModule,
+  value: unknown,
+  source: string,
+): Promise<unknown> {
+  if (typeof value === 'string') {
+    const result = await firewall.scanResponse(value);
+    if (result.blocked) {
+      throw new InjectionDetectedError(result.violations, source);
+    }
+    return result.sanitizedText;
+  }
+  if (Array.isArray(value)) {
+    return Promise.all(value.map(item => sanitizeStructuredResponse(firewall, item, source)));
+  }
+  if (value !== null && typeof value === 'object') {
+    const entries = await Promise.all(
+      Object.entries(value).map(async ([key, item]) => [
+        key,
+        await sanitizeStructuredResponse(firewall, item, source),
+      ] as const),
+    );
+    return Object.fromEntries(entries);
+  }
+  return value;
 }
 
 function serializeUntrustedResponse(

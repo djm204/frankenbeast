@@ -90,6 +90,14 @@ export class InjectionDetectionMiddleware implements LlmMiddleware {
   }
 
   afterResponse(response: LlmResponse): LlmResponse {
+    for (const pattern of this.patterns) {
+      if (pattern.test(response.content)) {
+        throw new InjectionDetectedError(
+          `Potential prompt injection detected: ${pattern.source}`,
+          pattern.source,
+        );
+      }
+    }
     return response;
   }
 }
