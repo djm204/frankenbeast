@@ -1418,6 +1418,65 @@ describe('ws chat server', () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
+  it('fails closed when the approval audit log cannot be read', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    session.state = 'pending_approval';
+    session.pendingApproval = {
+      description: 'deploy staging',
+      requestedAt: '2026-03-09T00:00:00Z',
+      tool: 'execution',
+      command: 'deploy staging',
+      sessionId: session.id,
+    };
+    store.save(session);
+    const auditPath = join(TMP, 'unreadable-audit-path');
+    mkdirSync(auditPath, { recursive: true });
+    const auditLog = new FileApprovalAuditLog(auditPath);
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const execute = vi.fn();
+    const runtime = new ChatRuntime({
+      engine: { processTurn: vi.fn() } as unknown as ConversationEngine,
+      turnRunner: new TurnRunner({ execute }),
+    });
+    const controller = new ChatSocketController({
+      runtime,
+      sessionStore: store,
+      tokenSecret: secret,
+      approvalAuditLog: auditLog,
+    });
+    const { peer, sent } = createPeer();
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    await expect(controller.receive(peer, JSON.stringify({
+      type: 'approval.respond',
+      approved: true,
+    }))).resolves.toBeUndefined();
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(store.get(session.id)?.state).toBe('rejected');
+    expect(store.get(session.id)?.pendingApproval).toBeNull();
+    const events = sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.error',
+      code: 'APPROVAL_AUDIT_UNAVAILABLE',
+      message: 'The approval audit log could not be read; recreate the approval request before retrying.',
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.approval.resolved',
+      approved: false,
+    }));
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
   it('does not retry approved work when live event delivery fails', async () => {
     mkdirSync(TMP, { recursive: true });
     const store = new FileSessionStore(TMP);

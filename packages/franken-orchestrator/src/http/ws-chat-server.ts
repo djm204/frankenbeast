@@ -637,7 +637,29 @@ export class ChatSocketController {
       }
       throw error;
     }
-    if (await this.hasConsumedApproval(session, runtimeInput)) {
+    let approvalConsumed: boolean;
+    try {
+      approvalConsumed = await this.hasConsumedApproval(session, runtimeInput);
+    } catch {
+      session.pendingApproval = null;
+      session.state = 'rejected';
+      session.updatedAt = nowIso();
+      this.sessionStore.save(session);
+      const timestamp = nowIso();
+      this.emit(peer, {
+        type: 'turn.error',
+        code: 'APPROVAL_AUDIT_UNAVAILABLE',
+        message: 'The approval audit log could not be read; recreate the approval request before retrying.',
+        timestamp,
+      });
+      this.emit(peer, {
+        type: 'turn.approval.resolved',
+        approved: false,
+        timestamp,
+      });
+      return;
+    }
+    if (approvalConsumed) {
       await this.recordApprovalReplay(session, runtimeInput, 'approval was already consumed', connectionRequester(peer, this.connections));
       session.pendingApproval = null;
       session.state = 'rejected';
@@ -739,16 +761,12 @@ export class ChatSocketController {
   private async hasConsumedApproval(session: ChatSession, command: string): Promise<boolean> {
     const pendingApproval = session.pendingApproval;
     if (!pendingApproval) return false;
-    try {
-      return await this.approvalAuditLog.hasConsumedApproval({
-        sessionId: session.id,
-        projectId: session.projectId,
-        token: approvalAuditToken(session, command),
-        commandHash: commandSha256(command),
-      });
-    } catch {
-      return false;
-    }
+    return this.approvalAuditLog.hasConsumedApproval({
+      sessionId: session.id,
+      projectId: session.projectId,
+      token: approvalAuditToken(session, command),
+      commandHash: commandSha256(command),
+    });
   }
 
   private async recordApprovalDecision(
