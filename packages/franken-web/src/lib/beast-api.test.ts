@@ -72,3 +72,44 @@ describe('BeastApiClient error handling', () => {
     });
   });
 });
+
+describe('BeastApiClient log paging', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps getLogs compatible while accepting the paged response', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      data: {
+        logs: ['one', 'two'],
+        page: { offset: 0, nextOffset: 2, hasMore: false, tail: true, bytes: 13 },
+      },
+    })));
+    vi.stubGlobal('fetch', fetch);
+
+    await expect(new BeastApiClient('http://beast.test').getLogs('run/id')).resolves.toEqual(['one', 'two']);
+    expect(fetch).toHaveBeenCalledWith('http://beast.test/v1/beasts/runs/run%2Fid/logs', expect.anything());
+  });
+
+  it('generates typed log page query parameters and returns metadata', async () => {
+    const payload = {
+      logs: ['two', 'three'],
+      page: { offset: 1, nextOffset: 3, hasMore: true, tail: false, bytes: 15 },
+    };
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: payload })));
+    vi.stubGlobal('fetch', fetch);
+
+    const page = await new BeastApiClient('http://beast.test').getLogsPage('run 1', {
+      offset: 1,
+      limit: 2,
+      tail: false,
+      maxBytes: 4_096,
+    });
+
+    expect(page).toEqual(payload);
+    expect(fetch).toHaveBeenCalledWith(
+      'http://beast.test/v1/beasts/runs/run%201/logs?offset=1&limit=2&tail=false&maxBytes=4096',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+});

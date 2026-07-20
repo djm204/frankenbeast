@@ -339,7 +339,7 @@ describe('SQLiteBeastRepository', () => {
     });
   });
 
-  it('keeps recovered event pages full across corrupt rows and indexes the cursor query', async () => {
+  it('bounds recovered event pages by raw rows scanned and indexes the cursor query', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
     const databasePath = join(workDir, 'beasts.db');
     const repo = new SQLiteBeastRepository(databasePath);
@@ -361,7 +361,7 @@ describe('SQLiteBeastRepository', () => {
     database.prepare('UPDATE beast_run_events SET payload = ? WHERE id = ?').run('{invalid', events[1]!.id);
 
     expect(repo.listEvents(run.id, { recoverCorruptJson: true, limit: 3 }).map((event) => event.sequence))
-      .toEqual([1, 3, 4]);
+      .toEqual([1, 3]);
     const indexes = database.pragma("index_list('beast_run_events')") as Array<{ name: string }>;
     expect(indexes.map((index) => index.name)).toContain('idx_beast_run_events_run_sequence');
     database.close();

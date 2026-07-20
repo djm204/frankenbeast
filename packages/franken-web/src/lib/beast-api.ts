@@ -7,6 +7,7 @@ import type {
   BeastEventHandlers,
   BeastExecutionMode,
   BeastRunDetail,
+  BeastRunEvent,
   BeastRunEventPage,
   BeastRunSummary,
   BeastSseAgentEvent,
@@ -47,6 +48,26 @@ export type {
   TrackedAgentInitAction,
   TrackedAgentSummary,
 } from '@franken/types';
+
+export interface BeastLogPageOptions {
+  readonly offset?: number;
+  readonly limit?: number;
+  readonly tail?: boolean;
+  readonly maxBytes?: number;
+}
+
+export interface BeastLogPageMetadata {
+  readonly offset: number;
+  readonly nextOffset: number;
+  readonly hasMore: boolean;
+  readonly tail: boolean;
+  readonly bytes: number;
+}
+
+export interface BeastLogPage {
+  readonly logs: string[];
+  readonly page: BeastLogPageMetadata;
+}
 
 export class BeastApiError extends Error {
   constructor(
@@ -96,6 +117,21 @@ export class BeastApiClient {
     return this.request(`/v1/beasts/runs/${encodeURIComponent(runId)}/events${suffix}`, { method: 'GET' });
   }
 
+  async getAllRunEvents(runId: string): Promise<BeastRunEvent[]> {
+    const events: BeastRunEvent[] = [];
+    let afterSequence = 0;
+    while (true) {
+      const page = await this.getRunEvents(runId, { limit: 500, afterSequence });
+      events.push(...page.events);
+      if (!page.page.hasMore) return events;
+      const nextAfterSequence = page.page.nextAfterSequence;
+      if (nextAfterSequence === null || nextAfterSequence <= afterSequence) {
+        throw new Error('Beast run event pagination did not advance');
+      }
+      afterSequence = nextAfterSequence;
+    }
+  }
+
   async getAgent(agentId: string): Promise<TrackedAgentDetail> {
     return this.request(`/v1/beasts/agents/${encodeURIComponent(agentId)}`, { method: 'GET' });
   }
@@ -103,6 +139,19 @@ export class BeastApiClient {
   async getLogs(runId: string): Promise<string[]> {
     const body = await this.request<{ logs: string[] }>(`/v1/beasts/runs/${encodeURIComponent(runId)}/logs`, { method: 'GET' });
     return body.logs;
+  }
+
+  async getLogsPage(runId: string, options: BeastLogPageOptions = {}): Promise<BeastLogPage> {
+    const query = new URLSearchParams();
+    if (options.offset !== undefined) query.set('offset', String(options.offset));
+    if (options.limit !== undefined) query.set('limit', String(options.limit));
+    if (options.tail !== undefined) query.set('tail', String(options.tail));
+    if (options.maxBytes !== undefined) query.set('maxBytes', String(options.maxBytes));
+    const suffix = query.size > 0 ? `?${query.toString()}` : '';
+    return this.request<BeastLogPage>(
+      `/v1/beasts/runs/${encodeURIComponent(runId)}/logs${suffix}`,
+      { method: 'GET' },
+    );
   }
 
   async createRun(input: {
