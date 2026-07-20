@@ -674,6 +674,11 @@ describe('SQLiteBeastRepository', () => {
       'event_duplicate_b', run.id, null, 1, 'run.second', '{}', '2026-03-12T00:00:02.000Z',
     );
     database.prepare(
+      `INSERT INTO beast_run_events
+        (id, run_id, attempt_id, sequence, type, payload, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run('event_later', run.id, null, 1_000, 'run.later', '{}', '2026-03-12T00:00:03.000Z');
+    database.prepare(
       `INSERT INTO tracked_agent_events
         (id, agent_id, sequence, level, type, message, payload, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -681,17 +686,26 @@ describe('SQLiteBeastRepository', () => {
       'agent_event_duplicate_a', agent.id, 1, 'info', 'agent.first', 'First', '{}', '2026-03-12T00:00:01.000Z',
       'agent_event_duplicate_b', agent.id, 1, 'info', 'agent.second', 'Second', '{}', '2026-03-12T00:00:02.000Z',
     );
+    database.prepare(
+      `INSERT INTO tracked_agent_events
+        (id, agent_id, sequence, level, type, message, payload, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'agent_event_later', agent.id, 1_000, 'info', 'agent.later', 'Later', '{}', '2026-03-12T00:00:03.000Z',
+    );
     database.close();
 
     const migrated = new SQLiteBeastRepository(databasePath);
 
     expect(migrated.listEvents(run.id).map((event) => [event.sequence, event.type])).toEqual([
       [1, 'run.first'],
-      [2, 'run.second'],
+      [1_000, 'run.later'],
+      [1_001, 'run.second'],
     ]);
     expect(migrated.listTrackedAgentEvents(agent.id).map((event) => [event.sequence, event.type])).toEqual([
       [1, 'agent.first'],
-      [2, 'agent.second'],
+      [1_000, 'agent.later'],
+      [1_001, 'agent.second'],
     ]);
     const migratedDatabase = new Database(databasePath);
     expect(migratedDatabase.pragma("index_list('beast_run_events')")).toContainEqual(expect.objectContaining({

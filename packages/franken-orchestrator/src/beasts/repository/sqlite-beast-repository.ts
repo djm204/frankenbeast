@@ -851,7 +851,7 @@ export class SQLiteBeastRepository {
          HAVING COUNT(*) != COUNT(DISTINCT sequence)`,
       ).all() as Array<{ run_id: string }>;
       const selectRunEvents = this.db.prepare(
-        `SELECT id
+        `SELECT id, sequence
            FROM beast_run_events
           WHERE run_id = ?
           ORDER BY sequence ASC, created_at ASC, id ASC`,
@@ -860,12 +860,16 @@ export class SQLiteBeastRepository {
         'UPDATE beast_run_events SET sequence = ? WHERE id = ?',
       );
       for (const { run_id: runId } of duplicateRunIds) {
-        const rows = selectRunEvents.all(runId) as Array<{ id: string }>;
-        for (const [index, row] of rows.entries()) {
-          updateRunEventSequence.run(-(index + 1), row.id);
-        }
-        for (const [index, row] of rows.entries()) {
-          updateRunEventSequence.run(index + 1, row.id);
+        const rows = selectRunEvents.all(runId) as Array<{ id: string; sequence: number }>;
+        const seenSequences = new Set<number>();
+        let nextSequence = rows.reduce((maximum, row) => Math.max(maximum, row.sequence), 0);
+        for (const row of rows) {
+          if (seenSequences.has(row.sequence)) {
+            nextSequence += 1;
+            updateRunEventSequence.run(nextSequence, row.id);
+          } else {
+            seenSequences.add(row.sequence);
+          }
         }
       }
 
@@ -876,7 +880,7 @@ export class SQLiteBeastRepository {
          HAVING COUNT(*) != COUNT(DISTINCT sequence)`,
       ).all() as Array<{ agent_id: string }>;
       const selectAgentEvents = this.db.prepare(
-        `SELECT id
+        `SELECT id, sequence
            FROM tracked_agent_events
           WHERE agent_id = ?
           ORDER BY sequence ASC, created_at ASC, id ASC`,
@@ -885,12 +889,16 @@ export class SQLiteBeastRepository {
         'UPDATE tracked_agent_events SET sequence = ? WHERE id = ?',
       );
       for (const { agent_id: agentId } of duplicateAgentIds) {
-        const rows = selectAgentEvents.all(agentId) as Array<{ id: string }>;
-        for (const [index, row] of rows.entries()) {
-          updateAgentEventSequence.run(-(index + 1), row.id);
-        }
-        for (const [index, row] of rows.entries()) {
-          updateAgentEventSequence.run(index + 1, row.id);
+        const rows = selectAgentEvents.all(agentId) as Array<{ id: string; sequence: number }>;
+        const seenSequences = new Set<number>();
+        let nextSequence = rows.reduce((maximum, row) => Math.max(maximum, row.sequence), 0);
+        for (const row of rows) {
+          if (seenSequences.has(row.sequence)) {
+            nextSequence += 1;
+            updateAgentEventSequence.run(nextSequence, row.id);
+          } else {
+            seenSequences.add(row.sequence);
+          }
         }
       }
 
