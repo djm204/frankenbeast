@@ -134,6 +134,39 @@ describe('BeastDispatchService', () => {
     expect(repo.listRuns()).toEqual([]);
   });
 
+  it('derives direct-run defaults from runtime config and trusted skill manifests', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs, {
+      trustedSkillToolManifests: { github: ['get_issue'] },
+    });
+
+    const run = await dispatch.createRun({
+      definitionId: 'chunk-plan',
+      config: {
+        designDocPath: 'docs/design.md',
+        outputDir: 'docs/chunks',
+        skills: ['github'],
+        gitConfig: { prCreation: 'manual' },
+      },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+    });
+
+    expect(run.configSnapshot).toMatchObject({
+      agentRole: 'docs',
+      requestedTools: ['read_file', 'search_files', 'write_file', 'github.pr', 'github.read'],
+      skills: ['github'],
+    });
+  });
+
   it('validates explicit direct-run tool policy instead of replacing it with workflow defaults', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
@@ -808,7 +841,7 @@ describe('BeastDispatchService', () => {
     expect(run.configSnapshot).toMatchObject({ objective: 'Legacy direct dispatch without tracked agent policy metadata' });
   });
 
-  it('preserves dispatch-selected skills while keeping persisted tracked-agent role policy', async () => {
+  it('keeps persisted tracked-agent skill policy when dispatch requests broader skills', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const logs = new BeastLogStore(join(workDir, 'logs'));
@@ -853,7 +886,7 @@ describe('BeastDispatchService', () => {
     expect(run.configSnapshot).toMatchObject({
       agentRole: 'coding',
       requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
-      skills: ['context-only'],
+      skills: [],
     });
   });
 

@@ -1672,6 +1672,9 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Recover stopped work',
         chunkDirectory: 'docs/chunks',
+        agentRole: 'coding',
+        enabledTools: CODING_POLICY.requestedTools,
+        skills: [],
       },
       createdAt: '2026-03-11T00:00:00.000Z',
       updatedAt: '2026-03-11T00:00:00.000Z',
@@ -1713,6 +1716,12 @@ describe('BeastRunService', () => {
       }),
       expect.objectContaining({ id: 'martin-loop' }),
     );
+    const rebuiltSnapshot = start.mock.calls[0]?.[0].configSnapshot;
+    expect(rebuiltSnapshot).toMatchObject({
+      enabledTools: CODING_POLICY.requestedTools,
+      skills: [],
+    });
+    expect(rebuiltSnapshot).not.toHaveProperty('requestedTools');
   });
 
   it('clears active dispatch redaction when a retry completes before running is observed', async () => {

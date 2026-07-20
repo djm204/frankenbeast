@@ -29,6 +29,17 @@ export interface BeastRunServiceOptions {
   trustedSkillToolManifests?: ToolPolicyValidationContext['trustedSkillToolManifests'] | undefined;
 }
 
+const STORED_AGENT_POLICY_KEYS = [
+  'agentRole',
+  'requestedTools',
+  'enabledTools',
+  'toolManifest',
+  'tools',
+  'skills',
+] as const;
+
+const STORED_AGENT_MANIFEST_ALIASES = ['enabledTools', 'toolManifest', 'tools'] as const;
+
 export class UnknownBeastRunError extends Error {
   constructor(public readonly runId: string) {
     super(`Unknown Beast run: ${runId}`);
@@ -429,12 +440,23 @@ export class BeastRunService {
       normalized = normalizeBeastRunConfig(definition, run.configSnapshot);
     }
     const storedPolicy = Object.fromEntries(
-      ['agentRole', 'requestedTools', 'skills']
+      STORED_AGENT_POLICY_KEYS
         .filter(key => Object.prototype.hasOwnProperty.call(trackedAgent.initConfig, key))
         .map(key => [key, trackedAgent.initConfig[key]]),
     );
+    const policyDefaults: Record<string, unknown> = {
+      ...defaultAgentToolPolicyConfig(
+        definition.id,
+        trackedAgent.initAction.kind,
+        trackedAgent.initConfig,
+        this.serviceOptions.trustedSkillToolManifests,
+      ),
+    };
+    if (STORED_AGENT_MANIFEST_ALIASES.some(key => Object.hasOwn(storedPolicy, key))) {
+      delete policyDefaults.requestedTools;
+    }
     const rebuiltPolicyConfig = {
-      ...defaultAgentToolPolicyConfig(definition.id),
+      ...policyDefaults,
       ...storedPolicy,
       ...normalized,
     };

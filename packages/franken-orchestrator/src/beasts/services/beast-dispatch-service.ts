@@ -176,7 +176,6 @@ function pickSkillsPolicyConfig(config: Readonly<Record<string, unknown>>): Read
 
 function preserveTrackedAgentPolicyConfig(
   config: Readonly<Record<string, unknown>>,
-  requestConfig: Readonly<Record<string, unknown>>,
   trackedAgent?: TrackedAgent | undefined,
 ): Readonly<Record<string, unknown>> {
   if (!trackedAgent) return config;
@@ -184,7 +183,6 @@ function preserveTrackedAgentPolicyConfig(
     ...config,
     ...pickSkillsPolicyConfig(trackedAgent.initAction.config),
     ...pickSkillsPolicyConfig(trackedAgent.initConfig),
-    ...pickSkillsPolicyConfig(requestConfig),
     ...canonicalTrackedAgentToolPolicyConfig(trackedAgent.initAction.config),
     ...canonicalTrackedAgentToolPolicyConfig(trackedAgent.initConfig),
   };
@@ -251,7 +249,12 @@ export class BeastDispatchService {
           ...pickSkillsPolicyConfig(request.config),
         };
     const policyDefaults: Record<string, unknown> = {
-      ...defaultAgentToolPolicyConfig(definition.id),
+      ...defaultAgentToolPolicyConfig(
+        definition.id,
+        undefined,
+        trackedAgent ? trackedAgent.initConfig : request.config,
+        this.options.trustedSkillToolManifests,
+      ),
     };
     if (!trackedAgent && TOOL_MANIFEST_CONFIG_KEYS.some(key => Object.hasOwn(request.config, key))) {
       delete policyDefaults.requestedTools;
@@ -259,7 +262,7 @@ export class BeastDispatchService {
     const parsedConfigSnapshot: Readonly<Record<string, unknown>> = moduleConfig
       ? { ...policyDefaults, ...config, ...directRunPolicyConfig, modules: moduleConfig }
       : { ...policyDefaults, ...config, ...directRunPolicyConfig };
-    const policyConfigSnapshot = preserveTrackedAgentPolicyConfig(parsedConfigSnapshot, request.config, trackedAgent);
+    const policyConfigSnapshot = preserveTrackedAgentPolicyConfig(parsedConfigSnapshot, trackedAgent);
     this.assertRoleToolManifestAllows(request, policyConfigSnapshot);
     const configSnapshot = policyConfigSnapshot;
     const executionMode = request.executionMode ?? definition.executionModeDefault;

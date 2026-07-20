@@ -684,7 +684,7 @@ describe('agent routes integration', () => {
     });
   });
 
-  it('returns a policy-denied 403 for tracked-agent run dispatch policy failures', async () => {
+  it('ignores tracked-run policy overrides and preserves the stored agent policy', async () => {
     const { app, operatorToken, agents } = createIntegratedBeastApp();
 
     const createResponse = await app.request('/v1/beasts/agents', {
@@ -721,17 +721,8 @@ describe('agent routes integration', () => {
       }),
     });
 
-    expect(runResponse.status).toBe(403);
-    expect(await runResponse.json()).toMatchObject({
-      error: {
-        code: 'AGENT_TOOL_POLICY_DENIED',
-        details: {
-          validation: {
-            denials: expect.arrayContaining([expect.objectContaining({ requestedTool: 'skill:unknown-installed-skill' })]),
-          },
-        },
-      },
-    });
+    expect(runResponse.status).toBe(201);
+    expect(agents.getAgent(agent.id).initConfig.skills).toEqual([]);
   });
 
   it('returns malformed json errors for invalid tracked agent request bodies', async () => {
