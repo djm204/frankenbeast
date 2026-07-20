@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
 import { AgentService } from '../../../src/beasts/services/agent-service.js';
 import { CapacityReservationPolicy } from '../../../src/beasts/services/capacity-reservation-policy.js';
+import { defaultAgentToolPolicyConfig } from '../../../src/beasts/services/role-tool-manifest.js';
 
 let workDir: string | undefined;
 
@@ -32,14 +33,14 @@ describe('AgentService capacity reservations', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { labels: ['feature'] },
+      initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
     });
     const securityAgent = service.createAgent({
       definitionId: 'martin-loop',
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { labels: ['security'] },
+      initConfig: { labels: ['security'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
     });
     service.updateAgent(normalAgent.id, { status: 'running' });
     service.updateAgent(securityAgent.id, { status: 'running' });
@@ -72,11 +73,13 @@ describe('AgentService capacity reservations', () => {
     });
     const healthy = service.createAgent({
       definitionId: 'martin-loop', source: 'dashboard', createdByUser: 'operator',
-      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} }, initConfig: { labels: ['feature'] },
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: { ...defaultAgentToolPolicyConfig('martin-loop'), labels: ['feature'] },
     });
     const corrupt = service.createAgent({
       definitionId: 'martin-loop', source: 'dashboard', createdByUser: 'operator',
-      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} }, initConfig: { labels: ['security'] },
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: { ...defaultAgentToolPolicyConfig('martin-loop'), labels: ['security'] },
     });
     service.updateAgent(healthy.id, { status: 'running' });
     service.updateAgent(corrupt.id, { status: 'running' });

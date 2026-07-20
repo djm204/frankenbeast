@@ -2,6 +2,7 @@ import { Parser, parse } from 'acorn';
 import { tsPlugin } from 'acorn-typescript';
 import type { Node } from 'acorn';
 import type { Evaluator, EvaluationInput, EvaluationResult, EvaluationFinding } from './evaluator.js';
+import { createScore } from '../types/common.js';
 
 // Keywords that legitimately exit (or suspend) a loop. `await`/`yield` cover
 // intentional async event loops such as `while (true) { await queue.next(); }`.
@@ -909,7 +910,7 @@ export class LogicLoopEvaluator implements Evaluator {
     }
 
     const uniqueFindings = dedupeFindings(findings);
-    const score = uniqueFindings.length === 0 ? 1 : 0;
+    const score = createScore(uniqueFindings.length === 0 ? 1 : 0);
 
     return {
       evaluatorName: this.name,

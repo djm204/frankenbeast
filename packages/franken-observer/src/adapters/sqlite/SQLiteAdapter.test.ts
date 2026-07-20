@@ -34,6 +34,7 @@ function sqliteBusyError(): Error & { code: string } {
 describe('SQLiteAdapter', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    pragmaMock.mockReset()
   })
 
   it('configures WAL, foreign keys, and a busy timeout so concurrent writers wait for locks', () => {
@@ -44,10 +45,28 @@ describe('SQLiteAdapter', () => {
       'busy_timeout = 5000',
       'journal_mode = WAL',
       'foreign_keys = ON',
+      "index_list('traces')",
     ])
     expect(execMock).toHaveBeenCalledTimes(1)
 
     adapter.close()
+  })
+
+  it('executes schema DDL only once when multiple adapters open the same initialized database', () => {
+    pragmaMock.mockImplementation((statement: string) => {
+      if (statement === "index_list('traces')") {
+        return execMock.mock.calls.length === 0 ? [] : [{ name: 'idx_traces_startedAt' }]
+      }
+      return undefined
+    })
+
+    const first = new SQLiteAdapter('/tmp/shared-traces.db')
+    const second = new SQLiteAdapter('/tmp/shared-traces.db')
+
+    expect(execMock).toHaveBeenCalledTimes(1)
+
+    first.close()
+    second.close()
   })
 
   it('validates retry options before opening a database handle', () => {
@@ -120,6 +139,55 @@ describe('SQLiteAdapter', () => {
 
     expect(upsertTraceRun).toHaveBeenCalledWith(expect.objectContaining({ goal: 'original-goal' }))
     expect(upsertSpanRun).toHaveBeenCalledWith(expect.objectContaining({ metadata: '{}' }))
+  })
+
+  it('flushes a batch in one SQLite transaction', async () => {
+    const upsertTraceRun = vi.fn()
+    const upsertSpanRun = vi.fn()
+    prepareMock
+      .mockReturnValueOnce({ run: upsertTraceRun })
+      .mockReturnValueOnce({ run: upsertSpanRun })
+    transactionMock.mockImplementation(fn => (traces: unknown) => fn(traces))
+
+    const adapter = new SQLiteAdapter('/tmp/traces.db')
+    const first = TraceContext.createTrace('first')
+    const second = TraceContext.createTrace('second')
+
+    await adapter.flushBatch([first, second])
+
+    expect(transactionMock).toHaveBeenCalledOnce()
+    expect(upsertTraceRun).toHaveBeenCalledTimes(2)
+    expect(upsertTraceRun.mock.calls.map(call => call[0].goal)).toEqual(['first', 'second'])
+  })
+
+  it('persists the last duplicate span snapshot within a batch', async () => {
+    const upsertTraceRun = vi.fn()
+    const upsertSpanRun = vi.fn()
+    prepareMock.mockReturnValue({ run: vi.fn() })
+    prepareMock
+      .mockReturnValueOnce({ run: upsertTraceRun })
+      .mockReturnValueOnce({ run: upsertSpanRun })
+      .mockReturnValueOnce({ run: upsertTraceRun })
+      .mockReturnValueOnce({ run: upsertSpanRun })
+    transactionMock.mockImplementation(fn => (traces: unknown) => fn(traces))
+
+    const adapter = new SQLiteAdapter('/tmp/traces.db')
+    const trace = TraceContext.createTrace('duplicate snapshots')
+    const span = TraceContext.startSpan(trace, { name: 'first' })
+    TraceContext.endSpan(span)
+    await adapter.flush(trace)
+
+    const intermediate = structuredClone(trace)
+    intermediate.spans[0]!.metadata.version = 1
+    const reverted = structuredClone(trace)
+
+    await adapter.flushBatch([intermediate, reverted])
+
+    expect(upsertSpanRun.mock.calls.map(call => call[0].metadata)).toEqual([
+      '{}',
+      '{"version":1}',
+      '{}',
+    ])
   })
 
   it('retries transient SQLite lock failures with bounded backoff and diagnostics', async () => {

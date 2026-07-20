@@ -16,7 +16,11 @@ export class SkillManagerAdapter implements ISkillsModule {
     return this.manager.getEnabledSkills().some((enabledSkill) => {
       const tools = this.manager.readTools(enabledSkill);
       return (
-        (enabledSkill === skillId && isServerAliasExecutable(enabledSkill, tools)) ||
+        (enabledSkill === skillId && isServerAliasExecutable(
+          enabledSkill,
+          tools,
+          this.manager.hasToolManifest(enabledSkill),
+        )) ||
         tools.some(tool => tool.name === skillId || namespacedToolId(enabledSkill, tool.name) === skillId)
       );
     });
@@ -27,7 +31,7 @@ export class SkillManagerAdapter implements ISkillsModule {
       const tools = this.manager.readTools(name);
       const descriptors: SkillDescriptor[] = [];
 
-      if (isServerAliasExecutable(name, tools)) {
+      if (isServerAliasExecutable(name, tools, this.manager.hasToolManifest(name))) {
         descriptors.push(createDescriptor(name, name, undefined, aliasToolFor(name, tools)?.requiresHitl ?? true));
       }
 
@@ -69,8 +73,11 @@ function namespacedToolId(skillName: string, toolName: string): string {
 function isServerAliasExecutable(
   skillName: string,
   tools: ReturnType<SkillManager['readTools']>,
+  hasToolManifest: boolean,
 ): boolean {
-  return tools.length === 0 || tools.length === 1 || tools.some(tool => tool.name === skillName);
+  return (tools.length === 0 && !hasToolManifest)
+    || tools.length === 1
+    || tools.some(tool => tool.name === skillName);
 }
 
 function aliasToolFor(

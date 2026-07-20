@@ -3,6 +3,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { getWorkspacePackageDirNames } from "./helpers/workspaces.js";
+import { validateVerificationTaskWiring } from "./helpers/verification-task-wiring.js";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const exec = (command: string, args: string[]) =>
@@ -23,6 +24,14 @@ type NpmLsPackage = {
   invalid?: boolean;
   missing?: boolean;
   problems?: string[];
+};
+
+type RootPackageJson = {
+  scripts?: Record<string, unknown>;
+};
+
+type TurboConfig = {
+  tasks?: Record<string, unknown>;
 };
 
 const toOutput = (value: string | Buffer | undefined) =>
@@ -59,6 +68,24 @@ const assertFrankenTypesResolved = (result: NpmLsResult) => {
 };
 
 describe("Chunk 10: full verification pass", () => {
+  describe("aggregate task wiring", () => {
+    it("wires build and test scripts to defined Turbo tasks", () => {
+      const packageJson = JSON.parse(
+        readFileSync(resolve(ROOT, "package.json"), "utf8"),
+      ) as RootPackageJson;
+      const turboConfig = JSON.parse(
+        readFileSync(resolve(ROOT, "turbo.json"), "utf8"),
+      ) as TurboConfig;
+
+      expect(() =>
+        validateVerificationTaskWiring(
+          packageJson.scripts ?? {},
+          turboConfig.tasks ?? {},
+        ),
+      ).not.toThrow();
+    });
+  });
+
   describe("verification command portability", () => {
     it("does not rely on shell pipeline parsing in the default suite", () => {
       const source = readFileSync(import.meta.filename, "utf8");

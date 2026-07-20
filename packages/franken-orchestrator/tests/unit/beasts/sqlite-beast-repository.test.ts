@@ -71,7 +71,9 @@ function seedCorruptJsonFixture(repo: SQLiteBeastRepository): CorruptJsonFixture
     status: 'initializing',
     createdByUser: 'operator',
     initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-    initConfig: { identity: { name: 'Corruption test agent' } },
+    initConfig: { identity: { name: 'Corruption test agent' },
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],},
     moduleConfig: { firewall: true },
     createdAt: '2026-03-10T00:03:00.000Z',
     updatedAt: '2026-03-10T00:03:00.000Z',
@@ -331,11 +333,40 @@ describe('SQLiteBeastRepository', () => {
     expect(event1.sequence).toBe(1);
     expect(event2.sequence).toBe(2);
     expect(repo.listEvents(run.id)).toEqual([event1, event2]);
+    expect(repo.listEvents(run.id, { afterSequence: 1, limit: 1 })).toEqual([event2]);
     expect(repo.getRun(run.id)).toMatchObject({
       status: 'stopped',
       latestExitCode: 137,
       stopReason: 'operator_kill',
     });
+  });
+
+  it('bounds recovered event pages by raw rows scanned and indexes the cursor query', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
+    const databasePath = join(workDir, 'beasts.db');
+    const repo = new SQLiteBeastRepository(databasePath);
+    const run = repo.createRun({
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+    const events = Array.from({ length: 4 }, (_, index) => repo.appendEvent(run.id, {
+      type: `run.event.${index + 1}`,
+      payload: { sequence: index + 1 },
+      createdAt: `2026-03-10T00:00:0${index + 1}.000Z`,
+    }));
+    const database = new Database(databasePath);
+    database.prepare('UPDATE beast_run_events SET payload = ? WHERE id = ?').run('{invalid', events[1]!.id);
+
+    expect(repo.listEvents(run.id, { recoverCorruptJson: true, limit: 3 }).map((event) => event.sequence))
+      .toEqual([1, 3]);
+    const indexes = database.pragma("index_list('beast_run_events')") as Array<{ name: string }>;
+    expect(indexes.map((index) => index.name)).toContain('idx_beast_run_events_run_sequence');
+    database.close();
   });
 
   it('creates, lists, and loads tracked agents', async () => {
@@ -353,7 +384,7 @@ describe('SQLiteBeastRepository', () => {
         config: { goal: 'Map the lifecycle' },
         chatSessionId: 'sess-1',
       },
-      initConfig: { goal: 'Map the lifecycle' },
+      initConfig: { goal: 'Map the lifecycle', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'] },
       chatSessionId: 'sess-1',
       createdAt: '2026-03-11T00:00:00.000Z',
       updatedAt: '2026-03-11T00:00:00.000Z',
@@ -419,7 +450,8 @@ describe('SQLiteBeastRepository', () => {
       },
       initConfig: {
         designDocPath: 'docs/plans/design.md',
-      },
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],},
       chatSessionId: 'sess-1',
       createdAt: '2026-03-11T00:00:00.000Z',
       updatedAt: '2026-03-11T00:00:00.000Z',

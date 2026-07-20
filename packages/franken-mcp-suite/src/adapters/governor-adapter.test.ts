@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -20,6 +20,24 @@ describe('GovernorAdapter', () => {
     return path;
   }
 
+  function installSkillAtConfigDir(configDir: string, name: string, tools?: unknown[], enabled = true): void {
+    const skillDir = join(configDir, 'skills', name);
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, 'mcp.json'), JSON.stringify({
+      mcpServers: { [name]: { command: `${name}-server` } },
+    }));
+    if (tools !== undefined) {
+      writeFileSync(join(skillDir, 'tools.json'), JSON.stringify(tools));
+    }
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      skills: { enabled: enabled ? [name] : [] },
+    }));
+  }
+
+  function installSkill(dbPath: string, name: string, tools?: unknown[], enabled = true): void {
+    installSkillAtConfigDir(join(dbPath, '..'), name, tools, enabled);
+  }
+
   afterEach(() => {
     for (const path of dbPaths) {
       rmSync(join(path, '..'), { recursive: true, force: true });
@@ -31,6 +49,440 @@ describe('GovernorAdapter', () => {
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
     const result = await governor.check({ action: 'edit_file', context: '{"path":"src/app.ts"}' });
     expect(result.decision).toBe('approved');
+  });
+
+  it('requires review when an installed skill tool is marked as requiring HITL', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'reporting', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]);
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__reporting__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('applies skill HITL before a colliding built-in non-executing exemption', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'audit', [
+      {
+        name: 'fbeast_memory_query',
+        description: 'Custom audit query',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]);
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__audit__fbeast_memory_query', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('requires review for manifest-less skill aliases', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'dynamic');
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__dynamic__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('inherits HITL metadata for single-tool skill aliases', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'reporting', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]);
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__reporting__reporting', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('does not apply a custom profile to an unqualified built-in tool with the same leaf name', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'audit', [
+      {
+        name: 'fbeast_memory_query',
+        description: 'Custom audit query',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]);
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'fbeast_memory_query', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+  });
+
+  it('ignores installed skill profiles that are disabled in project config', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'reporting', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ], false);
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__reporting__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+  });
+
+  it('does not load project skill profiles for an in-memory governor', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'reporting', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]);
+    const originalCwd = process.cwd();
+    process.chdir(join(dbPath, '..'));
+
+    try {
+      const governor = createGovernorAdapter(':memory:');
+      await expect(governor.check({ action: 'mcp__reporting__publish_report', context: '{}' }))
+        .resolves.toMatchObject({ decision: 'approved' });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  it('matches qualified MCP server names that contain double underscores', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'foo__bar', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]);
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__foo__bar__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('preserves double underscores in MCP tool names when matching profiles', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'github', [
+      {
+        name: 'create__issue',
+        description: 'Create an issue',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]);
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__github__create__issue', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('prefers the longest registered MCP server prefix', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'reporting', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: false,
+      },
+    ]);
+    writeFileSync(join(dbPath, '..', 'skills', 'reporting', 'mcp.json'), JSON.stringify({
+      mcpServers: {
+        foo: { command: 'foo-server' },
+        foo__bar: { command: 'foobar-server' },
+      },
+    }));
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__foo__bar__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+  });
+
+  it('prefers the longest MCP server prefix across enabled skills', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'short-server', [
+      {
+        name: 'other_tool',
+        description: 'Other tool',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]);
+    installSkill(dbPath, 'long-server', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: false,
+      },
+    ]);
+    writeFileSync(join(dbPath, '..', 'config.json'), JSON.stringify({
+      skills: { enabled: ['short-server', 'long-server'] },
+    }));
+    writeFileSync(join(dbPath, '..', 'skills', 'short-server', 'mcp.json'), JSON.stringify({
+      mcpServers: { foo: { command: 'foo-server' } },
+    }));
+    writeFileSync(join(dbPath, '..', 'skills', 'long-server', 'mcp.json'), JSON.stringify({
+      mcpServers: { foo__bar: { command: 'foobar-server' } },
+    }));
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__foo__bar__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+  });
+
+  it('honors safe tool metadata for slash aliases when the MCP server was renamed', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'memory-skill', [
+      {
+        name: 'query',
+        description: 'Query memory',
+        inputSchema: { type: 'object' },
+        requiresHitl: false,
+      },
+    ]);
+    writeFileSync(join(dbPath, '..', 'skills', 'memory-skill', 'mcp.json'), JSON.stringify({
+      mcpServers: { 'renamed-memory': { command: 'memory-server' } },
+    }));
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'memory-skill/query', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+  });
+
+  it('preserves high-risk hard denials for tools whose profile requires HITL', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'alerts', [
+      {
+        name: 'send_webhook',
+        description: 'Send a webhook',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]);
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({
+      action: 'mcp__alerts__send_webhook',
+      context: '{"url":"https://hooks.example.test/a","allowlisted":false}',
+    })).resolves.toMatchObject({ decision: 'denied' });
+  });
+
+  it('fails closed when a tool manifest does not satisfy the shared schema', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'reporting', [
+      { name: 'publish_report', requiresHitl: false },
+    ]);
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__reporting__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('uses an explicit active config path for enabled skill profiles', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const alternateConfigDir = join(dbPath, '..', 'alternate');
+    installSkill(dbPath, 'reporting', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]);
+    mkdirSync(alternateConfigDir, { recursive: true });
+    writeFileSync(join(alternateConfigDir, 'config.json'), JSON.stringify({
+      skills: { enabled: ['reporting'] },
+    }));
+
+    const governor = createGovernorAdapter(dbPath, join(alternateConfigDir, 'config.json'));
+
+    await expect(governor.check({ action: 'mcp__reporting__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('fails closed for enabled skills installed only beside an explicit active config', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const alternateConfigDir = join(dbPath, '..', 'alternate');
+    installSkillAtConfigDir(alternateConfigDir, 'reporting', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]);
+
+    const governor = createGovernorAdapter(dbPath, join(alternateConfigDir, 'config.json'));
+
+    await expect(governor.check({ action: 'mcp__reporting__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('does not let an external config root shadow a project skill manifest', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const alternateConfigDir = join(dbPath, '..', 'alternate');
+    installSkill(dbPath, 'reporting', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]);
+    installSkillAtConfigDir(alternateConfigDir, 'reporting', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: false,
+      },
+    ]);
+
+    const governor = createGovernorAdapter(dbPath, join(alternateConfigDir, 'config.json'));
+
+    await expect(governor.check({ action: 'mcp__reporting__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('does not trust a skill manifest installed only beside an external config', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const alternateConfigDir = join(dbPath, '..', 'alternate');
+    installSkillAtConfigDir(alternateConfigDir, 'reporting', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: false,
+      },
+    ]);
+
+    const governor = createGovernorAdapter(dbPath, join(alternateConfigDir, 'config.json'));
+
+    await expect(governor.check({ action: 'mcp__reporting__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('fails closed for renamed servers of external-only enabled skills', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const alternateConfigDir = join(dbPath, '..', 'alternate');
+    installSkillAtConfigDir(alternateConfigDir, 'memory-skill', [
+      {
+        name: 'query',
+        description: 'Query memory',
+        inputSchema: { type: 'object' },
+        requiresHitl: false,
+      },
+    ]);
+    writeFileSync(join(alternateConfigDir, 'skills', 'memory-skill', 'mcp.json'), JSON.stringify({
+      mcpServers: { 'renamed-memory': { command: 'memory-server' } },
+    }));
+
+    const governor = createGovernorAdapter(dbPath, join(alternateConfigDir, 'config.json'));
+
+    await expect(governor.check({ action: 'mcp__renamed-memory__query', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('does not gate unrelated MCP calls when enabled skill roots are missing', async () => {
+    const dbPath = tracked(tmpDbPath());
+    writeFileSync(join(dbPath, '..', 'config.json'), JSON.stringify({
+      skills: { enabled: ['missing-skill'] },
+    }));
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__fbeast-memory__fbeast_memory_query', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({ action: 'mcp__missing-skill__some_tool', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('fails closed when a declared MCP server has an invalid manifest entry', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'reporting', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: false,
+      },
+    ]);
+    writeFileSync(join(dbPath, '..', 'skills', 'reporting', 'mcp.json'), JSON.stringify({
+      mcpServers: { reporting: {} },
+    }));
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__reporting__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('fails closed for qualified skill calls when the active config is unreadable', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'reporting', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: true,
+      },
+    ]);
+    writeFileSync(join(dbPath, '..', 'config.json'), '{ invalid json');
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__reporting__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('fails closed for an enabled directory-name server whose MCP config is unreadable', async () => {
+    const dbPath = tracked(tmpDbPath());
+    installSkill(dbPath, 'reporting', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: false,
+      },
+    ]);
+    rmSync(join(dbPath, '..', 'skills', 'reporting', 'mcp.json'));
+
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({ action: 'mcp__reporting__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
   });
 
   it('rejects duplicate reserved provenance keys instead of persisting forgeable JSON', async () => {

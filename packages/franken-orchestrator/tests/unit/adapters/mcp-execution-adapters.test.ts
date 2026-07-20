@@ -88,6 +88,20 @@ describe('MCP execution adapters', () => {
     ]);
   });
 
+  it('SkillManagerAdapter does not expose prompt-only empty tool manifests as executable aliases', () => {
+    const skillsDir = mkdtempSync(join(tmpdir(), 'franken-skills-'));
+    mkdirSync(join(skillsDir, 'prompt-only'));
+    writeFileSync(join(skillsDir, 'prompt-only', 'mcp.json'), JSON.stringify({
+      mcpServers: { 'prompt-only': { command: 'prompt-only' } },
+    }));
+    writeFileSync(join(skillsDir, 'prompt-only', 'tools.json'), '[]');
+    const manager = new SkillManager(skillsDir, new Set(['prompt-only']));
+    const adapter = new SkillManagerAdapter(manager);
+
+    expect(adapter.hasSkill('prompt-only')).toBe(false);
+    expect(adapter.getAvailableSkills()).toEqual([]);
+  });
+
   it('McpSdkAdapter fails closed when no live MCP transport is configured', async () => {
     const adapter = new McpSdkAdapter([{ name: 'search', serverId: 'search', description: 'Search' }]);
 

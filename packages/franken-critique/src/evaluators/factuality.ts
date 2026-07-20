@@ -1,5 +1,6 @@
 import type { Evaluator, EvaluationInput, EvaluationResult, EvaluationFinding } from './evaluator.js';
 import type { MemoryPort } from '../types/contracts.js';
+import { createScore } from '../types/common.js';
 
 const RELEVANCE_THRESHOLD = 0.7;
 const TOP_K = 5;
@@ -30,7 +31,9 @@ export class FactualityEvaluator implements Evaluator {
       }
     }
 
-    const score = findings.length === 0 ? 1 : Math.max(0.3, 1 - findings.length * 0.15);
+    const score = createScore(
+      findings.length === 0 ? 1 : Math.max(0.3, 1 - findings.length * 0.15),
+    );
 
     return {
       evaluatorName: this.name,

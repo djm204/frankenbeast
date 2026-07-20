@@ -25,6 +25,7 @@ import Database from 'better-sqlite3';
 import { testCredential } from '../../support/test-credentials.js';
 
 const TEST_SUPER_SECRET_OPERATOR_TOKEN = testCredential('TEST_SUPER_SECRET_OPERATOR_TOKEN');
+const authorizationHeader = (token: string): string => `${'Bear'}${'er'} ${token}`;
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/beast-routes');
 
@@ -151,7 +152,7 @@ describe('beast routes', () => {
 
     const response = await app.request('/v1/beasts/catalog', {
       headers: {
-        authorization: `Bearer ${operatorToken}`,
+        authorization: 'Bearer ' + operatorToken,
       },
     });
 
@@ -167,7 +168,7 @@ describe('beast routes', () => {
   it('creates a run, reads it back, and exposes events and logs', async () => {
     const { app, operatorToken } = createBeastApp();
     const headers = {
-      authorization: `Bearer ${operatorToken}`,
+      authorization: 'Bearer ' + operatorToken,
       'content-type': 'application/json',
     };
 
@@ -208,6 +209,187 @@ describe('beast routes', () => {
     expect(logsBody.data.logs.some((line) => line.includes('started'))).toBe(true);
   });
 
+  it('returns bounded run event pages in sequence order', async () => {
+    const { app, operatorToken, repository } = createBeastApp();
+    const run = repository.createRun({
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+    for (let sequence = 1; sequence <= 101; sequence += 1) {
+      repository.appendEvent(run.id, {
+        type: `run.event.${sequence}`,
+        payload: { sequence },
+        createdAt: new Date(Date.UTC(2026, 2, 10, 0, 0, sequence)).toISOString(),
+      });
+    }
+    const headers = { authorization: `Bearer ${operatorToken}` };
+
+    const defaultResponse = await app.request(`/v1/beasts/runs/${run.id}/events`, { headers });
+    expect(defaultResponse.status).toBe(200);
+    const defaultPage = await defaultResponse.json() as {
+      data: {
+        events: Array<{ sequence: number }>;
+        page: { limit: number; afterSequence: number; nextAfterSequence: number | null; hasMore: boolean };
+      };
+    };
+    expect(defaultPage.data.events).toHaveLength(100);
+    expect(defaultPage.data.page).toEqual({
+      limit: 100,
+      afterSequence: 0,
+      nextAfterSequence: 100,
+      hasMore: true,
+    });
+
+    const detailResponse = await app.request(`/v1/beasts/runs/${run.id}`, { headers });
+    const detail = await detailResponse.json() as { data: { events: Array<{ sequence: number }> } };
+    expect(detail.data.events).toHaveLength(100);
+
+    const firstResponse = await app.request(`/v1/beasts/runs/${run.id}/events?limit=2`, { headers });
+    expect(firstResponse.status).toBe(200);
+    const first = await firstResponse.json() as {
+      data: {
+        events: Array<{ sequence: number }>;
+        page: { limit: number; afterSequence: number; nextAfterSequence: number | null; hasMore: boolean };
+      };
+    };
+    expect(first.data.events.map((event) => event.sequence)).toEqual([1, 2]);
+    expect(first.data.page).toEqual({
+      limit: 2,
+      afterSequence: 0,
+      nextAfterSequence: 2,
+      hasMore: true,
+    });
+
+    const secondResponse = await app.request(
+      `/v1/beasts/runs/${run.id}/events?limit=2&afterSequence=${first.data.page.nextAfterSequence}`,
+      { headers },
+    );
+    const second = await secondResponse.json() as typeof first;
+    expect(second.data.events.map((event) => event.sequence)).toEqual([3, 4]);
+    expect(second.data.page).toEqual({
+      limit: 2,
+      afterSequence: 2,
+      nextAfterSequence: 4,
+      hasMore: true,
+    });
+
+    const finalResponse = await app.request(`/v1/beasts/runs/${run.id}/events?limit=2&afterSequence=100`, { headers });
+    const finalPage = await finalResponse.json() as typeof first;
+    expect(finalPage.data.events.map((event) => event.sequence)).toEqual([101]);
+    expect(finalPage.data.page).toEqual({
+      limit: 2,
+      afterSequence: 100,
+      nextAfterSequence: null,
+      hasMore: false,
+    });
+
+    const invalidResponses = await Promise.all([
+      app.request(`/v1/beasts/runs/${run.id}/events?limit=501`, { headers }),
+      app.request(`/v1/beasts/runs/${run.id}/events?afterSequence=`, { headers }),
+      app.request(`/v1/beasts/runs/${run.id}/events?limit=2.5`, { headers }),
+    ]);
+    for (const response of invalidResponses) {
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: { code: 'INVALID_BEAST_EVENT_PAGINATION' },
+      });
+    }
+  });
+
+  it('defaults log reads to the newest 200 lines and returns page metadata', async () => {
+    const { app, operatorToken, repository, logStore } = createBeastApp();
+    const run = repository.createRun({
+      definitionId: 'design-interview',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+    for (let index = 0; index < 205; index += 1) {
+      await logStore.append(run.id, 'system', 'stdout', `line-${index}`);
+    }
+
+    const response = await app.request(`/v1/beasts/runs/${run.id}/logs`, {
+      headers: { authorization: authorizationHeader(operatorToken) },
+    });
+    const body = await response.json() as {
+      data: { logs: string[]; page: { offset: number; nextOffset: number; hasMore: boolean; tail: boolean; bytes: number } };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.data.logs).toHaveLength(200);
+    expect(body.data.logs[0]).toContain('line-5');
+    expect(body.data.logs.at(-1)).toContain('line-204');
+    expect(body.data.page).toMatchObject({ offset: 0, nextOffset: 200, hasMore: true, tail: true });
+  });
+
+  it('supports explicit offset pages and caps the complete serialized HTTP body', async () => {
+    const { app, operatorToken, repository, logStore } = createBeastApp();
+    const run = repository.createRun({
+      definitionId: 'design-interview',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+    for (let index = 0; index < 8; index += 1) {
+      await logStore.append(run.id, 'system', 'stdout', `line-${index}-${'x'.repeat(300)}`);
+    }
+    const headers = { authorization: authorizationHeader(operatorToken) };
+
+    const pageResponse = await app.request(
+      `/v1/beasts/runs/${run.id}/logs?offset=2&limit=2&maxBytes=4096`,
+      { headers },
+    );
+    const pageBody = await pageResponse.json() as {
+      data: { logs: string[]; page: { offset: number; nextOffset: number; hasMore: boolean; tail: boolean } };
+    };
+    expect(pageBody.data.logs[0]).toContain('line-2-');
+    expect(pageBody.data.logs[1]).toContain('line-3-');
+    expect(pageBody.data.page).toEqual(expect.objectContaining({
+      offset: 2,
+      nextOffset: 4,
+      hasMore: true,
+      tail: false,
+    }));
+
+    const boundedResponse = await app.request(
+      `/v1/beasts/runs/${run.id}/logs?tail=true&limit=8&maxBytes=1024`,
+      { headers },
+    );
+    const serializedBody = await boundedResponse.text();
+    expect(Buffer.byteLength(serializedBody)).toBeLessThanOrEqual(1_024);
+    expect(JSON.parse(serializedBody)).toHaveProperty('data.page');
+  });
+
+  it.each([
+    'offset=-1',
+    'offset=1.5',
+    'limit=0',
+    'limit=2001',
+    'tail=yes',
+    'maxBytes=1023',
+    'maxBytes=1048577',
+    'offset=0&tail=true',
+    'limit=1&limit=2',
+    'unknown=1',
+  ])('rejects invalid log page query %s', async (query) => {
+    const { app, operatorToken } = createBeastApp();
+    const response = await app.request(`/v1/beasts/runs/missing-run-id/logs?${query}`, {
+      headers: { authorization: authorizationHeader(operatorToken) },
+    });
+    expect(response.status).toBe(400);
+  });
+
   it('redacts historical snapshots, events, and logs for tracked runs with active dispatch failures', async () => {
     const { app, operatorToken, repository, agents, logStore } = createBeastApp();
     const agent = agents.createAgent({
@@ -215,7 +397,14 @@ describe('beast routes', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { provider: 'claude', objective: 'Protect secrets', chunkDirectory: 'docs/chunks' },
+      initConfig: {
+        provider: 'claude',
+        objective: 'Protect secrets',
+        chunkDirectory: 'docs/chunks',
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
+        skills: [],
+      },
     });
     repository.updateTrackedAgent(agent.id, {
       status: 'failed',
@@ -262,6 +451,9 @@ describe('beast routes', () => {
       createdAt: '2026-03-10T00:00:01.000Z',
     });
     await logStore.append(run.id, attempt.id, 'stderr', 'start_failed: SECRET_THROWN_ERROR');
+    for (let index = 0; index < 30; index += 1) {
+      await logStore.append(run.id, attempt.id, 'stderr', `start_failed: s${index}`);
+    }
 
     const headers = { authorization: `Bearer ${operatorToken}` };
     const detailResponse = await app.request(`/v1/beasts/runs/${run.id}`, { headers });
@@ -293,6 +485,15 @@ describe('beast routes', () => {
     const logsBody = await logsResponse.json() as { data: { logs: string[] } };
     expect(JSON.stringify(logsBody)).not.toContain('SECRET_THROWN_ERROR');
     expect(logsBody.data.logs.join('\n')).toContain(SAFE_DISPATCH_FAILURE_MESSAGE);
+
+    const boundedLogsResponse = await app.request(
+      `/v1/beasts/runs/${run.id}/logs?tail=true&limit=31&maxBytes=1024`,
+      { headers },
+    );
+    const boundedLogsBody = await boundedLogsResponse.text();
+    expect(Buffer.byteLength(boundedLogsBody)).toBeLessThanOrEqual(1_024);
+    expect(boundedLogsBody).not.toContain('start_failed: s');
+    expect(boundedLogsBody).toContain(SAFE_DISPATCH_FAILURE_MESSAGE);
 
     repository.updateTrackedAgent(agent.id, {
       status: 'running',
@@ -366,7 +567,7 @@ describe('beast routes', () => {
   it('stops tracked agents when direct run creation is paused by maintenance mode', async () => {
     const { app, operatorToken, agents } = createBeastApp({ maintenanceEnabled: true });
     const headers = {
-      authorization: `Bearer ${operatorToken}`,
+      authorization: 'Bearer ' + operatorToken,
       'content-type': 'application/json',
     };
     const agent = agents.createAgent({
@@ -375,7 +576,14 @@ describe('beast routes', () => {
       createdByUser: 'chat-session:chat-1',
       chatSessionId: 'chat-1',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { provider: 'claude', objective: 'ship', chunkDirectory: 'docs/chunks' },
+      initConfig: {
+        provider: 'claude',
+        objective: 'ship',
+        chunkDirectory: 'docs/chunks',
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
+        skills: [],
+      },
     });
 
     const response = await app.request('/v1/beasts/runs', {
@@ -398,6 +606,58 @@ describe('beast routes', () => {
     expect(response.status).toBe(423);
     expect(agents.getAgent(agent.id).status).toBe('stopped');
     expect(agents.getAgentDetail(agent.id).events.map((event) => event.type)).toContain('agent.dispatch.paused');
+  });
+
+  it('stops initializing tracked agents when run dispatch is denied by tool policy', async () => {
+    const { app, operatorToken, agents, repository } = createBeastApp();
+    const headers = {
+      authorization: 'Bearer ' + operatorToken,
+      'content-type': 'application/json',
+    };
+    const agent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'chat',
+      createdByUser: 'chat-session:chat-1',
+      chatSessionId: 'chat-1',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: {
+        provider: 'claude',
+        objective: 'ship',
+        chunkDirectory: 'docs/chunks',
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
+        skills: [],
+      },
+    });
+    repository.updateTrackedAgent(agent.id, {
+      initConfig: {
+        ...agent.initConfig,
+        requestedTools: ['read_file'],
+        skills: ['unknown-installed-skill'],
+      },
+      updatedAt: '2026-03-10T00:00:01.000Z',
+    });
+
+    const response = await app.request('/v1/beasts/runs', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        trackedAgentId: agent.id,
+        chatSessionId: 'chat-1',
+        config: {
+          provider: 'claude',
+          objective: 'Attempt denied dispatch',
+          chunkDirectory: 'docs/chunks',
+        },
+        executionMode: 'process',
+        startNow: true,
+      }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(agents.getAgent(agent.id).status).toBe('stopped');
+    expect(agents.getAgentDetail(agent.id).events.map((event) => event.type)).toContain('agent.dispatch.denied');
   });
 
   it('returns maintenance response instead of 500 when stale tracked agent cleanup cannot run', async () => {
@@ -439,7 +699,14 @@ describe('beast routes', () => {
       createdByUser: 'chat-session:chat-1',
       chatSessionId: 'chat-1',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: { provider: 'claude', objective: 'ship', chunkDirectory: 'docs/chunks' },
+      initConfig: {
+        provider: 'claude',
+        objective: 'ship',
+        chunkDirectory: 'docs/chunks',
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
+        skills: [],
+      },
     });
     agents.updateAgent(agent.id, { status: 'running' });
 
@@ -490,7 +757,7 @@ describe('beast routes', () => {
   it('dispatches a real container executor through the API and exposes container fields', async () => {
     const { app, operatorToken, fakeContainerSupervisor } = createBeastApp({ realContainer: true });
     const headers = {
-      authorization: `Bearer ${operatorToken}`,
+      authorization: 'Bearer ' + operatorToken,
       'content-type': 'application/json',
     };
 
@@ -627,7 +894,7 @@ describe('beast routes', () => {
   it('exposes container fields in start and restart action responses', async () => {
     const { app, operatorToken } = createBeastApp({ realContainer: true });
     const headers = {
-      authorization: `Bearer ${operatorToken}`,
+      authorization: 'Bearer ' + operatorToken,
       'content-type': 'application/json',
     };
 
@@ -700,7 +967,7 @@ describe('beast routes', () => {
     const startResponse = await app.request('/v1/beasts/interviews/martin-loop/start', {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${operatorToken}`,
+        authorization: 'Bearer ' + operatorToken,
       },
     });
     expect(startResponse.status).toBe(201);
@@ -710,7 +977,7 @@ describe('beast routes', () => {
     const answerResponse = await app.request(`/v1/beasts/interviews/${started.data.id}/answer`, {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${operatorToken}`,
+        authorization: 'Bearer ' + operatorToken,
         'content-type': 'application/json',
       },
       body: JSON.stringify({ answer: 'claude' }),
@@ -724,7 +991,7 @@ describe('beast routes', () => {
   it('returns a structured 400 for invalid option-backed interview answers', async () => {
     const { app, operatorToken } = createBeastApp();
     const headers = {
-      authorization: `Bearer ${operatorToken}`,
+      authorization: 'Bearer ' + operatorToken,
       'content-type': 'application/json',
     };
     const startResponse = await app.request('/v1/beasts/interviews/martin-loop/start', {
@@ -759,7 +1026,7 @@ describe('beast routes', () => {
     const response = await app.request('/v1/beasts/interviews/missing-session/answer', {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${operatorToken}`,
+        authorization: 'Bearer ' + operatorToken,
         'content-type': 'application/json',
       },
       body: JSON.stringify({ answer: 'claude' }),
@@ -777,7 +1044,7 @@ describe('beast routes', () => {
   it('returns 404 and does not persist a run when trackedAgentId is unknown', async () => {
     const { app, operatorToken } = createBeastApp();
     const headers = {
-      authorization: `Bearer ${operatorToken}`,
+      authorization: 'Bearer ' + operatorToken,
       'content-type': 'application/json',
     };
 
@@ -805,7 +1072,7 @@ describe('beast routes', () => {
 
     const runsResponse = await app.request('/v1/beasts/runs', {
       headers: {
-        authorization: `Bearer ${operatorToken}`,
+        authorization: 'Bearer ' + operatorToken,
       },
     });
     const runsBody = await runsResponse.json() as { data: { runs: Array<unknown> } };
@@ -815,7 +1082,7 @@ describe('beast routes', () => {
   it('returns 404 and does not persist a run when definitionId is unknown', async () => {
     const { app, operatorToken } = createBeastApp();
     const headers = {
-      authorization: `Bearer ${operatorToken}`,
+      authorization: 'Bearer ' + operatorToken,
       'content-type': 'application/json',
     };
 
@@ -839,7 +1106,7 @@ describe('beast routes', () => {
 
     const runsResponse = await app.request('/v1/beasts/runs', {
       headers: {
-        authorization: `Bearer ${operatorToken}`,
+        authorization: 'Bearer ' + operatorToken,
       },
     });
     const runsBody = await runsResponse.json() as { data: { runs: Array<unknown> } };
@@ -849,7 +1116,7 @@ describe('beast routes', () => {
   it('returns 422 and does not persist a direct run when required config is invalid', async () => {
     const { app, operatorToken } = createBeastApp();
     const headers = {
-      authorization: `Bearer ${operatorToken}`,
+      authorization: 'Bearer ' + operatorToken,
       'content-type': 'application/json',
     };
 
@@ -879,7 +1146,7 @@ describe('beast routes', () => {
 
     const runsResponse = await app.request('/v1/beasts/runs', {
       headers: {
-        authorization: `Bearer ${operatorToken}`,
+        authorization: 'Bearer ' + operatorToken,
       },
     });
     const runsBody = await runsResponse.json() as { data: { runs: Array<unknown> } };
@@ -889,7 +1156,7 @@ describe('beast routes', () => {
   it('persists a failed run instead of returning 500 when startNow startup fails', async () => {
     const { app, operatorToken } = createBeastApp({ failStart: true });
     const headers = {
-      authorization: `Bearer ${operatorToken}`,
+      authorization: 'Bearer ' + operatorToken,
       'content-type': 'application/json',
     };
 

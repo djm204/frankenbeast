@@ -59,6 +59,8 @@ interface FlushedSpanState {
   thoughtBlocksJson: string
 }
 
+const SQLITE_SCHEMA_SENTINEL_INDEX = 'idx_traces_startedAt'
+
 export interface SQLiteAdapterOptions {
   /** Maximum flushed-span snapshots retained for repeated-flush dirty checks. */
   maxFlushedSpanSnapshots?: number
@@ -297,7 +299,12 @@ export class SQLiteAdapter implements ExportAdapter {
       this.withSqliteLockRetrySync('initialize SQLite adapter', () => {
         this.db.pragma('journal_mode = WAL')
         this.db.pragma('foreign_keys = ON')
-        this.db.exec(CREATE_TABLES)
+        const traceIndexes = this.db.pragma("index_list('traces')") as Array<{ name?: unknown }>
+        const schemaInitialized = Array.isArray(traceIndexes)
+          && traceIndexes.some(index => index.name === SQLITE_SCHEMA_SENTINEL_INDEX)
+        if (!schemaInitialized) {
+          this.db.exec(CREATE_TABLES)
+        }
       })
     } catch (error) {
       this.db.close()
@@ -307,45 +314,59 @@ export class SQLiteAdapter implements ExportAdapter {
 
   async flush(trace: Trace): Promise<void> {
     const snapshot = snapshotTrace(trace)
-    return this.enqueueSqliteWrite(() => this.flushNow(snapshot))
+    return this.enqueueSqliteWrite(() => this.flushNow([snapshot]))
   }
 
-  private async flushNow(trace: Trace): Promise<void> {
-    warnIfTraceHasActiveSpans(trace, 'SQLiteAdapter')
-    const flushedInTransaction = await this.withSqliteLockRetry('flush trace transaction', () => {
+  async flushBatch(traces: Trace[]): Promise<void> {
+    if (traces.length === 0) return
+    const snapshots = traces.map(snapshotTrace)
+    return this.enqueueSqliteWrite(() => this.flushNow(snapshots))
+  }
+
+  private async flushNow(traces: Trace[]): Promise<void> {
+    for (const trace of traces) warnIfTraceHasActiveSpans(trace, 'SQLiteAdapter')
+    const operation = traces.length === 1 ? 'flush trace transaction' : 'flush trace batch transaction'
+    const flushedInTransaction = await this.withSqliteLockRetry(operation, () => {
       const upsertTrace = this.db.prepare(UPSERT_TRACE)
       const upsertSpan = this.db.prepare(UPSERT_SPAN)
       const flushed: Span[] = []
 
-      const transaction = this.db.transaction((t: Trace) => {
-        upsertTrace.run({
-          id: t.id,
-          goal: t.goal,
-          status: t.status,
-          startedAt: t.startedAt,
-          endedAt: t.endedAt ?? null,
-        })
-        for (const span of t.spans) {
-          if (!this.shouldFlushSpan(span)) continue
-
-          upsertSpan.run({
-            id: span.id,
-            traceId: span.traceId,
-            parentSpanId: span.parentSpanId ?? null,
-            name: span.name,
-            status: span.status,
-            startedAt: span.startedAt,
-            endedAt: span.endedAt ?? null,
-            durationMs: span.durationMs ?? null,
-            errorMessage: span.errorMessage ?? null,
-            metadata: JSON.stringify(span.metadata),
-            thoughtBlocks: JSON.stringify(span.thoughtBlocks),
+      const transaction = this.db.transaction((batch: Trace[]) => {
+        const batchFlushedSpans = new Map<string, FlushedSpanState>()
+        for (const trace of batch) {
+          upsertTrace.run({
+            id: trace.id,
+            goal: trace.goal,
+            status: trace.status,
+            startedAt: trace.startedAt,
+            endedAt: trace.endedAt ?? null,
           })
-          flushed.push(span)
+          for (const span of trace.spans) {
+            const batchKey = `${span.traceId}\0${span.id}`
+            const previous = batchFlushedSpans.get(batchKey)
+              ?? this.flushedSpans.get(span.traceId)?.get(span.id)
+            if (!this.shouldFlushSpan(span, previous)) continue
+
+            upsertSpan.run({
+              id: span.id,
+              traceId: span.traceId,
+              parentSpanId: span.parentSpanId ?? null,
+              name: span.name,
+              status: span.status,
+              startedAt: span.startedAt,
+              endedAt: span.endedAt ?? null,
+              durationMs: span.durationMs ?? null,
+              errorMessage: span.errorMessage ?? null,
+              metadata: JSON.stringify(span.metadata),
+              thoughtBlocks: JSON.stringify(span.thoughtBlocks),
+            })
+            flushed.push(span)
+            batchFlushedSpans.set(batchKey, this.toFlushedSpanState(span))
+          }
         }
       })
 
-      transaction(trace)
+      transaction(traces)
       return flushed
     })
     for (const span of flushedInTransaction) {
@@ -353,9 +374,10 @@ export class SQLiteAdapter implements ExportAdapter {
     }
   }
 
-  private shouldFlushSpan(span: Span): boolean {
-    const byTrace = this.flushedSpans.get(span.traceId)
-    const previous = byTrace?.get(span.id)
+  private shouldFlushSpan(
+    span: Span,
+    previous = this.flushedSpans.get(span.traceId)?.get(span.id),
+  ): boolean {
     if (previous === undefined) return true
 
     // Active spans are still mutable: metadata/thought blocks can grow and the
@@ -382,6 +404,21 @@ export class SQLiteAdapter implements ExportAdapter {
     return previous.thoughtBlocksJson !== JSON.stringify(span.thoughtBlocks)
   }
 
+  private toFlushedSpanState(span: Span): FlushedSpanState {
+    return {
+      status: span.status,
+      endedAt: span.endedAt,
+      durationMs: span.durationMs,
+      errorMessage: span.errorMessage,
+      metadata: span.metadata,
+      metadataKeyCount: Object.keys(span.metadata).length,
+      metadataJson: JSON.stringify(span.metadata),
+      thoughtBlocks: span.thoughtBlocks,
+      thoughtBlockCount: span.thoughtBlocks.length,
+      thoughtBlocksJson: JSON.stringify(span.thoughtBlocks),
+    }
+  }
+
   private rememberFlushedSpan(span: Span): void {
     if (this.maxFlushedSpanSnapshots === 0) return
 
@@ -393,18 +430,7 @@ export class SQLiteAdapter implements ExportAdapter {
     if (!byTrace.has(span.id)) {
       this.flushedSpanSnapshotCount += 1
     }
-    byTrace.set(span.id, {
-      status: span.status,
-      endedAt: span.endedAt,
-      durationMs: span.durationMs,
-      errorMessage: span.errorMessage,
-      metadata: span.metadata,
-      metadataKeyCount: Object.keys(span.metadata).length,
-      metadataJson: JSON.stringify(span.metadata),
-      thoughtBlocks: span.thoughtBlocks,
-      thoughtBlockCount: span.thoughtBlocks.length,
-      thoughtBlocksJson: JSON.stringify(span.thoughtBlocks),
-    })
+    byTrace.set(span.id, this.toFlushedSpanState(span))
     this.pruneFlushedSpanSnapshots(span.traceId)
   }
 

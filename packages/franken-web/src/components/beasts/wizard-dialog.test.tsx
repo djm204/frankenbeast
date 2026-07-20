@@ -149,10 +149,12 @@ describe('WizardDialog validation', () => {
     renderWizard();
 
     fireEvent.click(screen.getByRole('radio', { name: /Martin Loop/ }));
-    expect(screen.getByText(/Browser directory pickers cannot provide server paths/i)).toBeTruthy();
 
+    // Interview prompts reveal conversationally: the directory prompt (and its
+    // picker hint) appears once the earlier required answers are provided.
     fireEvent.change(screen.getByLabelText(/Which provider should run the martin loop/i), { target: { value: 'codex' } });
     fireEvent.change(screen.getByLabelText(/What should the martin loop accomplish/i), { target: { value: 'Run chunks' } });
+    expect(screen.getByText(/Browser directory pickers cannot provide server paths/i)).toBeTruthy();
     fireEvent.change(screen.getByLabelText(/Which chunk directory should MartinLoop execute from/i), {
       target: { value: 'C:\\fakepath\\chunks' },
     });

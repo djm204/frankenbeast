@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
-import { mkdtemp, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -45,7 +45,6 @@ describe('createBeastServices', () => {
     const parentCwd = join(tempDir, 'parent-cwd');
     const projectRoot = join(tempDir, 'target-project');
     const originalCwd = process.cwd();
-    const { mkdir } = await import('node:fs/promises');
     await mkdir(parentCwd, { recursive: true });
     await mkdir(projectRoot, { recursive: true });
 
@@ -166,7 +165,7 @@ describe('createBeastServices', () => {
         source: 'dashboard',
         createdByUser: 'operator',
         initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-        initConfig: { labels: ['feature'] },
+        initConfig: { labels: ['feature'], agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
       });
       services.agents.updateAgent(agent.id, { status: 'running' });
 
@@ -175,6 +174,163 @@ describe('createBeastServices', () => {
         reason: 'capacity_full',
         reservationId: undefined,
       });
+    } finally {
+      services.dispose();
+    }
+  });
+
+  it('loads default .fbeast skill manifests while ignoring an unrelated malformed manifest', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-create-beast-services-'));
+    const skillsDir = join(tempDir, '.fbeast', 'skills');
+    const skillDir = join(skillsDir, 'context-only');
+    const brokenSkillDir = join(skillsDir, 'broken-unselected');
+    await mkdir(skillDir, { recursive: true });
+    await mkdir(brokenSkillDir, { recursive: true });
+    await writeFile(
+      join(skillDir, 'mcp.json'),
+      JSON.stringify({ mcpServers: { 'context-only': { command: 'context-only' } } }),
+    );
+    await writeFile(
+      join(skillDir, 'tools.json'),
+      JSON.stringify([{ name: 'read_file', description: 'Read context', inputSchema: {} }]),
+    );
+    await writeFile(
+      join(brokenSkillDir, 'mcp.json'),
+      '{not-json',
+    );
+    await writeFile(join(brokenSkillDir, 'tools.json'), '{not-json');
+    const { createBeastServices } = await import('../../../src/beasts/create-beast-services.js');
+    const services = createBeastServices({
+      beastsDb: join(tempDir, 'beast.db'),
+      beastLogsDir: join(tempDir, 'logs'),
+      root: tempDir,
+    });
+
+    try {
+      const agent = services.agents.createAgent({
+        definitionId: 'martin-loop',
+        source: 'dashboard',
+        createdByUser: 'operator',
+        initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+        initConfig: {
+          provider: 'claude',
+          objective: 'Use the selected context skill',
+          chunkDirectory: 'docs/chunks',
+          agentRole: 'coding',
+          requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
+          skills: ['context-only'],
+        },
+      });
+
+      const run = await services.dispatch.createRun({
+        definitionId: 'martin-loop',
+        trackedAgentId: agent.id,
+        config: {
+          provider: 'claude',
+          objective: 'Dispatch with selected context skill',
+          chunkDirectory: 'docs/chunks',
+          skills: ['context-only'],
+        },
+        dispatchedBy: 'dashboard',
+        dispatchedByUser: 'operator',
+        executionMode: 'process',
+      });
+
+      expect(run.configSnapshot).toMatchObject({ skills: ['context-only'] });
+      expect(processExecutorConstructor.mock.calls.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      services.dispose();
+    }
+  });
+
+  it('refreshes trusted skill tool manifests added after service construction', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-create-beast-services-'));
+    const skillsDir = join(tempDir, 'dashboard-skills');
+    const { createBeastServices } = await import('../../../src/beasts/create-beast-services.js');
+    const services = createBeastServices({
+      beastsDb: join(tempDir, 'beast.db'),
+      beastLogsDir: join(tempDir, 'logs'),
+      root: tempDir,
+      skillsDir,
+    });
+
+    try {
+      const skillDir = join(skillsDir, 'late-context');
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(
+        join(skillDir, 'mcp.json'),
+        JSON.stringify({ mcpServers: { 'late-context': { command: 'late-context' } } }),
+      );
+      await writeFile(
+        join(skillDir, 'tools.json'),
+        JSON.stringify([{ name: 'read_file', description: 'Read context', inputSchema: {} }]),
+      );
+
+      const agent = services.agents.createAgent({
+        definitionId: 'martin-loop',
+        source: 'dashboard',
+        createdByUser: 'operator',
+        initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+        initConfig: {
+          provider: 'claude',
+          objective: 'Use a skill installed after startup',
+          chunkDirectory: 'docs/chunks',
+          agentRole: 'coding',
+          requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
+          skills: ['late-context'],
+        },
+      });
+
+      const run = await services.dispatch.createRun({
+        definitionId: 'martin-loop',
+        trackedAgentId: agent.id,
+        config: {
+          provider: 'claude',
+          objective: 'Dispatch after late skill install',
+          chunkDirectory: 'docs/chunks',
+          skills: ['late-context'],
+        },
+        dispatchedBy: 'dashboard',
+        dispatchedByUser: 'operator',
+        executionMode: 'process',
+      });
+
+      expect(run.configSnapshot).toMatchObject({ skills: ['late-context'] });
+    } finally {
+      services.dispose();
+    }
+  });
+
+  it('does not trust installed skills that omit an explicit tools manifest', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-create-beast-services-'));
+    const skillDir = join(tempDir, 'skills', 'manifestless');
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(
+      join(skillDir, 'mcp.json'),
+      JSON.stringify({ mcpServers: { manifestless: { command: 'manifestless' } } }),
+    );
+    const { createBeastServices } = await import('../../../src/beasts/create-beast-services.js');
+    const services = createBeastServices({
+      beastsDb: join(tempDir, 'beast.db'),
+      beastLogsDir: join(tempDir, 'logs'),
+      root: tempDir,
+    });
+
+    try {
+      expect(() => services.agents.createAgent({
+        definitionId: 'martin-loop',
+        source: 'dashboard',
+        createdByUser: 'operator',
+        initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+        initConfig: {
+          provider: 'claude',
+          objective: 'Use a manifestless skill',
+          chunkDirectory: 'docs/chunks',
+          agentRole: 'coding',
+          requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
+          skills: ['manifestless'],
+        },
+      })).toThrow(/coding:skill:manifestless/);
     } finally {
       services.dispose();
     }

@@ -7,6 +7,11 @@ import { ChunkValidator, type ValidationIssue } from './chunk-validator.js';
 import { ChunkRemediator } from './chunk-remediator.js';
 import type { PlanContextGatherer, PlanContext } from './plan-context-gatherer.js';
 import { CHUNK_GUARDRAILS } from './chunk-guardrails.js';
+import {
+  PLANNING_STAGE_TOTAL,
+  type PlanningProgressEvent,
+  type PlanningProgressListener,
+} from './planning-progress.js';
 
 const DEFAULT_PLAN_TIMEOUT_MS = 120_000;
 const QUALITY_RAMP_UP_MAX_CHARS = 2_000;
@@ -38,6 +43,7 @@ export interface LlmGraphBuilderOptions {
   /** Total deadline shared by context gathering, all LLM passes, retries, and fallbacks. */
   timeoutMs?: number;
   signal?: AbortSignal;
+  onProgress?: PlanningProgressListener;
 }
 
 class PlanBudgetExceededError extends Error {
@@ -134,18 +140,37 @@ export class LlmGraphBuilder implements GraphBuilder {
 
     try {
       this.throwIfAborted(controller.signal);
+      this.progress({
+        stage: 'gathering-context', status: 'started', position: 1,
+        message: 'Gathering codebase context',
+      });
       const context = this.contextGatherer
         ? await this.awaitWithAbort(this.contextGatherer.gather(intent.goal), controller.signal)
         : emptyContext;
-      checkPlanningDeadline();
+      if (this.contextGatherer) checkPlanningDeadline();
+      this.progress({
+        stage: 'gathering-context', status: this.contextGatherer ? 'completed' : 'skipped', position: 1,
+        message: this.contextGatherer ? 'Codebase context gathered' : 'Codebase context skipped — no gatherer configured',
+        nextStage: 'Decomposing design',
+      });
 
       const decomposer = new ChunkDecomposer(meteredLlm, { maxChunks: this.maxChunks });
+      this.progress({
+        stage: 'decomposing', status: 'started', position: 2,
+        message: 'Decomposing design into chunks',
+      });
       let chunks = await this.runStage(
         'decompose',
         controller.signal,
         () => decomposer.decompose(intent.goal, context, { signal: controller.signal }),
         checkPlanningDeadline,
       );
+      this.progress({
+        stage: 'decomposing', status: 'completed', position: 2,
+        message: `Decomposition complete — ${chunks.length} chunk${chunks.length === 1 ? '' : 's'}`,
+        chunks: chunks.length,
+        nextStage: 'Validating chunks',
+      });
       let validationIssues: ValidationIssue[] = [];
 
       const shouldValidate = !this.options.skipValidation
@@ -159,6 +184,10 @@ export class LlmGraphBuilder implements GraphBuilder {
         const validator = new ChunkValidator(meteredLlm);
 
         try {
+          this.progress({
+            stage: 'validating', status: 'started', position: 3,
+            message: 'Validating chunks',
+          });
           const result = await this.runStage(
             'validate',
             controller.signal,
@@ -168,16 +197,40 @@ export class LlmGraphBuilder implements GraphBuilder {
 
           if (result.revisedChunks) chunks = result.revisedChunks;
           validationIssues = result.issues;
+          const errors = result.issues.filter((issue) => issue.severity === 'error').length;
+          const warnings = result.issues.filter((issue) => issue.severity === 'warning').length;
+          this.progress({
+            stage: 'validating', status: 'completed', position: 3,
+            message: result.valid
+              ? `Validation passed — ${warnings} warning${warnings === 1 ? '' : 's'}`
+              : `Validation complete — ${errors} error${errors === 1 ? '' : 's'}, ${warnings} warning${warnings === 1 ? '' : 's'}`,
+            errors, warnings,
+            nextStage: result.valid ? 'Writing chunks' : 'Remediating chunks',
+          });
 
           if (!result.valid) {
             const remediator = new ChunkRemediator(meteredLlm);
+            this.progress({
+              stage: 'remediating', status: 'started', position: 4,
+              message: 'Remediating validation errors',
+            });
             chunks = await this.runStage(
               'remediate',
               controller.signal,
               () => remediator.remediate(chunks, result.issues, qualityContext, { signal: controller.signal }),
               checkPlanningDeadline,
             );
+            this.progress({
+              stage: 'remediating', status: 'completed', position: 4,
+              message: `Remediation complete — ${chunks.length} chunk${chunks.length === 1 ? '' : 's'} updated`,
+              chunks: chunks.length,
+              nextStage: 'Re-validating chunks',
+            });
 
+            this.progress({
+              stage: 'revalidating', status: 'started', position: 5,
+              message: 'Re-validating remediated chunks',
+            });
             const revalidation = await this.runStage(
               'revalidate',
               controller.signal,
@@ -186,6 +239,25 @@ export class LlmGraphBuilder implements GraphBuilder {
             );
             if (revalidation.revisedChunks) chunks = revalidation.revisedChunks;
             validationIssues = revalidation.issues;
+            const remainingErrors = revalidation.issues.filter((issue) => issue.severity === 'error').length;
+            const remainingWarnings = revalidation.issues.filter((issue) => issue.severity === 'warning').length;
+            this.progress({
+              stage: 'revalidating', status: 'completed', position: 5,
+              message: `Re-validation complete — ${remainingErrors} error${remainingErrors === 1 ? '' : 's'}, ${remainingWarnings} warning${remainingWarnings === 1 ? '' : 's'}`,
+              errors: remainingErrors,
+              warnings: remainingWarnings,
+              nextStage: 'Writing chunks',
+            });
+          } else {
+            this.progress({
+              stage: 'remediating', status: 'skipped', position: 4,
+              message: 'Remediation skipped — validation passed',
+            });
+            this.progress({
+              stage: 'revalidating', status: 'skipped', position: 5,
+              message: 'Re-validation skipped — no remediation required',
+              nextStage: 'Writing chunks',
+            });
           }
         } catch (error) {
           if (
@@ -202,6 +274,25 @@ export class LlmGraphBuilder implements GraphBuilder {
             this.buildDraftWarning(controller.signal.reason, timeoutMs),
           ];
         }
+      } else {
+        const reason = this.options.skipValidation
+          ? 'validation disabled'
+          : !this.contextGatherer
+            ? 'no codebase context available'
+            : 'adaptive validation not required';
+        this.progress({
+          stage: 'validating', status: 'skipped', position: 3,
+          message: `Validation skipped — ${reason}`,
+        });
+        this.progress({
+          stage: 'remediating', status: 'skipped', position: 4,
+          message: 'Remediation skipped — validation did not run',
+        });
+        this.progress({
+          stage: 'revalidating', status: 'skipped', position: 5,
+          message: 'Re-validation skipped — validation did not run',
+          nextStage: 'Writing chunks',
+        });
       }
 
       this.lastChunks = chunks;
@@ -324,6 +415,10 @@ export class LlmGraphBuilder implements GraphBuilder {
       description: `${description}; saved the completed decomposition as a draft`,
       suggestion: `Review the draft manually or retry with a plan timeout above ${timeoutMs}ms`,
     };
+  }
+
+  private progress(event: Omit<PlanningProgressEvent, 'total'>): void {
+    this.options.onProgress?.({ ...event, total: PLANNING_STAGE_TOTAL });
   }
 
   /** Sanitize chunk ID: only alphanumeric, underscores, hyphens. */

@@ -98,7 +98,9 @@ export class CodexCliAdapter implements ILlmProvider {
           env: (s['env'] as Record<string, string>) ?? {},
         },
         authFields: extractAuthFields(s['env'] as Record<string, string>),
-        toolDefinitions: (s['toolDefinitions'] as Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>) ?? [],
+        ...(Array.isArray(s['toolDefinitions'])
+          ? { toolDefinitions: s['toolDefinitions'] as Array<{ name: string; description: string; inputSchema: Record<string, unknown> }> }
+          : {}),
       }));
     } catch {
       return [];

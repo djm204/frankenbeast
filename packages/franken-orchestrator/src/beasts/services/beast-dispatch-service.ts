@@ -1,4 +1,4 @@
-import type { BeastDefinition, BeastDispatchSource, BeastExecutionMode, BeastRun, ModuleConfig } from '../types.js';
+import type { BeastDefinition, BeastDispatchSource, BeastExecutionMode, BeastRun, ModuleConfig, TrackedAgent } from '../types.js';
 import { BeastLogStore } from '../events/beast-log-store.js';
 import type { BeastEventBus } from '../events/beast-event-bus.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
@@ -16,11 +16,14 @@ import {
   capacityItemFromConfig,
 } from './capacity-reservation-policy.js';
 import type { MaintenanceModeService } from './maintenance-mode-service.js';
+import { AgentToolPolicyError, defaultAgentToolPolicyConfig, validateAgentRoleTools } from './role-tool-manifest.js';
+import type { ToolPolicyDenial, ToolPolicyValidationContext } from './role-tool-manifest.js';
 
 export interface BeastDispatchServiceOptions {
   eventBus?: BeastEventBus;
   capacityPolicy?: CapacityReservationPolicy | undefined;
   maintenance?: MaintenanceModeService | undefined;
+  trustedSkillToolManifests?: ToolPolicyValidationContext['trustedSkillToolManifests'];
 }
 
 export interface BeastExecutors {
@@ -44,6 +47,23 @@ const SHARED_RUNTIME_CONFIG_KEYS = [
   'category',
   'categories',
   'issue',
+] as const;
+
+const TOOL_POLICY_CONFIG_KEYS = [
+  'agentRole',
+  'role',
+  'laneRole',
+  'requestedTools',
+  'enabledTools',
+  'toolManifest',
+  'tools',
+] as const;
+
+const TOOL_MANIFEST_CONFIG_KEYS = [
+  'requestedTools',
+  'enabledTools',
+  'toolManifest',
+  'tools',
 ] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -128,6 +148,46 @@ function pickSharedRuntimeConfig(config: Readonly<Record<string, unknown>>): Rea
   );
 }
 
+function pickToolPolicyConfig(config: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  return Object.fromEntries(
+    TOOL_POLICY_CONFIG_KEYS
+      .filter((key) => Object.hasOwn(config, key))
+      .map((key) => [key, config[key]]),
+  );
+}
+
+function canonicalTrackedAgentToolPolicyConfig(
+  config: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  const policy = pickToolPolicyConfig(config);
+  const rawRole = config.agentRole ?? config.role ?? config.laneRole;
+  const canonicalRole = typeof rawRole === 'string' && rawRole.trim().length > 0
+    ? { agentRole: rawRole.trim() }
+    : {};
+  return {
+    ...Object.fromEntries(Object.entries(policy).filter(([key]) => key !== 'agentRole' && key !== 'role' && key !== 'laneRole')),
+    ...canonicalRole,
+  };
+}
+
+function pickSkillsPolicyConfig(config: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  return Object.hasOwn(config, 'skills') ? { skills: config.skills } : {};
+}
+
+function preserveTrackedAgentPolicyConfig(
+  config: Readonly<Record<string, unknown>>,
+  trackedAgent?: TrackedAgent | undefined,
+): Readonly<Record<string, unknown>> {
+  if (!trackedAgent) return config;
+  return {
+    ...config,
+    ...pickSkillsPolicyConfig(trackedAgent.initAction.config),
+    ...pickSkillsPolicyConfig(trackedAgent.initConfig),
+    ...canonicalTrackedAgentToolPolicyConfig(trackedAgent.initAction.config),
+    ...canonicalTrackedAgentToolPolicyConfig(trackedAgent.initConfig),
+  };
+}
+
 export function normalizeBeastRunConfig(
   definition: BeastDefinition,
   requestedConfig: Readonly<Record<string, unknown>>,
@@ -178,10 +238,38 @@ export class BeastDispatchService {
     // Normalize strict definition fields while preserving approved shared runtime
     // keys; retry paths reuse this same contract when rebuilding redacted snapshots.
     const config = normalizeBeastRunConfig(definition, request.config);
+    const trackedAgent = request.trackedAgentId
+      ? this.repository.requireTrackedAgent(request.trackedAgentId)
+      : undefined;
     const moduleConfig = request.moduleConfig ?? this.resolveAgentModuleConfig(request.trackedAgentId);
-    const configSnapshot: Readonly<Record<string, unknown>> = moduleConfig
-      ? { ...config, modules: moduleConfig }
-      : config;
+    const directRunPolicyConfig = trackedAgent
+      ? {}
+      : {
+          ...canonicalTrackedAgentToolPolicyConfig(request.config),
+          ...pickSkillsPolicyConfig(request.config),
+        };
+    const policyDefaults: Record<string, unknown> = {
+      ...defaultAgentToolPolicyConfig(
+        definition.id,
+        undefined,
+        trackedAgent ? trackedAgent.initConfig : request.config,
+        this.options.trustedSkillToolManifests,
+      ),
+    };
+    const hasExplicitManifest = trackedAgent
+      ? TOOL_MANIFEST_CONFIG_KEYS.some(key =>
+          Object.hasOwn(trackedAgent.initAction.config, key)
+          || Object.hasOwn(trackedAgent.initConfig, key))
+      : TOOL_MANIFEST_CONFIG_KEYS.some(key => Object.hasOwn(request.config, key));
+    if (trackedAgent || hasExplicitManifest) {
+      delete policyDefaults.requestedTools;
+    }
+    const parsedConfigSnapshot: Readonly<Record<string, unknown>> = moduleConfig
+      ? { ...policyDefaults, ...config, ...directRunPolicyConfig, modules: moduleConfig }
+      : { ...policyDefaults, ...config, ...directRunPolicyConfig };
+    const policyConfigSnapshot = preserveTrackedAgentPolicyConfig(parsedConfigSnapshot, trackedAgent);
+    this.assertRoleToolManifestAllows(request, policyConfigSnapshot);
+    const configSnapshot = policyConfigSnapshot;
     const executionMode = request.executionMode ?? definition.executionModeDefault;
     const createdAt = new Date(wallClockNow()).toISOString();
     const linkedAt = new Date(wallClockNow()).toISOString();
@@ -220,10 +308,13 @@ export class BeastDispatchService {
         const identity = trackedAgent && isRecord(trackedAgent.initConfig.identity)
           ? trackedAgent.initConfig.identity
           : undefined;
+        const trackedInitConfig = Object.fromEntries(
+          Object.entries(configSnapshot).filter(([key]) => key !== 'modules'),
+        );
         this.repository.updateTrackedAgent(request.trackedAgentId, {
           status: 'dispatching',
           dispatchRunId: createdRun.id,
-          initConfig: identity ? { ...config, identity } : config,
+          initConfig: identity ? { ...trackedInitConfig, identity } : trackedInitConfig,
           ...(moduleConfig ? { moduleConfig } : {}),
           updatedAt: linkedAt,
         });
@@ -399,8 +490,50 @@ export class BeastDispatchService {
 
   private resolveAgentModuleConfig(trackedAgentId?: string): ModuleConfig | undefined {
     if (!trackedAgentId) return undefined;
-    const agent = this.repository.getTrackedAgent(trackedAgentId);
-    return agent?.moduleConfig;
+    return this.repository.getTrackedAgent(trackedAgentId)?.moduleConfig;
+  }
+
+  private assertRoleToolManifestAllows(
+    request: CreateBeastRunRequest,
+    configSnapshot: Readonly<Record<string, unknown>>,
+  ): void {
+    const trackedAgent = request.trackedAgentId
+      ? this.repository.requireTrackedAgent(request.trackedAgentId)
+      : undefined;
+    if (trackedAgent && trackedAgent.definitionId !== request.definitionId) {
+      throw new AgentToolPolicyError({
+        allowed: false,
+        rawRole: undefined,
+        requestedTools: [],
+        denials: [{
+          role: '<definition-mismatch>',
+          requestedTool: `definition:${request.definitionId}`,
+          reason: `tracked agent '${trackedAgent.id}' was created for definition '${trackedAgent.definitionId}' and cannot dispatch definition '${request.definitionId}'`,
+        }],
+      });
+    }
+    const policyConfig = trackedAgent
+      ? {
+        ...request.config,
+        ...pickSkillsPolicyConfig(trackedAgent.initAction.config),
+        ...pickSkillsPolicyConfig(trackedAgent.initConfig),
+        ...configSnapshot,
+        ...canonicalTrackedAgentToolPolicyConfig(trackedAgent.initAction.config),
+        ...canonicalTrackedAgentToolPolicyConfig(trackedAgent.initConfig),
+      }
+      : { ...request.config, ...configSnapshot };
+    const validation = validateAgentRoleTools(policyConfig, {
+      definitionId: request.definitionId,
+      initActionKind: trackedAgent?.initAction.kind,
+      initActionConfig: trackedAgent?.initAction.config,
+      trustedSkillToolManifests: this.options.trustedSkillToolManifests,
+    });
+    if (validation.allowed) return;
+
+    for (const denial of validation.denials) {
+      defaultToolPolicyLogger(denial);
+    }
+    throw new AgentToolPolicyError(validation);
   }
 
   private getDefinitionOrThrow(definitionId: string): BeastDefinition {
@@ -410,4 +543,8 @@ export class BeastDispatchService {
     }
     return definition;
   }
+}
+
+function defaultToolPolicyLogger(entry: ToolPolicyDenial): void {
+  console.warn('[agent-tool-policy-denial]', JSON.stringify(entry));
 }

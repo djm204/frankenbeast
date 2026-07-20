@@ -14,6 +14,7 @@ import {
 } from '../../beasts/services/beast-interview-service.js';
 import { BeastRunService, UnknownBeastRunError } from '../../beasts/services/beast-run-service.js';
 import { CapacityReservationError } from '../../beasts/services/capacity-reservation-policy.js';
+import { AgentToolPolicyError } from '../../beasts/services/role-tool-manifest.js';
 import type { MaintenanceModeService } from '../../beasts/services/maintenance-mode-service.js';
 import { MaintenanceModeError } from '../../beasts/services/maintenance-mode-service.js';
 import type { AgentService } from '../../beasts/services/agent-service.js';
@@ -43,6 +44,26 @@ type BeastRunResponse = BeastRun & {
   readonly workspaceHostPath?: unknown;
   readonly workspaceContainerPath?: unknown;
 };
+
+const DEFAULT_BEAST_EVENT_PAGE_LIMIT = 100;
+const MAX_BEAST_EVENT_PAGE_LIMIT = 500;
+
+function parseBeastEventPagination(query: Record<string, string>): { afterSequence: number; limit: number } {
+  const afterSequenceRaw = query.afterSequence ?? '0';
+  const limitRaw = query.limit ?? String(DEFAULT_BEAST_EVENT_PAGE_LIMIT);
+  const isUnsignedInteger = (value: string): boolean => /^(0|[1-9]\d*)$/.test(value);
+  const afterSequence = isUnsignedInteger(afterSequenceRaw) ? Number(afterSequenceRaw) : Number.NaN;
+  const limit = isUnsignedInteger(limitRaw) ? Number(limitRaw) : Number.NaN;
+  if (!Number.isSafeInteger(afterSequence) || afterSequence < 0
+    || !Number.isSafeInteger(limit) || limit < 1 || limit > MAX_BEAST_EVENT_PAGE_LIMIT) {
+    throw new HttpError(
+      400,
+      'INVALID_BEAST_EVENT_PAGINATION',
+      `afterSequence must be a non-negative integer and limit must be between 1 and ${MAX_BEAST_EVENT_PAGE_LIMIT}`,
+    );
+  }
+  return { afterSequence, limit };
+}
 
 function runWithContainerFields(run: BeastRun | undefined, attempts: BeastRunAttempt[]): BeastRunResponse | undefined {
   if (!run || run.executionMode !== 'container') {
@@ -102,6 +123,17 @@ function throwCapacityReservationError(error: unknown): void {
   }
 }
 
+function throwAgentToolPolicyError(error: unknown): void {
+  if (error instanceof AgentToolPolicyError) {
+    throw new HttpError(
+      403,
+      'AGENT_TOOL_POLICY_DENIED',
+      error.message,
+      { validation: error.validation },
+    );
+  }
+}
+
 class InterviewSessionNotFoundHttpError extends HttpError {
   constructor(sessionId: string) {
     super(404, 'INTERVIEW_SESSION_NOT_FOUND', `Beast interview session '${sessionId}' was not found`);
@@ -112,6 +144,7 @@ function throwKnownRunError(runId: string, error: unknown): never {
   if (error instanceof MaintenanceModeError) {
     throw new HttpError(423, 'MAINTENANCE_MODE_ACTIVE', error.message, { maintenance: error.state });
   }
+  throwAgentToolPolicyError(error);
   throwCapacityReservationError(error);
   if (error instanceof UnknownBeastRunError) {
     throw beastRunNotFound(runId);
@@ -150,6 +183,82 @@ const CreateRunBody = z.object({
 const InterviewAnswerBody = z.object({
   answer: z.string().min(1),
 }).strict();
+
+const StrictQueryInteger = z.string()
+  .regex(/^(?:0|[1-9]\d*)$/u)
+  .transform(Number)
+  .refine(Number.isSafeInteger);
+
+const BeastLogPageQuery = z.object({
+  offset: StrictQueryInteger.optional(),
+  limit: StrictQueryInteger.refine((value) => value >= 1 && value <= 2_000).optional(),
+  tail: z.enum(['true', 'false']).transform((value) => value === 'true').optional(),
+  maxBytes: StrictQueryInteger.refine((value) => value >= 1_024 && value <= 1024 * 1024).optional(),
+}).strict();
+
+const DEFAULT_BEAST_LOG_LIMIT = 200;
+const DEFAULT_BEAST_LOG_MAX_BYTES = 256 * 1024;
+
+function parseBeastLogPageQuery(searchParams: URLSearchParams): {
+  offset?: number;
+  limit: number;
+  tail: boolean;
+  maxBytes: number;
+} {
+  const keys = [...searchParams.keys()];
+  if (new Set(keys).size !== keys.length) {
+    throw new HttpError(400, 'INVALID_BEAST_LOG_QUERY', 'Duplicate Beast log pagination query parameter');
+  }
+  const query = Object.fromEntries(searchParams.entries());
+  const result = BeastLogPageQuery.safeParse(query);
+  if (!result.success) {
+    throw new HttpError(400, 'INVALID_BEAST_LOG_QUERY', 'Invalid Beast log pagination query', result.error.issues);
+  }
+  const tail = result.data.tail ?? result.data.offset === undefined;
+  if (tail && result.data.offset !== undefined) {
+    throw new HttpError(400, 'INVALID_BEAST_LOG_QUERY', 'offset cannot be combined with tail=true');
+  }
+  return {
+    ...(result.data.offset !== undefined ? { offset: result.data.offset } : {}),
+    limit: result.data.limit ?? DEFAULT_BEAST_LOG_LIMIT,
+    tail,
+    maxBytes: result.data.maxBytes ?? DEFAULT_BEAST_LOG_MAX_BYTES,
+  };
+}
+
+type BeastLogPageResponse = {
+  logs: string[];
+  page: {
+    offset: number;
+    nextOffset: number;
+    hasMore: boolean;
+    tail: boolean;
+    bytes: number;
+  };
+};
+
+function boundBeastLogHttpResponse(response: BeastLogPageResponse, maxBytes: number): { data: BeastLogPageResponse } {
+  const bounded: BeastLogPageResponse = {
+    logs: [...response.logs],
+    page: { ...response.page },
+  };
+  const envelope = { data: bounded };
+  while (Buffer.byteLength(JSON.stringify(envelope)) > maxBytes && bounded.logs.length > 0) {
+    if (bounded.logs.length === 1) {
+      bounded.logs[0] = '[log line omitted: exceeds response byte budget]';
+      bounded.page.hasMore = true;
+      bounded.page.nextOffset = bounded.page.offset + 1;
+      bounded.page.bytes = Buffer.byteLength(JSON.stringify(bounded.logs));
+      if (Buffer.byteLength(JSON.stringify(envelope)) <= maxBytes) break;
+    }
+    if (bounded.page.tail) bounded.logs.shift();
+    else bounded.logs.pop();
+    bounded.page.hasMore = true;
+    bounded.page.nextOffset = bounded.page.offset + bounded.logs.length;
+    bounded.page.bytes = Buffer.byteLength(JSON.stringify(bounded.logs));
+  }
+  return envelope;
+}
 
 export interface BeastRoutesDeps {
   agents: AgentService;
@@ -269,6 +378,25 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
           `Tracked agent '${body.trackedAgentId}' was not found`,
         );
       }
+      if (error instanceof AgentToolPolicyError && body.trackedAgentId) {
+        try {
+          const trackedAgent = deps.agents.getAgent(body.trackedAgentId);
+          if (trackedAgent.status === 'initializing') {
+            deps.agents.updateAgent(body.trackedAgentId, { status: 'stopped' });
+            deps.agents.appendEvent(body.trackedAgentId, {
+              level: 'warning',
+              type: 'agent.dispatch.denied',
+              message: error.message,
+              payload: { denials: error.validation.denials },
+            });
+          }
+        } catch (cleanupError) {
+          if (!(cleanupError instanceof UnknownTrackedAgentError)) {
+            throw cleanupError;
+          }
+        }
+      }
+      throwAgentToolPolicyError(error);
       if (error instanceof ZodError) {
         throw new HttpError(
           422,
@@ -304,18 +432,17 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
       data: {
         run: runWithContainerFields(deps.runs.sanitizeRunForResponse(run), attempts),
         attempts,
-        events: deps.runs.listEventsForResponse(runId),
+        events: deps.runs.listEventPageForResponse(runId, 0, DEFAULT_BEAST_EVENT_PAGE_LIMIT).events,
       },
     });
   });
 
   app.get('/v1/beasts/runs/:runId/events', (c) => {
     const runId = c.req.param('runId');
+    const { afterSequence, limit } = parseBeastEventPagination(c.req.query());
     try {
       return c.json({
-        data: {
-          events: deps.runs.listEventsForResponse(runId),
-        },
+        data: deps.runs.listEventPageForResponse(runId, afterSequence, limit),
       });
     } catch (error) {
       throwKnownRunError(runId, error);
@@ -324,12 +451,19 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
 
   app.get('/v1/beasts/runs/:runId/logs', async (c) => {
     const runId = c.req.param('runId');
+    const options = parseBeastLogPageQuery(new URL(c.req.url).searchParams);
     try {
-      return c.json({
-        data: {
-          logs: await deps.runs.readLogs(runId),
+      const page = await deps.runs.readLogsPage(runId, options);
+      return c.json(boundBeastLogHttpResponse({
+        logs: page.lines,
+        page: {
+          offset: page.offset,
+          nextOffset: page.nextOffset,
+          hasMore: page.hasMore,
+          tail: page.tail,
+          bytes: page.bytes,
         },
-      });
+      }, options.maxBytes));
     } catch (error) {
       throwKnownRunError(runId, error);
     }

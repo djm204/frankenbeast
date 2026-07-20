@@ -1,0 +1,28 @@
+# Close out PR #2573 current-head Codex findings progress
+
+- [x] Load Kanban context and applicable workflow skills.
+- [x] Reconstruct live PR/Codex state for PR #2573.
+- [x] Inspect affected role tool policy and dispatch service code/tests.
+- [x] Confirm latest Codex findings are present on PR #2573: local Beast skills path, run-start denial translation, immediate untracked run policy validation, tracked-agent definition mismatch, prompt-only skill manifests, queued-run skill allowlists, and trusted skill manifest refresh.
+- [x] Fix actionable current-head Codex findings.
+  - Chat-local Beast services now use the configured `.fbeast` skills directory for trusted manifest loading.
+  - Agent run start/resume routes translate `AgentToolPolicyError` to `AGENT_TOOL_POLICY_DENIED` 403 responses with validation details.
+  - Dispatch now validates tool policy for untracked runs, snapshots canonical default policy at run creation, and rejects tracked-agent definition mismatches.
+  - Runtime workflow-required tools are keyed by the actual init workflow before the run definition, preventing `chunk-plan`/`design-interview` tracked agents from being widened by martin-loop dispatch.
+  - Queued run start validates the persisted run config as stored instead of defaulting missing `skills` to `[]`/undefined later.
+  - Trusted skill manifests are reloaded from the configured skills directory at validation time and manifestless skills remain untrusted.
+  - Catalog installs with explicit `toolDefinitions: []` now write an empty `tools.json` so prompt-only skills can be distinguished from untrusted/manifestless skills.
+- [x] Run targeted tests and repository verification gates as feasible.
+  - `npm --workspace @franken/orchestrator test -- tests/unit/beasts/create-beast-services.test.ts tests/unit/beasts/beast-run-service.test.ts tests/unit/skills/skill-manager.test.ts` (74 passed)
+  - `npm run typecheck -- --filter=@franken/orchestrator` (passed)
+  - `npm run build -- --filter=@franken/orchestrator` (passed)
+  - `npm --workspace @franken/orchestrator run lint -- src/beasts/services/beast-dispatch-service.ts src/beasts/services/beast-run-service.ts src/beasts/create-beast-services.ts src/beasts/services/role-tool-manifest.ts src/skills/skill-manager.ts src/cli/run.ts tests/unit/beasts/create-beast-services.test.ts tests/unit/beasts/beast-run-service.test.ts tests/unit/skills/skill-manager.test.ts` (0 errors, existing repo warnings)
+- [x] Commit and push fixes to PR #2573.
+  - Commit: `cd4018b31cc34277a7655373e011374aae4c31f1` (`fix(security): close current-head tool policy gaps`)
+- [x] Reply to and resolve current-head Codex review threads.
+  - Resolved threads: `PRRT_kwDORezACM6R8aXf`, `PRRT_kwDORezACM6R8aXg`, `PRRT_kwDORezACM6R8aXh`, `PRRT_kwDORezACM6R8aXi`, `PRRT_kwDORezACM6R8aXk`, `PRRT_kwDORezACM6R8aXm`, `PRRT_kwDORezACM6R8aXp`.
+  - GraphQL verification after resolution: zero unresolved Codex-authored review threads at head `cd4018b31cc34277a7655373e011374aae4c31f1`.
+- [ ] Trigger/poll a fresh Codex review until clean, or block on the exact gate.
+  - Blocked: codex-review-loop refused fresh trigger because invocation cap is already reached (`11/5`). Exact command attempted: `bash /home/pfkagent/.hermes/skills/codex-review-loop/scripts/codex-review-loop.sh trigger --repo djm204/frankenbeast --pr 2573`.
+- [ ] Re-check CI and mergeability, then merge or block with evidence.
+  - Latest observed GitHub state: PR head `cd4018b31cc34277a7655373e011374aae4c31f1`, mergeable `MERGEABLE`, mergeStateStatus `UNSTABLE`, `publish smoke` success, `build-test-lint (1337)` still in progress.

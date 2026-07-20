@@ -1,5 +1,5 @@
 import type { BeastDefinition, BeastRun, BeastRunEvent, ModuleConfig } from '../types.js';
-import { BeastLogStore } from '../events/beast-log-store.js';
+import { BeastLogStore, type BeastLogPage, type BeastLogPageOptions } from '../events/beast-log-store.js';
 import type { BeastEventBus, BeastSseEvent } from '../events/beast-event-bus.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import type { BeastMetrics } from '../telemetry/beast-metrics.js';
@@ -14,12 +14,28 @@ import {
   capacityItemFromConfig,
 } from './capacity-reservation-policy.js';
 import type { MaintenanceModeService } from './maintenance-mode-service.js';
+import {
+  AgentToolPolicyError,
+  validateAgentRoleTools,
+  type ToolPolicyDenial,
+  type ToolPolicyValidationContext,
+} from './role-tool-manifest.js';
 
 export interface BeastRunServiceOptions {
   eventBus?: BeastEventBus;
   capacityPolicy?: CapacityReservationPolicy | undefined;
   maintenance?: MaintenanceModeService | undefined;
+  trustedSkillToolManifests?: ToolPolicyValidationContext['trustedSkillToolManifests'] | undefined;
 }
+
+const STORED_AGENT_POLICY_KEYS = [
+  'agentRole',
+  'requestedTools',
+  'enabledTools',
+  'toolManifest',
+  'tools',
+  'skills',
+] as const;
 
 export class UnknownBeastRunError extends Error {
   constructor(public readonly runId: string) {
@@ -93,6 +109,36 @@ export class BeastRunService {
     return this.listEventsFromRepository(runId, true);
   }
 
+  listEventPageForResponse(runId: string, afterSequence: number, limit: number) {
+    const run = this.requireRun(runId);
+    const scannedPage = this.repository.scanEventPage(runId, {
+      recoverCorruptJson: true,
+      afterSequence,
+      limit: limit + 1,
+    });
+    let events = scannedPage.events;
+    if (this.hasDispatchFailureHistory(run)) {
+      events = events.map(redactDispatchFailureEvent);
+    }
+    const overfilled = events.length > limit;
+    const hasMore = overfilled || scannedPage.hasMoreRows;
+    const pageEvents = overfilled ? events.slice(0, limit) : events;
+    const nextAfterSequence = hasMore
+      ? overfilled
+        ? pageEvents.at(-1)?.sequence ?? scannedPage.scannedThroughSequence
+        : scannedPage.scannedThroughSequence
+      : null;
+    return {
+      events: pageEvents,
+      page: {
+        limit,
+        afterSequence,
+        nextAfterSequence,
+        hasMore,
+      },
+    };
+  }
+
   private listEventsFromRepository(runId: string, recoverCorruptJson = false) {
     const run = this.requireRun(runId);
     const events = this.repository.listEvents(runId, { recoverCorruptJson });
@@ -108,11 +154,28 @@ export class BeastRunService {
     return lines.map(redactDispatchFailureLogLine);
   }
 
+  async readLogsPage(runId: string, options: BeastLogPageOptions): Promise<BeastLogPage> {
+    const run = this.requireRun(runId);
+    const page = await this.logs.readPage(run.id, run.currentAttemptId ?? 'system', options);
+    if (!this.hasDispatchFailureHistory(run)) return page;
+
+    const redacted = page.lines.map(redactDispatchFailureLogLine);
+    const bounded = boundSerializedLogLines(redacted, options.maxBytes, page.tail);
+    return {
+      ...page,
+      lines: bounded.lines,
+      nextOffset: page.offset + bounded.lines.length,
+      hasMore: page.hasMore || bounded.lines.length < redacted.length,
+      bytes: bounded.bytes,
+    };
+  }
+
   async start(runId: string, _actor: string): Promise<BeastRun> {
     this.serviceOptions.maintenance?.assertDispatchAllowed();
     let run = this.requireRun(runId);
     const definition = this.getDefinitionOrThrow(run.definitionId);
     const rebuiltConfig = this.rebuildFailedTrackedRunConfig(run, definition);
+    this.assertRoleToolManifestAllows(run, rebuiltConfig ?? run.configSnapshot);
     run = this.reserveTrackedAgentCapacityForStart(run, rebuiltConfig);
     if (rebuiltConfig) {
       run = this.persistRebuiltTrackedRunConfig(run, rebuiltConfig);
@@ -329,6 +392,7 @@ export class BeastRunService {
     this.serviceOptions.maintenance?.assertDispatchAllowed();
     const run = this.requireRun(runId);
     if (run.status === 'running') {
+      this.assertRoleToolManifestAllows(run);
       this.assertTrackedAgentCapacity(run);
       await this.stop(runId, actor);
     }
@@ -371,6 +435,28 @@ export class BeastRunService {
     return definition;
   }
 
+  private assertRoleToolManifestAllows(
+    run: BeastRun,
+    configSnapshot: Readonly<Record<string, unknown>> = run.configSnapshot,
+  ): void {
+    // Policy metadata was introduced for tracked agents. Preserve pre-migration
+    // direct runs, which have no tracked-agent policy context to validate.
+    if (!run.trackedAgentId) return;
+    const trackedAgent = this.repository.getTrackedAgent(run.trackedAgentId);
+    const validation = validateAgentRoleTools(configSnapshot, {
+      definitionId: run.definitionId,
+      initActionKind: trackedAgent?.initAction.kind,
+      initActionConfig: trackedAgent?.initAction.config,
+      trustedSkillToolManifests: this.serviceOptions.trustedSkillToolManifests,
+    });
+    if (validation.allowed) return;
+
+    for (const denial of validation.denials) {
+      defaultToolPolicyLogger(denial);
+    }
+    throw new AgentToolPolicyError(validation);
+  }
+
   notifyRunStatusChange(runId: string): void {
     const run = this.repository.getRun(runId);
     if (run) {
@@ -397,11 +483,20 @@ export class BeastRunService {
       // original failed run still holds the only valid completed answer set.
       normalized = normalizeBeastRunConfig(definition, run.configSnapshot);
     }
+    const storedPolicy = Object.fromEntries(
+      STORED_AGENT_POLICY_KEYS
+        .filter(key => Object.prototype.hasOwnProperty.call(trackedAgent.initConfig, key))
+        .map(key => [key, trackedAgent.initConfig[key]]),
+    );
+    const rebuiltPolicyConfig = {
+      ...storedPolicy,
+      ...normalized,
+    };
     const snapshotModules = run.configSnapshot.modules;
     const modules = snapshotModules && typeof snapshotModules === 'object' && !Array.isArray(snapshotModules)
       ? snapshotModules
       : trackedAgent.moduleConfig;
-    return modules ? { ...normalized, modules } : normalized;
+    return modules ? { ...rebuiltPolicyConfig, modules } : rebuiltPolicyConfig;
   }
 
   private persistRebuiltTrackedRunConfig(
@@ -585,6 +680,10 @@ export class BeastRunService {
   }
 }
 
+function defaultToolPolicyLogger(entry: ToolPolicyDenial): void {
+  console.warn('[agent-tool-policy-denial]', JSON.stringify(entry));
+}
+
 function redactDispatchFailureEvent(event: BeastRunEvent): BeastRunEvent {
   if (event.type !== 'run.start_failed' && event.type !== 'run.spawn_failed') return event;
   return {
@@ -611,4 +710,25 @@ function redactDispatchFailureLogLine(line: string): string {
   return line.includes('start_failed:')
     ? `start_failed: ${SAFE_DISPATCH_FAILURE_MESSAGE}`
     : line;
+}
+
+function boundSerializedLogLines(
+  lines: readonly string[],
+  maxBytes: number,
+  tail: boolean,
+): { lines: string[]; bytes: number } {
+  const selected: string[] = [];
+  let bytes = 2;
+  const candidates = tail ? [...lines].reverse() : lines;
+  for (const line of candidates) {
+    const selectedLine = Buffer.byteLength(JSON.stringify([line])) <= maxBytes
+      ? line
+      : `[log line omitted: ${Buffer.byteLength(line)} bytes exceeds page budget]`;
+    const nextBytes = bytes + Buffer.byteLength(JSON.stringify(selectedLine)) + (selected.length > 0 ? 1 : 0);
+    if (nextBytes > maxBytes) break;
+    selected.push(selectedLine);
+    bytes = nextBytes;
+  }
+  if (tail) selected.reverse();
+  return { lines: selected, bytes };
 }

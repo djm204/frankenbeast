@@ -1,3 +1,4 @@
+import { existsSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { BeastEventBus } from './events/beast-event-bus.js';
 import { BeastLogStore } from './events/beast-log-store.js';
@@ -21,11 +22,14 @@ import { CapacityReservationPolicy, type CapacityReservationRule } from './servi
 import { BeastRunService } from './services/beast-run-service.js';
 import { MaintenanceModeService } from './services/maintenance-mode-service.js';
 import { PrometheusBeastMetrics } from './telemetry/prometheus-beast-metrics.js';
+import { SkillManager } from '../skills/skill-manager.js';
+
 
 export interface BeastServicePaths {
   beastsDb: string;
   beastLogsDir: string;
   root?: string | undefined;
+  skillsDir?: string | undefined;
 }
 
 export interface BeastServiceBundle {
@@ -52,6 +56,8 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   const ticketStore = new SseConnectionTicketStore({ databasePath: paths.beastsDb });
   const capacityPolicy = createCapacityReservationPolicyFromEnv();
   const maintenance = MaintenanceModeService.forProjectRoot(projectRoot);
+  const trustedSkillsDir = paths.skillsDir ?? join(projectRoot, '.fbeast', 'skills');
+  const trustedSkillToolManifests = () => collectTrustedSkillToolManifests(trustedSkillsDir);
 
   // Deferred reference to break circular dep: executor → runService → executors → executor
   // eslint-disable-next-line prefer-const
@@ -99,12 +105,22 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
     );
   }
 
-  runService = new BeastRunService(repository, catalog, executors, metrics, logStore, { eventBus, capacityPolicy, maintenance });
+  runService = new BeastRunService(repository, catalog, executors, metrics, logStore, {
+    eventBus,
+    capacityPolicy,
+    maintenance,
+    trustedSkillToolManifests,
+  });
 
   return {
-    agents: new AgentService(repository, undefined, { capacityPolicy }),
+    agents: new AgentService(repository, undefined, { capacityPolicy, trustedSkillToolManifests }),
     catalog,
-    dispatch: new BeastDispatchService(repository, catalog, executors, metrics, logStore, { eventBus, capacityPolicy, maintenance }),
+    dispatch: new BeastDispatchService(repository, catalog, executors, metrics, logStore, {
+      eventBus,
+      capacityPolicy,
+      maintenance,
+      trustedSkillToolManifests,
+    }),
     runs: runService,
     interviews: new BeastInterviewService(repository, catalog),
     metrics,
@@ -116,6 +132,30 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
       repository.close();
     },
   };
+}
+
+function collectTrustedSkillToolManifests(
+  skillsDir: string,
+): Readonly<Record<string, readonly string[]>> {
+  const skillManager = new SkillManager(skillsDir, new Set());
+  let skillNames: string[];
+  try {
+    skillNames = readdirSync(skillsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  } catch {
+    return {};
+  }
+  return Object.fromEntries(
+    skillNames.flatMap((skillName) => {
+      if (!existsSync(join(skillsDir, skillName, 'tools.json'))) return [];
+      try {
+        return [[skillName, skillManager.readTools(skillName).map((tool) => tool.name)] as const];
+      } catch {
+        return [];
+      }
+    }),
+  );
 }
 
 function createBeastLogStoreOptionsFromEnv(): { maxLogFileBytes?: number; maxRotatedLogFiles?: number } {
