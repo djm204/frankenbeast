@@ -56,10 +56,65 @@ const A = new Proxy(RAW_ANSI, {
 
 /** Strip all ANSI escape codes for plain-text output (e.g. log files). */
 export function stripAnsi(s: string): string {
-  return s
-    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '')
-    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
-    .replace(/\x1b[@-_]/g, '');
+  const sanitizer = new AnsiStreamSanitizer();
+  return sanitizer.push(s) + sanitizer.flush();
+}
+
+type AnsiParserState = 'text' | 'escape' | 'csi' | 'osc' | 'oscEscape' | 'controlString' | 'controlStringEscape';
+
+/**
+ * Incrementally remove ANSI/ECMA-48 control sequences without leaking
+ * fragments when a sequence is split across stream chunks.
+ */
+export class AnsiStreamSanitizer {
+  private state: AnsiParserState = 'text';
+
+  push(chunk: string): string {
+    let visible = '';
+
+    for (const char of chunk) {
+      switch (this.state) {
+        case 'text':
+          if (char === '\x1b') this.state = 'escape';
+          else visible += char;
+          break;
+        case 'escape':
+          if (char === '[') this.state = 'csi';
+          else if (char === ']') this.state = 'osc';
+          else if (char === 'P' || char === 'X' || char === '^' || char === '_') this.state = 'controlString';
+          else if (char === '\x1b') this.state = 'escape';
+          else this.state = 'text';
+          break;
+        case 'csi':
+          if (char >= '@' && char <= '~') this.state = 'text';
+          else if (char === '\x1b') this.state = 'escape';
+          break;
+        case 'osc':
+          if (char === '\x07') this.state = 'text';
+          else if (char === '\x1b') this.state = 'oscEscape';
+          break;
+        case 'oscEscape':
+          if (char === '\\' || char === '\x07') this.state = 'text';
+          else if (char !== '\x1b') this.state = 'osc';
+          break;
+        case 'controlString':
+          if (char === '\x1b') this.state = 'controlStringEscape';
+          break;
+        case 'controlStringEscape':
+          if (char === '\\') this.state = 'text';
+          else if (char !== '\x1b') this.state = 'controlString';
+          break;
+      }
+    }
+
+    return visible;
+  }
+
+  /** Discard any unterminated control sequence at end-of-stream. */
+  flush(): string {
+    this.state = 'text';
+    return '';
+  }
 }
 
 /**

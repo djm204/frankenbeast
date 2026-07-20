@@ -23,7 +23,7 @@ import type { ICliProvider } from './providers/cli-provider.js';
 import { ProviderRegistry, createDefaultRegistry } from './providers/cli-provider.js';
 import { tryExtractTextFromNode } from './providers/index.js';
 import { createChunkSession, createChunkTranscriptEntry, type ChunkSession } from '../session/chunk-session.js';
-import { ANSI, isPlainOutput, stripAnsi } from '../logging/beast-logger.js';
+import { ANSI, AnsiStreamSanitizer, isPlainOutput, stripAnsi } from '../logging/beast-logger.js';
 import {
   classifyCommandFailure,
   commandFailureFromExecError,
@@ -323,6 +323,7 @@ function spawnIteration(
     let timedOut = false;
     const cleanParts: string[] = [];
     const streamBuffer = provider.supportsStreamJson() ? new StreamLineBuffer() : null;
+    const plainStreamSanitizer = plain && !streamBuffer ? new AnsiStreamSanitizer() : null;
 
     const finish = (result: { stdout: string; stderr: string; exitCode: number; timedOut: boolean; cleanStdout: string }): void => {
       if (settled) return;
@@ -347,7 +348,7 @@ function spawnIteration(
           process.stdout.write(displayLine + '\n');
         }
       } else {
-        const displayText = plain ? stripAnsi(text) : text;
+        const displayText = plainStreamSanitizer?.push(text) ?? text;
         cleanParts.push(displayText);
         process.stdout.write(displayText);
       }
@@ -430,6 +431,7 @@ function spawnIteration(
 
     child.on('close', (code) => {
       clearTimers();
+      plainStreamSanitizer?.flush();
       if (streamBuffer) {
         const remaining = streamBuffer.flush();
         for (const line of remaining) cleanParts.push(line);

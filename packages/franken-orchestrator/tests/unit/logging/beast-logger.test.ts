@@ -35,6 +35,11 @@ describe('stripAnsi', () => {
     expect(stripAnsi(input)).toBe('ready link');
   });
 
+  it('preserves visible text between multiple ST-terminated OSC sequences', () => {
+    const input = '\x1b]0;first\x1b\\visible\x1b]0;second\x1b\\ text';
+    expect(stripAnsi(input)).toBe('visible text');
+  });
+
   it('handles empty string', () => {
     expect(stripAnsi('')).toBe('');
   });

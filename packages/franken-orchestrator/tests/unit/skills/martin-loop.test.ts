@@ -22,7 +22,7 @@ import { spawn } from 'node:child_process';
 const mockSpawn = spawn as unknown as ReturnType<typeof vi.fn>;
 
 interface MockChildOpts {
-  stdout?: string;
+  stdout?: string | readonly string[];
   stderr?: string;
   exitCode?: number;
   hang?: boolean;
@@ -45,7 +45,10 @@ function mockChild(opts: MockChildOpts): ChildProcess {
     });
   } else if (!opts.hang) {
     process.nextTick(() => {
-      if (opts.stdout) (child.stdout as EventEmitter).emit('data', Buffer.from(opts.stdout));
+      const stdoutChunks = Array.isArray(opts.stdout) ? opts.stdout : [opts.stdout];
+      for (const chunk of stdoutChunks) {
+        if (chunk) (child.stdout as EventEmitter).emit('data', Buffer.from(chunk));
+      }
       if (opts.stderr) (child.stderr as EventEmitter).emit('data', Buffer.from(opts.stderr));
       child.emit('close', opts.exitCode ?? 0);
     });
@@ -258,6 +261,23 @@ describe('MartinLoop', () => {
       }),
     );
     expect(stdoutWriteSpy).toHaveBeenCalledWith('working\n<promise>IMPL_X_DONE</promise>');
+  });
+
+  it('strips ANSI sequences split across stdout chunks in plain mode', async () => {
+    vi.stubEnv('NO_COLOR', '1');
+    queueMock({
+      stdout: ['\x1b[', '31mred', '\x1b[0', 'm done\n<promise>IMPL_X_DONE</promise>'],
+      exitCode: 0,
+    });
+
+    const loop = new MartinLoop();
+    await loop.run(baseConfig({ provider: 'aider', command: '/usr/bin/aider' }));
+
+    const displayed = stdoutWriteSpy.mock.calls.map(([chunk]) => String(chunk)).join('');
+    expect(displayed).toBe('red done\n<promise>IMPL_X_DONE</promise>');
+    expect(displayed).not.toContain('\x1b');
+    expect(displayed).not.toContain('31m');
+    expect(displayed).not.toContain('0m');
   });
 
   it('normalizes codex JSON output to readable text and detects promise tag', async () => {
