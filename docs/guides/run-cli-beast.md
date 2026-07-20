@@ -230,6 +230,7 @@ The orchestrator CLI accepts global flags before or after the subcommand unless 
 | `--config <path>` | commands that load CLI config | JSON config file override. Explicit config paths fail closed when missing or invalid. |
 | `--no-pr` | run/issues PR flows | Skip automated PR creation. |
 | `--verbose` | all orchestrator commands | Enable debug logging and trace-viewer output. |
+| `--plain` | all orchestrator commands | Disable ANSI styling while preserving timestamps, level names, service labels, and status text. `NO_COLOR` and `FORCE_COLOR=0` provide equivalent environment-based control for scripts and assistive tooling. |
 | `--help` | all orchestrator commands | Show the current CLI help surface. |
 
 ### Phase-selection and run-state flags

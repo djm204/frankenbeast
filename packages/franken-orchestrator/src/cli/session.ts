@@ -86,6 +86,7 @@ export interface SessionConfig {
   trustProviderCommandOverrides?: boolean | undefined;
   noPr: boolean;
   verbose: boolean;
+  plain?: boolean | undefined;
   reset: boolean;
   resume?: boolean | undefined;
   io: InterviewIO;
@@ -831,6 +832,7 @@ export class Session {
       trustProviderCommandOverrides: this.config.trustProviderCommandOverrides,
       noPr: this.config.noPr,
       verbose: this.config.verbose,
+      plain: this.config.plain,
       reset: this.config.reset,
       resume: this.config.resume ?? false,
       planDirOverride: this.config.planDirOverride,

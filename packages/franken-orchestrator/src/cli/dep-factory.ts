@@ -51,6 +51,7 @@ export interface CliDepOptions {
   trustProviderCommandOverrides?: boolean | undefined;
   noPr: boolean;
   verbose: boolean;
+  plain?: boolean | undefined;
   reset: boolean;
   resume?: boolean | undefined;
   planDirOverride?: string | undefined;
@@ -507,6 +508,7 @@ async function createObserverDeps(
   mkdirSync(options.paths.buildDir, { recursive: true });
   const logger = new BeastLogger({
     verbose: options.verbose,
+    plain: options.plain,
     captureForFile: true,
     logFile: artifacts.logFile,
   });

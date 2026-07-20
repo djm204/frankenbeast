@@ -211,6 +211,7 @@ vi.mock('../../../src/adapters/cli-llm-adapter.js', () => ({
 vi.mock('../../../src/logging/beast-logger.js', () => ({
   BANNER: '[BANNER]',
   renderBanner: vi.fn(async () => '[BANNER]'),
+  setPlainOutput: vi.fn(),
   BeastLogger: vi.fn(function (this: Record<string, unknown>) {
     this.info = vi.fn();
     this.warn = vi.fn();

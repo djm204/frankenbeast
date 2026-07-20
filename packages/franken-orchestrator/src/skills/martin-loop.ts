@@ -23,6 +23,7 @@ import type { ICliProvider } from './providers/cli-provider.js';
 import { ProviderRegistry, createDefaultRegistry } from './providers/cli-provider.js';
 import { tryExtractTextFromNode } from './providers/index.js';
 import { createChunkSession, createChunkTranscriptEntry, type ChunkSession } from '../session/chunk-session.js';
+import { ANSI } from '../logging/beast-logger.js';
 import {
   classifyCommandFailure,
   commandFailureFromExecError,
@@ -126,7 +127,7 @@ export function processStreamLine(line: string): string {
     // Check for thinking content (extended thinking / reasoning)
     const delta = obj.delta as Record<string, unknown> | undefined;
     if (delta?.thinking && typeof delta.thinking === 'string') {
-      return `\x1b[2m${delta.thinking}\x1b[0m`;
+      return `${ANSI.dim}${delta.thinking}${ANSI.reset}`;
     }
 
     const parts: string[] = [];
@@ -161,7 +162,7 @@ function summarizeToolUse(toolName: string, inputJson: string): string {
     // Partial / malformed JSON — just show the tool name
   }
   const label = detail ? `${toolName} ${detail}` : toolName;
-  return `\x1b[2m[tool] ${label}\x1b[0m`;
+  return `${ANSI.dim}[tool] ${label}${ANSI.reset}`;
 }
 
 /**

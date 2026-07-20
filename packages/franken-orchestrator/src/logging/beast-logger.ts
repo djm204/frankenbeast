@@ -13,12 +13,9 @@ import { isCommandFailure } from '../errors/command-failure.js';
 import { redactLogData, redactSensitiveText } from './redaction.js';
 
 
-function printLine(...args: unknown[]): void {
-  console.info(...args);
-}
 // ── ANSI escape codes ──
 
-const A = {
+const RAW_ANSI = {
   reset: '\x1b[0m',
   bold: '\x1b[1m',
   dim: '\x1b[2m',
@@ -33,6 +30,27 @@ const A = {
   bgRed: '\x1b[41m',
   bgGreen: '\x1b[42m',
 } as const;
+
+let plainOutputOverride = false;
+
+/** Return true when ANSI styling should be suppressed. */
+export function isPlainOutput(): boolean {
+  return plainOutputOverride
+    || Object.prototype.hasOwnProperty.call(process.env, 'NO_COLOR')
+    || process.env.FORCE_COLOR === '0';
+}
+
+/** Configure process-wide CLI output. Environment conventions still apply. */
+export function setPlainOutput(enabled: boolean): void {
+  plainOutputOverride = enabled;
+}
+
+const A = new Proxy(RAW_ANSI, {
+  get(target, property, receiver): string {
+    if (isPlainOutput() && typeof property === 'string' && property in target) return '';
+    return Reflect.get(target, property, receiver) as string;
+  },
+}) as typeof RAW_ANSI;
 
 // ── Utility functions ──
 
@@ -83,19 +101,19 @@ export const BANNER = `\n${A.green}${A.bold}` +
   `${A.reset}\n`;
 
 export async function renderBanner(_root: string): Promise<string> {
-  return BANNER;
+  return isPlainOutput() ? stripAnsi(BANNER) : BANNER;
 }
 
 // ── Service badge ──
 
-const BADGE_COLORS: Record<string, string> = {
-  martin: A.cyan,
-  git: A.yellow,
-  observer: A.magenta,
-  planner: A.blue,
-  session: A.green,
-  budget: A.red,
-  config: A.white,
+const BADGE_COLORS: Record<string, keyof typeof RAW_ANSI> = {
+  martin: 'cyan',
+  git: 'yellow',
+  observer: 'magenta',
+  planner: 'blue',
+  session: 'green',
+  budget: 'red',
+  config: 'white',
 };
 
 const BADGE_WIDTH = 10;
@@ -103,7 +121,8 @@ const DEFAULT_MAX_LOG_FILE_BYTES = 10 * 1024 * 1024;
 const DEFAULT_ROTATED_LOG_FILES = 3;
 
 function formatBadge(source: string): string {
-  const color = BADGE_COLORS[source] ?? A.dim;
+  const colorKey = BADGE_COLORS[source];
+  const color = colorKey === undefined ? A.dim : A[colorKey];
   const badge = `[${source}]`;
   const padded = badge.padEnd(BADGE_WIDTH);
   return `${color}${padded}${A.reset} `;
@@ -136,6 +155,8 @@ function highlightServices(msg: string): string {
 
 export interface BeastLoggerOptions {
   readonly verbose: boolean;
+  /** Suppress ANSI escape sequences while preserving textual labels. */
+  readonly plain?: boolean | undefined;
   readonly captureForFile?: boolean;
   /**
    * Redact secret-looking environment/config keys from terminal and file logs.
@@ -152,6 +173,7 @@ export interface BeastLoggerOptions {
 
 export class BeastLogger implements ILogger {
   private readonly verbose: boolean;
+  private readonly plain: boolean;
   private readonly captureForFile: boolean;
   private readonly redactSecrets: boolean;
   private readonly logFile: string | undefined;
@@ -163,6 +185,7 @@ export class BeastLogger implements ILogger {
 
   constructor(options: BeastLoggerOptions) {
     this.verbose = options.verbose;
+    this.plain = options.plain ?? isPlainOutput();
     this.captureForFile = options.captureForFile ?? false;
     this.redactSecrets = options.redactSecrets ?? true;
     this.logFile = options.logFile;
@@ -176,7 +199,7 @@ export class BeastLogger implements ILogger {
     const badge = src ? formatBadge(src) : '';
     const safeMsg = this.redactMessage(msg);
     const display = data !== undefined ? `${safeMsg}  ${formatCompact(data, this.redactSecrets)}` : safeMsg;
-    printLine(`${ts} ${A.cyan}${A.bold} INFO${A.reset} ${badge}${display}`);
+    this.print(`${ts} ${A.cyan}${A.bold} INFO${A.reset} ${badge}${display}`);
     this.capture('INFO', this.withBadgeAndData(msg, data, src));
   }
 
@@ -190,7 +213,7 @@ export class BeastLogger implements ILogger {
     const ts = this.timestamp();
     const badge = src ? formatBadge(src) : '';
     const highlighted = highlightServices(line);
-    printLine(`${ts} ${A.gray}DEBUG ${badge}${highlighted}${A.reset}`);
+    this.print(`${ts} ${A.gray}DEBUG ${badge}${highlighted}${A.reset}`);
   }
 
   warn(msg: string, dataOrSource?: unknown, source?: string): void {
@@ -199,7 +222,7 @@ export class BeastLogger implements ILogger {
     const badge = src ? formatBadge(src) : '';
     const safeMsg = this.redactMessage(msg);
     const display = data !== undefined ? `${safeMsg}  ${formatCompact(data, this.redactSecrets)}` : safeMsg;
-    printLine(`${ts} ${A.yellow}${A.bold} WARN${A.reset} ${badge}${A.yellow}${display}${A.reset}`);
+    this.print(`${ts} ${A.yellow}${A.bold} WARN${A.reset} ${badge}${A.yellow}${display}${A.reset}`);
     this.capture('WARN', this.withBadgeAndData(msg, data, src));
   }
 
@@ -208,7 +231,7 @@ export class BeastLogger implements ILogger {
     const ts = this.timestamp();
     const badge = src ? formatBadge(src) : '';
     const line = this.withData(msg, data);
-    printLine(`${ts} ${A.red}${A.bold}ERROR${A.reset} ${badge}${A.red}${line}${A.reset}`);
+    this.print(`${ts} ${A.red}${A.bold}ERROR${A.reset} ${badge}${A.red}${line}${A.reset}`);
     this.capture('ERROR', this.withBadgeAndData(msg, data, src));
   }
 
@@ -226,6 +249,10 @@ export class BeastLogger implements ILogger {
 
   private timestamp(): string {
     return `${A.gray}${new Date(deterministicNow()).toTimeString().slice(0, 8)}${A.reset}`;
+  }
+
+  private print(line: string): void {
+    console.info(this.plain ? stripAnsi(line) : line);
   }
 
   private capture(level: string, msg: string): void {

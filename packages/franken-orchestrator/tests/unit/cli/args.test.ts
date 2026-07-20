@@ -9,6 +9,7 @@ describe('parseArgs', () => {
     expect(args.provider).toBe('claude');
     expect(args.noPr).toBe(false);
     expect(args.verbose).toBe(false);
+    expect(args.plain).toBe(false);
     expect(args.reset).toBe(false);
     expect(args.resume).toBe(false);
     expect(args.help).toBe(false);
@@ -29,6 +30,12 @@ describe('parseArgs', () => {
     const args = parseArgs(['run', '--resume']);
     expect(args.subcommand).toBe('run');
     expect(args.resume).toBe(true);
+  });
+
+  it('parses --plain as a global output flag', () => {
+    const args = parseArgs(['--plain', 'run']);
+    expect(args.subcommand).toBe('run');
+    expect(args.plain).toBe(true);
   });
 
   it('parses global flags before the run subcommand', () => {

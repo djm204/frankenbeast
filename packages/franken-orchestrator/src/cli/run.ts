@@ -27,7 +27,7 @@ import { Session } from './session.js';
 import { createEgressGuardedFetch } from '../network/egress-policy.js';
 import type { SessionPhase } from './session.js';
 import type { InterviewIO } from '../planning/interview-loop.js';
-import { renderBanner, BeastLogger } from '../logging/beast-logger.js';
+import { renderBanner, BeastLogger, setPlainOutput } from '../logging/beast-logger.js';
 import { ChatRepl } from './chat-repl.js';
 import { createChatRuntime } from '../chat/chat-runtime-factory.js';
 import { FileSessionStore } from '../chat/session-store.js';
@@ -1454,6 +1454,7 @@ async function runChatCommandIfRequested(
 
 export async function main(): Promise<void> {
   const args = parseArgs();
+  setPlainOutput(args.plain);
 
   if (args.help) {
     printUsage();
@@ -1561,7 +1562,7 @@ export async function main(): Promise<void> {
     return;
   }
 
-  const logger = new BeastLogger({ verbose: args.verbose });
+  const logger = new BeastLogger({ verbose: args.verbose, plain: args.plain });
   if (args.config) {
     logger.info(`Loaded config from ${args.config}`, 'config');
   } else {
@@ -1629,6 +1630,7 @@ export async function main(): Promise<void> {
     trustProviderCommandOverrides: args.trustProviderCommandOverrides,
     noPr: args.noPr,
     verbose: args.verbose,
+    plain: args.plain,
     reset: args.reset,
     resume: args.resume,
     io,
