@@ -51,6 +51,11 @@ describe('corpus loader', () => {
       tier: 'candidate',
       requiredChecks: [{ type: 'unknown-check' }],
     });
+    const invalidTierPath = writeTask(root, 'candidate/invalid-tier.task.json', {
+      ...validTask,
+      taskId: 'invalid-tier',
+      tier: 'canidate',
+    });
     writeTask(root, 'candidate/z.task.json', { ...validTask, taskId: 'z-task', tier: 'candidate' });
     writeTask(root, 'core/a.task.json', { ...validTask, taskId: 'a-task' });
 
@@ -59,6 +64,7 @@ describe('corpus loader', () => {
     expect(result.tasks.map((task) => task.taskId)).toEqual(['a-task', 'z-task']);
     expect(result.quarantined).toEqual([
       expect.objectContaining({ path: invalidSchemaPath, tier: 'candidate' }),
+      expect.objectContaining({ path: invalidTierPath, tier: 'candidate' }),
       expect.objectContaining({ path: malformedJsonPath, tier: 'candidate' }),
     ]);
     expect(result.quarantined.every((entry) => entry.error.startsWith('Invalid benchmark task '))).toBe(true);

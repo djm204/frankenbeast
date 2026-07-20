@@ -56,6 +56,10 @@ export function loadCorpusWithDiagnostics(root: string, tiers?: readonly CorpusT
     try {
       tier = validatedTaskTier(parsed);
     } catch (error) {
+      if (isCandidatePath(root, path)) {
+        quarantined.push(candidateQuarantine(path, error));
+        continue;
+      }
       throw invalidTaskError(path, error);
     }
     if (allowed && !allowed.has(tier)) {
