@@ -8,6 +8,10 @@ import type { GraphBuilder } from './chunk-file-graph-builder.js';
  */
 export interface InterviewIO {
   ask(question: string): Promise<string>;
+  /** Ask with a fully formatted prompt, without adding the interview prompt marker. */
+  askRaw?(prompt: string): Promise<string>;
+  /** Cancel the currently pending question without closing the shared terminal owner. */
+  cancelQuestion?(): void;
   display(message: string): void;
 }
 

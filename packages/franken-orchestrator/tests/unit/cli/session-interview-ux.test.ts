@@ -120,6 +120,7 @@ function createIO(answers: string[]): InterviewIO {
   let index = 0;
   return {
     ask: vi.fn(async () => answers[index++] ?? 'c'),
+    cancelQuestion: vi.fn(),
     display: vi.fn(),
   };
 }
@@ -188,6 +189,23 @@ describe('Session interview UX', () => {
   afterEach(() => {
     console.info = originalLog;
     rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('passes its existing prompt owner to governor dependency wiring', async () => {
+    const io = createIO(['x']);
+    const askRaw = vi.fn(async () => 'approved');
+    io.askRaw = askRaw;
+    const { Session } = await import('../../../src/cli/session.js');
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+
+    await new Session(createConfig(paths, io, { exitAfter: 'interview' })).start();
+
+    const depOptions = vi.mocked(createCliDeps).mock.calls[0]?.[0];
+    await expect(depOptions?.governorQuestion?.('Approve?')).resolves.toBe('approved');
+    depOptions?.governorCancel?.();
+    expect(askRaw).toHaveBeenCalledWith('Approve?');
+    expect(io.ask).not.toHaveBeenCalledWith('Approve?');
+    expect(io.cancelQuestion).toHaveBeenCalledTimes(1);
   });
 
   it('wraps AdapterLlmClient with ProgressLlmClient and shows a summary card', async () => {

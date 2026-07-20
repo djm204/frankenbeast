@@ -5,6 +5,7 @@ import { formatApprovalPromptWithBoundaries } from '../gateway/approval-prompt-m
 
 export interface ReadlineAdapter {
   question(prompt: string): Promise<string>;
+  cancel?(): void;
 }
 
 export interface CliChannelDeps {
@@ -34,31 +35,62 @@ export class CliChannel implements ApprovalChannel {
   readonly channelId = 'cli';
   private readonly readline: ReadlineAdapter;
   private readonly operatorName: string;
+  private approvalQueue: Promise<void> = Promise.resolve();
+  private activeRequestId: string | undefined;
+  private readonly pendingRequestIds = new Set<string>();
+  private readonly cancelledRequestIds = new Set<string>();
 
   constructor(deps: CliChannelDeps) {
     this.readline = deps.readline;
     this.operatorName = deps.operatorName;
   }
 
+  cancel(requestId: string): void {
+    if (!this.pendingRequestIds.has(requestId)) return;
+    this.cancelledRequestIds.add(requestId);
+    if (this.activeRequestId === requestId) this.readline.cancel?.();
+  }
+
   async requestApproval(request: ApprovalRequest): Promise<ApprovalResponse> {
-    const { decision, feedback: inlineFeedback } = await this.promptForDecision(request);
-    const base = {
-      requestId: request.requestId,
-      decision,
-      respondedBy: this.operatorName,
-      respondedAt: new Date(deterministicNow()),
-    };
+    this.pendingRequestIds.add(request.requestId);
+    const previous = this.approvalQueue;
+    let release!: () => void;
+    this.approvalQueue = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
 
-    if (inlineFeedback !== undefined) {
-      return { ...base, feedback: inlineFeedback };
+    try {
+      if (this.cancelledRequestIds.has(request.requestId)) throw this.cancelledError();
+      this.activeRequestId = request.requestId;
+      const { decision, feedback: inlineFeedback } = await this.promptForDecision(request);
+      const base = {
+        requestId: request.requestId,
+        decision,
+        respondedBy: this.operatorName,
+        respondedAt: new Date(deterministicNow()),
+      };
+
+      if (inlineFeedback !== undefined) {
+        return { ...base, feedback: inlineFeedback };
+      }
+
+      if (decision === 'REGEN') {
+        const feedback = await this.readline.question('Feedback: ');
+        return { ...base, feedback };
+      }
+
+      return base;
+    } finally {
+      if (this.activeRequestId === request.requestId) this.activeRequestId = undefined;
+      this.pendingRequestIds.delete(request.requestId);
+      this.cancelledRequestIds.delete(request.requestId);
+      release();
     }
+  }
 
-    if (decision === 'REGEN') {
-      const feedback = await this.readline.question('Feedback: ');
-      return { ...base, feedback };
-    }
-
-    return base;
+  private cancelledError(): Error {
+    const error = new Error('Approval prompt cancelled');
+    error.name = 'AbortError';
+    return error;
   }
 
   private async promptForDecision(request: ApprovalRequest): Promise<{

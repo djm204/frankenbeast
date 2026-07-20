@@ -28,6 +28,10 @@ const SLASH_COMMANDS = new Set([
 
 export interface ChatIO {
   prompt(): Promise<string>;
+  /** Ask an arbitrary question through this same terminal owner. */
+  ask?(question: string): Promise<string>;
+  /** Cancel the currently pending question without closing the shared terminal owner. */
+  cancelQuestion?(): void;
   print(msg: string): void;
   close(): void;
   /** Pause input (block typing while processing). */
@@ -45,16 +49,43 @@ export interface ChatReplOptions {
   io?: ChatIO;
 }
 
-function createReadlineIO(): ChatIO {
-  const rl: Interface = createInterface({ input: process.stdin, output: process.stdout });
+export function createReadlineIO(): ChatIO {
+  let rl: Interface | undefined;
+  let activeQuestion: AbortController | undefined;
+  const getReadline = (): Interface => {
+    rl ??= createInterface({ input: process.stdin, output: process.stdout });
+    return rl;
+  };
+  const cancelQuestion = (): void => {
+    activeQuestion?.abort();
+  };
+  const ask = (question: string) => {
+    const reader = getReadline();
+    const controller = new AbortController();
+    activeQuestion = controller;
+    return new Promise<string>((resolve, reject) => {
+      const onAbort = () => {
+        const error = new Error('Terminal question cancelled');
+        error.name = 'AbortError';
+        reject(error);
+      };
+      controller.signal.addEventListener('abort', onAbort, { once: true });
+      reader.question(question, { signal: controller.signal }, (answer) => {
+        controller.signal.removeEventListener('abort', onAbort);
+        resolve(answer);
+      });
+    }).finally(() => {
+      if (activeQuestion === controller) activeQuestion = undefined;
+    });
+  };
   return {
-    prompt: () => new Promise<string>((resolve) =>
-      rl.question(`${ANSI.cyan}${CHAT_GLYPHS.user}${ANSI.reset} `, resolve),
-    ),
+    prompt: () => ask(`${ANSI.cyan}${CHAT_GLYPHS.user}${ANSI.reset} `),
+    ask,
+    cancelQuestion,
     print: (msg: string) => printLine(msg),
-    close: () => rl.close(),
-    pause: () => { rl.pause(); process.stdin.pause(); },
-    resume: () => { process.stdin.resume(); rl.resume(); },
+    close: () => { cancelQuestion(); rl?.close(); },
+    pause: () => { rl?.pause(); process.stdin.pause(); },
+    resume: () => { process.stdin.resume(); rl?.resume(); },
   };
 }
 
