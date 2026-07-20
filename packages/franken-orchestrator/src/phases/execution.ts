@@ -1072,12 +1072,22 @@ async function sanitizeStructuredResponse(
     return Promise.all(value.map(item => sanitizeStructuredResponse(firewall, item, source)));
   }
   if (value !== null && typeof value === 'object') {
-    const entries = await Promise.all(
-      Object.entries(value).map(async ([key, item]) => [
-        key,
+    const entries: Array<readonly [string, unknown]> = [];
+    const sanitizedKeys = new Set<string>();
+    for (const [key, item] of Object.entries(value)) {
+      const keyResult = await firewall.scanResponse(key);
+      if (keyResult.blocked) {
+        throw new InjectionDetectedError(keyResult.violations, source);
+      }
+      if (sanitizedKeys.has(keyResult.sanitizedText)) {
+        throw responseSerializationError(source, 'sanitization produced duplicate response keys');
+      }
+      sanitizedKeys.add(keyResult.sanitizedText);
+      entries.push([
+        keyResult.sanitizedText,
         await sanitizeStructuredResponse(firewall, item, source),
-      ] as const),
-    );
+      ]);
+    }
     return Object.fromEntries(entries);
   }
   return value;
