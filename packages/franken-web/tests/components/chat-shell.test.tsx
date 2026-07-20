@@ -1062,7 +1062,7 @@ describe('ChatShell', () => {
     const firstAgent = {
       id: 'agent-page-1',
       definitionId: 'chunk-plan',
-      status: 'deleted',
+      status: 'stopped',
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'chunk-plan', command: '/plan', config: {} },
@@ -1092,6 +1092,12 @@ describe('ChatShell', () => {
     await waitFor(() => expect(screen.getByText('agent-page-2')).toBeTruthy());
     expect(mockListAgentPage).toHaveBeenNthCalledWith(2, { cursor: 'cursor-page-2' });
     expect(screen.queryByRole('button', { name: 'Load more agents' })).toBeNull();
+
+    fireEvent.click(screen.getByText('agent-page-2'));
+    await waitFor(() => expect(mockGetAgent).toHaveBeenCalledWith('agent-page-2'));
+    expect(screen.getByText('agent-page-1')).toBeTruthy();
+    expect(screen.getByText('agent-page-2')).toBeTruthy();
+    expect(mockListAgentPage).toHaveBeenCalledTimes(2);
   });
 
   it('persists Beast drawer edits and refreshes the selected agent detail', async () => {

@@ -400,38 +400,50 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
       setBeastRuns(runs);
       setBeastContainerRuntime(containerRuntime);
       const autoSelectedAgentId = agentPage.agents.find((agent) => agent.status !== 'deleted')?.id ?? null;
-      const currentAgentId = selectedBeastAgentId ?? (shouldAutoSelectBeastAgentRef.current ? autoSelectedAgentId : null);
+      const currentAgentId = selectedBeastAgentIdRef.current ?? (shouldAutoSelectBeastAgentRef.current ? autoSelectedAgentId : null);
       setSelectedBeastAgentId(currentAgentId);
+    }
 
+    void refreshBeasts();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [route, beastClient, beastRefreshNonce]);
+
+  useEffect(() => {
+    if (route !== 'beasts') return;
+
+    const agentId = selectedBeastAgentId;
+    if (!agentId) {
+      setBeastAgentDetail(null);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
       try {
-        if (currentAgentId) {
-          const detail = await client.getAgent(currentAgentId);
-          if (!cancelled) {
-            if (detail.agent.dispatchRunId) {
-              const [run, logs] = await Promise.all([
-                client.getRun(detail.agent.dispatchRunId),
-                client.getLogs(detail.agent.dispatchRunId),
-              ]);
-              if (!cancelled) {
-                setBeastAgentDetail({ ...detail, run: { ...run, logs } });
-              }
-            } else {
-              setBeastAgentDetail({ ...detail, run: null });
-            }
+        const detail = await beastClient.getAgent(agentId);
+        if (cancelled) return;
+        if (detail.agent.dispatchRunId) {
+          const [run, logs] = await Promise.all([
+            beastClient.getRun(detail.agent.dispatchRunId),
+            beastClient.getLogs(detail.agent.dispatchRunId),
+          ]);
+          if (!cancelled && selectedBeastAgentIdRef.current === agentId) {
+            setBeastAgentDetail({ ...detail, run: { ...run, logs } });
           }
-        } else {
-          setBeastAgentDetail(null);
+        } else if (selectedBeastAgentIdRef.current === agentId) {
+          setBeastAgentDetail({ ...detail, run: null });
         }
       } catch (error) {
-        if (!cancelled) {
+        if (!cancelled && selectedBeastAgentIdRef.current === agentId) {
           const message = error instanceof Error ? error.message : 'Unable to load Beast dispatch state.';
           beastStreamErrorRef.current = null;
           setBeastError(message);
         }
       }
-    }
-
-    void refreshBeasts();
+    })();
 
     return () => {
       cancelled = true;
