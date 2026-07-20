@@ -1,5 +1,9 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-20 — Incremental type-aware ESLint adoption
+- Enable type-aware rules in a dedicated TypeScript source override with `projectService: true` and an explicit `tsconfigRootDir`; source-adjacent tests excluded from package tsconfig files must be ignored by that override or ESLint fails before rule evaluation.
+- A targeted rule such as `@typescript-eslint/no-floating-promises` can establish type-aware coverage without enabling the entire strict preset at once. Treat surfaced promises as real call-site decisions: await work that must finish, use `void` only for intentional fire-and-forget, and add rejection handling for shutdown paths.
+
 ## 2026-07-20 — Bounded Beast event paging through corrupt rows
 - Recovery pagination must bound raw rows scanned, not only healthy rows returned. Return the last scanned raw sequence plus an indexed `hasMore` probe so a short or empty page can advance past corrupt rows without turning one request into a full-history scan.
 - Before wiring a new paginated endpoint into dashboard hydration, trace which detail field the UI actually renders. Do not eagerly collect every page for an unused compatibility field; keep the bounded endpoint available for intentional consumers and preserve fast detail loading.
