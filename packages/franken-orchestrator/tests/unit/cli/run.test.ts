@@ -28,6 +28,7 @@ const {
   mockCreateBeastServices,
   mockFinalize,
   mockParseArgs,
+  mockSetPlainOutput,
   mockSessionStart,
   mockStartChatServer,
   mockStartBeastDaemon,
@@ -39,6 +40,7 @@ const {
 } = vi.hoisted(() => {
   const mockAdapterComplete = vi.fn(async () => 'mock-complete');
   const mockFinalize = vi.fn(async () => undefined);
+  const mockSetPlainOutput = vi.fn();
   const mockCreateCliDeps = vi.fn(async () => ({
     deps: {},
     cliLlmAdapter: { name: 'chat-adapter' },
@@ -78,6 +80,7 @@ const {
     allowOrigin: undefined,
     noPr: false,
     verbose: false,
+    plain: false,
     reset: false,
     resume: false,
     cleanup: false,
@@ -116,6 +119,7 @@ const {
     mockCreateBeastServices,
     mockFinalize,
     mockParseArgs,
+    mockSetPlainOutput,
     mockSessionStart,
     mockStartChatServer,
     mockStartBeastDaemon,
@@ -211,7 +215,7 @@ vi.mock('../../../src/adapters/cli-llm-adapter.js', () => ({
 vi.mock('../../../src/logging/beast-logger.js', () => ({
   BANNER: '[BANNER]',
   renderBanner: vi.fn(async () => '[BANNER]'),
-  setPlainOutput: vi.fn(),
+  setPlainOutput: mockSetPlainOutput,
   BeastLogger: vi.fn(function (this: Record<string, unknown>) {
     this.info = vi.fn();
     this.warn = vi.fn();
@@ -1223,6 +1227,17 @@ describe('main() execution', () => {
     await main();
     expect(scaffoldFrankenbeast).toHaveBeenCalled();
     expect(resolveBaseBranch).toHaveBeenCalled();
+  });
+
+  it('enables plain output from the parsed CLI flag before startup', async () => {
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as ReturnType<typeof mockParseArgs>),
+      plain: true,
+    });
+
+    await main();
+
+    expect(mockSetPlainOutput).toHaveBeenCalledWith(true);
   });
 
   it('creates a Session and calls start()', async () => {

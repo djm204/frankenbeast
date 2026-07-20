@@ -5,6 +5,7 @@ import type { MartinLoop } from './martin-loop.js';
 import type { GitBranchIsolator } from './git-branch-isolator.js';
 import type { FileChunkSessionStore } from '../session/chunk-session-store.js';
 import { isoNow } from '@franken/types';
+import { isPlainOutput, stripAnsi } from '../logging/beast-logger.js';
 
 // ── Number formatting ──
 
@@ -54,10 +55,10 @@ export function writeProgress(
 ): void {
   const write = opts.write ?? process.stdout.write.bind(process.stdout);
   const tty = opts.isTTY ?? process.stdout.isTTY ?? false;
-  if (tty) {
+  if (tty && !isPlainOutput()) {
     write(`\r\x1b[K${line}${opts.final ? '\n' : ''}`);
   } else {
-    write(`${line}\n`);
+    write(`${stripAnsi(line)}\n`);
   }
 }
 

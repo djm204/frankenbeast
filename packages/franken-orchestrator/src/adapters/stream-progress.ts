@@ -1,4 +1,4 @@
-import { ANSI } from '../logging/beast-logger.js';
+import { ANSI, isPlainOutput, stripAnsi } from '../logging/beast-logger.js';
 import { wallClockNow } from '@franken/types';
 import type { PlanningProgressEvent } from '../planning/planning-progress.js';
 import { PLANNING_STAGE_LABELS } from '../planning/planning-progress.js';
@@ -61,6 +61,8 @@ export function createStreamProgressWithSpinner(
   let frameIndex = 0;
   let stopped = false;
   let activeEvent: PlanningProgressEvent | undefined;
+  const plain = isPlainOutput();
+  let lastPlainStatus = '';
   const heartbeatIntervalMs = options.heartbeatIntervalMs ?? 15_000;
   let lastHeartbeatMs = 0;
 
@@ -70,14 +72,23 @@ export function createStreamProgressWithSpinner(
     const frame = FRAMES[frameIndex % FRAMES.length]!;
     const label = activeEvent?.message ?? fallbackLabel;
     const position = activeEvent ? ` [${activeEvent.position}/${activeEvent.total}]` : '';
-    write(`\r\x1b[K${frame} ${label}${position} ${ANSI.dim}(stage ${formatDuration(now - stageStartedAt)} · total ${formatDuration(now - totalStartedAt)})${ANSI.reset}`);
+    if (plain) {
+      const status = `${label}${position}`;
+      if (status !== lastPlainStatus) {
+        write(`${stripAnsi(status)}\n`);
+        lastPlainStatus = status;
+      }
+    } else {
+      write(`\r\x1b[K${frame} ${label}${position} ${ANSI.dim}(stage ${formatDuration(now - stageStartedAt)} · total ${formatDuration(now - totalStartedAt)})${ANSI.reset}`);
+    }
     frameIndex++;
     const elapsedMs = now - totalStartedAt;
     if (heartbeatIntervalMs > 0 && elapsedMs - lastHeartbeatMs >= heartbeatIntervalMs) {
       lastHeartbeatMs = elapsedMs;
       options.onProgressEvent?.({ type: 'heartbeat', elapsedMs });
       if (activeEvent?.status === 'started') {
-        write(`\r\x1b[K${ANSI.dim}Still ${activeEvent.message.toLowerCase()} — ${formatDuration(now - stageStartedAt)} in stage, ${formatDuration(elapsedMs)} total${ANSI.reset}\n`);
+        const heartbeat = `Still ${activeEvent.message.toLowerCase()} — ${formatDuration(now - stageStartedAt)} in stage, ${formatDuration(elapsedMs)} total`;
+        write(plain ? `${stripAnsi(heartbeat)}\n` : `\r\x1b[K${ANSI.dim}${heartbeat}${ANSI.reset}\n`);
       }
     }
   };
@@ -87,8 +98,8 @@ export function createStreamProgressWithSpinner(
   renderSpinner();
 
   const writeProgress = (text: string): void => {
-    write('\r\x1b[K');
-    write(text);
+    if (!plain) write('\r\x1b[K');
+    write(plain ? stripAnsi(text) : text);
   };
 
   const operationLabel = (): string => activeEvent
@@ -116,7 +127,7 @@ export function createStreamProgressWithSpinner(
       if (stopped) return;
       stopped = true;
       clearInterval(interval);
-      write('\r\x1b[K');
+      if (!plain) write('\r\x1b[K');
     },
   };
 }
