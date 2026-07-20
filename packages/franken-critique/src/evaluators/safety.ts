@@ -14,6 +14,15 @@ const REGEX_EVALUATION_BASE_TIMEOUT_MS = 2_000;
 const REGEX_EVALUATION_MAX_TIMEOUT_MS = 10_000;
 const REGEX_EVALUATION_BYTES_PER_EXTRA_MS = 32 * 1024;
 const EMPTY_ALTERNATIVE_TOKEN = 'EMPTY_ALTERNATIVE';
+const UNICODE_PROPERTIES_OF_STRINGS = new Set([
+  'Basic_Emoji',
+  'Emoji_Keycap_Sequence',
+  'RGI_Emoji',
+  'RGI_Emoji_Flag_Sequence',
+  'RGI_Emoji_Modifier_Sequence',
+  'RGI_Emoji_Tag_Sequence',
+  'RGI_Emoji_ZWJ_Sequence',
+]);
 
 interface RegexGroupState {
   startIndex: number;
@@ -325,6 +334,7 @@ export class SafetyEvaluator implements Evaluator {
     characterClass: string,
     ignoreCase: boolean,
   ): boolean {
+    if (this.hasUnicodePropertyOfStrings(characterClass)) return true;
     if (!characterClass.includes('\\q{')) return false;
     const values = this.unicodeStringSetValues(characterClass);
     if (values === null) return true;
@@ -359,6 +369,12 @@ export class SafetyEvaluator implements Evaluator {
     } catch {
       return true;
     }
+  }
+
+  private hasUnicodePropertyOfStrings(characterClass: string): boolean {
+    return Array.from(characterClass.matchAll(/\\p\{([^}]+)\}/g)).some(
+      (match) => UNICODE_PROPERTIES_OF_STRINGS.has(match[1]!),
+    );
   }
 
   private unicodeClassMatchesValue(
@@ -673,14 +689,25 @@ export class SafetyEvaluator implements Evaluator {
     const end = this.skipCharacterClass(semantic, 0, true);
     if (semantic[end] !== ']') return true;
     const characterClass = semantic.slice(0, end + 1);
+    const semanticQuantifier = this.quantifierAt(semantic, end + 1);
+    const nullableSuffix = semanticQuantifier?.nullable
+      ? this.expandSimpleAlternativePrefix(
+          semantic.slice(semanticQuantifier.end + 1),
+        )
+      : null;
 
     return alternatives
       .filter((alternative) => alternative !== semantic)
       .some((alternative) => {
-        const firstToken = this.expandSimpleAlternativePrefix(alternative).tokens[0];
+        const expansion = this.expandSimpleAlternativePrefix(alternative);
+        const firstToken = expansion.tokens[0];
         if (firstToken === undefined || firstToken.length !== 1) return true;
         try {
-          return new RegExp(`^(?:${characterClass})$`, 'v').test(firstToken);
+          return (
+            new RegExp(`^(?:${characterClass})$`, 'v').test(firstToken) ||
+            (nullableSuffix !== null &&
+              this.tokenPrefixOverlaps(nullableSuffix, expansion))
+          );
         } catch {
           return true;
         }
@@ -784,6 +811,12 @@ export class SafetyEvaluator implements Evaluator {
     pattern: string,
     start: number,
   ): boolean {
+    if (
+      this.parsingUnicodeSets &&
+      this.hasUnicodeSetSemanticSyntax(groupContent)
+    ) {
+      return false;
+    }
     const followingToken = this.nextAtomTokenInCurrentAlternative(pattern, start);
     if (followingToken === null) return false;
 

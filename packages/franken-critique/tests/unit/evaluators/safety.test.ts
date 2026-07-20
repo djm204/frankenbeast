@@ -910,7 +910,14 @@ describe('SafetyEvaluator', () => {
     expect(
       evaluator.hasUnsafeRegexShape('^(?:[[a-z]&&[a-z]]|aa)+$', true),
     ).toBe(true);
+    expect(
+      evaluator.hasUnsafeRegexShape(
+        '^(?:[[ab]&&[a]]{0}b|b)+$',
+        true,
+      ),
+    ).toBe(true);
     expect(evaluator.hasUnsafeRegexShape('^(?:\\p{L}|a)+$', true)).toBe(true);
+    expect(evaluator.hasUnsafeRegexShape('^((\\p{L}|a)b)+$', true)).toBe(true);
     expect(evaluator.hasUnsafeRegexShape('^(?:\\p{L})+$', true)).toBe(false);
     expect(
       evaluator.hasUnsafeRegexShape(
@@ -938,6 +945,12 @@ describe('SafetyEvaluator', () => {
     ).toBe(false);
     expect(
       evaluator.hasUnsafeRegexShape('^(?i:[\\q{a}\\q{Aa}])+$', true),
+    ).toBe(true);
+    expect(
+      evaluator.hasUnsafeRegexShape(
+        '^[\\p{RGI_Emoji_Flag_Sequence}\\p{Regional_Indicator}]+$',
+        true,
+      ),
     ).toBe(true);
     expect(
       evaluator.hasUnsafeRegexShape(
