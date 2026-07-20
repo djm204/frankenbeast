@@ -97,7 +97,13 @@ export function AgentList({
       {/* Content */}
       {filtered.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-6 text-beast-muted p-8">
-          <p className="text-sm">{agents.length === 0 ? 'No agents yet' : 'No matching agents'}</p>
+          <p className="text-sm">
+            {agents.length === 0
+              ? 'No agents yet'
+              : hasMore
+                ? 'No matching loaded agents. Load more agents to continue searching.'
+                : 'No matching agents'}
+          </p>
           {agents.length === 0 && (
             <div className="flex flex-col items-center gap-3 text-center">
               {createAgentDisabled && createAgentDisabledReason && (

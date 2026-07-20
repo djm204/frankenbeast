@@ -87,6 +87,23 @@ describe('AgentList', () => {
     expect(screen.queryByText('agent-2')).toBeNull();
   });
 
+  it('does not claim a definitive empty search while later pages remain', () => {
+    render(
+      <AgentList
+        agents={agents}
+        runs={[]}
+        selectedAgentId={null}
+        onSelectAgent={vi.fn()}
+        onCreateAgent={vi.fn()}
+        hasMore={true}
+        onLoadMore={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+    fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: 'older-agent' } });
+    expect(screen.getByText('No matching loaded agents. Load more agents to continue searching.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Load more agents' })).toBeTruthy();
+  });
+
   it('filters agents by status', () => {
     render(<AgentList agents={agents} runs={[]} selectedAgentId={null} onSelectAgent={vi.fn()} onCreateAgent={vi.fn()} />);
     const statusSelect = screen.getByLabelText(/filter by status/i);

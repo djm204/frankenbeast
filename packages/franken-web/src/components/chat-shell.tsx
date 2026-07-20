@@ -121,6 +121,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const [beastCatalog, setBeastCatalog] = useState<BeastCatalogEntry[]>([]);
   const [beastAgents, setBeastAgents] = useState<TrackedAgentSummary[]>([]);
   const [beastAgentNextCursor, setBeastAgentNextCursor] = useState<string | undefined>(undefined);
+  const beastAgentNextCursorRef = useRef<string | undefined>(undefined);
   const [beastAgentsLoadingMore, setBeastAgentsLoadingMore] = useState(false);
   const [beastRuns, setBeastRuns] = useState<BeastRunSummary[]>([]);
   const [beastContainerRuntime, setBeastContainerRuntime] = useState<BeastContainerRuntimeStatus | undefined>(undefined);
@@ -395,6 +396,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
       setBeastCreationUnavailableReason(null);
       setBeastCatalog(catalog);
       setBeastAgents(agentPage.agents);
+      beastAgentNextCursorRef.current = agentPage.nextCursor;
       setBeastAgentNextCursor(agentPage.nextCursor);
       setBeastAgentsLoadingMore(false);
       setBeastRuns(runs);
@@ -445,9 +447,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
       }
     })();
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [route, beastClient, selectedBeastAgentId, beastRefreshNonce]);
 
   useEffect(() => {
@@ -491,7 +491,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
           const next = snapshot.agents?.find((candidate) => candidate.id === current.agent.id);
           return next ? { ...current, agent: { ...current.agent, ...next } } : current;
         });
-        if (sawUnknownAgent || selectedAgentLinkedRun) requestBeastRefresh();
+        if ((sawUnknownAgent && !beastAgentNextCursorRef.current) || selectedAgentLinkedRun) requestBeastRefresh();
       },
       agentStatus: (event) => {
         if (cancelled) return;
@@ -510,13 +510,14 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               },
             }
           : current));
-        if (!sawKnownAgent) requestBeastRefresh();
+        if (!sawKnownAgent && !beastAgentNextCursorRef.current) requestBeastRefresh();
         setBeastError(null);
       },
       agentEvent: (event) => {
         if (cancelled) return;
         const currentDetail = beastAgentDetailRef.current;
         const sawSelectedAgent = currentDetail?.agent.id === event.agentId;
+        const sawKnownAgent = beastAgentsRef.current.some((agent) => agent.id === event.agentId);
         const linkedRunId = getAgentEventRunId(event.event.payload);
         const selectedAgentLinkedRun = Boolean(
           sawSelectedAgent
@@ -550,7 +551,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             events: [...current.events, nextEvent],
           };
         });
-        if (!sawSelectedAgent || selectedAgentLinkedRun) requestBeastRefresh();
+        if ((!sawKnownAgent && !beastAgentNextCursorRef.current) || selectedAgentLinkedRun) requestBeastRefresh();
       },
       runStatus: (event) => {
         if (cancelled) return;
@@ -1069,6 +1070,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                   const knownIds = new Set(current.map((agent) => agent.id));
                   return [...current, ...page.agents.filter((agent) => !knownIds.has(agent.id))];
                 });
+                beastAgentNextCursorRef.current = page.nextCursor;
                 setBeastAgentNextCursor(page.nextCursor);
               } catch (error) {
                 setBeastError(error instanceof Error ? error.message : 'Unable to load more tracked agents.');

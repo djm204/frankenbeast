@@ -1427,6 +1427,36 @@ describe('ChatShell', () => {
     });
   });
 
+  it('does not refetch the first page for events from agents on unloaded pages', async () => {
+    window.location.hash = '#/beasts';
+    mockListAgentPage.mockImplementation(async () => ({
+      agents: await mockListAgents(),
+      nextCursor: 'cursor-page-2',
+    }));
+
+    render(
+      <ChatShell
+        baseUrl="http://localhost:3000"
+        projectId="test-project"
+        version="0.9.0"
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Load more agents' })).toBeTruthy());
+    expect(mockListAgentPage).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      latestBeastEventHandlers?.agentStatus?.({
+        agentId: 'agent-on-later-page',
+        status: 'running',
+        updatedAt: '2026-03-11T00:00:03.000Z',
+      });
+      await Promise.resolve();
+    });
+
+    expect(mockListAgentPage).toHaveBeenCalledTimes(1);
+  });
+
   it('refreshes selected agent details when a newly linked run emits logs', async () => {
     window.location.hash = '#/beasts';
     mockListAgents.mockResolvedValue([
