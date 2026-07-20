@@ -56,7 +56,10 @@ const A = new Proxy(RAW_ANSI, {
 
 /** Strip all ANSI escape codes for plain-text output (e.g. log files). */
 export function stripAnsi(s: string): string {
-  return s.replace(/\x1b\[[0-9;]*m/g, '');
+  return s
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '')
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1b[@-_]/g, '');
 }
 
 /**

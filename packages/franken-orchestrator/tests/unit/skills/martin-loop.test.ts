@@ -87,6 +87,7 @@ describe('MartinLoop', () => {
   afterEach(() => {
     stdoutWriteSpy.mockRestore();
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     for (const dir of tmpDirs.splice(0)) {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -240,6 +241,23 @@ describe('MartinLoop', () => {
         cwd: '/tmp/test-project',
       }),
     );
+  });
+
+  it('forces no-color provider output and strips terminal controls in plain mode', async () => {
+    vi.stubEnv('NO_COLOR', '1');
+    queueMock({ stdout: '\x1b[31mworking\x1b[0m\x1b[K\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    const loop = new MartinLoop();
+    await loop.run(baseConfig({ provider: 'aider', command: '/usr/bin/aider' }));
+
+    expect(mockSpawn).toHaveBeenCalledWith(
+      '/usr/bin/aider',
+      expect.any(Array),
+      expect.objectContaining({
+        env: expect.objectContaining({ NO_COLOR: '1', FORCE_COLOR: '0' }),
+      }),
+    );
+    expect(stdoutWriteSpy).toHaveBeenCalledWith('working\n<promise>IMPL_X_DONE</promise>');
   });
 
   it('normalizes codex JSON output to readable text and detects promise tag', async () => {

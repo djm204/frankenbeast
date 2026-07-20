@@ -23,7 +23,7 @@ import type { ICliProvider } from './providers/cli-provider.js';
 import { ProviderRegistry, createDefaultRegistry } from './providers/cli-provider.js';
 import { tryExtractTextFromNode } from './providers/index.js';
 import { createChunkSession, createChunkTranscriptEntry, type ChunkSession } from '../session/chunk-session.js';
-import { ANSI } from '../logging/beast-logger.js';
+import { ANSI, isPlainOutput, stripAnsi } from '../logging/beast-logger.js';
 import {
   classifyCommandFailure,
   commandFailureFromExecError,
@@ -304,6 +304,11 @@ function spawnIteration(
       : [...providerArgs, prompt];
 
     const env = provider.filterEnv(process.env as Record<string, string>);
+    const plain = isPlainOutput();
+    if (plain) {
+      env.NO_COLOR = env.NO_COLOR ?? '1';
+      env.FORCE_COLOR = '0';
+    }
 
     const child = spawn(cmd, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -337,12 +342,14 @@ function spawnIteration(
       if (streamBuffer) {
         const lines = streamBuffer.push(text);
         for (const line of lines) {
-          cleanParts.push(line);
-          process.stdout.write(line + '\n');
+          const displayLine = plain ? stripAnsi(line) : line;
+          cleanParts.push(displayLine);
+          process.stdout.write(displayLine + '\n');
         }
       } else {
-        cleanParts.push(text);
-        process.stdout.write(text);
+        const displayText = plain ? stripAnsi(text) : text;
+        cleanParts.push(displayText);
+        process.stdout.write(displayText);
       }
     });
 

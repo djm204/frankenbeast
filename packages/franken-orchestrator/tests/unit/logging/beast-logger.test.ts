@@ -30,6 +30,11 @@ describe('stripAnsi', () => {
     expect(stripAnsi(input)).toBe(' INFO green text');
   });
 
+  it('removes cursor, erase-line, and OSC hyperlink sequences', () => {
+    const input = '\x1b[2K\x1b[3Gready \x1b]8;;https://example.com\x07link\x1b]8;;\x07';
+    expect(stripAnsi(input)).toBe('ready link');
+  });
+
   it('handles empty string', () => {
     expect(stripAnsi('')).toBe('');
   });
