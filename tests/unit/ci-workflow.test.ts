@@ -554,6 +554,29 @@ jobs:
     );
   });
 
+  it('fails closed while repairing the latest release marker', () => {
+    const releaseLatestStep = expectSteps(releasePlease).find(
+      (step) => step.name === 'Ensure only root release is marked latest',
+    );
+    expect(releaseLatestStep).toBeTruthy();
+    const releaseLatestRun = String(releaseLatestStep?.run ?? '');
+    const firstCommand = releaseLatestRun
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => line.length > 0 && !line.startsWith('#'));
+
+    expect(firstCommand).toBe('set -euo pipefail');
+    expect(releaseLatestRun).not.toContain("|| echo ''");
+    expect(releaseLatestRun).toContain('release_json=$(gh release list');
+    expect(releaseLatestRun).toContain('latest_tag=$(jq -r');
+
+    const promoteIndex = releaseLatestRun.indexOf('gh release edit "$root_tag" --latest');
+    const verifyIndex = releaseLatestRun.indexOf('verified_tag=$(gh release view');
+    expect(verifyIndex).toBeGreaterThan(promoteIndex);
+    expect(releaseLatestRun).toContain('if [ "$verified_tag" != "$root_tag" ]; then');
+    expect(releaseLatestRun).toContain('exit 1');
+  });
+
   it('does not demote component-only latest releases unless a root release exists to promote', () => {
     const releaseLatestStep = expectSteps(releasePlease).find(
       (step) => step.name === 'Ensure only root release is marked latest',
@@ -561,8 +584,8 @@ jobs:
     expect(releaseLatestStep).toBeTruthy();
     const releaseLatestRun = String(releaseLatestStep?.run ?? '');
 
-    const rootLookupIndex = releaseLatestRun.indexOf('root_tag=$(gh release list');
-    const emptyRootNormalizationIndex = releaseLatestRun.indexOf('.tagName // empty');
+    const rootLookupIndex = releaseLatestRun.indexOf('root_tag=$(jq -r');
+    const emptyRootNormalizationIndex = releaseLatestRun.indexOf('.tagName // empty', rootLookupIndex);
     const noRootGuardIndex = releaseLatestRun.indexOf(
       'No root release found; leaving component latest unchanged',
     );
@@ -570,7 +593,7 @@ jobs:
     const promoteIndex = releaseLatestRun.indexOf('gh release edit "$root_tag" --latest');
 
     expect(rootLookupIndex).toBeGreaterThan(-1);
-    expect(releaseLatestRun).toContain('gh release list --limit 1000 --json tagName');
+    expect(releaseLatestRun).toContain('gh release list --limit 1000 --json tagName,isLatest');
     expect(emptyRootNormalizationIndex).toBeGreaterThan(rootLookupIndex);
     expect(noRootGuardIndex).toBeGreaterThan(emptyRootNormalizationIndex);
     expect(demoteIndex).toBeGreaterThan(noRootGuardIndex);
@@ -593,13 +616,13 @@ jobs:
     expect(latestStep).toBeTruthy();
 
     const latestRun = String(latestStep?.run ?? '');
-    const rootLookupIndex = latestRun.indexOf('root_tag=$(gh release list');
+    const rootLookupIndex = latestRun.indexOf('root_tag=$(jq -r');
     const missingRootGuardIndex = latestRun.indexOf('No root release found; leaving component latest unchanged');
     const demoteIndex = latestRun.indexOf('gh release edit "$latest_tag" --latest=false');
     const promoteIndex = latestRun.indexOf('gh release edit "$root_tag" --latest');
 
     expect(rootLookupIndex).toBeGreaterThan(-1);
-    expect(latestRun).toContain('gh release list --limit 1000 --json tagName');
+    expect(latestRun).toContain('gh release list --limit 1000 --json tagName,isLatest');
     expect(missingRootGuardIndex).toBeGreaterThan(rootLookupIndex);
     expect(demoteIndex).toBeGreaterThan(missingRootGuardIndex);
     expect(promoteIndex).toBeGreaterThan(demoteIndex);
