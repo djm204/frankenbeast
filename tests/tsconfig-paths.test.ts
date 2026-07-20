@@ -6,6 +6,7 @@ import {
   readJson,
   getWorkspacePackages,
   getWorkspaceSourceAliases,
+  getPackageExportEntries,
 } from "./helpers/workspaces.js";
 
 const hasTypeScriptSource = (relDir: string): boolean => {
@@ -63,6 +64,25 @@ const TSCONFIG_TEST_INCLUDE_ALLOWLIST: Record<string, string> = {
   "@franken/mcp-suite":
     "Uses a package-level tsconfig/vitest boundary for src and tests; the root tsconfig.test.json cannot model its CLI/server package settings.",
 };
+
+describe("workspace package exports", () => {
+  it("normalizes string-form exports as the root export", () => {
+    expect(
+      getPackageExportEntries({ exports: "./dist/index.js" }),
+    ).toEqual([[".", "./dist/index.js"]]);
+  });
+
+  it("normalizes root conditional exports as the root export", () => {
+    const rootExport = {
+      types: "./dist/index.d.ts",
+      import: "./dist/index.js",
+    };
+
+    expect(getPackageExportEntries({ exports: rootExport })).toEqual([
+      [".", rootExport],
+    ]);
+  });
+});
 
 describe("tsconfig.json path aliases", () => {
   const tsconfig = readJson("tsconfig.json");

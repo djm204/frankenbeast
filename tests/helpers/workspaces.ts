@@ -3,21 +3,21 @@ import { join, posix } from "node:path";
 
 export const ROOT = join(import.meta.dirname, "..", "..");
 
+export type PackageExportTarget =
+  | string
+  | {
+      import?: string;
+      types?: string;
+      default?: string;
+    };
+
 export type PackageJson = {
   name?: string;
   version?: string;
   workspaces?: string[];
   main?: string;
   types?: string;
-  exports?: Record<
-    string,
-    | string
-    | {
-        import?: string;
-        types?: string;
-        default?: string;
-      }
-  >;
+  exports?: PackageExportTarget | Record<string, PackageExportTarget>;
   scripts?: Record<string, string>;
   license?: string;
   description?: string;
@@ -117,34 +117,37 @@ const sourcePathFromPublishedEntry = (publishedEntry: string): string | null => 
 };
 
 const getPublishedEntry = (
-  target: NonNullable<PackageJson["exports"]>[string],
+  target: PackageExportTarget,
 ): string | undefined =>
   typeof target === "string"
     ? target
     : (target.types ?? target.import ?? target.default);
 
+export const getPackageExportEntries = (
+  packageJson: PackageJson,
+): Array<[string, PackageExportTarget]> => {
+  const packageExports = packageJson.exports;
+  if (typeof packageExports === "string") {
+    return [[".", packageExports]];
+  }
+  if (packageExports !== undefined) {
+    const exportNames = Object.keys(packageExports);
+    return exportNames.some((exportName) => exportName.startsWith("."))
+      ? Object.entries(packageExports)
+      : [[".", packageExports]];
+  }
+
+  const fallbackEntry = packageJson.types ?? packageJson.main;
+  return fallbackEntry === undefined ? [] : [[".", fallbackEntry]];
+};
+
 export const getWorkspaceSourceAliases = (): Record<string, string> => {
   const aliases: Array<[string, string]> = [];
 
   for (const workspacePackage of getWorkspacePackages()) {
-    const exportedEntries = Object.entries(
-      workspacePackage.packageJson.exports ?? {},
-    );
-    const entries: Array<
-      [string, NonNullable<PackageJson["exports"]>[string] | undefined]
-    > =
-      exportedEntries.length > 0
-        ? exportedEntries
-        : [
-            [
-              ".",
-              workspacePackage.packageJson.types ??
-                workspacePackage.packageJson.main,
-            ],
-          ];
+    const entries = getPackageExportEntries(workspacePackage.packageJson);
 
     for (const [exportName, target] of entries) {
-      if (exportName === undefined || target === undefined) continue;
       const publishedEntry = getPublishedEntry(target);
       if (publishedEntry === undefined) continue;
       const sourcePath = sourcePathFromPublishedEntry(publishedEntry);
