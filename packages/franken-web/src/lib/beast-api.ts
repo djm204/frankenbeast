@@ -7,6 +7,7 @@ import type {
   BeastEventHandlers,
   BeastExecutionMode,
   BeastRunDetail,
+  BeastRunEventPage,
   BeastRunSummary,
   BeastSseAgentEvent,
   BeastSseAgentStatusEvent,
@@ -31,6 +32,7 @@ export type {
   BeastEventHandlers,
   BeastExecutionMode,
   BeastRunDetail,
+  BeastRunEventPage,
   BeastRunSummary,
   BeastSseAgentEvent,
   BeastSseAgentStatusEvent,
@@ -81,6 +83,17 @@ export class BeastApiClient {
 
   async getRun(runId: string): Promise<Omit<BeastRunDetail, 'logs'> & { run: BeastRunSummary }> {
     return this.request(`/v1/beasts/runs/${encodeURIComponent(runId)}`, { method: 'GET' });
+  }
+
+  async getRunEvents(
+    runId: string,
+    options: { limit?: number; afterSequence?: number } = {},
+  ): Promise<BeastRunEventPage> {
+    const query = new URLSearchParams();
+    if (options.limit !== undefined) query.set('limit', String(options.limit));
+    if (options.afterSequence !== undefined) query.set('afterSequence', String(options.afterSequence));
+    const suffix = query.size > 0 ? `?${query.toString()}` : '';
+    return this.request(`/v1/beasts/runs/${encodeURIComponent(runId)}/events${suffix}`, { method: 'GET' });
   }
 
   async getAgent(agentId: string): Promise<TrackedAgentDetail> {

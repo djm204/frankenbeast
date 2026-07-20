@@ -125,6 +125,12 @@ Path-style fields entered in the dashboard are normalized client-side before sub
 
 Execution controls (`start`, `stop`, `restart`, `kill`) still target Beast runs after a tracked agent has dispatched.
 
+### Beast run event pagination
+
+`GET /v1/beasts/runs/:runId/events` returns events in ascending sequence order and never performs an unbounded API read. Use the optional `limit` query parameter (default `100`, maximum `500`) and pass the response's non-null `page.nextAfterSequence` back as `afterSequence` to request the next page. The response includes `page.hasMore`; when it is `false`, `nextAfterSequence` is `null`. Invalid, negative, or over-limit pagination values return `400 INVALID_BEAST_EVENT_PAGINATION`.
+
+The dashboard API client exposes the same contract through `BeastApiClient.getRunEvents(runId, { limit, afterSequence })`. Run-detail responses retain a compatibility `events` array, bounded to the first default page; consumers that need later events must page through the dedicated event endpoint.
+
 ### Read-only degraded mode
 
 When Beast daemon health detects dependency read failures, or when an operator manually enters degraded mode with `POST /v1/beasts/availability/degraded`, the daemon reports `status: "degraded"` and an `availability` object from `/health`. Read-only diagnostics such as `/health`, `/v1/beasts/catalog`, `/v1/beasts/runs`, `/v1/beasts/agents`, run events/logs, dashboard snapshots, and SSE tickets remain available so operators can inspect state during partial outages.

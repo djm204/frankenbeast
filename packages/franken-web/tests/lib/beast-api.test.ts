@@ -172,6 +172,26 @@ describe('BeastApiClient', () => {
     );
   });
 
+  it('requests later bounded Beast run event pages', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({
+        data: {
+          events: [{ id: 'event-3', runId: 'run-1', sequence: 3, type: 'run.finished', payload: {}, createdAt: '2026-03-10T00:00:03.000Z' }],
+          page: { limit: 25, afterSequence: 2, nextAfterSequence: null, hasMore: false },
+        },
+      }),
+    });
+
+    const page = await client.getRunEvents('run-1', { limit: 25, afterSequence: 2 });
+
+    expect(page.events.map((event) => event.sequence)).toEqual([3]);
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://localhost:3000/v1/beasts/runs/run-1/events?limit=25&afterSequence=2',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
   it('resumes a tracked agent through the agent-specific endpoint', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,

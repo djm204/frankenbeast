@@ -331,6 +331,7 @@ describe('SQLiteBeastRepository', () => {
     expect(event1.sequence).toBe(1);
     expect(event2.sequence).toBe(2);
     expect(repo.listEvents(run.id)).toEqual([event1, event2]);
+    expect(repo.listEvents(run.id, { afterSequence: 1, limit: 1 })).toEqual([event2]);
     expect(repo.getRun(run.id)).toMatchObject({
       status: 'stopped',
       latestExitCode: 137,

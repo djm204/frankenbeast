@@ -201,6 +201,11 @@ export interface CorruptJsonRecoveryOptions {
   readonly recoverCorruptJson?: boolean;
 }
 
+export interface ListBeastRunEventsOptions extends CorruptJsonRecoveryOptions {
+  readonly afterSequence?: number;
+  readonly limit?: number;
+}
+
 export interface BeastRunProcessReference {
   readonly id: string;
   readonly trackedAgentId?: string | undefined;
@@ -481,10 +486,27 @@ export class SQLiteBeastRepository {
     return event;
   }
 
-  listEvents(runId: string, options: CorruptJsonRecoveryOptions = {}): BeastRunEvent[] {
-    const rows = this.db.prepare(
-      'SELECT * FROM beast_run_events WHERE run_id = ? ORDER BY sequence ASC',
-    ).all(runId) as BeastEventRow[];
+  listEvents(runId: string, options: ListBeastRunEventsOptions = {}): BeastRunEvent[] {
+    if (options.afterSequence !== undefined
+      && (!Number.isSafeInteger(options.afterSequence) || options.afterSequence < 0)) {
+      throw new RangeError('afterSequence must be a non-negative safe integer');
+    }
+    if (options.limit !== undefined
+      && (!Number.isSafeInteger(options.limit) || options.limit < 1)) {
+      throw new RangeError('limit must be a positive safe integer');
+    }
+    const clauses = ['run_id = ?'];
+    const parameters: Array<string | number> = [runId];
+    if (options.afterSequence !== undefined) {
+      clauses.push('sequence > ?');
+      parameters.push(options.afterSequence);
+    }
+    let sql = `SELECT * FROM beast_run_events WHERE ${clauses.join(' AND ')} ORDER BY sequence ASC`;
+    if (options.limit !== undefined) {
+      sql += ' LIMIT ?';
+      parameters.push(options.limit);
+    }
+    const rows = this.db.prepare(sql).all(...parameters) as BeastEventRow[];
     return mapRowsRecoveringCorruptJson(rows, mapEvent, options);
   }
 

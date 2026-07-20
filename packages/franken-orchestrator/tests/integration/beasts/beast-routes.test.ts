@@ -208,6 +208,98 @@ describe('beast routes', () => {
     expect(logsBody.data.logs.some((line) => line.includes('started'))).toBe(true);
   });
 
+  it('returns bounded run event pages in sequence order', async () => {
+    const { app, operatorToken, repository } = createBeastApp();
+    const run = repository.createRun({
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+    for (let sequence = 1; sequence <= 101; sequence += 1) {
+      repository.appendEvent(run.id, {
+        type: `run.event.${sequence}`,
+        payload: { sequence },
+        createdAt: new Date(Date.UTC(2026, 2, 10, 0, 0, sequence)).toISOString(),
+      });
+    }
+    const headers = { authorization: `Bearer ${operatorToken}` };
+
+    const defaultResponse = await app.request(`/v1/beasts/runs/${run.id}/events`, { headers });
+    expect(defaultResponse.status).toBe(200);
+    const defaultPage = await defaultResponse.json() as {
+      data: {
+        events: Array<{ sequence: number }>;
+        page: { limit: number; afterSequence: number; nextAfterSequence: number | null; hasMore: boolean };
+      };
+    };
+    expect(defaultPage.data.events).toHaveLength(100);
+    expect(defaultPage.data.page).toEqual({
+      limit: 100,
+      afterSequence: 0,
+      nextAfterSequence: 100,
+      hasMore: true,
+    });
+
+    const detailResponse = await app.request(`/v1/beasts/runs/${run.id}`, { headers });
+    const detail = await detailResponse.json() as { data: { events: Array<{ sequence: number }> } };
+    expect(detail.data.events).toHaveLength(100);
+
+    const firstResponse = await app.request(`/v1/beasts/runs/${run.id}/events?limit=2`, { headers });
+    expect(firstResponse.status).toBe(200);
+    const first = await firstResponse.json() as {
+      data: {
+        events: Array<{ sequence: number }>;
+        page: { limit: number; afterSequence: number; nextAfterSequence: number | null; hasMore: boolean };
+      };
+    };
+    expect(first.data.events.map((event) => event.sequence)).toEqual([1, 2]);
+    expect(first.data.page).toEqual({
+      limit: 2,
+      afterSequence: 0,
+      nextAfterSequence: 2,
+      hasMore: true,
+    });
+
+    const secondResponse = await app.request(
+      `/v1/beasts/runs/${run.id}/events?limit=2&afterSequence=${first.data.page.nextAfterSequence}`,
+      { headers },
+    );
+    const second = await secondResponse.json() as typeof first;
+    expect(second.data.events.map((event) => event.sequence)).toEqual([3, 4]);
+    expect(second.data.page).toEqual({
+      limit: 2,
+      afterSequence: 2,
+      nextAfterSequence: 4,
+      hasMore: true,
+    });
+
+    const finalResponse = await app.request(`/v1/beasts/runs/${run.id}/events?limit=2&afterSequence=100`, { headers });
+    const finalPage = await finalResponse.json() as typeof first;
+    expect(finalPage.data.events.map((event) => event.sequence)).toEqual([101]);
+    expect(finalPage.data.page).toEqual({
+      limit: 2,
+      afterSequence: 100,
+      nextAfterSequence: null,
+      hasMore: false,
+    });
+
+    const invalidResponses = await Promise.all([
+      app.request(`/v1/beasts/runs/${run.id}/events?limit=501`, { headers }),
+      app.request(`/v1/beasts/runs/${run.id}/events?afterSequence=`, { headers }),
+      app.request(`/v1/beasts/runs/${run.id}/events?limit=2.5`, { headers }),
+    ]);
+    for (const response of invalidResponses) {
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: { code: 'INVALID_BEAST_EVENT_PAGINATION' },
+      });
+    }
+  });
+
   it('redacts historical snapshots, events, and logs for tracked runs with active dispatch failures', async () => {
     const { app, operatorToken, repository, agents, logStore } = createBeastApp();
     const agent = agents.createAgent({

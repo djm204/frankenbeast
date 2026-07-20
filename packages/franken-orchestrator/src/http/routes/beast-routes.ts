@@ -44,6 +44,26 @@ type BeastRunResponse = BeastRun & {
   readonly workspaceContainerPath?: unknown;
 };
 
+const DEFAULT_BEAST_EVENT_PAGE_LIMIT = 100;
+const MAX_BEAST_EVENT_PAGE_LIMIT = 500;
+
+function parseBeastEventPagination(query: Record<string, string>): { afterSequence: number; limit: number } {
+  const afterSequenceRaw = query.afterSequence ?? '0';
+  const limitRaw = query.limit ?? String(DEFAULT_BEAST_EVENT_PAGE_LIMIT);
+  const isUnsignedInteger = (value: string): boolean => /^(0|[1-9]\d*)$/.test(value);
+  const afterSequence = isUnsignedInteger(afterSequenceRaw) ? Number(afterSequenceRaw) : Number.NaN;
+  const limit = isUnsignedInteger(limitRaw) ? Number(limitRaw) : Number.NaN;
+  if (!Number.isSafeInteger(afterSequence) || afterSequence < 0
+    || !Number.isSafeInteger(limit) || limit < 1 || limit > MAX_BEAST_EVENT_PAGE_LIMIT) {
+    throw new HttpError(
+      400,
+      'INVALID_BEAST_EVENT_PAGINATION',
+      `afterSequence must be a non-negative integer and limit must be between 1 and ${MAX_BEAST_EVENT_PAGE_LIMIT}`,
+    );
+  }
+  return { afterSequence, limit };
+}
+
 function runWithContainerFields(run: BeastRun | undefined, attempts: BeastRunAttempt[]): BeastRunResponse | undefined {
   if (!run || run.executionMode !== 'container') {
     return run;
@@ -304,18 +324,17 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
       data: {
         run: runWithContainerFields(deps.runs.sanitizeRunForResponse(run), attempts),
         attempts,
-        events: deps.runs.listEventsForResponse(runId),
+        events: deps.runs.listEventPageForResponse(runId, 0, DEFAULT_BEAST_EVENT_PAGE_LIMIT).events,
       },
     });
   });
 
   app.get('/v1/beasts/runs/:runId/events', (c) => {
     const runId = c.req.param('runId');
+    const { afterSequence, limit } = parseBeastEventPagination(c.req.query());
     try {
       return c.json({
-        data: {
-          events: deps.runs.listEventsForResponse(runId),
-        },
+        data: deps.runs.listEventPageForResponse(runId, afterSequence, limit),
       });
     } catch (error) {
       throwKnownRunError(runId, error);
