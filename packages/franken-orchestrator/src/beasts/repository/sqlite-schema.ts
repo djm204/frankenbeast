@@ -45,6 +45,7 @@ export const BEAST_SQLITE_SCHEMA_STATEMENTS = [
     FOREIGN KEY (attempt_id) REFERENCES beast_run_attempts(id)
   )`,
   'CREATE INDEX IF NOT EXISTS idx_beast_run_events_run_sequence ON beast_run_events(run_id, sequence)',
+  'CREATE UNIQUE INDEX IF NOT EXISTS uq_beast_run_events_run_sequence ON beast_run_events(run_id, sequence)',
   `CREATE TABLE IF NOT EXISTS beast_interview_sessions (
     id TEXT PRIMARY KEY,
     definition_id TEXT NOT NULL,
@@ -80,4 +81,5 @@ export const BEAST_SQLITE_SCHEMA_STATEMENTS = [
     created_at TEXT NOT NULL,
     FOREIGN KEY (agent_id) REFERENCES tracked_agents(id)
   )`,
+  'CREATE UNIQUE INDEX IF NOT EXISTS uq_tracked_agent_events_agent_sequence ON tracked_agent_events(agent_id, sequence)',
 ] as const;

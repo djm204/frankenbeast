@@ -397,7 +397,7 @@ export class SQLiteBeastRepository {
       const priorMs = Date.parse(priorHeartbeatAt);
       const nextMs = Date.parse(newHeartbeatAt);
       if (Number.isFinite(priorMs) && Number.isFinite(nextMs) && nextMs <= priorMs) {
-        this.insertEvent(runId, {
+        this.appendEvent(runId, {
           type: 'run.heartbeat.anomaly',
           payload: {
             code: nextMs < priorMs ? 'regressive-heartbeat' : 'duplicate-heartbeat',
@@ -454,7 +454,7 @@ export class SQLiteBeastRepository {
   }
 
   appendEvent(runId: string, input: AppendEventInput): BeastRunEvent {
-    return this.insertEvent(runId, input);
+    return this.db.transaction(() => this.insertEvent(runId, input)).immediate();
   }
 
   private insertEvent(runId: string, input: AppendEventInput): BeastRunEvent {
@@ -652,41 +652,43 @@ export class SQLiteBeastRepository {
   }
 
   appendTrackedAgentEvent(agentId: string, input: AppendTrackedAgentEventInput): TrackedAgentEvent {
-    this.getTrackedAgentOrThrow(agentId);
-    const event: TrackedAgentEvent = {
-      id: prefixedId('agent_event'),
-      agentId,
-      sequence: nextTrackedAgentEventSequence(this.db, agentId),
-      level: input.level,
-      type: input.type,
-      message: input.message,
-      payload: input.payload,
-      createdAt: input.createdAt,
-    };
+    return this.db.transaction(() => {
+      this.getTrackedAgentOrThrow(agentId);
+      const event: TrackedAgentEvent = {
+        id: prefixedId('agent_event'),
+        agentId,
+        sequence: nextTrackedAgentEventSequence(this.db, agentId),
+        level: input.level,
+        type: input.type,
+        message: input.message,
+        payload: input.payload,
+        createdAt: input.createdAt,
+      };
 
-    this.db.prepare(
-      `INSERT INTO tracked_agent_events (
-        id,
-        agent_id,
-        sequence,
-        level,
-        type,
-        message,
-        payload,
-        created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      event.id,
-      event.agentId,
-      event.sequence,
-      event.level,
-      event.type,
-      event.message,
-      JSON.stringify(event.payload),
-      event.createdAt,
-    );
+      this.db.prepare(
+        `INSERT INTO tracked_agent_events (
+          id,
+          agent_id,
+          sequence,
+          level,
+          type,
+          message,
+          payload,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        event.id,
+        event.agentId,
+        event.sequence,
+        event.level,
+        event.type,
+        event.message,
+        JSON.stringify(event.payload),
+        event.createdAt,
+      );
 
-    return event;
+      return event;
+    }).immediate();
   }
 
   listTrackedAgentEvents(agentId: string, options: CorruptJsonRecoveryOptions = {}): TrackedAgentEvent[] {
