@@ -2924,9 +2924,10 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     )
       .map((event) => {
         const summary = event.summary.toLowerCase();
-        const details = event.details
-          ? JSON.stringify(event.details).toLowerCase()
-          : '';
+        const details =
+          event.details && !isQuarantinedEpisodicDetails(event)
+            ? JSON.stringify(event.details).toLowerCase()
+            : '';
         const score = keywords.reduce(
           (sum, keyword) =>
             sum +
@@ -2993,7 +2994,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     >;
   }
 
-  recentFailures(n = 10): EpisodicEvent[] {
+  recentFailures(n = 10, includeQuarantined = true): EpisodicEvent[] {
     try {
       const quarantinedEventIds = new Set<number>();
       const stmt = this.db.prepare(
@@ -3005,6 +3006,9 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
         n,
         this.encryption,
         (eventId) => quarantinedEventIds.add(eventId),
+        includeQuarantined
+          ? undefined
+          : (event) => !isQuarantinedEpisodicDetails(event),
       );
       this.audit?.({
         operation: 'episodic.recentFailures',
@@ -5566,7 +5570,7 @@ export class SqliteBrain implements IBrain {
         evidencePointers: Set<string>;
       }>();
 
-      for (const event of this.episodic.recentFailures(lookback)) {
+      for (const event of this.episodic.recentFailures(lookback, false)) {
         const signal = skillEvolutionSignalFromEvent(event);
         if (!signal) continue;
         const groupKey = `${normalizeLearningKey(signal.skillName)}:${signal.failureSignatureHash}`;
@@ -5928,7 +5932,10 @@ export class SqliteBrain implements IBrain {
 
     for (const event of this.episodic.recent(-1)) {
       const key = String(event.id ?? event.summary);
-      const className = isRightToForgetAuditEvent(event)
+      const className = (
+        isRightToForgetAuditEvent(event)
+        || isQuarantinedRightToForgetAuditEvent(event)
+      )
         ? 'audit_record'
         : classifyMemoryEntry({
           store: 'episodic',
@@ -7617,6 +7624,24 @@ function workingEntryMatchesSelector(key: string, value: unknown, selector: Norm
   return false;
 }
 
+function isQuarantinedEpisodicDetails(event: EpisodicEvent): boolean {
+  const details = event.details;
+  if (details === null || typeof details !== 'object' || Array.isArray(details)) return false;
+  const quarantine = (details as Record<string, unknown>).quarantine;
+  if (quarantine === null || typeof quarantine !== 'object' || Array.isArray(quarantine)) return false;
+  const record = quarantine as Record<string, unknown>;
+  return record.field === 'details'
+    && record.eventId === event.id
+    && record.reason === 'invalid JSON';
+}
+
+function isQuarantinedRightToForgetAuditEvent(event: EpisodicEvent): boolean {
+  return event.type === 'observation'
+    && event.step === 'right-to-forget'
+    && event.summary === 'Right-to-forget deletion completed'
+    && isQuarantinedEpisodicDetails(event);
+}
+
 function isRightToForgetAuditEvent(event: EpisodicEvent): boolean {
   if (event.type !== 'observation' || event.step !== 'right-to-forget') return false;
   if (event.summary !== 'Right-to-forget deletion completed') return false;
@@ -8210,6 +8235,7 @@ function collectRowsToEvents(
   limit: number,
   encryption?: MemoryCipher,
   reportCorruptDetails?: CorruptEpisodicDetailsReporter,
+  includeEvent?: (event: EpisodicEvent) => boolean,
 ): EpisodicEvent[] {
   if (limit === 0) {
     return [];
@@ -8226,7 +8252,7 @@ function collectRowsToEvents(
     const rows = fetchRows(batchSize, offset);
     for (const row of rows) {
       const event = rowToEvent(row, encryption, reportCorruptDetails);
-      if (event) {
+      if (includeEvent?.(event) ?? true) {
         events.push(event);
         if (events.length >= target) {
           break;

@@ -296,6 +296,37 @@ describe('SqliteBrain', () => {
       expect(report.compactionCandidates.map((entry) => entry.class)).not.toContain('audit_record');
     });
 
+    it('protects quarantined right-to-forget audit envelopes from retention compaction', () => {
+      brain.episodic.record({
+        type: 'observation',
+        step: 'right-to-forget',
+        summary: 'Right-to-forget deletion completed',
+        details: {
+          selectorHash: 'a'.repeat(64),
+          deleted: { working: 1, episodic: 0, derived: 1 },
+        },
+        createdAt: '2020-01-01T00:00:00.000Z',
+      });
+      const eventId = brain.episodic.recent(1)[0]!.id;
+      const db = (
+        brain as unknown as {
+          db: { prepare: (sql: string) => { run: (...args: unknown[]) => void } };
+        }
+      ).db;
+      db.prepare(`UPDATE episodic_events SET details = ? WHERE id = ?`).run('{', eventId);
+
+      const report = brain.memoryRetentionReport({ now: '2027-01-01T00:00:00.000Z' });
+
+      expect(report.entries.find((entry) => entry.key === String(eventId))).toMatchObject({
+        class: 'audit_record',
+        action: 'protect',
+        protected: true,
+      });
+      expect(report.compactionCandidates).not.toContainEqual(
+        expect.objectContaining({ key: String(eventId) }),
+      );
+    });
+
     it('treats explicit audit class aliases as protected audit records', () => {
       brain.episodic.record({
         type: 'observation',
@@ -508,6 +539,39 @@ describe('SqliteBrain', () => {
       }));
       expect(JSON.stringify(item)).not.toContain('stack trace');
       expect(brain.createSkillEvolutionReviewGate({ threshold: 3 })).toEqual([]);
+    });
+
+    it('does not let quarantined failures consume the skill-evolution lookback', () => {
+      for (const evidenceId of ['task-1', 'task-2', 'task-3']) {
+        brain.episodic.recordSkillFailure({
+          skillName: 'resolve-issues',
+          failureSignature: 'same bounded failure',
+          evidenceId,
+          createdAt: '2026-07-16T10:00:00.000Z',
+        });
+      }
+      brain.episodic.record({
+        type: 'failure',
+        summary: 'newer corrupt failure',
+        details: { marker: 'valid-before-corruption' },
+        createdAt: '2026-07-16T10:01:00.000Z',
+      });
+      const db = (
+        brain as unknown as {
+          db: { prepare: (sql: string) => { run: (...args: unknown[]) => void } };
+        }
+      ).db;
+      db.prepare(`UPDATE episodic_events SET details = ? WHERE summary = ?`).run(
+        '{',
+        'newer corrupt failure',
+      );
+
+      const [item] = brain.createSkillEvolutionReviewGate({ threshold: 3, lookback: 3 });
+
+      expect(item?.value).toMatchObject({
+        kind: 'skill-evolution-review',
+        failureCount: 3,
+      });
     });
 
     it('does not create a review item for unrelated one-off failures', () => {
@@ -5461,6 +5525,45 @@ describe('SqliteBrain', () => {
         expect(
           encrypted.episodic.recall('alpha', 2).map((event) => event.createdAt),
         ).toEqual(['2026-07-13T00:00:00.000Z', '2026-07-13T00:01:00.000Z']);
+        encrypted.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('does not score synthetic quarantine metadata during encrypted recall', () => {
+      const dir = mkdtempSync(
+        join(tmpdir(), 'sqlite-brain-encryption-quarantine-recall-'),
+      );
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const encrypted = new SqliteBrain(dbPath, undefined, { encryption });
+        encrypted.episodic.record({
+          type: 'observation',
+          summary: 'corrupt payload event',
+          details: { note: 'valid before corruption' },
+          createdAt: '2026-07-13T00:00:00.000Z',
+        });
+        const encodedMalformedJson = (
+          encrypted.episodic as unknown as { encode: (value: string) => string }
+        ).encode('{');
+        const db = (
+          encrypted as unknown as {
+            db: { prepare: (sql: string) => { run: (...args: unknown[]) => void } };
+          }
+        ).db;
+        db.prepare(`UPDATE episodic_events SET details = ?`).run(encodedMalformedJson);
+
+        expect(encrypted.episodic.recall('invalid', 10)).toEqual([]);
+        expect(encrypted.episodic.recall('corrupt', 10)[0]).toMatchObject({
+          details: {
+            quarantine: {
+              field: 'details',
+              reason: 'invalid JSON',
+            },
+          },
+        });
         encrypted.close();
       } finally {
         rmSync(dir, { recursive: true, force: true });
