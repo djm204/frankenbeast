@@ -120,10 +120,14 @@ export type {
   TraceValidationResult,
 } from './core/types.js'
 export type { TokenUsage } from './core/SpanLifecycle.js'
-export type { TokenRecord, TokenTotals } from './cost/TokenCounter.js'
+export type { TokenRecord, TokenTotals, TokenCounterOptions } from './cost/TokenCounter.js'
 export type { CostCalculatorOptions } from './cost/CostCalculator.js'
 export type { CircuitBreakerOptions, CircuitBreakerResult } from './cost/CircuitBreaker.js'
-export type { AttributionEntry, AttributionRow } from './cost/ModelAttribution.js'
+export type {
+  AttributionEntry,
+  AttributionRow,
+  ModelAttributionOptions,
+} from './cost/ModelAttribution.js'
 export type {
   AgentDecisionRecord,
   AgentDecisionRecordInput,
