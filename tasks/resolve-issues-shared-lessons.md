@@ -1,5 +1,9 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-20 — Outbound request deadlines must include response consumption
+- JavaScript `fetch()` resolves when response headers arrive, not when the body has been consumed. A hard outbound-delivery deadline must wrap both the fetch and all body/error parsing under the same abort signal and timer; otherwise a provider can send headers and stall forever during `json()` or `text()`.
+- In fresh monorepo worktrees, run the root build before package-local TypeScript checks so internal workspace declaration outputs exist and unrelated module-resolution errors do not mask the feature result.
+
 ## 2026-07-20 — Recovered PID signal-boundary identity checks
 - Carry the persisted process-start token into the supervisor and re-read identity immediately before every fallback signal; validating ownership in an upstream executor leaves a TOCTOU gap, especially when a failed process-group sweep falls back to direct PID signaling. If the token is missing, unreadable, unsupported, or mismatched while the PID exists, refuse the signal with operator guidance. An absent PID is a safe no-op for direct signaling, but a persisted owned process group must still be swept because descendants can survive their group leader.
 
