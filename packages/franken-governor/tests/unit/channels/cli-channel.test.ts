@@ -31,16 +31,57 @@ function makeFakeReadline(inputs: string[]): ReadlineAdapter {
 }
 
 describe('CliChannel', () => {
-  it('forwards gateway cancellation to the active readline question', () => {
-    const cancel = vi.fn();
+  it('forwards gateway cancellation only to the matching active readline question', async () => {
+    let rejectQuestion: ((reason: Error) => void) | undefined;
+    const cancel = vi.fn(() => {
+      const error = new Error('Terminal question cancelled');
+      error.name = 'AbortError';
+      rejectQuestion?.(error);
+    });
+    let answer: ((value: string) => void) | undefined;
     const channel = new CliChannel({
-      readline: { ...makeFakeReadline([]), cancel },
+      readline: {
+        question: vi.fn(() => new Promise<string>((resolve, reject) => {
+          answer = resolve;
+          rejectQuestion = reject;
+        })),
+        cancel,
+      },
       operatorName: 'dev',
     });
 
-    channel.cancel('req-001');
+    const pending = channel.requestApproval(makeRequest({ requestId: 'req-001' }));
+    await Promise.resolve();
+    channel.cancel('req-other');
 
+    expect(cancel).not.toHaveBeenCalled();
+
+    channel.cancel('req-001');
     expect(cancel).toHaveBeenCalledTimes(1);
+
+    answer?.('a');
+    await pending;
+  });
+
+  it('serializes approvals and drops a queued request cancelled by its own timeout', async () => {
+    const answers: Array<(value: string) => void> = [];
+    const question = vi.fn(() => new Promise<string>((resolve) => answers.push(resolve)));
+    const cancel = vi.fn();
+    const channel = new CliChannel({ readline: { question, cancel }, operatorName: 'dev' });
+
+    const first = channel.requestApproval(makeRequest({ requestId: 'req-first' }));
+    const second = channel.requestApproval(makeRequest({ requestId: 'req-second' }));
+    await Promise.resolve();
+
+    expect(question).toHaveBeenCalledTimes(1);
+    channel.cancel('req-second');
+    expect(cancel).not.toHaveBeenCalled();
+
+    answers[0]?.('a');
+    await expect(first).resolves.toMatchObject({ requestId: 'req-first' });
+    await expect(second).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(question).toHaveBeenCalledTimes(1);
   });
 
   it('implements ApprovalChannel with channelId "cli"', () => {

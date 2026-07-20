@@ -95,25 +95,27 @@ export function createStdinIO(): InterviewIO & { close(): void } {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   let activeQuestion: AbortController | undefined;
   const cancelQuestion = (): void => activeQuestion?.abort();
-  return {
-    ask: (question: string) => {
-      const controller = new AbortController();
-      activeQuestion = controller;
-      return new Promise<string>((resolve, reject) => {
-        const onAbort = () => {
-          const error = new Error('Terminal question cancelled');
-          error.name = 'AbortError';
-          reject(error);
-        };
-        controller.signal.addEventListener('abort', onAbort, { once: true });
-        rl.question(`${question}\n> `, { signal: controller.signal }, (answer) => {
-          controller.signal.removeEventListener('abort', onAbort);
-          resolve(answer);
-        });
-      }).finally(() => {
-        if (activeQuestion === controller) activeQuestion = undefined;
+  const askRaw = (prompt: string) => {
+    const controller = new AbortController();
+    activeQuestion = controller;
+    return new Promise<string>((resolve, reject) => {
+      const onAbort = () => {
+        const error = new Error('Terminal question cancelled');
+        error.name = 'AbortError';
+        reject(error);
+      };
+      controller.signal.addEventListener('abort', onAbort, { once: true });
+      rl.question(prompt, { signal: controller.signal }, (answer) => {
+        controller.signal.removeEventListener('abort', onAbort);
+        resolve(answer);
       });
-    },
+    }).finally(() => {
+      if (activeQuestion === controller) activeQuestion = undefined;
+    });
+  };
+  return {
+    ask: (question: string) => askRaw(`${question}\n> `),
+    askRaw,
     cancelQuestion,
     display: (message: string) => printLine(message),
     close: () => {

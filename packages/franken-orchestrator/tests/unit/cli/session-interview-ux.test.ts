@@ -192,7 +192,9 @@ describe('Session interview UX', () => {
   });
 
   it('passes its existing prompt owner to governor dependency wiring', async () => {
-    const io = createIO(['x', 'approved']);
+    const io = createIO(['x']);
+    const askRaw = vi.fn(async () => 'approved');
+    io.askRaw = askRaw;
     const { Session } = await import('../../../src/cli/session.js');
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
 
@@ -201,7 +203,8 @@ describe('Session interview UX', () => {
     const depOptions = vi.mocked(createCliDeps).mock.calls[0]?.[0];
     await expect(depOptions?.governorQuestion?.('Approve?')).resolves.toBe('approved');
     depOptions?.governorCancel?.();
-    expect(io.ask).toHaveBeenLastCalledWith('Approve?');
+    expect(askRaw).toHaveBeenCalledWith('Approve?');
+    expect(io.ask).not.toHaveBeenCalledWith('Approve?');
     expect(io.cancelQuestion).toHaveBeenCalledTimes(1);
   });
 

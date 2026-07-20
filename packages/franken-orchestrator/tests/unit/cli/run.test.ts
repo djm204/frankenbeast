@@ -1087,6 +1087,23 @@ describe('createStdinIO', () => {
     const io = createStdinIO();
     const answer = await io.ask('What?');
     expect(answer).toBe('mock-answer');
+    const readline = vi.mocked(createInterface).mock.results.at(-1)?.value;
+    expect(readline.question).toHaveBeenLastCalledWith(
+      'What?\n> ',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      expect.any(Function),
+    );
+  });
+
+  it('askRaw preserves an already formatted governor prompt', async () => {
+    const io = createStdinIO();
+    await io.askRaw?.('Approve?\n> ');
+    const readline = vi.mocked(createInterface).mock.results.at(-1)?.value;
+    expect(readline.question).toHaveBeenLastCalledWith(
+      'Approve?\n> ',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      expect.any(Function),
+    );
   });
 
   it('close closes readline and pauses stdin so read-only commands can terminate', () => {
