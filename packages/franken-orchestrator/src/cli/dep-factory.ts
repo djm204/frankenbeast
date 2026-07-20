@@ -131,6 +131,7 @@ const stubGovernor: IGovernorModule = {
 };
 const stubFirewall: IFirewallModule = {
   runPipeline: async (input: string) => ({ sanitizedText: input, violations: [], blocked: false }),
+  scanResponse: async (input: string) => ({ sanitizedText: input, violations: [], blocked: false }),
 };
 const stubMemory: IMemoryModule = {
   frontload: async () => {},

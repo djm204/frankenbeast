@@ -1,7 +1,6 @@
 import type {
   IFirewallModule,
   FirewallResult,
-  FirewallViolation,
 } from '../deps.js';
 import type { MiddlewareChain } from '../middleware/llm-middleware.js';
 import { InjectionDetectedError } from '../middleware/injection-detection.js';
@@ -59,6 +58,51 @@ export class MiddlewareChainFirewallAdapter implements IFirewallModule {
       const message = err instanceof Error ? err.message : String(err);
       return {
         sanitizedText: input,
+        violations: [{ rule: 'middleware-error', severity: 'block', detail: message }],
+        blocked: true,
+      };
+    }
+  }
+
+  async scanResponse(input: string): Promise<FirewallResult> {
+    const requestResult = await this.runPipeline(input);
+    if (requestResult.blocked) return requestResult;
+
+    try {
+      const processed = this.chain.processResponse({
+        content: requestResult.sanitizedText,
+        usage: { inputTokens: 0, outputTokens: 0 },
+      });
+      return {
+        sanitizedText: processed.content,
+        violations: requestResult.violations,
+        blocked: false,
+      };
+    } catch (err) {
+      if (err instanceof InjectionDetectedError) {
+        return {
+          sanitizedText: requestResult.sanitizedText,
+          violations: [{ rule: 'injection-detection', severity: 'block', detail: err.message }],
+          blocked: true,
+        };
+      }
+      if (err instanceof DomainBlockedError) {
+        return {
+          sanitizedText: requestResult.sanitizedText,
+          violations: [{ rule: 'domain-allowlist', severity: 'block', detail: err.message }],
+          blocked: true,
+        };
+      }
+      if (err instanceof CustomRuleError) {
+        return {
+          sanitizedText: requestResult.sanitizedText,
+          violations: [{ rule: `custom:${err.ruleName}`, severity: 'block', detail: err.message }],
+          blocked: true,
+        };
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        sanitizedText: requestResult.sanitizedText,
         violations: [{ rule: 'middleware-error', severity: 'block', detail: message }],
         blocked: true,
       };
