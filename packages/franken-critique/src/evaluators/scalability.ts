@@ -1,4 +1,5 @@
 import type { Evaluator, EvaluationInput, EvaluationResult, EvaluationFinding } from './evaluator.js';
+import { createScore } from '../types/common.js';
 
 const HARDCODED_URL_PATTERN = /["'](https?:\/\/(?:localhost|127\.0\.0\.1)[^"']*)["']/g;
 const HARDCODED_IP_PATTERN = /["'](\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})["']/g;
@@ -50,7 +51,7 @@ export class ScalabilityEvaluator implements Evaluator {
 
   async evaluate(input: EvaluationInput): Promise<EvaluationResult> {
     if (!input.content.trim()) {
-      return { evaluatorName: this.name, verdict: 'pass', score: 1, findings: [] };
+      return { evaluatorName: this.name, verdict: 'pass', score: createScore(1), findings: [] };
     }
 
     const findings: EvaluationFinding[] = [];
@@ -59,7 +60,7 @@ export class ScalabilityEvaluator implements Evaluator {
     this.checkHardcodedIPs(input.content, findings);
     this.checkHardcodedPorts(input.content, findings);
 
-    const score = Math.max(0, 1 - findings.length * 0.25);
+    const score = createScore(Math.max(0, 1 - findings.length * 0.25));
 
     return {
       evaluatorName: this.name,

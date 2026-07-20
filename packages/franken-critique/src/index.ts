@@ -2,6 +2,7 @@
 // Public API barrel export
 
 // Types — common
+export { createScore } from './types/common.js';
 export type {
   Severity,
   Verdict,
