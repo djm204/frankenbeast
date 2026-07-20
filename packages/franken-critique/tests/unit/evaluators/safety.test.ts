@@ -928,7 +928,16 @@ describe('SafetyEvaluator', () => {
     expect(evaluator.hasUnsafeRegexShape('^(?:\\u{61}|a)+$', true)).toBe(true);
     expect(evaluator.hasUnsafeRegexShape('^(?:\\u{62}|a)+$', true)).toBe(false);
     expect(
+      evaluator.hasUnsafeRegexShape('^(?:[\\u{61}]|aa)+$', true),
+    ).toBe(true);
+    expect(
+      evaluator.hasUnsafeRegexShape('^(?i:\\u{41}|aa)+$', true),
+    ).toBe(true);
+    expect(
       evaluator.hasUnsafeRegexShape('^[\\q{a}\\q{aa}]+$', true),
+    ).toBe(true);
+    expect(
+      evaluator.hasUnsafeRegexShape('^[\\q{\\0|\\0\\0}]+$', true),
     ).toBe(true);
     expect(evaluator.hasUnsafeRegexShape('^[a\\q{aa}]+$', true)).toBe(true);
     expect(
@@ -984,6 +993,31 @@ describe('SafetyEvaluator', () => {
         message: 'Safety rule violated: unicode set intersection',
       }),
     ]);
+  });
+
+  it('reports malformed unicodeSets rules as invalid instead of throwing', async () => {
+    const evaluator = new SafetyEvaluator(
+      createMockGuardrailsPort([
+        {
+          id: 'invalid-unicode-set-subtraction',
+          description: 'invalid unicode set subtraction',
+          pattern: '[\\q{a}--]',
+          flags: 'v',
+          severity: 'block',
+        },
+      ]),
+    );
+
+    await expect(evaluator.evaluate(createInput('safe content'))).resolves.toEqual(
+      expect.objectContaining({
+        verdict: 'fail',
+        findings: [
+          expect.objectContaining({
+            message: 'Invalid safety rule regex: invalid unicode set subtraction',
+          }),
+        ],
+      }),
+    );
   });
 
   it('rejects nullable and variable-quantified alternation bypass patterns', async () => {

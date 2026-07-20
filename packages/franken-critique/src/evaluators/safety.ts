@@ -214,7 +214,18 @@ export class SafetyEvaluator implements Evaluator {
       };
     }
 
-    if (this.hasUnsafeRegexShape(rule.pattern, rule.flags === 'v')) {
+    let unsafe: boolean;
+    try {
+      unsafe = this.hasUnsafeRegexShape(rule.pattern, rule.flags === 'v');
+    } catch {
+      return {
+        message: `Invalid safety rule regex: ${rule.description}`,
+        severity,
+        suggestion: 'Fix or remove invalid pattern before enabling this rule.',
+      };
+    }
+
+    if (unsafe) {
       return {
         message: `Unsafe safety rule regex: ${rule.description}`,
         severity,
@@ -475,6 +486,7 @@ export class SafetyEvaluator implements Evaluator {
       };
     }
     const controlEscapes: Record<string, string> = {
+      '0': '\0',
       f: '\f',
       n: '\n',
       r: '\r',
@@ -1022,6 +1034,17 @@ export class SafetyEvaluator implements Evaluator {
         end: start + 5,
       };
     }
+    if (this.parsingUnicodeSets && escaped === 'u') {
+      const braced = body.slice(start + 2).match(/^\{([0-9A-Fa-f]{1,6})\}/);
+      if (braced) {
+        const codePoint = Number.parseInt(braced[1]!, 16);
+        if (codePoint > 0x10ffff) return null;
+        return {
+          value: String.fromCodePoint(codePoint),
+          end: start + 1 + braced[0].length,
+        };
+      }
+    }
     if (escaped === 'c' && /^[A-Za-z0-9_]$/.test(body[start + 2] ?? '')) {
       return { value: String.fromCharCode(body.charCodeAt(start + 2) & 31), end: start + 2 };
     }
@@ -1508,6 +1531,20 @@ export class SafetyEvaluator implements Evaluator {
           ).toLowerCase();
           i += 3;
           continue;
+        }
+        if (
+          pattern[i + 1] === 'u' &&
+          /^\{[0-9A-Fa-f]{1,6}\}/.test(pattern.slice(i + 2))
+        ) {
+          const codePoint = pattern
+            .slice(i + 2)
+            .match(/^\{([0-9A-Fa-f]{1,6})\}/)!;
+          const valueAsNumber = Number.parseInt(codePoint[1]!, 16);
+          if (valueAsNumber <= 0x10ffff) {
+            result += String.fromCodePoint(valueAsNumber).toLowerCase();
+            i += 1 + codePoint[0].length;
+            continue;
+          }
         }
         if (
           pattern[i + 1] === 'u' &&
