@@ -33,6 +33,41 @@ const agents: TrackedAgentSummary[] = [
 ];
 
 describe('AgentList', () => {
+  it('offers access to later tracked-agent pages', () => {
+    const onLoadMore = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AgentList
+        agents={agents}
+        runs={[]}
+        selectedAgentId={null}
+        onSelectAgent={vi.fn()}
+        onCreateAgent={vi.fn()}
+        hasMore={true}
+        onLoadMore={onLoadMore}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load more agents' }));
+    expect(onLoadMore).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables the later-page action while loading', () => {
+    render(
+      <AgentList
+        agents={agents}
+        runs={[]}
+        selectedAgentId={null}
+        onSelectAgent={vi.fn()}
+        onCreateAgent={vi.fn()}
+        hasMore={true}
+        loadingMore={true}
+        onLoadMore={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect((screen.getByRole('button', { name: 'Loading agents…' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('renders all agents', () => {
     render(<AgentList agents={agents} runs={[]} selectedAgentId={null} onSelectAgent={vi.fn()} onCreateAgent={vi.fn()} />);
     expect(screen.getByText('agent-1')).toBeTruthy();
@@ -50,6 +85,23 @@ describe('AgentList', () => {
     fireEvent.change(search, { target: { value: 'agent-1' } });
     expect(screen.getByText('agent-1')).toBeTruthy();
     expect(screen.queryByText('agent-2')).toBeNull();
+  });
+
+  it('does not claim a definitive empty search while later pages remain', () => {
+    render(
+      <AgentList
+        agents={agents}
+        runs={[]}
+        selectedAgentId={null}
+        onSelectAgent={vi.fn()}
+        onCreateAgent={vi.fn()}
+        hasMore={true}
+        onLoadMore={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+    fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: 'older-agent' } });
+    expect(screen.getByText('No matching loaded agents. Load more agents to continue searching.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Load more agents' })).toBeTruthy();
   });
 
   it('filters agents by status', () => {

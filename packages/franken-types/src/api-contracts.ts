@@ -222,6 +222,7 @@ export interface BeastRunDetail {
 
 export interface BeastSseSnapshot {
   agents?: Array<Partial<TrackedAgentSummary> & { id: string }>;
+  nextCursor?: string;
 }
 
 export const TRACKED_AGENT_STATUSES = [

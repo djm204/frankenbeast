@@ -40,6 +40,7 @@ import { SseConnectionTicketStore } from '../beasts/events/sse-connection-ticket
 import { createAnalyticsRoutes, type AnalyticsRouteDeps } from './routes/analytics-routes.js';
 import { ChatMutationAdmission, createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, type ChatRateLimitOptions } from './chat-rate-limit.js';
 import type { InMemoryRateLimiter } from '../beasts/http/beast-rate-limit.js';
+import { DEFAULT_TRACKED_AGENT_PAGE_LIMIT } from '../beasts/repository/sqlite-beast-repository.js';
 
 export interface ChatAppOptions {
   sessionStoreDir?: string;
@@ -288,14 +289,19 @@ export function createChatApp(opts: ChatAppOptions): Hono {
       bus: bc.eventBus,
       ticketStore: bc.ticketStore,
       operatorToken: bc.operatorToken,
-      getSnapshot: () => ({
-        agents: bc.agents.listAgents().map((a) => ({
-          id: a.id,
-          definitionId: a.definitionId,
-          status: a.status,
-          updatedAt: a.updatedAt,
-        })),
-      }),
+      getSnapshot: () => {
+        const page = bc.agents.listAgentPage({ limit: DEFAULT_TRACKED_AGENT_PAGE_LIMIT });
+        return {
+          agents: page.agents.map((a) => ({
+            id: a.id,
+            definitionId: a.definitionId,
+            status: a.status,
+            createdAt: a.createdAt,
+            updatedAt: a.updatedAt,
+          })),
+          ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+        };
+      },
     }));
   } else if (opts.beastDaemon) {
     const proxyOperatorToken = opts.beastDaemon.operatorToken ?? effectiveOperatorToken;

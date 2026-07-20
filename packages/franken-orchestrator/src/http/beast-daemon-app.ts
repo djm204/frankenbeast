@@ -13,6 +13,7 @@ import {
 } from './middleware.js';
 import { TransportSecurityService } from './security/transport-security.js';
 import { isoNow } from '@franken/types';
+import { DEFAULT_TRACKED_AGENT_PAGE_LIMIT } from '../beasts/repository/sqlite-beast-repository.js';
 import {
   availabilityModeDenialDetails,
   InMemoryAvailabilityModeState,
@@ -216,14 +217,19 @@ export function createBeastDaemonApp(options: BeastDaemonAppOptions): Hono {
     bus: services.eventBus,
     ticketStore: services.ticketStore,
     operatorToken: options.operatorToken,
-    getSnapshot: () => ({
-      agents: services.agents.listAgents().map((agent) => ({
-        id: agent.id,
-        definitionId: agent.definitionId,
-        status: agent.status,
-        updatedAt: agent.updatedAt,
-      })),
-    }),
+    getSnapshot: () => {
+      const page = services.agents.listAgentPage({ limit: DEFAULT_TRACKED_AGENT_PAGE_LIMIT });
+      return {
+        agents: page.agents.map((agent) => ({
+          id: agent.id,
+          definitionId: agent.definitionId,
+          status: agent.status,
+          createdAt: agent.createdAt,
+          updatedAt: agent.updatedAt,
+        })),
+        ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+      };
+    },
   }));
   app.route('/', beastRoutes(routeDeps));
   app.route('/', agentRoutes({

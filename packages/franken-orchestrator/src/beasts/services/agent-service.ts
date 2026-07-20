@@ -11,6 +11,8 @@ import { DeletedTrackedAgentError, UnknownTrackedAgentError } from '../errors.js
 import {
   BeastRepositoryJsonCorruptionError,
   SQLiteBeastRepository,
+  type TrackedAgentPage,
+  type TrackedAgentPageOptions,
 } from '../repository/sqlite-beast-repository.js';
 import type {
   CapacityReservationDecision,
@@ -93,6 +95,10 @@ export class AgentService {
     return this.repository.listTrackedAgents({ recoverCorruptJson: true });
   }
 
+  listAgentPage(options: Omit<TrackedAgentPageOptions, 'recoverCorruptJson'>): TrackedAgentPage {
+    return this.repository.listTrackedAgentPage({ ...options, recoverCorruptJson: true });
+  }
+
   getCapacityReservationState(): CapacityReservationState | undefined {
     return this.options.capacityPolicy?.describe(this.activeCapacityItems(true));
   }
@@ -144,8 +150,8 @@ export class AgentService {
     };
   }
 
-  listDispatchFailureRedactedAgentIds(): Set<string> {
-    return new Set(this.repository.listDispatchFailureHistoryAgentIds());
+  listDispatchFailureRedactedAgentIds(agentIds?: readonly string[]): Set<string> {
+    return new Set(this.repository.listDispatchFailureHistoryAgentIds(agentIds));
   }
 
   hasActiveDispatchFailure(agentId: string): boolean {
@@ -209,10 +215,7 @@ export class AgentService {
   }
 
   private activeCapacityItems(recoverCorruptJson = false): CapacityReservationWorkItem[] {
-    return this.repository.listTrackedAgents({ recoverCorruptJson })
-      .filter((agent) => agent.status === 'dispatching'
-        || agent.status === 'awaiting_approval'
-        || agent.status === 'running')
+    return this.repository.listCapacityTrackedAgents({ recoverCorruptJson })
       .map((agent) => {
         let linkedRun: BeastRun | undefined;
         try {

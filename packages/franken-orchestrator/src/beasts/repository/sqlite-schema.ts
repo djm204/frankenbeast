@@ -80,4 +80,10 @@ export const BEAST_SQLITE_SCHEMA_STATEMENTS = [
     created_at TEXT NOT NULL,
     FOREIGN KEY (agent_id) REFERENCES tracked_agents(id)
   )`,
+  `CREATE INDEX IF NOT EXISTS idx_tracked_agents_created_at_id
+    ON tracked_agents(created_at DESC, id DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_tracked_agents_status
+    ON tracked_agents(status)`,
+  `CREATE INDEX IF NOT EXISTS idx_tracked_agent_events_type_agent
+    ON tracked_agent_events(type, agent_id)`,
 ] as const;

@@ -201,6 +201,56 @@ export interface CorruptJsonRecoveryOptions {
   readonly recoverCorruptJson?: boolean;
 }
 
+export const DEFAULT_TRACKED_AGENT_PAGE_LIMIT = 50;
+export const MAX_TRACKED_AGENT_PAGE_LIMIT = 200;
+
+interface TrackedAgentPageCursor {
+  readonly version: 1;
+  readonly snapshotRowId: number;
+  readonly afterCreatedAt: string;
+  readonly afterId: string;
+}
+
+export interface TrackedAgentPageOptions extends CorruptJsonRecoveryOptions {
+  readonly limit: number;
+  readonly cursor?: string | undefined;
+}
+
+export interface TrackedAgentPage {
+  readonly agents: TrackedAgent[];
+  readonly nextCursor?: string | undefined;
+}
+
+export class InvalidTrackedAgentCursorError extends Error {
+  constructor() {
+    super('Invalid tracked-agent pagination cursor');
+    this.name = 'InvalidTrackedAgentCursorError';
+  }
+}
+
+function encodeTrackedAgentCursor(cursor: TrackedAgentPageCursor): string {
+  return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url');
+}
+
+function decodeTrackedAgentCursor(value: string): TrackedAgentPageCursor {
+  try {
+    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as Partial<TrackedAgentPageCursor>;
+    if (parsed.version !== 1
+      || !Number.isSafeInteger(parsed.snapshotRowId)
+      || (parsed.snapshotRowId ?? -1) < 0
+      || typeof parsed.afterCreatedAt !== 'string'
+      || parsed.afterCreatedAt.length === 0
+      || typeof parsed.afterId !== 'string'
+      || parsed.afterId.length === 0) {
+      throw new InvalidTrackedAgentCursorError();
+    }
+    return parsed as TrackedAgentPageCursor;
+  } catch (error) {
+    if (error instanceof InvalidTrackedAgentCursorError) throw error;
+    throw new InvalidTrackedAgentCursorError();
+  }
+}
+
 export interface ListBeastRunEventsOptions extends CorruptJsonRecoveryOptions {
   readonly afterSequence?: number;
   readonly limit?: number;
@@ -610,6 +660,50 @@ export class SQLiteBeastRepository {
     return mapRowsRecoveringCorruptJson(rows, mapTrackedAgent, options);
   }
 
+  listTrackedAgentPage(options: TrackedAgentPageOptions): TrackedAgentPage {
+    if (!Number.isSafeInteger(options.limit) || options.limit < 1 || options.limit > MAX_TRACKED_AGENT_PAGE_LIMIT) {
+      throw new RangeError(`Tracked-agent page limit must be between 1 and ${MAX_TRACKED_AGENT_PAGE_LIMIT}`);
+    }
+    const cursor = options.cursor !== undefined ? decodeTrackedAgentCursor(options.cursor) : undefined;
+    const snapshotRowId = cursor?.snapshotRowId ?? (
+      this.db.prepare('SELECT COALESCE(MAX(rowid), 0) AS max_row_id FROM tracked_agents')
+        .get() as { max_row_id: number }
+    ).max_row_id;
+    const rows = (cursor
+      ? this.db.prepare(
+        `SELECT * FROM tracked_agents WHERE rowid <= ?
+           AND (created_at < ? OR (created_at = ? AND id < ?))
+         ORDER BY created_at DESC, id DESC LIMIT ?`,
+      ).all(snapshotRowId, cursor.afterCreatedAt, cursor.afterCreatedAt, cursor.afterId, options.limit + 1)
+      : this.db.prepare(
+        `SELECT * FROM tracked_agents WHERE rowid <= ?
+         ORDER BY created_at DESC, id DESC LIMIT ?`,
+      ).all(snapshotRowId, options.limit + 1)) as TrackedAgentRow[];
+    const pageRows = rows.slice(0, options.limit);
+    const agents = mapRowsRecoveringCorruptJson(pageRows, mapTrackedAgent, options);
+    const lastRow = pageRows.at(-1);
+    return {
+      agents,
+      ...(rows.length > options.limit && lastRow ? {
+        nextCursor: encodeTrackedAgentCursor({
+          version: 1,
+          snapshotRowId,
+          afterCreatedAt: lastRow.created_at,
+          afterId: lastRow.id,
+        }),
+      } : {}),
+    };
+  }
+
+  listCapacityTrackedAgents(options: CorruptJsonRecoveryOptions = {}): TrackedAgent[] {
+    const rows = this.db.prepare(
+      `SELECT * FROM tracked_agents
+       WHERE status IN ('dispatching', 'awaiting_approval', 'running')
+       ORDER BY created_at DESC, id DESC`,
+    ).all() as TrackedAgentRow[];
+    return mapRowsRecoveringCorruptJson(rows, mapTrackedAgent, options);
+  }
+
   updateTrackedAgent(agentId: string, patch: UpdateTrackedAgentPatch): TrackedAgent {
     const current = this.getTrackedAgentOrThrow(agentId);
     const next: TrackedAgent = {
@@ -714,12 +808,14 @@ export class SQLiteBeastRepository {
     return rows.map((row) => row.agent_id);
   }
 
-  listDispatchFailureHistoryAgentIds(): string[] {
+  listDispatchFailureHistoryAgentIds(agentIds?: readonly string[]): string[] {
+    if (agentIds?.length === 0) return [];
+    const scope = agentIds ? ` AND agent_id IN (${agentIds.map(() => '?').join(', ')})` : '';
     const rows = this.db.prepare(
       `SELECT DISTINCT agent_id
          FROM tracked_agent_events
-        WHERE type = 'agent.dispatch.failed'`,
-    ).all() as Array<{ agent_id: string }>;
+        WHERE type = 'agent.dispatch.failed'${scope}`,
+    ).all(...(agentIds ?? [])) as Array<{ agent_id: string }>;
     return rows.map((row) => row.agent_id);
   }
 
