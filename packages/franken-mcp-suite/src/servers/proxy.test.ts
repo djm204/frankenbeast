@@ -132,7 +132,7 @@ describe('proxy server', () => {
       const placeholderServer = createProxyServer({
         dbPath: '$FBEAST_ROOT/.fbeast/beast.db',
         root: '/tmp/placeholder-project',
-        configPath: '$FBEAST_ROOT/.fbeast/config.json',
+        configPath: '$FBEAST_ROOT/configs/fbeast.json',
         governance: { check: gateCheck },
         audit: { record: auditRecord },
       });
@@ -146,7 +146,7 @@ describe('proxy server', () => {
         '/tmp/placeholder-project/.fbeast/beast.db',
         {
           root: '/tmp/placeholder-project',
-          configPath: '/tmp/placeholder-project/.fbeast/config.json',
+          configPath: '/tmp/placeholder-project/configs/fbeast.json',
         },
       );
     });
