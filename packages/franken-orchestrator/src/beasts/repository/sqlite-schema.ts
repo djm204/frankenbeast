@@ -87,3 +87,8 @@ export const BEAST_SQLITE_SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_tracked_agent_events_type_agent
     ON tracked_agent_events(type, agent_id)`,
 ] as const;
+
+export const BEAST_SQLITE_EVENT_UNIQUENESS_INDEX_STATEMENTS = [
+  'CREATE UNIQUE INDEX IF NOT EXISTS uq_beast_run_events_run_sequence ON beast_run_events(run_id, sequence)',
+  'CREATE UNIQUE INDEX IF NOT EXISTS uq_tracked_agent_events_agent_sequence ON tracked_agent_events(agent_id, sequence)',
+] as const;

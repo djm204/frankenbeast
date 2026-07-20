@@ -17,7 +17,10 @@ import type {
   TrackedAgentStatus,
 } from '../types.js';
 import { UnknownTrackedAgentError } from '../errors.js';
-import { BEAST_SQLITE_SCHEMA_STATEMENTS } from './sqlite-schema.js';
+import {
+  BEAST_SQLITE_EVENT_UNIQUENESS_INDEX_STATEMENTS,
+  BEAST_SQLITE_SCHEMA_STATEMENTS,
+} from './sqlite-schema.js';
 
 interface CreateRunInput {
   trackedAgentId?: string | undefined;
@@ -283,6 +286,7 @@ export class SQLiteBeastRepository {
     }
 
     this.migrateLegacySchema();
+    this.repairDuplicateEventSequencesAndEnforceUniqueness();
   }
 
   createRun(input: CreateRunInput): BeastRun {
@@ -332,7 +336,7 @@ export class SQLiteBeastRepository {
   }
 
   transaction<T>(fn: () => T): T {
-    return this.db.transaction(fn)();
+    return this.db.transaction(fn).immediate();
   }
 
   getRun(runId: string): BeastRun | undefined {
@@ -447,7 +451,7 @@ export class SQLiteBeastRepository {
       const priorMs = Date.parse(priorHeartbeatAt);
       const nextMs = Date.parse(newHeartbeatAt);
       if (Number.isFinite(priorMs) && Number.isFinite(nextMs) && nextMs <= priorMs) {
-        this.insertEvent(runId, {
+        this.appendEvent(runId, {
           type: 'run.heartbeat.anomaly',
           payload: {
             code: nextMs < priorMs ? 'regressive-heartbeat' : 'duplicate-heartbeat',
@@ -504,7 +508,7 @@ export class SQLiteBeastRepository {
   }
 
   appendEvent(runId: string, input: AppendEventInput): BeastRunEvent {
-    return this.insertEvent(runId, input);
+    return this.db.transaction(() => this.insertEvent(runId, input)).immediate();
   }
 
   private insertEvent(runId: string, input: AppendEventInput): BeastRunEvent {
@@ -746,41 +750,43 @@ export class SQLiteBeastRepository {
   }
 
   appendTrackedAgentEvent(agentId: string, input: AppendTrackedAgentEventInput): TrackedAgentEvent {
-    this.getTrackedAgentOrThrow(agentId);
-    const event: TrackedAgentEvent = {
-      id: prefixedId('agent_event'),
-      agentId,
-      sequence: nextTrackedAgentEventSequence(this.db, agentId),
-      level: input.level,
-      type: input.type,
-      message: input.message,
-      payload: input.payload,
-      createdAt: input.createdAt,
-    };
+    return this.db.transaction(() => {
+      this.getTrackedAgentOrThrow(agentId);
+      const event: TrackedAgentEvent = {
+        id: prefixedId('agent_event'),
+        agentId,
+        sequence: nextTrackedAgentEventSequence(this.db, agentId),
+        level: input.level,
+        type: input.type,
+        message: input.message,
+        payload: input.payload,
+        createdAt: input.createdAt,
+      };
 
-    this.db.prepare(
-      `INSERT INTO tracked_agent_events (
-        id,
-        agent_id,
-        sequence,
-        level,
-        type,
-        message,
-        payload,
-        created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      event.id,
-      event.agentId,
-      event.sequence,
-      event.level,
-      event.type,
-      event.message,
-      JSON.stringify(event.payload),
-      event.createdAt,
-    );
+      this.db.prepare(
+        `INSERT INTO tracked_agent_events (
+          id,
+          agent_id,
+          sequence,
+          level,
+          type,
+          message,
+          payload,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        event.id,
+        event.agentId,
+        event.sequence,
+        event.level,
+        event.type,
+        event.message,
+        JSON.stringify(event.payload),
+        event.createdAt,
+      );
 
-    return event;
+      return event;
+    }).immediate();
   }
 
   listTrackedAgentEvents(agentId: string, options: CorruptJsonRecoveryOptions = {}): TrackedAgentEvent[] {
@@ -930,6 +936,72 @@ export class SQLiteBeastRepository {
     this.ensureColumnExists('beast_runs', 'last_heartbeat_sequence', 'ALTER TABLE beast_runs ADD COLUMN last_heartbeat_sequence INTEGER NOT NULL DEFAULT 0');
     this.ensureColumnExists('tracked_agents', 'module_config', 'ALTER TABLE tracked_agents ADD COLUMN module_config TEXT');
     this.ensureColumnExists('tracked_agents', 'execution_mode', 'ALTER TABLE tracked_agents ADD COLUMN execution_mode TEXT');
+  }
+
+  private repairDuplicateEventSequencesAndEnforceUniqueness(): void {
+    this.db.transaction(() => {
+      const duplicateRunIds = this.db.prepare(
+        `SELECT run_id
+           FROM beast_run_events
+          GROUP BY run_id
+         HAVING COUNT(*) != COUNT(DISTINCT sequence)`,
+      ).all() as Array<{ run_id: string }>;
+      const selectRunEvents = this.db.prepare(
+        `SELECT id, sequence
+           FROM beast_run_events
+          WHERE run_id = ?
+          ORDER BY sequence ASC, created_at ASC, id ASC`,
+      );
+      const updateRunEventSequence = this.db.prepare(
+        'UPDATE beast_run_events SET sequence = ? WHERE id = ?',
+      );
+      for (const { run_id: runId } of duplicateRunIds) {
+        const rows = selectRunEvents.all(runId) as Array<{ id: string; sequence: number }>;
+        let previousSequence: number | undefined;
+        for (const row of rows) {
+          const repairedSequence = previousSequence === undefined
+            ? row.sequence
+            : Math.max(row.sequence, previousSequence + 1);
+          if (repairedSequence !== row.sequence) {
+            updateRunEventSequence.run(repairedSequence, row.id);
+          }
+          previousSequence = repairedSequence;
+        }
+      }
+
+      const duplicateAgentIds = this.db.prepare(
+        `SELECT agent_id
+           FROM tracked_agent_events
+          GROUP BY agent_id
+         HAVING COUNT(*) != COUNT(DISTINCT sequence)`,
+      ).all() as Array<{ agent_id: string }>;
+      const selectAgentEvents = this.db.prepare(
+        `SELECT id, sequence
+           FROM tracked_agent_events
+          WHERE agent_id = ?
+          ORDER BY sequence ASC, created_at ASC, id ASC`,
+      );
+      const updateAgentEventSequence = this.db.prepare(
+        'UPDATE tracked_agent_events SET sequence = ? WHERE id = ?',
+      );
+      for (const { agent_id: agentId } of duplicateAgentIds) {
+        const rows = selectAgentEvents.all(agentId) as Array<{ id: string; sequence: number }>;
+        let previousSequence: number | undefined;
+        for (const row of rows) {
+          const repairedSequence = previousSequence === undefined
+            ? row.sequence
+            : Math.max(row.sequence, previousSequence + 1);
+          if (repairedSequence !== row.sequence) {
+            updateAgentEventSequence.run(repairedSequence, row.id);
+          }
+          previousSequence = repairedSequence;
+        }
+      }
+
+      for (const statement of BEAST_SQLITE_EVENT_UNIQUENESS_INDEX_STATEMENTS) {
+        this.db.prepare(statement).run();
+      }
+    }).immediate();
   }
 
   private ensureColumnExists(table: string, column: string, alterStatement: string): void {
