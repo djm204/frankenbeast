@@ -138,19 +138,40 @@ export class BatchAdapter implements ExportAdapter {
     try {
       await currentDrain
     } catch {
-      if (this.buffer.length > 0) {
-        try {
-          await this.drain()
-        } catch (error) {
-          if (this.buffer.includes(triggerTrace)) {
-            throw error instanceof Error ? error : new Error(String(error))
-          }
+      try {
+        await this.drainBufferedTrace(triggerTrace)
+      } catch (error) {
+        if (this.buffer.includes(triggerTrace)) {
+          throw error instanceof Error ? error : new Error(String(error))
         }
       }
       return
     }
 
     if (this.buffer.length >= this.maxBatchSize) await this.drain()
+  }
+
+  private async drainBufferedTrace(trace: Trace): Promise<void> {
+    while (this.buffer.includes(trace)) {
+      if (this.drainPromise !== null) {
+        const activeDrain = this.drainPromise
+        try {
+          await activeDrain
+        } catch {
+          // This trace was queued after the failed drain, so its result is independent.
+        }
+        if (this.drainPromise === activeDrain) this.drainPromise = null
+        continue
+      }
+
+      const followUpDrain = Promise.resolve().then(() => this.drainBufferedTraces([trace]))
+      this.drainPromise = followUpDrain
+      try {
+        await followUpDrain
+      } finally {
+        if (this.drainPromise === followUpDrain) this.drainPromise = null
+      }
+    }
   }
 
   private async drainBufferedTraces(batch: Trace[]): Promise<void> {

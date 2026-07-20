@@ -365,6 +365,30 @@ describe('BatchAdapter — drain()', () => {
     expect(await batch.listTraceIds()).toEqual(['old'])
   })
 
+  it('does not include stale bulk failures in a new size-triggered flush', async () => {
+    const oldFailure = deferred()
+    const calls: string[][] = []
+    const inner: ExportAdapter = {
+      async flush() { throw new Error('individual flush should not run') },
+      async flushBatch(traces) {
+        calls.push(traces.map(trace => trace.id))
+        if (traces.some(trace => trace.id === 'old')) return oldFailure.promise
+      },
+      async queryByTraceId() { return null },
+      async listTraceIds() { return [] },
+    }
+    const batch = new BatchAdapter({ adapter: inner, maxBatchSize: 1 })
+
+    const oldFlush = batch.flush(makeTrace('old'))
+    const newFlush = batch.flush(makeTrace('new'))
+
+    oldFailure.reject(new Error('old batch failed'))
+    await expect(oldFlush).rejects.toThrow('old batch failed')
+    await expect(newFlush).resolves.toBeUndefined()
+    expect(calls).toEqual([['old'], ['new']])
+    expect(await batch.listTraceIds()).toEqual(['old'])
+  })
+
   it('surfaces failures from follow-up size-triggered drains after the older drain succeeds', async () => {
     const oldSuccess = deferred()
     const inner: ExportAdapter = {
