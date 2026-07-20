@@ -41,6 +41,7 @@ describe('BeastCatalogService', () => {
       expect.objectContaining({
         key: 'designDocPath',
         kind: 'file',
+        description: 'Enter a repo-relative path to the Markdown design document (.md, .mdx, or .markdown) that will be split into implementation chunks.',
       }),
     ]));
 

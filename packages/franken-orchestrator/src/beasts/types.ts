@@ -24,6 +24,7 @@ export type BeastRunStatus =
 export interface BeastInterviewPrompt {
   readonly key: string;
   readonly prompt: string;
+  readonly description?: string | undefined;
   readonly kind: 'string' | 'boolean' | 'file' | 'directory';
   readonly required?: boolean | undefined;
   readonly options?: readonly string[] | undefined;

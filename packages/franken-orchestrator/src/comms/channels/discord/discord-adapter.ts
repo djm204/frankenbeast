@@ -16,6 +16,13 @@ export interface DiscordAdapterOptions {
   token: string;
 }
 
+export class DiscordRoutingError extends Error {
+  constructor() {
+    super('Discord routing error: missing channelId or threadId metadata');
+    this.name = 'DiscordRoutingError';
+  }
+}
+
 export class DiscordAdapter implements ChannelAdapter {
   readonly type: ChannelType = 'discord';
   readonly capabilities: ChannelCapabilities = {
@@ -43,14 +50,22 @@ export class DiscordAdapter implements ChannelAdapter {
     // but for general proactive messages or delayed execution results, 
     // we use the channel message API.
     
-    const channelId = (message.metadata?.channelId as string) || 'unknown';
-    const threadId = message.metadata?.threadId as string | undefined;
+    const rawChannelId = message.metadata?.channelId;
+    const rawThreadId = message.metadata?.threadId;
+    const channelId = typeof rawChannelId === 'string' && rawChannelId.trim().length > 0
+      ? rawChannelId.trim()
+      : undefined;
+    const threadId = typeof rawThreadId === 'string' && rawThreadId.trim().length > 0
+      ? rawThreadId.trim()
+      : undefined;
+
+    if (!channelId && !threadId) {
+      throw new DiscordRoutingError();
+    }
 
     const body = this.formatPayload(message);
 
-    const targetUrl = threadId 
-      ? `https://discord.com/api/v10/channels/${threadId}/messages`
-      : `https://discord.com/api/v10/channels/${channelId}/messages`;
+    const targetUrl = `https://discord.com/api/v10/channels/${threadId ?? channelId}/messages`;
 
     await this.fetchImpl(targetUrl, {
       method: 'POST',

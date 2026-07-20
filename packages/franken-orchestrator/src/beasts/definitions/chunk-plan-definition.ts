@@ -76,6 +76,7 @@ export const chunkPlanDefinition: BeastDefinition = {
     {
       key: 'designDocPath',
       prompt: 'Which design document should be chunked?',
+      description: 'Enter a repo-relative path to the Markdown design document (.md, .mdx, or .markdown) that will be split into implementation chunks.',
       kind: 'file',
       required: true,
     },
