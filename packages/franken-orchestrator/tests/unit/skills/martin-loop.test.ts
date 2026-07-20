@@ -266,18 +266,34 @@ describe('MartinLoop', () => {
   it('strips ANSI sequences split across stdout chunks in plain mode', async () => {
     vi.stubEnv('NO_COLOR', '1');
     queueMock({
-      stdout: ['\x1b[', '31mred', '\x1b[0', 'm done\n<promise>IMPL_X_DONE</promise>'],
+      stdout: ['\x1b[', '31mred', '\x1b[0', 'm done\x1b[K\n<promise>IMPL_X_DONE</promise>'],
       exitCode: 0,
     });
 
     const loop = new MartinLoop();
-    await loop.run(baseConfig({ provider: 'aider', command: '/usr/bin/aider' }));
+    const result = await loop.run(baseConfig({ provider: 'aider', command: '/usr/bin/aider' }));
 
     const displayed = stdoutWriteSpy.mock.calls.map(([chunk]) => String(chunk)).join('');
     expect(displayed).toBe('red done\n<promise>IMPL_X_DONE</promise>');
     expect(displayed).not.toContain('\x1b');
     expect(displayed).not.toContain('31m');
     expect(displayed).not.toContain('0m');
+    expect(result.output).toBe('red done\n<promise>IMPL_X_DONE</promise>');
+    expect(result.output).not.toContain('\x1b');
+  });
+
+  it('sanitizes an unterminated stream-json tail in plain mode', async () => {
+    vi.stubEnv('NO_COLOR', '1');
+    queueMock({
+      stdout: 'tail output\n\x1b[31m<promise>IMPL_X_DONE</promise>\x1b[0m',
+      exitCode: 0,
+    });
+
+    const loop = new MartinLoop();
+    const result = await loop.run(baseConfig({ provider: 'claude' }));
+
+    expect(result.output).toBe('tail output\n<promise>IMPL_X_DONE</promise>');
+    expect(result.output).not.toContain('\x1b');
   });
 
   it('normalizes codex JSON output to readable text and detects promise tag', async () => {

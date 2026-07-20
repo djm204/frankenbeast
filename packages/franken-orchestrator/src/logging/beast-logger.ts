@@ -60,7 +60,7 @@ export function stripAnsi(s: string): string {
   return sanitizer.push(s) + sanitizer.flush();
 }
 
-type AnsiParserState = 'text' | 'escape' | 'csi' | 'osc' | 'oscEscape' | 'controlString' | 'controlStringEscape';
+type AnsiParserState = 'text' | 'escape' | 'escapeIntermediate' | 'csi' | 'osc' | 'oscEscape' | 'controlString' | 'controlStringEscape';
 
 /**
  * Incrementally remove ANSI/ECMA-48 control sequences without leaking
@@ -82,8 +82,13 @@ export class AnsiStreamSanitizer {
           if (char === '[') this.state = 'csi';
           else if (char === ']') this.state = 'osc';
           else if (char === 'P' || char === 'X' || char === '^' || char === '_') this.state = 'controlString';
+          else if (char >= ' ' && char <= '/') this.state = 'escapeIntermediate';
           else if (char === '\x1b') this.state = 'escape';
           else this.state = 'text';
+          break;
+        case 'escapeIntermediate':
+          if (char >= '0' && char <= '~') this.state = 'text';
+          else if (char === '\x1b') this.state = 'escape';
           break;
         case 'csi':
           if (char >= '@' && char <= '~') this.state = 'text';

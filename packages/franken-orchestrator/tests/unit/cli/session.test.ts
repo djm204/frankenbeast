@@ -182,6 +182,7 @@ vi.mock('../../../src/logging/beast-logger.js', () => ({
     this.getLogEntries = vi.fn(() => []);
   }),
   isPlainOutput: vi.fn(() => false),
+  setPlainOutput: vi.fn(),
   stripAnsi: vi.fn((s: string) => s),
 }));
 
@@ -238,6 +239,15 @@ describe('Session', () => {
       const config = makeConfig({ entryPhase: 'interview' });
       const session = new Session(config);
       expect(session).toBeDefined();
+    });
+
+    it('applies direct Session plain mode process-wide', async () => {
+      const { Session } = await import('../../../src/cli/session.js');
+      const { setPlainOutput } = await import('../../../src/logging/beast-logger.js');
+
+      new Session(makeConfig({ plain: true }));
+
+      expect(setPlainOutput).toHaveBeenCalledWith(true);
     });
   });
 

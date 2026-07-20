@@ -1093,6 +1093,18 @@ describe('CliLlmAdapter', () => {
   });
 
   describe('transformResponse', () => {
+    it('strips provider controls from normalized responses in plain mode', () => {
+      setPlainOutput(true);
+      try {
+        const adapter = new CliLlmAdapter(aiderProvider, baseOpts);
+        const result = adapter.transformResponse('\x1b[31manswer\x1b[0m\x1b[K', 'req-plain');
+
+        expect(result.content).toBe('answer');
+      } finally {
+        setPlainOutput(false);
+      }
+    });
+
     describe('stream-json path (supportsStreamJson=true, ClaudeProvider)', () => {
       it('extracts text from stream-json deltas via provider.normalizeOutput', () => {
         const adapter = new CliLlmAdapter(claudeProvider, baseOpts);

@@ -40,6 +40,10 @@ describe('stripAnsi', () => {
     expect(stripAnsi(input)).toBe('visible text');
   });
 
+  it('removes ANSI charset-designation sequences', () => {
+    expect(stripAnsi('before\x1b(0line\x1b(B after')).toBe('beforeline after');
+  });
+
   it('handles empty string', () => {
     expect(stripAnsi('')).toBe('');
   });

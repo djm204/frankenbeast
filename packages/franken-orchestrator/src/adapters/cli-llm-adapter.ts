@@ -12,7 +12,7 @@ import {
   parseResetTimeText,
   type CommandFailure,
 } from '../errors/command-failure.js';
-import { isPlainOutput } from '../logging/beast-logger.js';
+import { isPlainOutput, stripAnsi } from '../logging/beast-logger.js';
 
 type CliCacheSessionHint = {
   key: string;
@@ -416,7 +416,7 @@ export class CliLlmAdapter implements IAdapter {
     const providerName = this.responseProviders.get(_requestId) ?? this.provider.name;
     this.responseProviders.delete(_requestId);
     const normalized = this.resolveProvider(providerName).normalizeOutput(raw ?? '');
-    return { content: normalized };
+    return { content: isPlainOutput() ? stripAnsi(normalized) : normalized };
   }
 
   validateCapabilities(feature: string): boolean {

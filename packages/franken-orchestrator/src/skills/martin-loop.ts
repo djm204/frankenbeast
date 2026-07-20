@@ -324,6 +324,12 @@ function spawnIteration(
     const cleanParts: string[] = [];
     const streamBuffer = provider.supportsStreamJson() ? new StreamLineBuffer() : null;
     const plainStreamSanitizer = plain && !streamBuffer ? new AnsiStreamSanitizer() : null;
+    const flushStreamBuffer = (): void => {
+      if (!streamBuffer) return;
+      for (const line of streamBuffer.flush()) {
+        cleanParts.push(plain ? stripAnsi(line) : line);
+      }
+    };
 
     const finish = (result: { stdout: string; stderr: string; exitCode: number; timedOut: boolean; cleanStdout: string }): void => {
       if (settled) return;
@@ -371,10 +377,7 @@ function spawnIteration(
       }, 5_000));
       // Hard fail-safe: if process still hasn't closed, force resolution.
       escalationTimers.push(setTimeout(() => {
-        if (streamBuffer) {
-          const remaining = streamBuffer.flush();
-          for (const line of remaining) cleanParts.push(line);
-        }
+        flushStreamBuffer();
         finish({
           stdout,
           stderr: `${stderr}\n[MartinLoop] iteration timed out after ${config.timeoutMs}ms`,
@@ -413,10 +416,7 @@ function spawnIteration(
         try { child.kill('SIGKILL'); } catch { /* already dead */ }
       }, 5_000));
       escalationTimers.push(setTimeout(() => {
-        if (streamBuffer) {
-          const remaining = streamBuffer.flush();
-          for (const line of remaining) cleanParts.push(line);
-        }
+        flushStreamBuffer();
         clearTimers();
         finish({
           stdout,
@@ -432,10 +432,7 @@ function spawnIteration(
     child.on('close', (code) => {
       clearTimers();
       plainStreamSanitizer?.flush();
-      if (streamBuffer) {
-        const remaining = streamBuffer.flush();
-        for (const line of remaining) cleanParts.push(line);
-      }
+      flushStreamBuffer();
       finish({ stdout, stderr, exitCode: code ?? 1, timedOut, cleanStdout: cleanParts.join('\n') });
     });
 
@@ -593,9 +590,12 @@ export class MartinLoop {
       const durationMs = wallClockNow() - startTime;
       // For stream-json providers, use the pre-cleaned output from StreamLineBuffer.
       // For non-stream-json providers, normalize the raw stdout via the provider.
-      const normalizedStdout = resolved.supportsStreamJson()
+      const providerNormalizedStdout = resolved.supportsStreamJson()
         ? result.cleanStdout
         : resolved.normalizeOutput(result.stdout);
+      const normalizedStdout = isPlainOutput()
+        ? stripAnsi(providerNormalizedStdout)
+        : providerNormalizedStdout;
       lastOutput = normalizedStdout;
 
       const tokensEstimated = resolved.estimateTokens(normalizedStdout);

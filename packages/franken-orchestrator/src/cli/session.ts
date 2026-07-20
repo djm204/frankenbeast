@@ -12,7 +12,7 @@ import { ChunkFileWriter } from '../planning/chunk-file-writer.js';
 import { InterviewLoop } from '../planning/interview-loop.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { ProgressLlmClient } from '../adapters/progress-llm-client.js';
-import { ANSI, budgetBar, statusBadge, logHeader, type BeastLogger } from '../logging/beast-logger.js';
+import { ANSI, budgetBar, statusBadge, logHeader, setPlainOutput, type BeastLogger } from '../logging/beast-logger.js';
 import { createStreamProgressWithSpinner, type StreamProgressEvent } from '../adapters/stream-progress.js';
 import type { CliLlmLifecycleEvent } from '../adapters/cli-llm-adapter.js';
 import type { InterviewIO } from '../planning/interview-loop.js';
@@ -128,7 +128,9 @@ export interface SessionConfig {
 }
 
 export class Session {
-  constructor(private readonly config: SessionConfig) {}
+  constructor(private readonly config: SessionConfig) {
+    if (config.plain !== undefined) setPlainOutput(config.plain);
+  }
 
   async start(): Promise<BeastResult | undefined> {
     const { entryPhase, exitAfter } = this.config;
