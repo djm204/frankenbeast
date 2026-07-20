@@ -208,6 +208,69 @@ describe('SQLiteBeastRepository', () => {
     expect(repo.listRuns()).toEqual([run]);
   });
 
+  it('paginates Beast runs over a stable snapshot and enforces page limits', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
+    const dbPath = join(workDir, 'beasts.db');
+    const repo = new SQLiteBeastRepository(dbPath);
+    let sequence = 0;
+    const createRun = () => repo.createRun({
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'pfk',
+      createdAt: new Date(Date.UTC(2026, 2, 10, 0, 0, sequence++)).toISOString(),
+    });
+    const originalIds = [createRun().id, createRun().id, createRun().id];
+
+    const first = repo.listRunPage({ limit: 2 });
+    expect(first.runs).toHaveLength(2);
+    expect(first.nextCursor).toEqual(expect.any(String));
+
+    const insertedBetweenPages = repo.createRun({
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'pfk',
+      // A row inserted after page one but sorted into the remaining window must
+      // still be excluded from the snapshot.
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+    const second = repo.listRunPage({ limit: 2, cursor: first.nextCursor });
+    expect(second.runs).toHaveLength(1);
+    expect(second.nextCursor).toBeUndefined();
+    expect([...first.runs, ...second.runs].map(({ id }) => id).sort()).toEqual(originalIds.sort());
+    expect([...first.runs, ...second.runs]).not.toContainEqual(expect.objectContaining({ id: insertedBetweenPages.id }));
+    expect(() => repo.listRunPage({ limit: 201 })).toThrow(RangeError);
+    expect(() => repo.listRunPage({ limit: 1, cursor: 'not-a-cursor' })).toThrow('Invalid Beast run pagination cursor');
+
+    const db = new Database(dbPath, { readonly: true });
+    const firstPlan = db.prepare(
+      `EXPLAIN QUERY PLAN SELECT * FROM beast_runs INDEXED BY idx_beast_runs_created_at_id
+        WHERE rowid <= ? ORDER BY created_at DESC, id DESC LIMIT ?`,
+    ).all(3, 3) as Array<{ detail: string }>;
+    const cursorPlan = db.prepare(
+      `EXPLAIN QUERY PLAN SELECT * FROM beast_runs INDEXED BY idx_beast_runs_created_at_id
+        WHERE rowid <= ?
+          AND (created_at < ? OR (created_at = ? AND id < ?))
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?`,
+    ).all(
+      3,
+      '2026-03-10T00:00:01.000Z',
+      '2026-03-10T00:00:01.000Z',
+      originalIds[1],
+      3,
+    ) as Array<{ detail: string }>;
+    const plan = [...firstPlan, ...cursorPlan].map(({ detail }) => detail).join('\n');
+    expect(plan).toContain('idx_beast_runs_created_at_id');
+    expect(plan).not.toContain('USE TEMP B-TREE');
+    db.close();
+  });
+
   it('creates attempts and keeps run state in sync', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

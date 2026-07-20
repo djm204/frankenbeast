@@ -116,6 +116,22 @@ describe('BeastApiClient', () => {
     );
   });
 
+  it('requests encoded Beast run pages without eagerly following cursors', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { runs: [{ id: 'run-1' }], nextCursor: 'next/page+=' } }),
+    });
+
+    await expect(client.listRunPage({ limit: 25, cursor: 'cursor/with+symbols=' })).resolves.toEqual({
+      runs: [{ id: 'run-1' }],
+      nextCursor: 'next/page+=',
+    });
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://localhost:3000/v1/beasts/runs?limit=25&cursor=cursor%2Fwith%2Bsymbols%3D',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
   it('rejects createAgent when the API reports an auto-dispatch failure', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,

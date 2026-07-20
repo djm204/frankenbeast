@@ -67,8 +67,8 @@ const mockListAgentPage = vi.fn().mockImplementation(async () => ({
   agents: await mockListAgents(),
 }));
 
-const mockListRuns = vi.fn().mockResolvedValue([
-  {
+const mockListRunPage = vi.fn().mockResolvedValue({
+  runs: [{
     id: 'run-1',
     definitionId: 'chunk-plan',
     status: 'running',
@@ -78,8 +78,8 @@ const mockListRuns = vi.fn().mockResolvedValue([
     attemptCount: 1,
     executionMode: 'process',
     createdAt: '2026-03-11T00:00:02.000Z',
-  },
-]);
+  }],
+});
 const mockGetContainerRuntimeStatus = vi.fn().mockResolvedValue({ available: true });
 
 const mockGetAgent = vi.fn().mockResolvedValue({
@@ -288,7 +288,7 @@ vi.mock('../../src/lib/beast-api.js', () => ({
     getCatalog: typeof mockGetCatalog;
     listAgentPage: typeof mockListAgentPage;
     listAgents: typeof mockListAgents;
-    listRuns: typeof mockListRuns;
+    listRunPage: typeof mockListRunPage;
     getContainerRuntimeStatus: typeof mockGetContainerRuntimeStatus;
     getAgent: typeof mockGetAgent;
     getRun: typeof mockGetRun;
@@ -310,7 +310,7 @@ vi.mock('../../src/lib/beast-api.js', () => ({
     this.getCatalog = mockGetCatalog;
     this.listAgentPage = mockListAgentPage;
     this.listAgents = mockListAgents;
-    this.listRuns = mockListRuns;
+    this.listRunPage = mockListRunPage;
     this.getContainerRuntimeStatus = mockGetContainerRuntimeStatus;
     this.getAgent = mockGetAgent;
     this.getRun = mockGetRun;
@@ -432,8 +432,8 @@ afterEach(() => {
   ]);
   mockListAgentPage.mockReset();
   mockListAgentPage.mockImplementation(async () => ({ agents: await mockListAgents() }));
-  mockListRuns.mockResolvedValue([
-    {
+  mockListRunPage.mockResolvedValue({
+    runs: [{
       id: 'run-1',
       definitionId: 'chunk-plan',
       status: 'running',
@@ -443,8 +443,8 @@ afterEach(() => {
       attemptCount: 1,
       executionMode: 'process',
       createdAt: '2026-03-11T00:00:02.000Z',
-    },
-  ]);
+    }],
+  });
   mockGetContainerRuntimeStatus.mockResolvedValue({ available: true });
   mockGetAgent.mockResolvedValue({
     agent: {
@@ -1067,14 +1067,32 @@ describe('ChatShell', () => {
       createdByUser: 'operator',
       initAction: { kind: 'chunk-plan', command: '/plan', config: {} },
       initConfig: {},
+      dispatchRunId: 'run-page-1',
       createdAt: '2026-03-11T00:00:00.000Z',
       updatedAt: '2026-03-11T00:00:01.000Z',
     };
     const secondAgent = {
       ...firstAgent,
       id: 'agent-page-2',
+      dispatchRunId: 'run-page-2',
       createdAt: '2026-03-10T00:00:00.000Z',
     };
+    mockListRunPage.mockResolvedValue({
+      runs: [{
+        id: 'run-page-1', definitionId: 'chunk-plan', status: 'succeeded',
+        dispatchedBy: 'dashboard', dispatchedByUser: 'operator', executionMode: 'process',
+        createdAt: '2026-03-11T00:00:00.000Z', updatedAt: '2026-03-11T00:00:01.000Z',
+      }],
+    });
+    mockGetRun.mockResolvedValue({
+      run: {
+        id: 'run-page-2', definitionId: 'chunk-plan', status: 'succeeded',
+        dispatchedBy: 'dashboard', dispatchedByUser: 'operator', executionMode: 'container',
+        createdAt: '2026-03-10T00:00:00.000Z', updatedAt: '2026-03-10T00:00:01.000Z',
+      },
+      steps: [],
+      logs: [],
+    });
     mockListAgentPage
       .mockResolvedValueOnce({ agents: [firstAgent], nextCursor: 'cursor-page-2' })
       .mockResolvedValueOnce({ agents: [secondAgent] });
@@ -1091,6 +1109,8 @@ describe('ChatShell', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Load more agents' }, { timeout: 5000 }));
     await waitFor(() => expect(screen.getByText('agent-page-2')).toBeTruthy());
     expect(mockListAgentPage).toHaveBeenNthCalledWith(2, { cursor: 'cursor-page-2' });
+    expect(mockGetRun).toHaveBeenCalledWith('run-page-2');
+    expect(screen.getAllByText('container mode').length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Load more agents' })).toBeNull();
 
     fireEvent.click(screen.getByText('agent-page-2'));

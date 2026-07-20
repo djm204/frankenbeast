@@ -18,7 +18,7 @@ import {
   type TrackedAgentInitAction,
   type TrackedAgentSummary,
 } from '../lib/beast-api';
-import { loadTrackedAgentWindow, sortTrackedAgentsNewestFirst, type TrackedAgentWindow } from '../lib/tracked-agent-window';
+import { loadMissingAgentRuns, loadTrackedAgentWindow, mergeUniqueRuns, sortTrackedAgentsNewestFirst, type TrackedAgentWindow } from '../lib/tracked-agent-window';
 import { ChatApiClient, type ChatSessionSummary, type CorruptChatSessionFile } from '../lib/api';
 import { NetworkApiClient, type NetworkConfigResponse, type NetworkStatusResponse } from '../lib/network-api';
 import type { AgentLifecycleAction } from './beasts/agent-action-bar';
@@ -365,18 +365,19 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     async function refreshBeasts() {
       let catalog: Awaited<ReturnType<typeof client.getCatalog>>;
       let agentWindow: TrackedAgentWindow;
-      let runs: Awaited<ReturnType<typeof client.listRuns>>;
+      let runPage: Awaited<ReturnType<typeof client.listRunPage>>;
       let containerRuntime: Awaited<ReturnType<typeof client.getContainerRuntimeStatus>>;
       try {
-        [catalog, agentWindow, runs, containerRuntime] = await Promise.all([
+        [catalog, agentWindow, runPage, containerRuntime] = await Promise.all([
           client.getCatalog(),
           loadTrackedAgentWindow(client, beastAgentPagesLoadedRef.current, selectedBeastAgentIdRef.current),
-          client.listRuns(),
+          client.listRunPage(),
           client.getContainerRuntimeStatus().catch((error) => ({
             available: false,
             reason: error instanceof Error ? error.message : 'Container runtime status unavailable.',
           })),
         ]);
+        runPage = { ...runPage, runs: [...runPage.runs, ...await loadMissingAgentRuns(client, agentWindow.agents, runPage.runs)] };
         if (cancelled) {
           return;
         }
@@ -400,7 +401,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
       setBeastAgentNextCursor(agentWindow.nextCursor);
       beastAgentPagesLoadedRef.current = agentWindow.pagesLoaded;
       setBeastAgentsLoadingMore(false);
-      setBeastRuns(runs);
+      setBeastRuns(runPage.runs);
       setBeastContainerRuntime(containerRuntime);
       const autoSelectedAgentId = agentWindow.agents.find((agent) => agent.status !== 'deleted')?.id ?? null;
       const currentAgentId = selectedBeastAgentIdRef.current ?? (shouldAutoSelectBeastAgentRef.current ? autoSelectedAgentId : null);
@@ -1056,6 +1057,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               setBeastAgentsLoadingMore(true);
               try {
                 const page = await beastClient.listAgentPage({ cursor });
+                const linkedRuns = await loadMissingAgentRuns(beastClient, page.agents, beastRuns);
                 if (windowVersion !== beastAgentWindowVersionRef.current) return;
                 setBeastAgents((current) => {
                   const knownIds = new Set(current.map((agent) => agent.id));
@@ -1064,6 +1066,9 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                 beastAgentNextCursorRef.current = page.nextCursor;
                 setBeastAgentNextCursor(page.nextCursor);
                 beastAgentPagesLoadedRef.current += 1;
+                if (linkedRuns.length > 0) {
+                  setBeastRuns((current) => mergeUniqueRuns(current, linkedRuns));
+                }
               } catch (error) {
                 if (windowVersion === beastAgentWindowVersionRef.current) {
                   setBeastError(error instanceof Error ? error.message : 'Unable to load more tracked agents.');

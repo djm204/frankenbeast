@@ -165,6 +165,51 @@ describe('beast routes', () => {
     ]);
   });
 
+  it('defaults Beast run pages to 50 and validates cursors and limits', async () => {
+    const { app, operatorToken, repository } = createBeastApp({ rateLimitMax: 100 });
+    const headers = { authorization: 'Bearer ' + operatorToken };
+    const createdIds = Array.from({ length: 51 }, (_, index) => repository.createRun({
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: new Date(Date.UTC(2026, 2, 10, 0, 0, index)).toISOString(),
+    }).id);
+
+    const firstResponse = await app.request('/v1/beasts/runs', { headers });
+    expect(firstResponse.status).toBe(200);
+    const first = await firstResponse.json() as { data: { runs: Array<{ id: string }>; nextCursor?: string } };
+    expect(first.data.runs).toHaveLength(50);
+    expect(first.data.nextCursor).toEqual(expect.any(String));
+
+    const secondResponse = await app.request(
+      `/v1/beasts/runs?cursor=${encodeURIComponent(first.data.nextCursor ?? '')}`,
+      { headers },
+    );
+    expect(secondResponse.status).toBe(200);
+    const second = await secondResponse.json() as { data: { runs: Array<{ id: string }>; nextCursor?: string } };
+    expect(second.data.runs).toHaveLength(1);
+    expect(second.data.nextCursor).toBeUndefined();
+    expect([...first.data.runs, ...second.data.runs].map(({ id }) => id).sort()).toEqual(createdIds.sort());
+
+    const limitedResponse = await app.request('/v1/beasts/runs?limit=1', { headers });
+    expect(limitedResponse.status).toBe(200);
+    const limited = await limitedResponse.json() as { data: { runs: Array<{ id: string }>; nextCursor?: string } };
+    expect(limited.data.runs).toHaveLength(1);
+    expect(limited.data.nextCursor).toEqual(expect.any(String));
+
+    for (const path of [
+      '/v1/beasts/runs?limit=201',
+      '/v1/beasts/runs?limit=1.5',
+      '/v1/beasts/runs?cursor=',
+      '/v1/beasts/runs?cursor=not-a-cursor',
+    ]) {
+      expect((await app.request(path, { headers })).status).toBe(400);
+    }
+  });
+
   it('creates a run, reads it back, and exposes events and logs', async () => {
     const { app, operatorToken } = createBeastApp();
     const headers = {

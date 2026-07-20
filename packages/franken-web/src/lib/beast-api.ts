@@ -91,9 +91,18 @@ export class BeastApiClient {
     return this.request<BeastContainerRuntimeStatus>('/v1/beasts/runtime/container', { method: 'GET' });
   }
 
-  async listRuns(): Promise<BeastRunSummary[]> {
-    const body = await this.request<{ runs: BeastRunSummary[] }>('/v1/beasts/runs', { method: 'GET' });
-    return body.runs;
+  async listRunPage(options: { limit?: number; cursor?: string } = {}): Promise<{
+    runs: BeastRunSummary[];
+    nextCursor?: string;
+  }> {
+    const search = new URLSearchParams();
+    if (options.limit !== undefined) search.set('limit', String(options.limit));
+    if (options.cursor) search.set('cursor', options.cursor);
+    const query = search.size > 0 ? `?${search.toString()}` : '';
+    return this.request<{ runs: BeastRunSummary[]; nextCursor?: string }>(
+      `/v1/beasts/runs${query}`,
+      { method: 'GET' },
+    );
   }
 
   async listAgentPage(options: { limit?: number; cursor?: string } = {}): Promise<{
