@@ -184,7 +184,7 @@ function cloneWithDelete<T extends object>(source: T, segments: string[]): T {
 
 export function setNetworkConfigValue<T extends object>(config: T, path: string, rawValue: string): T {
   const definition = getPathDefinition(path);
-  if (rawValue === '' && definition.unsetOnEmpty) {
+  if (rawValue.trim() === '' && definition.unsetOnEmpty) {
     return cloneWithDelete(config, path.split('.'));
   }
   const coerced = coerceNetworkConfigValue(path, rawValue);
