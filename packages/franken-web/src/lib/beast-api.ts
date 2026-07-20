@@ -7,7 +7,6 @@ import type {
   BeastEventHandlers,
   BeastExecutionMode,
   BeastRunDetail,
-  BeastRunEvent,
   BeastRunEventPage,
   BeastRunSummary,
   BeastSseAgentEvent,
@@ -115,21 +114,6 @@ export class BeastApiClient {
     if (options.afterSequence !== undefined) query.set('afterSequence', String(options.afterSequence));
     const suffix = query.size > 0 ? `?${query.toString()}` : '';
     return this.request(`/v1/beasts/runs/${encodeURIComponent(runId)}/events${suffix}`, { method: 'GET' });
-  }
-
-  async getAllRunEvents(runId: string): Promise<BeastRunEvent[]> {
-    const events: BeastRunEvent[] = [];
-    let afterSequence = 0;
-    while (true) {
-      const page = await this.getRunEvents(runId, { limit: 500, afterSequence });
-      events.push(...page.events);
-      if (!page.page.hasMore) return events;
-      const nextAfterSequence = page.page.nextAfterSequence;
-      if (nextAfterSequence === null || nextAfterSequence <= afterSequence) {
-        throw new Error('Beast run event pagination did not advance');
-      }
-      afterSequence = nextAfterSequence;
-    }
   }
 
   async getAgent(agentId: string): Promise<TrackedAgentDetail> {

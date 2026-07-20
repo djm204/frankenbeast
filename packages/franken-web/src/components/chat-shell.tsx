@@ -401,13 +401,12 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
           const detail = await client.getAgent(currentAgentId);
           if (!cancelled) {
             if (detail.agent.dispatchRunId) {
-              const [run, events, logs] = await Promise.all([
+              const [run, logs] = await Promise.all([
                 client.getRun(detail.agent.dispatchRunId),
-                client.getAllRunEvents(detail.agent.dispatchRunId),
                 client.getLogs(detail.agent.dispatchRunId),
               ]);
               if (!cancelled) {
-                setBeastAgentDetail({ ...detail, run: { ...run, events, logs } });
+                setBeastAgentDetail({ ...detail, run: { ...run, logs } });
               }
             } else {
               setBeastAgentDetail({ ...detail, run: null });

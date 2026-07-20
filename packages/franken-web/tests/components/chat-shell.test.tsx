@@ -124,7 +124,6 @@ const mockGetRun = vi.fn().mockResolvedValue({
   attempts: [],
   events: [],
 });
-const mockGetAllRunEvents = vi.fn().mockResolvedValue([]);
 
 const mockGetLogs = vi.fn().mockResolvedValue(['started from chat']);
 const mockCreateAgent = vi.fn().mockResolvedValue({
@@ -288,7 +287,6 @@ vi.mock('../../src/lib/beast-api.js', () => ({
     getContainerRuntimeStatus: typeof mockGetContainerRuntimeStatus;
     getAgent: typeof mockGetAgent;
     getRun: typeof mockGetRun;
-    getAllRunEvents: typeof mockGetAllRunEvents;
     getLogs: typeof mockGetLogs;
     createAgent: typeof mockCreateAgent;
     deleteAgent: typeof mockDeleteAgent;
@@ -310,7 +308,6 @@ vi.mock('../../src/lib/beast-api.js', () => ({
     this.getContainerRuntimeStatus = mockGetContainerRuntimeStatus;
     this.getAgent = mockGetAgent;
     this.getRun = mockGetRun;
-    this.getAllRunEvents = mockGetAllRunEvents;
     this.getLogs = mockGetLogs;
     this.createAgent = mockCreateAgent;
     this.deleteAgent = mockDeleteAgent;
@@ -520,8 +517,6 @@ afterEach(() => {
     attempts: [],
     events: [],
   });
-  mockGetAllRunEvents.mockReset();
-  mockGetAllRunEvents.mockResolvedValue([]);
 });
 
 describe('buildInitAction', () => {
@@ -561,16 +556,6 @@ describe('buildInitAction', () => {
 });
 
 describe('ChatShell', () => {
-  it('hydrates the selected Beast run from the paginated event API', async () => {
-    window.location.hash = '#/beasts';
-
-    render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
-
-    await waitFor(() => {
-      expect(mockGetAllRunEvents).toHaveBeenCalledWith('run-1');
-    });
-  });
-
   it('renders Frankenbeast branding and keeps the version in the sidebar footer', () => {
     const { container } = render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
     const nav = container.querySelector('[aria-label="Dashboard navigation"]');

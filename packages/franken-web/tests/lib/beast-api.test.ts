@@ -192,42 +192,6 @@ describe('BeastApiClient', () => {
     );
   });
 
-  it('loads complete run event history across bounded pages', async () => {
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({
-          data: {
-            events: [{ id: 'event-1', runId: 'run-1', sequence: 1, type: 'run.started', payload: {}, createdAt: '2026-03-10T00:00:01.000Z' }],
-            page: { limit: 500, afterSequence: 0, nextAfterSequence: 1, hasMore: true },
-          },
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({
-          data: {
-            events: [{ id: 'event-2', runId: 'run-1', sequence: 2, type: 'run.finished', payload: {}, createdAt: '2026-03-10T00:00:02.000Z' }],
-            page: { limit: 500, afterSequence: 1, nextAfterSequence: null, hasMore: false },
-          },
-        }),
-      });
-
-    const events = await client.getAllRunEvents('run-1');
-
-    expect(events.map((event) => event.sequence)).toEqual([1, 2]);
-    expect(mockFetch).toHaveBeenNthCalledWith(
-      1,
-      'http://localhost:3000/v1/beasts/runs/run-1/events?limit=500&afterSequence=0',
-      expect.objectContaining({ method: 'GET' }),
-    );
-    expect(mockFetch).toHaveBeenNthCalledWith(
-      2,
-      'http://localhost:3000/v1/beasts/runs/run-1/events?limit=500&afterSequence=1',
-      expect.objectContaining({ method: 'GET' }),
-    );
-  });
-
   it('resumes a tracked agent through the agent-specific endpoint', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
