@@ -513,6 +513,7 @@ export class ChatSocketController {
         type: 'assistant.message.complete',
         messageId,
         content: contentToSend,
+        kind: display.kind,
         ...(display.modelTier ? { modelTier: display.modelTier } : {}),
         timestamp: nowIso(),
       });
@@ -731,6 +732,7 @@ export class ChatSocketController {
         type: 'assistant.message.complete',
         messageId: deterministicUuid('packages/franken-orchestrator/src/http/ws-chat-server.ts'),
         content: display.content,
+        kind: display.kind,
         timestamp: nowIso(),
       });
     }

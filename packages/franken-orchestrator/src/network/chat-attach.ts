@@ -205,6 +205,30 @@ function createIo(): {
   };
 }
 
+/**
+ * Non-streamed completions carry the display kind (plan, clarify, status, …);
+ * render them with the same glyph vocabulary as the local REPL. Unknown or
+ * absent kinds (older servers) fall back to the beast reply glyph.
+ */
+function renderCompletion(kind: string, content: string): string {
+  switch (kind) {
+    case 'plan':
+      return chatBlock(CHAT_GLYPHS.plan, ANSI.blue, `plan\n${content}`);
+    case 'clarify':
+      return chatBlock(CHAT_GLYPHS.clarify, ANSI.yellow, content, ANSI.yellow);
+    case 'approval':
+      return chatBlock(CHAT_GLYPHS.approval, ANSI.yellow, content, ANSI.yellow);
+    case 'execution':
+      return chatBlock(CHAT_GLYPHS.execution, ANSI.green, content);
+    case 'error':
+      return chatBlock(CHAT_GLYPHS.error, ANSI.red, content, ANSI.dim);
+    case 'status':
+      return chatBlock(CHAT_GLYPHS.status, ANSI.dim, content, ANSI.dim);
+    default:
+      return chatBlock(CHAT_GLYPHS.beast, ANSI.magenta, content);
+  }
+}
+
 async function awaitRemoteReply(socket: WebSocket, verbose: boolean): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     let streamed = false;
@@ -238,14 +262,15 @@ async function awaitRemoteReply(socket: WebSocket, verbose: boolean): Promise<vo
           if (!streamed) {
             process.stdout.write(`${ANSI.magenta}${CHAT_GLYPHS.beast}${ANSI.reset} `);
           }
-          process.stdout.write(String(payload.chunk ?? ''));
+          // Continuation lines align under the glyph, matching chatBlock.
+          process.stdout.write(String(payload.chunk ?? '').replaceAll('\n', '\n  '));
           streamed = true;
           break;
         case 'assistant.message.complete':
           if (streamed) {
             process.stdout.write('\n');
           } else {
-            printLine(chatBlock(CHAT_GLYPHS.beast, ANSI.magenta, sanitizeChatOutput(String(payload.content ?? ''))));
+            printLine(renderCompletion(String(payload.kind ?? 'reply'), sanitizeChatOutput(String(payload.content ?? ''))));
           }
           if (verbose && payload.modelTier) {
             printLine(chatStatusLine(`[${String(payload.modelTier)}]`));
