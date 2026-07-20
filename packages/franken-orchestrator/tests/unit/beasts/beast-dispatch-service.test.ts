@@ -93,9 +93,45 @@ describe('BeastDispatchService', () => {
       executionMode: 'process',
     });
     expect(run.configSnapshot.provider).toBe('prod-claude');
-    expect(run.configSnapshot).not.toHaveProperty('skills');
+    expect(run.configSnapshot.skills).toEqual([]);
     expect(executors.process.start).not.toHaveBeenCalled();
     expect(repo.listRuns()).toHaveLength(1);
+  });
+
+  it('does not widen explicit direct-run manifest aliases with workflow defaults', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+
+    await expect(dispatch.createRun({
+      definitionId: 'martin-loop',
+      config: {
+        provider: 'claude',
+        objective: 'Keep this direct run read-only',
+        chunkDirectory: 'docs/chunks',
+        agentRole: 'coding',
+        enabledTools: ['read_file'],
+        skills: [],
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+    })).rejects.toMatchObject({
+      name: 'AgentToolPolicyError',
+      validation: {
+        denials: expect.arrayContaining([
+          expect.objectContaining({ requestedTool: 'search_files' }),
+          expect.objectContaining({ requestedTool: 'write_file' }),
+        ]),
+      },
+    });
+    expect(repo.listRuns()).toEqual([]);
   });
 
   it('validates explicit direct-run tool policy instead of replacing it with workflow defaults', async () => {

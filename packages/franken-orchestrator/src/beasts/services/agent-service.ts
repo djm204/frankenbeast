@@ -19,7 +19,7 @@ import type {
   CapacityReservationWorkItem,
 } from './capacity-reservation-policy.js';
 import { capacityItemFromConfig } from './capacity-reservation-policy.js';
-import { AgentToolPolicyError, validateAgentRoleTools } from './role-tool-manifest.js';
+import { AgentToolPolicyError, defaultAgentToolPolicyConfig, validateAgentRoleTools } from './role-tool-manifest.js';
 import type { ToolPolicyDenial, ToolPolicyValidationContext } from './role-tool-manifest.js';
 
 export interface CreateTrackedAgentRequest {
@@ -106,6 +106,19 @@ export class AgentService {
     const activeItems = this.activeCapacityItems().filter((item) => item.id !== agent.id);
     return this.options.capacityPolicy?.canStart(capacityItemFromAgent(agent), activeItems)
       ?? { allowed: true, reason: 'normal_capacity_available', reservationId: undefined };
+  }
+
+  defaultToolPolicyConfig(
+    definitionId: string,
+    initActionKind: string,
+    config: Readonly<Record<string, unknown>>,
+  ): Readonly<Record<string, unknown>> {
+    return defaultAgentToolPolicyConfig(
+      definitionId,
+      initActionKind,
+      config,
+      this.options.trustedSkillToolManifests,
+    );
   }
 
   getAgent(agentId: string): TrackedAgent {

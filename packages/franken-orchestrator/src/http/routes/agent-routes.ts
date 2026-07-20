@@ -6,7 +6,7 @@ import { DeletedTrackedAgentError, UnknownTrackedAgentError } from '../../beasts
 import { CapacityReservationError } from '../../beasts/services/capacity-reservation-policy.js';
 import { MaintenanceModeError, type MaintenanceModeService } from '../../beasts/services/maintenance-mode-service.js';
 import type { AgentService } from '../../beasts/services/agent-service.js';
-import { AgentToolPolicyError, defaultAgentToolPolicyConfig } from '../../beasts/services/role-tool-manifest.js';
+import { AgentToolPolicyError } from '../../beasts/services/role-tool-manifest.js';
 import type { BeastDispatchService } from '../../beasts/services/beast-dispatch-service.js';
 import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../../beasts/services/dispatch-failure-message.js';
 import type { BeastRunService } from '../../beasts/services/beast-run-service.js';
@@ -116,7 +116,11 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       key => Object.hasOwn(actionPolicyConfig, key) || Object.hasOwn(body.initConfig, key),
     );
     const policyDefaults: Record<string, unknown> = {
-      ...defaultAgentToolPolicyConfig(body.definitionId, body.initAction.kind),
+      ...deps.agents.defaultToolPolicyConfig(
+        body.definitionId,
+        body.initAction.kind,
+        { ...body.initAction.config, ...body.initConfig },
+      ),
     };
     if (hasExplicitToolManifest) {
       delete policyDefaults.requestedTools;

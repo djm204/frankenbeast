@@ -54,7 +54,11 @@ function expectEventsToIncludeTypes(events: AgentEvent[], requiredTypes: string[
   }
 }
 
-function createIntegratedBeastApp(opts?: { rateLimitMax?: number; capacityPolicy?: CapacityReservationPolicy }) {
+function createIntegratedBeastApp(opts?: {
+  rateLimitMax?: number;
+  capacityPolicy?: CapacityReservationPolicy;
+  trustedSkillToolManifests?: Readonly<Record<string, readonly string[]>>;
+}) {
   // Intentionally exercise the route with the real repository, dispatch service,
   // run service, and event log graph. This file lives under tests/integration so
   // circular service/linking behavior is covered here rather than hidden in unit tests.
@@ -136,6 +140,7 @@ function createIntegratedBeastApp(opts?: { rateLimitMax?: number; capacityPolicy
   const interviews = new BeastInterviewService(repository, catalog);
   const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z', {
     capacityPolicy: opts?.capacityPolicy,
+    trustedSkillToolManifests: opts?.trustedSkillToolManifests,
   });
   const security = new TransportSecurityService();
   const operatorToken = TEST_SUPER_SECRET_OPERATOR_TOKEN;
@@ -507,6 +512,36 @@ describe('agent routes integration', () => {
       },
     });
     expect(agents.listAgents()).toEqual([]);
+  });
+
+  it('includes body-implied runtime and trusted skill tools in default manifests', async () => {
+    const { app, operatorToken, agents } = createIntegratedBeastApp({
+      trustedSkillToolManifests: { github: ['get_issue'] },
+    });
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer ' + operatorToken,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'chunk-plan',
+        autoDispatch: false,
+        initAction: { kind: 'chunk-plan', command: 'chunk-plan', config: {} },
+        initConfig: {
+          skills: ['github'],
+          gitConfig: { prCreation: 'manual' },
+        },
+      }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(agents.listAgents()[0]?.initConfig).toMatchObject({
+      agentRole: 'docs',
+      requestedTools: ['read_file', 'search_files', 'write_file', 'github.pr', 'github.read'],
+      skills: ['github'],
+    });
   });
 
   it('honors policy fields supplied in init action config before applying dashboard defaults', async () => {

@@ -244,14 +244,21 @@ function trustedSkillToolManifestFor(context: ToolPolicyValidationContext, skill
 export function defaultAgentToolPolicyConfig(
   definitionId: string,
   initActionKind?: string | undefined,
+  config: Readonly<Record<string, unknown>> = {},
+  trustedSkillToolManifests?: TrustedSkillToolManifestSource | undefined,
 ): Readonly<Record<string, unknown>> {
-  const context = { definitionId, initActionKind };
+  const context = { definitionId, initActionKind, trustedSkillToolManifests };
   const agentRole = defaultAgentRoleForWorkflow(definitionId, initActionKind);
+  const selectedSkills = selectedSkillsFromConfig(config).skills;
+  const trustedSkillTools = skillToolDenials(agentRole, selectedSkills, context)
+    .map(denial => denial.requestedTool)
+    .filter(tool => !tool.startsWith('skill:'));
   return {
     agentRole,
     requestedTools: [...new Set([
       ...workflowRequiredTools(context),
-      ...runtimeToolsFromConfig({ agentRole }, context),
+      ...runtimeToolsFromConfig(config, context),
+      ...trustedSkillTools,
     ])],
     skills: [],
   };

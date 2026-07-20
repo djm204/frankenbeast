@@ -59,6 +59,13 @@ const TOOL_POLICY_CONFIG_KEYS = [
   'tools',
 ] as const;
 
+const TOOL_MANIFEST_CONFIG_KEYS = [
+  'requestedTools',
+  'enabledTools',
+  'toolManifest',
+  'tools',
+] as const;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -243,14 +250,18 @@ export class BeastDispatchService {
           ...canonicalTrackedAgentToolPolicyConfig(request.config),
           ...pickSkillsPolicyConfig(request.config),
         };
+    const policyDefaults: Record<string, unknown> = {
+      ...defaultAgentToolPolicyConfig(definition.id),
+    };
+    if (!trackedAgent && TOOL_MANIFEST_CONFIG_KEYS.some(key => Object.hasOwn(request.config, key))) {
+      delete policyDefaults.requestedTools;
+    }
     const parsedConfigSnapshot: Readonly<Record<string, unknown>> = moduleConfig
-      ? { ...defaultAgentToolPolicyConfig(definition.id), ...config, ...directRunPolicyConfig, modules: moduleConfig }
-      : { ...defaultAgentToolPolicyConfig(definition.id), ...config, ...directRunPolicyConfig };
+      ? { ...policyDefaults, ...config, ...directRunPolicyConfig, modules: moduleConfig }
+      : { ...policyDefaults, ...config, ...directRunPolicyConfig };
     const policyConfigSnapshot = preserveTrackedAgentPolicyConfig(parsedConfigSnapshot, request.config, trackedAgent);
     this.assertRoleToolManifestAllows(request, policyConfigSnapshot);
-    const configSnapshot = !trackedAgent && !Object.hasOwn(request.config, 'skills')
-      ? Object.fromEntries(Object.entries(policyConfigSnapshot).filter(([key]) => key !== 'skills'))
-      : policyConfigSnapshot;
+    const configSnapshot = policyConfigSnapshot;
     const executionMode = request.executionMode ?? definition.executionModeDefault;
     const createdAt = new Date(wallClockNow()).toISOString();
     const linkedAt = new Date(wallClockNow()).toISOString();
