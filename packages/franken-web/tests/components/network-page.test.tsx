@@ -10,6 +10,12 @@ const baseConfig: NetworkConfigResponse = {
   comms: { enabled: false },
 };
 
+function confirmServiceAction(action: 'stop' | 'restart', serviceId: string): void {
+  const label = action === 'stop' ? 'Stop' : 'Restart';
+  fireEvent.click(screen.getByRole('button', { name: `${label} ${serviceId}` }));
+  fireEvent.click(screen.getByRole('button', { name: `Confirm ${action} ${serviceId}` }));
+}
+
 afterEach(cleanup);
 
 describe('NetworkPage', () => {
@@ -44,6 +50,60 @@ describe('NetworkPage', () => {
     expect((screen.getByLabelText('Chat enabled') as HTMLInputElement).checked).toBe(true);
     expect(screen.getByRole('button', { name: 'Refresh' }).getAttribute('class')).toContain('button--secondary');
     expect(screen.getByRole('button', { name: 'Save config' }).getAttribute('class')).toContain('button--primary');
+  });
+
+  it('allows unrelated config changes when the provider supplies the default chat model', () => {
+    const onSaveConfig = vi.fn();
+    const configWithoutModel: NetworkConfigResponse = {
+      ...baseConfig,
+      chat: { enabled: true, host: '127.0.0.1', port: 3737 },
+    };
+
+    render(
+      <NetworkPage
+        config={configWithoutModel}
+        logs={[]}
+        onSelectLogService={vi.fn()}
+        onRefresh={vi.fn()}
+        onRestart={vi.fn()}
+        onSaveConfig={onSaveConfig}
+        onStart={vi.fn()}
+        onStop={vi.fn()}
+        services={[]}
+        status={{ mode: 'secure', secureBackend: 'local-encrypted' }}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Chat host'), { target: { value: '0.0.0.0' } });
+    const saveButton = screen.getByRole('button', { name: 'Save config' });
+    expect(saveButton).toHaveProperty('disabled', false);
+    fireEvent.click(saveButton);
+    expect(onSaveConfig).toHaveBeenCalledWith(['chat.host=0.0.0.0']);
+  });
+
+  it('clears an explicit chat model so the provider default can take over', () => {
+    const onSaveConfig = vi.fn();
+
+    render(
+      <NetworkPage
+        config={baseConfig}
+        logs={[]}
+        onSelectLogService={vi.fn()}
+        onRefresh={vi.fn()}
+        onRestart={vi.fn()}
+        onSaveConfig={onSaveConfig}
+        onStart={vi.fn()}
+        onStop={vi.fn()}
+        services={[]}
+        status={{ mode: 'secure', secureBackend: 'local-encrypted' }}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Chat model'), { target: { value: '' } });
+    const saveButton = screen.getByRole('button', { name: 'Save config' });
+    expect(saveButton).toHaveProperty('disabled', false);
+    fireEvent.click(saveButton);
+    expect(onSaveConfig).toHaveBeenCalledWith(['chat.model=']);
   });
 
   it('gates service controls by status and saves all changed config assignments atomically', async () => {
@@ -106,19 +166,19 @@ describe('NetworkPage', () => {
     expect(onStop).not.toHaveBeenCalledWith('dashboard');
     expect(onRestart).not.toHaveBeenCalledWith('dashboard');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Stop chat-server' }));
+    confirmServiceAction('stop', 'chat-server');
     await waitFor(() => expect(screen.getByText('Stopped chat-server.')).toBeDefined());
-    fireEvent.click(screen.getByRole('button', { name: 'Restart chat-server' }));
+    confirmServiceAction('restart', 'chat-server');
     await waitFor(() => expect(screen.getByText('Restarted chat-server.')).toBeDefined());
     fireEvent.click(screen.getByRole('button', { name: 'Start dashboard' }));
     await waitFor(() => expect(screen.getByText('Started dashboard.')).toBeDefined());
-    fireEvent.click(screen.getByRole('button', { name: 'Stop worker' }));
+    confirmServiceAction('stop', 'worker');
     await waitFor(() => expect(screen.getByText('Stopped worker.')).toBeDefined());
-    fireEvent.click(screen.getByRole('button', { name: 'Restart worker' }));
+    confirmServiceAction('restart', 'worker');
     await waitFor(() => expect(screen.getByText('Restarted worker.')).toBeDefined());
-    fireEvent.click(screen.getByRole('button', { name: 'Stop degraded-worker' }));
+    confirmServiceAction('stop', 'degraded-worker');
     await waitFor(() => expect(screen.getByText('Stopped degraded-worker.')).toBeDefined());
-    fireEvent.click(screen.getByRole('button', { name: 'Restart degraded-worker' }));
+    confirmServiceAction('restart', 'degraded-worker');
     await waitFor(() => expect(screen.getByText('Restarted degraded-worker.')).toBeDefined());
     fireEvent.change(screen.getByLabelText('Network mode'), { target: { value: 'insecure' } });
     fireEvent.change(screen.getByLabelText('Chat model'), { target: { value: 'gpt-5' } });
@@ -164,6 +224,7 @@ describe('NetworkPage', () => {
 
     const stopButton = screen.getByRole('button', { name: 'Stop chat-server' });
     fireEvent.click(stopButton);
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm stop chat-server' }));
     fireEvent.click(stopButton);
 
     await waitFor(() => expect(stopButton).toHaveProperty('disabled', true));

@@ -1,5 +1,9 @@
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { createTestOrchestrator } from '../helpers/test-orchestrator-factory.js';
+import { InMemoryLogger } from '../helpers/in-memory-ports.js';
 import type { BeastInput } from '../../src/types.js';
 
 describe('E2E: Budget exceeded', () => {
@@ -9,7 +13,7 @@ describe('E2E: Budget exceeded', () => {
   };
 
   it('completes when token spend is within budget', async () => {
-    const { loop, ports } = createTestOrchestrator({
+    const { loop } = createTestOrchestrator({
       config: { maxTotalTokens: 10_000 },
     });
     // Default observer returns 700 tokens
@@ -48,5 +52,63 @@ describe('E2E: Budget exceeded', () => {
 
     expect(result.status).toBe('completed');
     expect(ports.heartbeat.pulseCalled).toBe(true);
+  });
+
+  it('aborts the full flow when budget is exceeded and preserves phase audit evidence', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'franken-budget-abort-'));
+    const logger = new InMemoryLogger();
+
+    try {
+      const { loop, ports } = createTestOrchestrator({
+        config: {
+          enableHeartbeat: true,
+          enableTracing: true,
+          maxTotalTokens: 1_000,
+          stateDir,
+        },
+        logger,
+      });
+      ports.observer.setTokenSpend({
+        inputTokens: 800,
+        outputTokens: 400,
+        totalTokens: 1_200,
+        estimatedCostUsd: 0.02,
+      });
+
+      const result = await loop.run(input);
+
+      expect(result).toMatchObject({
+        status: 'aborted',
+        abortReason: 'Token budget exceeded: 1200/1000',
+        tokenSpend: {
+          inputTokens: 800,
+          outputTokens: 400,
+          totalTokens: 1_200,
+          estimatedCostUsd: 0.02,
+        },
+      });
+      expect(ports.observer.traceIds).toEqual([result.sessionId]);
+
+      // The abort happens after hydration, before planning/execution/closure can
+      // create additional state or side effects.
+      expect(ports.planner.intents).toEqual([]);
+      expect(ports.skills.executions).toEqual([]);
+      expect(ports.governor.requests).toEqual([]);
+      expect(ports.memory.traces).toEqual([]);
+      expect(ports.heartbeat.pulseCalled).toBe(false);
+
+      const snapshots = (await readFile(join(stateDir, `${result.sessionId}.jsonl`), 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as { phase: string });
+      expect(snapshots.map(({ phase }) => phase)).toEqual(['ingestion', 'hydration']);
+      expect(logger.entries).toContainEqual({
+        level: 'error',
+        msg: 'BeastLoop: error',
+        data: { error: 'Token budget exceeded: 1200/1000' },
+      });
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
   });
 });

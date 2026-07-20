@@ -45,7 +45,7 @@ function stringifyArgsForGovernanceLog(tool: string, args: Record<string, unknow
  * lazy-DB semantics of the proxy server) or an existing `GovernorAdapter` to
  * reuse one already constructed by the caller.
  */
-export function createGovernanceGate(source: string | GovernorAdapter): GovernanceGate {
+export function createGovernanceGate(source: string | GovernorAdapter, configPath?: string): GovernanceGate {
   let governor: GovernorAdapter | undefined = typeof source === 'string' ? undefined : source;
   const dbPath = typeof source === 'string' ? source : undefined;
 
@@ -61,7 +61,7 @@ export function createGovernanceGate(source: string | GovernorAdapter): Governan
         };
       }
       if (!governor) {
-        governor = createGovernorAdapter(dbPath!);
+        governor = createGovernorAdapter(dbPath!, configPath);
       }
       // Destructive-tool classification (e.g. `forget`) lives in the shared
       // governor adapter, so the decision here matches every other caller.

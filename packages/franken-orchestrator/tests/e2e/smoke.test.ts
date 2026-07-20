@@ -33,7 +33,8 @@ describe('E2E smoke test', () => {
     expect(result.durationMs).toBeGreaterThanOrEqual(0);
 
     // Verify ports were exercised
-    expect(ports.firewall.processedInputs).toHaveLength(1);
+    expect(ports.firewall.processedInputs).toHaveLength(3);
+    expect(ports.firewall.processedInputs[0]).toBe(input.userInput);
     expect(ports.planner.intents).toHaveLength(1);
     expect(ports.critique.reviewedPlans).toHaveLength(1);
     expect(ports.memory.traces.length).toBeGreaterThan(0);

@@ -19,6 +19,12 @@ export interface LoopDetectorOptions {
 
 type LoopHandler = (result: LoopDetectionResult) => void
 
+interface CachedSpanName {
+  original: string
+  normalized: string
+  digitMask: string
+}
+
 /**
  * Detects repeating span-name patterns using a sliding-window comparison.
  * Non-blocking: fires event handlers synchronously, never throws.
@@ -30,7 +36,8 @@ export class LoopDetector {
   private readonly maxGapBetweenRepetitions: number
   private readonly historyLimit: number
   private readonly handlers = new Set<LoopHandler>()
-  private history: string[] = []
+  private readonly comparisonCache = new WeakMap<CachedSpanName, WeakMap<CachedSpanName, boolean>>()
+  private history: CachedSpanName[] = []
 
   constructor(options: LoopDetectorOptions = {}) {
     this.windowSize = LoopDetector.validatePositiveInteger('windowSize', options.windowSize ?? 3)
@@ -75,7 +82,12 @@ export class LoopDetector {
   }
 
   check(spanName: string): LoopDetectionResult {
-    this.history.push(spanName)
+    const normalized = LoopDetector.normalizeSpanName(spanName)
+    this.history.push({
+      original: spanName,
+      normalized,
+      digitMask: LoopDetector.maskDigits(normalized),
+    })
     if (this.history.length > this.historyLimit) {
       this.history = this.history.slice(-this.historyLimit)
     }
@@ -122,7 +134,7 @@ export class LoopDetector {
       if (repetitions >= this.repeatThreshold && cursor === this.history.length) {
         return {
           detected: true,
-          detectedPattern: pattern,
+          detectedPattern: pattern.map(span => span.original),
           repetitions,
         }
       }
@@ -131,7 +143,7 @@ export class LoopDetector {
     return { detected: false, detectedPattern: [], repetitions: 0 }
   }
 
-  private findNextPatternStart(pattern: string[], searchStart: number): number | undefined {
+  private findNextPatternStart(pattern: CachedSpanName[], searchStart: number): number | undefined {
     const latestPatternStart = this.history.length - this.windowSize
     const latestAllowedStart = Math.min(
       latestPatternStart,
@@ -147,13 +159,25 @@ export class LoopDetector {
     return undefined
   }
 
-  private windowMatches(pattern: string[], start: number): boolean {
-    return pattern.every((spanName, index) => this.spanNamesMatch(spanName, this.history[start + index]))
+  private windowMatches(pattern: CachedSpanName[], start: number): boolean {
+    return pattern.every((spanName, index) => this.spanNamesMatch(spanName, this.history[start + index]!))
   }
 
-  private spanNamesMatch(left: string, right: string): boolean {
-    const normalizedLeft = LoopDetector.normalizeSpanName(left)
-    const normalizedRight = LoopDetector.normalizeSpanName(right)
+  private spanNamesMatch(left: CachedSpanName, right: CachedSpanName): boolean {
+    const cached = this.comparisonCache.get(left)?.get(right)
+    if (cached !== undefined) {
+      return cached
+    }
+
+    const matches = this.compareSpanNames(left, right)
+    this.cacheComparison(left, right, matches)
+    this.cacheComparison(right, left, matches)
+    return matches
+  }
+
+  private compareSpanNames(left: CachedSpanName, right: CachedSpanName): boolean {
+    const normalizedLeft = left.normalized
+    const normalizedRight = right.normalized
 
     if (normalizedLeft === normalizedRight) {
       return true
@@ -163,7 +187,7 @@ export class LoopDetector {
     // `iter-1` vs `iter-9`) represent normal progression, not a loop. Without
     // this guard the fuzzy match below would also collapse them into a fake
     // loop because the edit distance is tiny.
-    if (LoopDetector.maskDigits(normalizedLeft) === LoopDetector.maskDigits(normalizedRight)) {
+    if (left.digitMask === right.digitMask) {
       return false
     }
 
@@ -172,6 +196,15 @@ export class LoopDetector {
     }
 
     return LoopDetector.similarity(normalizedLeft, normalizedRight) >= this.similarityThreshold
+  }
+
+  private cacheComparison(left: CachedSpanName, right: CachedSpanName, matches: boolean): void {
+    let comparisons = this.comparisonCache.get(left)
+    if (!comparisons) {
+      comparisons = new WeakMap<CachedSpanName, boolean>()
+      this.comparisonCache.set(left, comparisons)
+    }
+    comparisons.set(right, matches)
   }
 
   private static maskDigits(value: string): string {
@@ -207,18 +240,18 @@ export class LoopDetector {
     const previous = Array.from({ length: right.length + 1 }, (_, index) => index)
 
     for (let leftIndex = 0; leftIndex < left.length; leftIndex += 1) {
-      let upperLeft = previous[0]
+      let upperLeft = previous[0]!
       previous[0] = leftIndex + 1
 
       for (let rightIndex = 0; rightIndex < right.length; rightIndex += 1) {
-        const upper = previous[rightIndex + 1]
+        const upper = previous[rightIndex + 1]!
         const cost = left[leftIndex] === right[rightIndex] ? 0 : 1
-        previous[rightIndex + 1] = Math.min(previous[rightIndex + 1] + 1, previous[rightIndex] + 1, upperLeft + cost)
+        previous[rightIndex + 1] = Math.min(previous[rightIndex + 1]! + 1, previous[rightIndex]! + 1, upperLeft + cost)
         upperLeft = upper
       }
     }
 
-    return previous[right.length]
+    return previous[right.length]!
   }
 
   on(event: 'loop-detected', handler: LoopHandler): void {

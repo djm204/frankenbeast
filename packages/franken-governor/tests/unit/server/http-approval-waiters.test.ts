@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createHmac } from 'node:crypto';
 import { createGovernorApp } from '../../../src/server/app.js';
 import { ApprovalGateway } from '../../../src/gateway/approval-gateway.js';
@@ -227,6 +227,116 @@ describe('standalone governor HTTP app wired to real approval waiters', () => {
 
     expect(registry.resolve('req-placeholder-1', response)).toBe(true);
     await expect(waiter).resolves.toBe(response);
+  });
+
+  it('delivers an HTTP response that arrives after placeholder registration but before the real waiter', async () => {
+    const registry = new ApprovalWaiterRegistry();
+    const app = createGovernorApp({ registry, allowUnsignedApprovalsForTests: true });
+
+    registry.register('req-out-of-order-1', 'task-1', 'Deploy');
+    const response = await app.request('/v1/approval/respond', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId: 'req-out-of-order-1', decision: 'APPROVE' }),
+    });
+    expect(response.status).toBe(200);
+    expect(registry.size).toBe(0);
+    expect(registry.has('req-out-of-order-1')).toBe(false);
+    expect(registry.hasKnownRequest('req-out-of-order-1')).toBe(true);
+
+    const duplicateResponse = await app.request('/v1/approval/respond', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId: 'req-out-of-order-1', decision: 'ABORT' }),
+    });
+    expect(duplicateResponse.status).toBe(404);
+
+    // A retry of the request metadata must not overwrite the already accepted
+    // decision before the in-process channel attaches its waiter.
+    registry.register('req-out-of-order-1', 'task-1', 'Deploy retry');
+    await expect(
+      registry.waitFor('req-out-of-order-1', 'task-1', 'Deploy'),
+    ).resolves.toMatchObject({
+      requestId: 'req-out-of-order-1',
+      decision: 'APPROVE',
+      respondedBy: 'http-operator',
+    });
+    expect(registry.size).toBe(0);
+  });
+
+  it('accepts metadata retries for cached early responses even when pending approval backpressure is full', async () => {
+    const registry = new ApprovalWaiterRegistry();
+    const app = createGovernorApp({
+      registry,
+      allowUnsignedApprovalsForTests: true,
+      approvalQueueBackpressure: { maxPendingApprovals: 1 },
+    });
+    const response = {
+      requestId: 'req-early-backpressure-1',
+      decision: 'APPROVE' as const,
+      respondedBy: 'operator',
+      respondedAt: new Date('2026-01-01T00:00:00Z'),
+    };
+
+    registry.register('req-early-backpressure-1', 'task-1', 'Deploy');
+    expect(registry.resolve('req-early-backpressure-1', response)).toBe(true);
+    registry.register('req-at-capacity-1', 'task-2', 'Other approval');
+
+    const retry = await app.request('/v1/approval/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requestId: 'req-early-backpressure-1',
+        taskId: 'task-1',
+        summary: 'Deploy retry',
+      }),
+    });
+    expect(retry.status).toBe(201);
+    await expect(
+      registry.waitFor('req-early-backpressure-1', 'task-1', 'Deploy'),
+    ).resolves.toBe(response);
+  });
+
+  it('rejects a duplicate waiter while delivering a cached early response', async () => {
+    const registry = new ApprovalWaiterRegistry();
+    const response = {
+      requestId: 'req-early-duplicate-1',
+      decision: 'APPROVE' as const,
+      respondedBy: 'operator',
+      respondedAt: new Date('2026-01-01T00:00:00Z'),
+    };
+
+    registry.register('req-early-duplicate-1', 'task-1', 'Deploy');
+    expect(registry.resolve('req-early-duplicate-1', response)).toBe(true);
+
+    const firstWaiter = registry.waitFor('req-early-duplicate-1', 'task-1', 'Deploy');
+    await expect(
+      registry.waitFor('req-early-duplicate-1', 'task-2', 'Duplicate deploy'),
+    ).rejects.toThrow('Approval waiter already registered for requestId req-early-duplicate-1');
+    await expect(firstWaiter).resolves.toBe(response);
+  });
+
+  it('expires an early response when no real waiter ever attaches', () => {
+    vi.useFakeTimers();
+    try {
+      const registry = new ApprovalWaiterRegistry();
+      const response = {
+        requestId: 'req-http-only-1',
+        decision: 'APPROVE' as const,
+        respondedBy: 'operator',
+        respondedAt: new Date('2026-01-01T00:00:00Z'),
+      };
+
+      registry.register('req-http-only-1', 'task-1', 'HTTP-only approval');
+      expect(registry.resolve('req-http-only-1', response)).toBe(true);
+      vi.advanceTimersByTime(300_000);
+
+      expect(registry.delete('req-http-only-1')).toBe(false);
+      registry.register('req-http-only-1', 'task-2', 'Reused request ID');
+      expect(registry.has('req-http-only-1')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   /**

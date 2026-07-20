@@ -61,7 +61,7 @@ describe('BeastApiClient', () => {
       chatSessionId: 'sess-1',
       moduleConfig: { planner: true, skills: true },
     });
-    await client.listAgents();
+    await client.listAgentPage();
     await client.getAgent('agent-1');
 
     expect(mockFetch).toHaveBeenNthCalledWith(
@@ -96,6 +96,38 @@ describe('BeastApiClient', () => {
     expect(mockFetch).toHaveBeenNthCalledWith(
       3,
       'http://localhost:3000/v1/beasts/agents/agent-1',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
+  it('requests a tracked-agent page with an encoded cursor', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { agents: [], nextCursor: 'next-page' } }),
+    });
+
+    await expect(client.listAgentPage({ limit: 25, cursor: 'cursor/with+symbols=' })).resolves.toEqual({
+      agents: [],
+      nextCursor: 'next-page',
+    });
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://localhost:3000/v1/beasts/agents?limit=25&cursor=cursor%2Fwith%2Bsymbols%3D',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
+  it('requests encoded Beast run pages without eagerly following cursors', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { runs: [{ id: 'run-1' }], nextCursor: 'next/page+=' } }),
+    });
+
+    await expect(client.listRunPage({ limit: 25, cursor: 'cursor/with+symbols=' })).resolves.toEqual({
+      runs: [{ id: 'run-1' }],
+      nextCursor: 'next/page+=',
+    });
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://localhost:3000/v1/beasts/runs?limit=25&cursor=cursor%2Fwith%2Bsymbols%3D',
       expect.objectContaining({ method: 'GET' }),
     );
   });
@@ -169,6 +201,26 @@ describe('BeastApiClient', () => {
       3,
       'http://localhost:3000/v1/beasts/runs/run-1/restart',
       expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('requests later bounded Beast run event pages', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({
+        data: {
+          events: [{ id: 'event-3', runId: 'run-1', sequence: 3, type: 'run.finished', payload: {}, createdAt: '2026-03-10T00:00:03.000Z' }],
+          page: { limit: 25, afterSequence: 2, nextAfterSequence: null, hasMore: false },
+        },
+      }),
+    });
+
+    const page = await client.getRunEvents('run-1', { limit: 25, afterSequence: 2 });
+
+    expect(page.events.map((event) => event.sequence)).toEqual([3]);
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://localhost:3000/v1/beasts/runs/run-1/events?limit=25&afterSequence=2',
+      expect.objectContaining({ method: 'GET' }),
     );
   });
 

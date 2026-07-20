@@ -62,6 +62,13 @@ export type PlanResult =
       failedTaskId: TaskId;
       error: Error;
       /**
+       * Failures from one execution wave that belong to the same recovery graph.
+       * Strategies may provide this so the Planner can inject every independent
+       * recovery before re-running the graph instead of recovering them one pass
+       * at a time. Omitted strategies retain single-failure recovery semantics.
+       */
+      recoveryFailures?: TaskResultFailure[];
+      /**
        * Graph that owns failedTaskId when it differs from the current top-level
        * graph, e.g. a recursive dynamic expansion sub-graph.
        */

@@ -63,8 +63,12 @@ const mockListAgents = vi.fn().mockResolvedValue([
   },
 ]);
 
-const mockListRuns = vi.fn().mockResolvedValue([
-  {
+const mockListAgentPage = vi.fn().mockImplementation(async () => ({
+  agents: await mockListAgents(),
+}));
+
+const mockListRunPage = vi.fn().mockResolvedValue({
+  runs: [{
     id: 'run-1',
     definitionId: 'chunk-plan',
     status: 'running',
@@ -74,8 +78,8 @@ const mockListRuns = vi.fn().mockResolvedValue([
     attemptCount: 1,
     executionMode: 'process',
     createdAt: '2026-03-11T00:00:02.000Z',
-  },
-]);
+  }],
+});
 const mockGetContainerRuntimeStatus = vi.fn().mockResolvedValue({ available: true });
 
 const mockGetAgent = vi.fn().mockResolvedValue({
@@ -282,8 +286,9 @@ vi.mock('../../src/lib/beast-api.js', () => ({
   ],
   BeastApiClient: vi.fn(function (this: {
     getCatalog: typeof mockGetCatalog;
+    listAgentPage: typeof mockListAgentPage;
     listAgents: typeof mockListAgents;
-    listRuns: typeof mockListRuns;
+    listRunPage: typeof mockListRunPage;
     getContainerRuntimeStatus: typeof mockGetContainerRuntimeStatus;
     getAgent: typeof mockGetAgent;
     getRun: typeof mockGetRun;
@@ -303,8 +308,9 @@ vi.mock('../../src/lib/beast-api.js', () => ({
     subscribeToEvents: typeof mockSubscribeToEvents;
   }) {
     this.getCatalog = mockGetCatalog;
+    this.listAgentPage = mockListAgentPage;
     this.listAgents = mockListAgents;
-    this.listRuns = mockListRuns;
+    this.listRunPage = mockListRunPage;
     this.getContainerRuntimeStatus = mockGetContainerRuntimeStatus;
     this.getAgent = mockGetAgent;
     this.getRun = mockGetRun;
@@ -424,8 +430,10 @@ afterEach(() => {
       updatedAt: '2026-03-11T00:00:01.000Z',
     },
   ]);
-  mockListRuns.mockResolvedValue([
-    {
+  mockListAgentPage.mockReset();
+  mockListAgentPage.mockImplementation(async () => ({ agents: await mockListAgents() }));
+  mockListRunPage.mockResolvedValue({
+    runs: [{
       id: 'run-1',
       definitionId: 'chunk-plan',
       status: 'running',
@@ -435,8 +443,8 @@ afterEach(() => {
       attemptCount: 1,
       executionMode: 'process',
       createdAt: '2026-03-11T00:00:02.000Z',
-    },
-  ]);
+    }],
+  });
   mockGetContainerRuntimeStatus.mockResolvedValue({ available: true });
   mockGetAgent.mockResolvedValue({
     agent: {
@@ -839,6 +847,7 @@ describe('ChatShell', () => {
     render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Restart chat-server' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm restart chat-server' }));
 
     await waitFor(() => {
       expect(mockNetworkRestart).toHaveBeenCalledWith('chat-server');
@@ -863,6 +872,7 @@ describe('ChatShell', () => {
     render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Restart chat-server' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm restart chat-server' }));
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
 
     await waitFor(() => {
@@ -908,6 +918,7 @@ describe('ChatShell', () => {
     render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Restart chat-server' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm restart chat-server' }));
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
 
     act(() => {
@@ -1043,7 +1054,138 @@ describe('ChatShell', () => {
     }, { timeout: 5000 });
 
     expect(screen.getByRole('heading', { level: 1, name: 'Beasts' })).toBeDefined();
-    expect(mockListAgents).toHaveBeenCalled();
+    expect(mockListAgentPage).toHaveBeenCalledWith();
+  });
+
+  it('loads subsequent tracked-agent pages from the returned cursor', async () => {
+    window.location.hash = '#/beasts';
+    const firstAgent = {
+      id: 'agent-page-1',
+      definitionId: 'chunk-plan',
+      status: 'stopped',
+      source: 'dashboard',
+      createdByUser: 'operator',
+      initAction: { kind: 'chunk-plan', command: '/plan', config: {} },
+      initConfig: {},
+      dispatchRunId: 'run-page-1',
+      createdAt: '2026-03-11T00:00:00.000Z',
+      updatedAt: '2026-03-11T00:00:01.000Z',
+    };
+    const secondAgent = {
+      ...firstAgent,
+      id: 'agent-page-2',
+      dispatchRunId: 'run-page-2',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    };
+    mockListRunPage.mockResolvedValue({
+      runs: [{
+        id: 'run-page-1', definitionId: 'chunk-plan', status: 'succeeded',
+        dispatchedBy: 'dashboard', dispatchedByUser: 'operator', executionMode: 'process',
+        createdAt: '2026-03-11T00:00:00.000Z', updatedAt: '2026-03-11T00:00:01.000Z',
+      }],
+    });
+    mockGetRun.mockResolvedValue({
+      run: {
+        id: 'run-page-2', definitionId: 'chunk-plan', status: 'succeeded',
+        dispatchedBy: 'dashboard', dispatchedByUser: 'operator', executionMode: 'container',
+        createdAt: '2026-03-10T00:00:00.000Z', updatedAt: '2026-03-10T00:00:01.000Z',
+      },
+      steps: [],
+      logs: [],
+    });
+    mockListAgentPage
+      .mockResolvedValueOnce({ agents: [firstAgent], nextCursor: 'cursor-page-2' })
+      .mockResolvedValueOnce({ agents: [secondAgent] });
+
+    render(
+      <ChatShell
+        baseUrl="http://localhost:3000"
+        projectId="test-project"
+        sessionId="sess-1"
+        version="0.1.0"
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more agents' }, { timeout: 5000 }));
+    await waitFor(() => expect(screen.getByText('agent-page-2')).toBeTruthy());
+    expect(mockListAgentPage).toHaveBeenNthCalledWith(2, { cursor: 'cursor-page-2' });
+    expect(mockGetRun).toHaveBeenCalledWith('run-page-2');
+    expect(screen.getAllByText('container mode').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Load more agents' })).toBeNull();
+
+    fireEvent.click(screen.getByText('agent-page-2'));
+    await waitFor(() => expect(mockGetAgent).toHaveBeenCalledWith('agent-page-2'));
+    expect(screen.getByText('agent-page-1')).toBeTruthy();
+    expect(screen.getByText('agent-page-2')).toBeTruthy();
+    expect(mockListAgentPage).toHaveBeenCalledTimes(2);
+
+    const newlyCreatedAgent = {
+      ...firstAgent,
+      id: 'agent-new',
+      createdAt: '2026-03-12T00:00:00.000Z',
+    };
+    mockListAgentPage
+      .mockResolvedValueOnce({ agents: [newlyCreatedAgent, firstAgent], nextCursor: 'cursor-page-2' })
+      .mockResolvedValueOnce({ agents: [secondAgent] });
+    await act(async () => {
+      latestBeastEventHandlers?.agentEvent?.({
+        agentId: 'agent-new',
+        event: {
+          id: 'created-event', sequence: 1, level: 'info', type: 'agent.created',
+          message: 'Tracked agent created', payload: {}, createdAt: newlyCreatedAgent.createdAt,
+        },
+      });
+    });
+
+    await waitFor(() => expect(screen.getByText('agent-new')).toBeTruthy());
+    expect(screen.getByText('agent-page-1')).toBeTruthy();
+    expect(screen.getByText('agent-page-2')).toBeTruthy();
+    expect(mockListAgentPage).toHaveBeenCalledTimes(4);
+  });
+
+  it('discards an in-flight load-more page when a fleet refresh replaces its cursor snapshot', async () => {
+    window.location.hash = '#/beasts';
+    const firstAgent = {
+      id: 'agent-page-1', definitionId: 'chunk-plan', status: 'stopped', source: 'dashboard',
+      createdByUser: 'operator', initAction: { kind: 'chunk-plan', command: '/plan', config: {} },
+      initConfig: {}, createdAt: '2026-03-11T00:00:00.000Z', updatedAt: '2026-03-11T00:00:01.000Z',
+    };
+    const newAgent = { ...firstAgent, id: 'agent-new', createdAt: '2026-03-12T00:00:00.000Z' };
+    const staleSecondPageAgent = { ...firstAgent, id: 'agent-stale-page-2', createdAt: '2026-03-10T00:00:00.000Z' };
+    let resolveStalePage!: (page: { agents: typeof firstAgent[]; nextCursor?: string }) => void;
+    const stalePage = new Promise<{ agents: typeof firstAgent[]; nextCursor?: string }>((resolve) => {
+      resolveStalePage = resolve;
+    });
+    mockListAgentPage
+      .mockResolvedValueOnce({ agents: [firstAgent], nextCursor: 'old-page-2' })
+      .mockReturnValueOnce(stalePage)
+      .mockResolvedValueOnce({ agents: [newAgent, firstAgent], nextCursor: 'fresh-page-2' })
+      .mockResolvedValueOnce({ agents: [], nextCursor: undefined });
+
+    render(
+      <ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.1.0" />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more agents' }, { timeout: 5000 }));
+    await act(async () => {
+      latestBeastEventHandlers?.agentEvent?.({
+        agentId: 'agent-new',
+        event: {
+          id: 'dispatch-linked', sequence: 1, level: 'info', type: 'agent.dispatch.linked',
+          message: 'Dispatch run linked', payload: { runId: 'run-new' }, createdAt: newAgent.createdAt,
+        },
+      });
+    });
+    await waitFor(() => expect(screen.getByText('agent-new')).toBeTruthy());
+
+    await act(async () => {
+      resolveStalePage({ agents: [staleSecondPageAgent], nextCursor: 'stale-page-3' });
+      await stalePage;
+    });
+
+    expect(screen.queryByText('agent-stale-page-2')).toBeNull();
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more agents' }));
+    await waitFor(() => expect(mockListAgentPage).toHaveBeenNthCalledWith(4, { cursor: 'fresh-page-2' }));
   });
 
   it('persists Beast drawer edits and refreshes the selected agent detail', async () => {
@@ -1371,6 +1513,76 @@ describe('ChatShell', () => {
     await waitFor(() => {
       expect(screen.getAllByText('agent-2').length).toBeGreaterThan(0);
     });
+  });
+
+  it('does not refetch the first page for events from agents on unloaded pages', async () => {
+    window.location.hash = '#/beasts';
+    mockListAgentPage.mockImplementation(async () => ({
+      agents: await mockListAgents(),
+      nextCursor: 'cursor-page-2',
+    }));
+
+    render(
+      <ChatShell
+        baseUrl="http://localhost:3000"
+        projectId="test-project"
+        version="0.9.0"
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Load more agents' })).toBeTruthy());
+    expect(mockListAgentPage).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      latestBeastEventHandlers?.agentStatus?.({
+        agentId: 'agent-on-later-page',
+        status: 'running',
+        updatedAt: '2026-03-11T00:00:03.000Z',
+      });
+      await Promise.resolve();
+    });
+
+    expect(mockListAgentPage).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      latestBeastEventHandlers?.snapshot?.({
+        agents: [{
+          id: 'agent-0-inside-first-page',
+          definitionId: 'chunk-plan',
+          status: 'dispatching',
+          createdAt: '2026-03-11T00:00:00.000Z',
+          updatedAt: '2026-03-11T00:00:00.000Z',
+        }],
+      });
+    });
+    await waitFor(() => expect(mockListAgentPage).toHaveBeenCalledTimes(2));
+  });
+
+  it('refreshes a paginated fleet for an unknown agent dispatch-link event', async () => {
+    window.location.hash = '#/beasts';
+    mockListAgentPage.mockImplementation(async () => ({
+      agents: await mockListAgents(),
+      nextCursor: 'cursor-page-2',
+    }));
+
+    render(
+      <ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />,
+    );
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Load more agents' })).toBeTruthy());
+    expect(mockListAgentPage).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      latestBeastEventHandlers?.agentEvent?.({
+        agentId: 'new-auto-dispatched-agent',
+        event: {
+          id: 'dispatch-linked', sequence: 1, level: 'info', type: 'agent.dispatch.linked',
+          message: 'Dispatch run linked', payload: { runId: 'run-new' }, createdAt: '2026-03-12T00:00:00.000Z',
+        },
+      });
+    });
+
+    await waitFor(() => expect(mockListAgentPage).toHaveBeenCalledTimes(2));
   });
 
   it('refreshes selected agent details when a newly linked run emits logs', async () => {

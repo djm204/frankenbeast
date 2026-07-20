@@ -5,8 +5,9 @@ import { NullLogger } from '../logger.js';
 export class InjectionDetectedError extends Error {
   constructor(
     public readonly violations: readonly { rule: string; severity: string; detail: string }[],
+    source = 'Input',
   ) {
-    super('Input blocked by firewall: injection detected');
+    super(`${source} blocked by firewall: injection detected`);
     this.name = 'InjectionDetectedError';
   }
 }

@@ -10,6 +10,8 @@ export interface LlmMiddleware {
   readonly name: string;
   beforeRequest(request: LlmRequest): LlmRequest;
   afterResponse(response: LlmResponse): LlmResponse;
+  /** Optional checks that apply only to untrusted tool/skill responses. */
+  inspectUntrustedResponse?(response: LlmResponse): LlmResponse;
 }
 
 export class MiddlewareChain {
@@ -39,6 +41,14 @@ export class MiddlewareChain {
     let processed = response;
     for (const mw of [...this.middlewares].reverse()) {
       processed = mw.afterResponse(processed);
+    }
+    return processed;
+  }
+
+  inspectUntrustedResponse(response: LlmResponse): LlmResponse {
+    let processed = response;
+    for (const mw of [...this.middlewares].reverse()) {
+      processed = mw.inspectUntrustedResponse?.(processed) ?? processed;
     }
     return processed;
   }

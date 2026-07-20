@@ -1,5 +1,49 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-20 — Outbound request deadlines must include response consumption
+- JavaScript `fetch()` resolves when response headers arrive, not when the body has been consumed. A hard outbound-delivery deadline must wrap both the fetch and all body/error parsing under the same abort signal and timer; otherwise a provider can send headers and stall forever during `json()` or `text()`.
+- In fresh monorepo worktrees, run the root build before package-local TypeScript checks so internal workspace declaration outputs exist and unrelated module-resolution errors do not mask the feature result.
+
+## 2026-07-18 — Cron credential scanner closeout
+- For cron credential scanners, taint propagation must cover neutral alias names, exported declarations, destructured env containers, env-name variables, multiline assignments, shell indirect expansions, printenv/getenv aliases, and programmatic CLI calls; otherwise hardening that only matches direct `process.env`/`$TOKEN` reads leaves easy PAT-persistence bypasses.
+- Cron-context detection should inspect code outside string literals plus actual schedule literals, not diagnostic text that merely says `crontab`; credential assignment parsing must handle quoted values while preserving runtime `$(gh auth token)` as safe.
+- Async child-process taint needs both returned child/stdout aliases and callback stdout parameters, including multiline calls; once a multiline alias becomes sensitive, trailing defaults/options must not clear it before the call closes.
+- Indirect shell `printenv` names, schedule aliases inside template interpolation, and dotted object-property assignments all require explicit taint propagation; option literals such as `--token` must remain non-sensitive when paired with a runtime `$(gh auth token)` value.
+- Multiline TypeScript destructuring, split `process.env` chains, destructured async stdout, and cached `os.environ.get` getters need dedicated alias paths; runtime cron allow-lists should treat `command gh auth token` like direct `gh auth token`.
+- When expanding shell-file scanning for cron writers, avoid both basename-only install/setup filters and scanning every shell script blindly; include cron/crontab-named writers while preserving non-cron bootstrap scripts to prevent fixture false positives.
+- Separate shell interpolation parsing from JavaScript template interpolation, carry quote/heredoc context across lines, recognize staged crontab files and programmatic crontab sinks, and propagate aliased Python `os.environ`; otherwise a line-oriented scanner both misses persisted credentials and rejects safe runtime `$(gh auth token)` strings.
+- Treat cron-install taint as a language-aware dataflow problem: cover post-processed/backquoted `printenv`, wrapped/incrementally assembled `gh auth token`, aliased env imports/containers/sinks, dot/bracket/destructuring/joined interpolation flows, multiline schedules/assembly/programmatic sinks, and redirect/tee/stdin staging while preserving shell URLs and excluding quoted heredoc/escaped runtime expansion.
+- Pre-scan bounded source lines for cross-line facts that a single-line taint pass cannot recover reliably: multiline `gh auth token` argv arrays, named callback stdout parameters, default `node:process` imports, command-array crontab sinks, and shell staging through command aliases. Split multiple declarations only at top-level delimiters so commas inside calls, arrays, objects, and strings do not corrupt alias tracking.
+
+## 2026-07-20 — Recovered PID signal-boundary identity checks
+- Carry the persisted process-start token into the supervisor and re-read identity immediately before every fallback signal; validating ownership in an upstream executor leaves a TOCTOU gap, especially when a failed process-group sweep falls back to direct PID signaling. If the token is missing, unreadable, unsupported, or mismatched while the PID exists, refuse the signal with operator guidance. An absent PID is a safe no-op for direct signaling, but a persisted owned process group must still be swept because descendants can survive their group leader.
+
+## 2026-07-20 — ESM-compatible inline workers for synchronous native dependencies
+- When a package offloads synchronous native calls to an inline worker, do not assume `Worker(..., { eval: true })` provides CommonJS: package `type` and runtime context can make `require` unavailable in the built artifact even when test runners pass. Use an ESM data-URL worker with dynamic imports and verify the compiled `dist` entry point in plain Node, not only source-mode tests.
+- Keep idle workers unref'ed, ref them while requests are outstanding, and route every worker response/error through correlated pending requests so asynchronous APIs remain non-blocking without changing process-liveness behavior.
+- Preserve adapter invocation order across the worker boundary: serialize reads and deletes behind earlier queued writes, not just write calls, or a read can observe stale state while a preceding write is still retrying.
+- Preserve JSON persistence semantics at the worker boundary by serializing metadata and thought blocks before `postMessage`; structured cloning rejects values such as functions that `JSON.stringify` historically omitted. Also remove/ref-clean any pending request when `postMessage` throws synchronously.
+- Resolve relative database paths once before opening either the main or worker connection; asynchronous worker startup must not reinterpret a path after `process.cwd()` changes.
+- Keep worker startup lock-free after the main connection has initialized persistent WAL/schema state. Re-running DDL or `journal_mode` in asynchronous startup can turn a transient lock into a permanently failed worker before request-level retry logic can run.
+- A synchronous public `close()` needs a synchronous worker acknowledgement after the native database handle is closed. A small `SharedArrayBuffer`/`Atomics` handshake preserves the existing API while making immediate reopen, journal changes, and shutdown deterministic; skip that wait after a recorded worker failure so cleanup cannot mask the original error with a timeout.
+
+## 2026-07-20 — Incremental type-aware ESLint adoption
+- Enable type-aware rules in a dedicated TypeScript source override with `projectService: true` and an explicit `tsconfigRootDir`; source-adjacent tests excluded from package tsconfig files must be ignored by that override or ESLint fails before rule evaluation.
+- A targeted rule such as `@typescript-eslint/no-floating-promises` can establish type-aware coverage without enabling the entire strict preset at once. Treat surfaced promises as real call-site decisions: await work that must finish, use `void` only for intentional fire-and-forget, and add rejection handling for shutdown paths.
+
+## 2026-07-20 — Bounded Beast event paging through corrupt rows
+- Recovery pagination must bound raw rows scanned, not only healthy rows returned. Return the last scanned raw sequence plus an indexed `hasMore` probe so a short or empty page can advance past corrupt rows without turning one request into a full-history scan.
+- Before wiring a new paginated endpoint into dashboard hydration, trace which detail field the UI actually renders. Do not eagerly collect every page for an unused compatibility field; keep the bounded endpoint available for intentional consumers and preserve fast detail loading.
+
+## 2026-07-19 — Skill HITL configuration boundaries
+- Keep the active config path and installed skill root as separate inputs: the active config determines which skills are enabled, while manifests remain anchored to the database/project `.fbeast/skills` directory even when operators supply an external `--config` path.
+- Distinguish a valid empty enabled-skill list from malformed/unreadable config. For qualified calls, fail closed only when the action matches an installed skill server or directory alias, so stale custom registrations remain gated without changing policy for unrelated built-in MCP servers.
+- MCP action parsing cannot split blindly on the first or last `__`, because both server and tool names may contain double underscores; match configured server-name prefixes and preserve the full remaining tool name.
+
+## 2026-07-19 — Bounded Beast log paging
+- A tail endpoint is not operationally bounded if it collects a bounded result after scanning all retained history. Read newest rotations in reverse chunks and stop as soon as the line or byte budget is full; also restrict page reads to configured retention so stale extra rotations cannot re-expand request I/O.
+- Treat oversized individual records as consumed pagination entries even when replacing or omitting their payload, or offset clients can become stuck on the same line. For HTTP byte limits, measure the final post-redaction JSON envelope (logs plus page metadata), not only the serialized logs array.
+
 ## 2026-07-19 — MCP integer precision validation
 - JSON-schema `integer` checks at JavaScript transport boundaries must use `Number.isSafeInteger`, not `Number.isInteger`: integral-valued numbers beyond `Number.MAX_SAFE_INTEGER` can no longer represent exact IDs, limits, or pagination values. Cover both accepted safe boundaries and rejected values immediately outside them.
 
@@ -27,6 +71,16 @@
 
 ## 2026-07-18 — Kanban reviewer isolation
 - Independent review workers must receive a distinct child card or explicitly review-only context; never let a delegated reviewer inherit and complete the implementation parent card, because completion can garbage-collect its workspace before the verified diff is committed and shipped.
+
+## 2026-07-19 — PR #3270 reviewer fail-closed follow-up
+- Symptom: the reviewer could pass raw 39-character Google API keys to the model, let `gh` subprocesses use a stale lower-precedence token, depend on the host locale for emoji-bearing review files, and exit successfully after diff-fetch failures.
+- Treatment: match published `AIza` plus 35-character keys before model invocation, force every `gh` subprocess to use the token selected for API calls, write review files explicitly as UTF-8, and accumulate diff-fetch failures while continuing later PRs before failing the run.
+- Reusable lesson: security/reliability reviewers must keep credential selection, text encoding, and exit status deterministic across API and subprocess paths; add regressions for mixed token environments, non-default locales, standard secret formats, and partial-batch fetch failures.
+
+## 2026-07-19 — PR #3270 over-cap Codex closeout
+- Symptom: each approved current-head Codex round produced actionable findings, so the repaired head advanced after the approved trigger and required another fresh review; green CI and zero unresolved Codex threads did not satisfy the current-head gate.
+- Treatment: preserve the existing closeout worker as the sole owner, verify local/upstream/PR head equality, green required checks, CLEAN merge state, zero unresolved Codex threads, and exact trigger count before requesting one bounded additional invocation. Do not retrigger or merge until that explicit approval is recorded.
+- Reusable lesson: an over-cap approval is scoped to one trigger and the head it reviews, not to the whole PR. If valid findings move the head, request a new exact-command approval for the next invocation rather than treating the prior approval or resolved threads as transferable.
 
 ## 2026-07-18 — Working-memory hydration corruption
 - Fail closed on malformed persisted values that are shaped like structured JSON (`{` or `[` after leading whitespace), while retaining the documented plain-text fallback for genuinely legacy rows. Typed hydration errors should identify the affected key without deleting the row, so operators can repair it and reopen the store.
@@ -406,7 +460,17 @@
 ## Lessons
 - 2026-07-19 — Docs regression tests should assert exact pinned values from manifest and treat setup commands as gate-narrow/full setup distinctions.
 - 2026-07-19 — Bounded multi-pass LLM flows need one shared deadline propagated through cache/client/adapter layers, explicit subprocess and retry-wait cancellation, and a caller-side abort race for implementations that ignore signals. Preserve the last useful pre-quality artifact on timeout, use deterministic structural confidence for fast paths, avoid resending unchanged repository context, and test 1/2/4-pass paths plus child-process termination.
+- 2026-07-19 — SQLite multi-writer regressions need genuinely independent worker-thread connections, not `Promise.all` around synchronous calls. Acquire write locks with immediate transactions before read-to-write paths, and merge newly persisted working-memory rows for incremental flushes while preserving explicit clear/restore replacement semantics and configured limits.
 
 ## 2026-07-19 — Type export renames and deprecation compatibility
 - When renaming shared public type names for clarity, keep deprecated aliases temporarily (with `@deprecated` JSDoc) for downstream consumers, update docs/tests to use new names, and add targeted tests validating both canonical and deprecated aliases.
 - Before merging such API refactors, require `tsc`, package `lint`, `build`, and focused unit tests for both packages to avoid regressions in public contracts.
+
+## 2026-07-19 — Stable SQLite keyset pagination
+- Stable keyset pagination over mutable SQLite data needs both a deterministic tie-breaker (`created_at`, then `id`) and a first-page high-water mark such as `rowid`; the key boundary prevents duplicates while the high-water mark excludes same-timestamp rows inserted between requests.
+- Bound secondary metadata work with the page: scope event-history queries to returned IDs, query only active statuses for capacity calculations, and add matching composite indexes so a bounded primary response does not hide unbounded side scans.
+- Keep a page-returning client primitive and migrate real UI callers to it explicitly; legacy list helpers must not loop over every page and recreate the original unbounded load.
+- Cursor pagination in mutable live views must invalidate in-flight append requests whenever a full refresh replaces the loaded window; capture a window generation before `load more`, discard late responses on generation mismatch, and test the refresh/append race. Use the earliest lifecycle event the backend actually emits as the creation refresh signal rather than relying on a nonexistent synthetic event. Keep SSE snapshots bounded to the same page limit, retain `createdAt`, expose `nextCursor`, and refresh for every unknown row in that bounded first-page snapshot. Compare/sort loaded rows by the full server key `(createdAt DESC, id DESC)` so selected-row pinning preserves pagination semantics; remove misleading array-returning list wrappers rather than silently truncating them.
+
+## 2026-07-20 — Terminal input ownership
+- Interactive CLI processes must have one long-lived stdin/readline owner. Inject that owner's question and cancellation functions into approval/governance channels rather than creating a second readline interface; create the owner lazily so startup work cannot consume early keystrokes, and abort expired questions without closing the shared interface. Preserve the existing non-TTY fail-closed path and verify chat-to-approval input routing with a real scripted PTY.

@@ -81,7 +81,24 @@ describe('StepWorkflow', () => {
     useBeastStore.getState().setStepValues(1, { workflowType: 'design-interview' });
     render(<StepWorkflow />);
     expect(screen.getByPlaceholderText(/design interview should produce/i)).toBeTruthy();
+    // Later interview questions reveal conversationally once the first
+    // required answer is provided.
+    expect(screen.queryByLabelText(/design document be written/i)).toBeNull();
+    expect(screen.getByText(/1 more question after this one/i)).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText(/design interview produce/i), { target: { value: 'Draft billing design' } });
     expect(screen.getByLabelText(/design document be written/i)).toBeTruthy();
+    expect(screen.queryByText(/more question/i)).toBeNull();
+  });
+
+  it('renders all interview prompts at once in form view', () => {
+    useBeastStore.getState().toggleWizardMode();
+    useBeastStore.getState().setStepValues(1, { workflowType: 'design-interview' });
+    render(<StepWorkflow />);
+
+    expect(screen.getByLabelText(/design interview produce/i)).toBeTruthy();
+    expect(screen.getByLabelText(/design document be written/i)).toBeTruthy();
+    expect(screen.queryByText(/more question/i)).toBeNull();
   });
 
   it('collects backend design-interview fields', () => {
@@ -111,6 +128,17 @@ describe('StepWorkflow', () => {
       designDocPath: 'docs/design.md',
       outputDir: 'tasks/chunks',
     });
+  });
+
+  it('associates the chunk-plan file description with its input', () => {
+    useBeastStore.getState().setStepValues(1, { workflowType: 'chunk-plan' });
+    render(<StepWorkflow />);
+
+    const input = screen.getByLabelText(/design document should be chunked/i);
+    const description = screen.getByText(/repo-relative path to the Markdown design document/i);
+
+    expect(input.getAttribute('aria-describedby')).toBe(description.id);
+    expect(description.textContent).toContain('split into implementation chunks');
   });
 
   it('collects backend martin-loop fields', () => {

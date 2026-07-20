@@ -5,8 +5,8 @@ export type AnalyticsOutcome = 'approved' | 'denied' | 'review_recommended' | 'f
 export type AnalyticsSeverity = 'info' | 'warning' | 'error';
 
 export interface AnalyticsFilters {
-  sessionId?: string;
-  toolQuery?: string;
+  sessionId?: string | undefined;
+  toolQuery?: string | undefined;
   outcome?: AnalyticsOutcome;
   timeWindow?: string;
 }

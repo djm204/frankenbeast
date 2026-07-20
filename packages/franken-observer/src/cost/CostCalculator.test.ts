@@ -29,6 +29,20 @@ describe('CostCalculator', () => {
       expect(cost).toBeCloseTo(expected, 8)
     })
 
+    it('multiplies small token counts by the rate before scaling to millions', () => {
+      const calc = new CostCalculator({
+        'small-usage-model': { promptPerMillion: 15, completionPerMillion: 0 },
+      })
+
+      const cost = calc.calculate({
+        model: 'small-usage-model',
+        promptTokens: 1,
+        completionTokens: 0,
+      })
+
+      expect(cost).toBe((1 * 15) / 1_000_000)
+    })
+
     it('returns 0 for an unknown model', () => {
       const quietCalc = new CostCalculator(DEFAULT_PRICING, {
         onUnknownModel: () => {},
@@ -125,6 +139,23 @@ describe('CostCalculator', () => {
         DEFAULT_PRICING['claude-opus-4-6']!.promptPerMillion +
         DEFAULT_PRICING['gpt-4o']!.promptPerMillion
       expect(cost).toBeCloseTo(expected, 6)
+    })
+
+    it('preserves low-order costs when summing mixed magnitudes', () => {
+      const calc = new CostCalculator({
+        expensive: { promptPerMillion: 10_000_000_000_000_000, completionPerMillion: 0 },
+        inexpensive: { promptPerMillion: 100_000, completionPerMillion: 0 },
+      })
+      const entries = [
+        { model: 'expensive', promptTokens: 1_000_000, completionTokens: 0 },
+        ...Array.from({ length: 20 }, () => ({
+          model: 'inexpensive',
+          promptTokens: 1,
+          completionTokens: 0,
+        })),
+      ]
+
+      expect(calc.totalCost(entries)).toBe(10_000_000_000_000_002)
     })
 
     it('returns 0 for an empty list', () => {

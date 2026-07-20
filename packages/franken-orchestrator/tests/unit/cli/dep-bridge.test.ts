@@ -270,14 +270,14 @@ describe('bridgeToBeastConfig()', () => {
       expect(config.skillsDir).toBe('/custom/skills');
     });
 
-    it('defaults skillsDir to resolve(paths.root, skills)', () => {
+    it('defaults skillsDir to the project .fbeast metadata directory', () => {
       const config = bridgeToBeastConfig(makeOptions({}));
-      expect(config.skillsDir).toBe('/project/skills');
+      expect(config.skillsDir).toBe('/project/.fbeast/skills');
     });
 
-    it('resolves skillsDir relative to custom project root', () => {
+    it('resolves the .fbeast skills directory relative to a custom project root', () => {
       const config = bridgeToBeastConfig(makeOptions({ paths: makePaths({ root: '/tmp/myproj' }) }));
-      expect(config.skillsDir).toBe('/tmp/myproj/skills');
+      expect(config.skillsDir).toBe('/tmp/myproj/.fbeast/skills');
     });
 
     it('defaults configDir to the project .fbeast metadata directory', () => {

@@ -7,6 +7,7 @@
 import type {
   IFirewallModule,
   FirewallResult,
+  FirewallViolation,
   ISkillsModule,
   SkillDescriptor,
   SkillInput,
@@ -51,6 +52,10 @@ export class InMemoryFirewall implements IFirewallModule {
     ];
   }
 
+  async scanResponse(input: string): Promise<FirewallResult> {
+    return this.runPipeline(input);
+  }
+
   async runPipeline(input: string): Promise<FirewallResult> {
     this.processedInputs.push(input);
 
@@ -67,7 +72,7 @@ export class InMemoryFirewall implements IFirewallModule {
 
     // PII redaction
     let sanitized = input;
-    const warnings: FirewallResult['violations'] = [];
+    const warnings: FirewallViolation[] = [];
     for (const pattern of this.piiPatterns) {
       const matches = sanitized.match(pattern);
       if (matches) {
@@ -85,13 +90,19 @@ export class InMemoryFirewall implements IFirewallModule {
 export class InMemorySkills implements ISkillsModule {
   readonly executions: Array<{ skillId: string; input: SkillInput }> = [];
   private readonly skills: SkillDescriptor[];
+  private readonly outputFactory: (skillId: string, input: SkillInput) => unknown;
 
-  constructor(skills?: SkillDescriptor[]) {
+  constructor(
+    skills?: SkillDescriptor[],
+    outputFactory: (skillId: string, input: SkillInput) => unknown =
+      (skillId, input) => `Executed ${skillId}: ${input.objective}`,
+  ) {
     this.skills = skills ?? [
       { id: 'code-gen', name: 'Code Generation', requiresHitl: false, executionType: 'function' },
       { id: 'file-write', name: 'File Write', requiresHitl: true, executionType: 'function' },
       { id: 'search', name: 'Search', requiresHitl: false, executionType: 'function' },
     ];
+    this.outputFactory = outputFactory;
   }
 
   hasSkill(skillId: string): boolean {
@@ -109,7 +120,7 @@ export class InMemorySkills implements ISkillsModule {
 
     this.executions.push({ skillId, input });
     return {
-      output: `Executed ${skillId}: ${input.objective}`,
+      output: this.outputFactory(skillId, input),
       tokensUsed: 0,
     };
   }

@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
-import { loadCorpus, loadTaskFile } from '../src/corpus/loader.js';
+import { loadCorpus, loadCorpusWithDiagnostics, loadTaskFile } from '../src/corpus/loader.js';
 
 function tempCorpus(): string {
   return mkdtempSync(join(tmpdir(), 'live-bench-corpus-'));
@@ -38,6 +38,77 @@ describe('corpus loader', () => {
       tier: 'core',
       requiredChecks: [{ type: 'file-exists', path: 'README.md' }],
     });
+  });
+
+  it('quarantines malformed candidate tasks while returning valid corpus entries and structured diagnostics', () => {
+    const root = tempCorpus();
+    const malformedJsonPath = join(root, 'candidate/malformed.task.json');
+    mkdirSync(join(malformedJsonPath, '..'), { recursive: true });
+    writeFileSync(malformedJsonPath, '{not-json', 'utf8');
+    const invalidSchemaPath = writeTask(root, 'candidate/invalid-schema.task.json', {
+      ...validTask,
+      taskId: 'invalid-schema',
+      tier: 'candidate',
+      requiredChecks: [{ type: 'unknown-check' }],
+    });
+    const invalidTierPath = writeTask(root, 'candidate/invalid-tier.task.json', {
+      ...validTask,
+      taskId: 'invalid-tier',
+      tier: 'canidate',
+    });
+    writeTask(root, 'candidate/z.task.json', { ...validTask, taskId: 'z-task', tier: 'candidate' });
+    writeTask(root, 'core/a.task.json', { ...validTask, taskId: 'a-task' });
+
+    const result = loadCorpusWithDiagnostics(root);
+
+    expect(result.tasks.map((task) => task.taskId)).toEqual(['a-task', 'z-task']);
+    expect(result.quarantined).toEqual([
+      expect.objectContaining({ path: invalidSchemaPath, tier: 'candidate' }),
+      expect.objectContaining({ path: invalidTierPath, tier: 'candidate' }),
+      expect.objectContaining({ path: malformedJsonPath, tier: 'candidate' }),
+    ]);
+    expect(result.quarantined.every((entry) => entry.error.startsWith('Invalid benchmark task '))).toBe(true);
+  });
+
+  it('keeps strict corpus loading backward compatible', () => {
+    const root = tempCorpus();
+    const malformedJsonPath = join(root, 'candidate/malformed.task.json');
+    mkdirSync(join(malformedJsonPath, '..'), { recursive: true });
+    writeFileSync(malformedJsonPath, '{not-json', 'utf8');
+
+    expect(() => loadCorpus(root)).toThrow(/Invalid benchmark task/);
+  });
+
+  it('rejects corpus directories deeper than the configured limit', () => {
+    const root = tempCorpus();
+    const taskPath = writeTask(root, 'core/one/two/deep.task.json', validTask);
+
+    expect(() => loadCorpus(root, undefined, { maxDepth: 2 })).toThrow(
+      `Corpus directory depth limit of 2 exceeded at ${join(taskPath, '..')}`,
+    );
+  });
+
+  it('rejects corpora with more files than the configured limit', () => {
+    const root = tempCorpus();
+    writeTask(root, 'core/a.task.json', { ...validTask, taskId: 'a-task' });
+    writeTask(root, 'core/b.task.json', { ...validTask, taskId: 'b-task' });
+    writeTask(root, 'core/c.task.json', { ...validTask, taskId: 'c-task' });
+
+    expect(() => loadCorpusWithDiagnostics(root, undefined, { maxFiles: 2 })).toThrow(
+      /Corpus file count limit of 2 exceeded/,
+    );
+  });
+
+  it.each([
+    ['maxDepth', -1],
+    ['maxFiles', Number.NaN],
+  ] as const)('rejects invalid corpus traversal option %s=%s', (name, value) => {
+    const root = tempCorpus();
+    writeTask(root, 'core/a.task.json', validTask);
+
+    expect(() => loadCorpus(root, undefined, { [name]: value })).toThrow(
+      `Corpus load option ${name} must be a non-negative safe integer`,
+    );
   });
 
   it('loads matching tiers sorted by task id without validating unselected tiers', () => {

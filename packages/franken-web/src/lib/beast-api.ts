@@ -7,6 +7,7 @@ import type {
   BeastEventHandlers,
   BeastExecutionMode,
   BeastRunDetail,
+  BeastRunEventPage,
   BeastRunSummary,
   BeastSseAgentEvent,
   BeastSseAgentStatusEvent,
@@ -31,6 +32,7 @@ export type {
   BeastEventHandlers,
   BeastExecutionMode,
   BeastRunDetail,
+  BeastRunEventPage,
   BeastRunSummary,
   BeastSseAgentEvent,
   BeastSseAgentStatusEvent,
@@ -45,6 +47,26 @@ export type {
   TrackedAgentInitAction,
   TrackedAgentSummary,
 } from '@franken/types';
+
+export interface BeastLogPageOptions {
+  readonly offset?: number;
+  readonly limit?: number;
+  readonly tail?: boolean;
+  readonly maxBytes?: number;
+}
+
+export interface BeastLogPageMetadata {
+  readonly offset: number;
+  readonly nextOffset: number;
+  readonly hasMore: boolean;
+  readonly tail: boolean;
+  readonly bytes: number;
+}
+
+export interface BeastLogPage {
+  readonly logs: string[];
+  readonly page: BeastLogPageMetadata;
+}
 
 export class BeastApiError extends Error {
   constructor(
@@ -69,18 +91,47 @@ export class BeastApiClient {
     return this.request<BeastContainerRuntimeStatus>('/v1/beasts/runtime/container', { method: 'GET' });
   }
 
-  async listRuns(): Promise<BeastRunSummary[]> {
-    const body = await this.request<{ runs: BeastRunSummary[] }>('/v1/beasts/runs', { method: 'GET' });
-    return body.runs;
+  async listRunPage(options: { limit?: number; cursor?: string } = {}): Promise<{
+    runs: BeastRunSummary[];
+    nextCursor?: string;
+  }> {
+    const search = new URLSearchParams();
+    if (options.limit !== undefined) search.set('limit', String(options.limit));
+    if (options.cursor) search.set('cursor', options.cursor);
+    const query = search.size > 0 ? `?${search.toString()}` : '';
+    return this.request<{ runs: BeastRunSummary[]; nextCursor?: string }>(
+      `/v1/beasts/runs${query}`,
+      { method: 'GET' },
+    );
   }
 
-  async listAgents(): Promise<TrackedAgentSummary[]> {
-    const body = await this.request<{ agents: TrackedAgentSummary[] }>('/v1/beasts/agents', { method: 'GET' });
-    return body.agents;
+  async listAgentPage(options: { limit?: number; cursor?: string } = {}): Promise<{
+    agents: TrackedAgentSummary[];
+    nextCursor?: string;
+  }> {
+    const search = new URLSearchParams();
+    if (options.limit !== undefined) search.set('limit', String(options.limit));
+    if (options.cursor) search.set('cursor', options.cursor);
+    const query = search.size > 0 ? `?${search.toString()}` : '';
+    return this.request<{ agents: TrackedAgentSummary[]; nextCursor?: string }>(
+      `/v1/beasts/agents${query}`,
+      { method: 'GET' },
+    );
   }
 
   async getRun(runId: string): Promise<Omit<BeastRunDetail, 'logs'> & { run: BeastRunSummary }> {
     return this.request(`/v1/beasts/runs/${encodeURIComponent(runId)}`, { method: 'GET' });
+  }
+
+  async getRunEvents(
+    runId: string,
+    options: { limit?: number; afterSequence?: number } = {},
+  ): Promise<BeastRunEventPage> {
+    const query = new URLSearchParams();
+    if (options.limit !== undefined) query.set('limit', String(options.limit));
+    if (options.afterSequence !== undefined) query.set('afterSequence', String(options.afterSequence));
+    const suffix = query.size > 0 ? `?${query.toString()}` : '';
+    return this.request(`/v1/beasts/runs/${encodeURIComponent(runId)}/events${suffix}`, { method: 'GET' });
   }
 
   async getAgent(agentId: string): Promise<TrackedAgentDetail> {
@@ -90,6 +141,19 @@ export class BeastApiClient {
   async getLogs(runId: string): Promise<string[]> {
     const body = await this.request<{ logs: string[] }>(`/v1/beasts/runs/${encodeURIComponent(runId)}/logs`, { method: 'GET' });
     return body.logs;
+  }
+
+  async getLogsPage(runId: string, options: BeastLogPageOptions = {}): Promise<BeastLogPage> {
+    const query = new URLSearchParams();
+    if (options.offset !== undefined) query.set('offset', String(options.offset));
+    if (options.limit !== undefined) query.set('limit', String(options.limit));
+    if (options.tail !== undefined) query.set('tail', String(options.tail));
+    if (options.maxBytes !== undefined) query.set('maxBytes', String(options.maxBytes));
+    const suffix = query.size > 0 ? `?${query.toString()}` : '';
+    return this.request<BeastLogPage>(
+      `/v1/beasts/runs/${encodeURIComponent(runId)}/logs${suffix}`,
+      { method: 'GET' },
+    );
   }
 
   async createRun(input: {
@@ -430,7 +494,7 @@ function extractServerError(parsed: unknown, text: string): { message?: string; 
     if (isRecord(parsed.error) && typeof parsed.error.message === 'string' && parsed.error.message.trim()) {
       return {
         message: parsed.error.message,
-        code: typeof parsed.error.code === 'string' ? parsed.error.code : undefined,
+        ...(typeof parsed.error.code === 'string' ? { code: parsed.error.code } : {}),
         details: parsed.error.details,
       };
     }
@@ -439,7 +503,7 @@ function extractServerError(parsed: unknown, text: string): { message?: string; 
     if (typeof directMessage === 'string' && directMessage.trim()) {
       return {
         message: directMessage,
-        code: typeof parsed.code === 'string' ? parsed.code : undefined,
+        ...(typeof parsed.code === 'string' ? { code: parsed.code } : {}),
         details: parsed.details,
       };
     }
@@ -447,7 +511,7 @@ function extractServerError(parsed: unknown, text: string): { message?: string; 
     if (typeof parsed.error === 'string' && parsed.error.trim()) {
       return {
         message: parsed.error,
-        code: typeof parsed.code === 'string' ? parsed.code : undefined,
+        ...(typeof parsed.code === 'string' ? { code: parsed.code } : {}),
         details: parsed.details,
       };
     }
@@ -473,4 +537,3 @@ function normalizeHeaders(headers: HeadersInit | undefined): Record<string, stri
   }
   return { ...headers };
 }
-

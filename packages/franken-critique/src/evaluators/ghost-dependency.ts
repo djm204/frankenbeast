@@ -6,6 +6,7 @@ import type {
   EvaluationResult,
   EvaluationFinding,
 } from './evaluator.js';
+import { createScore } from '../types/common.js';
 
 const IDENTIFIER_PATTERN = /[A-Za-z0-9_$]/;
 const QUOTE_CHARS = new Set(["'", '"', '`']);
@@ -62,7 +63,7 @@ export class GhostDependencyEvaluator implements Evaluator {
       }
     }
 
-    const score = findings.length === 0 ? 1 : 0;
+    const score = createScore(findings.length === 0 ? 1 : 0);
 
     return {
       evaluatorName: this.name,

@@ -1,8 +1,16 @@
 import type { TrackedAgent, TrackedAgentInitActionKind, BeastExecutionMode, BeastRun } from '../types.js';
 import type { BeastDispatchService } from './beast-dispatch-service.js';
 import { AgentService } from './agent-service.js';
+import { AgentToolPolicyError } from './role-tool-manifest.js';
 import { MaintenanceModeError } from './maintenance-mode-service.js';
 import { isoNow } from '@franken/types';
+
+const TOOL_MANIFEST_CONFIG_KEYS = [
+  'requestedTools',
+  'enabledTools',
+  'toolManifest',
+  'tools',
+] as const;
 
 export interface CreateChatInitAgentRequest {
   readonly definitionId: string;
@@ -27,6 +35,16 @@ export class AgentInitService {
   ) {}
 
   createChatInitAgent(request: CreateChatInitAgentRequest): TrackedAgent {
+    const policyDefaults: Record<string, unknown> = {
+      ...this.agents.defaultToolPolicyConfig(request.definitionId, request.initActionKind, request.config),
+    };
+    if (TOOL_MANIFEST_CONFIG_KEYS.some(key => Object.hasOwn(request.config, key))) {
+      delete policyDefaults.requestedTools;
+    }
+    const initConfig = {
+      ...policyDefaults,
+      ...request.config,
+    };
     const agent = this.agents.createAgent({
       definitionId: request.definitionId,
       source: 'chat',
@@ -34,10 +52,10 @@ export class AgentInitService {
       initAction: {
         kind: request.initActionKind,
         command: request.command,
-        config: request.config,
+        config: initConfig,
         chatSessionId: request.chatSessionId,
       },
-      initConfig: request.config,
+      initConfig,
       chatSessionId: request.chatSessionId,
     });
 
@@ -90,6 +108,15 @@ export class AgentInitService {
         ...(request.executionMode ? { executionMode: request.executionMode } : {}),
       });
     } catch (error) {
+      if (error instanceof AgentToolPolicyError) {
+        this.agents.updateAgent(agentId, { status: 'stopped' });
+        this.agents.appendEvent(agentId, {
+          level: 'warning',
+          type: 'agent.dispatch.denied',
+          message: error.message,
+          payload: { validation: error.validation },
+        });
+      }
       if (error instanceof MaintenanceModeError) {
         this.agents.updateAgent(agentId, { status: 'stopped' });
         this.agents.appendEvent(agentId, {

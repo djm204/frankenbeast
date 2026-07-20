@@ -5,6 +5,7 @@ import type {
   EvaluationFinding,
 } from './evaluator.js';
 import { stripCommentsAndStringLiterals } from './source-sanitizer.js';
+import { createScore } from '../types/common.js';
 
 const MAX_PARAMS = 5;
 const MAX_NESTING = 4;
@@ -602,7 +603,7 @@ export class ComplexityEvaluator implements Evaluator {
       return {
         evaluatorName: this.name,
         verdict: 'pass',
-        score: 1,
+        score: createScore(1),
         findings: [],
       };
     }
@@ -614,7 +615,7 @@ export class ComplexityEvaluator implements Evaluator {
     this.checkNestingDepth(sanitizedContent, findings);
     this.checkFunctionLength(sanitizedContent, findings);
 
-    const score = Math.max(0, 1 - findings.length * 0.25);
+    const score = createScore(Math.max(0, 1 - findings.length * 0.25));
 
     return {
       evaluatorName: this.name,

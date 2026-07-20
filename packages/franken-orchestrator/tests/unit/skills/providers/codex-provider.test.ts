@@ -8,6 +8,10 @@ import { RUN_CONFIG_INTEGRITY_ENV, RUN_CONFIG_INTEGRITY_SECRET_ENV } from '../..
 describe('CodexProvider', () => {
   const provider = new CodexProvider();
 
+  it('lets Codex select its configured default chat model', () => {
+    expect(provider.chatModel).toBeUndefined();
+  });
+
   it('implements ICliProvider', () => {
     const p: ICliProvider = provider;
     expect(p.name).toBe('codex');
@@ -27,6 +31,11 @@ describe('CodexProvider', () => {
     const args = provider.buildArgs({});
     expect(args).toEqual(['exec', '--sandbox', 'workspace-write', '--json', '--color', 'never']);
     expect(args).not.toContain('--full-auto');
+  });
+
+  it('buildArgs allows chat prompts from the isolated non-repository working directory', () => {
+    const args = provider.buildArgs({ chatMode: true });
+    expect(args).toContain('--skip-git-repo-check');
   });
 
   it('buildArgs includes --color never', () => {

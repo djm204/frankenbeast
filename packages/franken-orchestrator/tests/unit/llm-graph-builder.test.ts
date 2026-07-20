@@ -877,6 +877,87 @@ describe('LlmGraphBuilder', () => {
       expect(builder.lastValidationIssues[0]!.severity).toBe('warning');
     });
 
+    it('reports the complete ordered stage sequence for a remediated plan', async () => {
+      const validationResponse = JSON.stringify({
+        valid: false,
+        issues: [{
+          severity: 'error',
+          chunkId: '01_setup',
+          category: 'chunk_too_thin',
+          description: 'Missing context field',
+          suggestion: 'Add context',
+        }],
+        revisedChunks: null,
+      });
+      const revalidationResponse = JSON.stringify({ valid: true, issues: [], revisedChunks: null });
+      const llm = {
+        complete: vi.fn()
+          .mockResolvedValueOnce(validChunksJson(twoChunks))
+          .mockResolvedValueOnce(validationResponse)
+          .mockResolvedValueOnce(validChunksJson(twoChunks))
+          .mockResolvedValueOnce(revalidationResponse),
+      };
+      const gatherer = {
+        gather: vi.fn().mockResolvedValue({
+          rampUp: '', relevantSignatures: [], packageDeps: {}, existingPatterns: [],
+        }),
+      };
+      const events: Array<{
+        stage: string; status: string; position: number; total: number;
+        chunks?: number; errors?: number;
+      }> = [];
+
+      const builder = new LlmGraphBuilder(llm, gatherer as any, {
+        validationMode: 'always',
+        onProgress: (event) => events.push(event),
+      });
+      await builder.build(intent);
+
+      expect(events.map((event) =>
+        `${event.position}/${event.total}:${event.stage}:${event.status}`,
+      )).toEqual([
+        '1/6:gathering-context:started',
+        '1/6:gathering-context:completed',
+        '2/6:decomposing:started',
+        '2/6:decomposing:completed',
+        '3/6:validating:started',
+        '3/6:validating:completed',
+        '4/6:remediating:started',
+        '4/6:remediating:completed',
+        '5/6:revalidating:started',
+        '5/6:revalidating:completed',
+      ]);
+      expect(events.find((event) => event.stage === 'decomposing' && event.status === 'completed'))
+        .toMatchObject({ chunks: 2 });
+      expect(events.find((event) => event.stage === 'validating' && event.status === 'completed'))
+        .toMatchObject({ errors: 1 });
+    });
+
+    it('reports conditional remediation and re-validation as skipped', async () => {
+      const validationResponse = JSON.stringify({ valid: true, issues: [], revisedChunks: null });
+      const llm = {
+        complete: vi.fn()
+          .mockResolvedValueOnce(validChunksJson(twoChunks))
+          .mockResolvedValueOnce(validationResponse),
+      };
+      const gatherer = {
+        gather: vi.fn().mockResolvedValue({
+          rampUp: '', relevantSignatures: [], packageDeps: {}, existingPatterns: [],
+        }),
+      };
+      const events: Array<{ stage: string; status: string }> = [];
+
+      const builder = new LlmGraphBuilder(llm, gatherer as any, {
+        onProgress: (event) => events.push(event),
+      });
+      await builder.build(intent);
+
+      expect(events.slice(-2)).toEqual([
+        expect.objectContaining({ stage: 'remediating', status: 'skipped' }),
+        expect.objectContaining({ stage: 'revalidating', status: 'skipped' }),
+      ]);
+    });
+
     it('skips remediation when validation passes', async () => {
       const validationResponse = JSON.stringify({
         valid: true,

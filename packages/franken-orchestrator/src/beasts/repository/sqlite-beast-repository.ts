@@ -17,7 +17,10 @@ import type {
   TrackedAgentStatus,
 } from '../types.js';
 import { UnknownTrackedAgentError } from '../errors.js';
-import { BEAST_SQLITE_SCHEMA_STATEMENTS } from './sqlite-schema.js';
+import {
+  BEAST_SQLITE_EVENT_UNIQUENESS_INDEX_STATEMENTS,
+  BEAST_SQLITE_SCHEMA_STATEMENTS,
+} from './sqlite-schema.js';
 
 interface CreateRunInput {
   trackedAgentId?: string | undefined;
@@ -201,6 +204,117 @@ export interface CorruptJsonRecoveryOptions {
   readonly recoverCorruptJson?: boolean;
 }
 
+export const DEFAULT_BEAST_RUN_PAGE_LIMIT = 50;
+export const MAX_BEAST_RUN_PAGE_LIMIT = 200;
+
+interface BeastRunPageCursor {
+  readonly version: 1;
+  readonly snapshotRowId: number;
+  readonly afterCreatedAt: string;
+  readonly afterId: string;
+}
+
+export interface BeastRunPageOptions extends CorruptJsonRecoveryOptions {
+  readonly limit: number;
+  readonly cursor?: string | undefined;
+}
+
+export interface BeastRunPage {
+  readonly runs: BeastRun[];
+  readonly nextCursor?: string | undefined;
+}
+
+export class InvalidBeastRunCursorError extends Error {
+  constructor() {
+    super('Invalid Beast run pagination cursor');
+    this.name = 'InvalidBeastRunCursorError';
+  }
+}
+
+function encodeBeastRunCursor(cursor: BeastRunPageCursor): string {
+  return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url');
+}
+
+function decodeBeastRunCursor(value: string): BeastRunPageCursor {
+  try {
+    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as Partial<BeastRunPageCursor>;
+    if (parsed.version !== 1
+      || !Number.isSafeInteger(parsed.snapshotRowId)
+      || (parsed.snapshotRowId ?? -1) < 0
+      || typeof parsed.afterCreatedAt !== 'string'
+      || parsed.afterCreatedAt.length === 0
+      || typeof parsed.afterId !== 'string'
+      || parsed.afterId.length === 0) {
+      throw new InvalidBeastRunCursorError();
+    }
+    return parsed as BeastRunPageCursor;
+  } catch (error) {
+    if (error instanceof InvalidBeastRunCursorError) throw error;
+    throw new InvalidBeastRunCursorError();
+  }
+}
+
+export const DEFAULT_TRACKED_AGENT_PAGE_LIMIT = 50;
+export const MAX_TRACKED_AGENT_PAGE_LIMIT = 200;
+
+interface TrackedAgentPageCursor {
+  readonly version: 1;
+  readonly snapshotRowId: number;
+  readonly afterCreatedAt: string;
+  readonly afterId: string;
+}
+
+export interface TrackedAgentPageOptions extends CorruptJsonRecoveryOptions {
+  readonly limit: number;
+  readonly cursor?: string | undefined;
+}
+
+export interface TrackedAgentPage {
+  readonly agents: TrackedAgent[];
+  readonly nextCursor?: string | undefined;
+}
+
+export class InvalidTrackedAgentCursorError extends Error {
+  constructor() {
+    super('Invalid tracked-agent pagination cursor');
+    this.name = 'InvalidTrackedAgentCursorError';
+  }
+}
+
+function encodeTrackedAgentCursor(cursor: TrackedAgentPageCursor): string {
+  return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url');
+}
+
+function decodeTrackedAgentCursor(value: string): TrackedAgentPageCursor {
+  try {
+    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as Partial<TrackedAgentPageCursor>;
+    if (parsed.version !== 1
+      || !Number.isSafeInteger(parsed.snapshotRowId)
+      || (parsed.snapshotRowId ?? -1) < 0
+      || typeof parsed.afterCreatedAt !== 'string'
+      || parsed.afterCreatedAt.length === 0
+      || typeof parsed.afterId !== 'string'
+      || parsed.afterId.length === 0) {
+      throw new InvalidTrackedAgentCursorError();
+    }
+    return parsed as TrackedAgentPageCursor;
+  } catch (error) {
+    if (error instanceof InvalidTrackedAgentCursorError) throw error;
+    throw new InvalidTrackedAgentCursorError();
+  }
+}
+
+export interface ListBeastRunEventsOptions extends CorruptJsonRecoveryOptions {
+  readonly afterSequence?: number;
+  readonly limit?: number;
+}
+
+export interface BeastRunEventScanPage {
+  readonly events: BeastRunEvent[];
+  readonly scannedThroughSequence: number;
+  readonly hasMoreRows: boolean;
+}
+
 export interface BeastRunProcessReference {
   readonly id: string;
   readonly trackedAgentId?: string | undefined;
@@ -222,6 +336,7 @@ export class SQLiteBeastRepository {
     }
 
     this.migrateLegacySchema();
+    this.repairDuplicateEventSequencesAndEnforceUniqueness();
   }
 
   createRun(input: CreateRunInput): BeastRun {
@@ -271,7 +386,7 @@ export class SQLiteBeastRepository {
   }
 
   transaction<T>(fn: () => T): T {
-    return this.db.transaction(fn)();
+    return this.db.transaction(fn).immediate();
   }
 
   getRun(runId: string): BeastRun | undefined {
@@ -282,6 +397,41 @@ export class SQLiteBeastRepository {
   listRuns(options: CorruptJsonRecoveryOptions = {}): BeastRun[] {
     const rows = this.db.prepare('SELECT * FROM beast_runs ORDER BY created_at DESC, id DESC').all() as BeastRunRow[];
     return mapRowsRecoveringCorruptJson(rows, mapRun, options);
+  }
+
+  listRunPage(options: BeastRunPageOptions): BeastRunPage {
+    if (!Number.isSafeInteger(options.limit) || options.limit < 1 || options.limit > MAX_BEAST_RUN_PAGE_LIMIT) {
+      throw new RangeError(`Beast run page limit must be between 1 and ${MAX_BEAST_RUN_PAGE_LIMIT}`);
+    }
+    const cursor = options.cursor !== undefined ? decodeBeastRunCursor(options.cursor) : undefined;
+    const snapshotRowId = cursor?.snapshotRowId ?? (
+      this.db.prepare('SELECT COALESCE(MAX(rowid), 0) AS max_row_id FROM beast_runs')
+        .get() as { max_row_id: number }
+    ).max_row_id;
+    const rows = (cursor
+      ? this.db.prepare(
+        `SELECT * FROM beast_runs INDEXED BY idx_beast_runs_created_at_id WHERE rowid <= ?
+           AND (created_at < ? OR (created_at = ? AND id < ?))
+         ORDER BY created_at DESC, id DESC LIMIT ?`,
+      ).all(snapshotRowId, cursor.afterCreatedAt, cursor.afterCreatedAt, cursor.afterId, options.limit + 1)
+      : this.db.prepare(
+        `SELECT * FROM beast_runs INDEXED BY idx_beast_runs_created_at_id WHERE rowid <= ?
+         ORDER BY created_at DESC, id DESC LIMIT ?`,
+      ).all(snapshotRowId, options.limit + 1)) as BeastRunRow[];
+    const pageRows = rows.slice(0, options.limit);
+    const runs = mapRowsRecoveringCorruptJson(pageRows, mapRun, options);
+    const lastRow = pageRows.at(-1);
+    return {
+      runs,
+      ...(rows.length > options.limit && lastRow ? {
+        nextCursor: encodeBeastRunCursor({
+          version: 1,
+          snapshotRowId,
+          afterCreatedAt: lastRow.created_at,
+          afterId: lastRow.id,
+        }),
+      } : {}),
+    };
   }
 
   listRunProcessReferences(): BeastRunProcessReference[] {
@@ -311,9 +461,10 @@ export class SQLiteBeastRepository {
     return mapRowsRecoveringCorruptJson(rows, mapAttempt, options);
   }
 
-  getAttempt(attemptId: string): BeastRunAttempt | undefined {
+  getAttempt(attemptId: string, options: CorruptJsonRecoveryOptions = {}): BeastRunAttempt | undefined {
     const row = this.db.prepare('SELECT * FROM beast_run_attempts WHERE id = ?').get(attemptId) as BeastAttemptRow | undefined;
-    return row ? mapAttempt(row) : undefined;
+    if (!row) return undefined;
+    return mapRowsRecoveringCorruptJson([row], mapAttempt, options)[0];
   }
 
   updateRun(runId: string, patch: UpdateRunPatch): BeastRun {
@@ -386,7 +537,7 @@ export class SQLiteBeastRepository {
       const priorMs = Date.parse(priorHeartbeatAt);
       const nextMs = Date.parse(newHeartbeatAt);
       if (Number.isFinite(priorMs) && Number.isFinite(nextMs) && nextMs <= priorMs) {
-        this.insertEvent(runId, {
+        this.appendEvent(runId, {
           type: 'run.heartbeat.anomaly',
           payload: {
             code: nextMs < priorMs ? 'regressive-heartbeat' : 'duplicate-heartbeat',
@@ -443,7 +594,7 @@ export class SQLiteBeastRepository {
   }
 
   appendEvent(runId: string, input: AppendEventInput): BeastRunEvent {
-    return this.insertEvent(runId, input);
+    return this.db.transaction(() => this.insertEvent(runId, input)).immediate();
   }
 
   private insertEvent(runId: string, input: AppendEventInput): BeastRunEvent {
@@ -481,11 +632,52 @@ export class SQLiteBeastRepository {
     return event;
   }
 
-  listEvents(runId: string, options: CorruptJsonRecoveryOptions = {}): BeastRunEvent[] {
-    const rows = this.db.prepare(
-      'SELECT * FROM beast_run_events WHERE run_id = ? ORDER BY sequence ASC',
-    ).all(runId) as BeastEventRow[];
+  listEvents(runId: string, options: ListBeastRunEventsOptions = {}): BeastRunEvent[] {
+    if (options.afterSequence !== undefined
+      && (!Number.isSafeInteger(options.afterSequence) || options.afterSequence < 0)) {
+      throw new RangeError('afterSequence must be a non-negative safe integer');
+    }
+    if (options.limit !== undefined
+      && (!Number.isSafeInteger(options.limit) || options.limit < 1)) {
+      throw new RangeError('limit must be a positive safe integer');
+    }
+    const clauses = ['run_id = ?'];
+    const parameters: Array<string | number> = [runId];
+    if (options.afterSequence !== undefined) {
+      clauses.push('sequence > ?');
+      parameters.push(options.afterSequence);
+    }
+    let sql = `SELECT * FROM beast_run_events WHERE ${clauses.join(' AND ')} ORDER BY sequence ASC`;
+    if (options.limit !== undefined) {
+      sql += ' LIMIT ?';
+      parameters.push(options.limit);
+    }
+    const rows = this.db.prepare(sql).all(...parameters) as BeastEventRow[];
     return mapRowsRecoveringCorruptJson(rows, mapEvent, options);
+  }
+
+  scanEventPage(
+    runId: string,
+    options: CorruptJsonRecoveryOptions & { readonly afterSequence: number; readonly limit: number },
+  ): BeastRunEventScanPage {
+    if (!Number.isSafeInteger(options.afterSequence) || options.afterSequence < 0) {
+      throw new RangeError('afterSequence must be a non-negative safe integer');
+    }
+    if (!Number.isSafeInteger(options.limit) || options.limit < 1) {
+      throw new RangeError('limit must be a positive safe integer');
+    }
+    const rows = this.db.prepare(
+      'SELECT * FROM beast_run_events WHERE run_id = ? AND sequence > ? ORDER BY sequence ASC LIMIT ?',
+    ).all(runId, options.afterSequence, options.limit) as BeastEventRow[];
+    const scannedThroughSequence = rows.at(-1)?.sequence ?? options.afterSequence;
+    const hasMoreRows = rows.length === options.limit && this.db.prepare(
+      'SELECT 1 FROM beast_run_events WHERE run_id = ? AND sequence > ? LIMIT 1',
+    ).get(runId, scannedThroughSequence) !== undefined;
+    return {
+      events: mapRowsRecoveringCorruptJson(rows, mapEvent, options),
+      scannedThroughSequence,
+      hasMoreRows,
+    };
   }
 
   createTrackedAgent(input: CreateTrackedAgentInput): TrackedAgent {
@@ -558,6 +750,50 @@ export class SQLiteBeastRepository {
     return mapRowsRecoveringCorruptJson(rows, mapTrackedAgent, options);
   }
 
+  listTrackedAgentPage(options: TrackedAgentPageOptions): TrackedAgentPage {
+    if (!Number.isSafeInteger(options.limit) || options.limit < 1 || options.limit > MAX_TRACKED_AGENT_PAGE_LIMIT) {
+      throw new RangeError(`Tracked-agent page limit must be between 1 and ${MAX_TRACKED_AGENT_PAGE_LIMIT}`);
+    }
+    const cursor = options.cursor !== undefined ? decodeTrackedAgentCursor(options.cursor) : undefined;
+    const snapshotRowId = cursor?.snapshotRowId ?? (
+      this.db.prepare('SELECT COALESCE(MAX(rowid), 0) AS max_row_id FROM tracked_agents')
+        .get() as { max_row_id: number }
+    ).max_row_id;
+    const rows = (cursor
+      ? this.db.prepare(
+        `SELECT * FROM tracked_agents WHERE rowid <= ?
+           AND (created_at < ? OR (created_at = ? AND id < ?))
+         ORDER BY created_at DESC, id DESC LIMIT ?`,
+      ).all(snapshotRowId, cursor.afterCreatedAt, cursor.afterCreatedAt, cursor.afterId, options.limit + 1)
+      : this.db.prepare(
+        `SELECT * FROM tracked_agents WHERE rowid <= ?
+         ORDER BY created_at DESC, id DESC LIMIT ?`,
+      ).all(snapshotRowId, options.limit + 1)) as TrackedAgentRow[];
+    const pageRows = rows.slice(0, options.limit);
+    const agents = mapRowsRecoveringCorruptJson(pageRows, mapTrackedAgent, options);
+    const lastRow = pageRows.at(-1);
+    return {
+      agents,
+      ...(rows.length > options.limit && lastRow ? {
+        nextCursor: encodeTrackedAgentCursor({
+          version: 1,
+          snapshotRowId,
+          afterCreatedAt: lastRow.created_at,
+          afterId: lastRow.id,
+        }),
+      } : {}),
+    };
+  }
+
+  listCapacityTrackedAgents(options: CorruptJsonRecoveryOptions = {}): TrackedAgent[] {
+    const rows = this.db.prepare(
+      `SELECT * FROM tracked_agents
+       WHERE status IN ('dispatching', 'awaiting_approval', 'running')
+       ORDER BY created_at DESC, id DESC`,
+    ).all() as TrackedAgentRow[];
+    return mapRowsRecoveringCorruptJson(rows, mapTrackedAgent, options);
+  }
+
   updateTrackedAgent(agentId: string, patch: UpdateTrackedAgentPatch): TrackedAgent {
     const current = this.getTrackedAgentOrThrow(agentId);
     const next: TrackedAgent = {
@@ -600,41 +836,43 @@ export class SQLiteBeastRepository {
   }
 
   appendTrackedAgentEvent(agentId: string, input: AppendTrackedAgentEventInput): TrackedAgentEvent {
-    this.getTrackedAgentOrThrow(agentId);
-    const event: TrackedAgentEvent = {
-      id: prefixedId('agent_event'),
-      agentId,
-      sequence: nextTrackedAgentEventSequence(this.db, agentId),
-      level: input.level,
-      type: input.type,
-      message: input.message,
-      payload: input.payload,
-      createdAt: input.createdAt,
-    };
+    return this.db.transaction(() => {
+      this.getTrackedAgentOrThrow(agentId);
+      const event: TrackedAgentEvent = {
+        id: prefixedId('agent_event'),
+        agentId,
+        sequence: nextTrackedAgentEventSequence(this.db, agentId),
+        level: input.level,
+        type: input.type,
+        message: input.message,
+        payload: input.payload,
+        createdAt: input.createdAt,
+      };
 
-    this.db.prepare(
-      `INSERT INTO tracked_agent_events (
-        id,
-        agent_id,
-        sequence,
-        level,
-        type,
-        message,
-        payload,
-        created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      event.id,
-      event.agentId,
-      event.sequence,
-      event.level,
-      event.type,
-      event.message,
-      JSON.stringify(event.payload),
-      event.createdAt,
-    );
+      this.db.prepare(
+        `INSERT INTO tracked_agent_events (
+          id,
+          agent_id,
+          sequence,
+          level,
+          type,
+          message,
+          payload,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        event.id,
+        event.agentId,
+        event.sequence,
+        event.level,
+        event.type,
+        event.message,
+        JSON.stringify(event.payload),
+        event.createdAt,
+      );
 
-    return event;
+      return event;
+    }).immediate();
   }
 
   listTrackedAgentEvents(agentId: string, options: CorruptJsonRecoveryOptions = {}): TrackedAgentEvent[] {
@@ -662,12 +900,14 @@ export class SQLiteBeastRepository {
     return rows.map((row) => row.agent_id);
   }
 
-  listDispatchFailureHistoryAgentIds(): string[] {
+  listDispatchFailureHistoryAgentIds(agentIds?: readonly string[]): string[] {
+    if (agentIds?.length === 0) return [];
+    const scope = agentIds ? ` AND agent_id IN (${agentIds.map(() => '?').join(', ')})` : '';
     const rows = this.db.prepare(
       `SELECT DISTINCT agent_id
          FROM tracked_agent_events
-        WHERE type = 'agent.dispatch.failed'`,
-    ).all() as Array<{ agent_id: string }>;
+        WHERE type = 'agent.dispatch.failed'${scope}`,
+    ).all(...(agentIds ?? [])) as Array<{ agent_id: string }>;
     return rows.map((row) => row.agent_id);
   }
 
@@ -782,6 +1022,72 @@ export class SQLiteBeastRepository {
     this.ensureColumnExists('beast_runs', 'last_heartbeat_sequence', 'ALTER TABLE beast_runs ADD COLUMN last_heartbeat_sequence INTEGER NOT NULL DEFAULT 0');
     this.ensureColumnExists('tracked_agents', 'module_config', 'ALTER TABLE tracked_agents ADD COLUMN module_config TEXT');
     this.ensureColumnExists('tracked_agents', 'execution_mode', 'ALTER TABLE tracked_agents ADD COLUMN execution_mode TEXT');
+  }
+
+  private repairDuplicateEventSequencesAndEnforceUniqueness(): void {
+    this.db.transaction(() => {
+      const duplicateRunIds = this.db.prepare(
+        `SELECT run_id
+           FROM beast_run_events
+          GROUP BY run_id
+         HAVING COUNT(*) != COUNT(DISTINCT sequence)`,
+      ).all() as Array<{ run_id: string }>;
+      const selectRunEvents = this.db.prepare(
+        `SELECT id, sequence
+           FROM beast_run_events
+          WHERE run_id = ?
+          ORDER BY sequence ASC, created_at ASC, id ASC`,
+      );
+      const updateRunEventSequence = this.db.prepare(
+        'UPDATE beast_run_events SET sequence = ? WHERE id = ?',
+      );
+      for (const { run_id: runId } of duplicateRunIds) {
+        const rows = selectRunEvents.all(runId) as Array<{ id: string; sequence: number }>;
+        let previousSequence: number | undefined;
+        for (const row of rows) {
+          const repairedSequence = previousSequence === undefined
+            ? row.sequence
+            : Math.max(row.sequence, previousSequence + 1);
+          if (repairedSequence !== row.sequence) {
+            updateRunEventSequence.run(repairedSequence, row.id);
+          }
+          previousSequence = repairedSequence;
+        }
+      }
+
+      const duplicateAgentIds = this.db.prepare(
+        `SELECT agent_id
+           FROM tracked_agent_events
+          GROUP BY agent_id
+         HAVING COUNT(*) != COUNT(DISTINCT sequence)`,
+      ).all() as Array<{ agent_id: string }>;
+      const selectAgentEvents = this.db.prepare(
+        `SELECT id, sequence
+           FROM tracked_agent_events
+          WHERE agent_id = ?
+          ORDER BY sequence ASC, created_at ASC, id ASC`,
+      );
+      const updateAgentEventSequence = this.db.prepare(
+        'UPDATE tracked_agent_events SET sequence = ? WHERE id = ?',
+      );
+      for (const { agent_id: agentId } of duplicateAgentIds) {
+        const rows = selectAgentEvents.all(agentId) as Array<{ id: string; sequence: number }>;
+        let previousSequence: number | undefined;
+        for (const row of rows) {
+          const repairedSequence = previousSequence === undefined
+            ? row.sequence
+            : Math.max(row.sequence, previousSequence + 1);
+          if (repairedSequence !== row.sequence) {
+            updateAgentEventSequence.run(repairedSequence, row.id);
+          }
+          previousSequence = repairedSequence;
+        }
+      }
+
+      for (const statement of BEAST_SQLITE_EVENT_UNIQUENESS_INDEX_STATEMENTS) {
+        this.db.prepare(statement).run();
+      }
+    }).immediate();
   }
 
   private ensureColumnExists(table: string, column: string, alterStatement: string): void {

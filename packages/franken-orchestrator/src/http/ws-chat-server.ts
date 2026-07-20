@@ -29,6 +29,8 @@ interface ConnectionState {
   sessionId: string;
   remoteAddress?: string | undefined;
   rateLimitKey: string;
+  /** Client opted in (via ?features=message-kind) to `kind` on completions. */
+  supportsMessageKind: boolean;
 }
 
 type ClientSocketEvent =
@@ -68,6 +70,12 @@ export interface ChatSocketConnectRequest {
   sessionId: string;
   token: string | null;
   remoteAddress?: string | undefined;
+  /**
+   * Optional client feature opt-ins from the socket URL. The v1 event schemas
+   * are strict, so extensions like `kind` on assistant.message.complete are
+   * only sent to clients that explicitly advertise support.
+   */
+  features?: readonly string[] | undefined;
 }
 
 export interface AttachChatWebSocketServerOptions extends ChatSocketControllerOptions {
@@ -187,9 +195,10 @@ function createPeerState(
   sessionId: string,
   remoteAddress: string | undefined,
   rateLimitKey: string,
+  supportsMessageKind: boolean,
   controller: ChatSocketController,
 ): ConnectionState {
-  const state = { sessionId, remoteAddress, rateLimitKey };
+  const state = { sessionId, remoteAddress, rateLimitKey, supportsMessageKind };
   controller.connections.set(peer, state);
   return state;
 }
@@ -268,7 +277,7 @@ export class ChatSocketController {
       return { ok: false, status: 404 };
     }
 
-    createPeerState(peer, request.sessionId, request.remoteAddress, this.rateLimitKey(request), this);
+    createPeerState(peer, request.sessionId, request.remoteAddress, this.rateLimitKey(request), request.features?.includes('message-kind') ?? false, this);
     this.emit(peer, {
       type: 'session.ready',
       sessionId: session.id,
@@ -278,6 +287,14 @@ export class ChatSocketController {
       pendingApproval: redactPendingApproval(session.pendingApproval),
     });
     return { ok: true };
+  }
+
+  /**
+   * `kind` extends the strict v1 completion schema, so it is only included
+   * for peers that opted in via the `message-kind` feature.
+   */
+  private messageKindField(peer: ChatSocketPeer, kind: string): { kind: string } | Record<string, never> {
+    return this.connections.get(peer)?.supportsMessageKind ? { kind } : {};
   }
 
   private auditRejectedTicketReuse(sessionId: string): void {
@@ -513,6 +530,7 @@ export class ChatSocketController {
         type: 'assistant.message.complete',
         messageId,
         content: contentToSend,
+        ...this.messageKindField(peer, display.kind),
         ...(display.modelTier ? { modelTier: display.modelTier } : {}),
         timestamp: nowIso(),
       });
@@ -561,6 +579,7 @@ export class ChatSocketController {
             type: 'assistant.message.complete',
             messageId: deterministicUuid('packages/franken-orchestrator/src/http/ws-chat-server.ts'),
             content: 'Rejected.',
+            ...this.messageKindField(peer, 'approval'),
             timestamp: nowIso(),
           });
           return;
@@ -599,6 +618,7 @@ export class ChatSocketController {
         type: 'assistant.message.complete',
         messageId: deterministicUuid('packages/franken-orchestrator/src/http/ws-chat-server.ts'),
         content: 'Rejected.',
+        ...this.messageKindField(peer, 'approval'),
         timestamp: nowIso(),
       });
       return;
@@ -637,7 +657,29 @@ export class ChatSocketController {
       }
       throw error;
     }
-    if (await this.hasConsumedApproval(session, runtimeInput)) {
+    let approvalConsumed: boolean;
+    try {
+      approvalConsumed = await this.hasConsumedApproval(session, runtimeInput);
+    } catch {
+      session.pendingApproval = null;
+      session.state = 'rejected';
+      session.updatedAt = nowIso();
+      this.sessionStore.save(session);
+      const timestamp = nowIso();
+      this.emit(peer, {
+        type: 'turn.error',
+        code: 'APPROVAL_AUDIT_UNAVAILABLE',
+        message: 'The approval audit log could not be read; recreate the approval request before retrying.',
+        timestamp,
+      });
+      this.emit(peer, {
+        type: 'turn.approval.resolved',
+        approved: false,
+        timestamp,
+      });
+      return;
+    }
+    if (approvalConsumed) {
       await this.recordApprovalReplay(session, runtimeInput, 'approval was already consumed', connectionRequester(peer, this.connections));
       session.pendingApproval = null;
       session.state = 'rejected';
@@ -731,6 +773,7 @@ export class ChatSocketController {
         type: 'assistant.message.complete',
         messageId: deterministicUuid('packages/franken-orchestrator/src/http/ws-chat-server.ts'),
         content: display.content,
+        ...this.messageKindField(peer, display.kind),
         timestamp: nowIso(),
       });
     }
@@ -739,16 +782,12 @@ export class ChatSocketController {
   private async hasConsumedApproval(session: ChatSession, command: string): Promise<boolean> {
     const pendingApproval = session.pendingApproval;
     if (!pendingApproval) return false;
-    try {
-      return await this.approvalAuditLog.hasConsumedApproval({
-        sessionId: session.id,
-        projectId: session.projectId,
-        token: approvalAuditToken(session, command),
-        commandHash: commandSha256(command),
-      });
-    } catch {
-      return false;
-    }
+    return this.approvalAuditLog.hasConsumedApproval({
+      sessionId: session.id,
+      projectId: session.projectId,
+      token: approvalAuditToken(session, command),
+      commandHash: commandSha256(command),
+    });
   }
 
   private async recordApprovalDecision(
@@ -936,6 +975,7 @@ export function attachChatWebSocketServer(options: AttachChatWebSocketServerOpti
     }
 
     const sessionId = url.searchParams.get('sessionId');
+    const features = url.searchParams.get('features')?.split(',').filter((feature) => feature.length > 0) ?? [];
     const protocolAuth = extractChatSocketProtocolAuth(request);
     if (!sessionId || !protocolAuth.hasChatProtocol) {
       closeUnauthorized(socket, 400);
@@ -962,6 +1002,7 @@ export function attachChatWebSocketServer(options: AttachChatWebSocketServerOpti
         sessionId,
         token,
         remoteAddress: request.socket.remoteAddress,
+        features,
       });
       if (!result.ok) {
         ws.close();

@@ -37,7 +37,8 @@ export class ToolCallAccuracyEval implements Eval<ToolCallAccuracyInput> {
     }
 
     const missingParams = schema.required.filter(p => !(p in actual.params))
-    const ghostParams = actualParams.filter(p => !schema.allowed.includes(p))
+    const allowedParams = new Set(schema.allowed)
+    const ghostParams = actualParams.filter(p => !allowedParams.has(p))
 
     const issues: string[] = []
     if (missingParams.length > 0) issues.push(`missing required params: ${missingParams.join(', ')}`)

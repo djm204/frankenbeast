@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -13,6 +13,274 @@ describe('AgentService', () => {
     if (workDir) {
       await rm(workDir, { recursive: true, force: true });
     }
+  });
+
+  it('blocks low-risk role manifests from requesting mutation tools before tracking a run', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-agent-service-'));
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const securityLog: unknown[] = [];
+    const service = new AgentService(repository, () => '2026-03-11T00:00:00.000Z', {
+      toolPolicyLogger: (entry) => securityLog.push(entry),
+    });
+
+    expect(() => service.createAgent({
+      definitionId: 'fallback-ticket-manager',
+      source: 'cli',
+      createdByUser: 'operator',
+      initAction: {
+        kind: 'martin-loop',
+        command: 'ticket-manager',
+        config: {},
+      },
+      initConfig: {
+        agentRole: 'ticket-manager',
+        requestedTools: ['read_file', 'patch', 'terminal.background'],
+      },
+    })).toThrow(/least-privilege tool manifest denied/i);
+
+    expect(service.listAgents()).toEqual([]);
+    expect(securityLog).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: 'ticket-manager',
+        requestedTool: 'patch',
+        reason: expect.stringContaining('not allowed'),
+      }),
+      expect.objectContaining({
+        role: 'ticket-manager',
+        requestedTool: 'terminal.background',
+        reason: expect.stringContaining('not allowed'),
+      }),
+    ]));
+  });
+
+  it('fails closed for unknown roles, missing roles, missing manifests, and merged alias denials', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-agent-service-'));
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const securityLog: unknown[] = [];
+    const service = new AgentService(repository, () => '2026-03-11T00:00:00.000Z', {
+      toolPolicyLogger: (entry) => securityLog.push(entry),
+      trustedSkillToolManifests: { 'repo-writer': ['patch'] },
+    });
+
+    expect(() => service.createAgent({
+      definitionId: 'fallback-issue-worker',
+      source: 'cli',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'issue-worker', config: {} },
+      initConfig: {
+        agentRole: 'issue-worker',
+        requestedTools: ['patch'],
+      },
+    })).toThrow(/least-privilege tool manifest denied/i);
+
+    expect(() => service.createAgent({
+      definitionId: 'fallback-ticket-manager',
+      source: 'cli',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'ticket-manager', config: {} },
+      initConfig: {
+        requestedTools: ['patch'],
+      },
+    })).toThrow(/least-privilege tool manifest denied/i);
+
+    expect(() => service.createAgent({
+      definitionId: 'fallback-ticket-manager',
+      source: 'cli',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'ticket-manager', config: {} },
+      initConfig: {
+        agentRole: 'ticket-manager',
+      },
+    })).toThrow(/least-privilege tool manifest denied/i);
+
+    expect(() => service.createAgent({
+      definitionId: 'fallback-ticket-manager',
+      source: 'cli',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'ticket-manager', config: {} },
+      initConfig: {
+        agentRole: 'ticket-manager',
+        requestedTools: ['read_file'],
+        tools: ['patch'],
+      },
+    })).toThrow(/least-privilege tool manifest denied/i);
+
+    expect(() => service.createAgent({
+      definitionId: 'fallback-constructor-role',
+      source: 'cli',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'constructor-role', config: {} },
+      initConfig: {
+        agentRole: 'constructor',
+        requestedTools: ['read_file'],
+      },
+    })).toThrow(/least-privilege tool manifest denied/i);
+
+    expect(() => service.createAgent({
+      definitionId: 'fallback-no-manifest',
+      source: 'cli',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'no-manifest', config: {} },
+      initConfig: {},
+    })).toThrow(/least-privilege tool manifest denied/i);
+
+    expect(() => service.createAgent({
+      definitionId: 'fallback-ticket-manager',
+      source: 'cli',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'ticket-manager', config: {} },
+      initConfig: {
+        agentRole: 'ticket-manager',
+        requestedTools: ['read_file'],
+        skills: ['repo-writer'],
+      },
+    })).toThrow(/least-privilege tool manifest denied/i);
+
+    expect(() => service.createAgent({
+      definitionId: 'fallback-ticket-manager',
+      source: 'cli',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'ticket-manager', config: {} },
+      initConfig: {
+        agentRole: 'ticket-manager',
+        requestedTools: ['read_file'],
+        skills: ['repo-writer'],
+        skillToolManifests: { 'repo-writer': ['patch'] },
+      },
+    })).toThrow(/least-privilege tool manifest denied/i);
+
+    expect(service.listAgents()).toEqual([]);
+    expect(securityLog).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: 'issue-worker',
+        requestedTool: 'patch',
+        reason: expect.stringContaining('not recognized'),
+      }),
+      expect.objectContaining({
+        role: '<missing-role>',
+        requestedTool: 'patch',
+        reason: expect.stringContaining('must include a role'),
+      }),
+      expect.objectContaining({
+        role: 'ticket-manager',
+        requestedTool: '<missing-tool-manifest>',
+        reason: expect.stringContaining('explicit least-privilege tool manifest'),
+      }),
+      expect.objectContaining({
+        role: 'ticket-manager',
+        requestedTool: 'patch',
+        reason: expect.stringContaining('not allowed'),
+      }),
+      expect.objectContaining({
+        role: 'constructor',
+        requestedTool: 'read_file',
+        reason: expect.stringContaining('not recognized'),
+      }),
+      expect.objectContaining({
+        role: '<missing-role>',
+        requestedTool: '<missing-tool-manifest>',
+        reason: expect.stringContaining('explicit least-privilege tool manifest'),
+      }),
+      expect.objectContaining({
+        role: 'ticket-manager',
+        requestedTool: 'patch',
+        reason: expect.stringContaining('not allowed'),
+      }),
+    ]));
+  });
+
+  it('emits structured default denial logs when no policy logger is injected', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-agent-service-'));
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const service = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
+
+    try {
+      expect(() => service.createAgent({
+        definitionId: 'fallback-ticket-manager',
+        source: 'cli',
+        createdByUser: 'operator',
+        initAction: { kind: 'martin-loop', command: 'ticket-manager', config: {} },
+        initConfig: {
+          agentRole: 'ticket-manager',
+          requestedTools: ['patch'],
+        },
+      })).toThrow(/least-privilege tool manifest denied/i);
+
+      expect(warn).toHaveBeenCalledWith(
+        '[agent-tool-policy-denial]',
+        expect.stringContaining('"requestedTool":"patch"'),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('allows coding requests that match the martin-loop runtime surface', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-agent-service-'));
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const service = new AgentService(repository, () => '2026-03-11T00:00:00.000Z', {
+      trustedSkillToolManifests: { 'read-only-context': ['read_file'] },
+    });
+
+    service.createAgent({
+      definitionId: 'coding-lane',
+      source: 'api',
+      createdByUser: 'operator',
+      initAction: {
+        kind: 'martin-loop',
+        command: 'coding lane',
+        config: {},
+      },
+      initConfig: {
+        agentRole: 'coding',
+        requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
+        skills: ['read-only-context'],
+        skillToolManifests: { 'read-only-context': ['read_file'] },
+      },
+    });
+
+    expect(service.listAgents()).toHaveLength(1);
+  });
+
+  it('rejects low-privilege roles when the martin-loop runtime would expose mutation tools', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-agent-service-'));
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const securityLog: unknown[] = [];
+    const service = new AgentService(repository, () => '2026-03-11T00:00:00.000Z', {
+      trustedSkillToolManifests: { 'read-only-context': ['read_file'] },
+      toolPolicyLogger: (entry) => securityLog.push(entry),
+    });
+
+    expect(() => service.createAgent({
+      definitionId: 'triage-lane',
+      source: 'api',
+      createdByUser: 'operator',
+      initAction: {
+        kind: 'martin-loop',
+        command: 'triage lane',
+        config: {},
+      },
+      initConfig: {
+        agentRole: 'triage',
+        requestedTools: ['read_file'],
+        skills: ['read-only-context'],
+      },
+    })).toThrow(/least-privilege tool manifest denied/i);
+
+    expect(securityLog).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: 'triage',
+        requestedTool: 'patch',
+        reason: expect.stringContaining("not allowed for role 'triage'"),
+      }),
+      expect.objectContaining({
+        role: 'triage',
+        requestedTool: 'terminal.background',
+        reason: expect.stringContaining("not allowed for role 'triage'"),
+      }),
+    ]));
+    expect(service.listAgents()).toEqual([]);
   });
 
   it('creates tracked agents and lists them newest first', async () => {
@@ -34,7 +302,7 @@ describe('AgentService', () => {
         config: { goal: 'First' },
         chatSessionId: 'sess-1',
       },
-      initConfig: { goal: 'First' },
+      initConfig: { goal: 'First', agentRole: 'docs', requestedTools: ['read_file', 'search_files', 'write_file'], skills: [] },
       chatSessionId: 'sess-1',
     });
     const second = service.createAgent({
@@ -46,7 +314,7 @@ describe('AgentService', () => {
         command: 'martin-loop',
         config: { chunkDirectory: 'docs/chunks' },
       },
-      initConfig: { chunkDirectory: 'docs/chunks' },
+      initConfig: { chunkDirectory: 'docs/chunks', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
     });
 
     expect(first.status).toBe('initializing');
@@ -68,7 +336,7 @@ describe('AgentService', () => {
         config: { designDocPath: 'docs/plans/design.md' },
         chatSessionId: 'sess-1',
       },
-      initConfig: { designDocPath: 'docs/plans/design.md' },
+      initConfig: { designDocPath: 'docs/plans/design.md', agentRole: 'docs', requestedTools: ['read_file', 'search_files', 'write_file'], skills: [] },
       chatSessionId: 'sess-1',
     });
 
@@ -108,7 +376,14 @@ describe('AgentService', () => {
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
-      initConfig: {},
+      initConfig: {
+        agentRole: 'coding',
+        requestedTools: [
+          'read_file', 'search_files', 'write_file', 'patch', 'terminal',
+          'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment',
+        ],
+        skills: [],
+      },
     });
     const recovered = createAgent('recovered-agent');
     const stillFailed = createAgent('failed-agent');
@@ -149,7 +424,7 @@ describe('AgentService', () => {
         command: 'martin-loop',
         config: { chunkDirectory: 'docs/chunks' },
       },
-      initConfig: { chunkDirectory: 'docs/chunks' },
+      initConfig: { chunkDirectory: 'docs/chunks', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
     });
     const run = repository.createRun({
       trackedAgentId: agent.id,
@@ -193,7 +468,7 @@ describe('AgentService', () => {
         command: 'martin-loop',
         config: { chunkDirectory: 'docs/chunks' },
       },
-      initConfig: { chunkDirectory: 'docs/chunks' },
+      initConfig: { chunkDirectory: 'docs/chunks', agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'], skills: [] },
     });
 
     service.updateAgent(agent.id, { status: 'stopped' });

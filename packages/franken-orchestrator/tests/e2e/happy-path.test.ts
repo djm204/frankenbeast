@@ -27,11 +27,15 @@ describe('E2E: Happy path', () => {
     expect(result.tokenSpend.totalTokens).toBeGreaterThan(0);
   });
 
-  it('firewall processes input first', async () => {
+  it('firewall processes input first, then skill responses', async () => {
     const { loop, ports } = createTestOrchestrator();
     await loop.run(input);
 
-    expect(ports.firewall.processedInputs).toEqual([input.userInput]);
+    expect(ports.firewall.processedInputs).toEqual([
+      input.userInput,
+      'Executed code-gen: Implement feature',
+      'Executed code-gen: Write tests',
+    ]);
   });
 
   it('memory is hydrated with project context', async () => {

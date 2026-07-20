@@ -56,7 +56,11 @@ Frankenbeast is currently organized as 10 npm workspace packages under `packages
 
 The diagrams below use current package names or implementation-surface names, and the package inventory table remains the authoritative workspace map.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full interconnection diagram.
+Start with the [current workspace package inventory](#current-workspace-packages) for the package-name source of truth, then see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full interconnection diagram.
+
+Older copies of these diagrams used numbered MOD capability labels. Their current equivalents are: `MOD-01` → `@franken/orchestrator firewall`; `MOD-02` → `@franken/orchestrator skills`; `MOD-03` → `@franken/brain`; `MOD-04` → `@franken/planner`; `MOD-05` → `@franken/observer`; `MOD-06` → `@franken/critique`; `MOD-07` → `@franken/governor`; and `MOD-08` → `@franken/orchestrator heartbeat`.
+
+**Text alternative — Beast Loop overview:** User input enters ingestion, where the orchestrator firewall sanitizes it and the brain hydrates context. Planning builds and critiques a task graph. Execution resolves tools and requests human approval for high-stakes work. Closure records observability data and performs reflection before it returns the final BeastResult to the user. Circuit breakers can halt unsafe input, require approval when budgets are exceeded, or escalate planning spirals.
 
 ```mermaid
 flowchart TD
@@ -114,6 +118,8 @@ flowchart TD
 ```
 
 ### Beast Loop Sequence
+
+**Text alternative — Beast Loop sequence:** The user sends raw input to the orchestrator firewall, which scans for injection and masks PII while the brain supplies project context to the planner. The planner builds a task DAG and sends it through repeated deterministic and heuristic critique until it passes; a spiral instead escalates to the governor. For each approved task, orchestrator skills resolve a registry or MCP tool, the governor accepts or denies high-stakes actions, and the observer records spans and token usage. Finally, the observer produces trace and cost summaries, orchestrator heartbeat reflects and may feed improvement tasks back to planning, and the observer returns BeastResult to the user.
 
 ```mermaid
 sequenceDiagram
@@ -177,6 +183,8 @@ sequenceDiagram
 ```
 
 ### Module Interconnections
+
+**Text alternative — module interconnections:** The orchestrator's four-phase Beast Loop coordinates the current implementation surfaces: ingestion connects to the orchestrator firewall and brain; planning connects to planner and critique; execution connects to orchestrator skills, governor, and the MCP suite; and closure connects to observer and orchestrator heartbeat before returning a result. The firewall sends sanitized intent to planning and validates skill calls; planning discovers skills and loads memory; critique can enforce firewall rules or escalate to the governor; the governor consults observer circuit breakers; and heartbeat uses traces and memory to inject improvement tasks. External LLM providers connect through the firewall adapter, while external MCP servers connect through the MCP suite registry and client.
 
 ```mermaid
 graph TB
@@ -482,6 +490,8 @@ frankenbeast chat-server --port 3737
 # GitHub issues — fetch, triage, and fix issues autonomously
 frankenbeast issues --label bug --repo owner/repo
 ```
+
+Pass one label with `--label bug`, or multiple labels as a single comma-separated value like `--label critical,high`.
 
 ### Options
 

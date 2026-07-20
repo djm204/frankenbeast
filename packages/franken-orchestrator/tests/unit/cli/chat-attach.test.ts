@@ -136,6 +136,20 @@ describe('resolveManagedChatAttachment', () => {
     expect(attachment).toBeUndefined();
   });
 
+  it('falls back to standalone chat when the managed service is unreachable', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-chat-attach-'));
+
+    const attachment = await resolveManagedChatAttachment({
+      config: defaultConfig(),
+      frankenbeastDir: join(workDir, '.fbeast'),
+      fetchImpl: async () => {
+        throw new TypeError('fetch failed');
+      },
+    });
+
+    expect(attachment).toBeUndefined();
+  });
+
   it('ignores stale detached state when healthcheck fails', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-chat-attach-'));
     const frankenbeastDir = join(workDir, '.fbeast');

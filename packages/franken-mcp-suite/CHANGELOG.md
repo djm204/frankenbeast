@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.8.1](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.8.0...franken-mcp-suite-v0.8.1) (2026-07-19)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/brain bumped from 0.15.1 to 0.15.2
+    * @franken/orchestrator bumped from 0.55.0 to 0.55.1
+
 ## [0.8.0](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.7.0...franken-mcp-suite-v0.8.0) (2026-07-19)
 
 

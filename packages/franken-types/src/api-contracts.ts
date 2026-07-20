@@ -126,6 +126,7 @@ export type ApprovalReadinessResult = z.infer<typeof ApprovalReadinessResultSche
 export interface BeastInterviewPrompt {
   key: string;
   prompt: string;
+  description?: string;
   kind: 'string' | 'boolean' | 'file' | 'directory';
   required?: boolean;
   options?: readonly string[];
@@ -188,6 +189,18 @@ export interface BeastRunEvent {
   createdAt: string;
 }
 
+export interface BeastRunEventPageInfo {
+  limit: number;
+  afterSequence: number;
+  nextAfterSequence: number | null;
+  hasMore: boolean;
+}
+
+export interface BeastRunEventPage {
+  events: BeastRunEvent[];
+  page: BeastRunEventPageInfo;
+}
+
 export interface BeastRunAttempt {
   id: string;
   runId: string;
@@ -210,6 +223,7 @@ export interface BeastRunDetail {
 
 export interface BeastSseSnapshot {
   agents?: Array<Partial<TrackedAgentSummary> & { id: string }>;
+  nextCursor?: string;
 }
 
 export const TRACKED_AGENT_STATUSES = [
@@ -377,7 +391,7 @@ export interface NetworkStatusResponse {
 
 export interface NetworkConfigResponse {
   network: { mode: string; secureBackend?: string };
-  chat: { model: string; enabled: boolean; host?: string; port?: number };
+  chat: { model?: string | undefined; enabled: boolean; host?: string; port?: number };
   dashboard?: { enabled?: boolean; host?: string; port?: number; apiUrl?: string };
-  comms?: { enabled?: boolean };
+  comms?: { enabled?: boolean; outboundTimeoutMs?: number };
 }

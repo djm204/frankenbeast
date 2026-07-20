@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import * as AlertDialog from '@radix-ui/react-alert-dialog';
 
 interface NetworkServiceItem {
   id: string;
@@ -47,6 +48,64 @@ function canStopOrRestartService(service: NetworkServiceItem): boolean {
 
 function canViewServiceLogs(service: NetworkServiceItem): boolean {
   return !service.inProcess || Boolean(service.hostServiceId);
+}
+
+function ConfirmServiceAction({
+  action,
+  serviceId,
+  disabled,
+  onConfirm,
+}: {
+  action: 'stop' | 'restart';
+  serviceId: string;
+  disabled: boolean;
+  onConfirm(): void;
+}) {
+  const actionLabel = action === 'stop' ? 'Stop' : 'Restart';
+  const consequence = action === 'stop'
+    ? 'Stopping this service will interrupt active sessions that depend on it. The service will remain unavailable until it is started again.'
+    : 'Restarting this service will interrupt active sessions that depend on it while the service restarts.';
+
+  return (
+    <AlertDialog.Root>
+      <AlertDialog.Trigger asChild>
+        <button
+          aria-label={`${actionLabel} ${serviceId}`}
+          className="button button--secondary button--small"
+          disabled={disabled}
+          type="button"
+        >
+          {actionLabel}
+        </button>
+      </AlertDialog.Trigger>
+      <AlertDialog.Portal>
+        <AlertDialog.Overlay className="fixed inset-0 bg-black/50 z-[60]" />
+        <AlertDialog.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-beast-panel border border-beast-border rounded-xl p-6 z-[60] max-w-md">
+          <AlertDialog.Title className="text-beast-text font-semibold">
+            {actionLabel} {serviceId}?
+          </AlertDialog.Title>
+          <AlertDialog.Description className="text-beast-muted text-sm mt-2">
+            {consequence}
+          </AlertDialog.Description>
+          <div className="flex gap-3 mt-4 justify-end">
+            <AlertDialog.Cancel asChild>
+              <button className="button button--secondary button--small" type="button">Cancel</button>
+            </AlertDialog.Cancel>
+            <AlertDialog.Action asChild>
+              <button
+                aria-label={`Confirm ${action} ${serviceId}`}
+                className="px-3 py-1.5 rounded-lg text-sm bg-beast-danger text-white"
+                onClick={onConfirm}
+                type="button"
+              >
+                {actionLabel} service
+              </button>
+            </AlertDialog.Action>
+          </div>
+        </AlertDialog.Content>
+      </AlertDialog.Portal>
+    </AlertDialog.Root>
+  );
 }
 
 export function NetworkServiceList({
@@ -141,8 +200,18 @@ export function NetworkServiceList({
                 </button>
               ) : null}
               <button className="button button--secondary button--small" type="button" onClick={() => runAction(service, 'start', onStart)} aria-label={`Start ${service.id}`} disabled={startDisabled}>Start</button>
-              <button className="button button--secondary button--small" type="button" onClick={() => runAction(service, 'stop', onStop)} aria-label={`Stop ${service.id}`} disabled={stopOrRestartDisabled}>Stop</button>
-              <button className="button button--secondary button--small" type="button" onClick={() => runAction(service, 'restart', onRestart)} aria-label={`Restart ${service.id}`} disabled={stopOrRestartDisabled}>Restart</button>
+              <ConfirmServiceAction
+                action="stop"
+                serviceId={service.id}
+                disabled={stopOrRestartDisabled}
+                onConfirm={() => runAction(service, 'stop', onStop)}
+              />
+              <ConfirmServiceAction
+                action="restart"
+                serviceId={service.id}
+                disabled={stopOrRestartDisabled}
+                onConfirm={() => runAction(service, 'restart', onRestart)}
+              />
             </div>
           </article>
           );

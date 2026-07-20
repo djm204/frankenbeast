@@ -11,6 +11,8 @@ import { DeletedTrackedAgentError, UnknownTrackedAgentError } from '../errors.js
 import {
   BeastRepositoryJsonCorruptionError,
   SQLiteBeastRepository,
+  type TrackedAgentPage,
+  type TrackedAgentPageOptions,
 } from '../repository/sqlite-beast-repository.js';
 import type {
   CapacityReservationDecision,
@@ -19,6 +21,8 @@ import type {
   CapacityReservationWorkItem,
 } from './capacity-reservation-policy.js';
 import { capacityItemFromConfig } from './capacity-reservation-policy.js';
+import { AgentToolPolicyError, defaultAgentToolPolicyConfig, validateAgentRoleTools } from './role-tool-manifest.js';
+import type { ToolPolicyDenial, ToolPolicyValidationContext } from './role-tool-manifest.js';
 
 export interface CreateTrackedAgentRequest {
   readonly definitionId: string;
@@ -54,6 +58,12 @@ export interface TrackedAgentDetail {
 
 export interface AgentServiceOptions {
   readonly capacityPolicy?: CapacityReservationPolicy | undefined;
+  readonly toolPolicyLogger?: ((entry: ToolPolicyDenial) => void) | undefined;
+  readonly trustedSkillToolManifests?: ToolPolicyValidationContext['trustedSkillToolManifests'];
+}
+
+function defaultToolPolicyLogger(entry: ToolPolicyDenial): void {
+  console.warn('[agent-tool-policy-denial]', JSON.stringify(entry));
 }
 
 export class AgentService {
@@ -64,6 +74,7 @@ export class AgentService {
   ) {}
 
   createAgent(request: CreateTrackedAgentRequest): TrackedAgent {
+    this.assertRoleToolManifestAllows(request);
     const timestamp = this.now();
     return this.repository.createTrackedAgent({
       definitionId: request.definitionId,
@@ -84,6 +95,10 @@ export class AgentService {
     return this.repository.listTrackedAgents({ recoverCorruptJson: true });
   }
 
+  listAgentPage(options: Omit<TrackedAgentPageOptions, 'recoverCorruptJson'>): TrackedAgentPage {
+    return this.repository.listTrackedAgentPage({ ...options, recoverCorruptJson: true });
+  }
+
   getCapacityReservationState(): CapacityReservationState | undefined {
     return this.options.capacityPolicy?.describe(this.activeCapacityItems(true));
   }
@@ -97,6 +112,19 @@ export class AgentService {
     const activeItems = this.activeCapacityItems().filter((item) => item.id !== agent.id);
     return this.options.capacityPolicy?.canStart(capacityItemFromAgent(agent), activeItems)
       ?? { allowed: true, reason: 'normal_capacity_available', reservationId: undefined };
+  }
+
+  defaultToolPolicyConfig(
+    definitionId: string,
+    initActionKind: string,
+    config: Readonly<Record<string, unknown>>,
+  ): Readonly<Record<string, unknown>> {
+    return defaultAgentToolPolicyConfig(
+      definitionId,
+      initActionKind,
+      config,
+      this.options.trustedSkillToolManifests,
+    );
   }
 
   getAgent(agentId: string): TrackedAgent {
@@ -122,8 +150,8 @@ export class AgentService {
     };
   }
 
-  listDispatchFailureRedactedAgentIds(): Set<string> {
-    return new Set(this.repository.listDispatchFailureHistoryAgentIds());
+  listDispatchFailureRedactedAgentIds(agentIds?: readonly string[]): Set<string> {
+    return new Set(this.repository.listDispatchFailureHistoryAgentIds(agentIds));
   }
 
   hasActiveDispatchFailure(agentId: string): boolean {
@@ -171,11 +199,23 @@ export class AgentService {
     });
   }
 
+  private assertRoleToolManifestAllows(request: CreateTrackedAgentRequest): void {
+    const validation = validateAgentRoleTools(request.initConfig, {
+      definitionId: request.definitionId,
+      initActionKind: request.initAction.kind,
+      initActionConfig: request.initAction.config,
+      trustedSkillToolManifests: this.options.trustedSkillToolManifests,
+    });
+    if (validation.allowed) return;
+
+    for (const denial of validation.denials) {
+      (this.options.toolPolicyLogger ?? defaultToolPolicyLogger)(denial);
+    }
+    throw new AgentToolPolicyError(validation);
+  }
+
   private activeCapacityItems(recoverCorruptJson = false): CapacityReservationWorkItem[] {
-    return this.repository.listTrackedAgents({ recoverCorruptJson })
-      .filter((agent) => agent.status === 'dispatching'
-        || agent.status === 'awaiting_approval'
-        || agent.status === 'running')
+    return this.repository.listCapacityTrackedAgents({ recoverCorruptJson })
       .map((agent) => {
         let linkedRun: BeastRun | undefined;
         try {

@@ -6,6 +6,7 @@ import type {
   EvaluationFinding,
 } from './evaluator.js';
 import type { GuardrailsPort } from '../types/contracts.js';
+import { createScore } from '../types/common.js';
 
 const MAX_SAFETY_PATTERN_LENGTH = 1_000;
 const MAX_ALTERNATIVE_PREFIX_TOKENS = MAX_SAFETY_PATTERN_LENGTH;
@@ -107,11 +108,13 @@ export class SafetyEvaluator implements Evaluator {
     const warningCount = findings.filter(
       (f) => f.severity === 'warning',
     ).length;
-    const score = hasBlock
-      ? 0
-      : warningCount > 0
-        ? Math.max(0, 1 - warningCount * 0.2)
-        : 1;
+    const score = createScore(
+      hasBlock
+        ? 0
+        : warningCount > 0
+          ? Math.max(0, 1 - warningCount * 0.2)
+          : 1,
+    );
 
     return {
       evaluatorName: this.name,

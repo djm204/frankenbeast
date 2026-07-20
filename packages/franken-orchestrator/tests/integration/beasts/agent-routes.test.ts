@@ -12,6 +12,7 @@ import { BeastDispatchService } from '../../../src/beasts/services/beast-dispatc
 import { BeastRunService } from '../../../src/beasts/services/beast-run-service.js';
 import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../../../src/beasts/services/dispatch-failure-message.js';
 import { AgentService } from '../../../src/beasts/services/agent-service.js';
+import { AgentToolPolicyError } from '../../../src/beasts/services/role-tool-manifest.js';
 import { MaintenanceModeError } from '../../../src/beasts/services/maintenance-mode-service.js';
 import { CapacityReservationError, CapacityReservationPolicy } from '../../../src/beasts/services/capacity-reservation-policy.js';
 import { PrometheusBeastMetrics } from '../../../src/beasts/telemetry/prometheus-beast-metrics.js';
@@ -28,6 +29,21 @@ const TEST_SUPER_SECRET_OPERATOR_TOKEN = testCredential('TEST_SUPER_SECRET_OPERA
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/agent-routes');
 
+const CODING_POLICY = {
+  agentRole: 'coding',
+  requestedTools: [
+    'read_file', 'search_files', 'write_file', 'patch', 'terminal',
+    'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment',
+  ],
+  skills: [],
+} as const;
+
+const DOCS_POLICY = {
+  agentRole: 'docs',
+  requestedTools: ['read_file', 'search_files', 'write_file'],
+  skills: [],
+} as const;
+
 type AgentEvent = { type: string };
 
 function expectEventsToIncludeTypes(events: AgentEvent[], requiredTypes: string[]) {
@@ -38,7 +54,11 @@ function expectEventsToIncludeTypes(events: AgentEvent[], requiredTypes: string[
   }
 }
 
-function createIntegratedBeastApp(opts?: { rateLimitMax?: number; capacityPolicy?: CapacityReservationPolicy }) {
+function createIntegratedBeastApp(opts?: {
+  rateLimitMax?: number;
+  capacityPolicy?: CapacityReservationPolicy;
+  trustedSkillToolManifests?: Readonly<Record<string, readonly string[]>>;
+}) {
   // Intentionally exercise the route with the real repository, dispatch service,
   // run service, and event log graph. This file lives under tests/integration so
   // circular service/linking behavior is covered here rather than hidden in unit tests.
@@ -120,6 +140,7 @@ function createIntegratedBeastApp(opts?: { rateLimitMax?: number; capacityPolicy
   const interviews = new BeastInterviewService(repository, catalog);
   const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z', {
     capacityPolicy: opts?.capacityPolicy,
+    trustedSkillToolManifests: opts?.trustedSkillToolManifests,
   });
   const security = new TransportSecurityService();
   const operatorToken = TEST_SUPER_SECRET_OPERATOR_TOKEN;
@@ -207,12 +228,14 @@ describe('agent routes integration', () => {
           provider: 'claude',
           objective: 'Resume with capacity guard',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
         },
       },
       initConfig: {
         provider: 'claude',
         objective: 'Resume with capacity guard',
         chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
       },
     });
     const linkedRun = repository.createRun({
@@ -291,9 +314,9 @@ describe('agent routes integration', () => {
         initAction: {
           kind: 'martin-loop',
           command: 'martin-loop',
-          config: { provider: 'claude', objective: 'Race auto-dispatch', chunkDirectory: 'docs/chunks' },
+          config: { provider: 'claude', objective: 'Race auto-dispatch', chunkDirectory: 'docs/chunks', ...CODING_POLICY },
         },
-        initConfig: { provider: 'claude', objective: 'Race auto-dispatch', chunkDirectory: 'docs/chunks' },
+        initConfig: { provider: 'claude', objective: 'Race auto-dispatch', chunkDirectory: 'docs/chunks', ...CODING_POLICY },
       }),
     });
 
@@ -345,9 +368,9 @@ describe('agent routes integration', () => {
         initAction: {
           kind: 'martin-loop',
           command: 'martin-loop',
-          config: { provider: 'claude', objective: 'Race maintenance', chunkDirectory: 'docs/chunks' },
+          config: { provider: 'claude', objective: 'Race maintenance', chunkDirectory: 'docs/chunks', ...CODING_POLICY },
         },
-        initConfig: { provider: 'claude', objective: 'Race maintenance', chunkDirectory: 'docs/chunks' },
+        initConfig: { provider: 'claude', objective: 'Race maintenance', chunkDirectory: 'docs/chunks', ...CODING_POLICY },
       }),
     });
 
@@ -382,6 +405,324 @@ describe('agent routes integration', () => {
         code: 'VALIDATION_ERROR',
       },
     });
+  });
+
+  it('returns a policy-denied 403 for forbidden role tool manifests', async () => {
+    const { app, operatorToken, agents } = createIntegratedBeastApp();
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        autoDispatch: false,
+        initAction: {
+          kind: 'martin-loop',
+          command: 'ticket-manager',
+          config: {},
+        },
+        initConfig: {
+          agentRole: 'ticket-manager',
+          requestedTools: ['read_file', 'patch'],
+        },
+      }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'AGENT_TOOL_POLICY_DENIED',
+        details: {
+          validation: {
+            denials: expect.arrayContaining([expect.objectContaining({ requestedTool: 'patch' })]),
+          },
+        },
+      },
+    });
+    expect(agents.listAgents()).toEqual([]);
+  });
+
+  it('canonicalizes role aliases before applying dashboard policy defaults', async () => {
+    const { app, operatorToken, agents } = createIntegratedBeastApp();
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        autoDispatch: false,
+        initAction: { kind: 'martin-loop', command: 'ticket-manager', config: {} },
+        initConfig: {
+          role: 'ticket-manager',
+          requestedTools: ['read_file', 'patch'],
+        },
+      }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'AGENT_TOOL_POLICY_DENIED',
+        details: {
+          validation: {
+            role: 'ticket-manager',
+            denials: expect.arrayContaining([expect.objectContaining({ requestedTool: 'patch' })]),
+          },
+        },
+      },
+    });
+    expect(agents.listAgents()).toEqual([]);
+  });
+
+  it('does not seed default requested tools over an explicit tool manifest alias', async () => {
+    const { app, operatorToken, agents } = createIntegratedBeastApp();
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer ' + operatorToken,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'chunk-plan',
+        autoDispatch: false,
+        initAction: { kind: 'chunk-plan', command: 'chunk-plan', config: {} },
+        initConfig: {
+          agentRole: 'docs',
+          tools: ['read_file'],
+          skills: [],
+        },
+      }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'AGENT_TOOL_POLICY_DENIED',
+        details: { validation: { denials: expect.arrayContaining([
+          expect.objectContaining({ requestedTool: 'search_files' }),
+          expect.objectContaining({ requestedTool: 'write_file' }),
+        ]) } },
+      },
+    });
+    expect(agents.listAgents()).toEqual([]);
+  });
+
+  it('includes body-implied runtime and trusted skill tools in default manifests', async () => {
+    const { app, operatorToken, agents } = createIntegratedBeastApp({
+      trustedSkillToolManifests: { github: ['get_issue'] },
+    });
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer ' + operatorToken,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'chunk-plan',
+        autoDispatch: false,
+        initAction: { kind: 'chunk-plan', command: 'chunk-plan', config: {} },
+        initConfig: {
+          skills: ['github'],
+          gitConfig: { prCreation: 'manual' },
+        },
+      }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(agents.listAgents()[0]?.initConfig).toMatchObject({
+      agentRole: 'docs',
+      requestedTools: ['read_file', 'search_files', 'write_file', 'github.pr', 'github.read'],
+      skills: ['github'],
+    });
+  });
+
+  it('honors policy fields supplied in init action config before applying dashboard defaults', async () => {
+    const { app, operatorToken, agents } = createIntegratedBeastApp();
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        autoDispatch: false,
+        initAction: {
+          kind: 'martin-loop',
+          command: 'ticket-manager',
+          config: {
+            agentRole: 'triage',
+            requestedTools: ['read_file', 'search_files'],
+            skills: [],
+          },
+        },
+        initConfig: {
+          provider: 'claude',
+          objective: 'Do not replace an explicit lower-privilege role',
+          chunkDirectory: 'docs/chunks',
+        },
+      }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'AGENT_TOOL_POLICY_DENIED',
+        details: { validation: { rawRole: 'triage' } },
+      },
+    });
+    expect(agents.listAgents()).toEqual([]);
+  });
+
+  it('returns a policy-denied 403 when auto-dispatch rejects the effective run policy', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const repository = new SQLiteBeastRepository(join(TMP, 'auto-dispatch-policy-denial.db'));
+    const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
+    const denial = {
+      role: 'coding' as const,
+      requestedTool: 'skill:changed-manifest',
+      reason: 'selected skill manifest changed before dispatch',
+    };
+    const dispatch = {
+      createRun: vi.fn(async () => {
+        throw new AgentToolPolicyError({
+          allowed: false,
+          role: 'coding',
+          rawRole: 'coding',
+          requestedTools: ['skill:changed-manifest'],
+          denials: [denial],
+        });
+      }),
+    };
+    const app = new Hono();
+    app.onError(errorHandler);
+    app.route('/', agentRoutes({
+      agents,
+      dispatch: dispatch as never,
+      runs: { getRun: vi.fn(), start: vi.fn(), stop: vi.fn(), kill: vi.fn(), restart: vi.fn() } as never,
+      operatorToken: TEST_SUPER_SECRET_OPERATOR_TOKEN,
+      security: new TransportSecurityService(),
+    }));
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${TEST_SUPER_SECRET_OPERATOR_TOKEN}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+        initConfig: {
+          provider: 'claude',
+          objective: 'Reject after effective dispatch policy changes',
+          chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
+        },
+      }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'AGENT_TOOL_POLICY_DENIED',
+        details: {
+          validation: { denials: [denial] },
+        },
+      },
+    });
+    const [agent] = agents.listAgents();
+    expect(agent).toMatchObject({ status: 'stopped' });
+    expect(agents.getAgentDetail(agent.id).events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'agent.dispatch.denied' }),
+    ]));
+  });
+
+  it('derives policy defaults for dashboard wizard agent launches', async () => {
+    const { app, operatorToken, agents } = createIntegratedBeastApp();
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        autoDispatch: false,
+        initAction: {
+          kind: 'martin-loop',
+          command: 'martin-loop',
+          config: {},
+        },
+        initConfig: {
+          provider: 'claude',
+          objective: 'Launch from the dashboard without explicit policy fields',
+          chunkDirectory: 'docs/chunks',
+        },
+      }),
+    });
+
+    expect(response.status).toBe(201);
+    const [agent] = agents.listAgents();
+    expect(agent.initConfig).toMatchObject({
+      agentRole: 'coding',
+      requestedTools: [
+        'read_file', 'search_files', 'write_file', 'patch', 'terminal',
+        'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment',
+      ],
+      skills: [],
+    });
+  });
+
+  it('ignores tracked-run policy overrides and preserves the stored agent policy', async () => {
+    const { app, operatorToken, agents } = createIntegratedBeastApp();
+
+    const createResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        autoDispatch: false,
+        initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+        initConfig: { provider: 'claude', objective: 'Create tracked shell', chunkDirectory: 'docs/chunks' },
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+    const [agent] = agents.listAgents();
+
+    const runResponse = await app.request('/v1/beasts/runs', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        trackedAgentId: agent.id,
+        config: {
+          provider: 'claude',
+          objective: 'Dispatch with an untrusted selected skill',
+          chunkDirectory: 'docs/chunks',
+          skills: ['unknown-installed-skill'],
+        },
+      }),
+    });
+
+    expect(runResponse.status).toBe(201);
+    expect(agents.getAgent(agent.id).initConfig.skills).toEqual([]);
   });
 
   it('returns malformed json errors for invalid tracked agent request bodies', async () => {
@@ -422,6 +763,7 @@ describe('agent routes integration', () => {
             provider: 'claude',
             objective: 'Start later',
             chunkDirectory: 'docs/chunks',
+            ...CODING_POLICY,
             promptConfig: { text: 'x'.repeat(20 * 1024) },
           },
         },
@@ -429,6 +771,7 @@ describe('agent routes integration', () => {
           provider: 'claude',
           objective: 'Start later',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
           promptConfig: { text: 'x'.repeat(20 * 1024) },
         },
         autoDispatch: false,
@@ -456,6 +799,7 @@ describe('agent routes integration', () => {
             provider: 'claude',
             objective: 'Start later',
             chunkDirectory: 'docs/chunks',
+            ...CODING_POLICY,
             promptConfig: { text: 'x'.repeat(20 * 1024) },
           },
         },
@@ -463,6 +807,7 @@ describe('agent routes integration', () => {
           provider: 'claude',
           objective: 'Start later',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
           promptConfig: { text: 'x'.repeat(20 * 1024) },
         },
         autoDispatch: false,
@@ -483,9 +828,9 @@ describe('agent routes integration', () => {
         initAction: {
           kind: 'martin-loop',
           command: 'martin-loop',
-          config: { promptConfig: { text: 'x'.repeat(2 * 1024 * 1024) } },
+          config: { promptConfig: { text: 'x'.repeat(2 * 1024 * 1024) }, ...CODING_POLICY },
         },
-        initConfig: { promptConfig: { text: 'x'.repeat(2 * 1024 * 1024) } },
+        initConfig: { promptConfig: { text: 'x'.repeat(2 * 1024 * 1024) }, ...CODING_POLICY },
         autoDispatch: false,
       }),
     });
@@ -511,12 +856,14 @@ describe('agent routes integration', () => {
           config: {
             goal: 'Design the init workflow',
             outputPath: 'docs/design.md',
+            ...DOCS_POLICY,
           },
           chatSessionId: 'sess-1',
         },
         initConfig: {
           goal: 'Design the init workflow',
           outputPath: 'docs/design.md',
+          ...DOCS_POLICY,
         },
         chatSessionId: 'sess-1',
       }),
@@ -539,6 +886,57 @@ describe('agent routes integration', () => {
         chatSessionId: 'sess-1',
       }),
     ]);
+  });
+
+  it('defaults tracked-agent pages to 50 and validates cursors and limits', async () => {
+    const { app, operatorToken } = createIntegratedBeastApp({ rateLimitMax: 100 });
+    const headers = {
+      authorization: 'Bear' + 'er ' + operatorToken,
+      'content-type': 'application/json',
+    };
+    const createdIds: string[] = [];
+    for (let index = 0; index < 51; index += 1) {
+      const response = await app.request('/v1/beasts/agents', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          definitionId: 'design-interview',
+          initAction: {
+            kind: 'design-interview',
+            command: '/interview',
+            config: { goal: `goal-${index}` },
+          },
+          initConfig: { goal: `goal-${index}` },
+          autoDispatch: false,
+        }),
+      });
+      expect(response.status).toBe(201);
+      const body = await response.json() as { data: { id: string } };
+      createdIds.push(body.data.id);
+    }
+
+    const firstResponse = await app.request('/v1/beasts/agents', { headers });
+    expect(firstResponse.status).toBe(200);
+    const first = await firstResponse.json() as { data: { agents: Array<{ id: string }>; nextCursor?: string } };
+    expect(first.data.agents).toHaveLength(50);
+    expect(first.data.nextCursor).toEqual(expect.any(String));
+    const secondResponse = await app.request(
+      `/v1/beasts/agents?cursor=${encodeURIComponent(first.data.nextCursor ?? '')}`,
+      { headers },
+    );
+    const second = await secondResponse.json() as { data: { agents: Array<{ id: string }>; nextCursor?: string } };
+    expect(second.data.agents).toHaveLength(1);
+    expect(second.data.nextCursor).toBeUndefined();
+    expect([...first.data.agents, ...second.data.agents].map(({ id }) => id).sort()).toEqual(createdIds.sort());
+
+    for (const path of [
+      '/v1/beasts/agents?limit=201',
+      '/v1/beasts/agents?limit=1.5',
+      '/v1/beasts/agents?cursor=',
+      '/v1/beasts/agents?cursor=not-a-cursor',
+    ]) {
+      expect((await app.request(path, { headers })).status).toBe(400);
+    }
   });
 
   it('dispatches chunk-plan tracked agents during creation when init config is complete', async () => {
@@ -567,12 +965,14 @@ describe('agent routes integration', () => {
           config: {
             designDocPath: 'docs/plans/design.md',
             outputDir: 'docs/chunks',
+            ...DOCS_POLICY,
           },
           chatSessionId: createdSession.data.id,
         },
         initConfig: {
           designDocPath: 'docs/plans/design.md',
           outputDir: 'docs/chunks',
+          ...DOCS_POLICY,
         },
         chatSessionId: createdSession.data.id,
       }),
@@ -636,12 +1036,14 @@ describe('agent routes integration', () => {
             provider: 'claude',
             objective: 'Start later',
             chunkDirectory: 'docs/chunks',
+            ...CODING_POLICY,
           },
         },
         initConfig: {
           provider: 'claude',
           objective: 'Start later',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
         },
         executionMode: 'container',
         autoDispatch: false,
@@ -684,12 +1086,14 @@ describe('agent routes integration', () => {
             provider: 'claude',
             objective: 'Ship route integration',
             chunkDirectory: 'docs/chunks',
+            ...CODING_POLICY,
           },
         },
         initConfig: {
           provider: 'claude',
           objective: 'Ship route integration',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
         },
       }),
     });
@@ -705,6 +1109,7 @@ describe('agent routes integration', () => {
           provider: 'claude',
           objective: 'Ship route integration',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
         },
         executionMode: 'process',
         startNow: true,
@@ -752,12 +1157,14 @@ describe('agent routes integration', () => {
             provider: 'claude',
             objective: 'Resume from dashboard',
             chunkDirectory: 'docs/chunks',
+            ...CODING_POLICY,
           },
         },
         initConfig: {
           provider: 'claude',
           objective: 'Resume from dashboard',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
         },
       }),
     });
@@ -773,6 +1180,7 @@ describe('agent routes integration', () => {
           provider: 'claude',
           objective: 'Resume from dashboard',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
         },
         executionMode: 'process',
         startNow: true,
@@ -818,10 +1226,10 @@ describe('agent routes integration', () => {
         initAction: {
           kind: 'design-interview',
           command: '/interview',
-          config: { goal: 'Stop from dashboard' },
+          config: { goal: 'Stop from dashboard', ...DOCS_POLICY },
           chatSessionId: 'sess-1',
         },
-        initConfig: { goal: 'Stop from dashboard' },
+        initConfig: { goal: 'Stop from dashboard', ...DOCS_POLICY },
         chatSessionId: 'sess-1',
       }),
     });
@@ -875,12 +1283,14 @@ describe('agent routes integration', () => {
             provider: 'claude',
             objective: 'Restart from dashboard',
             chunkDirectory: 'docs/chunks',
+            ...CODING_POLICY,
           },
         },
         initConfig: {
           provider: 'claude',
           objective: 'Restart from dashboard',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
         },
       }),
     });
@@ -896,6 +1306,7 @@ describe('agent routes integration', () => {
           provider: 'claude',
           objective: 'Restart from dashboard',
           chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
         },
         executionMode: 'process',
         startNow: true,
@@ -957,11 +1368,13 @@ describe('agent routes integration', () => {
           config: {
             designDocPath: 'docs/plans/design.md',
             outputDir: 'docs/chunks',
+            ...DOCS_POLICY,
           },
         },
         initConfig: {
           designDocPath: 'docs/plans/design.md',
           outputDir: 'docs/chunks',
+          ...DOCS_POLICY,
         },
       }),
     });
@@ -1015,11 +1428,13 @@ describe('agent routes integration', () => {
           config: {
             designDocPath: 'docs/plans/design.md',
             outputDir: 'docs/chunks',
+            ...DOCS_POLICY,
           },
         },
         initConfig: {
           designDocPath: 'docs/plans/design.md',
           outputDir: 'docs/chunks',
+          ...DOCS_POLICY,
         },
       }),
     });
@@ -1081,9 +1496,9 @@ describe('agent routes integration', () => {
         initAction: {
           kind: 'design-interview',
           command: '/interview',
-          config: { goal: 'Kill without a linked run' },
+          config: { goal: 'Kill without a linked run', ...DOCS_POLICY },
         },
-        initConfig: { goal: 'Kill without a linked run' },
+        initConfig: { goal: 'Kill without a linked run', ...DOCS_POLICY },
       }),
     });
     expect(createResponse.status).toBe(201);
@@ -1139,9 +1554,9 @@ describe('agent routes integration', () => {
         initAction: {
           kind: 'design-interview',
           command: '/interview',
-          config: { goal: 'Delete from dashboard', outputPath: 'docs/delete-design.md' },
+          config: { goal: 'Delete from dashboard', outputPath: 'docs/delete-design.md', ...DOCS_POLICY },
         },
-        initConfig: { goal: 'Delete from dashboard', outputPath: 'docs/delete-design.md' },
+        initConfig: { goal: 'Delete from dashboard', outputPath: 'docs/delete-design.md', ...DOCS_POLICY },
       }),
     });
     expect(createResponse.status).toBe(201);
@@ -1214,9 +1629,9 @@ describe('agent routes integration', () => {
           initAction: {
             kind: 'design-interview',
             command: '/interview',
-            config: { goal: `Delete ${status} from dashboard` },
+            config: { goal: `Delete ${status} from dashboard`, ...DOCS_POLICY },
           },
-          initConfig: { goal: `Delete ${status} from dashboard` },
+          initConfig: { goal: `Delete ${status} from dashboard`, ...DOCS_POLICY },
           autoDispatch: false,
         }),
       });
@@ -1258,9 +1673,9 @@ describe('agent routes integration', () => {
         initAction: {
           kind: 'design-interview',
           command: '/interview',
-          config: { goal: 'Do not delete running agents', outputPath: 'docs/running-delete.md' },
+          config: { goal: 'Do not delete running agents', outputPath: 'docs/running-delete.md', ...DOCS_POLICY },
         },
-        initConfig: { goal: 'Do not delete running agents', outputPath: 'docs/running-delete.md' },
+        initConfig: { goal: 'Do not delete running agents', outputPath: 'docs/running-delete.md', ...DOCS_POLICY },
       }),
     });
     expect(createResponse.status).toBe(201);
@@ -1310,6 +1725,7 @@ describe('agent routes integration', () => {
         initConfig: {
           identity: { name: 'Old name', description: 'Old description' },
           workflow: { workflowType: 'design-interview' },
+          ...DOCS_POLICY,
         },
         autoDispatch: false,
       }),
@@ -1361,12 +1777,14 @@ describe('agent routes integration', () => {
           config: {
             designDocPath: 'docs/plans/design.md',
             outputDir: 'docs/chunks',
+            ...DOCS_POLICY,
           },
         },
         initConfig: {
           identity: { name: 'Linked run agent' },
           designDocPath: 'docs/plans/design.md',
           outputDir: 'docs/chunks',
+          ...DOCS_POLICY,
           modules: { firewall: true, memory: false },
         },
         moduleConfig: { firewall: true, memory: false },
@@ -1431,9 +1849,9 @@ describe('agent routes integration', () => {
       initAction: {
         kind: 'design-interview',
         command: '/interview',
-        config: {},
+        config: { ...DOCS_POLICY },
       },
-      initConfig: {},
+      initConfig: { ...DOCS_POLICY },
       autoDispatch: false,
     });
 
@@ -1513,11 +1931,13 @@ describe('agent routes integration', () => {
           config: {
             designDocPath: 'docs/plans/design.md',
             outputDir: 'docs/chunks',
+            ...DOCS_POLICY,
             invalidField: 'this-will-fail-schema',
           },
         },
         initConfig: {
           invalidField: 'this-will-fail-schema',
+          ...DOCS_POLICY,
         },
       }),
     });
@@ -1803,11 +2223,13 @@ describe('agent routes integration', () => {
           config: {
             designDocPath: 'docs/plans/design.md',
             outputDir: 'docs/chunks',
+            ...DOCS_POLICY,
           },
         },
         initConfig: {
           designDocPath: 'docs/plans/design.md',
           outputDir: 'docs/chunks',
+          ...DOCS_POLICY,
         },
       }),
     });
@@ -1832,10 +2254,11 @@ describe('agent routes integration', () => {
         initAction: {
           kind: 'chunk-plan',
           command: '/plan',
-          config: {},
+          config: { ...DOCS_POLICY },
         },
         initConfig: {
           invalidField: 'will-fail',
+          ...DOCS_POLICY,
         },
       }),
     });

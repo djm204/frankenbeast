@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { unlinkSync, existsSync, rmSync } from 'node:fs'
+import { unlinkSync, existsSync, mkdirSync, rmSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import Database from 'better-sqlite3'
 import { TraceContext } from '../../core/TraceContext.js'
 import { SpanLifecycle } from '../../core/SpanLifecycle.js'
 import { SQLiteAdapter } from './SQLiteAdapter.js'
+import { SELECT_TRACE_SUMMARIES } from './schema.js'
 
 function tempDbPath() {
   return join(tmpdir(), `franken-observer-test-${randomUUID()}.db`)
@@ -51,6 +52,55 @@ describe('SQLiteAdapter', () => {
         rmSync(root, { recursive: true, force: true })
       }
     })
+
+    it('resolves a relative database path before the worker starts', async () => {
+      const originalCwd = process.cwd()
+      const root = join(tmpdir(), `franken-observer-relative-${randomUUID()}`)
+      const firstCwd = join(root, 'first')
+      const secondCwd = join(root, 'second')
+      mkdirSync(firstCwd, { recursive: true })
+      mkdirSync(secondCwd, { recursive: true })
+      let relativeAdapter: SQLiteAdapter | undefined
+
+      try {
+        process.chdir(firstCwd)
+        relativeAdapter = new SQLiteAdapter('relative.db')
+        process.chdir(secondCwd)
+
+        const trace = TraceContext.createTrace('stable relative path')
+        TraceContext.endTrace(trace)
+        await relativeAdapter.flush(trace)
+        relativeAdapter.close()
+
+        expect(existsSync(join(firstCwd, 'relative.db'))).toBe(true)
+        expect(existsSync(join(secondCwd, 'relative.db'))).toBe(false)
+      } finally {
+        process.chdir(originalCwd)
+        relativeAdapter?.close()
+        rmSync(root, { recursive: true, force: true })
+      }
+    })
+
+    it.each([':memory:', ''])(
+      'keeps transient database %j operations on the initialized connection',
+      async transientPath => {
+        const transientAdapter = new SQLiteAdapter(transientPath)
+        try {
+          const trace = TraceContext.createTrace('transient database')
+          TraceContext.endTrace(trace)
+
+          await transientAdapter.flush(trace)
+
+          expect(await transientAdapter.queryByTraceId(trace.id)).toMatchObject({
+            id: trace.id,
+            goal: 'transient database',
+          })
+          expect((transientAdapter as unknown as { workerClient?: unknown }).workerClient).toBeUndefined()
+        } finally {
+          transientAdapter.close()
+        }
+      },
+    )
   })
 
   describe('flush() + queryByTraceId()', () => {
@@ -104,6 +154,21 @@ describe('SQLiteAdapter', () => {
       const s = result!.spans[0]!
       expect(s.status).toBe('error')
       expect(s.errorMessage).toBe('timeout')
+    })
+
+    it('preserves JSON persistence semantics for metadata that cannot be structured-cloned', async () => {
+      const trace = TraceContext.createTrace('non-cloneable metadata')
+      const span = TraceContext.startSpan(trace, { name: 'step' })
+      SpanLifecycle.setMetadata(span, {
+        kept: 'value',
+        omitted: () => 'not persisted by JSON.stringify',
+      })
+      TraceContext.endSpan(span)
+      TraceContext.endTrace(trace)
+
+      await adapter.flush(trace)
+
+      expect((await adapter.queryByTraceId(trace.id))!.spans[0]!.metadata).toEqual({ kept: 'value' })
     })
 
     it('returns null for an unknown trace id', async () => {
@@ -206,6 +271,27 @@ describe('SQLiteAdapter', () => {
   })
 
   describe('process restart simulation', () => {
+    it('does not wait for a close acknowledgement after the worker has failed', async () => {
+      const worker = (adapter as unknown as {
+        workerClient?: { worker: { terminate: () => Promise<number> } }
+      }).workerClient?.worker
+      expect(worker).toBeDefined()
+      await worker!.terminate()
+
+      expect(() => adapter.close()).not.toThrow()
+    })
+
+    it('waits for the worker to release its database handle before close returns', () => {
+      adapter.close()
+
+      const reopened = new Database(dbPath)
+      try {
+        expect(reopened.pragma('journal_mode = DELETE', { simple: true })).toBe('delete')
+      } finally {
+        reopened.close()
+      }
+    })
+
     it('a 10-span trace survives closing and reopening the DB', async () => {
       const trace = TraceContext.createTrace('long task')
       for (let i = 0; i < 10; i++) {
@@ -277,20 +363,142 @@ describe('SQLiteAdapter', () => {
       ])
     })
 
-    it('creates a composite index for trace detail span ordering', () => {
+    it('creates indexes for ordered trace and span queries', () => {
       const raw = new Database(dbPath)
-      const indexes = raw.prepare("PRAGMA index_list('spans')").all() as Array<{ name: string }>
-      const columns = indexes.map(index => ({
+      const traceIndexes = raw.prepare("PRAGMA index_list('traces')").all() as Array<{ name: string }>
+      const spanIndexes = raw.prepare("PRAGMA index_list('spans')").all() as Array<{ name: string }>
+      const indexColumns = (tableIndexes: Array<{ name: string }>) => tableIndexes.map(index => ({
         name: index.name,
         columns: (raw.prepare(`PRAGMA index_info('${index.name}')`).all() as Array<{ name: string }>).map(row => row.name),
       }))
+
+      expect(indexColumns(traceIndexes)).toContainEqual({ name: 'idx_traces_startedAt', columns: ['startedAt'] })
+      expect(indexColumns(spanIndexes)).toContainEqual({ name: 'idx_spans_traceId_startedAt', columns: ['traceId', 'startedAt'] })
+      raw.close()
+    })
+
+    it('adds the ordered trace index when opening an existing database', () => {
+      adapter.close()
+      const raw = new Database(dbPath)
+      raw.exec('DROP INDEX IF EXISTS idx_traces_startedAt')
       raw.close()
 
-      expect(columns).toContainEqual({ name: 'idx_spans_traceId_startedAt', columns: ['traceId', 'startedAt'] })
+      adapter = new SQLiteAdapter(dbPath)
+
+      const reopened = new Database(dbPath)
+      const indexes = reopened.prepare("PRAGMA index_list('traces')").all() as Array<{ name: string }>
+      reopened.close()
+      expect(indexes.map(index => index.name)).toContain('idx_traces_startedAt')
+    })
+
+    it('uses the ordered trace index for trace summaries without a temporary sort', () => {
+      const raw = new Database(dbPath)
+      const plan = raw.prepare(`EXPLAIN QUERY PLAN ${SELECT_TRACE_SUMMARIES}`).all() as Array<{ detail: string }>
+      raw.close()
+
+      expect(plan.some(row => row.detail.includes('USING INDEX idx_traces_startedAt'))).toBe(true)
+      expect(plan.some(row => row.detail.includes('USE TEMP B-TREE FOR ORDER BY'))).toBe(false)
     })
   })
 
   describe('concurrent sequential writes', () => {
+    it('does not poison the worker when startup overlaps a transient write lock', async () => {
+      adapter.close()
+      const bootstrap = new SQLiteAdapter(dbPath, { useWorkerThread: false })
+      bootstrap.close()
+      const blocker = new Database(dbPath)
+      blocker.exec('BEGIN IMMEDIATE')
+
+      adapter = new SQLiteAdapter(dbPath, {
+        busyTimeoutMs: 25,
+        maxLockRetries: 3,
+        lockRetryBaseDelayMs: 20,
+        lockRetryMaxDelayMs: 20,
+        lockRetryJitter: false,
+      })
+      const trace = TraceContext.createTrace('startup lock retry')
+      TraceContext.endTrace(trace)
+      const release = setTimeout(() => {
+        blocker.exec('ROLLBACK')
+        blocker.close()
+      }, 75)
+
+      try {
+        await adapter.flush(trace)
+        expect(await adapter.queryByTraceId(trace.id)).not.toBeNull()
+      } finally {
+        clearTimeout(release)
+        if (blocker.open) {
+          blocker.exec('ROLLBACK')
+          blocker.close()
+        }
+      }
+    })
+
+    it('does not let a read overtake an earlier queued write', async () => {
+      adapter.close()
+      adapter = new SQLiteAdapter(dbPath, {
+        busyTimeoutMs: 500,
+        maxLockRetries: 0,
+      })
+      const blocker = new Database(dbPath)
+      blocker.exec('BEGIN IMMEDIATE')
+
+      const first = TraceContext.createTrace('first queued write')
+      const second = TraceContext.createTrace('second queued write')
+      TraceContext.endTrace(first)
+      TraceContext.endTrace(second)
+
+      const firstFlush = adapter.flush(first)
+      const secondFlush = adapter.flush(second)
+      const readAfterSecondFlush = adapter.queryByTraceId(second.id)
+      const release = setTimeout(() => {
+        blocker.exec('ROLLBACK')
+        blocker.close()
+      }, 25)
+
+      try {
+        await expect(readAfterSecondFlush).resolves.toMatchObject({ id: second.id })
+        await Promise.all([firstFlush, secondFlush])
+      } finally {
+        clearTimeout(release)
+        if (blocker.open) {
+          blocker.exec('ROLLBACK')
+          blocker.close()
+        }
+      }
+    })
+
+    it('keeps the event loop responsive while SQLite waits for a write lock', async () => {
+      adapter.close()
+      adapter = new SQLiteAdapter(dbPath, {
+        busyTimeoutMs: 500,
+        maxLockRetries: 0,
+      })
+      const blocker = new Database(dbPath)
+      blocker.exec('BEGIN IMMEDIATE')
+
+      const trace = TraceContext.createTrace('write while locked')
+      TraceContext.endTrace(trace)
+      let timerFired = false
+      const timer = setTimeout(() => {
+        timerFired = true
+        blocker.exec('ROLLBACK')
+        blocker.close()
+      }, 25)
+
+      const startedAt = Date.now()
+      const flush = adapter.flush(trace)
+      const returnedAfterMs = Date.now() - startedAt
+
+      expect(returnedAfterMs).toBeLessThan(100)
+      await new Promise(resolve => setTimeout(resolve, 75))
+      expect(timerFired).toBe(true)
+      await flush
+      clearTimeout(timer)
+      expect(await adapter.queryByTraceId(trace.id)).not.toBeNull()
+    })
+
     it('handles 20 traces written in rapid succession without corruption', async () => {
       const traces = Array.from({ length: 20 }, (_, i) => {
         const t = TraceContext.createTrace(`task-${i}`)

@@ -39,12 +39,29 @@ export class CostCalculator {
       return 0
     }
     return (
-      (entry.promptTokens / 1_000_000) * model.promptPerMillion +
-      (entry.completionTokens / 1_000_000) * model.completionPerMillion
+      (entry.promptTokens * model.promptPerMillion) / 1_000_000 +
+      (entry.completionTokens * model.completionPerMillion) / 1_000_000
     )
   }
 
   totalCost(entries: TokenRecord[]): number {
-    return entries.reduce((sum, entry) => sum + this.calculate(entry), 0)
+    let sum = 0
+    let compensation = 0
+
+    for (const entry of entries) {
+      const cost = this.calculate(entry)
+      const next = sum + cost
+
+      // Neumaier summation preserves low-order costs that direct addition loses
+      // when a snapshot mixes values with very different magnitudes.
+      if (Math.abs(sum) >= Math.abs(cost)) {
+        compensation += (sum - next) + cost
+      } else {
+        compensation += (cost - next) + sum
+      }
+      sum = next
+    }
+
+    return sum + compensation
   }
 }

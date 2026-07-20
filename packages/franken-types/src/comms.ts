@@ -90,6 +90,8 @@ export const ServerSocketEventSchema = z.discriminatedUnion('type', [
     messageId: z.string().min(1),
     content: z.string(),
     modelTier: z.string().optional(),
+    /** Display kind of the completed message (reply, plan, clarify, …). */
+    kind: z.string().optional(),
     timestamp: z.string(),
   }),
   serverEventShape({

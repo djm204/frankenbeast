@@ -56,6 +56,10 @@ export interface CliDepOptions {
   planDirOverride?: string | undefined;
   /** When provided, issue-specific deps will be created. */
   issueIO?: ReviewIO | undefined;
+  /** Reuse the session's terminal owner for governor approval questions. */
+  governorQuestion?: ((prompt: string) => Promise<string>) | undefined;
+  /** Cancel a pending shared governor question after approval timeout. */
+  governorCancel?: (() => void) | undefined;
   /** Dry-run flag for IssueReview. */
   dryRun?: boolean | undefined;
   /** Stream line callback for real-time progress during LLM calls. */
@@ -130,7 +134,9 @@ const stubGovernor: IGovernorModule = {
   requestApproval: async () => ({ decision: 'approved' as const }),
 };
 const stubFirewall: IFirewallModule = {
+  enabled: false,
   runPipeline: async (input: string) => ({ sanitizedText: input, violations: [], blocked: false }),
+  scanResponse: async (input: string) => ({ sanitizedText: input, violations: [], blocked: false }),
 };
 const stubMemory: IMemoryModule = {
   frontload: async () => {},
@@ -824,6 +830,29 @@ async function createGovernanceDeps(
         defaultDecision: process.env.FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL === '1'
           ? ('approved' as const)
           : ('rejected' as const),
+      }),
+      finalize,
+    };
+  }
+
+  if (options.governorQuestion) {
+    const cliChannel = new governorModule.CliChannel({
+      readline: {
+        question: options.governorQuestion,
+        ...(options.governorCancel ? { cancel: options.governorCancel } : {}),
+      },
+      operatorName: 'operator',
+    });
+    const gateway = new governorModule.ApprovalGateway({
+      channel: cliChannel,
+      auditRecorder: { record: async () => {} },
+      config: governorModule.defaultConfig(),
+    });
+
+    return {
+      governor: new GovernorPortAdapter({
+        gateway: gateway as unknown as GovernorPortAdapterDeps['gateway'],
+        projectId: basename(options.paths.root),
       }),
       finalize,
     };

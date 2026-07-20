@@ -194,7 +194,7 @@ export async function runLearningSandboxExperiment(
       const promise = runSandboxTool({
         tool,
         input,
-        handler,
+        ...(handler === undefined ? {} : { handler }),
         policy: enforcedPolicy,
         workspaceDir,
         originalWorkspaceDir,

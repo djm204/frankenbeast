@@ -420,30 +420,169 @@ process.stdout.write('parent done\\n');`,
       });
     });
 
-    it('uses direct PID signaling by default for unmarked recovered attempts', async () => {
+    it('refuses fallback signaling when an untracked PID has no verifiable identity', async () => {
       const killProcess = vi.fn();
       supervisor = new ProcessSupervisor({
-        orphanSweeper: { killProcess },
+        orphanSweeper: {
+          killProcess,
+          readProcessIdentity: () => ({
+            status: 'found',
+            startTimeTicks: 'untrusted-current-process',
+          }),
+        },
       });
 
-      await supervisor.stop(12345);
-      await supervisor.kill(23456);
+      await expect(supervisor.stop(12345)).rejects.toThrow(
+        /Refusing to signal untracked PID 12345.*identity.*operator/i,
+      );
+      await expect(supervisor.kill(23456)).rejects.toThrow(
+        /Refusing to signal untracked PID 23456.*identity.*operator/i,
+      );
 
-      expect(killProcess).toHaveBeenNthCalledWith(1, 12345, 'SIGTERM');
-      expect(killProcess).toHaveBeenNthCalledWith(2, 23456, 'SIGKILL');
+      expect(killProcess).not.toHaveBeenCalled();
+    });
+
+    it('refuses fallback signaling when an untracked PID identity has changed', async () => {
+      const killProcess = vi.fn();
+      supervisor = new ProcessSupervisor({
+        orphanSweeper: {
+          killProcess,
+          readProcessIdentity: () => ({
+            status: 'found',
+            startTimeTicks: 'reused-pid-start-time',
+          }),
+        },
+      });
+
+      await expect(supervisor.kill(12345, {
+        expectedStartTimeTicks: 'original-start-time',
+      })).rejects.toThrow(/current process identity could not be verified.*operator/i);
+
+      expect(killProcess).not.toHaveBeenCalled();
+    });
+
+    it.each(['unreadable', 'unsupported'] as const)(
+      'refuses fallback signaling when process identity is %s',
+      async (status) => {
+        const killProcess = vi.fn();
+        supervisor = new ProcessSupervisor({
+          orphanSweeper: {
+            killProcess,
+            readProcessIdentity: () => ({ status }),
+          },
+        });
+
+        await expect(supervisor.kill(12345, {
+          expectedStartTimeTicks: 'original-start-time',
+        })).rejects.toThrow(/current process identity could not be verified.*operator/i);
+        expect(killProcess).not.toHaveBeenCalled();
+      },
+    );
+
+    it('treats an absent untracked PID as an idempotent no-op', async () => {
+      const killProcess = vi.fn();
+      supervisor = new ProcessSupervisor({
+        orphanSweeper: {
+          killProcess,
+          readProcessIdentity: () => ({ status: 'absent' }),
+        },
+      });
+
+      await expect(supervisor.stop(12345, {
+        expectedStartTimeTicks: 'original-start-time',
+      })).resolves.toBeUndefined();
+
+      expect(killProcess).not.toHaveBeenCalled();
+    });
+
+    it('sweeps an owned recovered group when its leader PID is absent', async () => {
+      const killProcess = vi.fn(() => true as const);
+      supervisor = new ProcessSupervisor({
+        orphanSweeper: {
+          killProcess,
+          readProcessIdentity: () => ({ status: 'absent' }),
+        },
+      });
+
+      await supervisor.kill(12345, {
+        processGroupOwned: true,
+        expectedStartTimeTicks: 'original-start-time',
+      });
+
+      expect(killProcess).toHaveBeenCalledOnce();
+      expect(killProcess).toHaveBeenCalledWith(-12345, 'SIGKILL');
+    });
+
+    it('signals an untracked PID only when its persisted identity still matches', async () => {
+      const killProcess = vi.fn();
+      supervisor = new ProcessSupervisor({
+        orphanSweeper: {
+          killProcess,
+          readProcessIdentity: () => ({
+            status: 'found',
+            startTimeTicks: 'original-start-time',
+          }),
+        },
+      });
+
+      await supervisor.stop(12345, { expectedStartTimeTicks: 'original-start-time' });
+
+      expect(killProcess).toHaveBeenCalledOnce();
+      expect(killProcess).toHaveBeenCalledWith(12345, 'SIGTERM');
     });
 
     it('tries a process-group sweep before direct PID signaling for marked recovered attempts', async () => {
       const killProcess = vi.fn();
+      const readProcessIdentity = vi.fn(() => ({
+        status: 'found' as const,
+        startTimeTicks: 'known-start-time',
+      }));
       supervisor = new ProcessSupervisor({
-        orphanSweeper: { killProcess },
+        orphanSweeper: { killProcess, readProcessIdentity },
       });
 
-      await supervisor.stop(12345, { processGroupOwned: true });
-      await supervisor.kill(23456, { processGroupOwned: true });
+      await supervisor.stop(12345, {
+        processGroupOwned: true,
+        expectedStartTimeTicks: 'known-start-time',
+      });
+      await supervisor.kill(23456, {
+        processGroupOwned: true,
+        expectedStartTimeTicks: 'known-start-time',
+      });
 
       expect(killProcess).toHaveBeenNthCalledWith(1, -12345, 'SIGTERM');
       expect(killProcess).toHaveBeenNthCalledWith(2, -23456, 'SIGKILL');
+    });
+
+    it('revalidates identity before direct fallback when the process group is gone', async () => {
+      const noGroup = Object.assign(new Error('no process group'), { code: 'ESRCH' });
+      const killProcess = vi.fn((pid: number, _signal?: string | number) => {
+        if (pid < 0) {
+          throw noGroup;
+        }
+        return true as const;
+      });
+      const readProcessIdentity = vi.fn()
+        .mockReturnValueOnce({
+          status: 'found' as const,
+          startTimeTicks: 'known-start-time',
+        })
+        .mockReturnValueOnce({
+          status: 'found' as const,
+          startTimeTicks: 'reused-pid-start-time',
+        });
+      supervisor = new ProcessSupervisor({
+        orphanSweeper: { killProcess, readProcessIdentity },
+      });
+
+      await expect(supervisor.stop(34567, {
+        processGroupOwned: true,
+        expectedStartTimeTicks: 'known-start-time',
+      })).rejects.toThrow(/current process identity could not be verified.*operator/i);
+
+      expect(killProcess).toHaveBeenCalledOnce();
+      expect(killProcess).toHaveBeenCalledWith(-34567, 'SIGTERM');
+      expect(readProcessIdentity).toHaveBeenCalledTimes(2);
     });
 
     it('falls back to direct PID signaling when a marked recovered process group is gone', async () => {
@@ -454,14 +593,22 @@ process.stdout.write('parent done\\n');`,
         }
         return true as const;
       });
+      const readProcessIdentity = vi.fn(() => ({
+        status: 'found' as const,
+        startTimeTicks: 'known-start-time',
+      }));
       supervisor = new ProcessSupervisor({
-        orphanSweeper: { killProcess },
+        orphanSweeper: { killProcess, readProcessIdentity },
       });
 
-      await supervisor.stop(34567, { processGroupOwned: true });
+      await supervisor.stop(34567, {
+        processGroupOwned: true,
+        expectedStartTimeTicks: 'known-start-time',
+      });
 
       expect(killProcess).toHaveBeenCalledWith(-34567, 'SIGTERM');
       expect(killProcess).toHaveBeenCalledWith(34567, 'SIGTERM');
+      expect(readProcessIdentity).toHaveBeenCalledTimes(2);
     });
 
     it('strips CLAUDE env vars from spawned process environment', async () => {

@@ -11,13 +11,13 @@
   },
   {
     "name": "@testing-library/jest-dom",
-    "dependent": "franken-web",
+    "dependent": "@franken/web",
     "location": "node_modules/@testing-library/jest-dom",
     "currentMajor": 6,
     "latestMajor": 7,
     "current": "6.9.1",
     "latest": "7.0.0",
-    "reason": "Defer the newly released major upgrade so dependency drift does not block unrelated validated changes."
+    "reason": "Major release appeared after the branch was synchronized and would otherwise make the repository-wide freshness gate fail independently of this PR."
   },
   {
     "name": "@types/node",

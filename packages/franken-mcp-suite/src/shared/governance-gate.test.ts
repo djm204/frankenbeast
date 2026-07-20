@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createGovernanceGate } from './governance-gate.js';
 import type { GovernorAdapter } from '../adapters/governor-adapter.js';
 
@@ -25,6 +28,31 @@ describe('createGovernanceGate', () => {
   it('does not open a database until the first check (lazy from dbPath)', () => {
     // Construction with a path must not throw or open a connection eagerly.
     expect(() => createGovernanceGate('/nonexistent/path/should/not/open.db')).not.toThrow();
+  });
+
+  it('threads an explicit active config path into the lazy governor', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'fbeast-governance-config-'));
+    const configDir = join(root, 'alternate');
+    const skillDir = join(configDir, 'skills', 'reporting');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({ skills: { enabled: ['reporting'] } }));
+    writeFileSync(join(skillDir, 'mcp.json'), JSON.stringify({
+      mcpServers: { reporting: { command: 'reporting-server' } },
+    }));
+    writeFileSync(join(skillDir, 'tools.json'), JSON.stringify([{
+      name: 'publish_report',
+      description: 'Publish a report',
+      inputSchema: { type: 'object' },
+      requiresHitl: true,
+    }]));
+
+    try {
+      const gate = createGovernanceGate(join(root, 'beast.db'), join(configDir, 'config.json'));
+      await expect(gate.check({ tool: 'mcp__reporting__publish_report', args: {} }))
+        .resolves.toMatchObject({ decision: 'review_recommended' });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   function spyGovernor(decision: 'approved' | 'review_recommended' | 'denied'): {

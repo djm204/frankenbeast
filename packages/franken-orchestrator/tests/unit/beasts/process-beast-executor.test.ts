@@ -195,10 +195,13 @@ describe('ProcessBeastExecutor', () => {
 
     await executor.kill(run.id, attempt.id);
 
-    expect(supervisor.kill).toHaveBeenCalledWith(process.pid, { processGroupOwned: true });
+    expect(supervisor.kill).toHaveBeenCalledWith(process.pid, {
+      processGroupOwned: true,
+      expectedStartTimeTicks: processStartTimeTicks,
+    });
   });
 
-  it('fails closed to direct PID signaling when recovered process start time is unreadable or stale', async () => {
+  it('passes stale recovered identity metadata to the supervisor for fail-closed validation', async () => {
     workDir = await createTempWorkDir();
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const logs = new BeastLogStore(join(workDir, 'logs'));
@@ -217,10 +220,13 @@ describe('ProcessBeastExecutor', () => {
 
     await executor.kill(run.id, attempt.id);
 
-    expect(supervisor.kill).toHaveBeenCalledWith(4242, { processGroupOwned: false });
+    expect(supervisor.kill).toHaveBeenCalledWith(4242, {
+      processGroupOwned: true,
+      expectedStartTimeTicks: 'stale-start-time',
+    });
   });
 
-  it('fails closed when a recovered process-group leader start time is unreadable', async () => {
+  it('passes persisted identity metadata to the supervisor without pre-signaling probes', async () => {
     workDir = await createTempWorkDir();
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const logs = new BeastLogStore(join(workDir, 'logs'));
@@ -239,7 +245,10 @@ describe('ProcessBeastExecutor', () => {
 
     await executor.kill(run.id, attempt.id);
 
-    expect(supervisor.kill).toHaveBeenCalledWith(4242, { processGroupOwned: false });
+    expect(supervisor.kill).toHaveBeenCalledWith(4242, {
+      processGroupOwned: true,
+      expectedStartTimeTicks: 'known-original-start-time',
+    });
   });
 
   it('kills a spawned process when attempt creation fails', async () => {
@@ -366,7 +375,7 @@ describe('ProcessBeastExecutor', () => {
       status: 'dispatching',
       createdByUser: 'pfk',
       initAction: { kind: 'martin-loop', command: 'test', config: {} },
-      initConfig: {},
+      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'] },
       createdAt: '2026-03-10T00:00:00.000Z',
       updatedAt: '2026-03-10T00:00:00.000Z',
     });
@@ -424,7 +433,7 @@ describe('ProcessBeastExecutor', () => {
       status: 'dispatching',
       createdByUser: 'pfk',
       initAction: { kind: 'martin-loop', command: 'test', config: {} },
-      initConfig: {},
+      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'] },
       createdAt: '2026-03-10T00:00:00.000Z',
       updatedAt: '2026-03-10T00:00:00.000Z',
     });
@@ -494,7 +503,7 @@ describe('ProcessBeastExecutor', () => {
       status: 'dispatching',
       createdByUser: 'pfk',
       initAction: { kind: 'martin-loop', command: 'test', config: {} },
-      initConfig: {},
+      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'] },
       createdAt: '2026-03-10T00:00:00.000Z',
       updatedAt: '2026-03-10T00:00:00.000Z',
     });
@@ -589,7 +598,7 @@ describe('ProcessBeastExecutor', () => {
       status: 'dispatching',
       createdByUser: 'pfk',
       initAction: { kind: 'martin-loop', command: 'test', config: {} },
-      initConfig: {},
+      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'] },
       createdAt: '2026-03-10T00:00:00.000Z',
       updatedAt: '2026-03-10T00:00:00.000Z',
     });
@@ -646,7 +655,7 @@ describe('ProcessBeastExecutor', () => {
       status: 'dispatching',
       createdByUser: 'pfk',
       initAction: { kind: 'martin-loop', command: 'test', config: {} },
-      initConfig: {},
+      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'] },
       createdAt: '2026-03-10T00:00:00.000Z',
       updatedAt: '2026-03-10T00:00:00.000Z',
     });
@@ -695,7 +704,7 @@ describe('ProcessBeastExecutor', () => {
       status: 'dispatching',
       createdByUser: 'pfk',
       initAction: { kind: 'martin-loop', command: 'test', config: {} },
-      initConfig: {},
+      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'] },
       createdAt: '2026-03-10T00:00:00.000Z',
       updatedAt: '2026-03-10T00:00:00.000Z',
     });
@@ -747,7 +756,7 @@ describe('ProcessBeastExecutor', () => {
       status: 'dispatching',
       createdByUser: 'pfk',
       initAction: { kind: 'martin-loop', command: 'test', config: {} },
-      initConfig: {},
+      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'] },
       createdAt: '2026-03-10T00:00:00.000Z',
       updatedAt: '2026-03-10T00:00:00.000Z',
     });
@@ -799,7 +808,7 @@ describe('ProcessBeastExecutor', () => {
       status: 'dispatching',
       createdByUser: 'pfk',
       initAction: { kind: 'martin-loop', command: 'test', config: {} },
-      initConfig: {},
+      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'] },
       createdAt: '2026-03-10T00:00:00.000Z',
       updatedAt: '2026-03-10T00:00:00.000Z',
     });
@@ -847,7 +856,7 @@ describe('ProcessBeastExecutor', () => {
       status: 'dispatching',
       createdByUser: 'pfk',
       initAction: { kind: 'martin-loop', command: 'test', config: {} },
-      initConfig: {},
+      initConfig: { agentRole: 'coding', requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'] },
       createdAt: '2026-03-10T00:00:00.000Z',
       updatedAt: '2026-03-10T00:00:00.000Z',
     });

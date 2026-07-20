@@ -7,11 +7,20 @@ import type {
 import { isoNow } from '@franken/types';
 import { formatHttpErrorMessage } from '../http-error-context.js';
 import { createEgressGuardedFetch, type EgressPolicyConfig } from '../../../network/egress-policy.js';
+import { createBoundedFetch, type BoundedFetch } from '../bounded-fetch.js';
 
 export interface DiscordAdapterOptions {
   egressPolicy?: EgressPolicyConfig | undefined;
   fetchImpl?: typeof fetch | undefined;
+  timeoutMs?: number | undefined;
   token: string;
+}
+
+export class DiscordRoutingError extends Error {
+  constructor() {
+    super('Discord routing error: missing channelId or threadId metadata');
+    this.name = 'DiscordRoutingError';
+  }
 }
 
 export class DiscordAdapter implements ChannelAdapter {
@@ -27,11 +36,12 @@ export class DiscordAdapter implements ChannelAdapter {
 
   private readonly token: string;
 
-  private readonly fetchImpl: typeof fetch;
+  private readonly fetchImpl: BoundedFetch;
 
   constructor(options: DiscordAdapterOptions) {
     this.token = options.token;
-    this.fetchImpl = options.fetchImpl ?? createEgressGuardedFetch({ lane: 'operator', policy: options.egressPolicy });
+    const fetchImpl = options.fetchImpl ?? createEgressGuardedFetch({ lane: 'operator', policy: options.egressPolicy });
+    this.fetchImpl = createBoundedFetch(fetchImpl, { channel: 'Discord', timeoutMs: options.timeoutMs });
   }
 
   async send(sessionId: string, message: ChannelOutboundMessage): Promise<void> {
@@ -40,27 +50,35 @@ export class DiscordAdapter implements ChannelAdapter {
     // but for general proactive messages or delayed execution results, 
     // we use the channel message API.
     
-    const channelId = (message.metadata?.channelId as string) || 'unknown';
-    const threadId = message.metadata?.threadId as string | undefined;
+    const rawChannelId = message.metadata?.channelId;
+    const rawThreadId = message.metadata?.threadId;
+    const channelId = typeof rawChannelId === 'string' && rawChannelId.trim().length > 0
+      ? rawChannelId.trim()
+      : undefined;
+    const threadId = typeof rawThreadId === 'string' && rawThreadId.trim().length > 0
+      ? rawThreadId.trim()
+      : undefined;
+
+    if (!channelId && !threadId) {
+      throw new DiscordRoutingError();
+    }
 
     const body = this.formatPayload(message);
 
-    const targetUrl = threadId 
-      ? `https://discord.com/api/v10/channels/${threadId}/messages`
-      : `https://discord.com/api/v10/channels/${channelId}/messages`;
+    const targetUrl = `https://discord.com/api/v10/channels/${threadId ?? channelId}/messages`;
 
-    const response = await this.fetchImpl(targetUrl, {
+    await this.fetchImpl(targetUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bot ${this.token}`,
       },
       body: JSON.stringify(body),
+    }, async response => {
+      if (!response.ok) {
+        throw new Error(await formatHttpErrorMessage('Discord API error', response, targetUrl));
+      }
     });
-
-    if (!response.ok) {
-      throw new Error(await formatHttpErrorMessage('Discord API error', response, targetUrl));
-    }
   }
 
   private formatPayload(message: ChannelOutboundMessage): Record<string, unknown> {

@@ -91,7 +91,7 @@ export const ChatServiceConfigSchema = z.object({
   enabled: z.boolean().default(true),
   host: HostSchema,
   port: PortSchema.default(3737),
-  model: z.string().min(1).default('claude-sonnet-4-6'),
+  model: z.string().min(1).optional(),
 }).superRefine((value, ctx) => {
   if (value.enabled) requireLoopbackServiceHost(ctx, value.host);
 });
@@ -158,6 +158,7 @@ export const CommsServiceConfigSchema = z.object({
   enabled: z.boolean().default(false),
   host: HostSchema,
   port: PortSchema.default(3200),
+  outboundTimeoutMs: z.number().int().positive().max(300_000).default(15_000),
   orchestratorWsUrl: UrlSchema.default('ws://127.0.0.1:3737/v1/chat/ws'),
   orchestratorTokenRef: z.string().min(1).optional(),
   slack: SlackChannelConfigSchema.default(() => ({ enabled: false, allowSensitiveDelivery: false })),
@@ -201,7 +202,6 @@ export const NetworkConfigFieldsSchema = z.object({
     enabled: true,
     host: '127.0.0.1',
     port: 3737,
-    model: 'claude-sonnet-4-6',
   })),
   dashboard: DashboardServiceConfigSchema.default(() => ({
     enabled: true,
@@ -213,6 +213,7 @@ export const NetworkConfigFieldsSchema = z.object({
     enabled: false,
     host: '127.0.0.1',
     port: 3200,
+    outboundTimeoutMs: 15_000,
     orchestratorWsUrl: 'ws://127.0.0.1:3737/v1/chat/ws',
     slack: { enabled: false, allowSensitiveDelivery: false },
     discord: { enabled: false, allowSensitiveDelivery: false },

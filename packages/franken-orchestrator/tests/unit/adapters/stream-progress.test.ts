@@ -108,7 +108,10 @@ describe('createStreamProgressHandler', () => {
 
   it('shows completion stats on result event', () => {
     const lines: string[] = [];
-    const handler = createStreamProgressHandler((t) => lines.push(t));
+    const handler = createStreamProgressHandler(
+      (t) => lines.push(t),
+      { operationLabel: () => 'Validation' },
+    );
 
     handler(JSON.stringify({
       type: 'result',
@@ -117,7 +120,7 @@ describe('createStreamProgressHandler', () => {
       duration_ms: 15200,
     }));
 
-    const resultLines = lines.filter(l => l.includes('LLM done'));
+    const resultLines = lines.filter(l => l.includes('Validation provider call complete'));
     expect(resultLines).toHaveLength(1);
     expect(resultLines[0]).toContain('15.2s');
     expect(resultLines[0]).toContain('$0.0523');
@@ -206,7 +209,8 @@ describe('createStreamProgressHandler', () => {
     expect(events.map((event) => event.type)).toEqual(['text', 'tool', 'usage', 'result']);
     expect(lines.some((line) => line.includes('gemini-plan'))).toBe(true);
     expect(lines.some((line) => line.includes('Using read_file:') && line.includes('gemini.ts'))).toBe(true);
-    expect(lines.some((line) => line.includes('LLM done') && line.includes('2.5s'))).toBe(true);
+    expect(lines.some((line) => line.includes('LLM provider call complete') && line.includes('2.5s'))).toBe(true);
+    expect(lines.join('')).not.toContain('LLM done');
   });
 
   it('redacts tool payloads from normalized events', () => {
@@ -458,7 +462,7 @@ describe('createStreamProgressWithSpinner', () => {
       duration_ms: 5000,
     }));
 
-    const doneLines = output.filter(t => t.includes('LLM done'));
+    const doneLines = output.filter(t => t.includes('LLM provider call complete'));
     expect(doneLines).toHaveLength(1);
     expect(doneLines[0]).toContain('5.0s');
 

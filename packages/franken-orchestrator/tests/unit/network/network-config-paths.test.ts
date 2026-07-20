@@ -6,7 +6,7 @@ import {
   parseConfigAssignment,
   setNetworkConfigValue,
 } from '../../../src/network/network-config-paths.js';
-import { defaultConfig } from '../../../src/config/orchestrator-config.js';
+import { defaultConfig, OrchestratorConfigSchema } from '../../../src/config/orchestrator-config.js';
 
 describe('network-config-paths', () => {
   it('parses dotted config assignments', () => {
@@ -32,6 +32,18 @@ describe('network-config-paths', () => {
     const next = setNetworkConfigValue(defaultConfig(), 'comms.slack.allowSensitiveDelivery', 'true');
 
     expect(next.comms.slack.allowSensitiveDelivery).toBe(true);
+  });
+
+  it('configures and validates the outbound comms timeout', () => {
+    const next = setNetworkConfigValue(defaultConfig(), 'comms.outboundTimeoutMs', '25000');
+
+    expect(next.comms.outboundTimeoutMs).toBe(25_000);
+    expect(() => OrchestratorConfigSchema.parse(
+      setNetworkConfigValue(next, 'comms.outboundTimeoutMs', '0'),
+    )).toThrow();
+    expect(() => OrchestratorConfigSchema.parse(
+      setNetworkConfigValue(next, 'comms.outboundTimeoutMs', '250.5'),
+    )).toThrow();
   });
 
   it('coerces egress policy config updates through setNetworkConfigValue', () => {
@@ -61,6 +73,16 @@ describe('network-config-paths', () => {
 
     expect(next.chat.model).toBe('gpt-5');
     expect(next.comms.slack.enabled).toBe(true);
+  });
+
+  it('unsets an explicit chat model when assigned an empty or whitespace-only value', () => {
+    const configured = applyNetworkConfigSets(defaultConfig(), ['chat.model=claude-sonnet-4-6']);
+
+    for (const assignment of ['chat.model=', 'chat.model=   ']) {
+      const next = applyNetworkConfigSets(configured, [assignment]);
+      expect(next.chat.model).toBeUndefined();
+      expect(Object.hasOwn(next.chat, 'model')).toBe(false);
+    }
   });
 
   it('classifies secret-ref paths as sensitive', () => {

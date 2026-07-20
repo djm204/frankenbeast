@@ -1,7 +1,6 @@
 import type {
   IFirewallModule,
   FirewallResult,
-  FirewallViolation,
 } from '../deps.js';
 import type { MiddlewareChain } from '../middleware/llm-middleware.js';
 import { InjectionDetectedError } from '../middleware/injection-detection.js';
@@ -56,6 +55,49 @@ export class MiddlewareChainFirewallAdapter implements IFirewallModule {
         };
       }
       // Unknown errors still become blocks with structured reporting
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        sanitizedText: input,
+        violations: [{ rule: 'middleware-error', severity: 'block', detail: message }],
+        blocked: true,
+      };
+    }
+  }
+
+  async scanResponse(input: string): Promise<FirewallResult> {
+    try {
+      const processed = this.chain.processResponse({
+        content: input,
+        usage: { inputTokens: 0, outputTokens: 0 },
+      });
+      const inspected = this.chain.inspectUntrustedResponse(processed);
+      return {
+        sanitizedText: inspected.content,
+        violations: [],
+        blocked: false,
+      };
+    } catch (err) {
+      if (err instanceof InjectionDetectedError) {
+        return {
+          sanitizedText: input,
+          violations: [{ rule: 'injection-detection', severity: 'block', detail: err.message }],
+          blocked: true,
+        };
+      }
+      if (err instanceof DomainBlockedError) {
+        return {
+          sanitizedText: input,
+          violations: [{ rule: 'domain-allowlist', severity: 'block', detail: err.message }],
+          blocked: true,
+        };
+      }
+      if (err instanceof CustomRuleError) {
+        return {
+          sanitizedText: input,
+          violations: [{ rule: `custom:${err.ruleName}`, severity: 'block', detail: err.message }],
+          blocked: true,
+        };
+      }
       const message = err instanceof Error ? err.message : String(err);
       return {
         sanitizedText: input,
