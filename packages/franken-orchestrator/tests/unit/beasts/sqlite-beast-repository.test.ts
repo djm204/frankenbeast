@@ -364,6 +364,34 @@ describe('SQLiteBeastRepository', () => {
     expect(repo.listTrackedAgents()).toEqual([agent]);
   });
 
+  it('paginates tracked agents with stable same-timestamp boundaries and snapshots', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const createAgent = () => repo.createTrackedAgent({
+      definitionId: 'design-interview',
+      source: 'dashboard',
+      status: 'initializing',
+      createdByUser: 'operator',
+      initAction: { kind: 'design-interview', command: '/interview', config: {} },
+      initConfig: {},
+      createdAt: '2026-03-11T00:00:00.000Z',
+      updatedAt: '2026-03-11T00:00:00.000Z',
+    });
+    const originalIds = [createAgent().id, createAgent().id, createAgent().id];
+    const first = repo.listTrackedAgentPage({ limit: 2 });
+    expect(first.agents).toHaveLength(2);
+    expect(first.nextCursor).toEqual(expect.any(String));
+
+    const insertedBetweenPages = createAgent();
+    const second = repo.listTrackedAgentPage({ limit: 2, cursor: first.nextCursor });
+    expect(second.agents).toHaveLength(1);
+    expect(second.nextCursor).toBeUndefined();
+    expect([...first.agents, ...second.agents].map(({ id }) => id).sort()).toEqual(originalIds.sort());
+    expect([...first.agents, ...second.agents]).not.toContainEqual(expect.objectContaining({ id: insertedBetweenPages.id }));
+    expect(() => repo.listTrackedAgentPage({ limit: 201 })).toThrow(RangeError);
+    expect(() => repo.listTrackedAgentPage({ limit: 1, cursor: 'not-a-cursor' })).toThrow('Invalid tracked-agent pagination cursor');
+  });
+
   it('treats healthy legacy agents as operationally recovered while retaining redaction history', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

@@ -100,6 +100,22 @@ describe('BeastApiClient', () => {
     );
   });
 
+  it('requests a tracked-agent page with an encoded cursor', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { agents: [], nextCursor: 'next-page' } }),
+    });
+
+    await expect(client.listAgentPage({ limit: 25, cursor: 'cursor/with+symbols=' })).resolves.toEqual({
+      agents: [],
+      nextCursor: 'next-page',
+    });
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://localhost:3000/v1/beasts/agents?limit=25&cursor=cursor%2Fwith%2Bsymbols%3D',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
   it('rejects createAgent when the API reports an auto-dispatch failure', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,

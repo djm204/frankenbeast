@@ -18,6 +18,11 @@ import {
 } from '../middleware.js';
 import { TransportSecurityService } from '../security/transport-security.js';
 import type { BeastRun, TrackedAgent, TrackedAgentEvent } from '../../beasts/types.js';
+import {
+  DEFAULT_TRACKED_AGENT_PAGE_LIMIT,
+  InvalidTrackedAgentCursorError,
+  MAX_TRACKED_AGENT_PAGE_LIMIT,
+} from '../../beasts/repository/sqlite-beast-repository.js';
 
 const ModuleConfigSchema = z.object({
   firewall: z.boolean().optional(),
@@ -230,12 +235,39 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
   });
 
   app.get('/v1/beasts/agents', (c) => {
-    const redactedAgentIds = deps.agents.listDispatchFailureRedactedAgentIds();
+    const rawLimit = c.req.query('limit');
+    const limit = rawLimit === undefined ? DEFAULT_TRACKED_AGENT_PAGE_LIMIT : Number(rawLimit);
+    if (rawLimit !== undefined
+      && (!/^\d+$/.test(rawLimit)
+        || !Number.isSafeInteger(limit)
+        || limit < 1
+        || limit > MAX_TRACKED_AGENT_PAGE_LIMIT)) {
+      throw new HttpError(
+        400,
+        'INVALID_AGENT_PAGE_LIMIT',
+        `Tracked-agent page limit must be an integer between 1 and ${MAX_TRACKED_AGENT_PAGE_LIMIT}`,
+      );
+    }
+    let page;
+    try {
+      const cursor = c.req.query('cursor');
+      page = deps.agents.listAgentPage({
+        limit,
+        ...(cursor !== undefined ? { cursor } : {}),
+      });
+    } catch (error) {
+      if (error instanceof InvalidTrackedAgentCursorError) {
+        throw new HttpError(400, 'INVALID_AGENT_PAGE_CURSOR', error.message);
+      }
+      throw error;
+    }
+    const redactedAgentIds = deps.agents.listDispatchFailureRedactedAgentIds(page.agents.map(({ id }) => id));
     return c.json({
       data: {
-        agents: deps.agents.listAgents().map((agent) => redactedAgentIds.has(agent.id)
+        agents: page.agents.map((agent) => redactedAgentIds.has(agent.id)
           ? redactDispatchFailedAgentResponse(agent)
           : agent),
+        ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
         capacityReservation: deps.agents.getCapacityReservationState(),
       },
     });

@@ -359,13 +359,16 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
 
     async function refreshBeasts() {
       let catalog: Awaited<ReturnType<typeof client.getCatalog>>;
-      let agents: Awaited<ReturnType<typeof client.listAgents>>;
+      let agentPage: Awaited<ReturnType<typeof client.listAgentPage>>;
       let runs: Awaited<ReturnType<typeof client.listRuns>>;
       let containerRuntime: Awaited<ReturnType<typeof client.getContainerRuntimeStatus>>;
+      const agentPageRequest = typeof client.listAgentPage === 'function'
+        ? client.listAgentPage()
+        : client.listAgents().then((agents) => ({ agents }));
       try {
-        [catalog, agents, runs, containerRuntime] = await Promise.all([
+        [catalog, agentPage, runs, containerRuntime] = await Promise.all([
           client.getCatalog(),
-          client.listAgents(),
+          agentPageRequest,
           client.listRuns(),
           client.getContainerRuntimeStatus().catch((error) => ({
             available: false,
@@ -389,10 +392,10 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
       setBeastError(null);
       setBeastCreationUnavailableReason(null);
       setBeastCatalog(catalog);
-      setBeastAgents(agents);
+      setBeastAgents(agentPage.agents);
       setBeastRuns(runs);
       setBeastContainerRuntime(containerRuntime);
-      const autoSelectedAgentId = agents.find((agent) => agent.status !== 'deleted')?.id ?? null;
+      const autoSelectedAgentId = agentPage.agents.find((agent) => agent.status !== 'deleted')?.id ?? null;
       const currentAgentId = selectedBeastAgentId ?? (shouldAutoSelectBeastAgentRef.current ? autoSelectedAgentId : null);
       setSelectedBeastAgentId(currentAgentId);
 

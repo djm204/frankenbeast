@@ -541,6 +541,57 @@ describe('agent routes integration', () => {
     ]);
   });
 
+  it('defaults tracked-agent pages to 50 and validates cursors and limits', async () => {
+    const { app, operatorToken } = createIntegratedBeastApp({ rateLimitMax: 100 });
+    const headers = {
+      authorization: 'Bear' + 'er ' + operatorToken,
+      'content-type': 'application/json',
+    };
+    const createdIds: string[] = [];
+    for (let index = 0; index < 51; index += 1) {
+      const response = await app.request('/v1/beasts/agents', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          definitionId: 'design-interview',
+          initAction: {
+            kind: 'design-interview',
+            command: '/interview',
+            config: { goal: `goal-${index}` },
+          },
+          initConfig: { goal: `goal-${index}` },
+          autoDispatch: false,
+        }),
+      });
+      expect(response.status).toBe(201);
+      const body = await response.json() as { data: { id: string } };
+      createdIds.push(body.data.id);
+    }
+
+    const firstResponse = await app.request('/v1/beasts/agents', { headers });
+    expect(firstResponse.status).toBe(200);
+    const first = await firstResponse.json() as { data: { agents: Array<{ id: string }>; nextCursor?: string } };
+    expect(first.data.agents).toHaveLength(50);
+    expect(first.data.nextCursor).toEqual(expect.any(String));
+    const secondResponse = await app.request(
+      `/v1/beasts/agents?cursor=${encodeURIComponent(first.data.nextCursor ?? '')}`,
+      { headers },
+    );
+    const second = await secondResponse.json() as { data: { agents: Array<{ id: string }>; nextCursor?: string } };
+    expect(second.data.agents).toHaveLength(1);
+    expect(second.data.nextCursor).toBeUndefined();
+    expect([...first.data.agents, ...second.data.agents].map(({ id }) => id).sort()).toEqual(createdIds.sort());
+
+    for (const path of [
+      '/v1/beasts/agents?limit=201',
+      '/v1/beasts/agents?limit=1.5',
+      '/v1/beasts/agents?cursor=',
+      '/v1/beasts/agents?cursor=not-a-cursor',
+    ]) {
+      expect((await app.request(path, { headers })).status).toBe(400);
+    }
+  });
+
   it('dispatches chunk-plan tracked agents during creation when init config is complete', async () => {
     const { app, operatorToken } = createIntegratedBeastApp();
     const headers = {

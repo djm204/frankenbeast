@@ -74,9 +74,23 @@ export class BeastApiClient {
     return body.runs;
   }
 
+  async listAgentPage(options: { limit?: number; cursor?: string } = {}): Promise<{
+    agents: TrackedAgentSummary[];
+    nextCursor?: string;
+  }> {
+    const search = new URLSearchParams();
+    if (options.limit !== undefined) search.set('limit', String(options.limit));
+    if (options.cursor) search.set('cursor', options.cursor);
+    const query = search.size > 0 ? `?${search.toString()}` : '';
+    return this.request<{ agents: TrackedAgentSummary[]; nextCursor?: string }>(
+      `/v1/beasts/agents${query}`,
+      { method: 'GET' },
+    );
+  }
+
   async listAgents(): Promise<TrackedAgentSummary[]> {
-    const body = await this.request<{ agents: TrackedAgentSummary[] }>('/v1/beasts/agents', { method: 'GET' });
-    return body.agents;
+    const page = await this.listAgentPage();
+    return page.agents;
   }
 
   async getRun(runId: string): Promise<Omit<BeastRunDetail, 'logs'> & { run: BeastRunSummary }> {
