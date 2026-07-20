@@ -167,7 +167,7 @@ function stat(
       textMode: 'auto',
       colorMode: 'background',
     },
-    fieldConfig: unit ? { defaults: { unit } } : undefined,
+    ...(unit ? { fieldConfig: { defaults: { unit } } } : {}),
   }
 }
 

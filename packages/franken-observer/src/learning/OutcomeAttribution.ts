@@ -192,6 +192,7 @@ export class OutcomeAttribution {
     assertNonEmptyString(input.chosenAction, 'chosenAction')
     assertOptionalStringArray(input.alternatives, 'alternatives')
     const timestamp = normalizeIsoTimestamp(input.timestamp ?? defaultTimestamp(), 'timestamp')
+    const metadata = sanitizeMetadata(input.metadata)
 
     const record: AgentDecisionRecord = Object.freeze({
       decisionId: randomUUID(),
@@ -201,7 +202,7 @@ export class OutcomeAttribution {
       chosenAction: input.chosenAction,
       alternatives: Object.freeze([...(input.alternatives ?? [])]),
       timestamp,
-      metadata: sanitizeMetadata(input.metadata),
+      ...(metadata === undefined ? {} : { metadata }),
     })
     this.decisionRecords.push(record)
     return record

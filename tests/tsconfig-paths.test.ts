@@ -25,6 +25,14 @@ const hasTypeScriptSource = (relDir: string): boolean => {
 
 const workspacePackages = getWorkspacePackages();
 
+const REQUIRED_STRICT_COMPILER_OPTIONS = [
+  "strict",
+  "noUncheckedIndexedAccess",
+  "exactOptionalPropertyTypes",
+  "noImplicitReturns",
+  "noFallthroughCasesInSwitch",
+] as const;
+
 const EXPECTED_ALIASES: Record<string, string> = {
   "@franken/brain": "./packages/franken-brain/src/index.ts",
   "@franken/planner": "./packages/franken-planner/src/index.ts",
@@ -140,6 +148,28 @@ describe("tsconfig.json path aliases", () => {
 
   it("keeps include as empty array", () => {
     expect(tsconfig.include).toEqual([]);
+  });
+});
+
+describe("workspace TypeScript strictness", () => {
+  it("enables every required safety flag in each TypeScript workspace", () => {
+    const drift = workspacePackages.flatMap((workspacePackage) => {
+      if (!existsSync(join(ROOT, workspacePackage.dir, "tsconfig.json"))) {
+        return [];
+      }
+
+      const compilerOptions = readJson(
+        `${workspacePackage.dir}/tsconfig.json`,
+      ).compilerOptions;
+      return REQUIRED_STRICT_COMPILER_OPTIONS.filter(
+        (option) => compilerOptions?.[option] !== true,
+      ).map((option) => `${workspacePackage.name}: ${option}`);
+    });
+
+    expect(
+      drift,
+      "Every TypeScript workspace must compile with the shared strict safety flags",
+    ).toEqual([]);
   });
 });
 

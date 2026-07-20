@@ -83,9 +83,9 @@ export interface DashboardSnapshot {
   skills: DashboardSkill[];
   security: DashboardSecurity;
   providers: DashboardProvider[];
-  availability?: DashboardAvailability;
-  maintenance?: DashboardMaintenanceMode;
-  slo?: DashboardSlo;
+  availability?: DashboardAvailability | undefined;
+  maintenance?: DashboardMaintenanceMode | undefined;
+  slo?: DashboardSlo | undefined;
 }
 
 export class DashboardApiClient {
@@ -232,4 +232,3 @@ async function createResponseError(res: Response): Promise<Error> {
   const message = await extractResponseErrorMessage(res);
   return new Error(message ?? `HTTP ${res.status}`);
 }
-

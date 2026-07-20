@@ -5,7 +5,7 @@ export type Density = 'compact' | 'comfortable' | 'detailed';
 
 interface AgentRowProps {
   agent: TrackedAgentSummary;
-  run?: BeastRunSummary;
+  run?: BeastRunSummary | undefined;
   density: Density;
   selected: boolean;
   onClick: (agentId: string) => void;

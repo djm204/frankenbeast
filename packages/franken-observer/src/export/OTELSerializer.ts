@@ -66,7 +66,7 @@ function metadataToAttributes(metadata: Record<string, unknown>): OTELAttribute[
 
 function spanStatus(span: Span): OTELStatus {
   if (span.status === 'error') {
-    return { code: 'ERROR', message: span.errorMessage }
+    return { code: 'ERROR', ...(span.errorMessage === undefined ? {} : { message: span.errorMessage }) }
   }
   return { code: 'OK' }
 }
@@ -84,7 +84,7 @@ function serializeSpan(span: Span): OTELSpan {
   return {
     traceId: span.traceId,
     spanId: span.id,
-    parentSpanId: span.parentSpanId,
+    ...(span.parentSpanId === undefined ? {} : { parentSpanId: span.parentSpanId }),
     name: span.name,
     startTimeUnixNano: span.startedAt * 1_000_000,
     endTimeUnixNano: (span.endedAt ?? span.startedAt) * 1_000_000,

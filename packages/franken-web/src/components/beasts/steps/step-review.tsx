@@ -28,7 +28,7 @@ const CANONICAL_MODULE_KEYS = [
   'heartbeat',
 ] as const;
 
-export function StepReview({ catalog }: { catalog?: readonly BeastCatalogEntry[] }) {
+export function StepReview({ catalog }: { catalog?: readonly BeastCatalogEntry[] | undefined }) {
   const { stepValues, setWizardStep } = useBeastStore();
 
   const identity = stepValues[0] as { name?: string; description?: string } | undefined;
@@ -110,7 +110,7 @@ function getSelectedModuleKeys(modules: Record<string, unknown> | undefined): st
 function WorkflowReview({ workflow, stepValues, catalog }: {
   workflow: WorkflowReviewValues | undefined;
   stepValues: Record<number, Record<string, unknown> | undefined>;
-  catalog?: readonly BeastCatalogEntry[];
+  catalog?: readonly BeastCatalogEntry[] | undefined;
 }) {
   const workflowErrors = validateWizardStep(1, stepValues, catalog);
   const rows = buildWorkflowReviewRows(workflow, catalog);

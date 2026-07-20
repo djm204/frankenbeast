@@ -280,15 +280,15 @@ function ipv4FromMappedIpv6(ip: string): string | undefined {
   const normalizedIp = ip.toLowerCase()
   const dotted = /^(?:::ffff:|0:0:0:0:0:ffff:)(\d{1,3}(?:\.\d{1,3}){3})$/u.exec(normalizedIp)
   if (dotted) {
-    return dotted[1]
+    return dotted[1]!
   }
 
   const hexMapped = /^(?:::ffff:|0:0:0:0:0:ffff:)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/u.exec(normalizedIp)
   if (!hexMapped) {
     return undefined
   }
-  const high = Number.parseInt(hexMapped[1], 16)
-  const low = Number.parseInt(hexMapped[2], 16)
+  const high = Number.parseInt(hexMapped[1]!, 16)
+  const low = Number.parseInt(hexMapped[2]!, 16)
   if (!Number.isInteger(high) || !Number.isInteger(low) || high < 0 || high > 0xffff || low < 0 || low > 0xffff) {
     return undefined
   }
@@ -437,10 +437,8 @@ function normalizeAllowedTargets(
       validateUrlHasNoQueryOrFragment(url, `allowedTargets[${index}]`)
       validatePublicWebhookHost(url, `allowedTargets[${index}]`)
       validateWebhookPathname(url.pathname, `allowedTargets[${index}].pathname`)
-      return {
-        origin: url.origin,
-        pathnamePrefix: normalizePathnamePrefix(url.pathname, `allowedTargets[${index}].pathnamePrefix`),
-      }
+      const pathnamePrefix = normalizePathnamePrefix(url.pathname, `allowedTargets[${index}].pathnamePrefix`)
+      return { origin: url.origin, ...(pathnamePrefix === undefined ? {} : { pathnamePrefix }) }
     }
 
     const url = parseAbsoluteUrl(target.origin, `allowedTargets[${index}].origin`)
@@ -448,10 +446,8 @@ function normalizeAllowedTargets(
     validateUrlHasNoCredentials(url, `allowedTargets[${index}].origin`)
     validatePublicWebhookHost(url, `allowedTargets[${index}].origin`)
     assertOriginOnly(url, `allowedTargets[${index}].origin`)
-    return {
-      origin: url.origin,
-      pathnamePrefix: normalizePathnamePrefix(target.pathnamePrefix, `allowedTargets[${index}].pathnamePrefix`),
-    }
+    const pathnamePrefix = normalizePathnamePrefix(target.pathnamePrefix, `allowedTargets[${index}].pathnamePrefix`)
+    return { origin: url.origin, ...(pathnamePrefix === undefined ? {} : { pathnamePrefix }) }
   })
 }
 
@@ -550,7 +546,7 @@ export class WebhookNotifier {
     const contentHash = hashWebhookBody(requestBody)
     const reservationId = options.idempotencyKey ? randomUUID() : undefined
     const receiptBase = {
-      idempotencyKey: options.idempotencyKey,
+      ...(options.idempotencyKey === undefined ? {} : { idempotencyKey: options.idempotencyKey }),
       target: receiptTarget,
       contentHash,
     }
@@ -566,7 +562,7 @@ export class WebhookNotifier {
 
       const reserved = await this.receiptStore.reserve({
         ...receiptBase,
-        reservationId,
+        ...(reservationId === undefined ? {} : { reservationId }),
         status: 'pending',
         timestamp: new Date().toISOString(),
       })
@@ -865,8 +861,8 @@ export class WebhookNotifier {
         resolve({
           ok: response.statusCode !== undefined && response.statusCode >= 200 && response.statusCode < 300,
           status: response.statusCode ?? 0,
-          statusText: response.statusMessage,
-          body: response as unknown as WebhookFetchResponse['body'],
+          ...(response.statusMessage === undefined ? {} : { statusText: response.statusMessage }),
+          body: response as unknown as NonNullable<WebhookFetchResponse['body']>,
         })
       })
       request.on('error', reject)

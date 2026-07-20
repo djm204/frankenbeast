@@ -3,9 +3,9 @@ import type { ConnectionStatus, SessionStatus } from '../hooks/use-chat-session'
 
 export interface ComposerProps {
   connectionStatus: ConnectionStatus;
-  clearedFailedDraft?: { content: string; nonce: number };
+  clearedFailedDraft?: { content: string; nonce: number } | undefined;
   disabled: boolean;
-  disabledReasonText?: string;
+  disabledReasonText?: string | undefined;
   onReconnect?: () => void;
   onSend: (content: string) => Promise<void> | void;
   status: SessionStatus;

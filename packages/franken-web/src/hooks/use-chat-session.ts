@@ -53,23 +53,23 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: string;
-  modelTier?: string;
+  modelTier?: string | undefined;
   receipt?: MessageReceipt;
-  error?: string;
-  canRetry?: boolean;
-  streaming?: boolean;
+  error?: string | undefined;
+  canRetry?: boolean | undefined;
+  streaming?: boolean | undefined;
 }
 
 export interface ActivityEvent {
   type: string;
-  data?: Record<string, unknown>;
+  data?: Record<string, unknown> | undefined;
   timestamp: string;
 }
 
 export interface UseChatSessionOptions {
   baseUrl: string;
   projectId: string;
-  sessionId?: string;
+  sessionId?: string | undefined;
   sessionSeed?: number;
 }
 
@@ -82,7 +82,7 @@ export interface UseChatSessionResult {
   costUsd: number;
   costTelemetryStatus: CostTelemetryStatus;
   tokenTelemetryStatus: TokenTelemetryStatus;
-  clearedFailedDraft?: { content: string; nonce: number };
+  clearedFailedDraft?: { content: string; nonce: number } | undefined;
   dismissError: (id: string) => void;
   errorBanners: ChatErrorBanner[];
   messages: ChatMessage[];

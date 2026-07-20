@@ -25,8 +25,8 @@ interface WizardDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onLaunch: (config: Record<string, unknown>) => void;
-  catalog?: readonly BeastCatalogEntry[];
-  containerRuntime?: BeastContainerRuntimeStatus;
+  catalog?: readonly BeastCatalogEntry[] | undefined;
+  containerRuntime?: BeastContainerRuntimeStatus | undefined;
   launching?: boolean;
   launchError?: string | null;
 }

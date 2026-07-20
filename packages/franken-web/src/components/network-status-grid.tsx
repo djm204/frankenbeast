@@ -1,6 +1,6 @@
 interface NetworkStatusGridProps {
-  mode?: string;
-  secureBackend?: string;
+  mode?: string | undefined;
+  secureBackend?: string | undefined;
 }
 
 export function NetworkStatusGrid({ mode, secureBackend }: NetworkStatusGridProps) {

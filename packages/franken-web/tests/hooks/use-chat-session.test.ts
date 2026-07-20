@@ -34,7 +34,7 @@ class MockWebSocket {
   static instances: MockWebSocket[] = [];
 
   readonly url: string;
-  readonly protocols?: string | string[];
+  readonly protocols?: string | string[] | undefined;
   onopen: ((event: Event) => void) | null = null;
   onmessage: ((event: MessageEvent<string>) => void) | null = null;
   onclose: ((event: CloseEvent) => void) | null = null;
