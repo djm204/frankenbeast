@@ -19,7 +19,13 @@ export const FALLBACK_BEAST_CATALOG: readonly BeastCatalogEntry[] = [
     description: 'Turn a design document into chunked implementation artifacts through the tracked init workflow.',
     executionModeDefault: 'process',
     interviewPrompts: [
-      { key: 'designDocPath', prompt: 'Which design document should be chunked?', kind: 'file', required: true },
+      {
+        key: 'designDocPath',
+        prompt: 'Which design document should be chunked?',
+        description: 'Enter a repo-relative path to the Markdown design document (.md, .mdx, or .markdown) that will be split into implementation chunks.',
+        kind: 'file',
+        required: true,
+      },
       { key: 'outputDir', prompt: 'Where should the chunk plan be written?', kind: 'string', required: true },
     ],
   },

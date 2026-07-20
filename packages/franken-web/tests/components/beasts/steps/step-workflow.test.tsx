@@ -130,6 +130,17 @@ describe('StepWorkflow', () => {
     });
   });
 
+  it('associates the chunk-plan file description with its input', () => {
+    useBeastStore.getState().setStepValues(1, { workflowType: 'chunk-plan' });
+    render(<StepWorkflow />);
+
+    const input = screen.getByLabelText(/design document should be chunked/i);
+    const description = screen.getByText(/repo-relative path to the Markdown design document/i);
+
+    expect(input.getAttribute('aria-describedby')).toBe(description.id);
+    expect(description.textContent).toContain('split into implementation chunks');
+  });
+
   it('collects backend martin-loop fields', () => {
     useBeastStore.getState().setStepValues(1, { workflowType: 'martin-loop' });
     render(<StepWorkflow />);

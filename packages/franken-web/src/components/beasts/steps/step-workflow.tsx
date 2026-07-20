@@ -194,6 +194,7 @@ function CatalogPromptField({
 }) {
   const label = getPromptLabel(prompt);
   const id = `wf-${prompt.key}`;
+  const descriptionId = prompt.description ? `${id}-description` : undefined;
 
   if (prompt.kind === 'boolean') {
     return (
@@ -216,6 +217,7 @@ function CatalogPromptField({
         <label htmlFor={id} className="block text-sm font-medium text-beast-text mb-1.5">{label}{prompt.required ? ' *' : ''}</label>
         <select
           id={id}
+          aria-describedby={descriptionId}
           value={typeof value === 'string' ? value : ''}
           onChange={(event) => onChange(event.target.value)}
           className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
@@ -223,6 +225,9 @@ function CatalogPromptField({
           <option value="">Select...</option>
           {prompt.options.map((option) => <option key={option} value={option}>{option}</option>)}
         </select>
+        {prompt.description && (
+          <p id={descriptionId} className="mt-1 text-xs text-beast-muted">{prompt.description}</p>
+        )}
       </div>
     );
   }
@@ -237,6 +242,7 @@ function CatalogPromptField({
       {rows ? (
         <textarea
           id={id}
+          aria-describedby={descriptionId}
           value={typeof value === 'string' ? value : ''}
           onChange={(event) => onChange(event.target.value)}
           placeholder={placeholder}
@@ -246,6 +252,7 @@ function CatalogPromptField({
       ) : (
         <input
           id={id}
+          aria-describedby={descriptionId}
           type={inputType ?? 'text'}
           value={typeof value === 'string' ? value : ''}
           onChange={(event) => onChange(event.target.value)}
@@ -253,10 +260,13 @@ function CatalogPromptField({
           className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text placeholder:text-beast-subtle text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
         />
       )}
-      {prompt.kind === 'file' && (
+      {prompt.description && (
+        <p id={descriptionId} className="mt-1 text-xs text-beast-muted">{prompt.description}</p>
+      )}
+      {!prompt.description && prompt.kind === 'file' && (
         <p className="mt-1 text-xs text-beast-muted">Use a repo-relative Markdown path when required by the selected Beast.</p>
       )}
-      {prompt.kind === 'directory' && (
+      {!prompt.description && prompt.kind === 'directory' && (
         <p className="mt-1 text-xs text-beast-muted">
           Browser directory pickers cannot provide server paths. Enter a repo-relative directory path manually.
         </p>
