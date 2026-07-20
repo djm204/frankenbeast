@@ -16,6 +16,12 @@ function makeTrace(goal: string) {
   return trace
 }
 
+function extractClientScript(html: string): string {
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1]
+  if (!script) throw new Error('Trace viewer HTML did not include its client script')
+  return script
+}
+
 describe('TraceServer', () => {
   let adapter: InMemoryAdapter
   let server: TraceServer
@@ -97,13 +103,60 @@ describe('TraceServer', () => {
       expect(html).not.toMatch(/<link\s[^>]*rel=["']stylesheet["']/i)
     })
 
+    it('renders trace rows as keyboard-operable buttons and exposes selection state', async () => {
+      const html = await fetch(server.url + '/').then(r => r.text())
+      const script = extractClientScript(html)
+
+      const sidebar = { innerHTML: '', addEventListener: () => {} }
+      const panel = { innerHTML: '' }
+      const attributes = new Map<string, string>()
+      const traceItem = {
+        dataset: { id: 'trace-1' },
+        classList: { toggle: () => {} },
+        setAttribute: (name: string, value: string) => attributes.set(name, value),
+      }
+      const context = createContext({
+        document: {
+          getElementById: (id: string) => id === 'sidebar' ? sidebar : panel,
+          querySelectorAll: () => [traceItem],
+        },
+        fetch: (url: string) => Promise.resolve(url === '/api/traces'
+          ? {
+              json: () => Promise.resolve({
+                traces: [{ id: 'trace-1', goal: 'Inspect me', status: 'completed', spanCount: 0, startedAt: 0 }],
+              }),
+            }
+          : {
+              ok: true,
+              json: () => Promise.resolve({ id: 'trace-1', goal: 'Inspect me', status: 'completed', spans: [] }),
+            }),
+        Date,
+      }) as {
+        loadTraces?: () => Promise<void>
+        loadDetail?: (id: string) => Promise<void>
+      }
+      new Script(script.replace(/loadTraces\(\)\s*$/, '')).runInContext(context)
+
+      expect(html).toContain('.trace-item:hover,.trace-item.active,.trace-item[aria-current="true"]{')
+      expect(html).toContain('.trace-goal{display:block;')
+      await context.loadTraces!()
+      expect(html).toContain('<nav id="sidebar" aria-label="Traces">')
+      expect(sidebar.innerHTML).toContain('<button type="button" class="trace-item"')
+      expect(sidebar.innerHTML).toContain('aria-current="false"')
+
+      await context.loadDetail!('trace-1')
+      expect(attributes.get('aria-current')).toBe('true')
+
+      await context.loadTraces!()
+      expect(sidebar.innerHTML).toContain('data-id="trace-1" aria-current="true"')
+    })
+
     it('escapes template-literal metacharacters in trace text before writing innerHTML', async () => {
       const html = await fetch(server.url + '/').then(r => r.text())
-      const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1]
-      expect(script).toBeDefined()
+      const script = extractClientScript(html)
 
       const context = createContext({ document: { getElementById: () => ({ addEventListener: () => {} }) } }) as { esc?: (s: string) => string }
-      new Script(script!.replace(/loadTraces\(\)\s*$/, '')).runInContext(context)
+      new Script(script.replace(/loadTraces\(\)\s*$/, '')).runInContext(context)
 
       const escaped = context.esc!('goal`);globalThis.__xss=1;//${alert(1)}<img src=x onerror=alert(2)>')
       expect(escaped).not.toContain('`')
@@ -113,8 +166,7 @@ describe('TraceServer', () => {
 
     it('escapes trace IDs when rendering sidebar and detail (XSS via t.id)', async () => {
       const html = await fetch(server.url + '/').then(r => r.text())
-      const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1]
-      expect(script).toBeDefined()
+      const script = extractClientScript(html)
 
       const maliciousId = '"><img src=x onerror=alert(1)>'
       const sidebar = { innerHTML: '', addEventListener: () => {} }
@@ -146,7 +198,7 @@ describe('TraceServer', () => {
         loadTraces?: () => Promise<void>
         loadDetail?: (id: string) => Promise<void>
       }
-      new Script(script!.replace(/loadTraces\(\)\s*$/, '')).runInContext(context)
+      new Script(script.replace(/loadTraces\(\)\s*$/, '')).runInContext(context)
 
       await context.loadTraces!()
       expect(sidebar.innerHTML).not.toContain('<img')
@@ -159,8 +211,7 @@ describe('TraceServer', () => {
 
     it('renders an escaped recoverable error when a trace detail request returns 404', async () => {
       const html = await fetch(server.url + '/').then(r => r.text())
-      const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1]
-      expect(script).toBeDefined()
+      const script = extractClientScript(html)
 
       const panel = { innerHTML: '' }
       const context = createContext({
@@ -177,7 +228,7 @@ describe('TraceServer', () => {
         }),
         Date,
       }) as { loadDetail?: (id: string) => Promise<void> }
-      new Script(script!.replace(/loadTraces\(\)\s*$/, '')).runInContext(context)
+      new Script(script.replace(/loadTraces\(\)\s*$/, '')).runInContext(context)
 
       await expect(context.loadDetail!('stale-trace')).resolves.toBeUndefined()
       expect(panel.innerHTML).toContain('trace not found')
@@ -187,8 +238,7 @@ describe('TraceServer', () => {
 
     it('renders a recoverable error when successful trace JSON has no spans array', async () => {
       const html = await fetch(server.url + '/').then(r => r.text())
-      const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1]
-      expect(script).toBeDefined()
+      const script = extractClientScript(html)
 
       const panel = { innerHTML: '' }
       const context = createContext({
@@ -205,7 +255,7 @@ describe('TraceServer', () => {
         }),
         Date,
       }) as { loadDetail?: (id: string) => Promise<void> }
-      new Script(script!.replace(/loadTraces\(\)\s*$/, '')).runInContext(context)
+      new Script(script.replace(/loadTraces\(\)\s*$/, '')).runInContext(context)
 
       await expect(context.loadDetail!('malformed-trace')).resolves.toBeUndefined()
       expect(panel.innerHTML).toContain('Trace details are unavailable')

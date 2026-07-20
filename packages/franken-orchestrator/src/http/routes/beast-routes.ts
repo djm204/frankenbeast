@@ -48,7 +48,9 @@ function runWithContainerFields(run: BeastRun | undefined, attempts: BeastRunAtt
   if (!run || run.executionMode !== 'container') {
     return run;
   }
-  const currentAttempt = attempts.find((attempt) => attempt.id === run.currentAttemptId) ?? attempts.at(-1);
+  const currentAttempt = run.currentAttemptId
+    ? attempts.find((attempt) => attempt.id === run.currentAttemptId)
+    : attempts.at(-1);
   const metadata = currentAttempt?.executorMetadata;
   if (!metadata) {
     return run;
@@ -72,7 +74,7 @@ function attemptsForContainerRun(run: BeastRun | undefined, deps: BeastRoutesDep
   if (!run || run.executionMode !== 'container') {
     return [];
   }
-  return deps.runs.listAttempts(run.id);
+  return deps.runs.listAttemptsForResponse(run.id);
 }
 
 function runResponse(run: BeastRun | undefined, deps: BeastRoutesDeps): BeastRunResponse | undefined {
@@ -148,6 +150,82 @@ const CreateRunBody = z.object({
 const InterviewAnswerBody = z.object({
   answer: z.string().min(1),
 }).strict();
+
+const StrictQueryInteger = z.string()
+  .regex(/^(?:0|[1-9]\d*)$/u)
+  .transform(Number)
+  .refine(Number.isSafeInteger);
+
+const BeastLogPageQuery = z.object({
+  offset: StrictQueryInteger.optional(),
+  limit: StrictQueryInteger.refine((value) => value >= 1 && value <= 2_000).optional(),
+  tail: z.enum(['true', 'false']).transform((value) => value === 'true').optional(),
+  maxBytes: StrictQueryInteger.refine((value) => value >= 1_024 && value <= 1024 * 1024).optional(),
+}).strict();
+
+const DEFAULT_BEAST_LOG_LIMIT = 200;
+const DEFAULT_BEAST_LOG_MAX_BYTES = 256 * 1024;
+
+function parseBeastLogPageQuery(searchParams: URLSearchParams): {
+  offset?: number;
+  limit: number;
+  tail: boolean;
+  maxBytes: number;
+} {
+  const keys = [...searchParams.keys()];
+  if (new Set(keys).size !== keys.length) {
+    throw new HttpError(400, 'INVALID_BEAST_LOG_QUERY', 'Duplicate Beast log pagination query parameter');
+  }
+  const query = Object.fromEntries(searchParams.entries());
+  const result = BeastLogPageQuery.safeParse(query);
+  if (!result.success) {
+    throw new HttpError(400, 'INVALID_BEAST_LOG_QUERY', 'Invalid Beast log pagination query', result.error.issues);
+  }
+  const tail = result.data.tail ?? result.data.offset === undefined;
+  if (tail && result.data.offset !== undefined) {
+    throw new HttpError(400, 'INVALID_BEAST_LOG_QUERY', 'offset cannot be combined with tail=true');
+  }
+  return {
+    ...(result.data.offset !== undefined ? { offset: result.data.offset } : {}),
+    limit: result.data.limit ?? DEFAULT_BEAST_LOG_LIMIT,
+    tail,
+    maxBytes: result.data.maxBytes ?? DEFAULT_BEAST_LOG_MAX_BYTES,
+  };
+}
+
+type BeastLogPageResponse = {
+  logs: string[];
+  page: {
+    offset: number;
+    nextOffset: number;
+    hasMore: boolean;
+    tail: boolean;
+    bytes: number;
+  };
+};
+
+function boundBeastLogHttpResponse(response: BeastLogPageResponse, maxBytes: number): { data: BeastLogPageResponse } {
+  const bounded: BeastLogPageResponse = {
+    logs: [...response.logs],
+    page: { ...response.page },
+  };
+  const envelope = { data: bounded };
+  while (Buffer.byteLength(JSON.stringify(envelope)) > maxBytes && bounded.logs.length > 0) {
+    if (bounded.logs.length === 1) {
+      bounded.logs[0] = '[log line omitted: exceeds response byte budget]';
+      bounded.page.hasMore = true;
+      bounded.page.nextOffset = bounded.page.offset + 1;
+      bounded.page.bytes = Buffer.byteLength(JSON.stringify(bounded.logs));
+      if (Buffer.byteLength(JSON.stringify(envelope)) <= maxBytes) break;
+    }
+    if (bounded.page.tail) bounded.logs.shift();
+    else bounded.logs.pop();
+    bounded.page.hasMore = true;
+    bounded.page.nextOffset = bounded.page.offset + bounded.logs.length;
+    bounded.page.bytes = Buffer.byteLength(JSON.stringify(bounded.logs));
+  }
+  return envelope;
+}
 
 export interface BeastRoutesDeps {
   agents: AgentService;
@@ -284,7 +362,7 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
   app.get('/v1/beasts/runs', (c) => {
     return c.json({
       data: {
-        runs: deps.runs.listRuns().map((run) => (
+        runs: deps.runs.listRunsForResponse().map((run) => (
           runWithContainerFields(run, attemptsForContainerRun(run, deps))
         )),
       },
@@ -297,12 +375,12 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
     if (!run) {
       throw beastRunNotFound(runId);
     }
-    const attempts = deps.runs.listAttempts(runId);
+    const attempts = deps.runs.listAttemptsForResponse(runId);
     return c.json({
       data: {
         run: runWithContainerFields(deps.runs.sanitizeRunForResponse(run), attempts),
         attempts,
-        events: deps.runs.listEvents(runId),
+        events: deps.runs.listEventsForResponse(runId),
       },
     });
   });
@@ -312,7 +390,7 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
     try {
       return c.json({
         data: {
-          events: deps.runs.listEvents(runId),
+          events: deps.runs.listEventsForResponse(runId),
         },
       });
     } catch (error) {
@@ -322,12 +400,19 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
 
   app.get('/v1/beasts/runs/:runId/logs', async (c) => {
     const runId = c.req.param('runId');
+    const options = parseBeastLogPageQuery(new URL(c.req.url).searchParams);
     try {
-      return c.json({
-        data: {
-          logs: await deps.runs.readLogs(runId),
+      const page = await deps.runs.readLogsPage(runId, options);
+      return c.json(boundBeastLogHttpResponse({
+        logs: page.lines,
+        page: {
+          offset: page.offset,
+          nextOffset: page.nextOffset,
+          hasMore: page.hasMore,
+          tail: page.tail,
+          bytes: page.bytes,
         },
-      });
+      }, options.maxBytes));
     } catch (error) {
       throwKnownRunError(runId, error);
     }

@@ -109,7 +109,7 @@ function buildTour(root) {
 
   const keyDocs = [
     doc('onboarding', 'ONBOARDING.md', 'First-run setup, architecture reading path, worker preflight, local services, and dashboard bootstrap.'),
-    doc('ramp-up', 'docs/RAMP_UP.md', 'Shortest current implementation map for agents; read before broad architecture or historical plans.'),
+    doc('ramp-up', 'docs/onboarding/RAMP_UP.md', 'Shortest current implementation map for agents; read before broad architecture or historical plans.'),
     doc('architecture', 'docs/ARCHITECTURE.md', 'Authoritative system overview, package table, Beast Loop, current CLI path, and dashboard/control-plane details.'),
     doc('architecture-map', 'docs/onboarding/architecture-map.md', 'New-contributor routing map from issue symptoms to packages, tests, approval/HITL boundaries, and memory surfaces.'),
     doc('contract-matrix', 'docs/CONTRACT_MATRIX.md', 'Cross-package interface boundaries and ports before changing shared contracts.'),

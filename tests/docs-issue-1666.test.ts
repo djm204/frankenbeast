@@ -66,7 +66,7 @@ describe('issue #1666 architecture map for new agent contributors', () => {
     const links = [...map.matchAll(linkPattern)].map((match) => match.groups?.href).filter((href): href is string => Boolean(href));
 
     expect(links).toEqual(expect.arrayContaining([
-      '../RAMP_UP.md',
+      'RAMP_UP.md',
       '../ARCHITECTURE.md',
       '../DATA_FLOW.md',
       '../CONTRACT_MATRIX.md',

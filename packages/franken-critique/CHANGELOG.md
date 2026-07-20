@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.10.0](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.9.2...franken-critique-v0.10.0) (2026-07-19)
+
+
+### Features
+
+* **learning:** add post-task lesson extraction ([#2548](https://github.com/djm204/frankenbeast/issues/2548)) ([32e0bb7](https://github.com/djm204/frankenbeast/commit/32e0bb72310a6c45638c87e6212caea0c05e57c4))
+
+
+### Bug Fixes
+
+* disambiguate critique result type exports ([#3316](https://github.com/djm204/frankenbeast/issues/3316)) ([48756fd](https://github.com/djm204/frankenbeast/commit/48756fd04b2490566ba5e2a28b6f96fa0cb9d153))
+* **dx:** align workspace TypeScript versions ([#3232](https://github.com/djm204/frankenbeast/issues/3232)) ([5a58ead](https://github.com/djm204/frankenbeast/commit/5a58ead0e541104b41d87e5780419386ea727c26))
+
+
+### Documentation
+
+* **onboarding:** relocate concise agent ramp-up guide ([#3396](https://github.com/djm204/frankenbeast/issues/3396)) ([c39eb74](https://github.com/djm204/frankenbeast/commit/c39eb74886803b2a8f041553cfc742e0655aa483))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.14.0 to 0.14.1
+
 ## [0.9.2](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.9.1...franken-critique-v0.9.2) (2026-07-18)
 
 

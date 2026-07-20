@@ -638,7 +638,7 @@ The target goal is one canonical service control model across CLI and dashboard,
 ## Related Documents
 
 - [docs/ARCHITECTURE.md](./ARCHITECTURE.md)
-- [docs/RAMP_UP.md](./RAMP_UP.md)
+- [docs/onboarding/RAMP_UP.md](./onboarding/RAMP_UP.md)
 - [docs/adr/017-network-operator-control-plane.md](./adr/017-network-operator-control-plane.md)
 - [docs/adr/018-tracked-agent-init-workflow.md](./adr/018-tracked-agent-init-workflow.md)
 - [docs/adr/020-standardized-issue-execution-path.md](./adr/020-standardized-issue-execution-path.md)

@@ -1,5 +1,5 @@
 import type { BeastDefinition, BeastRun, BeastRunEvent, ModuleConfig } from '../types.js';
-import { BeastLogStore } from '../events/beast-log-store.js';
+import { BeastLogStore, type BeastLogPage, type BeastLogPageOptions } from '../events/beast-log-store.js';
 import type { BeastEventBus, BeastSseEvent } from '../events/beast-event-bus.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import type { BeastMetrics } from '../telemetry/beast-metrics.js';
@@ -39,8 +39,16 @@ export class BeastRunService {
   ) {}
 
   listRuns(): BeastRun[] {
+    return this.listRunsFromRepository();
+  }
+
+  listRunsForResponse(): BeastRun[] {
+    return this.listRunsFromRepository(true);
+  }
+
+  private listRunsFromRepository(recoverCorruptJson = false): BeastRun[] {
     const redactedAgentIds = new Set(this.repository.listDispatchFailureHistoryAgentIds());
-    return this.repository.listRuns().map((run) => (
+    return this.repository.listRuns({ recoverCorruptJson }).map((run) => (
       run.trackedAgentId && redactedAgentIds.has(run.trackedAgentId)
         ? { ...run, configSnapshot: {} }
         : run
@@ -63,16 +71,33 @@ export class BeastRunService {
   }
 
   listAttempts(runId: string) {
+    return this.listAttemptsFromRepository(runId);
+  }
+
+  listAttemptsForResponse(runId: string) {
+    return this.listAttemptsFromRepository(runId, true);
+  }
+
+  private listAttemptsFromRepository(runId: string, recoverCorruptJson = false) {
     const run = this.requireRun(runId);
-    const attempts = this.repository.listAttempts(runId);
+    const attempts = this.repository.listAttempts(runId, { recoverCorruptJson });
     if (!this.hasDispatchFailureHistory(run)) return attempts;
     return attempts.map((attempt) => ({ ...attempt, executorMetadata: undefined }));
   }
 
   listEvents(runId: string) {
+    return this.listEventsFromRepository(runId);
+  }
+
+  listEventsForResponse(runId: string) {
+    return this.listEventsFromRepository(runId, true);
+  }
+
+  private listEventsFromRepository(runId: string, recoverCorruptJson = false) {
     const run = this.requireRun(runId);
-    if (!this.hasDispatchFailureHistory(run)) return this.repository.listEvents(runId);
-    return this.repository.listEvents(runId).map(redactDispatchFailureEvent);
+    const events = this.repository.listEvents(runId, { recoverCorruptJson });
+    if (!this.hasDispatchFailureHistory(run)) return events;
+    return events.map(redactDispatchFailureEvent);
   }
 
   async readLogs(runId: string): Promise<string[]> {
@@ -81,6 +106,22 @@ export class BeastRunService {
     const lines = await this.logs.read(run.id, attemptId ?? 'system');
     if (!this.hasDispatchFailureHistory(run)) return lines;
     return lines.map(redactDispatchFailureLogLine);
+  }
+
+  async readLogsPage(runId: string, options: BeastLogPageOptions): Promise<BeastLogPage> {
+    const run = this.requireRun(runId);
+    const page = await this.logs.readPage(run.id, run.currentAttemptId ?? 'system', options);
+    if (!this.hasDispatchFailureHistory(run)) return page;
+
+    const redacted = page.lines.map(redactDispatchFailureLogLine);
+    const bounded = boundSerializedLogLines(redacted, options.maxBytes, page.tail);
+    return {
+      ...page,
+      lines: bounded.lines,
+      nextOffset: page.offset + bounded.lines.length,
+      hasMore: page.hasMore || bounded.lines.length < redacted.length,
+      bytes: bounded.bytes,
+    };
   }
 
   async start(runId: string, _actor: string): Promise<BeastRun> {
@@ -586,4 +627,25 @@ function redactDispatchFailureLogLine(line: string): string {
   return line.includes('start_failed:')
     ? `start_failed: ${SAFE_DISPATCH_FAILURE_MESSAGE}`
     : line;
+}
+
+function boundSerializedLogLines(
+  lines: readonly string[],
+  maxBytes: number,
+  tail: boolean,
+): { lines: string[]; bytes: number } {
+  const selected: string[] = [];
+  let bytes = 2;
+  const candidates = tail ? [...lines].reverse() : lines;
+  for (const line of candidates) {
+    const selectedLine = Buffer.byteLength(JSON.stringify([line])) <= maxBytes
+      ? line
+      : `[log line omitted: ${Buffer.byteLength(line)} bytes exceeds page budget]`;
+    const nextBytes = bytes + Buffer.byteLength(JSON.stringify(selectedLine)) + (selected.length > 0 ? 1 : 0);
+    if (nextBytes > maxBytes) break;
+    selected.push(selectedLine);
+    bytes = nextBytes;
+  }
+  if (tail) selected.reverse();
+  return { lines: selected, bytes };
 }

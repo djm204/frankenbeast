@@ -16,6 +16,8 @@ let llmGraphBuilderCtorArg: unknown = undefined;
 let llmGraphBuilderCtorOptions: unknown = undefined;
 let lastCreateCliDepsOptions: import('../../../src/cli/dep-factory.js').CliDepOptions | undefined;
 let streamProgressOptions: { onProgressEvent?: (event: { type: string; [key: string]: unknown }) => void } | undefined;
+const mockProgressUpdate = vi.fn();
+const mockCurrentStage = vi.fn();
 const mockFinalize = vi.fn(async () => {});
 
 // ── Mock heavy deps ──
@@ -155,7 +157,7 @@ vi.mock('../../../src/planning/chunk-file-writer.js', () => {
 vi.mock('../../../src/adapters/stream-progress.js', () => ({
   createStreamProgressWithSpinner: vi.fn((options: typeof streamProgressOptions) => {
     streamProgressOptions = options;
-    return { onLine: vi.fn(), stop: vi.fn() };
+    return { onLine: vi.fn(), update: mockProgressUpdate, currentStage: mockCurrentStage, stop: vi.fn() };
   }),
   createStreamProgressHandler: vi.fn(() => vi.fn()),
 }));
@@ -310,7 +312,7 @@ describe('Session plan phase — CliLlmAdapter wiring', () => {
     const config = makeConfig({ maxDurationMs: 300_000, planningTimeoutMs: 75_000 });
     await new Session(config).start();
 
-    expect(llmGraphBuilderCtorOptions).toEqual({ timeoutMs: 75_000 });
+    expect(llmGraphBuilderCtorOptions).toEqual(expect.objectContaining({ timeoutMs: 75_000 }));
   });
 
   it('runPlan() persists sanitized live progress and discloses the build log path', async () => {

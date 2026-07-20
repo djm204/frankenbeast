@@ -25,6 +25,7 @@ For a complete clean-checkout setup, use the root [onboarding checklist](../../O
 | Clean up after a first PR merges                         | [After your first pull request](after-your-first-pr.md)                       | [Contributor guide](../../CONTRIBUTING.md) when you are ready to select the next issue                                                                 |
 | Practice before editing production code                  | [Sample agent practice issue](sample-agent-practice-issue.md)                 | The linked practice fixture and reset workflow                                                                                                         |
 | Find the package that owns a change                      | [Architecture map](architecture-map.md)                                       | [Repository ownership](repository-ownership.md)                                                                                                        |
+| Get a concise current implementation map                 | [Agent ramp-up](RAMP_UP.md)                                                    | [Architecture map](architecture-map.md), then the package-specific tests and docs for the change                                                       |
 | Assign or recover agent work                             | [Agent role responsibility map](agent-role-responsibility-map.md)             | [Agent coordination runtime glossary](agent-coordination-runtime-glossary.md)                                                                          |
 | Understand merge, release, and deployment ownership      | [Release and deployment mental model](release-deployment-mental-model.md)     | The release and rollback references linked from that guide                                                                                             |
 
@@ -33,6 +34,7 @@ For a complete clean-checkout setup, use the root [onboarding checklist](../../O
 - [After your first pull request](after-your-first-pr.md) — verifies merge and issue state, updates a fork, and safely removes the merged branch or worktree.
 - [Agent coordination runtime glossary](agent-coordination-runtime-glossary.md) — terms used in Kanban, liveness, approval, and PR handoffs.
 - [Agent role responsibility map](agent-role-responsibility-map.md) — boundaries and required evidence for coordinators, workers, reviewers, and repair owners.
+- [Agent ramp-up](RAMP_UP.md) — concise package map, Beast Loop overview, CLI surfaces, build/test commands, and current limitations for coding agents.
 - [Architecture map](architecture-map.md) — routes issue topics to current packages, tests, and safety boundaries.
 - [Coding-agent PR etiquette](coding-agent-pr-etiquette.md) — one-issue PR scope, review gates, and blocked-work handoffs.
 - [First-PR CI failure triage](ci-failure-triage.md) — confirms the failing head, reads failed job logs, chooses local reproduction commands, and limits reruns to transient failures.

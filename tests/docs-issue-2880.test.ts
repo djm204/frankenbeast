@@ -12,7 +12,7 @@ const workspacePackages = () => readdirSync(resolve(ROOT, 'packages'), { withFil
   .map((entry) => entry.name)
   .sort();
 
-const packageRows = () => readDoc('docs/RAMP_UP.md')
+const packageRows = () => readDoc('docs/onboarding/RAMP_UP.md')
   .split('\n')
   .map((line) => line.match(/^\| `packages\/(?<dir>[^/`]+)\/`/u)?.groups?.dir)
   .filter((dir): dir is string => dir !== undefined)
@@ -20,7 +20,7 @@ const packageRows = () => readDoc('docs/RAMP_UP.md')
 
 describe('issue #2880 package metadata alignment', () => {
   it('keeps RAMP_UP package list and count aligned with workspace metadata', () => {
-    const rampUp = readDoc('docs/RAMP_UP.md');
+    const rampUp = readDoc('docs/onboarding/RAMP_UP.md');
     const workspacePackageDirs = workspacePackages();
     const listedPackageDirs = packageRows();
 
@@ -29,7 +29,7 @@ describe('issue #2880 package metadata alignment', () => {
   });
 
   it('includes explicit entries for recently added packages', () => {
-    const rampUp = readDoc('docs/RAMP_UP.md');
+    const rampUp = readDoc('docs/onboarding/RAMP_UP.md');
 
     expect(rampUp).toContain('packages/franken-mcp-suite/');
     expect(rampUp).toContain('packages/live-bench/');

@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.1](https://github.com/djm204/frankenbeast/compare/live-bench-v0.4.0...live-bench-v0.4.1) (2026-07-19)
+
+
+### Bug Fixes
+
+* **dx:** align workspace TypeScript versions ([#3232](https://github.com/djm204/frankenbeast/issues/3232)) ([5a58ead](https://github.com/djm204/frankenbeast/commit/5a58ead0e541104b41d87e5780419386ea727c26))
+* **live-bench:** harden run directory cleanup ([#3294](https://github.com/djm204/frankenbeast/issues/3294)) ([a5761a5](https://github.com/djm204/frankenbeast/commit/a5761a554f2b45fc602416bfebf27d483da57890))
+* **live-bench:** validate artifact paths ([#3293](https://github.com/djm204/frankenbeast/issues/3293)) ([710c9d0](https://github.com/djm204/frankenbeast/commit/710c9d097bdc98805d9544fb8e15b46c154c4f27))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/observer bumped from 0.11.0 to 0.11.1
+    * @franken/types bumped from 0.14.0 to 0.14.1
+
 ## [0.4.0](https://github.com/djm204/frankenbeast/compare/live-bench-v0.3.2...live-bench-v0.4.0) (2026-07-18)
 
 

@@ -24,7 +24,7 @@ describe('issue #1776 newcomer architecture reading path', () => {
     const section = sectionBetween(onboarding, '## Architecture reading path', '## Run UI');
 
     const orderedSteps = [
-      '[`docs/RAMP_UP.md`](docs/RAMP_UP.md)',
+      '[`docs/onboarding/RAMP_UP.md`](docs/onboarding/RAMP_UP.md)',
       '[`README.md#architecture`](README.md#architecture)',
       '[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)',
       '[`docs/DATA_FLOW.md`](docs/DATA_FLOW.md)',

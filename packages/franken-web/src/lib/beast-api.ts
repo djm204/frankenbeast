@@ -46,6 +46,26 @@ export type {
   TrackedAgentSummary,
 } from '@franken/types';
 
+export interface BeastLogPageOptions {
+  readonly offset?: number;
+  readonly limit?: number;
+  readonly tail?: boolean;
+  readonly maxBytes?: number;
+}
+
+export interface BeastLogPageMetadata {
+  readonly offset: number;
+  readonly nextOffset: number;
+  readonly hasMore: boolean;
+  readonly tail: boolean;
+  readonly bytes: number;
+}
+
+export interface BeastLogPage {
+  readonly logs: string[];
+  readonly page: BeastLogPageMetadata;
+}
+
 export class BeastApiError extends Error {
   constructor(
     message: string,
@@ -90,6 +110,19 @@ export class BeastApiClient {
   async getLogs(runId: string): Promise<string[]> {
     const body = await this.request<{ logs: string[] }>(`/v1/beasts/runs/${encodeURIComponent(runId)}/logs`, { method: 'GET' });
     return body.logs;
+  }
+
+  async getLogsPage(runId: string, options: BeastLogPageOptions = {}): Promise<BeastLogPage> {
+    const query = new URLSearchParams();
+    if (options.offset !== undefined) query.set('offset', String(options.offset));
+    if (options.limit !== undefined) query.set('limit', String(options.limit));
+    if (options.tail !== undefined) query.set('tail', String(options.tail));
+    if (options.maxBytes !== undefined) query.set('maxBytes', String(options.maxBytes));
+    const suffix = query.size > 0 ? `?${query.toString()}` : '';
+    return this.request<BeastLogPage>(
+      `/v1/beasts/runs/${encodeURIComponent(runId)}/logs${suffix}`,
+      { method: 'GET' },
+    );
   }
 
   async createRun(input: {

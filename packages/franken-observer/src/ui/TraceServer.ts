@@ -169,9 +169,10 @@ header button{margin-left:auto;font-size:.75rem;background:#1e1e1e;color:#aaa;bo
 header button:hover{background:#2a2a2a}
 main{display:flex;flex:1;overflow:hidden}
 #sidebar{width:280px;border-right:1px solid #2a2a2a;overflow-y:auto;flex-shrink:0}
-.trace-item{padding:.65rem 1rem;cursor:pointer;border-bottom:1px solid #1c1c1c}
-.trace-item:hover,.trace-item.active{background:#161616}
-.trace-goal{font-size:.825rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trace-item{display:block;width:100%;padding:.65rem 1rem;cursor:pointer;border:0;border-bottom:1px solid #1c1c1c;background:transparent;color:inherit;font:inherit;text-align:left}
+.trace-item:hover,.trace-item.active,.trace-item[aria-current="true"]{background:#161616}
+.trace-item:focus-visible{outline:2px solid #60a5fa;outline-offset:-2px}
+.trace-goal{display:block;font-size:.825rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .trace-meta{font-size:.7rem;color:#555;margin-top:.2rem;display:flex;gap:.4rem}
 #panel{flex:1;overflow-y:auto;padding:1.5rem}
 #panel h2{font-size:1rem;margin-bottom:.4rem}
@@ -193,12 +194,13 @@ td{padding:.4rem .6rem;border-bottom:1px solid #1a1a1a;font-variant-numeric:tabu
   <button onclick="loadTraces()">↺ Refresh</button>
 </header>
 <main>
-  <div id="sidebar"><p class="empty" style="padding:1rem;font-size:.8rem">Loading…</p></div>
+  <nav id="sidebar" aria-label="Traces"><p class="empty" style="padding:1rem;font-size:.8rem">Loading…</p></nav>
   <div id="panel"><p class="empty">Select a trace to inspect.</p></div>
 </main>
 <script>
 const sidebar = document.getElementById('sidebar')
 const panel   = document.getElementById('panel')
+let selectedTraceId = null
 
 function esc(s){
   return String(s??'')
@@ -219,14 +221,14 @@ async function loadTraces(){
   const {traces} = await fetch('/api/traces').then(r=>r.json())
   if(!traces.length){sidebar.innerHTML='<p class="empty" style="padding:1rem;font-size:.8rem">No traces yet.</p>';return}
   sidebar.innerHTML = traces.map(t=>\`
-    <div class="trace-item" data-id="\${esc(t.id)}">
-      <div class="trace-goal">\${esc(t.goal)}</div>
-      <div class="trace-meta">
+    <button type="button" class="trace-item" data-id="\${esc(t.id)}" aria-current="\${String(t.id)===selectedTraceId}">
+      <span class="trace-goal">\${esc(t.goal)}</span>
+      <span class="trace-meta">
         \${badge(t.status)}
         <span>\${t.spanCount} span\${t.spanCount!==1?'s':''}</span>
         <span>\${fmtTime(t.startedAt)}</span>
-      </div>
-    </div>\`).join('')
+      </span>
+    </button>\`).join('')
 }
 
 sidebar.addEventListener('click', e=>{
@@ -235,7 +237,12 @@ sidebar.addEventListener('click', e=>{
 })
 
 async function loadDetail(id){
-  document.querySelectorAll('.trace-item').forEach(el=>el.classList.toggle('active',el.dataset.id===id))
+  selectedTraceId = id
+  document.querySelectorAll('.trace-item').forEach(el=>{
+    const selected = el.dataset.id===id
+    el.classList.toggle('active',selected)
+    el.setAttribute('aria-current',String(selected))
+  })
   let response
   let t
   try {

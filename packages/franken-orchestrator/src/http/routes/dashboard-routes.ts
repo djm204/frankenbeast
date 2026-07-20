@@ -175,6 +175,116 @@ function authenticateTicketRequest(c: Context, operatorToken: string): Response 
   return undefined;
 }
 
+type DashboardSseStream = Parameters<Parameters<typeof streamSSE>[1]>[0];
+
+interface DashboardSseMessage {
+  data: string;
+  event?: string;
+  id?: string;
+}
+
+function dashboardSseBody(message: DashboardSseMessage): ReadableStream<Uint8Array> {
+  const dataLines = message.data.split(/\r\n|\r|\n/).map((line) => `data: ${line}`).join('\n');
+  const payload = [
+    message.event && `event: ${message.event}`,
+    dataLines,
+    message.id && `id: ${message.id}`,
+  ].filter(Boolean).join('\n') + '\n\n';
+  const bytes = new TextEncoder().encode(payload);
+
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
+}
+
+export async function runDashboardEventStream(
+  deps: DashboardRouteDeps,
+  stream: DashboardSseStream,
+  nextSnapshotId: () => string,
+): Promise<void> {
+  // Hono's writeSSE() intentionally swallows writer failures. pipe() preserves
+  // them, so serialize dashboard writes through it to make disconnect cleanup
+  // observable even when the runtime does not emit an abort event.
+  let writeChain = Promise.resolve();
+  const writeSse = (message: DashboardSseMessage): Promise<void> => {
+    const write = writeChain.then(() => stream.pipe(dashboardSseBody(message)));
+    writeChain = write.catch(() => undefined);
+    return write;
+  };
+
+  const initialSnapshot = await buildSnapshot(deps);
+  let lastSnapshot = JSON.stringify(initialSnapshot);
+  let lastSnapshotDiffKey = snapshotDiffKey(initialSnapshot);
+
+  try {
+    await writeSse({
+      id: nextSnapshotId(),
+      event: 'snapshot',
+      data: lastSnapshot,
+    });
+  } catch {
+    return;
+  }
+
+  const cleanup: Array<() => void> = [];
+  const clearAll = () => {
+    while (cleanup.length > 0) {
+      cleanup.pop()?.();
+    }
+  };
+  let resolveStreamEnd!: () => void;
+  const streamEnd = new Promise<void>((resolve) => {
+    resolveStreamEnd = resolve;
+  });
+  let streamEnded = false;
+  const endStream = () => {
+    if (streamEnded) return;
+    streamEnded = true;
+    clearAll();
+    resolveStreamEnd();
+  };
+
+  const snapshotInterval = setInterval(async () => {
+    let nextSnapshot: string;
+    let nextSnapshotDiffKey: string;
+    try {
+      const snapshot = await buildSnapshot(deps);
+      nextSnapshot = JSON.stringify(snapshot);
+      nextSnapshotDiffKey = snapshotDiffKey(snapshot);
+    } catch {
+      return;
+    }
+
+    if (nextSnapshotDiffKey === lastSnapshotDiffKey) {
+      return;
+    }
+    lastSnapshot = nextSnapshot;
+    lastSnapshotDiffKey = nextSnapshotDiffKey;
+    try {
+      await writeSse({ id: nextSnapshotId(), event: 'snapshot', data: nextSnapshot });
+    } catch {
+      endStream();
+    }
+  }, DASHBOARD_SNAPSHOT_POLL_MS);
+  cleanup.push(() => clearInterval(snapshotInterval));
+
+  const heartbeatInterval = setInterval(async () => {
+    try {
+      await writeSse({ event: 'heartbeat', data: '' });
+    } catch {
+      endStream();
+    }
+  }, DASHBOARD_HEARTBEAT_MS);
+  cleanup.push(() => clearInterval(heartbeatInterval));
+
+  // Hono stores one abort callback, not a list.
+  stream.onAbort(endStream);
+  await streamEnd;
+}
+
 export function createDashboardRoutes(deps: DashboardRouteDeps): Hono {
   const app = new Hono();
   const ticketStore = deps.ticketStore;
@@ -235,68 +345,10 @@ export function createDashboardRoutes(deps: DashboardRouteDeps): Hono {
       }
     }
 
-    return streamSSE(c, async (stream) => {
-      const initialSnapshot = await buildSnapshot(deps);
-      let lastSnapshot = JSON.stringify(initialSnapshot);
-      let lastSnapshotDiffKey = snapshotDiffKey(initialSnapshot);
-
-      // Send initial snapshot
+    return streamSSE(c, (stream) => runDashboardEventStream(deps, stream, () => {
       dashboardSnapshotSequence += 1;
-      await stream.writeSSE({
-        id: `dashboard:${dashboardSnapshotEpoch}:${dashboardSnapshotSequence}`,
-        event: 'snapshot',
-        data: lastSnapshot,
-      });
-
-      const cleanup: Array<() => void> = [];
-      const clearAll = () => {
-        while (cleanup.length > 0) {
-          cleanup.pop()?.();
-        }
-      };
-
-      const snapshotInterval = setInterval(async () => {
-        let nextSnapshot: string;
-        let nextSnapshotDiffKey: string;
-        try {
-          const snapshot = await buildSnapshot(deps);
-          nextSnapshot = JSON.stringify(snapshot);
-          nextSnapshotDiffKey = snapshotDiffKey(snapshot);
-        } catch {
-          return;
-        }
-
-        if (nextSnapshotDiffKey === lastSnapshotDiffKey) {
-          return;
-        }
-        lastSnapshot = nextSnapshot;
-        lastSnapshotDiffKey = nextSnapshotDiffKey;
-        dashboardSnapshotSequence += 1;
-        try {
-          await stream.writeSSE({ id: `dashboard:${dashboardSnapshotEpoch}:${dashboardSnapshotSequence}`, event: 'snapshot', data: nextSnapshot });
-        } catch {
-          clearAll();
-        }
-      }, DASHBOARD_SNAPSHOT_POLL_MS);
-      cleanup.push(() => clearInterval(snapshotInterval));
-
-      const heartbeatInterval = setInterval(async () => {
-        try {
-          await stream.writeSSE({ event: 'heartbeat', data: '' });
-        } catch {
-          clearAll();
-        }
-      }, DASHBOARD_HEARTBEAT_MS);
-      cleanup.push(() => clearInterval(heartbeatInterval));
-
-      // Block until client disconnects (single onAbort — Hono stores one callback, not a list)
-      await new Promise<void>((resolve) => {
-        stream.onAbort(() => {
-          clearAll();
-          resolve();
-        });
-      });
-    });
+      return `dashboard:${dashboardSnapshotEpoch}:${dashboardSnapshotSequence}`;
+    }));
   });
 
   return app;

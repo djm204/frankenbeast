@@ -1,5 +1,74 @@
 # Changelog
 
+## [0.8.1](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.8.0...franken-mcp-suite-v0.8.1) (2026-07-19)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/brain bumped from 0.15.1 to 0.15.2
+    * @franken/orchestrator bumped from 0.55.0 to 0.55.1
+
+## [0.8.0](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.7.0...franken-mcp-suite-v0.8.0) (2026-07-19)
+
+
+### Features
+
+* **memory:** add access audit report ([a39a13c](https://github.com/djm204/frankenbeast/commit/a39a13c1f6a1d44faa2e07c524723e21409e2f1f))
+
+
+### Bug Fixes
+
+* **dx:** align workspace TypeScript versions ([#3232](https://github.com/djm204/frankenbeast/issues/3232)) ([5a58ead](https://github.com/djm204/frankenbeast/commit/5a58ead0e541104b41d87e5780419386ea727c26))
+* **mcp-suite:** write profile settings atomically ([#2656](https://github.com/djm204/frankenbeast/issues/2656)) ([e15b4f9](https://github.com/djm204/frankenbeast/commit/e15b4f97673cfc29d3f233ef85589c0dcaa1a3aa))
+* **mcp:** cap brain startup hydration ([#3247](https://github.com/djm204/frankenbeast/issues/3247)) ([c63e531](https://github.com/djm204/frankenbeast/commit/c63e531ee287b902870c7a8e8e728bf89a4d6198))
+* **mcp:** close observer resources on shutdown ([#3250](https://github.com/djm204/frankenbeast/issues/3250)) ([82272c1](https://github.com/djm204/frankenbeast/commit/82272c13bd420769db6ec7b0e6569cd4d78ce9c8))
+* **mcp:** enforce per-tool execution deadlines ([#3238](https://github.com/djm204/frankenbeast/issues/3238)) ([88f56de](https://github.com/djm204/frankenbeast/commit/88f56de4b31b3e5931fc3bc08c773b76fa9e9acf))
+* **mcp:** enforce tool schema bounds ([#3248](https://github.com/djm204/frankenbeast/issues/3248)) ([8b95dc9](https://github.com/djm204/frankenbeast/commit/8b95dc952cd1ec4a70954f863e034719b8c7887e))
+* **mcp:** preserve audit integrity during migration ([#3245](https://github.com/djm204/frankenbeast/issues/3245)) ([5c4aa84](https://github.com/djm204/frankenbeast/commit/5c4aa84c495d74b5b5dbe1dbfb2dbc3f36ff615d))
+* **mcp:** reject unsafe integer arguments ([#3393](https://github.com/djm204/frankenbeast/issues/3393)) ([25cb09f](https://github.com/djm204/frankenbeast/commit/25cb09fc25adbaf3d9dc001415acfb4de4c5138c))
+* **memory:** address audit report review findings ([32ecc5c](https://github.com/djm204/frankenbeast/commit/32ecc5cb246652a17dbf1e6a67d8fbe793cff840))
+* **memory:** align audit SQL filters with derived tools ([4ad62b9](https://github.com/djm204/frankenbeast/commit/4ad62b97ce009918b4126185fb38af5f8881bdce))
+* **memory:** close audit filter gaps ([c13d969](https://github.com/djm204/frankenbeast/commit/c13d9691e49ca8e19e6d41334890a473d9971176))
+* **memory:** close final audit review gaps ([e8180dc](https://github.com/djm204/frankenbeast/commit/e8180dcf1f3b33f729c1b68f3b0c524b0455a9ee))
+* **memory:** cover hook audit edge cases ([8fd9a96](https://github.com/djm204/frankenbeast/commit/8fd9a96c2eaf4312103fc95481c1018ef61d9dfa))
+* **memory:** harden audit report provenance handling ([f7b653e](https://github.com/djm204/frankenbeast/commit/f7b653e86cf13a4ac382295c54c256445a961740))
+* **memory:** harden audit report validation ([07e3973](https://github.com/djm204/frankenbeast/commit/07e397348a35b788c95a7b2fd49efdace2c728c6))
+* **memory:** preserve hook audit gate coverage ([b306eea](https://github.com/djm204/frankenbeast/commit/b306eea1add2ed38252454551fd9cf1a1e73c9ef))
+* **memory:** redact audit report review surfaces ([f984818](https://github.com/djm204/frankenbeast/commit/f9848180778634c09c457760e2e538da28050f63))
+* **memory:** redact key-only attribution proxy filters ([#2544](https://github.com/djm204/frankenbeast/issues/2544)) ([67c0676](https://github.com/djm204/frankenbeast/commit/67c0676c957a2b53d8fdd722e6c57eca7a7b9d56))
+* **memory:** refine audit report correlation ([6304e6b](https://github.com/djm204/frankenbeast/commit/6304e6be3c739501154bcd53c25cf4c09bc2d07c))
+* **memory:** remove stale audit scan helper ([0296a8a](https://github.com/djm204/frankenbeast/commit/0296a8ac01064496382ec0bfe9fdabf16a4c8bb6))
+* **memory:** tighten audit report filters ([a2050be](https://github.com/djm204/frankenbeast/commit/a2050be6b60d813c268e2ccda4bb32391290611a))
+* **memory:** tighten audit report filters ([3b8bd8f](https://github.com/djm204/frankenbeast/commit/3b8bd8ff57bc1160052a6ffc60cad86082ebc719))
+* **security:** address Codex redaction findings ([#2583](https://github.com/djm204/frankenbeast/issues/2583)) ([e497d90](https://github.com/djm204/frankenbeast/commit/e497d904af9fb9ee81aa7a1edc94f53aeb4f6f7d))
+* **security:** redact MCP handler exception details ([#3234](https://github.com/djm204/frankenbeast/issues/3234)) ([459985e](https://github.com/djm204/frankenbeast/commit/459985e0c98374bb423e63cc82f75905e816d739))
+* **security:** redact tracked agent dispatch failures ([#3237](https://github.com/djm204/frankenbeast/issues/3237)) ([ac39f65](https://github.com/djm204/frankenbeast/commit/ac39f65941e7a2aaabc2a45ed724760e4800b000))
+
+
+### Performance
+
+* **mcp:** validate only audit trail tail on append ([#3244](https://github.com/djm204/frankenbeast/issues/3244)) ([05da76f](https://github.com/djm204/frankenbeast/commit/05da76f79218b9185fb1a586acc7118b0827d0e6))
+
+
+### Tests
+
+* **mcp:** expect trusted audit provenance metadata ([98cdccc](https://github.com/djm204/frankenbeast/commit/98cdcccdddc1196cb28146820df452d5571ee4ea))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.14.0 to 0.14.1
+    * @franken/brain bumped from 0.15.0 to 0.15.1
+    * @franken/critique bumped from 0.9.2 to 0.10.0
+    * @franken/governor bumped from 0.7.3 to 0.8.0
+    * @franken/observer bumped from 0.11.0 to 0.11.1
+    * @franken/orchestrator bumped from 0.54.0 to 0.55.0
+    * @franken/planner bumped from 0.4.21 to 0.4.22
+
 ## [0.7.0](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.6.0...franken-mcp-suite-v0.7.0) (2026-07-18)
 
 

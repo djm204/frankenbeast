@@ -1,10 +1,10 @@
 # Frankenbeast Agent Ramp-Up
 
-> Agent-oriented companion to `docs/RAMP_UP.md`. Keep this current when structural changes affect how agents should read, modify, or verify the repository.
+> Agent-oriented companion to `docs/onboarding/RAMP_UP.md`. Keep this current when structural changes affect how agents should read, modify, or verify the repository.
 
 ## Start Here
 
-- Read `docs/RAMP_UP.md` first for the package map, Beast Loop overview, CLI surfaces, build/test commands, and known limitations.
+- Read `docs/onboarding/RAMP_UP.md` first for the package map, Beast Loop overview, CLI surfaces, build/test commands, and known limitations.
 - Treat live source and focused tests as the source of truth when older docs disagree.
 - Prefer the narrowest package-level test command that covers your change, then run broader root checks when the change crosses package boundaries.
 
