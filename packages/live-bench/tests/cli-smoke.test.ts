@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -79,6 +79,48 @@ describe('live-bench CLI smoke coverage', () => {
 
       expect(result.status).toBe(0);
       expect(result.stdout.split('\n').filter(Boolean)).toEqual(['alpha-task', 'zeta-task']);
+    } finally {
+      rmSync(corpusDir, { recursive: true, force: true });
+    }
+  }, 35_000);
+
+  it('lists valid tasks and emits structured diagnostics for quarantined candidate files', () => {
+    const corpusDir = mkdtempSync(join(tmpdir(), 'live-bench-quarantine-corpus-'));
+    const candidateDir = join(corpusDir, 'candidate');
+    const coreDir = join(corpusDir, 'core');
+    mkdirSync(candidateDir, { recursive: true });
+    mkdirSync(coreDir, { recursive: true });
+    writeFileSync(join(candidateDir, 'broken.task.json'), '{not-json', 'utf8');
+    writeFileSync(join(coreDir, 'valid.task.json'), JSON.stringify({
+      taskId: 'valid-core-task',
+      tier: 'core',
+      taskClass: 'workflow-critical',
+      projectFixture: 'project',
+      prompt: 'run check',
+      expectedArtifacts: ['artifacts/out.txt'],
+      requiredChecks: [{ type: 'file-exists', path: 'artifacts/out.txt' }],
+      timeoutMs: 60_000,
+      allowedNondeterminism: [],
+      baselineSupported: true,
+    }));
+
+    try {
+      const result = runCli(['list', corpusDir]);
+      const diagnostics = JSON.parse(result.stderr) as {
+        type: string;
+        count: number;
+        tasks: Array<{ path: string; tier: string; error: string }>;
+      };
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe('valid-core-task\n');
+      expect(diagnostics).toMatchObject({
+        type: 'live-bench-corpus-quarantine',
+        count: 1,
+        tasks: [{ tier: 'candidate' }],
+      });
+      expect(diagnostics.tasks[0]?.path).toContain(join('candidate', 'broken.task.json'));
+      expect(diagnostics.tasks[0]?.error).toContain('Invalid benchmark task');
     } finally {
       rmSync(corpusDir, { recursive: true, force: true });
     }
