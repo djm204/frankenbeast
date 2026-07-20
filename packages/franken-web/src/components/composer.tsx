@@ -146,7 +146,7 @@ export function Composer({ connectionStatus, clearedFailedDraft, disabled, disab
   }
 
   return (
-    <form className="composer" onSubmit={handleSubmit} aria-label="Message composer">
+    <form className="composer terminal-composer" onSubmit={handleSubmit} aria-label="Message composer">
       <label className="composer__field">
         <span className="eyebrow">Dispatch Input</span>
         <textarea
