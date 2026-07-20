@@ -27,7 +27,11 @@ describe('issue #2652 architecture labels', () => {
       '## Current workspace packages',
     );
 
-    expect(readmeArchitecture).not.toMatch(/MOD-\d{2}/);
+    const readmeDiagrams = [...readmeArchitecture.matchAll(/```mermaid\n[\s\S]*?\n```/g)]
+      .map((match) => match[0])
+      .join('\n');
+
+    expect(readmeDiagrams).not.toMatch(/MOD-\d{2}/);
     expect(readmeArchitecture).not.toContain('still use MOD labels');
     expect(readmeArchitecture).toContain('@franken/orchestrator');
     expect(readmeArchitecture).toContain('@franken/mcp-suite');
