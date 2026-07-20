@@ -27,6 +27,11 @@ export function warnIfTraceHasActiveSpans(trace: Trace, destination = 'export'):
 export interface ExportAdapter {
   /** Persist a completed trace. Implementations should upsert. */
   flush(trace: Trace): Promise<void>
+  /**
+   * Persist multiple completed traces as one backend operation when supported.
+   * Implementations should make the batch atomic; callers fall back to flush().
+   */
+  flushBatch?(traces: Trace[]): Promise<void>
   /** Retrieve a trace by id. Returns null if not found. */
   queryByTraceId(traceId: string): Promise<Trace | null>
   /** List all stored trace ids. */

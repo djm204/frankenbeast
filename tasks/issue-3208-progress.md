@@ -8,5 +8,5 @@
 - [x] Run focused tests, full lint/typecheck/build, and relevant tests for the initial implementation.
 - [x] Add review regressions for dashboard event hydration and bounded corrupt-row recovery.
 - [x] Implement paginated dashboard hydration and raw-row-bounded recovery cursors.
-- [ ] Re-run full lint, typecheck, build, and tests after review fixes and base reconciliation.
+- [x] Re-run full lint, typecheck, build, and tests after review fixes and base reconciliation.
 - [ ] Commit, push, open PR, pass CI and current-head Codex review, merge.
