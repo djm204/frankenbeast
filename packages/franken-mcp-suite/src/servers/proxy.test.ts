@@ -369,7 +369,7 @@ describe('proxy server', () => {
       expect(auditRecord).toHaveBeenCalledWith({ tool: 'test_tool', ok: false, decision: 'denied', args: { key: 'credential' } });
     });
 
-    it('masks secret fields and replaces oversized proxy audit values with bounded hashes', async () => {
+    it('masks secret fields and replaces oversized proxy audit values with non-disclosing bounds', async () => {
       const privateValue = ['private', 'proxy', 'material'].join('-');
       const oversizedValue = 'x'.repeat(1_024);
       const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
@@ -399,13 +399,15 @@ describe('proxy server', () => {
         });
 
         const event = auditRecord.mock.calls[0]![0] as {
-          args: { payload: { accessToken: string; authorizationHeader: string; description: string; items: unknown[] } };
+          args: { payload: Record<string, unknown> & { description: string; items: unknown[] } };
         };
-        expect(event.args.payload.accessToken).toBe('[redacted]');
-        expect(event.args.payload.authorizationHeader).toBe('[redacted]');
-        expect(event.args.payload.description).toMatch(/^\[truncated length=1024 sha256:[a-f0-9]{64}\]$/);
+        expect(Object.keys(event.args.payload)).not.toContain('accessToken');
+        expect(Object.keys(event.args.payload)).not.toContain('authorizationHeader');
+        expect(Object.values(event.args.payload).filter((value) => value === '[redacted]')).toHaveLength(2);
+        expect(event.args.payload.description).toBe('[truncated length=1024]');
         expect(event.args.payload.items).toHaveLength(26);
-        expect(event.args.payload.items.at(-1)).toMatch(/^\[truncated items=75 sha256:[a-f0-9]{64}\]$/);
+        expect(event.args.payload.items.at(-1)).toBe('[truncated items=75]');
+        expect(JSON.stringify(event)).not.toContain('sha256');
         expect(JSON.stringify(event)).not.toContain(privateValue);
         expect(JSON.stringify(event)).not.toContain(oversizedValue);
       } finally {

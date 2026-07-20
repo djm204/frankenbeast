@@ -4,7 +4,6 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { createHash } from 'node:crypto';
 
 export interface ToolContent {
   type: 'text';
@@ -284,61 +283,8 @@ function validateSafeArgumentShape(
   return { ok: true };
 }
 
-function sanitizeForAudit(value: unknown, depth = 0): unknown {
-  if (depth > MAX_ARGUMENT_SHAPE_DEPTH) {
-    return '[max-depth]';
-  }
-  if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : '[non-finite-number]';
-  }
-  if (value === undefined || typeof value === 'function' || typeof value === 'symbol' || typeof value === 'bigint') {
-    return '[non-json-value]';
-  }
-  if (Array.isArray(value)) {
-    const sanitized: unknown[] = [];
-    const descriptors = Object.getOwnPropertyDescriptors(value);
-    for (const key of Reflect.ownKeys(descriptors)) {
-      if (key === 'length' || typeof key !== 'string') continue;
-      if (DENIED_ARGUMENT_KEYS.has(key)) {
-        Object.defineProperty(sanitized, key, { enumerable: true, value: '[denied-property]' });
-        continue;
-      }
-      const descriptor = descriptors[key];
-      if (!descriptor) continue;
-      if ('get' in descriptor || 'set' in descriptor) {
-        Object.defineProperty(sanitized, key, { enumerable: true, value: '[accessor]' });
-        continue;
-      }
-      Object.defineProperty(sanitized, key, { enumerable: descriptor.enumerable ?? true, value: sanitizeForAudit(descriptor.value, depth + 1) });
-    }
-    return sanitized;
-  }
-  if (!isObjectLike(value)) {
-    return value;
-  }
-  if (!isPlainJsonObject(value)) {
-    return '[non-plain-object]';
-  }
-  const sanitized: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
-  const descriptors = Object.getOwnPropertyDescriptors(value);
-  for (const key of Reflect.ownKeys(descriptors)) {
-    if (typeof key !== 'string') continue;
-    if (DENIED_ARGUMENT_KEYS.has(key)) {
-      sanitized[key] = '[denied-property]';
-      continue;
-    }
-    const descriptor = descriptors[key];
-    if (!descriptor) continue;
-    if ('get' in descriptor || 'set' in descriptor) {
-      sanitized[key] = '[accessor]';
-      continue;
-    }
-    sanitized[key] = sanitizeForAudit(descriptor.value, depth + 1);
-  }
-  return sanitized;
-}
-
 const MAX_AUDIT_STRING_LENGTH = 256;
+const MAX_AUDIT_PROPERTY_NAME_LENGTH = 128;
 const MAX_AUDIT_ARRAY_ITEMS = 25;
 const MAX_AUDIT_OBJECT_KEYS = 50;
 const MAX_AUDIT_VALUE_NODES = 500;
@@ -357,98 +303,126 @@ const SENSITIVE_AUDIT_KEY_NAMES = [
   'token',
 ] as const;
 
+const AUDIT_PRIORITY_PROPERTY_NAMES = [
+  'tool',
+  'action',
+  'args',
+  'context',
+  'password',
+  'secret',
+  'accessToken',
+  'authorizationHeader',
+] as const;
+
 function isSensitiveAuditKey(key: string): boolean {
+  if (key.length > MAX_AUDIT_PROPERTY_NAME_LENGTH) return true;
   const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, '');
   return SENSITIVE_AUDIT_KEY_NAMES.some(
     (sensitiveName) => normalized === sensitiveName || normalized.startsWith(sensitiveName) || normalized.endsWith(sensitiveName),
   );
 }
 
-function auditValueHash(value: unknown): string {
-  const hash = createHash('sha256');
-  const pending: Array<{ key?: string; value: unknown }> = [{ value }];
-  while (pending.length > 0) {
-    const current = pending.pop()!;
-    if (current.key !== undefined) hash.update(`key:${current.key};`);
-    if (current.key !== undefined && isSensitiveAuditKey(current.key)) {
-      hash.update('[redacted]');
-      continue;
-    }
-    if (Array.isArray(current.value)) {
-      hash.update(`array:${current.value.length};`);
-      for (let index = current.value.length - 1; index >= 0; index -= 1) {
-        pending.push({ value: Object.getOwnPropertyDescriptor(current.value, String(index))?.value });
-      }
-      continue;
-    }
-    if (isObjectLike(current.value)) {
-      const entries = Object.entries(current.value);
-      hash.update(`object:${entries.length};`);
-      for (let index = entries.length - 1; index >= 0; index -= 1) {
-        const [entryKey, entryValue] = entries[index]!;
-        pending.push({ key: entryKey, value: entryValue });
-      }
-      continue;
-    }
-    hash.update(`${typeof current.value}:${String(current.value)};`);
-  }
-  return hash.digest('hex');
+function boundedAuditPropertyName(key: string, ordinal: number): string {
+  return key.length > MAX_AUDIT_PROPERTY_NAME_LENGTH ? `[redacted-key-${ordinal}]` : key;
 }
 
-function redactAndBoundAuditValue(
+function uniqueAuditPropertyName(target: Record<string, unknown>, requested: string): string {
+  if (!Object.prototype.hasOwnProperty.call(target, requested)) return requested;
+  let suffix = 2;
+  while (Object.prototype.hasOwnProperty.call(target, `${requested}#${suffix}`)) suffix += 1;
+  return `${requested}#${suffix}`;
+}
+
+function sanitizeForAudit(
   value: unknown,
-  key: string | undefined,
+  depth: number,
   budget: { remaining: number },
+  key?: string,
 ): unknown {
-  if (key !== undefined && isSensitiveAuditKey(key) && value !== '[accessor]') return '[redacted]';
+  if (key !== undefined && isSensitiveAuditKey(key)) return '[redacted]';
   if (budget.remaining <= 0) return '[truncated node-budget]';
   budget.remaining -= 1;
-
+  if (depth > MAX_ARGUMENT_SHAPE_DEPTH) return '[max-depth]';
   if (typeof value === 'string') {
-    if (value.length <= MAX_AUDIT_STRING_LENGTH) return value;
-    return `[truncated length=${value.length} sha256:${auditValueHash(value)}]`;
+    return value.length <= MAX_AUDIT_STRING_LENGTH ? value : `[truncated length=${value.length}]`;
+  }
+  if (typeof value === 'number') return Number.isFinite(value) ? value : '[non-finite-number]';
+  if (value === undefined || typeof value === 'function' || typeof value === 'symbol' || typeof value === 'bigint') {
+    return '[non-json-value]';
   }
   if (Array.isArray(value)) {
-    const retained: unknown[] = [];
+    const sanitized: unknown[] = [];
     const retainedCount = Math.min(value.length, MAX_AUDIT_ARRAY_ITEMS);
     for (let index = 0; index < retainedCount; index += 1) {
       if (budget.remaining <= 0) {
-        retained.push('[truncated node-budget]');
+        sanitized.push('[truncated node-budget]');
         break;
       }
       const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
-      retained.push(redactAndBoundAuditValue(descriptor?.value, undefined, budget));
+      sanitized.push(descriptor && ('get' in descriptor || 'set' in descriptor)
+        ? '[accessor]'
+        : sanitizeForAudit(descriptor?.value, depth + 1, budget));
     }
     if (value.length > MAX_AUDIT_ARRAY_ITEMS) {
-      const omitted: unknown[] = [];
-      for (let index = MAX_AUDIT_ARRAY_ITEMS; index < value.length; index += 1) {
-        omitted.push(Object.getOwnPropertyDescriptor(value, String(index))?.value);
-      }
-      retained.push(`[truncated items=${omitted.length} sha256:${auditValueHash(omitted)}]`);
+      sanitized.push(`[truncated items=${value.length - MAX_AUDIT_ARRAY_ITEMS}]`);
     }
-    return retained;
+    return sanitized;
   }
   if (!isObjectLike(value)) return value;
+  if (!isPlainJsonObject(value)) return '[non-plain-object]';
 
-  const entries = Object.entries(value);
-  const retained: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
-  for (const [entryKey, entryValue] of entries.slice(0, MAX_AUDIT_OBJECT_KEYS)) {
-    if (budget.remaining <= 0) {
-      retained['[audit-truncated]'] = '[node-budget]';
+  const sanitized: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  const retainedKeys = new Set<string>();
+  let retainedCount = 0;
+  let truncated = false;
+  const retainProperty = (keyName: string, descriptor: PropertyDescriptor | undefined): void => {
+    retainedCount += 1;
+    retainedKeys.add(keyName);
+    const outputKey = uniqueAuditPropertyName(
+      sanitized,
+      boundedAuditPropertyName(keyName, retainedCount),
+    );
+    if (DENIED_ARGUMENT_KEYS.has(keyName)) {
+      sanitized[outputKey] = '[denied-property]';
+      return;
+    }
+    if (!descriptor || 'get' in descriptor || 'set' in descriptor) {
+      sanitized[outputKey] = '[accessor]';
+      return;
+    }
+    sanitized[outputKey] = sanitizeForAudit(descriptor.value, depth + 1, budget, keyName);
+  };
+  for (const keyName of AUDIT_PRIORITY_PROPERTY_NAMES) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, keyName);
+    if (descriptor && descriptor.enumerable === false) retainProperty(keyName, descriptor);
+  }
+  for (const keyName in value) {
+    if (!Object.prototype.hasOwnProperty.call(value, keyName) || retainedKeys.has(keyName)) continue;
+    if (retainedCount >= MAX_AUDIT_OBJECT_KEYS) {
+      truncated = true;
       break;
     }
-    retained[entryKey] = redactAndBoundAuditValue(entryValue, entryKey, budget);
+    retainProperty(keyName, Object.getOwnPropertyDescriptor(value, keyName));
   }
-  if (entries.length > MAX_AUDIT_OBJECT_KEYS) {
-    const omitted = Object.fromEntries(entries.slice(MAX_AUDIT_OBJECT_KEYS));
-    retained['[audit-truncated]'] = `[keys=${entries.length - MAX_AUDIT_OBJECT_KEYS} sha256:${auditValueHash(omitted)}]`;
+  if (truncated) sanitized[uniqueAuditPropertyName(sanitized, '[audit-truncated]')] = '[keys omitted]';
+  return sanitized;
+}
+
+function redactAuditPropertyNames(value: unknown, ordinal = { value: 0 }): unknown {
+  if (Array.isArray(value)) return value.map((item) => redactAuditPropertyNames(item, ordinal));
+  if (!isObjectLike(value)) return value;
+  const redacted: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  for (const [key, child] of Object.entries(value)) {
+    ordinal.value += 1;
+    const requestedKey = isSensitiveAuditKey(key) ? `[redacted-key-${ordinal.value}]` : key;
+    const outputKey = uniqueAuditPropertyName(redacted, requestedKey);
+    redacted[outputKey] = redactAuditPropertyNames(child, ordinal);
   }
-  return retained;
+  return redacted;
 }
 
 export function sanitizeToolArgumentsForAudit(args: unknown): Record<string, unknown> {
-  const value = sanitizeForAudit(args);
-  const bounded = redactAndBoundAuditValue(value, undefined, { remaining: MAX_AUDIT_VALUE_NODES });
+  const bounded = sanitizeForAudit(args, 0, { remaining: MAX_AUDIT_VALUE_NODES });
   return isObjectLike(bounded) && !Array.isArray(bounded) ? (bounded as Record<string, unknown>) : { invalid: bounded };
 }
 
@@ -821,7 +795,22 @@ function redactObserverLogEnvelope(sanitized: Record<string, unknown>, redaction
   return sanitized;
 }
 
-export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unknown): Record<string, unknown> {
+function ownAuditDiscriminator(args: unknown, key: 'tool' | 'action'): string | undefined {
+  if (!isObjectLike(args) || Array.isArray(args)) return undefined;
+  const descriptor = Object.getOwnPropertyDescriptor(args, key);
+  return descriptor && 'value' in descriptor && typeof descriptor.value === 'string'
+    && descriptor.value.length <= MAX_AUDIT_PROPERTY_NAME_LENGTH
+    ? unqualifyMcpToolName(descriptor.value)
+    : undefined;
+}
+
+function sanitizeToolArgumentsForAuditTrailWithRawKeys(
+  toolName: string,
+  args: unknown,
+  discriminatorSource: unknown = args,
+): Record<string, unknown> {
+  const rawTool = ownAuditDiscriminator(discriminatorSource, 'tool');
+  const rawAction = ownAuditDiscriminator(discriminatorSource, 'action');
   const sanitized = sanitizeToolArgumentsForAudit(args);
   const unqualifiedToolName = unqualifyMcpToolName(toolName);
   const isMemoryReviewPropose = unqualifiedToolName === MEMORY_REVIEW_PROPOSE_TOOL;
@@ -835,10 +824,10 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
   const isDirectRightToForget = unqualifiedToolName === 'fbeast_memory_right_to_forget';
   const auditedTool = isDirectMemoryExport || isDirectMemoryRetentionReport || isDirectMemoryAccessAuditReport || isDirectMemoryReviewDecide || isMemoryReviewPropose || isDirectMemoryStore || isDirectMemorySourceAttribution || isDirectObserverLog || isDirectRightToForget
     ? unqualifiedToolName
-    : typeof sanitized['tool'] === 'string'
+    : rawTool ?? (typeof sanitized['tool'] === 'string'
       ? unqualifyMcpToolName(sanitized['tool'])
-      : unqualifiedToolName;
-  const auditedAction = typeof sanitized['action'] === 'string' ? unqualifyMcpToolName(sanitized['action']) : undefined;
+      : unqualifiedToolName);
+  const auditedAction = rawAction ?? (typeof sanitized['action'] === 'string' ? unqualifyMcpToolName(sanitized['action']) : undefined);
   if (auditedTool === MEMORY_EXPORT_TOOL || auditedAction === MEMORY_EXPORT_TOOL) {
     if (unqualifiedToolName === 'execute_tool') {
       return redactMemoryExportEnvelope(sanitized);
@@ -961,6 +950,12 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
   return sanitized;
 }
 
+export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unknown): Record<string, unknown> {
+  return redactAuditPropertyNames(
+    sanitizeToolArgumentsForAuditTrailWithRawKeys(toolName, args),
+  ) as Record<string, unknown>;
+}
+
 function acceptsSchemaType(type: string | readonly string[], value: unknown, actual: string): boolean {
   const allowedTypes = typeof type === 'string' ? [type] : type;
   return allowedTypes.some((candidate) => (candidate === 'integer' ? Number.isSafeInteger(value) : actual === candidate));
@@ -981,16 +976,18 @@ function exceedsStringCodePointLimit(value: string, maximum: number): boolean {
 }
 
 export function sanitizeRejectedToolArgumentsForAudit(tool: ToolSchemaDef, args: unknown): Record<string, unknown> {
-  if (!isObjectLike(args)) return sanitizeToolArgumentsForAuditTrail(tool.name, args);
-  if (!isPlainJsonObject(args)) return sanitizeToolArgumentsForAuditTrail(tool.name, args);
+  if (!isObjectLike(args) || Array.isArray(args) || !isPlainJsonObject(args)) {
+    return sanitizeToolArgumentsForAuditTrail(tool.name, args);
+  }
   const bounded: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
-  const descriptors = Object.getOwnPropertyDescriptors(args);
-  for (const key of Reflect.ownKeys(descriptors)) {
-    if (typeof key !== 'string') continue;
-    const descriptor = descriptors[key];
+  const retainedKeys = new Set<string>();
+  let retainedCount = 0;
+  const retainRejectedProperty = (key: string, descriptor: PropertyDescriptor | undefined): void => {
+    retainedCount += 1;
+    retainedKeys.add(key);
     if (!descriptor || 'get' in descriptor || 'set' in descriptor) {
       bounded[key] = '[accessor]';
-      continue;
+      return;
     }
     const value = descriptor.value;
     const property = tool.inputSchema.properties[key];
@@ -1001,8 +998,23 @@ export function sanitizeRejectedToolArgumentsForAudit(tool: ToolSchemaDef, args:
     } else {
       bounded[key] = value;
     }
+  };
+  for (const key of Object.keys(tool.inputSchema.properties)) {
+    if (retainedCount >= MAX_AUDIT_OBJECT_KEYS) break;
+    const descriptor = Object.getOwnPropertyDescriptor(args, key);
+    if (descriptor && descriptor.enumerable === false) retainRejectedProperty(key, descriptor);
   }
-  return sanitizeToolArgumentsForAuditTrail(tool.name, bounded);
+  for (const key in args) {
+    if (!Object.prototype.hasOwnProperty.call(args, key) || retainedKeys.has(key)) continue;
+    if (retainedCount >= MAX_AUDIT_OBJECT_KEYS) {
+      bounded[uniqueAuditPropertyName(bounded, '[audit-truncated]')] = '[keys omitted]';
+      break;
+    }
+    retainRejectedProperty(key, Object.getOwnPropertyDescriptor(args, key));
+  }
+  return redactAuditPropertyNames(
+    sanitizeToolArgumentsForAuditTrailWithRawKeys(tool.name, bounded, args),
+  ) as Record<string, unknown>;
 }
 
 export function validateToolArguments(

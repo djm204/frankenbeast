@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createMcpServer, sanitizeRejectedToolArgumentsForAudit, sanitizeToolArgumentsForAuditTrail, validateToolArguments, type ToolDef, type GovernanceGate, type AuditSink } from './server-factory.js';
+import { createMcpServer, sanitizeRejectedToolArgumentsForAudit, sanitizeToolArgumentsForAudit, sanitizeToolArgumentsForAuditTrail, validateToolArguments, type ToolDef, type GovernanceGate, type AuditSink } from './server-factory.js';
 
 describe('createMcpServer', () => {
   it('creates server with name and version', () => {
@@ -341,7 +341,7 @@ describe('createMcpServer', () => {
     expect(accessorRes.isError).toBe(true);
     expect(nonJsonRes.isError).toBe(true);
     expect(recorded).toEqual([
-      { tool: 'cfg', ok: false, decision: 'validation_error', args: { args: { secret: '[accessor]' } } },
+      { tool: 'cfg', ok: false, decision: 'validation_error', args: { args: { '[redacted-key-2]': '[accessor]' } } },
       { tool: 'cfg', ok: false, decision: 'validation_error', args: { args: { toJSON: '[non-json-value]' } } },
     ]);
   });
@@ -376,6 +376,125 @@ describe('createMcpServer', () => {
       },
       context: '[memory-store-value-redacted]',
     });
+  });
+
+  it('resolves proxy audit discriminators before the root key cap', () => {
+    const malformedEnvelope: Record<string, unknown> = {
+      args: { value: 'SECRET_MEMORY_VALUE', type: 'working' },
+    };
+    for (let index = 0; index < 50; index += 1) malformedEnvelope[`filler${index}`] = index;
+    malformedEnvelope['tool'] = 'fbeast_memory_store';
+
+    const audited = sanitizeToolArgumentsForAuditTrail('execute_tool', malformedEnvelope);
+    const rejected = sanitizeRejectedToolArgumentsForAudit({
+      name: 'execute_tool',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          tool: { type: 'string', description: 'tool' },
+          args: { type: 'object', description: 'args' },
+        },
+      },
+    }, malformedEnvelope);
+
+    for (const record of [audited, rejected]) {
+      expect(record['tool']).toBeUndefined();
+      expect(record['args']).toEqual({
+        value: '[memory-store-value-redacted]',
+        type: 'working',
+      });
+      expect(JSON.stringify(record)).not.toContain('SECRET_MEMORY_VALUE');
+    }
+  });
+
+  it('preserves bounded markers for non-enumerable priority and schema properties', () => {
+    const genericArgs: Record<string, unknown> = {};
+    Object.defineProperty(genericArgs, 'secret', { get: () => 'NEVER_READ', enumerable: false });
+    const rejectedArgs: Record<string, unknown> = {};
+    Object.defineProperty(rejectedArgs, 'hidden', { get: () => 'NEVER_READ', enumerable: false });
+
+    const generic = sanitizeToolArgumentsForAuditTrail('generic_tool', genericArgs);
+    const rejected = sanitizeRejectedToolArgumentsForAudit({
+      name: 'cfg',
+      inputSchema: {
+        type: 'object',
+        properties: { hidden: { type: 'string', description: 'hidden' } },
+      },
+    }, rejectedArgs);
+
+    expect(Object.values(generic)).toContain('[accessor]');
+    expect(Object.keys(generic)).not.toContain('secret');
+    expect(rejected).toEqual({ hidden: '[accessor]' });
+  });
+
+  it('redacts sensitive and oversized audit property names', () => {
+    const sensitiveKey = 'password=PROPERTY_NAME_SECRET';
+    const oversizedKey = `prefix-${'K'.repeat(10_000)}`;
+
+    const audited = sanitizeToolArgumentsForAuditTrail('generic_tool', {
+      [sensitiveKey]: 'sensitive-value',
+      [oversizedKey]: 'oversized-key-value',
+      safe: 'retained',
+    });
+    const serialized = JSON.stringify(audited);
+
+    expect(serialized).not.toContain(sensitiveKey);
+    expect(serialized).not.toContain('PROPERTY_NAME_SECRET');
+    expect(serialized).not.toContain(oversizedKey);
+    expect(serialized).not.toContain('sensitive-value');
+    expect(serialized).not.toContain('oversized-key-value');
+    expect(Object.keys(audited).every((key) => key.length <= 128)).toBe(true);
+    expect(audited['safe']).toBe('retained');
+  });
+
+  it('keeps generated redaction placeholders collision-free', () => {
+    const oversizedKey = `oversized-${'K'.repeat(1_000)}`;
+    const audited = sanitizeToolArgumentsForAuditTrail('generic_tool', {
+      password: 'sensitive',
+      '[redacted-key-1]': 'crafted-one',
+      [oversizedKey]: 'oversized-value',
+      '[redacted-key-3]': 'crafted-three',
+    });
+
+    expect(Object.keys(audited)).toHaveLength(4);
+    expect(Object.values(audited)).toContain('crafted-one');
+    expect(Object.values(audited)).toContain('crafted-three');
+    expect(Object.values(audited).filter((value) => value === '[redacted]')).toHaveLength(2);
+    expect(JSON.stringify(audited)).not.toContain('sensitive');
+    expect(JSON.stringify(audited)).not.toContain('oversized-value');
+  });
+
+  it('bounds sanitizer work before omitted million-element array tails', () => {
+    let descriptorReads = 0;
+    let ownKeyWalks = 0;
+    const hugeSparseArray = new Proxy(new Array<unknown>(1_000_000), {
+      getOwnPropertyDescriptor(target, property) {
+        descriptorReads += 1;
+        return Reflect.getOwnPropertyDescriptor(target, property);
+      },
+      ownKeys(target) {
+        ownKeyWalks += 1;
+        return Reflect.ownKeys(target);
+      },
+    });
+
+    const audited = sanitizeToolArgumentsForAudit({ payload: hugeSparseArray });
+
+    expect(audited['payload']).toEqual([
+      ...Array.from({ length: 25 }, () => '[non-json-value]'),
+      '[truncated items=999975]',
+    ]);
+    expect(descriptorReads).toBeLessThanOrEqual(25);
+    expect(ownKeyWalks).toBe(0);
+  });
+
+  it('uses non-disclosing truncation markers instead of raw-value hashes', () => {
+    const first = sanitizeToolArgumentsForAudit({ payload: `first-${'a'.repeat(1_000)}` });
+    const second = sanitizeToolArgumentsForAudit({ payload: `other-${'b'.repeat(1_000)}` });
+
+    expect(first).toEqual({ payload: '[truncated length=1006]' });
+    expect(second).toEqual({ payload: '[truncated length=1006]' });
+    expect(JSON.stringify(first)).not.toMatch(/sha256|[a-f0-9]{64}/i);
   });
 
   it('redacts observer metadata from direct and proxy audit records', () => {
@@ -921,7 +1040,7 @@ describe('createMcpServer', () => {
       })).toEqual({
         tool: '[memory-retention-report-args-redacted]',
         agentId: '[memory-retention-report-args-redacted]',
-        password: '[memory-retention-report-args-redacted]',
+        '[redacted-key-3]': '[memory-retention-report-args-redacted]',
         maxEntries: '[memory-retention-report-args-redacted]',
       });
     });
@@ -935,7 +1054,7 @@ describe('createMcpServer', () => {
       })).toEqual({
         tool: '[memory-export-args-redacted]',
         agentId: '[memory-export-args-redacted]',
-        password: '[memory-export-args-redacted]',
+        '[redacted-key-3]': '[memory-export-args-redacted]',
         redaction: 'safe',
       });
     });
