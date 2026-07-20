@@ -35,7 +35,7 @@ const NETWORK_CONFIG_PATH_DEFINITIONS = {
   'chat.enabled': { type: 'boolean' },
   'chat.host': { type: 'string' },
   'chat.port': { type: 'number' },
-  'chat.model': { type: 'string' },
+  'chat.model': { type: 'string', unsetOnEmpty: true },
   'beastsDaemon.enabled': { type: 'boolean' },
   'beastsDaemon.host': { type: 'string' },
   'beastsDaemon.port': { type: 'number' },
@@ -75,6 +75,7 @@ type ConfigPathDefinition = {
   type: ConfigValueType;
   values?: readonly string[];
   sensitive?: boolean;
+  unsetOnEmpty?: boolean;
 };
 
 export type NetworkConfigPath = keyof typeof NETWORK_CONFIG_PATH_DEFINITIONS;
@@ -160,8 +161,32 @@ function cloneWithSet<T extends object>(source: T, segments: string[], value: un
   return root as T;
 }
 
+function cloneWithDelete<T extends object>(source: T, segments: string[]): T {
+  const root: Record<string, unknown> = { ...(source as Record<string, unknown>) };
+  let cursor: Record<string, unknown> = root;
+  let sourceCursor: Record<string, unknown> = source as Record<string, unknown>;
+
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    const segment = segments[index]!;
+    const sourceValue = sourceCursor[segment];
+    if (sourceValue === null || typeof sourceValue !== 'object' || Array.isArray(sourceValue)) {
+      return root as T;
+    }
+    const next = { ...(sourceValue as Record<string, unknown>) };
+    cursor[segment] = next;
+    cursor = next;
+    sourceCursor = sourceValue as Record<string, unknown>;
+  }
+
+  delete cursor[segments[segments.length - 1]!];
+  return root as T;
+}
+
 export function setNetworkConfigValue<T extends object>(config: T, path: string, rawValue: string): T {
-  getPathDefinition(path);
+  const definition = getPathDefinition(path);
+  if (rawValue.trim() === '' && definition.unsetOnEmpty) {
+    return cloneWithDelete(config, path.split('.'));
+  }
   const coerced = coerceNetworkConfigValue(path, rawValue);
   return cloneWithSet(config, path.split('.'), coerced);
 }

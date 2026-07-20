@@ -61,7 +61,7 @@ describe('BeastApiClient', () => {
       chatSessionId: 'sess-1',
       moduleConfig: { planner: true, skills: true },
     });
-    await client.listAgents();
+    await client.listAgentPage();
     await client.getAgent('agent-1');
 
     expect(mockFetch).toHaveBeenNthCalledWith(
@@ -96,6 +96,22 @@ describe('BeastApiClient', () => {
     expect(mockFetch).toHaveBeenNthCalledWith(
       3,
       'http://localhost:3000/v1/beasts/agents/agent-1',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
+  it('requests a tracked-agent page with an encoded cursor', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { agents: [], nextCursor: 'next-page' } }),
+    });
+
+    await expect(client.listAgentPage({ limit: 25, cursor: 'cursor/with+symbols=' })).resolves.toEqual({
+      agents: [],
+      nextCursor: 'next-page',
+    });
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://localhost:3000/v1/beasts/agents?limit=25&cursor=cursor%2Fwith%2Bsymbols%3D',
       expect.objectContaining({ method: 'GET' }),
     );
   });

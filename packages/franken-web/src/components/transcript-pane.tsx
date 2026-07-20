@@ -18,7 +18,7 @@ export function TranscriptPane({ messages, onRetryMessage, resetKey, retryDisabl
   );
 
   return (
-    <section className="transcript-pane" aria-label="Transcript">
+    <section className="transcript-pane terminal-chat" aria-label="Transcript">
       <div className="transcript-pane__header">
         <div>
           <p className="eyebrow">Command Console</p>

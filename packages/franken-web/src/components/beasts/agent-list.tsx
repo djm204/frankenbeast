@@ -12,6 +12,9 @@ interface AgentListProps {
   onCreateAgent: () => void;
   createAgentDisabled?: boolean;
   createAgentDisabledReason?: string | null;
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => Promise<void>;
 }
 
 export function AgentList({
@@ -22,6 +25,9 @@ export function AgentList({
   onCreateAgent,
   createAgentDisabled = false,
   createAgentDisabledReason,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
 }: AgentListProps) {
   const [density, setDensity] = useState<Density>('comfortable');
   const [search, setSearch] = useState('');
@@ -91,7 +97,13 @@ export function AgentList({
       {/* Content */}
       {filtered.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-6 text-beast-muted p-8">
-          <p className="text-sm">{agents.length === 0 ? 'No agents yet' : 'No matching agents'}</p>
+          <p className="text-sm">
+            {agents.length === 0
+              ? 'No agents yet'
+              : hasMore
+                ? 'No matching loaded agents. Load more agents to continue searching.'
+                : 'No matching agents'}
+          </p>
           {agents.length === 0 && (
             <div className="flex flex-col items-center gap-3 text-center">
               {createAgentDisabled && createAgentDisabledReason && (
@@ -132,6 +144,19 @@ export function AgentList({
             <ScrollArea.Thumb className="bg-beast-border rounded-full" />
           </ScrollArea.Scrollbar>
         </ScrollArea.Root>
+      )}
+      {hasMore && onLoadMore && (
+        <div className="flex justify-center px-6 py-3 border-t border-beast-border shrink-0">
+          <button
+            type="button"
+            onClick={() => { void onLoadMore(); }}
+            disabled={loadingMore}
+            className="px-4 py-2 rounded-lg border border-beast-border text-beast-muted text-sm
+              hover:text-beast-text hover:bg-beast-elevated transition-colors disabled:cursor-wait disabled:opacity-50"
+          >
+            {loadingMore ? 'Loading agents…' : 'Load more agents'}
+          </button>
+        </div>
       )}
     </div>
   );

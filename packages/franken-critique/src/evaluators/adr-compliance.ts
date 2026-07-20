@@ -1,5 +1,6 @@
 import type { Evaluator, EvaluationInput, EvaluationResult, EvaluationFinding } from './evaluator.js';
 import type { MemoryPort } from '../types/contracts.js';
+import { createScore } from '../types/common.js';
 
 const RELEVANCE_THRESHOLD = 0.7;
 const TOP_K = 5;
@@ -31,7 +32,7 @@ export class ADRComplianceEvaluator implements Evaluator {
     }
 
     const hasHighRelevance = adrs.some((a) => a.relevanceScore >= RELEVANCE_THRESHOLD);
-    const score = hasHighRelevance ? 0.5 : 1;
+    const score = createScore(hasHighRelevance ? 0.5 : 1);
 
     return {
       evaluatorName: this.name,

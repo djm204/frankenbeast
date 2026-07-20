@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { mkdir, readFile, open, chmod } from 'node:fs/promises';
+import { mkdir, open, chmod } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { isoNow } from '@franken/types';
 
@@ -193,10 +193,19 @@ export class FileApprovalAuditLog implements ApprovalAuditLog {
 
   private async readEntries(): Promise<ApprovalAuditEntry[]> {
     let raw: string;
+    let file;
     try {
-      raw = await readFile(this.path, 'utf8');
-    } catch {
-      return [];
+      file = await open(this.path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
+        return [];
+      }
+      throw error;
+    }
+    try {
+      raw = await file.readFile({ encoding: 'utf8' });
+    } finally {
+      await file.close();
     }
 
     const entries: ApprovalAuditEntry[] = [];

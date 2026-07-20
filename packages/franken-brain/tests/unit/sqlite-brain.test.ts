@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { Worker } from 'node:worker_threads';
 import Database from 'better-sqlite3';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { BrainSnapshotSchema } from '@franken/types';
@@ -1647,6 +1649,29 @@ describe('SqliteBrain', () => {
         WorkingMemoryLimitError,
       );
       bounded.close();
+    });
+
+    it('enforces maxEntries when absorbing writes from another connection', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-concurrent-limit-'));
+      const dbPath = join(dir, 'brain.db');
+      let first: SqliteBrain | undefined;
+      let second: SqliteBrain | undefined;
+
+      try {
+        first = new SqliteBrain(dbPath, { maxEntries: 1 });
+        second = new SqliteBrain(dbPath, { maxEntries: 1 });
+        first.working.set('first', 1);
+        second.working.set('second', 2);
+        second.flush();
+
+        expect(() => first!.flush()).toThrow(WorkingMemoryLimitError);
+        expect(first.working.snapshot()).toEqual({ first: 1 });
+        expect(first.working.usage()).toMatchObject({ entries: 1 });
+      } finally {
+        first?.close();
+        second?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it('allows overwriting an existing key at maxEntries', () => {
@@ -6589,6 +6614,246 @@ describe('SqliteBrain', () => {
         ]),
       );
     });
+  });
+
+  describe('concurrent file-backed stores', () => {
+    it('refreshes clean cached keys before flushing unrelated local changes', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-concurrent-refresh-'));
+      const dbPath = join(dir, 'brain.db');
+      let stale: SqliteBrain | undefined;
+      let writer: SqliteBrain | undefined;
+      let verifier: SqliteBrain | undefined;
+
+      try {
+        writer = new SqliteBrain(dbPath);
+        writer.working.set('updated-elsewhere', 'old');
+        writer.working.set('deleted-elsewhere', 'present');
+        writer.flush();
+        stale = new SqliteBrain(dbPath);
+
+        writer.working.set('updated-elsewhere', 'new');
+        writer.working.delete('deleted-elsewhere');
+        writer.flush();
+
+        stale.working.set('local-change', 'preserved');
+        stale.flush();
+
+        verifier = new SqliteBrain(dbPath);
+        expect(verifier.working.snapshot()).toEqual({
+          'updated-elsewhere': 'new',
+          'local-change': 'preserved',
+        });
+      } finally {
+        verifier?.close();
+        stale?.close();
+        writer?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('fails closed without mutating runtime state when an external row is corrupt', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-concurrent-corrupt-'));
+      const dbPath = join(dir, 'brain.db');
+      let instance: SqliteBrain | undefined;
+      let db: Database.Database | undefined;
+
+      try {
+        instance = new SqliteBrain(dbPath);
+        instance.working.set('safe', { preserved: true });
+        instance.flush();
+
+        db = new Database(dbPath);
+        db.prepare(
+          `INSERT INTO working_memory (key, value, updated_at, schema_version) VALUES (?, ?, ?, ?)`,
+        ).run(
+          'external-corrupt',
+          '{not-json',
+          new Date().toISOString(),
+          CURRENT_MEMORY_SCHEMA_VERSION,
+        );
+
+        expect(() => instance!.flush()).toThrow(CorruptWorkingMemoryRowError);
+        expect(instance.working.snapshot()).toEqual({ safe: { preserved: true } });
+        expect(
+          db.prepare(`SELECT value FROM working_memory WHERE key = ?`).get(
+            'external-corrupt',
+          ),
+        ).toEqual({ value: '{not-json' });
+      } finally {
+        db?.close();
+        instance?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('preserves simultaneous working, episodic, and recovery writes while snapshots are read', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-concurrent-'));
+      const dbPath = join(dir, 'brain.db');
+      const workerCount = 3;
+      const writesPerWorker = 6;
+      const workers: Worker[] = [];
+      const workerSourcePath = fileURLToPath(
+        new URL('../../src/sqlite-brain.ts', import.meta.url),
+      );
+      const vitestConfigPath = fileURLToPath(
+        new URL('../../vitest.config.ts', import.meta.url),
+      );
+      const workerScript = String.raw`
+        const { parentPort, workerData } = require('node:worker_threads');
+
+        void (async () => {
+          const { createServer } = await import('vite');
+          const vite = await createServer({
+            configFile: workerData.vitestConfigPath,
+            logLevel: 'silent',
+            server: { middlewareMode: true, hmr: false, watch: null },
+          });
+          const { SqliteBrain } = await vite.ssrLoadModule(workerData.sourcePath);
+          const brain = new SqliteBrain(workerData.dbPath);
+          parentPort.postMessage({ type: 'ready' });
+          parentPort.once('message', async (message) => {
+            if (message?.type !== 'start') return;
+            try {
+              for (let index = 0; index < workerData.writesPerWorker; index += 1) {
+                const key = 'worker-' + workerData.workerId + '-entry-' + index;
+                brain.working.set(key, { workerId: workerData.workerId, index });
+                brain.flush();
+                brain.episodic.record({
+                  type: 'observation',
+                  step: 'worker-' + workerData.workerId,
+                  summary: 'concurrent event ' + workerData.workerId + ':' + index,
+                  details: { workerId: workerData.workerId, index },
+                  createdAt: new Date(
+                    Date.UTC(2026, 6, 19, 0, workerData.workerId, index),
+                  ).toISOString(),
+                });
+                brain.recovery.checkpoint({
+                  runId: 'concurrent-run-' + workerData.workerId + '-' + index,
+                  phase: 'execution',
+                  step: index,
+                  context: { workerId: workerData.workerId, index },
+                  timestamp: new Date(
+                    Date.UTC(2026, 6, 19, 1, workerData.workerId, index),
+                  ).toISOString(),
+                });
+
+                const roundTrip = JSON.parse(JSON.stringify(brain.serialize()));
+                if (roundTrip.working[key]?.index !== index) {
+                  throw new Error('snapshot lost the worker\'s latest working-memory write');
+                }
+                if (!Array.isArray(roundTrip.episodic)) {
+                  throw new Error('snapshot episodic memory is corrupted');
+                }
+              }
+              brain.close();
+              await vite.close();
+              parentPort.postMessage({ type: 'done' });
+            } catch (error) {
+              brain.close();
+              await vite.close();
+              parentPort.postMessage({
+                type: 'error',
+                message: error instanceof Error ? error.stack ?? error.message : String(error),
+              });
+            }
+          });
+        })().catch((error) => {
+          parentPort.postMessage({
+            type: 'error',
+            message: error instanceof Error ? error.stack ?? error.message : String(error),
+          });
+        });
+      `;
+
+      try {
+        const controls = Array.from({ length: workerCount }, (_, workerId) => {
+          const worker = new Worker(workerScript, {
+            eval: true,
+            workerData: {
+              dbPath,
+              sourcePath: workerSourcePath,
+              vitestConfigPath,
+              workerId,
+              writesPerWorker,
+            },
+          });
+          workers.push(worker);
+
+          let markReady: (() => void) | undefined;
+          let finish: (() => void) | undefined;
+          let fail: ((error: Error) => void) | undefined;
+          let failReady: ((error: Error) => void) | undefined;
+          let isReady = false;
+          let isDone = false;
+          const ready = new Promise<void>((resolve, reject) => {
+            markReady = resolve;
+            failReady = reject;
+          });
+          const done = new Promise<void>((resolve, reject) => {
+            finish = resolve;
+            fail = reject;
+          });
+          const rejectWorker = (error: Error): void => {
+            if (isReady) fail?.(error);
+            else failReady?.(error);
+          };
+          worker.on('message', (message: { type?: string; message?: string }) => {
+            if (message.type === 'ready') {
+              isReady = true;
+              markReady?.();
+            }
+            if (message.type === 'done') {
+              isDone = true;
+              finish?.();
+            }
+            if (message.type === 'error') {
+              const error = new Error(message.message ?? 'worker failed');
+              rejectWorker(error);
+            }
+          });
+          worker.on('error', (error) => {
+            const normalized: Error = error instanceof Error
+              ? error
+              : new Error(String(error));
+            rejectWorker(normalized);
+          });
+          worker.on('exit', (code) => {
+            if (!isDone) {
+              rejectWorker(new Error(`worker exited before completion with code ${code}`));
+            }
+          });
+          return { worker, ready, done };
+        });
+
+        await Promise.all(controls.map(({ ready }) => ready));
+        for (const { worker } of controls) worker.postMessage({ type: 'start' });
+        await Promise.all(controls.map(({ done }) => done));
+
+        const verifier = new SqliteBrain(dbPath);
+        try {
+          const expectedWrites = workerCount * writesPerWorker;
+          const snapshot = verifier.serialize();
+          expect(() => BrainSnapshotSchema.parse(snapshot)).not.toThrow();
+          expect(Object.keys(snapshot.working)).toHaveLength(expectedWrites);
+          expect(verifier.episodic.count()).toBe(expectedWrites);
+          expect(verifier.recovery.listCheckpoints()).toHaveLength(expectedWrites);
+
+          for (let workerId = 0; workerId < workerCount; workerId += 1) {
+            for (let index = 0; index < writesPerWorker; index += 1) {
+              expect(snapshot.working[`worker-${workerId}-entry-${index}`]).toEqual({
+                workerId,
+                index,
+              });
+            }
+          }
+        } finally {
+          verifier.close();
+        }
+      } finally {
+        await Promise.all(workers.map((worker) => worker.terminate()));
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 30_000);
   });
 
   describe('constructor', () => {

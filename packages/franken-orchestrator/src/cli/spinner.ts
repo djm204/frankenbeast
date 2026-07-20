@@ -1,6 +1,6 @@
 import { wallClockNow } from '@franken/types';
 import { isPlainOutput, stripAnsi } from '../logging/beast-logger.js';
-const FRAMES = ['|', '/', '-', '\\'];
+const FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const INTERVAL_MS = 100;
 const LABEL_ROTATE_MS = 5_000;
 

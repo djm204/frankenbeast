@@ -54,6 +54,20 @@ const baseProps = {
 };
 
 describe('BeastsPage', () => {
+  it('forwards later-page controls to the agent list', () => {
+    const onLoadMoreAgents = vi.fn().mockResolvedValue(undefined);
+    render(
+      <BeastsPage
+        {...baseProps}
+        hasMoreAgents={true}
+        onLoadMoreAgents={onLoadMoreAgents}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load more agents' }));
+    expect(onLoadMoreAgents).toHaveBeenCalledTimes(1);
+  });
+
   it('renders the agent list', () => {
     render(<BeastsPage {...baseProps} />);
     expect(screen.getByText('agent-1')).toBeTruthy();

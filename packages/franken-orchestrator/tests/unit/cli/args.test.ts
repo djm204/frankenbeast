@@ -6,7 +6,7 @@ describe('parseArgs', () => {
     const args = parseArgs([]);
     expect(args.subcommand).toBeUndefined();
     expect(args.budget).toBe(10);
-    expect(args.provider).toBe('claude');
+    expect(args.provider).toBe('codex');
     expect(args.noPr).toBe(false);
     expect(args.verbose).toBe(false);
     expect(args.plain).toBe(false);

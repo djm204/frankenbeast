@@ -8,6 +8,10 @@ import { RUN_CONFIG_INTEGRITY_ENV, RUN_CONFIG_INTEGRITY_SECRET_ENV } from '../..
 describe('CodexProvider', () => {
   const provider = new CodexProvider();
 
+  it('lets Codex select its configured default chat model', () => {
+    expect(provider.chatModel).toBeUndefined();
+  });
+
   it('implements ICliProvider', () => {
     const p: ICliProvider = provider;
     expect(p.name).toBe('codex');

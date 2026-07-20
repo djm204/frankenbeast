@@ -1,0 +1,391 @@
+/*
+ * Terminal transcript theme, scoped to the chat + interview surfaces via the
+ * .terminal-chat / .terminal-composer / .terminal-activity / .interview-transcript
+ * roots. Nothing here targets global selectors, so the rest of the dashboard is
+ * unaffected.
+ */
+
+.terminal-chat,
+.terminal-composer,
+.terminal-activity,
+.interview-transcript {
+  --term-bg: #0d1117;
+  --term-panel: #10151c;
+  --term-border: #29313c;
+  --term-text: #e6edf3;
+  --term-muted: #8b949e;
+  --term-accent: #3fb950;
+  --term-user: #58a6ff;
+  --term-beast: #d2a8ff;
+  --term-error: #f85149;
+  --term-mono: ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, Consolas, monospace;
+  font-family: var(--term-mono);
+}
+
+/* ---------- transcript ---------- */
+
+.terminal-chat {
+  background: var(--term-bg);
+  border: 1px solid var(--term-border);
+  border-radius: 8px;
+  color: var(--term-text);
+}
+
+.terminal-chat .transcript-pane__header {
+  border-bottom: 1px solid var(--term-border);
+  padding: 0.5rem 0.9rem;
+}
+
+.terminal-chat .transcript-pane__header .eyebrow {
+  color: var(--term-accent);
+  font-family: var(--term-mono);
+  letter-spacing: 0.08em;
+}
+
+.terminal-chat .transcript-pane__header .eyebrow::before {
+  content: '● ';
+  color: var(--term-accent);
+}
+
+.terminal-chat .transcript-pane__header h2 {
+  font-family: var(--term-mono);
+  font-size: 0.95rem;
+  color: var(--term-text);
+}
+
+.terminal-chat .transcript-pane__meta {
+  color: var(--term-muted);
+  font-size: 0.72rem;
+}
+
+.terminal-chat .transcript-pane__body {
+  background: var(--term-bg);
+  padding: 0.75rem 0.9rem;
+}
+
+.terminal-chat .empty-state {
+  color: var(--term-muted);
+  border: 1px dashed var(--term-border);
+  background: transparent;
+}
+
+/* turns: flat, prefix-glyphed lines instead of cards */
+.terminal-chat .message-card {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0.35rem 0 0.55rem;
+  border-bottom: none;
+}
+
+.terminal-chat .message-card__meta {
+  gap: 0.5rem;
+  margin-bottom: 0.15rem;
+}
+
+.terminal-chat .message-card__role {
+  font-family: var(--term-mono);
+  font-size: 0.78rem;
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+  background: transparent;
+  padding: 0;
+}
+
+.terminal-chat .message-card--user .message-card__role {
+  color: var(--term-user);
+}
+
+.terminal-chat .message-card--user .message-card__role::before {
+  content: '> ';
+}
+
+.terminal-chat .message-card--assistant .message-card__role {
+  color: var(--term-beast);
+}
+
+.terminal-chat .message-card--assistant .message-card__role::before {
+  content: '✦ ';
+}
+
+.terminal-chat .message-card__tier,
+.terminal-chat .message-card__receipt {
+  background: transparent;
+  border: 1px solid var(--term-border);
+  border-radius: 4px;
+  color: var(--term-muted);
+  font-family: var(--term-mono);
+  font-size: 0.66rem;
+  padding: 0 0.35rem;
+}
+
+.terminal-chat .message-card__content {
+  color: var(--term-text);
+  font-family: var(--term-mono);
+  font-size: 0.84rem;
+  line-height: 1.55;
+  padding-left: 1.15rem;
+}
+
+.terminal-chat .message-card__error {
+  color: var(--term-error);
+  font-family: var(--term-mono);
+  font-size: 0.78rem;
+  padding-left: 1.15rem;
+}
+
+.terminal-chat .message-card--typing .message-card__content::after {
+  content: '▋';
+  color: var(--term-accent);
+  animation: term-blink 1s steps(2, start) infinite;
+  margin-left: 0.15rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terminal-chat .message-card--typing .message-card__content::after {
+    animation: none;
+  }
+}
+
+@keyframes term-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+.terminal-chat .scroll-jump-button {
+  font-family: var(--term-mono);
+  background: var(--term-panel);
+  border: 1px solid var(--term-border);
+  color: var(--term-accent);
+}
+
+/* ---------- composer ---------- */
+
+.terminal-composer {
+  background: var(--term-bg);
+  border: 1px solid var(--term-border);
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  color: var(--term-text);
+}
+
+.terminal-composer .composer__field {
+  position: relative;
+}
+
+.terminal-composer .composer__field > .eyebrow {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.terminal-composer .composer__field::before {
+  content: '❯';
+  position: absolute;
+  left: 0.65rem;
+  top: 0.62rem;
+  color: var(--term-accent);
+  font-family: var(--term-mono);
+  font-size: 0.9rem;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.terminal-composer .composer__textarea {
+  background: var(--term-panel);
+  border: 1px solid var(--term-border);
+  border-radius: 6px;
+  color: var(--term-text);
+  font-family: var(--term-mono);
+  font-size: 0.84rem;
+  padding-left: 1.9rem;
+  caret-color: var(--term-accent);
+}
+
+.terminal-composer .composer__textarea::placeholder {
+  color: var(--term-muted);
+}
+
+.terminal-composer .composer__textarea:focus {
+  outline: none;
+  border-color: var(--term-accent);
+  box-shadow: 0 0 0 1px var(--term-accent);
+}
+
+.terminal-composer .composer__help {
+  color: var(--term-muted);
+  font-family: var(--term-mono);
+  font-size: 0.7rem;
+}
+
+.terminal-composer .composer__footer {
+  border-top: 1px solid var(--term-border);
+  margin-top: 0.5rem;
+  padding-top: 0.45rem;
+}
+
+.terminal-composer .composer__status {
+  color: var(--term-muted);
+  font-family: var(--term-mono);
+  font-size: 0.7rem;
+}
+
+.terminal-composer .composer__status > span:not(.composer__status-message)::before {
+  content: '· ';
+  color: var(--term-accent);
+}
+
+.terminal-composer .composer__error {
+  border: 1px solid var(--term-error);
+  border-radius: 6px;
+  color: var(--term-error);
+  font-family: var(--term-mono);
+  background: transparent;
+}
+
+.terminal-composer .button {
+  font-family: var(--term-mono);
+}
+
+.terminal-composer .button--primary {
+  background: var(--term-accent);
+  border-color: var(--term-accent);
+  color: #04150a;
+}
+
+.terminal-composer .button--secondary {
+  background: transparent;
+  border: 1px solid var(--term-border);
+  color: var(--term-text);
+}
+
+/* ---------- activity rail ---------- */
+
+.terminal-activity {
+  background: var(--term-bg);
+  border: 1px solid var(--term-border);
+  color: var(--term-text);
+}
+
+.terminal-activity .eyebrow {
+  color: var(--term-accent);
+  font-family: var(--term-mono);
+}
+
+.terminal-activity .rail-card__empty {
+  color: var(--term-muted);
+  font-family: var(--term-mono);
+  font-size: 0.75rem;
+}
+
+.terminal-activity .activity-event {
+  background: transparent;
+  border: none;
+  border-left: 2px solid var(--term-border);
+  border-radius: 0;
+  padding: 0.3rem 0 0.3rem 0.6rem;
+}
+
+.terminal-activity .activity-event__title {
+  font-family: var(--term-mono);
+  font-size: 0.78rem;
+  color: var(--term-text);
+}
+
+.terminal-activity .activity-event__title::before {
+  content: '▸ ';
+  color: var(--term-accent);
+}
+
+.terminal-activity .activity-event--error {
+  border-left-color: var(--term-error);
+}
+
+.terminal-activity .activity-event--warning {
+  border-left-color: #d29922;
+}
+
+.terminal-activity .activity-event__type,
+.terminal-activity .activity-event__summary,
+.terminal-activity .activity-event__timestamp {
+  font-family: var(--term-mono);
+  color: var(--term-muted);
+  font-size: 0.7rem;
+}
+
+.terminal-activity .activity-event__chip {
+  background: transparent;
+  border: 1px solid var(--term-border);
+  border-radius: 4px;
+  font-family: var(--term-mono);
+  font-size: 0.64rem;
+  color: var(--term-muted);
+}
+
+/* ---------- interview transcript (beast wizard) ---------- */
+
+.interview-transcript {
+  background: var(--term-bg);
+  border: 1px solid var(--term-border);
+  border-radius: 8px;
+  padding: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.interview-turn {
+  padding-left: 0.15rem;
+}
+
+.interview-turn label {
+  color: var(--term-beast);
+  font-family: var(--term-mono);
+  font-size: 0.8rem;
+}
+
+.interview-turn::before {
+  content: '✦ question ' attr(data-step);
+  display: block;
+  color: var(--term-beast);
+  font-family: var(--term-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.3rem;
+}
+
+.interview-turn input[type='text'],
+.interview-turn textarea,
+.interview-turn select {
+  background: var(--term-panel) !important;
+  border-color: var(--term-border) !important;
+  color: var(--term-text) !important;
+  font-family: var(--term-mono);
+  font-size: 0.82rem;
+}
+
+.interview-turn--answered {
+  opacity: 0.85;
+}
+
+.interview-turn--active input[type='text'],
+.interview-turn--active textarea,
+.interview-turn--active select {
+  border-color: var(--term-accent) !important;
+}
+
+.interview-transcript__pending {
+  color: var(--term-muted);
+  font-family: var(--term-mono);
+  font-size: 0.72rem;
+}
+
+.interview-transcript__pending::before {
+  content: '⠿ ';
+  color: var(--term-accent);
+}

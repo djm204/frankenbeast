@@ -1,6 +1,9 @@
 import { SkillTrigger, TriggerRegistry, evaluateHighRiskActionPolicy } from '@franken/governor';
 import type { HighRiskActionClass, HighRiskActionEvidence, TriggerResult, TriggerSeverity } from '@franken/governor';
 import { CostCalculator, DEFAULT_PRICING } from '@franken/observer';
+import { McpConfigSchema, SkillToolManifestSchema, type ToolDefinition } from '@franken/types';
+import { lstatSync, readFileSync, readdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 import { createSqliteStore } from '../shared/sqlite-store.js';
 
@@ -650,7 +653,7 @@ function extractUrl(text: string): string | undefined {
 function inferHighRiskActionClass(action: string, context: string): HighRiskActionClass | undefined {
   const explicit = HIGH_RISK_ACTIONS[action];
   if (explicit !== undefined) return explicit;
-  const combined = `${action} ${context}`;
+  const combined = `${action.replace(/[_-]+/g, ' ')} ${context}`;
   return HIGH_RISK_ACTION_NAME_PATTERNS.find(([pattern]) => pattern.test(combined))?.[1];
 }
 
@@ -761,9 +764,214 @@ function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; m
   return true;
 }
 
-function assessAction(action: string, context: string): GovernorCheckResult {
+interface QualifiedSkillAction {
+  serverName: string;
+  toolName: string;
+}
+
+function parseSlashQualifiedSkillAction(action: string): QualifiedSkillAction | undefined {
+  if (action.startsWith('mcp__')) return undefined;
+  const slash = action.indexOf('/');
+  if (slash > 0 && slash < action.length - 1) {
+    return { serverName: action.slice(0, slash), toolName: action.slice(slash + 1) };
+  }
+  return undefined;
+}
+
+function readSkillToolProfiles(toolsPath: string): ToolDefinition[] | undefined {
+  try {
+    if (!lstatSync(toolsPath).isFile()) return undefined;
+    const parsed = SkillToolManifestSchema.safeParse(JSON.parse(readFileSync(toolsPath, 'utf8')));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readEnabledSkills(configPath: string): Set<string> | undefined {
+  try {
+    const config = JSON.parse(readFileSync(configPath, 'utf8')) as unknown;
+    if (config === null || typeof config !== 'object' || Array.isArray(config)) return undefined;
+    const skills = (config as Record<string, unknown>)['skills'];
+    if (skills === undefined) return new Set();
+    if (skills === null || typeof skills !== 'object' || Array.isArray(skills)) return undefined;
+    const enabled = (skills as Record<string, unknown>)['enabled'];
+    if (enabled === undefined) return new Set();
+    if (!Array.isArray(enabled) || enabled.some((name) => typeof name !== 'string')) return undefined;
+    return new Set(enabled as string[]);
+  } catch {
+    return undefined;
+  }
+}
+
+function readSkillServerNames(skillDir: string): { names: Set<string>; valid: boolean } {
+  try {
+    if (!lstatSync(join(skillDir, 'mcp.json')).isFile()) return { names: new Set(), valid: false };
+    const config = JSON.parse(readFileSync(join(skillDir, 'mcp.json'), 'utf8')) as unknown;
+    const rawServers = config !== null && typeof config === 'object' && !Array.isArray(config)
+      ? (config as Record<string, unknown>)['mcpServers']
+      : undefined;
+    const rawNames = rawServers !== null && typeof rawServers === 'object' && !Array.isArray(rawServers)
+      ? new Set(Object.keys(rawServers))
+      : new Set<string>();
+    const parsed = McpConfigSchema.safeParse(config);
+    return parsed.success
+      ? { names: new Set(Object.keys(parsed.data.mcpServers)), valid: true }
+      : { names: rawNames, valid: false };
+  } catch {
+    return { names: new Set(), valid: false };
+  }
+}
+
+function profileRequiresHitl(profile: ToolDefinition): boolean {
+  // SkillManager normalizes omitted flags to true when installing a profile;
+  // preserve that fail-safe default when reading an existing manifest.
+  return profile.requiresHitl !== false;
+}
+
+function skillRequiresHitl(configPath: string | undefined, skillsDirs: string[], action: string): boolean {
+  if (configPath === undefined || skillsDirs.length === 0) return false;
+  const mcpQualifiedName = action.startsWith('mcp__') ? action.slice('mcp__'.length) : undefined;
+  const slashQualifiedAction = parseSlashQualifiedSkillAction(action);
+  if (mcpQualifiedName === undefined && slashQualifiedAction === undefined) return false;
+
+  const enabledSkills = readEnabledSkills(configPath);
+  const configUnreadable = enabledSkills === undefined;
+  if (!configUnreadable && enabledSkills.size === 0) return false;
+  const skillDirectories = new Map<string, string>();
+  for (const skillsDir of skillsDirs) {
+    try {
+      for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
+        if (entry.isDirectory() && !skillDirectories.has(entry.name)) {
+          skillDirectories.set(entry.name, join(skillsDir, entry.name));
+        }
+      }
+    } catch {
+      // An external active-config skill root may not exist; the trusted
+      // database-adjacent root is checked first and external manifests are only
+      // a fallback when the project has no same-named installed skill.
+    }
+  }
+  if (!configUnreadable) {
+    const missingEnabledSkills = [...enabledSkills].filter((skillName) => !skillDirectories.has(skillName));
+    // An external active-config root is untrusted for HITL policy, but its MCP
+    // registration names can conservatively identify calls that belong to an
+    // enabled skill whose trusted project manifest is missing. Such calls always
+    // fail closed; external tools.json metadata is never used to approve them.
+    const missingSkillServerNames = new Set(missingEnabledSkills.flatMap((skillName) => [
+      ...readSkillServerNames(join(dirname(configPath), 'skills', skillName)).names,
+    ]));
+    if (mcpQualifiedName !== undefined
+      && (missingEnabledSkills.some((skillName) => mcpQualifiedName.startsWith(`${skillName}__`))
+        || [...missingSkillServerNames].some((serverName) => mcpQualifiedName.startsWith(`${serverName}__`)))) {
+      return true;
+    }
+    if (slashQualifiedAction !== undefined
+      && (missingEnabledSkills.includes(slashQualifiedAction.serverName)
+        || missingSkillServerNames.has(slashQualifiedAction.serverName))) {
+      return true;
+    }
+  }
+  if (skillDirectories.size === 0) return false;
+
+  const skillRecords = [...skillDirectories]
+    .filter(([skillName]) => configUnreadable || enabledSkills.has(skillName))
+    .map(([skillName, skillDir]) => ({
+      skillName,
+      skillDir,
+      serverConfig: readSkillServerNames(skillDir),
+    }));
+  const globallyMatchingServerName = mcpQualifiedName === undefined
+    ? undefined
+    : skillRecords
+        .flatMap(({ serverConfig }) => [...serverConfig.names])
+        .filter((serverName) => mcpQualifiedName.startsWith(`${serverName}__`))
+        .sort((left, right) => right.length - left.length)[0];
+
+  for (const { skillName, skillDir, serverConfig } of skillRecords) {
+    const { names: serverNames, valid: serverConfigValid } = serverConfig;
+    let toolNames: string[] = [];
+
+    if (mcpQualifiedName !== undefined) {
+      if (globallyMatchingServerName !== undefined) {
+        if (!serverNames.has(globallyMatchingServerName)) continue;
+        toolNames = [mcpQualifiedName.slice(globallyMatchingServerName.length + 2)];
+      } else {
+        // Installed skills conventionally use their directory name as the MCP
+        // server key. If that registration is stale/unreadable, keep calls to the
+        // known directory-name server fail-closed instead of silently skipping it.
+        if (mcpQualifiedName.startsWith(`${skillName}__`)) return true;
+        continue;
+      }
+    } else if (slashQualifiedAction !== undefined) {
+      const matchesRegisteredServer = serverNames.has(slashQualifiedAction.serverName);
+      const matchesSkillAlias = slashQualifiedAction.serverName === skillName;
+      if (!matchesRegisteredServer && !matchesSkillAlias) continue;
+      if (matchesSkillAlias && serverNames.size === 0) return true;
+      toolNames = [slashQualifiedAction.toolName];
+    }
+
+    // A declared server from a malformed MCP manifest is not trusted to opt out
+    // of review. Preserve its raw key only to recognize stale client calls and
+    // fail them closed.
+    if (!serverConfigValid) return true;
+
+    // A malformed active config cannot tell us whether an installed matching
+    // skill is enabled. Keep already-exposed or stale client registrations
+    // fail-closed, without changing policy for unrelated built-in MCP servers.
+    if (configUnreadable) return true;
+
+    const profiles = readSkillToolProfiles(join(skillDir, 'tools.json'));
+
+    // Unknown or stale runtime tool manifests fail closed for every tool exposed
+    // by this enabled MCP server, not only an artificial server-name alias.
+    if (profiles === undefined || profiles.length === 0) return true;
+
+    for (const toolName of toolNames) {
+      let profile = profiles.find((candidate) => candidate.name === toolName);
+      if (profile === undefined && toolName === skillName) {
+        if (profiles.length === 1) {
+          profile = profiles[0];
+        } else {
+          profile = profiles.find((candidate) => candidate.name === skillName);
+        }
+      }
+
+      // A runtime tool omitted from the installed profile is unknown and therefore
+      // keeps the same conservative HITL default as a manifest-less skill.
+      if (profile === undefined || profileRequiresHitl(profile)) return true;
+    }
+  }
+
+  return false;
+}
+
+function assessAction(action: string, context: string, requiresHitl: boolean): GovernorCheckResult {
   const unqualifiedAction = unqualifyMcpActionName(action);
+  const isDestructive = DESTRUCTIVE_ACTIONS.has(unqualifiedAction)
+    || matchesDangerousPattern(action, context)
+    || matchesDangerousPattern(unqualifiedAction, context);
+
   const highRiskResult = assessHighRiskAction(unqualifiedAction, context);
+  // Explicit policy-as-code hard denials are never downgraded into a reviewable
+  // HITL decision. Non-deny policy results remain subject to stricter profile
+  // HITL below.
+  if (highRiskResult?.decision === 'denied') return highRiskResult;
+
+  // Profile HITL is an explicit policy and must win over built-in exemptions
+  // for leaf-name collisions with trusted fbeast tools.
+  if (requiresHitl) {
+    const profileTriggerResult: TriggerResult = triggerRegistry.evaluateAll({
+      skillId: unqualifiedAction,
+      requiresHitl,
+      isDestructive,
+    });
+    return {
+      decision: mapSeverityToDecision(profileTriggerResult.severity),
+      reason: profileTriggerResult.reason ?? `Skill '${unqualifiedAction}' requires HITL.`,
+    };
+  }
+
   if (highRiskResult !== undefined) return highRiskResult;
 
   if (isTrustedOperatorMemoryExport(unqualifiedAction, context)) {
@@ -850,14 +1058,10 @@ function assessAction(action: string, context: string): GovernorCheckResult {
     };
   }
 
-  const isDestructive = DESTRUCTIVE_ACTIONS.has(unqualifiedAction)
-    || matchesDangerousPattern(action, context)
-    || matchesDangerousPattern(unqualifiedAction, context);
-
   // Evaluate via governor SkillTrigger with pattern-derived destructiveness
   const triggerResult: TriggerResult = triggerRegistry.evaluateAll({
     skillId: unqualifiedAction,
-    requiresHitl: false,
+    requiresHitl,
     isDestructive,
   });
 
@@ -874,8 +1078,14 @@ function assessAction(action: string, context: string): GovernorCheckResult {
   };
 }
 
-export function createGovernorAdapter(dbPath: string): GovernorAdapter {
+export function createGovernorAdapter(dbPath: string, configPath?: string): GovernorAdapter {
   const store = createSqliteStore(dbPath);
+  const skillConfigPath = dbPath === ':memory:'
+    ? undefined
+    : (configPath ?? join(dirname(dbPath), 'config.json'));
+  const installedSkillsDirs = dbPath === ':memory:'
+    ? []
+    : [join(dirname(dbPath), 'skills')];
   const costCalculator = new CostCalculator(DEFAULT_PRICING, {
     onUnknownModel: (model) => {
       process.stderr.write(`[fbeast-governor] Unknown model "${model}" — budget status will report $0.0000 until pricing is configured.\n`);
@@ -884,7 +1094,8 @@ export function createGovernorAdapter(dbPath: string): GovernorAdapter {
 
   return {
     async check(input) {
-      const isDryRunForget = isRightToForgetDryRun(input.action, input.context);
+      const requiresHitl = skillRequiresHitl(skillConfigPath, installedSkillsDirs, input.action);
+      const isDryRunForget = !requiresHitl && isRightToForgetDryRun(input.action, input.context);
       if (hasDuplicateReservedProvenanceKeys(input.context)) {
         const reason = 'Duplicate reserved fbeast provenance keys are not allowed.';
         store.db.prepare(`
@@ -899,7 +1110,7 @@ export function createGovernorAdapter(dbPath: string): GovernorAdapter {
             decision: 'approved' as const,
             reason: 'Right-to-forget dryRun is non-mutating and allowed so users can inspect deletion counts before approval.',
           }
-        : assessAction(input.action, context);
+        : assessAction(input.action, context, requiresHitl);
 
       store.db.prepare(`
         INSERT INTO governor_log (action, context, decision, reason)

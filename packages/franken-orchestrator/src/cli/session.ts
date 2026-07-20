@@ -838,6 +838,8 @@ export class Session {
       reset: this.config.reset,
       resume: this.config.resume ?? false,
       planDirOverride: this.config.planDirOverride,
+      governorQuestion: (prompt: string) => this.config.io.askRaw?.(prompt) ?? this.config.io.ask(prompt),
+      governorCancel: () => this.config.io.cancelQuestion?.(),
       runConfig: loadCompatibleRunConfigFromEnv(),
       orchestratorConfig: this.config.orchestratorConfig,
     };

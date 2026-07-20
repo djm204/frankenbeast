@@ -15,7 +15,6 @@ const RATE_LIMIT_PATTERNS = BASE_RATE_LIMIT_PATTERNS;
 export class CodexProvider implements ICliProvider {
   readonly name = 'codex';
   readonly command = 'codex';
-  readonly chatModel = 'codex-mini';
 
   buildArgs(opts: ProviderOpts): string[] {
     const { sandboxArgs, extraArgs } = resolveCodexSandboxArgs(opts.extraArgs);

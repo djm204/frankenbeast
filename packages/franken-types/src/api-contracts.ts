@@ -222,6 +222,7 @@ export interface BeastRunDetail {
 
 export interface BeastSseSnapshot {
   agents?: Array<Partial<TrackedAgentSummary> & { id: string }>;
+  nextCursor?: string;
 }
 
 export const TRACKED_AGENT_STATUSES = [
@@ -389,7 +390,7 @@ export interface NetworkStatusResponse {
 
 export interface NetworkConfigResponse {
   network: { mode: string; secureBackend?: string };
-  chat: { model: string; enabled: boolean; host?: string; port?: number };
+  chat: { model?: string | undefined; enabled: boolean; host?: string; port?: number };
   dashboard?: { enabled?: boolean; host?: string; port?: number; apiUrl?: string };
   comms?: { enabled?: boolean };
 }

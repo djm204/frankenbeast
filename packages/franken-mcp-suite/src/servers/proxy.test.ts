@@ -28,6 +28,10 @@ vi.mock('../shared/tool-registry.js', () => ({
   createAdapterSet: vi.fn(() => ({})),
 }));
 
+vi.mock('../shared/governance-gate.js', () => ({
+  createGovernanceGate: vi.fn(() => ({ check: vi.fn() })),
+}));
+
 import { createProxyServer, deriveProxyRoot } from './proxy.js';
 import * as registry from '../shared/tool-registry.js';
 
@@ -99,6 +103,98 @@ describe('proxy server', () => {
   describe('execute_tool', () => {
     it('keeps the proxy wrapper deadline longer than every target deadline', () => {
       expect(executeToolDef.timeoutMs).toBe(60_000);
+    });
+
+    it('resolves a relative active config path against the proxy project root', async () => {
+      const server = createProxyServer({
+        dbPath: '/tmp/configured-project/.fbeast/beast.db',
+        root: '/tmp/configured-project',
+        configPath: '.fbeast/config.json',
+        governance: { check: gateCheck },
+        audit: { record: auditRecord },
+      });
+
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+      vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
+      await server.tools.find((tool) => tool.name === 'execute_tool')!
+        .handler({ tool: 'test_tool', args: { key: 'val' } });
+
+      expect(mockCreateAdapterSet).toHaveBeenCalledWith(
+        '/tmp/configured-project/.fbeast/beast.db',
+        {
+          root: '/tmp/configured-project',
+          configPath: '/tmp/configured-project/.fbeast/config.json',
+        },
+      );
+    });
+
+    it('resolves project-root placeholders in active config paths', async () => {
+      const placeholderServer = createProxyServer({
+        dbPath: '$FBEAST_ROOT/.fbeast/beast.db',
+        root: '/tmp/placeholder-project',
+        configPath: '$FBEAST_ROOT/configs/fbeast.json',
+        governance: { check: gateCheck },
+        audit: { record: auditRecord },
+      });
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+      vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
+
+      await placeholderServer.tools.find((tool) => tool.name === 'execute_tool')!
+        .handler({ tool: 'test_tool', args: { key: 'val' } });
+
+      expect(mockCreateAdapterSet).toHaveBeenCalledWith(
+        '/tmp/placeholder-project/.fbeast/beast.db',
+        {
+          root: '/tmp/placeholder-project',
+          configPath: '/tmp/placeholder-project/configs/fbeast.json',
+        },
+      );
+    });
+
+    it('resolves non-.fbeast relative config paths against the proxy root', async () => {
+      const relativeConfigServer = createProxyServer({
+        dbPath: '/tmp/relative-config-project/.fbeast/beast.db',
+        root: '/tmp/relative-config-project',
+        configPath: 'configs/fbeast.json',
+        governance: { check: gateCheck },
+        audit: { record: auditRecord },
+      });
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+      vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
+
+      await relativeConfigServer.tools.find((tool) => tool.name === 'execute_tool')!
+        .handler({ tool: 'test_tool', args: { key: 'val' } });
+
+      expect(mockCreateAdapterSet).toHaveBeenCalledWith(
+        '/tmp/relative-config-project/.fbeast/beast.db',
+        {
+          root: '/tmp/relative-config-project',
+          configPath: '/tmp/relative-config-project/configs/fbeast.json',
+        },
+      );
+    });
+
+    it('preserves nested .fbeast segments in relative active config paths', async () => {
+      const server = createProxyServer({
+        dbPath: '/tmp/nested-config-project/.fbeast/beast.db',
+        root: '/tmp/nested-config-project',
+        configPath: 'nested/.fbeast/config.json',
+        governance: { check: gateCheck },
+        audit: { record: auditRecord },
+      });
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+      vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
+
+      await server.tools.find((tool) => tool.name === 'execute_tool')!
+        .handler({ tool: 'test_tool', args: { key: 'val' } });
+
+      expect(mockCreateAdapterSet).toHaveBeenCalledWith(
+        '/tmp/nested-config-project/.fbeast/beast.db',
+        {
+          root: '/tmp/nested-config-project',
+          configPath: '/tmp/nested-config-project/nested/.fbeast/config.json',
+        },
+      );
     });
 
     it('calls through to handler and returns its result', async () => {

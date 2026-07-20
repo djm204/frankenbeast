@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { Worker } from 'node:worker_threads';
 import Database from 'better-sqlite3';
 import { UnknownTrackedAgentError } from '../../../src/beasts/errors.js';
 import {
@@ -126,6 +127,57 @@ function corruptJsonColumn(
   } finally {
     db.close();
   }
+}
+
+function startConcurrentEventInsert(
+  dbPath: string,
+  sql: string,
+  parameters: readonly unknown[],
+): { readonly inserted: Promise<void>; readonly completed: Promise<void> } {
+  let resolveInserted!: () => void;
+  let rejectInserted!: (error: Error) => void;
+  const inserted = new Promise<void>((resolve, reject) => {
+    resolveInserted = resolve;
+    rejectInserted = reject;
+  });
+
+  const worker = new Worker(`
+    const { parentPort, workerData } = require('node:worker_threads');
+    const Database = require('better-sqlite3');
+    const db = new Database(workerData.dbPath);
+    db.pragma('busy_timeout = 5000');
+    db.prepare('BEGIN IMMEDIATE').run();
+    db.prepare(workerData.sql).run(...workerData.parameters);
+    parentPort.postMessage('inserted');
+    setTimeout(() => {
+      db.prepare('COMMIT').run();
+      db.close();
+      parentPort.postMessage('committed');
+    }, 100);
+  `, {
+    eval: true,
+    workerData: { dbPath, sql, parameters },
+  });
+
+  const completed = new Promise<void>((resolve, reject) => {
+    worker.on('message', (message: unknown) => {
+      if (message === 'inserted') resolveInserted();
+      if (message === 'committed') resolve();
+    });
+    worker.once('error', (error) => {
+      rejectInserted(error);
+      reject(error);
+    });
+    worker.once('exit', (code) => {
+      if (code !== 0) {
+        const error = new Error(`concurrent event writer exited with code ${code}`);
+        rejectInserted(error);
+        reject(error);
+      }
+    });
+  });
+
+  return { inserted, completed };
 }
  
 describe('SQLiteBeastRepository', () => {
@@ -341,6 +393,42 @@ describe('SQLiteBeastRepository', () => {
     });
   });
 
+  it('allocates a run-event sequence after a concurrent writer commits', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
+    const databasePath = join(workDir, 'beasts.db');
+    const repo = new SQLiteBeastRepository(databasePath);
+    const run = repo.createRun({
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+    const concurrent = startConcurrentEventInsert(
+      databasePath,
+      `INSERT INTO beast_run_events
+        (id, run_id, attempt_id, sequence, type, payload, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ['event_concurrent', run.id, null, 1, 'run.concurrent', '{}', '2026-03-10T00:00:01.000Z'],
+    );
+    await concurrent.inserted;
+
+    const appended = repo.transaction(() => {
+      expect(repo.getRun(run.id)).toBeDefined();
+      return repo.appendEvent(run.id, {
+        type: 'run.local',
+        payload: {},
+        createdAt: '2026-03-10T00:00:02.000Z',
+      });
+    });
+    await concurrent.completed;
+
+    expect(appended.sequence).toBe(2);
+    expect(repo.listEvents(run.id).map((event) => event.sequence)).toEqual([1, 2]);
+  });
+
   it('bounds recovered event pages by raw rows scanned and indexes the cursor query', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
     const databasePath = join(workDir, 'beasts.db');
@@ -364,8 +452,12 @@ describe('SQLiteBeastRepository', () => {
 
     expect(repo.listEvents(run.id, { recoverCorruptJson: true, limit: 3 }).map((event) => event.sequence))
       .toEqual([1, 3]);
-    const indexes = database.pragma("index_list('beast_run_events')") as Array<{ name: string }>;
+    const indexes = database.pragma("index_list('beast_run_events')") as Array<{ name: string; unique: 0 | 1 }>;
     expect(indexes.map((index) => index.name)).toContain('idx_beast_run_events_run_sequence');
+    expect(indexes).toContainEqual(expect.objectContaining({
+      name: 'uq_beast_run_events_run_sequence',
+      unique: 1,
+    }));
     database.close();
   });
 
@@ -393,6 +485,34 @@ describe('SQLiteBeastRepository', () => {
     expect(agent.id).toMatch(/^agent_/);
     expect(repo.getTrackedAgent(agent.id)).toEqual(agent);
     expect(repo.listTrackedAgents()).toEqual([agent]);
+  });
+
+  it('paginates tracked agents with stable same-timestamp boundaries and snapshots', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const createAgent = () => repo.createTrackedAgent({
+      definitionId: 'design-interview',
+      source: 'dashboard',
+      status: 'initializing',
+      createdByUser: 'operator',
+      initAction: { kind: 'design-interview', command: '/interview', config: {} },
+      initConfig: {},
+      createdAt: '2026-03-11T00:00:00.000Z',
+      updatedAt: '2026-03-11T00:00:00.000Z',
+    });
+    const originalIds = [createAgent().id, createAgent().id, createAgent().id];
+    const first = repo.listTrackedAgentPage({ limit: 2 });
+    expect(first.agents).toHaveLength(2);
+    expect(first.nextCursor).toEqual(expect.any(String));
+
+    const insertedBetweenPages = createAgent();
+    const second = repo.listTrackedAgentPage({ limit: 2, cursor: first.nextCursor });
+    expect(second.agents).toHaveLength(1);
+    expect(second.nextCursor).toBeUndefined();
+    expect([...first.agents, ...second.agents].map(({ id }) => id).sort()).toEqual(originalIds.sort());
+    expect([...first.agents, ...second.agents]).not.toContainEqual(expect.objectContaining({ id: insertedBetweenPages.id }));
+    expect(() => repo.listTrackedAgentPage({ limit: 201 })).toThrow(RangeError);
+    expect(() => repo.listTrackedAgentPage({ limit: 1, cursor: 'not-a-cursor' })).toThrow('Invalid tracked-agent pagination cursor');
   });
 
   it('treats healthy legacy agents as operationally recovered while retaining redaction history', async () => {
@@ -493,6 +613,139 @@ describe('SQLiteBeastRepository', () => {
       status: 'dispatching',
       dispatchRunId: run.id,
     });
+  });
+
+  it('allocates a tracked-agent-event sequence after a concurrent writer commits', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
+    const databasePath = join(workDir, 'beasts.db');
+    const repo = new SQLiteBeastRepository(databasePath);
+    const agent = repo.createTrackedAgent({
+      definitionId: 'martin-loop',
+      source: 'dashboard',
+      status: 'initializing',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: {},
+      createdAt: '2026-03-11T00:00:00.000Z',
+      updatedAt: '2026-03-11T00:00:00.000Z',
+    });
+    const concurrent = startConcurrentEventInsert(
+      databasePath,
+      `INSERT INTO tracked_agent_events
+        (id, agent_id, sequence, level, type, message, payload, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        'agent_event_concurrent',
+        agent.id,
+        1,
+        'info',
+        'agent.concurrent',
+        'Concurrent event',
+        '{}',
+        '2026-03-11T00:00:01.000Z',
+      ],
+    );
+    await concurrent.inserted;
+
+    const appended = repo.appendTrackedAgentEvent(agent.id, {
+      level: 'info',
+      type: 'agent.local',
+      message: 'Local event',
+      payload: {},
+      createdAt: '2026-03-11T00:00:02.000Z',
+    });
+    await concurrent.completed;
+
+    expect(appended.sequence).toBe(2);
+    expect(repo.listTrackedAgentEvents(agent.id).map((event) => event.sequence)).toEqual([1, 2]);
+    const database = new Database(databasePath);
+    const indexes = database.pragma("index_list('tracked_agent_events')") as Array<{ name: string; unique: 0 | 1 }>;
+    expect(indexes).toContainEqual(expect.objectContaining({
+      name: 'uq_tracked_agent_events_agent_sequence',
+      unique: 1,
+    }));
+    database.close();
+  });
+
+  it('repairs duplicate event sequences before enforcing unique indexes', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
+    const databasePath = join(workDir, 'beasts.db');
+    const repo = new SQLiteBeastRepository(databasePath);
+    const run = repo.createRun({
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-12T00:00:00.000Z',
+    });
+    const agent = repo.createTrackedAgent({
+      definitionId: 'martin-loop',
+      source: 'dashboard',
+      status: 'initializing',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: {},
+      createdAt: '2026-03-12T00:00:00.000Z',
+      updatedAt: '2026-03-12T00:00:00.000Z',
+    });
+    const database = new Database(databasePath);
+    database.prepare('DROP INDEX uq_beast_run_events_run_sequence').run();
+    database.prepare('DROP INDEX uq_tracked_agent_events_agent_sequence').run();
+    database.prepare(
+      `INSERT INTO beast_run_events
+        (id, run_id, attempt_id, sequence, type, payload, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'event_duplicate_a', run.id, null, 1, 'run.first', '{}', '2026-03-12T00:00:01.000Z',
+      'event_duplicate_b', run.id, null, 1, 'run.second', '{}', '2026-03-12T00:00:02.000Z',
+    );
+    database.prepare(
+      `INSERT INTO beast_run_events
+        (id, run_id, attempt_id, sequence, type, payload, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run('event_later', run.id, null, 1_000, 'run.later', '{}', '2026-03-12T00:00:03.000Z');
+    database.prepare(
+      `INSERT INTO tracked_agent_events
+        (id, agent_id, sequence, level, type, message, payload, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'agent_event_duplicate_a', agent.id, 1, 'error', 'agent.dispatch.failed', 'First failure', '{}', '2026-03-12T00:00:01.000Z',
+      'agent_event_duplicate_b', agent.id, 1, 'info', 'agent.dispatch.recovered', 'Recovered', '{}', '2026-03-12T00:00:02.000Z',
+    );
+    database.prepare(
+      `INSERT INTO tracked_agent_events
+        (id, agent_id, sequence, level, type, message, payload, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'agent_event_later', agent.id, 1_000, 'error', 'agent.dispatch.failed', 'Later failure', '{}', '2026-03-12T00:00:03.000Z',
+    );
+    database.close();
+
+    const migrated = new SQLiteBeastRepository(databasePath);
+
+    expect(migrated.listEvents(run.id).map((event) => [event.sequence, event.type])).toEqual([
+      [1, 'run.first'],
+      [2, 'run.second'],
+      [1_000, 'run.later'],
+    ]);
+    expect(migrated.listTrackedAgentEvents(agent.id).map((event) => [event.sequence, event.type])).toEqual([
+      [1, 'agent.dispatch.failed'],
+      [2, 'agent.dispatch.recovered'],
+      [1_000, 'agent.dispatch.failed'],
+    ]);
+    expect(migrated.hasUnrecoveredDispatchFailure(agent.id)).toBe(true);
+    const migratedDatabase = new Database(databasePath);
+    expect(migratedDatabase.pragma("index_list('beast_run_events')")).toContainEqual(expect.objectContaining({
+      name: 'uq_beast_run_events_run_sequence',
+      unique: 1,
+    }));
+    expect(migratedDatabase.pragma("index_list('tracked_agent_events')")).toContainEqual(expect.objectContaining({
+      name: 'uq_tracked_agent_events_agent_sequence',
+      unique: 1,
+    }));
+    migratedDatabase.close();
   });
 
   it('rolls back linked run creation when the tracked agent is unknown', async () => {

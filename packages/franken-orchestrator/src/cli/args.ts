@@ -219,7 +219,7 @@ Options:
   --base-dir <path>       Project root (default: cwd)
   --base-branch <name>    Git base branch (default: main)
   --budget <usd>          Budget limit in USD (default: 10)
-  --provider <name>       Provider name (default: claude)
+  --provider <name>       Provider name (default: codex)
   --providers <list>      Comma-separated fallback chain (e.g. claude,gemini,aider)
   --trust-provider-command-overrides
                            Explicitly approve trusted repo-configured provider command overrides
@@ -703,7 +703,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     throw new TypeError(`Unexpected argument '${positionals[0]}'. This command does not take positional arguments`);
   }
 
-  const provider = values.provider?.toLowerCase() ?? 'claude';
+  const provider = values.provider?.toLowerCase() ?? 'codex';
 
   const beastExecutionModeRaw = values.mode?.toLowerCase();
   let beastExecutionMode: import('../beasts/types.js').BeastExecutionMode | undefined;

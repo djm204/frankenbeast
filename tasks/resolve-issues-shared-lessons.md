@@ -1,8 +1,17 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-20 — Incremental type-aware ESLint adoption
+- Enable type-aware rules in a dedicated TypeScript source override with `projectService: true` and an explicit `tsconfigRootDir`; source-adjacent tests excluded from package tsconfig files must be ignored by that override or ESLint fails before rule evaluation.
+- A targeted rule such as `@typescript-eslint/no-floating-promises` can establish type-aware coverage without enabling the entire strict preset at once. Treat surfaced promises as real call-site decisions: await work that must finish, use `void` only for intentional fire-and-forget, and add rejection handling for shutdown paths.
+
 ## 2026-07-20 — Bounded Beast event paging through corrupt rows
 - Recovery pagination must bound raw rows scanned, not only healthy rows returned. Return the last scanned raw sequence plus an indexed `hasMore` probe so a short or empty page can advance past corrupt rows without turning one request into a full-history scan.
 - Before wiring a new paginated endpoint into dashboard hydration, trace which detail field the UI actually renders. Do not eagerly collect every page for an unused compatibility field; keep the bounded endpoint available for intentional consumers and preserve fast detail loading.
+
+## 2026-07-19 — Skill HITL configuration boundaries
+- Keep the active config path and installed skill root as separate inputs: the active config determines which skills are enabled, while manifests remain anchored to the database/project `.fbeast/skills` directory even when operators supply an external `--config` path.
+- Distinguish a valid empty enabled-skill list from malformed/unreadable config. For qualified calls, fail closed only when the action matches an installed skill server or directory alias, so stale custom registrations remain gated without changing policy for unrelated built-in MCP servers.
+- MCP action parsing cannot split blindly on the first or last `__`, because both server and tool names may contain double underscores; match configured server-name prefixes and preserve the full remaining tool name.
 
 ## 2026-07-19 — Bounded Beast log paging
 - A tail endpoint is not operationally bounded if it collects a bounded result after scanning all retained history. Read newest rotations in reverse chunks and stop as soon as the line or byte budget is full; also restrict page reads to configured retention so stale extra rotations cannot re-expand request I/O.
@@ -35,6 +44,16 @@
 
 ## 2026-07-18 — Kanban reviewer isolation
 - Independent review workers must receive a distinct child card or explicitly review-only context; never let a delegated reviewer inherit and complete the implementation parent card, because completion can garbage-collect its workspace before the verified diff is committed and shipped.
+
+## 2026-07-19 — PR #3270 reviewer fail-closed follow-up
+- Symptom: the reviewer could pass raw 39-character Google API keys to the model, let `gh` subprocesses use a stale lower-precedence token, depend on the host locale for emoji-bearing review files, and exit successfully after diff-fetch failures.
+- Treatment: match published `AIza` plus 35-character keys before model invocation, force every `gh` subprocess to use the token selected for API calls, write review files explicitly as UTF-8, and accumulate diff-fetch failures while continuing later PRs before failing the run.
+- Reusable lesson: security/reliability reviewers must keep credential selection, text encoding, and exit status deterministic across API and subprocess paths; add regressions for mixed token environments, non-default locales, standard secret formats, and partial-batch fetch failures.
+
+## 2026-07-19 — PR #3270 over-cap Codex closeout
+- Symptom: each approved current-head Codex round produced actionable findings, so the repaired head advanced after the approved trigger and required another fresh review; green CI and zero unresolved Codex threads did not satisfy the current-head gate.
+- Treatment: preserve the existing closeout worker as the sole owner, verify local/upstream/PR head equality, green required checks, CLEAN merge state, zero unresolved Codex threads, and exact trigger count before requesting one bounded additional invocation. Do not retrigger or merge until that explicit approval is recorded.
+- Reusable lesson: an over-cap approval is scoped to one trigger and the head it reviews, not to the whole PR. If valid findings move the head, request a new exact-command approval for the next invocation rather than treating the prior approval or resolved threads as transferable.
 
 ## 2026-07-18 — Working-memory hydration corruption
 - Fail closed on malformed persisted values that are shaped like structured JSON (`{` or `[` after leading whitespace), while retaining the documented plain-text fallback for genuinely legacy rows. Typed hydration errors should identify the affected key without deleting the row, so operators can repair it and reopen the store.
@@ -414,7 +433,17 @@
 ## Lessons
 - 2026-07-19 — Docs regression tests should assert exact pinned values from manifest and treat setup commands as gate-narrow/full setup distinctions.
 - 2026-07-19 — Bounded multi-pass LLM flows need one shared deadline propagated through cache/client/adapter layers, explicit subprocess and retry-wait cancellation, and a caller-side abort race for implementations that ignore signals. Preserve the last useful pre-quality artifact on timeout, use deterministic structural confidence for fast paths, avoid resending unchanged repository context, and test 1/2/4-pass paths plus child-process termination.
+- 2026-07-19 — SQLite multi-writer regressions need genuinely independent worker-thread connections, not `Promise.all` around synchronous calls. Acquire write locks with immediate transactions before read-to-write paths, and merge newly persisted working-memory rows for incremental flushes while preserving explicit clear/restore replacement semantics and configured limits.
 
 ## 2026-07-19 — Type export renames and deprecation compatibility
 - When renaming shared public type names for clarity, keep deprecated aliases temporarily (with `@deprecated` JSDoc) for downstream consumers, update docs/tests to use new names, and add targeted tests validating both canonical and deprecated aliases.
 - Before merging such API refactors, require `tsc`, package `lint`, `build`, and focused unit tests for both packages to avoid regressions in public contracts.
+
+## 2026-07-19 — Stable SQLite keyset pagination
+- Stable keyset pagination over mutable SQLite data needs both a deterministic tie-breaker (`created_at`, then `id`) and a first-page high-water mark such as `rowid`; the key boundary prevents duplicates while the high-water mark excludes same-timestamp rows inserted between requests.
+- Bound secondary metadata work with the page: scope event-history queries to returned IDs, query only active statuses for capacity calculations, and add matching composite indexes so a bounded primary response does not hide unbounded side scans.
+- Keep a page-returning client primitive and migrate real UI callers to it explicitly; legacy list helpers must not loop over every page and recreate the original unbounded load.
+- Cursor pagination in mutable live views must invalidate in-flight append requests whenever a full refresh replaces the loaded window; capture a window generation before `load more`, discard late responses on generation mismatch, and test the refresh/append race. Use the earliest lifecycle event the backend actually emits as the creation refresh signal rather than relying on a nonexistent synthetic event. Keep SSE snapshots bounded to the same page limit, retain `createdAt`, expose `nextCursor`, and refresh for every unknown row in that bounded first-page snapshot. Compare/sort loaded rows by the full server key `(createdAt DESC, id DESC)` so selected-row pinning preserves pagination semantics; remove misleading array-returning list wrappers rather than silently truncating them.
+
+## 2026-07-20 — Terminal input ownership
+- Interactive CLI processes must have one long-lived stdin/readline owner. Inject that owner's question and cancellation functions into approval/governance channels rather than creating a second readline interface; create the owner lazily so startup work cannot consume early keystrokes, and abort expired questions without closing the shared interface. Preserve the existing non-TTY fail-closed path and verify chat-to-approval input routing with a real scripted PTY.

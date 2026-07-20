@@ -141,6 +141,23 @@ describe('CostCalculator', () => {
       expect(cost).toBeCloseTo(expected, 6)
     })
 
+    it('preserves low-order costs when summing mixed magnitudes', () => {
+      const calc = new CostCalculator({
+        expensive: { promptPerMillion: 10_000_000_000_000_000, completionPerMillion: 0 },
+        inexpensive: { promptPerMillion: 100_000, completionPerMillion: 0 },
+      })
+      const entries = [
+        { model: 'expensive', promptTokens: 1_000_000, completionTokens: 0 },
+        ...Array.from({ length: 20 }, () => ({
+          model: 'inexpensive',
+          promptTokens: 1,
+          completionTokens: 0,
+        })),
+      ]
+
+      expect(calc.totalCost(entries)).toBe(10_000_000_000_000_002)
+    })
+
     it('returns 0 for an empty list', () => {
       const calc = new CostCalculator(DEFAULT_PRICING)
       expect(calc.totalCost([])).toBe(0)

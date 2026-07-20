@@ -30,11 +30,11 @@ export interface HookDeps {
   readPostToolPayload?(): Promise<string>;
 }
 
-export function defaultHookDeps(dbPath?: string): HookDeps {
+export function defaultHookDeps(dbPath?: string, configPath?: string): HookDeps {
   const resolved = dbPath ?? join(process.cwd(), '.fbeast', 'beast.db');
 
   return {
-    governor: createGovernorAdapter(resolved),
+    governor: createGovernorAdapter(resolved, configPath),
     observer: createObserverAdapter(resolved),
     sessionId: () =>
       process.env['FBEAST_SESSION_ID']
@@ -241,6 +241,7 @@ export async function runHook(
   // option parsing so any following token (e.g. an untrusted tool name) is never
   // interpreted as a flag.
   let dbPath: string | undefined;
+  let configPath: string | undefined;
   let streamPostToolPayload = false;
   const positionals: string[] = [];
   for (let i = 0; i < argv.length; i++) {
@@ -253,6 +254,10 @@ export async function runHook(
       dbPath = argv[++i];
     } else if (arg.startsWith('--db=')) {
       dbPath = arg.slice(5);
+    } else if (arg === '--config' && i + 1 < argv.length) {
+      configPath = argv[++i];
+    } else if (arg.startsWith('--config=')) {
+      configPath = arg.slice('--config='.length);
     } else if (arg === '--stdin-payload') {
       streamPostToolPayload = true;
     } else {
@@ -260,7 +265,7 @@ export async function runHook(
     }
   }
 
-  const resolvedDeps = deps ?? defaultHookDeps(dbPath);
+  const resolvedDeps = deps ?? defaultHookDeps(dbPath, configPath);
   const [phase, toolName = '', payload = ''] = positionals;
 
   if (phase === 'pre-tool') {
