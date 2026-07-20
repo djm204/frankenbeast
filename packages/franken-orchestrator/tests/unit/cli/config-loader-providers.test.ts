@@ -41,8 +41,8 @@ describe('Config loader providers passthrough', () => {
 
   it('returns default providers config when no file provided', async () => {
     const config = await loadConfig(makeArgs());
-    expect(config.providers.default).toBe('claude');
-    expect(config.providers.fallbackChain).toEqual(['claude', 'codex']);
+    expect(config.providers.default).toBe('codex');
+    expect(config.providers.fallbackChain).toEqual(['codex', 'claude']);
     expect(config.providers.overrides).toEqual({});
   });
 
@@ -181,6 +181,6 @@ describe('Config loader providers passthrough', () => {
     expect(config.maxTotalTokens).toBe(200_000);
     expect(config.providers.default).toBe('aider');
     // Defaults fill in
-    expect(config.providers.fallbackChain).toEqual(['claude', 'codex']);
+    expect(config.providers.fallbackChain).toEqual(['codex', 'claude']);
   });
 });

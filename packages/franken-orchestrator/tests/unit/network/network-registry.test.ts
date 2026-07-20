@@ -314,7 +314,6 @@ describe('network-registry', () => {
       port: 4242,
       url: 'http://127.0.0.1:4242',
       wsUrl: 'ws://127.0.0.1:4242/v1/chat/ws',
-      model: 'claude-sonnet-4-6',
     });
     expect(dashboard?.runtimeConfig).toMatchObject({
       host: '127.0.0.1',

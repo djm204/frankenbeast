@@ -28,7 +28,7 @@ function formStateFromConfig(config: NetworkConfigResponse): NetworkConfigFormSt
     networkMode: config.network.mode,
     secureBackend: config.network.secureBackend ?? 'local-encrypted',
     chatEnabled: config.chat.enabled,
-    chatModel: config.chat.model,
+    chatModel: config.chat.model ?? '',
     chatHost: config.chat.host ?? '',
     chatPort: config.chat.port === undefined ? '' : String(config.chat.port),
     dashboardEnabled: config.dashboard?.enabled ?? false,
@@ -95,9 +95,6 @@ function validateForm(state: NetworkConfigFormState): string[] {
   }
   if (!SECURE_BACKENDS.includes(state.secureBackend as (typeof SECURE_BACKENDS)[number])) {
     errors.push('Secure backend must be local-encrypted, os-keychain, 1password, or bitwarden.');
-  }
-  if (!state.chatModel.trim()) {
-    errors.push('Chat model is required.');
   }
   if (!state.chatHost.trim()) {
     errors.push('Chat host is required.');

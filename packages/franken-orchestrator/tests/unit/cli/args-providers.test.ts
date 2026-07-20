@@ -17,9 +17,9 @@ describe('parseArgs --provider as string', () => {
     expect(args.provider).toBe('aider');
   });
 
-  it('defaults provider to claude when not specified', () => {
+  it('defaults provider to codex when not specified', () => {
     const args = parseArgs([]);
-    expect(args.provider).toBe('claude');
+    expect(args.provider).toBe('codex');
   });
 
   it('still accepts codex as provider', () => {

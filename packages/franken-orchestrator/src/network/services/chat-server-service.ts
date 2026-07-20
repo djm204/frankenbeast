@@ -24,7 +24,7 @@ export const chatServerService: NetworkServiceDefinition = {
     wsUrl: localPlaintextOrSecureWebSocketUrl(config.chat.host, config.chat.port, '/v1/chat/ws'),
     serviceIdentity: 'chat-server',
     suppressManagedBanner: true,
-    model: config.chat.model,
+    ...(config.chat.model ? { model: config.chat.model } : {}),
     process: {
       command: 'npm',
       args: [

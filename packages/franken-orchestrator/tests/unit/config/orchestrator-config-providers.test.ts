@@ -7,8 +7,8 @@ describe('OrchestratorConfigSchema providers section', () => {
   it('produces sensible defaults when parsed with empty object', () => {
     const config = OrchestratorConfigSchema.parse({});
     expect(config.providers).toBeDefined();
-    expect(config.providers.default).toBe('claude');
-    expect(config.providers.fallbackChain).toEqual(['claude', 'codex']);
+    expect(config.providers.default).toBe('codex');
+    expect(config.providers.fallbackChain).toEqual(['codex', 'claude']);
     expect(config.providers.overrides).toEqual({});
   });
 
@@ -18,7 +18,7 @@ describe('OrchestratorConfigSchema providers section', () => {
     });
     expect(config.providers.default).toBe('gemini');
     // Other defaults still apply
-    expect(config.providers.fallbackChain).toEqual(['claude', 'codex']);
+    expect(config.providers.fallbackChain).toEqual(['codex', 'claude']);
     expect(config.providers.overrides).toEqual({});
   });
 

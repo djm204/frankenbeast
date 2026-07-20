@@ -63,6 +63,16 @@ describe('network-config-paths', () => {
     expect(next.comms.slack.enabled).toBe(true);
   });
 
+  it('unsets an explicit chat model when assigned an empty or whitespace-only value', () => {
+    const configured = applyNetworkConfigSets(defaultConfig(), ['chat.model=claude-sonnet-4-6']);
+
+    for (const assignment of ['chat.model=', 'chat.model=   ']) {
+      const next = applyNetworkConfigSets(configured, [assignment]);
+      expect(next.chat.model).toBeUndefined();
+      expect(Object.hasOwn(next.chat, 'model')).toBe(false);
+    }
+  });
+
   it('classifies secret-ref paths as sensitive', () => {
     expect(isSensitiveConfigPath('comms.slack.signingSecretRef')).toBe(true);
     expect(isSensitiveConfigPath('comms.discord.botTokenRef')).toBe(true);
