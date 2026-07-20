@@ -1690,6 +1690,21 @@ type NetworkPaths = Pick<ReturnType<typeof getProjectPaths>, 'frankenbeastDir' |
 
 type BeastDaemonPaths = ReturnType<typeof getProjectPaths>;
 
+export async function handleBeastDaemonShutdown(
+  close: () => Promise<void>,
+  exit: (code: number) => unknown = (code) => process.exit(code),
+  reportError: (message: string, error: unknown) => void = (message, error) => console.error(message, error),
+): Promise<void> {
+  try {
+    await close();
+  } catch (error) {
+    reportError('Beast daemon shutdown failed:', error);
+    exit(1);
+    return;
+  }
+  exit(0);
+}
+
 async function runBeastDaemonCommand(
   args: CliArgs,
   config: OrchestratorConfig,
@@ -1733,7 +1748,7 @@ async function runBeastDaemonCommand(
     await daemon.close();
   };
   const onSignal = (): void => {
-    void shutdown().then(() => process.exit(0));
+    void handleBeastDaemonShutdown(shutdown);
   };
   process.once('SIGINT', onSignal);
   process.once('SIGTERM', onSignal);

@@ -8,6 +8,19 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
   prettierConfig,
   {
+    files: ['src/**/*.{ts,tsx,mts,cts}'],
+    ignores: ['src/**/*.test.{ts,tsx}', 'src/**/*.integration.test.{ts,tsx}'],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-floating-promises': 'error',
+    },
+  },
+  {
     rules: {
       'radix': ['error', 'always'],
       '@typescript-eslint/no-explicit-any': 'error',

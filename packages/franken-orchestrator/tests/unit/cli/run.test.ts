@@ -255,7 +255,7 @@ vi.mock('node:readline', () => ({
 
 // ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
-import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, resolveEffectivePreflightProvider, resolveEffectivePreflightProviders, buildDashboardProviderSnapshot, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance, validateStateDirBeforeScaffold, resolveScaffoldStateDir, runNetworkCommand } from '../../../src/cli/run.js';
+import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, resolveEffectivePreflightProvider, resolveEffectivePreflightProviders, buildDashboardProviderSnapshot, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance, validateStateDirBeforeScaffold, resolveScaffoldStateDir, runNetworkCommand, handleBeastDaemonShutdown } from '../../../src/cli/run.js';
 import { loadConfig } from '../../../src/cli/config-loader.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths, readActivePlanName, writeActivePlanName } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
@@ -1073,6 +1073,30 @@ describe('runDirectCli', () => {
     expect(exit).toHaveBeenCalledWith(1);
     expect(errorSpy).toHaveBeenCalledWith('Fatal:', 'boom');
     errorSpy.mockRestore();
+  });
+});
+
+describe('handleBeastDaemonShutdown', () => {
+  it('exits zero after closing the daemon', async () => {
+    const close = vi.fn(async () => undefined);
+    const exit = vi.fn();
+
+    await handleBeastDaemonShutdown(close, exit);
+
+    expect(close).toHaveBeenCalledOnce();
+    expect(exit).toHaveBeenCalledWith(0);
+  });
+
+  it('reports daemon close failures and exits non-zero', async () => {
+    const closeError = new Error('daemon close failed');
+    const close = vi.fn(async () => Promise.reject(closeError));
+    const exit = vi.fn();
+    const reportError = vi.fn();
+
+    await handleBeastDaemonShutdown(close, exit, reportError);
+
+    expect(reportError).toHaveBeenCalledWith('Beast daemon shutdown failed:', closeError);
+    expect(exit).toHaveBeenCalledWith(1);
   });
 });
 
