@@ -597,6 +597,41 @@ describe("npm workspaces configuration", () => {
       }
     });
 
+    it("enables type-aware floating promise checks in every workspace", () => {
+      const rootConfig = readFileSync(
+        join(ROOT, "eslint.workspace.config.js"),
+        "utf8",
+      );
+
+      expect(rootConfig).toContain("projectService: true");
+      expect(rootConfig).toContain(
+        "'@typescript-eslint/no-floating-promises': 'error'",
+      );
+
+      for (const path of packageJsonPaths) {
+        const packageDir = path.replace(/\/package\.json$/, "");
+        const packageConfig = readFileSync(
+          join(ROOT, packageDir, "eslint.config.js"),
+          "utf8",
+        );
+        const inheritsWorkspaceConfig = packageConfig.includes(
+          "eslint.workspace.config.js",
+        );
+
+        expect(
+          inheritsWorkspaceConfig || packageConfig.includes("projectService: true"),
+          `${packageDir} must enable type-aware linting`,
+        ).toBe(true);
+        expect(
+          inheritsWorkspaceConfig ||
+            packageConfig.includes(
+              "'@typescript-eslint/no-floating-promises': 'error'",
+            ),
+          `${packageDir} must reject floating promises`,
+        ).toBe(true);
+      }
+    });
+
     it("keeps every Number.parseInt call explicit about its radix", () => {
       const missingRadixLocations = collectSourceFiles(ROOT).flatMap((path) => {
         const source = ts.createSourceFile(
