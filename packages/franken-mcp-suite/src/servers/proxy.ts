@@ -120,7 +120,7 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
           argsForAudit: Record<string, unknown> = toolArgs,
         ): Promise<void> => {
           try {
-            await audit.record({ tool: toolName, ok: input.ok, ...(input.decision !== undefined ? { decision: input.decision } : {}), args: summarizeProxyToolArgumentsForAudit(argsForAudit) });
+            await audit.record({ tool: toolName, ok: input.ok, ...(input.decision !== undefined ? { decision: input.decision } : {}), args: summarizeProxyToolArgumentsForAudit(argsForAudit, toolName) });
           } catch (err) {
             process.stderr.write(`fbeast audit failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}\n`);
           }

@@ -28,6 +28,28 @@ describe('createMcpServer', () => {
     expect(serialized.length).toBeLessThan(1_000);
   });
 
+  it('preserves only bounded audit selectors for proxied memory tools', () => {
+    const summarized = summarizeProxyToolArgumentsForAudit({
+      agentId: 'agent-7',
+      profile: 'doctor',
+      repo: '/srv/frankenbeast',
+      query: 'private search text',
+    }, 'fbeast_memory_query');
+    const oversized = summarizeProxyToolArgumentsForAudit({ agentId: 'a'.repeat(257) }, 'fbeast_memory_query');
+    const unknownTool = summarizeProxyToolArgumentsForAudit({ agentId: 'attacker-value' }, 'fbeast_memory_fake');
+
+    expect(summarized).toMatchObject({
+      agentId: 'agent-7',
+      profile: 'doctor',
+      repo: '/srv/frankenbeast',
+      redacted: true,
+    });
+    expect(JSON.stringify(summarized)).not.toContain('private search text');
+    expect(oversized.agentId).toBe('[redacted-selector]');
+    expect(unknownTool).not.toHaveProperty('agentId');
+    expect(JSON.stringify(unknownTool)).not.toContain('attacker-value');
+  });
+
   it('finds execute_tool discriminators without depending on property order', () => {
     const args: Record<string, unknown> = { args: { password: 'private-value' } };
     for (let index = 0; index < 60; index += 1) args[`filler${index}`] = index;
@@ -37,7 +59,40 @@ describe('createMcpServer', () => {
     expect(sanitized).toMatchObject({
       tool: 'test_tool',
       args: { redacted: true, sha256: expect.stringMatching(/^[a-f0-9]{64}$/) },
+      envelope: {
+        redacted: true,
+        summary: {
+          type: 'object',
+          fields: expect.arrayContaining([
+            expect.objectContaining({ name: 'args' }),
+            expect.objectContaining({ name: 'filler0' }),
+          ]),
+          truncated: true,
+        },
+      },
     });
+    expect(JSON.stringify(sanitized)).not.toContain('private-value');
+  });
+
+  it('keeps bounded malformed execute_tool envelope fields in audit summaries', () => {
+    const sanitized = sanitizeToolArgumentsForAuditTrail('execute_tool', {
+      tool: 'test_tool',
+      args: { query: 'private-value' },
+      unexpected: 'attacker-value',
+    });
+
+    expect(sanitized.envelope).toMatchObject({
+      redacted: true,
+      summary: {
+        type: 'object',
+        fields: expect.arrayContaining([
+          expect.objectContaining({ name: 'tool' }),
+          expect.objectContaining({ name: 'args' }),
+          expect.objectContaining({ name: 'unexpected' }),
+        ]),
+      },
+    });
+    expect(JSON.stringify(sanitized)).not.toContain('attacker-value');
     expect(JSON.stringify(sanitized)).not.toContain('private-value');
   });
 

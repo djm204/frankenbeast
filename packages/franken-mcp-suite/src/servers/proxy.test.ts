@@ -24,6 +24,25 @@ vi.mock('../shared/tool-registry.js', () => ({
         makeHandler: vi.fn(),
       },
     ],
+    [
+      'fbeast_memory_query',
+      {
+        name: 'fbeast_memory_query',
+        server: 'memory',
+        description: 'Query memory',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'Query' },
+            agentId: { type: 'string', description: 'Agent id' },
+            profile: { type: 'string', description: 'Profile' },
+            repo: { type: 'string', description: 'Repository' },
+          },
+          required: ['query'],
+        },
+        makeHandler: vi.fn(),
+      },
+    ],
   ]),
   createAdapterSet: vi.fn(() => ({})),
 }));
@@ -374,6 +393,33 @@ describe('proxy server', () => {
       expect(event).toMatchObject({ tool: 'test_tool', ok: true });
       expectValueFreeAuditArgs(event.args, ['key']);
       expect(JSON.stringify(event.args)).not.toContain(':"val"');
+    });
+
+    it('retains bounded selector attribution in value-free memory proxy audits', async () => {
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+      vi.mocked(mockRegistry.get('fbeast_memory_query')!.makeHandler).mockReturnValue(fakeHandler);
+
+      await executeToolDef.handler({
+        tool: 'fbeast_memory_query',
+        args: {
+          query: 'private search text',
+          agentId: 'agent-7',
+          profile: 'doctor',
+          repo: '/srv/frankenbeast',
+        },
+      });
+
+      const event = auditRecord.mock.calls[0]![0];
+      expect(event).toMatchObject({
+        tool: 'fbeast_memory_query',
+        args: {
+          agentId: 'agent-7',
+          profile: 'doctor',
+          repo: '/srv/frankenbeast',
+          redacted: true,
+        },
+      });
+      expect(JSON.stringify(event.args)).not.toContain('private search text');
     });
 
     it('audits a governance denial of the target (ok=false, decision, args)', async () => {
