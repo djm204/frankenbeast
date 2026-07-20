@@ -10,10 +10,28 @@ export interface TokenTotals {
   totalTokens: number
 }
 
+export interface TokenCounterOptions {
+  /** Maximum number of distinct model labels retained by this counter. */
+  maxModels?: number
+}
+
+const DEFAULT_MAX_MODELS = 1_000
+
 export class TokenCounter {
   private readonly counts = new Map<string, { prompt: number; completion: number }>()
+  private readonly maxModels: number
   private totalPromptTokens = 0
   private totalCompletionTokens = 0
+
+  constructor(options: TokenCounterOptions = {}) {
+    const maxModels = options.maxModels ?? DEFAULT_MAX_MODELS
+    if (!Number.isSafeInteger(maxModels) || maxModels <= 0) {
+      throw new RangeError(
+        `TokenCounter: maxModels must be a positive safe integer, received ${maxModels}`,
+      )
+    }
+    this.maxModels = maxModels
+  }
 
   /** A token delta must be a non-negative safe integer. */
   private static assertValidDelta(value: number, label: string): void {
@@ -38,6 +56,11 @@ export class TokenCounter {
   record(entry: TokenRecord): void {
     TokenCounter.assertValidDelta(entry.promptTokens, 'promptTokens')
     TokenCounter.assertValidDelta(entry.completionTokens, 'completionTokens')
+    if (!this.counts.has(entry.model) && this.counts.size >= this.maxModels) {
+      throw new RangeError(
+        `TokenCounter: model cardinality limit of ${this.maxModels} reached; rejected model "${entry.model}"`,
+      )
+    }
     const existing = this.counts.get(entry.model) ?? { prompt: 0, completion: 0 }
     const prompt = TokenCounter.safeAdd(existing.prompt, entry.promptTokens)
     const completion = TokenCounter.safeAdd(existing.completion, entry.completionTokens)

@@ -22,6 +22,27 @@ describe('ModelAttribution', () => {
       expect(row.failedCalls).toBe(1)
     })
 
+    it('rejects a new model after reaching the configured cardinality limit', () => {
+      const attr = new ModelAttribution(DEFAULT_PRICING, { maxModels: 2 })
+      attr.record({ model: 'gpt-4o', promptTokens: 10, completionTokens: 5, success: true })
+      attr.record({ model: 'claude-opus-4-6', promptTokens: 20, completionTokens: 10, success: false })
+
+      expect(() =>
+        attr.record({ model: 'model-c', promptTokens: 30, completionTokens: 15, success: true }),
+      ).toThrow('model cardinality limit of 2 reached')
+      expect(attr.report().map(row => row.model)).toEqual(['gpt-4o', 'claude-opus-4-6'])
+    })
+
+    it('continues updating an existing model at the cardinality limit', () => {
+      const attr = new ModelAttribution(DEFAULT_PRICING, { maxModels: 1 })
+      attr.record({ model: 'gpt-4o', promptTokens: 10, completionTokens: 5, success: true })
+
+      expect(() =>
+        attr.record({ model: 'gpt-4o', promptTokens: 20, completionTokens: 10, success: false }),
+      ).not.toThrow()
+      expect(attr.report()[0]).toMatchObject({ model: 'gpt-4o', totalCalls: 2 })
+    })
+
     it.each([
       ['negative prompt tokens', { promptTokens: -1, completionTokens: 0 }],
       ['negative completion tokens', { promptTokens: 0, completionTokens: -1 }],
