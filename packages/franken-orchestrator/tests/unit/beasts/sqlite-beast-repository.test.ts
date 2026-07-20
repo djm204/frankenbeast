@@ -306,6 +306,53 @@ describe('SQLiteBeastRepository', () => {
     });
   });
 
+  it('migrates the run-attempt lookup index idempotently', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
+    const dbPath = join(workDir, 'beasts.db');
+    const initialRepo = new SQLiteBeastRepository(dbPath);
+    const run = initialRepo.createRun({
+      definitionId: 'chunk-plan',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'cli',
+      dispatchedByUser: 'pfk',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+    initialRepo.createAttempt(run.id, { status: 'failed' });
+    initialRepo.restartAttempt(run.id, { status: 'running' });
+    initialRepo.close();
+
+    const legacyDatabase = new Database(dbPath);
+    legacyDatabase.prepare('DROP INDEX IF EXISTS idx_beast_run_attempts_run_id_attempt_number').run();
+    legacyDatabase.close();
+
+    const migratedRepo = new SQLiteBeastRepository(dbPath);
+    expect(migratedRepo.listAttempts(run.id).map(({ attemptNumber }) => attemptNumber)).toEqual([1, 2]);
+    migratedRepo.close();
+
+    // Opening an already-migrated database must remain safe.
+    const reopenedRepo = new SQLiteBeastRepository(dbPath);
+    reopenedRepo.close();
+
+    const database = new Database(dbPath, { readonly: true });
+    const indexes = database.pragma("index_list('beast_run_attempts')") as Array<{ name: string }>;
+    expect(indexes.map(({ name }) => name)).toContain('idx_beast_run_attempts_run_id_attempt_number');
+    const indexColumns = database.pragma(
+      "index_info('idx_beast_run_attempts_run_id_attempt_number')",
+    ) as Array<{
+      name: string;
+    }>;
+    expect(indexColumns.map(({ name }) => name)).toEqual(['run_id', 'attempt_number']);
+    const plan = database.prepare(
+      'EXPLAIN QUERY PLAN SELECT * FROM beast_run_attempts WHERE run_id = ? ORDER BY attempt_number ASC',
+    ).all(run.id) as Array<{ detail: string }>;
+    expect(plan.map(({ detail }) => detail).join('\n')).toContain(
+      'idx_beast_run_attempts_run_id_attempt_number',
+    );
+    database.close();
+  });
+
   it('rolls back attempt insertion when the paired run update fails', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
