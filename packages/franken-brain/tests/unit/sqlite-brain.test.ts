@@ -5945,7 +5945,7 @@ describe('SqliteBrain', () => {
       ).toEqual(['late match kw1199', 'early match kw0000']);
     });
 
-    it('skips corrupt persisted details while keeping healthy recent and failure rows available', () => {
+    it('quarantines corrupt persisted details while keeping recent and failure rows available', () => {
       brain.episodic.record(
         makeEvent({
           type: 'failure',
@@ -5983,18 +5983,35 @@ describe('SqliteBrain', () => {
       ).run('{', 'newer corrupt failure');
 
       expect(() => brain.episodic.recent(2)).not.toThrow();
-      expect(brain.episodic.recent(2).map((event) => event.summary)).toEqual([
+      const recent = brain.episodic.recent(2);
+      expect(recent.map((event) => event.summary)).toEqual([
         'newest healthy success',
-        'older healthy failure',
+        'newer corrupt failure',
       ]);
+      expect(recent[0]!.details).toEqual({ marker: 'healthy' });
+      expect(recent[1]!.details).toEqual({
+        quarantine: {
+          field: 'details',
+          eventId: recent[1]!.id,
+          reason: 'invalid JSON',
+        },
+      });
 
       expect(() => brain.episodic.recentFailures(1)).not.toThrow();
-      expect(
-        brain.episodic.recentFailures(1).map((event) => event.summary),
-      ).toEqual(['older healthy failure']);
+      const failures = brain.episodic.recentFailures(1);
+      expect(failures.map((event) => event.summary)).toEqual([
+        'newer corrupt failure',
+      ]);
+      expect(failures[0]!.details).toEqual({
+        quarantine: {
+          field: 'details',
+          eventId: failures[0]!.id,
+          reason: 'invalid JSON',
+        },
+      });
     });
 
-    it('skips corrupt persisted details during recall', () => {
+    it('quarantines corrupt persisted details during recall', () => {
       brain.episodic.record(
         makeEvent({
           summary: 'healthy searchable event',
@@ -6022,12 +6039,68 @@ describe('SqliteBrain', () => {
       ).run('{', 'corrupt searchable event');
 
       expect(() => brain.episodic.recall('searchable', 10)).not.toThrow();
-      expect(
-        brain.episodic.recall('searchable', 10).map((event) => event.summary),
-      ).toEqual(['healthy searchable event']);
+      const recalled = brain.episodic.recall('searchable', 10);
+      expect(recalled.map((event) => event.summary)).toEqual([
+        'healthy searchable event',
+        'corrupt searchable event',
+      ]);
+      expect(recalled[0]!.details).toEqual({ marker: 'searchable' });
+      expect(recalled[1]!.details).toEqual({
+        quarantine: {
+          field: 'details',
+          eventId: recalled[1]!.id,
+          reason: 'invalid JSON',
+        },
+      });
       expect(brain.episodic.recall('searchable', 0)).toEqual([]);
       expect(brain.episodic.recent(0)).toEqual([]);
       expect(brain.episodic.recentFailures(0)).toEqual([]);
+    });
+
+    it('audits quarantined details rows with their event ids', () => {
+      brain.episodic.record(
+        makeEvent({
+          summary: 'diagnostic searchable event',
+          details: { marker: 'valid-before-corruption' },
+        }),
+      );
+      const eventId = brain.episodic.recent(1)[0]!.id;
+      const db = (
+        brain as unknown as {
+          db: {
+            prepare: (sql: string) => { run: (...args: unknown[]) => void };
+          };
+        }
+      ).db;
+      db.prepare(
+        `UPDATE episodic_events SET details = ? WHERE id = ?`,
+      ).run('{', eventId);
+
+      const recent = brain.episodic.recent(1);
+      expect(recent).toHaveLength(1);
+      expect(recent[0]).toMatchObject({
+        id: eventId,
+        summary: 'diagnostic searchable event',
+        details: {
+          quarantine: {
+            field: 'details',
+            eventId,
+            reason: 'invalid JSON',
+          },
+        },
+      });
+      expect(brain.accessAudit.list({ operation: 'episodic.recent' })[0]).toMatchObject({
+        outcome: 'success',
+        details: { quarantinedEventIds: [eventId] },
+      });
+
+      const recalled = brain.episodic.recall('diagnostic', 1);
+      expect(recalled).toHaveLength(1);
+      expect(recalled[0]).toMatchObject({ id: eventId });
+      expect(brain.accessAudit.list({ operation: 'episodic.recall' })[0]).toMatchObject({
+        outcome: 'success',
+        details: { quarantinedEventIds: [eventId] },
+      });
     });
   });
 

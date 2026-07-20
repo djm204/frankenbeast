@@ -2594,6 +2594,8 @@ interface EpisodicRow {
   created_at: string;
 }
 
+type CorruptEpisodicDetailsReporter = (eventId: number) => void;
+
 class SqliteEpisodicMemory implements IEpisodicMemory {
   constructor(
     private db: Database.Database,
@@ -2813,9 +2815,13 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
 
   recall(query: string, limit = 10): EpisodicEvent[] {
     try {
+      const quarantinedEventIds = new Set<number>();
+      const reportCorruptDetails: CorruptEpisodicDetailsReporter = (eventId) => {
+        quarantinedEventIds.add(eventId);
+      };
       let result: EpisodicEvent[];
       if (this.encryption) {
-        result = this.recallEncrypted(query, limit);
+        result = this.recallEncrypted(query, limit, reportCorruptDetails);
       } else {
         const keywords = query
           .toLowerCase()
@@ -2824,13 +2830,14 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
           .filter((w) => !STOPWORDS.has(w));
 
         if (keywords.length === 0) {
-          result = this.recent(limit);
+          result = this.recent(limit, reportCorruptDetails);
         } else if (keywords.length <= MAX_RECALL_KEYWORDS_PER_QUERY) {
           result = collectRowsToEvents(
             (batchLimit, offset) =>
               this.recallKeywordChunk(keywords, batchLimit, offset),
             limit,
             this.encryption,
+            reportCorruptDetails,
           );
         } else {
           const rowsById = new Map<
@@ -2855,7 +2862,12 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
               b.id - a.id,
           );
 
-          result = rowsToEvents(sortedRows, limit, this.encryption);
+          result = rowsToEvents(
+            sortedRows,
+            limit,
+            this.encryption,
+            reportCorruptDetails,
+          );
         }
       }
       this.audit?.({
@@ -2863,7 +2875,13 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
         store: 'episodic',
         query,
         outcome: 'success',
-        details: { limit, count: result.length },
+        details: {
+          limit,
+          count: result.length,
+          ...(quarantinedEventIds.size > 0
+            ? { quarantinedEventIds: [...quarantinedEventIds] }
+            : {}),
+        },
       });
       return result;
     } catch (error) {
@@ -2881,7 +2899,11 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     }
   }
 
-  private recallEncrypted(query: string, limit = 10): EpisodicEvent[] {
+  private recallEncrypted(
+    query: string,
+    limit = 10,
+    reportCorruptDetails?: CorruptEpisodicDetailsReporter,
+  ): EpisodicEvent[] {
     if (limit === 0) return [];
     const keywords = query
       .toLowerCase()
@@ -2889,12 +2911,17 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       .filter((w) => w.length > 2)
       .filter((w) => !STOPWORDS.has(w));
     if (keywords.length === 0) {
-      return this.recent(limit);
+      return this.recent(limit, reportCorruptDetails);
     }
     const rows = this.db
       .prepare(`SELECT * FROM episodic_events ORDER BY created_at DESC`)
       .all() as EpisodicRow[];
-    const scored = rowsToEvents(rows, -1, this.encryption)
+    const scored = rowsToEvents(
+      rows,
+      -1,
+      this.encryption,
+      reportCorruptDetails,
+    )
       .map((event) => {
         const summary = event.summary.toLowerCase();
         const details = event.details
@@ -2968,6 +2995,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
 
   recentFailures(n = 10): EpisodicEvent[] {
     try {
+      const quarantinedEventIds = new Set<number>();
       const stmt = this.db.prepare(
         `SELECT * FROM episodic_events WHERE type = 'failure'
          ORDER BY created_at DESC LIMIT ? OFFSET ?`,
@@ -2976,12 +3004,19 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
         (limit, offset) => stmt.all(limit, offset) as EpisodicRow[],
         n,
         this.encryption,
+        (eventId) => quarantinedEventIds.add(eventId),
       );
       this.audit?.({
         operation: 'episodic.recentFailures',
         store: 'episodic',
         outcome: 'success',
-        details: { limit: n, count: result.length },
+        details: {
+          limit: n,
+          count: result.length,
+          ...(quarantinedEventIds.size > 0
+            ? { quarantinedEventIds: [...quarantinedEventIds] }
+            : {}),
+        },
       });
       return result;
     } catch (error) {
@@ -2998,8 +3033,12 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     }
   }
 
-  recent(n = 10): EpisodicEvent[] {
+  recent(
+    n = 10,
+    reportCorruptDetails?: CorruptEpisodicDetailsReporter,
+  ): EpisodicEvent[] {
     try {
+      const quarantinedEventIds = new Set<number>();
       const stmt = this.db.prepare(
         `SELECT * FROM episodic_events ORDER BY created_at DESC LIMIT ? OFFSET ?`,
       );
@@ -3007,12 +3046,22 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
         (limit, offset) => stmt.all(limit, offset) as EpisodicRow[],
         n,
         this.encryption,
+        (eventId) => {
+          quarantinedEventIds.add(eventId);
+          reportCorruptDetails?.(eventId);
+        },
       );
       this.audit?.({
         operation: 'episodic.recent',
         store: 'episodic',
         outcome: 'success',
-        details: { limit: n, count: result.length },
+        details: {
+          limit: n,
+          count: result.length,
+          ...(quarantinedEventIds.size > 0
+            ? { quarantinedEventIds: [...quarantinedEventIds] }
+            : {}),
+        },
       });
       return result;
     } catch (error) {
@@ -8137,6 +8186,7 @@ function rowsToEvents(
   rows: EpisodicRow[],
   limit: number,
   encryption?: MemoryCipher,
+  reportCorruptDetails?: CorruptEpisodicDetailsReporter,
 ): EpisodicEvent[] {
   if (limit === 0) {
     return [];
@@ -8144,7 +8194,7 @@ function rowsToEvents(
 
   const events: EpisodicEvent[] = [];
   for (const row of rows) {
-    const event = rowToEvent(row, encryption);
+    const event = rowToEvent(row, encryption, reportCorruptDetails);
     if (event) {
       events.push(event);
       if (limit >= 0 && events.length >= limit) {
@@ -8159,6 +8209,7 @@ function collectRowsToEvents(
   fetchRows: (limit: number, offset: number) => EpisodicRow[],
   limit: number,
   encryption?: MemoryCipher,
+  reportCorruptDetails?: CorruptEpisodicDetailsReporter,
 ): EpisodicEvent[] {
   if (limit === 0) {
     return [];
@@ -8174,7 +8225,7 @@ function collectRowsToEvents(
   for (let offset = 0; events.length < target; offset += batchSize) {
     const rows = fetchRows(batchSize, offset);
     for (const row of rows) {
-      const event = rowToEvent(row, encryption);
+      const event = rowToEvent(row, encryption, reportCorruptDetails);
       if (event) {
         events.push(event);
         if (events.length >= target) {
@@ -8206,7 +8257,8 @@ function parseCheckpointState(
 function rowToEvent(
   row: EpisodicRow,
   encryption?: MemoryCipher,
-): EpisodicEvent | null {
+  reportCorruptDetails?: CorruptEpisodicDetailsReporter,
+): EpisodicEvent {
   const event: EpisodicEvent = {
     id: row.id,
     type: row.type as EpisodicEventType,
@@ -8214,13 +8266,20 @@ function rowToEvent(
     createdAt: row.created_at,
   };
   if (row.step) event.step = row.step;
-  if (row.details) {
+  if (row.details !== null) {
     try {
       event.details = JSON.parse(
         encryption?.decrypt(row.details) ?? row.details,
       ) as Record<string, unknown>;
     } catch {
-      return null;
+      reportCorruptDetails?.(row.id);
+      event.details = {
+        quarantine: {
+          field: 'details',
+          eventId: row.id,
+          reason: 'invalid JSON',
+        },
+      };
     }
   }
   return event;
