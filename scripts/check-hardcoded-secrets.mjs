@@ -357,6 +357,31 @@ function hasHardcodedSourceLiteral(line) {
   return false;
 }
 
+function stripShellSingleQuotedSegments(line) {
+  if (!line.includes("'")) return line;
+  const pieces = [];
+  let quote = '';
+  let keptStart = 0;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if (character === '\\' && quote !== "'") {
+      index += 1;
+      continue;
+    }
+    if (!quote && character === '"') quote = '"';
+    else if (quote === '"' && character === '"') quote = '';
+    else if (!quote && character === "'") {
+      pieces.push(line.slice(keptStart, index));
+      quote = "'";
+    } else if (quote === "'" && character === "'") {
+      keptStart = index + 1;
+      quote = '';
+    }
+  }
+  pieces.push(line.slice(keptStart));
+  return pieces.join('');
+}
+
 function hasSensitiveEnvAccess(line, envContainerAliases = new Set(), envNameAliases = new Set(), envGetterAliases = new Set(), options = {}) {
   line = line
     .replace(/\bprocess\.env!/g, 'process.env')
@@ -412,9 +437,7 @@ function hasSensitiveEnvAccess(line, envContainerAliases = new Set(), envNameAli
     if (computedName && sensitiveIdentifierPattern.test(computedName)) return true;
   }
   if (options.shell) {
-    const installTimeShell = line
-      .replace(/'(?:\\.|[^'])*'/g, '')
-      .replace(/\\\$/g, '');
+    const installTimeShell = stripShellSingleQuotedSegments(line).replace(/\\\$/g, '');
     for (const match of installTimeShell.matchAll(/\$\{?([A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY|PASSPHRASE|PAT|ACCESS_KEY)[A-Z0-9_]*)\}?/gi)) {
       if (sensitiveIdentifierPattern.test(match[1])) {
         return true;
@@ -526,6 +549,12 @@ function collectSensitiveEnvAliases(line, aliases, envNameAliases, envContainerA
   const commonProcessEnv = line.match(/^\s*(?:const|let|var)\s*\{\s*env(?:\s*:\s*([A-Za-z_$][\w$]*))?\s*\}\s*=\s*require\(\s*['"](?:node:)?process['"]\s*\)\s*;?$/);
   if (commonProcessEnv) {
     envContainerAliases.add(commonProcessEnv[1] ?? 'env');
+    return;
+  }
+
+  const commonProcessModule = line.match(/^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*require\(\s*['"](?:node:)?process['"]\s*\)\s*;?$/);
+  if (commonProcessModule) {
+    envContainerAliases.add(`${commonProcessModule[1]}.env`);
     return;
   }
 
@@ -644,7 +673,9 @@ function collectSensitiveEnvAliases(line, aliases, envNameAliases, envContainerA
     envGetterAliases.delete(alias);
   }
   const commandLiteral = stringLiterals(expression).map((literal) => literal.value.trim()).find((literal) => /(?:^|\/)gh$/.test(literal));
-  if ((commandLiteral && /^\s*['"`](?:[^'"`]*\/)?gh['"`]\s*;?\s*$/.test(expression)) || (options.shell && /^(?:command\s+)?\/?(?:[^\s/]+\/)*gh\s*;?$/.test(trimmedExpression))) options.ghCommandAliases?.add(alias);
+  const commandParts = stringLiterals(expression).map((literal) => literal.value.trim());
+  const fullGhArgv = /^(?:gh|(?:[^/]+\/)*gh)$/.test(commandParts[0] ?? '') && commandParts.includes('auth') && commandParts.includes('token');
+  if ((commandLiteral && /^\s*['"`](?:[^'"`]*\/)?gh['"`]\s*;?\s*$/.test(expression)) || fullGhArgv || (options.shell && (/^(?:command\s+)?\/?(?:[^\s/]+\/)*gh\s*;?$/.test(trimmedExpression) || /^\$\(\s*command\s+-v\s+gh\s*\)\s*;?$/.test(trimmedExpression)))) options.ghCommandAliases?.add(alias);
   else options.ghCommandAliases?.delete(alias);
   const envNameLiteral = stringLiterals(expression)
     .map((literal) => literal.value.trim())
@@ -677,7 +708,11 @@ function hasCronScheduleLiteral(line) {
 
 function hasCronCommandMarker(line, cronScheduleAliases = new Set()) {
   const outsideStrings = codeOutsideStringLiterals(line);
-  const programmaticCrontabCall = /\b(?:execFileSync|execFile|spawnSync|spawn|execSync|exec|check_output|check_call|Popen|run|call|subprocess\.(?:run|check_output|check_call|Popen|call)|(?:os\.)?system)\s*\([^\n]*['"`][^'"`]*\bcrontab\b[^'"`]*['"`]/.test(line);
+  const crontabCallPattern = /\b(?:execFileSync|execFile|spawnSync|spawn|execSync|exec|check_output|check_call|Popen|run|call|subprocess\.(?:run|check_output|check_call|Popen|call)|(?:os\.)?system)\s*\([^\n]*['"`][^'"`]*\bcrontab\b[^'"`]*['"`]/;
+  const crontabArguments = stringLiterals(line).map((literal) => literal.value.trim());
+  const crontabIndex = crontabArguments.findIndex((argument) => /(?:^|\/)crontab$/.test(argument));
+  const readOnlyCrontabCall = crontabIndex >= 0 && crontabArguments.slice(crontabIndex + 1).some((argument) => argument === '-l' || argument === '--list');
+  const programmaticCrontabCall = crontabCallPattern.test(line) && !readOnlyCrontabCall;
   if (/(?:\bCRON(?:_CMD|_COMMAND)?\b|\bcrontab\b)/i.test(outsideStrings) || programmaticCrontabCall || hasCronScheduleLiteral(line) || hasCronScheduleText(line)) {
     return true;
   }
@@ -733,13 +768,13 @@ function hasInlineTokenMaterial(value) {
 
 function hasPersistedCredentialAssignment(value) {
   const normalizedValue = value.replace(/\\(["'`])/g, '$1');
-  const assignmentPattern = new RegExp(`${sensitiveIdentifierPattern.source}\\s*=\\s*(?:(["'` + '`' + `])([^"'` + '`' + `]*?)\\1|((?:\\\\?\\$\\(\\s*(?:command\\s+)?(?:(?:\\/[A-Za-z0-9._-]+)+\\/)?gh\\s+auth\\s+token(?:[^)]*)\\))|[^\\s]+))`, 'i');
+  const assignmentPattern = new RegExp(`${sensitiveIdentifierPattern.source}\\s*=\\s*(?:(["'` + '`' + `])([^"'` + '`' + `]*?)\\1|((?:\\\\?\\$\\([^)]*\\))|[^\\s]+))`, 'i');
   const match = assignmentPattern.exec(normalizedValue);
   if (!match) {
     return false;
   }
   const assignedValue = match[2] ?? match[3] ?? '';
-  return !/^\\?\$\(\s*(?:command\s+)?(?:(?:\/[A-Za-z0-9._-]+)+\/)?gh\s+auth\s+token(?:[^)]*)\)$/i.test(assignedValue);
+  return !/^\\?\$\(\s*(?:(?:env|(?:\/[A-Za-z0-9._-]+)*\/env)\s+)?(?:[A-Za-z_][A-Za-z0-9_]*=[^\s]+\s+)*(?:command\s+)?(?:(?:\/[A-Za-z0-9._-]+)+\/)?gh\s+auth\s+token(?:[^)]*)\)$/i.test(assignedValue);
 }
 
 function hasCronCredentialLiteral(line) {
@@ -900,6 +935,8 @@ function cronStagingStartLines(lines, commandNames = new Set()) {
   for (const line of lines) {
     const assignment = line.match(/^\s*(?:(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)\s*=\s*['"`]([^'"`]+)['"`]\s*;?$/);
     if (assignment) pathAliases.set(assignment[1], assignment[2]);
+    const pathAssignment = line.match(/^\s*(?:(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)\s*=\s*Path\s*\(\s*['"`]([^'"`]+)['"`]\s*\)\s*;?$/);
+    if (pathAssignment) pathAliases.set(pathAssignment[1], pathAssignment[2]);
   }
   for (const [index, line] of lines.entries()) {
     const rawTarget = (
@@ -907,6 +944,7 @@ function cronStagingStartLines(lines, commandNames = new Set()) {
       ?? /\|\s*tee(?:\s+-a)?\s+([^\s;]+)/.exec(line)?.[1]
       ?? /\b(?:writeFileSync|writeFile)\s*\(\s*(?:['"`]([^'"`]+)['"`]|([A-Za-z_$][\w$]*))/.exec(line)?.slice(1).find(Boolean)
       ?? /\bPath\s*\(\s*['"`]([^'"`]+)['"`]\s*\)\.write_text\s*\(/.exec(line)?.[1]
+      ?? /\b([A-Za-z_$][\w$]*)\.write_text\s*\(/.exec(line)?.[1]
       ?? /\bopen\s*\(\s*['"`]([^'"`]+)['"`]/.exec(line)?.[1]
     )?.replace(/^['"]|['"]$/g, '');
     const target = pathAliases.get(rawTarget) ?? rawTarget;
@@ -1012,8 +1050,11 @@ function multilineProgrammaticCrontabLines(lines, aliases = collectProgrammaticC
     }
     const outsideCombined = codeOutsideStringLiterals(combined);
     const commandAliasUsed = [...aliases.commandNames].some((name) => new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'u').test(outsideCombined));
-    const literalCrontabCommand = stringLiterals(combined).some((literal) => /(?:^|[\s|/])crontab(?:\s|$)/.test(literal.value));
-    if (hasCronCommandMarker(combined) || commandAliasUsed || literalCrontabCommand) {
+    const callArguments = stringLiterals(combined).map((literal) => literal.value.trim());
+    const crontabIndex = callArguments.findIndex((argument) => /(?:^|\/)crontab$/.test(argument));
+    const readOnlyCrontabCall = crontabIndex >= 0 && callArguments.slice(crontabIndex + 1).some((argument) => argument === '-l' || argument === '--list');
+    const literalCrontabCommand = !readOnlyCrontabCall && callArguments.some((argument) => /(?:^|[\s|/])crontab(?:\s|$)/.test(argument));
+    if (!readOnlyCrontabCall && (hasCronCommandMarker(combined) || commandAliasUsed || literalCrontabCommand)) {
       for (let index = start; index <= end; index += 1) indexes.add(index);
     }
     start = end;

@@ -1557,6 +1557,85 @@ describe('hard-coded example secret scanner', () => {
     }
   });
 
+  it('rejects Codex round 30 cron scanner bypasses without flagging read-only or runtime lookups', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'round-30-commonjs.js'),
+      [
+        "const proc = require('node:process');",
+        'const token = proc.env.GITHUB_TOKEN;',
+        'const entry = `0 1 * * * agy pr --token ${token}`;',
+        "writeFileSync('/tmp/jobs-commonjs', entry);",
+        "execFileSync('crontab', ['/tmp/jobs-commonjs']);",
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'round-30-path.py'),
+      [
+        "job_path = Path('/tmp/jobs-path')",
+        "entry = f\"{sys.argv[1]} agy pr --token {os.environ['GITHUB_TOKEN']}\"",
+        'job_path.write_text(entry)',
+        "subprocess.run(['crontab', str(job_path)])",
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'round-30-shell.sh'),
+      [
+        '#!/usr/bin/env bash',
+        'CRON_CMD="0 1 * * * agy pr --token \'$GITHUB_TOKEN\'"',
+        'gh_cli=$(command -v gh)',
+        'auth="$($gh_cli auth token)"',
+        'CRON_CMD="0 2 * * * agy pr --token $auth"',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'round-30-argv.py'),
+      [
+        "cmd = ['gh', 'auth', 'token']",
+        'token = check_output(cmd, text=True).strip()',
+        'entry = f"0 1 * * * agy pr --token {token}"',
+        "Path('/tmp/jobs-argv').write_text(entry)",
+        "run(['crontab', '/tmp/jobs-argv'])",
+      ].join('\n'),
+      'utf8',
+    );
+
+    const rejected = runScanner(root);
+
+    expect(rejected.status).toBe(1);
+    for (const location of [
+      'scripts/round-30-commonjs.js:3',
+      'scripts/round-30-path.py:3',
+      'scripts/round-30-shell.sh:2',
+      'scripts/round-30-shell.sh:5',
+      'scripts/round-30-argv.py:3',
+    ]) {
+      expect(rejected.stderr).toContain(location);
+    }
+
+    const allowedRoot = makeFixtureRoot();
+    const allowedScriptDir = join(allowedRoot, 'scripts');
+    mkdirSync(allowedScriptDir, { recursive: true });
+    writeFileSync(
+      join(allowedScriptDir, 'list-crontab.js'),
+      "spawnSync('crontab', ['-l'], { env: { ...process.env, GITHUB_TOKEN: process.env.GITHUB_TOKEN } });\n",
+      'utf8',
+    );
+    writeFileSync(
+      join(allowedScriptDir, 'runtime-host.sh'),
+      "printf '%s\\n' '0 1 * * * GITHUB_TOKEN=$(GH_HOST=github.example gh auth token) agy pr' | crontab -\n",
+      'utf8',
+    );
+
+    const allowed = runScanner(allowedRoot);
+    expect(allowed.status, allowed.stderr).toBe(0);
+  });
+
   it('allows direct crontab installs that defer gh auth token lookup until runtime', () => {
     const root = makeFixtureRoot();
     const scriptDir = join(root, 'scripts');
