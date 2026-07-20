@@ -52,6 +52,10 @@ export class ApprovalWaiterRegistry {
   }
 
   has(requestId: string): boolean {
+    return this.pending.has(requestId);
+  }
+
+  hasKnownRequest(requestId: string): boolean {
     return this.pending.has(requestId) || this.resolvedBeforeWaiter.has(requestId);
   }
 

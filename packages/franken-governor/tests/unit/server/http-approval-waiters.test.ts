@@ -241,7 +241,15 @@ describe('standalone governor HTTP app wired to real approval waiters', () => {
     });
     expect(response.status).toBe(200);
     expect(registry.size).toBe(0);
-    expect(registry.has('req-out-of-order-1')).toBe(true);
+    expect(registry.has('req-out-of-order-1')).toBe(false);
+    expect(registry.hasKnownRequest('req-out-of-order-1')).toBe(true);
+
+    const duplicateResponse = await app.request('/v1/approval/respond', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId: 'req-out-of-order-1', decision: 'ABORT' }),
+    });
+    expect(duplicateResponse.status).toBe(404);
 
     // A retry of the request metadata must not overwrite the already accepted
     // decision before the in-process channel attaches its waiter.
