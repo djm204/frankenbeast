@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import { createInterface, type Interface } from 'node:readline';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import { sanitizeChatOutput } from '../chat/output-sanitizer.js';
+import { ANSI } from '../logging/beast-logger.js';
+import { CHAT_GLYPHS, chatBanner, chatBlock, chatStatusLine } from '../cli/chat-style.js';
 import {
   CHAT_SOCKET_PROTOCOL,
   CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX,
@@ -192,7 +194,7 @@ function createIo(): {
 } {
   const rl: Interface = createInterface({ input: process.stdin, output: process.stdout });
   return {
-    prompt: () => new Promise((resolve) => rl.question('> ', resolve)),
+    prompt: () => new Promise((resolve) => rl.question(`${ANSI.cyan}${CHAT_GLYPHS.user}${ANSI.reset} `, resolve)),
     print: (message: string) => printLine(message),
     close: () => rl.close(),
   };
@@ -228,6 +230,9 @@ async function awaitRemoteReply(socket: WebSocket, verbose: boolean): Promise<vo
       }
       switch (payload.type) {
         case 'assistant.message.delta':
+          if (!streamed) {
+            process.stdout.write(`${ANSI.magenta}${CHAT_GLYPHS.beast}${ANSI.reset} `);
+          }
           process.stdout.write(String(payload.chunk ?? ''));
           streamed = true;
           break;
@@ -235,26 +240,26 @@ async function awaitRemoteReply(socket: WebSocket, verbose: boolean): Promise<vo
           if (streamed) {
             process.stdout.write('\n');
           } else {
-            printLine(sanitizeChatOutput(String(payload.content ?? '')));
+            printLine(chatBlock(CHAT_GLYPHS.beast, ANSI.magenta, sanitizeChatOutput(String(payload.content ?? ''))));
           }
           if (verbose && payload.modelTier) {
-            printLine(`  [${String(payload.modelTier)}]`);
+            printLine(chatStatusLine(`[${String(payload.modelTier)}]`));
           }
           cleanup();
           resolve();
           break;
         case 'turn.approval.requested':
-          printLine(String(payload.description ?? 'approval required'));
+          printLine(chatBlock(CHAT_GLYPHS.approval, ANSI.yellow, String(payload.description ?? 'approval required'), ANSI.yellow));
           cleanup();
           resolve();
           break;
         case 'turn.error':
-          printLine(String(payload.message ?? payload.error ?? 'Chat request failed'));
+          printLine(chatBlock(CHAT_GLYPHS.error, ANSI.red, String(payload.message ?? payload.error ?? 'Chat request failed'), ANSI.red));
           cleanup();
           resolve();
           break;
         case 'turn.execution.progress':
-          printLine(String((payload.data as { summary?: string } | undefined)?.summary ?? 'Executing...'));
+          printLine(chatBlock(CHAT_GLYPHS.execution, ANSI.green, String((payload.data as { summary?: string } | undefined)?.summary ?? 'Executing...')));
           break;
         default:
           break;
@@ -295,7 +300,7 @@ export async function runManagedChatRepl(options: {
   const session = await createRemoteSession(options.attachment, options.projectId);
   const verbose = options.verbose ?? false;
 
-  io.print('\nfrankenbeast chat — attached to managed network (/quit to exit)\n');
+  io.print(chatBanner('frankenbeast', '· attached to managed network · /quit to exit'));
 
   try {
     for (;;) {
