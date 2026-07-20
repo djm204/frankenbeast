@@ -29,12 +29,15 @@ const currentDocs = [
   'docs/guides/add-llm-provider.md',
   'docs/guides/quickstart.md',
   'docs/guides/wrap-external-agent.md',
+  'packages/franken-critique/docs/adr/ADR-001-typescript-strict-mode.md',
+  'packages/franken-governor/docs/adr/ADR-001-typescript-strict-nodenext.md',
+  'packages/franken-governor/docs/adr/ADR-006-custom-error-hierarchy.md',
 ];
 
 const removedStandalonePackagePattern =
   /(?<![\w@/-])(?:frankenfirewall|franken-skills|franken-heartbeat|franken-mcp|franken-comms)(?![-\w/])/u;
 
-describe('issue #2631 current docs package inventory', () => {
+describe('issues #2631 and #3464 current docs package inventory', () => {
   it('keeps the README current package table aligned to packages/*', () => {
     const readme = readText('README.md');
     const packages = activePackages();
