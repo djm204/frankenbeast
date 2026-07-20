@@ -38,7 +38,7 @@ export interface PendingApprovalSnapshot {
  * in-process waiter (see issue #411).
  */
 export class ApprovalWaiterRegistry {
-  private static readonly EARLY_RESPONSE_TTL_MS = 30_000;
+  private static readonly EARLY_RESPONSE_TTL_MS = 300_000;
   private readonly pending = new Map<string, PendingApproval>();
   /**
    * Responses accepted for placeholder-only registrations before the
@@ -52,7 +52,7 @@ export class ApprovalWaiterRegistry {
   }
 
   has(requestId: string): boolean {
-    return this.pending.has(requestId);
+    return this.pending.has(requestId) || this.resolvedBeforeWaiter.has(requestId);
   }
 
   get(requestId: string): { taskId: string; summary: string; approvalAnomalyNotice?: string } | undefined {
@@ -113,7 +113,22 @@ export class ApprovalWaiterRegistry {
     if (earlyResponse) {
       this.resolvedBeforeWaiter.delete(requestId);
       clearTimeout(earlyResponse.expiry);
-      return Promise.resolve(earlyResponse.response);
+      return new Promise<ApprovalResponse>((resolvePromise) => {
+        this.pending.set(requestId, {
+          taskId,
+          summary,
+          ...(approvalAnomalyNotice !== undefined ? { approvalAnomalyNotice } : {}),
+          hasRealWaiter: true,
+          resolve: resolvePromise,
+        });
+        queueMicrotask(() => {
+          const pending = this.pending.get(requestId);
+          if (pending?.resolve === resolvePromise) {
+            this.pending.delete(requestId);
+            resolvePromise(earlyResponse.response);
+          }
+        });
+      });
     }
 
     const existing = this.pending.get(requestId);
