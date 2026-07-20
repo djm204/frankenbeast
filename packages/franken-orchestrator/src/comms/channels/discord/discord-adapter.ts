@@ -7,7 +7,7 @@ import type {
 import { isoNow } from '@franken/types';
 import { formatHttpErrorMessage } from '../http-error-context.js';
 import { createEgressGuardedFetch, type EgressPolicyConfig } from '../../../network/egress-policy.js';
-import { createBoundedFetch } from '../bounded-fetch.js';
+import { createBoundedFetch, type BoundedFetch } from '../bounded-fetch.js';
 
 export interface DiscordAdapterOptions {
   egressPolicy?: EgressPolicyConfig | undefined;
@@ -29,7 +29,7 @@ export class DiscordAdapter implements ChannelAdapter {
 
   private readonly token: string;
 
-  private readonly fetchImpl: typeof fetch;
+  private readonly fetchImpl: BoundedFetch;
 
   constructor(options: DiscordAdapterOptions) {
     this.token = options.token;
@@ -52,18 +52,18 @@ export class DiscordAdapter implements ChannelAdapter {
       ? `https://discord.com/api/v10/channels/${threadId}/messages`
       : `https://discord.com/api/v10/channels/${channelId}/messages`;
 
-    const response = await this.fetchImpl(targetUrl, {
+    await this.fetchImpl(targetUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bot ${this.token}`,
       },
       body: JSON.stringify(body),
+    }, async response => {
+      if (!response.ok) {
+        throw new Error(await formatHttpErrorMessage('Discord API error', response, targetUrl));
+      }
     });
-
-    if (!response.ok) {
-      throw new Error(await formatHttpErrorMessage('Discord API error', response, targetUrl));
-    }
   }
 
   private formatPayload(message: ChannelOutboundMessage): Record<string, unknown> {

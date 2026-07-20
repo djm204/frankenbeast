@@ -7,7 +7,7 @@ import type {
 import { redactTelegramBotTokenUrls } from '../../../security/telegram-redaction.js';
 import { formatHttpErrorMessage } from '../http-error-context.js';
 import { createEgressGuardedFetch, type EgressPolicyConfig } from '../../../network/egress-policy.js';
-import { createBoundedFetch } from '../bounded-fetch.js';
+import { createBoundedFetch, type BoundedFetch } from '../bounded-fetch.js';
 
 export interface TelegramAdapterOptions {
   egressPolicy?: EgressPolicyConfig | undefined;
@@ -51,7 +51,7 @@ export class TelegramAdapter implements ChannelAdapter {
 
   private readonly token: string;
 
-  private readonly fetchImpl: typeof fetch;
+  private readonly fetchImpl: BoundedFetch;
 
   constructor(options: TelegramAdapterOptions) {
     this.token = options.token;
@@ -68,22 +68,22 @@ export class TelegramAdapter implements ChannelAdapter {
     const body = this.formatPayload(sessionId, chatId, message);
     const targetUrl = `https://api.telegram.org/bot${this.token}/sendMessage`;
 
-    const response = await this.fetchImpl(targetUrl, {
+    await this.fetchImpl(targetUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
+    }, async response => {
+      if (!response.ok) {
+        throw new Error(await formatHttpErrorMessage(
+          'Telegram API error',
+          response,
+          targetUrl,
+          redactTelegramBotTokenUrls,
+        ));
+      }
     });
-
-    if (!response.ok) {
-      throw new Error(await formatHttpErrorMessage(
-        'Telegram API error',
-        response,
-        targetUrl,
-        redactTelegramBotTokenUrls,
-      ));
-    }
   }
 
   private formatPayload(sessionId: string, chatId: string, message: ChannelOutboundMessage): Record<string, unknown> {
