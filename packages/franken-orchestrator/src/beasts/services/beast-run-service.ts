@@ -16,7 +16,6 @@ import {
 import type { MaintenanceModeService } from './maintenance-mode-service.js';
 import {
   AgentToolPolicyError,
-  defaultAgentToolPolicyConfig,
   validateAgentRoleTools,
   type ToolPolicyDenial,
   type ToolPolicyValidationContext,
@@ -37,8 +36,6 @@ const STORED_AGENT_POLICY_KEYS = [
   'tools',
   'skills',
 ] as const;
-
-const STORED_AGENT_MANIFEST_ALIASES = ['enabledTools', 'toolManifest', 'tools'] as const;
 
 export class UnknownBeastRunError extends Error {
   constructor(public readonly runId: string) {
@@ -402,6 +399,7 @@ export class BeastRunService {
     const trackedAgent = this.repository.getTrackedAgent(run.trackedAgentId);
     const validation = validateAgentRoleTools(configSnapshot, {
       definitionId: run.definitionId,
+      initActionKind: trackedAgent?.initAction.kind,
       initActionConfig: trackedAgent?.initAction.config,
       trustedSkillToolManifests: this.serviceOptions.trustedSkillToolManifests,
     });
@@ -444,19 +442,7 @@ export class BeastRunService {
         .filter(key => Object.prototype.hasOwnProperty.call(trackedAgent.initConfig, key))
         .map(key => [key, trackedAgent.initConfig[key]]),
     );
-    const policyDefaults: Record<string, unknown> = {
-      ...defaultAgentToolPolicyConfig(
-        definition.id,
-        trackedAgent.initAction.kind,
-        trackedAgent.initConfig,
-        this.serviceOptions.trustedSkillToolManifests,
-      ),
-    };
-    if (STORED_AGENT_MANIFEST_ALIASES.some(key => Object.hasOwn(storedPolicy, key))) {
-      delete policyDefaults.requestedTools;
-    }
     const rebuiltPolicyConfig = {
-      ...policyDefaults,
       ...storedPolicy,
       ...normalized,
     };

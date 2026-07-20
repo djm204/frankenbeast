@@ -1593,7 +1593,7 @@ describe('BeastRunService', () => {
     }));
   });
 
-  it('persists rebuilt legacy retry config before a repeated failure clears the run snapshot', async () => {
+  it('fails closed instead of synthesizing policy for legacy tracked retries', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const logs = new BeastLogStore(join(workDir, 'logs'));
@@ -1638,17 +1638,16 @@ describe('BeastRunService', () => {
       stopReason: 'start_failed',
     });
 
-    const failed = await runs.start(run.id, 'operator');
-
-    expect(failed).toMatchObject({ status: 'failed', stopReason: 'start_failed', configSnapshot: {} });
-    expect(repo.getTrackedAgent(agent.id)).toMatchObject({
-      initConfig: {
-        provider: 'claude',
-        objective: 'Retry legacy work',
-        chunkDirectory: 'docs/chunks',
+    await expect(runs.start(run.id, 'operator')).rejects.toMatchObject({
+      name: 'AgentToolPolicyError',
+      validation: {
+        denials: expect.arrayContaining([
+          expect.objectContaining({ requestedTool: '<missing-tool-manifest>' }),
+        ]),
       },
-      moduleConfig: { firewall: true, planner: true },
     });
+    expect(executors.process.start).not.toHaveBeenCalled();
+    expect(repo.getTrackedAgent(agent.id)).toMatchObject({ initConfig: {} });
   });
 
   it('rebuilds a redacted stopped run before restarting an active failed dispatch', async () => {
@@ -1755,6 +1754,7 @@ describe('BeastRunService', () => {
         provider: 'claude',
         objective: 'Finish immediately',
         chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
       },
       createdAt: '2026-03-11T00:00:00.000Z',
       updatedAt: '2026-03-11T00:00:00.000Z',

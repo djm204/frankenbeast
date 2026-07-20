@@ -314,7 +314,8 @@ export function validateAgentRoleTools(
   const runtimeTools = runtimeToolsFromConfig(policyConfig, context);
   const workflowTools = workflowRequiredTools(context);
   const selectedSkills = selectedSkillsFromConfig(policyConfig);
-  const skillDenials = skillToolDenials(role ?? rawRole ?? '<missing-role>', selectedSkills.skills, context);
+  const installedSkills = selectedSkills.skills.filter(skill => !skill.startsWith('cli:'));
+  const skillDenials = skillToolDenials(role ?? rawRole ?? '<missing-role>', installedSkills, context);
   const malformedSkillsDenial = selectedSkills.malformed
     ? [{
       role: role ?? rawRole ?? '<missing-role>',

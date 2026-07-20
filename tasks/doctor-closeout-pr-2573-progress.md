@@ -7,11 +7,15 @@
 - [x] Include body-implied runtime and trusted-skill tools in route-generated defaults.
 - [x] Prevent chat-init aliases from inheriting generated default manifests.
 - [x] Fail closed when legacy tracked agents have no stored explicit manifest.
+- [x] Preserve tracked init workflow context during dispatch and retry validation.
+- [x] Fail closed instead of synthesizing policy for legacy tracked-agent retries.
+- [x] Keep `cli:*` run-config descriptors separate from installed MCP skill policy.
 - [x] Run targeted tests, orchestrator typecheck/build/lint, and broader tests as practical.
   - Targeted policy tests: 63/63 passed.
   - Full orchestrator suite: 4165/4165 passed.
   - Orchestrator typecheck and build passed; lint completed with 0 errors (existing warnings only).
   - Latest follow-up: 100/100 focused tests and orchestrator typecheck passed.
+  - Second follow-up: 116/116 focused tests, typecheck, build, and lint (0 errors) passed.
 - [x] Commit with the required Git identity and publish through approval-cop.
 - [ ] Reply to and resolve every addressed Codex thread, including the latest two findings.
 - [ ] Obtain a fresh Codex clean for the published current head within the authorized cap policy.

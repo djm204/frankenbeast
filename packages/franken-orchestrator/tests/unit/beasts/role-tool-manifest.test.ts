@@ -260,6 +260,18 @@ describe('role tool manifest policy', () => {
     });
   });
 
+  it('keeps CLI run-config skill descriptors separate from installed tool policy', () => {
+    expect(validateAgentRoleTools({
+      agentRole: 'coding',
+      requestedTools: ['read_file'],
+      skills: ['cli:01_setup'],
+    })).toMatchObject({
+      allowed: true,
+      role: 'coding',
+      denials: [],
+    });
+  });
+
   it('requires explicit manifests to cover inferred workflow, runtime, and skill tools', () => {
     expect(validateAgentRoleTools({
       agentRole: 'coding',

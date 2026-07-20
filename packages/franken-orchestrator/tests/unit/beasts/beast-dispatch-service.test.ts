@@ -919,7 +919,7 @@ describe('BeastDispatchService', () => {
       },
     });
 
-    await expect(dispatch.createRun({
+    const run = await dispatch.createRun({
       definitionId: 'martin-loop',
       trackedAgentId: agent.id,
       config: {
@@ -930,8 +930,9 @@ describe('BeastDispatchService', () => {
       dispatchedBy: 'chat',
       dispatchedByUser: 'operator',
       executionMode: 'process',
-    })).rejects.toBeInstanceOf(AgentToolPolicyError);
-    expect(repo.listRuns()).toEqual([]);
+    });
+    expect(run.configSnapshot).toMatchObject(policy);
+    expect(run.configSnapshot).not.toHaveProperty('requestedTools');
   });
 
   it('fails closed for legacy tracked agents without a stored tool manifest', async () => {
@@ -1031,7 +1032,7 @@ describe('BeastDispatchService', () => {
     });
   });
 
-  it('validates tracked-agent dispatches against the run definition rather than the init action', async () => {
+  it('validates tracked-agent dispatches against the stored init action workflow', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const logs = new BeastLogStore(join(workDir, 'logs'));
@@ -1054,7 +1055,7 @@ describe('BeastDispatchService', () => {
       },
     });
 
-    await expect(dispatch.createRun({
+    const run = await dispatch.createRun({
       definitionId: 'martin-loop',
       trackedAgentId: agent.id,
       config: {
@@ -1065,13 +1066,12 @@ describe('BeastDispatchService', () => {
       dispatchedBy: 'chat',
       dispatchedByUser: 'operator',
       executionMode: 'process',
-    })).rejects.toMatchObject({
-      name: 'AgentToolPolicyError',
-      validation: {
-        denials: expect.arrayContaining([expect.objectContaining({ requestedTool: 'patch' })]),
-      },
     });
-    expect(repo.listRuns()).toEqual([]);
+    expect(run.configSnapshot).toMatchObject({
+      agentRole: 'docs',
+      requestedTools: ['read_file', 'search_files', 'write_file'],
+      skills: [],
+    });
   });
 
   it('canonicalizes stored role aliases before merging request policy during dispatch', async () => {

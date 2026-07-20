@@ -524,6 +524,7 @@ export class BeastDispatchService {
       : { ...request.config, ...configSnapshot };
     const validation = validateAgentRoleTools(policyConfig, {
       definitionId: request.definitionId,
+      initActionKind: trackedAgent?.initAction.kind,
       initActionConfig: trackedAgent?.initAction.config,
       trustedSkillToolManifests: this.options.trustedSkillToolManifests,
     });
