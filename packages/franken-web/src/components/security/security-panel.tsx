@@ -3,7 +3,7 @@ interface SecurityPanelProps {
   injectionDetection: boolean;
   piiMasking: boolean;
   outputValidation: boolean;
-  requireApproval?: string;
+  requireApproval?: string | undefined;
   onProfileChange: (profile: string) => void;
 }
 

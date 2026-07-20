@@ -151,9 +151,9 @@ export class ClassificationGuardAdapter implements ExportAdapter {
     this.inner = options.adapter
     this.artifact = buildGuardClassification(options.artifactType ?? 'trace', options.classification)
     this.policyOptions = {
-      redactionApplied: options.redactionApplied,
-      allowSensitiveExportOverride: options.allowSensitiveExportOverride,
-      destination: options.destination,
+      ...(options.redactionApplied === undefined ? {} : { redactionApplied: options.redactionApplied }),
+      ...(options.allowSensitiveExportOverride === undefined ? {} : { allowSensitiveExportOverride: options.allowSensitiveExportOverride }),
+      ...(options.destination === undefined ? {} : { destination: options.destination }),
     }
   }
 

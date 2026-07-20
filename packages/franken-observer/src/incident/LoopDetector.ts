@@ -160,7 +160,7 @@ export class LoopDetector {
   }
 
   private windowMatches(pattern: CachedSpanName[], start: number): boolean {
-    return pattern.every((spanName, index) => this.spanNamesMatch(spanName, this.history[start + index]))
+    return pattern.every((spanName, index) => this.spanNamesMatch(spanName, this.history[start + index]!))
   }
 
   private spanNamesMatch(left: CachedSpanName, right: CachedSpanName): boolean {
@@ -240,18 +240,18 @@ export class LoopDetector {
     const previous = Array.from({ length: right.length + 1 }, (_, index) => index)
 
     for (let leftIndex = 0; leftIndex < left.length; leftIndex += 1) {
-      let upperLeft = previous[0]
+      let upperLeft = previous[0]!
       previous[0] = leftIndex + 1
 
       for (let rightIndex = 0; rightIndex < right.length; rightIndex += 1) {
-        const upper = previous[rightIndex + 1]
+        const upper = previous[rightIndex + 1]!
         const cost = left[leftIndex] === right[rightIndex] ? 0 : 1
-        previous[rightIndex + 1] = Math.min(previous[rightIndex + 1] + 1, previous[rightIndex] + 1, upperLeft + cost)
+        previous[rightIndex + 1] = Math.min(previous[rightIndex + 1]! + 1, previous[rightIndex]! + 1, upperLeft + cost)
         upperLeft = upper
       }
     }
 
-    return previous[right.length]
+    return previous[right.length]!
   }
 
   on(event: 'loop-detected', handler: LoopHandler): void {

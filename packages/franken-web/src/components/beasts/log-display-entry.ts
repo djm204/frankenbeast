@@ -63,8 +63,8 @@ export function buildLogDisplayEntries(
       entry: {
         kind: 'log',
         key: `log-${index}`,
-        level: parsed.stream === 'stderr' ? 'error' : undefined,
-        timestamp: parsed.createdAt,
+        ...(parsed.stream === 'stderr' ? { level: 'error' as const } : {}),
+        ...(parsed.createdAt === undefined ? {} : { timestamp: parsed.createdAt }),
         message: parsed.message,
         label: `${timestampPrefix}${streamPrefix}${parsed.message}`,
       },

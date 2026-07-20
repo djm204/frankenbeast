@@ -5,8 +5,8 @@ import type { BeastCatalogEntry, BeastContainerRuntimeStatus, BeastExecutionMode
 import { getEffectiveCatalog, getPromptLabel, getPromptValue } from '../wizard-catalog';
 
 interface StepWorkflowProps {
-  catalog?: readonly BeastCatalogEntry[];
-  containerRuntime?: BeastContainerRuntimeStatus;
+  catalog?: readonly BeastCatalogEntry[] | undefined;
+  containerRuntime?: BeastContainerRuntimeStatus | undefined;
 }
 
 const DEFAULT_CONTAINER_UNAVAILABLE_REASON = 'Container runtime availability has not been reported by the backend.';

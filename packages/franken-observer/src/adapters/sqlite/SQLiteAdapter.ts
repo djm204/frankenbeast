@@ -51,9 +51,9 @@ interface TraceSummaryRow {
 
 interface FlushedSpanState {
   status: Span['status']
-  endedAt?: number
-  durationMs?: number
-  errorMessage?: string
+  endedAt: number | undefined
+  durationMs: number | undefined
+  errorMessage: string | undefined
   metadata: Record<string, unknown>
   metadataKeyCount: number
   metadataJson: string
@@ -364,7 +364,7 @@ function normalizeLockRetryOptions(options: SQLiteAdapterOptions): NormalizedLoc
     maxDelayMs,
     jitter: options.lockRetryJitter ?? true,
     sleep: options.lockRetrySleep ?? (ms => new Promise<void>(resolve => setTimeout(resolve, ms))),
-    onDiagnostic: options.onLockRetryDiagnostic,
+    ...(options.onLockRetryDiagnostic === undefined ? {} : { onDiagnostic: options.onLockRetryDiagnostic }),
   }
 }
 
@@ -385,17 +385,17 @@ function snapshotTrace(trace: Trace): Trace {
     goal: redactSensitiveText(trace.goal),
     status: trace.status,
     startedAt: trace.startedAt,
-    endedAt: trace.endedAt,
+    ...(trace.endedAt === undefined ? {} : { endedAt: trace.endedAt }),
     spans: trace.spans.map(span => ({
       id: span.id,
       traceId: span.traceId,
-      parentSpanId: span.parentSpanId,
+      ...(span.parentSpanId === undefined ? {} : { parentSpanId: span.parentSpanId }),
       name: span.name,
       status: span.status,
       startedAt: span.startedAt,
-      endedAt: span.endedAt,
-      durationMs: span.durationMs,
-      errorMessage: span.errorMessage === undefined ? undefined : redactSensitiveText(span.errorMessage),
+      ...(span.endedAt === undefined ? {} : { endedAt: span.endedAt }),
+      ...(span.durationMs === undefined ? {} : { durationMs: span.durationMs }),
+      ...(span.errorMessage === undefined ? {} : { errorMessage: redactSensitiveText(span.errorMessage) }),
       metadata: redactMetadata(JSON.parse(JSON.stringify(span.metadata)) as Record<string, unknown>) as Record<string, unknown>,
       thoughtBlocks: span.thoughtBlocks.map(redactSensitiveText),
     })),
@@ -477,13 +477,13 @@ function rowToSpan(row: SpanRow): Span {
   return {
     id: row.id,
     traceId: row.traceId,
-    parentSpanId: row.parentSpanId ?? undefined,
+    ...(row.parentSpanId === null ? {} : { parentSpanId: row.parentSpanId }),
     name: row.name,
     status: row.status as Span['status'],
     startedAt: row.startedAt,
-    endedAt: row.endedAt ?? undefined,
-    durationMs: row.durationMs ?? undefined,
-    errorMessage: row.errorMessage ?? undefined,
+    ...(row.endedAt === null ? {} : { endedAt: row.endedAt }),
+    ...(row.durationMs === null ? {} : { durationMs: row.durationMs }),
+    ...(row.errorMessage === null ? {} : { errorMessage: row.errorMessage }),
     metadata: safeParse<Record<string, unknown>>(row.metadata, {}, `span ${row.id} metadata`),
     thoughtBlocks: safeParse<string[]>(row.thoughtBlocks, [], `span ${row.id} thoughtBlocks`),
   }
@@ -735,7 +735,7 @@ export class SQLiteAdapter implements ExportAdapter {
           goal: traceRow.goal,
           status: traceRow.status as Trace['status'],
           startedAt: traceRow.startedAt,
-          endedAt: traceRow.endedAt ?? undefined,
+          ...(traceRow.endedAt === null ? {} : { endedAt: traceRow.endedAt }),
           spans: result.spanRows.map(rowToSpan),
         }
       }
@@ -749,7 +749,7 @@ export class SQLiteAdapter implements ExportAdapter {
           goal: traceRow.goal,
           status: traceRow.status as Trace['status'],
           startedAt: traceRow.startedAt,
-          endedAt: traceRow.endedAt ?? undefined,
+          ...(traceRow.endedAt === null ? {} : { endedAt: traceRow.endedAt }),
           spans: spanRows.map(rowToSpan),
         }
       })

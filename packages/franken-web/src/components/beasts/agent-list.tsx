@@ -14,7 +14,7 @@ interface AgentListProps {
   createAgentDisabledReason?: string | null;
   hasMore?: boolean;
   loadingMore?: boolean;
-  onLoadMore?: () => Promise<void>;
+  onLoadMore?: (() => Promise<void>) | undefined;
 }
 
 export function AgentList({

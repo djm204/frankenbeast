@@ -126,7 +126,10 @@ function llmProviderModel(
     : stringRecord(llmConfig?.default);
   const provider = typeof section?.provider === 'string' ? section.provider : undefined;
   const model = typeof section?.model === 'string' ? section.model : undefined;
-  return { provider, model };
+  return {
+    ...(provider === undefined ? {} : { provider }),
+    ...(model === undefined ? {} : { model }),
+  };
 }
 
 function resolveLaunchExecutionMode(

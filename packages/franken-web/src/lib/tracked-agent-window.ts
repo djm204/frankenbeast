@@ -3,7 +3,7 @@ import type { BeastApiClient, BeastRunSummary } from './beast-api';
 
 interface TrackedAgentPage {
   agents: TrackedAgentSummary[];
-  nextCursor?: string;
+  nextCursor?: string | undefined;
 }
 
 export interface TrackedAgentWindow extends TrackedAgentPage {

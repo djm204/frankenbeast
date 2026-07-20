@@ -19,7 +19,7 @@ interface BeastsPageProps {
   agentDetail: TrackedAgentDetail | null;
   catalog: BeastCatalogEntry[];
   runs: BeastRunSummary[];
-  containerRuntime?: BeastContainerRuntimeStatus;
+  containerRuntime?: BeastContainerRuntimeStatus | undefined;
   disabled: boolean;
   error: string | null;
   logs: string[];
