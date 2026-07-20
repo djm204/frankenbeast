@@ -890,15 +890,11 @@ export class SQLiteBeastRepository {
       );
       for (const { agent_id: agentId } of duplicateAgentIds) {
         const rows = selectAgentEvents.all(agentId) as Array<{ id: string; sequence: number }>;
-        const seenSequences = new Set<number>();
-        let nextSequence = rows.reduce((maximum, row) => Math.max(maximum, row.sequence), 0);
-        for (const row of rows) {
-          if (seenSequences.has(row.sequence)) {
-            nextSequence += 1;
-            updateAgentEventSequence.run(nextSequence, row.id);
-          } else {
-            seenSequences.add(row.sequence);
-          }
+        for (const [index, row] of rows.entries()) {
+          updateAgentEventSequence.run(-(index + 1), row.id);
+        }
+        for (const [index, row] of rows.entries()) {
+          updateAgentEventSequence.run(index + 1, row.id);
         }
       }
 
