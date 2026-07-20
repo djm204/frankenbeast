@@ -31,6 +31,11 @@ import {
 import { wallClockNow } from '@franken/types';
 import { TransportSecurityService } from '../security/transport-security.js';
 import type { BeastRun, BeastRunAttempt } from '../../beasts/types.js';
+import {
+  DEFAULT_BEAST_RUN_PAGE_LIMIT,
+  InvalidBeastRunCursorError,
+  MAX_BEAST_RUN_PAGE_LIMIT,
+} from '../../beasts/repository/sqlite-beast-repository.js';
 
 type BeastRunResponse = BeastRun & {
   readonly containerId?: unknown;
@@ -95,7 +100,8 @@ function attemptsForContainerRun(run: BeastRun | undefined, deps: BeastRoutesDep
   if (!run || run.executionMode !== 'container') {
     return [];
   }
-  return deps.runs.listAttemptsForResponse(run.id);
+  const currentAttempt = deps.runs.getCurrentAttemptForResponse(run);
+  return currentAttempt ? [currentAttempt] : [];
 }
 
 function runResponse(run: BeastRun | undefined, deps: BeastRoutesDeps): BeastRunResponse | undefined {
@@ -412,11 +418,38 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
   });
 
   app.get('/v1/beasts/runs', (c) => {
+    const rawLimit = c.req.query('limit');
+    const limit = rawLimit === undefined ? DEFAULT_BEAST_RUN_PAGE_LIMIT : Number(rawLimit);
+    if (rawLimit !== undefined
+      && (!/^\d+$/.test(rawLimit)
+        || !Number.isSafeInteger(limit)
+        || limit < 1
+        || limit > MAX_BEAST_RUN_PAGE_LIMIT)) {
+      throw new HttpError(
+        400,
+        'INVALID_BEAST_RUN_PAGE_LIMIT',
+        `Beast run page limit must be an integer between 1 and ${MAX_BEAST_RUN_PAGE_LIMIT}`,
+      );
+    }
+    let page;
+    try {
+      const cursor = c.req.query('cursor');
+      page = deps.runs.listRunPageForResponse({
+        limit,
+        ...(cursor !== undefined ? { cursor } : {}),
+      });
+    } catch (error) {
+      if (error instanceof InvalidBeastRunCursorError) {
+        throw new HttpError(400, 'INVALID_BEAST_RUN_PAGE_CURSOR', error.message);
+      }
+      throw error;
+    }
     return c.json({
       data: {
-        runs: deps.runs.listRunsForResponse().map((run) => (
+        runs: page.runs.map((run) => (
           runWithContainerFields(run, attemptsForContainerRun(run, deps))
         )),
+        ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
       },
     });
   });

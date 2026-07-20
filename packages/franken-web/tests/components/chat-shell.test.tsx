@@ -67,8 +67,8 @@ const mockListAgentPage = vi.fn().mockImplementation(async () => ({
   agents: await mockListAgents(),
 }));
 
-const mockListRuns = vi.fn().mockResolvedValue([
-  {
+const mockListRunPage = vi.fn().mockResolvedValue({
+  runs: [{
     id: 'run-1',
     definitionId: 'chunk-plan',
     status: 'running',
@@ -78,8 +78,8 @@ const mockListRuns = vi.fn().mockResolvedValue([
     attemptCount: 1,
     executionMode: 'process',
     createdAt: '2026-03-11T00:00:02.000Z',
-  },
-]);
+  }],
+});
 const mockGetContainerRuntimeStatus = vi.fn().mockResolvedValue({ available: true });
 
 const mockGetAgent = vi.fn().mockResolvedValue({
@@ -288,7 +288,7 @@ vi.mock('../../src/lib/beast-api.js', () => ({
     getCatalog: typeof mockGetCatalog;
     listAgentPage: typeof mockListAgentPage;
     listAgents: typeof mockListAgents;
-    listRuns: typeof mockListRuns;
+    listRunPage: typeof mockListRunPage;
     getContainerRuntimeStatus: typeof mockGetContainerRuntimeStatus;
     getAgent: typeof mockGetAgent;
     getRun: typeof mockGetRun;
@@ -310,7 +310,7 @@ vi.mock('../../src/lib/beast-api.js', () => ({
     this.getCatalog = mockGetCatalog;
     this.listAgentPage = mockListAgentPage;
     this.listAgents = mockListAgents;
-    this.listRuns = mockListRuns;
+    this.listRunPage = mockListRunPage;
     this.getContainerRuntimeStatus = mockGetContainerRuntimeStatus;
     this.getAgent = mockGetAgent;
     this.getRun = mockGetRun;
@@ -432,8 +432,8 @@ afterEach(() => {
   ]);
   mockListAgentPage.mockReset();
   mockListAgentPage.mockImplementation(async () => ({ agents: await mockListAgents() }));
-  mockListRuns.mockResolvedValue([
-    {
+  mockListRunPage.mockResolvedValue({
+    runs: [{
       id: 'run-1',
       definitionId: 'chunk-plan',
       status: 'running',
@@ -443,8 +443,8 @@ afterEach(() => {
       attemptCount: 1,
       executionMode: 'process',
       createdAt: '2026-03-11T00:00:02.000Z',
-    },
-  ]);
+    }],
+  });
   mockGetContainerRuntimeStatus.mockResolvedValue({ available: true });
   mockGetAgent.mockResolvedValue({
     agent: {

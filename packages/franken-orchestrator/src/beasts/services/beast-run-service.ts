@@ -1,7 +1,11 @@
-import type { BeastDefinition, BeastRun, BeastRunEvent, ModuleConfig } from '../types.js';
+import type { BeastDefinition, BeastRun, BeastRunAttempt, BeastRunEvent, ModuleConfig } from '../types.js';
 import { BeastLogStore, type BeastLogPage, type BeastLogPageOptions } from '../events/beast-log-store.js';
 import type { BeastEventBus, BeastSseEvent } from '../events/beast-event-bus.js';
-import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
+import {
+  SQLiteBeastRepository,
+  type BeastRunPage,
+  type BeastRunPageOptions,
+} from '../repository/sqlite-beast-repository.js';
 import type { BeastMetrics } from '../telemetry/beast-metrics.js';
 import { normalizeBeastRunConfig, type BeastExecutors } from './beast-dispatch-service.js';
 import { SAFE_DISPATCH_FAILURE_MESSAGE } from './dispatch-failure-message.js';
@@ -62,6 +66,20 @@ export class BeastRunService {
     return this.listRunsFromRepository(true);
   }
 
+  listRunPageForResponse(options: Omit<BeastRunPageOptions, 'recoverCorruptJson'>): BeastRunPage {
+    const page = this.repository.listRunPage({ ...options, recoverCorruptJson: true });
+    const pageAgentIds = page.runs.flatMap((run) => run.trackedAgentId ? [run.trackedAgentId] : []);
+    const redactedAgentIds = new Set(this.repository.listDispatchFailureHistoryAgentIds(pageAgentIds));
+    return {
+      ...page,
+      runs: page.runs.map((run) => (
+        run.trackedAgentId && redactedAgentIds.has(run.trackedAgentId)
+          ? { ...run, configSnapshot: {} }
+          : run
+      )),
+    };
+  }
+
   private listRunsFromRepository(recoverCorruptJson = false): BeastRun[] {
     const redactedAgentIds = new Set(this.repository.listDispatchFailureHistoryAgentIds());
     return this.repository.listRuns({ recoverCorruptJson }).map((run) => (
@@ -92,6 +110,15 @@ export class BeastRunService {
 
   listAttemptsForResponse(runId: string) {
     return this.listAttemptsFromRepository(runId, true);
+  }
+
+  getCurrentAttemptForResponse(run: BeastRun): BeastRunAttempt | undefined {
+    if (!run.currentAttemptId) return undefined;
+    const attempt = this.repository.getAttempt(run.currentAttemptId, { recoverCorruptJson: true });
+    if (!attempt) return undefined;
+    return this.hasDispatchFailureHistory(run)
+      ? { ...attempt, executorMetadata: undefined }
+      : attempt;
   }
 
   private listAttemptsFromRepository(runId: string, recoverCorruptJson = false) {

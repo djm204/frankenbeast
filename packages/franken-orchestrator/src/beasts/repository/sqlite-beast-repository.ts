@@ -204,6 +204,56 @@ export interface CorruptJsonRecoveryOptions {
   readonly recoverCorruptJson?: boolean;
 }
 
+export const DEFAULT_BEAST_RUN_PAGE_LIMIT = 50;
+export const MAX_BEAST_RUN_PAGE_LIMIT = 200;
+
+interface BeastRunPageCursor {
+  readonly version: 1;
+  readonly snapshotRowId: number;
+  readonly afterCreatedAt: string;
+  readonly afterId: string;
+}
+
+export interface BeastRunPageOptions extends CorruptJsonRecoveryOptions {
+  readonly limit: number;
+  readonly cursor?: string | undefined;
+}
+
+export interface BeastRunPage {
+  readonly runs: BeastRun[];
+  readonly nextCursor?: string | undefined;
+}
+
+export class InvalidBeastRunCursorError extends Error {
+  constructor() {
+    super('Invalid Beast run pagination cursor');
+    this.name = 'InvalidBeastRunCursorError';
+  }
+}
+
+function encodeBeastRunCursor(cursor: BeastRunPageCursor): string {
+  return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url');
+}
+
+function decodeBeastRunCursor(value: string): BeastRunPageCursor {
+  try {
+    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as Partial<BeastRunPageCursor>;
+    if (parsed.version !== 1
+      || !Number.isSafeInteger(parsed.snapshotRowId)
+      || (parsed.snapshotRowId ?? -1) < 0
+      || typeof parsed.afterCreatedAt !== 'string'
+      || parsed.afterCreatedAt.length === 0
+      || typeof parsed.afterId !== 'string'
+      || parsed.afterId.length === 0) {
+      throw new InvalidBeastRunCursorError();
+    }
+    return parsed as BeastRunPageCursor;
+  } catch (error) {
+    if (error instanceof InvalidBeastRunCursorError) throw error;
+    throw new InvalidBeastRunCursorError();
+  }
+}
+
 export const DEFAULT_TRACKED_AGENT_PAGE_LIMIT = 50;
 export const MAX_TRACKED_AGENT_PAGE_LIMIT = 200;
 
@@ -349,6 +399,41 @@ export class SQLiteBeastRepository {
     return mapRowsRecoveringCorruptJson(rows, mapRun, options);
   }
 
+  listRunPage(options: BeastRunPageOptions): BeastRunPage {
+    if (!Number.isSafeInteger(options.limit) || options.limit < 1 || options.limit > MAX_BEAST_RUN_PAGE_LIMIT) {
+      throw new RangeError(`Beast run page limit must be between 1 and ${MAX_BEAST_RUN_PAGE_LIMIT}`);
+    }
+    const cursor = options.cursor !== undefined ? decodeBeastRunCursor(options.cursor) : undefined;
+    const snapshotRowId = cursor?.snapshotRowId ?? (
+      this.db.prepare('SELECT COALESCE(MAX(rowid), 0) AS max_row_id FROM beast_runs')
+        .get() as { max_row_id: number }
+    ).max_row_id;
+    const rows = (cursor
+      ? this.db.prepare(
+        `SELECT * FROM beast_runs INDEXED BY idx_beast_runs_created_at_id WHERE rowid <= ?
+           AND (created_at < ? OR (created_at = ? AND id < ?))
+         ORDER BY created_at DESC, id DESC LIMIT ?`,
+      ).all(snapshotRowId, cursor.afterCreatedAt, cursor.afterCreatedAt, cursor.afterId, options.limit + 1)
+      : this.db.prepare(
+        `SELECT * FROM beast_runs INDEXED BY idx_beast_runs_created_at_id WHERE rowid <= ?
+         ORDER BY created_at DESC, id DESC LIMIT ?`,
+      ).all(snapshotRowId, options.limit + 1)) as BeastRunRow[];
+    const pageRows = rows.slice(0, options.limit);
+    const runs = mapRowsRecoveringCorruptJson(pageRows, mapRun, options);
+    const lastRow = pageRows.at(-1);
+    return {
+      runs,
+      ...(rows.length > options.limit && lastRow ? {
+        nextCursor: encodeBeastRunCursor({
+          version: 1,
+          snapshotRowId,
+          afterCreatedAt: lastRow.created_at,
+          afterId: lastRow.id,
+        }),
+      } : {}),
+    };
+  }
+
   listRunProcessReferences(): BeastRunProcessReference[] {
     const rows = this.db.prepare(
       'SELECT id, tracked_agent_id, status, current_attempt_id FROM beast_runs ORDER BY created_at DESC, id DESC',
@@ -376,9 +461,10 @@ export class SQLiteBeastRepository {
     return mapRowsRecoveringCorruptJson(rows, mapAttempt, options);
   }
 
-  getAttempt(attemptId: string): BeastRunAttempt | undefined {
+  getAttempt(attemptId: string, options: CorruptJsonRecoveryOptions = {}): BeastRunAttempt | undefined {
     const row = this.db.prepare('SELECT * FROM beast_run_attempts WHERE id = ?').get(attemptId) as BeastAttemptRow | undefined;
-    return row ? mapAttempt(row) : undefined;
+    if (!row) return undefined;
+    return mapRowsRecoveringCorruptJson([row], mapAttempt, options)[0];
   }
 
   updateRun(runId: string, patch: UpdateRunPatch): BeastRun {

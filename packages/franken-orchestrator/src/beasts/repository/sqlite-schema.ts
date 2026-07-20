@@ -20,6 +20,8 @@ export const BEAST_SQLITE_SCHEMA_STATEMENTS = [
     latest_exit_code INTEGER,
     FOREIGN KEY (tracked_agent_id) REFERENCES tracked_agents(id)
   )`,
+  `CREATE INDEX IF NOT EXISTS idx_beast_runs_created_at_id
+    ON beast_runs(created_at DESC, id DESC)`,
   `CREATE TABLE IF NOT EXISTS beast_run_attempts (
     id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL,

@@ -365,13 +365,13 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     async function refreshBeasts() {
       let catalog: Awaited<ReturnType<typeof client.getCatalog>>;
       let agentWindow: TrackedAgentWindow;
-      let runs: Awaited<ReturnType<typeof client.listRuns>>;
+      let runPage: Awaited<ReturnType<typeof client.listRunPage>>;
       let containerRuntime: Awaited<ReturnType<typeof client.getContainerRuntimeStatus>>;
       try {
-        [catalog, agentWindow, runs, containerRuntime] = await Promise.all([
+        [catalog, agentWindow, runPage, containerRuntime] = await Promise.all([
           client.getCatalog(),
           loadTrackedAgentWindow(client, beastAgentPagesLoadedRef.current, selectedBeastAgentIdRef.current),
-          client.listRuns(),
+          client.listRunPage(),
           client.getContainerRuntimeStatus().catch((error) => ({
             available: false,
             reason: error instanceof Error ? error.message : 'Container runtime status unavailable.',
@@ -400,7 +400,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
       setBeastAgentNextCursor(agentWindow.nextCursor);
       beastAgentPagesLoadedRef.current = agentWindow.pagesLoaded;
       setBeastAgentsLoadingMore(false);
-      setBeastRuns(runs);
+      setBeastRuns(runPage.runs);
       setBeastContainerRuntime(containerRuntime);
       const autoSelectedAgentId = agentWindow.agents.find((agent) => agent.status !== 'deleted')?.id ?? null;
       const currentAgentId = selectedBeastAgentIdRef.current ?? (shouldAutoSelectBeastAgentRef.current ? autoSelectedAgentId : null);
