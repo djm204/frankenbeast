@@ -1,5 +1,5 @@
 import type { TrackedAgentSummary } from '@franken/types';
-import type { BeastApiClient } from './beast-api';
+import type { BeastApiClient, BeastRunSummary } from './beast-api';
 
 interface TrackedAgentPage {
   agents: TrackedAgentSummary[];
@@ -25,6 +25,26 @@ export function sortTrackedAgentsNewestFirst(agents: TrackedAgentSummary[]): Tra
     if (isTrackedAgentSortKeyNewer(b, a)) return 1;
     return 0;
   });
+}
+
+export function mergeUniqueRuns(current: BeastRunSummary[], additions: BeastRunSummary[]): BeastRunSummary[] {
+  const knownRunIds = new Set(current.map((run) => run.id));
+  return [...current, ...additions.filter((run) => !knownRunIds.has(run.id))];
+}
+
+export async function loadMissingAgentRuns(
+  client: BeastApiClient,
+  agents: TrackedAgentSummary[],
+  knownRuns: BeastRunSummary[],
+): Promise<BeastRunSummary[]> {
+  const knownRunIds = new Set(knownRuns.map((run) => run.id));
+  const missingRunIds = [...new Set(agents.flatMap((agent) => {
+    const runId = agent.dispatchRunId;
+    return typeof runId === 'string' && !knownRunIds.has(runId) ? [runId] : [];
+  }))];
+  if (missingRunIds.length === 0) return [];
+  const details = await Promise.all(missingRunIds.map((runId) => client.getRun(runId)));
+  return details.map((detail) => detail.run);
 }
 
 export async function loadTrackedAgentWindow(
