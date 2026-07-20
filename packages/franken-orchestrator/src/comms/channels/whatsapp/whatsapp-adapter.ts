@@ -37,8 +37,12 @@ export class WhatsAppAdapter implements ChannelAdapter {
   }
 
   async send(sessionId: string, message: ChannelOutboundMessage): Promise<void> {
-    const to = (message.metadata?.phoneNumber as string) || 'unknown';
-    const body = this.formatPayload(to, message);
+    const phoneNumber = message.metadata?.phoneNumber;
+    if (typeof phoneNumber !== 'string' || phoneNumber.trim().length === 0) {
+      throw new Error('WhatsApp routing error: missing recipient phoneNumber metadata');
+    }
+
+    const body = this.formatPayload(phoneNumber.trim(), message);
 
     const targetUrl = `https://graph.facebook.com/v21.0/${this.phoneNumberId}/messages`;
     const response = await this.fetchImpl(targetUrl, {
