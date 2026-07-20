@@ -66,12 +66,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
+
           # Root releases use bare version tags (v1.2.3).
           # Component releases are prefixed (franken-brain-v0.3.0).
           # GitHub auto-marks the most recently created release as "latest",
           # which could be any sub-package. Fix that.
-          latest_tag=$(gh release view --json tagName --jq '.tagName' 2>/dev/null || echo '')
-          if [ -z "$latest_tag" ]; then exit 0; fi
+          release_json=$(gh release list --limit 1000 --json tagName,isLatest)
+          latest_tag=$(jq -r '([.[] | select(.isLatest)][0].tagName // empty)' <<<"$release_json")
+          if [ -z "$latest_tag" ]; then
+            echo "No latest release found; nothing to repair"
+            exit 0
+          fi
 
           # If the current "latest" is already a root release, nothing to do
           if [[ "$latest_tag" =~ ^v[0-9] ]]; then
@@ -82,7 +88,7 @@ jobs:
           # Promote the most recent root release back to latest. If no root
           # release exists yet, keep the current latest marker in place rather
           # than demoting the component release and leaving no latest release.
-          root_tag=$(gh release list --limit 1000 --json tagName --jq '([.[] | select(.tagName | test("^v[0-9]"))][0].tagName // empty)' 2>/dev/null || echo '')
+          root_tag=$(jq -r '([.[] | select(.tagName | test("^v[0-9]"))][0].tagName // empty)' <<<"$release_json")
           if [ -z "$root_tag" ]; then
             echo "No root release found; leaving component latest unchanged: $latest_tag"
             exit 0
@@ -94,6 +100,12 @@ jobs:
 
           echo "Promoting root release: $root_tag"
           gh release edit "$root_tag" --latest
+
+          verified_tag=$(gh release view --json tagName --jq '.tagName')
+          if [ "$verified_tag" != "$root_tag" ]; then
+            echo "Latest release verification failed: expected $root_tag, got $verified_tag" >&2
+            exit 1
+          fi
 
   publish-npm:
     needs: release-please
