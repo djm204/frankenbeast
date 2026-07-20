@@ -18,7 +18,13 @@ export {
   serializeToolCallEvidence,
 } from './evidence/tool-call-evidence.js';
 export { BenchmarkTaskSchema } from './corpus/schema.js';
-export { loadCorpus, loadTaskFile } from './corpus/loader.js';
+export {
+  loadCorpus,
+  loadCorpusWithDiagnostics,
+  loadTaskFile,
+  type CorpusLoadDiagnostics,
+  type QuarantinedCorpusTask,
+} from './corpus/loader.js';
 export {
   WorkflowRegressionCandidateResultSchema,
   WorkflowRegressionCandidateResultsSchema,

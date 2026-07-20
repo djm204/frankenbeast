@@ -29,7 +29,8 @@ Key exports:
 
 | Export | Purpose |
 | --- | --- |
-| `loadCorpus`, `loadTaskFile` | Load benchmark task definitions from a corpus root. |
+| `loadCorpus`, `loadTaskFile` | Strictly load benchmark task definitions from a corpus root. |
+| `loadCorpusWithDiagnostics` | Load valid tasks while quarantining malformed candidate-tier files in a structured diagnostics result. Core and stress task errors remain fatal. |
 | `BenchmarkTaskSchema` | Validate benchmark task JSON with Zod. |
 | `ToolCallEvidenceSchema` | Validate a single tool-call evidence record. |
 | `ToolCallEvidenceManifestSchema`, `serializeToolCallEvidence` | Validate and serialize the full tool-call evidence artifact array. |
@@ -49,7 +50,7 @@ npm exec --workspace=@franken/live-bench -- fbeast-live-bench list <corpus-root>
 npm exec --workspace=@franken/live-bench -- fbeast-live-bench learning-regression <fixture-root> <baseline-results.json> <candidate-results.json> --min-pass-rate 1 --min-delta 0
 ```
 
-`list` loads the corpus root and prints the benchmark task ids, one per line. Use it as a lightweight sanity check before a live benchmark run.
+`list` loads the corpus root and prints the benchmark task ids, one per line. Malformed files under the candidate tier are skipped so valid tasks remain listable; a deterministic JSON quarantine summary is written to stderr with each path and validation error. Invalid core or stress tasks remain fatal. Use the command as a lightweight sanity check before a live benchmark run.
 
 `learning-regression` is a dry-run promotion gate for learned workflow changes. It loads `*.workflow.json` fixtures that include representative task transcripts, expected decisions, and prohibited actions; compares baseline and candidate result JSON; and prints a JSON report with per-fixture pass/fail state, score deltas, missing decisions, prohibited actions observed, and examples. A candidate is promotable only when the report meets the documented thresholds, typically `--min-pass-rate 1 --min-delta 0` or stricter.
 

@@ -5,7 +5,7 @@ function printLine(...args: unknown[]): void {
 }
 
 
-import { loadCorpus } from '../corpus/loader.js';
+import { loadCorpusWithDiagnostics } from '../corpus/loader.js';
 import {
   evaluateWorkflowRegression,
   loadWorkflowRegressionCandidateResults,
@@ -35,9 +35,16 @@ if (command === 'list') {
     process.exit(2);
   }
 
-  const tasks = loadCorpus(corpusRoot);
-  for (const task of tasks) {
+  const result = loadCorpusWithDiagnostics(corpusRoot);
+  for (const task of result.tasks) {
     printLine(task.taskId);
+  }
+  if (result.quarantined.length > 0) {
+    console.error(JSON.stringify({
+      type: 'live-bench-corpus-quarantine',
+      count: result.quarantined.length,
+      tasks: result.quarantined,
+    }, null, 2));
   }
   process.exit(0);
 }
