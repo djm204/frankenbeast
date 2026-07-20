@@ -30,41 +30,26 @@ describe("Turborepo configuration", () => {
       expect(existsSync(join(ROOT, "turbo.json"))).toBe(true);
     });
 
-    it("defines build task with ^build dependency and dist outputs", () => {
+    it("defines the exact build task contract", () => {
       const turbo = readJson("turbo.json");
       const buildTask = turbo.tasks?.build;
-      expect(buildTask).toBeDefined();
-      expect(buildTask.dependsOn).toContain("^build");
-      expect(buildTask.outputs).toContain("dist/**");
+      expect(buildTask).toEqual({
+        dependsOn: ["^build"],
+        outputs: ["dist/**"],
+      });
     });
 
-    it("defines test task without a build dependency for source-alias watch mode", () => {
+    it("defines the exact cached test task contract for source-alias watch mode", () => {
       const turbo = readJson("turbo.json");
       const testTask = turbo.tasks?.test;
-      expect(testTask).toBeDefined();
-      expect(testTask.dependsOn).toBeUndefined();
-    });
-
-    it("hashes cross-package Vitest source aliases and root setup scripts for cached test tasks", () => {
-      const turbo = readJson("turbo.json");
-      const testTask = turbo.tasks?.test;
-      expect(testTask).toBeDefined();
-      expect(testTask.inputs).toEqual(
-        expect.arrayContaining([
+      expect(testTask).toEqual({
+        inputs: [
           "$TURBO_DEFAULT$",
           "$TURBO_ROOT$/scripts/vitest-*.ts",
           "$TURBO_ROOT$/packages/*/src/**",
-        ]),
-      );
-    });
-
-    it("hashes suite-selection environment variables for cached test tasks", () => {
-      const turbo = readJson("turbo.json");
-      const testTask = turbo.tasks?.test;
-      expect(testTask).toBeDefined();
-      expect(testTask.env).toEqual(
-        expect.arrayContaining(["INTEGRATION", "E2E", "EVAL", "DOCKER_BUILD"]),
-      );
+        ],
+        env: ["INTEGRATION", "E2E", "EVAL", "DOCKER_BUILD"],
+      });
     });
 
     it("does not define a stale test:ci Turbo task", () => {
@@ -121,22 +106,22 @@ describe("Turborepo configuration", () => {
       expect(evalTask.env).toContain('EVAL');
     });
 
-    it("defines typecheck task", () => {
+    it("defines the exact typecheck task contract", () => {
       const turbo = readJson("turbo.json");
-      expect(turbo.tasks?.typecheck).toBeDefined();
+      expect(turbo.tasks?.typecheck).toEqual({
+        dependsOn: ["^build"],
+      });
     });
 
-    it("defines lint task with no dependencies (runs in parallel)", () => {
+    it("defines the exact parallel lint task contract", () => {
       const turbo = readJson("turbo.json");
       const lintTask = turbo.tasks?.lint;
-      expect(lintTask).toBeDefined();
-      expect(lintTask.dependsOn).toBeUndefined();
-      expect(lintTask.inputs).toEqual(
-        expect.arrayContaining([
+      expect(lintTask).toEqual({
+        inputs: [
           "$TURBO_DEFAULT$",
           "$TURBO_ROOT$/eslint.workspace.config.js",
-        ]),
-      );
+        ],
+      });
     });
   });
 
