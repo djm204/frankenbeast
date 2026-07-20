@@ -35,6 +35,13 @@ describe('wizard Zustand architecture', () => {
     }
   });
 
+  it('does not subscribe the dialog shell to the complete form map', () => {
+    const sourcePath = 'src/components/beasts/wizard-dialog.tsx';
+    const source = readFileSync(join(process.cwd(), sourcePath), 'utf8');
+
+    expect(source).not.toContain('useBeastStore((state) => state.stepValues);');
+  });
+
   it('subscribes each step only to its own form values', () => {
     for (const [sourcePath, step] of Object.entries(STEP_STATE_CONSUMERS)) {
       const source = readFileSync(join(process.cwd(), sourcePath), 'utf8');

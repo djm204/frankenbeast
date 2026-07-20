@@ -12,7 +12,7 @@
 
 ## Verification
 
-- `npm test` in `packages/franken-web`: 77 files, 692 tests passed.
+- `npm test` in `packages/franken-web`: 77 files, 693 tests passed.
 - `npm run lint` in `packages/franken-web`: passed with 17 pre-existing warnings and no errors.
 - `npm run build --workspace @franken/types`: passed (fresh clone prerequisite).
 - `npm run typecheck` in `packages/franken-web`: passed.
