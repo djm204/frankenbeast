@@ -447,6 +447,64 @@ describe('ws chat server', () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
+  it('includes completion kind only for peers that opted in via features', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const secret = createSessionTokenSecret();
+    const runtime = new ChatRuntime({
+      engine: new ConversationEngine({
+        llm: { complete: vi.fn().mockResolvedValue('Working on it right now.') },
+        projectName: 'proj',
+      }),
+      turnRunner: new TurnRunner({
+        execute: vi.fn().mockResolvedValue({
+          status: 'success' as const,
+          summary: 'Done',
+          filesChanged: [],
+          testsRun: 0,
+          errors: [],
+        }),
+      }),
+    });
+    const controller = new ChatSocketController({
+      runtime,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+
+    async function completionsFor(features?: readonly string[]): Promise<Array<Record<string, unknown>>> {
+      const session = store.create('proj');
+      const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+      const { peer, sent } = createPeer();
+      expect(controller.connect(peer, {
+        origin: null,
+        sessionId: session.id,
+        token,
+        ...(features ? { features } : {}),
+      }).ok).toBe(true);
+      await controller.receive(peer, JSON.stringify({
+        type: 'message.send',
+        clientMessageId: 'client-1',
+        content: 'Explain the routing logic',
+      }));
+      return sent
+        .map((raw) => JSON.parse(raw) as Record<string, unknown>)
+        .filter((event) => event.type === 'assistant.message.complete');
+    }
+
+    const optedIn = await completionsFor(['message-kind']);
+    expect(optedIn.length).toBeGreaterThan(0);
+    expect(optedIn.every((event) => typeof event.kind === 'string')).toBe(true);
+
+    // Legacy clients validate frames with strict v1 schemas, so the field
+    // must be absent unless requested.
+    const legacy = await completionsFor();
+    expect(legacy.length).toBeGreaterThan(0);
+    expect(legacy.every((event) => !('kind' in event))).toBe(true);
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
   it('enforces the shared chat content limit on websocket message sends', async () => {
     mkdirSync(TMP, { recursive: true });
     const store = new FileSessionStore(TMP);

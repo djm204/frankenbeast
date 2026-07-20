@@ -129,7 +129,7 @@ async function createRemoteSession(target: ManagedChatAttachment, projectId: str
   };
 
   const socket = new WebSocket(
-    `${target.wsUrl}?sessionId=${encodeURIComponent(body.data.id)}`,
+    `${target.wsUrl}?sessionId=${encodeURIComponent(body.data.id)}&features=message-kind`,
     [CHAT_SOCKET_PROTOCOL, `${CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX}${ticketBody.data.ticket}`],
   );
   await new Promise<void>((resolve, reject) => {
