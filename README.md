@@ -483,6 +483,8 @@ frankenbeast chat-server --port 3737
 frankenbeast issues --label bug --repo owner/repo
 ```
 
+Pass one label with `--label bug`, or multiple labels as a single comma-separated value like `--label critical,high`.
+
 ### Options
 
 ```
