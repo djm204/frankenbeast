@@ -7,6 +7,7 @@ import Database from 'better-sqlite3'
 import { TraceContext } from '../../core/TraceContext.js'
 import { SpanLifecycle } from '../../core/SpanLifecycle.js'
 import { SQLiteAdapter } from './SQLiteAdapter.js'
+import { SELECT_TRACE_SUMMARIES } from './schema.js'
 
 function tempDbPath() {
   return join(tmpdir(), `franken-observer-test-${randomUUID()}.db`)
@@ -303,6 +304,15 @@ describe('SQLiteAdapter', () => {
       const indexes = reopened.prepare("PRAGMA index_list('traces')").all() as Array<{ name: string }>
       reopened.close()
       expect(indexes.map(index => index.name)).toContain('idx_traces_startedAt')
+    })
+
+    it('uses the ordered trace index for trace summaries without a temporary sort', () => {
+      const raw = new Database(dbPath)
+      const plan = raw.prepare(`EXPLAIN QUERY PLAN ${SELECT_TRACE_SUMMARIES}`).all() as Array<{ detail: string }>
+      raw.close()
+
+      expect(plan.some(row => row.detail.includes('USING INDEX idx_traces_startedAt'))).toBe(true)
+      expect(plan.some(row => row.detail.includes('USE TEMP B-TREE FOR ORDER BY'))).toBe(false)
     })
   })
 

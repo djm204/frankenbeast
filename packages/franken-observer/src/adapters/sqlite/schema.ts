@@ -62,10 +62,8 @@ export const SELECT_TRACE_SUMMARIES = `
     traces.goal,
     traces.status,
     traces.startedAt,
-    COUNT(spans.traceId) AS spanCount
+    (SELECT COUNT(*) FROM spans WHERE spans.traceId = traces.id) AS spanCount
   FROM traces
-  LEFT JOIN spans ON spans.traceId = traces.id
-  GROUP BY traces.id
   ORDER BY traces.startedAt ASC
 `
 
