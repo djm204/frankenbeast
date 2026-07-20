@@ -346,7 +346,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
 
     if (
       approvalQueueBackpressure
-      && !registry.has(body.requestId)
+      && !registry.hasKnownRequest(body.requestId)
       && registry.size >= approvalQueueBackpressure.maxPendingApprovals
     ) {
       if (approvalQueueBackpressure.retryAfterSeconds) {
