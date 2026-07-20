@@ -314,45 +314,54 @@ export class SQLiteAdapter implements ExportAdapter {
 
   async flush(trace: Trace): Promise<void> {
     const snapshot = snapshotTrace(trace)
-    return this.enqueueSqliteWrite(() => this.flushNow(snapshot))
+    return this.enqueueSqliteWrite(() => this.flushNow([snapshot]))
   }
 
-  private async flushNow(trace: Trace): Promise<void> {
-    warnIfTraceHasActiveSpans(trace, 'SQLiteAdapter')
-    const flushedInTransaction = await this.withSqliteLockRetry('flush trace transaction', () => {
+  async flushBatch(traces: Trace[]): Promise<void> {
+    if (traces.length === 0) return
+    const snapshots = traces.map(snapshotTrace)
+    return this.enqueueSqliteWrite(() => this.flushNow(snapshots))
+  }
+
+  private async flushNow(traces: Trace[]): Promise<void> {
+    for (const trace of traces) warnIfTraceHasActiveSpans(trace, 'SQLiteAdapter')
+    const operation = traces.length === 1 ? 'flush trace transaction' : 'flush trace batch transaction'
+    const flushedInTransaction = await this.withSqliteLockRetry(operation, () => {
       const upsertTrace = this.db.prepare(UPSERT_TRACE)
       const upsertSpan = this.db.prepare(UPSERT_SPAN)
       const flushed: Span[] = []
 
-      const transaction = this.db.transaction((t: Trace) => {
-        upsertTrace.run({
-          id: t.id,
-          goal: t.goal,
-          status: t.status,
-          startedAt: t.startedAt,
-          endedAt: t.endedAt ?? null,
-        })
-        for (const span of t.spans) {
-          if (!this.shouldFlushSpan(span)) continue
-
-          upsertSpan.run({
-            id: span.id,
-            traceId: span.traceId,
-            parentSpanId: span.parentSpanId ?? null,
-            name: span.name,
-            status: span.status,
-            startedAt: span.startedAt,
-            endedAt: span.endedAt ?? null,
-            durationMs: span.durationMs ?? null,
-            errorMessage: span.errorMessage ?? null,
-            metadata: JSON.stringify(span.metadata),
-            thoughtBlocks: JSON.stringify(span.thoughtBlocks),
+      const transaction = this.db.transaction((batch: Trace[]) => {
+        for (const trace of batch) {
+          upsertTrace.run({
+            id: trace.id,
+            goal: trace.goal,
+            status: trace.status,
+            startedAt: trace.startedAt,
+            endedAt: trace.endedAt ?? null,
           })
-          flushed.push(span)
+          for (const span of trace.spans) {
+            if (!this.shouldFlushSpan(span)) continue
+
+            upsertSpan.run({
+              id: span.id,
+              traceId: span.traceId,
+              parentSpanId: span.parentSpanId ?? null,
+              name: span.name,
+              status: span.status,
+              startedAt: span.startedAt,
+              endedAt: span.endedAt ?? null,
+              durationMs: span.durationMs ?? null,
+              errorMessage: span.errorMessage ?? null,
+              metadata: JSON.stringify(span.metadata),
+              thoughtBlocks: JSON.stringify(span.thoughtBlocks),
+            })
+            flushed.push(span)
+          }
         }
       })
 
-      transaction(trace)
+      transaction(traces)
       return flushed
     })
     for (const span of flushedInTransaction) {

@@ -156,6 +156,16 @@ export class BatchAdapter implements ExportAdapter {
   private async drainBufferedTraces(batch: Trace[]): Promise<void> {
     if (batch.length === 0) return
 
+    if (this.inner.flushBatch !== undefined) {
+      await this.inner.flushBatch(batch)
+      for (const trace of batch) {
+        const index = this.buffer.indexOf(trace)
+        if (index !== -1) this.buffer.splice(index, 1)
+      }
+      if (this.buffer.length === 0 && this.timer !== null) setTimerRefState(this.timer, false)
+      return
+    }
+
     const results = await Promise.allSettled(batch.map(t => this.inner.flush(t)))
     const failures: unknown[] = []
 

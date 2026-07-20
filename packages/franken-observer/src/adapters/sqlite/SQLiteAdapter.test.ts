@@ -141,6 +141,25 @@ describe('SQLiteAdapter', () => {
     expect(upsertSpanRun).toHaveBeenCalledWith(expect.objectContaining({ metadata: '{}' }))
   })
 
+  it('flushes a batch in one SQLite transaction', async () => {
+    const upsertTraceRun = vi.fn()
+    const upsertSpanRun = vi.fn()
+    prepareMock
+      .mockReturnValueOnce({ run: upsertTraceRun })
+      .mockReturnValueOnce({ run: upsertSpanRun })
+    transactionMock.mockImplementation(fn => (traces: unknown) => fn(traces))
+
+    const adapter = new SQLiteAdapter('/tmp/traces.db')
+    const first = TraceContext.createTrace('first')
+    const second = TraceContext.createTrace('second')
+
+    await adapter.flushBatch([first, second])
+
+    expect(transactionMock).toHaveBeenCalledOnce()
+    expect(upsertTraceRun).toHaveBeenCalledTimes(2)
+    expect(upsertTraceRun.mock.calls.map(call => call[0].goal)).toEqual(['first', 'second'])
+  })
+
   it('retries transient SQLite lock failures with bounded backoff and diagnostics', async () => {
     const sleep = vi.fn().mockResolvedValue(undefined)
     const diagnostics = vi.fn()
