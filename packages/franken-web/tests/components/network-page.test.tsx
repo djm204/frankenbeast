@@ -81,6 +81,31 @@ describe('NetworkPage', () => {
     expect(onSaveConfig).toHaveBeenCalledWith(['chat.host=0.0.0.0']);
   });
 
+  it('clears an explicit chat model so the provider default can take over', () => {
+    const onSaveConfig = vi.fn();
+
+    render(
+      <NetworkPage
+        config={baseConfig}
+        logs={[]}
+        onSelectLogService={vi.fn()}
+        onRefresh={vi.fn()}
+        onRestart={vi.fn()}
+        onSaveConfig={onSaveConfig}
+        onStart={vi.fn()}
+        onStop={vi.fn()}
+        services={[]}
+        status={{ mode: 'secure', secureBackend: 'local-encrypted' }}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Chat model'), { target: { value: '' } });
+    const saveButton = screen.getByRole('button', { name: 'Save config' });
+    expect(saveButton).toHaveProperty('disabled', false);
+    fireEvent.click(saveButton);
+    expect(onSaveConfig).toHaveBeenCalledWith(['chat.model=']);
+  });
+
   it('gates service controls by status and saves all changed config assignments atomically', async () => {
     const onStart = vi.fn().mockResolvedValue(undefined);
     const onStop = vi.fn().mockResolvedValue(undefined);
