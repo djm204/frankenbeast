@@ -80,6 +80,27 @@ describe('SQLiteAdapter', () => {
         rmSync(root, { recursive: true, force: true })
       }
     })
+
+    it.each([':memory:', ''])(
+      'keeps transient database %j operations on the initialized connection',
+      async transientPath => {
+        const transientAdapter = new SQLiteAdapter(transientPath)
+        try {
+          const trace = TraceContext.createTrace('transient database')
+          TraceContext.endTrace(trace)
+
+          await transientAdapter.flush(trace)
+
+          expect(await transientAdapter.queryByTraceId(trace.id)).toMatchObject({
+            id: trace.id,
+            goal: 'transient database',
+          })
+          expect((transientAdapter as unknown as { workerClient?: unknown }).workerClient).toBeUndefined()
+        } finally {
+          transientAdapter.close()
+        }
+      },
+    )
   })
 
   describe('flush() + queryByTraceId()', () => {

@@ -529,7 +529,8 @@ export class SQLiteAdapter implements ExportAdapter {
           this.db.exec(CREATE_TABLES)
         }
       })
-      this.workerClient = options.useWorkerThread === false
+      const isTransientDatabase = databasePath === ':memory:' || databasePath === ''
+      this.workerClient = options.useWorkerThread === false || isTransientDatabase
         ? undefined
         : new SQLiteWorkerClient(databasePath, this.lockRetry.busyTimeoutMs)
     } catch (error) {
