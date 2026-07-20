@@ -229,6 +229,32 @@ describe('standalone governor HTTP app wired to real approval waiters', () => {
     await expect(waiter).resolves.toBe(response);
   });
 
+  it('delivers an HTTP response that arrives after placeholder registration but before the real waiter', async () => {
+    const registry = new ApprovalWaiterRegistry();
+    const app = createGovernorApp({ registry, allowUnsignedApprovalsForTests: true });
+
+    registry.register('req-out-of-order-1', 'task-1', 'Deploy');
+    const response = await app.request('/v1/approval/respond', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId: 'req-out-of-order-1', decision: 'APPROVE' }),
+    });
+    expect(response.status).toBe(200);
+    expect(registry.size).toBe(0);
+
+    // A retry of the request metadata must not overwrite the already accepted
+    // decision before the in-process channel attaches its waiter.
+    registry.register('req-out-of-order-1', 'task-1', 'Deploy retry');
+    await expect(
+      registry.waitFor('req-out-of-order-1', 'task-1', 'Deploy'),
+    ).resolves.toMatchObject({
+      requestId: 'req-out-of-order-1',
+      decision: 'APPROVE',
+      respondedBy: 'http-operator',
+    });
+    expect(registry.size).toBe(0);
+  });
+
   /**
    * Regression coverage for a Codex review follow-up on PR #452:
    * `ApprovalGateway`'s own timeout fired without telling the channel, so
