@@ -28,7 +28,7 @@ export const TraceContext = {
     const span: Span = {
       id: randomUUID(),
       traceId: trace.id,
-      parentSpanId: options.parentSpanId,
+      ...(options.parentSpanId === undefined ? {} : { parentSpanId: options.parentSpanId }),
       name: options.name,
       status: 'active',
       startedAt: wallClockNow(),

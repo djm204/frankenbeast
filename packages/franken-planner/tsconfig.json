@@ -4,6 +4,7 @@
     "noUncheckedIndexedAccess": true,
     "noImplicitReturns": true,
     "exactOptionalPropertyTypes": true,
+    "noFallthroughCasesInSwitch": true,
     "moduleResolution": "NodeNext",
     "module": "NodeNext",
     "target": "ES2022",

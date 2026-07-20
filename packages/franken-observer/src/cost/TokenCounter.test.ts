@@ -32,6 +32,36 @@ describe('TokenCounter', () => {
       expect(counter.totalsFor('claude-opus-4-6').totalTokens).toBe(150)
       expect(counter.totalsFor('gpt-4o').totalTokens).toBe(280)
     })
+
+    it('rejects a new model after reaching the configured cardinality limit', () => {
+      const boundedCounter = new TokenCounter({ maxModels: 2 })
+      boundedCounter.record({ model: 'model-a', promptTokens: 10, completionTokens: 5 })
+      boundedCounter.record({ model: 'model-b', promptTokens: 20, completionTokens: 10 })
+
+      expect(() =>
+        boundedCounter.record({ model: 'model-c', promptTokens: 30, completionTokens: 15 }),
+      ).toThrow('model cardinality limit of 2 reached')
+      expect(boundedCounter.allModels()).toEqual(['model-a', 'model-b'])
+      expect(boundedCounter.grandTotal()).toEqual({
+        promptTokens: 30,
+        completionTokens: 15,
+        totalTokens: 45,
+      })
+    })
+
+    it('continues updating an existing model at the cardinality limit', () => {
+      const boundedCounter = new TokenCounter({ maxModels: 1 })
+      boundedCounter.record({ model: 'model-a', promptTokens: 10, completionTokens: 5 })
+
+      expect(() =>
+        boundedCounter.record({ model: 'model-a', promptTokens: 20, completionTokens: 10 }),
+      ).not.toThrow()
+      expect(boundedCounter.totalsFor('model-a')).toEqual({
+        promptTokens: 30,
+        completionTokens: 15,
+        totalTokens: 45,
+      })
+    })
   })
 
   describe('totalsFor()', () => {

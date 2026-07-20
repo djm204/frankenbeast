@@ -20,6 +20,8 @@ export const BEAST_SQLITE_SCHEMA_STATEMENTS = [
     latest_exit_code INTEGER,
     FOREIGN KEY (tracked_agent_id) REFERENCES tracked_agents(id)
   )`,
+  `CREATE INDEX IF NOT EXISTS idx_beast_runs_created_at_id
+    ON beast_runs(created_at DESC, id DESC)`,
   `CREATE TABLE IF NOT EXISTS beast_run_attempts (
     id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL,
@@ -33,6 +35,8 @@ export const BEAST_SQLITE_SCHEMA_STATEMENTS = [
     executor_metadata TEXT,
     FOREIGN KEY (run_id) REFERENCES beast_runs(id)
   )`,
+  `CREATE INDEX IF NOT EXISTS idx_beast_run_attempts_run_id_attempt_number
+    ON beast_run_attempts(run_id, attempt_number)`,
   `CREATE TABLE IF NOT EXISTS beast_run_events (
     id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL,
@@ -80,4 +84,15 @@ export const BEAST_SQLITE_SCHEMA_STATEMENTS = [
     created_at TEXT NOT NULL,
     FOREIGN KEY (agent_id) REFERENCES tracked_agents(id)
   )`,
+  `CREATE INDEX IF NOT EXISTS idx_tracked_agents_created_at_id
+    ON tracked_agents(created_at DESC, id DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_tracked_agents_status
+    ON tracked_agents(status)`,
+  `CREATE INDEX IF NOT EXISTS idx_tracked_agent_events_type_agent
+    ON tracked_agent_events(type, agent_id)`,
+] as const;
+
+export const BEAST_SQLITE_EVENT_UNIQUENESS_INDEX_STATEMENTS = [
+  'CREATE UNIQUE INDEX IF NOT EXISTS uq_beast_run_events_run_sequence ON beast_run_events(run_id, sequence)',
+  'CREATE UNIQUE INDEX IF NOT EXISTS uq_tracked_agent_events_agent_sequence ON tracked_agent_events(agent_id, sequence)',
 ] as const;

@@ -74,7 +74,7 @@ describe('Config loader', () => {
     const filePath = join(tmpdir(), `missing-beast-default-config-${Date.now()}.json`);
 
     const config = await loadConfig(makeArgs(), filePath);
-    expect(config.chat.model).toBe('claude-sonnet-4-6');
+    expect(config.chat.model).toBeUndefined();
   });
 
   it('ignores a malformed default operator config file for init commands', async () => {
@@ -83,7 +83,7 @@ describe('Config loader', () => {
     await writeFile(filePath, '{"chat": {', 'utf-8');
 
     const config = await loadConfig(makeArgs({ subcommand: 'init' }), filePath);
-    expect(config.chat.model).toBe('claude-sonnet-4-6');
+    expect(config.chat.model).toBeUndefined();
   });
 
   it('throws on a malformed explicit config file for init commands', async () => {

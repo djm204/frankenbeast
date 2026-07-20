@@ -8,8 +8,8 @@ function mockFullscreenApi({
   exitFullscreen,
 }: {
   fullscreenElement?: Element | null;
-  requestFullscreen?: Element['requestFullscreen'];
-  exitFullscreen?: Document['exitFullscreen'];
+  requestFullscreen?: Element['requestFullscreen'] | undefined;
+  exitFullscreen?: Document['exitFullscreen'] | undefined;
 }) {
   Object.defineProperty(document, 'fullscreenElement', {
     configurable: true,

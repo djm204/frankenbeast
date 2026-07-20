@@ -71,9 +71,9 @@ export const ProviderOverrideSchema = z.object({
 function createProvidersConfigSchema(options: OrchestratorConfigParseOptions = {}) {
   return z.object({
     /** Default provider name. */
-    default: z.string().default('claude'),
+    default: z.string().default('codex'),
     /** Ordered fallback chain of provider names. */
-    fallbackChain: z.array(z.string()).default(['claude', 'codex']),
+    fallbackChain: z.array(z.string()).default(['codex', 'claude']),
     /** Per-provider overrides (command, model, extraArgs). */
     overrides: z.record(z.string(), ProviderOverrideSchema).default(() => ({})),
   }).superRefine((providers, ctx) => {
@@ -207,8 +207,8 @@ const BaseOrchestratorConfigSchema = z.object({
 
   /** Provider configuration. */
   providers: ProvidersConfigSchema.default(() => ({
-    default: 'claude',
-    fallbackChain: ['claude', 'codex'],
+    default: 'codex',
+    fallbackChain: ['codex', 'claude'],
     overrides: {},
   })),
 
@@ -231,8 +231,8 @@ const BaseOrchestratorConfigSchema = z.object({
 function createOrchestratorConfigSchema(options: OrchestratorConfigParseOptions = {}) {
   return BaseOrchestratorConfigSchema.extend({
     providers: createProvidersConfigSchema(options).default(() => ({
-      default: 'claude',
-      fallbackChain: ['claude', 'codex'],
+      default: 'codex',
+      fallbackChain: ['codex', 'claude'],
       overrides: {},
     })),
   }).extend(

@@ -3,7 +3,9 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createChatApp } from '../../../src/http/chat-app.js';
+import { networkRoutes } from '../../../src/http/routes/network-routes.js';
 import { defaultConfig } from '../../../src/config/orchestrator-config.js';
+import type { NetworkSupervisor } from '../../../src/network/network-supervisor.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/network-routes');
@@ -11,6 +13,27 @@ const TMP = join(__dirname, '__fixtures__/network-routes');
 describe('network routes', () => {
   afterEach(() => {
     rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('reuses one supervisor across repeated status requests', async () => {
+    const status = vi.fn().mockResolvedValue({ services: [] });
+    const supervisorFactory = vi.fn(() => ({ status }) as unknown as NetworkSupervisor);
+    const app = networkRoutes({
+      root: TMP,
+      frankenbeastDir: TMP,
+      configFile: join(TMP, 'config.json'),
+      getConfig: () => defaultConfig(),
+      setConfig: () => {},
+      supervisorFactory,
+    });
+
+    const first = await app.request('/v1/network/status');
+    const second = await app.request('/v1/network/status');
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(supervisorFactory).toHaveBeenCalledTimes(1);
+    expect(status).toHaveBeenCalledTimes(2);
   });
 
   it('serves status and persists config updates', async () => {

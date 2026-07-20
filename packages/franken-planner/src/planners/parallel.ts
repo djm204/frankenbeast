@@ -152,6 +152,7 @@ export class ParallelPlanner implements PlanningStrategy {
             taskResults: allResults,
             failedTaskId: first.taskId,
             error: first.error,
+            recoveryFailures: failures,
           };
         }
       }

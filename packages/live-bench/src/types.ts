@@ -37,11 +37,11 @@ export interface ToolCallEvidence {
   readonly tool: string;
   readonly params: Readonly<Record<string, unknown>>;
   readonly source: ToolCallEvidenceSource;
-  readonly startedAt?: string;
-  readonly completedAt?: string;
-  readonly ok?: boolean;
+  readonly startedAt?: string | undefined;
+  readonly completedAt?: string | undefined;
+  readonly ok?: boolean | undefined;
   readonly result?: unknown;
-  readonly error?: string;
+  readonly error?: string | undefined;
 }
 
 export interface BenchmarkMatrixRow {

@@ -7,11 +7,11 @@ import type { NetworkConfigResponse, NetworkStatusResponse } from '../lib/networ
 interface NetworkPageProps {
   status: Pick<NetworkStatusResponse, 'mode' | 'secureBackend'>;
   services: NetworkStatusResponse['services'];
-  error?: string | null;
+  error?: string | null | undefined;
   logs: string[];
-  selectedLogServiceId?: string;
-  logsLoading?: boolean;
-  logsError?: string | null;
+  selectedLogServiceId?: string | undefined;
+  logsLoading?: boolean | undefined;
+  logsError?: string | null | undefined;
   config: NetworkConfigResponse | null;
   configError?: string | null;
   onRefresh(): void;

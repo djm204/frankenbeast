@@ -12,12 +12,14 @@ import type {
   ILogger,
   ICheckpointStore,
   SkillDescriptor,
+  IFirewallModule,
 } from '../deps.js';
 import { isoNow, wallClockNow } from '@franken/types';
 import type { TaskOutcome } from '../types.js';
 import type { CliSkillExecutor } from '../skills/cli-skill-executor.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import { NullLogger } from '../logger.js';
+import { InjectionDetectedError } from './ingestion.js';
 import {
   RecoveryController,
   PlanGraph as RecoveryPlanGraph,
@@ -47,6 +49,8 @@ type WaveExecutionResult = {
   readonly taskId: string;
   readonly task: PlanTask;
   readonly outcome: TaskOutcome;
+  readonly fromCheckpoint?: boolean;
+  readonly hasCheckpointOutput?: boolean;
 };
 
 function selectExecutableWave(
@@ -124,6 +128,7 @@ export async function runExecution(
   checkpoint?: ICheckpointStore,
   refreshPlanTasks?: () => Promise<readonly PlanTask[]>,
   config?: Pick<OrchestratorConfig, 'enableTracing'>,
+  firewall?: IFirewallModule,
 ): Promise<readonly TaskOutcome[]> {
   ctx.phase = 'execution';
   ctx.checkpointPath = checkpoint?.checkpointPath;
@@ -137,6 +142,7 @@ export async function runExecution(
   const outcomes: TaskOutcome[] = [];
   const completed = new Set<string>();
   const completedOutputs = new Map<string, unknown>();
+  const taskTokenUsage = new Map<string, number>();
   ctx.plan = { tasks: mergeCheckpointRecoveryTasks(ctx.plan.tasks, checkpoint) };
   validateAcyclicPlan(ctx.plan.tasks);
   const knownTaskIds = new Set(ctx.plan.tasks.map((t) => t.id));
@@ -216,12 +222,23 @@ export async function runExecution(
           });
         }
         logger.info('Execution: Skipping checkpointed task', { taskId: task.id });
-        const outcome = { taskId: task.id, status: 'success' as const, output: checkpointedOutput?.output };
-        if (checkpointedOutput?.found) {
-          completedOutputs.set(task.id, checkpointedOutput.output);
-        }
-        completed.add(task.id);
-        return { taskId, task, outcome };
+        const acceptedOutput = checkpointedOutput?.found
+          && firewall && firewall.enabled !== false
+          && task.requiredSkills.length > 0
+          ? await scanAndSanitizeResponse(
+              firewall,
+              checkpointedOutput.output,
+              `Checkpointed output from task '${task.id}'`,
+            )
+          : checkpointedOutput?.output;
+        const outcome = { taskId: task.id, status: 'success' as const, output: acceptedOutput };
+        return {
+          taskId,
+          task,
+          outcome,
+          fromCheckpoint: true,
+          hasCheckpointOutput: checkpointedOutput?.found === true,
+        };
       }
 
       const outcome = await executeTask(
@@ -237,20 +254,9 @@ export async function runExecution(
         cliExecutor,
         checkpoint,
         config,
+        firewall,
+        tokensUsed => taskTokenUsage.set(task.id, tokensUsed),
       );
-
-      if (outcome.status === 'success') {
-        // Persist the task output before the done marker so a crash after marking
-        // done can still rehydrate dependency outputs for downstream tasks.
-        checkpoint?.writeTaskOutput?.(task.id, outcome.output);
-        // Persist the checkpoint before mutating in-memory state so a crash here
-        // is recovered as "done" on restart instead of silently re-running the task.
-        checkpoint?.write(`${task.id}:done`);
-        completed.add(task.id);
-        completedOutputs.set(task.id, outcome.output);
-      } else if (outcome.status === 'skipped') {
-        terminalSkipped.add(task.id);
-      }
 
       return { taskId, task, outcome };
     }));
@@ -267,6 +273,47 @@ export async function runExecution(
       return result.value;
     });
 
+    // Accept a wave atomically: no outputs, checkpoints, or traces are committed
+    // until every untrusted response in the wave has passed the firewall.
+    const acceptanceFailureTaskIds = new Set<string>();
+    for (let index = 0; index < waveResults.length; index += 1) {
+      const result = waveResults[index]!;
+      const { task, outcome, fromCheckpoint, hasCheckpointOutput } = result;
+      if (outcome.status === 'success') {
+        if (!fromCheckpoint) {
+          try {
+            await memory.recordTrace({
+              taskId: task.id,
+              summary: task.objective,
+              outcome: 'success',
+              timestamp: isoNow(),
+            });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            waveResults[index] = {
+              ...result,
+              outcome: { taskId: task.id, status: 'failure', error: message },
+            };
+            acceptanceFailureTaskIds.add(task.id);
+            continue;
+          }
+          ctx.addAudit('executor', 'task:complete', {
+            taskId: task.id,
+            tokensUsed: taskTokenUsage.get(task.id) ?? 0,
+            output: outcome.output,
+          });
+          checkpoint?.writeTaskOutput?.(task.id, outcome.output);
+          checkpoint?.write(`${task.id}:done`);
+        }
+        completed.add(task.id);
+        if (!fromCheckpoint || hasCheckpointOutput) {
+          completedOutputs.set(task.id, outcome.output);
+        }
+      } else if (outcome.status === 'skipped') {
+        terminalSkipped.add(task.id);
+      }
+    }
+
     logger.info('Execution: parallel wave done', {
       size: waveResults.length,
       taskIds: waveResults.map(result => result.taskId),
@@ -282,6 +329,11 @@ export async function runExecution(
       if (outcome.status === 'success' || outcome.status === 'skipped') {
         outcomes.push(outcome);
       } else if (outcome.status === 'failure') {
+        if (acceptanceFailureTaskIds.has(task.id)) {
+          terminalFailures.add(task.id);
+          outcomes.push(outcome);
+          continue;
+        }
         const recovered = await recoverFailedTask({
           ctx,
           governor,
@@ -826,6 +878,8 @@ async function executeTask(
   cliExecutor?: CliSkillExecutor,
   checkpoint?: ICheckpointStore,
   config?: Pick<OrchestratorConfig, 'enableTracing'>,
+  firewall?: IFirewallModule,
+  recordTokens?: (tokensUsed: number) => void,
 ): Promise<TaskOutcome> {
   ctx.retryCount = (ctx.retryCount ?? 0) + 1;
   const startTime = wallClockNow();
@@ -904,18 +958,6 @@ async function executeTask(
           ? dependencyOutputs.values().next().value
           : dependencyOutputs;
 
-      await memory.recordTrace({
-        taskId: task.id,
-        summary: task.objective,
-        outcome: 'success',
-        timestamp: isoNow(),
-      });
-
-      ctx.addAudit('executor', 'task:complete', {
-        taskId: task.id,
-        tokensUsed: 0,
-        output: passthroughOutput,
-      });
       logger.info('Execution: task complete', {
         taskId: task.id,
         status: 'success',
@@ -927,6 +969,7 @@ async function executeTask(
         tokensUsed: 0,
       });
 
+      recordTokens?.(0);
       return { taskId: task.id, status: 'success', output: passthroughOutput };
     }
 
@@ -951,27 +994,46 @@ async function executeTask(
         if (!cliExecutor) {
           throw new Error(`CLI skill '${skillId}' requires a CliSkillExecutor but none was provided`);
         }
-        result = await cliExecutor.execute(skillId, baseInput, {} as never, checkpoint, task.id);
+        result = firewall && firewall.enabled !== false
+          ? await cliExecutor.execute(
+              skillId,
+              baseInput,
+              {} as never,
+              checkpoint,
+              task.id,
+              response => scanAndSanitizeResponse(
+                firewall,
+                response,
+                `CLI skill '${skillId}' response`,
+              ),
+            )
+          : await cliExecutor.execute(skillId, baseInput, {} as never, checkpoint, task.id);
       } else if (isMcp) {
         result = await executeMcpSkill(skillId, baseInput, mcp);
       } else {
         result = await skills.execute(skillId, baseInput);
       }
 
-      output = result.output;
+      const acceptedOutput = firewall && firewall.enabled !== false
+        ? await scanAndSanitizeResponse(firewall, result.output, `Skill '${skillId}' response`)
+        : result.output;
+      logger.info('Execution: skill response accepted', {
+        taskId: task.id,
+        skillId,
+      });
+      if ('isError' in result && result.isError === true) {
+        const detail = typeof acceptedOutput === 'string'
+          ? acceptedOutput
+          : JSON.stringify(acceptedOutput);
+        throw new Error(`MCP tool '${skillId}' failed: ${detail ?? 'unknown error'}`);
+      }
+
+      output = acceptedOutput;
       tokensUsed += result.tokensUsed ?? 0;
       logger.debug('Execution: skill complete', { taskId: task.id, skillId, tokensUsed });
     }
 
     // Record trace
-    await memory.recordTrace({
-      taskId: task.id,
-      summary: task.objective,
-      outcome: 'success',
-      timestamp: isoNow(),
-    });
-
-    ctx.addAudit('executor', 'task:complete', { taskId: task.id, tokensUsed, output });
     logger.info('Execution: task complete', {
       taskId: task.id,
       status: 'success',
@@ -982,8 +1044,16 @@ async function executeTask(
       durationMs: wallClockNow() - startTime,
       tokensUsed,
     });
+    recordTokens?.(tokensUsed);
     return { taskId: task.id, status: 'success', output };
   } catch (error) {
+    if (error instanceof InjectionDetectedError) {
+      ctx.addAudit('firewall', 'skill-response:blocked', {
+        taskId: task.id,
+        violations: error.violations,
+      });
+      throw error;
+    }
     const errorObject = error instanceof Error ? error : new Error(String(error));
     ctx.errorContext = [...(ctx.errorContext ?? []), errorObject];
     ctx.circuitBreakerTripped = true;
@@ -1001,11 +1071,162 @@ async function executeTask(
   }
 }
 
+async function scanAndSanitizeResponse(
+  firewall: IFirewallModule,
+  output: unknown,
+  source: string,
+): Promise<unknown> {
+  const serialized = serializeUntrustedResponse(output, source);
+  if (typeof output !== 'string' && output !== null && typeof output === 'object') {
+    const sanitized = await sanitizeStructuredResponse(firewall, output, source);
+    const sanitizedSerialized = serializeUntrustedResponse(sanitized, source);
+    const aggregateResult = await firewall.scanResponse(sanitizedSerialized.text);
+    if (aggregateResult.blocked) {
+      throw new InjectionDetectedError(aggregateResult.violations, source);
+    }
+    if (aggregateResult.sanitizedText !== sanitizedSerialized.text) {
+      throw responseSerializationError(source, 'aggregate structured response exceeded response policy limits');
+    }
+    const combinedTexts = [
+      collectStructuredText(sanitized, false).join(' '),
+      collectStructuredText(sanitized, true).join(' '),
+    ];
+    for (const combinedText of new Set(combinedTexts)) {
+      if (combinedText.length === 0) continue;
+      const combinedResult = await firewall.scanResponse(combinedText);
+      if (combinedResult.blocked) {
+        throw new InjectionDetectedError(combinedResult.violations, source);
+      }
+    }
+    return sanitized;
+  }
+  const firewallResult = await firewall.scanResponse(serialized.text);
+  if (firewallResult.blocked) {
+    throw new InjectionDetectedError(firewallResult.violations, source);
+  }
+  return serialized.restore(firewallResult.sanitizedText);
+}
+
+async function sanitizeStructuredResponse(
+  firewall: IFirewallModule,
+  value: unknown,
+  source: string,
+): Promise<unknown> {
+  if (typeof value === 'string') {
+    const result = await firewall.scanResponse(value);
+    if (result.blocked) {
+      throw new InjectionDetectedError(result.violations, source);
+    }
+    return result.sanitizedText;
+  }
+  if (Array.isArray(value)) {
+    return Promise.all(value.map(item => sanitizeStructuredResponse(firewall, item, source)));
+  }
+  if (value !== null && typeof value === 'object') {
+    const entries: Array<readonly [string, unknown]> = [];
+    const sanitizedKeys = new Set<string>();
+    for (const [key, item] of Object.entries(value)) {
+      const keyResult = await firewall.scanResponse(key);
+      if (keyResult.blocked) {
+        throw new InjectionDetectedError(keyResult.violations, source);
+      }
+      if (sanitizedKeys.has(keyResult.sanitizedText)) {
+        throw responseSerializationError(source, 'sanitization produced duplicate response keys');
+      }
+      sanitizedKeys.add(keyResult.sanitizedText);
+      entries.push([
+        keyResult.sanitizedText,
+        await sanitizeStructuredResponse(firewall, item, source),
+      ]);
+    }
+    return Object.fromEntries(entries);
+  }
+  return value;
+}
+
+function collectStructuredText(value: unknown, includeKeys: boolean): string[] {
+  if (typeof value === 'string') return [value];
+  if (Array.isArray(value)) {
+    return value.flatMap(item => collectStructuredText(item, includeKeys));
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.entries(value).flatMap(([key, item]) => [
+      ...(includeKeys ? [key] : []),
+      ...collectStructuredText(item, includeKeys),
+    ]);
+  }
+  return [];
+}
+
+function serializeUntrustedResponse(
+  output: unknown,
+  source: string,
+): { text: string; restore: (sanitized: string) => unknown } {
+  if (typeof output === 'string') {
+    return { text: output, restore: sanitized => sanitized };
+  }
+
+  try {
+    assertJsonScannable(output, new Set<object>());
+    const text = JSON.stringify(output);
+    if (text === undefined) throw new Error('value has no JSON representation');
+    return {
+      text,
+      restore: sanitized => {
+        try {
+          return JSON.parse(sanitized) as unknown;
+        } catch {
+          throw responseSerializationError(source, 'sanitized response is not valid JSON');
+        }
+      },
+    };
+  } catch (error) {
+    if (error instanceof InjectionDetectedError) throw error;
+    const detail = error instanceof Error ? error.message : String(error);
+    throw responseSerializationError(source, detail);
+  }
+}
+
+function assertJsonScannable(value: unknown, ancestors: Set<object>): void {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return;
+  if (typeof value === 'number' && Number.isFinite(value)) return;
+  if (typeof value !== 'object') {
+    throw new Error(`unsupported ${typeof value} value`);
+  }
+  if (ancestors.has(value)) throw new Error('circular response value');
+
+  const prototype = Object.getPrototypeOf(value) as unknown;
+  if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
+    throw new Error('non-plain response object');
+  }
+  if (Object.getOwnPropertySymbols(value).length > 0) {
+    throw new Error('symbol-keyed response value');
+  }
+
+  ancestors.add(value);
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  for (const [key, descriptor] of Object.entries(descriptors)) {
+    if (Array.isArray(value) && key === 'length') continue;
+    if (!descriptor.enumerable || !('value' in descriptor)) {
+      throw new Error('accessor or non-enumerable response property');
+    }
+    assertJsonScannable(descriptor.value, ancestors);
+  }
+  ancestors.delete(value);
+}
+
+function responseSerializationError(source: string, detail: string): InjectionDetectedError {
+  return new InjectionDetectedError(
+    [{ rule: 'response-serialization', severity: 'block', detail }],
+    source,
+  );
+}
+
 async function executeMcpSkill(
   skillId: string,
   input: SkillInput,
   mcp?: IMcpModule,
-): Promise<{ output: unknown; tokensUsed: number }> {
+): Promise<{ output: unknown; tokensUsed: number; isError: boolean }> {
   if (!mcp) {
     throw new Error(
       `MCP skill '${skillId}' requires an IMcpModule but none was provided. ` +
@@ -1016,11 +1237,7 @@ async function executeMcpSkill(
   const tool = resolveMcpTool(skillId, mcp.getAvailableTools());
   const result = await mcp.callTool(tool.name, serializeMcpSkillInput(input, tool.inputSchema), tool.serverId);
 
-  if (result.isError) {
-    throw new Error(`MCP skill '${skillId}' failed via tool '${tool.name}': ${String(result.content)}`);
-  }
-
-  return { output: result.content, tokensUsed: 0 };
+  return { output: result.content, tokensUsed: 0, isError: result.isError };
 }
 
 function resolveMcpTool(

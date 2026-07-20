@@ -18,6 +18,9 @@
 - [x] Reply to and resolve all seven round-30 Codex threads.
 - [x] Merge current `origin/main` through `c089f8b1c` and preserve both the cron scanner lessons and all incoming shared lessons.
 - [x] Re-run the 47 focused scanner tests, security lint, workspace lint, typecheck, and build on the reconciled head.
-- [ ] Publish the verified reconciliation commit through approval-cop only.
-- [ ] Trigger another fresh current-head Codex review through approval-cop and poll it to clean.
-- [ ] Reverify exact-head CI and zero unresolved review threads.
+- [x] Publish the verified reconciliation commit through approval-cop only.
+- [x] Obtain explicit authorization for invocation 33 and confirm the bot accepted the review on head `5839570175f7cafb227322c086e39c11d0d63e53`.
+- [x] Merge the latest `origin/main`, preserve both sides of the shared-lessons conflict, and rerun the focused scanner tests, security lint, workspace lint, typecheck, and build.
+- [ ] Publish the latest conflict-resolution merge commit.
+- [ ] Obtain explicit authorization for a fresh review of the new exact head and poll it to clean.
+- [ ] Reverify exact-head CI, zero unresolved review threads, and clean mergeability before merging PR #3182.

@@ -3,9 +3,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 interface NetworkLogsPanelProps {
   logs: string[];
   services: Array<{ id: string; status: string; inProcess?: boolean; hostServiceId?: string }>;
-  selectedServiceId?: string;
-  isLoading?: boolean;
-  error?: string | null;
+  selectedServiceId?: string | undefined;
+  isLoading?: boolean | undefined;
+  error?: string | null | undefined;
   onSelectService(serviceId: string): void;
 }
 

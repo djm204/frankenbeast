@@ -21,6 +21,11 @@ export function makeFirewall(overrides: Partial<IFirewallModule> = {}): IFirewal
       violations: [],
       blocked: false,
     })),
+    scanResponse: vi.fn(async (input: string) => ({
+      sanitizedText: input,
+      violations: [],
+      blocked: false,
+    })),
     ...overrides,
   };
 }

@@ -130,4 +130,16 @@ describe('ErrorIngester', () => {
     const result = new ErrorIngester().classify(new Error('operation timedout unexpectedly'), [ke]);
     expect(result.type).toBe('unknown');
   });
+
+  it('applies word boundaries to non-BMP letters at both pattern edges', () => {
+    const leading = new ErrorIngester().classify(new Error('x𐐀failure'), [
+      makeKnownError('𐐀failure'),
+    ]);
+    expect(leading.type).toBe('unknown');
+
+    const trailing = new ErrorIngester().classify(new Error('failure𐐀x'), [
+      makeKnownError('failure𐐀'),
+    ]);
+    expect(trailing.type).toBe('unknown');
+  });
 });

@@ -21,7 +21,7 @@ vi.mock('better-sqlite3', () => ({
   }),
 }))
 
-import { SQLiteAdapter, SQLiteLockRetryExhaustedError } from './SQLiteAdapter.js'
+import { SQLiteAdapter, SQLiteLockRetryExhaustedError, type SQLiteAdapterOptions } from './SQLiteAdapter.js'
 import { TraceContext } from '../../core/TraceContext.js'
 import { SpanLifecycle } from '../../core/SpanLifecycle.js'
 
@@ -31,6 +31,10 @@ function sqliteBusyError(): Error & { code: string } {
   return error
 }
 
+function createSQLiteAdapter(filePath: string, options: SQLiteAdapterOptions = {}): SQLiteAdapter {
+  return new SQLiteAdapter(filePath, { ...options, useWorkerThread: false })
+}
+
 describe('SQLiteAdapter', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -38,7 +42,7 @@ describe('SQLiteAdapter', () => {
   })
 
   it('configures WAL, foreign keys, and a busy timeout so concurrent writers wait for locks', () => {
-    const adapter = new SQLiteAdapter('/tmp/traces.db')
+    const adapter = createSQLiteAdapter('/tmp/traces.db')
 
     expect(Database).toHaveBeenCalledWith('/tmp/traces.db')
     expect(pragmaMock.mock.calls.map(call => call[0])).toEqual([
@@ -60,8 +64,8 @@ describe('SQLiteAdapter', () => {
       return undefined
     })
 
-    const first = new SQLiteAdapter('/tmp/shared-traces.db')
-    const second = new SQLiteAdapter('/tmp/shared-traces.db')
+    const first = createSQLiteAdapter('/tmp/shared-traces.db')
+    const second = createSQLiteAdapter('/tmp/shared-traces.db')
 
     expect(execMock).toHaveBeenCalledTimes(1)
 
@@ -70,7 +74,7 @@ describe('SQLiteAdapter', () => {
   })
 
   it('validates retry options before opening a database handle', () => {
-    expect(() => new SQLiteAdapter('/tmp/traces.db', { maxLockRetries: -1 })).toThrow(
+    expect(() => createSQLiteAdapter('/tmp/traces.db', { maxLockRetries: -1 })).toThrow(
       'maxLockRetries must be an integer between 0 and 10',
     )
     expect(Database).not.toHaveBeenCalled()
@@ -86,7 +90,7 @@ describe('SQLiteAdapter', () => {
       .mockImplementationOnce(() => undefined)
       .mockImplementationOnce(() => undefined)
 
-    const adapter = new SQLiteAdapter('/tmp/traces.db', {
+    const adapter = createSQLiteAdapter('/tmp/traces.db', {
       maxLockRetries: 1,
       lockRetryBaseDelayMs: 1,
       lockRetryMaxDelayMs: 1,
@@ -110,7 +114,7 @@ describe('SQLiteAdapter', () => {
         throw sqliteBusyError()
       })
 
-    expect(() => new SQLiteAdapter('/tmp/traces.db', {
+    expect(() => createSQLiteAdapter('/tmp/traces.db', {
       maxLockRetries: 0,
       lockRetryBaseDelayMs: 1,
       lockRetryMaxDelayMs: 1,
@@ -127,7 +131,7 @@ describe('SQLiteAdapter', () => {
       .mockReturnValueOnce({ run: upsertSpanRun })
     transactionMock.mockImplementation(fn => (trace: unknown) => fn(trace))
 
-    const adapter = new SQLiteAdapter('/tmp/traces.db')
+    const adapter = createSQLiteAdapter('/tmp/traces.db')
     const trace = TraceContext.createTrace('original-goal')
     const span = TraceContext.startSpan(trace, { name: 'first' })
     TraceContext.endSpan(span)
@@ -149,7 +153,7 @@ describe('SQLiteAdapter', () => {
       .mockReturnValueOnce({ run: upsertSpanRun })
     transactionMock.mockImplementation(fn => (traces: unknown) => fn(traces))
 
-    const adapter = new SQLiteAdapter('/tmp/traces.db')
+    const adapter = createSQLiteAdapter('/tmp/traces.db')
     const first = TraceContext.createTrace('first')
     const second = TraceContext.createTrace('second')
 
@@ -171,7 +175,7 @@ describe('SQLiteAdapter', () => {
       .mockReturnValueOnce({ run: upsertSpanRun })
     transactionMock.mockImplementation(fn => (traces: unknown) => fn(traces))
 
-    const adapter = new SQLiteAdapter('/tmp/traces.db')
+    const adapter = createSQLiteAdapter('/tmp/traces.db')
     const trace = TraceContext.createTrace('duplicate snapshots')
     const span = TraceContext.startSpan(trace, { name: 'first' })
     TraceContext.endSpan(span)
@@ -201,7 +205,7 @@ describe('SQLiteAdapter', () => {
       return fn(trace)
     })
 
-    const adapter = new SQLiteAdapter('/tmp/traces.db', {
+    const adapter = createSQLiteAdapter('/tmp/traces.db', {
       maxLockRetries: 2,
       lockRetryBaseDelayMs: 10,
       lockRetryMaxDelayMs: 20,
@@ -233,7 +237,7 @@ describe('SQLiteAdapter', () => {
       return fn(trace)
     })
 
-    const adapter = new SQLiteAdapter('/tmp/traces.db', {
+    const adapter = createSQLiteAdapter('/tmp/traces.db', {
       maxLockRetries: 1,
       lockRetryBaseDelayMs: 5,
       lockRetryMaxDelayMs: 5,
@@ -257,7 +261,7 @@ describe('SQLiteAdapter', () => {
       throw sqliteBusyError()
     })
 
-    const adapter = new SQLiteAdapter('/tmp/traces.db', {
+    const adapter = createSQLiteAdapter('/tmp/traces.db', {
       maxLockRetries: 1,
       lockRetryBaseDelayMs: 5,
       lockRetryMaxDelayMs: 5,
@@ -293,7 +297,7 @@ describe('SQLiteAdapter', () => {
       .mockReturnValueOnce({ run: upsertSpanRun })
     transactionMock.mockImplementation(fn => (trace: unknown) => fn(trace))
 
-    const adapter = new SQLiteAdapter('/tmp/traces.db', {
+    const adapter = createSQLiteAdapter('/tmp/traces.db', {
       maxLockRetries: 1,
       lockRetryBaseDelayMs: 5,
       lockRetryMaxDelayMs: 5,
@@ -331,7 +335,7 @@ describe('SQLiteAdapter', () => {
       return fn(trace)
     })
 
-    const adapter = new SQLiteAdapter('/tmp/traces.db', {
+    const adapter = createSQLiteAdapter('/tmp/traces.db', {
       maxLockRetries: 1,
       lockRetryBaseDelayMs: 5,
       lockRetryMaxDelayMs: 5,
@@ -375,7 +379,7 @@ describe('SQLiteAdapter', () => {
       return fn(arg)
     })
 
-    const adapter = new SQLiteAdapter('/tmp/traces.db', {
+    const adapter = createSQLiteAdapter('/tmp/traces.db', {
       maxLockRetries: 1,
       lockRetryBaseDelayMs: 5,
       lockRetryMaxDelayMs: 5,
@@ -405,7 +409,7 @@ describe('SQLiteAdapter', () => {
       .mockReturnValueOnce({ run: upsertSpanRun })
     transactionMock.mockImplementation(fn => (trace: unknown) => fn(trace))
 
-    const adapter = new SQLiteAdapter('/tmp/traces.db')
+    const adapter = createSQLiteAdapter('/tmp/traces.db')
     const trace = TraceContext.createTrace('goal')
     const span = TraceContext.startSpan(trace, { name: 'first' })
     TraceContext.endSpan(span)
@@ -434,7 +438,7 @@ describe('SQLiteAdapter', () => {
       .mockReturnValueOnce({ run: deleteTraceRun })
     transactionMock.mockImplementation(fn => (traceId: unknown) => fn(traceId))
 
-    const adapter = new SQLiteAdapter('/tmp/traces.db', {
+    const adapter = createSQLiteAdapter('/tmp/traces.db', {
       maxLockRetries: 1,
       lockRetryBaseDelayMs: 5,
       lockRetryMaxDelayMs: 5,
@@ -465,7 +469,7 @@ describe('SQLiteAdapter', () => {
       .mockReturnValueOnce({ run: upsertSpanRun })
     transactionMock.mockImplementation(fn => (trace: unknown) => fn(trace))
 
-    const adapter = new SQLiteAdapter('/tmp/traces.db')
+    const adapter = createSQLiteAdapter('/tmp/traces.db')
     const trace = TraceContext.createTrace('goal')
     const first = TraceContext.startSpan(trace, { name: 'first' })
     SpanLifecycle.setMetadata(first, { step: 1 })
@@ -522,7 +526,7 @@ describe('SQLiteAdapter', () => {
       .mockReturnValueOnce({ run: upsertSpanRun })
     transactionMock.mockImplementation(fn => (trace: unknown) => fn(trace))
 
-    const adapter = new SQLiteAdapter('/tmp/traces.db')
+    const adapter = createSQLiteAdapter('/tmp/traces.db')
     const trace = TraceContext.createTrace('goal')
     const first = TraceContext.startSpan(trace, { name: 'first' })
     const second = TraceContext.startSpan(trace, { name: 'second' })
@@ -549,7 +553,7 @@ describe('SQLiteAdapter', () => {
       .mockReturnValueOnce({ run: upsertSpanRun })
     transactionMock.mockImplementation(fn => (trace: unknown) => fn(trace))
 
-    const adapter = new SQLiteAdapter('/tmp/traces.db', { maxFlushedSpanSnapshots: 1 })
+    const adapter = createSQLiteAdapter('/tmp/traces.db', { maxFlushedSpanSnapshots: 1 })
     const firstTrace = TraceContext.createTrace('first')
     const firstSpan = TraceContext.startSpan(firstTrace, { name: 'first' })
     TraceContext.endSpan(firstSpan)

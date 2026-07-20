@@ -133,6 +133,26 @@ describe('FileApprovalAuditLog', () => {
     }
   });
 
+  it('treats a missing log as empty but propagates other read failures', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-approval-audit-'));
+    try {
+      const input = {
+        sessionId: 'chat-1',
+        projectId: 'proj-1',
+        token: 'approval-token-1',
+        commandHash: commandSha256('git push origin HEAD'),
+      };
+
+      const missing = new FileApprovalAuditLog(join(dir, 'missing.jsonl'));
+      await expect(missing.hasConsumedApproval(input)).resolves.toBe(false);
+
+      const unreadable = new FileApprovalAuditLog(dir);
+      await expect(unreadable.hasConsumedApproval(input)).rejects.toThrow();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('separates a corrupt partial tail before appending replay-protecting entries', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'franken-approval-audit-'));
     try {
@@ -174,6 +194,12 @@ describe('FileApprovalAuditLog', () => {
       await symlink(outsidePath, logPath);
 
       const log = new FileApprovalAuditLog(logPath);
+      await expect(log.hasConsumedApproval({
+        sessionId: 'chat-1',
+        projectId: 'proj-1',
+        token: 'approval-token-1',
+        commandHash: commandSha256('git push origin HEAD'),
+      })).rejects.toThrow();
       await expect(log.recordExecution({
         sessionId: 'chat-1',
         projectId: 'proj-1',

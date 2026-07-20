@@ -25,6 +25,14 @@ function expectFlagToken(source: string, flag: string): void {
 }
 
 describe('README issue workflow flags', () => {
+  it('explains single and multiple issue-label filters in plain text', () => {
+    const subcommands = sectionBetween(README, '### Subcommands', '### Options');
+
+    expect(subcommands).toContain(
+      'Pass one label with `--label bug`, or multiple labels as a single comma-separated value like `--label critical,high`.',
+    );
+  });
+
   it('keeps the quick-reference aligned with the dedicated issue guide', () => {
     const readmeIssueFlags = sectionBetween(
       README,

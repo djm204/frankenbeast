@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn as defaultSpawn } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 import type { BeastProcessSpec } from '../types.js';
 import { DEFAULT_BEAST_ENV_ALLOWLIST } from './sandbox-policy.js';
@@ -23,7 +23,12 @@ export interface ProcessSupervisorLike {
 
 export interface ProcessSignalOptions {
   readonly processGroupOwned?: boolean | undefined;
+  readonly expectedStartTimeTicks?: string | undefined;
 }
+
+export type ProcessIdentityReadResult =
+  | { readonly status: 'found'; readonly startTimeTicks: string }
+  | { readonly status: 'absent' | 'unreadable' | 'unsupported' };
 
 export interface ProcessSupervisorOptions {
   readonly projectRoot?: string | undefined;
@@ -37,6 +42,7 @@ export interface OrphanProcessSweeperOptions {
   readonly escalationDelayMs?: number | undefined;
   readonly platform?: NodeJS.Platform | undefined;
   readonly killProcess?: typeof process.kill | undefined;
+  readonly readProcessIdentity?: ((pid: number) => ProcessIdentityReadResult) | undefined;
 }
 
 export interface OrphanProcessSweepResult {
@@ -55,6 +61,28 @@ function allowlistedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
     }
   }
   return cleaned;
+}
+
+function readLinuxProcessIdentity(pid: number): ProcessIdentityReadResult {
+  if (process.platform !== 'linux') {
+    return { status: 'unsupported' };
+  }
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const endOfCommand = stat.lastIndexOf(')');
+    if (endOfCommand < 0) {
+      return { status: 'unreadable' };
+    }
+    const fieldsFromState = stat.slice(endOfCommand + 2).trim().split(/\s+/);
+    const startTimeTicks = fieldsFromState[19];
+    return typeof startTimeTicks === 'string' && startTimeTicks.length > 0
+      ? { status: 'found', startTimeTicks }
+      : { status: 'unreadable' };
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT'
+      ? { status: 'absent' }
+      : { status: 'unreadable' };
+  }
 }
 
 export function assertContainedCwd(projectRoot: string | undefined, cwd: string | undefined): void {
@@ -89,6 +117,52 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
   private killProcess(): typeof process.kill {
     return this.options.orphanSweeper?.killProcess ?? process.kill;
   }
+
+  private verifyUntrackedProcessIdentity(pid: number, options: ProcessSignalOptions): 'verified' | 'absent' {
+    const identity = (this.options.orphanSweeper?.readProcessIdentity ?? readLinuxProcessIdentity)(pid);
+    if (identity.status === 'absent') {
+      return 'absent';
+    }
+
+    const expectedStartTimeTicks = options.expectedStartTimeTicks;
+    if (typeof expectedStartTimeTicks !== 'string' || expectedStartTimeTicks.length === 0) {
+      throw new Error(
+        `Refusing to signal untracked PID ${pid}: no verified process identity is available; an operator must inspect the process and stop it manually.`,
+      );
+    }
+
+    if (identity.status !== 'found' || identity.startTimeTicks !== expectedStartTimeTicks) {
+      throw new Error(
+        `Refusing to signal untracked PID ${pid}: the current process identity could not be verified; an operator must inspect the process and stop it manually.`,
+      );
+    }
+    return 'verified';
+  }
+
+  private signalUntrackedProcess(pid: number, signal: NodeJS.Signals, options: ProcessSignalOptions): void {
+    const identityStatus = this.verifyUntrackedProcessIdentity(pid, options);
+    if (identityStatus === 'absent') {
+      // A recovered group can remain alive after its original leader exits. The
+      // absent leader PID cannot be targeted directly, but its persisted,
+      // owned process-group ID remains safe to sweep.
+      if (options.processGroupOwned) {
+        this.sweepOrphanProcessGroup(pid, signal);
+      }
+      return;
+    }
+
+    if (options.processGroupOwned && this.sweepOrphanProcessGroup(pid, signal).swept) {
+      return;
+    }
+
+    // Revalidate after a failed group sweep so PID reuse during fallback cannot
+    // redirect the direct signal to a different process.
+    if (options.processGroupOwned && this.verifyUntrackedProcessIdentity(pid, options) === 'absent') {
+      return;
+    }
+    this.killProcess()(pid, signal);
+  }
+
   private shouldUseProcessGroup(): boolean {
     return this.orphanSweeperEnabled() && this.orphanSweeperPlatform() !== 'win32';
   }
@@ -343,13 +417,10 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
       return;
     }
 
-    // Only process-group sweep recovered attempts that were persisted as
-    // process-group leaders. Legacy/stale attempts fall back to direct PID
-    // signaling so a reused PID cannot fan out to an unrelated group.
+    // Recovered attempts are signaled only after their persisted process
+    // identity is revalidated at the signal boundary.
     try {
-      if (!options.processGroupOwned || !this.sweepOrphanProcessGroup(pid, 'SIGTERM').swept) {
-        this.killProcess()(pid, 'SIGTERM');
-      }
+      this.signalUntrackedProcess(pid, 'SIGTERM', options);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== 'ESRCH') {
@@ -369,13 +440,10 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
       return;
     }
 
-    // Only process-group sweep recovered attempts that were persisted as
-    // process-group leaders. Legacy/stale attempts fall back to direct PID
-    // signaling so a reused PID cannot fan out to an unrelated group.
+    // Recovered attempts are signaled only after their persisted process
+    // identity is revalidated at the signal boundary.
     try {
-      if (!options.processGroupOwned || !this.sweepOrphanProcessGroup(pid, 'SIGKILL').swept) {
-        this.killProcess()(pid, 'SIGKILL');
-      }
+      this.signalUntrackedProcess(pid, 'SIGKILL', options);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== 'ESRCH') {

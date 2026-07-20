@@ -40,7 +40,7 @@ export interface ICliProvider {
   readonly name: string;
   readonly command: string;
   /** Cheap model for conversational/chat use. Each provider defines its own. */
-  readonly chatModel: string;
+  readonly chatModel?: string;
   buildArgs(opts: ProviderOpts): string[];
   normalizeOutput(raw: string): string;
   estimateTokens(text: string): number;

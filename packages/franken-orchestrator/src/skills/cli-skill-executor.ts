@@ -313,7 +313,14 @@ export class CliSkillExecutor {
     return 'committed';
   }
 
-  async execute(skillId: string, input: SkillInput, config: Partial<CliSkillConfig>, checkpoint?: ICheckpointStore, taskId?: string): Promise<SkillResult> {
+  async execute(
+    skillId: string,
+    input: SkillInput,
+    config: Partial<CliSkillConfig>,
+    checkpoint?: ICheckpointStore,
+    taskId?: string,
+    sanitizeResponse?: (output: unknown) => Promise<unknown>,
+  ): Promise<SkillResult> {
     if (!skillId || skillId.trim().length === 0) {
       throw new Error('skillId must not be empty');
     }
@@ -366,6 +373,7 @@ export class CliSkillExecutor {
       throw new Error(`${errorMessage}: ${preMartinTrackedChanges.join(', ')}`);
     }
     const preMartinUntrackedFiles = this.untrackedFilesFromStatus(preMartinStatus);
+    const preMartinHead = sanitizeResponse ? this.git.getCurrentHead() : undefined;
 
     const staleMateState: StaleMateState = { lastSignature: '', stalledIterations: 0 };
     const wrappedConfig = this.buildMartinConfig({
@@ -464,6 +472,20 @@ export class CliSkillExecutor {
       throw new Error(errorMsg);
     }
 
+    let acceptedOutput: unknown = martinResult.output;
+    if (sanitizeResponse) {
+      try {
+        acceptedOutput = await sanitizeResponse(martinResult.output);
+      } catch (error) {
+        this.resetRejectedWorktree(preMartinHead!, preMartinUntrackedFiles);
+        this.observer.endSpan(chunkSpan, {
+          status: 'error',
+          errorMessage: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+    }
+
     // Generate commit message for squash merge (if available)
     let commitMessage: string | undefined;
     if (this.commitMessageFn) {
@@ -493,7 +515,7 @@ export class CliSkillExecutor {
       });
       const postTokens = this.observer.counter.grandTotal();
       return {
-        output: martinResult.output,
+        output: acceptedOutput,
         tokensUsed: postTokens.totalTokens - preTokens.totalTokens,
       };
     }
@@ -519,10 +541,10 @@ export class CliSkillExecutor {
       kind: 'tool.result',
       runId: input.sessionId,
       toolName: skillId,
-      content: JSON.stringify({ output: martinResult.output, tokensUsed: chunkTokensUsed, iterations: martinResult.iterations }),
+      content: JSON.stringify({ output: acceptedOutput, tokensUsed: chunkTokensUsed, iterations: martinResult.iterations }),
     });
     return {
-      output: martinResult.output,
+      output: acceptedOutput,
       tokensUsed: chunkTokensUsed,
     };
   }
@@ -873,6 +895,16 @@ export class CliSkillExecutor {
       promptTokens: Math.ceil(prompt.length / 4),
       completionTokens: Math.max(config.maxTurns, 1) * 1_000,
     }]);
+  }
+
+  private resetRejectedWorktree(preRunHead: string, preExistingUntrackedFiles: readonly string[]): void {
+    const status = this.git.getStatus();
+    this.git.resetHard(preRunHead);
+    const preExisting = new Set(preExistingUntrackedFiles);
+    const newUntracked = this.untrackedFilesFromStatus(status).filter(file => !preExisting.has(file));
+    if (newUntracked.length > 0) {
+      this.git.cleanUntracked(newUntracked);
+    }
   }
 
   private resetBudgetAbortedWorktree(preExistingUntrackedFiles: readonly string[] = []): void {

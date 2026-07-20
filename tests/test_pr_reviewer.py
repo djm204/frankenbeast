@@ -810,12 +810,13 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         self.assertEqual(header_warning, [])
         self.assertEqual(len(disguised_added_line), 1)
 
-    def test_failed_review_post_makes_the_run_fail(self):
+    def test_failed_review_post_is_marked_failed_and_retried(self):
         pull_request = {
             "number": 74,
             "author": {"login": "contributor"},
             "headRefOid": "a" * 40,
         }
+        post_failure = subprocess.CalledProcessError(1, ["gh", "api"])
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
             self.reviewer, "WORKSPACE", Path(directory)
         ), mock.patch.object(
@@ -831,10 +832,30 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         ), mock.patch.object(
             self.reviewer, "run_agy_review", return_value="VERDICT: APPROVE"
         ), mock.patch.object(
-            self.reviewer, "post_pr_review", return_value=False
-        ):
+            self.reviewer.subprocess,
+            "check_call",
+            side_effect=[post_failure, None],
+        ) as check_call:
             with self.assertRaisesRegex(RuntimeError, "review could not be posted"):
                 self.reviewer.process_prs()
+
+            connection = self.reviewer.sqlite3.connect(self.reviewer.DB_FILE)
+            failed_status = connection.execute(
+                "SELECT status FROM pr_reviews WHERE pr_number = 74"
+            ).fetchone()[0]
+            connection.close()
+
+            self.reviewer.process_prs()
+
+            connection = self.reviewer.sqlite3.connect(self.reviewer.DB_FILE)
+            completed_status = connection.execute(
+                "SELECT status FROM pr_reviews WHERE pr_number = 74"
+            ).fetchone()[0]
+            connection.close()
+
+        self.assertEqual(failed_status, "failed")
+        self.assertEqual(completed_status, "completed")
+        self.assertEqual(check_call.call_count, 2)
 
     def test_head_change_before_post_skips_stale_review(self):
         original = {

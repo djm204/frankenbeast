@@ -64,14 +64,17 @@ function patternMatches(message: string, pattern: string): boolean {
     return false;
   }
   const escapedPattern = escapeRegex(normalizedPattern).replace(/\s+/g, String.raw`\s+`);
+  const patternCodePoints = Array.from(normalizedPattern);
   // Only guard an edge with a word boundary when the pattern actually starts/ends
-  // with a word character. Applying the lookarounds unconditionally would drop
-  // legitimate partial patterns ending (or starting) in punctuation — e.g.
-  // `failed:` or `Cannot find module '` — when adjacent error text is a word.
-  const leadingBoundary = WORD_CHAR_RE.test(normalizedPattern[0] ?? '')
+  // with a word character. Iterate by Unicode code point so astral letters and
+  // numbers are tested whole instead of as individual UTF-16 surrogate halves.
+  // Applying the lookarounds unconditionally would drop legitimate partial
+  // patterns ending (or starting) in punctuation — e.g. `failed:` or
+  // `Cannot find module '` — when adjacent error text is a word.
+  const leadingBoundary = WORD_CHAR_RE.test(patternCodePoints[0] ?? '')
     ? String.raw`(?<![${WORD_CHAR_CLASS}])`
     : '';
-  const trailingBoundary = WORD_CHAR_RE.test(normalizedPattern[normalizedPattern.length - 1] ?? '')
+  const trailingBoundary = WORD_CHAR_RE.test(patternCodePoints.at(-1) ?? '')
     ? String.raw`(?![${WORD_CHAR_CLASS}])`
     : '';
   const matcher = new RegExp(`${leadingBoundary}${escapedPattern}${trailingBoundary}`, 'iu');

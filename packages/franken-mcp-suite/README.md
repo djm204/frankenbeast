@@ -258,6 +258,10 @@ All three clients are supported:
 
 ## Programmatic usage
 
+The package root is the only supported programmatic import. Internal files are
+not public subpaths, so import APIs from `@franken/mcp-suite` rather than from
+`@franken/mcp-suite/dist/*`.
+
 ```typescript
 import { createBrainAdapter, createGovernorAdapter, createFirewallAdapter } from '@franken/mcp-suite';
 

@@ -24,14 +24,29 @@ interface ModelState {
   completionTokens: number
 }
 
+export interface ModelAttributionOptions {
+  /** Maximum number of distinct model labels retained by this attribution report. */
+  maxModels?: number
+}
+
+const DEFAULT_MAX_MODELS = 1_000
+
 export class ModelAttribution {
   private readonly calc: CostCalculator
   private readonly state = new Map<string, ModelState>()
+  private readonly maxModels: number
   private totalPromptTokens = 0
   private totalCompletionTokens = 0
 
-  constructor(pricing: PricingTable) {
+  constructor(pricing: PricingTable, options: ModelAttributionOptions = {}) {
+    const maxModels = options.maxModels ?? DEFAULT_MAX_MODELS
+    if (!Number.isSafeInteger(maxModels) || maxModels <= 0) {
+      throw new RangeError(
+        `ModelAttribution: maxModels must be a positive safe integer, received ${maxModels}`,
+      )
+    }
     this.calc = new CostCalculator(pricing)
+    this.maxModels = maxModels
   }
 
   /** A token delta must be a non-negative safe integer. */
@@ -57,6 +72,11 @@ export class ModelAttribution {
   record(entry: AttributionEntry): void {
     ModelAttribution.assertValidDelta(entry.promptTokens, 'promptTokens')
     ModelAttribution.assertValidDelta(entry.completionTokens, 'completionTokens')
+    if (!this.state.has(entry.model) && this.state.size >= this.maxModels) {
+      throw new RangeError(
+        `ModelAttribution: model cardinality limit of ${this.maxModels} reached; rejected model "${entry.model}"`,
+      )
+    }
 
     const existing = this.state.get(entry.model) ?? {
       totalCalls: 0,

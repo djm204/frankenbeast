@@ -52,6 +52,33 @@ describe('WhatsAppAdapter', () => {
     expect(body.interactive.action.buttons[0].reply.title).toBe('Approve');
   });
 
+  it.each([
+    {
+      name: 'text',
+      message: { text: 'hello whatsapp', status: 'reply' as const },
+    },
+    {
+      name: 'interactive',
+      message: {
+        text: 'Approve?',
+        status: 'approval' as const,
+        actions: [{ id: 'approve', label: 'Approve' }],
+      },
+    },
+  ])('rejects $name messages without recipient metadata before calling WhatsApp', async ({ message }) => {
+    const mockFetch = vi.fn<typeof fetch>();
+    const adapter = new WhatsAppAdapter({
+      accessToken: 'token',
+      phoneNumberId: '123',
+      fetchImpl: mockFetch,
+    });
+
+    await expect(adapter.send('session-123', message)).rejects.toThrow(
+      'WhatsApp routing error: missing recipient phoneNumber metadata',
+    );
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   it('includes endpoint and response body when WhatsApp returns HTTP errors', async () => {
     const adapter = new WhatsAppAdapter({
       accessToken: 'token',

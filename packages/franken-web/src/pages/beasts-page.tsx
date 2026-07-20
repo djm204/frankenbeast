@@ -19,15 +19,18 @@ interface BeastsPageProps {
   agentDetail: TrackedAgentDetail | null;
   catalog: BeastCatalogEntry[];
   runs: BeastRunSummary[];
-  containerRuntime?: BeastContainerRuntimeStatus;
+  containerRuntime?: BeastContainerRuntimeStatus | undefined;
   disabled: boolean;
   error: string | null;
   logs: string[];
   pendingAgentActions?: Record<string, AgentLifecycleAction | undefined>;
   selectedAgentId: string | null;
   dashboardClient: DashboardApiClient;
+  hasMoreAgents?: boolean;
+  loadingMoreAgents?: boolean;
   onClose: () => void;
   onLaunch: (config: Record<string, unknown>) => Promise<void>;
+  onLoadMoreAgents?: () => Promise<void>;
   onDelete: (agentId: string) => void;
   onKill: (agentId: string) => void;
   onRestart: (agentId: string) => void;
@@ -50,8 +53,11 @@ export function BeastsPage({
   pendingAgentActions = {},
   selectedAgentId,
   dashboardClient,
+  hasMoreAgents = false,
+  loadingMoreAgents = false,
   onClose,
   onLaunch,
+  onLoadMoreAgents,
   onDelete,
   onKill,
   onRestart,
@@ -143,6 +149,9 @@ export function BeastsPage({
         onCreateAgent={handleOpenWizard}
         createAgentDisabled={disabled}
         createAgentDisabledReason={disabled ? createAgentDisabledReason : null}
+        hasMore={hasMoreAgents}
+        loadingMore={loadingMoreAgents}
+        onLoadMore={onLoadMoreAgents}
       />
 
       {agentDetail && (

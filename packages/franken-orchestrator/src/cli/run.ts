@@ -28,7 +28,7 @@ import { createEgressGuardedFetch } from '../network/egress-policy.js';
 import type { SessionPhase } from './session.js';
 import type { InterviewIO } from '../planning/interview-loop.js';
 import { renderBanner, BeastLogger } from '../logging/beast-logger.js';
-import { ChatRepl } from './chat-repl.js';
+import { ChatRepl, createReadlineIO, type ChatIO } from './chat-repl.js';
 import { createChatRuntime } from '../chat/chat-runtime-factory.js';
 import { FileSessionStore } from '../chat/session-store.js';
 import { createCliDeps } from './dep-factory.js';
@@ -93,11 +93,33 @@ function resolveSloKanbanDbPath(): string {
  */
 export function createStdinIO(): InterviewIO & { close(): void } {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
+  let activeQuestion: AbortController | undefined;
+  const cancelQuestion = (): void => activeQuestion?.abort();
+  const askRaw = (prompt: string) => {
+    const controller = new AbortController();
+    activeQuestion = controller;
+    return new Promise<string>((resolve, reject) => {
+      const onAbort = () => {
+        const error = new Error('Terminal question cancelled');
+        error.name = 'AbortError';
+        reject(error);
+      };
+      controller.signal.addEventListener('abort', onAbort, { once: true });
+      rl.question(prompt, { signal: controller.signal }, (answer) => {
+        controller.signal.removeEventListener('abort', onAbort);
+        resolve(answer);
+      });
+    }).finally(() => {
+      if (activeQuestion === controller) activeQuestion = undefined;
+    });
+  };
   return {
-    ask: (question: string) =>
-      new Promise<string>((resolve) => rl.question(`${question}\n> `, resolve)),
+    ask: (question: string) => askRaw(`${question}\n> `),
+    askRaw,
+    cancelQuestion,
     display: (message: string) => printLine(message),
     close: () => {
+      cancelQuestion();
       rl.close();
       process.stdin.pause();
     },
@@ -1129,10 +1151,12 @@ async function buildChatServerCommsConfig(
   });
 }
 
-async function createChatSurfaceDeps(
+export async function createChatSurfaceDeps(
   args: CliArgs,
   config: OrchestratorConfig,
   paths: ReturnType<typeof getProjectPaths>,
+  governorQuestion?: ((prompt: string) => Promise<string>) | undefined,
+  governorCancel?: (() => void) | undefined,
 ): Promise<ChatSurfaceDeps> {
   const provider = resolveSelectedProvider(args, config);
   const sessionStoreDir = join(paths.frankenbeastDir, 'chat');
@@ -1153,6 +1177,8 @@ async function createChatSurfaceDeps(
     adapterWorkingDir: tmpdir(),
     adapterModel: config.chat?.model ?? resolvedProvider.chatModel,
     chatMode: true,
+    governorQuestion,
+    governorCancel,
     orchestratorConfig: config,
   };
   const { cliLlmAdapter, finalize, skillManager, providerRegistry } = await createCliDeps(chatDepOpts);
@@ -1314,7 +1340,24 @@ async function runChatCommandIfRequested(
     }
   }
 
-  const { chatLlm, execLlm, finalize, projectId, sessionStoreDir, skillManager, providerRegistry } = await createChatSurfaceDeps(args, config, paths);
+  let chatIo: ChatIO | undefined;
+  if (args.subcommand === 'chat') {
+    chatIo = createReadlineIO();
+  }
+  let chatDeps: ChatSurfaceDeps;
+  try {
+    chatDeps = await createChatSurfaceDeps(
+      args,
+      config,
+      paths,
+      chatIo?.ask,
+      chatIo?.cancelQuestion,
+    );
+  } catch (error) {
+    chatIo?.close();
+    throw error;
+  }
+  const { chatLlm, execLlm, finalize, projectId, sessionStoreDir, skillManager, providerRegistry } = chatDeps;
 
   if (args.subcommand === 'chat-server') {
     let mutableConfig = config;
@@ -1446,9 +1489,14 @@ async function runChatCommandIfRequested(
     projectId,
     sessionStore,
     verbose: args.verbose,
+    ...(chatIo ? { io: chatIo } : {}),
   });
-  await repl.start();
-  await finalize();
+  try {
+    await repl.start();
+  } finally {
+    chatIo?.close();
+    await finalize();
+  }
   return true;
 }
 
