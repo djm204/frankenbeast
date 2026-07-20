@@ -350,7 +350,7 @@ describe('BeastLogStore', () => {
       const activePath = join(dir, SAFE_RUN_ID, `${SAFE_ATTEMPT_ID}.log`);
       await mkdir(join(dir, SAFE_RUN_ID), { recursive: true });
       await mkdir(`${activePath}.1`);
-      await writeFile(activePath, 'enough\nnewest\n');
+      await writeFile(activePath, 'newest\n');
 
       const page = await new BeastLogStore(dir).readPage(SAFE_RUN_ID, SAFE_ATTEMPT_ID, {
         tail: true,

@@ -112,7 +112,12 @@ export class BeastLogStore {
     let hasMore = false;
 
     if (tail) {
-      outer: for (const path of [...paths].reverse()) {
+      const newestFirstPaths = [...paths].reverse();
+      outer: for (const path of newestFirstPaths) {
+        if (selected.length >= options.limit) {
+          hasMore = true;
+          break;
+        }
         try {
           for await (const line of readLinesReverse(path)) {
             if (selected.length >= options.limit) {
