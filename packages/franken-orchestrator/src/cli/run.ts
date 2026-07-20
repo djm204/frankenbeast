@@ -1121,6 +1121,7 @@ async function buildChatServerCommsConfig(
       token: await resolveCommsSecret(root, config.comms.orchestratorTokenRef, secretStore),
     },
     channels: {
+      outboundTimeoutMs: config.comms.outboundTimeoutMs,
       slack: {
         enabled: config.comms.slack.enabled,
         token: slackToken,

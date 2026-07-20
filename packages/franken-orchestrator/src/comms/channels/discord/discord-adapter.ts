@@ -7,10 +7,12 @@ import type {
 import { isoNow } from '@franken/types';
 import { formatHttpErrorMessage } from '../http-error-context.js';
 import { createEgressGuardedFetch, type EgressPolicyConfig } from '../../../network/egress-policy.js';
+import { createBoundedFetch } from '../bounded-fetch.js';
 
 export interface DiscordAdapterOptions {
   egressPolicy?: EgressPolicyConfig | undefined;
   fetchImpl?: typeof fetch | undefined;
+  timeoutMs?: number | undefined;
   token: string;
 }
 
@@ -31,7 +33,8 @@ export class DiscordAdapter implements ChannelAdapter {
 
   constructor(options: DiscordAdapterOptions) {
     this.token = options.token;
-    this.fetchImpl = options.fetchImpl ?? createEgressGuardedFetch({ lane: 'operator', policy: options.egressPolicy });
+    const fetchImpl = options.fetchImpl ?? createEgressGuardedFetch({ lane: 'operator', policy: options.egressPolicy });
+    this.fetchImpl = createBoundedFetch(fetchImpl, { channel: 'Discord', timeoutMs: options.timeoutMs });
   }
 
   async send(sessionId: string, message: ChannelOutboundMessage): Promise<void> {

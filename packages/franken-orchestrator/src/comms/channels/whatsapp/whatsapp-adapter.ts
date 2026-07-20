@@ -6,10 +6,12 @@ import type {
 } from '../../core/types.js';
 import { formatHttpErrorMessage } from '../http-error-context.js';
 import { createEgressGuardedFetch, type EgressPolicyConfig } from '../../../network/egress-policy.js';
+import { createBoundedFetch } from '../bounded-fetch.js';
 
 export interface WhatsAppAdapterOptions {
   egressPolicy?: EgressPolicyConfig | undefined;
   fetchImpl?: typeof fetch | undefined;
+  timeoutMs?: number | undefined;
   accessToken: string;
   phoneNumberId: string;
 }
@@ -33,7 +35,8 @@ export class WhatsAppAdapter implements ChannelAdapter {
   constructor(options: WhatsAppAdapterOptions) {
     this.accessToken = options.accessToken;
     this.phoneNumberId = options.phoneNumberId;
-    this.fetchImpl = options.fetchImpl ?? createEgressGuardedFetch({ lane: 'operator', policy: options.egressPolicy });
+    const fetchImpl = options.fetchImpl ?? createEgressGuardedFetch({ lane: 'operator', policy: options.egressPolicy });
+    this.fetchImpl = createBoundedFetch(fetchImpl, { channel: 'WhatsApp', timeoutMs: options.timeoutMs });
   }
 
   async send(sessionId: string, message: ChannelOutboundMessage): Promise<void> {
