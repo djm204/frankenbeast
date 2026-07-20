@@ -303,7 +303,7 @@ function spawnIteration(
       ? [...providerArgs, '--', prompt]
       : [...providerArgs, prompt];
 
-    const env = provider.filterEnv(process.env as Record<string, string>);
+    const env = { ...provider.filterEnv(process.env as Record<string, string>) };
     const plain = isPlainOutput();
     if (plain) {
       env.NO_COLOR = env.NO_COLOR ?? '1';

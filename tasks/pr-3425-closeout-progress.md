@@ -9,6 +9,7 @@
 - [x] Run repository typecheck, lint, and build gates.
 - [x] Commit with the required David Mendez identity.
 - [x] Remediate all five Codex round-4 findings and rerun every local quality gate.
-- [ ] Publish, resolve/reply to Codex threads, and trigger the next Codex review through Approval Cop.
+- [x] Remediate all four Codex round-5 findings and rerun every local quality gate.
+- [ ] Publish and resolve/reply to the final Codex threads through Approval Cop.
 - [ ] Verify exact-head CI, clean current-head Codex review, zero unresolved Codex threads, and clean merge state.
 - [ ] Squash merge through Approval Cop and verify PR #3425 merged and issue #3422 closed.

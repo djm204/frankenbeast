@@ -201,6 +201,15 @@ describe('BeastLogger', () => {
       expect(output).not.toMatch(/\x1b/);
     });
 
+    it('treats an empty NO_COLOR value as unset', () => {
+      vi.stubEnv('NO_COLOR', '');
+      const logger = new BeastLogger({ verbose: false });
+
+      logger.info('colored');
+
+      expect(consoleLogSpy.mock.calls[0]![0]).toMatch(/\x1b\[/);
+    });
+
     it('honors FORCE_COLOR=0 for logs, badges, and banners', async () => {
       vi.stubEnv('FORCE_COLOR', '0');
       const logger = new BeastLogger({ verbose: false });

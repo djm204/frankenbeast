@@ -249,6 +249,16 @@ describe('Session', () => {
 
       expect(setPlainOutput).toHaveBeenCalledWith(true);
     });
+
+    it('resets direct Session plain mode when the option is omitted', async () => {
+      const { Session } = await import('../../../src/cli/session.js');
+      const { setPlainOutput } = await import('../../../src/logging/beast-logger.js');
+      vi.mocked(setPlainOutput).mockClear();
+
+      new Session(makeConfig());
+
+      expect(setPlainOutput).toHaveBeenCalledWith(false);
+    });
   });
 
   describe('entry point detection', () => {

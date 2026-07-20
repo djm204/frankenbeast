@@ -359,14 +359,16 @@ export class CliLlmAdapter implements IAdapter {
         this.responseSessions.delete(requestId);
       }
 
+      const failureStdout = isPlainOutput() ? stripAnsi(result.stdout) : result.stdout;
+      const failureStderr = isPlainOutput() ? stripAnsi(result.stderr) : result.stderr;
       const failure = classifyCommandFailure({
         tool: 'llm',
         provider: activeProvider,
         command: activeCommand,
         exitCode: result.exitCode,
-        stdout: result.stdout,
-        stderr: result.stderr,
-        normalizedOutput: provider.normalizeOutput(result.stdout),
+        stdout: failureStdout,
+        stderr: failureStderr,
+        normalizedOutput: provider.normalizeOutput(failureStdout),
         detectRateLimit: (text) => provider.isRateLimited(text),
         parseRetryAfterMs: (text) => {
           const providerMs = provider.parseRetryAfter(text);

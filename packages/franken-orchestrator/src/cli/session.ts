@@ -129,7 +129,7 @@ export interface SessionConfig {
 
 export class Session {
   constructor(private readonly config: SessionConfig) {
-    if (config.plain !== undefined) setPlainOutput(config.plain);
+    setPlainOutput(config.plain ?? false);
   }
 
   async start(): Promise<BeastResult | undefined> {

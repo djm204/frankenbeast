@@ -493,6 +493,30 @@ describe('CliLlmAdapter', () => {
           .rejects.toThrow('something went wrong');
       });
 
+      it('strips ANSI from non-zero failure summaries in plain mode', async () => {
+        setPlainOutput(true);
+        try {
+          const { spawnFn } = createMockSpawn({
+            stdout: '\x1b[31mfailed stdout\x1b[0m\x1b[K',
+            stderr: '\x1b[33mfailed stderr\x1b[0m',
+            exitCode: 1,
+          });
+          const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
+
+          try {
+            await adapter.execute({ prompt: 'test', maxTurns: 1 });
+            throw new Error('expected execute to throw');
+          } catch (error) {
+            expect(error).toBeInstanceOf(Error);
+            expect((error as Error).message).not.toContain('\x1b');
+            expect((error as Error).message).toContain('failed stdout');
+            expect((error as Error).message).toContain('failed stderr');
+          }
+        } finally {
+          setPlainOutput(false);
+        }
+      });
+
       it('attaches a standardized failure object to non-rate-limit exits', async () => {
         const { spawnFn } = createMockSpawn({
           stdout: '',

@@ -36,7 +36,7 @@ let plainOutputOverride = false;
 /** Return true when ANSI styling should be suppressed. */
 export function isPlainOutput(): boolean {
   return plainOutputOverride
-    || Object.prototype.hasOwnProperty.call(process.env, 'NO_COLOR')
+    || (process.env.NO_COLOR !== undefined && process.env.NO_COLOR !== '')
     || process.env.FORCE_COLOR === '0';
 }
 

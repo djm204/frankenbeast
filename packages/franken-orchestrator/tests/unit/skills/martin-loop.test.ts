@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { MartinLoopConfig, IterationResult } from '../../../src/skills/cli-types.js';
-import { ProviderRegistry } from '../../../src/skills/providers/index.js';
+import { ProviderRegistry, createDefaultRegistry } from '../../../src/skills/providers/index.js';
 import type { ICliProvider } from '../../../src/skills/providers/index.js';
 import { FileChunkSessionStore } from '../../../src/session/chunk-session-store.js';
 import { FileChunkSessionSnapshotStore } from '../../../src/session/chunk-session-snapshot-store.js';
@@ -261,6 +261,27 @@ describe('MartinLoop', () => {
       }),
     );
     expect(stdoutWriteSpy).toHaveBeenCalledWith('working\n<promise>IMPL_X_DONE</promise>');
+  });
+
+  it('does not mutate process.env when a custom provider returns the input env object', async () => {
+    vi.stubEnv('NO_COLOR', '1');
+    const originalForceColor = process.env['FORCE_COLOR'];
+    delete process.env['FORCE_COLOR'];
+    const registry = createDefaultRegistry();
+    vi.spyOn(registry.get('aider'), 'filterEnv').mockImplementation((env) => env);
+    queueMock({ stdout: '<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    try {
+      const loop = new MartinLoop(registry);
+      await loop.run(baseConfig({ provider: 'aider' }));
+
+      const spawnEnv = (mockSpawn.mock.calls[0] as unknown[])[2] as { env: Record<string, string> };
+      expect(spawnEnv.env).toMatchObject({ NO_COLOR: '1', FORCE_COLOR: '0' });
+      expect(process.env['FORCE_COLOR']).toBeUndefined();
+    } finally {
+      if (originalForceColor === undefined) delete process.env['FORCE_COLOR'];
+      else process.env['FORCE_COLOR'] = originalForceColor;
+    }
   });
 
   it('strips ANSI sequences split across stdout chunks in plain mode', async () => {
