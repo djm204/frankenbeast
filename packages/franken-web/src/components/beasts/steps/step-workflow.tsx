@@ -16,7 +16,7 @@ function isContainerRuntimeUnavailable(status: BeastContainerRuntimeStatus | und
 }
 
 export function StepWorkflow({ catalog, containerRuntime }: StepWorkflowProps) {
-  const { stepValues, setStepValues } = useBeastStore();
+  const { stepValues, setStepValues, wizardMode } = useBeastStore();
   const values = (stepValues[1] ?? {}) as { workflowType?: string; executionMode?: BeastExecutionMode; [key: string]: unknown };
   const workflows = getEffectiveCatalog(catalog);
   const selectedWorkflow = workflows.find((entry) => entry.id === values.workflowType);
@@ -115,6 +115,7 @@ export function StepWorkflow({ catalog, containerRuntime }: StepWorkflowProps) {
           prompts={selectedWorkflow.interviewPrompts}
           getValue={(prompt) => getPromptValue(values, prompt)}
           onChange={(key, value) => updateField(key, value)}
+          sequentialReveal={wizardMode === 'wizard'}
         />
       )}
     </div>
@@ -122,7 +123,11 @@ export function StepWorkflow({ catalog, containerRuntime }: StepWorkflowProps) {
 }
 
 function isPromptAnswered(prompt: BeastInterviewPrompt, value: unknown): boolean {
-  if (prompt.kind === 'boolean') return true;
+  if (prompt.kind === 'boolean') {
+    // Wizard validation treats an untouched required checkbox as missing
+    // (isBlankCatalogValue(undefined)), so only a real boolean counts.
+    return !prompt.required || typeof value === 'boolean';
+  }
   return typeof value === 'string' && value.trim().length > 0;
 }
 
@@ -136,12 +141,17 @@ function InterviewTranscript({
   prompts,
   getValue,
   onChange,
+  sequentialReveal,
 }: {
   prompts: readonly BeastInterviewPrompt[];
   getValue: (prompt: BeastInterviewPrompt) => unknown;
   onChange: (key: string, value: string | boolean) => void;
+  /** Form view renders every prompt at once; only wizard mode reveals turns. */
+  sequentialReveal: boolean;
 }) {
-  const firstBlocking = prompts.findIndex((prompt) => prompt.required && !isPromptAnswered(prompt, getValue(prompt)));
+  const firstBlocking = sequentialReveal
+    ? prompts.findIndex((prompt) => prompt.required && !isPromptAnswered(prompt, getValue(prompt)))
+    : -1;
   const visible = firstBlocking === -1 ? prompts : prompts.slice(0, firstBlocking + 1);
   const remaining = prompts.length - visible.length;
 

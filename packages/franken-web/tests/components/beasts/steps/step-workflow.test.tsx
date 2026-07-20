@@ -91,6 +91,16 @@ describe('StepWorkflow', () => {
     expect(screen.queryByText(/more question/i)).toBeNull();
   });
 
+  it('renders all interview prompts at once in form view', () => {
+    useBeastStore.getState().toggleWizardMode();
+    useBeastStore.getState().setStepValues(1, { workflowType: 'design-interview' });
+    render(<StepWorkflow />);
+
+    expect(screen.getByLabelText(/design interview produce/i)).toBeTruthy();
+    expect(screen.getByLabelText(/design document be written/i)).toBeTruthy();
+    expect(screen.queryByText(/more question/i)).toBeNull();
+  });
+
   it('collects backend design-interview fields', () => {
     useBeastStore.getState().setStepValues(1, { workflowType: 'design-interview' });
     render(<StepWorkflow />);

@@ -302,7 +302,7 @@
   color: var(--term-accent);
 }
 
-.terminal-activity .activity-event--danger {
+.terminal-activity .activity-event--error {
   border-left-color: var(--term-error);
 }
 
