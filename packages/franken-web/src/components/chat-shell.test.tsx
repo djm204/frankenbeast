@@ -75,7 +75,7 @@ vi.mock('../lib/beast-api', () => ({
     getCatalog = vi.fn().mockResolvedValue([]);
     getContainerRuntimeStatus = vi.fn().mockResolvedValue(undefined);
     listCatalog = vi.fn().mockResolvedValue([]);
-    listAgents = vi.fn().mockResolvedValue([]);
+    listAgentPage = vi.fn().mockResolvedValue({ agents: [] });
     listRuns = vi.fn().mockResolvedValue([]);
     getContainerRuntime = vi.fn().mockResolvedValue(undefined);
     subscribe = vi.fn().mockResolvedValue(() => undefined);
