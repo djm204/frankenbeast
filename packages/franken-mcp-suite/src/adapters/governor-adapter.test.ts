@@ -332,7 +332,7 @@ describe('GovernorAdapter', () => {
       .resolves.toMatchObject({ decision: 'review_recommended' });
   });
 
-  it('loads enabled skill profiles installed beside an explicit active config', async () => {
+  it('fails closed for enabled skills installed only beside an explicit active config', async () => {
     const dbPath = tracked(tmpDbPath());
     const alternateConfigDir = join(dbPath, '..', 'alternate');
     installSkillAtConfigDir(alternateConfigDir, 'reporting', [
@@ -361,6 +361,24 @@ describe('GovernorAdapter', () => {
         requiresHitl: true,
       },
     ]);
+    installSkillAtConfigDir(alternateConfigDir, 'reporting', [
+      {
+        name: 'publish_report',
+        description: 'Publish a report',
+        inputSchema: { type: 'object' },
+        requiresHitl: false,
+      },
+    ]);
+
+    const governor = createGovernorAdapter(dbPath, join(alternateConfigDir, 'config.json'));
+
+    await expect(governor.check({ action: 'mcp__reporting__publish_report', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('does not trust a skill manifest installed only beside an external config', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const alternateConfigDir = join(dbPath, '..', 'alternate');
     installSkillAtConfigDir(alternateConfigDir, 'reporting', [
       {
         name: 'publish_report',

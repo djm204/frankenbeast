@@ -1075,10 +1075,7 @@ export function createGovernorAdapter(dbPath: string, configPath?: string): Gove
     : (configPath ?? join(dirname(dbPath), 'config.json'));
   const installedSkillsDirs = dbPath === ':memory:'
     ? []
-    : [...new Set([
-        join(dirname(dbPath), 'skills'),
-        ...(configPath === undefined ? [] : [join(dirname(configPath), 'skills')]),
-      ])];
+    : [join(dirname(dbPath), 'skills')];
   const costCalculator = new CostCalculator(DEFAULT_PRICING, {
     onUnknownModel: (model) => {
       process.stderr.write(`[fbeast-governor] Unknown model "${model}" — budget status will report $0.0000 until pricing is configured.\n`);

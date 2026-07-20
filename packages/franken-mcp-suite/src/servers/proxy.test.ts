@@ -174,6 +174,29 @@ describe('proxy server', () => {
       );
     });
 
+    it('preserves nested .fbeast segments in relative active config paths', async () => {
+      const server = createProxyServer({
+        dbPath: '/tmp/nested-config-project/.fbeast/beast.db',
+        root: '/tmp/nested-config-project',
+        configPath: 'nested/.fbeast/config.json',
+        governance: { check: gateCheck },
+        audit: { record: auditRecord },
+      });
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+      vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
+
+      await server.tools.find((tool) => tool.name === 'execute_tool')!
+        .handler({ tool: 'test_tool', args: { key: 'val' } });
+
+      expect(mockCreateAdapterSet).toHaveBeenCalledWith(
+        '/tmp/nested-config-project/.fbeast/beast.db',
+        {
+          root: '/tmp/nested-config-project',
+          configPath: '/tmp/nested-config-project/nested/.fbeast/config.json',
+        },
+      );
+    });
+
     it('calls through to handler and returns its result', async () => {
       const fakeResult = { content: [{ type: 'text', text: 'tool executed' }] };
       const fakeHandler = vi.fn().mockResolvedValue(fakeResult);

@@ -19,10 +19,8 @@ function resolveProxyConfigPath(configPath: string, root: string | undefined): s
   if (root !== undefined && PROJECT_ROOT_PLACEHOLDER.test(configPath)) {
     return resolve(root, configPath.replace(PROJECT_ROOT_PLACEHOLDER, ''));
   }
-  const resolvedConfigPath = resolveProjectDbPath(configPath, root);
-  return root !== undefined && !isAbsolute(resolvedConfigPath)
-    ? resolve(root, resolvedConfigPath)
-    : resolvedConfigPath;
+  if (isAbsolute(configPath)) return configPath;
+  return resolve(root ?? process.cwd(), configPath);
 }
 
 const WORKSPACE_ROOT_REQUIRED_TOOLS = new Set(['fbeast_firewall_scan_file']);
