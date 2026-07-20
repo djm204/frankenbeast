@@ -415,10 +415,13 @@ describe('SQLiteBeastRepository', () => {
     );
     await concurrent.inserted;
 
-    const appended = repo.appendEvent(run.id, {
-      type: 'run.local',
-      payload: {},
-      createdAt: '2026-03-10T00:00:02.000Z',
+    const appended = repo.transaction(() => {
+      expect(repo.getRun(run.id)).toBeDefined();
+      return repo.appendEvent(run.id, {
+        type: 'run.local',
+        payload: {},
+        createdAt: '2026-03-10T00:00:02.000Z',
+      });
     });
     await concurrent.completed;
 
@@ -634,6 +637,72 @@ describe('SQLiteBeastRepository', () => {
       unique: 1,
     }));
     database.close();
+  });
+
+  it('repairs duplicate event sequences before enforcing unique indexes', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
+    const databasePath = join(workDir, 'beasts.db');
+    const repo = new SQLiteBeastRepository(databasePath);
+    const run = repo.createRun({
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-12T00:00:00.000Z',
+    });
+    const agent = repo.createTrackedAgent({
+      definitionId: 'martin-loop',
+      source: 'dashboard',
+      status: 'initializing',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: {},
+      createdAt: '2026-03-12T00:00:00.000Z',
+      updatedAt: '2026-03-12T00:00:00.000Z',
+    });
+    const database = new Database(databasePath);
+    database.prepare('DROP INDEX uq_beast_run_events_run_sequence').run();
+    database.prepare('DROP INDEX uq_tracked_agent_events_agent_sequence').run();
+    database.prepare(
+      `INSERT INTO beast_run_events
+        (id, run_id, attempt_id, sequence, type, payload, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'event_duplicate_a', run.id, null, 1, 'run.first', '{}', '2026-03-12T00:00:01.000Z',
+      'event_duplicate_b', run.id, null, 1, 'run.second', '{}', '2026-03-12T00:00:02.000Z',
+    );
+    database.prepare(
+      `INSERT INTO tracked_agent_events
+        (id, agent_id, sequence, level, type, message, payload, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'agent_event_duplicate_a', agent.id, 1, 'info', 'agent.first', 'First', '{}', '2026-03-12T00:00:01.000Z',
+      'agent_event_duplicate_b', agent.id, 1, 'info', 'agent.second', 'Second', '{}', '2026-03-12T00:00:02.000Z',
+    );
+    database.close();
+
+    const migrated = new SQLiteBeastRepository(databasePath);
+
+    expect(migrated.listEvents(run.id).map((event) => [event.sequence, event.type])).toEqual([
+      [1, 'run.first'],
+      [2, 'run.second'],
+    ]);
+    expect(migrated.listTrackedAgentEvents(agent.id).map((event) => [event.sequence, event.type])).toEqual([
+      [1, 'agent.first'],
+      [2, 'agent.second'],
+    ]);
+    const migratedDatabase = new Database(databasePath);
+    expect(migratedDatabase.pragma("index_list('beast_run_events')")).toContainEqual(expect.objectContaining({
+      name: 'uq_beast_run_events_run_sequence',
+      unique: 1,
+    }));
+    expect(migratedDatabase.pragma("index_list('tracked_agent_events')")).toContainEqual(expect.objectContaining({
+      name: 'uq_tracked_agent_events_agent_sequence',
+      unique: 1,
+    }));
+    migratedDatabase.close();
   });
 
   it('rolls back linked run creation when the tracked agent is unknown', async () => {
