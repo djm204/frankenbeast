@@ -7,6 +7,7 @@ import type { TranscriptMessage } from '../chat/types.js';
 import { sanitizeChatOutput } from '../chat/output-sanitizer.js';
 import { ANSI } from '../logging/beast-logger.js';
 import { withSpinner, QUIRKY_PHRASES } from './spinner.js';
+import { CHAT_GLYPHS, chatBanner, chatBlock, chatStatusLine } from './chat-style.js';
 import { isoNow } from '@franken/types';
 
 
@@ -48,7 +49,7 @@ function createReadlineIO(): ChatIO {
   const rl: Interface = createInterface({ input: process.stdin, output: process.stdout });
   return {
     prompt: () => new Promise<string>((resolve) =>
-      rl.question(`${ANSI.cyan}>${ANSI.reset} `, resolve),
+      rl.question(`${ANSI.cyan}${CHAT_GLYPHS.user}${ANSI.reset} `, resolve),
     ),
     print: (msg: string) => printLine(msg),
     close: () => rl.close(),
@@ -79,7 +80,7 @@ export class ChatRepl {
 
   async start(): Promise<void> {
     this.loadExistingSession();
-    this.io.print(`\n${ANSI.cyan}${ANSI.bold}frankenbeast chat${ANSI.reset} ${ANSI.dim}— /quit to exit${ANSI.reset}\n`);
+    this.io.print(chatBanner('frankenbeast', `· project ${this.projectId} · /quit to exit`));
 
     for (;;) {
       const input = await this.io.prompt();
@@ -120,7 +121,7 @@ export class ChatRepl {
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.io.print(`${ANSI.red}error: ${msg}${ANSI.reset}`);
+      this.io.print(chatBlock(CHAT_GLYPHS.error, ANSI.red, `error: ${msg}`, ANSI.red));
       return;
     } finally {
       this.io.resume?.();
@@ -132,31 +133,31 @@ export class ChatRepl {
     for (const message of result.displayMessages) {
       switch (message.kind) {
         case 'reply':
-          this.io.print(`${ANSI.green}${sanitizeChatOutput(message.content)}${ANSI.reset}`);
+          this.io.print(chatBlock(CHAT_GLYPHS.beast, ANSI.magenta, sanitizeChatOutput(message.content)));
           if (this.verbose && result.tier) {
-            this.io.print(`${ANSI.dim}  [${result.tier}]${ANSI.reset}`);
+            this.io.print(chatStatusLine(`[${result.tier}]`));
           }
           break;
         case 'clarify':
-          this.io.print(`${ANSI.yellow}${message.content}${ANSI.reset}`);
+          this.io.print(chatBlock(CHAT_GLYPHS.clarify, ANSI.yellow, message.content, ANSI.yellow));
           if (message.options && message.options.length > 0) {
-            this.io.print(`  ${message.options.join(', ')}`);
+            this.io.print(`${ANSI.dim}  ${message.options.map((option) => `· ${option}`).join('  ')}${ANSI.reset}`);
           }
           break;
         case 'plan':
-          this.io.print(`${ANSI.blue}plan:${ANSI.reset} ${message.content}`);
+          this.io.print(chatBlock(CHAT_GLYPHS.plan, ANSI.blue, `plan\n${message.content}`));
           break;
         case 'approval':
-          this.io.print(`${ANSI.yellow}${message.content}${ANSI.reset}`);
+          this.io.print(chatBlock(CHAT_GLYPHS.approval, ANSI.yellow, message.content, ANSI.yellow));
           break;
         case 'execution':
-          this.io.print(`${ANSI.green}${message.content}${ANSI.reset}`);
+          this.io.print(chatBlock(CHAT_GLYPHS.execution, ANSI.green, message.content));
           break;
         case 'error':
-          this.io.print(`${ANSI.dim}${message.content}${ANSI.reset}`);
+          this.io.print(chatBlock(CHAT_GLYPHS.error, ANSI.red, message.content, ANSI.dim));
           break;
         case 'status':
-          this.io.print(`${ANSI.dim}${message.content}${ANSI.reset}`);
+          this.io.print(chatBlock(CHAT_GLYPHS.status, ANSI.dim, message.content, ANSI.dim));
           break;
       }
     }
@@ -176,7 +177,7 @@ export class ChatRepl {
       const session = this.sessionStore.get(id);
       if (session && session.projectId === this.projectId && session.state === 'active') {
         this.transcript = [...session.transcript];
-        this.io.print(`${ANSI.dim}resumed session (${session.transcript.length} messages)${ANSI.reset}`);
+        this.io.print(chatBlock(CHAT_GLYPHS.session, ANSI.green, `resumed session (${session.transcript.length} messages)`, ANSI.dim));
         return;
       }
     }
