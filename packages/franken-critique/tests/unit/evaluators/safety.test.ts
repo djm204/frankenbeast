@@ -911,6 +911,7 @@ describe('SafetyEvaluator', () => {
       evaluator.hasUnsafeRegexShape('^(?:[[a-z]&&[a-z]]|aa)+$', true),
     ).toBe(true);
     expect(evaluator.hasUnsafeRegexShape('^(?:\\p{L}|a)+$', true)).toBe(true);
+    expect(evaluator.hasUnsafeRegexShape('^(?:\\p{L})+$', true)).toBe(false);
     expect(
       evaluator.hasUnsafeRegexShape(
         '^(?:[\\p{Script=Greek}]|[\\p{L}])+$',
@@ -918,6 +919,17 @@ describe('SafetyEvaluator', () => {
       ),
     ).toBe(true);
     expect(evaluator.hasUnsafeRegexShape('^(?:\\u{61}|a)+$', true)).toBe(true);
+    expect(evaluator.hasUnsafeRegexShape('^(?:\\u{62}|a)+$', true)).toBe(false);
+    expect(
+      evaluator.hasUnsafeRegexShape('^[\\q{a}\\q{aa}]+$', true),
+    ).toBe(true);
+    expect(evaluator.hasUnsafeRegexShape('^[a\\q{aa}]+$', true)).toBe(true);
+    expect(
+      evaluator.hasUnsafeRegexShape('^(?:[\\q{a}\\q{aa}])+$', true),
+    ).toBe(true);
+    expect(evaluator.hasUnsafeRegexShape('^[\\q{ab}\\q{cd}]+$', true)).toBe(
+      false,
+    );
     expect(
       evaluator.hasUnsafeRegexShape(
         '^(?:[[b-d]--[b]]|[[b-d]--[d]])+$',

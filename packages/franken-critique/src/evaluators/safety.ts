@@ -234,6 +234,8 @@ export class SafetyEvaluator implements Evaluator {
     try {
       return (
         this.hasBackreference(pattern) ||
+        (this.parsingUnicodeSets &&
+          this.hasAmbiguousUnicodeStringSetQuantifier(pattern)) ||
         this.hasNestedQuantifiedExpression(pattern) ||
         (this.hasEnabledInlineModifier(pattern, 's') &&
           this.hasNestedQuantifiedExpression(
@@ -264,6 +266,150 @@ export class SafetyEvaluator implements Evaluator {
     }
 
     return false;
+  }
+
+  private hasAmbiguousUnicodeStringSetQuantifier(pattern: string): boolean {
+    const groupAmbiguity = [false];
+    for (let i = 0; i < pattern.length; i += 1) {
+      if (pattern[i] === '\\') {
+        i += 1;
+        continue;
+      }
+      if (pattern[i] === '(') {
+        groupAmbiguity.push(false);
+        continue;
+      }
+      if (pattern[i] === ')' && groupAmbiguity.length > 1) {
+        const ambiguous = groupAmbiguity.pop()!;
+        if (ambiguous && this.quantifierAt(pattern, i + 1)?.repeatsGroup) {
+          return true;
+        }
+        if (ambiguous) groupAmbiguity[groupAmbiguity.length - 1] = true;
+        continue;
+      }
+      if (pattern[i] !== '[') continue;
+
+      const end = this.skipCharacterClass(pattern, i, true);
+      const characterClass = pattern.slice(i, end + 1);
+      if (this.hasAmbiguousUnicodeStringSet(characterClass)) {
+        if (this.quantifierAt(pattern, end + 1)?.repeatsGroup) return true;
+        groupAmbiguity[groupAmbiguity.length - 1] = true;
+      }
+      i = end;
+    }
+    return false;
+  }
+
+  private hasAmbiguousUnicodeStringSet(characterClass: string): boolean {
+    if (!characterClass.includes('\\q{')) return false;
+    const values = this.unicodeStringSetValues(characterClass);
+    if (values === null) return true;
+    const distinct = [...new Set(values)];
+    if (
+      distinct.some((left, leftIndex) =>
+        distinct.some(
+          (right, rightIndex) =>
+            leftIndex !== rightIndex && right.startsWith(left),
+        ),
+      )
+    ) {
+      return true;
+    }
+
+    try {
+      const matcher = new RegExp(`^(?:${characterClass})$`, 'v');
+      return distinct.some((value) => {
+        const firstCodePoint = Array.from(value)[0];
+        return (
+          value.length > (firstCodePoint?.length ?? 0) &&
+          firstCodePoint !== undefined &&
+          matcher.test(firstCodePoint)
+        );
+      });
+    } catch {
+      return true;
+    }
+  }
+
+  private unicodeStringSetValues(characterClass: string): string[] | null {
+    const values: string[] = [];
+    for (let i = 1; i < characterClass.length - 1; i += 1) {
+      if (!characterClass.startsWith('\\q{', i)) continue;
+      i += 3;
+      let current = '';
+      let closed = false;
+      for (; i < characterClass.length - 1; i += 1) {
+        const char = characterClass[i]!;
+        if (char === '}') {
+          values.push(current);
+          closed = true;
+          break;
+        }
+        if (char === '|') {
+          values.push(current);
+          current = '';
+          continue;
+        }
+        if (char === '\\') {
+          const escape = this.unicodeStringEscapeAt(characterClass, i);
+          if (escape === null) return null;
+          current += escape.value;
+          i = escape.end;
+          continue;
+        }
+        current += char;
+      }
+      if (!closed) return null;
+    }
+    return values;
+  }
+
+  private unicodeStringEscapeAt(
+    text: string,
+    start: number,
+  ): { value: string; end: number } | null {
+    const escaped = text[start + 1];
+    if (escaped === undefined) return null;
+    if (escaped === 'x' && /^[0-9A-Fa-f]{2}$/.test(text.slice(start + 2, start + 4))) {
+      return {
+        value: String.fromCharCode(Number.parseInt(text.slice(start + 2, start + 4), 16)),
+        end: start + 3,
+      };
+    }
+    if (escaped === 'u') {
+      const braced = text.slice(start + 2).match(/^\{([0-9A-Fa-f]{1,6})\}/);
+      if (braced) {
+        const codePoint = Number.parseInt(braced[1]!, 16);
+        if (codePoint > 0x10ffff) return null;
+        return {
+          value: String.fromCodePoint(codePoint),
+          end: start + 1 + braced[0].length,
+        };
+      }
+      if (/^[0-9A-Fa-f]{4}$/.test(text.slice(start + 2, start + 6))) {
+        return {
+          value: String.fromCharCode(
+            Number.parseInt(text.slice(start + 2, start + 6), 16),
+          ),
+          end: start + 5,
+        };
+      }
+      return null;
+    }
+    if (escaped === 'c' && /^[A-Za-z]$/.test(text[start + 2] ?? '')) {
+      return {
+        value: String.fromCharCode(text.charCodeAt(start + 2) & 31),
+        end: start + 2,
+      };
+    }
+    const controlEscapes: Record<string, string> = {
+      f: '\f',
+      n: '\n',
+      r: '\r',
+      t: '\t',
+      v: '\v',
+    };
+    return { value: controlEscapes[escaped] ?? escaped, end: start + 1 };
   }
 
   private collectCapturingGroups(pattern: string): {
@@ -401,9 +547,7 @@ export class SafetyEvaluator implements Evaluator {
     for (let i = 0; i < pattern.length; i += 1) {
       if (pattern[i] === '\\') {
         if (
-          (pattern[i + 1] === 'p' ||
-            pattern[i + 1] === 'P' ||
-            pattern[i + 1] === 'u') &&
+          (pattern[i + 1] === 'p' || pattern[i + 1] === 'P') &&
           pattern[i + 2] === '{'
         ) {
           return true;
@@ -432,6 +576,7 @@ export class SafetyEvaluator implements Evaluator {
     const alternativeTexts = this.splitTopLevelAlternatives(
       this.stripGroupPrefix(groupContent),
     );
+    if (alternativeTexts.length < 2) return false;
     if (
       this.parsingUnicodeSets &&
       this.hasUnicodeSetAlternationRisk(alternativeTexts)
@@ -465,7 +610,7 @@ export class SafetyEvaluator implements Evaluator {
     if (semanticAlternatives.length > 1) return true;
 
     const semantic = semanticAlternatives[0]!;
-    if (/\\[pPq]\{|\\u\{|--/.test(semantic) || semantic[0] !== '[') {
+    if (/\\[pPq]\{|--/.test(semantic) || semantic[0] !== '[') {
       return true;
     }
 
@@ -678,6 +823,18 @@ export class SafetyEvaluator implements Evaluator {
         value = String.fromCharCode(
           Number.parseInt(pattern.slice(start + 2, start + 4), 16),
         );
+      } else if (
+        this.parsingUnicodeSets &&
+        escaped === 'u' &&
+        /^\{[0-9A-Fa-f]{1,6}\}/.test(pattern.slice(start + 2))
+      ) {
+        const codePoint = pattern
+          .slice(start + 2)
+          .match(/^\{([0-9A-Fa-f]{1,6})\}/)!;
+        const valueAsNumber = Number.parseInt(codePoint[1]!, 16);
+        if (valueAsNumber > 0x10ffff) return null;
+        end = start + 1 + codePoint[0].length;
+        value = String.fromCodePoint(valueAsNumber);
       } else if (
         escaped === 'u' &&
         /^[0-9A-Fa-f]{4}$/.test(pattern.slice(start + 2, start + 6))
