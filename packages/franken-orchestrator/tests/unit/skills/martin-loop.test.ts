@@ -303,6 +303,27 @@ describe('MartinLoop', () => {
     expect(result.output).not.toContain('\x1b');
   });
 
+  it('strips OSC/ST sequences split across stdout chunks without losing visible text', async () => {
+    vi.stubEnv('NO_COLOR', '1');
+    queueMock({
+      stdout: [
+        '\x1b]0;first title\x1b',
+        '\\visible',
+        '\x1b]0;second title',
+        '\x1b',
+        '\\ text\n<promise>IMPL_X_DONE</promise>',
+      ],
+      exitCode: 0,
+    });
+
+    const loop = new MartinLoop();
+    const result = await loop.run(baseConfig({ provider: 'aider', command: '/usr/bin/aider' }));
+
+    const displayed = stdoutWriteSpy.mock.calls.map(([chunk]) => String(chunk)).join('');
+    expect(displayed).toBe('visible text\n<promise>IMPL_X_DONE</promise>');
+    expect(result.output).toBe('visible text\n<promise>IMPL_X_DONE</promise>');
+  });
+
   it('sanitizes an unterminated stream-json tail in plain mode', async () => {
     vi.stubEnv('NO_COLOR', '1');
     queueMock({
