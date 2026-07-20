@@ -32,6 +32,8 @@ export interface NetworkRoutesDeps {
   frankenbeastDir: string;
   configFile: string;
   allowTrustedProviderCommandOverrides?: boolean | undefined;
+  /** Optional owner-provided factory; invoked once to establish the route lifetime. */
+  supervisorFactory?: () => NetworkSupervisor;
   getConfig(): OrchestratorConfig;
   setConfig(config: OrchestratorConfig): void;
 }
@@ -76,9 +78,9 @@ function assertKnownStopTarget(target: string): void {
 
 export function networkRoutes(deps: NetworkRoutesDeps): Hono {
   const app = new Hono();
+  const supervisor = deps.supervisorFactory?.() ?? createSupervisor(deps.frankenbeastDir);
 
   app.get('/v1/network/status', async (c) => {
-    const supervisor = createSupervisor(deps.frankenbeastDir);
     const status = await supervisor.status();
     const config = deps.getConfig();
     const services = resolveNetworkServices(config, {
@@ -101,7 +103,6 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
   });
 
   app.post('/v1/network/up', async (c) => {
-    const supervisor = createSupervisor(deps.frankenbeastDir);
     const config = deps.getConfig();
     const services = resolveNetworkServices(config, {
       repoRoot: deps.root,
@@ -118,14 +119,12 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
   });
 
   app.post('/v1/network/down', async (c) => {
-    const supervisor = createSupervisor(deps.frankenbeastDir);
     await supervisor.down();
     return c.json({ data: { ok: true } });
   });
 
   app.post('/v1/network/start', async (c) => {
     const body = validateBody(TargetBody, await parseJsonBody(c));
-    const supervisor = createSupervisor(deps.frankenbeastDir);
     const config = deps.getConfig();
     const services = withValidTarget(
       resolveNetworkServices(config, {
@@ -146,7 +145,6 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
 
   app.post('/v1/network/stop', async (c) => {
     const body = validateBody(TargetBody, await parseJsonBody(c));
-    const supervisor = createSupervisor(deps.frankenbeastDir);
     assertKnownStopTarget(body.target);
     await supervisor.stop(body.target);
     return c.json({ data: { ok: true } });
@@ -154,7 +152,6 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
 
   app.post('/v1/network/restart', async (c) => {
     const body = validateBody(TargetBody, await parseJsonBody(c));
-    const supervisor = createSupervisor(deps.frankenbeastDir);
     const config = deps.getConfig();
     const services = withValidTarget(
       resolveNetworkServices(config, {
@@ -175,7 +172,6 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
   });
 
   app.get('/v1/network/logs/:service', async (c) => {
-    const supervisor = createSupervisor(deps.frankenbeastDir);
     const target = c.req.param('service');
     const logs = await supervisor.logs(target);
     return c.json({ data: { logs } });
