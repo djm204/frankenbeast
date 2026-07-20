@@ -59,6 +59,8 @@ interface FlushedSpanState {
   thoughtBlocksJson: string
 }
 
+const SQLITE_SCHEMA_SENTINEL_INDEX = 'idx_spans_traceId_startedAt'
+
 export interface SQLiteAdapterOptions {
   /** Maximum flushed-span snapshots retained for repeated-flush dirty checks. */
   maxFlushedSpanSnapshots?: number
@@ -297,7 +299,12 @@ export class SQLiteAdapter implements ExportAdapter {
       this.withSqliteLockRetrySync('initialize SQLite adapter', () => {
         this.db.pragma('journal_mode = WAL')
         this.db.pragma('foreign_keys = ON')
-        this.db.exec(CREATE_TABLES)
+        const spanIndexes = this.db.pragma("index_list('spans')") as Array<{ name?: unknown }>
+        const schemaInitialized = Array.isArray(spanIndexes)
+          && spanIndexes.some(index => index.name === SQLITE_SCHEMA_SENTINEL_INDEX)
+        if (!schemaInitialized) {
+          this.db.exec(CREATE_TABLES)
+        }
       })
     } catch (error) {
       this.db.close()
