@@ -28,10 +28,10 @@ function stubGuardrails(): GuardrailsModule {
 function stubGraphBuilder(graph: PlanGraph): GraphBuilder {
   return { build: vi.fn().mockResolvedValue(graph) };
 }
-function stubMemory(): MemoryModule {
+function stubMemory(knownErrors: Awaited<ReturnType<MemoryModule['getKnownErrors']>> = []): MemoryModule {
   return {
     getADRs: vi.fn().mockResolvedValue([]),
-    getKnownErrors: vi.fn().mockResolvedValue([]),
+    getKnownErrors: vi.fn().mockResolvedValue(knownErrors),
     getProjectContext: vi.fn().mockResolvedValue({ projectName: 'test', adrs: [], rules: [] }),
   };
 }
@@ -39,9 +39,10 @@ function stubMemory(): MemoryModule {
 function buildParallelPlanner(
   graph: PlanGraph,
   executor: TaskExecutor,
-  selfCritique?: SelfCritiqueModule
+  selfCritique?: SelfCritiqueModule,
+  memory = stubMemory()
 ): Planner {
-  const recovery = new RecoveryController(stubMemory());
+  const recovery = new RecoveryController(memory);
   return new Planner(
     stubGuardrails(),
     stubGraphBuilder(graph),
@@ -134,6 +135,42 @@ describe('Integration — ParallelPlanner', () => {
     const result = await buildParallelPlanner(graph, executor).plan('...');
 
     expect(result.status).toBe('failed');
+  });
+
+  it('injects recovery tasks for every concurrent failure before retrying the wave', async () => {
+    const graph = PlanGraph.empty()
+      .addTask(makeTask('a'))
+      .addTask(makeTask('b'));
+    const knownError = {
+      pattern: 'transient failure',
+      description: 'recoverable test failure',
+      fixSuggestion: 'apply the task-specific fix',
+    };
+    const executedTaskIds: string[] = [];
+    const executor = vi.fn().mockImplementation((task: Task) => {
+      executedTaskIds.push(task.id);
+      if (
+        (task.id === createTaskId('a') || task.id === createTaskId('b')) &&
+        !executedTaskIds.includes(`fix-${task.id}-attempt-1`)
+      ) {
+        return Promise.resolve(fail(task.id, 'transient failure'));
+      }
+      return Promise.resolve(ok(task.id));
+    });
+
+    const result = await buildParallelPlanner(
+      graph,
+      executor,
+      undefined,
+      stubMemory([knownError])
+    ).plan('...');
+
+    expect(result.status).toBe('completed');
+    expect(executedTaskIds.slice(0, 2)).toEqual([createTaskId('a'), createTaskId('b')]);
+    expect(new Set(executedTaskIds.slice(2, 4))).toEqual(
+      new Set([createTaskId('fix-a-attempt-1'), createTaskId('fix-b-attempt-1')])
+    );
+    expect(executedTaskIds).toHaveLength(6);
   });
 
   it('returns rationale_rejected when CoT rejects a task rationale', async () => {
