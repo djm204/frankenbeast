@@ -1,11 +1,190 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createMcpServer, sanitizeRejectedToolArgumentsForAudit, sanitizeToolArgumentsForAuditTrail, validateToolArguments, type ToolDef, type GovernanceGate, type AuditSink } from './server-factory.js';
+import { createMcpServer, sanitizeRejectedToolArgumentsForAudit, sanitizeToolArgumentsForAuditTrail, summarizeProxyToolArgumentsForAudit, validateToolArguments, type ToolDef, type GovernanceGate, type AuditSink } from './server-factory.js';
 
 describe('createMcpServer', () => {
   it('creates server with name and version', () => {
     const server = createMcpServer('fbeast-memory', '0.1.0', []);
     expect(server).toBeDefined();
     expect(server.name).toBe('fbeast-memory');
+  });
+
+  it('summarizes proxy arguments without retaining values, oversized keys, or value fingerprints', () => {
+    const first = summarizeProxyToolArgumentsForAudit({
+      query: 'alpha',
+      items: Array.from({ length: 100_000 }, () => 'first-private-value'),
+      [`private-${'x'.repeat(100)}`]: 'hidden-first',
+    });
+    const second = summarizeProxyToolArgumentsForAudit({
+      query: 'bravo',
+      items: Array.from({ length: 100_000 }, () => 'other-private-value'),
+      [`private-${'y'.repeat(100)}`]: 'hidden-other',
+    });
+
+    expect(first.sha256).toBe(second.sha256);
+    const serialized = JSON.stringify(first);
+    expect(serialized).not.toContain('alpha');
+    expect(serialized).not.toContain('hidden-first');
+    expect(serialized).not.toContain('x'.repeat(100));
+    expect(serialized.length).toBeLessThan(1_000);
+  });
+
+  it('preserves only bounded audit selectors for proxied memory tools', () => {
+    const summarized = summarizeProxyToolArgumentsForAudit({
+      agentId: 'agent-7',
+      profile: 'doctor',
+      repo: '/srv/frankenbeast',
+      query: 'private search text',
+    }, 'fbeast_memory_query');
+    const oversized = summarizeProxyToolArgumentsForAudit({ agentId: 'a'.repeat(257) }, 'fbeast_memory_query');
+    const unknownTool = summarizeProxyToolArgumentsForAudit({ agentId: 'attacker-value' }, 'fbeast_memory_fake');
+
+    expect(summarized).toMatchObject({
+      agentId: 'agent-7',
+      profile: 'doctor',
+      repo: '/srv/frankenbeast',
+      redacted: true,
+    });
+    expect(JSON.stringify(summarized)).not.toContain('private search text');
+    expect(oversized.agentId).toBe('[redacted-selector]');
+    expect(unknownTool).not.toHaveProperty('agentId');
+    expect(JSON.stringify(unknownTool)).not.toContain('attacker-value');
+  });
+
+  it('preserves safe memory operation classifiers in value-free proxy audits', () => {
+    const rightToForget = summarizeProxyToolArgumentsForAudit({
+      dryRun: true,
+      query: 'private selector',
+    }, 'fbeast_memory_right_to_forget');
+    const reviewDecision = summarizeProxyToolArgumentsForAudit({
+      action: 'approve',
+      note: 'private reviewer note',
+    }, 'fbeast_memory_review_decide');
+    const invalidDecision = summarizeProxyToolArgumentsForAudit({
+      action: 'attacker-controlled',
+    }, 'fbeast_memory_review_decide');
+
+    expect(rightToForget.dryRun).toBe(true);
+    expect(reviewDecision.action).toBe('approve');
+    expect(invalidDecision).not.toHaveProperty('action');
+    expect(JSON.stringify(rightToForget)).not.toContain('private selector');
+    expect(JSON.stringify(reviewDecision)).not.toContain('private reviewer note');
+  });
+
+  it('redacts memory export and retention selectors in value-free proxy audits', () => {
+    const exportAudit = summarizeProxyToolArgumentsForAudit({
+      readScope: 'agent',
+      agentId: 'alice@example.test',
+      profile: 'private-profile',
+      repo: 'private/repository',
+      redaction: 'safe',
+    }, 'fbeast_memory_export');
+    const retentionAudit = summarizeProxyToolArgumentsForAudit({
+      readScope: 'agent',
+      agentId: 'alice@example.test',
+      profile: 'private-profile',
+      repo: 'private/repository',
+    }, 'fbeast_memory_retention_report');
+
+    for (const audit of [exportAudit, retentionAudit]) {
+      expect(audit).not.toHaveProperty('agentId');
+      expect(audit).not.toHaveProperty('profile');
+      expect(audit).not.toHaveProperty('repo');
+      expect(JSON.stringify(audit)).not.toContain('alice@example.test');
+      expect(JSON.stringify(audit)).not.toContain('private-profile');
+      expect(JSON.stringify(audit)).not.toContain('private/repository');
+    }
+  });
+
+  it('preserves validated memory store types in value-free proxy audits', () => {
+    const working = summarizeProxyToolArgumentsForAudit({ type: 'working', value: 'private' }, 'fbeast_memory_store');
+    const episodic = summarizeProxyToolArgumentsForAudit({ type: 'episodic', query: 'private' }, 'fbeast_memory_query');
+    const invalid = summarizeProxyToolArgumentsForAudit({ type: 'attacker-controlled' }, 'fbeast_memory_query');
+
+    expect(working.type).toBe('working');
+    expect(episodic.type).toBe('episodic');
+    expect(invalid).not.toHaveProperty('type');
+    expect(JSON.stringify(working)).not.toContain('private');
+    expect(JSON.stringify(episodic)).not.toContain('private');
+  });
+
+  it('preserves validated export redaction mode in value-free proxy audits', () => {
+    const unredacted = summarizeProxyToolArgumentsForAudit({ redaction: 'none', value: 'private' }, 'fbeast_memory_export');
+    const safe = summarizeProxyToolArgumentsForAudit({ redaction: 'safe' }, 'fbeast_memory_export');
+    const invalid = summarizeProxyToolArgumentsForAudit({ redaction: 'attacker-controlled' }, 'fbeast_memory_export');
+
+    expect(unredacted.redaction).toBe('none');
+    expect(safe.redaction).toBe('safe');
+    expect(invalid).not.toHaveProperty('redaction');
+    expect(JSON.stringify(unredacted)).not.toContain('private');
+  });
+
+  it('finds execute_tool discriminators without depending on property order', () => {
+    const args: Record<string, unknown> = { args: { password: 'private-value' } };
+    for (let index = 0; index < 60; index += 1) args[`filler${index}`] = index;
+    args.tool = 'test_tool';
+
+    const sanitized = sanitizeToolArgumentsForAuditTrail('execute_tool', args);
+    expect(sanitized).toMatchObject({
+      tool: 'test_tool',
+      args: { redacted: true, sha256: expect.stringMatching(/^[a-f0-9]{64}$/) },
+      envelope: {
+        redacted: true,
+        summary: {
+          type: 'object',
+          fields: expect.arrayContaining([
+            expect.objectContaining({ name: 'args' }),
+            expect.objectContaining({ name: 'filler0' }),
+          ]),
+          truncated: true,
+        },
+      },
+    });
+    expect(JSON.stringify(sanitized)).not.toContain('private-value');
+  });
+
+  it('keeps bounded malformed execute_tool envelope fields in audit summaries', () => {
+    const sanitized = sanitizeToolArgumentsForAuditTrail('execute_tool', {
+      tool: 'test_tool',
+      args: { query: 'private-value' },
+      unexpected: 'attacker-value',
+    });
+
+    expect(sanitized.envelope).toMatchObject({
+      redacted: true,
+      summary: {
+        type: 'object',
+        fields: expect.arrayContaining([
+          expect.objectContaining({ name: 'tool' }),
+          expect.objectContaining({ name: 'args' }),
+          expect.objectContaining({ name: 'unexpected' }),
+        ]),
+      },
+    });
+    expect(JSON.stringify(sanitized)).not.toContain('attacker-value');
+    expect(JSON.stringify(sanitized)).not.toContain('private-value');
+  });
+
+  it('value-redacts malformed execute_tool envelopes that omit args', () => {
+    const sanitized = sanitizeToolArgumentsForAuditTrail('execute_tool', {
+      tool: 'test_tool',
+      password: 'sk-private-value',
+    });
+
+    expect(sanitized).toMatchObject({
+      tool: 'test_tool',
+      args: { redacted: true },
+      envelope: {
+        redacted: true,
+        summary: {
+          type: 'object',
+          fields: expect.arrayContaining([
+            expect.objectContaining({ name: 'tool' }),
+            expect.objectContaining({ name: '[redacted-key]' }),
+          ]),
+        },
+      },
+    });
+    expect(JSON.stringify(sanitized)).not.toContain('sk-private-value');
   });
 
   it('runs close lifecycle callbacks exactly once', async () => {

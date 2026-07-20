@@ -24,6 +24,25 @@ vi.mock('../shared/tool-registry.js', () => ({
         makeHandler: vi.fn(),
       },
     ],
+    [
+      'fbeast_memory_query',
+      {
+        name: 'fbeast_memory_query',
+        server: 'memory',
+        description: 'Query memory',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'Query' },
+            agentId: { type: 'string', description: 'Agent id' },
+            profile: { type: 'string', description: 'Profile' },
+            repo: { type: 'string', description: 'Repository' },
+          },
+          required: ['query'],
+        },
+        makeHandler: vi.fn(),
+      },
+    ],
   ]),
   createAdapterSet: vi.fn(() => ({})),
 }));
@@ -44,6 +63,17 @@ const FAKE_STUBS = [
   { name: 'another_tool', server: 'observer' as const, description: 'Another test tool for filtering' },
   { name: 'third_tool', server: 'planner' as const, description: 'Third tool' },
 ];
+
+function expectValueFreeAuditArgs(value: unknown, fieldNames: string[]): void {
+  expect(value).toEqual(expect.objectContaining({
+    redacted: true,
+    sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+    summary: expect.objectContaining({
+      type: 'object',
+      fields: expect.arrayContaining(fieldNames.map((name) => expect.objectContaining({ name }))),
+    }),
+  }));
+}
 
 describe('proxy server', () => {
   let server: ReturnType<typeof createProxyServer>;
@@ -262,7 +292,9 @@ describe('proxy server', () => {
 
     it('audits an unknown-target probe as ok=false', async () => {
       await executeToolDef.handler({ tool: 'nonexistent_tool', args: { probe: 1 } });
-      expect(auditRecord).toHaveBeenCalledWith({ tool: 'nonexistent_tool', ok: false, decision: 'unknown_tool', args: { probe: 1 } });
+      const event = auditRecord.mock.calls[0]![0];
+      expect(event).toMatchObject({ tool: 'nonexistent_tool', ok: false, decision: 'unknown_tool' });
+      expectValueFreeAuditArgs(event.args, ['probe']);
     });
 
     it('passes args to handler correctly', async () => {
@@ -357,7 +389,77 @@ describe('proxy server', () => {
       vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
 
       await executeToolDef.handler({ tool: 'test_tool', args: { key: 'val' } });
-      expect(auditRecord).toHaveBeenCalledWith({ tool: 'test_tool', ok: true, args: { key: 'val' } });
+      const event = auditRecord.mock.calls[0]![0];
+      expect(event).toMatchObject({ tool: 'test_tool', ok: true });
+      expectValueFreeAuditArgs(event.args, ['key']);
+      expect(JSON.stringify(event.args)).not.toContain(':"val"');
+    });
+
+    it('retains bounded selector attribution in value-free memory proxy audits', async () => {
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+      vi.mocked(mockRegistry.get('fbeast_memory_query')!.makeHandler).mockReturnValue(fakeHandler);
+
+      await executeToolDef.handler({
+        tool: 'fbeast_memory_query',
+        args: {
+          query: 'private search text',
+          agentId: 'agent-7',
+          profile: 'doctor',
+          repo: '/srv/frankenbeast',
+        },
+      });
+
+      const event = auditRecord.mock.calls[0]![0];
+      expect(event).toMatchObject({
+        tool: 'fbeast_memory_query',
+        args: {
+          agentId: 'agent-7',
+          profile: 'doctor',
+          repo: '/srv/frankenbeast',
+          redacted: true,
+        },
+      });
+      expect(JSON.stringify(event.args)).not.toContain('private search text');
+    });
+
+    it('preserves safe memory classifiers without leaking export selectors in resolved-target audits', async () => {
+      const makeEntry = (name: string, properties: Record<string, { type: string; description: string }>) => ({
+        name,
+        server: 'memory' as const,
+        description: name,
+        inputSchema: { type: 'object' as const, properties },
+        makeHandler: vi.fn().mockReturnValue(vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] })),
+      });
+      mockRegistry.set('fbeast_memory_store', makeEntry('fbeast_memory_store', {
+        type: { type: 'string', description: 'Memory type' },
+        value: { type: 'string', description: 'Private value' },
+      }));
+      mockRegistry.set('fbeast_memory_export', makeEntry('fbeast_memory_export', {
+        agentId: { type: 'string', description: 'Agent id' },
+        redaction: { type: 'string', description: 'Redaction mode' },
+      }));
+
+      try {
+        await executeToolDef.handler({
+          tool: 'fbeast_memory_store',
+          args: { type: 'working', value: 'private-memory-value' },
+        });
+        await executeToolDef.handler({
+          tool: 'fbeast_memory_export',
+          args: { agentId: 'alice@example.test', redaction: 'none' },
+        });
+
+        const storeEvent = auditRecord.mock.calls[0]![0];
+        const exportEvent = auditRecord.mock.calls[1]![0];
+        expect(storeEvent.args).toMatchObject({ type: 'working', redacted: true });
+        expect(exportEvent.args).toMatchObject({ redaction: 'none', redacted: true });
+        expect(exportEvent.args).not.toHaveProperty('agentId');
+        expect(JSON.stringify(storeEvent.args)).not.toContain('private-memory-value');
+        expect(JSON.stringify(exportEvent.args)).not.toContain('alice@example.test');
+      } finally {
+        mockRegistry.delete('fbeast_memory_store');
+        mockRegistry.delete('fbeast_memory_export');
+      }
     });
 
     it('audits a governance denial of the target (ok=false, decision, args)', async () => {
@@ -366,7 +468,10 @@ describe('proxy server', () => {
       gateCheck.mockResolvedValue({ decision: 'denied', reason: 'destructive' });
 
       await executeToolDef.handler({ tool: 'test_tool', args: { key: 'credential' } });
-      expect(auditRecord).toHaveBeenCalledWith({ tool: 'test_tool', ok: false, decision: 'denied', args: { key: 'credential' } });
+      const event = auditRecord.mock.calls[0]![0];
+      expect(event).toMatchObject({ tool: 'test_tool', ok: false, decision: 'denied' });
+      expectValueFreeAuditArgs(event.args, ['key']);
+      expect(JSON.stringify(event.args)).not.toContain('credential');
     });
 
     it('audits a fail-closed gate error of the target (decision="error")', async () => {
@@ -375,7 +480,9 @@ describe('proxy server', () => {
       gateCheck.mockRejectedValue(new Error('governor down'));
 
       await executeToolDef.handler({ tool: 'test_tool', args: { key: 'x' } });
-      expect(auditRecord).toHaveBeenCalledWith({ tool: 'test_tool', ok: false, decision: 'error', args: { key: 'x' } });
+      const event = auditRecord.mock.calls[0]![0];
+      expect(event).toMatchObject({ tool: 'test_tool', ok: false, decision: 'error' });
+      expectValueFreeAuditArgs(event.args, ['key']);
     });
   });
 
@@ -384,24 +491,37 @@ describe('proxy server', () => {
   // server.callTool (the full dispatch path), not the handler directly.
   describe('wrapper-level audit of malformed proxy probes', () => {
     it('audits a validation failure on execute_tool (missing required args)', async () => {
-      const res = await server.callTool('execute_tool', { tool: 'test_tool' }) as { isError?: boolean };
+      const res = await server.callTool('execute_tool', {
+        tool: 'test_tool',
+        password: 'sk-private-value',
+      }) as { isError?: boolean };
       expect(res.isError).toBe(true);
-      expect(auditRecord).toHaveBeenCalledWith({
+      const event = auditRecord.mock.calls[0]![0];
+      expect(event).toMatchObject({
         tool: 'execute_tool',
         ok: false,
         decision: 'validation_error',
-        args: { tool: 'test_tool' },
+        args: {
+          tool: 'test_tool',
+          args: { redacted: true },
+          envelope: { redacted: true },
+        },
       });
+      expect(JSON.stringify(event)).not.toContain('sk-private-value');
     });
 
-    it('audits a non-object payload probe (wraps the raw value)', async () => {
+    it('value-redacts a non-object payload probe', async () => {
       const res = await server.callTool('execute_tool', null) as { isError?: boolean };
       expect(res.isError).toBe(true);
       expect(auditRecord).toHaveBeenCalledWith({
         tool: 'execute_tool',
         ok: false,
         decision: 'validation_error',
-        args: { invalid: null },
+        args: {
+          tool: '[redacted-tool]',
+          args: expect.objectContaining({ redacted: true }),
+          envelope: expect.objectContaining({ redacted: true }),
+        },
       });
     });
 
@@ -424,12 +544,9 @@ describe('proxy server', () => {
       const res = await server.callTool('execute_tool', envelope) as { isError?: boolean };
 
       expect(res.isError).toBe(true);
-      expect(auditRecord).toHaveBeenCalledWith({
-        tool: 'execute_tool',
-        ok: false,
-        decision: 'timeout',
-        args: envelope,
-      });
+      const event = auditRecord.mock.calls[0]![0];
+      expect(event).toMatchObject({ tool: 'execute_tool', ok: false, decision: 'timeout', args: { tool: 'test_tool' } });
+      expectValueFreeAuditArgs(event.args.args, ['key']);
     });
 
     it('does NOT double-audit a successful execute_tool call at the wrapper level', async () => {
@@ -439,7 +556,9 @@ describe('proxy server', () => {
       await server.callTool('execute_tool', { tool: 'test_tool', args: { key: 'v' } });
       // Only the resolved-target record; no generic execute_tool wrapper record.
       expect(auditRecord).toHaveBeenCalledTimes(1);
-      expect(auditRecord).toHaveBeenCalledWith({ tool: 'test_tool', ok: true, args: { key: 'v' } });
+      const event = auditRecord.mock.calls[0]![0];
+      expect(event).toMatchObject({ tool: 'test_tool', ok: true });
+      expectValueFreeAuditArgs(event.args, ['key']);
     });
 
     it('does NOT audit a read-only search_tools call at the wrapper level', async () => {
@@ -471,12 +590,10 @@ describe('proxy server', () => {
       const result = await executeToolDef.handler({ tool: 'bounded_tool', args: { query: 'oversized' } }) as { isError: boolean };
 
       expect(result.isError).toBe(true);
-      expect(auditRecord).toHaveBeenCalledWith({
-        tool: 'bounded_tool',
-        ok: false,
-        decision: 'validation_error',
-        args: { query: '[schema-bound-exceeded]' },
-      });
+      const event = auditRecord.mock.calls[0]![0];
+      expect(event).toMatchObject({ tool: 'bounded_tool', ok: false, decision: 'validation_error' });
+      expectValueFreeAuditArgs(event.args, ['query']);
+      expect(JSON.stringify(event.args)).not.toContain('oversized');
     });
 
     it('rejects proxied calls with target unknown properties', async () => {
@@ -531,9 +648,9 @@ describe('proxy server', () => {
         expect(result.content[0].text).toContain('rejected unsafe argument shape');
         expect(result.content[0].text).toContain('denied property name: __proto__');
         expect(auditRecord).toHaveBeenCalledTimes(1);
-        const auditedArgs = auditRecord.mock.calls[0]![0].args as { payload: Record<string, unknown> };
-        expect(auditedArgs.payload.ok).toBe(true);
-        expect(auditedArgs.payload['__proto__']).toBe('[denied-property]');
+        const auditedArgs = auditRecord.mock.calls[0]![0].args;
+        expectValueFreeAuditArgs(auditedArgs, ['payload']);
+        expect(JSON.stringify(auditedArgs)).not.toContain('polluted');
         expect(gateCheck).not.toHaveBeenCalledWith(expect.objectContaining({ tool: 'object_tool' }));
         expect(fakeHandler).not.toHaveBeenCalled();
       } finally {
