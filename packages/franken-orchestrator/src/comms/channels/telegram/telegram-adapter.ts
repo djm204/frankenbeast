@@ -57,7 +57,11 @@ export class TelegramAdapter implements ChannelAdapter {
   }
 
   async send(sessionId: string, message: ChannelOutboundMessage): Promise<void> {
-    const chatId = (message.metadata?.chatId as string) || 'unknown';
+    const chatId = message.metadata?.chatId;
+    if (typeof chatId !== 'string' || chatId.trim().length === 0) {
+      throw new Error('Telegram routing error: missing chatId metadata');
+    }
+
     const body = this.formatPayload(sessionId, chatId, message);
     const targetUrl = `https://api.telegram.org/bot${this.token}/sendMessage`;
 
