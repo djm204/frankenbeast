@@ -20,6 +20,9 @@ export class CodexProvider implements ICliProvider {
   buildArgs(opts: ProviderOpts): string[] {
     const { sandboxArgs, extraArgs } = resolveCodexSandboxArgs(opts.extraArgs);
     const args: string[] = ['exec', ...sandboxArgs, '--json', '--color', 'never'];
+    if (opts.chatMode && !extraArgs.includes('--skip-git-repo-check')) {
+      args.push('--skip-git-repo-check');
+    }
     if (opts.model) {
       args.push('--model', opts.model);
     }

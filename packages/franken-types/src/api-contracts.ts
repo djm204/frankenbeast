@@ -188,6 +188,18 @@ export interface BeastRunEvent {
   createdAt: string;
 }
 
+export interface BeastRunEventPageInfo {
+  limit: number;
+  afterSequence: number;
+  nextAfterSequence: number | null;
+  hasMore: boolean;
+}
+
+export interface BeastRunEventPage {
+  events: BeastRunEvent[];
+  page: BeastRunEventPageInfo;
+}
+
 export interface BeastRunAttempt {
   id: string;
   runId: string;

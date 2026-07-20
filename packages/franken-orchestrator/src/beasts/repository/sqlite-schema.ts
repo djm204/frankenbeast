@@ -44,6 +44,7 @@ export const BEAST_SQLITE_SCHEMA_STATEMENTS = [
     FOREIGN KEY (run_id) REFERENCES beast_runs(id),
     FOREIGN KEY (attempt_id) REFERENCES beast_run_attempts(id)
   )`,
+  'CREATE INDEX IF NOT EXISTS idx_beast_run_events_run_sequence ON beast_run_events(run_id, sequence)',
   `CREATE TABLE IF NOT EXISTS beast_interview_sessions (
     id TEXT PRIMARY KEY,
     definition_id TEXT NOT NULL,

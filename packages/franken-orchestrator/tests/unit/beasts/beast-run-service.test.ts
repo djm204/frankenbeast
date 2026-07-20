@@ -55,6 +55,45 @@ describe('BeastRunService', () => {
     warn.mockRestore();
   });
 
+  it('advances bounded response pages across corrupt event rows', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
+    const dbPath = join(workDir, 'beasts.db');
+    const repo = new SQLiteBeastRepository(dbPath);
+    const runs = new BeastRunService(
+      repo,
+      new BeastCatalogService(),
+      {} as never,
+      new PrometheusBeastMetrics(),
+      new BeastLogStore(join(workDir, 'logs')),
+    );
+    const run = repo.createRun({
+      definitionId: 'martin-loop', definitionVersion: 1, executionMode: 'process',
+      configSnapshot: {}, dispatchedBy: 'api', dispatchedByUser: 'operator',
+      createdAt: '2026-07-19T00:00:00.000Z',
+    });
+    const events = Array.from({ length: 5 }, (_, index) => repo.appendEvent(run.id, {
+      type: `run.event.${index + 1}`,
+      payload: { sequence: index + 1 },
+      createdAt: `2026-07-19T00:00:0${index + 1}.000Z`,
+    }));
+    const db = new Database(dbPath);
+    for (const event of events.slice(0, 3)) {
+      db.prepare('UPDATE beast_run_events SET payload = ? WHERE id = ?').run('{invalid', event.id);
+    }
+    db.close();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    expect(runs.listEventPageForResponse(run.id, 0, 2)).toEqual({
+      events: [],
+      page: { limit: 2, afterSequence: 0, nextAfterSequence: 3, hasMore: true },
+    });
+    expect(runs.listEventPageForResponse(run.id, 3, 2)).toEqual({
+      events: [events[3], events[4]],
+      page: { limit: 2, afterSequence: 3, nextAfterSequence: null, hasMore: false },
+    });
+    warn.mockRestore();
+  });
+
   it('stops a running beast and preserves the durable run row', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

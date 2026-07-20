@@ -1,5 +1,9 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-20 — Bounded Beast event paging through corrupt rows
+- Recovery pagination must bound raw rows scanned, not only healthy rows returned. Return the last scanned raw sequence plus an indexed `hasMore` probe so a short or empty page can advance past corrupt rows without turning one request into a full-history scan.
+- Before wiring a new paginated endpoint into dashboard hydration, trace which detail field the UI actually renders. Do not eagerly collect every page for an unused compatibility field; keep the bounded endpoint available for intentional consumers and preserve fast detail loading.
+
 ## 2026-07-19 — Skill HITL configuration boundaries
 - Keep the active config path and installed skill root as separate inputs: the active config determines which skills are enabled, while manifests remain anchored to the database/project `.fbeast/skills` directory even when operators supply an external `--config` path.
 - Distinguish a valid empty enabled-skill list from malformed/unreadable config. For qualified calls, fail closed only when the action matches an installed skill server or directory alias, so stale custom registrations remain gated without changing policy for unrelated built-in MCP servers.

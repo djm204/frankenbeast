@@ -93,6 +93,36 @@ export class BeastRunService {
     return this.listEventsFromRepository(runId, true);
   }
 
+  listEventPageForResponse(runId: string, afterSequence: number, limit: number) {
+    const run = this.requireRun(runId);
+    const scannedPage = this.repository.scanEventPage(runId, {
+      recoverCorruptJson: true,
+      afterSequence,
+      limit: limit + 1,
+    });
+    let events = scannedPage.events;
+    if (this.hasDispatchFailureHistory(run)) {
+      events = events.map(redactDispatchFailureEvent);
+    }
+    const overfilled = events.length > limit;
+    const hasMore = overfilled || scannedPage.hasMoreRows;
+    const pageEvents = overfilled ? events.slice(0, limit) : events;
+    const nextAfterSequence = hasMore
+      ? overfilled
+        ? pageEvents.at(-1)?.sequence ?? scannedPage.scannedThroughSequence
+        : scannedPage.scannedThroughSequence
+      : null;
+    return {
+      events: pageEvents,
+      page: {
+        limit,
+        afterSequence,
+        nextAfterSequence,
+        hasMore,
+      },
+    };
+  }
+
   private listEventsFromRepository(runId: string, recoverCorruptJson = false) {
     const run = this.requireRun(runId);
     const events = this.repository.listEvents(runId, { recoverCorruptJson });
