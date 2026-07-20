@@ -424,6 +424,7 @@
 ## Lessons
 - 2026-07-19 — Docs regression tests should assert exact pinned values from manifest and treat setup commands as gate-narrow/full setup distinctions.
 - 2026-07-19 — Bounded multi-pass LLM flows need one shared deadline propagated through cache/client/adapter layers, explicit subprocess and retry-wait cancellation, and a caller-side abort race for implementations that ignore signals. Preserve the last useful pre-quality artifact on timeout, use deterministic structural confidence for fast paths, avoid resending unchanged repository context, and test 1/2/4-pass paths plus child-process termination.
+- 2026-07-19 — SQLite multi-writer regressions need genuinely independent worker-thread connections, not `Promise.all` around synchronous calls. Acquire write locks with immediate transactions before read-to-write paths, and merge newly persisted working-memory rows for incremental flushes while preserving explicit clear/restore replacement semantics and configured limits.
 
 ## 2026-07-19 — Type export renames and deprecation compatibility
 - When renaming shared public type names for clarity, keep deprecated aliases temporarily (with `@deprecated` JSDoc) for downstream consumers, update docs/tests to use new names, and add targeted tests validating both canonical and deprecated aliases.
