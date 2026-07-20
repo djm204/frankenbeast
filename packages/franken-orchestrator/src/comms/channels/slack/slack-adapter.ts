@@ -34,9 +34,12 @@ export class SlackAdapter implements ChannelAdapter {
   }
 
   async send(sessionId: string, message: ChannelOutboundMessage): Promise<void> {
-    // In a real implementation, we would map sessionId back to Slack channel/thread
-    // For now, we assume metadata contains the routing info or we have a store
-    const channel = (message.metadata?.channelId as string) || 'unknown';
+    const channelId = message.metadata?.channelId;
+    if (typeof channelId !== 'string' || channelId.trim().length === 0) {
+      throw new Error('Slack routing error: missing channelId metadata');
+    }
+
+    const channel = channelId.trim();
     const thread_ts = message.metadata?.threadTs as string | undefined;
 
     const blocks = this.formatBlocks(message);
