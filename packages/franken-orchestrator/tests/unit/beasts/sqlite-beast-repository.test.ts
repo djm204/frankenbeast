@@ -339,6 +339,34 @@ describe('SQLiteBeastRepository', () => {
     });
   });
 
+  it('keeps recovered event pages full across corrupt rows and indexes the cursor query', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
+    const databasePath = join(workDir, 'beasts.db');
+    const repo = new SQLiteBeastRepository(databasePath);
+    const run = repo.createRun({
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+    const events = Array.from({ length: 4 }, (_, index) => repo.appendEvent(run.id, {
+      type: `run.event.${index + 1}`,
+      payload: { sequence: index + 1 },
+      createdAt: `2026-03-10T00:00:0${index + 1}.000Z`,
+    }));
+    const database = new Database(databasePath);
+    database.prepare('UPDATE beast_run_events SET payload = ? WHERE id = ?').run('{invalid', events[1]!.id);
+
+    expect(repo.listEvents(run.id, { recoverCorruptJson: true, limit: 3 }).map((event) => event.sequence))
+      .toEqual([1, 3, 4]);
+    const indexes = database.pragma("index_list('beast_run_events')") as Array<{ name: string }>;
+    expect(indexes.map((index) => index.name)).toContain('idx_beast_run_events_run_sequence');
+    database.close();
+  });
+
   it('creates, lists, and loads tracked agents', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

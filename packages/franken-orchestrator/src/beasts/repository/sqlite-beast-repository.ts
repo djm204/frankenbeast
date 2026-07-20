@@ -495,6 +495,22 @@ export class SQLiteBeastRepository {
       && (!Number.isSafeInteger(options.limit) || options.limit < 1)) {
       throw new RangeError('limit must be a positive safe integer');
     }
+    if (options.limit !== undefined && options.recoverCorruptJson) {
+      const events: BeastRunEvent[] = [];
+      let cursor = options.afterSequence ?? 0;
+      while (events.length < options.limit) {
+        const batchLimit = options.limit - events.length;
+        const rows = this.db.prepare(
+          'SELECT * FROM beast_run_events WHERE run_id = ? AND sequence > ? ORDER BY sequence ASC LIMIT ?',
+        ).all(runId, cursor, batchLimit) as BeastEventRow[];
+        if (rows.length === 0) break;
+        events.push(...mapRowsRecoveringCorruptJson(rows, mapEvent, options));
+        cursor = rows[rows.length - 1]!.sequence;
+        if (rows.length < batchLimit) break;
+      }
+      return events;
+    }
+
     const clauses = ['run_id = ?'];
     const parameters: Array<string | number> = [runId];
     if (options.afterSequence !== undefined) {
