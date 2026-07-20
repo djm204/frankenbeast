@@ -23,14 +23,17 @@ def load_reviewer():
 
 
 class RecordingResponse:
-    def __init__(self, payload: bytes):
+    def __init__(self, payload: bytes, headers=None):
         self.payload = payload
+        self.headers = headers or {}
         self.read_sizes = []
+        self.closed = False
 
     def __enter__(self):
         return self
 
     def __exit__(self, *_args):
+        self.closed = True
         return False
 
     def read(self, size=-1):
@@ -77,6 +80,66 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         self.reviewer = load_reviewer()
         self.payload = b"x" * (self.reviewer.MAX_DIFF_BYTES + 4096)
 
+    def test_normal_diff_is_returned_without_truncation(self):
+        payload = b"diff --git a/file b/file\n+bounded change\n"
+
+        diff = self.reviewer.read_bounded_diff(io.BytesIO(payload))
+
+        self.assertEqual(diff, payload.decode("utf-8"))
+        self.assertNotIn(self.reviewer.DIFF_TRUNCATION_MARKER, diff)
+
+    def test_malformed_utf8_is_decoded_with_replacement_character(self):
+        diff = self.reviewer.read_bounded_diff(io.BytesIO(b"+change:\xff\n"))
+
+        self.assertEqual(diff, "+change:\ufffd\n")
+        self.assertNotIn(self.reviewer.DIFF_TRUNCATION_MARKER, diff)
+
+    def test_diff_at_exact_byte_limit_is_not_truncated(self):
+        payload = b"x" * self.reviewer.MAX_DIFF_BYTES
+
+        diff = self.reviewer.read_bounded_diff(io.BytesIO(payload))
+
+        self.assertEqual(diff, "x" * self.reviewer.MAX_DIFF_BYTES)
+        self.assertNotIn(self.reviewer.DIFF_TRUNCATION_MARKER, diff)
+
+    def test_diff_crossing_limit_by_one_byte_is_truncated(self):
+        stream = RecordingStream(b"x" * (self.reviewer.MAX_DIFF_BYTES + 1))
+
+        diff = self.reviewer.read_bounded_diff(stream)
+
+        self.assertEqual(stream.read_sizes, [self.reviewer.MAX_DIFF_BYTES + 1])
+        self.assertEqual(
+            diff[: self.reviewer.MAX_DIFF_BYTES],
+            "x" * self.reviewer.MAX_DIFF_BYTES,
+        )
+        self.assertTrue(diff.endswith(self.reviewer.DIFF_TRUNCATION_MARKER))
+
+    def test_api_diff_without_content_length_still_uses_stream_bound(self):
+        response = RecordingResponse(self.payload)
+        with mock.patch.dict(
+            os.environ, {"PR_REVIEWER_REPOSITORY": "djm204/frankenbeast"}
+        ), mock.patch.object(
+            self.reviewer.urllib.request, "urlopen", return_value=response
+        ):
+            diff = self.reviewer.get_pr_diff(120)
+
+        self.assertNotIn("Content-Length", response.headers)
+        self.assertEqual(response.read_sizes, [self.reviewer.MAX_DIFF_BYTES + 1])
+        self.assertTrue(response.closed)
+        self.assertTrue(diff.endswith(self.reviewer.DIFF_TRUNCATION_MARKER))
+
+    def test_api_diff_ignores_misleading_small_content_length(self):
+        response = RecordingResponse(self.payload, headers={"Content-Length": "10"})
+        with mock.patch.dict(
+            os.environ, {"PR_REVIEWER_REPOSITORY": "djm204/frankenbeast"}
+        ), mock.patch.object(
+            self.reviewer.urllib.request, "urlopen", return_value=response
+        ):
+            diff = self.reviewer.get_pr_diff(121)
+
+        self.assertEqual(response.read_sizes, [self.reviewer.MAX_DIFF_BYTES + 1])
+        self.assertTrue(diff.endswith(self.reviewer.DIFF_TRUNCATION_MARKER))
+
     def test_api_diff_read_is_bounded_before_decode(self):
         response = RecordingResponse(self.payload)
         with mock.patch.dict(
@@ -92,7 +155,10 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
 
         self.assertEqual(response.read_sizes, [self.reviewer.MAX_DIFF_BYTES + 1])
         self.assertTrue(diff.endswith(self.reviewer.DIFF_TRUNCATION_MARKER))
-        self.assertEqual(diff[: self.reviewer.MAX_DIFF_BYTES], "x" * self.reviewer.MAX_DIFF_BYTES)
+        self.assertEqual(
+            diff[: self.reviewer.MAX_DIFF_BYTES],
+            "x" * self.reviewer.MAX_DIFF_BYTES,
+        )
 
     def test_gh_fallback_diff_read_uses_the_same_bound(self):
         process = FakeProcess(self.payload)
