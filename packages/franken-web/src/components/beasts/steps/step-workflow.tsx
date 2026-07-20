@@ -16,8 +16,10 @@ function isContainerRuntimeUnavailable(status: BeastContainerRuntimeStatus | und
 }
 
 export function StepWorkflow({ catalog, containerRuntime }: StepWorkflowProps) {
-  const { stepValues, setStepValues, wizardMode } = useBeastStore();
-  const values = (stepValues[1] ?? {}) as { workflowType?: string; executionMode?: BeastExecutionMode; [key: string]: unknown };
+  const stepValue = useBeastStore((state) => state.stepValues[1]);
+  const setStepValues = useBeastStore((state) => state.setStepValues);
+  const wizardMode = useBeastStore((state) => state.wizardMode);
+  const values = (stepValue ?? {}) as { workflowType?: string; executionMode?: BeastExecutionMode; [key: string]: unknown };
   const workflows = getEffectiveCatalog(catalog);
   const selectedWorkflow = workflows.find((entry) => entry.id === values.workflowType);
   const selectedExecutionMode = values.executionMode ?? selectedWorkflow?.executionModeDefault ?? 'process';

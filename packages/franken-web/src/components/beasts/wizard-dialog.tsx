@@ -33,18 +33,16 @@ interface WizardDialogProps {
 
 export function WizardDialog({ isOpen, onClose, onLaunch, catalog, containerRuntime, launching, launchError }: WizardDialogProps) {
   const descriptionId = useId();
-  const {
-    wizardStep,
-    highestCompleted,
-    wizardMode,
-    nextStep,
-    prevStep,
-    setWizardStep,
-    toggleWizardMode,
-    stepValues,
-    setValidationErrors,
-    clearValidationErrors,
-  } = useBeastStore();
+  const wizardStep = useBeastStore((state) => state.wizardStep);
+  const highestCompleted = useBeastStore((state) => state.highestCompleted);
+  const wizardMode = useBeastStore((state) => state.wizardMode);
+  const nextStep = useBeastStore((state) => state.nextStep);
+  const prevStep = useBeastStore((state) => state.prevStep);
+  const setWizardStep = useBeastStore((state) => state.setWizardStep);
+  const toggleWizardMode = useBeastStore((state) => state.toggleWizardMode);
+  const stepValues = useBeastStore((state) => state.stepValues);
+  const setValidationErrors = useBeastStore((state) => state.setValidationErrors);
+  const clearValidationErrors = useBeastStore((state) => state.clearValidationErrors);
 
   const isLastStep = wizardStep === STEP_LABELS.length - 1;
   const isFirstStep = wizardStep === 0;
