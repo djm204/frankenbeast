@@ -1262,6 +1262,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
   private persistedSerialized = new Map<string, string>();
   private dirtyKeys = new Set<string>();
   private deletedKeys = new Set<string>();
+  private replacePersistedState = false;
   private totalBytes = 0;
 
   private static readonly persistedRowOrder = (
@@ -1577,6 +1578,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
       throw error;
     }
     if (!hasChanges) {
+      this.replacePersistedState = false;
       return;
     }
     const finalizeFlush = (): void => {
@@ -1591,6 +1593,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
       }
       this.deletedKeys.clear();
       this.dirtyKeys.clear();
+      this.replacePersistedState = false;
     };
 
     if (!this.db.inTransaction) {
@@ -1723,7 +1726,21 @@ class SqliteWorkingMemory implements IWorkingMemory {
     // after this instance was constructed. Without this, clear()/restore() can
     // miss externally added keys because deletedKeys would be seeded from a
     // stale cache.
+    const requestedDeletedKeys = new Set(this.deletedKeys);
     this.loadPersistedSerializedFromDb();
+
+    // Incremental writers must absorb rows committed by other connections
+    // after this instance was hydrated. Only clear()/restore() intentionally
+    // make this instance's complete in-memory state authoritative.
+    if (!this.replacePersistedState) {
+      for (const [key, serialized] of this.persistedSerialized) {
+        if (this.store.has(key) || requestedDeletedKeys.has(key)) continue;
+        const value = parseStoredWorkingMemoryValue(serialized);
+        if (!isExpiredWorkingMemoryValue(value)) {
+          this.store.set(key, value);
+        }
+      }
+    }
 
     const prepared: Array<[string, unknown, string, number]> = [];
     let total = 0;
@@ -1769,6 +1786,11 @@ class SqliteWorkingMemory implements IWorkingMemory {
       total += size;
       prepared.push([key, normalized, serialized, size]);
     }
+    if (prepared.length > this.limits.maxEntries) {
+      throw new WorkingMemoryLimitError(
+        `Working memory has ${prepared.length} entries after refreshing concurrent writes, exceeding maxEntries (${this.limits.maxEntries})`,
+      );
+    }
     if (!Number.isSafeInteger(total) || total > this.limits.maxTotalBytes) {
       throw new WorkingMemoryLimitError(
         `Working memory byte budget exceeded: ${total} bytes, maxTotalBytes is ${this.limits.maxTotalBytes}`,
@@ -1779,7 +1801,13 @@ class SqliteWorkingMemory implements IWorkingMemory {
     this.sizes.clear();
     this.serialized.clear();
     this.dirtyKeys.clear();
-    this.deletedKeys = new Set(this.persistedSerialized.keys());
+    this.deletedKeys = this.replacePersistedState
+      ? new Set(this.persistedSerialized.keys())
+      : new Set(
+          Array.from(requestedDeletedKeys).filter((key) =>
+            this.persistedSerialized.has(key),
+          ),
+        );
     this.totalBytes = total;
     for (const [key, normalized, serialized, size] of prepared) {
       this.store.set(key, normalized);
@@ -2449,6 +2477,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
     const previousSerialized = new Map(this.serialized);
     const previousDirtyKeys = new Set(this.dirtyKeys);
     const previousDeletedKeys = new Set(this.deletedKeys);
+    const previousReplacePersistedState = this.replacePersistedState;
     const previousTotalBytes = this.totalBytes;
     let mutationApplied = false;
 
@@ -2479,6 +2508,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
         this.serialized = previousSerialized;
         this.dirtyKeys = previousDirtyKeys;
         this.deletedKeys = previousDeletedKeys;
+        this.replacePersistedState = previousReplacePersistedState;
         this.totalBytes = previousTotalBytes;
       }
       try {
@@ -2507,6 +2537,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
     const previousSerialized = shouldAudit ? new Map(this.serialized) : undefined;
     const previousDirtyKeys = shouldAudit ? new Set(this.dirtyKeys) : undefined;
     const previousDeletedKeys = shouldAudit ? new Set(this.deletedKeys) : undefined;
+    const previousReplacePersistedState = this.replacePersistedState;
     const previousTotalBytes = shouldAudit ? this.totalBytes : undefined;
 
     this.store.clear();
@@ -2514,6 +2545,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
     this.serialized.clear();
     this.dirtyKeys.clear();
     this.deletedKeys = new Set(this.persistedSerialized.keys());
+    this.replacePersistedState = true;
     this.totalBytes = 0;
     if (shouldAudit) {
       try {
@@ -2528,6 +2560,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
         this.serialized = previousSerialized!;
         this.dirtyKeys = previousDirtyKeys!;
         this.deletedKeys = previousDeletedKeys!;
+        this.replacePersistedState = previousReplacePersistedState;
         this.totalBytes = previousTotalBytes!;
         throw error;
       }
@@ -3106,7 +3139,7 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
     });
 
     try {
-      const result = tx() as { id: string };
+      const result = tx.immediate() as { id: string };
       finalizeWorkingMemoryFlush.current?.();
       return result;
     } catch (error) {
