@@ -9,6 +9,8 @@
 ## 2026-07-20 — Episodic JSON quarantine reads
 - When an optional persisted JSON payload is corrupt, preserve the valid row envelope and replace only that payload with explicit quarantine metadata; thread the row id into read-audit diagnostics across every query path, including nested empty-query and encrypted scans, so operators can repair the exact record without losing timeline evidence.
 - Treat quarantine metadata as diagnostics, not domain content: exclude it from encrypted recall scoring, let consumers that count meaningful failure windows backfill past quarantined rows, and preserve protected retention classification only in the retention path rather than weakening strict audit validation globally.
+- Any consumer whose authorization scope lives inside the quarantined payload must fail closed for every read scope, including privileged `all`; otherwise corrupt private rows are silently reclassified as shared. Plaintext SQL recall must also re-check quarantined rows against their surviving summary so a keyword that exists only in corrupt details cannot produce a false match.
+- Snapshot replay should recognize quarantined right-to-forget audit envelopes from their fixed summary plus strict quarantine shape before applying deletion-guard assertions; keep that exception narrow so ordinary quarantined events cannot bypass replay guards.
 
 ## 2026-07-20 — Outbound request deadlines must include response consumption
 - JavaScript `fetch()` resolves when response headers arrive, not when the body has been consumed. A hard outbound-delivery deadline must wrap both the fetch and all body/error parsing under the same abort signal and timer; otherwise a provider can send headers and stall forever during `json()` or `text()`.

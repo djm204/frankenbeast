@@ -391,8 +391,17 @@ function formatWorkingEntryValue(entry: { value: string; expiresAt?: string }): 
 
 function parseAgentFromEpisodicDetails(
   details: Record<string, unknown> | undefined,
-): string | undefined {
+): string | null | undefined {
   if (!details) return undefined;
+  const quarantine = details["quarantine"];
+  if (
+    quarantine !== null &&
+    typeof quarantine === "object" &&
+    !Array.isArray(quarantine) &&
+    (quarantine as Record<string, unknown>)["field"] === "details"
+  ) {
+    return null;
+  }
   return details["__fbeastMemoryScope"] === AGENT_MEMORY_SCOPE_MARKER &&
     typeof details["agentId"] === "string"
     ? details["agentId"]
@@ -429,9 +438,12 @@ function resolveMemoryReadScope(input: MemoryScopeInput): {
 }
 
 function canReadMemoryEntry(
-  entryAgentId: string | undefined,
+  entryAgentId: string | null | undefined,
   scope: { readScope: MemoryReadScope; agentId?: string },
 ): boolean {
+  // Corrupt episodic details can no longer prove whether an event was shared or
+  // agent-scoped, so quarantine envelopes are hidden from every memory scope.
+  if (entryAgentId === null) return false;
   if (scope.readScope === "all") return true;
   if (scope.readScope === "shared") return entryAgentId === undefined;
   return entryAgentId === undefined || entryAgentId === scope.agentId;
@@ -1316,7 +1328,7 @@ export function createBrainAdapter(
           ...(event.details === undefined
             ? {}
             : { details: redactExportField(event.details, redaction, "details") }),
-          ...(entryAgentId === undefined
+          ...(entryAgentId == null
             ? {}
             : {
                 agentId: redactExportField(

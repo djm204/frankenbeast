@@ -6129,6 +6129,13 @@ describe('SqliteBrain', () => {
           details: { marker: 'searchable' },
         }),
       );
+      brain.episodic.record(
+        makeEvent({
+          summary: 'corrupt details-only event',
+          createdAt: '2026-07-10T00:02:00.000Z',
+          details: { marker: 'details-only-token' },
+        }),
+      );
 
       const db = (
         brain as unknown as {
@@ -6140,6 +6147,9 @@ describe('SqliteBrain', () => {
       db.prepare(
         `UPDATE episodic_events SET details = ? WHERE summary = ?`,
       ).run('{', 'corrupt searchable event');
+      db.prepare(
+        `UPDATE episodic_events SET details = ? WHERE summary = ?`,
+      ).run('{"details-only-token"', 'corrupt details-only event');
 
       expect(() => brain.episodic.recall('searchable', 10)).not.toThrow();
       const recalled = brain.episodic.recall('searchable', 10);
@@ -6155,6 +6165,7 @@ describe('SqliteBrain', () => {
           reason: 'invalid JSON',
         },
       });
+      expect(brain.episodic.recall('details-only-token', 10)).toEqual([]);
       expect(brain.episodic.recall('searchable', 0)).toEqual([]);
       expect(brain.episodic.recent(0)).toEqual([]);
       expect(brain.episodic.recentFailures(0)).toEqual([]);
@@ -6557,6 +6568,33 @@ describe('SqliteBrain', () => {
       const hydrated = SqliteBrain.hydrate(snapshot);
 
       expect(hydrated.episodic.recent(1)[0]?.step).toBe('right-to-forget');
+      hydrated.close();
+      source.close();
+    });
+
+    it('hydrate() preserves quarantined right-to-forget audit envelopes', () => {
+      const source = new SqliteBrain(':memory:');
+      source.working.set('task', 'delete project note');
+      source.rightToForget({ query: 'delete project' });
+      const snapshot = source.serialize();
+      const auditEvent = snapshot.episodic.find(
+        (event) => event.step === 'right-to-forget',
+      );
+      expect(auditEvent).toBeDefined();
+      auditEvent!.details = {
+        quarantine: {
+          field: 'details',
+          eventId: auditEvent!.id,
+          reason: 'invalid JSON',
+        },
+      };
+
+      const hydrated = SqliteBrain.hydrate(snapshot);
+
+      expect(hydrated.episodic.recent(1)[0]).toMatchObject({
+        step: 'right-to-forget',
+        details: { quarantine: { field: 'details', reason: 'invalid JSON' } },
+      });
       hydrated.close();
       source.close();
     });

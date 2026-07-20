@@ -2838,6 +2838,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
             limit,
             this.encryption,
             reportCorruptDetails,
+            (event) => recallEventMatchesKeywords(event, keywords),
           );
         } else {
           const rowsById = new Map<
@@ -2862,12 +2863,13 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
               b.id - a.id,
           );
 
-          result = rowsToEvents(
+          const matchingEvents = rowsToEvents(
             sortedRows,
-            limit,
+            -1,
             this.encryption,
             reportCorruptDetails,
-          );
+          ).filter((event) => recallEventMatchesKeywords(event, keywords));
+          result = limit < 0 ? matchingEvents : matchingEvents.slice(0, limit);
         }
       }
       this.audit?.({
@@ -6449,7 +6451,10 @@ export class SqliteBrain implements IBrain {
           brain.working.flushToDb() ?? undefined;
 
         for (const event of snapshot.episodic) {
-          if (!isRightToForgetAuditEvent(event)) {
+          if (
+            !isRightToForgetAuditEvent(event)
+            && !isQuarantinedRightToForgetAuditEvent(event)
+          ) {
             assertEpisodicNotDeletionGuarded(brain.db, event, brain.encryption);
           }
           insertEvent.run(
@@ -8205,6 +8210,15 @@ function parseHydratedWorkingMemoryValue(key: string, value: string): unknown {
     }
     return value;
   }
+}
+
+function recallEventMatchesKeywords(
+  event: EpisodicEvent,
+  keywords: string[],
+): boolean {
+  if (!isQuarantinedEpisodicDetails(event)) return true;
+  const summary = event.summary.toLowerCase();
+  return keywords.some((keyword) => summary.includes(keyword));
 }
 
 function rowsToEvents(

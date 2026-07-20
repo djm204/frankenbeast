@@ -950,6 +950,45 @@ describe("createBrainAdapter", () => {
     expect(mockBrain.episodic.recent).toHaveBeenCalledWith(-1);
   });
 
+  it("fails closed for episodic events whose details scope was quarantined", async () => {
+    const brain = createBrainAdapter("/tmp/quarantined-scope.db");
+    const mockBrain = brainInstances[0]!;
+    const quarantinedEvent = {
+      id: "evt-quarantined",
+      type: "success",
+      summary: "private quarantined episode",
+      details: {
+        quarantine: {
+          field: "details",
+          eventId: 17,
+          reason: "invalid JSON",
+        },
+      },
+      createdAt: "2026-07-20T00:00:00.000Z",
+    };
+    mockBrain.episodic.recall.mockReturnValue([quarantinedEvent]);
+    mockBrain.episodic.recent.mockReturnValue([quarantinedEvent]);
+
+    await expect(brain.query({
+      query: "private",
+      type: "episodic",
+      readScope: "all",
+      limit: 10,
+    })).resolves.toEqual([]);
+    const sharedFrontload = await brain.frontload({ readScope: "shared" });
+    expect(sharedFrontload.find((section) => section.type === "episodic")).toBeUndefined();
+    const agentFrontload = await brain.frontload({
+      readScope: "agent",
+      agentId: "another-agent",
+    });
+    expect(agentFrontload.find((section) => section.type === "episodic")).toBeUndefined();
+    const exported = await brain.exportProjectMemory({
+      readScope: "all",
+      limit: 10,
+    });
+    expect(exported.episodic).toEqual([]);
+  });
+
   it("exports scoped project memory with safe redaction by default", async () => {
     const brain = createBrainAdapter("/tmp/beast.db");
 
