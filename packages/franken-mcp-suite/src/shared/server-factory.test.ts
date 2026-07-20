@@ -50,6 +50,26 @@ describe('createMcpServer', () => {
     expect(JSON.stringify(unknownTool)).not.toContain('attacker-value');
   });
 
+  it('preserves safe memory operation classifiers in value-free proxy audits', () => {
+    const rightToForget = summarizeProxyToolArgumentsForAudit({
+      dryRun: true,
+      query: 'private selector',
+    }, 'fbeast_memory_right_to_forget');
+    const reviewDecision = summarizeProxyToolArgumentsForAudit({
+      action: 'approve',
+      note: 'private reviewer note',
+    }, 'fbeast_memory_review_decide');
+    const invalidDecision = summarizeProxyToolArgumentsForAudit({
+      action: 'attacker-controlled',
+    }, 'fbeast_memory_review_decide');
+
+    expect(rightToForget.dryRun).toBe(true);
+    expect(reviewDecision.action).toBe('approve');
+    expect(invalidDecision).not.toHaveProperty('action');
+    expect(JSON.stringify(rightToForget)).not.toContain('private selector');
+    expect(JSON.stringify(reviewDecision)).not.toContain('private reviewer note');
+  });
+
   it('finds execute_tool discriminators without depending on property order', () => {
     const args: Record<string, unknown> = { args: { password: 'private-value' } };
     for (let index = 0; index < 60; index += 1) args[`filler${index}`] = index;
@@ -94,6 +114,29 @@ describe('createMcpServer', () => {
     });
     expect(JSON.stringify(sanitized)).not.toContain('attacker-value');
     expect(JSON.stringify(sanitized)).not.toContain('private-value');
+  });
+
+  it('value-redacts malformed execute_tool envelopes that omit args', () => {
+    const sanitized = sanitizeToolArgumentsForAuditTrail('execute_tool', {
+      tool: 'test_tool',
+      password: 'sk-private-value',
+    });
+
+    expect(sanitized).toMatchObject({
+      tool: 'test_tool',
+      args: { redacted: true },
+      envelope: {
+        redacted: true,
+        summary: {
+          type: 'object',
+          fields: expect.arrayContaining([
+            expect.objectContaining({ name: 'tool' }),
+            expect.objectContaining({ name: '[redacted-key]' }),
+          ]),
+        },
+      },
+    });
+    expect(JSON.stringify(sanitized)).not.toContain('sk-private-value');
   });
 
   it('runs close lifecycle callbacks exactly once', async () => {

@@ -451,24 +451,37 @@ describe('proxy server', () => {
   // server.callTool (the full dispatch path), not the handler directly.
   describe('wrapper-level audit of malformed proxy probes', () => {
     it('audits a validation failure on execute_tool (missing required args)', async () => {
-      const res = await server.callTool('execute_tool', { tool: 'test_tool' }) as { isError?: boolean };
+      const res = await server.callTool('execute_tool', {
+        tool: 'test_tool',
+        password: 'sk-private-value',
+      }) as { isError?: boolean };
       expect(res.isError).toBe(true);
-      expect(auditRecord).toHaveBeenCalledWith({
+      const event = auditRecord.mock.calls[0]![0];
+      expect(event).toMatchObject({
         tool: 'execute_tool',
         ok: false,
         decision: 'validation_error',
-        args: { tool: 'test_tool' },
+        args: {
+          tool: 'test_tool',
+          args: { redacted: true },
+          envelope: { redacted: true },
+        },
       });
+      expect(JSON.stringify(event)).not.toContain('sk-private-value');
     });
 
-    it('audits a non-object payload probe (wraps the raw value)', async () => {
+    it('value-redacts a non-object payload probe', async () => {
       const res = await server.callTool('execute_tool', null) as { isError?: boolean };
       expect(res.isError).toBe(true);
       expect(auditRecord).toHaveBeenCalledWith({
         tool: 'execute_tool',
         ok: false,
         decision: 'validation_error',
-        args: { invalid: null },
+        args: {
+          tool: '[redacted-tool]',
+          args: expect.objectContaining({ redacted: true }),
+          envelope: expect.objectContaining({ redacted: true }),
+        },
       });
     });
 

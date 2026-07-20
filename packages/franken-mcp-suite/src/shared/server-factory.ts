@@ -350,6 +350,7 @@ const PROXY_AUDIT_MAX_SELECTOR_LENGTH = 256;
 const PROXY_AUDIT_SAFE_KEY = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
 const PROXY_AUDIT_SENSITIVE_KEY = /(?:api[-_]?key|authorization|auth[-_]?token|client[-_]?secret|cookie|credential|pass(?:word|wd)|private[-_]?key|secret|token)/i;
 const PROXY_MEMORY_AUDIT_SELECTOR_KEYS = ['agentId', 'profile', 'repo'] as const;
+const PROXY_MEMORY_RIGHT_TO_FORGET_TOOL = 'fbeast_memory_right_to_forget';
 const PROXY_MEMORY_AUDIT_SELECTOR_TOOLS = new Set([
   'fbeast_memory_store',
   'fbeast_memory_query',
@@ -416,18 +417,30 @@ function summarizeProxyAuditValue(value: unknown, depth: number, budget: { remai
 export function summarizeProxyToolArgumentsForAudit(args: unknown, toolName?: string): Record<string, unknown> {
   const summary = summarizeProxyAuditValue(args, 0, { remaining: PROXY_AUDIT_MAX_NODES });
   const sha256 = createHash('sha256').update(JSON.stringify(summary)).digest('hex');
-  const selectors: Record<string, string> = {};
-  if (toolName && PROXY_MEMORY_AUDIT_SELECTOR_TOOLS.has(unqualifyMcpToolName(toolName)) && isObjectLike(args) && isPlainJsonObject(args as Record<string, unknown>)) {
+  const auditMetadata: Record<string, string | boolean> = {};
+  const unqualifiedToolName = toolName ? unqualifyMcpToolName(toolName) : undefined;
+  if (unqualifiedToolName && PROXY_MEMORY_AUDIT_SELECTOR_TOOLS.has(unqualifiedToolName) && isObjectLike(args) && isPlainJsonObject(args as Record<string, unknown>)) {
     for (const key of PROXY_MEMORY_AUDIT_SELECTOR_KEYS) {
       const descriptor = Object.getOwnPropertyDescriptor(args as Record<string, unknown>, key);
       if (!descriptor || !('value' in descriptor) || typeof descriptor.value !== 'string') continue;
       const value = descriptor.value;
-      selectors[key] = value.trim().length > 0 && value.length <= PROXY_AUDIT_MAX_SELECTOR_LENGTH
+      auditMetadata[key] = value.trim().length > 0 && value.length <= PROXY_AUDIT_MAX_SELECTOR_LENGTH
         ? value
         : '[redacted-selector]';
     }
+    const dryRunDescriptor = Object.getOwnPropertyDescriptor(args as Record<string, unknown>, 'dryRun');
+    if (unqualifiedToolName === PROXY_MEMORY_RIGHT_TO_FORGET_TOOL
+      && dryRunDescriptor && 'value' in dryRunDescriptor && typeof dryRunDescriptor.value === 'boolean') {
+      auditMetadata['dryRun'] = dryRunDescriptor.value;
+    }
+    const actionDescriptor = Object.getOwnPropertyDescriptor(args as Record<string, unknown>, 'action');
+    if (unqualifiedToolName === MEMORY_REVIEW_DECIDE_TOOL
+      && actionDescriptor && 'value' in actionDescriptor && typeof actionDescriptor.value === 'string'
+      && MEMORY_REVIEW_DECIDE_SAFE_ACTIONS.has(actionDescriptor.value)) {
+      auditMetadata['action'] = actionDescriptor.value;
+    }
   }
-  return { ...selectors, redacted: true, summary, sha256 };
+  return { ...auditMetadata, redacted: true, summary, sha256 };
 }
 
 const RIGHT_TO_FORGET_SELECTOR_KEYS = new Set(['key', 'category', 'sourceScope', 'query']);
@@ -814,21 +827,20 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
   const unqualifiedToolName = unqualifyMcpToolName(toolName);
   if (unqualifiedToolName === 'execute_tool' && isObjectLike(args) && isPlainJsonObject(args)) {
     const argsDescriptor = Object.getOwnPropertyDescriptor(args, 'args');
-    if (argsDescriptor) {
-      const toolDescriptor = Object.getOwnPropertyDescriptor(args, 'tool');
-      const rawTool = toolDescriptor && 'value' in toolDescriptor ? toolDescriptor.value : undefined;
-      const boundedTool = typeof rawTool === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(rawTool)
-        ? rawTool
-        : '[redacted-tool]';
-      const rawArgs = 'value' in argsDescriptor ? argsDescriptor.value : '[accessor]';
-      const unqualifiedProxiedToolName = unqualifyMcpToolName(boundedTool);
-      if (!PROXY_TOOLS_WITH_VALUE_SAFE_AUDIT_REDACTION.has(unqualifiedProxiedToolName)) {
-        return {
-          tool: boundedTool,
-          args: summarizeProxyToolArgumentsForAudit(rawArgs, boundedTool),
-          envelope: summarizeProxyToolArgumentsForAudit(args),
-        };
-      }
+    const toolDescriptor = Object.getOwnPropertyDescriptor(args, 'tool');
+    const rawTool = toolDescriptor && 'value' in toolDescriptor ? toolDescriptor.value : undefined;
+    const boundedTool = typeof rawTool === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(rawTool)
+      ? rawTool
+      : '[redacted-tool]';
+    const rawArgs = argsDescriptor && 'value' in argsDescriptor ? argsDescriptor.value : undefined;
+    const unqualifiedProxiedToolName = unqualifyMcpToolName(boundedTool);
+    const usesSpecializedValueSafeRedaction = PROXY_TOOLS_WITH_VALUE_SAFE_AUDIT_REDACTION.has(unqualifiedProxiedToolName);
+    if (!usesSpecializedValueSafeRedaction) {
+      return {
+        tool: boundedTool,
+        args: summarizeProxyToolArgumentsForAudit(rawArgs, boundedTool),
+        envelope: summarizeProxyToolArgumentsForAudit(args),
+      };
     }
   }
   const sanitized = sanitizeToolArgumentsForAudit(args);
