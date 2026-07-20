@@ -29,6 +29,18 @@ describe('TelegramAdapter', () => {
     );
   });
 
+  it('rejects missing chat routing metadata without calling Telegram', async () => {
+    const adapter = new TelegramAdapter({ token: 'bot-token' });
+    const mockFetch = vi.mocked(fetch);
+
+    await expect(adapter.send('session-123', {
+      text: 'hello telegram',
+      status: 'reply',
+    })).rejects.toThrow('Telegram routing error: missing chatId metadata');
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   it('formats inline keyboards for approvals', async () => {
     const adapter = new TelegramAdapter({ token: 'bot-token' });
     const mockFetch = vi.mocked(fetch);
