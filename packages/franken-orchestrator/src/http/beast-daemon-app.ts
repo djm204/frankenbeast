@@ -221,6 +221,7 @@ export function createBeastDaemonApp(options: BeastDaemonAppOptions): Hono {
         id: agent.id,
         definitionId: agent.definitionId,
         status: agent.status,
+        createdAt: agent.createdAt,
         updatedAt: agent.updatedAt,
       })),
     }),

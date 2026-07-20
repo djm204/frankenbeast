@@ -293,6 +293,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
           id: a.id,
           definitionId: a.definitionId,
           status: a.status,
+          createdAt: a.createdAt,
           updatedAt: a.updatedAt,
         })),
       }),

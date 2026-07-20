@@ -1525,12 +1525,14 @@ describe('ChatShell', () => {
     expect(mockListAgentPage).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      latestBeastEventHandlers?.agentEvent?.({
-        agentId: 'new-agent-on-first-page',
-        event: {
-          id: 'created-event', sequence: 1, level: 'info', type: 'agent.created',
-          message: 'Tracked agent created', payload: {}, createdAt: '2026-03-12T00:00:00.000Z',
-        },
+      latestBeastEventHandlers?.snapshot?.({
+        agents: [{
+          id: 'new-agent-on-first-page',
+          definitionId: 'chunk-plan',
+          status: 'dispatching',
+          createdAt: '2026-03-12T00:00:00.000Z',
+          updatedAt: '2026-03-12T00:00:00.000Z',
+        }],
       });
     });
     await waitFor(() => expect(mockListAgentPage).toHaveBeenCalledTimes(2));
