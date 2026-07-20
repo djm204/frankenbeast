@@ -1727,19 +1727,23 @@ class SqliteWorkingMemory implements IWorkingMemory {
     // miss externally added keys because deletedKeys would be seeded from a
     // stale cache.
     const requestedDeletedKeys = new Set(this.deletedKeys);
+    const requestedDirtyKeys = new Set(this.dirtyKeys);
     this.loadPersistedSerializedFromDb();
     const preparedStore = new Map(this.store);
 
-    // Incremental writers must absorb rows committed by other connections
-    // after this instance was hydrated. Only clear()/restore() intentionally
-    // make this instance's complete in-memory state authoritative.
+    // Incremental writers preserve only locally changed keys. Clean cached keys
+    // are refreshed from the current persisted snapshot so a stale instance
+    // cannot overwrite another connection's update or resurrect its deletion.
     if (!this.replacePersistedState) {
+      for (const key of preparedStore.keys()) {
+        if (requestedDirtyKeys.has(key) || requestedDeletedKeys.has(key)) continue;
+        if (!this.persistedSerialized.has(key)) preparedStore.delete(key);
+      }
       for (const [key, serialized] of this.persistedSerialized) {
-        if (preparedStore.has(key) || requestedDeletedKeys.has(key)) continue;
+        if (requestedDirtyKeys.has(key) || requestedDeletedKeys.has(key)) continue;
         const value = parseHydratedWorkingMemoryValue(key, serialized);
-        if (!isExpiredWorkingMemoryValue(value)) {
-          preparedStore.set(key, value);
-        }
+        if (isExpiredWorkingMemoryValue(value)) preparedStore.delete(key);
+        else preparedStore.set(key, value);
       }
     }
 

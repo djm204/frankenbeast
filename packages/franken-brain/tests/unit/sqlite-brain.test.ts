@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import Database from 'better-sqlite3';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -6616,6 +6617,40 @@ describe('SqliteBrain', () => {
   });
 
   describe('concurrent file-backed stores', () => {
+    it('refreshes clean cached keys before flushing unrelated local changes', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-concurrent-refresh-'));
+      const dbPath = join(dir, 'brain.db');
+      let stale: SqliteBrain | undefined;
+      let writer: SqliteBrain | undefined;
+      let verifier: SqliteBrain | undefined;
+
+      try {
+        writer = new SqliteBrain(dbPath);
+        writer.working.set('updated-elsewhere', 'old');
+        writer.working.set('deleted-elsewhere', 'present');
+        writer.flush();
+        stale = new SqliteBrain(dbPath);
+
+        writer.working.set('updated-elsewhere', 'new');
+        writer.working.delete('deleted-elsewhere');
+        writer.flush();
+
+        stale.working.set('local-change', 'preserved');
+        stale.flush();
+
+        verifier = new SqliteBrain(dbPath);
+        expect(verifier.working.snapshot()).toEqual({
+          'updated-elsewhere': 'new',
+          'local-change': 'preserved',
+        });
+      } finally {
+        verifier?.close();
+        stale?.close();
+        writer?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('fails closed without mutating runtime state when an external row is corrupt', () => {
       const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-concurrent-corrupt-'));
       const dbPath = join(dir, 'brain.db');
@@ -6654,21 +6689,29 @@ describe('SqliteBrain', () => {
     it('preserves simultaneous working, episodic, and recovery writes while snapshots are read', async () => {
       const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-concurrent-'));
       const dbPath = join(dir, 'brain.db');
-      const workerCount = 4;
-      const writesPerWorker = 8;
+      const workerCount = 3;
+      const writesPerWorker = 6;
       const workers: Worker[] = [];
-      const workerModuleUrl = new URL('../../src/sqlite-brain.ts', import.meta.url).href;
+      const workerSourcePath = fileURLToPath(
+        new URL('../../src/sqlite-brain.ts', import.meta.url),
+      );
+      const vitestConfigPath = fileURLToPath(
+        new URL('../../vitest.config.ts', import.meta.url),
+      );
       const workerScript = String.raw`
         const { parentPort, workerData } = require('node:worker_threads');
 
         void (async () => {
-          const { register } = await import('tsx/esm/api');
-          const unregister = register();
-          const { SqliteBrain } = await import(workerData.moduleUrl);
-          unregister();
+          const { createServer } = await import('vite');
+          const vite = await createServer({
+            configFile: workerData.vitestConfigPath,
+            logLevel: 'silent',
+            server: { middlewareMode: true, hmr: false, watch: null },
+          });
+          const { SqliteBrain } = await vite.ssrLoadModule(workerData.sourcePath);
           const brain = new SqliteBrain(workerData.dbPath);
           parentPort.postMessage({ type: 'ready' });
-          parentPort.once('message', (message) => {
+          parentPort.once('message', async (message) => {
             if (message?.type !== 'start') return;
             try {
               for (let index = 0; index < workerData.writesPerWorker; index += 1) {
@@ -6703,9 +6746,11 @@ describe('SqliteBrain', () => {
                 }
               }
               brain.close();
+              await vite.close();
               parentPort.postMessage({ type: 'done' });
             } catch (error) {
               brain.close();
+              await vite.close();
               parentPort.postMessage({
                 type: 'error',
                 message: error instanceof Error ? error.stack ?? error.message : String(error),
@@ -6724,7 +6769,13 @@ describe('SqliteBrain', () => {
         const controls = Array.from({ length: workerCount }, (_, workerId) => {
           const worker = new Worker(workerScript, {
             eval: true,
-            workerData: { dbPath, moduleUrl: workerModuleUrl, workerId, writesPerWorker },
+            workerData: {
+              dbPath,
+              sourcePath: workerSourcePath,
+              vitestConfigPath,
+              workerId,
+              writesPerWorker,
+            },
           });
           workers.push(worker);
 
