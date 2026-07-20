@@ -6,6 +6,9 @@
 ## 2026-07-21 — Dashboard chat model precedence
 - For conversational dashboard replies, the selected provider's `providers.overrides.<provider>.model` wins over `chat.model`; `chat.model` only replaces the provider's built-in chat model when no selected-provider model override exists. Dashboard `/run` uses a separate execution adapter that ignores both model settings and provider `extraArgs`, although it does apply trusted command overrides. Trace both adapter construction paths and runtime provider override resolution before documenting dashboard behavior.
 
+## 2026-07-20 — Episodic JSON quarantine reads
+- When an optional persisted JSON payload is corrupt, preserve the valid row envelope and replace only that payload with explicit quarantine metadata; thread the row id into read-audit diagnostics across every query path, including nested empty-query and encrypted scans, so operators can repair the exact record without losing timeline evidence.
+
 ## 2026-07-20 — Outbound request deadlines must include response consumption
 - JavaScript `fetch()` resolves when response headers arrive, not when the body has been consumed. A hard outbound-delivery deadline must wrap both the fetch and all body/error parsing under the same abort signal and timer; otherwise a provider can send headers and stall forever during `json()` or `text()`.
 - In fresh monorepo worktrees, run the root build before package-local TypeScript checks so internal workspace declaration outputs exist and unrelated module-resolution errors do not mask the feature result.
