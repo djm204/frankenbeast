@@ -18,6 +18,7 @@ import {
   validateBody,
 } from '../middleware.js';
 import { TransportSecurityService } from '../security/transport-security.js';
+import { assertSafeJsonValue, SafeJsonParseError } from '../../utils/safe-json.js';
 import type { BeastRun, TrackedAgent, TrackedAgentEvent } from '../../beasts/types.js';
 import {
   DEFAULT_TRACKED_AGENT_PAGE_LIMIT,
@@ -35,15 +36,55 @@ const ModuleConfigSchema = z.object({
   heartbeat: z.boolean().optional(),
 }).strict();
 
+// Max length for an init-action command string (#3214). Real dashboard/chat
+// commands are short prompts or CLI invocations (well under 1 KiB); 8 KiB is
+// generous headroom while still bounding stored agent records.
+const AGENT_CREATE_COMMAND_MAX_LENGTH = 8 * 1024;
+
+// Size/depth bounds for the free-form `initAction.config` and `initConfig`
+// records (#3214), enforced via the shared safe-json helper. Real dashboard
+// payloads are shallow (<=4 nesting levels) with tens of keys/array items;
+// these caps are deliberately generous. Note maxObjectKeys/maxArrayItems are
+// cumulative across the whole record tree (see assertSafeJsonValue).
+const AGENT_CONFIG_MAX_DEPTH = 16;
+const AGENT_CONFIG_MAX_CONTAINERS = 1024;
+const AGENT_CONFIG_MAX_OBJECT_KEYS = 512;
+const AGENT_CONFIG_MAX_ARRAY_ITEMS = 1024;
+
+// Raw request-body cap for the agent-creation route (#3214). A realistic
+// creation payload is a few KB; 64 KiB leaves ample headroom. This sits below
+// the coarser BEAST_CONTROL_MAX_BODY_SIZE (1 MiB) applied to all agent routes.
+const AGENT_CREATE_MAX_BODY_SIZE = 64 * 1024;
+
+function boundedConfigRecord(context: string) {
+  return z.record(z.string(), z.unknown()).superRefine((value, ctx) => {
+    try {
+      assertSafeJsonValue(value, {
+        context,
+        maxDepth: AGENT_CONFIG_MAX_DEPTH,
+        maxContainers: AGENT_CONFIG_MAX_CONTAINERS,
+        maxObjectKeys: AGENT_CONFIG_MAX_OBJECT_KEYS,
+        maxArrayItems: AGENT_CONFIG_MAX_ARRAY_ITEMS,
+      });
+    } catch (error) {
+      if (error instanceof SafeJsonParseError) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: error.message });
+        return;
+      }
+      throw error;
+    }
+  });
+}
+
 const CreateAgentBody = z.object({
   definitionId: z.string().min(1),
   initAction: z.object({
     kind: z.enum(['design-interview', 'chunk-plan', 'martin-loop']),
-    command: z.string().min(1),
-    config: z.record(z.string(), z.unknown()),
+    command: z.string().min(1).max(AGENT_CREATE_COMMAND_MAX_LENGTH),
+    config: boundedConfigRecord('initAction.config'),
     chatSessionId: z.string().min(1).optional(),
   }).strict(),
-  initConfig: z.record(z.string(), z.unknown()),
+  initConfig: boundedConfigRecord('initConfig'),
   chatSessionId: z.string().min(1).optional(),
   moduleConfig: ModuleConfigSchema.optional(),
   executionMode: z.enum(['process', 'container']).optional(),
@@ -114,7 +155,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
     app.use('/v1/beasts/agents/*', rateLimit);
   }
 
-  app.post('/v1/beasts/agents', async (c) => {
+  app.post('/v1/beasts/agents', requestSizeLimit(AGENT_CREATE_MAX_BODY_SIZE), async (c) => {
     const body = validateBody(CreateAgentBody, await parseJsonBody(c));
     const actionPolicyConfig = pickAgentToolPolicyConfig(body.initAction.config);
     const hasExplicitToolManifest = AGENT_TOOL_MANIFEST_KEYS.some(
