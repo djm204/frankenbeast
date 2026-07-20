@@ -111,16 +111,63 @@ export function StepWorkflow({ catalog, containerRuntime }: StepWorkflowProps) {
       </fieldset>
 
       {selectedWorkflow && (
-        <div className="space-y-4">
-          {selectedWorkflow.interviewPrompts.map((prompt) => (
+        <InterviewTranscript
+          prompts={selectedWorkflow.interviewPrompts}
+          getValue={(prompt) => getPromptValue(values, prompt)}
+          onChange={(key, value) => updateField(key, value)}
+        />
+      )}
+    </div>
+  );
+}
+
+function isPromptAnswered(prompt: BeastInterviewPrompt, value: unknown): boolean {
+  if (prompt.kind === 'boolean') return true;
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+/**
+ * Interview prompts presented as a conversational transcript: each question is
+ * an interviewer turn, and the next question is revealed once the previous
+ * required one is answered. Earlier answers stay rendered and editable, so the
+ * underlying labeled controls (and wizard validation) are unchanged.
+ */
+function InterviewTranscript({
+  prompts,
+  getValue,
+  onChange,
+}: {
+  prompts: readonly BeastInterviewPrompt[];
+  getValue: (prompt: BeastInterviewPrompt) => unknown;
+  onChange: (key: string, value: string | boolean) => void;
+}) {
+  const firstBlocking = prompts.findIndex((prompt) => prompt.required && !isPromptAnswered(prompt, getValue(prompt)));
+  const visible = firstBlocking === -1 ? prompts : prompts.slice(0, firstBlocking + 1);
+  const remaining = prompts.length - visible.length;
+
+  return (
+    <div className="interview-transcript" role="group" aria-label="Beast interview">
+      {visible.map((prompt, index) => {
+        const value = getValue(prompt);
+        const answered = isPromptAnswered(prompt, value) && (index < visible.length - 1 || firstBlocking === -1);
+        return (
+          <div
+            key={prompt.key}
+            className={`interview-turn ${answered ? 'interview-turn--answered' : 'interview-turn--active'}`}
+            data-step={`${index + 1}/${prompts.length}`}
+          >
             <CatalogPromptField
-              key={prompt.key}
               prompt={prompt}
-              value={getPromptValue(values, prompt)}
-              onChange={(value) => updateField(prompt.key, value)}
+              value={value}
+              onChange={(next) => onChange(prompt.key, next)}
             />
-          ))}
-        </div>
+          </div>
+        );
+      })}
+      {remaining > 0 && (
+        <p className="interview-transcript__pending">
+          {remaining} more question{remaining === 1 ? '' : 's'} after this one
+        </p>
       )}
     </div>
   );
