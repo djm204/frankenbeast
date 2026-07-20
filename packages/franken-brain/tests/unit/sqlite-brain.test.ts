@@ -5550,15 +5550,41 @@ describe('SqliteBrain', () => {
         encrypted.flush();
         encrypted.close();
 
+        const dropEpisodicIndexes = () => {
+          const db = new Database(dbPath);
+          db.exec(`
+            DROP INDEX IF EXISTS idx_episodic_events_type_created_at;
+            DROP INDEX IF EXISTS idx_episodic_events_created_at;
+          `);
+          db.close();
+        };
+        const expectEpisodicIndexesMissing = () => {
+          const db = new Database(dbPath, { readonly: true });
+          expect(
+            db
+              .prepare(
+                `SELECT name FROM sqlite_master
+                 WHERE type = 'index' AND name LIKE 'idx_episodic_events_%'`,
+              )
+              .all(),
+          ).toEqual([]);
+          db.close();
+        };
+
+        dropEpisodicIndexes();
         expect(() => new SqliteBrain(dbPath)).toThrow(
           MemoryEncryptionRequiredError,
         );
+        expectEpisodicIndexesMissing();
+
+        dropEpisodicIndexes();
         expect(
           () =>
             new SqliteBrain(dbPath, undefined, {
               encryption: { enabled: true, key: 'wrong key' },
             }),
         ).toThrow(MemoryEncryptionWrongKeyError);
+        expectEpisodicIndexesMissing();
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

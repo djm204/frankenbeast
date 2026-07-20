@@ -31,6 +31,66 @@ const readQueryPlan = (db: Database.Database, sql: string): string[] =>
   );
 
 describe('state schema migration smoke tests', () => {
+  it('backs up and creates missing episodic indexes on an otherwise current database', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'franken-state-episodic-index-migration-'));
+    const dbPath = join(dir, 'brain.db');
+    const backupPath = join(dir, 'brain.backup.db');
+
+    try {
+      new SqliteBrain(dbPath).close();
+      const withoutIndexes = new Database(dbPath);
+      withoutIndexes.exec(`
+        DROP INDEX idx_episodic_events_type_created_at;
+        DROP INDEX idx_episodic_events_created_at;
+      `);
+      withoutIndexes.close();
+
+      const migrated = SqliteBrain.migrateMemorySchema(dbPath, {
+        backupBeforeMigrate: true,
+        backupPath,
+      });
+
+      expect(migrated.migrated).toBe(true);
+      expect(migrated.backupPath).toBe(backupPath);
+      expect(migrated.operations).toEqual(
+        expect.arrayContaining([
+          {
+            table: 'episodic_events',
+            action: 'create type and recency query indexes',
+          },
+        ]),
+      );
+      const backup = new Database(backupPath, { readonly: true });
+      expect(
+        backup
+          .prepare(
+            `SELECT name FROM sqlite_master
+             WHERE type = 'index' AND name LIKE 'idx_episodic_events_%'`,
+          )
+          .all(),
+      ).toEqual([]);
+      backup.close();
+
+      const indexed = new Database(dbPath, { readonly: true });
+      expect(
+        readQueryPlan(
+          indexed,
+          `SELECT * FROM episodic_events WHERE type = 'failure'
+           ORDER BY created_at DESC LIMIT 10 OFFSET 0`,
+        ).join('\n'),
+      ).toContain('USING INDEX idx_episodic_events_type_created_at');
+      expect(
+        readQueryPlan(
+          indexed,
+          `SELECT * FROM episodic_events ORDER BY created_at DESC LIMIT 10 OFFSET 0`,
+        ).join('\n'),
+      ).toContain('USING INDEX idx_episodic_events_created_at');
+      indexed.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('idempotently indexes episodic hot-path queries for existing databases', () => {
     const dir = mkdtempSync(join(tmpdir(), 'franken-state-episodic-indexes-'));
     const dbPath = join(dir, 'brain.db');
