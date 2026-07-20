@@ -118,28 +118,42 @@ export class Planner {
 
       Planner.recordCompletedTasks(result.taskResults, completedTaskIds, completedTaskResults);
 
-      // result.status === 'failed' — attempt recovery
-      const failedTaskLineage = Planner.getRecoveryLineageRoot(result.failedTaskId);
-      const attempt = (recoveryAttemptsByTask.get(failedTaskLineage) ?? 0) + 1;
-      try {
-        const recoveryGraph = result.recoveryGraph ?? currentGraph;
-        currentGraph = await this.recovery.recover(
-          result.failedTaskId,
-          result.error,
-          recoveryGraph,
-          attempt
-        );
-        recoveryContinuationGraphs.unshift(...(result.recoveryContinuationGraphs ?? []));
-        recoveryAttemptsByTask.set(failedTaskLineage, attempt);
-      } catch (recoveryErr) {
-        if (
-          recoveryErr instanceof MaxRecoveryAttemptsError ||
-          recoveryErr instanceof UnknownErrorEscalatedError
-        ) {
-          return Planner.mergeCompletedIntoFailedResult(result, completedTaskResults);
+      // result.status === 'failed' — inject recovery for every independent
+      // failure reported from the same execution wave before retrying the graph.
+      // Strategies that omit recoveryFailures retain the historical single-
+      // failure behavior.
+      const recoveryFailures = result.recoveryFailures ?? [
+        { status: 'failure' as const, taskId: result.failedTaskId, error: result.error },
+      ];
+      let recoveredGraph = result.recoveryGraph ?? currentGraph;
+
+      for (const failure of recoveryFailures) {
+        const failedTaskLineage = Planner.getRecoveryLineageRoot(failure.taskId);
+        const attempt = (recoveryAttemptsByTask.get(failedTaskLineage) ?? 0) + 1;
+        try {
+          recoveredGraph = await this.recovery.recover(
+            failure.taskId,
+            failure.error,
+            recoveredGraph,
+            attempt
+          );
+          recoveryAttemptsByTask.set(failedTaskLineage, attempt);
+        } catch (recoveryErr) {
+          if (
+            recoveryErr instanceof MaxRecoveryAttemptsError ||
+            recoveryErr instanceof UnknownErrorEscalatedError
+          ) {
+            return Planner.mergeCompletedIntoFailedResult(
+              { ...result, failedTaskId: failure.taskId, error: failure.error },
+              completedTaskResults
+            );
+          }
+          throw recoveryErr;
         }
-        throw recoveryErr;
       }
+
+      currentGraph = recoveredGraph;
+      recoveryContinuationGraphs.unshift(...(result.recoveryContinuationGraphs ?? []));
     }
   }
 
