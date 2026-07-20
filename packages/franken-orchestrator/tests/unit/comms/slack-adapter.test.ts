@@ -43,7 +43,7 @@ describe('SlackAdapter', () => {
     await adapter.send('session-123', {
       text: 'hello',
       status: 'reply',
-      metadata: { channelId: 'C1' },
+      metadata: { channelId: ' C1 ', threadTs: '1712345678.000100' },
     });
 
     expect(mockFetch).toHaveBeenCalledWith(
@@ -53,7 +53,47 @@ describe('SlackAdapter', () => {
         body: expect.stringContaining('"text":"hello"'),
       })
     );
+    const body = JSON.parse(mockFetch.mock.calls[0]![1]!.body as string) as {
+      channel: string;
+      thread_ts: string;
+    };
+    expect(body.channel).toBe('C1');
+    expect(body.thread_ts).toBe('1712345678.000100');
   });
+
+  it.each([
+    { name: 'reply', message: { text: 'hello', status: 'reply' as const } },
+    {
+      name: 'approval',
+      message: {
+        text: 'approve?',
+        status: 'approval' as const,
+        actions: [{ id: 'approve', label: 'Approve' }],
+      },
+    },
+  ])('rejects $name messages without channelId before calling Slack', async ({ message }) => {
+    const mockFetch = vi.fn<typeof fetch>();
+    const adapter = new SlackAdapter({ token: TEST_SLACK_BOT_TOKEN, fetchImpl: mockFetch });
+
+    await expect(adapter.send('session-123', message)).rejects.toThrow(
+      'Slack routing error: missing channelId metadata',
+    );
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, null, 42, '', '   '])(
+    'rejects invalid channelId metadata value %j before calling Slack',
+    async (channelId) => {
+      const mockFetch = vi.fn<typeof fetch>();
+      const adapter = new SlackAdapter({ token: TEST_SLACK_BOT_TOKEN, fetchImpl: mockFetch });
+
+      await expect(adapter.send('session-123', {
+        text: 'hello',
+        metadata: { channelId },
+      })).rejects.toThrow('Slack routing error: missing channelId metadata');
+      expect(mockFetch).not.toHaveBeenCalled();
+    },
+  );
 
   it('formats buttons correctly in blocks', async () => {
     const adapter = new SlackAdapter({ token: TEST_SLACK_BOT_TOKEN });
