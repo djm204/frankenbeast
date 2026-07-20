@@ -57,7 +57,12 @@ export async function resolveManagedChatAttachment(
   const baseUrl = stateUrl
     ? assertLocalPlaintextOrSecureHttpUrl(stateUrl, 'Persisted chat-server URL')
     : localPlaintextOrSecureEndpoint(options.config.chat.host, options.config.chat.port);
-  const healthResponse = await fetchImpl(`${baseUrl}/health`);
+  let healthResponse: Response;
+  try {
+    healthResponse = await fetchImpl(`${baseUrl}/health`);
+  } catch {
+    return undefined;
+  }
   if (!healthResponse.ok) {
     return undefined;
   }

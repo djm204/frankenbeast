@@ -193,6 +193,45 @@ describe('BatchAdapter — buffering', () => {
 // ── drain() ───────────────────────────────────────────────────────────────────
 
 describe('BatchAdapter — drain()', () => {
+  it('uses the inner adapter bulk flush capability once per drain', async () => {
+    const flush = vi.fn(async () => undefined)
+    const flushBatch = vi.fn(async () => undefined)
+    const inner: ExportAdapter = {
+      flush,
+      flushBatch,
+      async queryByTraceId() { return null },
+      async listTraceIds() { return [] },
+    }
+    const batch = new BatchAdapter({ adapter: inner, maxBatchSize: 100 })
+    const first = makeTrace('bulk-a')
+    const second = makeTrace('bulk-b')
+
+    await batch.flush(first)
+    await batch.flush(second)
+    await batch.drain()
+
+    expect(flushBatch).toHaveBeenCalledOnce()
+    expect(flushBatch).toHaveBeenCalledWith([first, second])
+    expect(flush).not.toHaveBeenCalled()
+    expect(await batch.listTraceIds()).toEqual([])
+  })
+
+  it('retains the entire batch when an atomic bulk flush fails', async () => {
+    const traces = [makeTrace('bulk-fail-a'), makeTrace('bulk-fail-b')]
+    const inner: ExportAdapter = {
+      async flush() { throw new Error('individual flush should not run') },
+      async flushBatch() { throw new Error('batch transaction rolled back') },
+      async queryByTraceId() { return null },
+      async listTraceIds() { return [] },
+    }
+    const batch = new BatchAdapter({ adapter: inner, maxBatchSize: 100 })
+
+    for (const trace of traces) await batch.flush(trace)
+
+    await expect(batch.drain()).rejects.toThrow('batch transaction rolled back')
+    expect((await batch.listTraceIds()).sort()).toEqual(['bulk-fail-a', 'bulk-fail-b'])
+  })
+
   it('flushes all buffered traces to the inner adapter', async () => {
     const inner = new InMemoryAdapter()
     const batch = new BatchAdapter({ adapter: inner, maxBatchSize: 100 })
@@ -323,6 +362,30 @@ describe('BatchAdapter — drain()', () => {
     oldFailure.reject(new Error('old batch failed'))
     await expect(oldFlush).rejects.toThrow('old batch failed')
     await expect(newFlush).resolves.toBeUndefined()
+    expect(await batch.listTraceIds()).toEqual(['old'])
+  })
+
+  it('does not include stale bulk failures in a new size-triggered flush', async () => {
+    const oldFailure = deferred()
+    const calls: string[][] = []
+    const inner: ExportAdapter = {
+      async flush() { throw new Error('individual flush should not run') },
+      async flushBatch(traces) {
+        calls.push(traces.map(trace => trace.id))
+        if (traces.some(trace => trace.id === 'old')) return oldFailure.promise
+      },
+      async queryByTraceId() { return null },
+      async listTraceIds() { return [] },
+    }
+    const batch = new BatchAdapter({ adapter: inner, maxBatchSize: 1 })
+
+    const oldFlush = batch.flush(makeTrace('old'))
+    const newFlush = batch.flush(makeTrace('new'))
+
+    oldFailure.reject(new Error('old batch failed'))
+    await expect(oldFlush).rejects.toThrow('old batch failed')
+    await expect(newFlush).resolves.toBeUndefined()
+    expect(calls).toEqual([['old'], ['new']])
     expect(await batch.listTraceIds()).toEqual(['old'])
   })
 

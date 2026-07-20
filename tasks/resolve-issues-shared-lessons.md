@@ -1,5 +1,13 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-20 — Bounded Beast event paging through corrupt rows
+- Recovery pagination must bound raw rows scanned, not only healthy rows returned. Return the last scanned raw sequence plus an indexed `hasMore` probe so a short or empty page can advance past corrupt rows without turning one request into a full-history scan.
+- Before wiring a new paginated endpoint into dashboard hydration, trace which detail field the UI actually renders. Do not eagerly collect every page for an unused compatibility field; keep the bounded endpoint available for intentional consumers and preserve fast detail loading.
+
+## 2026-07-19 — Bounded Beast log paging
+- A tail endpoint is not operationally bounded if it collects a bounded result after scanning all retained history. Read newest rotations in reverse chunks and stop as soon as the line or byte budget is full; also restrict page reads to configured retention so stale extra rotations cannot re-expand request I/O.
+- Treat oversized individual records as consumed pagination entries even when replacing or omitting their payload, or offset clients can become stuck on the same line. For HTTP byte limits, measure the final post-redaction JSON envelope (logs plus page metadata), not only the serialized logs array.
+
 ## 2026-07-19 — MCP integer precision validation
 - JSON-schema `integer` checks at JavaScript transport boundaries must use `Number.isSafeInteger`, not `Number.isInteger`: integral-valued numbers beyond `Number.MAX_SAFE_INTEGER` can no longer represent exact IDs, limits, or pagination values. Cover both accepted safe boundaries and rejected values immediately outside them.
 

@@ -29,6 +29,11 @@ describe('CodexProvider', () => {
     expect(args).not.toContain('--full-auto');
   });
 
+  it('buildArgs allows chat prompts from the isolated non-repository working directory', () => {
+    const args = provider.buildArgs({ chatMode: true });
+    expect(args).toContain('--skip-git-repo-check');
+  });
+
   it('buildArgs includes --color never', () => {
     const args = provider.buildArgs({});
     const idx = args.indexOf('--color');

@@ -251,6 +251,17 @@ function decodeTrackedAgentCursor(value: string): TrackedAgentPageCursor {
   }
 }
 
+export interface ListBeastRunEventsOptions extends CorruptJsonRecoveryOptions {
+  readonly afterSequence?: number;
+  readonly limit?: number;
+}
+
+export interface BeastRunEventScanPage {
+  readonly events: BeastRunEvent[];
+  readonly scannedThroughSequence: number;
+  readonly hasMoreRows: boolean;
+}
+
 export interface BeastRunProcessReference {
   readonly id: string;
   readonly trackedAgentId?: string | undefined;
@@ -531,11 +542,52 @@ export class SQLiteBeastRepository {
     return event;
   }
 
-  listEvents(runId: string, options: CorruptJsonRecoveryOptions = {}): BeastRunEvent[] {
-    const rows = this.db.prepare(
-      'SELECT * FROM beast_run_events WHERE run_id = ? ORDER BY sequence ASC',
-    ).all(runId) as BeastEventRow[];
+  listEvents(runId: string, options: ListBeastRunEventsOptions = {}): BeastRunEvent[] {
+    if (options.afterSequence !== undefined
+      && (!Number.isSafeInteger(options.afterSequence) || options.afterSequence < 0)) {
+      throw new RangeError('afterSequence must be a non-negative safe integer');
+    }
+    if (options.limit !== undefined
+      && (!Number.isSafeInteger(options.limit) || options.limit < 1)) {
+      throw new RangeError('limit must be a positive safe integer');
+    }
+    const clauses = ['run_id = ?'];
+    const parameters: Array<string | number> = [runId];
+    if (options.afterSequence !== undefined) {
+      clauses.push('sequence > ?');
+      parameters.push(options.afterSequence);
+    }
+    let sql = `SELECT * FROM beast_run_events WHERE ${clauses.join(' AND ')} ORDER BY sequence ASC`;
+    if (options.limit !== undefined) {
+      sql += ' LIMIT ?';
+      parameters.push(options.limit);
+    }
+    const rows = this.db.prepare(sql).all(...parameters) as BeastEventRow[];
     return mapRowsRecoveringCorruptJson(rows, mapEvent, options);
+  }
+
+  scanEventPage(
+    runId: string,
+    options: CorruptJsonRecoveryOptions & { readonly afterSequence: number; readonly limit: number },
+  ): BeastRunEventScanPage {
+    if (!Number.isSafeInteger(options.afterSequence) || options.afterSequence < 0) {
+      throw new RangeError('afterSequence must be a non-negative safe integer');
+    }
+    if (!Number.isSafeInteger(options.limit) || options.limit < 1) {
+      throw new RangeError('limit must be a positive safe integer');
+    }
+    const rows = this.db.prepare(
+      'SELECT * FROM beast_run_events WHERE run_id = ? AND sequence > ? ORDER BY sequence ASC LIMIT ?',
+    ).all(runId, options.afterSequence, options.limit) as BeastEventRow[];
+    const scannedThroughSequence = rows.at(-1)?.sequence ?? options.afterSequence;
+    const hasMoreRows = rows.length === options.limit && this.db.prepare(
+      'SELECT 1 FROM beast_run_events WHERE run_id = ? AND sequence > ? LIMIT 1',
+    ).get(runId, scannedThroughSequence) !== undefined;
+    return {
+      events: mapRowsRecoveringCorruptJson(rows, mapEvent, options),
+      scannedThroughSequence,
+      hasMoreRows,
+    };
   }
 
   createTrackedAgent(input: CreateTrackedAgentInput): TrackedAgent {

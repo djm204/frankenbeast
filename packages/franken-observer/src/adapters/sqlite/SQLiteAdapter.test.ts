@@ -141,6 +141,55 @@ describe('SQLiteAdapter', () => {
     expect(upsertSpanRun).toHaveBeenCalledWith(expect.objectContaining({ metadata: '{}' }))
   })
 
+  it('flushes a batch in one SQLite transaction', async () => {
+    const upsertTraceRun = vi.fn()
+    const upsertSpanRun = vi.fn()
+    prepareMock
+      .mockReturnValueOnce({ run: upsertTraceRun })
+      .mockReturnValueOnce({ run: upsertSpanRun })
+    transactionMock.mockImplementation(fn => (traces: unknown) => fn(traces))
+
+    const adapter = new SQLiteAdapter('/tmp/traces.db')
+    const first = TraceContext.createTrace('first')
+    const second = TraceContext.createTrace('second')
+
+    await adapter.flushBatch([first, second])
+
+    expect(transactionMock).toHaveBeenCalledOnce()
+    expect(upsertTraceRun).toHaveBeenCalledTimes(2)
+    expect(upsertTraceRun.mock.calls.map(call => call[0].goal)).toEqual(['first', 'second'])
+  })
+
+  it('persists the last duplicate span snapshot within a batch', async () => {
+    const upsertTraceRun = vi.fn()
+    const upsertSpanRun = vi.fn()
+    prepareMock.mockReturnValue({ run: vi.fn() })
+    prepareMock
+      .mockReturnValueOnce({ run: upsertTraceRun })
+      .mockReturnValueOnce({ run: upsertSpanRun })
+      .mockReturnValueOnce({ run: upsertTraceRun })
+      .mockReturnValueOnce({ run: upsertSpanRun })
+    transactionMock.mockImplementation(fn => (traces: unknown) => fn(traces))
+
+    const adapter = new SQLiteAdapter('/tmp/traces.db')
+    const trace = TraceContext.createTrace('duplicate snapshots')
+    const span = TraceContext.startSpan(trace, { name: 'first' })
+    TraceContext.endSpan(span)
+    await adapter.flush(trace)
+
+    const intermediate = structuredClone(trace)
+    intermediate.spans[0]!.metadata.version = 1
+    const reverted = structuredClone(trace)
+
+    await adapter.flushBatch([intermediate, reverted])
+
+    expect(upsertSpanRun.mock.calls.map(call => call[0].metadata)).toEqual([
+      '{}',
+      '{"version":1}',
+      '{}',
+    ])
+  })
+
   it('retries transient SQLite lock failures with bounded backoff and diagnostics', async () => {
     const sleep = vi.fn().mockResolvedValue(undefined)
     const diagnostics = vi.fn()
