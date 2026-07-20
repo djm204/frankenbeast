@@ -369,50 +369,6 @@ describe('proxy server', () => {
       expect(auditRecord).toHaveBeenCalledWith({ tool: 'test_tool', ok: false, decision: 'denied', args: { key: 'credential' } });
     });
 
-    it('masks secret fields and replaces oversized proxy audit values with bounded hashes', async () => {
-      const privateValue = ['private', 'proxy', 'material'].join('-');
-      const oversizedValue = 'x'.repeat(1_024);
-      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
-      mockRegistry.set('audit_tool', {
-        name: 'audit_tool',
-        server: 'observer',
-        description: 'Audit sanitizer test tool',
-        inputSchema: {
-          type: 'object',
-          properties: { payload: { type: 'object', description: 'Nested payload' } },
-          required: ['payload'],
-        },
-        makeHandler: vi.fn().mockReturnValue(fakeHandler),
-      });
-
-      try {
-        await executeToolDef.handler({
-          tool: 'audit_tool',
-          args: {
-            payload: {
-              accessToken: privateValue,
-              authorizationHeader: privateValue,
-              description: oversizedValue,
-              items: Array.from({ length: 100 }, (_, index) => index),
-            },
-          },
-        });
-
-        const event = auditRecord.mock.calls[0]![0] as {
-          args: { payload: { accessToken: string; authorizationHeader: string; description: string; items: unknown[] } };
-        };
-        expect(event.args.payload.accessToken).toBe('[redacted]');
-        expect(event.args.payload.authorizationHeader).toBe('[redacted]');
-        expect(event.args.payload.description).toMatch(/^\[truncated length=1024 sha256:[a-f0-9]{64}\]$/);
-        expect(event.args.payload.items).toHaveLength(26);
-        expect(event.args.payload.items.at(-1)).toMatch(/^\[truncated items=75 sha256:[a-f0-9]{64}\]$/);
-        expect(JSON.stringify(event)).not.toContain(privateValue);
-        expect(JSON.stringify(event)).not.toContain(oversizedValue);
-      } finally {
-        mockRegistry.delete('audit_tool');
-      }
-    });
-
     it('audits a fail-closed gate error of the target (decision="error")', async () => {
       const fakeHandler = vi.fn();
       vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);

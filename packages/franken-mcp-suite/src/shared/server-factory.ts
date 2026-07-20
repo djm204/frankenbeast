@@ -4,7 +4,6 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { createHash } from 'node:crypto';
 
 export interface ToolContent {
   type: 'text';
@@ -98,7 +97,7 @@ export interface AuditSink {
      * call, or `error` for a fail-closed gate error. Omitted for handler runs.
      */
     decision?: string;
-    /** Sanitized call arguments, so the trail records intent without persisting raw secrets or unbounded values. */
+    /** Validated call arguments, so the trail records *what* was attempted. */
     args?: Record<string, unknown>;
   }): Promise<void> | void;
   /** Release resources owned by the sink, when applicable. */
@@ -338,118 +337,9 @@ function sanitizeForAudit(value: unknown, depth = 0): unknown {
   return sanitized;
 }
 
-const MAX_AUDIT_STRING_LENGTH = 256;
-const MAX_AUDIT_ARRAY_ITEMS = 25;
-const MAX_AUDIT_OBJECT_KEYS = 50;
-const MAX_AUDIT_VALUE_NODES = 500;
-const SENSITIVE_AUDIT_KEY_NAMES = [
-  'apikey',
-  'authorization',
-  'authtoken',
-  'bearertoken',
-  'clientsecret',
-  'cookie',
-  'credential',
-  'password',
-  'passwd',
-  'privatekey',
-  'secret',
-  'token',
-] as const;
-
-function isSensitiveAuditKey(key: string): boolean {
-  const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, '');
-  return SENSITIVE_AUDIT_KEY_NAMES.some(
-    (sensitiveName) => normalized === sensitiveName || normalized.startsWith(sensitiveName) || normalized.endsWith(sensitiveName),
-  );
-}
-
-function auditValueHash(value: unknown): string {
-  const hash = createHash('sha256');
-  const pending: Array<{ key?: string; value: unknown }> = [{ value }];
-  while (pending.length > 0) {
-    const current = pending.pop()!;
-    if (current.key !== undefined) hash.update(`key:${current.key};`);
-    if (current.key !== undefined && isSensitiveAuditKey(current.key)) {
-      hash.update('[redacted]');
-      continue;
-    }
-    if (Array.isArray(current.value)) {
-      hash.update(`array:${current.value.length};`);
-      for (let index = current.value.length - 1; index >= 0; index -= 1) {
-        pending.push({ value: Object.getOwnPropertyDescriptor(current.value, String(index))?.value });
-      }
-      continue;
-    }
-    if (isObjectLike(current.value)) {
-      const entries = Object.entries(current.value);
-      hash.update(`object:${entries.length};`);
-      for (let index = entries.length - 1; index >= 0; index -= 1) {
-        const [entryKey, entryValue] = entries[index]!;
-        pending.push({ key: entryKey, value: entryValue });
-      }
-      continue;
-    }
-    hash.update(`${typeof current.value}:${String(current.value)};`);
-  }
-  return hash.digest('hex');
-}
-
-function redactAndBoundAuditValue(
-  value: unknown,
-  key: string | undefined,
-  budget: { remaining: number },
-): unknown {
-  if (key !== undefined && isSensitiveAuditKey(key) && value !== '[accessor]') return '[redacted]';
-  if (budget.remaining <= 0) return '[truncated node-budget]';
-  budget.remaining -= 1;
-
-  if (typeof value === 'string') {
-    if (value.length <= MAX_AUDIT_STRING_LENGTH) return value;
-    return `[truncated length=${value.length} sha256:${auditValueHash(value)}]`;
-  }
-  if (Array.isArray(value)) {
-    const retained: unknown[] = [];
-    const retainedCount = Math.min(value.length, MAX_AUDIT_ARRAY_ITEMS);
-    for (let index = 0; index < retainedCount; index += 1) {
-      if (budget.remaining <= 0) {
-        retained.push('[truncated node-budget]');
-        break;
-      }
-      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
-      retained.push(redactAndBoundAuditValue(descriptor?.value, undefined, budget));
-    }
-    if (value.length > MAX_AUDIT_ARRAY_ITEMS) {
-      const omitted: unknown[] = [];
-      for (let index = MAX_AUDIT_ARRAY_ITEMS; index < value.length; index += 1) {
-        omitted.push(Object.getOwnPropertyDescriptor(value, String(index))?.value);
-      }
-      retained.push(`[truncated items=${omitted.length} sha256:${auditValueHash(omitted)}]`);
-    }
-    return retained;
-  }
-  if (!isObjectLike(value)) return value;
-
-  const entries = Object.entries(value);
-  const retained: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
-  for (const [entryKey, entryValue] of entries.slice(0, MAX_AUDIT_OBJECT_KEYS)) {
-    if (budget.remaining <= 0) {
-      retained['[audit-truncated]'] = '[node-budget]';
-      break;
-    }
-    retained[entryKey] = redactAndBoundAuditValue(entryValue, entryKey, budget);
-  }
-  if (entries.length > MAX_AUDIT_OBJECT_KEYS) {
-    const omitted = Object.fromEntries(entries.slice(MAX_AUDIT_OBJECT_KEYS));
-    retained['[audit-truncated]'] = `[keys=${entries.length - MAX_AUDIT_OBJECT_KEYS} sha256:${auditValueHash(omitted)}]`;
-  }
-  return retained;
-}
-
 export function sanitizeToolArgumentsForAudit(args: unknown): Record<string, unknown> {
   const value = sanitizeForAudit(args);
-  const bounded = redactAndBoundAuditValue(value, undefined, { remaining: MAX_AUDIT_VALUE_NODES });
-  return isObjectLike(bounded) && !Array.isArray(bounded) ? (bounded as Record<string, unknown>) : { invalid: bounded };
+  return isObjectLike(value) && !Array.isArray(value) ? (value as Record<string, unknown>) : { invalid: value };
 }
 
 const RIGHT_TO_FORGET_SELECTOR_KEYS = new Set(['key', 'category', 'sourceScope', 'query']);
