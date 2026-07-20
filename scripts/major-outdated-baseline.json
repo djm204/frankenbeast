@@ -10,6 +10,16 @@
     "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
   },
   {
+    "name": "@testing-library/jest-dom",
+    "dependent": "franken-web",
+    "location": "node_modules/@testing-library/jest-dom",
+    "currentMajor": 6,
+    "latestMajor": 7,
+    "current": "6.9.1",
+    "latest": "7.0.0",
+    "reason": "Defer the newly released major upgrade so dependency drift does not block unrelated validated changes."
+  },
+  {
     "name": "@types/node",
     "dependent": "@franken/brain",
     "location": "node_modules/@types/node",
