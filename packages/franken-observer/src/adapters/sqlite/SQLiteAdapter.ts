@@ -332,6 +332,7 @@ export class SQLiteAdapter implements ExportAdapter {
       const flushed: Span[] = []
 
       const transaction = this.db.transaction((batch: Trace[]) => {
+        const batchFlushedSpans = new Map<string, FlushedSpanState>()
         for (const trace of batch) {
           upsertTrace.run({
             id: trace.id,
@@ -341,7 +342,10 @@ export class SQLiteAdapter implements ExportAdapter {
             endedAt: trace.endedAt ?? null,
           })
           for (const span of trace.spans) {
-            if (!this.shouldFlushSpan(span)) continue
+            const batchKey = `${span.traceId}\0${span.id}`
+            const previous = batchFlushedSpans.get(batchKey)
+              ?? this.flushedSpans.get(span.traceId)?.get(span.id)
+            if (!this.shouldFlushSpan(span, previous)) continue
 
             upsertSpan.run({
               id: span.id,
@@ -357,6 +361,7 @@ export class SQLiteAdapter implements ExportAdapter {
               thoughtBlocks: JSON.stringify(span.thoughtBlocks),
             })
             flushed.push(span)
+            batchFlushedSpans.set(batchKey, this.toFlushedSpanState(span))
           }
         }
       })
@@ -369,9 +374,10 @@ export class SQLiteAdapter implements ExportAdapter {
     }
   }
 
-  private shouldFlushSpan(span: Span): boolean {
-    const byTrace = this.flushedSpans.get(span.traceId)
-    const previous = byTrace?.get(span.id)
+  private shouldFlushSpan(
+    span: Span,
+    previous = this.flushedSpans.get(span.traceId)?.get(span.id),
+  ): boolean {
     if (previous === undefined) return true
 
     // Active spans are still mutable: metadata/thought blocks can grow and the
@@ -398,6 +404,21 @@ export class SQLiteAdapter implements ExportAdapter {
     return previous.thoughtBlocksJson !== JSON.stringify(span.thoughtBlocks)
   }
 
+  private toFlushedSpanState(span: Span): FlushedSpanState {
+    return {
+      status: span.status,
+      endedAt: span.endedAt,
+      durationMs: span.durationMs,
+      errorMessage: span.errorMessage,
+      metadata: span.metadata,
+      metadataKeyCount: Object.keys(span.metadata).length,
+      metadataJson: JSON.stringify(span.metadata),
+      thoughtBlocks: span.thoughtBlocks,
+      thoughtBlockCount: span.thoughtBlocks.length,
+      thoughtBlocksJson: JSON.stringify(span.thoughtBlocks),
+    }
+  }
+
   private rememberFlushedSpan(span: Span): void {
     if (this.maxFlushedSpanSnapshots === 0) return
 
@@ -409,18 +430,7 @@ export class SQLiteAdapter implements ExportAdapter {
     if (!byTrace.has(span.id)) {
       this.flushedSpanSnapshotCount += 1
     }
-    byTrace.set(span.id, {
-      status: span.status,
-      endedAt: span.endedAt,
-      durationMs: span.durationMs,
-      errorMessage: span.errorMessage,
-      metadata: span.metadata,
-      metadataKeyCount: Object.keys(span.metadata).length,
-      metadataJson: JSON.stringify(span.metadata),
-      thoughtBlocks: span.thoughtBlocks,
-      thoughtBlockCount: span.thoughtBlocks.length,
-      thoughtBlocksJson: JSON.stringify(span.thoughtBlocks),
-    })
+    byTrace.set(span.id, this.toFlushedSpanState(span))
     this.pruneFlushedSpanSnapshots(span.traceId)
   }
 
