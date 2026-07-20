@@ -394,6 +394,27 @@ describe('GovernorAdapter', () => {
       .resolves.toMatchObject({ decision: 'review_recommended' });
   });
 
+  it('fails closed for renamed servers of external-only enabled skills', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const alternateConfigDir = join(dbPath, '..', 'alternate');
+    installSkillAtConfigDir(alternateConfigDir, 'memory-skill', [
+      {
+        name: 'query',
+        description: 'Query memory',
+        inputSchema: { type: 'object' },
+        requiresHitl: false,
+      },
+    ]);
+    writeFileSync(join(alternateConfigDir, 'skills', 'memory-skill', 'mcp.json'), JSON.stringify({
+      mcpServers: { 'renamed-memory': { command: 'memory-server' } },
+    }));
+
+    const governor = createGovernorAdapter(dbPath, join(alternateConfigDir, 'config.json'));
+
+    await expect(governor.check({ action: 'mcp__renamed-memory__query', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
   it('does not gate unrelated MCP calls when enabled skill roots are missing', async () => {
     const dbPath = tracked(tmpDbPath());
     writeFileSync(join(dbPath, '..', 'config.json'), JSON.stringify({

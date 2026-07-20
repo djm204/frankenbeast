@@ -854,11 +854,21 @@ function skillRequiresHitl(configPath: string | undefined, skillsDirs: string[],
   }
   if (!configUnreadable) {
     const missingEnabledSkills = [...enabledSkills].filter((skillName) => !skillDirectories.has(skillName));
+    // An external active-config root is untrusted for HITL policy, but its MCP
+    // registration names can conservatively identify calls that belong to an
+    // enabled skill whose trusted project manifest is missing. Such calls always
+    // fail closed; external tools.json metadata is never used to approve them.
+    const missingSkillServerNames = new Set(missingEnabledSkills.flatMap((skillName) => [
+      ...readSkillServerNames(join(dirname(configPath), 'skills', skillName)).names,
+    ]));
     if (mcpQualifiedName !== undefined
-      && missingEnabledSkills.some((skillName) => mcpQualifiedName.startsWith(`${skillName}__`))) {
+      && (missingEnabledSkills.some((skillName) => mcpQualifiedName.startsWith(`${skillName}__`))
+        || [...missingSkillServerNames].some((serverName) => mcpQualifiedName.startsWith(`${serverName}__`)))) {
       return true;
     }
-    if (slashQualifiedAction !== undefined && missingEnabledSkills.includes(slashQualifiedAction.serverName)) {
+    if (slashQualifiedAction !== undefined
+      && (missingEnabledSkills.includes(slashQualifiedAction.serverName)
+        || missingSkillServerNames.has(slashQualifiedAction.serverName))) {
       return true;
     }
   }
