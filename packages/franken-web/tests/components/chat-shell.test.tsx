@@ -1104,7 +1104,9 @@ describe('ChatShell', () => {
       id: 'agent-new',
       createdAt: '2026-03-12T00:00:00.000Z',
     };
-    mockListAgentPage.mockResolvedValueOnce({ agents: [newlyCreatedAgent], nextCursor: 'cursor-page-2' });
+    mockListAgentPage
+      .mockResolvedValueOnce({ agents: [newlyCreatedAgent, firstAgent], nextCursor: 'cursor-page-2' })
+      .mockResolvedValueOnce({ agents: [secondAgent] });
     await act(async () => {
       latestBeastEventHandlers?.agentEvent?.({
         agentId: 'agent-new',
@@ -1118,7 +1120,7 @@ describe('ChatShell', () => {
     await waitFor(() => expect(screen.getByText('agent-new')).toBeTruthy());
     expect(screen.getByText('agent-page-1')).toBeTruthy();
     expect(screen.getByText('agent-page-2')).toBeTruthy();
-    expect(mockListAgentPage).toHaveBeenCalledTimes(3);
+    expect(mockListAgentPage).toHaveBeenCalledTimes(4);
   });
 
   it('persists Beast drawer edits and refreshes the selected agent detail', async () => {
