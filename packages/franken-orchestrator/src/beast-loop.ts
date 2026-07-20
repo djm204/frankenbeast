@@ -103,6 +103,7 @@ export class BeastLoop {
         this.deps.checkpoint,
         this.deps.refreshPlanTasks,
         this.config,
+        this.deps.firewall,
       );
       logger.info('BeastLoop: phase end', { phase: 'execution' });
       recordPhase('execution');

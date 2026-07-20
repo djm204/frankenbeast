@@ -1997,7 +1997,7 @@ function createIssueCliExecutor(
 ): CliSkillExecutor {
   return {
     recoverDirtyFiles: (...args) => baseCliExecutor.recoverDirtyFiles(...args),
-    execute: (skillId, input, _config, checkpoint, taskId) => {
+    execute: (skillId, input, _config, checkpoint, taskId, sanitizeResponse) => {
       const martinConfig: CliSkillConfig = {
         martin: {
           planName,
@@ -2014,7 +2014,14 @@ function createIssueCliExecutor(
         },
       };
 
-      return baseCliExecutor.execute(skillId, input, martinConfig, checkpoint, taskId);
+      return baseCliExecutor.execute(
+        skillId,
+        input,
+        martinConfig,
+        checkpoint,
+        taskId,
+        sanitizeResponse,
+      );
     },
   } as CliSkillExecutor;
 }

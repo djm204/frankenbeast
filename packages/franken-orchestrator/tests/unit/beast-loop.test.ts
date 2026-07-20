@@ -152,6 +152,7 @@ describe('BeastLoop', () => {
       expect.anything(),
       undefined,
       'task-cli',
+      expect.any(Function),
     );
   });
 

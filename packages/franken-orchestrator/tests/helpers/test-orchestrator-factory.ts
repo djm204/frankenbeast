@@ -39,6 +39,7 @@ export interface TestOrchestratorPorts {
 
 export interface TestOrchestratorOverrides {
   firewall?: InMemoryFirewallOptions;
+  skillOutputFactory?: (skillId: string, input: Parameters<InMemorySkills['execute']>[1]) => unknown;
   planner?: InMemoryPlannerOptions;
   critique?: InMemoryCritiqueOptions;
   governor?: InMemoryGovernorOptions;
@@ -61,7 +62,7 @@ export function createTestOrchestrator(
   const logger = overrides.logger ?? new NullLogger();
   const ports: TestOrchestratorPorts = {
     firewall: new InMemoryFirewall(overrides.firewall),
-    skills: new InMemorySkills(),
+    skills: new InMemorySkills(undefined, overrides.skillOutputFactory),
     memory: new InMemoryMemory(),
     planner: new InMemoryPlanner(overrides.planner),
     observer: new InMemoryObserver(),

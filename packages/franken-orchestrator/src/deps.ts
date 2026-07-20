@@ -17,7 +17,11 @@ export interface ILogger {
 
 /** What the orchestrator needs from MOD-01 (Firewall). */
 export interface IFirewallModule {
+  /** False only for an explicit no-firewall adapter. */
+  readonly enabled?: boolean;
   runPipeline(input: string): Promise<FirewallResult>;
+  /** Scan untrusted response content, including response-target middleware. */
+  scanResponse(input: string): Promise<FirewallResult>;
 }
 
 export interface FirewallResult {
