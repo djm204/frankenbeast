@@ -4,6 +4,7 @@ import type {
   EvaluationResult,
   EvaluationFinding,
 } from './evaluator.js';
+import { createScore } from '../types/common.js';
 
 const COMMENT_LINE_PATTERN = /^\s*\/\//;
 const BLOCK_COMMENT_PATTERN = /\/\*[\s\S]*?\*\//g;
@@ -1008,7 +1009,7 @@ export class ConcisenessEvaluator implements Evaluator {
       return {
         evaluatorName: this.name,
         verdict: 'pass',
-        score: 1,
+        score: createScore(1),
         findings: [],
       };
     }
@@ -1018,7 +1019,7 @@ export class ConcisenessEvaluator implements Evaluator {
     this.checkCommentRatio(input.content, findings);
     this.checkTodoComments(input.content, findings);
 
-    const score = Math.max(0, 1 - findings.length * 0.2);
+    const score = createScore(Math.max(0, 1 - findings.length * 0.2));
 
     return {
       evaluatorName: this.name,

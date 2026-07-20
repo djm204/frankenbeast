@@ -4,6 +4,7 @@ import type {
   EvaluationResult,
   EvaluationFinding,
 } from './evaluator.js';
+import { createScore } from '../types/common.js';
 
 export interface ReflectionCompletionOptions {
   maxTokens?: number;
@@ -44,7 +45,7 @@ export class ReflectionEvaluator implements Evaluator {
     );
 
     const severity = this.parseSeverity(reflection);
-    const score = Math.max(0, 1 - (severity - 1) / 9); // 1→1.0, 10→0.0
+    const score = createScore(Math.max(0, 1 - (severity - 1) / 9)); // 1→1.0, 10→0.0
 
     const finding: EvaluationFinding = {
       message: reflection,
