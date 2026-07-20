@@ -1,5 +1,8 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-20 — Recovered PID signal-boundary identity checks
+- Carry the persisted process-start token into the supervisor and re-read identity immediately before every fallback signal; validating ownership in an upstream executor leaves a TOCTOU gap, especially when a failed process-group sweep falls back to direct PID signaling. If the token is missing, unreadable, unsupported, or mismatched while the PID exists, refuse the signal with operator guidance; an absent PID remains a safe no-op.
+
 ## 2026-07-20 — Incremental type-aware ESLint adoption
 - Enable type-aware rules in a dedicated TypeScript source override with `projectService: true` and an explicit `tsconfigRootDir`; source-adjacent tests excluded from package tsconfig files must be ignored by that override or ESLint fails before rule evaluation.
 - A targeted rule such as `@typescript-eslint/no-floating-promises` can establish type-aware coverage without enabling the entire strict preset at once. Treat surfaced promises as real call-site decisions: await work that must finish, use `void` only for intentional fire-and-forget, and add rejection handling for shutdown paths.
