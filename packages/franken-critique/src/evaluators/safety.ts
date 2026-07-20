@@ -433,7 +433,8 @@ export class SafetyEvaluator implements Evaluator {
       .filter(
         (alternative) =>
           !this.parsingUnicodeSets ||
-          !this.hasUnicodeSetSemanticSyntax(alternative),
+          !this.hasUnicodeSetSemanticSyntax(alternative) ||
+          this.hasAnalyzableUnicodeSetPrefix(alternative),
       )
       .map((alternative) => this.expandSimpleAlternativePrefix(alternative));
     if (alternatives.length < 2) return false;
@@ -445,6 +446,13 @@ export class SafetyEvaluator implements Evaluator {
           this.tokenPrefixOverlaps(left, right),
       ),
     );
+  }
+
+  private hasAnalyzableUnicodeSetPrefix(alternative: string): boolean {
+    if (alternative[0] !== '[') return false;
+    const end = this.skipCharacterClass(alternative, 0, true);
+    if (alternative[end] !== ']') return false;
+    return !alternative.slice(0, end + 1).includes('\\q{');
   }
 
   private hasDeterministicTopLevelAlternation(groupContent: string): boolean {
@@ -898,6 +906,10 @@ export class SafetyEvaluator implements Evaluator {
   }
 
   private classTokenOverlaps(classToken: string, token: string): boolean {
+    if (this.parsingUnicodeSets) {
+      return this.tokenMayMatchSample(classToken, token);
+    }
+
     if (classToken.startsWith('CLASS:[^')) {
       const body = classToken.slice('CLASS:[^'.length, -1);
       if (token.length === 1) return !this.positiveClassBodyOverlaps(body, token);
@@ -1091,6 +1103,8 @@ export class SafetyEvaluator implements Evaluator {
       '.',
       '/',
       '\u00A0',
+      ...(left.length === 1 ? [left] : []),
+      ...(right.length === 1 ? [right] : []),
       ...this.tokenProbeSamples(left),
       ...this.tokenProbeSamples(right),
     ]);
@@ -1169,6 +1183,14 @@ export class SafetyEvaluator implements Evaluator {
   }
 
   private classMatchesSample(characterClass: string, sample: string): boolean {
+    if (this.parsingUnicodeSets) {
+      try {
+        return new RegExp(`^(?:${characterClass})$`, 'v').test(sample);
+      } catch {
+        return false;
+      }
+    }
+
     const body = characterClass.slice(1, -1);
     const negated = body.startsWith('^');
     const positiveBody = negated ? body.slice(1) : body;
