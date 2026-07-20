@@ -91,7 +91,7 @@ export const ChatServiceConfigSchema = z.object({
   enabled: z.boolean().default(true),
   host: HostSchema,
   port: PortSchema.default(3737),
-  model: z.string().min(1).default('claude-sonnet-4-6'),
+  model: z.string().min(1).optional(),
 }).superRefine((value, ctx) => {
   if (value.enabled) requireLoopbackServiceHost(ctx, value.host);
 });
@@ -201,7 +201,6 @@ export const NetworkConfigFieldsSchema = z.object({
     enabled: true,
     host: '127.0.0.1',
     port: 3737,
-    model: 'claude-sonnet-4-6',
   })),
   dashboard: DashboardServiceConfigSchema.default(() => ({
     enabled: true,

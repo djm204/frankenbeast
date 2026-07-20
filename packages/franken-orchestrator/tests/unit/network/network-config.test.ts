@@ -16,6 +16,7 @@ describe('NetworkConfigSchema', () => {
     expect(config.chat.enabled).toBe(true);
     expect(config.chat.host).toBe('127.0.0.1');
     expect(config.chat.port).toBe(3737);
+    expect(config.chat.model).toBeUndefined();
     expect(config.dashboard.enabled).toBe(true);
     expect(config.dashboard.port).toBe(5173);
     expect(config.dashboard.apiUrl).toBe('http://127.0.0.1:3737');

@@ -28,7 +28,7 @@ function formStateFromConfig(config: NetworkConfigResponse): NetworkConfigFormSt
     networkMode: config.network.mode,
     secureBackend: config.network.secureBackend ?? 'local-encrypted',
     chatEnabled: config.chat.enabled,
-    chatModel: config.chat.model,
+    chatModel: config.chat.model ?? '',
     chatHost: config.chat.host ?? '',
     chatPort: config.chat.port === undefined ? '' : String(config.chat.port),
     dashboardEnabled: config.dashboard?.enabled ?? false,
