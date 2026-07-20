@@ -422,6 +422,46 @@ describe('proxy server', () => {
       expect(JSON.stringify(event.args)).not.toContain('private search text');
     });
 
+    it('preserves safe memory classifiers without leaking export selectors in resolved-target audits', async () => {
+      const makeEntry = (name: string, properties: Record<string, { type: string; description: string }>) => ({
+        name,
+        server: 'memory' as const,
+        description: name,
+        inputSchema: { type: 'object' as const, properties },
+        makeHandler: vi.fn().mockReturnValue(vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] })),
+      });
+      mockRegistry.set('fbeast_memory_store', makeEntry('fbeast_memory_store', {
+        type: { type: 'string', description: 'Memory type' },
+        value: { type: 'string', description: 'Private value' },
+      }));
+      mockRegistry.set('fbeast_memory_export', makeEntry('fbeast_memory_export', {
+        agentId: { type: 'string', description: 'Agent id' },
+        redaction: { type: 'string', description: 'Redaction mode' },
+      }));
+
+      try {
+        await executeToolDef.handler({
+          tool: 'fbeast_memory_store',
+          args: { type: 'working', value: 'private-memory-value' },
+        });
+        await executeToolDef.handler({
+          tool: 'fbeast_memory_export',
+          args: { agentId: 'alice@example.test', redaction: 'none' },
+        });
+
+        const storeEvent = auditRecord.mock.calls[0]![0];
+        const exportEvent = auditRecord.mock.calls[1]![0];
+        expect(storeEvent.args).toMatchObject({ type: 'working', redacted: true });
+        expect(exportEvent.args).toMatchObject({ redaction: 'none', redacted: true });
+        expect(exportEvent.args).not.toHaveProperty('agentId');
+        expect(JSON.stringify(storeEvent.args)).not.toContain('private-memory-value');
+        expect(JSON.stringify(exportEvent.args)).not.toContain('alice@example.test');
+      } finally {
+        mockRegistry.delete('fbeast_memory_store');
+        mockRegistry.delete('fbeast_memory_export');
+      }
+    });
+
     it('audits a governance denial of the target (ok=false, decision, args)', async () => {
       const fakeHandler = vi.fn();
       vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);

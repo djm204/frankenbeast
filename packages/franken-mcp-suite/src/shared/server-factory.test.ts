@@ -70,6 +70,54 @@ describe('createMcpServer', () => {
     expect(JSON.stringify(reviewDecision)).not.toContain('private reviewer note');
   });
 
+  it('redacts memory export and retention selectors in value-free proxy audits', () => {
+    const exportAudit = summarizeProxyToolArgumentsForAudit({
+      readScope: 'agent',
+      agentId: 'alice@example.test',
+      profile: 'private-profile',
+      repo: 'private/repository',
+      redaction: 'safe',
+    }, 'fbeast_memory_export');
+    const retentionAudit = summarizeProxyToolArgumentsForAudit({
+      readScope: 'agent',
+      agentId: 'alice@example.test',
+      profile: 'private-profile',
+      repo: 'private/repository',
+    }, 'fbeast_memory_retention_report');
+
+    for (const audit of [exportAudit, retentionAudit]) {
+      expect(audit).not.toHaveProperty('agentId');
+      expect(audit).not.toHaveProperty('profile');
+      expect(audit).not.toHaveProperty('repo');
+      expect(JSON.stringify(audit)).not.toContain('alice@example.test');
+      expect(JSON.stringify(audit)).not.toContain('private-profile');
+      expect(JSON.stringify(audit)).not.toContain('private/repository');
+    }
+  });
+
+  it('preserves validated memory store types in value-free proxy audits', () => {
+    const working = summarizeProxyToolArgumentsForAudit({ type: 'working', value: 'private' }, 'fbeast_memory_store');
+    const episodic = summarizeProxyToolArgumentsForAudit({ type: 'episodic', query: 'private' }, 'fbeast_memory_query');
+    const invalid = summarizeProxyToolArgumentsForAudit({ type: 'attacker-controlled' }, 'fbeast_memory_query');
+
+    expect(working.type).toBe('working');
+    expect(episodic.type).toBe('episodic');
+    expect(invalid).not.toHaveProperty('type');
+    expect(JSON.stringify(working)).not.toContain('private');
+    expect(JSON.stringify(episodic)).not.toContain('private');
+  });
+
+  it('preserves validated export redaction mode in value-free proxy audits', () => {
+    const unredacted = summarizeProxyToolArgumentsForAudit({ redaction: 'none', value: 'private' }, 'fbeast_memory_export');
+    const safe = summarizeProxyToolArgumentsForAudit({ redaction: 'safe' }, 'fbeast_memory_export');
+    const invalid = summarizeProxyToolArgumentsForAudit({ redaction: 'attacker-controlled' }, 'fbeast_memory_export');
+
+    expect(unredacted.redaction).toBe('none');
+    expect(safe.redaction).toBe('safe');
+    expect(invalid).not.toHaveProperty('redaction');
+    expect(JSON.stringify(unredacted)).not.toContain('private');
+  });
+
   it('finds execute_tool discriminators without depending on property order', () => {
     const args: Record<string, unknown> = { args: { password: 'private-value' } };
     for (let index = 0; index < 60; index += 1) args[`filler${index}`] = index;
