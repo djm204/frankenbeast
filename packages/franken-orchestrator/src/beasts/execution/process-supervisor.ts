@@ -140,7 +140,14 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
   }
 
   private signalUntrackedProcess(pid: number, signal: NodeJS.Signals, options: ProcessSignalOptions): void {
-    if (this.verifyUntrackedProcessIdentity(pid, options) === 'absent') {
+    const identityStatus = this.verifyUntrackedProcessIdentity(pid, options);
+    if (identityStatus === 'absent') {
+      // A recovered group can remain alive after its original leader exits. The
+      // absent leader PID cannot be targeted directly, but its persisted,
+      // owned process-group ID remains safe to sweep.
+      if (options.processGroupOwned) {
+        this.sweepOrphanProcessGroup(pid, signal);
+      }
       return;
     }
 

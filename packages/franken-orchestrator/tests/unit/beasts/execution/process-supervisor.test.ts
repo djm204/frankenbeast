@@ -495,6 +495,24 @@ process.stdout.write('parent done\\n');`,
       expect(killProcess).not.toHaveBeenCalled();
     });
 
+    it('sweeps an owned recovered group when its leader PID is absent', async () => {
+      const killProcess = vi.fn(() => true as const);
+      supervisor = new ProcessSupervisor({
+        orphanSweeper: {
+          killProcess,
+          readProcessIdentity: () => ({ status: 'absent' }),
+        },
+      });
+
+      await supervisor.kill(12345, {
+        processGroupOwned: true,
+        expectedStartTimeTicks: 'original-start-time',
+      });
+
+      expect(killProcess).toHaveBeenCalledOnce();
+      expect(killProcess).toHaveBeenCalledWith(-12345, 'SIGKILL');
+    });
+
     it('signals an untracked PID only when its persisted identity still matches', async () => {
       const killProcess = vi.fn();
       supervisor = new ProcessSupervisor({
