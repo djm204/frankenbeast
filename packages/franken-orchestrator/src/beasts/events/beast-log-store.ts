@@ -124,12 +124,13 @@ export class BeastLogStore {
               hasMore = true;
               break outer;
             }
-            const nextBytes = serializedArrayBytesAfterAppend(bytes, selected.length, line);
+            const selectedLine = lineForPageBudget(line, options.maxBytes);
+            const nextBytes = serializedArrayBytesAfterAppend(bytes, selected.length, selectedLine);
             if (nextBytes > options.maxBytes) {
               hasMore = true;
               break outer;
             }
-            selected.push(line);
+            selected.push(selectedLine);
             bytes = nextBytes;
           }
         } catch (error) {
@@ -150,12 +151,13 @@ export class BeastLogStore {
               hasMore = true;
               break outer;
             }
-            const nextBytes = serializedArrayBytesAfterAppend(bytes, selected.length, line);
+            const selectedLine = lineForPageBudget(line, options.maxBytes);
+            const nextBytes = serializedArrayBytesAfterAppend(bytes, selected.length, selectedLine);
             if (nextBytes > options.maxBytes) {
               hasMore = true;
               break outer;
             }
-            selected.push(line);
+            selected.push(selectedLine);
             bytes = nextBytes;
           }
         } catch (error) {
@@ -378,6 +380,11 @@ function parseRotationIndex(entry: string, prefix: string): number {
 
 function serializedArrayBytesAfterAppend(currentBytes: number, currentLength: number, line: string): number {
   return currentBytes + Buffer.byteLength(JSON.stringify(line)) + (currentLength > 0 ? 1 : 0);
+}
+
+function lineForPageBudget(line: string, maxBytes: number): string {
+  if (serializedArrayBytesAfterAppend(2, 0, line) <= maxBytes) return line;
+  return `[log line omitted: ${Buffer.byteLength(line)} bytes exceeds page budget]`;
 }
 
 async function* readLinesForward(path: string): AsyncGenerator<string> {

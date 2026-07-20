@@ -380,6 +380,27 @@ describe('BeastLogStore', () => {
     });
   });
 
+  it('represents an individually oversized line without stalling offset pagination', async () => {
+    await withTempDir(async (dir) => {
+      const activePath = join(dir, SAFE_RUN_ID, `${SAFE_ATTEMPT_ID}.log`);
+      await mkdir(join(dir, SAFE_RUN_ID), { recursive: true });
+      await writeFile(activePath, `${'x'.repeat(1_500)}\nafter\n`);
+
+      const page = await new BeastLogStore(dir).readPage(SAFE_RUN_ID, SAFE_ATTEMPT_ID, {
+        offset: 0,
+        limit: 2,
+        maxBytes: 1_024,
+      });
+
+      expect(page.lines).toEqual([
+        '[log line omitted: 1500 bytes exceeds page budget]',
+        'after',
+      ]);
+      expect(page.nextOffset).toBe(2);
+      expect(page.bytes).toBeLessThanOrEqual(1_024);
+    });
+  });
+
   it('returns stable empty page metadata', async () => {
     await withTempDir(async (dir) => {
       await expect(new BeastLogStore(dir).readPage(SAFE_RUN_ID, SAFE_ATTEMPT_ID, {

@@ -638,9 +638,12 @@ function boundSerializedLogLines(
   let bytes = 2;
   const candidates = tail ? [...lines].reverse() : lines;
   for (const line of candidates) {
-    const nextBytes = bytes + Buffer.byteLength(JSON.stringify(line)) + (selected.length > 0 ? 1 : 0);
+    const selectedLine = Buffer.byteLength(JSON.stringify([line])) <= maxBytes
+      ? line
+      : `[log line omitted: ${Buffer.byteLength(line)} bytes exceeds page budget]`;
+    const nextBytes = bytes + Buffer.byteLength(JSON.stringify(selectedLine)) + (selected.length > 0 ? 1 : 0);
     if (nextBytes > maxBytes) break;
-    selected.push(line);
+    selected.push(selectedLine);
     bytes = nextBytes;
   }
   if (tail) selected.reverse();

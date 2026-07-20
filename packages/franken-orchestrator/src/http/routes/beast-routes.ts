@@ -211,6 +211,13 @@ function boundBeastLogHttpResponse(response: BeastLogPageResponse, maxBytes: num
   };
   const envelope = { data: bounded };
   while (Buffer.byteLength(JSON.stringify(envelope)) > maxBytes && bounded.logs.length > 0) {
+    if (bounded.logs.length === 1) {
+      bounded.logs[0] = '[log line omitted: exceeds response byte budget]';
+      bounded.page.hasMore = true;
+      bounded.page.nextOffset = bounded.page.offset + 1;
+      bounded.page.bytes = Buffer.byteLength(JSON.stringify(bounded.logs));
+      if (Buffer.byteLength(JSON.stringify(envelope)) <= maxBytes) break;
+    }
     if (bounded.page.tail) bounded.logs.shift();
     else bounded.logs.pop();
     bounded.page.hasMore = true;
