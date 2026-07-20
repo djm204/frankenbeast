@@ -4,6 +4,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { createHash } from 'node:crypto';
 
 export interface ToolContent {
   type: 'text';
@@ -342,6 +343,65 @@ export function sanitizeToolArgumentsForAudit(args: unknown): Record<string, unk
   return isObjectLike(value) && !Array.isArray(value) ? (value as Record<string, unknown>) : { invalid: value };
 }
 
+const PROXY_AUDIT_MAX_DEPTH = 6;
+const PROXY_AUDIT_MAX_FIELDS = 25;
+const PROXY_AUDIT_MAX_NODES = 200;
+const PROXY_AUDIT_SAFE_KEY = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
+const PROXY_AUDIT_SENSITIVE_KEY = /(?:api[-_]?key|authorization|auth[-_]?token|client[-_]?secret|cookie|credential|pass(?:word|wd)|private[-_]?key|secret|token)/i;
+
+type ProxyAuditSummary =
+  | { type: 'null' | 'boolean' | 'number' | 'undefined' }
+  | { type: 'string'; length: number }
+  | { type: 'array'; length: number }
+  | { type: 'object'; fields: Array<{ name: string; value: ProxyAuditSummary }>; truncated?: true }
+  | { type: 'accessor' | 'denied-property' | 'non-plain-object' | 'max-depth' | 'node-budget' };
+
+function summarizeProxyAuditValue(value: unknown, depth: number, budget: { remaining: number }): ProxyAuditSummary {
+  if (budget.remaining <= 0) return { type: 'node-budget' };
+  budget.remaining -= 1;
+  if (value === null) return { type: 'null' };
+  if (typeof value === 'string') return { type: 'string', length: value.length };
+  if (typeof value === 'boolean') return { type: 'boolean' };
+  if (typeof value === 'number') return { type: 'number' };
+  if (typeof value === 'undefined') return { type: 'undefined' };
+  if (Array.isArray(value)) return { type: 'array', length: value.length };
+  if (!isObjectLike(value)) return { type: 'non-plain-object' };
+  if (!isPlainJsonObject(value)) return { type: 'non-plain-object' };
+  if (depth >= PROXY_AUDIT_MAX_DEPTH) return { type: 'max-depth' };
+
+  const fields: Array<{ name: string; value: ProxyAuditSummary }> = [];
+  let truncated = false;
+  for (const rawKey in value) {
+    if (!Object.prototype.hasOwnProperty.call(value, rawKey)) continue;
+    if (fields.length >= PROXY_AUDIT_MAX_FIELDS || budget.remaining <= 0) {
+      truncated = true;
+      break;
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(value, rawKey);
+    const name = PROXY_AUDIT_SAFE_KEY.test(rawKey) && !PROXY_AUDIT_SENSITIVE_KEY.test(rawKey)
+      ? rawKey
+      : '[redacted-key]';
+    if (DENIED_ARGUMENT_KEYS.has(rawKey)) {
+      fields.push({ name: '[redacted-key]', value: { type: 'denied-property' } });
+    } else if (!descriptor || 'get' in descriptor || 'set' in descriptor) {
+      fields.push({ name, value: { type: 'accessor' } });
+    } else {
+      fields.push({ name, value: summarizeProxyAuditValue(descriptor.value, depth + 1, budget) });
+    }
+  }
+  return { type: 'object', fields, ...(truncated ? { truncated: true as const } : {}) };
+}
+
+/**
+ * Produce a bounded, value-free description of proxied target arguments.
+ * The digest fingerprints only this redacted shape, never caller payload bytes.
+ */
+export function summarizeProxyToolArgumentsForAudit(args: unknown): Record<string, unknown> {
+  const summary = summarizeProxyAuditValue(args, 0, { remaining: PROXY_AUDIT_MAX_NODES });
+  const sha256 = createHash('sha256').update(JSON.stringify(summary)).digest('hex');
+  return { redacted: true, summary, sha256 };
+}
+
 const RIGHT_TO_FORGET_SELECTOR_KEYS = new Set(['key', 'category', 'sourceScope', 'query']);
 const RIGHT_TO_FORGET_SAFE_AUDIT_KEYS = new Set(['type', 'dryRun']);
 const RIGHT_TO_FORGET_SAFE_TYPES = new Set(['working', 'episodic', 'all']);
@@ -367,6 +427,17 @@ const MEMORY_STORE_TOOL = 'fbeast_memory_store';
 const MEMORY_STORE_SAFE_AUDIT_KEYS = new Set(['key', 'type', 'agentId', 'ttlMs']);
 const OBSERVER_LOG_TOOL = 'fbeast_observer_log';
 const OBSERVER_LOG_SAFE_AUDIT_KEYS = new Set(['event', 'sessionId']);
+const PROXY_TOOLS_WITH_VALUE_SAFE_AUDIT_REDACTION = new Set([
+  MEMORY_EXPORT_TOOL,
+  MEMORY_RETENTION_REPORT_TOOL,
+  MEMORY_ACCESS_AUDIT_REPORT_TOOL,
+  'fbeast_memory_right_to_forget',
+  MEMORY_REVIEW_PROPOSE_TOOL,
+  MEMORY_REVIEW_DECIDE_TOOL,
+  MEMORY_SOURCE_ATTRIBUTION_TOOL,
+  MEMORY_STORE_TOOL,
+  OBSERVER_LOG_TOOL,
+]);
 
 function normalizeAuditDateString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
@@ -712,8 +783,23 @@ function redactObserverLogEnvelope(sanitized: Record<string, unknown>, redaction
 }
 
 export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unknown): Record<string, unknown> {
-  const sanitized = sanitizeToolArgumentsForAudit(args);
   const unqualifiedToolName = unqualifyMcpToolName(toolName);
+  if (unqualifiedToolName === 'execute_tool' && isObjectLike(args) && isPlainJsonObject(args)) {
+    const argsDescriptor = Object.getOwnPropertyDescriptor(args, 'args');
+    if (argsDescriptor) {
+      const toolDescriptor = Object.getOwnPropertyDescriptor(args, 'tool');
+      const rawTool = toolDescriptor && 'value' in toolDescriptor ? toolDescriptor.value : undefined;
+      const boundedTool = typeof rawTool === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(rawTool)
+        ? rawTool
+        : '[redacted-tool]';
+      const rawArgs = 'value' in argsDescriptor ? argsDescriptor.value : '[accessor]';
+      const unqualifiedProxiedToolName = unqualifyMcpToolName(boundedTool);
+      if (!PROXY_TOOLS_WITH_VALUE_SAFE_AUDIT_REDACTION.has(unqualifiedProxiedToolName)) {
+        return { tool: boundedTool, args: summarizeProxyToolArgumentsForAudit(rawArgs) };
+      }
+    }
+  }
+  const sanitized = sanitizeToolArgumentsForAudit(args);
   const isMemoryReviewPropose = unqualifiedToolName === MEMORY_REVIEW_PROPOSE_TOOL;
   const isDirectMemoryExport = unqualifiedToolName === MEMORY_EXPORT_TOOL;
   const isDirectMemoryRetentionReport = unqualifiedToolName === MEMORY_RETENTION_REPORT_TOOL;

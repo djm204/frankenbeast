@@ -45,6 +45,17 @@ const FAKE_STUBS = [
   { name: 'third_tool', server: 'planner' as const, description: 'Third tool' },
 ];
 
+function expectValueFreeAuditArgs(value: unknown, fieldNames: string[]): void {
+  expect(value).toEqual(expect.objectContaining({
+    redacted: true,
+    sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+    summary: expect.objectContaining({
+      type: 'object',
+      fields: expect.arrayContaining(fieldNames.map((name) => expect.objectContaining({ name }))),
+    }),
+  }));
+}
+
 describe('proxy server', () => {
   let server: ReturnType<typeof createProxyServer>;
   let searchToolsDef: { handler: (args: Record<string, unknown>) => Promise<unknown> };
@@ -262,7 +273,9 @@ describe('proxy server', () => {
 
     it('audits an unknown-target probe as ok=false', async () => {
       await executeToolDef.handler({ tool: 'nonexistent_tool', args: { probe: 1 } });
-      expect(auditRecord).toHaveBeenCalledWith({ tool: 'nonexistent_tool', ok: false, decision: 'unknown_tool', args: { probe: 1 } });
+      const event = auditRecord.mock.calls[0]![0];
+      expect(event).toMatchObject({ tool: 'nonexistent_tool', ok: false, decision: 'unknown_tool' });
+      expectValueFreeAuditArgs(event.args, ['probe']);
     });
 
     it('passes args to handler correctly', async () => {
@@ -357,7 +370,10 @@ describe('proxy server', () => {
       vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
 
       await executeToolDef.handler({ tool: 'test_tool', args: { key: 'val' } });
-      expect(auditRecord).toHaveBeenCalledWith({ tool: 'test_tool', ok: true, args: { key: 'val' } });
+      const event = auditRecord.mock.calls[0]![0];
+      expect(event).toMatchObject({ tool: 'test_tool', ok: true });
+      expectValueFreeAuditArgs(event.args, ['key']);
+      expect(JSON.stringify(event.args)).not.toContain(':"val"');
     });
 
     it('audits a governance denial of the target (ok=false, decision, args)', async () => {
@@ -366,7 +382,10 @@ describe('proxy server', () => {
       gateCheck.mockResolvedValue({ decision: 'denied', reason: 'destructive' });
 
       await executeToolDef.handler({ tool: 'test_tool', args: { key: 'credential' } });
-      expect(auditRecord).toHaveBeenCalledWith({ tool: 'test_tool', ok: false, decision: 'denied', args: { key: 'credential' } });
+      const event = auditRecord.mock.calls[0]![0];
+      expect(event).toMatchObject({ tool: 'test_tool', ok: false, decision: 'denied' });
+      expectValueFreeAuditArgs(event.args, ['key']);
+      expect(JSON.stringify(event.args)).not.toContain('credential');
     });
 
     it('audits a fail-closed gate error of the target (decision="error")', async () => {
@@ -375,7 +394,9 @@ describe('proxy server', () => {
       gateCheck.mockRejectedValue(new Error('governor down'));
 
       await executeToolDef.handler({ tool: 'test_tool', args: { key: 'x' } });
-      expect(auditRecord).toHaveBeenCalledWith({ tool: 'test_tool', ok: false, decision: 'error', args: { key: 'x' } });
+      const event = auditRecord.mock.calls[0]![0];
+      expect(event).toMatchObject({ tool: 'test_tool', ok: false, decision: 'error' });
+      expectValueFreeAuditArgs(event.args, ['key']);
     });
   });
 
@@ -424,12 +445,9 @@ describe('proxy server', () => {
       const res = await server.callTool('execute_tool', envelope) as { isError?: boolean };
 
       expect(res.isError).toBe(true);
-      expect(auditRecord).toHaveBeenCalledWith({
-        tool: 'execute_tool',
-        ok: false,
-        decision: 'timeout',
-        args: envelope,
-      });
+      const event = auditRecord.mock.calls[0]![0];
+      expect(event).toMatchObject({ tool: 'execute_tool', ok: false, decision: 'timeout', args: { tool: 'test_tool' } });
+      expectValueFreeAuditArgs(event.args.args, ['key']);
     });
 
     it('does NOT double-audit a successful execute_tool call at the wrapper level', async () => {
@@ -439,7 +457,9 @@ describe('proxy server', () => {
       await server.callTool('execute_tool', { tool: 'test_tool', args: { key: 'v' } });
       // Only the resolved-target record; no generic execute_tool wrapper record.
       expect(auditRecord).toHaveBeenCalledTimes(1);
-      expect(auditRecord).toHaveBeenCalledWith({ tool: 'test_tool', ok: true, args: { key: 'v' } });
+      const event = auditRecord.mock.calls[0]![0];
+      expect(event).toMatchObject({ tool: 'test_tool', ok: true });
+      expectValueFreeAuditArgs(event.args, ['key']);
     });
 
     it('does NOT audit a read-only search_tools call at the wrapper level', async () => {
@@ -471,12 +491,10 @@ describe('proxy server', () => {
       const result = await executeToolDef.handler({ tool: 'bounded_tool', args: { query: 'oversized' } }) as { isError: boolean };
 
       expect(result.isError).toBe(true);
-      expect(auditRecord).toHaveBeenCalledWith({
-        tool: 'bounded_tool',
-        ok: false,
-        decision: 'validation_error',
-        args: { query: '[schema-bound-exceeded]' },
-      });
+      const event = auditRecord.mock.calls[0]![0];
+      expect(event).toMatchObject({ tool: 'bounded_tool', ok: false, decision: 'validation_error' });
+      expectValueFreeAuditArgs(event.args, ['query']);
+      expect(JSON.stringify(event.args)).not.toContain('oversized');
     });
 
     it('rejects proxied calls with target unknown properties', async () => {
@@ -531,9 +549,9 @@ describe('proxy server', () => {
         expect(result.content[0].text).toContain('rejected unsafe argument shape');
         expect(result.content[0].text).toContain('denied property name: __proto__');
         expect(auditRecord).toHaveBeenCalledTimes(1);
-        const auditedArgs = auditRecord.mock.calls[0]![0].args as { payload: Record<string, unknown> };
-        expect(auditedArgs.payload.ok).toBe(true);
-        expect(auditedArgs.payload['__proto__']).toBe('[denied-property]');
+        const auditedArgs = auditRecord.mock.calls[0]![0].args;
+        expectValueFreeAuditArgs(auditedArgs, ['payload']);
+        expect(JSON.stringify(auditedArgs)).not.toContain('polluted');
         expect(gateCheck).not.toHaveBeenCalledWith(expect.objectContaining({ tool: 'object_tool' }));
         expect(fakeHandler).not.toHaveBeenCalled();
       } finally {

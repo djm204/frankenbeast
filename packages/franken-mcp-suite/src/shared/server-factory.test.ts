@@ -1,11 +1,44 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createMcpServer, sanitizeRejectedToolArgumentsForAudit, sanitizeToolArgumentsForAuditTrail, validateToolArguments, type ToolDef, type GovernanceGate, type AuditSink } from './server-factory.js';
+import { createMcpServer, sanitizeRejectedToolArgumentsForAudit, sanitizeToolArgumentsForAuditTrail, summarizeProxyToolArgumentsForAudit, validateToolArguments, type ToolDef, type GovernanceGate, type AuditSink } from './server-factory.js';
 
 describe('createMcpServer', () => {
   it('creates server with name and version', () => {
     const server = createMcpServer('fbeast-memory', '0.1.0', []);
     expect(server).toBeDefined();
     expect(server.name).toBe('fbeast-memory');
+  });
+
+  it('summarizes proxy arguments without retaining values, oversized keys, or value fingerprints', () => {
+    const first = summarizeProxyToolArgumentsForAudit({
+      query: 'alpha',
+      items: Array.from({ length: 100_000 }, () => 'first-private-value'),
+      [`private-${'x'.repeat(100)}`]: 'hidden-first',
+    });
+    const second = summarizeProxyToolArgumentsForAudit({
+      query: 'bravo',
+      items: Array.from({ length: 100_000 }, () => 'other-private-value'),
+      [`private-${'y'.repeat(100)}`]: 'hidden-other',
+    });
+
+    expect(first.sha256).toBe(second.sha256);
+    const serialized = JSON.stringify(first);
+    expect(serialized).not.toContain('alpha');
+    expect(serialized).not.toContain('hidden-first');
+    expect(serialized).not.toContain('x'.repeat(100));
+    expect(serialized.length).toBeLessThan(1_000);
+  });
+
+  it('finds execute_tool discriminators without depending on property order', () => {
+    const args: Record<string, unknown> = { args: { password: 'private-value' } };
+    for (let index = 0; index < 60; index += 1) args[`filler${index}`] = index;
+    args.tool = 'test_tool';
+
+    const sanitized = sanitizeToolArgumentsForAuditTrail('execute_tool', args);
+    expect(sanitized).toMatchObject({
+      tool: 'test_tool',
+      args: { redacted: true, sha256: expect.stringMatching(/^[a-f0-9]{64}$/) },
+    });
+    expect(JSON.stringify(sanitized)).not.toContain('private-value');
   });
 
   it('runs close lifecycle callbacks exactly once', async () => {
