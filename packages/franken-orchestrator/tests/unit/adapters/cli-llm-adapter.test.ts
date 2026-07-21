@@ -1072,6 +1072,52 @@ describe('CliLlmAdapter', () => {
 
         expect(response.content).toBe('fallback output');
       });
+
+      it('reports providerContext with switchedFrom/switchReason after a rate-limit fallback', async () => {
+        const { spawnFn } = createQueuedSpawn([
+          { stderr: 'rate limit exceeded', exitCode: 1 },
+          { stdout: 'claude fallback success', exitCode: 0 },
+        ]);
+        const adapter = new CliLlmAdapter(
+          codexProvider,
+          { ...baseOpts, providers: ['codex', 'claude'] },
+          spawnFn,
+        );
+
+        const request = adapter.transformRequest({
+          id: 'req-fallback-2',
+          provider: 'adapter',
+          model: 'adapter',
+          messages: [{ role: 'user', content: 'hello' }],
+        });
+
+        const raw = await adapter.execute(request);
+        const response = adapter.transformResponse(raw, 'req-fallback-2');
+
+        expect(response.providerContext).toEqual({
+          provider: 'claude',
+          switchedFrom: 'codex',
+          switchReason: 'rate_limited',
+        });
+      });
+
+      it('reports providerContext without a fallback marker when the initial provider succeeds', async () => {
+        const { spawnFn } = createQueuedSpawn([{ stdout: 'ok', exitCode: 0 }]);
+        const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
+
+        const request = adapter.transformRequest({
+          id: 'req-no-fallback',
+          provider: 'adapter',
+          model: 'adapter',
+          messages: [{ role: 'user', content: 'hello' }],
+        });
+
+        const raw = await adapter.execute(request);
+        const response = adapter.transformResponse(raw, 'req-no-fallback');
+
+        expect(response.providerContext).toEqual({ provider: 'claude' });
+        expect(response.providerContext?.switchedFrom).toBeUndefined();
+      });
     });
   });
 

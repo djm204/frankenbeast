@@ -1,4 +1,4 @@
-import type { ILlmClient, TokenUsage } from '@franken/types';
+import type { ILlmClient, ProviderContext, TokenUsage } from '@franken/types';
 import type {
   ModelTierValue,
   TranscriptMessage,
@@ -18,6 +18,8 @@ export interface TurnResult {
   usage?: TokenUsage;
   /** Whether this turn's prompt had to drop history to fit maxTranscriptLength. */
   truncated?: boolean;
+  /** The CLI provider/model that actually served this turn, and any fallback that occurred. */
+  providerContext?: ProviderContext;
 }
 
 export interface ConversationEngineOptions {
@@ -31,6 +33,35 @@ export interface ConversationEngineOptions {
 
 interface ConversationEngineTurnOptions {
   sessionId?: string;
+  /**
+   * The provider/model that served the most recently completed turn, if any.
+   * Injected into this turn's prompt so the model can answer "what model are
+   * you" or "is this a fallback" from real runtime facts rather than its own
+   * training-time self-description, which has no way to know it was invoked
+   * via a fallback. Deliberately based on the *last known* state, not this
+   * turn's outcome — that isn't knowable until after the call completes.
+   */
+  priorProviderContext?: ProviderContext;
+}
+
+const SWITCH_REASON_TEXT: Record<string, string> = {
+  rate_limited: 'was rate-limited',
+  unavailable: 'was unavailable',
+};
+
+/**
+ * Builds a short runtime-status note describing which provider/model is
+ * actually serving this turn, for injection into the prompt. Exported for
+ * direct unit testing of the wording.
+ */
+export function formatProviderTransparencyNote(ctx: ProviderContext): string {
+  const modelPart = ctx.model ? ` (model: ${ctx.model})` : '';
+  const base = `Runtime status: this turn is being served by the "${ctx.provider}" CLI provider${modelPart}.`;
+  if (!ctx.switchedFrom) {
+    return `${base} Answer questions about your current model/provider using this fact.`;
+  }
+  const reasonText = (ctx.switchReason && SWITCH_REASON_TEXT[ctx.switchReason]) ?? 'was unavailable';
+  return `${base} This is an automatic fallback: the configured provider "${ctx.switchedFrom}" ${reasonText}, so the request was retried against "${ctx.provider}". If asked what model/provider you're running on, or whether this is a fallback, answer truthfully using these facts — do not deny it or guess your identity from training data.`;
 }
 
 type ContinuationAwareLlmClient = ILlmClient & {
@@ -38,7 +69,7 @@ type ContinuationAwareLlmClient = ILlmClient & {
   completeWithUsage?(
     prompt: string,
     options?: { sessionContinue?: boolean; sessionId?: string },
-  ): Promise<{ text: string; usage?: TokenUsage }>;
+  ): Promise<{ text: string; usage?: TokenUsage; providerContext?: ProviderContext }>;
 };
 
 export class ConversationEngine {
@@ -114,14 +145,22 @@ export class ConversationEngine {
         const built = shouldContinue
           ? undefined
           : this.promptBuilder.build([...history, userMessage]);
-        const prompt = built ? built.prompt : input;
+        const basePrompt = built ? built.prompt : input;
+        // Based on the last known provider state (available from the prior
+        // completed turn, if any) — this turn's own outcome isn't knowable
+        // until after the call below, so a fallback happening *right now*
+        // is reported starting next turn, not this one.
+        const transparencyNote = options.priorProviderContext
+          ? formatProviderTransparencyNote(options.priorProviderContext)
+          : undefined;
+        const prompt = transparencyNote ? `${basePrompt}\n\n${transparencyNote}` : basePrompt;
         const completeOptions = {
           sessionContinue: shouldContinue,
           ...(sessionId ? { sessionId } : {}),
         };
-        const { response, usage } = typeof this.llm.completeWithUsage === 'function'
-          ? await this.llm.completeWithUsage(prompt, completeOptions).then((result) => ({ response: result.text, usage: result.usage }))
-          : await this.llm.complete(prompt, completeOptions).then((text) => ({ response: text, usage: undefined as TokenUsage | undefined }));
+        const { response, usage, providerContext } = typeof this.llm.completeWithUsage === 'function'
+          ? await this.llm.completeWithUsage(prompt, completeOptions).then((result) => ({ response: result.text, usage: result.usage, providerContext: result.providerContext }))
+          : await this.llm.complete(prompt, completeOptions).then((text) => ({ response: text, usage: undefined as TokenUsage | undefined, providerContext: undefined as ProviderContext | undefined }));
         if (sessionId) {
           this.primedSessions.add(sessionId);
         }
@@ -144,6 +183,7 @@ export class ConversationEngine {
           newMessages: [userMessage, assistantMessage],
           ...(usage ? { usage } : {}),
           ...(built ? { truncated: built.truncated } : {}),
+          ...(providerContext ? { providerContext } : {}),
         };
       } catch (error) {
         const errorMsg =

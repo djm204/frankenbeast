@@ -321,6 +321,40 @@ describe('resolveManagedChatAttachment', () => {
 
     await expect(reply).resolves.toEqual({});
   });
+
+  it('resolves with real provider context reflecting a server-side fallback', async () => {
+    stubManagedChatWebSocket();
+    const socket = new MockManagedChatWebSocket('ws://127.0.0.1:4242/v1/chat/ws');
+
+    const reply = __chatAttachTestHooks.awaitRemoteReply(socket as unknown as WebSocket, false);
+    socket.emitMessage(JSON.stringify({
+      type: 'assistant.message.complete',
+      messageId: 'm1',
+      content: 'Running on claude now.',
+      providerContext: { provider: 'claude', model: 'claude-sonnet-4-6', switchedFrom: 'codex', switchReason: 'rate_limited' },
+      timestamp: new Date().toISOString(),
+    }));
+
+    await expect(reply).resolves.toEqual({
+      providerContext: { provider: 'claude', model: 'claude-sonnet-4-6', switchedFrom: 'codex', switchReason: 'rate_limited' },
+    });
+  });
+
+  it('ignores a malformed providerContext payload rather than throwing', async () => {
+    stubManagedChatWebSocket();
+    const socket = new MockManagedChatWebSocket('ws://127.0.0.1:4242/v1/chat/ws');
+
+    const reply = __chatAttachTestHooks.awaitRemoteReply(socket as unknown as WebSocket, false);
+    socket.emitMessage(JSON.stringify({
+      type: 'assistant.message.complete',
+      messageId: 'm1',
+      content: 'hello',
+      providerContext: { model: 'claude-sonnet-4-6' }, // missing required `provider`
+      timestamp: new Date().toISOString(),
+    }));
+
+    await expect(reply).resolves.toEqual({});
+  });
 });
 
 describe('createRemoteSession websocket URL', () => {

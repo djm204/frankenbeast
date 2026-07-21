@@ -1,4 +1,4 @@
-import type { ILlmClient, LlmCompletionOptions, LlmCompletionResult, TokenUsage } from '@franken/types';
+import type { ILlmClient, LlmCompletionOptions, LlmCompletionResult, ProviderContext, TokenUsage } from '@franken/types';
 import { now as deterministicNow, seededRandom } from '@franken/types';
 
 type UnifiedRequest = {
@@ -23,6 +23,8 @@ type UnifiedResponse = {
   content: string | null;
   /** Present only when the underlying provider reported real token usage. */
   usage?: TokenUsage;
+  /** The CLI provider/model that actually served this completion, and any fallback that occurred. */
+  providerContext?: ProviderContext;
 };
 
 export interface IAdapter {
@@ -76,14 +78,14 @@ export class AdapterLlmClient implements ILlmClient {
     prompt: string,
     options?: LlmCompletionOptions & { sessionContinue?: boolean; sessionId?: string },
   ): Promise<LlmCompletionResult> {
-    const { content, usage } = await this.runComplete(prompt, options);
-    return { text: content, ...(usage ? { usage } : {}) };
+    const { content, usage, providerContext } = await this.runComplete(prompt, options);
+    return { text: content, ...(usage ? { usage } : {}), ...(providerContext ? { providerContext } : {}) };
   }
 
   private async runComplete(
     prompt: string,
     options?: LlmCompletionOptions & { sessionContinue?: boolean; sessionId?: string },
-  ): Promise<{ content: string; usage?: TokenUsage }> {
+  ): Promise<{ content: string; usage?: TokenUsage; providerContext?: ProviderContext }> {
     const requestId = `llm-${deterministicNow()}-${seededRandom.random().toString(16).slice(2)}`;
     const model = this.defaultModel;
 
@@ -107,12 +109,14 @@ export class AdapterLlmClient implements ILlmClient {
     try {
       let content: string | null;
       let usage: TokenUsage | undefined;
+      let providerContext: ProviderContext | undefined;
       try {
         const providerRequest = this.adapter.transformRequest(request);
         const providerResponse = await this.adapter.execute(providerRequest);
         const response = this.adapter.transformResponse(providerResponse, requestId);
         content = response.content;
         usage = response.usage;
+        providerContext = response.providerContext;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         throw new AdapterLlmError(
@@ -146,7 +150,7 @@ export class AdapterLlmClient implements ILlmClient {
         );
       }
 
-      return { content, ...(usage ? { usage } : {}) };
+      return { content, ...(usage ? { usage } : {}), ...(providerContext ? { providerContext } : {}) };
     } catch (error) {
       failed = true;
       throw error;

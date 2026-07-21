@@ -4,7 +4,7 @@ import type { ChatBeastContext, ExecuteOutcome, ExtendedPendingApproval, Transcr
 import { sanitizeChatOutput } from './output-sanitizer.js';
 import type { BeastDispatchPort } from './beast-daemon-dispatch-adapter.js';
 import type { BeastExecutionMode } from '../beasts/types.js';
-import { isoNow, type TokenUsage } from '@franken/types';
+import { isoNow, type ProviderContext, type TokenUsage } from '@franken/types';
 
 type PendingApprovalContext = Omit<ExtendedPendingApproval, 'description' | 'requestedAt'>;
 
@@ -29,6 +29,14 @@ export interface ChatRuntimeState {
   transcript: TranscriptMessage[];
   beastContext?: ChatBeastContext | null | undefined;
   executionMode?: BeastExecutionMode | undefined;
+  /**
+   * The provider/model that served the most recently completed reply turn.
+   * Carried forward by the caller (like pendingApproval) so it survives
+   * turns that don't call the LLM, and fed back into the next reply turn's
+   * prompt so the model can answer "what model are you" / "is this a
+   * fallback" truthfully.
+   */
+  lastProviderContext?: ProviderContext | undefined;
 }
 
 export interface ChatDisplayMessage {
@@ -46,12 +54,7 @@ export interface ChatRuntimeResult {
   pendingApprovalContext?: PendingApprovalContext;
   pendingApprovalDescription?: string;
   pendingApprovalRequestedAt?: string;
-  providerContext?: {
-    provider: string;
-    model?: string;
-    switchedFrom?: string;
-    switchReason?: string;
-  };
+  providerContext?: ProviderContext;
   phase?: string;
   state: string;
   tier: string | null;
@@ -281,7 +284,10 @@ export class ChatRuntime {
       }
     }
 
-    const result = await this.engine.processTurn(input, state.transcript, { sessionId: state.sessionId });
+    const result = await this.engine.processTurn(input, state.transcript, {
+      sessionId: state.sessionId,
+      ...(state.lastProviderContext ? { priorProviderContext: state.lastProviderContext } : {}),
+    });
     const transcript = [...state.transcript, ...result.newMessages];
 
     switch (result.outcome.kind) {
@@ -294,9 +300,13 @@ export class ChatRuntime {
           }
           return message;
         });
+        // result() reads state.lastProviderContext to populate
+        // ChatRuntimeResult.providerContext, so update it here rather than
+        // passing providerContext separately in extra.
+        const providerContext = result.providerContext ?? state.lastProviderContext;
 
         return this.result(
-          { ...state, transcript: nextTranscript },
+          { ...state, transcript: nextTranscript, ...(providerContext ? { lastProviderContext: providerContext } : {}) },
           [{ kind: 'reply', content, modelTier: result.outcome.modelTier }],
           {
             outcome: { ...result.outcome, content },
@@ -396,6 +406,11 @@ export class ChatRuntime {
       truncated?: boolean;
     },
   ): ChatRuntimeResult {
+    // Always reflect the best-known provider context, not just turns that
+    // refreshed it — so callers can rely on the result rather than having to
+    // separately fall back to their own last-known state (mirrors how
+    // pendingApproval is always present regardless of what changed).
+    const providerContext = extra?.providerContext ?? state.lastProviderContext;
     return {
       ...(extra?.beastContext !== undefined ? { beastContext: extra.beastContext } : {}),
       displayMessages,
@@ -410,7 +425,7 @@ export class ChatRuntime {
       ...(extra?.pendingApprovalRequestedAt !== undefined
         ? { pendingApprovalRequestedAt: extra.pendingApprovalRequestedAt }
         : {}),
-      ...(extra?.providerContext ? { providerContext: extra.providerContext } : {}),
+      ...(providerContext ? { providerContext } : {}),
       ...(extra?.phase ? { phase: extra.phase } : {}),
       state: extra?.state ?? 'active',
       tier: extra?.tier ?? null,

@@ -124,4 +124,20 @@ describe('AdapterLlmClient', () => {
       expect.anything(),
     );
   });
+
+  it('completeWithUsage returns providerContext when the adapter reports a fallback', async () => {
+    const providerContext = { provider: 'claude', switchedFrom: 'codex', switchReason: 'rate_limited' };
+    const client = new AdapterLlmClient(
+      makeAdapter({ transformResponse: vi.fn(() => ({ content: 'hello', providerContext })) }),
+    );
+
+    await expect(client.completeWithUsage('prompt')).resolves.toEqual({ text: 'hello', providerContext });
+  });
+
+  it('completeWithUsage omits providerContext when the adapter did not report it', async () => {
+    const client = new AdapterLlmClient(makeAdapter());
+
+    const result = await client.completeWithUsage('prompt');
+    expect(result.providerContext).toBeUndefined();
+  });
 });

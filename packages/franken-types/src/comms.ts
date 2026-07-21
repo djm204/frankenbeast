@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { TokenUsageSchema } from './provider.js';
+import { ProviderContextSchema } from './api-contracts.js';
 
 // Keep below the default 16 KiB HTTP body cap so the JSON envelope has
 // headroom while REST and WebSocket enforce one shared content limit.
@@ -97,6 +98,8 @@ export const ServerSocketEventSchema = z.discriminatedUnion('type', [
     usage: TokenUsageSchema.optional(),
     /** Whether the server truncated history to build this turn's prompt. */
     truncated: z.boolean().optional(),
+    /** The CLI provider/model that actually served this turn, sent only to peers opted into `usage-stats`. */
+    providerContext: ProviderContextSchema.optional(),
     timestamp: z.string(),
   }),
   serverEventShape({

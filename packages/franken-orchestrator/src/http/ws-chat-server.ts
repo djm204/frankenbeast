@@ -16,7 +16,7 @@ import {
   ChatSocketSessionTicketStore,
   verifyChatSocketRequest,
 } from './ws-chat-auth.js';
-import { ClientSocketEventSchema, type ChatSessionResponse, type TokenUsage, deterministicUuid, isoNow } from '@franken/types';
+import { ClientSocketEventSchema, type ChatSessionResponse, type ProviderContext, type TokenUsage, deterministicUuid, isoNow } from '@franken/types';
 import { InMemoryRateLimiter } from '../beasts/http/beast-rate-limit.js';
 import { ChatMutationAdmission, chatClientKey, createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, type ChatRateLimitOptions } from './chat-rate-limit.js';
 
@@ -309,18 +309,24 @@ export class ChatSocketController {
   }
 
   /**
-   * `usage`/`truncated` extend the strict v1 completion schema, so they are
-   * only included for peers that opted in via the `usage-stats` feature.
+   * `usage`/`truncated`/`providerContext` extend the strict v1 completion
+   * schema, so they are only included for peers that opted in via the
+   * `usage-stats` feature.
    */
   private usageStatsFields(
     peer: ChatSocketPeer,
     usage: TokenUsage | undefined,
     truncated: boolean | undefined,
-  ): { usage?: TokenUsage; truncated?: boolean } {
+    providerContext?: ProviderContext | undefined,
+  ): { usage?: TokenUsage; truncated?: boolean; providerContext?: ProviderContext } {
     if (!this.connections.get(peer)?.supportsUsageStats) {
       return {};
     }
-    return { ...(usage ? { usage } : {}), ...(truncated !== undefined ? { truncated } : {}) };
+    return {
+      ...(usage ? { usage } : {}),
+      ...(truncated !== undefined ? { truncated } : {}),
+      ...(providerContext ? { providerContext } : {}),
+    };
   }
 
   private auditRejectedTicketReuse(sessionId: string): void {
@@ -501,6 +507,7 @@ export class ChatSocketController {
       projectId: session.projectId,
       transcript: session.transcript,
       ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
+      ...(session.providerContext ? { lastProviderContext: session.providerContext } : {}),
       ...(executionMode ? { executionMode } : {}),
     });
 
@@ -514,6 +521,7 @@ export class ChatSocketController {
         }
       : null;
     session.beastContext = result.beastContext ?? null;
+    session.providerContext = result.providerContext ?? session.providerContext ?? null;
     session.updatedAt = nowIso();
     this.sessionStore.save(session);
 
@@ -557,7 +565,7 @@ export class ChatSocketController {
         messageId,
         content: contentToSend,
         ...this.messageKindField(peer, display.kind),
-        ...this.usageStatsFields(peer, result.usage, result.truncated),
+        ...this.usageStatsFields(peer, result.usage, result.truncated, result.providerContext),
         ...(display.modelTier ? { modelTier: display.modelTier } : {}),
         timestamp: nowIso(),
       });
@@ -750,6 +758,7 @@ export class ChatSocketController {
         projectId: session.projectId,
         transcript: session.transcript,
         ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
+        ...(session.providerContext ? { lastProviderContext: session.providerContext } : {}),
       }, {
         onEvent: (event) => {
           try {
@@ -792,6 +801,7 @@ export class ChatSocketController {
     session.pendingApproval = null;
     session.state = result.state === 'active' ? 'approved' : result.state;
     session.beastContext = result.beastContext ?? null;
+    session.providerContext = result.providerContext ?? session.providerContext ?? null;
     session.updatedAt = nowIso();
     this.sessionStore.save(session);
 
@@ -801,7 +811,7 @@ export class ChatSocketController {
         messageId: deterministicUuid('packages/franken-orchestrator/src/http/ws-chat-server.ts'),
         content: display.content,
         ...this.messageKindField(peer, display.kind),
-        ...this.usageStatsFields(peer, result.usage, result.truncated),
+        ...this.usageStatsFields(peer, result.usage, result.truncated, result.providerContext),
         timestamp: nowIso(),
       });
     }

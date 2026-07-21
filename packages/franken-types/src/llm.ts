@@ -1,5 +1,6 @@
 import type { Result } from './result.js';
 import type { TokenUsage } from './provider.js';
+import type { ProviderContext } from './api-contracts.js';
 
 /**
  * Provider-agnostic LLM client interface (brain variant).
@@ -16,6 +17,8 @@ export interface LlmCompletionResult {
   text: string;
   /** Present only when the underlying provider reported real token usage. */
   usage?: TokenUsage;
+  /** The CLI provider/model that actually served this completion, and any fallback that occurred. */
+  providerContext?: ProviderContext;
 }
 
 export interface ILlmClient {

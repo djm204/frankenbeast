@@ -566,6 +566,70 @@ describe('ws chat server', () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
+  it('forwards providerContext to opted-in peers and feeds it to the next turn as ground truth', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const secret = createSessionTokenSecret();
+    const providerContext = { provider: 'claude', model: 'claude-sonnet-4-6', switchedFrom: 'codex', switchReason: 'rate_limited' };
+    const completeWithUsage = vi.fn().mockResolvedValue({ text: 'Running on claude now.', providerContext });
+    const runtime = new ChatRuntime({
+      engine: new ConversationEngine({
+        llm: { complete: vi.fn().mockResolvedValue('should not be used'), completeWithUsage },
+        projectName: 'proj',
+      }),
+      turnRunner: new TurnRunner({
+        execute: vi.fn().mockResolvedValue({
+          status: 'success' as const,
+          summary: 'Done',
+          filesChanged: [],
+          testsRun: 0,
+          errors: [],
+        }),
+      }),
+    });
+    const controller = new ChatSocketController({
+      runtime,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+
+    const session = store.create('proj');
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const { peer, sent } = createPeer();
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+      features: ['usage-stats'],
+    }).ok).toBe(true);
+
+    await controller.receive(peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-1',
+      content: 'which model are you',
+    }));
+
+    const firstCompletion = sent
+      .map((raw) => JSON.parse(raw) as Record<string, unknown>)
+      .find((event) => event.type === 'assistant.message.complete');
+    expect(firstCompletion?.providerContext).toEqual(providerContext);
+
+    // The server persists providerContext on the session (like pendingApproval),
+    // so a second turn on the same session tells the model about the fallback
+    // that already happened — this is what lets it answer honestly.
+    await controller.receive(peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-2',
+      content: 'is this a fallback?',
+    }));
+
+    const secondPrompt = completeWithUsage.mock.calls[1]![0] as string;
+    expect(secondPrompt).toContain('This is an automatic fallback');
+    expect(secondPrompt).toContain('"codex" was rate-limited');
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
   it('enforces the shared chat content limit on websocket message sends', async () => {
     mkdirSync(TMP, { recursive: true });
     const store = new FileSessionStore(TMP);

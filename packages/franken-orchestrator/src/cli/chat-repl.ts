@@ -8,7 +8,7 @@ import { sanitizeChatOutput } from '../chat/output-sanitizer.js';
 import { ANSI } from '../logging/beast-logger.js';
 import { withSpinner, QUIRKY_PHRASES } from './spinner.js';
 import { CHAT_COLOR, CHAT_GLYPHS, chatBanner, chatBlock, chatStatusLine, statusRule } from './chat-style.js';
-import { isoNow, type TokenUsage } from '@franken/types';
+import { isoNow, type ProviderContext, type TokenUsage } from '@franken/types';
 
 const ZERO_USAGE: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
 
@@ -116,6 +116,7 @@ export class ChatRepl {
   private readonly sessionStartedAt = Date.now();
   private cumulativeUsage: TokenUsage = ZERO_USAGE;
   private compactionCount = 0;
+  private lastProviderContext: ProviderContext | undefined;
 
   constructor(opts: ChatReplOptions) {
     this.projectId = opts.projectId;
@@ -131,12 +132,18 @@ export class ChatRepl {
   }
 
   private printStatusRule(): void {
+    // Once a turn has actually completed, prefer the real serving
+    // provider/model over the static configured label — the configured
+    // provider can silently differ from what's actually answering (e.g.
+    // after a rate-limit fallback), and the status rule should never
+    // contradict what the model itself can now truthfully say about itself.
+    const label = this.lastProviderContext?.model ?? this.lastProviderContext?.provider ?? this.modelLabel;
     this.io.print(statusRule(process.stdout.columns ?? 80, {
       usage: this.cumulativeUsage,
       ...(this.contextMaxTokens !== undefined ? { contextMaxTokens: this.contextMaxTokens } : {}),
       compactions: this.compactionCount,
       sessionDurationMs: Date.now() - this.sessionStartedAt,
-      modelLabel: this.modelLabel,
+      modelLabel: label,
     }));
   }
 
@@ -180,6 +187,7 @@ export class ChatRepl {
           pendingApproval: this.pendingApproval,
           projectId: this.projectId,
           transcript: this.transcript,
+          ...(this.lastProviderContext ? { lastProviderContext: this.lastProviderContext } : {}),
         }),
         { silent: !process.stderr.isTTY },
       );
@@ -198,6 +206,9 @@ export class ChatRepl {
     }
     if (result.truncated) {
       this.compactionCount++;
+    }
+    if (result.providerContext) {
+      this.lastProviderContext = result.providerContext;
     }
 
     for (const message of result.displayMessages) {

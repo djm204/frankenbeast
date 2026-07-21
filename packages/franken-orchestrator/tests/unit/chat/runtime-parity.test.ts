@@ -274,4 +274,85 @@ describe('chat runtime parity', () => {
 
     expect(result.truncated).toBe(true);
   });
+
+  it('feeds the last known provider context into the next reply turn and reports it back', async () => {
+    const llm = {
+      complete: vi.fn().mockResolvedValue('should not be used'),
+      completeWithUsage: vi.fn().mockResolvedValue({
+        text: 'Sure, running on claude now.',
+        providerContext: { provider: 'claude', model: 'claude-sonnet-4-6', switchedFrom: 'codex', switchReason: 'rate_limited' },
+      }),
+    };
+    const runtime = createChatRuntime({ chatLlm: llm, projectName: 'test-project' });
+
+    const first = await runtime.runtime.run('hello', {
+      sessionId: 'session-1',
+      pendingApproval: false,
+      projectId: 'test-project',
+      transcript: [],
+    });
+
+    expect(first.providerContext).toEqual({
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      switchedFrom: 'codex',
+      switchReason: 'rate_limited',
+    });
+
+    // Caller (ChatRepl/ws-chat-server) is responsible for persisting
+    // providerContext forward, exactly like pendingApproval.
+    const second = await runtime.runtime.run('which model are you', {
+      sessionId: 'session-1',
+      pendingApproval: false,
+      projectId: 'test-project',
+      transcript: first.transcript,
+      lastProviderContext: first.providerContext,
+    });
+
+    const [secondPrompt] = (llm.completeWithUsage as ReturnType<typeof vi.fn>).mock.calls[1]!;
+    expect(secondPrompt).toContain('This is an automatic fallback');
+    expect(secondPrompt).toContain('"codex" was rate-limited');
+    // Still reported forward even though this turn's own response carried no new providerContext.
+    expect(second.providerContext).toEqual(first.providerContext);
+  });
+
+  it('carries lastProviderContext forward across non-reply turns (e.g. /status)', async () => {
+    const providerContext = { provider: 'claude', model: 'claude-sonnet-4-6' };
+    const llm = {
+      complete: vi.fn().mockResolvedValue('should not be used'),
+      completeWithUsage: vi.fn().mockResolvedValue({ text: 'hi', providerContext }),
+    };
+    const runtime = createChatRuntime({ chatLlm: llm, projectName: 'test-project' });
+
+    const first = await runtime.runtime.run('hello', {
+      sessionId: 'session-1',
+      pendingApproval: false,
+      projectId: 'test-project',
+      transcript: [],
+    });
+
+    const statusTurn = await runtime.runtime.run('/status', {
+      sessionId: 'session-1',
+      pendingApproval: false,
+      projectId: 'test-project',
+      transcript: first.transcript,
+      lastProviderContext: first.providerContext,
+    });
+
+    expect(statusTurn.displayMessages[0]?.kind).toBe('status');
+    // /status never calls the LLM, but the result still reports the
+    // best-known provider context — callers don't need their own fallback.
+    expect(statusTurn.providerContext).toEqual(providerContext);
+
+    const third = await runtime.runtime.run('are you still on claude', {
+      sessionId: 'session-1',
+      pendingApproval: false,
+      projectId: 'test-project',
+      transcript: statusTurn.transcript,
+      lastProviderContext: statusTurn.providerContext,
+    });
+
+    const [thirdPrompt] = (llm.completeWithUsage as ReturnType<typeof vi.fn>).mock.calls[1]!;
+    expect(thirdPrompt).toContain('"claude" CLI provider');
+  });
 });

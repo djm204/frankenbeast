@@ -393,6 +393,62 @@ describe('ChatRepl', () => {
     expect(finalRule).toContain('18%'); // (120+60)/1000
     expect(finalRule).toContain('compactions 1');
   });
+
+  it('reflects the real serving provider on the status rule after a fallback, and feeds it to the next turn', async () => {
+    const { io, outputs, pushInput } = mockChatIO();
+    pushInput('first');
+    pushInput('second');
+    pushInput('/quit');
+
+    const fallbackProcessTurn = vi.fn()
+      .mockResolvedValueOnce({
+        outcome: { kind: 'reply', content: 'Running on claude now.', modelTier: 'cheap' },
+        tier: 'cheap',
+        providerContext: { provider: 'claude', model: 'claude-sonnet-4-6', switchedFrom: 'codex', switchReason: 'rate_limited' },
+        newMessages: [
+          { role: 'user', content: 'first', timestamp: new Date().toISOString() },
+          { role: 'assistant', content: 'Running on claude now.', timestamp: new Date().toISOString(), modelTier: 'cheap' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        outcome: { kind: 'reply', content: 'Still on claude.', modelTier: 'cheap' },
+        tier: 'cheap',
+        newMessages: [
+          { role: 'user', content: 'second', timestamp: new Date().toISOString() },
+          { role: 'assistant', content: 'Still on claude.', timestamp: new Date().toISOString(), modelTier: 'cheap' },
+        ],
+      });
+
+    const repl = new ChatRepl({
+      engine: { processTurn: fallbackProcessTurn } as any,
+      turnRunner: { run: mockRunTurn } as any,
+      projectId: 'test',
+      io,
+      modelLabel: 'codex',
+    });
+    await repl.start();
+
+    const statusRules = outputs.filter((o) => o.includes('session'));
+
+    // Before any turn completes, the static configured label is shown.
+    expect(statusRules[0]).toContain('codex');
+    expect(statusRules[0]).not.toContain('claude');
+
+    // Once the fallback is known, the model-specific label replaces it.
+    const claudeRules = statusRules.filter((o) => o.includes('claude-sonnet-4-6'));
+    expect(claudeRules.length).toBeGreaterThan(0);
+    expect(claudeRules.every((o) => !/codex/.test(o))).toBe(true);
+
+    // The second turn is told about the fallback that happened on the first.
+    expect(fallbackProcessTurn).toHaveBeenNthCalledWith(
+      2,
+      'second',
+      expect.any(Array),
+      expect.objectContaining({
+        priorProviderContext: { provider: 'claude', model: 'claude-sonnet-4-6', switchedFrom: 'codex', switchReason: 'rate_limited' },
+      }),
+    );
+  });
 });
 
 describe('sanitizeChatOutput', () => {

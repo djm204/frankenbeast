@@ -9,7 +9,7 @@ import {
   CHAT_SOCKET_PROTOCOL,
   CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX,
 } from '../http/ws-chat-server.js';
-import { deterministicUuid, type TokenUsage } from '@franken/types';
+import { deterministicUuid, type ProviderContext, type TokenUsage } from '@franken/types';
 import { assertLocalPlaintextOrSecureHttpUrl, localPlaintextOrSecureEndpoint } from './network-url.js';
 
 const ZERO_USAGE: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
@@ -244,6 +244,8 @@ export interface RemoteReplyOutcome {
   usage?: TokenUsage;
   /** Whether the server truncated history to build this turn's prompt. */
   truncated?: boolean;
+  /** The CLI provider/model that actually served this turn, and any fallback that occurred. */
+  providerContext?: ProviderContext;
 }
 
 function parseTokenUsage(value: unknown): TokenUsage | undefined {
@@ -256,6 +258,22 @@ function parseTokenUsage(value: unknown): TokenUsage | undefined {
     return { inputTokens, outputTokens, totalTokens };
   }
   return undefined;
+}
+
+function parseProviderContext(value: unknown): ProviderContext | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const ctx = value as Record<string, unknown>;
+  const provider = ctx['provider'];
+  if (typeof provider !== 'string') return undefined;
+  const model = ctx['model'];
+  const switchedFrom = ctx['switchedFrom'];
+  const switchReason = ctx['switchReason'];
+  return {
+    provider,
+    ...(typeof model === 'string' ? { model } : {}),
+    ...(typeof switchedFrom === 'string' ? { switchedFrom } : {}),
+    ...(typeof switchReason === 'string' ? { switchReason } : {}),
+  };
 }
 
 async function awaitRemoteReply(socket: WebSocket, verbose: boolean): Promise<RemoteReplyOutcome> {
@@ -306,8 +324,13 @@ async function awaitRemoteReply(socket: WebSocket, verbose: boolean): Promise<Re
           }
           const usage = parseTokenUsage(payload.usage);
           const truncated = typeof payload.truncated === 'boolean' ? payload.truncated : undefined;
+          const providerContext = parseProviderContext(payload.providerContext);
           cleanup();
-          resolve({ ...(usage ? { usage } : {}), ...(truncated !== undefined ? { truncated } : {}) });
+          resolve({
+            ...(usage ? { usage } : {}),
+            ...(truncated !== undefined ? { truncated } : {}),
+            ...(providerContext ? { providerContext } : {}),
+          });
           break;
         }
         case 'turn.approval.requested':
@@ -364,18 +387,22 @@ export async function runManagedChatRepl(options: {
   const sessionStartedAt = Date.now();
   let cumulativeUsage: TokenUsage = ZERO_USAGE;
   let compactionCount = 0;
+  let lastProviderContext: ProviderContext | undefined;
 
   io.print(chatBanner('frankenbeast', '· attached to managed network · /quit to exit'));
 
   // Managed attach has no direct line to the server's resolved provider, so
   // there is no known context window here — the status rule falls back to a
-  // bare token count instead of a percentage bar (see statusRule).
+  // bare token count instead of a percentage bar (see statusRule). Once a
+  // turn actually completes, prefer the real serving provider/model — the
+  // server may be falling back to a different provider than configured.
   const printStatusRule = (): void => {
+    const label = lastProviderContext?.model ?? lastProviderContext?.provider ?? 'frankenbeast';
     io.print(statusRule(process.stdout.columns ?? 80, {
       usage: cumulativeUsage,
       compactions: compactionCount,
       sessionDurationMs: Date.now() - sessionStartedAt,
-      modelLabel: 'frankenbeast',
+      modelLabel: label,
     }));
   };
 
@@ -398,6 +425,9 @@ export async function runManagedChatRepl(options: {
       }
       if (outcome.truncated) {
         compactionCount++;
+      }
+      if (outcome.providerContext) {
+        lastProviderContext = outcome.providerContext;
       }
     }
   } finally {
