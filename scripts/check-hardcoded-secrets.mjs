@@ -1011,6 +1011,12 @@ function collectProgrammaticCrontabAliases(lines) {
   const commandNames = new Set();
   const processNames = new Set();
   const childProcessModuleAliases = new Set();
+  for (const line of lines) {
+    const esmAlias = line.match(/^\s*import\s+(?:\*\s+as\s+)?([A-Za-z_$][\w$]*)\s+from\s*['"](?:node:)?child_process['"]\s*;?$/);
+    const commonJsAlias = line.match(/^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)\s*;?$/);
+    if (esmAlias) childProcessModuleAliases.add(esmAlias[1]);
+    if (commonJsAlias) childProcessModuleAliases.add(commonJsAlias[1]);
+  }
   for (const [index, line] of lines.entries()) {
     const importLine = line.match(/^\s*from\s+subprocess\s+import\s+(.+)$/);
     if (importLine) {
@@ -1026,8 +1032,6 @@ function collectProgrammaticCrontabAliases(lines) {
         if (imported) callNames.add(imported[1] ?? part.trim());
       }
     }
-    const childProcessModuleAlias = line.match(/^\s*(?:import\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from|(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*require\()\s*['"](?:node:)?child_process['"]\s*\)?\s*;?$/);
-    if (childProcessModuleAlias) childProcessModuleAliases.add(childProcessModuleAlias[1] ?? childProcessModuleAlias[2]);
     const promisifiedCall = line.match(/^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:util\.)?promisify\s*\(\s*([A-Za-z_$][\w$]*)\s*\)\s*;?$/);
     if (promisifiedCall && callNames.has(promisifiedCall[2])) callNames.add(promisifiedCall[1]);
     const assignment = line.match(/^\s*(?:(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)\s*=\s*(?:['"`](?:[^'"`]*\/)?crontab['"`]|\/?(?:[^\s/]+\/)*crontab)\s*;?$/);
