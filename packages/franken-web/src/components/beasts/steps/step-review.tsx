@@ -29,7 +29,8 @@ const CANONICAL_MODULE_KEYS = [
 ] as const;
 
 export function StepReview({ catalog }: { catalog?: readonly BeastCatalogEntry[] | undefined }) {
-  const { stepValues, setWizardStep } = useBeastStore();
+  const stepValues = useBeastStore((state) => state.stepValues);
+  const setWizardStep = useBeastStore((state) => state.setWizardStep);
 
   const identity = stepValues[0] as { name?: string; description?: string } | undefined;
   const workflow = stepValues[1] as WorkflowReviewValues | undefined;

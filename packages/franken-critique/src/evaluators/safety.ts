@@ -14,6 +14,15 @@ const REGEX_EVALUATION_BASE_TIMEOUT_MS = 2_000;
 const REGEX_EVALUATION_MAX_TIMEOUT_MS = 10_000;
 const REGEX_EVALUATION_BYTES_PER_EXTRA_MS = 32 * 1024;
 const EMPTY_ALTERNATIVE_TOKEN = 'EMPTY_ALTERNATIVE';
+const UNICODE_PROPERTIES_OF_STRINGS = new Set([
+  'Basic_Emoji',
+  'Emoji_Keycap_Sequence',
+  'RGI_Emoji',
+  'RGI_Emoji_Flag_Sequence',
+  'RGI_Emoji_Modifier_Sequence',
+  'RGI_Emoji_Tag_Sequence',
+  'RGI_Emoji_ZWJ_Sequence',
+]);
 
 interface RegexGroupState {
   startIndex: number;
@@ -27,7 +36,7 @@ interface RegexPrefixExpansion {
 }
 
 type RegexWorkerFactory = {
-  (pattern: string, content: string): Worker;
+  (pattern: string, content: string, flags: string): Worker;
 };
 
 export class SafetyEvaluator implements Evaluator {
@@ -36,6 +45,7 @@ export class SafetyEvaluator implements Evaluator {
 
   private readonly guardrails: GuardrailsPort;
   private readonly createRegexWorker: RegexWorkerFactory;
+  private parsingUnicodeSets = false;
 
   constructor(
     guardrails: GuardrailsPort,
@@ -46,18 +56,18 @@ export class SafetyEvaluator implements Evaluator {
     this.guardrails = guardrails;
     this.createRegexWorker =
       options?.createRegexWorker ??
-      ((pattern, content): Worker =>
+      ((pattern, content, flags): Worker =>
         new Worker(
           `
         import { parentPort, workerData } from 'node:worker_threads';
         try {
-          const regex = new RegExp(workerData.pattern, 'g');
+          const regex = new RegExp(workerData.pattern, workerData.flags);
           parentPort.postMessage({ matches: regex.test(workerData.content) });
         } catch (error) {
           parentPort.postMessage({ error: error instanceof Error ? error.message : String(error) });
         }
       `,
-          { eval: true, workerData: { pattern, content } },
+          { eval: true, workerData: { pattern, content, flags } },
         ));
   }
 
@@ -77,13 +87,17 @@ export class SafetyEvaluator implements Evaluator {
       const matchResult = await this.regexMatchesWithTimeout(
         rule.pattern,
         input.content,
+        this.regexFlags(rule.flags),
       );
       if (matchResult === 'timeout') {
+        const failClosed = rule.flags === 'v' && rule.severity === 'block';
+        if (failClosed) hasBlock = true;
         findings.push({
           message: `Safety rule regex evaluation timed out: ${rule.description}`,
-          severity: 'warning',
-          suggestion:
-            'Review this validated pattern or narrow the input scope; evaluation exceeded the regex safety timeout and was skipped to keep critique responsive.',
+          severity: failClosed ? 'critical' : 'warning',
+          suggestion: failClosed
+            ? 'Refactor this v-mode block rule so it completes within the regex safety timeout.'
+            : 'Review this validated pattern or narrow the input scope; evaluation exceeded the regex safety timeout and was skipped to keep critique responsive.',
         });
         continue;
       }
@@ -122,8 +136,9 @@ export class SafetyEvaluator implements Evaluator {
   private async regexMatchesWithTimeout(
     pattern: string,
     content: string,
+    flags = 'g',
   ): Promise<boolean | 'timeout'> {
-    const worker = this.createRegexWorker(pattern, content);
+    const worker = this.createRegexWorker(pattern, content, flags);
 
     return new Promise<boolean | 'timeout'>((resolve, reject) => {
       let settled = false;
@@ -185,6 +200,7 @@ export class SafetyEvaluator implements Evaluator {
 
   private validateRulePattern(rule: {
     pattern: string;
+    flags?: 'v';
     description: string;
     severity: 'block' | 'warn';
   }): EvaluationFinding | null {
@@ -198,7 +214,18 @@ export class SafetyEvaluator implements Evaluator {
       };
     }
 
-    if (this.hasUnsafeRegexShape(rule.pattern)) {
+    let unsafe: boolean;
+    try {
+      unsafe = this.hasUnsafeRegexShape(rule.pattern, rule.flags === 'v');
+    } catch {
+      return {
+        message: `Invalid safety rule regex: ${rule.description}`,
+        severity,
+        suggestion: 'Fix or remove invalid pattern before enabling this rule.',
+      };
+    }
+
+    if (unsafe) {
       return {
         message: `Unsafe safety rule regex: ${rule.description}`,
         severity,
@@ -208,7 +235,7 @@ export class SafetyEvaluator implements Evaluator {
     }
 
     try {
-      new RegExp(rule.pattern, 'g');
+      new RegExp(rule.pattern, this.regexFlags(rule.flags));
     } catch {
       return {
         message: `Invalid safety rule regex: ${rule.description}`,
@@ -220,15 +247,27 @@ export class SafetyEvaluator implements Evaluator {
     return null;
   }
 
-  private hasUnsafeRegexShape(pattern: string): boolean {
-    return (
-      this.hasBackreference(pattern) ||
-      this.hasNestedQuantifiedExpression(pattern) ||
-      (this.hasEnabledInlineModifier(pattern, 's') &&
-        this.hasNestedQuantifiedExpression(
-          this.expandScopedDotAllLiterals(pattern),
-        ))
-    );
+  private regexFlags(flags?: 'v'): string {
+    return flags === 'v' ? 'gv' : 'g';
+  }
+
+  private hasUnsafeRegexShape(pattern: string, unicodeSets = false): boolean {
+    const previousParsingMode = this.parsingUnicodeSets;
+    this.parsingUnicodeSets = unicodeSets;
+    try {
+      return (
+        this.hasBackreference(pattern) ||
+        (this.parsingUnicodeSets &&
+          this.hasAmbiguousUnicodeStringSetQuantifier(pattern)) ||
+        this.hasNestedQuantifiedExpression(pattern) ||
+        (this.hasEnabledInlineModifier(pattern, 's') &&
+          this.hasNestedQuantifiedExpression(
+            this.expandScopedDotAllLiterals(pattern),
+          ))
+      );
+    } finally {
+      this.parsingUnicodeSets = previousParsingMode;
+    }
   }
 
   private hasBackreference(pattern: string): boolean {
@@ -250,6 +289,211 @@ export class SafetyEvaluator implements Evaluator {
     }
 
     return false;
+  }
+
+  private hasAmbiguousUnicodeStringSetQuantifier(pattern: string): boolean {
+    const groupAmbiguity = [false];
+    const ignoreCase = [false];
+    for (let i = 0; i < pattern.length; i += 1) {
+      if (pattern[i] === '\\') {
+        i += 1;
+        continue;
+      }
+      if (pattern[i] === '(') {
+        groupAmbiguity.push(false);
+        const modifier = /^\(\?([ims]*)(?:-([ims]*))?:/.exec(
+          pattern.slice(i),
+        );
+        const inherited = ignoreCase.at(-1) ?? false;
+        ignoreCase.push(
+          modifier?.[1]?.includes('i')
+            ? true
+            : modifier?.[2]?.includes('i')
+              ? false
+              : inherited,
+        );
+        continue;
+      }
+      if (pattern[i] === ')' && groupAmbiguity.length > 1) {
+        const ambiguous = groupAmbiguity.pop()!;
+        ignoreCase.pop();
+        if (ambiguous && this.quantifierAt(pattern, i + 1)?.repeatsGroup) {
+          return true;
+        }
+        if (ambiguous) groupAmbiguity[groupAmbiguity.length - 1] = true;
+        continue;
+      }
+      if (pattern[i] !== '[') continue;
+
+      const end = this.skipCharacterClass(pattern, i, true);
+      const characterClass = pattern.slice(i, end + 1);
+      if (
+        this.hasAmbiguousUnicodeStringSet(
+          characterClass,
+          ignoreCase.at(-1) ?? false,
+        )
+      ) {
+        if (this.quantifierAt(pattern, end + 1)?.repeatsGroup) return true;
+        groupAmbiguity[groupAmbiguity.length - 1] = true;
+      }
+      i = end;
+    }
+    return false;
+  }
+
+  private hasAmbiguousUnicodeStringSet(
+    characterClass: string,
+    ignoreCase: boolean,
+  ): boolean {
+    if (this.hasUnicodePropertyOfStrings(characterClass)) return true;
+    if (!characterClass.includes('\\q{')) return false;
+    const values = this.unicodeStringSetValues(characterClass);
+    if (values === null) return true;
+    const distinct = [...new Set(values)].filter((value) =>
+      this.unicodeClassMatchesValue(characterClass, value, ignoreCase),
+    );
+    if (
+      distinct.some((left, leftIndex) =>
+        distinct.some(
+          (right, rightIndex) =>
+            leftIndex !== rightIndex &&
+            this.unicodeStringsHavePrefixOverlap(left, right, ignoreCase),
+        ),
+      )
+    ) {
+      return true;
+    }
+
+    try {
+      return distinct.some((value) => {
+        const firstCodePoint = Array.from(value)[0];
+        return (
+          value.length > (firstCodePoint?.length ?? 0) &&
+          firstCodePoint !== undefined &&
+          this.unicodeClassMatchesValue(
+            characterClass,
+            firstCodePoint,
+            ignoreCase,
+          )
+        );
+      });
+    } catch {
+      return true;
+    }
+  }
+
+  private hasUnicodePropertyOfStrings(characterClass: string): boolean {
+    return Array.from(characterClass.matchAll(/\\p\{([^}]+)\}/g)).some(
+      (match) => UNICODE_PROPERTIES_OF_STRINGS.has(match[1]!),
+    );
+  }
+
+  private unicodeClassMatchesValue(
+    characterClass: string,
+    value: string,
+    ignoreCase: boolean,
+  ): boolean {
+    return new RegExp(
+      `^(?:${characterClass})$`,
+      ignoreCase ? 'iv' : 'v',
+    ).test(value);
+  }
+
+  private unicodeStringsHavePrefixOverlap(
+    left: string,
+    right: string,
+    ignoreCase: boolean,
+  ): boolean {
+    const flags = ignoreCase ? 'iu' : 'u';
+    const matchesPrefix = (prefix: string, value: string): boolean =>
+      new RegExp(`^(?:${this.escapeRegexLiteral(prefix)})`, flags).test(value);
+    return matchesPrefix(left, right) || matchesPrefix(right, left);
+  }
+
+  private escapeRegexLiteral(value: string): string {
+    return value.replace(/[\\^$.*+?()[\]{}|/]/g, '\\$&');
+  }
+
+  private unicodeStringSetValues(characterClass: string): string[] | null {
+    const values: string[] = [];
+    for (let i = 1; i < characterClass.length - 1; i += 1) {
+      if (!characterClass.startsWith('\\q{', i)) continue;
+      i += 3;
+      let current = '';
+      let closed = false;
+      for (; i < characterClass.length - 1; i += 1) {
+        const char = characterClass[i]!;
+        if (char === '}') {
+          values.push(current);
+          closed = true;
+          break;
+        }
+        if (char === '|') {
+          values.push(current);
+          current = '';
+          continue;
+        }
+        if (char === '\\') {
+          const escape = this.unicodeStringEscapeAt(characterClass, i);
+          if (escape === null) return null;
+          current += escape.value;
+          i = escape.end;
+          continue;
+        }
+        current += char;
+      }
+      if (!closed) return null;
+    }
+    return values;
+  }
+
+  private unicodeStringEscapeAt(
+    text: string,
+    start: number,
+  ): { value: string; end: number } | null {
+    const escaped = text[start + 1];
+    if (escaped === undefined) return null;
+    if (escaped === 'x' && /^[0-9A-Fa-f]{2}$/.test(text.slice(start + 2, start + 4))) {
+      return {
+        value: String.fromCharCode(Number.parseInt(text.slice(start + 2, start + 4), 16)),
+        end: start + 3,
+      };
+    }
+    if (escaped === 'u') {
+      const braced = text.slice(start + 2).match(/^\{([0-9A-Fa-f]{1,6})\}/);
+      if (braced) {
+        const codePoint = Number.parseInt(braced[1]!, 16);
+        if (codePoint > 0x10ffff) return null;
+        return {
+          value: String.fromCodePoint(codePoint),
+          end: start + 1 + braced[0].length,
+        };
+      }
+      if (/^[0-9A-Fa-f]{4}$/.test(text.slice(start + 2, start + 6))) {
+        return {
+          value: String.fromCharCode(
+            Number.parseInt(text.slice(start + 2, start + 6), 16),
+          ),
+          end: start + 5,
+        };
+      }
+      return null;
+    }
+    if (escaped === 'c' && /^[A-Za-z]$/.test(text[start + 2] ?? '')) {
+      return {
+        value: String.fromCharCode(text.charCodeAt(start + 2) & 31),
+        end: start + 2,
+      };
+    }
+    const controlEscapes: Record<string, string> = {
+      '0': '\0',
+      f: '\f',
+      n: '\n',
+      r: '\r',
+      t: '\t',
+      v: '\v',
+    };
+    return { value: controlEscapes[escaped] ?? escaped, end: start + 1 };
   }
 
   private collectCapturingGroups(pattern: string): {
@@ -329,9 +573,8 @@ export class SafetyEvaluator implements Evaluator {
 
       if (char === ')' && stack.length > 1) {
         const group = stack.pop()!;
-        if (
-          this.hasOverlappingAlternation(pattern.slice(group.startIndex + 1, i))
-        ) {
+        const groupContent = pattern.slice(group.startIndex + 1, i);
+        if (this.hasOverlappingAlternation(groupContent)) {
           group.containsAmbiguousAlternation = true;
         }
         if (group.containsQuantifiedAtom) {
@@ -384,10 +627,54 @@ export class SafetyEvaluator implements Evaluator {
     return false;
   }
 
+  private hasUnicodeSetSemanticSyntax(pattern: string): boolean {
+    for (let i = 0; i < pattern.length; i += 1) {
+      if (pattern[i] === '\\') {
+        if (
+          (pattern[i + 1] === 'p' || pattern[i + 1] === 'P') &&
+          pattern[i + 2] === '{'
+        ) {
+          return true;
+        }
+        i += 1;
+        continue;
+      }
+
+      if (pattern[i] !== '[') continue;
+      const end = this.skipCharacterClass(pattern, i, true);
+      const characterClass = pattern.slice(i, end + 1);
+      if (
+        characterClass.includes('&&') ||
+        characterClass.includes('--') ||
+        /\\[pPq]\{/.test(characterClass)
+      ) {
+        return true;
+      }
+      i = end;
+    }
+
+    return false;
+  }
+
   private hasOverlappingAlternation(groupContent: string): boolean {
-    const alternatives = this.splitTopLevelAlternatives(
+    const alternativeTexts = this.splitTopLevelAlternatives(
       this.stripGroupPrefix(groupContent),
-    ).map((alternative) => this.expandSimpleAlternativePrefix(alternative));
+    );
+    if (alternativeTexts.length < 2) return false;
+    if (
+      this.parsingUnicodeSets &&
+      this.hasUnicodeSetAlternationRisk(alternativeTexts)
+    ) {
+      return true;
+    }
+
+    const alternatives = alternativeTexts
+      .filter(
+        (alternative) =>
+          !this.parsingUnicodeSets ||
+          !this.hasUnicodeSetSemanticSyntax(alternative),
+      )
+      .map((alternative) => this.expandSimpleAlternativePrefix(alternative));
     if (alternatives.length < 2) return false;
 
     return alternatives.some((left, leftIndex) =>
@@ -397,6 +684,46 @@ export class SafetyEvaluator implements Evaluator {
           this.tokenPrefixOverlaps(left, right),
       ),
     );
+  }
+
+  private hasUnicodeSetAlternationRisk(alternatives: string[]): boolean {
+    const semanticAlternatives = alternatives.filter((alternative) =>
+      this.hasUnicodeSetSemanticSyntax(alternative),
+    );
+    if (semanticAlternatives.length === 0) return false;
+    if (semanticAlternatives.length > 1) return true;
+
+    const semantic = semanticAlternatives[0]!;
+    if (/\\[pPq]\{|--/.test(semantic) || semantic[0] !== '[') {
+      return true;
+    }
+
+    const end = this.skipCharacterClass(semantic, 0, true);
+    if (semantic[end] !== ']') return true;
+    const characterClass = semantic.slice(0, end + 1);
+    const semanticQuantifier = this.quantifierAt(semantic, end + 1);
+    const nullableSuffix = semanticQuantifier?.nullable
+      ? this.expandSimpleAlternativePrefix(
+          semantic.slice(semanticQuantifier.end + 1),
+        )
+      : null;
+
+    return alternatives
+      .filter((alternative) => alternative !== semantic)
+      .some((alternative) => {
+        const expansion = this.expandSimpleAlternativePrefix(alternative);
+        const firstToken = expansion.tokens[0];
+        if (firstToken === undefined || firstToken.length !== 1) return true;
+        try {
+          return (
+            new RegExp(`^(?:${characterClass})$`, 'v').test(firstToken) ||
+            (nullableSuffix !== null &&
+              this.tokenPrefixOverlaps(nullableSuffix, expansion))
+          );
+        } catch {
+          return true;
+        }
+      });
   }
 
   private hasDeterministicTopLevelAlternation(groupContent: string): boolean {
@@ -496,6 +823,12 @@ export class SafetyEvaluator implements Evaluator {
     pattern: string,
     start: number,
   ): boolean {
+    if (
+      this.parsingUnicodeSets &&
+      this.hasUnicodeSetSemanticSyntax(groupContent)
+    ) {
+      return false;
+    }
     const followingToken = this.nextAtomTokenInCurrentAlternative(pattern, start);
     if (followingToken === null) return false;
 
@@ -591,6 +924,18 @@ export class SafetyEvaluator implements Evaluator {
         value = String.fromCharCode(
           Number.parseInt(pattern.slice(start + 2, start + 4), 16),
         );
+      } else if (
+        this.parsingUnicodeSets &&
+        escaped === 'u' &&
+        /^\{[0-9A-Fa-f]{1,6}\}/.test(pattern.slice(start + 2))
+      ) {
+        const codePoint = pattern
+          .slice(start + 2)
+          .match(/^\{([0-9A-Fa-f]{1,6})\}/)!;
+        const valueAsNumber = Number.parseInt(codePoint[1]!, 16);
+        if (valueAsNumber > 0x10ffff) return null;
+        end = start + 1 + codePoint[0].length;
+        value = String.fromCodePoint(valueAsNumber);
       } else if (
         escaped === 'u' &&
         /^[0-9A-Fa-f]{4}$/.test(pattern.slice(start + 2, start + 6))
@@ -688,6 +1033,17 @@ export class SafetyEvaluator implements Evaluator {
         value: String.fromCharCode(Number.parseInt(body.slice(start + 2, start + 6), 16)),
         end: start + 5,
       };
+    }
+    if (this.parsingUnicodeSets && escaped === 'u') {
+      const braced = body.slice(start + 2).match(/^\{([0-9A-Fa-f]{1,6})\}/);
+      if (braced) {
+        const codePoint = Number.parseInt(braced[1]!, 16);
+        if (codePoint > 0x10ffff) return null;
+        return {
+          value: String.fromCodePoint(codePoint),
+          end: start + 1 + braced[0].length,
+        };
+      }
     }
     if (escaped === 'c' && /^[A-Za-z0-9_]$/.test(body[start + 2] ?? '')) {
       return { value: String.fromCharCode(body.charCodeAt(start + 2) & 31), end: start + 2 };
@@ -1178,6 +1534,20 @@ export class SafetyEvaluator implements Evaluator {
         }
         if (
           pattern[i + 1] === 'u' &&
+          /^\{[0-9A-Fa-f]{1,6}\}/.test(pattern.slice(i + 2))
+        ) {
+          const codePoint = pattern
+            .slice(i + 2)
+            .match(/^\{([0-9A-Fa-f]{1,6})\}/)!;
+          const valueAsNumber = Number.parseInt(codePoint[1]!, 16);
+          if (valueAsNumber <= 0x10ffff) {
+            result += String.fromCodePoint(valueAsNumber).toLowerCase();
+            i += 1 + codePoint[0].length;
+            continue;
+          }
+        }
+        if (
+          pattern[i + 1] === 'u' &&
           /^[0-9A-Fa-f]{4}$/.test(pattern.slice(i + 2, i + 6))
         ) {
           result += String.fromCharCode(
@@ -1371,13 +1741,28 @@ export class SafetyEvaluator implements Evaluator {
     return alternatives;
   }
 
-  private skipCharacterClass(pattern: string, start: number): number {
+  private skipCharacterClass(
+    pattern: string,
+    start: number,
+    unicodeSets = this.parsingUnicodeSets,
+  ): number {
+    let depth = 1;
+
     for (let i = start + 1; i < pattern.length; i += 1) {
       if (pattern[i] === '\\') {
         i += 1;
         continue;
       }
-      if (pattern[i] === ']') return i;
+
+      if (pattern[i] === '[' && unicodeSets) {
+        depth += 1;
+        continue;
+      }
+
+      if (pattern[i] === ']') {
+        depth -= 1;
+        if (depth === 0) return i;
+      }
     }
     return pattern.length - 1;
   }

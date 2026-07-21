@@ -6,13 +6,14 @@ import { dashboardProvidersToModelOptions } from '../shared/provider-catalog';
 const ACTION_TYPES = ['planning', 'execution', 'critique', 'reflection', 'chat'];
 
 export function StepLlmTargets() {
-  const { stepValues, setStepValues } = useBeastStore();
+  const stepValue = useBeastStore((state) => state.stepValues[2]);
+  const setStepValues = useBeastStore((state) => state.setStepValues);
   const dashboardProviders = useDashboardStore((state) => state.providers);
   const providersLoading = useDashboardStore((state) => state.loading);
   const providersError = useDashboardStore((state) => state.error);
   const providers = providersLoading || providersError ? [] : dashboardProvidersToModelOptions(dashboardProviders);
   const hasProviderStatus = providersLoading || providersError || providers.length === 0;
-  const values = (stepValues[2] ?? {}) as {
+  const values = (stepValue ?? {}) as {
     defaultProvider?: string;
     defaultModel?: string;
     overrides?: Record<string, { provider: string; model: string; useDefault: boolean }>;

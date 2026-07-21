@@ -2,8 +2,9 @@ import { useBeastStore } from '../../../stores/beast-store';
 import { FilePicker, type PickedFile } from '../shared/file-picker';
 
 export function StepPrompts() {
-  const { stepValues, setStepValues } = useBeastStore();
-  const values = (stepValues[5] ?? {}) as { promptText?: string; files?: PickedFile[] };
+  const stepValue = useBeastStore((state) => state.stepValues[5]);
+  const setStepValues = useBeastStore((state) => state.setStepValues);
+  const values = (stepValue ?? {}) as { promptText?: string; files?: PickedFile[] };
 
   function updateField(field: string, value: unknown) {
     const currentValues = (useBeastStore.getState().stepValues[5] ?? {}) as Record<string, unknown>;

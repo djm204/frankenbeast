@@ -19,8 +19,9 @@ const PRESET_CARDS = [
 ];
 
 export function StepGit() {
-  const { stepValues, setStepValues } = useBeastStore();
-  const values = (stepValues[6] ?? {}) as {
+  const stepValue = useBeastStore((state) => state.stepValues[6]);
+  const setStepValues = useBeastStore((state) => state.setStepValues);
+  const values = (stepValue ?? {}) as {
     preset?: string;
     baseBranch?: string;
     branchPattern?: string;

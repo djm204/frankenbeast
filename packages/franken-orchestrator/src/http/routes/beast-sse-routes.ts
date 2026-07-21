@@ -5,6 +5,7 @@ import { streamSSE } from 'hono/streaming';
 import type { BeastEventBus } from '../../beasts/events/beast-event-bus.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
 import { extractOperatorToken, extractOperatorTokenCookie, isCookieOperatorAuthAllowed } from '../operator-auth.js';
+import { redactHostExecutionData } from '../beast-response-redaction.js';
 
 const SSE_TICKET_COOKIE = 'frankenbeast_sse_ticket';
 const SSE_STREAM_PATH = '/v1/beasts/events/stream';
@@ -127,7 +128,7 @@ export function createBeastSseRoutes(deps: BeastSseRouteDeps): Hono {
           await stream.writeSSE({
             id: String(event.id),
             event: event.type,
-            data: JSON.stringify(event.data),
+            data: JSON.stringify(redactHostExecutionData(event.data)),
           });
         }
       }
@@ -137,7 +138,7 @@ export function createBeastSseRoutes(deps: BeastSseRouteDeps): Hono {
           await stream.writeSSE({
             id: String(event.id),
             event: event.type,
-            data: JSON.stringify(event.data),
+            data: JSON.stringify(redactHostExecutionData(event.data)),
           });
         } catch {
           unsub();
