@@ -2835,21 +2835,25 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
         if (keywords.length === 0) {
           result = this.recent(limit, reportCorruptDetails);
         } else {
-          const rowsById = new Map<number, EpisodicRow>();
+          const eventsById = new Map<number, EpisodicEvent>();
+          const candidateLimit = limit < 0
+            ? -1
+            : Math.max(CORRUPT_JSON_SCAN_BATCH_SIZE, limit * 2);
           for (const chunk of chunkArray(keywords, MAX_RECALL_KEYWORDS_PER_QUERY)) {
-            for (const row of this.recallKeywordChunk(chunk)) {
-              rowsById.set(row.id, row);
+            const events = collectRowsToEvents(
+              (batchLimit, offset) => this.recallKeywordChunk(chunk, batchLimit, offset),
+              candidateLimit,
+              this.encryption,
+              reportCorruptDetails,
+              (event) => recallEventScore(event, keywords) > 0,
+            );
+            for (const event of events) {
+              eventsById.set(event.id!, event);
             }
           }
 
-          const scoredEvents = rowsToEvents(
-            [...rowsById.values()],
-            -1,
-            this.encryption,
-            reportCorruptDetails,
-          )
+          const scoredEvents = [...eventsById.values()]
             .map((event) => ({ event, score: recallEventScore(event, keywords) }))
-            .filter(({ score }) => score > 0)
             .sort(
               (a, b) =>
                 b.score - a.score ||
@@ -6234,9 +6238,10 @@ export class SqliteBrain implements IBrain {
           createdAt: '',
           ...(eventDetails === undefined ? {} : { details: eventDetails }),
         };
+        if (isRightToForgetAuditEvent(candidateEvent)) return false;
         if (
-          isRightToForgetAuditEvent(candidateEvent)
-          || isQuarantinedRightToForgetAuditEvent(candidateEvent)
+          isQuarantinedRightToForgetAuditEvent(candidateEvent)
+          && !episodicRowMatchesSelector('', '', details, selector)
         ) return false;
         return episodicRowMatchesSelector(step, summary, details, selector);
       })
@@ -8227,7 +8232,9 @@ function recallEventScore(
   keywords: string[],
 ): number {
   const summary = event.summary.toLowerCase();
-  const details = event.details === undefined ? '' : JSON.stringify(event.details).toLowerCase();
+  const details = event.details === undefined || isQuarantinedEpisodicDetails(event)
+    ? ''
+    : JSON.stringify(event.details).toLowerCase();
   return keywords.reduce(
     (score, keyword) => score + Number(summary.includes(keyword)) + Number(details.includes(keyword)),
     0,

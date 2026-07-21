@@ -946,8 +946,8 @@ describe("createBrainAdapter", () => {
     expect(text).not.toContain("beta episode");
 
     const mockBrain = brainInstances[0];
-    expect(mockBrain.episodic.recall).toHaveBeenCalledWith("entry", -1);
-    expect(mockBrain.episodic.recent).toHaveBeenCalledWith(-1);
+    expect(mockBrain.episodic.recall).not.toHaveBeenCalledWith("entry", -1);
+    expect(mockBrain.episodic.recent).not.toHaveBeenCalledWith(-1);
   });
 
   it("fails closed for episodic events whose details scope was quarantined", async () => {
@@ -1030,8 +1030,10 @@ describe("createBrainAdapter", () => {
     expect(exported.episodic).toEqual([
       expect.objectContaining({ id: 101, summary: "readable backfill event" }),
     ]);
-    expect(mockBrain.episodic.recall).toHaveBeenCalledWith("event", -1);
-    expect(mockBrain.episodic.recent).toHaveBeenCalledWith(-1);
+    expect(mockBrain.episodic.recall).not.toHaveBeenCalledWith("event", -1);
+    expect(mockBrain.episodic.recent).not.toHaveBeenCalledWith(-1);
+    expect(mockBrain.episodic.recall.mock.calls.every(([, scanLimit]) => scanLimit > 0)).toBe(true);
+    expect(mockBrain.episodic.recent.mock.calls.every(([scanLimit]) => scanLimit > 0)).toBe(true);
   });
 
   it("does not hide ordinary episodic metadata with an incomplete quarantine marker", async () => {
@@ -1343,15 +1345,15 @@ describe("createBrainAdapter", () => {
     expect(mockBrain.episodic.recall).toHaveBeenNthCalledWith(
       1,
       "episode",
-      -1,
+      100,
     );
-    expect(mockBrain.episodic.recent).toHaveBeenNthCalledWith(1, -1);
+    expect(mockBrain.episodic.recent).toHaveBeenNthCalledWith(1, 200);
     expect(mockBrain.episodic.recall).toHaveBeenNthCalledWith(
       2,
       "episode",
-      -1,
+      100,
     );
-    expect(mockBrain.episodic.recent).toHaveBeenNthCalledWith(2, -1);
+    expect(mockBrain.episodic.recent).toHaveBeenNthCalledWith(2, 200);
   });
 
   it("translates right-to-forget exact keys for agent-scoped working memory", async () => {

@@ -460,6 +460,23 @@ function takeVisibleEntries<T>(
   return entries.filter(canRead).slice(0, limit);
 }
 
+function collectVisibleEntries<T>(
+  fetchEntries: (limit: number) => T[],
+  limit: number,
+  canRead: (entry: T) => boolean,
+): T[] {
+  if (limit <= 0) return [];
+  const batchSize = Math.max(100, limit * 2);
+
+  for (let scanLimit = batchSize; ; scanLimit += batchSize) {
+    const entries = fetchEntries(scanLimit);
+    const visible = takeVisibleEntries(entries, limit, canRead);
+    if (visible.length >= limit || entries.length < scanLimit) {
+      return visible;
+    }
+  }
+}
+
 function scopedReportEntry(entry: MemoryRetentionEntryReport): MemoryRetentionEntryReport {
   if (entry.store !== "working") return entry;
   const scoped = parseScopedWorkingExportEntry(entry.key, undefined);
@@ -1178,8 +1195,8 @@ export function createBrainAdapter(
 
       // Search episodic memory
       if (!memoryType || memoryType === "episodic") {
-        const events = takeVisibleEntries(
-          brain.episodic.recall(input.query, -1) as EpisodicEvent[],
+        const events = collectVisibleEntries(
+          (scanLimit) => brain.episodic.recall(input.query, scanLimit) as EpisodicEvent[],
           limit,
           (event) =>
             canReadMemoryEntry(
@@ -1261,8 +1278,8 @@ export function createBrainAdapter(
       }
 
       // Recent episodic events
-      const events = takeVisibleEntries(
-        brain.episodic.recent(-1) as EpisodicEvent[],
+      const events = collectVisibleEntries(
+        (scanLimit) => brain.episodic.recent(scanLimit) as EpisodicEvent[],
         100,
         (event) =>
           canReadMemoryEntry(
@@ -1308,8 +1325,8 @@ export function createBrainAdapter(
           return exported;
         });
 
-      const episodic = takeVisibleEntries(
-        brain.episodic.recent(-1) as EpisodicEvent[],
+      const episodic = collectVisibleEntries(
+        (scanLimit) => brain.episodic.recent(scanLimit) as EpisodicEvent[],
         limit,
         (event) =>
           canReadMemoryEntry(

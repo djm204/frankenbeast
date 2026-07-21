@@ -15,6 +15,22 @@
 - [ ] Record review handoff evidence on the kanban card.
 - [ ] Block the task for required human review.
 
+## Fresh current-head review round (`ac77da5c8`)
+
+- [x] Add regressions proving plaintext recall ignores quarantine metadata while retaining bounded backfill.
+- [x] Add a regression proving malformed audit details are scanned before the quarantine-audit exemption.
+- [x] Add a regression proving bounded frontload backfills in batches instead of reading the whole episodic table.
+- [x] Implement the minimal fixes and run affected package checks.
+- [ ] Publish with lease safety, reply to and resolve threads 3626006123, 3626006126, 3626006130, and 3626006134.
+- [ ] Record exact-head CI/Codex evidence and finish the Kanban handoff.
+
+Verification for this round:
+
+- `@franken/brain`: 330/330 tests passed; lint and typecheck passed.
+- `@franken/mcp-suite`: 605/605 tests passed; lint and typecheck passed (pre-existing warnings only).
+- Repository typecheck, build, and lint passed.
+- Repository test sweep reached 7/10 successful package tasks; three unrelated orchestrator timing failures all passed together in isolation (122/122).
+
 ## Review handoff notes
 
 - Current implementation commit: `e7915c8e2f60b25abe299380b0b3dce563567c65`.
