@@ -97,11 +97,8 @@ jobs:
           path: .cache/dependency-vulnerability-sla-state.json
           key: dependency-vulnerability-sla-${{ github.ref_name }}-${{ hashFiles('package-lock.json') }}-${{ github.run_id }}
 
-      # The SLA dashboard above owns the blocking policy (new critical/high and
-      # remediation windows). Keep the raw report for diagnostics without
-      # bypassing that policy when npm publishes a new moderate advisory.
-      - name: Dependency vulnerability audit snapshot
-        run: npm run audit:dependencies -- --json > "${RUNNER_TEMP}/audit.json" || true
+      - name: Dependency vulnerability audit
+        run: npm run audit:dependencies -- --json > "${RUNNER_TEMP}/audit.json"
 
       - name: Dependency major-version freshness check
         run: npm run deps:outdated:major
