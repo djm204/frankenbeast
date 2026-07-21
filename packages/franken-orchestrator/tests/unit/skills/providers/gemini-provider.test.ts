@@ -164,6 +164,11 @@ describe('GeminiProvider', () => {
     expect(provider.extractUsage?.(raw)).toEqual({ inputTokens: 80, outputTokens: 20, totalTokens: 100 });
   });
 
+  it('extractUsage reports real token counts from a Gemini stats frame', () => {
+    const raw = JSON.stringify({ type: 'result', stats: { input_tokens: 80, output_tokens: 20 } });
+    expect(provider.extractUsage?.(raw)).toEqual({ inputTokens: 80, outputTokens: 20, totalTokens: 100 });
+  });
+
   it('extractUsage returns undefined when the CLI output has no usage', () => {
     expect(provider.extractUsage?.('plain output')).toBeUndefined();
   });

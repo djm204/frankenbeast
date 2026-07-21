@@ -126,6 +126,7 @@ describe('chat approval route persistence', () => {
         state: 'active' as const,
         transcript: [],
         beastContext: null,
+        providerContext: { provider: 'gemini', switchedFrom: 'codex', switchReason: 'rate_limited' },
       }),
     };
     const app = createChatApp({
@@ -139,6 +140,7 @@ describe('chat approval route persistence', () => {
       }),
     });
     const session = pendingApprovalSession(sessionStore.create('project-1'));
+    session.providerContext = { provider: 'claude', switchedFrom: 'codex', switchReason: 'rate_limited' };
     session.pendingApproval = {
       ...session.pendingApproval!,
       workerId: 'worker-1',
@@ -162,8 +164,14 @@ describe('chat approval route persistence', () => {
       sessionId: session.id,
       pendingApproval: true,
       approvalResolved: true,
+      lastProviderContext: session.providerContext,
     }));
     expect(sessionStore.get(session.id)?.pendingApproval).toBeNull();
+    expect(sessionStore.get(session.id)?.providerContext).toEqual({
+      provider: 'gemini',
+      switchedFrom: 'codex',
+      switchReason: 'rate_limited',
+    });
     const entries = readFileSync(auditPath, 'utf8')
       .trim()
       .split('\n')

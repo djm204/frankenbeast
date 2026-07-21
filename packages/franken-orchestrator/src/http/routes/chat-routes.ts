@@ -397,6 +397,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
         projectId: session.projectId,
         transcript: session.transcript,
         ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
+        ...(session.providerContext ? { lastProviderContext: session.providerContext } : {}),
         ...(executionMode ? { executionMode } : {}),
       }).catch(throwKnownChatRuntimeError);
 
@@ -410,6 +411,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
           }
         : null;
       session.beastContext = result.beastContext ?? null;
+      session.providerContext = result.providerContext ?? session.providerContext ?? null;
       session.updatedAt = isoNow();
       sessionStore.save(session);
 
@@ -545,6 +547,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
             projectId: session.projectId,
             transcript: session.transcript,
             ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
+            ...(session.providerContext ? { lastProviderContext: session.providerContext } : {}),
           });
         } catch (error) {
           await recordApprovalExecution(
@@ -573,6 +576,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
         session.state = result.state === 'active' ? 'approved' : result.state;
         session.pendingApproval = null;
         session.beastContext = result.beastContext ?? null;
+        session.providerContext = result.providerContext ?? session.providerContext ?? null;
       } else {
         await recordApprovalDecision(session, 'denied', 'human', {
           requester: approvalRequester(c),

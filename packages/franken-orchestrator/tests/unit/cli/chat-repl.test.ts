@@ -394,6 +394,26 @@ describe('ChatRepl', () => {
     expect(finalRule).toContain('compactions 1');
   });
 
+  it('keeps usage unknown until a provider reports real tokens', async () => {
+    const { io, outputs, pushInput } = mockChatIO();
+    pushInput('hello');
+    pushInput('/quit');
+
+    const repl = new ChatRepl({
+      engine: { processTurn: mockProcessTurn } as any,
+      turnRunner: { run: mockRunTurn } as any,
+      projectId: 'test',
+      io,
+      contextMaxTokens: 1000,
+      modelLabel: 'test-model',
+    });
+    await repl.start();
+
+    const statusRules = outputs.filter((output) => output.includes('test-model'));
+    expect(statusRules.length).toBeGreaterThan(0);
+    expect(statusRules.every((output) => !output.includes('0/1000') && !output.includes('0%'))).toBe(true);
+  });
+
   it('reflects the real serving provider on the status rule after a fallback, and feeds it to the next turn', async () => {
     const { io, outputs, pushInput } = mockChatIO();
     pushInput('first');
@@ -404,6 +424,7 @@ describe('ChatRepl', () => {
       .mockResolvedValueOnce({
         outcome: { kind: 'reply', content: 'Running on claude now.', modelTier: 'cheap' },
         tier: 'cheap',
+        usage: { inputTokens: 80_000, outputTokens: 20_000, totalTokens: 100_000 },
         providerContext: { provider: 'claude', model: 'claude-sonnet-4-6', switchedFrom: 'codex', switchReason: 'rate_limited' },
         newMessages: [
           { role: 'user', content: 'first', timestamp: new Date().toISOString() },
@@ -425,6 +446,8 @@ describe('ChatRepl', () => {
       projectId: 'test',
       io,
       modelLabel: 'codex',
+      contextMaxTokens: 128_000,
+      contextMaxTokensForProvider: (provider) => provider === 'claude' ? 200_000 : undefined,
     });
     await repl.start();
 
@@ -438,6 +461,7 @@ describe('ChatRepl', () => {
     const claudeRules = statusRules.filter((o) => o.includes('claude-sonnet-4-6'));
     expect(claudeRules.length).toBeGreaterThan(0);
     expect(claudeRules.every((o) => !/codex/.test(o))).toBe(true);
+    expect(claudeRules.some((o) => o.includes('50%'))).toBe(true);
 
     // The second turn is told about the fallback that happened on the first.
     expect(fallbackProcessTurn).toHaveBeenNthCalledWith(

@@ -10,8 +10,6 @@ import { withSpinner, QUIRKY_PHRASES } from './spinner.js';
 import { CHAT_COLOR, CHAT_GLYPHS, chatBanner, chatBlock, chatStatusLine, statusRule } from './chat-style.js';
 import { isoNow, type ProviderContext, type TokenUsage } from '@franken/types';
 
-const ZERO_USAGE: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
-
 function addUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
   return {
     inputTokens: a.inputTokens + b.inputTokens,
@@ -59,6 +57,8 @@ export interface ChatReplOptions {
   io?: ChatIO;
   /** Resolved provider's declared context window, for the status rule's usage bar. */
   contextMaxTokens?: number;
+  /** Resolve the serving provider's context window after a fallback. */
+  contextMaxTokensForProvider?: (provider: string) => number | undefined;
   /** Chat model label shown on the status rule. */
   modelLabel?: string;
 }
@@ -109,12 +109,13 @@ export class ChatRepl {
   private readonly verbose: boolean;
   private readonly io: ChatIO;
   private readonly runtime: ChatRuntime;
-  private readonly contextMaxTokens: number | undefined;
+  private readonly configuredContextMaxTokens: number | undefined;
+  private readonly contextMaxTokensForProvider: ((provider: string) => number | undefined) | undefined;
   private readonly modelLabel: string;
   private transcript: TranscriptMessage[] = [];
   private pendingApproval = false;
   private readonly sessionStartedAt = Date.now();
-  private cumulativeUsage: TokenUsage = ZERO_USAGE;
+  private cumulativeUsage: TokenUsage | undefined;
   private compactionCount = 0;
   private lastProviderContext: ProviderContext | undefined;
 
@@ -123,7 +124,8 @@ export class ChatRepl {
     this.sessionStore = opts.sessionStore;
     this.verbose = opts.verbose ?? false;
     this.io = opts.io ?? createReadlineIO();
-    this.contextMaxTokens = opts.contextMaxTokens;
+    this.configuredContextMaxTokens = opts.contextMaxTokens;
+    this.contextMaxTokensForProvider = opts.contextMaxTokensForProvider;
     this.modelLabel = opts.modelLabel ?? 'frankenbeast';
     this.runtime = new ChatRuntime({
       engine: opts.engine,
@@ -138,9 +140,12 @@ export class ChatRepl {
     // after a rate-limit fallback), and the status rule should never
     // contradict what the model itself can now truthfully say about itself.
     const label = this.lastProviderContext?.model ?? this.lastProviderContext?.provider ?? this.modelLabel;
+    const contextMaxTokens = this.lastProviderContext
+      ? this.contextMaxTokensForProvider?.(this.lastProviderContext.provider)
+      : this.configuredContextMaxTokens;
     this.io.print(statusRule(process.stdout.columns ?? 80, {
-      usage: this.cumulativeUsage,
-      ...(this.contextMaxTokens !== undefined ? { contextMaxTokens: this.contextMaxTokens } : {}),
+      ...(this.cumulativeUsage ? { usage: this.cumulativeUsage } : {}),
+      ...(contextMaxTokens !== undefined ? { contextMaxTokens } : {}),
       compactions: this.compactionCount,
       sessionDurationMs: Date.now() - this.sessionStartedAt,
       modelLabel: label,
@@ -202,7 +207,9 @@ export class ChatRepl {
     this.pendingApproval = result.pendingApproval;
     this.transcript = result.transcript;
     if (result.usage) {
-      this.cumulativeUsage = addUsage(this.cumulativeUsage, result.usage);
+      this.cumulativeUsage = this.cumulativeUsage
+        ? addUsage(this.cumulativeUsage, result.usage)
+        : result.usage;
     }
     if (result.truncated) {
       this.compactionCount++;

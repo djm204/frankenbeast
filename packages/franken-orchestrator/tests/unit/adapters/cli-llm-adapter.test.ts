@@ -808,6 +808,53 @@ describe('CliLlmAdapter', () => {
         ]);
       });
 
+      it('keeps the configured provider in provenance across multiple fallback hops', async () => {
+        const { spawnFn } = createQueuedSpawn([
+          { stderr: 'rate limit exceeded', exitCode: 1 },
+          { stderr: 'rate limit exceeded', exitCode: 1 },
+          { stdout: 'gemini success', exitCode: 0 },
+        ]);
+        const adapter = new CliLlmAdapter(
+          codexProvider,
+          { ...baseOpts, providers: ['codex', 'claude', 'gemini'] } as never,
+          spawnFn,
+        );
+
+        const requestId = 'multi-hop-fallback';
+        const raw = await adapter.execute({ prompt: 'test', maxTurns: 1, requestId });
+        const response = adapter.transformResponse(raw, requestId);
+
+        expect(response.providerContext).toEqual(expect.objectContaining({
+          provider: 'gemini',
+          switchedFrom: 'codex',
+          switchReason: 'rate_limited',
+        }));
+      });
+
+      it('keeps the first fallback reason across mixed fallback hops', async () => {
+        const unavailable = Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT' });
+        const { spawnFn } = createQueuedSpawn([
+          { error: unavailable },
+          { stderr: 'rate limit exceeded', exitCode: 1 },
+          { stdout: 'gemini success', exitCode: 0 },
+        ]);
+        const adapter = new CliLlmAdapter(
+          codexProvider,
+          { ...baseOpts, providers: ['codex', 'claude', 'gemini'] } as never,
+          spawnFn,
+        );
+
+        const requestId = 'mixed-multi-hop-fallback';
+        const raw = await adapter.execute({ prompt: 'test', maxTurns: 1, requestId });
+        const response = adapter.transformResponse(raw, requestId);
+
+        expect(response.providerContext).toEqual(expect.objectContaining({
+          provider: 'gemini',
+          switchedFrom: 'codex',
+          switchReason: 'unavailable',
+        }));
+      });
+
       it('switches to the next provider when the selected provider is rate limited via stdout only', async () => {
         const { spawnFn, calls } = createQueuedSpawn([
           { stdout: 'rate limit exceeded\nretry-after: 4', stderr: '', exitCode: 1 },
