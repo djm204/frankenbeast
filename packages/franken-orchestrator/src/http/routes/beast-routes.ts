@@ -46,7 +46,6 @@ type BeastRunResponse = BeastRun & {
   readonly containerNetwork?: unknown;
   readonly resourceSnapshot?: unknown;
   readonly resources?: unknown;
-  readonly workspaceHostPath?: unknown;
   readonly workspaceContainerPath?: unknown;
 };
 
@@ -91,9 +90,21 @@ function runWithContainerFields(run: BeastRun | undefined, attempts: BeastRunAtt
     ...(metadata.containerNetwork !== undefined ? { containerNetwork: metadata.containerNetwork } : {}),
     ...(metadata.resourceSnapshot !== undefined ? { resourceSnapshot: metadata.resourceSnapshot } : {}),
     ...(metadata.resources !== undefined ? { resources: metadata.resources } : {}),
-    ...(metadata.workspaceHostPath !== undefined ? { workspaceHostPath: metadata.workspaceHostPath } : {}),
     ...(metadata.workspaceContainerPath !== undefined ? { workspaceContainerPath: metadata.workspaceContainerPath } : {}),
   };
+}
+
+function redactHostExecutionPaths(attempt: BeastRunAttempt): BeastRunAttempt {
+  if (!attempt.executorMetadata) {
+    return attempt;
+  }
+  const executorMetadata = { ...attempt.executorMetadata };
+  delete executorMetadata.workspaceHostPath;
+  delete executorMetadata.command;
+  delete executorMetadata.args;
+  delete executorMetadata.dockerCommand;
+  delete executorMetadata.dockerArgs;
+  return { ...attempt, executorMetadata };
 }
 
 function attemptsForContainerRun(run: BeastRun | undefined, deps: BeastRoutesDeps): BeastRunAttempt[] {
@@ -101,7 +112,7 @@ function attemptsForContainerRun(run: BeastRun | undefined, deps: BeastRoutesDep
     return [];
   }
   const currentAttempt = deps.runs.getCurrentAttemptForResponse(run);
-  return currentAttempt ? [currentAttempt] : [];
+  return currentAttempt ? [redactHostExecutionPaths(currentAttempt)] : [];
 }
 
 function runResponse(run: BeastRun | undefined, deps: BeastRoutesDeps): BeastRunResponse | undefined {
@@ -460,7 +471,7 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
     if (!run) {
       throw beastRunNotFound(runId);
     }
-    const attempts = deps.runs.listAttemptsForResponse(runId);
+    const attempts = deps.runs.listAttemptsForResponse(runId).map(redactHostExecutionPaths);
     return c.json({
       data: {
         run: runWithContainerFields(deps.runs.sanitizeRunForResponse(run), attempts),

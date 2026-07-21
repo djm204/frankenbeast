@@ -799,7 +799,7 @@ describe('beast routes', () => {
     });
   });
 
-  it('dispatches a real container executor through the API and exposes container fields', async () => {
+  it('dispatches a real container executor through the API and exposes only safe container fields', async () => {
     const { app, operatorToken, fakeContainerSupervisor } = createBeastApp({ realContainer: true });
     const headers = {
       authorization: 'Bearer ' + operatorToken,
@@ -847,6 +847,8 @@ describe('beast routes', () => {
       resourceSnapshot: { memory: '512m', cpus: '1.0', pidsLimit: 256 },
       workspaceContainerPath: '/workspace',
     });
+    expect(created.data).not.toHaveProperty('workspaceHostPath');
+    expect(JSON.stringify(created)).not.toContain(TMP);
     expect(fakeContainerSupervisor.spawn).toHaveBeenCalledWith(
       expect.objectContaining({ command: 'docker' }),
       expect.any(Object),
@@ -874,8 +876,22 @@ describe('beast routes', () => {
       containerRuntime: 'docker',
       image: 'fbeast/sandbox:test',
       containerImage: 'fbeast/sandbox:test',
-      dockerCommand: 'docker',
     });
+    expect(detail.data.run).not.toHaveProperty('workspaceHostPath');
+    expect(detail.data.attempts[0]?.executorMetadata).not.toHaveProperty('workspaceHostPath');
+    expect(detail.data.attempts[0]?.executorMetadata).not.toHaveProperty('command');
+    expect(detail.data.attempts[0]?.executorMetadata).not.toHaveProperty('args');
+    expect(detail.data.attempts[0]?.executorMetadata).not.toHaveProperty('dockerCommand');
+    expect(detail.data.attempts[0]?.executorMetadata).not.toHaveProperty('dockerArgs');
+    expect(JSON.stringify(detail)).not.toContain(TMP);
+
+    const listResponse = await app.request('/v1/beasts/runs', {
+      headers: { authorization: authorizationHeader(operatorToken) },
+    });
+    expect(listResponse.status).toBe(200);
+    const list = await listResponse.json() as { data: { runs: Array<Record<string, unknown>> } };
+    expect(list.data.runs[0]).not.toHaveProperty('workspaceHostPath');
+    expect(JSON.stringify(list)).not.toContain(TMP);
   });
 
   it('does not expose stale container metadata when the current attempt metadata is corrupt', async () => {
@@ -936,7 +952,7 @@ describe('beast routes', () => {
     expect(body.data.runs.map((run) => run.id)).toContain(staleRun.id);
   });
 
-  it('exposes container fields in start and restart action responses', async () => {
+  it('exposes safe container fields in start and restart action responses', async () => {
     const { app, operatorToken } = createBeastApp({ realContainer: true });
     const headers = {
       authorization: 'Bearer ' + operatorToken,
@@ -973,6 +989,7 @@ describe('beast routes', () => {
       containerId: `fbeast-${startCandidate.data.id}-attempt-1`,
       containerRuntime: 'docker',
     });
+    expect(started.data).not.toHaveProperty('workspaceHostPath');
 
     const restartCandidate = await createRun();
     const restartResponse = await app.request(`/v1/beasts/runs/${restartCandidate.data.id}/restart`, {
@@ -985,6 +1002,7 @@ describe('beast routes', () => {
       containerId: `fbeast-${restartCandidate.data.id}-attempt-1`,
       containerRuntime: 'docker',
     });
+    expect(restarted.data).not.toHaveProperty('workspaceHostPath');
   });
 
   it.each(['start', 'stop', 'kill', 'restart'] as const)(
