@@ -5441,10 +5441,10 @@ export class SqliteBrain implements IBrain {
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('busy_timeout = 5000');
     this.initSchema();
-    migrateMemorySchemaDatabase(this.db, dbPath, { dryRun: false });
     const encryption = makeMemoryCipher(options.encryption);
     this.encryption = encryption;
     assertMemoryEncryptionState(this.db, dbPath, encryption);
+    migrateMemorySchemaDatabase(this.db, dbPath, { dryRun: false });
     this.auditRecorder = (event) => insertMemoryAccessAuditEvent(this.db, event, encryption);
     this.accessAudit = new SqliteMemoryAccessAuditTrail(this.db, encryption);
     try {
@@ -6545,6 +6545,25 @@ function migrateMemorySchemaDatabase(
     }
   }
 
+  if (existingTables.has('episodic_events')) {
+    const episodicIndexes = new Set(
+      (
+        db
+          .prepare(`PRAGMA index_list(episodic_events)`)
+          .all() as Array<{ name: string }>
+      ).map((row) => row.name),
+    );
+    if (
+      !episodicIndexes.has('idx_episodic_events_type_created_at') ||
+      !episodicIndexes.has('idx_episodic_events_created_at')
+    ) {
+      operations.push({
+        table: 'episodic_events',
+        action: 'create type and recency query indexes',
+      });
+    }
+  }
+
   for (const store of stores) {
     if (existingTables.has(store)) {
       const hasRegistryRow = existingTables.has('memory_schema_versions')
@@ -6628,6 +6647,10 @@ function migrateMemorySchemaDatabase(
         created_at TEXT NOT NULL,
         schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
       );
+      CREATE INDEX IF NOT EXISTS idx_episodic_events_type_created_at
+        ON episodic_events(type, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_episodic_events_created_at
+        ON episodic_events(created_at DESC);
       CREATE TABLE IF NOT EXISTS checkpoints (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         state TEXT NOT NULL,

@@ -1,7 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ROOT, readJson, getWorkspacePackages } from "./helpers/workspaces.js";
+import {
+  ROOT,
+  readJson,
+  getWorkspacePackages,
+  getWorkspaceSourceAliases,
+  getPackageExportEntries,
+} from "./helpers/workspaces.js";
 
 const hasTypeScriptSource = (relDir: string): boolean => {
   const absDir = join(ROOT, relDir);
@@ -25,22 +31,15 @@ const hasTypeScriptSource = (relDir: string): boolean => {
 
 const workspacePackages = getWorkspacePackages();
 
-const EXPECTED_ALIASES: Record<string, string> = {
-  "@franken/brain": "./packages/franken-brain/src/index.ts",
-  "@franken/planner": "./packages/franken-planner/src/index.ts",
-  "@franken/observer": "./packages/franken-observer/src/index.ts",
-  "@franken/critique": "./packages/franken-critique/src/index.ts",
-  "@franken/governor": "./packages/franken-governor/src/index.ts",
-  "@franken/types/path-containment":
-    "./packages/franken-types/src/path-containment.ts",
-  "@franken/types/json-pointer":
-    "./packages/franken-types/src/json-pointer.ts",
-  "@franken/types/utils": "./packages/franken-types/src/utils/index.ts",
-  "@franken/types": "./packages/franken-types/src/index.ts",
-  "@franken/orchestrator": "./packages/franken-orchestrator/src/index.ts",
-  "@franken/mcp-suite": "./packages/franken-mcp-suite/src/index.ts",
-  "@franken/live-bench": "./packages/live-bench/src/index.ts",
-};
+const REQUIRED_STRICT_COMPILER_OPTIONS = [
+  "strict",
+  "noUncheckedIndexedAccess",
+  "exactOptionalPropertyTypes",
+  "noImplicitReturns",
+  "noFallthroughCasesInSwitch",
+] as const;
+
+const EXPECTED_ALIASES = getWorkspaceSourceAliases();
 
 const ALIASED_WORKSPACE_PACKAGES = new Set(
   workspacePackages
@@ -65,6 +64,25 @@ const TSCONFIG_TEST_INCLUDE_ALLOWLIST: Record<string, string> = {
   "@franken/mcp-suite":
     "Uses a package-level tsconfig/vitest boundary for src and tests; the root tsconfig.test.json cannot model its CLI/server package settings.",
 };
+
+describe("workspace package exports", () => {
+  it("normalizes string-form exports as the root export", () => {
+    expect(
+      getPackageExportEntries({ exports: "./dist/index.js" }),
+    ).toEqual([[".", "./dist/index.js"]]);
+  });
+
+  it("normalizes root conditional exports as the root export", () => {
+    const rootExport = {
+      types: "./dist/index.d.ts",
+      import: "./dist/index.js",
+    };
+
+    expect(getPackageExportEntries({ exports: rootExport })).toEqual([
+      [".", rootExport],
+    ]);
+  });
+});
 
 describe("tsconfig.json path aliases", () => {
   const tsconfig = readJson("tsconfig.json");
@@ -140,6 +158,28 @@ describe("tsconfig.json path aliases", () => {
 
   it("keeps include as empty array", () => {
     expect(tsconfig.include).toEqual([]);
+  });
+});
+
+describe("workspace TypeScript strictness", () => {
+  it("enables every required safety flag in each TypeScript workspace", () => {
+    const drift = workspacePackages.flatMap((workspacePackage) => {
+      if (!existsSync(join(ROOT, workspacePackage.dir, "tsconfig.json"))) {
+        return [];
+      }
+
+      const compilerOptions = readJson(
+        `${workspacePackage.dir}/tsconfig.json`,
+      ).compilerOptions;
+      return REQUIRED_STRICT_COMPILER_OPTIONS.filter(
+        (option) => compilerOptions?.[option] !== true,
+      ).map((option) => `${workspacePackage.name}: ${option}`);
+    });
+
+    expect(
+      drift,
+      "Every TypeScript workspace must compile with the shared strict safety flags",
+    ).toEqual([]);
   });
 });
 

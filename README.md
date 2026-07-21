@@ -963,9 +963,9 @@ Delivery-channel sensitivity defaults fail-closed: runtime replies marked with `
 | 11 | External Comms (Slack/Discord/Telegram/WhatsApp) | Complete |
 | 12 | GitHub Issues Pipeline | Complete |
 
-Run `npm test`, `npm run typecheck`, and `npm run build` for the current baseline. The workspace currently contains 10 package manifests under `packages/*`; avoid relying on stale static test-count claims in older docs.
+Run `npm test`, `npm run typecheck`, and `npm run build` for the current baseline. Use the [test command decision tree](docs/onboarding/test-command-decision-tree.md) to choose narrower checks for a specific change. The maintained root and workspace scripts are authoritative; avoid relying on stale static test-count claims in older docs.
 
-See [docs/PROGRESS.md](docs/PROGRESS.md) for the full PR-by-PR breakdown.
+For historical implementation chronology only, see the archived [PR-by-PR progress tracker](docs/PROGRESS.md); it does not define the current testing baseline.
 
 ### In Progress
 

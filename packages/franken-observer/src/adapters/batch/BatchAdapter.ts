@@ -196,7 +196,7 @@ export class BatchAdapter implements ExportAdapter {
     }
 
     for (let i = 0; i < results.length; i++) {
-      const result = results[i]
+      const result = results[i]!
       const trace = batch[i]!
       if (result.status === 'fulfilled') {
         const index = this.buffer.indexOf(trace)

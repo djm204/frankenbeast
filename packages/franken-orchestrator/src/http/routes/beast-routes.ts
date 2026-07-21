@@ -30,12 +30,13 @@ import {
 } from '../middleware.js';
 import { wallClockNow } from '@franken/types';
 import { TransportSecurityService } from '../security/transport-security.js';
-import type { BeastRun, BeastRunAttempt } from '../../beasts/types.js';
+import type { BeastRun, BeastRunAttempt, BeastRunEvent } from '../../beasts/types.js';
 import {
   DEFAULT_BEAST_RUN_PAGE_LIMIT,
   InvalidBeastRunCursorError,
   MAX_BEAST_RUN_PAGE_LIMIT,
 } from '../../beasts/repository/sqlite-beast-repository.js';
+import { redactAbsoluteHostPathValues, redactHostExecutionData } from '../beast-response-redaction.js';
 
 type BeastRunResponse = BeastRun & {
   readonly containerId?: unknown;
@@ -46,7 +47,6 @@ type BeastRunResponse = BeastRun & {
   readonly containerNetwork?: unknown;
   readonly resourceSnapshot?: unknown;
   readonly resources?: unknown;
-  readonly workspaceHostPath?: unknown;
   readonly workspaceContainerPath?: unknown;
 };
 
@@ -71,6 +71,7 @@ function parseBeastEventPagination(query: Record<string, string>): { afterSequen
 }
 
 function runWithContainerFields(run: BeastRun | undefined, attempts: BeastRunAttempt[]): BeastRunResponse | undefined {
+  run = redactRunHostPaths(run);
   if (!run || run.executionMode !== 'container') {
     return run;
   }
@@ -91,9 +92,39 @@ function runWithContainerFields(run: BeastRun | undefined, attempts: BeastRunAtt
     ...(metadata.containerNetwork !== undefined ? { containerNetwork: metadata.containerNetwork } : {}),
     ...(metadata.resourceSnapshot !== undefined ? { resourceSnapshot: metadata.resourceSnapshot } : {}),
     ...(metadata.resources !== undefined ? { resources: metadata.resources } : {}),
-    ...(metadata.workspaceHostPath !== undefined ? { workspaceHostPath: metadata.workspaceHostPath } : {}),
     ...(metadata.workspaceContainerPath !== undefined ? { workspaceContainerPath: metadata.workspaceContainerPath } : {}),
   };
+}
+
+function redactHostExecutionPaths(attempt: BeastRunAttempt): BeastRunAttempt {
+  if (!attempt.executorMetadata) {
+    return attempt;
+  }
+  const executorMetadata = { ...attempt.executorMetadata };
+  delete executorMetadata.workspaceHostPath;
+  delete executorMetadata.command;
+  delete executorMetadata.args;
+  delete executorMetadata.dockerCommand;
+  delete executorMetadata.dockerArgs;
+  delete executorMetadata.worktreePath;
+  delete executorMetadata.worktreeExecutionCwd;
+  delete executorMetadata.worktreeProjectRoot;
+  return { ...attempt, executorMetadata };
+}
+
+function redactRunHostPaths(run: BeastRun | undefined): BeastRun | undefined {
+  if (!run) return run;
+  const configSnapshot = redactAbsoluteHostPathValues(run.configSnapshot) as Readonly<Record<string, unknown>>;
+  return { ...run, configSnapshot };
+}
+
+function redactEventHostPaths(event: BeastRunEvent): BeastRunEvent {
+  const payload = redactHostExecutionData(event.payload) as Readonly<Record<string, unknown>>;
+  return { ...event, payload };
+}
+
+function redactEventPageHostPaths<T extends { readonly events: BeastRunEvent[] }>(page: T): T {
+  return { ...page, events: page.events.map(redactEventHostPaths) };
 }
 
 function attemptsForContainerRun(run: BeastRun | undefined, deps: BeastRoutesDeps): BeastRunAttempt[] {
@@ -101,7 +132,7 @@ function attemptsForContainerRun(run: BeastRun | undefined, deps: BeastRoutesDep
     return [];
   }
   const currentAttempt = deps.runs.getCurrentAttemptForResponse(run);
-  return currentAttempt ? [currentAttempt] : [];
+  return currentAttempt ? [redactHostExecutionPaths(currentAttempt)] : [];
 }
 
 function runResponse(run: BeastRun | undefined, deps: BeastRoutesDeps): BeastRunResponse | undefined {
@@ -460,12 +491,14 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
     if (!run) {
       throw beastRunNotFound(runId);
     }
-    const attempts = deps.runs.listAttemptsForResponse(runId);
+    const attempts = deps.runs.listAttemptsForResponse(runId).map(redactHostExecutionPaths);
     return c.json({
       data: {
         run: runWithContainerFields(deps.runs.sanitizeRunForResponse(run), attempts),
         attempts,
-        events: deps.runs.listEventPageForResponse(runId, 0, DEFAULT_BEAST_EVENT_PAGE_LIMIT).events,
+        events: redactEventPageHostPaths(
+          deps.runs.listEventPageForResponse(runId, 0, DEFAULT_BEAST_EVENT_PAGE_LIMIT),
+        ).events,
       },
     });
   });
@@ -475,7 +508,7 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
     const { afterSequence, limit } = parseBeastEventPagination(c.req.query());
     try {
       return c.json({
-        data: deps.runs.listEventPageForResponse(runId, afterSequence, limit),
+        data: redactEventPageHostPaths(deps.runs.listEventPageForResponse(runId, afterSequence, limit)),
       });
     } catch (error) {
       throwKnownRunError(runId, error);

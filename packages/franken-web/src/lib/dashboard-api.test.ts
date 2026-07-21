@@ -355,7 +355,7 @@ describe('DashboardApiClient', () => {
         this.addEventListener = vi.fn((type: string, handler: (event: { data?: string; lastEventId?: string }) => void) => {
           listeners[index]![type] = handler;
         });
-        this.close = closeFns[index];
+        this.close = closeFns[index]!;
       });
 
       const originalEventSource = globalThis.EventSource;
@@ -407,7 +407,7 @@ describe('DashboardApiClient', () => {
         this.addEventListener = vi.fn((type: string, handler: (event: { data?: string }) => void) => {
           listeners[index]![type] = handler;
         });
-        this.close = closeFns[index];
+        this.close = closeFns[index]!;
       });
 
       const originalEventSource = globalThis.EventSource;
@@ -458,7 +458,7 @@ describe('DashboardApiClient', () => {
         this.addEventListener = vi.fn((type: string, handler: (event: { data?: string }) => void) => {
           listeners[index]![type] = handler;
         });
-        this.close = closeFns[index];
+        this.close = closeFns[index]!;
       });
 
       const originalEventSource = globalThis.EventSource;
@@ -514,7 +514,7 @@ describe('DashboardApiClient', () => {
         this.addEventListener = vi.fn((type: string, handler: (event: { data?: string }) => void) => {
           listeners[index]![type] = handler;
         });
-        this.close = closeFns[index];
+        this.close = closeFns[index]!;
       });
 
       const originalEventSource = globalThis.EventSource;

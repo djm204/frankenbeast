@@ -102,7 +102,7 @@ export class TraceServer {
         // (e.g. a lone "%") throw URIError — treat those as "not found".
         let traceId: string
         try {
-          traceId = decodeURIComponent(traceMatch[1])
+          traceId = decodeURIComponent(traceMatch[1]!)
         } catch {
           json(res, 404, { error: 'trace not found' })
           return

@@ -1,5 +1,20 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-20 — Outbound request deadlines must include response consumption
+- JavaScript `fetch()` resolves when response headers arrive, not when the body has been consumed. A hard outbound-delivery deadline must wrap both the fetch and all body/error parsing under the same abort signal and timer; otherwise a provider can send headers and stall forever during `json()` or `text()`.
+- In fresh monorepo worktrees, run the root build before package-local TypeScript checks so internal workspace declaration outputs exist and unrelated module-resolution errors do not mask the feature result.
+
+## 2026-07-18 — Cron credential scanner closeout
+- For cron credential scanners, taint propagation must cover neutral alias names, exported declarations, destructured env containers, env-name variables, multiline assignments, shell indirect expansions, printenv/getenv aliases, and programmatic CLI calls; otherwise hardening that only matches direct `process.env`/`$TOKEN` reads leaves easy PAT-persistence bypasses.
+- Cron-context detection should inspect code outside string literals plus actual schedule literals, not diagnostic text that merely says `crontab`; credential assignment parsing must handle quoted values while preserving runtime `$(gh auth token)` as safe.
+- Async child-process taint needs both returned child/stdout aliases and callback stdout parameters, including multiline calls; once a multiline alias becomes sensitive, trailing defaults/options must not clear it before the call closes.
+- Indirect shell `printenv` names, schedule aliases inside template interpolation, and dotted object-property assignments all require explicit taint propagation; option literals such as `--token` must remain non-sensitive when paired with a runtime `$(gh auth token)` value.
+- Multiline TypeScript destructuring, split `process.env` chains, destructured async stdout, and cached `os.environ.get` getters need dedicated alias paths; runtime cron allow-lists should treat `command gh auth token` like direct `gh auth token`.
+- When expanding shell-file scanning for cron writers, avoid both basename-only install/setup filters and scanning every shell script blindly; include cron/crontab-named writers while preserving non-cron bootstrap scripts to prevent fixture false positives.
+- Separate shell interpolation parsing from JavaScript template interpolation, carry quote/heredoc context across lines, recognize staged crontab files and programmatic crontab sinks, and propagate aliased Python `os.environ`; otherwise a line-oriented scanner both misses persisted credentials and rejects safe runtime `$(gh auth token)` strings.
+- Treat cron-install taint as a language-aware dataflow problem: cover post-processed/backquoted `printenv`, wrapped/incrementally assembled `gh auth token`, aliased env imports/containers/sinks, dot/bracket/destructuring/joined interpolation flows, multiline schedules/assembly/programmatic sinks, and redirect/tee/stdin staging while preserving shell URLs and excluding quoted heredoc/escaped runtime expansion.
+- Pre-scan bounded source lines for cross-line facts that a single-line taint pass cannot recover reliably: multiline `gh auth token` argv arrays, named callback stdout parameters, default `node:process` imports, command-array crontab sinks, and shell staging through command aliases. Split multiple declarations only at top-level delimiters so commas inside calls, arrays, objects, and strings do not corrupt alias tracking.
+
 ## 2026-07-20 — Recovered PID signal-boundary identity checks
 - Carry the persisted process-start token into the supervisor and re-read identity immediately before every fallback signal; validating ownership in an upstream executor leaves a TOCTOU gap, especially when a failed process-group sweep falls back to direct PID signaling. If the token is missing, unreadable, unsupported, or mismatched while the PID exists, refuse the signal with operator guidance. An absent PID is a safe no-op for direct signaling, but a persisted owned process group must still be swept because descendants can survive their group leader.
 

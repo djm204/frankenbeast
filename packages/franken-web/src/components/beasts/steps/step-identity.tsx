@@ -1,8 +1,9 @@
 import { useBeastStore } from '../../../stores/beast-store';
 
 export function StepIdentity() {
-  const { stepValues, setStepValues } = useBeastStore();
-  const values = (stepValues[0] ?? {}) as { name?: string; description?: string };
+  const stepValue = useBeastStore((state) => state.stepValues[0]);
+  const setStepValues = useBeastStore((state) => state.setStepValues);
+  const values = (stepValue ?? {}) as { name?: string; description?: string };
 
   function updateField(field: string, value: string) {
     setStepValues(0, { ...values, [field]: value });

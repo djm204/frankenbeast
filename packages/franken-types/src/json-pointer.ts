@@ -102,8 +102,8 @@ export function setJsonPointerValue<T extends JsonContainer>(
   let current: JsonContainer = target;
   assertWritableJsonContainer(current);
   for (let index = 0; index < segments.length - 1; index += 1) {
-    const segment = segments[index];
-    const nextSegment = segments[index + 1];
+    const segment = segments[index]!;
+    const nextSegment = segments[index + 1]!;
     if (hasOwnContainerValue(current, segment, options)) {
       const existing = readOwnContainerValue(current, segment, options);
       if (!isJsonContainer(existing)) {
@@ -166,8 +166,8 @@ function validateSetJsonPointerTraversal(target: JsonContainer, segments: readon
   let current: JsonContainer = target;
   assertWritableJsonContainer(current);
   for (let index = 0; index < segments.length - 1; index += 1) {
-    const segment = segments[index];
-    const nextSegment = segments[index + 1];
+    const segment = segments[index]!;
+    const nextSegment = segments[index + 1]!;
     if (hasOwnContainerValue(current, segment, options)) {
       const existing = readOwnContainerValue(current, segment, options);
       if (!isJsonContainer(existing)) {

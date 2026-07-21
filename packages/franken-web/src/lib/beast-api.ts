@@ -494,7 +494,7 @@ function extractServerError(parsed: unknown, text: string): { message?: string; 
     if (isRecord(parsed.error) && typeof parsed.error.message === 'string' && parsed.error.message.trim()) {
       return {
         message: parsed.error.message,
-        code: typeof parsed.error.code === 'string' ? parsed.error.code : undefined,
+        ...(typeof parsed.error.code === 'string' ? { code: parsed.error.code } : {}),
         details: parsed.error.details,
       };
     }
@@ -503,7 +503,7 @@ function extractServerError(parsed: unknown, text: string): { message?: string; 
     if (typeof directMessage === 'string' && directMessage.trim()) {
       return {
         message: directMessage,
-        code: typeof parsed.code === 'string' ? parsed.code : undefined,
+        ...(typeof parsed.code === 'string' ? { code: parsed.code } : {}),
         details: parsed.details,
       };
     }
@@ -511,7 +511,7 @@ function extractServerError(parsed: unknown, text: string): { message?: string; 
     if (typeof parsed.error === 'string' && parsed.error.trim()) {
       return {
         message: parsed.error,
-        code: typeof parsed.code === 'string' ? parsed.code : undefined,
+        ...(typeof parsed.code === 'string' ? { code: parsed.code } : {}),
         details: parsed.details,
       };
     }
@@ -537,4 +537,3 @@ function normalizeHeaders(headers: HeadersInit | undefined): Record<string, stri
   }
   return { ...headers };
 }
-

@@ -170,11 +170,13 @@ export function updateReceipt(
   messageId: string,
   receipt: MessageReceipt,
 ): ChatMessage[] {
-  return messages.map((message) => (
-    message.id === messageId
-      ? { ...message, receipt, ...(receipt !== 'failed' ? { error: undefined } : {}) }
-      : message
-  ));
+  return messages.map((message) => {
+    if (message.id !== messageId) return message;
+    if (receipt === 'failed') return { ...message, receipt };
+    const messageWithoutError = { ...message };
+    delete messageWithoutError.error;
+    return { ...messageWithoutError, receipt };
+  });
 }
 
 export function markMessageFailed(messages: ChatMessage[], messageId: string, error: string, canRetry = true): ChatMessage[] {

@@ -43,7 +43,7 @@ describe('SlackAdapter', () => {
     await adapter.send('session-123', {
       text: 'hello',
       status: 'reply',
-      metadata: { channelId: 'C1' },
+      metadata: { channelId: ' C1 ', threadTs: '1712345678.000100' },
     });
 
     expect(mockFetch).toHaveBeenCalledWith(
@@ -53,7 +53,47 @@ describe('SlackAdapter', () => {
         body: expect.stringContaining('"text":"hello"'),
       })
     );
+    const body = JSON.parse(mockFetch.mock.calls[0]![1]!.body as string) as {
+      channel: string;
+      thread_ts: string;
+    };
+    expect(body.channel).toBe('C1');
+    expect(body.thread_ts).toBe('1712345678.000100');
   });
+
+  it.each([
+    { name: 'reply', message: { text: 'hello', status: 'reply' as const } },
+    {
+      name: 'approval',
+      message: {
+        text: 'approve?',
+        status: 'approval' as const,
+        actions: [{ id: 'approve', label: 'Approve' }],
+      },
+    },
+  ])('rejects $name messages without channelId before calling Slack', async ({ message }) => {
+    const mockFetch = vi.fn<typeof fetch>();
+    const adapter = new SlackAdapter({ token: TEST_SLACK_BOT_TOKEN, fetchImpl: mockFetch });
+
+    await expect(adapter.send('session-123', message)).rejects.toThrow(
+      'Slack routing error: missing channelId metadata',
+    );
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, null, 42, '', '   '])(
+    'rejects invalid channelId metadata value %j before calling Slack',
+    async (channelId) => {
+      const mockFetch = vi.fn<typeof fetch>();
+      const adapter = new SlackAdapter({ token: TEST_SLACK_BOT_TOKEN, fetchImpl: mockFetch });
+
+      await expect(adapter.send('session-123', {
+        text: 'hello',
+        metadata: { channelId },
+      })).rejects.toThrow('Slack routing error: missing channelId metadata');
+      expect(mockFetch).not.toHaveBeenCalled();
+    },
+  );
 
   it('formats buttons correctly in blocks', async () => {
     const adapter = new SlackAdapter({ token: TEST_SLACK_BOT_TOKEN });
@@ -138,5 +178,57 @@ describe('SlackAdapter', () => {
     })).rejects.toThrow(
       'Slack API error: 503 Service Unavailable for https://slack.com/api/chat.postMessage: temporarily unavailable',
     );
+  });
+
+  it('times out a never-resolving outbound request with a redacted error', async () => {
+    vi.useFakeTimers();
+    const mockFetch = vi.fn<typeof fetch>(() => new Promise<Response>(() => undefined));
+    const adapter = new SlackAdapter({
+      token: TEST_SLACK_BOT_TOKEN,
+      fetchImpl: mockFetch,
+      timeoutMs: 25,
+    });
+
+    const sendPromise = adapter.send('session-123', {
+      text: 'hello',
+      metadata: { channelId: 'C1' },
+    });
+    const outcomePromise = sendPromise.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(25);
+
+    const error = await outcomePromise;
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe('Slack outbound request timed out after 25ms');
+    expect((error as { code?: string }).code).toBe('OUTBOUND_COMMS_TIMEOUT');
+    expect((error as Error).message).not.toContain(TEST_SLACK_BOT_TOKEN);
+    expect(mockFetch.mock.calls[0]![1]!.signal).toBeInstanceOf(AbortSignal);
+    expect(mockFetch.mock.calls[0]![1]!.signal!.aborted).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('keeps the outbound deadline active while reading a successful response body', async () => {
+    vi.useFakeTimers();
+    const mockFetch = vi.fn<typeof fetch>(async () => ({
+      ok: true,
+      json: () => new Promise<never>(() => undefined),
+    }) as Response);
+    const adapter = new SlackAdapter({
+      token: TEST_SLACK_BOT_TOKEN,
+      fetchImpl: mockFetch,
+      timeoutMs: 25,
+    });
+
+    const outcomePromise = adapter.send('session-123', {
+      text: 'hello',
+      metadata: { channelId: 'C1' },
+    }).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(25);
+
+    const error = await outcomePromise;
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe('Slack outbound request timed out after 25ms');
+    expect((error as { code?: string }).code).toBe('OUTBOUND_COMMS_TIMEOUT');
+    expect(mockFetch.mock.calls[0]![1]!.signal!.aborted).toBe(true);
+    vi.useRealTimers();
   });
 });

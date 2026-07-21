@@ -86,6 +86,7 @@ export function parseTraceparent(header: string | null | undefined): Traceparent
   if (parts.length < 4) return null
 
   const [version, traceId, parentSpanId, flags] = parts
+  if (version === undefined || traceId === undefined || parentSpanId === undefined || flags === undefined) return null
 
   if (!RE_HEX_02.test(version) || version === TRACEPARENT_VERSION_FORBIDDEN) return null
   if (version === TRACEPARENT_VERSION_00 && parts.length !== 4) return null
