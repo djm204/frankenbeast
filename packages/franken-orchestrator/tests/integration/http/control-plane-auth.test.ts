@@ -10,6 +10,7 @@ import type { CommsConfig } from '../../../src/comms/config/comms-config.js';
 import type { CommsRuntimePort } from '../../../src/comms/core/comms-runtime-port.js';
 import type { SkillManager } from '../../../src/skills/skill-manager.js';
 import type { ProviderRegistry } from '../../../src/providers/provider-registry.js';
+import { SECURITY_CONFIG_MAX_BODY_SIZE } from '../../../src/http/middleware.js';
 
 import { testCredential } from '../../support/test-credentials.js';
 
@@ -383,16 +384,44 @@ describe('control-plane operator auth', () => {
           setSecurityConfig,
         },
       });
+      const emptyEnvelope = JSON.stringify({ padding: '' });
+      const oversizedSecurityBody = JSON.stringify({
+        padding: 'x'.repeat(SECURITY_CONFIG_MAX_BODY_SIZE - emptyEnvelope.length + 1),
+      });
 
       const res = await app.request('/api/security', {
         method: 'PATCH',
         headers: { ...authHeader, 'Content-Type': 'application/json' },
-        body: oversizedJsonBody,
+        body: oversizedSecurityBody,
       });
 
       expect(res.status).toBe(413);
       expect(await res.json()).toMatchObject({ error: { code: 'PAYLOAD_TOO_LARGE' } });
       expect(setSecurityConfig).not.toHaveBeenCalled();
+    });
+
+    it('allows security config payloads at the route-specific size boundary', async () => {
+      const setSecurityConfig = vi.fn();
+      const app = buildApp({
+        securityConfig: {
+          getSecurityConfig: () => resolveSecurityConfig('standard'),
+          setSecurityConfig,
+        },
+      });
+      const emptyEnvelope = JSON.stringify({ padding: '' });
+      const boundarySecurityBody = JSON.stringify({
+        padding: 'x'.repeat(SECURITY_CONFIG_MAX_BODY_SIZE - emptyEnvelope.length),
+      });
+
+      const res = await app.request('/api/security', {
+        method: 'PATCH',
+        headers: { ...authHeader, 'Content-Type': 'application/json' },
+        body: boundarySecurityBody,
+      });
+
+      expect(new TextEncoder().encode(boundarySecurityBody)).toHaveLength(SECURITY_CONFIG_MAX_BODY_SIZE);
+      expect(res.status).toBe(200);
+      expect(setSecurityConfig).toHaveBeenCalledWith({});
     });
   });
 
