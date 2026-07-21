@@ -1021,10 +1021,12 @@ function collectProgrammaticCrontabAliases(lines) {
         if (alias) childProcessModuleAliases.add(alias);
       }
     }
-    const commonJsAlias = line.match(/^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)(?:\s*:\s*[^=]+)?\s*=\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)(?:\s+as\s+[^;]+)?\s*;?\s*(?:(?:\/\/|\/\*).*?)?$/);
-    if (commonJsAlias) childProcessModuleAliases.add(commonJsAlias[1]);
+    const commonJsAliasPattern = /(?:^\s*(?:const|let|var)\s+|,\s*)([A-Za-z_$][\w$]*)(?:\s*:\s*[^=,]+)?\s*=\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)(?:\s+as\s+[^,;]+)?(?=\s*(?:,|;|\/\/|\/\*|$))/gu;
+    for (const commonJsAlias of line.matchAll(commonJsAliasPattern)) childProcessModuleAliases.add(commonJsAlias[1]);
     const importEqualsAlias = line.match(/^\s*import\s+([A-Za-z_$][\w$]*)\s*=\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)\s*;?\s*(?:(?:\/\/|\/\*).*?)?$/);
     if (importEqualsAlias) childProcessModuleAliases.add(importEqualsAlias[1]);
+    const dynamicImportAlias = line.match(/(?:^|[,;]\s*)(?:const|let|var)?\s*([A-Za-z_$][\w$]*)(?:\s*:\s*[^=,]+)?\s*=\s*(?:await\s+)?import\s*\(\s*['"](?:node:)?child_process['"]\s*\)/);
+    if (dynamicImportAlias) childProcessModuleAliases.add(dynamicImportAlias[1]);
   }
   for (const [index, line] of lines.entries()) {
     const importLine = line.match(/^\s*from\s+subprocess\s+import\s+(.+)$/);
@@ -1058,11 +1060,13 @@ function collectProgrammaticCrontabAliases(lines) {
       .join('|');
     let spawnStartIndex = index;
     let spawnStartLine = line;
-    let spawnedProcess = line.match(new RegExp(`^\\s*(?:(?:const|let|var)\\s+)?([A-Za-z_$][\\w$]*)\\s*=\\s*(?:(?:(?:${childProcessQualifierPattern})\\.|require\\s*\\(\\s*['"](?:node:)?child_process['"]\\s*\\)\\.))?(?:spawn|Popen)\\s*\\((.*)$`, 'u'));
-    const splitDirectRequire = line.match(/^\s*(?:(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)\s*=\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)\s*$/);
-    const splitSpawn = splitDirectRequire ? lines[index + 1]?.match(/^\s*\.spawn\s*\((.*)$/) : null;
-    if (!spawnedProcess && splitDirectRequire && splitSpawn) {
-      spawnedProcess = ['', splitDirectRequire[1], splitSpawn[1]];
+    const childProcessMethodPattern = String.raw`(?:\.\s*(?:spawn|Popen)|\[\s*['"]spawn['"]\s*\])`;
+    const qualifiedChildProcessCallPattern = String.raw`(?:(?:${childProcessQualifierPattern})\s*${childProcessMethodPattern}|require\s*\(\s*['"](?:node:)?child_process['"]\s*\)\s*${childProcessMethodPattern})`;
+    let spawnedProcess = line.match(new RegExp(`^\\s*(?:(?:const|let|var)\\s+)?([A-Za-z_$][\\w$]*)(?:\\s*:\\s*[^=]+)?\\s*=\\s*(?:${qualifiedChildProcessCallPattern}|spawn|Popen)\\s*\\((.*)$`, 'u'));
+    const splitQualifier = line.match(new RegExp(`^\\s*(?:(?:const|let|var)\\s+)?([A-Za-z_$][\\w$]*)(?:\\s*:\\s*[^=]+)?\\s*=\\s*(?:(?:${childProcessQualifierPattern})|require\\s*\\(\\s*['"](?:node:)?child_process['"]\\s*\\))\\s*$`, 'u'));
+    const splitSpawn = splitQualifier ? lines[index + 1]?.match(new RegExp(`^\\s*${childProcessMethodPattern}\\s*\\((.*)$`, 'u')) : null;
+    if (!spawnedProcess && splitQualifier && splitSpawn) {
+      spawnedProcess = ['', splitQualifier[1], splitSpawn[1]];
       spawnStartIndex = index + 1;
       spawnStartLine = lines[spawnStartIndex];
     }

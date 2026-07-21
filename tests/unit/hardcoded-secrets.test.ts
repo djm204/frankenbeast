@@ -1551,6 +1551,57 @@ describe('hard-coded example secret scanner', () => {
       ].join('\n'),
       'utf8',
     );
+    writeFileSync(
+      join(scriptDir, 'split-namespace-cron.mjs'),
+      [
+        "import * as cp from 'node:child_process';",
+        'const installer = cp',
+        "  .spawn('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'dynamic-import-cron.mjs'),
+      [
+        "const cp = await import('node:child_process');",
+        "const installer = cp.spawn('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'bracket-spawn-cron.mjs'),
+      [
+        "import * as cp from 'node:child_process';",
+        "const installer = cp['spawn']('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'typed-process-cron.ts'),
+      [
+        "import * as cp from 'node:child_process';",
+        "const installer: ChildProcess = cp.spawn('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'multi-declarator-cron.cjs'),
+      [
+        "const cp = require('node:child_process'), fs = require('node:fs');",
+        "const installer = cp.spawn('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
 
     const result = runScanner(root);
 
@@ -1568,6 +1619,11 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('scripts/commented-import-cron.mjs:4');
     expect(result.stderr).toContain('scripts/combined-namespace-cron.mjs:4');
     expect(result.stderr).toContain('scripts/split-direct-require-cron.cjs:4');
+    expect(result.stderr).toContain('scripts/split-namespace-cron.mjs:5');
+    expect(result.stderr).toContain('scripts/dynamic-import-cron.mjs:4');
+    expect(result.stderr).toContain('scripts/bracket-spawn-cron.mjs:4');
+    expect(result.stderr).toContain('scripts/typed-process-cron.ts:4');
+    expect(result.stderr).toContain('scripts/multi-declarator-cron.cjs:4');
   });
 
   it('rejects Codex round 28 cron scanner bypasses', () => {
