@@ -1010,6 +1010,7 @@ function collectProgrammaticCrontabAliases(lines) {
   const callNames = new Set(['execFileSync', 'execFile', 'spawnSync', 'spawn', 'execSync', 'exec', 'check_output', 'check_call', 'Popen', 'run', 'call']);
   const commandNames = new Set();
   const processNames = new Set();
+  const childProcessModuleAliases = new Set();
   for (const [index, line] of lines.entries()) {
     const importLine = line.match(/^\s*from\s+subprocess\s+import\s+(.+)$/);
     if (importLine) {
@@ -1025,6 +1026,8 @@ function collectProgrammaticCrontabAliases(lines) {
         if (imported) callNames.add(imported[1] ?? part.trim());
       }
     }
+    const childProcessModuleAlias = line.match(/^\s*(?:import\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from|(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*require\()\s*['"](?:node:)?child_process['"]\s*\)?\s*;?$/);
+    if (childProcessModuleAlias) childProcessModuleAliases.add(childProcessModuleAlias[1] ?? childProcessModuleAlias[2]);
     const promisifiedCall = line.match(/^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:util\.)?promisify\s*\(\s*([A-Za-z_$][\w$]*)\s*\)\s*;?$/);
     if (promisifiedCall && callNames.has(promisifiedCall[2])) callNames.add(promisifiedCall[1]);
     const assignment = line.match(/^\s*(?:(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)\s*=\s*(?:['"`](?:[^'"`]*\/)?crontab['"`]|\/?(?:[^\s/]+\/)*crontab)\s*;?$/);
@@ -1037,7 +1040,10 @@ function collectProgrammaticCrontabAliases(lines) {
       const crontabPosition = commandParts.findIndex((part) => /(?:^|\/)crontab$/.test(part));
       if (crontabPosition === 0 || (crontabPosition === 1 && /(?:^|\/)env$/.test(commandParts[0] ?? ''))) commandNames.add(arrayAssignment[1]);
     }
-    const spawnedProcess = line.match(/^\s*(?:(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)\s*=\s*(?:subprocess\.)?(?:spawn|Popen)\s*\((.*)$/);
+    const childProcessQualifierPattern = [...childProcessModuleAliases]
+      .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('|');
+    const spawnedProcess = line.match(new RegExp(`^\\s*(?:(?:const|let|var)\\s+)?([A-Za-z_$][\\w$]*)\\s*=\\s*(?:(?:subprocess${childProcessQualifierPattern ? `|${childProcessQualifierPattern}` : ''})\\.)?(?:spawn|Popen)\\s*\\((.*)$`, 'u'));
     if (spawnedProcess) {
       let callExpression = spawnedProcess[2];
       let depth = groupingDepthDelta(line);
