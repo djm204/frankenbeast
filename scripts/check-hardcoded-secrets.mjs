@@ -1029,7 +1029,7 @@ function collectProgrammaticCrontabAliases(lines) {
         if (alias) childProcessModuleAliases.add(alias);
       }
     }
-    const commonJsAliasPattern = /(?:^\s*(?:const|let|var)\s+|,\s*)([A-Za-z_$][\w$]*)(?:\s*:\s*[^=,]+)?\s*=\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)(?:\s+as\s+[^,;]+)?(?=\s*(?:,|;|\/\/|\/\*|$))/gu;
+    const commonJsAliasPattern = /(?:^\s*(?:const|let|var)\s+|,\s*)([A-Za-z_$][\w$]*)(?:\s*:\s*[^=,]+)?\s*=\s*(?:require\s*\(\s*['"](?:node:)?child_process['"]\s*\)|\(\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)\s*\))(?:\s+as\s+[^,;]+)?(?=\s*(?:,|;|\/\/|\/\*|$))/gu;
     for (const commonJsAlias of line.matchAll(commonJsAliasPattern)) childProcessModuleAliases.add(commonJsAlias[1]);
     const importEqualsAlias = line.match(/^\s*import\s+([A-Za-z_$][\w$]*)\s*=\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)\s*;?\s*(?:(?:\/\/|\/\*).*?)?$/);
     if (importEqualsAlias) childProcessModuleAliases.add(importEqualsAlias[1]);
@@ -1047,11 +1047,11 @@ function collectProgrammaticCrontabAliases(lines) {
     const childProcessAliases = line.match(/^\s*(?:import|const|let|var)\s*\{([^}]+)\}\s*(?:from\s*['"]node:child_process['"]|=\s*require\(\s*['"]node:child_process['"]\s*\))\s*;?$/);
     if (childProcessAliases) {
       for (const part of childProcessAliases[1].split(',')) {
-        const imported = part.trim().match(/^(?:execFileSync|execFile|spawnSync|spawn|execSync|exec)(?:\s*(?:as|:)\s*([A-Za-z_$][\w$]*))?$/);
+        const imported = part.trim().match(/^(execFileSync|execFile|spawnSync|spawn|execSync|exec)(?:\s*(?:as|:)\s*([A-Za-z_$][\w$]*))?$/);
         if (imported) {
-          const alias = imported[1] ?? part.trim();
+          const alias = imported[2] ?? imported[1];
           callNames.add(alias);
-          if (/^spawn(?:\s|$)/.test(part.trim())) spawnCallNames.add(alias);
+          if (imported[1] === 'spawn') spawnCallNames.add(alias);
         }
       }
     }
@@ -1073,9 +1073,9 @@ function collectProgrammaticCrontabAliases(lines) {
     let spawnStartIndex = index;
     let spawnStartLine = line;
     const childProcessMethodPattern = String.raw`(?:\.\s*(?:spawn|Popen)|\[\s*['"]spawn['"]\s*\])`;
-    const directRequireExpressionPattern = String.raw`(?:require\s*\(\s*['"](?:node:)?child_process['"]\s*\)|\(\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)(?:\s+as\s+typeof\s+import\s*\(\s*['"](?:node:)?child_process['"]\s*\))?\s*\))`;
+    const directRequireExpressionPattern = String.raw`(?:require\s*\(\s*['"](?:node:)?child_process['"]\s*\)|\(\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)(?:\s+as\s+typeof\s+import\s*\(\s*['"](?:node:)?child_process['"]\s*\))?\s*\)|\(\s*<\s*typeof\s+import\s*\(\s*['"](?:node:)?child_process['"]\s*\)\s*>\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)\s*\))`;
     const qualifiedChildProcessCallPattern = String.raw`(?:(?:${childProcessQualifierPattern})\s*${childProcessMethodPattern}|${directRequireExpressionPattern}\s*${childProcessMethodPattern})`;
-    const namespaceMethodAlias = line.match(new RegExp(`^\\s*(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*(?:${childProcessQualifierPattern})\\s*${childProcessMethodPattern}\\s*;?\\s*$`, 'u'));
+    const namespaceMethodAlias = line.match(new RegExp(`^\\s*(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)(?:\\s*:\\s*[^=]+)?\\s*=\\s*(?:${childProcessQualifierPattern})\\s*${childProcessMethodPattern}\\s*;?\\s*$`, 'u'));
     if (namespaceMethodAlias) {
       spawnCallNames.add(namespaceMethodAlias[1]);
       callNames.add(namespaceMethodAlias[1]);

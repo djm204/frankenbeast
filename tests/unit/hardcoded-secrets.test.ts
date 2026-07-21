@@ -1633,6 +1633,46 @@ describe('hard-coded example secret scanner', () => {
       ].join('\n'),
       'utf8',
     );
+    writeFileSync(
+      join(scriptDir, 'colon-spawn-alias-cron.cjs'),
+      [
+        "const { spawn: run } = require('node:child_process');",
+        "const installer = run('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'typed-spawn-alias-cron.ts'),
+      [
+        "import * as cp from 'node:child_process';",
+        'const run: typeof cp.spawn = cp.spawn;',
+        "const installer = run('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'angle-asserted-require-cron.ts'),
+      [
+        "const installer = (<typeof import('node:child_process')>require('node:child_process')).spawn('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'wrapped-commonjs-alias-cron.cjs'),
+      [
+        "const cp = (require('node:child_process'));",
+        "const installer = cp.spawn('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
 
     const result = runScanner(root);
 
@@ -1658,6 +1698,10 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('scripts/wrapped-import-cron.mjs:5');
     expect(result.stderr).toContain('scripts/spawn-method-alias-cron.mjs:5');
     expect(result.stderr).toContain('scripts/parenthesized-require-cron.ts:3');
+    expect(result.stderr).toContain('scripts/colon-spawn-alias-cron.cjs:4');
+    expect(result.stderr).toContain('scripts/typed-spawn-alias-cron.ts:5');
+    expect(result.stderr).toContain('scripts/angle-asserted-require-cron.ts:3');
+    expect(result.stderr).toContain('scripts/wrapped-commonjs-alias-cron.cjs:4');
   });
 
   it('rejects Codex round 28 cron scanner bypasses', () => {
