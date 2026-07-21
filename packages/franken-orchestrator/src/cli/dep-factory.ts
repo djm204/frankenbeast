@@ -1,7 +1,7 @@
 import { existsSync, unlinkSync, readdirSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
 import { basename, resolve, join } from 'node:path';
 import { AuditTrailStore, type ReplayRecord } from '@franken/observer';
-import { BeastLogger } from '../logging/beast-logger.js';
+import { BeastLogger, setPlainOutput } from '../logging/beast-logger.js';
 import { MartinLoop } from '../skills/martin-loop.js';
 import { GitBranchIsolator } from '../skills/git-branch-isolator.js';
 import { CliSkillExecutor, type ObserverDeps } from '../skills/cli-skill-executor.js';
@@ -1123,6 +1123,7 @@ function createObserverFinalize(observer: ObserverDepsBundle): () => Promise<voi
 }
 
 export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
+  setPlainOutput(options.plain ?? false);
   const config = resolveEffectiveConfig(options);
   const commandOverridePolicy = {
     allowTrustedCommandOverrides: options.trustProviderCommandOverrides,

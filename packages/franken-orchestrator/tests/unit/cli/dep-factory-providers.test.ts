@@ -49,6 +49,7 @@ vi.mock('../../../src/logging/beast-logger.js', () => ({
     this.getLogEntries = vi.fn(() => []);
   }),
   isPlainOutput: vi.fn(() => false),
+  setPlainOutput: vi.fn(),
   stripAnsi: vi.fn((s: string) => s),
 }));
 

@@ -517,6 +517,31 @@ describe('CliLlmAdapter', () => {
         }
       });
 
+      it('strips JSON-escaped ANSI after normalizing non-zero failure output', async () => {
+        setPlainOutput(true);
+        try {
+          const { spawnFn } = createMockSpawn({
+            stdout: JSON.stringify({
+              type: 'result',
+              result: '\x1b[31mnormalized failure\x1b[0m\x1b[K',
+            }),
+            exitCode: 1,
+          });
+          const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
+
+          try {
+            await adapter.execute({ prompt: 'test', maxTurns: 1 });
+            throw new Error('expected execute to throw');
+          } catch (error) {
+            expect(error).toBeInstanceOf(Error);
+            expect((error as Error).message).not.toContain('\x1b');
+            expect((error as Error).message).toContain('normalized failure');
+          }
+        } finally {
+          setPlainOutput(false);
+        }
+      });
+
       it('attaches a standardized failure object to non-rate-limit exits', async () => {
         const { spawnFn } = createMockSpawn({
           stdout: '',

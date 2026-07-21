@@ -361,6 +361,7 @@ export class CliLlmAdapter implements IAdapter {
 
       const failureStdout = isPlainOutput() ? stripAnsi(result.stdout) : result.stdout;
       const failureStderr = isPlainOutput() ? stripAnsi(result.stderr) : result.stderr;
+      const normalizedFailureOutput = provider.normalizeOutput(failureStdout);
       const failure = classifyCommandFailure({
         tool: 'llm',
         provider: activeProvider,
@@ -368,7 +369,7 @@ export class CliLlmAdapter implements IAdapter {
         exitCode: result.exitCode,
         stdout: failureStdout,
         stderr: failureStderr,
-        normalizedOutput: provider.normalizeOutput(failureStdout),
+        normalizedOutput: isPlainOutput() ? stripAnsi(normalizedFailureOutput) : normalizedFailureOutput,
         detectRateLimit: (text) => provider.isRateLimited(text),
         parseRetryAfterMs: (text) => {
           const providerMs = provider.parseRetryAfter(text);

@@ -11,6 +11,9 @@
 - [x] Remediate all five Codex round-4 findings and rerun every local quality gate.
 - [x] Remediate all four Codex round-5 findings and rerun every local quality gate.
 - [x] Add explicit MartinLoop coverage for OSC/ST terminators split across stdout chunks.
-- [ ] Publish and resolve/reply to the final Codex threads through Approval Cop.
+- [x] Publish and resolve/reply to the previously final Codex threads through Approval Cop.
+- [x] Add regressions for current-head Codex findings on managed-service plain mode, direct dep-factory state, and normalized failure output.
+- [x] Fix all three current-head Codex findings and rerun every local quality gate.
+- [ ] Publish, reply, and resolve the new Codex threads through Approval Cop.
 - [ ] Verify exact-head CI, clean current-head Codex review, zero unresolved Codex threads, and clean merge state.
 - [ ] Squash merge through Approval Cop and verify PR #3425 merged and issue #3422 closed.

@@ -27,7 +27,7 @@ import { Session } from './session.js';
 import { createEgressGuardedFetch } from '../network/egress-policy.js';
 import type { SessionPhase } from './session.js';
 import type { InterviewIO } from '../planning/interview-loop.js';
-import { renderBanner, BeastLogger, setPlainOutput } from '../logging/beast-logger.js';
+import { renderBanner, BeastLogger, isPlainOutput, setPlainOutput } from '../logging/beast-logger.js';
 import { ChatRepl, createReadlineIO, type ChatIO } from './chat-repl.js';
 import { createChatRuntime } from '../chat/chat-runtime-factory.js';
 import { FileSessionStore } from '../chat/session-store.js';
@@ -2226,6 +2226,7 @@ export async function runNetworkCommand(
       ...(configFile ? { configFile } : {}),
       ...(args.networkSet ? { configOverrides: args.networkSet } : {}),
       allowTrustedProviderCommandOverrides: args.trustProviderCommandOverrides,
+      ...(args.plain || isPlainOutput() ? { plain: true } : {}),
     }),
     action === 'up' ? undefined : args.networkTarget,
   );
