@@ -7639,10 +7639,13 @@ function workingEntryMatchesSelector(key: string, value: unknown, selector: Norm
 function isQuarantinedEpisodicDetails(event: EpisodicEvent): boolean {
   const details = event.details;
   if (details === null || typeof details !== 'object' || Array.isArray(details)) return false;
-  const quarantine = (details as Record<string, unknown>).quarantine;
+  const detailsRecord = details as Record<string, unknown>;
+  if (Object.keys(detailsRecord).join(',') !== 'quarantine') return false;
+  const quarantine = detailsRecord.quarantine;
   if (quarantine === null || typeof quarantine !== 'object' || Array.isArray(quarantine)) return false;
   const record = quarantine as Record<string, unknown>;
-  return record.field === 'details'
+  return Object.keys(record).sort().join(',') === 'eventId,field,reason'
+    && record.field === 'details'
     && record.eventId === event.id
     && record.reason === 'invalid JSON';
 }
@@ -8321,6 +8324,9 @@ function rowToEvent(
       event.details = JSON.parse(
         encryption?.decrypt(row.details) ?? row.details,
       ) as Record<string, unknown>;
+      if (isQuarantinedEpisodicDetails(event)) {
+        reportCorruptDetails?.(row.id);
+      }
     } catch {
       reportCorruptDetails?.(row.id);
       event.details = {

@@ -6277,6 +6277,44 @@ describe('SqliteBrain', () => {
         details: { quarantinedEventIds: [eventId] },
       });
     });
+
+    it('audits imported quarantine envelopes with their event ids', () => {
+      brain.episodic.record(
+        makeEvent({
+          summary: 'imported diagnostic event',
+          details: { marker: 'valid-before-import' },
+        }),
+      );
+      const eventId = brain.episodic.recent(1)[0]!.id;
+      const db = (
+        brain as unknown as {
+          db: {
+            prepare: (sql: string) => { run: (...args: unknown[]) => void };
+          };
+        }
+      ).db;
+      db.prepare(
+        `UPDATE episodic_events SET details = ? WHERE id = ?`,
+      ).run(JSON.stringify({
+        quarantine: {
+          field: 'details',
+          eventId,
+          reason: 'invalid JSON',
+        },
+      }), eventId);
+
+      expect(brain.episodic.recent(1)).toHaveLength(1);
+      expect(brain.accessAudit.list({ operation: 'episodic.recent' })[0]).toMatchObject({
+        outcome: 'success',
+        details: { quarantinedEventIds: [eventId] },
+      });
+
+      expect(brain.episodic.recall('imported diagnostic', 1)).toHaveLength(1);
+      expect(brain.accessAudit.list({ operation: 'episodic.recall' })[0]).toMatchObject({
+        outcome: 'success',
+        details: { quarantinedEventIds: [eventId] },
+      });
+    });
   });
 
   describe('recovery memory', () => {
@@ -6657,6 +6695,28 @@ describe('SqliteBrain', () => {
         details: { quarantine: { field: 'details', reason: 'invalid JSON' } },
       });
       hydrated.close();
+      source.close();
+    });
+
+    it('hydrate() rejects quarantined audit envelopes with extra guarded details', () => {
+      const source = new SqliteBrain(':memory:');
+      source.working.set('task', 'alice@example.test');
+      source.rightToForget({ query: 'alice@example.test' });
+      const snapshot = source.serialize();
+      const auditEvent = snapshot.episodic.find(
+        (event) => event.step === 'right-to-forget',
+      );
+      expect(auditEvent).toBeDefined();
+      auditEvent!.details = {
+        quarantine: {
+          field: 'details',
+          eventId: auditEvent!.id,
+          reason: 'invalid JSON',
+        },
+        note: 'alice@example.test',
+      };
+
+      expect(() => SqliteBrain.hydrate(snapshot)).toThrow(/right-to-forget/);
       source.close();
     });
 

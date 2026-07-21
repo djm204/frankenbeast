@@ -486,3 +486,6 @@
 
 ## 2026-07-20 — Terminal input ownership
 - Interactive CLI processes must have one long-lived stdin/readline owner. Inject that owner's question and cancellation functions into approval/governance channels rather than creating a second readline interface; create the owner lazily so startup work cannot consume early keystrokes, and abort expired questions without closing the shared interface. Preserve the existing non-TTY fail-closed path and verify chat-to-approval input routing with a real scripted PTY.
+
+## 2026-07-21 — Quarantine-envelope import hardening
+- Treat synthetic quarantine metadata as a strict, exact envelope at trust boundaries: validate the outer and inner key sets plus field, reason, and matching event ID before granting audit exemptions. Report both newly detected malformed rows and already-serialized quarantine envelopes through read audit diagnostics so handoff/import does not erase repair visibility.
