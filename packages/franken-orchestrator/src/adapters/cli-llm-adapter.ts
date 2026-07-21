@@ -305,8 +305,8 @@ export class CliLlmAdapter implements IAdapter {
           const nextProvider = providers.find((name) => !exhaustedProviders.has(name));
           if (nextProvider) {
             this.opts.onLifecycleEvent?.({ type: 'fallback', from: activeProvider, to: nextProvider });
-            fallbackFrom = activeProvider;
-            fallbackReason = failure.rateLimited ? 'rate_limited' : 'unavailable';
+            fallbackFrom ??= initialProvider;
+            fallbackReason ??= failure.rateLimited ? 'rate_limited' : 'unavailable';
             activeProvider = nextProvider;
             continue;
           }
@@ -404,8 +404,8 @@ export class CliLlmAdapter implements IAdapter {
       const nextProvider = providers.find((name) => !exhaustedProviders.has(name));
       if (nextProvider) {
         this.opts.onLifecycleEvent?.({ type: 'fallback', from: activeProvider, to: nextProvider });
-        fallbackFrom = activeProvider;
-        fallbackReason = 'rate_limited';
+        fallbackFrom ??= initialProvider;
+        fallbackReason ??= 'rate_limited';
         activeProvider = nextProvider;
         continue;
       }

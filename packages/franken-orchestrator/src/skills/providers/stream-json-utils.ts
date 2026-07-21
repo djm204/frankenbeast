@@ -53,7 +53,17 @@ export function extractNdjsonTokenUsage(raw: string): TokenUsage | undefined {
     if (typeof parsed !== 'object' || parsed === null) continue;
     const obj = parsed as Record<string, unknown>;
 
-    const candidates: unknown[] = [obj['usage'], (obj['message'] as Record<string, unknown> | undefined)?.['usage']];
+    const message = obj['message'] as Record<string, unknown> | undefined;
+    const candidates: unknown[] = [
+      obj['usage'],
+      obj['stats'],
+      obj['usageMetadata'],
+      obj['usage_metadata'],
+      message?.['usage'],
+      message?.['stats'],
+      message?.['usageMetadata'],
+      message?.['usage_metadata'],
+    ];
     for (const candidate of candidates) {
       if (typeof candidate !== 'object' || candidate === null) continue;
       const usage = candidate as Record<string, unknown>;
