@@ -389,12 +389,14 @@ describe('chat terminal ownership', () => {
       providers: [],
       trustProviderCommandOverrides: false,
       verbose: false,
+      plain: true,
     } as any, defaultConfig(), paths, governorQuestion, governorCancel);
 
     expect(mockCreateCliDeps).toHaveBeenCalledWith(expect.objectContaining({
       governorQuestion,
       governorCancel,
       chatMode: true,
+      plain: true,
     }));
   });
 });

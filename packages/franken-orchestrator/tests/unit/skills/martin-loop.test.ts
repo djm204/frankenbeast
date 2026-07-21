@@ -427,6 +427,21 @@ describe('MartinLoop', () => {
     expect(mockSpawn).toHaveBeenCalledTimes(2);
   });
 
+  it('sanitizes failure stderr in plain mode', async () => {
+    vi.stubEnv('NO_COLOR', '1');
+    queueMock({ stdout: 'failed', stderr: '\x1b[31mprovider failed\x1b[0m\x1b[K', exitCode: 1 });
+    queueMock({ stdout: 'Success!\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+    const onIteration = vi.fn();
+
+    const loop = new MartinLoop();
+    await loop.run(baseConfig({ maxIterations: 2, onIteration }));
+
+    const firstIteration = (onIteration.mock.calls[0] as [number, IterationResult])[1];
+    expect(firstIteration.stderr).toBe('provider failed');
+    expect(firstIteration.failure?.stderr).toBe('provider failed');
+    expect(firstIteration.failure?.summary).not.toContain('\x1b');
+  });
+
   // ── 7. Promise-without-changes rejection ──
 
   it('rejects promise when stdout has no meaningful content beyond the tag', async () => {

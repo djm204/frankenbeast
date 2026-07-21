@@ -1173,6 +1173,7 @@ export async function createChatSurfaceDeps(
     trustProviderCommandOverrides: args.trustProviderCommandOverrides,
     noPr: true,
     verbose: args.verbose,
+    plain: args.plain,
     reset: false,
     adapterWorkingDir: tmpdir(),
     adapterModel: config.chat?.model ?? resolvedProvider.chatModel,

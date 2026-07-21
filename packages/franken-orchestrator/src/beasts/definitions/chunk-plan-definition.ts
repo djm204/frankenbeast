@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { realpathSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { BeastDefinition } from '../types.js';
-import { resolveCliEntrypoint } from './resolve-cli-entrypoint.js';
+import { resolveCliEntrypoint, spawnedCliEnv } from './resolve-cli-entrypoint.js';
 
 const promptConfigSchema = z.object({
   text: z.string().optional(),
@@ -103,7 +103,7 @@ export const chunkPlanDefinition: BeastDefinition = {
         '--design-doc', designDocPath,
         '--output-dir', String(config.outputDir),
       ],
-      env: { FRANKENBEAST_SPAWNED: '1' },
+      env: spawnedCliEnv(),
       cwd: projectRoot,
     };
   },

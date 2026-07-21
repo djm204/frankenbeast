@@ -596,6 +596,8 @@ export class MartinLoop {
       const normalizedStdout = isPlainOutput()
         ? stripAnsi(providerNormalizedStdout)
         : providerNormalizedStdout;
+      const failureStdout = isPlainOutput() ? stripAnsi(result.stdout) : result.stdout;
+      const failureStderr = isPlainOutput() ? stripAnsi(result.stderr) : result.stderr;
       lastOutput = normalizedStdout;
 
       const tokensEstimated = resolved.estimateTokens(normalizedStdout);
@@ -613,8 +615,8 @@ export class MartinLoop {
           command: resolved.command,
           exitCode: result.exitCode,
           timedOut: result.timedOut,
-          stdout: result.stdout,
-          stderr: result.stderr,
+          stdout: failureStdout,
+          stderr: failureStderr,
           normalizedOutput: normalizedStdout,
           detectRateLimit: (text) => resolved.isRateLimited(text),
           parseRetryAfterMs: (text) => {
@@ -634,7 +636,7 @@ export class MartinLoop {
         provider: activeProvider,
         exitCode: result.exitCode,
         stdout: normalizedStdout,
-        stderr: result.stderr,
+        stderr: failureStderr,
         durationMs,
         rateLimited,
         promiseDetected,

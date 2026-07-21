@@ -1123,7 +1123,9 @@ function createObserverFinalize(observer: ObserverDepsBundle): () => Promise<voi
 }
 
 export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
-  setPlainOutput(options.plain ?? false);
+  if (options.plain !== undefined) {
+    setPlainOutput(options.plain);
+  }
   const config = resolveEffectiveConfig(options);
   const commandOverridePolicy = {
     allowTrustedCommandOverrides: options.trustProviderCommandOverrides,

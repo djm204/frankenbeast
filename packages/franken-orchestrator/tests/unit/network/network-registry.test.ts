@@ -57,7 +57,7 @@ describe('network-registry', () => {
       plain: true,
     });
 
-    for (const serviceId of ['beasts-daemon', 'chat-server']) {
+    for (const serviceId of ['beasts-daemon', 'chat-server', 'dashboard-web']) {
       expect(services.find((service) => service.id === serviceId)?.runtimeConfig.process?.env)
         .toMatchObject({ NO_COLOR: '1', FORCE_COLOR: '0' });
     }
