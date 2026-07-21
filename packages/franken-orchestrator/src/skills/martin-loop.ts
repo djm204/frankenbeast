@@ -323,11 +323,17 @@ function spawnIteration(
     let timedOut = false;
     const cleanParts: string[] = [];
     const streamBuffer = provider.supportsStreamJson() ? new StreamLineBuffer() : null;
-    const plainStreamSanitizer = plain && !streamBuffer ? new AnsiStreamSanitizer() : null;
+    const plainStreamSanitizer = plain ? new AnsiStreamSanitizer() : null;
+    const appendStreamLine = (line: string): void => {
+      const displayLine = plainStreamSanitizer?.push(line) ?? line;
+      if (displayLine.length === 0) return;
+      cleanParts.push(displayLine);
+      process.stdout.write(displayLine + '\n');
+    };
     const flushStreamBuffer = (): void => {
       if (!streamBuffer) return;
       for (const line of streamBuffer.flush()) {
-        cleanParts.push(plain ? stripAnsi(line) : line);
+        appendStreamLine(line);
       }
     };
 
@@ -349,9 +355,7 @@ function spawnIteration(
       if (streamBuffer) {
         const lines = streamBuffer.push(text);
         for (const line of lines) {
-          const displayLine = plain ? stripAnsi(line) : line;
-          cleanParts.push(displayLine);
-          process.stdout.write(displayLine + '\n');
+          appendStreamLine(line);
         }
       } else {
         const displayText = plainStreamSanitizer?.push(text) ?? text;
@@ -428,11 +432,11 @@ function spawnIteration(
       }, 7_000));
     };
     config.abortSignal?.addEventListener('abort', onAbort, { once: true });
-
     child.on('close', (code) => {
+      if (settled) return;
       clearTimers();
-      plainStreamSanitizer?.flush();
       flushStreamBuffer();
+      plainStreamSanitizer?.flush();
       finish({ stdout, stderr, exitCode: code ?? 1, timedOut, cleanStdout: cleanParts.join('\n') });
     });
 

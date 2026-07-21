@@ -18,3 +18,11 @@
 - [ ] Publish, reply, and resolve the new Codex threads through Approval Cop.
 - [ ] Verify exact-head CI, clean current-head Codex review, zero unresolved Codex threads, and clean merge state.
 - [ ] Squash merge through Approval Cop and verify PR #3425 merged and issue #3422 closed.
+- [x] Reproduce the new dependency audit failure and identify vulnerable `@hono/node-server` plus stale `body-parser` lock entries.
+- [x] Add regression coverage for ANSI sequences split across stream-json deltas.
+- [x] Add regression coverage for plain-output env propagation to all managed network services and container-mode Beasts.
+- [x] Implement the three current-head Codex P2 fixes.
+- [x] Refresh the minimal vulnerable dependency lock entries and verify a clean dependency audit.
+- [x] Run focused tests plus full orchestrator test, typecheck, lint, and build gates.
+- [ ] Commit, publish through Approval Cop, resolve the three current-head threads, and request one fresh Codex review.
+- [ ] Merge after exact-head CI and Codex all-clear, then verify PR #3425 merged and issue #3422 closed.

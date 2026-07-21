@@ -338,6 +338,26 @@ describe('MartinLoop', () => {
     expect(result.output).not.toContain('\x1b');
   });
 
+  it('strips ANSI sequences split across stream-json text deltas in plain mode', async () => {
+    vi.stubEnv('NO_COLOR', '1');
+    queueMock({
+      stdout: [
+        `${JSON.stringify({ type: 'content_block_delta', delta: { text: '\x1b[' } })}\n`,
+        `${JSON.stringify({ type: 'content_block_delta', delta: { text: '31mred' } })}\n`,
+        `${JSON.stringify({ type: 'content_block_delta', delta: { text: '\x1b[0m<promise>IMPL_X_DONE</promise>' } })}\n`,
+      ],
+      exitCode: 0,
+    });
+
+    const loop = new MartinLoop();
+    const result = await loop.run(baseConfig({ provider: 'claude' }));
+
+    const displayed = stdoutWriteSpy.mock.calls.map(([chunk]) => String(chunk)).join('');
+    expect(displayed).toBe('red\n<promise>IMPL_X_DONE</promise>\n');
+    expect(result.output).toBe('red\n<promise>IMPL_X_DONE</promise>');
+    expect(result.output).not.toContain('31m');
+  });
+
   it('normalizes codex JSON output to readable text and detects promise tag', async () => {
     queueMock({
       stdout: [
