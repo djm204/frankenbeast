@@ -5,8 +5,9 @@
  * parseResetTime, and env filtering logic.
  */
 
+import type { TokenUsage } from '@franken/types';
 import type { ICliProvider, ProviderOpts } from './cli-provider.js';
-import { tryExtractTextFromNode, stripHookJson, BASE_RATE_LIMIT_PATTERNS } from './stream-json-utils.js';
+import { tryExtractTextFromNode, stripHookJson, BASE_RATE_LIMIT_PATTERNS, extractNdjsonTokenUsage } from './stream-json-utils.js';
 import { sanitizeRunConfigIntegrityEnv } from '../../cli/run-config-integrity.js';
 
 // Re-export for backward compatibility (used by providers/index.ts)
@@ -91,6 +92,10 @@ export class ClaudeProvider implements ICliProvider {
 
   estimateTokens(text: string): number {
     return Math.ceil(text.length / 4);
+  }
+
+  extractUsage(raw: string): TokenUsage | undefined {
+    return extractNdjsonTokenUsage(raw);
   }
 
   isRateLimited(stderr: string): boolean {

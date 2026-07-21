@@ -1,4 +1,5 @@
 import type { Result } from './result.js';
+import type { TokenUsage } from './provider.js';
 
 /**
  * Provider-agnostic LLM client interface (brain variant).
@@ -11,8 +12,21 @@ export interface LlmCompletionOptions {
   timeoutMs?: number | undefined;
 }
 
+export interface LlmCompletionResult {
+  text: string;
+  /** Present only when the underlying provider reported real token usage. */
+  usage?: TokenUsage;
+}
+
 export interface ILlmClient {
   complete(prompt: string, options?: LlmCompletionOptions): Promise<string>;
+  /**
+   * Same completion as `complete()`, but surfaces real token usage when the
+   * underlying provider reports it. Optional so every existing `ILlmClient`
+   * implementation keeps working unchanged; callers that want usage data
+   * should feature-detect with `typeof client.completeWithUsage === 'function'`.
+   */
+  completeWithUsage?(prompt: string, options?: LlmCompletionOptions): Promise<LlmCompletionResult>;
 }
 
 /**

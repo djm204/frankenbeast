@@ -5,8 +5,9 @@
  * tryExtractTextFromNode.
  */
 
+import type { TokenUsage } from '@franken/types';
 import type { ICliProvider, ProviderOpts } from './cli-provider.js';
-import { tryExtractTextFromNode, BASE_RATE_LIMIT_PATTERNS } from './stream-json-utils.js';
+import { tryExtractTextFromNode, BASE_RATE_LIMIT_PATTERNS, extractNdjsonTokenUsage } from './stream-json-utils.js';
 import { sanitizeRunConfigIntegrityEnv } from '../../cli/run-config-integrity.js';
 import { resolveCodexSandboxArgs } from '../../providers/codex-args.js';
 
@@ -54,6 +55,10 @@ export class CodexProvider implements ICliProvider {
 
   estimateTokens(text: string): number {
     return Math.ceil(text.length / 16);
+  }
+
+  extractUsage(raw: string): TokenUsage | undefined {
+    return extractNdjsonTokenUsage(raw);
   }
 
   isRateLimited(stderr: string): boolean {

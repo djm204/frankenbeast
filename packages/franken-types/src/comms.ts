@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TokenUsageSchema } from './provider.js';
 
 // Keep below the default 16 KiB HTTP body cap so the JSON envelope has
 // headroom while REST and WebSocket enforce one shared content limit.
@@ -92,6 +93,10 @@ export const ServerSocketEventSchema = z.discriminatedUnion('type', [
     modelTier: z.string().optional(),
     /** Display kind of the completed message (reply, plan, clarify, …). */
     kind: z.string().optional(),
+    /** Real token usage for this turn, sent only to peers opted into `usage-stats`. */
+    usage: TokenUsageSchema.optional(),
+    /** Whether the server truncated history to build this turn's prompt. */
+    truncated: z.boolean().optional(),
     timestamp: z.string(),
   }),
   serverEventShape({

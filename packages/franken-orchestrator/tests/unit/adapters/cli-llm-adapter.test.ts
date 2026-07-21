@@ -1091,6 +1091,23 @@ describe('CliLlmAdapter', () => {
         expect(result.content).toBe('Hello \nworld');
       });
 
+      it('extracts real token usage from a result event alongside the text', () => {
+        const adapter = new CliLlmAdapter(claudeProvider, baseOpts);
+        const streamJson = [
+          '{"type":"message_start","message":{"id":"msg_01","type":"message","role":"assistant","content":[]}}',
+          '{"type":"result","result":"Hello world","usage":{"input_tokens":80,"output_tokens":20}}',
+        ].join('\n');
+
+        const result = adapter.transformResponse(streamJson, 'req-1');
+        expect(result.usage).toEqual({ inputTokens: 80, outputTokens: 20, totalTokens: 100 });
+      });
+
+      it('omits usage when the stream carries none', () => {
+        const adapter = new CliLlmAdapter(claudeProvider, baseOpts);
+        const result = adapter.transformResponse('just plain text', 'req-1');
+        expect(result.usage).toBeUndefined();
+      });
+
       it('returns plain text as-is when not JSON', () => {
         const adapter = new CliLlmAdapter(claudeProvider, baseOpts);
         const result = adapter.transformResponse('just plain text', 'req-1');

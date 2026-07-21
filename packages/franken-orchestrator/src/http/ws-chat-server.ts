@@ -16,7 +16,7 @@ import {
   ChatSocketSessionTicketStore,
   verifyChatSocketRequest,
 } from './ws-chat-auth.js';
-import { ClientSocketEventSchema, type ChatSessionResponse, deterministicUuid, isoNow } from '@franken/types';
+import { ClientSocketEventSchema, type ChatSessionResponse, type TokenUsage, deterministicUuid, isoNow } from '@franken/types';
 import { InMemoryRateLimiter } from '../beasts/http/beast-rate-limit.js';
 import { ChatMutationAdmission, chatClientKey, createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, type ChatRateLimitOptions } from './chat-rate-limit.js';
 
@@ -31,6 +31,8 @@ interface ConnectionState {
   rateLimitKey: string;
   /** Client opted in (via ?features=message-kind) to `kind` on completions. */
   supportsMessageKind: boolean;
+  /** Client opted in (via ?features=usage-stats) to `usage`/`truncated` on completions. */
+  supportsUsageStats: boolean;
 }
 
 type ClientSocketEvent =
@@ -196,9 +198,10 @@ function createPeerState(
   remoteAddress: string | undefined,
   rateLimitKey: string,
   supportsMessageKind: boolean,
+  supportsUsageStats: boolean,
   controller: ChatSocketController,
 ): ConnectionState {
-  const state = { sessionId, remoteAddress, rateLimitKey, supportsMessageKind };
+  const state = { sessionId, remoteAddress, rateLimitKey, supportsMessageKind, supportsUsageStats };
   controller.connections.set(peer, state);
   return state;
 }
@@ -277,7 +280,15 @@ export class ChatSocketController {
       return { ok: false, status: 404 };
     }
 
-    createPeerState(peer, request.sessionId, request.remoteAddress, this.rateLimitKey(request), request.features?.includes('message-kind') ?? false, this);
+    createPeerState(
+      peer,
+      request.sessionId,
+      request.remoteAddress,
+      this.rateLimitKey(request),
+      request.features?.includes('message-kind') ?? false,
+      request.features?.includes('usage-stats') ?? false,
+      this,
+    );
     this.emit(peer, {
       type: 'session.ready',
       sessionId: session.id,
@@ -295,6 +306,21 @@ export class ChatSocketController {
    */
   private messageKindField(peer: ChatSocketPeer, kind: string): { kind: string } | Record<string, never> {
     return this.connections.get(peer)?.supportsMessageKind ? { kind } : {};
+  }
+
+  /**
+   * `usage`/`truncated` extend the strict v1 completion schema, so they are
+   * only included for peers that opted in via the `usage-stats` feature.
+   */
+  private usageStatsFields(
+    peer: ChatSocketPeer,
+    usage: TokenUsage | undefined,
+    truncated: boolean | undefined,
+  ): { usage?: TokenUsage; truncated?: boolean } {
+    if (!this.connections.get(peer)?.supportsUsageStats) {
+      return {};
+    }
+    return { ...(usage ? { usage } : {}), ...(truncated !== undefined ? { truncated } : {}) };
   }
 
   private auditRejectedTicketReuse(sessionId: string): void {
@@ -531,6 +557,7 @@ export class ChatSocketController {
         messageId,
         content: contentToSend,
         ...this.messageKindField(peer, display.kind),
+        ...this.usageStatsFields(peer, result.usage, result.truncated),
         ...(display.modelTier ? { modelTier: display.modelTier } : {}),
         timestamp: nowIso(),
       });
@@ -774,6 +801,7 @@ export class ChatSocketController {
         messageId: deterministicUuid('packages/franken-orchestrator/src/http/ws-chat-server.ts'),
         content: display.content,
         ...this.messageKindField(peer, display.kind),
+        ...this.usageStatsFields(peer, result.usage, result.truncated),
         timestamp: nowIso(),
       });
     }

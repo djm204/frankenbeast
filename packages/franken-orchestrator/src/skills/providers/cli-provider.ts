@@ -7,6 +7,7 @@
  * ProviderRegistry holds named providers and validates on lookup.
  */
 
+import type { TokenUsage } from '@franken/types';
 import { ClaudeProvider } from './claude-provider.js';
 import { CodexProvider } from './codex-provider.js';
 import { GeminiProvider } from './gemini-provider.js';
@@ -51,6 +52,14 @@ export interface ICliProvider {
   supportsNativeSessionResume(): boolean;
   defaultContextWindowTokens(): number;
   getCacheCapabilities?(): ProviderCacheCapabilities;
+  /**
+   * Real token usage parsed from the CLI's own NDJSON output, when the CLI
+   * reports it. Optional: providers with no structured usage output (e.g.
+   * plain-text CLIs) simply don't implement this, and callers must treat an
+   * absent result as "unknown" rather than falling back to `estimateTokens`
+   * silently mislabeled as real.
+   */
+  extractUsage?(raw: string): TokenUsage | undefined;
 }
 
 export function resolveProviderCacheCapabilities(provider: ICliProvider): ProviderCacheCapabilities {

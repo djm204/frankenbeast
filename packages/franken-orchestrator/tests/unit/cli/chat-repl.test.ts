@@ -343,6 +343,56 @@ describe('ChatRepl', () => {
     expect(secondCall).toBeDefined();
     expect(secondCall[1].length).toBeGreaterThan(0);
   });
+
+  it('surrounds each prompt with a status rule and accumulates real usage across turns', async () => {
+    const { io, outputs, pushInput } = mockChatIO();
+    pushInput('first');
+    pushInput('second');
+    pushInput('/quit');
+
+    const usageProcessTurn = vi.fn()
+      .mockResolvedValueOnce({
+        outcome: { kind: 'reply', content: 'One', modelTier: 'cheap' },
+        tier: 'cheap',
+        usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 },
+        truncated: true,
+        newMessages: [
+          { role: 'user', content: 'first', timestamp: new Date().toISOString() },
+          { role: 'assistant', content: 'One', timestamp: new Date().toISOString(), modelTier: 'cheap' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        outcome: { kind: 'reply', content: 'Two', modelTier: 'cheap' },
+        tier: 'cheap',
+        usage: { inputTokens: 50, outputTokens: 10, totalTokens: 60 },
+        newMessages: [
+          { role: 'user', content: 'second', timestamp: new Date().toISOString() },
+          { role: 'assistant', content: 'Two', timestamp: new Date().toISOString(), modelTier: 'cheap' },
+        ],
+      });
+
+    const repl = new ChatRepl({
+      engine: { processTurn: usageProcessTurn } as any,
+      turnRunner: { run: mockRunTurn } as any,
+      projectId: 'test',
+      io,
+      contextMaxTokens: 1000,
+      modelLabel: 'test-model',
+    });
+    await repl.start();
+
+    // A status rule is printed before every prompt and again right after
+    // the input is read, so the exchange is visually boxed top and bottom.
+    const ruleOutputs = outputs.filter((o) => o.includes('test-model'));
+    expect(ruleOutputs.length).toBeGreaterThanOrEqual(6); // 3 prompts (incl. /quit) × 2 rules each
+
+    // First turn's usage (120 tokens) is visible on the rule printed for the
+    // second prompt; by the third (final) prompt both turns are summed.
+    expect(ruleOutputs.some((o) => /120\/1000|12%/.test(o))).toBe(true);
+    const finalRule = ruleOutputs[ruleOutputs.length - 1]!;
+    expect(finalRule).toContain('18%'); // (120+60)/1000
+    expect(finalRule).toContain('compactions 1');
+  });
 });
 
 describe('sanitizeChatOutput', () => {

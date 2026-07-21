@@ -13,7 +13,8 @@
 - **Workspace shape:** the repo currently has 10 first-party packages under `packages/`, including `franken-mcp-suite` (`@franken/mcp-suite`) and `live-bench` (`@franken/live-bench`). Do not use the old “8 packages / MCP deleted” summary as current architecture.
 - **Fail-closed deps:** required Beast dependency assembly is fail-closed. `createBeastDeps()` failures are surfaced by `createCliDeps()` instead of being converted into permissive runtime success stubs. Unsafe safety-module stubs require the explicit `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1` opt-out.
 - **Resume semantics:** cold `frankenbeast run` starts from cleared checkpoint/chunk-session state. Use `--resume` only to continue an interrupted run with existing checkpoint data; without that data it fails fast.
-- **ADR anchors:** ADR-033 covers explicit resume/fail-closed dependency assembly, ADR-036 covers sandboxed Beast execution, and ADR-038 covers fail-closed safety-module loading.
+- **ADR anchors:** ADR-033 covers explicit resume/fail-closed dependency assembly, ADR-036 covers sandboxed Beast execution, ADR-038 covers fail-closed safety-module loading, and ADR-039 covers real token/context usage instrumentation for chat.
+- **Real chat usage data:** `ILlmClient.completeWithUsage()` (optional) and `ICliProvider.extractUsage()` (optional) surface real, provider-reported token counts — not estimates — through `ConversationEngine`/`ChatRuntime` to `fbeast chat`'s status line. Only Claude/Codex/Gemini CLI providers implement `extractUsage`; treat an absent result as "unknown," never coerce it to zero.
 
 ## Agent Workflow Notes
 

@@ -1,4 +1,4 @@
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient, TokenUsage } from '@franken/types';
 import type {
   ModelTierValue,
   TranscriptMessage,
@@ -14,6 +14,10 @@ export interface TurnResult {
   outcome: TurnOutcome;
   tier: ModelTierValue;
   newMessages: TranscriptMessage[];
+  /** Real token usage for this turn's LLM call, when the provider reported it. */
+  usage?: TokenUsage;
+  /** Whether this turn's prompt had to drop history to fit maxTranscriptLength. */
+  truncated?: boolean;
 }
 
 export interface ConversationEngineOptions {
@@ -31,6 +35,10 @@ interface ConversationEngineTurnOptions {
 
 type ContinuationAwareLlmClient = ILlmClient & {
   complete(prompt: string, options?: { sessionContinue?: boolean; sessionId?: string }): Promise<string>;
+  completeWithUsage?(
+    prompt: string,
+    options?: { sessionContinue?: boolean; sessionId?: string },
+  ): Promise<{ text: string; usage?: TokenUsage }>;
 };
 
 export class ConversationEngine {
@@ -103,13 +111,17 @@ export class ConversationEngine {
         const sessionId = this.sessionContinuation ? options.sessionId : undefined;
         const shouldContinue = this.sessionContinuation
           && (sessionId ? this.primedSessions.has(sessionId) : history.length > 0);
-        const prompt = shouldContinue
-          ? input
+        const built = shouldContinue
+          ? undefined
           : this.promptBuilder.build([...history, userMessage]);
-        const response = await this.llm.complete(prompt, {
+        const prompt = built ? built.prompt : input;
+        const completeOptions = {
           sessionContinue: shouldContinue,
           ...(sessionId ? { sessionId } : {}),
-        });
+        };
+        const { response, usage } = typeof this.llm.completeWithUsage === 'function'
+          ? await this.llm.completeWithUsage(prompt, completeOptions).then((result) => ({ response: result.text, usage: result.usage }))
+          : await this.llm.complete(prompt, completeOptions).then((text) => ({ response: text, usage: undefined as TokenUsage | undefined }));
         if (sessionId) {
           this.primedSessions.add(sessionId);
         }
@@ -124,11 +136,14 @@ export class ConversationEngine {
           content: response,
           timestamp: isoNow(),
           modelTier: tier,
+          ...(usage ? { tokens: usage.totalTokens } : {}),
         };
         return {
           outcome: replyOutcome,
           tier,
           newMessages: [userMessage, assistantMessage],
+          ...(usage ? { usage } : {}),
+          ...(built ? { truncated: built.truncated } : {}),
         };
       } catch (error) {
         const errorMsg =
