@@ -103,24 +103,31 @@ describe('commsRoutes', () => {
     })).not.toThrow();
   });
 
-  it('handles POST /v1/comms/inbound', async () => {
-    const app = commsRoutes({ config: minimalConfig(), runtime: mockRuntime() });
+  it.each([
+    ['slack', { type: 'event_callback', event_id: 'Ev1' }],
+    ['discord', { type: 0, id: 'interaction-1' }],
+    ['telegram', { update_id: 1, message: { message_id: 1 } }],
+    ['whatsapp', { object: 'whatsapp_business_account', entry: [] }],
+  ] as const)('accepts %s-shaped generic inbound payloads', async (channelType, rawEvent) => {
+    const runtime = mockRuntime();
+    const app = commsRoutes({ config: minimalConfig(), runtime });
     const res = await app.request('/v1/comms/inbound', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        channelType: 'slack',
-        externalUserId: 'U1',
-        externalChannelId: 'C1',
-        externalMessageId: 'M1',
+        channelType,
+        externalUserId: `${channelType}-user`,
+        externalChannelId: `${channelType}-channel`,
+        externalMessageId: `${channelType}-message`,
         text: 'hello',
         receivedAt: new Date().toISOString(),
-        rawEvent: {},
+        rawEvent,
       }),
     });
+
     expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body).toEqual({ accepted: true });
+    await expect(res.json()).resolves.toEqual({ accepted: true });
+    expect(runtime.processInbound).toHaveBeenCalledWith(expect.objectContaining({ channelType, text: 'hello' }));
   });
 
   it('keeps generic inbound comms validation coupled to the ChannelInboundMessage type without double-casts', async () => {
@@ -222,7 +229,7 @@ describe('commsRoutes', () => {
       }),
     });
 
-    expect(res.status).toBe(422);
+    expect(res.status).toBe(400);
     await expect(res.json()).resolves.toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
     expect(runtime.processInbound).not.toHaveBeenCalled();
   });
