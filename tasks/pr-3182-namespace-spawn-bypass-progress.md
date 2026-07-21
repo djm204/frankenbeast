@@ -9,7 +9,7 @@
 - [x] Run the focused regression and security lint GREEN verification.
 - [x] Run additional relevant scanner verification (`tests/unit/hardcoded-secrets.test.ts`: 49/49 passed).
 - [x] Create and verify linked security issue #3513 with P1/security labels.
-- [ ] Review diff, commit conventionally, push, and open the follow-up PR.
+- [x] Review diff, commit conventionally, push, and open follow-up PR #3514.
 - [ ] Drive current-head CI and Codex review to green/clean with zero unresolved threads.
 - [ ] Merge the follow-up PR and verify the fix is on `main`.
 - [ ] Reply to and resolve the original PR #3182 post-merge finding.
