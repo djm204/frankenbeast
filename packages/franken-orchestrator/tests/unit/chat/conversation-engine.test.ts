@@ -119,11 +119,33 @@ describe('ConversationEngine', () => {
     });
 
     expect(llm.complete).toHaveBeenCalledWith(
-      expect.stringContaining('Runtime status: this turn is being served by the "codex" CLI provider (model: codex-mini).'),
+      expect.stringContaining('Runtime status: this turn is being served by the "codex" CLI provider.'),
+      expect.anything(),
+    );
+    expect(llm.complete).toHaveBeenCalledWith(
+      expect.stringContaining('The specific underlying model is "codex-mini".'),
       expect.anything(),
     );
     expect(llm.complete).toHaveBeenCalledWith(
       expect.not.stringContaining('fallback'),
+      expect.anything(),
+    );
+  });
+
+  it('tells the model not to guess a version when none is known', async () => {
+    const llm = mockLlm('Hello!');
+    const engine = new ConversationEngine({ llm, projectName: 'test' });
+
+    await engine.processTurn('hello', [], {
+      priorProviderContext: { provider: 'codex' },
+    });
+
+    expect(llm.complete).toHaveBeenCalledWith(
+      expect.stringContaining('not exposed to this session — do not name one'),
+      expect.anything(),
+    );
+    expect(llm.complete).toHaveBeenCalledWith(
+      expect.stringContaining('never state a specific model name or version'),
       expect.anything(),
     );
   });
@@ -157,10 +179,11 @@ describe('formatProviderTransparencyNote', () => {
     expect(note).not.toContain('fallback');
   });
 
-  it('omits the parenthetical model when none is known', () => {
+  it('explicitly forbids naming a model version when none is known, rather than staying silent', () => {
     const note = formatProviderTransparencyNote({ provider: 'claude' });
     expect(note).toContain('"claude"');
-    expect(note).not.toContain('(model:');
+    expect(note).toContain('not exposed to this session — do not name one');
+    expect(note).toContain('never state a specific model name or version');
   });
 
   it('explains a rate-limit fallback', () => {

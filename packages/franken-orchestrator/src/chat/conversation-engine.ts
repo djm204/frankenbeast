@@ -55,13 +55,19 @@ const SWITCH_REASON_TEXT: Record<string, string> = {
  * direct unit testing of the wording.
  */
 export function formatProviderTransparencyNote(ctx: ProviderContext): string {
-  const modelPart = ctx.model ? ` (model: ${ctx.model})` : '';
-  const base = `Runtime status: this turn is being served by the "${ctx.provider}" CLI provider${modelPart}.`;
+  // The CLI provider frequently doesn't expose an underlying model/version
+  // string. Silence here must not become an invitation to guess — models
+  // will confidently name a specific version (e.g. "GPT-5") if a runtime
+  // note only says which provider is active and stays quiet about the rest.
+  const modelFact = ctx.model
+    ? `The specific underlying model is "${ctx.model}".`
+    : 'The specific underlying model/version is not exposed to this session — do not name one.';
+  const base = `Runtime status: this turn is being served by the "${ctx.provider}" CLI provider. ${modelFact}`;
   if (!ctx.switchedFrom) {
-    return `${base} Answer questions about your current model/provider using this fact.`;
+    return `${base} If asked what model/provider you're running on, answer using only these facts — never state a specific model name or version beyond what's given here, and never answer from your own training-time self-description.`;
   }
   const reasonText = (ctx.switchReason && SWITCH_REASON_TEXT[ctx.switchReason]) ?? 'was unavailable';
-  return `${base} This is an automatic fallback: the configured provider "${ctx.switchedFrom}" ${reasonText}, so the request was retried against "${ctx.provider}". If asked what model/provider you're running on, or whether this is a fallback, answer truthfully using these facts — do not deny it or guess your identity from training data.`;
+  return `${base} This is an automatic fallback: the configured provider "${ctx.switchedFrom}" ${reasonText}, so the request was retried against "${ctx.provider}". If asked what model/provider you're running on, or whether this is a fallback, answer truthfully using these facts — do not deny the fallback, and never state a specific model name or version beyond what's given here or from your own training-time self-description.`;
 }
 
 type ContinuationAwareLlmClient = ILlmClient & {
