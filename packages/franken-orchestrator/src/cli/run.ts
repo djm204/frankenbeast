@@ -27,7 +27,7 @@ import { Session } from './session.js';
 import { createEgressGuardedFetch } from '../network/egress-policy.js';
 import type { SessionPhase } from './session.js';
 import type { InterviewIO } from '../planning/interview-loop.js';
-import { renderBanner, BeastLogger } from '../logging/beast-logger.js';
+import { renderBanner, BeastLogger, isPlainOutput, setPlainOutput } from '../logging/beast-logger.js';
 import { ChatRepl, createReadlineIO, type ChatIO } from './chat-repl.js';
 import { createChatRuntime } from '../chat/chat-runtime-factory.js';
 import { FileSessionStore } from '../chat/session-store.js';
@@ -1180,6 +1180,7 @@ export async function createChatSurfaceDeps(
     trustProviderCommandOverrides: args.trustProviderCommandOverrides,
     noPr: true,
     verbose: args.verbose,
+    plain: args.plain,
     reset: false,
     adapterWorkingDir: tmpdir(),
     adapterModel: config.chat?.model ?? resolvedProvider.chatModel,
@@ -1528,6 +1529,7 @@ async function runChatCommandIfRequested(
 
 export async function main(): Promise<void> {
   const args = parseArgs();
+  setPlainOutput(args.plain);
 
   if (args.help) {
     printUsage();
@@ -1635,7 +1637,7 @@ export async function main(): Promise<void> {
     return;
   }
 
-  const logger = new BeastLogger({ verbose: args.verbose });
+  const logger = new BeastLogger({ verbose: args.verbose, plain: args.plain });
   if (args.config) {
     logger.info(`Loaded config from ${args.config}`, 'config');
   } else {
@@ -1703,6 +1705,7 @@ export async function main(): Promise<void> {
     trustProviderCommandOverrides: args.trustProviderCommandOverrides,
     noPr: args.noPr,
     verbose: args.verbose,
+    plain: args.plain,
     reset: args.reset,
     resume: args.resume,
     io,
@@ -2250,6 +2253,7 @@ export async function runNetworkCommand(
       ...(configFile ? { configFile } : {}),
       ...(args.networkSet ? { configOverrides: args.networkSet } : {}),
       allowTrustedProviderCommandOverrides: args.trustProviderCommandOverrides,
+      ...(args.plain || isPlainOutput() ? { plain: true } : {}),
     }),
     action === 'up' ? undefined : args.networkTarget,
   );

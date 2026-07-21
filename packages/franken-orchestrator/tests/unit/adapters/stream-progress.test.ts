@@ -385,6 +385,7 @@ describe('createStreamProgressWithSpinner', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllEnvs();
   });
 
   it('returns an object with onLine and stop methods', () => {
@@ -409,6 +410,28 @@ describe('createStreamProgressWithSpinner', () => {
     expect(spinnerFrames.length).toBeGreaterThanOrEqual(1);
 
     handle.stop();
+  });
+
+  it('uses newline-delimited escape-free progress in plain mode', () => {
+    vi.stubEnv('NO_COLOR', '1');
+    const output: string[] = [];
+    const handle = createStreamProgressWithSpinner({
+      write: (text) => output.push(text),
+      label: 'Planning...',
+    });
+
+    handle.update({
+      stage: 'decompose',
+      status: 'started',
+      message: 'Decomposing plan',
+      position: 1,
+      total: 3,
+    });
+    handle.stop();
+
+    expect(output.join('')).toContain('Planning...\n');
+    expect(output.join('')).toContain('Decomposing plan [1/3]\n');
+    expect(output.join('')).not.toMatch(/[\r\x1b]/);
   });
 
   it('clears spinner line before writing progress events', () => {

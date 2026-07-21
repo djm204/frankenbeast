@@ -30,6 +30,20 @@ describe('stripAnsi', () => {
     expect(stripAnsi(input)).toBe(' INFO green text');
   });
 
+  it('removes cursor, erase-line, and OSC hyperlink sequences', () => {
+    const input = '\x1b[2K\x1b[3Gready \x1b]8;;https://example.com\x07link\x1b]8;;\x07';
+    expect(stripAnsi(input)).toBe('ready link');
+  });
+
+  it('preserves visible text between multiple ST-terminated OSC sequences', () => {
+    const input = '\x1b]0;first\x1b\\visible\x1b]0;second\x1b\\ text';
+    expect(stripAnsi(input)).toBe('visible text');
+  });
+
+  it('removes ANSI charset-designation sequences', () => {
+    expect(stripAnsi('before\x1b(0line\x1b(B after')).toBe('beforeline after');
+  });
+
   it('handles empty string', () => {
     expect(stripAnsi('')).toBe('');
   });
@@ -158,6 +172,54 @@ describe('BeastLogger', () => {
 
   afterEach(() => {
     consoleLogSpy.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  describe('plain output', () => {
+    it('preserves level and service labels without ANSI when explicitly enabled', () => {
+      const logger = new BeastLogger({ verbose: false, plain: true });
+
+      logger.info('test message', 'planner');
+
+      const output = consoleLogSpy.mock.calls[0]![0] as string;
+      expect(output).toContain('INFO');
+      expect(output).toContain('[planner]');
+      expect(output).toContain('test message');
+      expect(output).not.toMatch(/\x1b\[/);
+    });
+
+    it('honors the NO_COLOR environment convention even when plain is explicitly false', () => {
+      vi.stubEnv('NO_COLOR', '1');
+      const logger = new BeastLogger({ verbose: true, plain: false });
+
+      logger.debug('\x1b[31mcalling [codex] api\x1b[0m\x1b[K', 'observer');
+
+      const output = consoleLogSpy.mock.calls[0]![0] as string;
+      expect(output).toContain('DEBUG');
+      expect(output).toContain('[observer]');
+      expect(output).toContain('[codex]');
+      expect(output).not.toMatch(/\x1b/);
+    });
+
+    it('treats an empty NO_COLOR value as unset', () => {
+      vi.stubEnv('NO_COLOR', '');
+      const logger = new BeastLogger({ verbose: false });
+
+      logger.info('colored');
+
+      expect(consoleLogSpy.mock.calls[0]![0]).toMatch(/\x1b\[/);
+    });
+
+    it('honors FORCE_COLOR=0 for logs, badges, and banners', async () => {
+      vi.stubEnv('FORCE_COLOR', '0');
+      const logger = new BeastLogger({ verbose: false });
+
+      logger.warn('warning', 'budget');
+
+      expect(consoleLogSpy.mock.calls[0]![0]).not.toMatch(/\x1b\[/);
+      expect(statusBadge(false)).toBe(' FAIL ');
+      expect(await renderBanner('/definitely/missing')).not.toMatch(/\x1b\[/);
+    });
   });
 
   describe('log levels', () => {

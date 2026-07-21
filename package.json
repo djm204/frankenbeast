@@ -60,6 +60,7 @@
     "ci:dr:restore-rehearsal": "npm run dr:restore-rehearsal"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^26.1.1",
     "@vitest/coverage-v8": "^4.1.10",
@@ -81,6 +82,7 @@
   },
   "overrides": {
     "@anthropic-ai/sdk": "^0.110.0",
+    "@hono/node-server": "2.0.5",
     "esbuild": "^0.28.1",
     "hono": "^4.12.27",
     "protobufjs": "^7.6.5",

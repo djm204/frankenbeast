@@ -51,6 +51,18 @@ describe('network-registry', () => {
     });
   });
 
+  it('propagates plain mode to managed orchestrator children', () => {
+    const services = resolveNetworkServices(defaultConfig(), {
+      repoRoot: '/repo/frankenbeast',
+      plain: true,
+    });
+
+    for (const serviceId of ['beasts-daemon', 'chat-server', 'dashboard-web']) {
+      expect(services.find((service) => service.id === serviceId)?.runtimeConfig.process?.env)
+        .toMatchObject({ NO_COLOR: '1', FORCE_COLOR: '0' });
+    }
+  });
+
   it('declares only the runtime environment required by each managed service', () => {
     const config = defaultConfig();
     config.network.secureBackend = 'bitwarden';

@@ -23,6 +23,7 @@ import type { ICliProvider } from './providers/cli-provider.js';
 import { ProviderRegistry, createDefaultRegistry } from './providers/cli-provider.js';
 import { tryExtractTextFromNode } from './providers/index.js';
 import { createChunkSession, createChunkTranscriptEntry, type ChunkSession } from '../session/chunk-session.js';
+import { ANSI, AnsiStreamSanitizer, isPlainOutput, stripAnsi } from '../logging/beast-logger.js';
 import {
   classifyCommandFailure,
   commandFailureFromExecError,
@@ -126,7 +127,7 @@ export function processStreamLine(line: string): string {
     // Check for thinking content (extended thinking / reasoning)
     const delta = obj.delta as Record<string, unknown> | undefined;
     if (delta?.thinking && typeof delta.thinking === 'string') {
-      return `\x1b[2m${delta.thinking}\x1b[0m`;
+      return `${ANSI.dim}${delta.thinking}${ANSI.reset}`;
     }
 
     const parts: string[] = [];
@@ -161,7 +162,7 @@ function summarizeToolUse(toolName: string, inputJson: string): string {
     // Partial / malformed JSON — just show the tool name
   }
   const label = detail ? `${toolName} ${detail}` : toolName;
-  return `\x1b[2m[tool] ${label}\x1b[0m`;
+  return `${ANSI.dim}[tool] ${label}${ANSI.reset}`;
 }
 
 /**
@@ -302,7 +303,12 @@ function spawnIteration(
       ? [...providerArgs, '--', prompt]
       : [...providerArgs, prompt];
 
-    const env = provider.filterEnv(process.env as Record<string, string>);
+    const env = { ...provider.filterEnv(process.env as Record<string, string>) };
+    const plain = isPlainOutput();
+    if (plain) {
+      env.NO_COLOR = env.NO_COLOR ?? '1';
+      env.FORCE_COLOR = '0';
+    }
 
     const child = spawn(cmd, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -317,6 +323,19 @@ function spawnIteration(
     let timedOut = false;
     const cleanParts: string[] = [];
     const streamBuffer = provider.supportsStreamJson() ? new StreamLineBuffer() : null;
+    const plainStreamSanitizer = plain ? new AnsiStreamSanitizer() : null;
+    const appendStreamLine = (line: string): void => {
+      const displayLine = plainStreamSanitizer?.push(line) ?? line;
+      if (displayLine.length === 0) return;
+      cleanParts.push(displayLine);
+      process.stdout.write(displayLine + '\n');
+    };
+    const flushStreamBuffer = (): void => {
+      if (!streamBuffer) return;
+      for (const line of streamBuffer.flush()) {
+        appendStreamLine(line);
+      }
+    };
 
     const finish = (result: { stdout: string; stderr: string; exitCode: number; timedOut: boolean; cleanStdout: string }): void => {
       if (settled) return;
@@ -336,12 +355,12 @@ function spawnIteration(
       if (streamBuffer) {
         const lines = streamBuffer.push(text);
         for (const line of lines) {
-          cleanParts.push(line);
-          process.stdout.write(line + '\n');
+          appendStreamLine(line);
         }
       } else {
-        cleanParts.push(text);
-        process.stdout.write(text);
+        const displayText = plainStreamSanitizer?.push(text) ?? text;
+        cleanParts.push(displayText);
+        process.stdout.write(displayText);
       }
     });
 
@@ -362,10 +381,7 @@ function spawnIteration(
       }, 5_000));
       // Hard fail-safe: if process still hasn't closed, force resolution.
       escalationTimers.push(setTimeout(() => {
-        if (streamBuffer) {
-          const remaining = streamBuffer.flush();
-          for (const line of remaining) cleanParts.push(line);
-        }
+        flushStreamBuffer();
         finish({
           stdout,
           stderr: `${stderr}\n[MartinLoop] iteration timed out after ${config.timeoutMs}ms`,
@@ -404,10 +420,7 @@ function spawnIteration(
         try { child.kill('SIGKILL'); } catch { /* already dead */ }
       }, 5_000));
       escalationTimers.push(setTimeout(() => {
-        if (streamBuffer) {
-          const remaining = streamBuffer.flush();
-          for (const line of remaining) cleanParts.push(line);
-        }
+        flushStreamBuffer();
         clearTimers();
         finish({
           stdout,
@@ -419,13 +432,11 @@ function spawnIteration(
       }, 7_000));
     };
     config.abortSignal?.addEventListener('abort', onAbort, { once: true });
-
     child.on('close', (code) => {
+      if (settled) return;
       clearTimers();
-      if (streamBuffer) {
-        const remaining = streamBuffer.flush();
-        for (const line of remaining) cleanParts.push(line);
-      }
+      flushStreamBuffer();
+      plainStreamSanitizer?.flush();
       finish({ stdout, stderr, exitCode: code ?? 1, timedOut, cleanStdout: cleanParts.join('\n') });
     });
 
@@ -583,9 +594,14 @@ export class MartinLoop {
       const durationMs = wallClockNow() - startTime;
       // For stream-json providers, use the pre-cleaned output from StreamLineBuffer.
       // For non-stream-json providers, normalize the raw stdout via the provider.
-      const normalizedStdout = resolved.supportsStreamJson()
+      const providerNormalizedStdout = resolved.supportsStreamJson()
         ? result.cleanStdout
         : resolved.normalizeOutput(result.stdout);
+      const normalizedStdout = isPlainOutput()
+        ? stripAnsi(providerNormalizedStdout)
+        : providerNormalizedStdout;
+      const failureStdout = isPlainOutput() ? stripAnsi(result.stdout) : result.stdout;
+      const failureStderr = isPlainOutput() ? stripAnsi(result.stderr) : result.stderr;
       lastOutput = normalizedStdout;
 
       const tokensEstimated = resolved.estimateTokens(normalizedStdout);
@@ -603,8 +619,8 @@ export class MartinLoop {
           command: resolved.command,
           exitCode: result.exitCode,
           timedOut: result.timedOut,
-          stdout: result.stdout,
-          stderr: result.stderr,
+          stdout: failureStdout,
+          stderr: failureStderr,
           normalizedOutput: normalizedStdout,
           detectRateLimit: (text) => resolved.isRateLimited(text),
           parseRetryAfterMs: (text) => {
@@ -624,7 +640,7 @@ export class MartinLoop {
         provider: activeProvider,
         exitCode: result.exitCode,
         stdout: normalizedStdout,
-        stderr: result.stderr,
+        stderr: failureStderr,
         durationMs,
         rateLimited,
         promiseDetected,

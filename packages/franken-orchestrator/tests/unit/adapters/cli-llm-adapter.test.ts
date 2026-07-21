@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { CliLlmAdapter } from '../../../src/adapters/cli-llm-adapter.js';
+import { setPlainOutput } from '../../../src/logging/beast-logger.js';
 import { AiderProvider } from '../../../src/skills/providers/aider-provider.js';
 import { ClaudeProvider } from '../../../src/skills/providers/claude-provider.js';
 import { CodexProvider } from '../../../src/skills/providers/codex-provider.js';
@@ -464,6 +465,22 @@ describe('CliLlmAdapter', () => {
         expect(result).toBe('response text');
       });
 
+      it('propagates explicit plain mode to provider subprocesses', async () => {
+        const { spawnFn, calls } = createMockSpawn({ stdout: 'response text', exitCode: 0 });
+        setPlainOutput(true);
+
+        try {
+          const adapter = new CliLlmAdapter(aiderProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env.NO_COLOR).toBe('1');
+          expect(env.FORCE_COLOR).toBe('0');
+        } finally {
+          setPlainOutput(false);
+        }
+      });
+
       it('rejects on non-zero exit code with stderr in error message', async () => {
         const { spawnFn } = createMockSpawn({
           stdout: '',
@@ -474,6 +491,55 @@ describe('CliLlmAdapter', () => {
 
         await expect(adapter.execute({ prompt: 'test', maxTurns: 1 }))
           .rejects.toThrow('something went wrong');
+      });
+
+      it('strips ANSI from non-zero failure summaries in plain mode', async () => {
+        setPlainOutput(true);
+        try {
+          const { spawnFn } = createMockSpawn({
+            stdout: '\x1b[31mfailed stdout\x1b[0m\x1b[K',
+            stderr: '\x1b[33mfailed stderr\x1b[0m',
+            exitCode: 1,
+          });
+          const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
+
+          try {
+            await adapter.execute({ prompt: 'test', maxTurns: 1 });
+            throw new Error('expected execute to throw');
+          } catch (error) {
+            expect(error).toBeInstanceOf(Error);
+            expect((error as Error).message).not.toContain('\x1b');
+            expect((error as Error).message).toContain('failed stdout');
+            expect((error as Error).message).toContain('failed stderr');
+          }
+        } finally {
+          setPlainOutput(false);
+        }
+      });
+
+      it('strips JSON-escaped ANSI after normalizing non-zero failure output', async () => {
+        setPlainOutput(true);
+        try {
+          const { spawnFn } = createMockSpawn({
+            stdout: JSON.stringify({
+              type: 'result',
+              result: '\x1b[31mnormalized failure\x1b[0m\x1b[K',
+            }),
+            exitCode: 1,
+          });
+          const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
+
+          try {
+            await adapter.execute({ prompt: 'test', maxTurns: 1 });
+            throw new Error('expected execute to throw');
+          } catch (error) {
+            expect(error).toBeInstanceOf(Error);
+            expect((error as Error).message).not.toContain('\x1b');
+            expect((error as Error).message).toContain('normalized failure');
+          }
+        } finally {
+          setPlainOutput(false);
+        }
       });
 
       it('attaches a standardized failure object to non-rate-limit exits', async () => {
@@ -1169,6 +1235,18 @@ describe('CliLlmAdapter', () => {
   });
 
   describe('transformResponse', () => {
+    it('strips provider controls from normalized responses in plain mode', () => {
+      setPlainOutput(true);
+      try {
+        const adapter = new CliLlmAdapter(aiderProvider, baseOpts);
+        const result = adapter.transformResponse('\x1b[31manswer\x1b[0m\x1b[K', 'req-plain');
+
+        expect(result.content).toBe('answer');
+      } finally {
+        setPlainOutput(false);
+      }
+    });
+
     describe('stream-json path (supportsStreamJson=true, ClaudeProvider)', () => {
       it('extracts text from stream-json deltas via provider.normalizeOutput', () => {
         const adapter = new CliLlmAdapter(claudeProvider, baseOpts);

@@ -166,7 +166,7 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
   }
 
   app.post('/v1/comms/inbound', async (c) => {
-    const body = validateBody(GenericCommsInboundBody, await parseJsonBody(c));
+    const body = validateBody(GenericCommsInboundBody, await parseJsonBody(c), 400);
     await gateway.handleInbound(body);
     return c.json({ accepted: true });
   });

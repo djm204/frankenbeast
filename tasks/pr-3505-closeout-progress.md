@@ -9,7 +9,10 @@
 - [x] Preserve the first fallback reason together with the configured provider across mixed-cause multi-hop fallback.
 - [x] Add a mixed unavailable -> rate-limited -> success three-provider regression.
 - [x] Re-run focused verification: 261 unit tests, the focused REST integration regression, orchestrator typecheck, and `git diff --check` all pass.
-- [ ] Route the exact branch push through approval-cop.
+- [x] Route repair commit `d657cf99` through approval-cop and verify the remote PR head matches.
+- [x] Merge current `origin/main` into the repair head and resolve the sole conflict by preserving both provider usage/context extraction and plain-output ANSI stripping.
+- [x] Verify the reconciled tree: 316 focused unit tests pass, focused REST provider-context regression passes, orchestrator typecheck/lint pass, root build passes, and `git diff --check` passes; the full REST integration file retains its two documented unrelated concurrency timeouts.
+- [ ] Route the exact reconciled branch head push through approval-cop.
 - [ ] Verify exact-head GitHub CI is green; repair only exact-head failures if needed.
 - [ ] Obtain a fresh exact-head Codex clean and verify zero unresolved Codex threads.
 - [ ] Route a head-pinned squash merge through approval-cop and verify PR terminal state.

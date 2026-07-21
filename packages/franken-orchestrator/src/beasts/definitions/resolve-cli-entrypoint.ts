@@ -1,6 +1,7 @@
 import { resolve, dirname } from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { isPlainOutput } from '../../logging/beast-logger.js';
 
 const thisDir = dirname(fileURLToPath(import.meta.url));
 // thisDir is src/beasts/definitions — package root is three levels up
@@ -25,4 +26,11 @@ export function resolveCliEntrypoint(): string {
   throw new Error(
     `Cannot find CLI entrypoint. Checked:\n  ${distPath}\n  ${srcPath}`,
   );
+}
+
+export function spawnedCliEnv(): Record<string, string> {
+  return {
+    FRANKENBEAST_SPAWNED: '1',
+    ...(isPlainOutput() ? { NO_COLOR: '1', FORCE_COLOR: '0' } : {}),
+  };
 }
