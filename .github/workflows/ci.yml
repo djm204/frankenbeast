@@ -104,7 +104,12 @@ jobs:
         run: npm run deps:outdated:major
 
       - name: Generate CycloneDX dependency SBOM
-        run: npm sbom --sbom-format cyclonedx > "${RUNNER_TEMP}/sbom.cyclonedx.json"
+        run: |
+          # npm's installed-package metadata retains the pre-override range, so
+          # reconcile it with the root override before npm validates the graph.
+          hono_node_server_override=$(npm pkg get 'overrides.@modelcontextprotocol/sdk.@hono/node-server' | jq -r .)
+          npm pkg set "dependencies.@hono/node-server=${hono_node_server_override}" --prefix node_modules/@modelcontextprotocol/sdk
+          npm sbom --sbom-format cyclonedx > "${RUNNER_TEMP}/sbom.cyclonedx.json"
 
       - name: Upload dependency SBOM
         uses: actions/upload-artifact@v7
