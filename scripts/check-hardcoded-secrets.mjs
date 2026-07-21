@@ -1012,9 +1012,15 @@ function collectProgrammaticCrontabAliases(lines) {
   const processNames = new Set();
   const childProcessModuleAliases = new Set();
   for (const line of lines) {
-    const esmAlias = line.match(/^\s*import\s+(?:\*\s+as\s+)?([A-Za-z_$][\w$]*)\s+from\s*['"](?:node:)?child_process['"]\s*;?$/);
-    const commonJsAlias = line.match(/^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)\s*;?$/);
-    if (esmAlias) childProcessModuleAliases.add(esmAlias[1]);
+    const esmImport = line.match(/^\s*import\s+(.+?)\s+from\s*['"](?:node:)?child_process['"]\s*;?$/);
+    if (esmImport) {
+      const namespaceAlias = esmImport[1].match(/^\*\s+as\s+([A-Za-z_$][\w$]*)$/);
+      const defaultAlias = esmImport[1].match(/^([A-Za-z_$][\w$]*)(?:\s*,|$)/);
+      const namedDefaultAlias = esmImport[1].match(/(?:^|[{,]\s*)default\s+as\s+([A-Za-z_$][\w$]*)(?:\s*[,}]|$)/);
+      const alias = namespaceAlias?.[1] ?? defaultAlias?.[1] ?? namedDefaultAlias?.[1];
+      if (alias) childProcessModuleAliases.add(alias);
+    }
+    const commonJsAlias = line.match(/^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)(?:\s*:\s*[^=]+)?\s*=\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)(?:\s+as\s+[^;]+)?\s*;?$/);
     if (commonJsAlias) childProcessModuleAliases.add(commonJsAlias[1]);
   }
   for (const [index, line] of lines.entries()) {
@@ -1044,10 +1050,10 @@ function collectProgrammaticCrontabAliases(lines) {
       const crontabPosition = commandParts.findIndex((part) => /(?:^|\/)crontab$/.test(part));
       if (crontabPosition === 0 || (crontabPosition === 1 && /(?:^|\/)env$/.test(commandParts[0] ?? ''))) commandNames.add(arrayAssignment[1]);
     }
-    const childProcessQualifierPattern = [...childProcessModuleAliases]
+    const childProcessQualifierPattern = ['subprocess', ...childProcessModuleAliases]
       .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
       .join('|');
-    const spawnedProcess = line.match(new RegExp(`^\\s*(?:(?:const|let|var)\\s+)?([A-Za-z_$][\\w$]*)\\s*=\\s*(?:(?:subprocess${childProcessQualifierPattern ? `|${childProcessQualifierPattern}` : ''})\\.)?(?:spawn|Popen)\\s*\\((.*)$`, 'u'));
+    const spawnedProcess = line.match(new RegExp(`^\\s*(?:(?:const|let|var)\\s+)?([A-Za-z_$][\\w$]*)\\s*=\\s*(?:(?:(?:${childProcessQualifierPattern})\\.|require\\s*\\(\\s*['"](?:node:)?child_process['"]\\s*\\)\\.))?(?:spawn|Popen)\\s*\\((.*)$`, 'u'));
     if (spawnedProcess) {
       let callExpression = spawnedProcess[2];
       let depth = groupingDepthDelta(line);
