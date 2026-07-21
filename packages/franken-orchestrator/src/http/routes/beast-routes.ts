@@ -30,7 +30,7 @@ import {
 } from '../middleware.js';
 import { wallClockNow } from '@franken/types';
 import { TransportSecurityService } from '../security/transport-security.js';
-import type { BeastRun, BeastRunAttempt } from '../../beasts/types.js';
+import type { BeastRun, BeastRunAttempt, BeastRunEvent } from '../../beasts/types.js';
 import {
   DEFAULT_BEAST_RUN_PAGE_LIMIT,
   InvalidBeastRunCursorError,
@@ -70,6 +70,7 @@ function parseBeastEventPagination(query: Record<string, string>): { afterSequen
 }
 
 function runWithContainerFields(run: BeastRun | undefined, attempts: BeastRunAttempt[]): BeastRunResponse | undefined {
+  run = redactRunHostPaths(run);
   if (!run || run.executionMode !== 'container') {
     return run;
   }
@@ -104,7 +105,30 @@ function redactHostExecutionPaths(attempt: BeastRunAttempt): BeastRunAttempt {
   delete executorMetadata.args;
   delete executorMetadata.dockerCommand;
   delete executorMetadata.dockerArgs;
+  delete executorMetadata.worktreePath;
+  delete executorMetadata.worktreeExecutionCwd;
+  delete executorMetadata.worktreeProjectRoot;
   return { ...attempt, executorMetadata };
+}
+
+function redactRunHostPaths(run: BeastRun | undefined): BeastRun | undefined {
+  if (!run) return run;
+  const configSnapshot = { ...run.configSnapshot };
+  delete configSnapshot.projectRoot;
+  return { ...run, configSnapshot };
+}
+
+function redactEventHostPaths(event: BeastRunEvent): BeastRunEvent {
+  const payload = { ...event.payload };
+  delete payload.command;
+  delete payload.args;
+  delete payload.dockerCommand;
+  delete payload.dockerArgs;
+  return { ...event, payload };
+}
+
+function redactEventPageHostPaths<T extends { readonly events: BeastRunEvent[] }>(page: T): T {
+  return { ...page, events: page.events.map(redactEventHostPaths) };
 }
 
 function attemptsForContainerRun(run: BeastRun | undefined, deps: BeastRoutesDeps): BeastRunAttempt[] {
@@ -476,7 +500,9 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
       data: {
         run: runWithContainerFields(deps.runs.sanitizeRunForResponse(run), attempts),
         attempts,
-        events: deps.runs.listEventPageForResponse(runId, 0, DEFAULT_BEAST_EVENT_PAGE_LIMIT).events,
+        events: redactEventPageHostPaths(
+          deps.runs.listEventPageForResponse(runId, 0, DEFAULT_BEAST_EVENT_PAGE_LIMIT),
+        ).events,
       },
     });
   });
@@ -486,7 +512,7 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
     const { afterSequence, limit } = parseBeastEventPagination(c.req.query());
     try {
       return c.json({
-        data: deps.runs.listEventPageForResponse(runId, afterSequence, limit),
+        data: redactEventPageHostPaths(deps.runs.listEventPageForResponse(runId, afterSequence, limit)),
       });
     } catch (error) {
       throwKnownRunError(runId, error);

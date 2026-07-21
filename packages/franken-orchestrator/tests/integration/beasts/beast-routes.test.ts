@@ -894,6 +894,60 @@ describe('beast routes', () => {
     expect(JSON.stringify(list)).not.toContain(TMP);
   });
 
+  it('redacts host paths from run snapshots, process attempts, and events', async () => {
+    const { app, operatorToken, repository } = createBeastApp();
+    const hostRoot = '/srv/private/frankenbeast';
+    const run = repository.createRun({
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: { objective: 'redact paths', projectRoot: hostRoot },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-07-21T00:00:00.000Z',
+    });
+    const attempt = repository.createAttempt(run.id, {
+      status: 'running',
+      executorMetadata: {
+        backend: 'process',
+        worktreeIsolation: true,
+        worktreePath: `${hostRoot}/.worktrees/agent-1`,
+        worktreeExecutionCwd: `${hostRoot}/.worktrees/agent-1/packages/app`,
+        worktreeProjectRoot: hostRoot,
+        worktreeBranch: 'beast/agent-1',
+      },
+    });
+    repository.updateRun(run.id, { currentAttemptId: attempt.id, attemptCount: 1 });
+    repository.appendEvent(run.id, {
+      attemptId: attempt.id,
+      type: 'attempt.started',
+      payload: { pid: 1234, command: `${hostRoot}/bin/frankenbeast` },
+      createdAt: '2026-07-21T00:01:00.000Z',
+    });
+    const headers = { authorization: 'Bearer ' + operatorToken };
+
+    const detail = await (await app.request(`/v1/beasts/runs/${run.id}`, { headers })).json() as {
+      data: {
+        run: { configSnapshot: Record<string, unknown> };
+        attempts: Array<{ executorMetadata?: Record<string, unknown> }>;
+        events: Array<{ payload: Record<string, unknown> }>;
+      };
+    };
+    expect(detail.data.run.configSnapshot).toEqual({ objective: 'redact paths' });
+    expect(detail.data.attempts[0]?.executorMetadata).toEqual({
+      backend: 'process',
+      worktreeIsolation: true,
+      worktreeBranch: 'beast/agent-1',
+    });
+    expect(detail.data.events[0]?.payload).toEqual({ pid: 1234 });
+    expect(JSON.stringify(detail)).not.toContain(hostRoot);
+
+    const events = await (await app.request(`/v1/beasts/runs/${run.id}/events`, { headers })).json();
+    const list = await (await app.request('/v1/beasts/runs', { headers })).json();
+    expect(JSON.stringify(events)).not.toContain(hostRoot);
+    expect(JSON.stringify(list)).not.toContain(hostRoot);
+  });
+
   it('does not expose stale container metadata when the current attempt metadata is corrupt', async () => {
     const { app, operatorToken, repository } = createBeastApp();
     const run = repository.createRun({
