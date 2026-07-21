@@ -36,6 +36,7 @@ import {
   InvalidBeastRunCursorError,
   MAX_BEAST_RUN_PAGE_LIMIT,
 } from '../../beasts/repository/sqlite-beast-repository.js';
+import { redactAbsoluteHostPathValues, redactHostExecutionData } from '../beast-response-redaction.js';
 
 type BeastRunResponse = BeastRun & {
   readonly containerId?: unknown;
@@ -113,17 +114,12 @@ function redactHostExecutionPaths(attempt: BeastRunAttempt): BeastRunAttempt {
 
 function redactRunHostPaths(run: BeastRun | undefined): BeastRun | undefined {
   if (!run) return run;
-  const configSnapshot = { ...run.configSnapshot };
-  delete configSnapshot.projectRoot;
+  const configSnapshot = redactAbsoluteHostPathValues(run.configSnapshot) as Readonly<Record<string, unknown>>;
   return { ...run, configSnapshot };
 }
 
 function redactEventHostPaths(event: BeastRunEvent): BeastRunEvent {
-  const payload = { ...event.payload };
-  delete payload.command;
-  delete payload.args;
-  delete payload.dockerCommand;
-  delete payload.dockerArgs;
+  const payload = redactHostExecutionData(event.payload) as Readonly<Record<string, unknown>>;
   return { ...event, payload };
 }
 

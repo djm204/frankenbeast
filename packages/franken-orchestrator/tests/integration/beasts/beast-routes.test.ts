@@ -901,7 +901,11 @@ describe('beast routes', () => {
       definitionId: 'martin-loop',
       definitionVersion: 1,
       executionMode: 'process',
-      configSnapshot: { objective: 'redact paths', projectRoot: hostRoot },
+      configSnapshot: {
+        objective: 'redact paths',
+        projectRoot: hostRoot,
+        chunkDirectory: `${hostRoot}/docs/chunks`,
+      },
       dispatchedBy: 'api',
       dispatchedByUser: 'operator',
       createdAt: '2026-07-21T00:00:00.000Z',
@@ -933,7 +937,10 @@ describe('beast routes', () => {
         events: Array<{ payload: Record<string, unknown> }>;
       };
     };
-    expect(detail.data.run.configSnapshot).toEqual({ objective: 'redact paths' });
+    expect(detail.data.run.configSnapshot).toEqual({
+      objective: 'redact paths',
+      chunkDirectory: '[REDACTED_HOST_PATH]',
+    });
     expect(detail.data.attempts[0]?.executorMetadata).toEqual({
       backend: 'process',
       worktreeIsolation: true,
