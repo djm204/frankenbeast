@@ -1012,16 +1012,19 @@ function collectProgrammaticCrontabAliases(lines) {
   const processNames = new Set();
   const childProcessModuleAliases = new Set();
   for (const line of lines) {
-    const esmImport = line.match(/^\s*import\s+(.+?)\s+from\s*['"](?:node:)?child_process['"]\s*;?$/);
+    const esmImport = line.match(/^\s*import\s+(.+?)\s+from\s*['"](?:node:)?child_process['"]\s*;?\s*(?:(?:\/\/|\/\*).*?)?$/);
     if (esmImport) {
-      const namespaceAlias = esmImport[1].match(/^\*\s+as\s+([A-Za-z_$][\w$]*)$/);
+      const namespaceAlias = esmImport[1].match(/(?:^|,\s*)\*\s+as\s+([A-Za-z_$][\w$]*)$/);
       const defaultAlias = esmImport[1].match(/^([A-Za-z_$][\w$]*)(?:\s*,|$)/);
       const namedDefaultAlias = esmImport[1].match(/(?:^|[{,]\s*)default\s+as\s+([A-Za-z_$][\w$]*)(?:\s*[,}]|$)/);
-      const alias = namespaceAlias?.[1] ?? defaultAlias?.[1] ?? namedDefaultAlias?.[1];
-      if (alias) childProcessModuleAliases.add(alias);
+      for (const alias of [namespaceAlias?.[1], defaultAlias?.[1], namedDefaultAlias?.[1]]) {
+        if (alias) childProcessModuleAliases.add(alias);
+      }
     }
-    const commonJsAlias = line.match(/^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)(?:\s*:\s*[^=]+)?\s*=\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)(?:\s+as\s+[^;]+)?\s*;?$/);
+    const commonJsAlias = line.match(/^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)(?:\s*:\s*[^=]+)?\s*=\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)(?:\s+as\s+[^;]+)?\s*;?\s*(?:(?:\/\/|\/\*).*?)?$/);
     if (commonJsAlias) childProcessModuleAliases.add(commonJsAlias[1]);
+    const importEqualsAlias = line.match(/^\s*import\s+([A-Za-z_$][\w$]*)\s*=\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)\s*;?\s*(?:(?:\/\/|\/\*).*?)?$/);
+    if (importEqualsAlias) childProcessModuleAliases.add(importEqualsAlias[1]);
   }
   for (const [index, line] of lines.entries()) {
     const importLine = line.match(/^\s*from\s+subprocess\s+import\s+(.+)$/);
@@ -1053,11 +1056,20 @@ function collectProgrammaticCrontabAliases(lines) {
     const childProcessQualifierPattern = ['subprocess', ...childProcessModuleAliases]
       .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
       .join('|');
-    const spawnedProcess = line.match(new RegExp(`^\\s*(?:(?:const|let|var)\\s+)?([A-Za-z_$][\\w$]*)\\s*=\\s*(?:(?:(?:${childProcessQualifierPattern})\\.|require\\s*\\(\\s*['"](?:node:)?child_process['"]\\s*\\)\\.))?(?:spawn|Popen)\\s*\\((.*)$`, 'u'));
+    let spawnStartIndex = index;
+    let spawnStartLine = line;
+    let spawnedProcess = line.match(new RegExp(`^\\s*(?:(?:const|let|var)\\s+)?([A-Za-z_$][\\w$]*)\\s*=\\s*(?:(?:(?:${childProcessQualifierPattern})\\.|require\\s*\\(\\s*['"](?:node:)?child_process['"]\\s*\\)\\.))?(?:spawn|Popen)\\s*\\((.*)$`, 'u'));
+    const splitDirectRequire = line.match(/^\s*(?:(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)\s*=\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)\s*$/);
+    const splitSpawn = splitDirectRequire ? lines[index + 1]?.match(/^\s*\.spawn\s*\((.*)$/) : null;
+    if (!spawnedProcess && splitDirectRequire && splitSpawn) {
+      spawnedProcess = ['', splitDirectRequire[1], splitSpawn[1]];
+      spawnStartIndex = index + 1;
+      spawnStartLine = lines[spawnStartIndex];
+    }
     if (spawnedProcess) {
       let callExpression = spawnedProcess[2];
-      let depth = groupingDepthDelta(line);
-      for (let cursor = index + 1; depth > 0 && cursor < Math.min(lines.length, index + 40); cursor += 1) {
+      let depth = groupingDepthDelta(spawnStartLine);
+      for (let cursor = spawnStartIndex + 1; depth > 0 && cursor < Math.min(lines.length, spawnStartIndex + 40); cursor += 1) {
         callExpression += ` ${lines[cursor]}`;
         depth += groupingDepthDelta(lines[cursor]);
       }

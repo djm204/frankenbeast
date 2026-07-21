@@ -1511,6 +1511,46 @@ describe('hard-coded example secret scanner', () => {
       ].join('\n'),
       'utf8',
     );
+    writeFileSync(
+      join(scriptDir, 'import-equals-cron.ts'),
+      [
+        "import cp = require('node:child_process');",
+        "const installer = cp.spawn('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'commented-import-cron.mjs'),
+      [
+        "import * as cp from 'node:child_process'; // helpers",
+        "const installer = cp.spawn('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'combined-namespace-cron.mjs'),
+      [
+        "import childProcess, * as cp from 'node:child_process';",
+        "const installer = cp.spawn('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'split-direct-require-cron.cjs'),
+      [
+        "const installer = require('node:child_process')",
+        "  .spawn('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
 
     const result = runScanner(root);
 
@@ -1524,6 +1564,10 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('scripts/combined-default-cron.mjs:4');
     expect(result.stderr).toContain('scripts/named-default-cron.mjs:4');
     expect(result.stderr).toContain('scripts/direct-require-cron.cjs:3');
+    expect(result.stderr).toContain('scripts/import-equals-cron.ts:4');
+    expect(result.stderr).toContain('scripts/commented-import-cron.mjs:4');
+    expect(result.stderr).toContain('scripts/combined-namespace-cron.mjs:4');
+    expect(result.stderr).toContain('scripts/split-direct-require-cron.cjs:4');
   });
 
   it('rejects Codex round 28 cron scanner bypasses', () => {
