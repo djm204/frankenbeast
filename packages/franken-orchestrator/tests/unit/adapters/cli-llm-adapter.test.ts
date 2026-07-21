@@ -1118,6 +1118,30 @@ describe('CliLlmAdapter', () => {
         expect(response.providerContext).toEqual({ provider: 'claude' });
         expect(response.providerContext?.switchedFrom).toBeUndefined();
       });
+
+      it('prefers the CLI-reported model over the configured one in providerContext', async () => {
+        const streamJson = '{"type":"assistant","message":{"model":"claude-sonnet-5","content":[]}}';
+        const { spawnFn } = createQueuedSpawn([{ stdout: streamJson, exitCode: 0 }]);
+        const adapter = new CliLlmAdapter(
+          claudeProvider,
+          { ...baseOpts, model: 'claude-opus-4-8' },
+          spawnFn,
+        );
+
+        const request = adapter.transformRequest({
+          id: 'req-model-override',
+          provider: 'adapter',
+          model: 'adapter',
+          messages: [{ role: 'user', content: 'hello' }],
+        });
+
+        const raw = await adapter.execute(request);
+        const response = adapter.transformResponse(raw, 'req-model-override');
+
+        // Configured model was 'claude-opus-4-8', but the CLI actually
+        // reported 'claude-sonnet-5' for this turn — the real one wins.
+        expect(response.providerContext?.model).toBe('claude-sonnet-5');
+      });
     });
   });
 

@@ -40,7 +40,14 @@ export interface ProviderCacheCapabilities {
 export interface ICliProvider {
   readonly name: string;
   readonly command: string;
-  /** Cheap model for conversational/chat use. Each provider defines its own. */
+  /**
+   * Default chat model for conversational/chat use when neither
+   * `config.chat.model` nor a per-provider override is set. Should be the
+   * provider's current flagship/most-capable model, not a cheaper tier —
+   * left unset entirely when the CLI's own default already tracks its
+   * vendor's latest release better than any string this codebase could
+   * hardcode (see CodexProvider).
+   */
   readonly chatModel?: string;
   buildArgs(opts: ProviderOpts): string[];
   normalizeOutput(raw: string): string;
@@ -60,6 +67,15 @@ export interface ICliProvider {
    * silently mislabeled as real.
    */
   extractUsage?(raw: string): TokenUsage | undefined;
+  /**
+   * Real resolved model name parsed from the CLI's own NDJSON output, when
+   * the CLI reports it (e.g. Claude Code CLI echoes it on every message
+   * event). Takes precedence over the statically configured model, since it
+   * reflects what actually executed — including any account-level routing
+   * this codebase has no other visibility into. Optional: not every CLI
+   * exposes this (Codex's `--json` output never reports a model field).
+   */
+  extractModel?(raw: string): string | undefined;
 }
 
 export function resolveProviderCacheCapabilities(provider: ICliProvider): ProviderCacheCapabilities {

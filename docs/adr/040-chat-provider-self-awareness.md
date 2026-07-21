@@ -79,6 +79,66 @@ status line from contradicting the model's own truthful answer.
   and the state only goes stale across a full server restart, an accepted,
   pre-existing risk shared with every other session field.
 
+## Update: closing the "unknown model" gap and defaulting to the flagship tier
+
+Live re-testing (`--provider codex`, no fallback this time) found a second
+gap: the model correctly said *"I'm running via the Codex CLI provider"*
+(the note reached it) but then added *"based on GPT-5"* — pure
+confabulation, since `providerContext.model` was genuinely `undefined` and
+the note's silence about it read as an invitation to guess rather than a
+fact to withhold on. `formatProviderTransparencyNote()` now explicitly says
+the model/version is "not exposed to this session — do not name one" and
+repeats the instruction not to state one from training data, instead of
+just omitting the parenthetical.
+
+Root cause for *why* it was undefined, and the follow-up ask ("the default
+should be the flagship/latest"), led to empirically probing the actual
+`claude`/`codex`/`gemini` CLI binaries installed in this environment
+(not guessed):
+
+- **Codex**: `chatModel` was removed entirely by an earlier commit (#3424,
+  same author) after a stale hardcoded `'codex-mini'` had broken chat
+  startup once already (#3412). Verified live: with no `--model` override,
+  `codex exec` resolves to whatever OpenAI's account-level default currently
+  is (observed newer than any string this codebase could hardcode), and
+  explicitly probing a plausible flagship string (`gpt-5-codex`) was
+  **rejected outright** as unsupported for this account type — confirming
+  that guessing here risks literally breaking chat, not just mislabeling
+  it. Also confirmed `codex exec --json` never reports a resolved model in
+  any event type, so there's no way to recover it after the fact either.
+  **Decision: leave `chatModel` unset for Codex, and let the transparency
+  note's "unknown, don't guess" wording carry the entire burden.** This is
+  the *correct*, not merely acceptable, way to satisfy "default to
+  flagship/latest" for a provider whose own default already outpaces
+  anything hardcoded here.
+- **Claude**: verified live that `claude -p --output-format stream-json`
+  reports the resolved model directly (`message.model` on every assistant
+  event, and as the key of the terminal `result` event's `modelUsage`) —
+  the same way it already reports `usage`. `ICliProvider.extractModel?()`
+  (mirroring `extractUsage?()`) parses this, and `CliLlmAdapter
+  .transformResponse()` prefers the **live-extracted** model over the
+  statically configured one when both are available, since the extracted
+  value reflects what actually executed (account-level routing this
+  codebase has no other visibility into). `ClaudeProvider.chatModel` is
+  bumped from the stale `'claude-sonnet-4-6'` to `'claude-opus-4-8'`
+  (verified: `--model opus` resolves to exactly this string) as the
+  fallback default when nothing else is known yet (e.g. before the first
+  turn completes).
+- **Gemini**: bumped from `'gemini-2.0-flash'` (the cheap/fast tier, not a
+  stale flagship — the tier itself was wrong) to `'gemini-2.5-pro'`. Not
+  empirically verified against a live `gemini` CLI in this environment (no
+  authenticated session available) — based on current public model
+  naming, flagged as the one value in this change without direct proof.
+  `extractModel` was not implemented for Gemini for the same reason: no
+  verified evidence of its stream-json shape.
+
+This generalizes the lesson from Codex's `#3412`/`#3424` history: a
+hardcoded model-version string is a **liability that goes stale or breaks
+outright**, not a convenience. Prefer extracting the CLI's own live report
+of what it actually ran; fall back to a static default only where no such
+signal exists, and only after confirming empirically that setting one
+doesn't foreclose something better the CLI would have chosen itself.
+
 ## Consequences
 
 **Easier:**

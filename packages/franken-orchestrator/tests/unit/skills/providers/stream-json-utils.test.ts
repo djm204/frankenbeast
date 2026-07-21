@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tryExtractTextFromNode, stripHookJson, cleanLlmJson, BASE_RATE_LIMIT_PATTERNS, extractNdjsonTokenUsage } from '../../../../src/skills/providers/stream-json-utils.js';
+import { tryExtractTextFromNode, stripHookJson, cleanLlmJson, BASE_RATE_LIMIT_PATTERNS, extractNdjsonTokenUsage, extractNdjsonModel } from '../../../../src/skills/providers/stream-json-utils.js';
 
 describe('tryExtractTextFromNode', () => {
   it('extracts direct string values', () => {
@@ -268,5 +268,49 @@ describe('extractNdjsonTokenUsage', () => {
   it('treats a partial reading (only one of input/output) as zero for the missing side', () => {
     const raw = '{"type":"usage","usage":{"output_tokens":9}}';
     expect(extractNdjsonTokenUsage(raw)).toEqual({ inputTokens: 0, outputTokens: 9, totalTokens: 9 });
+  });
+});
+
+describe('extractNdjsonModel', () => {
+  it('returns undefined when no line reports a model', () => {
+    const raw = [
+      '{"type":"turn.started"}',
+      '{"type":"turn.completed","usage":{"input_tokens":5,"output_tokens":1}}',
+    ].join('\n');
+    expect(extractNdjsonModel(raw)).toBeUndefined();
+  });
+
+  it('extracts the model from an assistant message event', () => {
+    const raw = '{"type":"assistant","message":{"model":"claude-sonnet-5","content":[]}}';
+    expect(extractNdjsonModel(raw)).toBe('claude-sonnet-5');
+  });
+
+  it('falls back to the modelUsage key on the terminal result event', () => {
+    const raw = '{"type":"result","subtype":"success","modelUsage":{"claude-opus-4-8":{"inputTokens":1,"outputTokens":1}}}';
+    expect(extractNdjsonModel(raw)).toBe('claude-opus-4-8');
+  });
+
+  it('prefers the assistant message model over a later modelUsage key mismatch', () => {
+    const raw = [
+      '{"type":"assistant","message":{"model":"claude-sonnet-5","content":[]}}',
+      '{"type":"result","modelUsage":{"claude-opus-4-8":{}}}',
+    ].join('\n');
+    // Last-seen-wins, matching extractNdjsonTokenUsage's semantics — the
+    // terminal result event is genuinely the most recent line.
+    expect(extractNdjsonModel(raw)).toBe('claude-opus-4-8');
+  });
+
+  it('ignores non-JSON and malformed lines without throwing', () => {
+    const raw = [
+      'plain text line',
+      '{not valid json',
+      '{"type":"assistant","message":{"model":"claude-sonnet-5"}}',
+    ].join('\n');
+    expect(extractNdjsonModel(raw)).toBe('claude-sonnet-5');
+  });
+
+  it('ignores a non-string model field', () => {
+    const raw = '{"type":"assistant","message":{"model":123}}';
+    expect(extractNdjsonModel(raw)).toBeUndefined();
   });
 });

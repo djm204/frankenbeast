@@ -72,6 +72,50 @@ export function extractNdjsonTokenUsage(raw: string): TokenUsage | undefined {
 }
 
 /**
+ * Extracts the real resolved model name from a CLI provider's NDJSON stdout,
+ * when the CLI reports one. Claude Code CLI echoes `message.model` on every
+ * `assistant` event and keys its terminal `result` event's `modelUsage` by
+ * model name — either is authoritative, since it reflects what actually
+ * executed (which can differ from what was requested, e.g. account-level
+ * routing this codebase has no other visibility into). Not every CLI
+ * reports this at all (Codex's `--json` output never includes a model
+ * field); returns `undefined` rather than guessing.
+ */
+export function extractNdjsonModel(raw: string): string | undefined {
+  let model: string | undefined;
+
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    if (typeof parsed !== 'object' || parsed === null) continue;
+    const obj = parsed as Record<string, unknown>;
+
+    const message = obj['message'] as Record<string, unknown> | undefined;
+    if (typeof message?.['model'] === 'string' && message['model'].length > 0) {
+      model = message['model'];
+      continue;
+    }
+
+    const modelUsage = obj['modelUsage'];
+    if (typeof modelUsage === 'object' && modelUsage !== null) {
+      const [firstKey] = Object.keys(modelUsage);
+      if (firstKey) {
+        model = firstKey;
+      }
+    }
+  }
+
+  return model;
+}
+
+/**
  * Return whether the quote at `index` is escaped by an odd backslash run.
  */
 function isEscapedQuote(text: string, index: number): boolean {

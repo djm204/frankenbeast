@@ -29,7 +29,11 @@ function parseBoundedRetryAfterMs(secondsText: string): number {
 export class GeminiProvider implements ICliProvider {
   readonly name = 'gemini';
   readonly command = 'gemini';
-  readonly chatModel = 'gemini-2.0-flash';
+  // Flagship (Pro) tier, not the cheaper/faster Flash line — see the
+  // ICliProvider.chatModel doc. Not empirically verified against a live
+  // `gemini` CLI in this environment (no authenticated session available);
+  // based on the current public Gemini model line.
+  readonly chatModel = 'gemini-2.5-pro';
 
   buildArgs(opts: ProviderOpts): string[] {
     const args: string[] = ['-p', '', '--yolo', '--output-format', 'stream-json'];

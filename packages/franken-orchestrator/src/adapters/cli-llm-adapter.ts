@@ -432,11 +432,18 @@ export class CliLlmAdapter implements IAdapter {
     const raw = providerResponse as string;
     const providerName = this.responseProviders.get(_requestId) ?? this.provider.name;
     this.responseProviders.delete(_requestId);
-    const providerContext = this.responseProviderContext.get(_requestId);
+    const storedContext = this.responseProviderContext.get(_requestId);
     this.responseProviderContext.delete(_requestId);
     const resolved = this.resolveProvider(providerName);
     const normalized = resolved.normalizeOutput(raw ?? '');
     const usage = resolved.extractUsage?.(raw ?? '');
+    // The CLI's own reported model (when it exposes one) reflects what
+    // actually executed and wins over the statically configured value —
+    // e.g. account-level routing this codebase has no other visibility into.
+    const extractedModel = resolved.extractModel?.(raw ?? '');
+    const providerContext = storedContext
+      ? { ...storedContext, ...(extractedModel ? { model: extractedModel } : {}) }
+      : undefined;
     return { content: normalized, ...(usage ? { usage } : {}), ...(providerContext ? { providerContext } : {}) };
   }
 
