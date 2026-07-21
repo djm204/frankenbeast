@@ -12,6 +12,7 @@ import { CritiquePortAdapter } from '../../../src/adapters/critique-adapter.js';
 import { GovernorPortAdapter } from '../../../src/adapters/governor-adapter.js';
 import type { ProjectPaths } from '../../../src/cli/project-root.js';
 import type { RunConfig } from '../../../src/cli/run-config-loader.js';
+import { isPlainOutput, setPlainOutput } from '../../../src/logging/beast-logger.js';
 
 function createTempPaths(): ProjectPaths {
   const root = join(tmpdir(), `dep-factory-wiring-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -63,10 +64,30 @@ describe('dep-factory wiring integration', () => {
   const cleanups: string[] = [];
 
   afterEach(() => {
+    setPlainOutput(false);
     for (const dir of cleanups) {
       try { rmSync(dir, { recursive: true, force: true }); } catch {}
     }
     cleanups.length = 0;
+  });
+
+  it('applies explicit plain mode to the process-wide dependency graph', async () => {
+    const paths = createTempPaths();
+    cleanups.push(paths.root);
+
+    const { finalize } = await createCliDeps({
+      paths,
+      baseBranch: 'main',
+      budget: 1.0,
+      provider: 'claude',
+      noPr: true,
+      verbose: false,
+      plain: true,
+      reset: false,
+    });
+
+    expect(isPlainOutput()).toBe(true);
+    await finalize();
   });
 
   it('creates real SqliteBrainMemoryAdapter when modules are enabled', async () => {

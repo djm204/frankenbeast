@@ -46,6 +46,7 @@ export const chatServerService: NetworkServiceDefinition = {
       inheritedEnvKeys: inheritedNetworkServiceEnvKeys('chat-server', config),
       env: {
         FRANKENBEAST_NETWORK_MANAGED: '1',
+        ...(context.plain ? { NO_COLOR: '1', FORCE_COLOR: '0' } : {}),
         FRANKENBEAST_BEAST_DAEMON_URL: localPlaintextOrSecureEndpoint(
           config.beastsDaemon.host,
           config.beastsDaemon.port,

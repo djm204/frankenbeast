@@ -28,6 +28,7 @@ const {
   mockCreateBeastServices,
   mockFinalize,
   mockParseArgs,
+  mockSetPlainOutput,
   mockSessionStart,
   mockStartChatServer,
   mockStartBeastDaemon,
@@ -39,6 +40,7 @@ const {
 } = vi.hoisted(() => {
   const mockAdapterComplete = vi.fn(async () => 'mock-complete');
   const mockFinalize = vi.fn(async () => undefined);
+  const mockSetPlainOutput = vi.fn();
   const mockCreateCliDeps = vi.fn(async () => ({
     deps: {},
     cliLlmAdapter: { name: 'chat-adapter' },
@@ -78,6 +80,7 @@ const {
     allowOrigin: undefined,
     noPr: false,
     verbose: false,
+    plain: false,
     reset: false,
     resume: false,
     cleanup: false,
@@ -116,6 +119,7 @@ const {
     mockCreateBeastServices,
     mockFinalize,
     mockParseArgs,
+    mockSetPlainOutput,
     mockSessionStart,
     mockStartChatServer,
     mockStartBeastDaemon,
@@ -212,6 +216,8 @@ vi.mock('../../../src/logging/beast-logger.js', () => ({
   ANSI: { cyan: '', reset: '', bold: '', dim: '', green: '', yellow: '', blue: '', red: '' },
   BANNER: '[BANNER]',
   renderBanner: vi.fn(async () => '[BANNER]'),
+  setPlainOutput: mockSetPlainOutput,
+  isPlainOutput: vi.fn(() => false),
   BeastLogger: vi.fn(function (this: Record<string, unknown>) {
     this.info = vi.fn();
     this.warn = vi.fn();
@@ -383,12 +389,14 @@ describe('chat terminal ownership', () => {
       providers: [],
       trustProviderCommandOverrides: false,
       verbose: false,
+      plain: true,
     } as any, defaultConfig(), paths, governorQuestion, governorCancel);
 
     expect(mockCreateCliDeps).toHaveBeenCalledWith(expect.objectContaining({
       governorQuestion,
       governorCancel,
       chatMode: true,
+      plain: true,
     }));
   });
 });
@@ -1338,6 +1346,17 @@ describe('main() execution', () => {
     await main();
     expect(scaffoldFrankenbeast).toHaveBeenCalled();
     expect(resolveBaseBranch).toHaveBeenCalled();
+  });
+
+  it('enables plain output from the parsed CLI flag before startup', async () => {
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as ReturnType<typeof mockParseArgs>),
+      plain: true,
+    });
+
+    await main();
+
+    expect(mockSetPlainOutput).toHaveBeenCalledWith(true);
   });
 
   it('creates a Session and calls start()', async () => {

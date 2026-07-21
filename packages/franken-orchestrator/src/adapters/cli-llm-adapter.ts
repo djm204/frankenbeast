@@ -12,6 +12,7 @@ import {
   parseResetTimeText,
   type CommandFailure,
 } from '../errors/command-failure.js';
+import { isPlainOutput, stripAnsi } from '../logging/beast-logger.js';
 
 type CliCacheSessionHint = {
   key: string;
@@ -358,14 +359,17 @@ export class CliLlmAdapter implements IAdapter {
         this.responseSessions.delete(requestId);
       }
 
+      const failureStdout = isPlainOutput() ? stripAnsi(result.stdout) : result.stdout;
+      const failureStderr = isPlainOutput() ? stripAnsi(result.stderr) : result.stderr;
+      const normalizedFailureOutput = provider.normalizeOutput(failureStdout);
       const failure = classifyCommandFailure({
         tool: 'llm',
         provider: activeProvider,
         command: activeCommand,
         exitCode: result.exitCode,
-        stdout: result.stdout,
-        stderr: result.stderr,
-        normalizedOutput: provider.normalizeOutput(result.stdout),
+        stdout: failureStdout,
+        stderr: failureStderr,
+        normalizedOutput: isPlainOutput() ? stripAnsi(normalizedFailureOutput) : normalizedFailureOutput,
         detectRateLimit: (text) => provider.isRateLimited(text),
         parseRetryAfterMs: (text) => {
           const providerMs = provider.parseRetryAfter(text);
@@ -415,7 +419,7 @@ export class CliLlmAdapter implements IAdapter {
     const providerName = this.responseProviders.get(_requestId) ?? this.provider.name;
     this.responseProviders.delete(_requestId);
     const normalized = this.resolveProvider(providerName).normalizeOutput(raw ?? '');
-    return { content: normalized };
+    return { content: isPlainOutput() ? stripAnsi(normalized) : normalized };
   }
 
   validateCapabilities(feature: string): boolean {
@@ -508,6 +512,10 @@ export class CliLlmAdapter implements IAdapter {
     const rawEnv: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) {
       if (value !== undefined) rawEnv[key] = value;
+    }
+    if (isPlainOutput()) {
+      rawEnv.NO_COLOR = rawEnv.NO_COLOR ?? '1';
+      rawEnv.FORCE_COLOR = '0';
     }
     return rawEnv;
   }

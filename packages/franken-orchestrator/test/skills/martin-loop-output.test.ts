@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { processStreamLine, StreamLineBuffer } from '../../src/skills/martin-loop.js';
 import { formatIterationProgress, writeProgress } from '../../src/skills/cli-skill-executor.js';
 
@@ -429,6 +429,9 @@ describe('formatIterationProgress', () => {
 // ── writeProgress ──
 
 describe('writeProgress', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
   it('uses carriage return + clear on TTY for non-final lines', () => {
     const chunks: string[] = [];
     const write = (s: string): void => { chunks.push(s); };
@@ -469,5 +472,18 @@ describe('writeProgress', () => {
 
     expect(chunks).toHaveLength(1);
     expect(chunks[0]).toBe('done\n');
+  });
+
+  it('uses escape-free newline output on a TTY in plain mode', () => {
+    vi.stubEnv('NO_COLOR', '1');
+    const chunks: string[] = [];
+
+    writeProgress('\x1b[2mworking\x1b[0m', {
+      final: false,
+      isTTY: true,
+      write: (text) => chunks.push(text),
+    });
+
+    expect(chunks).toEqual(['working\n']);
   });
 });
