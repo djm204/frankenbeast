@@ -15,7 +15,63 @@ This guide starts the Frankenbeast dashboard chat with the real CLI-chat-compati
 - `npm install` has already been run at the repo root
 - at least one supported CLI chat provider is configured locally
 
-If you normally run `frankenbeast chat`, use the same provider setup here. By default the server uses `claude`. You can override that with `--provider <name>` or `--config <path>`.
+If you normally run `frankenbeast chat`, use the same provider setup here. The server reads `.fbeast/config.json` by default. An explicit `--provider <name>` wins over `providers.default`; an explicit `--providers <comma-separated-list>` wins over `providers.fallbackChain`. Use `--config <path>` to load a different JSON config.
+
+### Provider and model overrides
+
+For a one-off provider switch, pass a registered CLI provider name (`claude`, `codex`, `gemini`, or `aider`):
+
+```bash
+npm --workspace @franken/orchestrator run chat-server -- --provider codex
+npm --workspace @franken/orchestrator run chat-server -- --provider claude --providers codex,gemini
+```
+
+For a persistent selection, update the config used by the server:
+
+```json
+{
+  "providers": {
+    "default": "claude",
+    "fallbackChain": ["claude", "codex"],
+    "overrides": {
+      "claude": {
+        "extraArgs": ["--verbose"]
+      }
+    }
+  },
+  "chat": {
+    "model": "claude-sonnet-4-6"
+  }
+}
+```
+
+`providers.overrides.<provider>.extraArgs` changes that provider's CLI arguments. For dashboard chat, set `chat.model` to override the conversational model; it takes precedence over a model in the selected provider override. Keep provider credentials in the provider's normal environment or credential store, not in this JSON file.
+
+Command overrides are intentionally fail-closed. Do not add `command` when the provider's normal binary is sufficient. To use a wrapper or nonstandard binary, put the override in an explicit operator-owned config outside the repository, set `trustCommandOverride: true`, restrict an absolute wrapper path with `trustedCommandPaths`, and start the server with both `--config <operator-config.json>` and `--trust-provider-command-overrides`:
+
+```json
+{
+  "providers": {
+    "default": "codex",
+    "fallbackChain": [],
+    "overrides": {
+      "codex": {
+        "command": "/opt/frankenbeast/bin/codex-wrapper",
+        "trustCommandOverride": true,
+        "trustedCommandPaths": ["/opt/frankenbeast/bin"]
+      }
+    }
+  }
+}
+```
+
+```bash
+npm --workspace @franken/orchestrator run chat-server -- \
+  --config "$HOME/.config/frankenbeast/dashboard-chat.json" \
+  --trust-provider-command-overrides
+```
+
+Repository-local config cannot approve its own command override: trust fields in `.fbeast/config.json` are stripped, and combining repo-local trust fields with the CLI approval flag is rejected. This prevents a checked-out project from selecting an executable merely because the server was started inside that project.
 
 ## 1. Start the chat server
 
@@ -151,9 +207,11 @@ and marker-looking text nested there must not be treated as a real prompt bounda
 
 `The server starts but chat replies fail`
 
-- verify your configured CLI provider works with `frankenbeast chat`
-- try passing `--provider <name>` explicitly
-- if you use a config file, pass `--config <path>`
+- verify the selected CLI provider works directly and is authenticated, then verify it with `frankenbeast chat`
+- pass `--provider <name>` explicitly to distinguish a bad `providers.default` from a provider runtime failure
+- if fallback selection is unexpected, pass `--providers <comma-separated-list>` explicitly and check `providers.fallbackChain`
+- if you use a config file, pass `--config <path>` and confirm that file contains `providers` and `chat.model` at the top level
+- if a command override is refused, do not weaken repository config; use the operator-owned config and explicit trust flow above
 
 `The UI loads but does not connect`
 
