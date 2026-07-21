@@ -21,8 +21,8 @@
 - [x] Add a regression proving malformed audit details are scanned before the quarantine-audit exemption.
 - [x] Add a regression proving bounded frontload backfills in batches instead of reading the whole episodic table.
 - [x] Implement the minimal fixes and run affected package checks.
-- [ ] Publish with lease safety, reply to and resolve threads 3626006123, 3626006126, 3626006130, and 3626006134.
-- [ ] Record exact-head CI/Codex evidence and finish the Kanban handoff.
+- [x] Publish with lease safety, reply to and resolve threads 3626006123, 3626006126, 3626006130, and 3626006134.
+- [x] Record implementation-head CI/Codex evidence and finish the Kanban handoff.
 
 Verification for this round:
 
@@ -30,6 +30,9 @@ Verification for this round:
 - `@franken/mcp-suite`: 605/605 tests passed; lint and typecheck passed (pre-existing warnings only).
 - Repository typecheck, build, and lint passed.
 - Repository test sweep reached 7/10 successful package tasks; three unrelated orchestrator timing failures all passed together in isolation (122/122).
+- Implementation commit `ce78ca08288d48e34b62ecf2c4999a542b99d0cf` passed all four CI checks, including `build-test-lint (1337)`.
+- All four target threads were answered and resolved; zero Codex-authored review threads remain unresolved.
+- A fresh Codex trigger was not sent because the PR already has 13 `@codex review` invocations, above the five-invocation safety cap.
 
 ## Review handoff notes
 
