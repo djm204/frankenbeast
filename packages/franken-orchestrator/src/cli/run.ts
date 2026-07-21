@@ -1205,7 +1205,7 @@ export async function createChatSurfaceDeps(
     ...(skillManager ? { skillManager } : {}),
     ...(providerRegistry ? { providerRegistry } : {}),
     contextMaxTokens: resolvedProvider.defaultContextWindowTokens(),
-    modelLabel: chatDepOpts.adapterModel,
+    modelLabel: chatDepOpts.adapterModel ?? provider,
   };
 }
 
