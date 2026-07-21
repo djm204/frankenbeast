@@ -15,6 +15,13 @@
 - [ ] Reply to and resolve the original PR #3182 post-merge finding.
 - [ ] Record final evidence in the Kanban handoff.
 
+## Review-loop status
+
+- CI passed on `a6ee9a12b` after rerunning an unrelated coverage-artifact upload failure; all four required jobs were green.
+- Five permitted GitHub Codex review invocations were used. Findings from rounds 1-4 were fixed, replied to, and resolved before each retrigger.
+- The fifth/final invocation reported three additional P2 variants: wrapped namespace imports, namespace spawn-method aliases, and parenthesized typed `require` spawn calls. Focused regressions and scanner support for all three were added and pass locally.
+- The invocation cap now prevents obtaining a fresh current-head Codex clean signal without explicit human approval. The PR must not merge until that review gate is approved/re-run and clean.
+
 ## Verification notes
 
 - Focused RED: the scanner returned success for the CommonJS object-qualified bypass before the implementation change.

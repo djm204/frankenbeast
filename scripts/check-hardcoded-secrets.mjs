@@ -1008,11 +1008,19 @@ function cronStagingStartLines(lines, commandNames = new Set()) {
 
 function collectProgrammaticCrontabAliases(lines) {
   const callNames = new Set(['execFileSync', 'execFile', 'spawnSync', 'spawn', 'execSync', 'exec', 'check_output', 'check_call', 'Popen', 'run', 'call']);
+  const spawnCallNames = new Set(['spawn', 'Popen']);
   const commandNames = new Set();
   const processNames = new Set();
   const childProcessModuleAliases = new Set();
-  for (const line of lines) {
-    const esmImport = line.match(/^\s*import\s+(.+?)\s+from\s*['"](?:node:)?child_process['"]\s*;?\s*(?:(?:\/\/|\/\*).*?)?$/);
+  for (const [index, line] of lines.entries()) {
+    let aliasDeclaration = line;
+    if (/^\s*import\b/.test(line) && !/\bfrom\s*['"]/.test(line)) {
+      for (let cursor = index + 1; cursor < Math.min(lines.length, index + 10); cursor += 1) {
+        aliasDeclaration += ` ${lines[cursor].trim()}`;
+        if (/\bfrom\s*['"]/.test(lines[cursor])) break;
+      }
+    }
+    const esmImport = aliasDeclaration.match(/^\s*import\s+(.+?)\s+from\s*['"](?:node:)?child_process['"]\s*;?\s*(?:(?:\/\/|\/\*).*?)?$/);
     if (esmImport) {
       const namespaceAlias = esmImport[1].match(/(?:^|,\s*)\*\s+as\s+([A-Za-z_$][\w$]*)$/);
       const defaultAlias = esmImport[1].match(/^([A-Za-z_$][\w$]*)(?:\s*,|$)/);
@@ -1040,7 +1048,11 @@ function collectProgrammaticCrontabAliases(lines) {
     if (childProcessAliases) {
       for (const part of childProcessAliases[1].split(',')) {
         const imported = part.trim().match(/^(?:execFileSync|execFile|spawnSync|spawn|execSync|exec)(?:\s*(?:as|:)\s*([A-Za-z_$][\w$]*))?$/);
-        if (imported) callNames.add(imported[1] ?? part.trim());
+        if (imported) {
+          const alias = imported[1] ?? part.trim();
+          callNames.add(alias);
+          if (/^spawn(?:\s|$)/.test(part.trim())) spawnCallNames.add(alias);
+        }
       }
     }
     const promisifiedCall = line.match(/^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:util\.)?promisify\s*\(\s*([A-Za-z_$][\w$]*)\s*\)\s*;?$/);
@@ -1061,9 +1073,18 @@ function collectProgrammaticCrontabAliases(lines) {
     let spawnStartIndex = index;
     let spawnStartLine = line;
     const childProcessMethodPattern = String.raw`(?:\.\s*(?:spawn|Popen)|\[\s*['"]spawn['"]\s*\])`;
-    const qualifiedChildProcessCallPattern = String.raw`(?:(?:${childProcessQualifierPattern})\s*${childProcessMethodPattern}|require\s*\(\s*['"](?:node:)?child_process['"]\s*\)\s*${childProcessMethodPattern})`;
-    let spawnedProcess = line.match(new RegExp(`^\\s*(?:(?:const|let|var)\\s+)?([A-Za-z_$][\\w$]*)(?:\\s*:\\s*[^=]+)?\\s*=\\s*(?:${qualifiedChildProcessCallPattern}|spawn|Popen)\\s*\\((.*)$`, 'u'));
-    const splitQualifier = line.match(new RegExp(`^\\s*(?:(?:const|let|var)\\s+)?([A-Za-z_$][\\w$]*)(?:\\s*:\\s*[^=]+)?\\s*=\\s*(?:(?:${childProcessQualifierPattern})|require\\s*\\(\\s*['"](?:node:)?child_process['"]\\s*\\))\\s*$`, 'u'));
+    const directRequireExpressionPattern = String.raw`(?:require\s*\(\s*['"](?:node:)?child_process['"]\s*\)|\(\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)(?:\s+as\s+typeof\s+import\s*\(\s*['"](?:node:)?child_process['"]\s*\))?\s*\))`;
+    const qualifiedChildProcessCallPattern = String.raw`(?:(?:${childProcessQualifierPattern})\s*${childProcessMethodPattern}|${directRequireExpressionPattern}\s*${childProcessMethodPattern})`;
+    const namespaceMethodAlias = line.match(new RegExp(`^\\s*(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*(?:${childProcessQualifierPattern})\\s*${childProcessMethodPattern}\\s*;?\\s*$`, 'u'));
+    if (namespaceMethodAlias) {
+      spawnCallNames.add(namespaceMethodAlias[1]);
+      callNames.add(namespaceMethodAlias[1]);
+    }
+    const spawnCallPattern = [...spawnCallNames]
+      .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('|');
+    let spawnedProcess = line.match(new RegExp(`^\\s*(?:(?:const|let|var)\\s+)?([A-Za-z_$][\\w$]*)(?:\\s*:\\s*[^=]+)?\\s*=\\s*(?:${qualifiedChildProcessCallPattern}|${spawnCallPattern})\\s*\\((.*)$`, 'u'));
+    const splitQualifier = line.match(new RegExp(`^\\s*(?:(?:const|let|var)\\s+)?([A-Za-z_$][\\w$]*)(?:\\s*:\\s*[^=]+)?\\s*=\\s*(?:(?:${childProcessQualifierPattern})|${directRequireExpressionPattern})\\s*$`, 'u'));
     const splitSpawn = splitQualifier ? lines[index + 1]?.match(new RegExp(`^\\s*${childProcessMethodPattern}\\s*\\((.*)$`, 'u')) : null;
     if (!spawnedProcess && splitQualifier && splitSpawn) {
       spawnedProcess = ['', splitQualifier[1], splitSpawn[1]];
