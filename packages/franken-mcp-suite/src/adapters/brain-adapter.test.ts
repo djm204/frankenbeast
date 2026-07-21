@@ -954,7 +954,7 @@ describe("createBrainAdapter", () => {
     const brain = createBrainAdapter("/tmp/quarantined-scope.db");
     const mockBrain = brainInstances[0]!;
     const quarantinedEvent = {
-      id: "evt-quarantined",
+      id: 17,
       type: "success",
       summary: "private quarantined episode",
       details: {
@@ -987,6 +987,74 @@ describe("createBrainAdapter", () => {
       limit: 10,
     });
     expect(exported.episodic).toEqual([]);
+  });
+
+  it("backfills all-scope episodic reads after quarantined events are hidden", async () => {
+    const brain = createBrainAdapter("/tmp/quarantined-backfill.db");
+    const mockBrain = brainInstances[0]!;
+    const quarantinedEvents = Array.from({ length: 100 }, (_, index) => ({
+      id: index + 1,
+      type: "success",
+      summary: `quarantined event ${index + 1}`,
+      details: {
+        quarantine: {
+          field: "details",
+          eventId: index + 1,
+          reason: "invalid JSON",
+        },
+      },
+      createdAt: `2026-07-20T00:${String(index % 60).padStart(2, "0")}:00.000Z`,
+    }));
+    const readableEvent = {
+      id: 101,
+      type: "success",
+      summary: "readable backfill event",
+      createdAt: "2026-07-19T00:00:00.000Z",
+    };
+    const events = [...quarantinedEvents, readableEvent];
+    const bounded = (limit: number) => limit < 0 ? events : events.slice(0, limit);
+    mockBrain.episodic.recall.mockImplementation((_query: string, limit: number) => bounded(limit));
+    mockBrain.episodic.recent.mockImplementation((limit: number) => bounded(limit));
+
+    await expect(brain.query({
+      query: "event",
+      type: "episodic",
+      readScope: "all",
+      limit: 1,
+    })).resolves.toEqual([
+      expect.objectContaining({ key: "101", value: "readable backfill event" }),
+    ]);
+    const frontload = await brain.frontload({ readScope: "all" });
+    expect(frontload.flatMap((section) => section.entries)).toContain("101: readable backfill event");
+    const exported = await brain.exportProjectMemory({ readScope: "all", limit: 1 });
+    expect(exported.episodic).toEqual([
+      expect.objectContaining({ id: 101, summary: "readable backfill event" }),
+    ]);
+    expect(mockBrain.episodic.recall).toHaveBeenCalledWith("event", -1);
+    expect(mockBrain.episodic.recent).toHaveBeenCalledWith(-1);
+  });
+
+  it("does not hide ordinary episodic metadata with an incomplete quarantine marker", async () => {
+    const brain = createBrainAdapter("/tmp/ordinary-quarantine-metadata.db");
+    const mockBrain = brainInstances[0]!;
+    const event = {
+      id: 42,
+      type: "success",
+      summary: "ordinary domain quarantine metadata",
+      details: { quarantine: { field: "details", reason: "business review", eventId: 42 } },
+      createdAt: "2026-07-20T00:00:00.000Z",
+    };
+    mockBrain.episodic.recall.mockReturnValue([event]);
+    mockBrain.episodic.recent.mockReturnValue([event]);
+
+    await expect(brain.query({
+      query: "ordinary",
+      type: "episodic",
+      readScope: "all",
+      limit: 1,
+    })).resolves.toEqual([
+      expect.objectContaining({ key: "42", value: "ordinary domain quarantine metadata" }),
+    ]);
   });
 
   it("exports scoped project memory with safe redaction by default", async () => {
@@ -1098,6 +1166,31 @@ describe("createBrainAdapter", () => {
       total: 2,
       compactionCandidates: 1,
     });
+  });
+
+  it("hides quarantined episodic rows from scoped retention reports", async () => {
+    const brain = createBrainAdapter("/tmp/quarantined-retention.db");
+    brainInstances[0].memoryRetentionReport.mockReturnValueOnce({
+      generatedAt: "2026-07-21T00:00:00.000Z",
+      policies: [],
+      counts: { total: 1, protected: 0, expired: 0, nearingExpiry: 0, compactionCandidates: 0 },
+      entries: [{
+        store: "episodic",
+        key: "17",
+        agentId: null,
+        class: "transient_observation",
+        action: "retain",
+        policy: { class: "transient_observation", retentionDays: 30, compactPriority: 1, protected: false, description: "test" },
+        protected: false,
+        reason: "test",
+      }],
+      compactionCandidates: [],
+    });
+
+    const report = await brain.memoryRetentionReport({ readScope: "shared" });
+
+    expect(report.entries).toEqual([]);
+    expect(report.counts.total).toBe(0);
   });
 
   it("counts existing scoped compaction candidates before applying retention budgets", async () => {
@@ -1233,7 +1326,7 @@ describe("createBrainAdapter", () => {
     );
   });
 
-  it("keeps all-scope episodic reads bounded while scoped reads can backfill visible rows", async () => {
+  it("backfills visible rows for both all-scope and scoped episodic reads", async () => {
     const brain = createBrainAdapter("/tmp/beast.db");
     const mockBrain = brainInstances[0];
 
@@ -1250,9 +1343,9 @@ describe("createBrainAdapter", () => {
     expect(mockBrain.episodic.recall).toHaveBeenNthCalledWith(
       1,
       "episode",
-      7,
+      -1,
     );
-    expect(mockBrain.episodic.recent).toHaveBeenNthCalledWith(1, 100);
+    expect(mockBrain.episodic.recent).toHaveBeenNthCalledWith(1, -1);
     expect(mockBrain.episodic.recall).toHaveBeenNthCalledWith(
       2,
       "episode",

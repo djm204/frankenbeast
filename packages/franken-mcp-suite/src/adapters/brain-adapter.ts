@@ -391,6 +391,7 @@ function formatWorkingEntryValue(entry: { value: string; expiresAt?: string }): 
 
 function parseAgentFromEpisodicDetails(
   details: Record<string, unknown> | undefined,
+  eventId?: unknown,
 ): string | null | undefined {
   if (!details) return undefined;
   const quarantine = details["quarantine"];
@@ -398,7 +399,9 @@ function parseAgentFromEpisodicDetails(
     quarantine !== null &&
     typeof quarantine === "object" &&
     !Array.isArray(quarantine) &&
-    (quarantine as Record<string, unknown>)["field"] === "details"
+    (quarantine as Record<string, unknown>)["field"] === "details" &&
+    (quarantine as Record<string, unknown>)["reason"] === "invalid JSON" &&
+    (quarantine as Record<string, unknown>)["eventId"] === eventId
   ) {
     return null;
   }
@@ -1175,13 +1178,12 @@ export function createBrainAdapter(
 
       // Search episodic memory
       if (!memoryType || memoryType === "episodic") {
-        const episodicLimit = readScope.readScope === "all" ? limit : -1;
         const events = takeVisibleEntries(
-          brain.episodic.recall(input.query, episodicLimit) as EpisodicEvent[],
+          brain.episodic.recall(input.query, -1) as EpisodicEvent[],
           limit,
           (event) =>
             canReadMemoryEntry(
-              parseAgentFromEpisodicDetails(event.details),
+              parseAgentFromEpisodicDetails(event.details, event.id),
               readScope,
             ),
         );
@@ -1259,13 +1261,12 @@ export function createBrainAdapter(
       }
 
       // Recent episodic events
-      const episodicLimit = readScope.readScope === "all" ? 100 : -1;
       const events = takeVisibleEntries(
-        brain.episodic.recent(episodicLimit) as EpisodicEvent[],
+        brain.episodic.recent(-1) as EpisodicEvent[],
         100,
         (event) =>
           canReadMemoryEntry(
-            parseAgentFromEpisodicDetails(event.details),
+            parseAgentFromEpisodicDetails(event.details, event.id),
             readScope,
           ),
       );
@@ -1307,17 +1308,16 @@ export function createBrainAdapter(
           return exported;
         });
 
-      const episodicLimit = readScope.readScope === "all" ? limit : -1;
       const episodic = takeVisibleEntries(
-        brain.episodic.recent(episodicLimit) as EpisodicEvent[],
+        brain.episodic.recent(-1) as EpisodicEvent[],
         limit,
         (event) =>
           canReadMemoryEntry(
-            parseAgentFromEpisodicDetails(event.details),
+            parseAgentFromEpisodicDetails(event.details, event.id),
             readScope,
           ),
       ).map((event) => {
-        const entryAgentId = parseAgentFromEpisodicDetails(event.details);
+        const entryAgentId = parseAgentFromEpisodicDetails(event.details, event.id);
         const exported: MemoryExportEpisodicEntry = {
           ...(event.id === undefined ? {} : { id: event.id }),
           eventType: event.type,

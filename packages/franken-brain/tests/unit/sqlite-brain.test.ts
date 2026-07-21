@@ -327,6 +327,28 @@ describe('SqliteBrain', () => {
       );
     });
 
+    it('marks quarantined episodic retention rows as unreadable by scoped reports', () => {
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'private scoped retention entry',
+        details: {
+          __fbeastMemoryScope: 'fbeast:agent-memory',
+          agentId: 'private-agent',
+        },
+        createdAt: '2026-07-20T00:00:00.000Z',
+      });
+      const eventId = brain.episodic.recent(1)[0]!.id;
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.prepare(`UPDATE episodic_events SET details = ? WHERE id = ?`).run('{', eventId);
+
+      const report = brain.memoryRetentionReport({ now: '2026-07-21T00:00:00.000Z' });
+
+      expect(report.entries.find((entry) => entry.key === String(eventId))).toMatchObject({
+        store: 'episodic',
+        agentId: null,
+      });
+    });
+
     it('treats explicit audit class aliases as protected audit records', () => {
       brain.episodic.record({
         type: 'observation',
@@ -848,6 +870,19 @@ describe('SqliteBrain', () => {
       expect(brain.episodic.recall('alice@example.test', 5)).toEqual([]);
       expect(brain.episodic.recall('Safe project note', 5)).toHaveLength(1);
       expect(brain.episodic.recent(5).some(event => event.step === 'right-to-forget')).toBe(true);
+    });
+
+    it('preserves quarantined right-to-forget audit envelopes during later forgets', () => {
+      brain.working.set('task', 'delete project note');
+      const first = brain.rightToForget({ query: 'delete project' });
+      const auditEventId = first.auditEventId;
+      expect(auditEventId).toBeDefined();
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.prepare(`UPDATE episodic_events SET details = ? WHERE id = ?`).run('{', auditEventId);
+
+      brain.rightToForget({ query: 'right-to-forget' });
+
+      expect(brain.episodic.recent(-1).map((event) => event.id)).toContain(auditEventId);
     });
 
     it('supports dry-run counts without deleting or auditing', () => {
@@ -6169,6 +6204,32 @@ describe('SqliteBrain', () => {
       expect(brain.episodic.recall('searchable', 0)).toEqual([]);
       expect(brain.episodic.recent(0)).toEqual([]);
       expect(brain.episodic.recentFailures(0)).toEqual([]);
+    });
+
+    it('re-scores quarantined plaintext recall rows from readable fields before limiting', () => {
+      brain.episodic.record(
+        makeEvent({
+          summary: 'alpha quarantined candidate',
+          createdAt: '2026-07-20T00:00:00.000Z',
+          details: { marker: 'beta' },
+        }),
+      );
+      brain.episodic.record(
+        makeEvent({
+          summary: 'alpha healthy candidate',
+          createdAt: '2026-07-21T00:00:00.000Z',
+          details: { marker: 'healthy' },
+        }),
+      );
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.prepare(`UPDATE episodic_events SET details = ? WHERE summary = ?`).run(
+        '{"marker":"beta"',
+        'alpha quarantined candidate',
+      );
+
+      expect(brain.episodic.recall('alpha beta', 1).map((event) => event.summary)).toEqual([
+        'alpha healthy candidate',
+      ]);
     });
 
     it('audits quarantined details rows with their event ids', () => {
