@@ -19,6 +19,7 @@ import { createSecurityRoutes } from './routes/security-routes.js';
 import type { SecurityConfig } from '../middleware/security-profiles.js';
 import {
   DEFAULT_MAX_BODY_SIZE,
+  SECURITY_CONFIG_MAX_BODY_SIZE,
   SKILL_CONTEXT_MAX_BODY_SIZE,
   errorHandler,
   localBrowserControlProtection,
@@ -118,11 +119,14 @@ function isBeastEventStreamPath(pathname: string): boolean {
 }
 
 const skillContextPathPattern = /^\/api\/skills\/[^/]+\/context$/;
+const securityConfigPathPattern = /^\/api\/security(?:\/|$)/;
 
 const controlRequestSizeLimit: MiddlewareHandler = (c, next) => {
   const pathname = new URL(c.req.url).pathname;
   const maxSize = skillContextPathPattern.test(pathname)
     ? SKILL_CONTEXT_MAX_BODY_SIZE
+    : securityConfigPathPattern.test(pathname)
+      ? SECURITY_CONFIG_MAX_BODY_SIZE
     : DEFAULT_MAX_BODY_SIZE;
   return requestSizeLimit(maxSize)(c, next);
 };
