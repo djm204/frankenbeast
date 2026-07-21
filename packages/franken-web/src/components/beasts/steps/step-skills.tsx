@@ -3,11 +3,12 @@ import { useBeastStore } from '../../../stores/beast-store';
 import { useDashboardStore } from '../../../stores/dashboard-store';
 
 export function StepSkills() {
-  const { stepValues, setStepValues } = useBeastStore();
+  const stepValue = useBeastStore((state) => state.stepValues[4]);
+  const setStepValues = useBeastStore((state) => state.setStepValues);
   const skills = useDashboardStore((state) => state.skills);
   const loading = useDashboardStore((state) => state.loading);
   const error = useDashboardStore((state) => state.error);
-  const values = (stepValues[4] ?? {}) as { selectedSkills?: string[] };
+  const values = (stepValue ?? {}) as { selectedSkills?: string[] };
   const selected = values.selectedSkills ?? [];
   const [search, setSearch] = useState('');
 

@@ -20,9 +20,10 @@ interface ModuleStepValues {
 }
 
 export function StepModules() {
-  const { stepValues, setStepValues } = useBeastStore();
+  const stepValue = useBeastStore((state) => state.stepValues[3]);
+  const setStepValues = useBeastStore((state) => state.setStepValues);
   const providers = dashboardProvidersToModelOptions(useDashboardStore((state) => state.providers));
-  const values = (stepValues[3] ?? {}) as ModuleStepValues;
+  const values = (stepValue ?? {}) as ModuleStepValues;
 
   function toggleModule(key: string) {
     setStepValues(3, { ...values, [key]: !values[key] });
