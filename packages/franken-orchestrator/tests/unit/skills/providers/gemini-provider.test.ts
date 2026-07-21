@@ -158,4 +158,13 @@ describe('GeminiProvider', () => {
   it('normalizeOutput passes through plain text', () => {
     expect(provider.normalizeOutput('plain output')).toBe('plain output');
   });
+
+  it('extractUsage reports real token counts from a usage event', () => {
+    const raw = JSON.stringify({ usage: { promptTokenCount: 80, candidatesTokenCount: 20 } });
+    expect(provider.extractUsage?.(raw)).toEqual({ inputTokens: 80, outputTokens: 20, totalTokens: 100 });
+  });
+
+  it('extractUsage returns undefined when the CLI output has no usage', () => {
+    expect(provider.extractUsage?.('plain output')).toBeUndefined();
+  });
 });

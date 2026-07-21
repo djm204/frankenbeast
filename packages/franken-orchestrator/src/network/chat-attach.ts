@@ -4,13 +4,23 @@ import { createInterface, type Interface } from 'node:readline';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import { sanitizeChatOutput } from '../chat/output-sanitizer.js';
 import { ANSI } from '../logging/beast-logger.js';
-import { CHAT_GLYPHS, chatBanner, chatBlock, chatStatusLine } from '../cli/chat-style.js';
+import { CHAT_COLOR, CHAT_GLYPHS, chatBanner, chatBlock, chatStatusLine, statusRule } from '../cli/chat-style.js';
 import {
   CHAT_SOCKET_PROTOCOL,
   CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX,
 } from '../http/ws-chat-server.js';
-import { deterministicUuid } from '@franken/types';
+import { deterministicUuid, type TokenUsage } from '@franken/types';
 import { assertLocalPlaintextOrSecureHttpUrl, localPlaintextOrSecureEndpoint } from './network-url.js';
+
+const ZERO_USAGE: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+
+function addUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
+  return {
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    totalTokens: a.totalTokens + b.totalTokens,
+  };
+}
 
 
 function printLine(...args: unknown[]): void {
@@ -129,7 +139,7 @@ async function createRemoteSession(target: ManagedChatAttachment, projectId: str
   };
 
   const socket = new WebSocket(
-    `${target.wsUrl}?sessionId=${encodeURIComponent(body.data.id)}&features=message-kind`,
+    `${target.wsUrl}?sessionId=${encodeURIComponent(body.data.id)}&features=message-kind,usage-stats`,
     [CHAT_SOCKET_PROTOCOL, `${CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX}${ticketBody.data.ticket}`],
   );
   await new Promise<void>((resolve, reject) => {
@@ -199,7 +209,7 @@ function createIo(): {
 } {
   const rl: Interface = createInterface({ input: process.stdin, output: process.stdout });
   return {
-    prompt: () => new Promise((resolve) => rl.question(`${ANSI.cyan}${CHAT_GLYPHS.user}${ANSI.reset} `, resolve)),
+    prompt: () => new Promise((resolve) => rl.question(`${CHAT_COLOR.user}${CHAT_GLYPHS.user}${ANSI.reset} `, resolve)),
     print: (message: string) => printLine(message),
     close: () => rl.close(),
   };
@@ -225,12 +235,31 @@ function renderCompletion(kind: string, content: string): string {
     case 'status':
       return chatBlock(CHAT_GLYPHS.status, ANSI.dim, content, ANSI.dim);
     default:
-      return chatBlock(CHAT_GLYPHS.beast, ANSI.magenta, content);
+      return chatBlock(CHAT_GLYPHS.beast, CHAT_COLOR.beast, content);
   }
 }
 
-async function awaitRemoteReply(socket: WebSocket, verbose: boolean): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
+export interface RemoteReplyOutcome {
+  /** Real token usage for this turn, present only when the server opted us in and reported it. */
+  usage?: TokenUsage;
+  /** Whether the server truncated history to build this turn's prompt. */
+  truncated?: boolean;
+}
+
+function parseTokenUsage(value: unknown): TokenUsage | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const usage = value as Record<string, unknown>;
+  const inputTokens = usage['inputTokens'];
+  const outputTokens = usage['outputTokens'];
+  const totalTokens = usage['totalTokens'];
+  if (typeof inputTokens === 'number' && typeof outputTokens === 'number' && typeof totalTokens === 'number') {
+    return { inputTokens, outputTokens, totalTokens };
+  }
+  return undefined;
+}
+
+async function awaitRemoteReply(socket: WebSocket, verbose: boolean): Promise<RemoteReplyOutcome> {
+  return new Promise<RemoteReplyOutcome>((resolve, reject) => {
     let streamed = false;
     const timeout = setTimeout(() => {
       cleanup();
@@ -260,13 +289,13 @@ async function awaitRemoteReply(socket: WebSocket, verbose: boolean): Promise<vo
       switch (payload.type) {
         case 'assistant.message.delta':
           if (!streamed) {
-            process.stdout.write(`${ANSI.magenta}${CHAT_GLYPHS.beast}${ANSI.reset} `);
+            process.stdout.write(`${CHAT_COLOR.beast}${CHAT_GLYPHS.beast}${ANSI.reset} `);
           }
           // Continuation lines align under the glyph, matching chatBlock.
           process.stdout.write(String(payload.chunk ?? '').replaceAll('\n', '\n  '));
           streamed = true;
           break;
-        case 'assistant.message.complete':
+        case 'assistant.message.complete': {
           if (streamed) {
             process.stdout.write('\n');
           } else {
@@ -275,18 +304,21 @@ async function awaitRemoteReply(socket: WebSocket, verbose: boolean): Promise<vo
           if (verbose && payload.modelTier) {
             printLine(chatStatusLine(`[${String(payload.modelTier)}]`));
           }
+          const usage = parseTokenUsage(payload.usage);
+          const truncated = typeof payload.truncated === 'boolean' ? payload.truncated : undefined;
           cleanup();
-          resolve();
+          resolve({ ...(usage ? { usage } : {}), ...(truncated !== undefined ? { truncated } : {}) });
           break;
+        }
         case 'turn.approval.requested':
           printLine(chatBlock(CHAT_GLYPHS.approval, ANSI.yellow, String(payload.description ?? 'approval required'), ANSI.yellow));
           cleanup();
-          resolve();
+          resolve({});
           break;
         case 'turn.error':
           printLine(chatBlock(CHAT_GLYPHS.error, ANSI.red, String(payload.message ?? payload.error ?? 'Chat request failed'), ANSI.red));
           cleanup();
-          resolve();
+          resolve({});
           break;
         case 'turn.execution.progress':
           printLine(chatBlock(CHAT_GLYPHS.execution, ANSI.green, String((payload.data as { summary?: string } | undefined)?.summary ?? 'Executing...')));
@@ -329,12 +361,29 @@ export async function runManagedChatRepl(options: {
   const io = createIo();
   const session = await createRemoteSession(options.attachment, options.projectId);
   const verbose = options.verbose ?? false;
+  const sessionStartedAt = Date.now();
+  let cumulativeUsage: TokenUsage = ZERO_USAGE;
+  let compactionCount = 0;
 
   io.print(chatBanner('frankenbeast', '· attached to managed network · /quit to exit'));
 
+  // Managed attach has no direct line to the server's resolved provider, so
+  // there is no known context window here — the status rule falls back to a
+  // bare token count instead of a percentage bar (see statusRule).
+  const printStatusRule = (): void => {
+    io.print(statusRule(process.stdout.columns ?? 80, {
+      usage: cumulativeUsage,
+      compactions: compactionCount,
+      sessionDurationMs: Date.now() - sessionStartedAt,
+      modelLabel: 'frankenbeast',
+    }));
+  };
+
   try {
     for (;;) {
+      printStatusRule();
       const input = (await io.prompt()).trim();
+      printStatusRule();
       if (!input) {
         continue;
       }
@@ -343,7 +392,13 @@ export async function runManagedChatRepl(options: {
       }
 
       sendManagedChatInput(session.socket, input);
-      await awaitRemoteReply(session.socket, verbose);
+      const outcome = await awaitRemoteReply(session.socket, verbose);
+      if (outcome.usage) {
+        cumulativeUsage = addUsage(cumulativeUsage, outcome.usage);
+      }
+      if (outcome.truncated) {
+        compactionCount++;
+      }
     }
   } finally {
     session.socket.close();

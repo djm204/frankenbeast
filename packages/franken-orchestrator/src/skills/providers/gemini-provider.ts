@@ -5,8 +5,9 @@
  * Uses stream-json output format like Claude.
  */
 
+import type { TokenUsage } from '@franken/types';
 import type { ICliProvider, ProviderOpts } from './cli-provider.js';
-import { tryExtractTextFromNode } from './stream-json-utils.js';
+import { tryExtractTextFromNode, extractNdjsonTokenUsage } from './stream-json-utils.js';
 import { sanitizeRunConfigIntegrityEnv } from '../../cli/run-config-integrity.js';
 
 // Gemini adds RESOURCE_EXHAUSTED to the shared base patterns
@@ -66,6 +67,10 @@ export class GeminiProvider implements ICliProvider {
 
   estimateTokens(text: string): number {
     return Math.ceil(text.length / 4);
+  }
+
+  extractUsage(raw: string): TokenUsage | undefined {
+    return extractNdjsonTokenUsage(raw);
   }
 
   isRateLimited(stderr: string): boolean {

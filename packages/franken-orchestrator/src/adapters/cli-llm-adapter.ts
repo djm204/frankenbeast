@@ -1,4 +1,5 @@
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import type { TokenUsage } from '@franken/types';
 import type { IAdapter } from './adapter-llm-client.js';
 import {
   createDefaultRegistry,
@@ -410,12 +411,14 @@ export class CliLlmAdapter implements IAdapter {
     }
   }
 
-  transformResponse(providerResponse: unknown, _requestId: string): { content: string | null } {
+  transformResponse(providerResponse: unknown, _requestId: string): { content: string | null; usage?: TokenUsage } {
     const raw = providerResponse as string;
     const providerName = this.responseProviders.get(_requestId) ?? this.provider.name;
     this.responseProviders.delete(_requestId);
-    const normalized = this.resolveProvider(providerName).normalizeOutput(raw ?? '');
-    return { content: normalized };
+    const resolved = this.resolveProvider(providerName);
+    const normalized = resolved.normalizeOutput(raw ?? '');
+    const usage = resolved.extractUsage?.(raw ?? '');
+    return { content: normalized, ...(usage ? { usage } : {}) };
   }
 
   validateCapabilities(feature: string): boolean {

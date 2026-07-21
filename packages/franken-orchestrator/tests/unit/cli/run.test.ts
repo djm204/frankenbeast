@@ -196,7 +196,11 @@ vi.mock('../../../src/http/beast-daemon-server.js', () => ({
 
 vi.mock('../../../src/skills/providers/cli-provider.js', () => ({
   createDefaultRegistry: vi.fn(() => ({
-    get: vi.fn(() => ({ chatModel: 'chat-model', command: 'claude' })),
+    get: vi.fn(() => ({
+      chatModel: 'chat-model',
+      command: 'claude',
+      defaultContextWindowTokens: () => 200_000,
+    })),
   })),
 }));
 

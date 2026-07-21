@@ -5,9 +5,71 @@
  * and gemini-provider.
  */
 
+import type { TokenUsage } from '@franken/types';
+
 /** Common rate-limit detection patterns shared across providers. */
 export const BASE_RATE_LIMIT_PATTERNS =
   /rate.?limit|429|too many requests|retry.?after|overloaded|capacity|temporarily unavailable|out of extra usage|usage limit|resets?\s+\d|resets?\s+in\s+\d+\s*s/i;
+
+// Alias lists mirror what the streaming provider adapters (providers/*.ts)
+// already accept from Claude Code CLI / Codex CLI / Gemini CLI stream-json
+// output, so a single parser covers all three without per-provider drift.
+const INPUT_TOKEN_KEYS = ['input_tokens', 'inputTokens', 'prompt_tokens', 'promptTokenCount', 'totalInputTokens'];
+const OUTPUT_TOKEN_KEYS = ['output_tokens', 'outputTokens', 'completion_tokens', 'candidatesTokenCount', 'totalOutputTokens'];
+
+function firstNumber(record: Record<string, unknown>, keys: readonly string[]): number | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Extracts real token usage from a CLI provider's NDJSON stdout (Claude Code
+ * CLI / Codex CLI / Gemini CLI `stream-json`/`--json` output). Each line is
+ * parsed independently; a `usage` object may sit at the top level or nested
+ * under `message` (Claude's `message_delta`/`result` events). The CLIs report
+ * running totals as the turn progresses, so the last non-undefined reading
+ * for each field wins. Returns `undefined` (never a zeroed object) when no
+ * line carries usage — "unknown", not "zero".
+ */
+export function extractNdjsonTokenUsage(raw: string): TokenUsage | undefined {
+  let inputTokens: number | undefined;
+  let outputTokens: number | undefined;
+
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    if (typeof parsed !== 'object' || parsed === null) continue;
+    const obj = parsed as Record<string, unknown>;
+
+    const candidates: unknown[] = [obj['usage'], (obj['message'] as Record<string, unknown> | undefined)?.['usage']];
+    for (const candidate of candidates) {
+      if (typeof candidate !== 'object' || candidate === null) continue;
+      const usage = candidate as Record<string, unknown>;
+      inputTokens = firstNumber(usage, INPUT_TOKEN_KEYS) ?? inputTokens;
+      outputTokens = firstNumber(usage, OUTPUT_TOKEN_KEYS) ?? outputTokens;
+    }
+  }
+
+  if (inputTokens === undefined && outputTokens === undefined) {
+    return undefined;
+  }
+
+  const finalInput = inputTokens ?? 0;
+  const finalOutput = outputTokens ?? 0;
+  return { inputTokens: finalInput, outputTokens: finalOutput, totalTokens: finalInput + finalOutput };
+}
 
 /**
  * Return whether the quote at `index` is escaped by an odd backslash run.

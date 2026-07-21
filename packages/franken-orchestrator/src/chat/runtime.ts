@@ -4,7 +4,7 @@ import type { ChatBeastContext, ExecuteOutcome, ExtendedPendingApproval, Transcr
 import { sanitizeChatOutput } from './output-sanitizer.js';
 import type { BeastDispatchPort } from './beast-daemon-dispatch-adapter.js';
 import type { BeastExecutionMode } from '../beasts/types.js';
-import { isoNow } from '@franken/types';
+import { isoNow, type TokenUsage } from '@franken/types';
 
 type PendingApprovalContext = Omit<ExtendedPendingApproval, 'description' | 'requestedAt'>;
 
@@ -57,6 +57,10 @@ export interface ChatRuntimeResult {
   tier: string | null;
   transcript: TranscriptMessage[];
   outcome?: TurnOutcome;
+  /** Real token usage for this turn's LLM call, when the provider reported it. */
+  usage?: TokenUsage;
+  /** Whether this turn's prompt had to drop history to fit the transcript limit. */
+  truncated?: boolean;
 }
 
 export interface ChatRuntimeOptions {
@@ -297,6 +301,8 @@ export class ChatRuntime {
           {
             outcome: { ...result.outcome, content },
             tier: result.tier,
+            ...(result.usage ? { usage: result.usage } : {}),
+            ...(result.truncated !== undefined ? { truncated: result.truncated } : {}),
           },
         );
       }
@@ -386,6 +392,8 @@ export class ChatRuntime {
       tier?: string | null;
       providerContext?: ChatRuntimeResult['providerContext'];
       phase?: string;
+      usage?: TokenUsage;
+      truncated?: boolean;
     },
   ): ChatRuntimeResult {
     return {
@@ -408,6 +416,8 @@ export class ChatRuntime {
       tier: extra?.tier ?? null,
       transcript: state.transcript,
       ...(extra?.outcome ? { outcome: extra.outcome } : {}),
+      ...(extra?.usage ? { usage: extra.usage } : {}),
+      ...(extra?.truncated !== undefined ? { truncated: extra.truncated } : {}),
     };
   }
 }

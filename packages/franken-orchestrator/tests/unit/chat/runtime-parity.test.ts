@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ConversationEngine } from '../../../src/chat/conversation-engine.js';
+import { ConversationEngine } from '../../../src/chat/conversation-engine.js';
 import { createChatRuntime } from '../../../src/chat/chat-runtime-factory.js';
 import { ChatRuntime } from '../../../src/chat/runtime.js';
 import { TurnRunner } from '../../../src/chat/turn-runner.js';
@@ -227,5 +227,51 @@ describe('chat runtime parity', () => {
     expect(result.state).toBe('rejected');
     expect(result.pendingApproval).toBe(false);
     expect(result.displayMessages[0]).toMatchObject({ kind: 'approval', content: 'Rejected.' });
+  });
+
+  it('surfaces real token usage and truncation on the runtime result when the llm reports it', async () => {
+    const usage = { inputTokens: 120, outputTokens: 30, totalTokens: 150 };
+    const llm = {
+      complete: vi.fn().mockResolvedValue('should not be used'),
+      completeWithUsage: vi.fn().mockResolvedValue({ text: 'reply with usage', usage }),
+    };
+    const runtime = createChatRuntime({ chatLlm: llm, projectName: 'test-project' });
+
+    const result = await runtime.runtime.run('hello', {
+      sessionId: 'session-1',
+      pendingApproval: false,
+      projectId: 'test-project',
+      transcript: [],
+    });
+
+    expect(llm.completeWithUsage).toHaveBeenCalled();
+    expect(llm.complete).not.toHaveBeenCalled();
+    expect(result.usage).toEqual(usage);
+    // A single-turn, well-under-the-limit transcript never truncates.
+    expect(result.truncated).toBe(false);
+    const assistantMessage = result.transcript.find((m) => m.role === 'assistant');
+    expect(assistantMessage?.tokens).toBe(150);
+  });
+
+  it('propagates truncation from the conversation engine onto the runtime result', async () => {
+    const llm = { complete: vi.fn().mockResolvedValue('reply') };
+    const engine = new ConversationEngine({ llm, projectName: 'test-project', maxTranscriptLength: 2 });
+    const turnRunner = new TurnRunner({ execute: vi.fn() });
+    const runtime = new ChatRuntime({ engine, turnRunner });
+
+    const history = Array.from({ length: 5 }, (_, i) => ({
+      role: 'user' as const,
+      content: `msg ${i}`,
+      timestamp: new Date().toISOString(),
+    }));
+
+    const result = await runtime.run('hello', {
+      sessionId: 'session-1',
+      pendingApproval: false,
+      projectId: 'test-project',
+      transcript: history,
+    });
+
+    expect(result.truncated).toBe(true);
   });
 });

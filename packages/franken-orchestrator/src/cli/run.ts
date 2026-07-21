@@ -438,6 +438,10 @@ interface ChatSurfaceDeps {
   sessionStoreDir: string;
   skillManager?: import('../skills/skill-manager.js').SkillManager | undefined;
   providerRegistry?: import('../providers/provider-registry.js').ProviderRegistry | undefined;
+  /** Resolved provider's declared context window, for the status line's usage bar. */
+  contextMaxTokens: number;
+  /** Chat model label for the status line (e.g. `claude-sonnet-4-6`). */
+  modelLabel: string;
 }
 
 function resolveSelectedProvider(args: CliArgs, config: OrchestratorConfig): string {
@@ -1173,6 +1177,8 @@ async function createChatSurfaceDeps(
     sessionStoreDir,
     ...(skillManager ? { skillManager } : {}),
     ...(providerRegistry ? { providerRegistry } : {}),
+    contextMaxTokens: resolvedProvider.defaultContextWindowTokens(),
+    modelLabel: chatDepOpts.adapterModel,
   };
 }
 
@@ -1314,7 +1320,7 @@ async function runChatCommandIfRequested(
     }
   }
 
-  const { chatLlm, execLlm, finalize, projectId, sessionStoreDir, skillManager, providerRegistry } = await createChatSurfaceDeps(args, config, paths);
+  const { chatLlm, execLlm, finalize, projectId, sessionStoreDir, skillManager, providerRegistry, contextMaxTokens, modelLabel } = await createChatSurfaceDeps(args, config, paths);
 
   if (args.subcommand === 'chat-server') {
     let mutableConfig = config;
@@ -1446,6 +1452,8 @@ async function runChatCommandIfRequested(
     projectId,
     sessionStore,
     verbose: args.verbose,
+    contextMaxTokens,
+    modelLabel,
   });
   await repl.start();
   await finalize();

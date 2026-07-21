@@ -1,4 +1,4 @@
-import type { ILlmClient, LlmCompletionOptions } from '@franken/types';
+import type { ILlmClient, LlmCompletionOptions, LlmCompletionResult, TokenUsage } from '@franken/types';
 import { now as deterministicNow, seededRandom } from '@franken/types';
 
 type UnifiedRequest = {
@@ -21,6 +21,8 @@ type UnifiedRequest = {
 
 type UnifiedResponse = {
   content: string | null;
+  /** Present only when the underlying provider reported real token usage. */
+  usage?: TokenUsage;
 };
 
 export interface IAdapter {
@@ -66,9 +68,25 @@ export class AdapterLlmClient implements ILlmClient {
     prompt: string,
     options?: LlmCompletionOptions & { sessionContinue?: boolean; sessionId?: string },
   ): Promise<string> {
+    const { content } = await this.runComplete(prompt, options);
+    return content;
+  }
+
+  async completeWithUsage(
+    prompt: string,
+    options?: LlmCompletionOptions & { sessionContinue?: boolean; sessionId?: string },
+  ): Promise<LlmCompletionResult> {
+    const { content, usage } = await this.runComplete(prompt, options);
+    return { text: content, ...(usage ? { usage } : {}) };
+  }
+
+  private async runComplete(
+    prompt: string,
+    options?: LlmCompletionOptions & { sessionContinue?: boolean; sessionId?: string },
+  ): Promise<{ content: string; usage?: TokenUsage }> {
     const requestId = `llm-${deterministicNow()}-${seededRandom.random().toString(16).slice(2)}`;
     const model = this.defaultModel;
-    
+
     const request: UnifiedRequest = {
       id: requestId,
       provider: 'adapter',
@@ -88,11 +106,13 @@ export class AdapterLlmClient implements ILlmClient {
     let failed = false;
     try {
       let content: string | null;
+      let usage: TokenUsage | undefined;
       try {
         const providerRequest = this.adapter.transformRequest(request);
         const providerResponse = await this.adapter.execute(providerRequest);
         const response = this.adapter.transformResponse(providerResponse, requestId);
         content = response.content;
+        usage = response.usage;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         throw new AdapterLlmError(
@@ -111,8 +131,10 @@ export class AdapterLlmClient implements ILlmClient {
       }
 
       if (this.observer && span) {
-        const promptTokens = Math.ceil(prompt.length / 4);
-        const completionTokens = Math.ceil(content.length / 4);
+        // Prefer the provider's real usage when available; fall back to the
+        // character-count estimate only when the provider didn't report it.
+        const promptTokens = usage?.inputTokens ?? Math.ceil(prompt.length / 4);
+        const completionTokens = usage?.outputTokens ?? Math.ceil(content.length / 4);
         this.observer.recordTokenUsage(
           span,
           {
@@ -124,7 +146,7 @@ export class AdapterLlmClient implements ILlmClient {
         );
       }
 
-      return content;
+      return { content, ...(usage ? { usage } : {}) };
     } catch (error) {
       failed = true;
       throw error;

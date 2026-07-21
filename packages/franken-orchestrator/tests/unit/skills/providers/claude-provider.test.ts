@@ -184,4 +184,17 @@ describe('ClaudeProvider', () => {
 
     expect(result).toBe('');
   });
+
+  it('extractUsage reports real token counts from the result event', () => {
+    const raw = [
+      '{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}',
+      '{"type":"result","result":"hi","usage":{"input_tokens":50,"output_tokens":12}}',
+    ].join('\n');
+
+    expect(provider.extractUsage?.(raw)).toEqual({ inputTokens: 50, outputTokens: 12, totalTokens: 62 });
+  });
+
+  it('extractUsage returns undefined when the CLI output has no usage', () => {
+    expect(provider.extractUsage?.('plain text output')).toBeUndefined();
+  });
 });

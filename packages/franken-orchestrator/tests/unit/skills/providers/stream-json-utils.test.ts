@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tryExtractTextFromNode, stripHookJson, cleanLlmJson, BASE_RATE_LIMIT_PATTERNS } from '../../../../src/skills/providers/stream-json-utils.js';
+import { tryExtractTextFromNode, stripHookJson, cleanLlmJson, BASE_RATE_LIMIT_PATTERNS, extractNdjsonTokenUsage } from '../../../../src/skills/providers/stream-json-utils.js';
 
 describe('tryExtractTextFromNode', () => {
   it('extracts direct string values', () => {
@@ -221,5 +221,52 @@ describe('BASE_RATE_LIMIT_PATTERNS', () => {
   it('does not match normal errors', () => {
     expect(BASE_RATE_LIMIT_PATTERNS.test('file not found')).toBe(false);
     expect(BASE_RATE_LIMIT_PATTERNS.test('syntax error')).toBe(false);
+  });
+});
+
+describe('extractNdjsonTokenUsage', () => {
+  it('returns undefined when no line carries usage', () => {
+    const raw = [
+      '{"type":"message_start"}',
+      '{"type":"content_block_delta","delta":{"text":"hi"}}',
+    ].join('\n');
+    expect(extractNdjsonTokenUsage(raw)).toBeUndefined();
+  });
+
+  it('extracts input/output tokens from a top-level usage object', () => {
+    const raw = '{"type":"result","result":"done","usage":{"input_tokens":100,"output_tokens":25}}';
+    expect(extractNdjsonTokenUsage(raw)).toEqual({ inputTokens: 100, outputTokens: 25, totalTokens: 125 });
+  });
+
+  it('extracts usage nested under a message field (Claude message_delta shape)', () => {
+    const raw = '{"type":"message_delta","message":{"usage":{"input_tokens":40,"output_tokens":10}}}';
+    expect(extractNdjsonTokenUsage(raw)).toEqual({ inputTokens: 40, outputTokens: 10, totalTokens: 50 });
+  });
+
+  it('accepts camelCase and provider-specific field aliases', () => {
+    const raw = '{"type":"usage","usage":{"promptTokenCount":7,"candidatesTokenCount":3}}';
+    expect(extractNdjsonTokenUsage(raw)).toEqual({ inputTokens: 7, outputTokens: 3, totalTokens: 10 });
+  });
+
+  it('keeps the last reported reading across multiple usage-bearing lines', () => {
+    const raw = [
+      '{"type":"usage","usage":{"input_tokens":10,"output_tokens":2}}',
+      '{"type":"usage","usage":{"input_tokens":10,"output_tokens":5}}',
+    ].join('\n');
+    expect(extractNdjsonTokenUsage(raw)).toEqual({ inputTokens: 10, outputTokens: 5, totalTokens: 15 });
+  });
+
+  it('ignores non-JSON and malformed lines without throwing', () => {
+    const raw = [
+      'plain text line',
+      '{not valid json',
+      '{"type":"result","usage":{"input_tokens":5,"output_tokens":1}}',
+    ].join('\n');
+    expect(extractNdjsonTokenUsage(raw)).toEqual({ inputTokens: 5, outputTokens: 1, totalTokens: 6 });
+  });
+
+  it('treats a partial reading (only one of input/output) as zero for the missing side', () => {
+    const raw = '{"type":"usage","usage":{"output_tokens":9}}';
+    expect(extractNdjsonTokenUsage(raw)).toEqual({ inputTokens: 0, outputTokens: 9, totalTokens: 9 });
   });
 });

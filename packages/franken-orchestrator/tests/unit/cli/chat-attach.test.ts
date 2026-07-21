@@ -286,4 +286,57 @@ describe('resolveManagedChatAttachment', () => {
     expect(socket.listenerCount('message')).toBe(0);
     expect(socket.listenerCount('error')).toBe(0);
   });
+
+  it('resolves with real token usage and truncation when the server reports them', async () => {
+    stubManagedChatWebSocket();
+    const socket = new MockManagedChatWebSocket('ws://127.0.0.1:4242/v1/chat/ws');
+
+    const reply = __chatAttachTestHooks.awaitRemoteReply(socket as unknown as WebSocket, false);
+    socket.emitMessage(JSON.stringify({
+      type: 'assistant.message.complete',
+      messageId: 'm1',
+      content: 'hello',
+      usage: { inputTokens: 40, outputTokens: 10, totalTokens: 50 },
+      truncated: true,
+      timestamp: new Date().toISOString(),
+    }));
+
+    await expect(reply).resolves.toEqual({
+      usage: { inputTokens: 40, outputTokens: 10, totalTokens: 50 },
+      truncated: true,
+    });
+  });
+
+  it('resolves with an empty outcome when the server has not opted the peer into usage-stats', async () => {
+    stubManagedChatWebSocket();
+    const socket = new MockManagedChatWebSocket('ws://127.0.0.1:4242/v1/chat/ws');
+
+    const reply = __chatAttachTestHooks.awaitRemoteReply(socket as unknown as WebSocket, false);
+    socket.emitMessage(JSON.stringify({
+      type: 'assistant.message.complete',
+      messageId: 'm1',
+      content: 'hello',
+      timestamp: new Date().toISOString(),
+    }));
+
+    await expect(reply).resolves.toEqual({});
+  });
+});
+
+describe('createRemoteSession websocket URL', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('opts into both message-kind and usage-stats features', async () => {
+    stubRemoteSessionFetch();
+    stubManagedChatWebSocket();
+
+    void __chatAttachTestHooks.createRemoteSession(managedChatAttachment(), 'project-1');
+    await vi.waitFor(() => expect(MockManagedChatWebSocket.instances).toHaveLength(1));
+
+    const socket = MockManagedChatWebSocket.instances[0]!;
+    const url = new URL(socket.url);
+    expect(url.searchParams.get('features')).toBe('message-kind,usage-stats');
+  });
 });
