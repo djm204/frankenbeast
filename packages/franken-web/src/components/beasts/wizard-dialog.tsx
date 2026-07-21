@@ -1,5 +1,6 @@
 import { useId, type ReactNode } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
+import { useShallow } from 'zustand/react/shallow';
 import { useBeastStore } from '../../stores/beast-store';
 import { WizardStepIndicator } from './wizard-step-indicator';
 import { StepIdentity } from './steps/step-identity';
@@ -33,27 +34,30 @@ interface WizardDialogProps {
 
 export function WizardDialog({ isOpen, onClose, onLaunch, catalog, containerRuntime, launching, launchError }: WizardDialogProps) {
   const descriptionId = useId();
-  const {
-    wizardStep,
-    highestCompleted,
-    wizardMode,
-    nextStep,
-    prevStep,
-    setWizardStep,
-    toggleWizardMode,
-    stepValues,
-    setValidationErrors,
-    clearValidationErrors,
-  } = useBeastStore();
+  const wizardStep = useBeastStore((state) => state.wizardStep);
+  const highestCompleted = useBeastStore((state) => state.highestCompleted);
+  const wizardMode = useBeastStore((state) => state.wizardMode);
+  const nextStep = useBeastStore((state) => state.nextStep);
+  const prevStep = useBeastStore((state) => state.prevStep);
+  const setWizardStep = useBeastStore((state) => state.setWizardStep);
+  const toggleWizardMode = useBeastStore((state) => state.toggleWizardMode);
+  const setValidationErrors = useBeastStore((state) => state.setValidationErrors);
+  const clearValidationErrors = useBeastStore((state) => state.clearValidationErrors);
 
   const isLastStep = wizardStep === STEP_LABELS.length - 1;
   const isFirstStep = wizardStep === 0;
-  const currentValidationErrors = validateWizardStep(wizardStep, stepValues, catalog);
+  const currentValidationErrors = useBeastStore(useShallow((state) => (
+    validateWizardStep(wizardStep, state.stepValues, catalog)
+  )));
   const currentStepIsValid = Object.keys(currentValidationErrors).length === 0;
-  const formValidationErrors = validateWizardStep(STEP_LABELS.length - 1, stepValues, catalog);
+  const formValidationErrors = useBeastStore(useShallow((state) => (
+    validateWizardStep(STEP_LABELS.length - 1, state.stepValues, catalog)
+  )));
   const formIsValid = Object.keys(formValidationErrors).length === 0;
-  const promptFilesLoading = Boolean(stepValues[5]?.filesLoading);
-  const stepStatuses = buildStepStatuses(wizardStep, highestCompleted, stepValues, catalog);
+  const promptFilesLoading = useBeastStore((state) => Boolean(state.stepValues[5]?.filesLoading));
+  const stepStatuses = useBeastStore(useShallow((state) => (
+    buildStepStatuses(wizardStep, highestCompleted, state.stepValues, catalog)
+  )));
 
   function syncValidationErrors(step: number, errors: WizardValidationErrors) {
     if (Object.keys(errors).length > 0) {
@@ -64,7 +68,9 @@ export function WizardDialog({ isOpen, onClose, onLaunch, catalog, containerRunt
   }
 
   function buildAndLaunch() {
-    if (promptFilesLoading) {
+    const stepValues = useBeastStore.getState().stepValues;
+
+    if (stepValues[5]?.filesLoading) {
       setValidationErrors(5, { files: 'Wait for selected files to finish loading before launching.' });
       if (wizardMode === 'wizard') {
         setWizardStep(5);
@@ -88,8 +94,10 @@ export function WizardDialog({ isOpen, onClose, onLaunch, catalog, containerRunt
   }
 
   function handleNext() {
-    syncValidationErrors(wizardStep, currentValidationErrors);
-    if (!currentStepIsValid) {
+    const stepValues = useBeastStore.getState().stepValues;
+    const latestValidationErrors = validateWizardStep(wizardStep, stepValues, catalog);
+    syncValidationErrors(wizardStep, latestValidationErrors);
+    if (Object.keys(latestValidationErrors).length > 0) {
       return;
     }
 

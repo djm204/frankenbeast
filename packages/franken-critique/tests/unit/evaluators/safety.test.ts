@@ -154,6 +154,35 @@ describe('SafetyEvaluator', () => {
     ]);
   });
 
+  it('fails closed when a v-mode block rule times out at runtime', async () => {
+    const port = createMockGuardrailsPort([
+      {
+        id: 'slow-unicode-set-block',
+        description: 'slow unicode set block rule',
+        pattern: '[[a-z]&&[p-z]]+',
+        flags: 'v',
+        severity: 'block',
+      },
+    ]);
+    const evaluator = new SafetyEvaluator(port);
+    vi.spyOn(
+      evaluator as unknown as {
+        regexMatchesWithTimeout(pattern: string, content: string): Promise<boolean | 'timeout'>;
+      },
+      'regexMatchesWithTimeout',
+    ).mockResolvedValue('timeout');
+
+    const result = await evaluator.evaluate(createInput('large review payload'));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        message: expect.stringContaining('Safety rule regex evaluation timed out'),
+        severity: 'critical',
+      }),
+    ]);
+  });
+
   it('surfaces timeout findings from evaluate when worker evaluation exceeds timeout', async () => {
     const hangingWorker = {
       once: vi.fn(),
@@ -852,6 +881,143 @@ describe('SafetyEvaluator', () => {
 
     expect(evaluator.hasUnsafeRegexShape('^(?s:a)(?:.|\\n)+!$')).toBe(false);
     expect(evaluator.hasUnsafeRegexShape('^(?s:(.|\\n\\n))+!$')).toBe(true);
+  });
+
+  it('skips complete unicodeSets character classes only in v mode', () => {
+    const evaluator = new SafetyEvaluator(createMockGuardrailsPort()) as unknown as {
+      skipCharacterClass(pattern: string, start: number, unicodeSets?: boolean): number;
+      hasUnsafeRegexShape(pattern: string, unicodeSets?: boolean): boolean;
+    };
+    const intersection = '[[a-z]&&[p-z]]+';
+    const subtraction = '[[a-z]--[aeiou]]+';
+
+    expect(evaluator.skipCharacterClass(intersection, 0, true)).toBe(intersection.length - 2);
+    expect(evaluator.skipCharacterClass(subtraction, 0, true)).toBe(subtraction.length - 2);
+    expect(evaluator.skipCharacterClass('[[]x', 0)).toBe(2);
+    expect(evaluator.hasUnsafeRegexShape('[[a-z]&&((a+)+)$')).toBe(true);
+    expect(
+      evaluator.hasUnsafeRegexShape('[[a-z]&&[p-z]]+((a+)+)$', true),
+    ).toBe(true);
+    expect(evaluator.hasUnsafeRegexShape('^(?:a|aa)+$', true)).toBe(true);
+    expect(evaluator.hasUnsafeRegexShape('^(?:a|aa|--)+$', true)).toBe(true);
+    expect(
+      evaluator.hasUnsafeRegexShape(
+        '^(?:[[a-z]&&[p-z]]|a|aa)+$',
+        true,
+      ),
+    ).toBe(true);
+    expect(evaluator.hasUnsafeRegexShape('^(?:\\p{L}|a|aa)+$', true)).toBe(true);
+    expect(
+      evaluator.hasUnsafeRegexShape('^(?:[[a-z]&&[a-z]]|aa)+$', true),
+    ).toBe(true);
+    expect(
+      evaluator.hasUnsafeRegexShape(
+        '^(?:[[ab]&&[a]]{0}b|b)+$',
+        true,
+      ),
+    ).toBe(true);
+    expect(evaluator.hasUnsafeRegexShape('^(?:\\p{L}|a)+$', true)).toBe(true);
+    expect(evaluator.hasUnsafeRegexShape('^((\\p{L}|a)b)+$', true)).toBe(true);
+    expect(evaluator.hasUnsafeRegexShape('^(?:\\p{L})+$', true)).toBe(false);
+    expect(
+      evaluator.hasUnsafeRegexShape(
+        '^(?:[\\p{Script=Greek}]|[\\p{L}])+$',
+        true,
+      ),
+    ).toBe(true);
+    expect(evaluator.hasUnsafeRegexShape('^(?:\\u{61}|a)+$', true)).toBe(true);
+    expect(evaluator.hasUnsafeRegexShape('^(?:\\u{62}|a)+$', true)).toBe(false);
+    expect(
+      evaluator.hasUnsafeRegexShape('^(?:[\\u{61}]|aa)+$', true),
+    ).toBe(true);
+    expect(
+      evaluator.hasUnsafeRegexShape('^(?i:\\u{41}|aa)+$', true),
+    ).toBe(true);
+    expect(
+      evaluator.hasUnsafeRegexShape('^[\\q{a}\\q{aa}]+$', true),
+    ).toBe(true);
+    expect(
+      evaluator.hasUnsafeRegexShape('^[\\q{\\0|\\0\\0}]+$', true),
+    ).toBe(true);
+    expect(evaluator.hasUnsafeRegexShape('^[a\\q{aa}]+$', true)).toBe(true);
+    expect(
+      evaluator.hasUnsafeRegexShape('^(?:[\\q{a}\\q{aa}])+$', true),
+    ).toBe(true);
+    expect(evaluator.hasUnsafeRegexShape('^[\\q{ab}\\q{cd}]+$', true)).toBe(
+      false,
+    );
+    expect(
+      evaluator.hasUnsafeRegexShape(
+        '^[[\\q{a}\\q{aa}]--[\\q{aa}]]+$',
+        true,
+      ),
+    ).toBe(false);
+    expect(
+      evaluator.hasUnsafeRegexShape('^(?i:[\\q{a}\\q{Aa}])+$', true),
+    ).toBe(true);
+    expect(
+      evaluator.hasUnsafeRegexShape(
+        '^[\\p{RGI_Emoji_Flag_Sequence}\\p{Regional_Indicator}]+$',
+        true,
+      ),
+    ).toBe(true);
+    expect(
+      evaluator.hasUnsafeRegexShape(
+        '^(?:[[b-d]--[b]]|[[b-d]--[d]])+$',
+        true,
+      ),
+    ).toBe(true);
+    expect(
+      evaluator.hasUnsafeRegexShape('^(?:[[a-z]&&[p-z]]|a)+$', true),
+    ).toBe(false);
+  });
+
+  it('evaluates unicodeSets safety rules with the v flag', async () => {
+    const evaluator = new SafetyEvaluator(
+      createMockGuardrailsPort([
+        {
+          id: 'unicode-set-intersection',
+          description: 'unicode set intersection',
+          pattern: '[[a-z]&&[p-z]]+',
+          flags: 'v',
+          severity: 'block',
+        },
+      ]),
+    );
+
+    const result = await evaluator.evaluate(createInput('qrst'));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        message: 'Safety rule violated: unicode set intersection',
+      }),
+    ]);
+  });
+
+  it('reports malformed unicodeSets rules as invalid instead of throwing', async () => {
+    const evaluator = new SafetyEvaluator(
+      createMockGuardrailsPort([
+        {
+          id: 'invalid-unicode-set-subtraction',
+          description: 'invalid unicode set subtraction',
+          pattern: '[\\q{a}--]',
+          flags: 'v',
+          severity: 'block',
+        },
+      ]),
+    );
+
+    await expect(evaluator.evaluate(createInput('safe content'))).resolves.toEqual(
+      expect.objectContaining({
+        verdict: 'fail',
+        findings: [
+          expect.objectContaining({
+            message: 'Invalid safety rule regex: invalid unicode set subtraction',
+          }),
+        ],
+      }),
+    );
   });
 
   it('rejects nullable and variable-quantified alternation bypass patterns', async () => {

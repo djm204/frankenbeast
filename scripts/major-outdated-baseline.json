@@ -130,6 +130,66 @@
     "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
   },
   {
+    "name": "better-sqlite3",
+    "dependent": "@franken/brain",
+    "location": "node_modules/better-sqlite3",
+    "currentMajor": 12,
+    "latestMajor": 13,
+    "current": "12.11.1",
+    "latest": "13.0.1",
+    "reason": "Upstream released a new major after this PR was verified, causing the repository-wide freshness gate to fail independently on both this PR and main."
+  },
+  {
+    "name": "better-sqlite3",
+    "dependent": "@franken/live-bench",
+    "location": "node_modules/better-sqlite3",
+    "currentMajor": 12,
+    "latestMajor": 13,
+    "current": "12.11.1",
+    "latest": "13.0.1",
+    "reason": "Upstream released a new major after this PR was verified, causing the repository-wide freshness gate to fail independently on both this PR and main."
+  },
+  {
+    "name": "better-sqlite3",
+    "dependent": "@franken/mcp-suite",
+    "location": "node_modules/better-sqlite3",
+    "currentMajor": 12,
+    "latestMajor": 13,
+    "current": "12.11.1",
+    "latest": "13.0.1",
+    "reason": "Upstream released a new major after this PR was verified, causing the repository-wide freshness gate to fail independently on both this PR and main."
+  },
+  {
+    "name": "better-sqlite3",
+    "dependent": "@franken/observer",
+    "location": "node_modules/better-sqlite3",
+    "currentMajor": 12,
+    "latestMajor": 13,
+    "current": "12.11.1",
+    "latest": "13.0.1",
+    "reason": "Upstream released a new major after this PR was verified, causing the repository-wide freshness gate to fail independently on both this PR and main."
+  },
+  {
+    "name": "better-sqlite3",
+    "dependent": "@franken/orchestrator",
+    "location": "node_modules/better-sqlite3",
+    "currentMajor": 12,
+    "latestMajor": 13,
+    "current": "12.11.1",
+    "latest": "13.0.1",
+    "reason": "Upstream released a new major after this PR was verified, causing the repository-wide freshness gate to fail independently on both this PR and main."
+  },
+  {
+    "name": "better-sqlite3",
+    "dependent": "frankenbeast",
+    "location": "node_modules/better-sqlite3",
+    "currentMajor": 12,
+    "latestMajor": 13,
+    "current": "12.11.1",
+    "latest": "13.0.1",
+    "reason": "Upstream released a new major after this PR was verified, causing the repository-wide freshness gate to fail independently on both this PR and main."
+  },
+  {
     "name": "eslint",
     "dependent": "@franken/critique",
     "location": "node_modules/eslint",

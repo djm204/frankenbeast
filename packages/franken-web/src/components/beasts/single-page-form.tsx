@@ -26,7 +26,7 @@ interface SinglePageFormProps {
 }
 
 export function SinglePageForm({ onLaunch }: SinglePageFormProps) {
-  const { stepValues } = useBeastStore();
+  const stepValues = useBeastStore((state) => state.stepValues);
 
   function handleLaunch() {
     const config: Record<string, unknown> = {};

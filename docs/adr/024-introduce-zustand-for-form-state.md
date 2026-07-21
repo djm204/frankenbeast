@@ -11,7 +11,7 @@ The beasts panel redesign introduces two complex state management needs:
 1. **Agent creation wizard** — 8-step form with per-step validation, cross-step dependencies (e.g., module toggles affect which config sections appear), wizard/form mode toggle that must preserve state, and a review step that reads all prior steps.
 2. **Agent detail edit mode** — dirty tracking via snapshot diff, save/cancel with discard confirmation, hot-swap vs restart-required field classification.
 
-The current dashboard uses React hooks (useState, useEffect) exclusively. While hooks work for simple state, the wizard's cross-component state sharing and dirty tracking logic would require deep prop drilling or context providers that add complexity without structure.
+At the time of this decision, the dashboard used React hooks (`useState`, `useEffect`) exclusively. While hooks work for simple state, the wizard's cross-component state sharing and dirty tracking logic would require deep prop drilling or context providers that add complexity without structure.
 
 ## Decision
 
@@ -21,6 +21,12 @@ Introduce Zustand (~1KB gzipped) with two store slices:
 - **`agentEditSlice`** — last-saved config snapshot, current edit values, computed `isDirty` flag, field-level restart-required metadata
 
 The rest of the dashboard continues using React hooks. No migration of existing state management.
+
+## Implementation
+
+The accepted design is implemented in `packages/franken-web/src/stores/beast-store.ts`. Wizard values, navigation, mode, and validation errors live in `useBeastStore`; the wizard dialog and every step component subscribe through scoped selectors rather than subscribing to the entire store. `BeastsPage` calls `resetWizard()` before each new create flow so state survives step unmounts but does not leak between launches.
+
+Local-only presentation state, such as the skills search query or dialog loading state, remains in React hooks as required by the boundary above. Store behavior is covered by `src/stores/beast-store.test.ts`, dialog behavior by `src/components/beasts/wizard-dialog.test.tsx`, and the scoped-selector boundary by `tests/components/beasts/wizard-zustand-architecture.test.ts`.
 
 ## Consequences
 

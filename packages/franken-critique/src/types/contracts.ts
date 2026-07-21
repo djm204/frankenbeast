@@ -8,6 +8,7 @@ export interface SafetyRule {
   readonly id: string;
   readonly description: string;
   readonly pattern: string;
+  readonly flags?: 'v';
   readonly severity: 'block' | 'warn';
 }
 
