@@ -86,12 +86,14 @@ interface DockerUser {
 }
 
 function parseFinalDockerUser(contents: string): DockerUser | undefined {
-  const finalStage = contents.split(/^FROM\s+.*$/gmu).at(-1);
+  const finalStage = contents.split(/^[ \t]*FROM\s+.*$/gmu).at(-1);
   if (!finalStage || finalStage === contents) {
     return undefined;
   }
 
-  const directives = [...finalStage.matchAll(/^USER\s+([^\s:]+)(?::([^\s:]+))?\s*$/gmu)];
+  const directives = [
+    ...finalStage.matchAll(/^[ \t]*USER\s+([^\s:]+)(?::([^\s:]+))?\s*$/gmu),
+  ];
   const match = directives.at(-1);
   if (!match?.[1]) {
     return undefined;
@@ -108,6 +110,8 @@ function isNonRootDockerUser(contents: string): boolean {
   const directive = parseFinalDockerUser(contents);
   if (
     !directive?.group
+    || directive.user.includes('$')
+    || directive.group.includes('$')
     || directive.user === 'root'
     || directive.group === 'root'
     || isNumericRootId(directive.user)
@@ -175,6 +179,8 @@ describe('sandbox Dockerfile', () => {
     ['named root group', 'FROM node\nUSER sandbox:root'],
     ['missing explicit group', 'FROM node\nUSER 1000'],
     ['later root-group override', 'FROM node\nUSER 1000:1000\nUSER 1000:0'],
+    ['indented root override', 'FROM node\nUSER 1000:1000\n  USER root:0'],
+    ['variable-based identity', 'FROM node\nUSER ${SANDBOX_UID}:${SANDBOX_GID}'],
     ['missing final-stage user', 'FROM node\nUSER 1000:1000\nFROM scratch'],
   ])('rejects a %s in the USER directive', (_description, contents) => {
     expect(isNonRootDockerUser(contents)).toBe(false);
