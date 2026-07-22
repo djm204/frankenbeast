@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, chmodSync, statSync, lstatSync, symlinkSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync, chmodSync, statSync, lstatSync, symlinkSync, mkdirSync } from 'node:fs';
 import { PassThrough } from 'node:stream';
 import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
@@ -28,14 +28,16 @@ function mockSpawn(stdoutLines: string[], exitCode = 0) {
     signalCode: null as NodeJS.Signals | null,
     kill: vi.fn(() => true),
   });
-  (spawn as ReturnType<typeof vi.fn>).mockReturnValue(proc);
-  setImmediate(() => {
-    for (const line of stdoutLines) stdout.write(line + '\n');
-    stdout.end();
+  (spawn as ReturnType<typeof vi.fn>).mockImplementation(() => {
     setImmediate(() => {
-      proc.exitCode = exitCode;
-      proc.emit('close', exitCode);
+      for (const line of stdoutLines) stdout.write(line + '\n');
+      stdout.end();
+      setImmediate(() => {
+        proc.exitCode = exitCode;
+        proc.emit('close', exitCode);
+      });
     });
+    return proc;
   });
   return proc;
 }
@@ -52,14 +54,16 @@ function mockSpawnError(errorMessage = 'spawn command not found') {
     signalCode: null as NodeJS.Signals | null,
     kill: vi.fn(() => true),
   });
-  (spawn as ReturnType<typeof vi.fn>).mockReturnValue(proc);
-  setImmediate(() => {
-    proc.emit('error', Object.assign(new Error(errorMessage), { code: 'ENOENT' }));
+  (spawn as ReturnType<typeof vi.fn>).mockImplementation(() => {
     setImmediate(() => {
-      stdout.end();
-      proc.exitCode = 127;
-      proc.emit('close', 127);
+      proc.emit('error', Object.assign(new Error(errorMessage), { code: 'ENOENT' }));
+      setImmediate(() => {
+        stdout.end();
+        proc.exitCode = 127;
+        proc.emit('close', 127);
+      });
     });
+    return proc;
   });
   return proc;
 }
@@ -134,7 +138,7 @@ describe('GeminiCliAdapter', () => {
   });
 
   describe('writeContextSettings()', () => {
-    it('merges inherited Gemini system settings while preserving scoped context files', () => {
+    it('merges inherited Gemini system settings while preserving scoped context files', async () => {
       const originalSettingsPath = process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH;
       const originalSystemDefaultsPath = process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH;
       const originalGeminiCliHome = process.env.GEMINI_CLI_HOME;
@@ -171,7 +175,7 @@ describe('GeminiCliAdapter', () => {
 
       try {
         const includeDir = join(tempDir, 'managed-context');
-        const { settingsPath, managedContextFileName } = (adapter as unknown as { writeContextSettings(dir: string, includeDir: string): { settingsPath: string; managedContextFileName: string } }).writeContextSettings(tempDir, includeDir);
+        const { settingsPath, managedContextFileName } = await (adapter as unknown as { writeContextSettings(dir: string, includeDir: string): Promise<{ settingsPath: string; managedContextFileName: string }> }).writeContextSettings(tempDir, includeDir);
         expect(managedContextFileName).toMatch(/^FRANKENBEAST_GEMINI_[0-9a-f-]+\.md$/);
         expect(JSON.parse(readFileSync(settingsPath, 'utf-8'))).toEqual({
           sandbox: true,
@@ -201,7 +205,7 @@ describe('GeminiCliAdapter', () => {
       }
     });
 
-    it('leaves lower-scope include directories to Gemini trust handling', () => {
+    it('leaves lower-scope include directories to Gemini trust handling', async () => {
       const originalSettingsPath = process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH;
       const originalSystemDefaultsPath = process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH;
       const originalGeminiCliHome = process.env.GEMINI_CLI_HOME;
@@ -229,7 +233,7 @@ describe('GeminiCliAdapter', () => {
 
       try {
         const includeDir = join(tempDir, 'managed-context');
-        const { settingsPath, managedContextFileName } = (adapter as unknown as { writeContextSettings(dir: string, includeDir: string): { settingsPath: string; managedContextFileName: string } }).writeContextSettings(tempDir, includeDir);
+        const { settingsPath, managedContextFileName } = await (adapter as unknown as { writeContextSettings(dir: string, includeDir: string): Promise<{ settingsPath: string; managedContextFileName: string }> }).writeContextSettings(tempDir, includeDir);
         expect(JSON.parse(readFileSync(settingsPath, 'utf-8'))).toMatchObject({
           sandbox: true,
           context: {
@@ -335,6 +339,20 @@ describe('GeminiCliAdapter', () => {
         retryable: false,
       });
       expect(proc.kill).not.toHaveBeenCalled();
+    });
+
+    it('returns a provider-scoped error when the managed prompt cannot be written', async () => {
+      const writeSpy = vi.spyOn(adapter, 'writeGeminiMd').mockRejectedValueOnce(new Error('read-only file system'));
+
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [] }));
+      writeSpy.mockRestore();
+
+      expect(events).toEqual([{
+        type: 'error',
+        error: 'gemini prompt file setup failed: read-only file system',
+        retryable: false,
+      }]);
+      expect(spawn).not.toHaveBeenCalled();
     });
 
     it('parses stream-json text events', async () => {
@@ -570,76 +588,90 @@ describe('GeminiCliAdapter', () => {
   });
 
   describe('writeGeminiMd()', () => {
-    it('creates GEMINI.md if not exists', () => {
-      adapter.writeGeminiMd('System prompt here');
+    it('creates GEMINI.md if not exists', async () => {
+      await adapter.writeGeminiMd('System prompt here');
       const content = readFileSync(join(tempDir, 'GEMINI.md'), 'utf-8');
       expect(content).toContain('FRANKENBEAST MANAGED SECTION');
       expect(content).toContain('System prompt here');
       expect(content).toContain('END FRANKENBEAST SECTION');
     });
 
-    it('replaces managed section if exists', () => {
-      adapter.writeGeminiMd('Version 1');
-      adapter.writeGeminiMd('Version 2');
+    it('replaces managed section if exists', async () => {
+      await adapter.writeGeminiMd('Version 1');
+      await adapter.writeGeminiMd('Version 2');
       const content = readFileSync(join(tempDir, 'GEMINI.md'), 'utf-8');
       expect(content).toContain('Version 2');
       expect(content).not.toContain('Version 1');
     });
 
-    it('preserves user content outside managed section', () => {
+    it('preserves user content outside managed section', async () => {
       writeFileSync(join(tempDir, 'GEMINI.md'), `User notes\n\n<!-- FRANKENBEAST MANAGED SECTION - DO NOT EDIT -->\nOld\n<!-- END FRANKENBEAST SECTION -->\n`);
-      adapter.writeGeminiMd('New');
+      await adapter.writeGeminiMd('New');
       const content = readFileSync(join(tempDir, 'GEMINI.md'), 'utf-8');
       expect(content).toContain('User notes');
       expect(content).toContain('New');
     });
 
-    it('preserves GEMINI.md file mode when updating atomically', () => {
+    it('preserves GEMINI.md file mode when updating atomically', async () => {
       const geminiPath = join(tempDir, 'GEMINI.md');
       writeFileSync(geminiPath, 'User notes');
       chmodSync(geminiPath, 0o600);
 
-      adapter.writeGeminiMd('New');
+      await adapter.writeGeminiMd('New');
 
       expect(statSync(geminiPath).mode & 0o777).toBe(0o600);
     });
 
-    it('updates symlinked GEMINI.md targets without replacing the symlink', () => {
+    it('preserves the original target and removes the temp file when atomic rename fails', async () => {
+      const targetPath = join(tempDir, 'GEMINI.md');
+      mkdirSync(targetPath);
+      writeFileSync(join(targetPath, 'original.txt'), 'original content');
+
+      const writeFileAtomically = (adapter as unknown as {
+        writeFileAtomically(path: string, content: string): Promise<void>;
+      }).writeFileAtomically.bind(adapter);
+
+      await expect(writeFileAtomically(targetPath, 'replacement')).rejects.toThrow();
+      expect(readFileSync(join(targetPath, 'original.txt'), 'utf-8')).toBe('original content');
+      expect(readdirSync(tempDir)).toEqual(['GEMINI.md']);
+    });
+
+    it('updates symlinked GEMINI.md targets without replacing the symlink', async () => {
       const targetPath = join(tempDir, 'shared-GEMINI.md');
       const geminiPath = join(tempDir, 'GEMINI.md');
       writeFileSync(targetPath, 'user notes\n');
       symlinkSync(targetPath, geminiPath);
 
-      adapter.writeGeminiMd('System prompt here');
+      await adapter.writeGeminiMd('System prompt here');
 
       expect(lstatSync(geminiPath).isSymbolicLink()).toBe(true);
       expect(readFileSync(targetPath, 'utf-8')).toContain('System prompt here');
     });
 
-    it('creates the target for dangling symlinked GEMINI.md without replacing the link', () => {
+    it('creates the target for dangling symlinked GEMINI.md without replacing the link', async () => {
       const targetPath = join(tempDir, 'generated-later-GEMINI.md');
       const geminiPath = join(tempDir, 'GEMINI.md');
       symlinkSync(targetPath, geminiPath);
 
-      adapter.writeGeminiMd('System prompt here');
+      await adapter.writeGeminiMd('System prompt here');
 
       expect(lstatSync(geminiPath).isSymbolicLink()).toBe(true);
       expect(readFileSync(targetPath, 'utf-8')).toContain('System prompt here');
     });
 
-    it('prepends managed content to user GEMINI.md content', () => {
+    it('prepends managed content to user GEMINI.md content', async () => {
       writeFileSync(
         join(tempDir, 'GEMINI.md'),
         '# My Project\nUser content here\n',
       );
-      adapter.writeGeminiMd('System prompt');
+      await adapter.writeGeminiMd('System prompt');
       const content = readFileSync(join(tempDir, 'GEMINI.md'), 'utf-8');
       expect(content).toContain('System prompt');
       expect(content).toContain('User content here');
     });
 
-    it('includes handoff context when provided', () => {
-      adapter.writeGeminiMd('System', '--- HANDOFF ---');
+    it('includes handoff context when provided', async () => {
+      await adapter.writeGeminiMd('System', '--- HANDOFF ---');
       const content = readFileSync(join(tempDir, 'GEMINI.md'), 'utf-8');
       expect(content).toContain('--- HANDOFF ---');
     });
