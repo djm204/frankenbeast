@@ -94,6 +94,19 @@ This starts the services defined in `docker-compose.yml`:
 
 The compose stack pins image versions and mounts `tempo.yaml` into Tempo so the
 optional tracing backend does not depend on floating tags or an implicit config.
+All published ports bind to `127.0.0.1` by default, so these development services
+are not reachable from other machines.
+
+To intentionally expose ChromaDB, Grafana, and Tempo to a trusted network, use
+the explicit override with Docker Compose 2.24.4 or newer:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.remote.yml up -d
+```
+
+The override publishes unauthenticated ChromaDB and Tempo endpoints, plus the
+Grafana login surface, on every IPv4 interface. Use it only behind an appropriate
+host firewall or other network access control, and stop the stack when finished.
 
 There is no `firewall` Docker service in the current compose file.
 

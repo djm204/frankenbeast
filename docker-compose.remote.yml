@@ -1,0 +1,16 @@
+# Explicit opt-in for exposing local infrastructure beyond this host.
+# Requires Docker Compose 2.24.4+ for the !override tag.
+services:
+  chromadb:
+    ports: !override
+      - '0.0.0.0:8000:8000'
+
+  grafana:
+    ports: !override
+      - '0.0.0.0:3000:3000'
+
+  tempo:
+    ports: !override
+      - '0.0.0.0:3200:3200' # Tempo query API
+      - '0.0.0.0:4317:4317' # OTLP gRPC
+      - '0.0.0.0:4318:4318' # OTLP HTTP
