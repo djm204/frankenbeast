@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.10.2](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.10.1...franken-critique-v0.10.2) (2026-07-22)
+
+
+### Bug Fixes
+
+* **critique:** decode braced unicode class escapes ([#3540](https://github.com/djm204/frankenbeast/issues/3540)) ([a11e8f8](https://github.com/djm204/frankenbeast/commit/a11e8f88825bd35b935ec9349402a8ca7d893e8b))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.15.0 to 0.16.0
+
 ## [0.10.1](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.10.0...franken-critique-v0.10.1) (2026-07-22)
 
 

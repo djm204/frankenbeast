@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.63.0](https://github.com/djm204/frankenbeast/compare/v0.62.0...v0.63.0) (2026-07-22)
+
+
+### Features
+
+* **cli:** add slash command tab completion ([#3542](https://github.com/djm204/frankenbeast/issues/3542)) ([04b77fa](https://github.com/djm204/frankenbeast/commit/04b77fafe02e82f0d1167f2ea9b4f2b92d4a37c1))
+* **cli:** box the chat input, purple/green theme, real usage stats + provider self-awareness ([#3505](https://github.com/djm204/frankenbeast/issues/3505)) ([32d11ff](https://github.com/djm204/frankenbeast/commit/32d11ff9bc8a263c4083e75d0961c35a8c691bd0))
+* **web:** adopt Radix provider selectors ([#3520](https://github.com/djm204/frankenbeast/issues/3520)) ([217a031](https://github.com/djm204/frankenbeast/commit/217a031ae09d36cd7968d3b7853a10d9e03855aa))
+* **web:** centralize wizard dirty tracking ([#3527](https://github.com/djm204/frankenbeast/issues/3527)) ([cbacaae](https://github.com/djm204/frankenbeast/commit/cbacaae091e4cd68b0b21ec3201c472aa33ba8d4))
+
+
+### Bug Fixes
+
+* **brain:** bound checkpoint listings ([#3592](https://github.com/djm204/frankenbeast/issues/3592)) ([5d60114](https://github.com/djm204/frankenbeast/commit/5d60114f652ecf380f0ba61d47467475e2624ef2))
+* **brain:** quarantine corrupt episodic details ([#3471](https://github.com/djm204/frankenbeast/issues/3471)) ([0ce3a2a](https://github.com/djm204/frankenbeast/commit/0ce3a2a6830f826efb6b08fbe6eaaadd771bf25a))
+* **ci:** bound root release tag selection ([#3558](https://github.com/djm204/frankenbeast/issues/3558)) ([2b163da](https://github.com/djm204/frankenbeast/commit/2b163daec72731f0cbdaef482f7028646c58bf32))
+* **deps:** override vulnerable Hono server ([#3515](https://github.com/djm204/frankenbeast/issues/3515)) ([302f6b2](https://github.com/djm204/frankenbeast/commit/302f6b2863feb2d85b0132d5538104cae1111698))
+* **observer:** bound MultiAdapter list fan-out ([#3597](https://github.com/djm204/frankenbeast/issues/3597)) ([c38773a](https://github.com/djm204/frankenbeast/commit/c38773a00d0631b8e1d539bb187e0b618716b8d8))
+* **planner:** preserve task dependencies in addTask ([#3545](https://github.com/djm204/frankenbeast/issues/3545)) ([5a83c9f](https://github.com/djm204/frankenbeast/commit/5a83c9f22edac21bd533ff25a33d3db9094a2cd5))
+* **reviewer:** persist PR attempt diagnostics ([#3577](https://github.com/djm204/frankenbeast/issues/3577)) ([f801e6b](https://github.com/djm204/frankenbeast/commit/f801e6b0437635fe547182d0ee45e70650336984))
+
+
+### Miscellaneous
+
+* **deps:** bump actions/setup-python from 6 to 7 ([#3578](https://github.com/djm204/frankenbeast/issues/3578)) ([f10f32b](https://github.com/djm204/frankenbeast/commit/f10f32bfb2eb04e00c5cd023a9262f42076b25ff))
+
+
+### Documentation
+
+* **examples:** add runnable sample projects ([#3524](https://github.com/djm204/frankenbeast/issues/3524)) ([7d115ef](https://github.com/djm204/frankenbeast/commit/7d115ef6525f2761b636e1b77f6793185572510d))
+* **mcp:** use canonical registry tool IDs ([#3571](https://github.com/djm204/frankenbeast/issues/3571)) ([3c50cb1](https://github.com/djm204/frankenbeast/commit/3c50cb18e99bed07733b591968aa0bf25f69cb38))
+* **readme:** clarify ADR reference status ([#3522](https://github.com/djm204/frankenbeast/issues/3522)) ([3e79597](https://github.com/djm204/frankenbeast/commit/3e79597790f2a8e62cf84e82b0ff81012263a839))
+
+
+### Tests
+
+* **brain:** lock in atomic working-memory flushes ([#3552](https://github.com/djm204/frankenbeast/issues/3552)) ([879e650](https://github.com/djm204/frankenbeast/commit/879e650d59d2e2973d4b523ee406f2939ea4b2ba))
+* **sandbox:** reject root Docker user groups ([#3525](https://github.com/djm204/frankenbeast/issues/3525)) ([0b62bad](https://github.com/djm204/frankenbeast/commit/0b62bad03d6f0049b63cc4711c90046e51d4db28))
+* strengthen removed workspace wiring assertions ([#3523](https://github.com/djm204/frankenbeast/issues/3523)) ([4232160](https://github.com/djm204/frankenbeast/commit/42321603f02ecb344c7cc1922a9178cbb9cb90da))
+
 ## [0.62.0](https://github.com/djm204/frankenbeast/compare/v0.61.0...v0.62.0) (2026-07-22)
 
 

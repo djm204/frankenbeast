@@ -1,6 +1,6 @@
 {
   "name": "@franken/live-bench",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Live Codex/Gemini CLI benchmark runner for Frankenbeast MCP suite A/B comparisons",
   "type": "module",
   "main": "dist/index.js",
@@ -26,8 +26,8 @@
     "prepublishOnly": "npm --prefix ../.. run build"
   },
   "dependencies": {
-    "@franken/observer": "0.11.2",
-    "@franken/types": "0.15.0",
+    "@franken/observer": "0.11.3",
+    "@franken/types": "0.16.0",
     "better-sqlite3": "^12.11.1",
     "zod": "^4.4.3"
   },

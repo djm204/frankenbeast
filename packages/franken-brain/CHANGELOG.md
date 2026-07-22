@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.16.1](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.16.0...@franken/brain-v0.16.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **brain:** audit corrupt recovery checkpoints ([#3568](https://github.com/djm204/frankenbeast/issues/3568)) ([4d78061](https://github.com/djm204/frankenbeast/commit/4d78061ec4cb71cb0940469d9c3340c3383aeefd))
+* **brain:** bound checkpoint listings ([#3592](https://github.com/djm204/frankenbeast/issues/3592)) ([5d60114](https://github.com/djm204/frankenbeast/commit/5d60114f652ecf380f0ba61d47467475e2624ef2))
+* **brain:** expose episodic snapshot truncation ([#3575](https://github.com/djm204/frankenbeast/issues/3575)) ([97bcc6c](https://github.com/djm204/frankenbeast/commit/97bcc6c0f3ecfdc586efbe06ad1a0360461227b0))
+* **brain:** guard checkpoint serialization budgets ([#3569](https://github.com/djm204/frankenbeast/issues/3569)) ([9a8f24f](https://github.com/djm204/frankenbeast/commit/9a8f24f1f80ca5ffa352f56ad4247db9332ccc26))
+* **brain:** normalize episodic recall punctuation ([#3591](https://github.com/djm204/frankenbeast/issues/3591)) ([7a97cf1](https://github.com/djm204/frankenbeast/commit/7a97cf1bc40a8e3e1b366d74e01c61f78fa2b515))
+* **brain:** quarantine corrupt episodic details ([#3471](https://github.com/djm204/frankenbeast/issues/3471)) ([0ce3a2a](https://github.com/djm204/frankenbeast/commit/0ce3a2a6830f826efb6b08fbe6eaaadd771bf25a))
+
+
+### Tests
+
+* **brain:** lock in atomic working-memory flushes ([#3552](https://github.com/djm204/frankenbeast/issues/3552)) ([879e650](https://github.com/djm204/frankenbeast/commit/879e650d59d2e2973d4b523ee406f2939ea4b2ba))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.15.0 to 0.16.0
+
 ## [0.16.0](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.15.2...@franken/brain-v0.16.0) (2026-07-22)
 
 

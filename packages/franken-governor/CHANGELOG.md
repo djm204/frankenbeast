@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.2](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.8.1...franken-governor-v0.8.2) (2026-07-22)
+
+
+### Bug Fixes
+
+* **governor:** validate Slack timestamp integers ([#3566](https://github.com/djm204/frankenbeast/issues/3566)) ([b4cc339](https://github.com/djm204/frankenbeast/commit/b4cc339f772026faa8f9273007fdd7ecad3d9edb))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.15.0 to 0.16.0
+
 ## [0.8.1](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.8.0...franken-governor-v0.8.1) (2026-07-22)
 
 

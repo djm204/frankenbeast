@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.11.3](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.11.2...franken-observer-v0.11.3) (2026-07-22)
+
+
+### Bug Fixes
+
+* **observer:** bound MultiAdapter list fan-out ([#3597](https://github.com/djm204/frankenbeast/issues/3597)) ([c38773a](https://github.com/djm204/frankenbeast/commit/c38773a00d0631b8e1d539bb187e0b618716b8d8))
+* **observer:** use monotonic span durations ([#3562](https://github.com/djm204/frankenbeast/issues/3562)) ([a99d66c](https://github.com/djm204/frankenbeast/commit/a99d66c6c060c8186c48445f9efc59b35a871eb7))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.15.0 to 0.16.0
+
 ## [0.11.2](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.11.1...franken-observer-v0.11.2) (2026-07-22)
 
 
