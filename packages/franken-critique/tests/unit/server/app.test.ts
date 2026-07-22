@@ -103,6 +103,23 @@ describe('Critique Hono Server', () => {
       expect((await res.json()).evaluatorsRun).toEqual(['selected']);
     });
 
+    it('treats an empty evaluator selector as the default evaluator set', async () => {
+      const app = createCritiqueApp({
+        pipeline: new CritiquePipeline([
+          makePassEvaluator('first'),
+          makePassEvaluator('second'),
+        ]),
+      });
+      const res = await app.request('/v1/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: 'const x = 1;', evaluators: [] }),
+      });
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).evaluatorsRun).toEqual(['first', 'second']);
+    });
+
     it('rejects evaluator selectors that are not registered', async () => {
       const app = createCritiqueApp({ pipeline: makePipeline() });
       const res = await app.request('/v1/review', {

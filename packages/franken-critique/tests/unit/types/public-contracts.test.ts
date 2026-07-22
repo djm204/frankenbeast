@@ -4,7 +4,11 @@ import type {
   ProviderCritiqueFinding,
   Score as SharedScore,
 } from '@franken/types';
-import { createScore, UnknownEvaluatorError } from '@franken/critique';
+import {
+  ConfigurationError,
+  createScore,
+  UnknownEvaluatorError,
+} from '@franken/critique';
 import type {
   CritiquePipelineRunOptions,
   CritiquePipelineResult,
@@ -25,6 +29,8 @@ describe('public critique type contracts', () => {
 
     expect(options.evaluatorNames).toEqual(['safety']);
     expect(error.evaluatorNames).toEqual(['missing']);
+    expect(error).toBeInstanceOf(ConfigurationError);
+    expect(error.code).toBe('CONFIGURATION_INVALID');
   });
 
   it('imports provider findings and critique pipeline results without alias confusion', () => {

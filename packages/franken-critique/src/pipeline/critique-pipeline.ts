@@ -6,6 +6,7 @@ import type {
   CritiquePipelineResult,
 } from '../types/evaluation.js';
 import { createScore } from '../types/common.js';
+import { ConfigurationError } from '../errors/index.js';
 
 const SAFETY_EVALUATOR_NAME = 'safety';
 
@@ -44,11 +45,13 @@ export interface CritiquePipelineRunOptions {
   readonly evaluatorNames?: readonly string[] | undefined;
 }
 
-export class UnknownEvaluatorError extends Error {
+export class UnknownEvaluatorError extends ConfigurationError {
   readonly evaluatorNames: readonly string[];
 
   constructor(evaluatorNames: readonly string[]) {
-    super(`Unknown evaluator selection: ${evaluatorNames.join(', ')}`);
+    super(`Unknown evaluator selection: ${evaluatorNames.join(', ')}`, {
+      context: { evaluatorNames },
+    });
     this.name = 'UnknownEvaluatorError';
     this.evaluatorNames = evaluatorNames;
   }
@@ -70,7 +73,8 @@ export class CritiquePipeline {
     options: CritiquePipelineRunOptions = {},
   ): Promise<CritiquePipelineResult> {
     const selectedNames = options.evaluatorNames;
-    if (selectedNames) {
+    const hasSelector = selectedNames !== undefined && selectedNames.length > 0;
+    if (hasSelector) {
       const registeredNames = new Set(
         this.evaluators.map((evaluator) => evaluator.name),
       );
@@ -81,7 +85,7 @@ export class CritiquePipeline {
         throw new UnknownEvaluatorError(unknownNames);
       }
     }
-    const evaluators = selectedNames
+    const evaluators = hasSelector
       ? this.evaluators.filter((evaluator) =>
           selectedNames.includes(evaluator.name),
         )
