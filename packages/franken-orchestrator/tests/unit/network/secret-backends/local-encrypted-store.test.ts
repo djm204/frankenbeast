@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { chmod, lstat, mkdtemp, readFile, readdir, rename, rm, stat, symlink } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { LocalEncryptedStore } from '../../../../src/network/secret-backends/local-encrypted-store.js';
@@ -99,14 +99,28 @@ describe('LocalEncryptedStore', () => {
       expect(fsMocks.open).toHaveBeenCalledWith(secretsDir, 'r');
     });
 
+    it('reports real parent-directory fsync failures', async () => {
+      const secretsDir = join(tempDir, '.fbeast');
+      const syncError = Object.assign(new Error('simulated directory sync failure'), { code: 'EIO' });
+      const originalOpen = fsMocks.open.getMockImplementation();
+      fsMocks.open.mockImplementation(async (...args) => {
+        if (args[0] === secretsDir && args[1] === 'r') {
+          return { sync: vi.fn().mockRejectedValue(syncError), close: vi.fn().mockResolvedValue(undefined) };
+        }
+        return originalOpen!(...args);
+      });
+
+      await expect(store.store('key', 'value')).rejects.toBe(syncError);
+    });
+
     it('preserves existing ciphertext permissions when replacing it', async () => {
       await store.store('key', 'value1');
       const encPath = join(tempDir, '.fbeast', 'secrets.enc');
-      await chmod(encPath, 0o640);
+      await chmod(encPath, 0o666);
 
       await store.store('key', 'value2');
 
-      expect((await stat(encPath)).mode & 0o777).toBe(0o640);
+      expect((await stat(encPath)).mode & 0o777).toBe(0o666);
     });
 
     it('atomically replaces the target of an existing ciphertext symlink', async () => {
@@ -121,6 +135,20 @@ describe('LocalEncryptedStore', () => {
       expect((await lstat(encPath)).isSymbolicLink()).toBe(true);
       expect(await store.resolve('key')).toBe('value2');
       expect((await stat(linkedEncPath)).isFile()).toBe(true);
+    });
+
+    it('preserves a dangling ciphertext symlink when creating its target', async () => {
+      const secretsDir = join(tempDir, '.fbeast');
+      const encPath = join(secretsDir, 'secrets.enc');
+      const linkedEncPath = join(tempDir, 'new-persisted-secrets.enc');
+      await mkdir(secretsDir);
+      await symlink(linkedEncPath, encPath);
+
+      await store.store('key', 'value');
+
+      expect((await lstat(encPath)).isSymbolicLink()).toBe(true);
+      expect((await stat(linkedEncPath)).isFile()).toBe(true);
+      expect(await store.resolve('key')).toBe('value');
     });
 
     it('handles multiple secrets', async () => {

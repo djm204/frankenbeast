@@ -1,6 +1,6 @@
 import { randomBytes, createCipheriv, createDecipheriv, pbkdf2Sync } from 'node:crypto';
-import { mkdir, open, readFile, realpath, rename, rm, stat } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { lstat, mkdir, open, readFile, readlink, realpath, rename, rm, stat } from 'node:fs/promises';
+import { basename, dirname, join, resolve } from 'node:path';
 import type { ISecretStore, SecretStoreDetection, SecretStoreOptions } from '../secret-store.js';
 
 const ALGORITHM = 'aes-256-gcm';
@@ -11,16 +11,39 @@ const IV_LENGTH = 16;
 const AUTH_TAG_LENGTH = 16;
 const SALT_LENGTH = 32;
 const DANGEROUS_SECRET_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+const UNSUPPORTED_DIRECTORY_SYNC_CODES = new Set(['EBADF', 'EISDIR', 'EINVAL', 'ENOSYS', 'ENOTSUP']);
 
 function createSecretsRecord(): Record<string, string> {
   return Object.create(null) as Record<string, string>;
 }
 
+async function resolveAtomicTarget(filePath: string): Promise<string> {
+  try {
+    return await realpath(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+  }
+
+  try {
+    if (!(await lstat(filePath)).isSymbolicLink()) {
+      return filePath;
+    }
+    const linkTarget = await readlink(filePath);
+    return resolveAtomicTarget(resolve(dirname(filePath), linkTarget));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return filePath;
+    }
+    throw error;
+  }
+}
+
 async function writeFileAtomic(filePath: string, data: string | Buffer): Promise<void> {
-  let targetPath = filePath;
+  const targetPath = await resolveAtomicTarget(filePath);
   let mode = 0o600;
   try {
-    targetPath = await realpath(filePath);
     mode = (await stat(targetPath)).mode & 0o777;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
@@ -36,6 +59,7 @@ async function writeFileAtomic(filePath: string, data: string | Buffer): Promise
 
   try {
     tempFile = await open(tempPath, 'wx', mode);
+    await tempFile.chmod(mode);
     await tempFile.writeFile(data);
     await tempFile.sync();
     await tempFile.close();
@@ -46,8 +70,11 @@ async function writeFileAtomic(filePath: string, data: string | Buffer): Promise
     try {
       parentDir = await open(dirname(targetPath), 'r');
       await parentDir.sync();
-    } catch {
-      // Some platforms/filesystems do not support syncing directory handles.
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (!code || !UNSUPPORTED_DIRECTORY_SYNC_CODES.has(code)) {
+        throw error;
+      }
     } finally {
       await parentDir?.close().catch(() => undefined);
     }
