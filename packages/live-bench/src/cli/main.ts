@@ -30,7 +30,7 @@ Commands:
 
 if (command === 'list') {
   const corpusRoot = process.argv[3];
-  if (!corpusRoot) {
+  if (!corpusRoot || process.argv.length !== 4) {
     console.error('Usage: fbeast-live-bench list <corpus-root>');
     process.exit(2);
   }

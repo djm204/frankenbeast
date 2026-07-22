@@ -230,6 +230,14 @@ describe('live-bench CLI smoke coverage', () => {
     expect(result.stderr).toContain('Usage: fbeast-live-bench list <corpus-root>');
   }, 35_000);
 
+  it('rejects extra list arguments instead of ignoring them', () => {
+    const result = runCli(['list', corpusRoot, '--unexpected']);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('Usage: fbeast-live-bench list <corpus-root>');
+  }, 35_000);
+
   it('exits with code 2 for unknown commands', () => {
     const result = runCli(['unsupported']);
 
