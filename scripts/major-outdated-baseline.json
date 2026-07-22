@@ -253,111 +253,111 @@
     "name": "typescript",
     "dependent": "@franken/brain",
     "location": "node_modules/typescript",
-    "currentMajor": 5,
+    "currentMajor": 6,
     "latestMajor": 7,
-    "current": "5.9.3",
+    "current": "6.0.3",
     "latest": "7.0.2",
-    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+    "reason": "TypeScript 7 is not yet supported by the repository's typescript-eslint release; retain the supported TypeScript 6 line."
   },
   {
     "name": "typescript",
     "dependent": "@franken/critique",
     "location": "node_modules/typescript",
-    "currentMajor": 5,
+    "currentMajor": 6,
     "latestMajor": 7,
-    "current": "5.9.3",
+    "current": "6.0.3",
     "latest": "7.0.2",
-    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+    "reason": "TypeScript 7 is not yet supported by the repository's typescript-eslint release; retain the supported TypeScript 6 line."
   },
   {
     "name": "typescript",
     "dependent": "@franken/governor",
     "location": "node_modules/typescript",
-    "currentMajor": 5,
+    "currentMajor": 6,
     "latestMajor": 7,
-    "current": "5.9.3",
+    "current": "6.0.3",
     "latest": "7.0.2",
-    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+    "reason": "TypeScript 7 is not yet supported by the repository's typescript-eslint release; retain the supported TypeScript 6 line."
   },
   {
     "name": "typescript",
     "dependent": "@franken/live-bench",
     "location": "node_modules/typescript",
-    "currentMajor": 5,
+    "currentMajor": 6,
     "latestMajor": 7,
-    "current": "5.9.3",
+    "current": "6.0.3",
     "latest": "7.0.2",
-    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+    "reason": "TypeScript 7 is not yet supported by the repository's typescript-eslint release; retain the supported TypeScript 6 line."
   },
   {
     "name": "typescript",
     "dependent": "@franken/mcp-suite",
     "location": "node_modules/typescript",
-    "currentMajor": 5,
+    "currentMajor": 6,
     "latestMajor": 7,
-    "current": "5.9.3",
+    "current": "6.0.3",
     "latest": "7.0.2",
-    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+    "reason": "TypeScript 7 is not yet supported by the repository's typescript-eslint release; retain the supported TypeScript 6 line."
   },
   {
     "name": "typescript",
     "dependent": "@franken/observer",
     "location": "node_modules/typescript",
-    "currentMajor": 5,
+    "currentMajor": 6,
     "latestMajor": 7,
-    "current": "5.9.3",
+    "current": "6.0.3",
     "latest": "7.0.2",
-    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+    "reason": "TypeScript 7 is not yet supported by the repository's typescript-eslint release; retain the supported TypeScript 6 line."
   },
   {
     "name": "typescript",
     "dependent": "@franken/orchestrator",
     "location": "node_modules/typescript",
-    "currentMajor": 5,
+    "currentMajor": 6,
     "latestMajor": 7,
-    "current": "5.9.3",
+    "current": "6.0.3",
     "latest": "7.0.2",
-    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+    "reason": "TypeScript 7 is not yet supported by the repository's typescript-eslint release; retain the supported TypeScript 6 line."
   },
   {
     "name": "typescript",
     "dependent": "@franken/planner",
     "location": "node_modules/typescript",
-    "currentMajor": 5,
+    "currentMajor": 6,
     "latestMajor": 7,
-    "current": "5.9.3",
+    "current": "6.0.3",
     "latest": "7.0.2",
-    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+    "reason": "TypeScript 7 is not yet supported by the repository's typescript-eslint release; retain the supported TypeScript 6 line."
   },
   {
     "name": "typescript",
     "dependent": "@franken/types",
     "location": "node_modules/typescript",
-    "currentMajor": 5,
+    "currentMajor": 6,
     "latestMajor": 7,
-    "current": "5.9.3",
+    "current": "6.0.3",
     "latest": "7.0.2",
-    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+    "reason": "TypeScript 7 is not yet supported by the repository's typescript-eslint release; retain the supported TypeScript 6 line."
   },
   {
     "name": "typescript",
     "dependent": "@franken/web",
     "location": "node_modules/typescript",
-    "currentMajor": 5,
+    "currentMajor": 6,
     "latestMajor": 7,
-    "current": "5.9.3",
+    "current": "6.0.3",
     "latest": "7.0.2",
-    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+    "reason": "TypeScript 7 is not yet supported by the repository's typescript-eslint release; retain the supported TypeScript 6 line."
   },
   {
     "name": "typescript",
     "dependent": "frankenbeast",
     "location": "node_modules/typescript",
-    "currentMajor": 5,
+    "currentMajor": 6,
     "latestMajor": 7,
-    "current": "5.9.3",
+    "current": "6.0.3",
     "latest": "7.0.2",
-    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+    "reason": "TypeScript 7 is not yet supported by the repository's typescript-eslint release; retain the supported TypeScript 6 line."
   },
   {
     "name": "zod",
