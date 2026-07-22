@@ -62,7 +62,7 @@ function mockSpawnError(errorMessage = 'spawn command not found') {
   return proc;
 }
 
-function mockStdinError(errorMessage = 'write EPIPE') {
+function mockStdinError(errorMessage = 'write EPIPE', late = false) {
   const stdout = new PassThrough();
   const stdin = new PassThrough();
   let hadErrorListener = false;
@@ -73,12 +73,28 @@ function mockStdinError(errorMessage = 'write EPIPE') {
     pid: 1,
     exitCode: null as number | null,
     signalCode: null as NodeJS.Signals | null,
-    kill: vi.fn(() => true),
+    kill: vi.fn(() => {
+      if (!late) {
+        setImmediate(() => {
+          stdout.end();
+          setImmediate(() => proc.emit('close', 1));
+        });
+      }
+      return true;
+    }),
   });
   vi.spyOn(stdin, 'write').mockImplementation(() => {
     hadErrorListener = stdin.listenerCount('error') > 0;
     setImmediate(() => {
-      if (hadErrorListener) stdin.emit('error', new Error(errorMessage));
+      if (late) {
+        stdout.end();
+        setImmediate(() => {
+          if (hadErrorListener) stdin.emit('error', new Error(errorMessage));
+          setImmediate(() => proc.emit('close', 0));
+        });
+      } else if (hadErrorListener) {
+        stdin.emit('error', new Error(errorMessage));
+      }
     });
     return true;
   });
@@ -289,6 +305,21 @@ describe('CodexCliAdapter', () => {
         error: expect.stringContaining('write EPIPE'),
         retryable: false,
       }]);
+    });
+
+    it('reports stdin errors that arrive after stdout ends but before process close', async () => {
+      const { proc } = mockStdinError('late write EPIPE', true);
+      const events = await collectEvents(adapter.execute({
+        systemPrompt: '',
+        messages: [{ role: 'user', content: 'x'.repeat(128 * 1024) }],
+      }));
+
+      expect(events).toEqual([{
+        type: 'error',
+        error: expect.stringContaining('late write EPIPE'),
+        retryable: false,
+      }]);
+      expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
     });
 
     it('parses tool call events', async () => {

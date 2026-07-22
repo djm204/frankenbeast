@@ -79,7 +79,13 @@ function mockStdinError(errorMessage = 'write EPIPE') {
     pid: 1,
     exitCode: null as number | null,
     signalCode: null as NodeJS.Signals | null,
-    kill: vi.fn(() => true),
+    kill: vi.fn(() => {
+      setImmediate(() => {
+        stdout.end();
+        setImmediate(() => proc.emit('close', 1));
+      });
+      return true;
+    }),
   });
   vi.spyOn(stdin, 'write').mockImplementation(() => {
     hadErrorListener = stdin.listenerCount('error') > 0;

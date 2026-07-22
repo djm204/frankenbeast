@@ -704,12 +704,15 @@ export class CliLlmAdapter implements IAdapter {
         settle(() => reject(err));
       });
 
-      child.stdin!.on('error', (err) => {
+      child.stdin!.on('error', (error) => {
         if (settled) return;
         clearTimeout(timer);
         input.signal?.removeEventListener('abort', abortRequest);
         terminate('stdin-failed');
-        settle(() => reject(err));
+        const message = error instanceof Error ? error.message : String(error);
+        settle(() => reject(new Error(`Failed to write prompt to ${input.cmd} stdin: ${message}`, {
+          cause: error,
+        })));
       });
 
       if (!settled) {
@@ -718,7 +721,10 @@ export class CliLlmAdapter implements IAdapter {
           child.stdin!.end();
         } catch (error) {
           terminate('stdin-failed');
-          settle(() => reject(error));
+          const message = error instanceof Error ? error.message : String(error);
+          settle(() => reject(new Error(`Failed to write prompt to ${input.cmd} stdin: ${message}`, {
+            cause: error,
+          })));
         }
       }
     });

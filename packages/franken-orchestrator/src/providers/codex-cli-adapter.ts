@@ -59,11 +59,9 @@ export class CodexCliAdapter implements ILlmProvider {
     const spawnState: {
       message: string | undefined;
       source: 'spawn' | 'stdin' | undefined;
-      closeStream: (() => void) | undefined;
     } = {
       message: undefined,
       source: undefined,
-      closeStream: undefined,
     };
     proc.once('error', (error) => {
       spawnState.message = error.message;
@@ -74,7 +72,6 @@ export class CodexCliAdapter implements ILlmProvider {
         spawnState.message = error.message;
         spawnState.source = 'stdin';
       }
-      spawnState.closeStream?.();
       if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGTERM');
     });
 
@@ -170,12 +167,9 @@ export class CodexCliAdapter implements ILlmProvider {
     spawnState: {
       message: string | undefined;
       source: 'spawn' | 'stdin' | undefined;
-      closeStream: (() => void) | undefined;
     },
   ): AsyncGenerator<LlmStreamEvent> {
     const rl = createInterface({ input: proc.stdout! });
-    spawnState.closeStream = () => rl.close();
-    if (spawnState.source === 'stdin') rl.close();
     proc.once('error', () => {
       rl.close();
     });
@@ -250,6 +244,18 @@ export class CodexCliAdapter implements ILlmProvider {
       const exitCode = await new Promise<number | null>((resolve) => {
         proc.on('close', resolve);
       });
+      // stdin errors can arrive after stdout reaches EOF but before process close.
+      if (spawnState.message) {
+        streamCompleted = true;
+        yield {
+          type: 'error',
+          error: spawnState.source === 'stdin'
+            ? `codex process stdin failed: ${spawnState.message}`
+            : `codex process failed to start: ${spawnState.message}`,
+          retryable: false,
+        };
+        return;
+      }
       if (exitCode !== 0 && exitCode !== null) {
         yield {
           type: 'error',

@@ -65,7 +65,7 @@ function mockSpawnError(errorMessage = 'spawn command not found') {
   return proc;
 }
 
-function mockStdinError(errorMessage = 'write EPIPE') {
+function mockStdinError(errorMessage = 'write EPIPE', stdoutFrame?: string) {
   const stdout = new PassThrough();
   const stdin = new PassThrough();
   let hadErrorListener = false;
@@ -76,7 +76,14 @@ function mockStdinError(errorMessage = 'write EPIPE') {
     pid: 1234,
     exitCode: null as number | null,
     signalCode: null as NodeJS.Signals | null,
-    kill: vi.fn(() => true),
+    kill: vi.fn(() => {
+      setImmediate(() => {
+        if (stdoutFrame) stdout.write(`${stdoutFrame}\n`);
+        stdout.end();
+        setImmediate(() => proc.emit('close', 1));
+      });
+      return true;
+    }),
   });
   vi.spyOn(stdin, 'write').mockImplementation(() => {
     hadErrorListener = stdin.listenerCount('error') > 0;
@@ -234,6 +241,25 @@ describe('ClaudeCliAdapter', () => {
         type: 'error',
         error: expect.stringContaining('write EPIPE'),
         retryable: false,
+      }]);
+    });
+
+    it('preserves a provider error frame emitted after stdin fails', async () => {
+      const providerError = JSON.stringify({
+        type: 'error',
+        error: { message: 'rate limit exceeded while rejecting prompt' },
+      });
+      mockStdinError('write EPIPE', providerError);
+
+      const events = await collectEvents(adapter.execute({
+        systemPrompt: '',
+        messages: [{ role: 'user', content: 'x'.repeat(128 * 1024) }],
+      }));
+
+      expect(events).toEqual([{
+        type: 'error',
+        error: 'rate limit exceeded while rejecting prompt',
+        retryable: true,
       }]);
     });
 

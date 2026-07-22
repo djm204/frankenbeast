@@ -508,7 +508,9 @@ describe('CliLlmAdapter', () => {
           vi.spyOn(stdin, 'write').mockImplementation(() => {
             hadErrorListener = stdin.listenerCount('error') > 0;
             setImmediate(() => {
-              if (hadErrorListener) stdin.emit('error', new Error('write EPIPE'));
+              if (hadErrorListener) {
+                stdin.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }));
+              }
               proc.emit('close', 1);
             });
             return true;
@@ -517,8 +519,14 @@ describe('CliLlmAdapter', () => {
         };
         const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
 
-        await expect(adapter.execute({ prompt: 'x'.repeat(128 * 1024), maxTurns: 1 }))
-          .rejects.toThrow('write EPIPE');
+        try {
+          await adapter.execute({ prompt: 'x'.repeat(128 * 1024), maxTurns: 1 });
+          throw new Error('expected execute to throw');
+        } catch (error) {
+          expect(error).toBeInstanceOf(Error);
+          expect((error as Error).message).toContain('write EPIPE');
+          expect((error as Error & { cause?: { kind?: string } }).cause?.kind).toBe('command_failed');
+        }
         expect(hadErrorListener).toBe(true);
       });
 
