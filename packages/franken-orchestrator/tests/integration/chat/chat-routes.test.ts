@@ -303,6 +303,36 @@ describe('Chat HTTP Routes', () => {
     expect(sessionBody.data.providerContext).toEqual(providerContext);
   });
 
+  it('recomputes persisted REST token totals from transcript usage', async () => {
+    app = createChatApp({
+      sessionStoreDir: TMP,
+      llm: {
+        complete: llmComplete,
+        completeWithUsage: vi.fn().mockResolvedValue({
+          text: 'Measured reply.',
+          usage: { inputTokens: 40, outputTokens: 10, totalTokens: 50 },
+        }),
+      },
+      projectName: 'test-project',
+    });
+    const createRes = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    const { data: created } = await createRes.json();
+
+    await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'measure this turn' }),
+    });
+
+    const sessionRes = await app.request(`/v1/chat/sessions/${created.id}`);
+    const sessionBody = await sessionRes.json();
+    expect(sessionBody.data.tokenTotals).toEqual({ cheap: 50, premiumReasoning: 0, premiumExecution: 0 });
+  });
+
   it('accepts chat message content at the 16,000-character limit', async () => {
     const createRes = await app.request('/v1/chat/sessions', {
       method: 'POST',

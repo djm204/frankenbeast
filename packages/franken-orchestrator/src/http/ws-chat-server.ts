@@ -10,6 +10,7 @@ import {
 } from '../chat/approval-audit-log.js';
 import { ChatRuntime, pendingApprovalRuntimeState } from '../chat/runtime.js';
 import type { ISessionStore } from '../chat/session-store.js';
+import { Transcript } from '../chat/transcript.js';
 import type { ChatSession } from '../chat/types.js';
 import type { TurnEvent } from '../chat/turn-runner.js';
 import {
@@ -512,6 +513,7 @@ export class ChatSocketController {
     });
 
     session.transcript = result.transcript;
+    session.tokenTotals = Transcript.fromMessages(result.transcript).tokensByTier();
     session.state = result.state;
     session.pendingApproval = result.pendingApproval && result.pendingApprovalDescription
       ? {
@@ -800,6 +802,8 @@ export class ChatSocketController {
     );
     session.pendingApproval = null;
     session.state = result.state === 'active' ? 'approved' : result.state;
+    session.transcript = result.transcript;
+    session.tokenTotals = Transcript.fromMessages(result.transcript).tokensByTier();
     session.beastContext = result.beastContext ?? null;
     session.providerContext = result.providerContext ?? session.providerContext ?? null;
     session.updatedAt = nowIso();

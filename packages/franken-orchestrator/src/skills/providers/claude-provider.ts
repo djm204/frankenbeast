@@ -98,11 +98,11 @@ export class ClaudeProvider implements ICliProvider {
   }
 
   extractUsage(raw: string): TokenUsage | undefined {
-    return extractNdjsonTokenUsage(raw);
+    return extractNdjsonTokenUsage(stripHookJson(raw));
   }
 
   extractModel(raw: string): string | undefined {
-    return extractNdjsonModel(raw);
+    return extractNdjsonModel(stripHookJson(raw));
   }
 
   isRateLimited(stderr: string): boolean {

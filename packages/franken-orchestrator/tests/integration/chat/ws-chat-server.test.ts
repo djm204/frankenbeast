@@ -549,6 +549,7 @@ describe('ws chat server', () => {
         clientMessageId: 'client-1',
         content: 'Explain the routing logic',
       }));
+      expect(store.get(session.id)?.tokenTotals).toEqual({ cheap: 50, premiumReasoning: 0, premiumExecution: 0 });
       return sent
         .map((raw) => JSON.parse(raw) as Record<string, unknown>)
         .filter((event) => event.type === 'assistant.message.complete');

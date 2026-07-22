@@ -194,6 +194,14 @@ describe('ClaudeProvider', () => {
     expect(provider.extractUsage?.(raw)).toEqual({ inputTokens: 50, outputTokens: 12, totalTokens: 62 });
   });
 
+  it('extracts usage and model when hook JSON leaks onto the result line', () => {
+    const raw = '{"hookSpecificOutput":{"hookEventName":"SessionStart"}}'
+      + '{"type":"result","result":"hi","modelUsage":{"claude-opus-4-8":{}},"usage":{"input_tokens":50,"output_tokens":12}}';
+
+    expect(provider.extractUsage?.(raw)).toEqual({ inputTokens: 50, outputTokens: 12, totalTokens: 62 });
+    expect(provider.extractModel?.(raw)).toBe('claude-opus-4-8');
+  });
+
   it('extractUsage returns undefined when the CLI output has no usage', () => {
     expect(provider.extractUsage?.('plain text output')).toBeUndefined();
   });

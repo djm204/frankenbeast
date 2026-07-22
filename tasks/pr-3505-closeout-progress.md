@@ -18,6 +18,9 @@
 - [x] Verify exact-head GitHub CI is green; repair only exact-head failures if needed.
 - [x] Address the five fresh Codex invocation-4 findings and add focused regressions; 367 targeted tests, orchestrator typecheck/lint, root build, and `git diff --check` pass.
 - [x] Repair the two stale provider-transparency assertions exposed by exact-head CI and re-run both focused suites (49 tests pass).
-- [ ] Publish the CI assertion repair through approval-cop and verify exact-head CI.
-- [ ] Obtain a fresh exact-head Codex clean and verify zero unresolved Codex threads.
+- [x] Publish the CI assertion repair through approval-cop and verify exact-head CI.
+- [x] Resolve invocation-4 threads and obtain the fifth/final Codex review response.
+- [x] Address the four invocation-5 findings: hook-safe usage/model extraction, per-turn context usage, persisted web token totals, and comms provider context; 103 focused tests, typecheck, lint, build, and diff checks pass.
+- [ ] Publish the invocation-5 repair through approval-cop and verify exact-head CI.
+- [ ] Verify zero unresolved Codex threads and record the invocation-cap closeout state.
 - [ ] Route a head-pinned squash merge through approval-cop and verify PR terminal state.

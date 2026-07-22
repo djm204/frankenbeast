@@ -387,10 +387,10 @@ describe('ChatRepl', () => {
     expect(ruleOutputs.length).toBeGreaterThanOrEqual(6); // 3 prompts (incl. /quit) × 2 rules each
 
     // First turn's usage (120 tokens) is visible on the rule printed for the
-    // second prompt; by the third (final) prompt both turns are summed.
+    // second prompt; the third prompt uses only the latest turn's usage.
     expect(ruleOutputs.some((o) => /120\/1000|12%/.test(o))).toBe(true);
     const finalRule = ruleOutputs[ruleOutputs.length - 1]!;
-    expect(finalRule).toContain('18%'); // (120+60)/1000
+    expect(finalRule).toContain('6%'); // latest turn: 60/1000
     expect(finalRule).toContain('compactions 1');
   });
 

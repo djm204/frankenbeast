@@ -10,14 +10,6 @@ import { withSpinner, QUIRKY_PHRASES } from './spinner.js';
 import { CHAT_COLOR, CHAT_GLYPHS, chatBanner, chatBlock, chatStatusLine, statusRule } from './chat-style.js';
 import { isoNow, type ProviderContext, type TokenUsage } from '@franken/types';
 
-function addUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
-  return {
-    inputTokens: a.inputTokens + b.inputTokens,
-    outputTokens: a.outputTokens + b.outputTokens,
-    totalTokens: a.totalTokens + b.totalTokens,
-  };
-}
-
 
 function printLine(...args: unknown[]): void {
   console.info(...args);
@@ -115,7 +107,7 @@ export class ChatRepl {
   private transcript: TranscriptMessage[] = [];
   private pendingApproval = false;
   private readonly sessionStartedAt = Date.now();
-  private cumulativeUsage: TokenUsage | undefined;
+  private latestUsage: TokenUsage | undefined;
   private compactionCount = 0;
   private lastProviderContext: ProviderContext | undefined;
 
@@ -144,7 +136,7 @@ export class ChatRepl {
       ? this.contextMaxTokensForProvider?.(this.lastProviderContext.provider)
       : this.configuredContextMaxTokens;
     this.io.print(statusRule(process.stdout.columns ?? 80, {
-      ...(this.cumulativeUsage ? { usage: this.cumulativeUsage } : {}),
+      ...(this.latestUsage ? { usage: this.latestUsage } : {}),
       ...(contextMaxTokens !== undefined ? { contextMaxTokens } : {}),
       compactions: this.compactionCount,
       sessionDurationMs: Date.now() - this.sessionStartedAt,
@@ -207,9 +199,7 @@ export class ChatRepl {
     this.pendingApproval = result.pendingApproval;
     this.transcript = result.transcript;
     if (result.usage) {
-      this.cumulativeUsage = this.cumulativeUsage
-        ? addUsage(this.cumulativeUsage, result.usage)
-        : result.usage;
+      this.latestUsage = result.usage;
     }
     if (result.truncated) {
       this.compactionCount++;

@@ -6,6 +6,7 @@ import { BeastDaemonRequestError } from '../../chat/beast-daemon-dispatch-adapte
 import { isValidChatSessionId, type CorruptChatSessionFile, type ISessionStore } from '../../chat/session-store.js';
 import type { ConversationEngine } from '../../chat/conversation-engine.js';
 import { ChatRuntime, pendingApprovalRuntimeState } from '../../chat/runtime.js';
+import { Transcript } from '../../chat/transcript.js';
 import type { TurnRunner } from '../../chat/turn-runner.js';
 import type {
   ApiDataEnvelope,
@@ -402,6 +403,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
       }).catch(throwKnownChatRuntimeError);
 
       session.transcript = result.transcript;
+      session.tokenTotals = Transcript.fromMessages(result.transcript).tokensByTier();
       session.state = result.state;
       session.pendingApproval = result.pendingApproval && result.pendingApprovalDescription
         ? {
@@ -574,6 +576,8 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
           approvalRequester(c),
         );
         session.state = result.state === 'active' ? 'approved' : result.state;
+        session.transcript = result.transcript;
+        session.tokenTotals = Transcript.fromMessages(result.transcript).tokensByTier();
         session.pendingApproval = null;
         session.beastContext = result.beastContext ?? null;
         session.providerContext = result.providerContext ?? session.providerContext ?? null;
