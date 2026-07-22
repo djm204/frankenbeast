@@ -167,7 +167,7 @@ export class ChatApiClient {
   private async request<T>(path: string, init: RequestInit): Promise<T> {
     // Browser chat requests authenticate through the same-origin server/BFF
     // layer (or HttpOnly/SameSite cookies), never by accepting an operator
-    // bearer token in bundled client code.
+    // credential in bundled client code.
     const effectiveInit: RequestInit = {
       ...init,
       credentials: init.credentials ?? this.requestCredentials,
