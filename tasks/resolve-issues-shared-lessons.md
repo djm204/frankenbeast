@@ -123,6 +123,10 @@
 - Preserve the one-agent-per-issue policy during doctor/PM closeout: if an existing worktree/card owns the PR, leave evidence-backed handoff comments instead of spawning a duplicate worker or parallel replacement; every PM status comment should explicitly state whether duplicate edits/workers were created.
 - DSM/docs-only closeout notes still move the PR head if committed, so after pushing them, re-check CI on the new head and report whether the push was a documentation/lesson-only change versus a code fix.
 
+## 2026-07-22 — Doctor closeout without force-pushing a diverged issue branch
+- When a verified PR fix is stranded in a rebased local branch that is ahead/behind the live PR head, preserve the fix as a patch and switch to a temporary local branch based directly on the remote PR branch; commit the fix there and push it as a normal fast-forward to the PR branch. This avoids rewriting reviewed history or waiting on destructive-reset/force-push approval while keeping one issue and one PR.
+- When an API changes cleanup from synchronous to awaitable, search repository consumers and await the returned promise in async teardown paths; package lint can expose missed consumers as `no-floating-promises`, and a Codex inline finding may point to a consumer even when attached to the changed API declaration.
+
 ## 2026-07-17 — Architecture docs package-name consistency
 - For docs-only architecture fixes, add narrow regression tests that slice the relevant README/docs sections and assert legacy labels are absent there, rather than banning every historical MOD reference across the repository; configuration/env docs may still need legacy toggles for compatibility.
 
