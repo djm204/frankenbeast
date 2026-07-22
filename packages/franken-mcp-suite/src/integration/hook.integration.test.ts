@@ -84,6 +84,16 @@ describe('fbeast-hook runtime', () => {
     expect(seen).toContain(substitution);
   });
 
+  it('preserves shell commands after authorization environment assignments for governance', async () => {
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], {
+      context: 'authorization=Token rm -rf /tmp/nope',
+    });
+
+    const seen = result.checkCalls[0]!.context;
+    expect(seen).toContain('authorization=[REDACTED]');
+    expect(seen).toContain('rm -rf /tmp/nope');
+  });
+
   it('redacts prefixed env-style credential assignments before governor persistence', async () => {
     const values = [
       ['openai', 'fixture', 'value'].join('-'),
@@ -251,6 +261,7 @@ describe('fbeast-hook runtime', () => {
       sessionCookie: secret,
       setCookie: secret,
       cookie: secret,
+      credential: secret,
       credentials: secret,
       passphrase: secret,
     });
@@ -259,7 +270,7 @@ describe('fbeast-hook runtime', () => {
     const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
     const loggedPayload = JSON.parse(metadata.payload) as Record<string, string>;
 
-    expect(Object.values(loggedPayload)).toEqual(Array(7).fill('[REDACTED]'));
+    expect(Object.values(loggedPayload)).toEqual(Array(8).fill('[REDACTED]'));
     expect(result.observerLogs[0]!.metadata).not.toContain(secret);
   });
 
@@ -340,6 +351,23 @@ describe('fbeast-hook runtime', () => {
 
     expect(result.observerLogs[0]!.metadata).not.toContain(secret);
     expect(result.observerLogs[0]!.metadata.match(/Authorization: \[REDACTED\]/g)).toHaveLength(2);
+  });
+
+  it('redacts credential values from serialized header entry arrays', async () => {
+    const secret = ['header', 'tuple', 'fixture'].join('-');
+    const payload = JSON.stringify({
+      headers: [['Authorization', `Basic ${secret}`], ['Content-Type', 'application/json']],
+    });
+
+    const result = await runHookForTest(['post-tool', 'custom_tool', payload]);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+    const loggedPayload = JSON.parse(metadata.payload) as { headers: string[][] };
+
+    expect(loggedPayload.headers).toEqual([
+      ['Authorization', '[REDACTED]'],
+      ['Content-Type', 'application/json'],
+    ]);
+    expect(result.observerLogs[0]!.metadata).not.toContain(secret);
   });
 
   it('recurses into top-level JSON string payloads before observer logging', async () => {
@@ -429,6 +457,19 @@ describe('fbeast-hook runtime', () => {
     const metadata = JSON.parse(result.observerLogs[0]!.metadata) as {
       payload: string;
     };
+    expect(metadata.payload).toBe('[post-tool-payload-redacted]');
+    expect(result.observerLogs[0]!.metadata).not.toContain(secret);
+  });
+
+  it('redacts oversized payloads containing escaped credential assignments', async () => {
+    const secret = ['escaped', 'oversized', 'fixture'].join('-');
+    const payload = JSON.stringify({
+      output: `${'x'.repeat(70_000)} ${JSON.stringify({ apiKey: secret })}`,
+    });
+
+    const result = await runHookForTest(['post-tool', 'read_file', payload]);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+
     expect(metadata.payload).toBe('[post-tool-payload-redacted]');
     expect(result.observerLogs[0]!.metadata).not.toContain(secret);
   });
