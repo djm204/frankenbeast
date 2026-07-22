@@ -107,6 +107,42 @@ function containsStructuredSecretIndicator(text: string): boolean {
   return false;
 }
 
+function redactLabelledObjectValues(objectText: string): string {
+  const valuePattern = /((?:\\*["'])value(?:\\*["'])\s*:\s*)((?:\\*)["'])/gi;
+  const pieces: string[] = [];
+  let cursor = 0;
+  let match = valuePattern.exec(objectText);
+
+  while (match) {
+    const matchIndex = match.index;
+    const openingMarker = match[2]!;
+    const quote = openingMarker.at(-1)!;
+    const structuralSlashCount = openingMarker.length - 1;
+    const valueStart = matchIndex + match[0].length;
+    let closingMarkerStart = objectText.length;
+    let closingMarkerEnd = objectText.length;
+
+    for (let index = valueStart; index < objectText.length; index += 1) {
+      if (objectText[index] !== quote) continue;
+      let slashCount = 0;
+      for (let slashIndex = index - 1; slashIndex >= valueStart && objectText[slashIndex] === '\\'; slashIndex -= 1) {
+        slashCount += 1;
+      }
+      if (slashCount !== structuralSlashCount) continue;
+      closingMarkerStart = index - slashCount;
+      closingMarkerEnd = index + 1;
+      break;
+    }
+
+    pieces.push(objectText.slice(cursor, valueStart), '[REDACTED]');
+    cursor = closingMarkerStart;
+    valuePattern.lastIndex = closingMarkerEnd;
+    match = valuePattern.exec(objectText);
+  }
+
+  return pieces.length === 0 ? objectText : pieces.join('') + objectText.slice(cursor);
+}
+
 function redactStructuredSecretsRaw(text: string): string {
   const tuplePattern = /(\[\s*\\*["']([A-Za-z][A-Za-z0-9_-]{0,127})\\*["']\s*,\s*)(\\*["'])([^\]\r\n]*?)\3(\s*\])/g;
   const tupleRedacted = text.replace(
@@ -117,10 +153,7 @@ function redactStructuredSecretsRaw(text: string): string {
 
   return tupleRedacted.replace(/\{[^{}\r\n]{0,8192}\}/g, (objectText) => {
     if (!containsStructuredSecretIndicator(objectText)) return objectText;
-    return objectText.replace(
-      /((?:\\*["'])value(?:\\*["'])\s*:\s*)(\\*["'])((?:\\.|(?!\2)[\s\S])*?)\2/i,
-      '$1$2[REDACTED]$2',
-    );
+    return redactLabelledObjectValues(objectText);
   });
 }
 
@@ -161,7 +194,7 @@ function redactRawSecrets(text: string, preserveShellCommands = false): string {
       .replace(/(\bauthorization\b\s*=\s*)(?:[A-Za-z][A-Za-z0-9_-]*(?:\s+(?![A-Za-z][A-Za-z0-9_-]{0,127}\s*=(?!=))[A-Za-z0-9._~+/-]+=*)+|[A-Za-z0-9._~+/-]+=*)/gi, '$1[REDACTED]');
 
   const sensitiveOptionPattern = preserveShellCommands
-    ? /(--([A-Za-z][A-Za-z0-9-]{0,127})\s+)("(?:\\.|[^"])*"|'[^']*'|AWS4-HMAC-SHA256(?:\s+(?:Credential|SignedHeaders|Signature)=[^\s\r\n;&|<>`$]+)+|(?:Basic|Bearer|Token)\s+[^\s\r\n;&|<>`$]+|[^\s\\;&|<>()$`]+)/gi
+    ? /(--([A-Za-z][A-Za-z0-9-]{0,127})\s+)("(?:\\.|[^"])*"|'[^']*'|AWS4-HMAC-SHA256(?:\s+(?:Credential|SignedHeaders|Signature)=[^\s\r\n;&|<>`$]+)+|(?:Basic|Bearer|Token)\s+[^\s\r\n;&|<>`$]+|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/gi
     : /(--([A-Za-z][A-Za-z0-9-]{0,127})\s+)("(?:\\.|[^"])*"|'[^']*'|AWS4-HMAC-SHA256(?:\s+(?:Credential|SignedHeaders|Signature)=[^\s\r\n&|<>`$]+)+|(?:Basic|Bearer|Token)\s+\S+|\S+)/gi;
 
   return redacted
@@ -232,14 +265,19 @@ export function redactSecrets(text: string, preserveShellCommands = false): stri
       const redacted = redactJsonSecrets(parsed, state, undefined, preserveShellCommands);
       if (state.changed) return JSON.stringify(redacted);
       const rawRedacted = redactRawSecrets(text, preserveShellCommands);
-      if (rawRedacted !== text) return rawRedacted;
-      if (!containsStructuredSecretIndicator(text)) return text;
-      return preserveShellCommands ? redactStructuredSecretsRaw(text) : '[REDACTED]';
+      if (containsStructuredSecretIndicator(text)) {
+        return preserveShellCommands ? redactStructuredSecretsRaw(rawRedacted) : '[REDACTED]';
+      }
+      return rawRedacted;
     }
   } catch {
     // Legacy command contexts are plain text, not JSON.
   }
-  return redactRawSecrets(text, preserveShellCommands);
+  const rawRedacted = redactRawSecrets(text, preserveShellCommands);
+  if (containsStructuredSecretIndicator(text)) {
+    return preserveShellCommands ? redactStructuredSecretsRaw(rawRedacted) : '[REDACTED]';
+  }
+  return rawRedacted;
 }
 
 async function readStdinPayload(): Promise<string> {

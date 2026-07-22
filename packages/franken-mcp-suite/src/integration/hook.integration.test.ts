@@ -113,14 +113,27 @@ describe('fbeast-hook runtime', () => {
   });
 
   it('redacts escaped quotes in shadowed structured secrets without hiding governed commands', async () => {
-    const escapedSecret = 'abc\\"def';
-    const structuredContext = `{"output":{"value":"${escapedSecret}","name":"OPENAI_API_KEY"},"output":"rm -rf /tmp/nope"}`;
+    const escapedSecret = String.raw`abc\\\"def`;
+    const structuredContext = String.raw`{\"output\":{\"value\":\"${escapedSecret}\",\"name\":\"OPENAI_API_KEY\"},\"output\":\"rm -rf /tmp/nope\"}`;
     const structuredResult = await runHookForTest(['pre-tool', '--', 'Bash'], { context: structuredContext });
     const governedContext = structuredResult.checkCalls[0]!.context;
 
     expect(governedContext).toContain('rm -rf /tmp/nope');
     expect(governedContext).not.toContain('abc');
     expect(governedContext).not.toContain('def');
+  });
+
+  it('redacts every duplicate value in labelled shadowed objects', async () => {
+    const firstSecret = ['first', 'pair', 'fixture'].join('-');
+    const secondSecret = ['second', 'pair', 'fixture'].join('-');
+    const context = String.raw`{\"output\":{\"name\":\"OPENAI_API_KEY\",\"value\":\"${firstSecret}\",\"value\":\"${secondSecret}\"},\"output\":\"rm -rf /tmp/nope\"}`;
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], { context });
+    const governedContext = result.checkCalls[0]!.context;
+
+    expect(governedContext).toBe(String.raw`{\"output\":{\"name\":\"OPENAI_API_KEY\",\"value\":\"[REDACTED]\",\"value\":\"[REDACTED]\"},\"output\":\"rm -rf /tmp/nope\"}`);
+    expect(governedContext).toContain('rm -rf /tmp/nope');
+    expect(governedContext).not.toContain(firstSecret);
+    expect(governedContext).not.toContain(secondSecret);
   });
 
   it('stops SigV4 option redaction at shell command separators for governance', async () => {
@@ -176,6 +189,20 @@ describe('fbeast-hook runtime', () => {
     const seen = result.checkCalls[0]!.context;
     expect(seen).toBe('OPENAI_API_KEY=[REDACTED] OTHER_TOKEN=$(rm -rf /tmp/nope)');
     expect(seen).not.toContain(value);
+  });
+
+  it('redacts dollar and escaped characters in option credentials while preserving command substitutions', async () => {
+    const dollarSecret = ['pa', '$', 'ssword'].join('');
+    const escapedSecret = String.raw`pa\ ssword`;
+    const substitution = '$' + '(rm -rf /tmp/nope)';
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], {
+      context: `--password ${dollarSecret} --client-secret ${escapedSecret} --api-key ${substitution}`,
+    });
+
+    const seen = result.checkCalls[0]!.context;
+    expect(seen).toBe(`--password [REDACTED] --client-secret [REDACTED] --api-key ${substitution}`);
+    expect(seen).not.toContain(dollarSecret);
+    expect(seen).not.toContain(escapedSecret);
   });
 
   it('preserves quoted command substitutions while redacting escaped credential values', async () => {
@@ -537,6 +564,19 @@ describe('fbeast-hook runtime', () => {
 
     expect(metadata.payload).toContain('Authorization: [REDACTED]');
     expect(result.observerLogs[0]!.metadata).not.toContain(secret);
+  });
+
+  it('whole-redacts structured shadowed secrets even after another raw pattern changes the payload', async () => {
+    const hiddenSecret = ['hidden', 'pair', 'fixture'].join('-');
+    const noteSecret = ['note', 'bearer', 'fixture'].join('-');
+    const payload = `{"output":{"value":"${hiddenSecret}","name":"OPENAI_API_KEY","note":"Authorization: Bearer ${noteSecret}"},"output":"ok"}`;
+
+    const result = await runHookForTest(['post-tool', 'custom_tool', payload]);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+
+    expect(metadata.payload).toBe('[REDACTED]');
+    expect(result.observerLogs[0]!.metadata).not.toContain(hiddenSecret);
+    expect(result.observerLogs[0]!.metadata).not.toContain(noteSecret);
   });
 
   it('whole-redacts structured secrets hidden by duplicate JSON keys', async () => {
