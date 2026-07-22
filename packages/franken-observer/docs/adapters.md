@@ -228,6 +228,12 @@ await cloud.flush(trace)
 | `otlpPath`  | `string`        | `'/v1/traces'`   | OTLP/HTTP path appended to `endpoint`           |
 | `basicAuth` | `TempoBasicAuth`| —                | Omit for unauthenticated local Tempo            |
 | `fetch`     | `FetchFn`       | `globalThis.fetch`| Injectable for testing                         |
+| `retry`     | `HttpRetryOptions` | 2 retries; 200 ms base/2 s max jittered backoff; 10 s per-attempt deadline | Override retry/backoff/deadline values; set `maxRetries: 0` for one attempt |
+
+The defaults retry only transient HTTP 429/5xx responses and network failures.
+Other 4xx responses fail immediately. After the bounded attempts are exhausted,
+`flush()` rejects with status/timeout context but does not include the trace
+payload or Basic auth credentials in the error.
 
 **Grafana Cloud environment variables**
 

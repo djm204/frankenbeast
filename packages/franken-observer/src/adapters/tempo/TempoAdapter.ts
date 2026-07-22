@@ -35,8 +35,20 @@ export interface TempoAdapterOptions {
   /** Injectable for testing. Defaults to globalThis.fetch. */
   fetch?: FetchFn
 
-  /** Retry on transient (5xx/network) failures. Omit for a single attempt. */
+  /**
+   * Retry and per-attempt deadline overrides for transient (429/5xx/network)
+   * failures. Defaults to 2 retries with bounded exponential backoff, jitter,
+   * and a 10 second request deadline. Set `maxRetries: 0` to disable retries.
+   */
   retry?: HttpRetryOptions
+}
+
+const DEFAULT_TEMPO_RETRY: Readonly<HttpRetryOptions> = {
+  maxRetries: 2,
+  baseDelayMs: 200,
+  maxDelayMs: 2_000,
+  jitter: true,
+  attemptTimeoutMs: 10_000,
 }
 
 /**
@@ -50,7 +62,7 @@ export class TempoAdapter implements ExportAdapter {
   private readonly tracesUrl: string
   private readonly authHeader: string | undefined
   private readonly fetchFn: FetchFn
-  private readonly retry: HttpRetryOptions | undefined
+  private readonly retry: HttpRetryOptions
 
   constructor(options: TempoAdapterOptions) {
     const base = options.endpoint.replace(/\/$/, '')
@@ -63,7 +75,7 @@ export class TempoAdapter implements ExportAdapter {
     }
 
     this.fetchFn = options.fetch ?? (globalThis.fetch as unknown as FetchFn)
-    this.retry = options.retry
+    this.retry = { ...DEFAULT_TEMPO_RETRY, ...options.retry }
   }
 
   async flush(trace: Trace): Promise<void> {
