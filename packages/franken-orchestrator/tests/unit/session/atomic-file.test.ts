@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { threadId } from 'node:worker_threads';
+import { performance } from 'node:perf_hooks';
 import {
   atomicWriteFileSync,
   quarantineFile,
@@ -146,7 +146,6 @@ describe('atomic-file', () => {
           startedAt: '2999-01-01T00:00:00.000Z',
           updatedAt: '2999-01-01T00:00:01.000Z',
           writerPid: process.pid,
-          writerThreadId: threadId,
           writerInstanceId: 'crashed-process-instance',
         }),
         'utf8',
@@ -175,8 +174,7 @@ describe('atomic-file', () => {
           startedAt: '2999-01-01T00:00:00.000Z',
           updatedAt: '2999-01-01T00:00:01.000Z',
           writerPid: process.pid,
-          writerThreadId: threadId + 1,
-          writerInstanceId: 'other-live-worker-instance',
+          writerInstanceId: performance.timeOrigin.toString(),
         }),
         'utf8',
       );
