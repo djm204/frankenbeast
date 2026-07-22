@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.10.1](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.10.0...franken-critique-v0.10.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **critique:** parse nested unicode set classes ([#3399](https://github.com/djm204/frankenbeast/issues/3399)) ([613162e](https://github.com/djm204/frankenbeast/commit/613162e40b7a6345ca8fd2775b0e07279558baa0))
+* **docs:** remove stale package references ([#3473](https://github.com/djm204/frankenbeast/issues/3473)) ([8e6e431](https://github.com/djm204/frankenbeast/commit/8e6e431cbc05b337f7a56b5000b65e1f5dfd1ef1))
+* **types:** share branded critique score contract ([#3433](https://github.com/djm204/frankenbeast/issues/3433)) ([6800c5d](https://github.com/djm204/frankenbeast/commit/6800c5d0da90d5b0aabd5043a24306456c9b4f8c))
+
+
+### Miscellaneous
+
+* **eslint:** enable type-aware promise linting ([#3435](https://github.com/djm204/frankenbeast/issues/3435)) ([c089f8b](https://github.com/djm204/frankenbeast/commit/c089f8b1cc0ff78a4fc5790567328b9c4928e8bf))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.14.1 to 0.15.0
+
 ## [0.10.0](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.9.2...franken-critique-v0.10.0) (2026-07-19)
 
 
