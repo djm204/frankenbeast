@@ -26,6 +26,8 @@ import { toError } from './http-error';
 
 export { MODULE_CONFIG_KEYS, TRACKED_AGENT_STATUSES } from '@franken/types';
 export type {
+  AgentGitConfig,
+  AgentLlmConfig,
   BeastCatalogEntry,
   BeastContainerRuntimeStatus,
   BeastInterviewPrompt,
