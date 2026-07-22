@@ -1,17 +1,19 @@
 import type { OTELAttribute, OTELAttributeValue, OTELPayload } from './OTELSerializer.js'
 
 const REDACTED = '[REDACTED]'
-const SENSITIVE_KEY_RE = /(?:^|_)(?:secret|token|password|passwd|pwd|credential|cookie|bearer|auth|authorization|api_?key|private_?key|access_?key)(?:$|_)/iu
+const SENSITIVE_KEY_RE = /(?:^|_)(?:secrets?|tokens?|passwords?|passwd|pwd|credentials?|cookies?|bearers?|auth|authorization|api_?keys?|private_?keys?|access_?keys?)(?:$|_)/iu
 const SENSITIVE_ASSIGNMENT_RE = /\b([A-Za-z_][A-Za-z0-9_-]*)(\s*[=:]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)/gu
+const SENSITIVE_FLAG_RE = /(^|\s)(--([A-Za-z][A-Za-z0-9_-]*))(\s+)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)/gu
 const SENSITIVE_JSON_FIELD_RE = /("([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*)("(?:\\.|[^"\\])*"|[^,}\]\s]+)/gu
 const PRIVATE_KEY_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gu
 const COOKIE_HEADER_RE = /\b(?:Cookie|Set-Cookie)\s*:\s*[^\r\n]+/giu
 const AUTHORIZATION_ASSIGNMENT_RE = /\b((?:proxy[-_])?authorization\s*[=:]\s*)[^\r\n]+/giu
 const AUTHORIZATION_RE = /\b((?:Proxy-)?Authorization\s*:\s*)[^\r\n]+/giu
 const DISCORD_WEBHOOK_RE = /https:\/\/(?:discord(?:app)?\.com|canary\.discord\.com)\/api\/webhooks\/\d+\/[A-Za-z0-9_-]+/giu
-const CREDENTIAL_URL_RE = /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|rediss?):\/\/[^\s:@/]*:[^\s@/]+@[^\s]+/giu
+const SLACK_WEBHOOK_RE = /https:\/\/hooks\.slack\.com\/services\/[A-Za-z0-9_/-]+/giu
+const CREDENTIAL_URL_RE = /\b[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s:/@"']*:[^\s@"']+@[^\s"'<>]+/gu
 const BEARER_RE = /\bBearer\s+[^\s,;]+/giu
-const TOKEN_RE = /\b(?:(?:sk|gh[oprsu]|glpat|glc|xox[baprs])[-_][A-Za-z0-9_-]{12,}|github_pat_[A-Za-z0-9_]{20,}|npm_[A-Za-z0-9_-]{12,})\b/gu
+const TOKEN_RE = /\b(?:(?:sk|gh[oprsu]|glpat|glc|xox[baprs])[-_][A-Za-z0-9_-]{12,}|github_pat_[A-Za-z0-9_]{20,}|npm_[A-Za-z0-9_-]{12,}|AIza[0-9A-Za-z_-]{35}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b/gu
 
 function normalizeSensitiveKey(key: string): string {
   return key
@@ -24,15 +26,70 @@ function isSensitiveKey(key: string): boolean {
   return SENSITIVE_KEY_RE.test(normalizeSensitiveKey(key))
 }
 
+function redactEmbeddedJson(value: string): string {
+  let output = ''
+  let cursor = 0
+
+  while (cursor < value.length) {
+    const start = value.slice(cursor).search(/[\[{]/u)
+    if (start < 0) return output + value.slice(cursor)
+
+    const absoluteStart = cursor + start
+    output += value.slice(cursor, absoluteStart)
+    const stack: string[] = []
+    let quoted = false
+    let escaped = false
+    let end = absoluteStart
+
+    for (; end < value.length; end += 1) {
+      const character = value[end]!
+      if (quoted) {
+        if (escaped) escaped = false
+        else if (character === '\\') escaped = true
+        else if (character === '"') quoted = false
+        continue
+      }
+      if (character === '"') {
+        quoted = true
+      } else if (character === '{' || character === '[') {
+        stack.push(character)
+      } else if (character === '}' || character === ']') {
+        const opening = stack.at(-1)
+        if ((opening === '{' && character !== '}') || (opening === '[' && character !== ']')) break
+        stack.pop()
+        if (stack.length === 0) {
+          end += 1
+          break
+        }
+      }
+    }
+
+    const candidate = value.slice(absoluteStart, end)
+    try {
+      output += JSON.stringify(redactJsonValue(JSON.parse(candidate)))
+      cursor = end
+    } catch {
+      output += value[absoluteStart]
+      cursor = absoluteStart + 1
+    }
+  }
+
+  return output
+}
+
 function redactPlainText(value: string): string {
-  return value
+  return redactEmbeddedJson(value)
     .replace(PRIVATE_KEY_RE, REDACTED)
     .replace(COOKIE_HEADER_RE, REDACTED)
     .replace(AUTHORIZATION_ASSIGNMENT_RE, `$1${REDACTED}`)
     .replace(AUTHORIZATION_RE, `$1${REDACTED}`)
     .replace(DISCORD_WEBHOOK_RE, REDACTED)
+    .replace(SLACK_WEBHOOK_RE, REDACTED)
     .replace(CREDENTIAL_URL_RE, REDACTED)
     .replace(BEARER_RE, REDACTED)
+    .replace(SENSITIVE_FLAG_RE, (match, leading: string, flag: string, key: string, separator: string) =>
+      isSensitiveKey(key) ? `${leading}${flag}${separator}${REDACTED}` : match,
+    )
     .replace(SENSITIVE_ASSIGNMENT_RE, (match, key: string, separator: string) =>
       isSensitiveKey(key) ? `${key}${separator}${REDACTED}` : match,
     )
