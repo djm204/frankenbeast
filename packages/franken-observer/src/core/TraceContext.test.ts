@@ -97,7 +97,7 @@ describe('TraceContext', () => {
         .mockReturnValueOnce(1_000)
         .mockReturnValueOnce(2_000)
         .mockReturnValueOnce(1_500)
-      vi.spyOn(performance, 'now').mockReturnValueOnce(10).mockReturnValueOnce(35)
+      vi.spyOn(performance, 'now').mockReturnValueOnce(10).mockReturnValueOnce(35.6)
 
       const trace = TraceContext.createTrace('goal')
       const span = TraceContext.startSpan(trace, { name: 'step' })
@@ -105,7 +105,8 @@ describe('TraceContext', () => {
 
       expect(span.startedAt).toBe(2_000)
       expect(span.endedAt).toBe(1_500)
-      expect(span.durationMs).toBe(25)
+      expect(span.durationMs).toBe(26)
+      expect(Number.isInteger(span.durationMs)).toBe(true)
     })
 
     it('can mark a span as errored', () => {

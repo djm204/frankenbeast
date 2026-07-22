@@ -48,13 +48,12 @@ export const TraceContext = {
     }
     const endedAt = wallClockNow()
     const monotonicStartedAt = spanMonotonicStartTimes.get(span)
-    span.endedAt = endedAt
-    span.durationMs = Math.max(
-      0,
+    const durationMs =
       monotonicStartedAt === undefined
         ? endedAt - span.startedAt
-        : performance.now() - monotonicStartedAt,
-    )
+        : performance.now() - monotonicStartedAt
+    span.endedAt = endedAt
+    span.durationMs = Math.max(0, Math.round(durationMs))
     spanMonotonicStartTimes.delete(span)
     span.status = options.status ?? 'completed'
     if (options.errorMessage !== undefined) {
