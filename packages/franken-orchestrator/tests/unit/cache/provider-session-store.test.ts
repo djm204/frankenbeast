@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ProviderSessionStore } from '../../../src/cache/provider-session-store.js';
@@ -174,6 +174,39 @@ describe('ProviderSessionStore', () => {
       sessionId: 'sess-99-replacement',
       schemaVersion: 3,
     });
+  });
+
+  it('quarantines schema-invalid provider-session records and treats them as explicit misses', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-provider-session-'));
+    const rootDir = join(workDir, '.fbeast', '.cache', 'llm');
+    const sessionDir = join(rootDir, 'work', 'frankenbeast', 'issue%3A99');
+    const sessionPath = join(sessionDir, 'provider-session.json');
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(sessionPath, JSON.stringify({
+      schemaVersion: 3,
+      projectId: 'frankenbeast',
+      workId: 'issue:99',
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      sessionId: null,
+      promptFingerprint: 'fp-99',
+      createdAt: '2026-03-13T00:00:00.000Z',
+      updatedAt: '2026-03-13T00:00:00.000Z',
+    }), 'utf8');
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const store = new ProviderSessionStore(rootDir, { schemaVersion: 3 });
+    await expect(store.load({
+      projectId: 'frankenbeast',
+      workId: 'issue:99',
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      promptFingerprint: 'fp-99',
+    })).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Invalid provider session record'));
+    await expect(readFile(sessionPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await readdir(sessionDir)).filter((entry) => entry.startsWith('provider-session.json.corrupt-'))).toHaveLength(1);
+    warn.mockRestore();
   });
 
   it('quarantines malformed provider-session JSON and treats corruption as an explicit miss', async () => {
