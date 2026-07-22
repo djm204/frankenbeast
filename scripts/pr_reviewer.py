@@ -85,7 +85,19 @@ def init_db():
 
 def error_diagnostic(stage, error):
     """Return bounded JSON diagnostics with common credential forms redacted."""
-    message = str(error) or "unknown failure"
+    messages = []
+    seen = set()
+    current = error
+    while current is not None and id(current) not in seen and len(messages) < 4:
+        seen.add(id(current))
+        messages.append(str(current) or "unknown failure")
+        if not isinstance(current, BaseException):
+            break
+        next_error = current.__cause__
+        if next_error is None and not current.__suppress_context__:
+            next_error = current.__context__
+        current = next_error
+    message = " <- caused by: ".join(messages)
     message = SECRET_PATTERN.sub("[REDACTED]", message)
     message = SENSITIVE_ERROR_VALUE_PATTERN.sub(r"\1[REDACTED]", message)
     message = " ".join(message.split())

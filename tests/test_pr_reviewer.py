@@ -621,6 +621,17 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         self.assertEqual(row[0:2], ("failed", 1))
         self.assertEqual(json.loads(row[2])["stage"], "post")
 
+    def test_error_diagnostic_includes_sanitized_exception_chain(self):
+        cause = TimeoutError("gh diff timed out with token=super-secret-value")
+        error = RuntimeError("Unable to fetch diff through API or gh")
+        error.__cause__ = cause
+
+        payload = json.loads(self.reviewer.error_diagnostic("fetch", error))
+
+        self.assertIn("Unable to fetch diff", payload["message"])
+        self.assertIn("gh diff timed out", payload["message"])
+        self.assertNotIn("super-secret-value", payload["message"])
+
     def test_error_diagnostic_remains_valid_json_at_length_limit(self):
         diagnostic = self.reviewer.error_diagnostic(
             "agent", 'password="' + ("\\\"secret" * 500)
