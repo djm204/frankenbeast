@@ -93,6 +93,16 @@ export class ProviderSessionStore {
       description: 'provider session',
       onCorrupt: warnJsonQuarantined,
     });
+    if (
+      stored !== null &&
+      typeof stored === 'object' &&
+      'schemaVersion' in stored &&
+      typeof stored.schemaVersion === 'number' &&
+      stored.schemaVersion !== this.options.schemaVersion
+    ) {
+      return undefined;
+    }
+
     const parsed = StoredProviderSessionRecordSchema.safeParse(stored);
     if (parsed.success) {
       return parsed.data;

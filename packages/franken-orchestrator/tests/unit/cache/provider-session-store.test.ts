@@ -176,6 +176,36 @@ describe('ProviderSessionStore', () => {
     });
   });
 
+  it('leaves unsupported provider-session schema versions untouched', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-provider-session-'));
+    const rootDir = join(workDir, '.fbeast', '.cache', 'llm');
+    const sessionPath = join(rootDir, 'work', 'frankenbeast', 'issue%3A99', 'provider-session.json');
+    await mkdir(dirname(sessionPath), { recursive: true });
+    await writeFile(sessionPath, JSON.stringify({
+      schemaVersion: 4,
+      projectId: 'frankenbeast',
+      workId: 'issue:99',
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      sessionId: 'sess-99',
+      createdAt: '2026-03-13T00:00:00.000Z',
+      updatedAt: '2026-03-13T00:00:00.000Z',
+    }), 'utf8');
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const store = new ProviderSessionStore(rootDir, { schemaVersion: 3 });
+    await expect(store.load({
+      projectId: 'frankenbeast',
+      workId: 'issue:99',
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      promptFingerprint: 'fp-99',
+    })).resolves.toBeUndefined();
+    await expect(readFile(sessionPath, 'utf8')).resolves.toContain('"schemaVersion":4');
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it('quarantines schema-invalid provider-session records and treats them as explicit misses', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-provider-session-'));
     const rootDir = join(workDir, '.fbeast', '.cache', 'llm');
