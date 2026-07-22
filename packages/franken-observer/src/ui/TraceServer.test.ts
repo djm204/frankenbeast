@@ -399,12 +399,16 @@ describe('TraceServer', () => {
       await expect(s.stop()).resolves.toBeUndefined()
     })
 
-    it('server refuses connections after stop()', async () => {
+    it('clears listening state and remains idempotent after stop()', async () => {
       const s = new TraceServer({ adapter, port: 0 })
       await s.start()
-      const url = s.url
+      const listeningUrl = s.url
+
       await s.stop()
-      await expect(fetch(url + '/')).rejects.toThrow()
+
+      expect(s.url).toBe('http://127.0.0.1:0')
+      await expect(s.stop()).resolves.toBeUndefined()
+      await expect(fetch(listeningUrl + '/')).rejects.toThrow()
     })
   })
 })
