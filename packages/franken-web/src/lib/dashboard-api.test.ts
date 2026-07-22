@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { DashboardApiClient, type DashboardSnapshot } from './dashboard-api';
+import { describe, it, expect, expectTypeOf, vi, beforeEach, afterEach } from 'vitest';
+import { DashboardApiClient, type DashboardSecurity, type DashboardSnapshot } from './dashboard-api';
 
 const BASE_URL = 'http://localhost:3737';
 
@@ -41,6 +41,11 @@ describe('DashboardApiClient', () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+  });
+
+  it('keeps approval requirements aligned with the backend security schema', () => {
+    expectTypeOf<DashboardSecurity['requireApproval']>()
+      .toEqualTypeOf<'all' | 'destructive' | 'none' | undefined>();
   });
 
   describe('fetchSnapshot', () => {
