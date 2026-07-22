@@ -372,6 +372,9 @@ function fdPath(fd: number): string {
 }
 
 const RUN_TIMESTAMP_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{3}))?(Z|[+-]\d{2}:\d{2})$/;
+// Live-bench run directories and retention reports support this inclusive operational window.
+const MIN_RUN_TIMESTAMP_YEAR = 2000;
+const MAX_RUN_TIMESTAMP_YEAR = 2100;
 
 function dateSegment(timestamp: string): string {
   const match = RUN_TIMESTAMP_PATTERN.exec(timestamp);
@@ -389,7 +392,9 @@ function dateSegment(timestamp: string): string {
   const millisecond = Number(millisecondText);
 
   if (
-    month < 1
+    year < MIN_RUN_TIMESTAMP_YEAR
+    || year > MAX_RUN_TIMESTAMP_YEAR
+    || month < 1
     || month > 12
     || day < 1
     || day > daysInMonth(year, month)
@@ -403,6 +408,10 @@ function dateSegment(timestamp: string): string {
 
   const parsed = new Date(timestamp);
   if (Number.isNaN(parsed.getTime())) {
+    throw new Error(`Invalid runTimestamp: ${timestamp}`);
+  }
+  const normalizedYear = parsed.getUTCFullYear();
+  if (normalizedYear < MIN_RUN_TIMESTAMP_YEAR || normalizedYear > MAX_RUN_TIMESTAMP_YEAR) {
     throw new Error(`Invalid runTimestamp: ${timestamp}`);
   }
   const normalized = parsed.toISOString();
