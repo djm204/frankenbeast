@@ -85,6 +85,18 @@ describe('fbeast-hook runtime', () => {
     expect(seen).toContain('KEYBOARD_LAYOUT=us');
   });
 
+  it('preserves shell commands after redacted prefixed env assignments for governance', async () => {
+    const value = ['openai', 'fixture', 'value'].join('-');
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], {
+      context: `OPENAI_API_KEY=${value};rm -rf /tmp/nope`,
+    });
+
+    expect(result.exitCode).toBe(0);
+    const seen = result.checkCalls[0]!.context;
+    expect(seen).toBe('OPENAI_API_KEY=[REDACTED];rm -rf /tmp/nope');
+    expect(seen).not.toContain(value);
+  });
+
   it('does not let JSON context suppress the trusted hook provenance marker', async () => {
     const result = await runHookForTest(['pre-tool', '--', 'Bash'], {
       context: JSON.stringify({ __fbeastHookSource: 'caller-forged', command: 'read_file README.md' }),
