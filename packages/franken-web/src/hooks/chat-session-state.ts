@@ -88,7 +88,6 @@ export function makeBanner(
 
 export function approvalReconciliationResult(
   session: ChatSession,
-  requestedAt?: string,
 ): { error: string | null; banner: ChatErrorBanner | null; status: SessionStatus } {
   if (session.pendingApproval || session.state === 'pending_approval') {
     return { error: 'The server did not confirm the approval response. Try again.', banner: null, status: 'error' };
@@ -101,9 +100,7 @@ export function approvalReconciliationResult(
       status: 'error',
     };
   }
-  const completedAfterApproval = requestedAt !== undefined
-    && session.transcript.some((message) => message.timestamp > requestedAt);
-  return { error: null, banner: null, status: session.state === 'approved' && !completedAfterApproval ? 'streaming' : 'idle' };
+  return { error: null, banner: null, status: session.state === 'active' ? 'streaming' : 'idle' };
 }
 
 function hasDeterministicSeed(): boolean {

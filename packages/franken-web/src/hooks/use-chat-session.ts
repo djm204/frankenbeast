@@ -137,7 +137,6 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   function reconcileApprovalResponse(
     capturedSessionId: string,
     approvalAttempt: number,
-    requestedAt?: string,
   ): void {
     const controller = new AbortController();
     const refreshTimeout = setTimeout(() => controller.abort(), APPROVAL_RESPONSE_TIMEOUT_MS);
@@ -147,7 +146,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           || refreshed.id !== capturedSessionId
           || approvalAttemptRef.current !== approvalAttempt
           || !approvalResolvingRef.current) return;
-        const reconciliation = approvalReconciliationResult(refreshed, requestedAt);
+        const reconciliation = approvalReconciliationResult(refreshed);
         readyRef.current = true;
         setMessages((current) => mergeSessionSnapshot(current, refreshed));
         setPendingApproval(refreshed.pendingApproval ?? null);
@@ -864,7 +863,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     }));
     approvalTimeoutRef.current = setTimeout(() => {
       approvalTimeoutRef.current = null;
-      reconcileApprovalResponse(sessionId, approvalAttempt, pendingApproval?.requestedAt);
+      reconcileApprovalResponse(sessionId, approvalAttempt);
     }, APPROVAL_RESPONSE_TIMEOUT_MS);
   }
 

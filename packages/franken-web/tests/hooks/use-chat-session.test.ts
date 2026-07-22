@@ -1201,7 +1201,7 @@ describe('useChatSession', () => {
     expect(result.current.sessionState).toBe('approved');
   });
 
-  it('keeps an approved action streaming while its REST snapshot has no completed output', async () => {
+  it('keeps an active approved action streaming while execution is still in progress', async () => {
     const { result } = renderHook(() => useChatSession(opts));
     await waitFor(() => expect(result.current.sessionId).toBe('chat-1'));
     vi.useFakeTimers();
@@ -1218,7 +1218,7 @@ describe('useChatSession', () => {
       id: 'chat-1',
       projectId: 'test-proj',
       transcript: [],
-      state: 'approved',
+      state: 'active',
       pendingApproval: null,
       socketToken: 'signed-token',
       tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
@@ -1234,8 +1234,45 @@ describe('useChatSession', () => {
 
     expect(result.current.approvalResolving).toBe(false);
     expect(result.current.pendingApproval).toBeNull();
-    expect(result.current.sessionState).toBe('approved');
+    expect(result.current.sessionState).toBe('active');
     expect(result.current.status).toBe('streaming');
+  });
+
+  it('restores idle from an approved snapshot even when execution produced no transcript messages', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+    await waitFor(() => expect(result.current.sessionId).toBe('chat-1'));
+    vi.useFakeTimers();
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+      socket.message({
+        type: 'turn.approval.requested',
+        description: 'Run a command without display output',
+        timestamp: '2026-03-09T00:00:06Z',
+      });
+    });
+    mockGetSession.mockResolvedValueOnce({
+      id: 'chat-1',
+      projectId: 'test-proj',
+      transcript: [],
+      state: 'approved',
+      pendingApproval: null,
+      socketToken: 'signed-token',
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: '2026-03-09T00:00:00Z',
+      updatedAt: '2026-03-09T00:00:20Z',
+    });
+
+    await act(async () => {
+      await result.current.approve(true);
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+
+    expect(result.current.approvalResolving).toBe(false);
+    expect(result.current.pendingApproval).toBeNull();
+    expect(result.current.sessionState).toBe('approved');
+    expect(result.current.status).toBe('idle');
   });
 
   it('bounds a stalled approval reconciliation fetch', async () => {
