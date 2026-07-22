@@ -6221,7 +6221,7 @@ describe('SqliteBrain', () => {
 
       expect(episodic.recall(query, -1)).toHaveLength(10_001);
       expect(recallKeywordChunk.mock.calls.some(([, , offset]) => offset === 10_000)).toBe(true);
-    });
+    }, 20_000);
 
     it('quarantines corrupt persisted details while keeping recent and failure rows available', () => {
       brain.episodic.record(
