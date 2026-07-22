@@ -79,10 +79,10 @@ export function useChatReconnect(
 
         if (isAuthenticationClose(event)) {
           authFailureRef.current += 1;
-        } else if (!event || event.code === 1006) {
-          // Browsers collapse rejected HTTP upgrades and transient setup
-          // failures into the same 1006 signal. Allow a generous retry window
-          // before requiring operator intervention.
+        } else if (!event || event.code === 1005 || event.code === 1006) {
+          // Browsers collapse accepted-but-aborted sockets, rejected upgrades,
+          // and transient setup failures into no-status/1006 signals. Allow a
+          // generous retry window before requiring operator intervention.
           setupFailureRef.current += 1;
         }
 

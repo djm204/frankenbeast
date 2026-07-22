@@ -127,6 +127,6 @@ describe('useChatReconnect', () => {
     for (let attempt = 1; attempt < 8; attempt += 1) {
       expect(result.current.beginCycle().onClose(new CloseEvent('close', { code: 1006 }))).toBe(false);
     }
-    expect(result.current.beginCycle().onClose(new CloseEvent('close', { code: 1006 }))).toBe(true);
+    expect(result.current.beginCycle().onClose(new CloseEvent('close', { code: 1005 }))).toBe(true);
   });
 });
