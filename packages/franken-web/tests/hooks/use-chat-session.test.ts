@@ -1058,6 +1058,43 @@ describe('useChatSession', () => {
     expect(result.current.status).toBe('streaming');
   });
 
+  it('clears approval timeout state when completion arrives without a resolution event', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    vi.useFakeTimers();
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+      socket.message({
+        type: 'turn.approval.requested',
+        description: 'Deploy the generated fix',
+        timestamp: '2026-03-09T00:00:06Z',
+      });
+    });
+    await act(async () => {
+      await result.current.approve(true);
+    });
+    act(() => {
+      socket.message({
+        type: 'assistant.message.complete',
+        messageId: 'assistant-approved',
+        content: 'Approved action complete',
+        timestamp: '2026-03-09T00:00:20Z',
+      });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+
+    expect(result.current.approvalResolving).toBe(false);
+    expect(result.current.status).toBe('idle');
+    expect(mockGetSession).not.toHaveBeenCalled();
+  });
+
   it('reconciles approval state when the websocket response event is dropped', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 
@@ -1116,6 +1153,23 @@ describe('useChatSession', () => {
     expect(result.current.costUsd).toBe(0.42);
     expect(mockCreateSocketTicket).toHaveBeenCalledTimes(1);
     expect(MockWebSocket.instances).toHaveLength(1);
+
+    act(() => {
+      socket.message({
+        type: 'session.ready',
+        sessionId: 'chat-1',
+        projectId: 'test-proj',
+        transcript: [],
+        state: 'pending_approval',
+        pendingApproval: {
+          description: 'Stale approval snapshot',
+          requestedAt: '2026-03-09T00:00:06Z',
+        },
+        timestamp: '2026-03-09T00:00:05Z',
+      });
+    });
+    expect(result.current.pendingApproval).toBeNull();
+    expect(result.current.sessionState).toBe('approved');
   });
 
   it('surfaces a failed approved action from REST reconciliation', async () => {
@@ -1251,8 +1305,14 @@ describe('useChatSession', () => {
         approved: true,
         timestamp: '2026-03-09T00:00:22Z',
       });
+      socket.message({
+        type: 'turn.approval.requested',
+        description: 'Approve the follow-up action',
+        timestamp: '2026-03-09T00:00:23Z',
+      });
     });
     await act(async () => {
+      await result.current.approve(false);
       resolveSnapshot({
         id: 'chat-1',
         projectId: 'test-proj',
@@ -1271,11 +1331,12 @@ describe('useChatSession', () => {
       await Promise.resolve();
     });
 
-    expect(result.current.approvalResolving).toBe(false);
+    expect(result.current.approvalResolving).toBe(true);
     expect(result.current.approvalError).toBeNull();
-    expect(result.current.pendingApproval).toBeNull();
-    expect(result.current.sessionState).toBe('approved');
-    expect(result.current.status).toBe('streaming');
+    expect(result.current.pendingApproval?.description).toBe('Approve the follow-up action');
+    expect(result.current.sessionState).toBe('pending_approval');
+    expect(result.current.status).toBe('sending');
+    expect(socket.sent).toHaveLength(2);
   });
 
   it.each([

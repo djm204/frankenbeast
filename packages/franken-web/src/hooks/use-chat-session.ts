@@ -82,6 +82,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   const lastMessageRef = useRef<{ clientMessageId: string; content: string } | null>(null);
   const errorActionRef = useRef(new Map<string, ChatErrorAction>());
   const approvalResolvingRef = useRef(false);
+  const approvalAttemptRef = useRef(0);
   const approvalTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const processedSocketEventIdsRef = useRef<Set<string>>(new Set());
   const replayCursorsRef = useRef<Map<string, number>>(new Map());
@@ -136,20 +137,23 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       clearTimeout(approvalTimeoutRef.current);
       approvalTimeoutRef.current = null;
     }
+    if (!value) approvalAttemptRef.current += 1;
     approvalResolvingRef.current = value;
     setApprovalResolving(value);
   }
 
-  function reconcileApprovalResponse(capturedSessionId: string): void {
+  function reconcileApprovalResponse(capturedSessionId: string, approvalAttempt: number): void {
     void clientRef.current.getSession(capturedSessionId)
       .then((refreshed) => {
         if (!sessionStillCurrent(capturedSessionId)
           || refreshed.id !== capturedSessionId
+          || approvalAttemptRef.current !== approvalAttempt
           || !approvalResolvingRef.current) {
           return;
         }
         const approvalPending = Boolean(refreshed.pendingApproval) || refreshed.state === 'pending_approval';
         const approvalFailed = refreshed.state === 'failed';
+        readyRef.current = true;
         setMessages((current) => mergeSessionSnapshot(current, refreshed));
         setPendingApproval(refreshed.pendingApproval ?? null);
         setSessionState(refreshed.state);
@@ -164,7 +168,9 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         setStatus(approvalPending || approvalFailed ? 'error' : refreshed.state === 'approved' ? 'streaming' : 'idle');
       })
       .catch((error) => {
-        if (!sessionStillCurrent(capturedSessionId) || !approvalResolvingRef.current) {
+        if (!sessionStillCurrent(capturedSessionId)
+          || approvalAttemptRef.current !== approvalAttempt
+          || !approvalResolvingRef.current) {
           return;
         }
         updateApprovalResolving(false);
@@ -470,6 +476,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         case 'assistant.message.complete':
           setShowTypingIndicator(false);
           setStatus('idle');
+          if (approvalResolvingRef.current) updateApprovalResolving(false);
           if (payload.modelTier) {
             setTier(payload.modelTier);
           }
@@ -797,6 +804,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
 
     setApprovalError(null);
     updateApprovalResolving(true);
+    const approvalAttempt = approvalAttemptRef.current;
     setStatus('sending');
     if (!socket || socket.readyState !== 1) {
       try {
@@ -853,7 +861,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     }));
     approvalTimeoutRef.current = setTimeout(() => {
       approvalTimeoutRef.current = null;
-      reconcileApprovalResponse(sessionId);
+      reconcileApprovalResponse(sessionId, approvalAttempt);
     }, APPROVAL_RESPONSE_TIMEOUT_MS);
   }
 
