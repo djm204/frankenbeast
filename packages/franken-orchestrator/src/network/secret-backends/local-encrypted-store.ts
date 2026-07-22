@@ -1,6 +1,6 @@
 import { randomBytes, createCipheriv, createDecipheriv, pbkdf2Sync } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 import type { ISecretStore, SecretStoreDetection, SecretStoreOptions } from '../secret-store.js';
 
 const ALGORITHM = 'aes-256-gcm';
@@ -14,6 +14,27 @@ const DANGEROUS_SECRET_KEYS = new Set(['__proto__', 'prototype', 'constructor'])
 
 function createSecretsRecord(): Record<string, string> {
   return Object.create(null) as Record<string, string>;
+}
+
+async function writeFileAtomic(filePath: string, data: string | Buffer): Promise<void> {
+  const tempPath = join(
+    dirname(filePath),
+    `.${basename(filePath)}.tmp-${process.pid}-${randomBytes(8).toString('hex')}`,
+  );
+  let tempFile: Awaited<ReturnType<typeof open>> | undefined;
+
+  try {
+    tempFile = await open(tempPath, 'wx', 0o600);
+    await tempFile.writeFile(data);
+    await tempFile.sync();
+    await tempFile.close();
+    tempFile = undefined;
+    await rename(tempPath, filePath);
+  } catch (error) {
+    await tempFile?.close().catch(() => undefined);
+    await rm(tempPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
 }
 
 function assertSafeSecretKey(key: string): void {
@@ -128,7 +149,7 @@ export class LocalEncryptedStore implements ISecretStore {
         const salt = randomBytes(SALT_LENGTH).toString('hex');
         meta = { salt, version: 1 };
         await this.ensureDir();
-        await writeFile(this.metaPath, JSON.stringify(meta, null, 2) + '\n', 'utf-8');
+        await writeFileAtomic(this.metaPath, JSON.stringify(meta, null, 2) + '\n');
       } else {
         throw error;
       }
@@ -175,6 +196,6 @@ export class LocalEncryptedStore implements ISecretStore {
     const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()]);
     const authTag = cipher.getAuthTag();
     const combined = Buffer.concat([iv, authTag, encrypted]);
-    await writeFile(this.encPath, combined);
+    await writeFileAtomic(this.encPath, combined);
   }
 }

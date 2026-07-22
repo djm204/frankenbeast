@@ -1,9 +1,19 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { LocalEncryptedStore } from '../../../../src/network/secret-backends/local-encrypted-store.js';
 import { testCredential } from '../../../support/test-credentials.js';
+
+const fsMocks = vi.hoisted(() => ({
+  rename: vi.fn(),
+}));
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  fsMocks.rename.mockImplementation(actual.rename);
+  return { ...actual, rename: fsMocks.rename };
+});
 
 const TEST_SLACK_BOT_TOKEN = testCredential('TEST_SLACK_BOT_TOKEN');
 
@@ -64,6 +74,21 @@ describe('LocalEncryptedStore', () => {
       expect(value).toBe('value2');
     });
 
+    it('preserves the previous ciphertext when the atomic replacement fails', async () => {
+      await store.store('key', 'value1');
+      const secretsDir = join(tempDir, '.fbeast');
+      const encPath = join(secretsDir, 'secrets.enc');
+      const originalCiphertext = await readFile(encPath);
+      const replacementError = Object.assign(new Error('simulated rename failure'), { code: 'EIO' });
+      fsMocks.rename.mockRejectedValueOnce(replacementError);
+
+      await expect(store.store('key', 'value2')).rejects.toBe(replacementError);
+
+      expect(await readFile(encPath)).toEqual(originalCiphertext);
+      expect((await readdir(secretsDir)).filter((name) => name.includes('secrets.enc.tmp'))).toEqual([]);
+      expect(await store.resolve('key')).toBe('value1');
+    });
+
     it('handles multiple secrets', async () => {
       await store.store('key1', 'value1');
       await store.store('key2', 'value2');
@@ -101,6 +126,20 @@ describe('LocalEncryptedStore', () => {
   });
 
   describe('encryption', () => {
+    it('removes temporary metadata when its atomic replacement fails', async () => {
+      const secretsDir = join(tempDir, '.fbeast');
+      const metaPath = join(secretsDir, 'secrets.meta.json');
+      const replacementError = Object.assign(new Error('simulated metadata rename failure'), {
+        code: 'EIO',
+      });
+      fsMocks.rename.mockRejectedValueOnce(replacementError);
+
+      await expect(store.store('key', 'value')).rejects.toBe(replacementError);
+
+      expect(await readdir(secretsDir)).toEqual([]);
+      await expect(readFile(metaPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
     it('persists secrets encrypted on disk', async () => {
       await store.store('key', 'sensitive-value');
       const { readFile } = await import('node:fs/promises');
