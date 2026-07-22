@@ -1,11 +1,11 @@
 import type { OTELAttribute, OTELAttributeValue, OTELPayload } from './OTELSerializer.js'
 
 const REDACTED = '[REDACTED]'
-const SENSITIVE_KEY_RE = /(?:^|_)(?:secrets?|tokens?|passwords?|passphrases?|passwd|pwd|credentials?|cookies?|bearers?|auth|authorization|api_?keys?|private_?keys?|access_?keys?|ssh_?keys?|signing_?keys?|gpg_?keys?|pats?|personal_?access_?tokens?|webhook_?urls?)(?:$|_)/iu
+const SENSITIVE_KEY_RE = /(?:^|_)(?:secrets?|tokens?|passwords?|passphrases?|passwd|pwd|credentials?|cookies?|bearers?|auth|authorization|api_?keys?|private_?keys?|access_?keys?|ssh_?keys?|signing_?keys?|gpg_?keys?|pats?|personal_?access_?tokens?|webhook_?urls?|claude_?sessions?)(?:$|_)/iu
 const TOKEN_METRIC_KEY_RE = /(?:^|_)(?:prompt|completion|total|input|output|cached|reasoning)_tokens?(?:$|_)/iu
 const AUTH_SCHEME_VALUE = String.raw`(?:Basic|Bearer|Token|ApiKey|Digest|Negotiate|NTLM|AWS4-HMAC-SHA256)\s+[^\s,;]+`
 const SENSITIVE_ASSIGNMENT_RE = new RegExp(
-  String.raw`\b([A-Za-z_][A-Za-z0-9_-]*)(\s*[=:]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|${AUTH_SCHEME_VALUE}|[^\s,;]+)`,
+  String.raw`\b([A-Za-z_][A-Za-z0-9_.-]*)(\s*[=:]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|${AUTH_SCHEME_VALUE}|[^\s,;]+)`,
   'giu',
 )
 const SENSITIVE_FLAG_RE = new RegExp(
@@ -14,9 +14,9 @@ const SENSITIVE_FLAG_RE = new RegExp(
 )
 const SENSITIVE_JSON_FIELD_RE = /("([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*)("(?:\\.|[^"\\])*"|"(?:\\.|[^"\\])*(?=$|[\r\n])|[^,}\]\r\n]+)/gu
 const ESCAPED_SENSITIVE_JSON_FIELD_RE = /(\\+"([^"\\]*(?:\\.[^"\\]*)*)\\+"\s*:\s*\\+")[^"\r\n]*?(\\+")/gu
-const SENSITIVE_JSON_COLLECTION_FIELD_RE = /("([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*)(\[[^\]\r\n]*\]|\{[^}\r\n]*\})/gu
-const ESCAPED_SENSITIVE_JSON_COLLECTION_FIELD_RE = /(\\+"([^"\\]*(?:\\.[^"\\]*)*)\\+"\s*:\s*)(\[[^\]\r\n]*\]|\{[^}\r\n]*\})/gu
-const SENSITIVE_LINE_ASSIGNMENT_RE = /\b([A-Za-z_][A-Za-z0-9_-]*)(\s*[=:]\s*)[^\r\n]*?(?=\s+[A-Za-z_][A-Za-z0-9_-]*\s*[=:]|$)/gu
+const SENSITIVE_JSON_COLLECTION_FIELD_RE = /("([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*)(\[[^\]\r\n]*(?:\]|$)|\{[^}\r\n]*(?:\}|$))/gu
+const ESCAPED_SENSITIVE_JSON_COLLECTION_FIELD_RE = /(\\+"([^"\\]*(?:\\.[^"\\]*)*)\\+"\s*:\s*)(\[[^\]\r\n]*(?:\]|$)|\{[^}\r\n]*(?:\}|$))/gu
+const SENSITIVE_LINE_ASSIGNMENT_RE = /\b([A-Za-z_][A-Za-z0-9_.-]*)(\s*[=:]\s*)[^\r\n]*?(?=\s+[A-Za-z_][A-Za-z0-9_.-]*\s*[=:]|$)/gu
 const SENSITIVE_HEADER_TUPLE_RE = /(\[\s*"([^"\\]*(?:\\.[^"\\]*)*)"\s*,\s*")[^"\r\n]*("\s*\])/gu
 const PRIVATE_KEY_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gu
 const COOKIE_HEADER_RE = /\b(?:Cookie|Set-Cookie)\s*:\s*[^\r\n]+/giu
@@ -37,7 +37,12 @@ function normalizeSensitiveKey(key: string): string {
 
 function isSensitiveKey(key: string): boolean {
   const normalized = normalizeSensitiveKey(key)
-  return !TOKEN_METRIC_KEY_RE.test(normalized) && SENSITIVE_KEY_RE.test(normalized)
+  return SENSITIVE_KEY_RE.test(normalized)
+}
+
+function isNumericTokenMetric(key: string, value: OTELAttributeValue): boolean {
+  return TOKEN_METRIC_KEY_RE.test(normalizeSensitiveKey(key))
+    && (value.intValue !== undefined || value.doubleValue !== undefined)
 }
 
 function redactEmbeddedJson(value: string): string {
@@ -183,7 +188,7 @@ function redactAttributeValue(value: OTELAttributeValue): OTELAttributeValue {
 
 function redactAttribute(attribute: OTELAttribute): OTELAttribute {
   const key = redactPlainText(attribute.key)
-  if (isSensitiveKey(attribute.key)) {
+  if (isSensitiveKey(attribute.key) && !isNumericTokenMetric(attribute.key, attribute.value)) {
     return { ...attribute, key, value: { stringValue: REDACTED } }
   }
   return { ...attribute, key, value: redactAttributeValue(attribute.value) }

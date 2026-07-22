@@ -46,6 +46,10 @@ describe('redactOTELPayloadSecrets', () => {
     const unmatchedTupleSecret = ['unmatched', 'tuple', 'credential'].join('-')
     const unmatchedArraySecrets = ['alpha one', 'beta two']
     const escapedArraySecrets = ['escaped alpha', 'escaped beta']
+    const truncatedArraySecrets = ['truncated alpha', 'truncated beta']
+    const dottedSecret = ['dotted', 'api', 'credential'].join('-')
+    const claudeSessionSecret = ['claude', 'session', 'credential'].join('-')
+    const stringMetricTokenSecret = ['input', 'token', 'credential'].join('-')
     const aliasSecrets = ['sshKey', 'signing_key', 'gpg_key', 'PAT', 'webhookUrl']
       .map(key => [key, `${key}-credential`] as const)
     const geminiSecret = `AIza${'e'.repeat(35)}`
@@ -84,6 +88,9 @@ describe('redactOTELPayloadSecrets', () => {
       `prefix { ... ${JSON.stringify({ safe: 'x', password: unmatchedArraySecrets })}`,
       `body={\\"password\\":[\\"${escapedArraySecrets[0]}\\",\\"${escapedArraySecrets[1]}\\"]}`,
       `user: alice password: ${multiwordSecret}`,
+      `{"password":["${truncatedArraySecrets[0]}","${truncatedArraySecrets[1]}"`,
+      `openai.api.key=${dottedSecret}`,
+      JSON.stringify({ CLAUDE_SESSION: claudeSessionSecret }),
       ...aliasSecrets.map(([key, secret]) => JSON.stringify({ [key]: secret })),
       geminiSecret,
       `https://hooks.slack.com/services/T000/B000/${slackSecret}`,
@@ -129,6 +136,9 @@ describe('redactOTELPayloadSecrets', () => {
       unmatchedTupleSecret,
       ...unmatchedArraySecrets,
       ...escapedArraySecrets,
+      ...truncatedArraySecrets,
+      dottedSecret,
+      claudeSessionSecret,
       ...aliasSecrets.map(([, secret]) => secret),
       geminiSecret,
       slackSecret,
@@ -144,11 +154,16 @@ describe('redactOTELPayloadSecrets', () => {
     for (const key of ['promptTokens', 'inputTokens', 'outputTokens', 'cached_tokens']) {
       input.resourceSpans[0]!.resource.attributes.push({ key, value: { intValue: 42 } })
     }
+    input.resourceSpans[0]!.resource.attributes.push({
+      key: 'inputToken',
+      value: { stringValue: stringMetricTokenSecret },
+    })
     const withMetrics = redactOTELPayloadSecrets(input)
-    expect(withMetrics.resourceSpans[0]!.resource.attributes.slice(-4)).toEqual(
+    expect(withMetrics.resourceSpans[0]!.resource.attributes.slice(-5, -1)).toEqual(
       ['promptTokens', 'inputTokens', 'outputTokens', 'cached_tokens']
         .map(key => ({ key, value: { intValue: 42 } })),
     )
+    expect(JSON.stringify(withMetrics)).not.toContain(stringMetricTokenSecret)
   })
 
   it('handles unmatched JSON openers without repeatedly rescanning the suffix', () => {
